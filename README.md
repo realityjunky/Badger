@@ -6,9 +6,10 @@ This repository extracts the Comet-any Creator seam from the upstream Comet chec
 
 The package includes:
 
-- real local Skill discovery with hashes and ambiguity reporting;
+- a shared workflow-kernel foundation behind the standalone Creator adapters;
+- real local Skill discovery with stable source hashes, strict preferences, and ambiguity reporting;
 - deterministic Workflow Contract normalization and validation;
-- confirmed plan/state lifecycle;
+- confirmed plan/state lifecycle in the standalone `.comet-any` namespace;
 - generated entry and Node Skills with protocol/evidence references;
 - current-hash evaluation, review approval, publication, and distribution preview.
 

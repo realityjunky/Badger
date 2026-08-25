@@ -11,11 +11,14 @@
 
 | Standalone module | Upstream responsibility retained |
 | --- | --- |
-| `src/skill/find.ts` | Real local Skill roots, frontmatter description, reference/script inventory, content hash, missing/ambiguous status |
+| `src/workflow-kernel/discovery.ts` | Real local Skill roots, frontmatter description, reference/script inventory, content hash, strict preference resolution, and missing/ambiguous status |
+| `src/workflow-kernel/hash.ts` | Stable source-tree fingerprints over sorted regular files and supported symbolic links |
 | `src/workflow/contract.ts` | Workflow-kernel Node vocabulary, binding enforcement, Output Schema validation, canonical edges, run-state contract, route eval metadata |
-| `src/factory/proposal.ts` | Plan loading, intent classification, candidate resolution, blockers, and plan hash |
+| `src/workflow-kernel/foundation.ts` | Shared plan loading, candidate resolution, proposal normalization, blockers, plan hash, confirmed state, and atomic state persistence |
+| `src/skill/find.ts` | Compatibility adapter to the shared discovery seam |
+| `src/factory/proposal.ts` | Standalone compatibility adapter to the shared proposal seam |
 | `src/factory/generate.ts` | Deterministic entry/Node package generation and protocol/evidence artifacts |
-| `src/factory/state.ts` | Confirmed Creator state and atomic state persistence |
+| `src/factory/state.ts` | Standalone compatibility adapter to the shared state seam and `.comet-any` namespace |
 | `src/eval/run.ts` | Current-package hash and route-conformance evidence |
 | `src/publish/lifecycle.ts` | Readiness, reviewer approval, hash-bound publication, and distribution preview |
 | `src/cli.ts` | Thin Creator-facing command interface |
@@ -25,6 +28,8 @@
 The upstream Creator closure also reaches `domains/comet-classic`, `domains/comet-native`, `domains/comet-entry`, `domains/engine`, `domains/skill/platform-install`, and host platform registries through the general Comet Bundle distribution path. Those modules are not copied or imported here. The standalone seam uses local package publication and preview-only distribution instead.
 
 The upstream `comet-five-phase-overlay` and `comet-native` built-in contracts are excluded. Only `workflow-kernel` is accepted by the standalone plan loader. The source checkout remains available for comparison and is protected from edits by the parent repository instructions.
+
+The extracted foundation accepts a project root, optional home directory, and state namespace. The standalone adapter fixes the namespace to `.comet-any`; it does not change the workflow contract or candidate-resolution semantics. Strict preference resolution is fail-closed: a missing or ambiguous source remains a proposal blocker.
 
 ## Differential baseline
 

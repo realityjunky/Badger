@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { hashDirectory as canonicalHashDirectory } from "./workflow-kernel/hash.js";
 
 export function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
@@ -76,17 +77,7 @@ export async function listFiles(
 }
 
 export async function hashDirectory(root: string): Promise<string> {
-  const hash = createHash("sha256");
-  for (const relative of await listFiles(root)) {
-    const content = await fs.readFile(path.join(root, relative));
-    hash.update(relative);
-    hash.update("\0");
-    hash.update(String(content.length));
-    hash.update("\0");
-    hash.update(content);
-    hash.update("\0");
-  }
-  return hash.digest("hex");
+  return canonicalHashDirectory(root);
 }
 
 export async function directoryExists(target: string): Promise<boolean> {
