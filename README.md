@@ -10,7 +10,7 @@ The package includes:
 - real local Skill discovery with stable source hashes, strict preferences, and ambiguity reporting;
 - deterministic Workflow Contract normalization and validation;
 - confirmed plan/state lifecycle in the standalone `.comet-any` namespace;
-- generated entry and Node Skills with protocol/evidence references;
+- complete local `SkillBundle` generation with an entry Skill, internal Node Skills, rules, hooks, scripts, references, guardrails, checks, and Eval declarations;
 - current-hash evaluation, review approval, publication, and distribution preview.
 
 It intentionally excludes Comet Classic, Comet Native, Comet Entry, host platform installers, ambient resume routing, and external Engine adapters.

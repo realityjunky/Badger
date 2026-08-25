@@ -37,7 +37,12 @@ export function reviewState(state: CreatorState): {
     blockers,
     evidence: {
       draft: state.draftPath,
-      ...(state.generated ? { generated: state.generated.packageRoot } : {}),
+      ...(state.generated
+        ? {
+            generated:
+              state.generated.bundleRoot ?? state.generated.packageRoot,
+          }
+        : {}),
       ...(state.eval ? { eval: state.eval.resultPath } : {}),
     },
   };
@@ -81,7 +86,10 @@ export async function publishState(state: CreatorState): Promise<CreatorState> {
   );
   await ensureDirectory(path.dirname(destination));
   await fs.rm(destination, { recursive: true, force: true });
-  await copyDirectory(state.generated!.packageRoot, destination);
+  await copyDirectory(
+    state.generated!.bundleRoot ?? state.generated!.packageRoot,
+    destination,
+  );
   state.published = {
     hash: state.currentHash!,
     path: destination,
@@ -101,7 +109,9 @@ export async function distributePreview(
     throw new Error(
       `Workflow must be publishable before distribution:\n${readiness.blockers.join("\n")}`,
     );
-  const files = await listFiles(state.generated!.packageRoot);
+  const files = await listFiles(
+    state.generated!.bundleRoot ?? state.generated!.packageRoot,
+  );
   return {
     destination: path.resolve(destination),
     files: files.map((file) => path.join(path.resolve(destination), file)),

@@ -63,7 +63,7 @@ export async function observeStandalone(options: {
       review: undefined,
     };
     await writeState(state);
-    generatedRoot = generated.packageRoot;
+    generatedRoot = generated.bundleRoot ?? generated.packageRoot;
     const review = reviewState(state);
     readiness = {
       state: review.state,

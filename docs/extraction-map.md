@@ -17,7 +17,7 @@
 | `src/workflow-kernel/foundation.ts` | Shared plan loading, candidate resolution, proposal normalization, blockers, plan hash, confirmed state, and atomic state persistence |
 | `src/skill/find.ts` | Compatibility adapter to the shared discovery seam |
 | `src/factory/proposal.ts` | Standalone compatibility adapter to the shared proposal seam |
-| `src/factory/generate.ts` | Deterministic entry/Node package generation and protocol/evidence artifacts |
+| `src/factory/generate.ts` | Deterministic `SkillBundle` generation, entry/internal Node Skills, control-plane resources, and protocol/evidence artifacts |
 | `src/factory/state.ts` | Standalone compatibility adapter to the shared state seam and `.comet-any` namespace |
 | `src/eval/run.ts` | Current-package hash and route-conformance evidence |
 | `src/publish/lifecycle.ts` | Readiness, reviewer approval, hash-bound publication, and distribution preview |

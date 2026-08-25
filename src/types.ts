@@ -193,6 +193,7 @@ export interface CreatorState {
   currentHash: string | null;
   candidates: SkillCandidate[];
   generated?: {
+    bundleRoot?: string;
     packageRoot: string;
     protocolPath: string;
     evalPath: string;
