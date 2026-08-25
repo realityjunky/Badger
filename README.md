@@ -30,3 +30,5 @@ node bin/comet-any.js guide --project . --json
 ```
 
 See `assets/skills/comet-any/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
+
+The pinned three-Skill differential harness is documented in `docs/differential-harness.md`. It runs both Creators only in disposable temporary projects and rejects protected raw-data paths.

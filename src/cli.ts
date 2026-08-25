@@ -11,6 +11,7 @@ import {
   publishState,
   reviewState,
 } from "./publish/lifecycle.js";
+import { runDifferentialHarness } from "./differential/run.js";
 
 const program = new Command();
 program
@@ -193,6 +194,29 @@ program
         await readState(projectRoot(options.project), name),
         options.destination,
       ),
+      options.json,
+    );
+  });
+
+program
+  .command("differential <fixture>")
+  .requiredOption("--official-root <dir>", "Pinned official Comet checkout")
+  .option("--official-cli <file>", "Official Comet CLI entrypoint")
+  .option("--official-revision <sha>", "Expected official revision")
+  .option("--repo <dir>", "Skill harness repository root", ".")
+  .option("--json", "JSON output")
+  .action(async (fixture, options) => {
+    const root = projectRoot(options.repo);
+    emit(
+      await runDifferentialHarness({
+        repositoryRoot: root,
+        fixturePath: path.resolve(root, fixture),
+        officialRoot: path.resolve(root, options.officialRoot),
+        officialCli: options.officialCli
+          ? path.resolve(root, options.officialCli)
+          : undefined,
+        officialRevision: options.officialRevision,
+      }),
       options.json,
     );
   });

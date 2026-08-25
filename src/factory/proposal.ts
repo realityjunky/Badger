@@ -27,11 +27,13 @@ export async function readPlan(file: string): Promise<FactoryPlan> {
 export async function buildProposal(options: {
   projectRoot: string;
   planPath: string;
+  homeDir?: string;
 }): Promise<FactoryProposal> {
   const plan = await readPlan(options.planPath);
   const normalized = normalizeWorkflow(plan.workflow);
   const candidates = await findSkills({
     projectRoot: options.projectRoot,
+    homeDir: options.homeDir,
     preferences: plan.preferredSkills.map((query, preferenceIndex) => ({
       query,
       preferenceIndex,

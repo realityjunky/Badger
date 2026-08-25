@@ -26,6 +26,12 @@ The upstream Creator closure also reaches `domains/comet-classic`, `domains/come
 
 The upstream `comet-five-phase-overlay` and `comet-native` built-in contracts are excluded. Only `workflow-kernel` is accepted by the standalone plan loader. The source checkout remains available for comparison and is protected from edits by the parent repository instructions.
 
+## Differential baseline
+
+`primer_designer_harness/differential/primer-designer-workflow.json` is the pinned three-Skill fixture for comparing candidate resolution, source/reference evidence, source hashes, normalized workflow protocol, generated artifact inventory, and initial readiness. `primer_designer_harness/differential/extraction-manifest.json` records the reusable workflow-kernel closure and the deliberate Classic, Native, installer, Engine, and host-platform exclusions.
+
+The differential runner uses disposable projects and home directories. It never builds or writes the upstream checkout, reads `primer_designer_harness/raw_data/`, executes biological resources, submits schedulers, or installs host-platform files.
+
 ## Follow-up candidates
 
 These are intentionally separate future batches:
