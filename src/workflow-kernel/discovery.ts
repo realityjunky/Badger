@@ -18,6 +18,10 @@ export interface SearchRoot {
   origin: SkillSource["origin"];
 }
 
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function looksLikePath(value: string): boolean {
   return (
     path.isAbsolute(value) ||
@@ -46,7 +50,7 @@ async function optionalFiles(
   try {
     const entries = await fs.readdir(target, { withFileTypes: true });
     const result: Array<{ path: string; hash: string }> = [];
-    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const entry of entries.sort((a, b) => compareText(a.name, b.name))) {
       const child = path.join(target, entry.name);
       if (entry.isDirectory()) {
         result.push(
@@ -93,10 +97,10 @@ async function readSource(
     ...(await optionalFiles(realRoot, "references")),
   ]
     .map((item) => ({ path: item.path, contentHash: item.hash }))
-    .sort((left, right) => left.path.localeCompare(right.path));
+    .sort((left, right) => compareText(left.path, right.path));
   const scripts = (await optionalFiles(realRoot, "scripts"))
     .map((item) => ({ path: item.path, sideEffect: "unknown" as const }))
-    .sort((left, right) => left.path.localeCompare(right.path));
+    .sort((left, right) => compareText(left.path, right.path));
   return {
     name,
     root: realRoot,
@@ -226,7 +230,7 @@ async function discoveredQueries(
     }
   }
   return [...names]
-    .sort()
+    .sort(compareText)
     .map((query, preferenceIndex) => ({ query, preferenceIndex }));
 }
 

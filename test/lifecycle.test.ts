@@ -103,8 +103,9 @@ describe("standalone Creator lifecycle", () => {
       plan,
       destination: initial.draftPath,
     });
-    await authorBundle(generated, proposal.workflow);
     initial.generated = generated;
+    await expect(publishState(initial)).rejects.toThrow(/not publishable/iu);
+    await authorBundle(generated, proposal.workflow);
     const report = await evaluatePackage(initial);
     expect(report.passed).toBe(true);
     expect(reviewState(await readState(project, initial.name)).state).toBe(
@@ -128,6 +129,9 @@ describe("standalone Creator lifecycle", () => {
     );
     expect(preview.preview).toBe(true);
     expect(preview.hostPlatformWrites).toBe(false);
+    expect(preview.executableDisclosures).toEqual(
+      expect.arrayContaining([expect.stringContaining("[executable]")]),
+    );
     expect(preview.files).toContain(
       path.join(project, "install-preview", "bundle.yaml"),
     );
@@ -161,7 +165,6 @@ describe("standalone Creator lifecycle", () => {
       "skills/primer-workflow-design/SKILL.md",
       "skills/primer-workflow/reference/resolved-skills.json",
       "skills/primer-workflow/reference/workflow-protocol.json",
-      "skills/primer-workflow/reference/authoring-plan.json",
       "skills/primer-workflow/reference/decision-points.md",
       "skills/primer-workflow/reference/recovery.md",
       "skills/primer-workflow/reference/authoring-lanes.json",

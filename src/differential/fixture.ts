@@ -51,6 +51,7 @@ async function collectSnapshotFiles(
   root: string,
   directory: string,
   result: SnapshotFile[],
+  canonicalProjectRoot?: string,
 ): Promise<void> {
   const entries = (await fs.readdir(directory, { withFileTypes: true })).sort(
     (left, right) => left.name.localeCompare(right.name),
@@ -64,7 +65,7 @@ async function collectSnapshotFiles(
         `Fixture snapshots do not support symbolic links: ${relative}`,
       );
     if (stats.isDirectory()) {
-      await collectSnapshotFiles(root, target, result);
+      await collectSnapshotFiles(root, target, result, canonicalProjectRoot);
       continue;
     }
     if (!stats.isFile())
@@ -72,16 +73,35 @@ async function collectSnapshotFiles(
         `Fixture snapshots do not support special files: ${relative}`,
       );
     const content = await fs.readFile(target);
+    const canonicalContent = canonicalProjectRoot
+      ? canonicalizeProjectPaths(content, canonicalProjectRoot)
+      : content;
     result.push({
       path: relative,
-      bytes: content.byteLength,
-      sha256: sha256(content),
+      bytes: canonicalContent.byteLength,
+      sha256: sha256(canonicalContent),
     });
   }
 }
 
+function canonicalizeProjectPaths(
+  content: Buffer,
+  projectRoot: string,
+): Buffer {
+  const resolvedRoot = path.resolve(projectRoot);
+  const variants = new Set([
+    resolvedRoot,
+    resolvedRoot.split(path.sep).join("/"),
+  ]);
+  let text = content.toString("utf8");
+  for (const variant of variants)
+    text = text.replaceAll(variant, "<project-root>");
+  return Buffer.from(text, "utf8");
+}
+
 export async function snapshotDirectory(
   root: string,
+  canonicalProjectRoot?: string,
 ): Promise<DirectorySnapshot> {
   const absoluteRoot = path.resolve(root);
   const rootStats = await fs.lstat(absoluteRoot);
@@ -90,7 +110,12 @@ export async function snapshotDirectory(
       `Fixture snapshots require a regular directory: ${absoluteRoot}`,
     );
   const files: SnapshotFile[] = [];
-  await collectSnapshotFiles(absoluteRoot, absoluteRoot, files);
+  await collectSnapshotFiles(
+    absoluteRoot,
+    absoluteRoot,
+    files,
+    canonicalProjectRoot,
+  );
   return {
     root: absoluteRoot,
     files,

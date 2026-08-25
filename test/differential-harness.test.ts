@@ -3,7 +3,9 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { buildProposal } from "../src/factory/proposal.js";
+import { generatePackage } from "../src/factory/generate.js";
 import { findSkills } from "../src/skill/find.js";
+import { lifecycleReadiness } from "../src/publish/lifecycle.js";
 import {
   assertFixtureSourcePath,
   snapshotDirectory,
@@ -11,6 +13,7 @@ import {
 } from "../src/differential/fixture.js";
 import { runDifferentialHarness } from "../src/differential/run.js";
 import type { OfficialCommandRunner } from "../src/differential/types.js";
+import type { CreatorState, FactoryPlan } from "../src/types.js";
 
 describe("differential fixture snapshots", () => {
   let root: string;
@@ -106,23 +109,22 @@ describe("differential fixture snapshots", () => {
         }
         if (args[0] === "creator" && args[1] === "init") return {};
         if (args[0] === "creator" && args[1] === "generate") {
+          const planPath = path.join(options.cwd, "fake-official-plan.json");
+          const plan = JSON.parse(
+            await fs.readFile(planPath, "utf8"),
+          ) as FactoryPlan;
+          const proposal = await buildProposal({
+            projectRoot: options.cwd,
+            homeDir: options.homeDir,
+            planPath,
+          });
           const draftPath = path.join(
             options.cwd,
             ".comet",
             "bundle-drafts",
             args[2],
           );
-          await fs.mkdir(path.join(draftPath, "skills", "entry"), {
-            recursive: true,
-          });
-          await fs.writeFile(
-            path.join(draftPath, "bundle.yaml"),
-            "kind: SkillBundle\n",
-          );
-          await fs.writeFile(
-            path.join(draftPath, "skills", "entry", "SKILL.md"),
-            "---\nname: entry\ndescription: entry.\n---\n",
-          );
+          await generatePackage({ proposal, plan, destination: draftPath });
           return { draftPath };
         }
         if (args[0] === "creator" && args[1] === "status") {
@@ -136,13 +138,40 @@ describe("differential fixture snapshots", () => {
           };
         }
         if (args[0] === "publish" && args[1] === "review") {
+          const planPath = path.join(options.cwd, "fake-official-plan.json");
+          const plan = JSON.parse(
+            await fs.readFile(planPath, "utf8"),
+          ) as FactoryPlan;
+          const proposal = await buildProposal({
+            projectRoot: options.cwd,
+            homeDir: options.homeDir,
+            planPath,
+          });
+          const draftPath = path.join(
+            options.cwd,
+            ".comet",
+            "bundle-drafts",
+            args[2],
+          );
+          const generated = await generatePackage({
+            proposal,
+            plan,
+            destination: draftPath,
+          });
+          const state: CreatorState = {
+            schemaVersion: 1,
+            name: proposal.name,
+            status: "generated",
+            projectRoot: options.cwd,
+            planPath,
+            planHash: proposal.planHash,
+            draftPath,
+            currentHash: null,
+            candidates: proposal.candidates,
+            generated,
+          };
           return {
-            readiness: {
-              state: "blocked",
-              blockers: ["[eval] Eval evidence is missing"],
-              warnings: ["[authoring] Authoring evidence is missing"],
-              evidence: {},
-            },
+            readiness: await lifecycleReadiness(state),
           };
         }
         throw new Error(`Unexpected fake official command: ${args.join(" ")}`);
@@ -169,11 +198,16 @@ describe("differential fixture snapshots", () => {
       sourceHashesEqual: true,
       referenceInventoryEqual: true,
       workflowProtocolEqual: true,
-      generatedArtifactInventoryEqual: false,
+      controlPlaneChecksEqual: true,
+      generatedArtifactInventoryEqual: true,
+      initialReadinessEqual: true,
     });
     expect(report.official.observation.initialReadiness).toMatchObject({
       state: "blocked",
-      blockers: ["[eval] Eval evidence is missing"],
+      blockers: expect.arrayContaining([
+        "[eval] Eval evidence for the current draft hash is missing",
+        expect.stringContaining("Entry Decision Core is not authored"),
+      ]),
     });
     expect(report.extractionManifest).toMatchObject({
       reusableWorkflowKernel: expect.any(Object),

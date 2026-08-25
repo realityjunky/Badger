@@ -324,9 +324,11 @@ function planPath(state: CreatorState): string {
   return path.resolve(
     state.generated.authoringPlanPath ??
       path.join(
-        state.generated.packageRoot,
-        "reference",
-        "authoring-plan.json",
+        state.projectRoot,
+        ".comet-any",
+        "authoring",
+        state.name,
+        "plan.json",
       ),
   );
 }

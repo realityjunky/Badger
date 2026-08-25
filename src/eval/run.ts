@@ -36,6 +36,14 @@ export async function inspectPackage(state: CreatorState): Promise<EvalReport> {
     passed: await bundleManifestIsValid(root, packageRoot, protocol),
     detail: path.join(root, "bundle.yaml"),
   });
+  checks.push(
+    ...(await controlPlaneEvidenceChecks(
+      root,
+      packageRoot,
+      protocol,
+      checks[checks.length - 1].passed,
+    )),
+  );
   for (const relative of requiredControlPlaneFiles(protocol, packageRoot)) {
     checks.push({
       id: `control-plane:${relative}`,
@@ -57,6 +65,20 @@ export async function inspectPackage(state: CreatorState): Promise<EvalReport> {
     id: "runtime-manifest",
     passed: await exists(state.generated.evalPath),
     detail: state.generated.evalPath,
+  });
+  const authoringPlanPath =
+    state.generated.authoringPlanPath ??
+    path.join(
+      state.projectRoot,
+      ".comet-any",
+      "authoring",
+      state.name,
+      "plan.json",
+    );
+  checks.push({
+    id: "authoring-plan",
+    passed: await validAuthoringPlanFile(authoringPlanPath),
+    detail: authoringPlanPath,
   });
   const passed = checks.every((check) => check.passed);
   const report: EvalReport = { schemaVersion: 1, hash, passed, checks };
@@ -96,7 +118,6 @@ function requiredControlPlaneFiles(
     `../../hooks/${path.basename(packageRoot)}-before-tool-guard.yaml`,
     "reference/resolved-skills.json",
     "reference/workflow-protocol.json",
-    "reference/authoring-plan.json",
     "reference/decision-points.md",
     "reference/recovery.md",
     "reference/authoring-lanes.json",
@@ -115,6 +136,103 @@ function requiredControlPlaneFiles(
     "comet/eval.yaml",
     ...activeNodes.map((name) => `../${name}/SKILL.md`),
   ];
+}
+
+const FACTORY_CONTROL_PLANE_FILES = [
+  "SKILL.md",
+  "reference/resolved-skills.json",
+  "reference/workflow-protocol.json",
+  "reference/decision-points.md",
+  "reference/recovery.md",
+  "reference/authoring-lanes.json",
+  "reference/skill-review.md",
+  "reference/composition-report.md",
+  "reference/subagents/script-author.md",
+  "scripts/comet-plan.mjs",
+  "scripts/comet-check.mjs",
+  "scripts/comet-hook-guard.mjs",
+  "scripts/workflow-state.mjs",
+  "scripts/workflow-guard.mjs",
+  "scripts/workflow-handoff.mjs",
+  "comet/skill.yaml",
+  "comet/guardrails.yaml",
+  "comet/checks.yaml",
+  "comet/eval.yaml",
+] as const;
+
+async function controlPlaneEvidenceChecks(
+  bundleRoot: string,
+  packageRoot: string,
+  protocol: { nodes?: Array<{ id: string; disabled?: boolean }> },
+  manifestPassed: boolean,
+): Promise<EvalReport["checks"]> {
+  const entryName = path.basename(packageRoot);
+  const checks: EvalReport["checks"] = [];
+  checks.push({
+    id: "control-plane:evidence:bundle.yaml",
+    passed: manifestPassed,
+    detail: path.join(bundleRoot, "bundle.yaml"),
+  });
+  for (const relative of FACTORY_CONTROL_PLANE_FILES) {
+    checks.push({
+      id: `control-plane:evidence:${relative}`,
+      passed: await exists(path.join(packageRoot, relative)),
+      detail: path.join(packageRoot, relative),
+    });
+  }
+  const manifestResources = [
+    ["required-capabilities", "platforms.requires"],
+    ["rule", path.join("rules", `${entryName}-orchestration.md`)],
+    ...[
+      "comet-plan",
+      "comet-check",
+      "comet-hook-guard",
+      "workflow-state",
+      "workflow-guard",
+      "workflow-handoff",
+    ].map((id) => [
+      "script",
+      path.join("skills", entryName, "scripts", `${id}.mjs`),
+    ]),
+    ...[
+      "resolved-skills.json",
+      "workflow-protocol.json",
+      "decision-points.md",
+      "recovery.md",
+      "authoring-lanes.json",
+      "skill-review.md",
+      "composition-report.md",
+      path.join("subagents", "script-author.md"),
+    ].map((relative) => [
+      "reference",
+      path.join("skills", entryName, "reference", relative),
+    ]),
+    ["hook", path.join("hooks", `${entryName}-before-write-guard.yaml`)],
+    ["hook", path.join("hooks", `${entryName}-before-tool-guard.yaml`)],
+  ];
+  for (const [kind, relative] of manifestResources) {
+    checks.push({
+      id: `control-plane:evidence:${kind}:${relative}`,
+      passed:
+        kind === "required-capabilities"
+          ? manifestPassed
+          : manifestPassed && (await exists(path.join(bundleRoot, relative))),
+      detail: relative,
+    });
+  }
+  const checkScript = await fs
+    .readFile(path.join(packageRoot, "scripts", "comet-check.mjs"), "utf8")
+    .catch(() => "");
+  checks.push({
+    id: "control-plane:evidence:script-contract",
+    passed:
+      checkScript.includes("workflow-contract-ok") &&
+      checkScript.includes(
+        "workflow-protocol.json must use the current schema with nodes",
+      ),
+    detail: path.join(packageRoot, "scripts", "comet-check.mjs"),
+  });
+  return checks;
 }
 
 async function bundleManifestIsValid(
@@ -178,7 +296,6 @@ async function bundleManifestIsValid(
     const expectedReferences = [
       `skills/${entryName}/reference/resolved-skills.json`,
       `skills/${entryName}/reference/workflow-protocol.json`,
-      `skills/${entryName}/reference/authoring-plan.json`,
       `skills/${entryName}/reference/decision-points.md`,
       `skills/${entryName}/reference/recovery.md`,
       `skills/${entryName}/reference/authoring-lanes.json`,
@@ -241,13 +358,6 @@ async function bundleManifestIsValid(
       )
         return false;
     }
-    const authoringPlan = JSON.parse(
-      await fs.readFile(
-        path.join(packageRoot, "reference", "authoring-plan.json"),
-        "utf8",
-      ),
-    ) as unknown;
-    if (validateAuthoringPlan(authoringPlan).length) return false;
     for (const relative of [
       "comet/skill.yaml",
       "comet/guardrails.yaml",
@@ -269,6 +379,15 @@ async function bundleManifestIsValid(
 async function exists(file: string): Promise<boolean> {
   try {
     return (await fs.stat(file)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function validAuthoringPlanFile(file: string): Promise<boolean> {
+  try {
+    const value = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
+    return validateAuthoringPlan(value).length === 0;
   } catch {
     return false;
   }

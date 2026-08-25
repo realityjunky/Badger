@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { stringify } from "yaml";
 import type {
   FactoryPlan,
@@ -387,7 +388,6 @@ function manifest(proposal: FactoryProposal): Record<string, unknown> {
       references: [
         `skills/${entry}/reference/resolved-skills.json`,
         `skills/${entry}/reference/workflow-protocol.json`,
-        `skills/${entry}/reference/authoring-plan.json`,
         `skills/${entry}/reference/decision-points.md`,
         `skills/${entry}/reference/recovery.md`,
         `skills/${entry}/reference/authoring-lanes.json`,
@@ -450,6 +450,22 @@ function script(lines: string[]): string {
   return `#!/usr/bin/env node\n${lines.join("\n")}\n`;
 }
 
+async function runtimeAsset(name: string): Promise<string> {
+  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(moduleDirectory, "../../assets/runtime", name),
+    path.resolve(moduleDirectory, "../../../assets/runtime", name),
+  ];
+  for (const candidate of candidates) {
+    try {
+      return await fs.readFile(candidate, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  throw new Error(`Runtime asset not found: ${name}`);
+}
+
 function checkScript(protocol: WorkflowProtocol): string {
   const required = [
     "SKILL.md",
@@ -458,7 +474,6 @@ function checkScript(protocol: WorkflowProtocol): string {
     ),
     "reference/resolved-skills.json",
     "reference/workflow-protocol.json",
-    "reference/authoring-plan.json",
     "reference/decision-points.md",
     "reference/recovery.md",
     "reference/authoring-lanes.json",
@@ -508,236 +523,6 @@ async function main() {
 
 main().catch((error) => {
   console.error(error.message);
-  process.exit(1);
-});
-`;
-}
-
-function stateScript(): string {
-  return script([
-    "import { promises as fs } from 'node:fs';",
-    "import path from 'node:path';",
-    "import { fileURLToPath } from 'node:url';",
-    "const command = process.argv[2] ?? 'status';",
-    "const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');",
-    "const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd();",
-    "const protocolPath = path.join(packageRoot, 'reference', 'workflow-protocol.json');",
-    "const slug = (value) => String(value).toLowerCase().replace(/[^a-z0-9._-]+/gu, '-').replace(/^-+|-+$/gu, '');",
-    "const route = (protocol) => (protocol.nodes ?? []).filter((node) => !node.disabled);",
-    "const nodeName = (protocol, id) => (slug(protocol.name) || 'workflow') + '-' + (slug(id) || 'node');",
-    "const statePath = (protocol) => { const value = String(protocol.state?.statePath ?? ''); if (!value || value.startsWith('/') || value.replaceAll('\\\\', '/').split('/').includes('..')) throw new Error('workflow state path must be project-relative'); return path.resolve(runRoot, value); };",
-    "const readProtocol = async () => { const protocol = JSON.parse(await fs.readFile(protocolPath, 'utf8')); if (protocol.schemaVersion !== 1 || protocol.kind !== 'workflow-kernel' || !Array.isArray(protocol.nodes)) throw new Error('workflow-protocol.json must use the current schema with nodes'); return protocol; };",
-    "const readState = async (protocol) => JSON.parse(await fs.readFile(statePath(protocol), 'utf8'));",
-    "const writeState = async (protocol, state) => { const file = statePath(protocol); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file + '.tmp', JSON.stringify(state, null, 2) + '\\n', 'utf8'); await fs.rename(file + '.tmp', file); };",
-    "const nextNode = (protocol, state) => { const completed = new Set(Array.isArray(state.completedNodes) ? state.completedNodes : []); return route(protocol).find((node) => !completed.has(node.id)) ?? null; };",
-    "const printNext = (protocol, node) => node ? (console.log('NEXT: auto'), console.log('NODE: ' + node.id), console.log('SKILL: ' + nodeName(protocol, node.id))) : console.log('NEXT: done');",
-    "const parseEvidence = (value) => { try { const parsed = JSON.parse(value || '{}'); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : { value: parsed }; } catch { return { summary: value }; } };",
-    "try { const protocol = await readProtocol(); const nodes = route(protocol); if (!nodes.length) throw new Error('workflow protocol has no enabled nodes'); if (command === 'init') { const node = nextNode(protocol, { completedNodes: [] }); await writeState(protocol, { schemaVersion: 1, workflow: protocol.name, status: node ? 'running' : 'completed', currentNode: node?.id ?? null, completedNodes: [], evidence: {}, history: [] }); printNext(protocol, node); } else if (command === 'status') { try { console.log(JSON.stringify(await readState(protocol), null, 2)); } catch (error) { if (error?.code === 'ENOENT') console.log(JSON.stringify({ status: 'not-started' }, null, 2)); else throw error; } } else if (command === 'next') { printNext(protocol, nextNode(protocol, await readState(protocol))); } else if (command === 'record') { const nodeId = process.argv[3]; const node = nodes.find((item) => item.id === nodeId || nodeName(protocol, item.id) === nodeId); if (!node) throw new Error('Unknown workflow Node: ' + nodeId); const state = await readState(protocol); if (state.workflow !== protocol.name || state.status !== 'running' || state.currentNode !== node.id) throw new Error('workflow state is not at the requested Node'); state.evidence = state.evidence && typeof state.evidence === 'object' ? state.evidence : {}; state.history = Array.isArray(state.history) ? state.history : []; state.evidence[node.id] = { ...parseEvidence(process.argv.slice(4).join(' ')), recordedAt: new Date().toISOString() }; state.history.push({ event: 'evidence-recorded', node: node.id, at: new Date().toISOString() }); await writeState(protocol, state); console.log('EVIDENCE: ' + node.id); printNext(protocol, nextNode(protocol, state)); } else throw new Error('Unknown command: ' + command); } catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); }",
-  ]);
-}
-
-function guardScript(): string {
-  return String.raw`#!/usr/bin/env node
-import { promises as fs } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const command = process.argv[2] ?? 'verify';
-const nodeId = process.argv[3] ?? null;
-const apply = process.argv.includes('--apply');
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const packageRoot = path.resolve(__dirname, '..');
-const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd();
-const protocolPath = path.join(packageRoot, 'reference', 'workflow-protocol.json');
-
-function fail(message) {
-  throw new Error(message);
-}
-
-function slug(value) {
-  return String(value).toLowerCase().replace(/[^a-z0-9._-]+/gu, '-').replace(/^-+|-+$/gu, '');
-}
-
-function nodeName(protocol, id) {
-  return (slug(protocol.name) || 'workflow') + '-' + (slug(id) || 'node');
-}
-
-function route(protocol) {
-  return (protocol.nodes ?? []).filter((node) => !node.disabled);
-}
-
-function statePath(protocol) {
-  const value = String(protocol.state?.statePath ?? '');
-  const portable = value.replaceAll('\\', '/');
-  if (!value || portable.startsWith('/') || portable.split('/').includes('..')) {
-    fail('workflow state path must be project-relative');
-  }
-  return path.resolve(runRoot, value);
-}
-
-function schemaMap(protocol) {
-  return new Map((protocol.outputSchemas ?? []).map((schema) => [schema.id, schema]));
-}
-
-function evidenceFor(state, id) {
-  const value = state.evidence && typeof state.evidence === 'object' ? state.evidence[id] : null;
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
-}
-
-function hasEvidenceField(evidence, id) {
-  if (Object.prototype.hasOwnProperty.call(evidence, id)) return true;
-  const schemaEvidence = evidence.schemaEvidence;
-  return !!(
-    schemaEvidence &&
-    typeof schemaEvidence === 'object' &&
-    !Array.isArray(schemaEvidence) &&
-    Object.prototype.hasOwnProperty.call(schemaEvidence, id)
-  );
-}
-
-function missingRequiredChecks(node, evidence) {
-  const completed = Array.isArray(evidence.completedChecks) ? evidence.completedChecks : [];
-  return [
-    ...(node.requiredSkillCalls ?? []).map((binding) => 'required-skill:' + node.id + '.' + binding.skill),
-    ...(node.augmentations ?? [])
-      .filter((binding) => binding.enforcement !== 'advisory')
-      .map((binding) => 'augmentation:' + node.id + '.' + binding.skill),
-  ].filter((check) => !completed.includes(check));
-}
-
-function missingSchemaEvidence(protocol, node, evidence) {
-  const schemas = schemaMap(protocol);
-  const missing = [];
-  for (const schemaId of node.outputSchemas ?? []) {
-    const schema = schemas.get(schemaId);
-    for (const field of schema?.evidence ?? []) {
-      if (field.required && !hasEvidenceField(evidence, field.id)) {
-        missing.push(schemaId + '.' + field.id);
-      }
-    }
-  }
-  return missing;
-}
-
-function patternMatcher(pattern) {
-  const escaped = pattern
-    .split('*')
-    .map((part) => part.replaceAll('.', '\\.'))
-    .join('.*');
-  return new RegExp('^' + escaped + '$', 'u');
-}
-
-async function pathPatternExists(root, pattern) {
-  const portable = String(pattern).replaceAll('\\', '/');
-  if (!portable || portable.startsWith('/') || portable.split('/').includes('..')) {
-    fail('workflow artifact path must be project-relative');
-  }
-  const parts = portable.split('/');
-  async function walk(current, index) {
-    if (index === parts.length) return true;
-    const part = parts[index];
-    if (!part.includes('*')) {
-      const target = path.join(current, part);
-      let stats;
-      try {
-        stats = await fs.lstat(target);
-      } catch {
-        return false;
-      }
-      if (stats.isSymbolicLink()) fail('workflow artifact path crosses a symbolic link');
-      return walk(target, index + 1);
-    }
-    let entries;
-    try {
-      entries = await fs.readdir(current, { withFileTypes: true });
-    } catch {
-      return false;
-    }
-    const matcher = patternMatcher(part);
-    for (const entry of entries) {
-      if (entry.isSymbolicLink()) fail('workflow artifact path crosses a symbolic link');
-      if (matcher.test(entry.name) && await walk(path.join(current, entry.name), index + 1)) return true;
-    }
-    return false;
-  }
-  return walk(root, 0);
-}
-
-async function missingRequiredArtifacts(protocol, node) {
-  const schemas = schemaMap(protocol);
-  const missing = [];
-  for (const schemaId of node.outputSchemas ?? []) {
-    const schema = schemas.get(schemaId);
-    for (const artifact of schema?.artifacts ?? []) {
-      if (!artifact.required) continue;
-      const present = await Promise.all(
-        (artifact.paths ?? []).map((pattern) => pathPatternExists(runRoot, pattern)),
-      );
-      if (!present.some(Boolean)) missing.push(schemaId + '.' + artifact.id);
-    }
-  }
-  return missing;
-}
-
-async function main() {
-  const protocol = JSON.parse(await fs.readFile(protocolPath, 'utf8'));
-  if (protocol.schemaVersion !== 1 || !Array.isArray(protocol.nodes)) {
-    fail('workflow-protocol.json must use the current schema with nodes');
-  }
-  if (command === 'verify') {
-    console.log('workflow-guard-ok');
-    return;
-  }
-  if (command !== 'entry' && command !== 'exit') fail('Unknown command: ' + command);
-  if (!nodeId) fail(command + ' requires a Node id.');
-  const node = route(protocol).find((item) => item.id === nodeId || nodeName(protocol, item.id) === nodeId);
-  if (!node) fail('Unknown workflow Node: ' + nodeId);
-  const file = statePath(protocol);
-  const state = JSON.parse(await fs.readFile(file, 'utf8'));
-  if (state.workflow !== protocol.name) fail('workflow state does not match this workflow protocol');
-  if (state.status !== 'running') fail('workflow is not running');
-  if (command === 'entry') {
-    const current = state.currentNode ?? route(protocol).find((item) => !state.completedNodes?.includes(item.id))?.id ?? null;
-    if (current !== node.id && !state.completedNodes?.includes(node.id)) fail('BLOCKED: current Node is ' + String(current) + ', cannot enter ' + node.id + '.');
-    console.log('ENTRY OK: ' + node.id);
-    return;
-  }
-  if (state.currentNode !== node.id) fail('BLOCKED: current Node is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
-  const evidence = evidenceFor(state, node.id);
-  if (!evidence) fail('BLOCKED: missing evidence for Node ' + node.id + '.');
-  const missingSchema = missingSchemaEvidence(protocol, node, evidence);
-  if (missingSchema.length) fail('BLOCKED: missing Output Schema evidence: ' + missingSchema.join(', '));
-  const missingChecks = missingRequiredChecks(node, evidence);
-  if (missingChecks.length) fail('BLOCKED: missing required Skill evidence: ' + missingChecks.join(', '));
-  const missingArtifacts = await missingRequiredArtifacts(protocol, node);
-  if (missingArtifacts.length) fail('BLOCKED: missing Output Schema artifacts: ' + missingArtifacts.join(', '));
-  if (!apply) {
-    console.log('ALL CHECKS PASSED');
-    console.log('APPLY: rerun with --apply to update workflow state');
-    return;
-  }
-  const completed = new Set(Array.isArray(state.completedNodes) ? state.completedNodes : []);
-  completed.add(node.id);
-  state.completedNodes = route(protocol).filter((item) => completed.has(item.id)).map((item) => item.id);
-  const next = route(protocol).find((item) => !completed.has(item.id)) ?? null;
-  state.currentNode = next?.id ?? null;
-  state.status = next ? 'running' : 'completed';
-  state.history = Array.isArray(state.history) ? state.history : [];
-  state.history.push({ event: 'exit-applied', node: node.id, at: new Date().toISOString() });
-  await fs.writeFile(file + '.tmp', JSON.stringify(state, null, 2) + '\n', 'utf8');
-  await fs.rename(file + '.tmp', file);
-  console.log('ALL CHECKS PASSED');
-  if (next) {
-    console.log('NEXT: auto');
-    console.log('NODE: ' + next.id);
-    console.log('SKILL: ' + nodeName(protocol, next.id));
-  } else {
-    console.log('NEXT: done');
-  }
-}
-
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });
 `;
@@ -976,10 +761,6 @@ export async function generatePackage(options: {
       JSON.stringify(protocol, null, 2) + "\n",
     ],
     [
-      "reference/authoring-plan.json",
-      JSON.stringify(authoringPlan, null, 2) + "\n",
-    ],
-    [
       "reference/decision-points.md",
       "# Workflow Decision Classification\n\nNo decision points have been authored. Do not infer that every Node or Output Schema requires confirmation. Classify each candidate as a genuine user decision, automatic handling, a stop condition, or a manual handoff; pause only when at least two valid choices change scope, behavior, accepted risk, or an irreversible outcome.\n",
     ],
@@ -1017,7 +798,7 @@ export async function generatePackage(options: {
     ],
     [
       "reference/skill-review.md",
-      "# Skill Review\n\nEvidence source: deterministic-check-only.\n\nNo LLM authoring review has been recorded for this Bundle yet. This file is an honest placeholder, not a review approval. Author the review output, then record its verdict with `comet-any authoring-record <name> --lane skill-review --file <review.json>` to replace this with a current review summary.\n",
+      "# Skill Review\n\nEvidence source: deterministic-check-only.\n\nNo LLM authoring review has been recorded for this Bundle yet. This file is an honest placeholder, not a review approval. Run the `/comet-any` skill-review lane and record its verdict via `comet creator authoring-record <name> --lane skill-review --file <review.json>` to replace this with a real multi-vote review summary.\n",
     ],
     ["reference/composition-report.md", compositionReport(options.proposal)],
     [
@@ -1028,20 +809,26 @@ export async function generatePackage(options: {
   for (const [relative, content] of references)
     await writeArtifact(bundleRoot, packageRoot, relative, content);
 
+  const authoringPlanPath = path.join(
+    path.dirname(path.dirname(bundleRoot)),
+    "authoring",
+    entry,
+    "plan.json",
+  );
+  await atomicWrite(
+    authoringPlanPath,
+    JSON.stringify(authoringPlan, null, 2) + "\n",
+  );
+
   const scripts: Array<[string, string]> = [
     ["scripts/comet-plan.mjs", script(["import './workflow-state.mjs';"])],
     ["scripts/comet-check.mjs", checkScript(protocol)],
     [
       "scripts/comet-hook-guard.mjs",
-      script([
-        "import { promises as fs } from 'node:fs';",
-        "import path from 'node:path';",
-        "import { fileURLToPath } from 'node:url';",
-        "const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd(); const protocol = JSON.parse(await fs.readFile(path.join(packageRoot, 'reference', 'workflow-protocol.json'), 'utf8')); const stateValue = String(protocol.state?.statePath ?? ''); if (!stateValue || stateValue.startsWith('/') || stateValue.replaceAll('\\\\', '/').split('/').includes('..')) throw new Error('workflow state path must be project-relative'); const state = JSON.parse(await fs.readFile(path.resolve(runRoot, stateValue), 'utf8')); if (state.workflow !== protocol.name || state.status !== 'running') throw new Error('workflow is not running'); console.log('workflow-hook-guard-ok'); console.log('EVENT: ' + (process.argv[2] ?? 'before_tool')); console.log('NODE: ' + state.currentNode);",
-      ]),
+      await runtimeAsset("comet-hook-guard.mjs"),
     ],
-    ["scripts/workflow-state.mjs", stateScript()],
-    ["scripts/workflow-guard.mjs", guardScript()],
+    ["scripts/workflow-state.mjs", await runtimeAsset("workflow-state.mjs")],
+    ["scripts/workflow-guard.mjs", await runtimeAsset("workflow-guard.mjs")],
     ["scripts/workflow-handoff.mjs", handoffScript()],
   ];
   for (const [relative, content] of scripts)
@@ -1098,10 +885,6 @@ export async function generatePackage(options: {
     packageRoot,
     protocolPath: path.join(packageRoot, "reference", "workflow-protocol.json"),
     evalPath: path.join(packageRoot, "comet", "eval.yaml"),
-    authoringPlanPath: path.join(
-      packageRoot,
-      "reference",
-      "authoring-plan.json",
-    ),
+    authoringPlanPath,
   };
 }

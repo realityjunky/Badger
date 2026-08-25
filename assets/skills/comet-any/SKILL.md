@@ -36,6 +36,7 @@ The standalone package deliberately excludes Classic customization, Native workf
 - Every custom Node declares a responsibility and implementation Skill. Required calls augment an implementation; they never replace it.
 - Control Nodes cannot be overridden. Producer overrides must declare every Output Schema they satisfy.
 - The authoring plan is the canonical six-lane DAG: `script`, `reference`, `pause-points`, `workflow-entry`, `skill-core`, and `skill-review`.
+- The authoring plan is stored at `.comet-any/authoring/<name>/plan.json`, outside the generated Bundle hash; lane records are stored beside it.
 - Authoring records are stored outside the hashed Bundle, but every record binds to the current Bundle and protocol hashes. `BLOCKED` and `NEEDS_CONTEXT` records halt downstream lanes.
 - Unresolved or ambiguous Skill candidates, scaffold content, stale hashes, failed eval, invalid control-plane files, missing authoring records, missing review, and missing confirmation block the next mutating step.
 - Generated packages and published copies are local filesystem artifacts. Review the preview before copying them elsewhere.
