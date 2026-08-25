@@ -1,13 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
+import { validateAuthoringPlan } from "../authoring/lifecycle.js";
 import type { CreatorState, EvalReport } from "../types.js";
 import { hashDirectory, atomicWrite } from "../util.js";
 import { writeState } from "../factory/state.js";
 
-export async function evaluatePackage(
-  state: CreatorState,
-): Promise<EvalReport> {
+export async function inspectPackage(state: CreatorState): Promise<EvalReport> {
   if (!state.generated)
     throw new Error("Generate the workflow package before evaluation");
   const root = state.generated.bundleRoot ?? state.generated.packageRoot;
@@ -61,6 +60,13 @@ export async function evaluatePackage(
   });
   const passed = checks.every((check) => check.passed);
   const report: EvalReport = { schemaVersion: 1, hash, passed, checks };
+  return report;
+}
+
+export async function evaluatePackage(
+  state: CreatorState,
+): Promise<EvalReport> {
+  const report = await inspectPackage(state);
   const resultPath = path.join(
     state.projectRoot,
     ".comet-any",
@@ -68,9 +74,9 @@ export async function evaluatePackage(
     `${state.name}.json`,
   );
   await atomicWrite(resultPath, JSON.stringify(report, null, 2) + "\n");
-  state.currentHash = hash;
-  state.eval = { hash, passed, resultPath };
-  state.status = passed ? "evaluated" : "generated";
+  state.currentHash = report.hash;
+  state.eval = { hash: report.hash, passed: report.passed, resultPath };
+  state.status = report.passed ? "evaluated" : "generated";
   await writeState(state);
   return report;
 }
@@ -90,6 +96,7 @@ function requiredControlPlaneFiles(
     `../../hooks/${path.basename(packageRoot)}-before-tool-guard.yaml`,
     "reference/resolved-skills.json",
     "reference/workflow-protocol.json",
+    "reference/authoring-plan.json",
     "reference/decision-points.md",
     "reference/recovery.md",
     "reference/authoring-lanes.json",
@@ -171,6 +178,7 @@ async function bundleManifestIsValid(
     const expectedReferences = [
       `skills/${entryName}/reference/resolved-skills.json`,
       `skills/${entryName}/reference/workflow-protocol.json`,
+      `skills/${entryName}/reference/authoring-plan.json`,
       `skills/${entryName}/reference/decision-points.md`,
       `skills/${entryName}/reference/recovery.md`,
       `skills/${entryName}/reference/authoring-lanes.json`,
@@ -231,6 +239,25 @@ async function bundleManifestIsValid(
         document.failure !== "block" ||
         document.requiresConfirmation !== false
       )
+        return false;
+    }
+    const authoringPlan = JSON.parse(
+      await fs.readFile(
+        path.join(packageRoot, "reference", "authoring-plan.json"),
+        "utf8",
+      ),
+    ) as unknown;
+    if (validateAuthoringPlan(authoringPlan).length) return false;
+    for (const relative of [
+      "comet/skill.yaml",
+      "comet/guardrails.yaml",
+      "comet/checks.yaml",
+      "comet/eval.yaml",
+    ]) {
+      const document = parse(
+        await fs.readFile(path.join(packageRoot, relative), "utf8"),
+      );
+      if (!document || typeof document !== "object" || Array.isArray(document))
         return false;
     }
     return true;

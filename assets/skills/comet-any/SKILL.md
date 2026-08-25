@@ -23,15 +23,19 @@ The standalone package deliberately excludes Classic customization, Native workf
 4. Show the user the goal, intent, Nodes, implementations, Required Skill Calls, Output Schemas, blockers, and warnings.
 5. Wait for explicit confirmation. Do not initialize state or generate files before confirmation.
 6. Run `comet-any init <plan.json> --confirm --project <dir>`.
-7. Run `comet-any generate <name> --project <dir>`, then `comet-any eval <name> --project <dir>`.
-8. Show `comet-any review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
-9. Run `comet-any approve <name> --reviewer <id> --confirm`, then `comet-any publish <name> --confirm`.
-10. Start with `comet-any distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
+7. Run `comet-any generate <name> --project <dir>`, then `comet-any authoring-plan <name> --project <dir> --json`.
+8. Author the generated scaffold and record each lane with `comet-any authoring-record <name> --lane <lane> --file <record.json>` in DAG order.
+9. Treat `BLOCKED`, `NEEDS_CONTEXT`, missing records, scaffold markers, stale hashes, and invalid control-plane files as hard stops. Re-record affected lanes after Bundle edits.
+10. Run `comet-any eval <name> --project <dir>`, then show `comet-any review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
+11. Run `comet-any approve <name> --reviewer <id> --confirm`, then `comet-any publish <name> --confirm`.
+12. Start with `comet-any distribute <name> --destination <dir>` to preview the complete Bundle file list. The standalone tool does not install into Agent platform directories.
 
 ## Contract rules
 
 - `reference/workflow-protocol.json` is the single runtime contract for Node order, state, Output Schemas, and recovery edges.
 - Every custom Node declares a responsibility and implementation Skill. Required calls augment an implementation; they never replace it.
 - Control Nodes cannot be overridden. Producer overrides must declare every Output Schema they satisfy.
-- Unresolved or ambiguous Skill candidates, stale hashes, failed eval, missing review, and missing confirmation block the next mutating step.
+- The authoring plan is the canonical six-lane DAG: `script`, `reference`, `pause-points`, `workflow-entry`, `skill-core`, and `skill-review`.
+- Authoring records are stored outside the hashed Bundle, but every record binds to the current Bundle and protocol hashes. `BLOCKED` and `NEEDS_CONTEXT` records halt downstream lanes.
+- Unresolved or ambiguous Skill candidates, scaffold content, stale hashes, failed eval, invalid control-plane files, missing authoring records, missing review, and missing confirmation block the next mutating step.
 - Generated packages and published copies are local filesystem artifacts. Review the preview before copying them elsewhere.

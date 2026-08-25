@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { readPreferenceEntries, findSkills } from "./skill/find.js";
 import { buildProposal, readPlan } from "./factory/proposal.js";
@@ -6,10 +7,15 @@ import { generatePackage } from "./factory/generate.js";
 import { initializeState, readState, writeState } from "./factory/state.js";
 import { evaluatePackage } from "./eval/run.js";
 import {
+  authoringReadiness,
+  readAuthoringPlan,
+  recordAuthoring,
+} from "./authoring/lifecycle.js";
+import {
   approveReview,
   distributePreview,
+  lifecycleReadiness,
   publishState,
-  reviewState,
 } from "./publish/lifecycle.js";
 import { runDifferentialHarness } from "./differential/run.js";
 
@@ -126,6 +132,7 @@ program
     state.currentHash = null;
     state.eval = undefined;
     state.review = undefined;
+    state.authoring = undefined;
     await writeState(state);
     emit({ name, status: state.status, generated }, options.json);
   });
@@ -144,12 +151,50 @@ program
   });
 
 program
+  .command("authoring-plan <name>")
+  .option("--project <dir>", "Project root", ".")
+  .option("--json", "JSON output")
+  .action(async (name, options) => {
+    const state = await readState(projectRoot(options.project), name);
+    emit(
+      {
+        plan: await readAuthoringPlan(state),
+        readiness: await authoringReadiness(state),
+      },
+      options.json,
+    );
+  });
+
+program
+  .command("authoring-record <name>")
+  .requiredOption("--lane <lane>", "Authoring lane")
+  .requiredOption("--file <file>", "Authoring record JSON")
+  .option("--project <dir>", "Project root", ".")
+  .option("--json", "JSON output")
+  .action(async (name, options) => {
+    const root = projectRoot(options.project);
+    const record = JSON.parse(
+      await fs.readFile(path.resolve(options.file), "utf8"),
+    );
+    emit(
+      await recordAuthoring({
+        state: await readState(root, name),
+        lane: options.lane,
+        record,
+      }),
+      options.json,
+    );
+  });
+
+program
   .command("review <name>")
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (name, options) => {
     emit(
-      reviewState(await readState(projectRoot(options.project), name)),
+      await lifecycleReadiness(
+        await readState(projectRoot(options.project), name),
+      ),
       options.json,
     );
   });

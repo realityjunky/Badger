@@ -197,8 +197,10 @@ export interface CreatorState {
     packageRoot: string;
     protocolPath: string;
     evalPath: string;
+    authoringPlanPath?: string;
   };
   eval?: { hash: string; passed: boolean; resultPath: string };
+  authoring?: AuthoringStateSummary;
   review?: {
     hash: string;
     decision: "approved" | "rejected";
@@ -213,4 +215,110 @@ export interface EvalReport {
   hash: string;
   passed: boolean;
   checks: Array<{ id: string; passed: boolean; detail: string }>;
+}
+
+export type AuthoringLaneId =
+  | "script"
+  | "reference"
+  | "pause-points"
+  | "workflow-entry"
+  | "skill-core"
+  | "skill-review";
+
+export type AuthoringStatus =
+  "PENDING" | "IN_PROGRESS" | "COMPLETE" | "BLOCKED" | "NEEDS_CONTEXT";
+
+export type AuthoringClaimStatus =
+  "SUPPORTED" | "UNSUPPORTED" | "NEEDS_CONTEXT";
+
+export interface AuthoringClaimDefinition {
+  id: string;
+  statement: string;
+  required: boolean;
+}
+
+export interface AuthoringArtifactDefinition {
+  id: string;
+  path: string;
+  kind: "file" | "directory";
+  required: boolean;
+}
+
+export interface AuthoringLaneDefinition {
+  lane: AuthoringLaneId;
+  dependsOn: AuthoringLaneId[];
+  claims: AuthoringClaimDefinition[];
+  artifacts: AuthoringArtifactDefinition[];
+  reviewRequired?: boolean;
+}
+
+export interface AuthoringPlan {
+  schemaVersion: 1;
+  kind: "authoring-plan";
+  workflow: string;
+  protocolHash: string;
+  lanes: AuthoringLaneDefinition[];
+}
+
+export interface AuthoringClaimEvidence {
+  id: string;
+  status: AuthoringClaimStatus;
+  evidence: string[];
+}
+
+export interface AuthoringArtifactEvidence {
+  id: string;
+  path: string;
+  present: boolean;
+  contentHash?: string;
+}
+
+export interface AuthoringReviewOutput {
+  decision: "approved" | "rejected" | "needs_context";
+  reviewer: string;
+  summary: string;
+  blockingFindings: string[];
+  warnings: string[];
+}
+
+export interface AuthoringRecord {
+  schemaVersion: 1;
+  kind: "authoring-record";
+  workflow: string;
+  lane: AuthoringLaneId;
+  status: AuthoringStatus;
+  protocolHash: string;
+  bundleHash: string;
+  claims: AuthoringClaimEvidence[];
+  artifacts: AuthoringArtifactEvidence[];
+  review?: AuthoringReviewOutput;
+  summary?: string;
+  at: string;
+}
+
+export interface AuthoringRecordInput {
+  status: AuthoringStatus;
+  claims: AuthoringClaimEvidence[];
+  artifacts: AuthoringArtifactEvidence[];
+  review?: AuthoringReviewOutput;
+  summary?: string;
+}
+
+export interface AuthoringStateSummary {
+  planPath: string;
+  recordsPath: string;
+  records: Partial<
+    Record<
+      AuthoringLaneId,
+      { path: string; status: AuthoringStatus; bundleHash: string }
+    >
+  >;
+}
+
+export interface AuthoringReadiness {
+  state: "blocked" | "needs-context" | "ready";
+  blockers: string[];
+  warnings: string[];
+  evidence: Record<string, string>;
+  records: Partial<Record<AuthoringLaneId, AuthoringRecord>>;
 }

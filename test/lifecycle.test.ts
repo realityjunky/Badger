@@ -9,12 +9,17 @@ import { generatePackage } from "../src/factory/generate.js";
 import { initializeState, readState } from "../src/factory/state.js";
 import { evaluatePackage } from "../src/eval/run.js";
 import {
+  authoringReadiness,
+  readAuthoringPlan,
+  recordAuthoring,
+} from "../src/authoring/lifecycle.js";
+import {
   approveReview,
   distributePreview,
   publishState,
   reviewState,
 } from "../src/publish/lifecycle.js";
-import type { FactoryPlan } from "../src/types.js";
+import type { FactoryPlan, WorkflowProtocol } from "../src/types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -98,14 +103,19 @@ describe("standalone Creator lifecycle", () => {
       plan,
       destination: initial.draftPath,
     });
+    await authorBundle(generated, proposal.workflow);
     initial.generated = generated;
     const report = await evaluatePackage(initial);
     expect(report.passed).toBe(true);
     expect(reviewState(await readState(project, initial.name)).state).toBe(
-      "reviewable",
+      "blocked",
     );
+    await recordAllAuthoring(await readState(project, initial.name));
+    const readyState = await readState(project, initial.name);
+    expect((await authoringReadiness(readyState)).state).toBe("ready");
+    expect(reviewState(readyState).state).toBe("reviewable");
     const approved = await approveReview({
-      state: await readState(project, initial.name),
+      state: readyState,
       reviewer: "test-reviewer",
       approve: true,
     });
@@ -117,9 +127,15 @@ describe("standalone Creator lifecycle", () => {
       path.join(project, "install-preview"),
     );
     expect(preview.preview).toBe(true);
+    expect(preview.hostPlatformWrites).toBe(false);
     expect(preview.files).toContain(
       path.join(project, "install-preview", "bundle.yaml"),
     );
+    await expect(
+      fs.stat(path.join(project, "install-preview")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("generates a complete inspectable workflow-kernel Bundle", async () => {
@@ -145,6 +161,7 @@ describe("standalone Creator lifecycle", () => {
       "skills/primer-workflow-design/SKILL.md",
       "skills/primer-workflow/reference/resolved-skills.json",
       "skills/primer-workflow/reference/workflow-protocol.json",
+      "skills/primer-workflow/reference/authoring-plan.json",
       "skills/primer-workflow/reference/decision-points.md",
       "skills/primer-workflow/reference/recovery.md",
       "skills/primer-workflow/reference/authoring-lanes.json",
@@ -264,6 +281,43 @@ describe("standalone Creator lifecycle", () => {
     ).resolves.toContain('"status": "completed"');
   });
 
+  it("rejects publication and preview after the approved Bundle drifts", async () => {
+    const proposal = await buildProposal({ projectRoot: project, planPath });
+    const plan = await readPlan(planPath);
+    const initial = await initializeState({
+      projectRoot: project,
+      planPath,
+      plan,
+      proposal,
+      confirmed: true,
+    });
+    const generated = await generatePackage({
+      proposal,
+      plan,
+      destination: initial.draftPath,
+    });
+    await authorBundle(generated, proposal.workflow);
+    initial.generated = generated;
+    await evaluatePackage(initial);
+    await recordAllAuthoring(await readState(project, initial.name));
+    const approved = await approveReview({
+      state: await readState(project, initial.name),
+      reviewer: "test-reviewer",
+      approve: true,
+    });
+    await fs.appendFile(
+      path.join(generated.packageRoot, "SKILL.md"),
+      "\nDrift.\n",
+    );
+
+    await expect(publishState(approved)).rejects.toThrow(
+      /current package hash|Eval checks/iu,
+    );
+    await expect(
+      distributePreview(approved, path.join(project, "install-preview")),
+    ).rejects.toThrow(/current package hash|Eval checks/iu);
+  });
+
   it("fails evaluation when a declared Bundle resource is missing", async () => {
     const proposal = await buildProposal({ projectRoot: project, planPath });
     const plan = await readPlan(planPath);
@@ -292,6 +346,39 @@ describe("standalone Creator lifecycle", () => {
         id: "control-plane:../../rules/primer-workflow-orchestration.md",
         passed: false,
       }),
+    );
+  });
+
+  it("fails evaluation when a control-plane hook is invalid", async () => {
+    const proposal = await buildProposal({ projectRoot: project, planPath });
+    const plan = await readPlan(planPath);
+    const initial = await initializeState({
+      projectRoot: project,
+      planPath,
+      plan,
+      proposal,
+      confirmed: true,
+    });
+    const generated = await generatePackage({
+      proposal,
+      plan,
+      destination: initial.draftPath,
+    });
+    await fs.writeFile(
+      path.join(
+        initial.draftPath,
+        "hooks",
+        "primer-workflow-before-write-guard.yaml",
+      ),
+      "event: before_tool\nmatcher: '*'\nscript: wrong\n",
+    );
+    initial.generated = generated;
+
+    const report = await evaluatePackage(initial);
+
+    expect(report.passed).toBe(false);
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({ id: "bundle-manifest", passed: false }),
     );
   });
 
@@ -367,4 +454,78 @@ async function listFiles(root: string, relative = ""): Promise<string[]> {
     else files.push(next.split(path.sep).join("/"));
   }
   return files;
+}
+
+async function authorBundle(
+  generated: { packageRoot: string },
+  workflow: WorkflowProtocol,
+): Promise<void> {
+  const files = [
+    path.join(generated.packageRoot, "SKILL.md"),
+    path.join(generated.packageRoot, "reference", "decision-points.md"),
+    path.join(generated.packageRoot, "reference", "skill-review.md"),
+    ...workflow.nodes
+      .filter((node) => !node.disabled)
+      .map((node) =>
+        path.join(
+          generated.packageRoot,
+          "..",
+          `${workflow.name}-${node.id}`,
+          "SKILL.md",
+        ),
+      ),
+  ];
+  for (const file of files) {
+    const content = await fs.readFile(file, "utf8");
+    await fs.writeFile(
+      file,
+      content
+        .replaceAll("<!-- AUTHORING PENDING -->", "<!-- authored -->")
+        .replaceAll("**Not yet authored.**", "Authored guidance.")
+        .replace(
+          "No decision points have been authored.",
+          "Decision points are classified.",
+        )
+        .replace(
+          "No LLM authoring review has been recorded",
+          "The authoring review record is current",
+        ),
+    );
+  }
+}
+
+async function recordAllAuthoring(
+  state: Awaited<ReturnType<typeof readState>>,
+): Promise<void> {
+  const plan = await readAuthoringPlan(state);
+  for (const lane of plan.lanes) {
+    await recordAuthoring({
+      state,
+      lane: lane.lane,
+      record: {
+        status: "COMPLETE",
+        claims: lane.claims.map((claim) => ({
+          id: claim.id,
+          status: "SUPPORTED",
+          evidence: [`evidence:${claim.id}`],
+        })),
+        artifacts: lane.artifacts.map((artifact) => ({
+          id: artifact.id,
+          path: artifact.path,
+          present: true,
+        })),
+        ...(lane.reviewRequired
+          ? {
+              review: {
+                decision: "approved",
+                reviewer: "authoring-reviewer",
+                summary: "All authoring lanes are complete.",
+                blockingFindings: [],
+                warnings: [],
+              },
+            }
+          : {}),
+      },
+    });
+  }
 }

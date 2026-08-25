@@ -19,8 +19,9 @@
 | `src/factory/proposal.ts` | Standalone compatibility adapter to the shared proposal seam |
 | `src/factory/generate.ts` | Deterministic `SkillBundle` generation, entry/internal Node Skills, control-plane resources, and protocol/evidence artifacts |
 | `src/factory/state.ts` | Standalone compatibility adapter to the shared state seam and `.comet-any` namespace |
-| `src/eval/run.ts` | Current-package hash and route-conformance evidence |
-| `src/publish/lifecycle.ts` | Readiness, reviewer approval, hash-bound publication, and distribution preview |
+| `src/authoring/lifecycle.ts` | Canonical authoring-lane DAG, hash-bound records, claim/artifact/review validation, and readiness |
+| `src/eval/run.ts` | Read-only current-package inspection and persisted route/control-plane Eval evidence |
+| `src/publish/lifecycle.ts` | Combined authoring/Eval readiness, reviewer approval, hash-bound publication, and distribution preview |
 | `src/cli.ts` | Thin Creator-facing command interface |
 
 ## Deliberate exclusions
@@ -42,6 +43,5 @@ The differential runner uses disposable projects and home directories. It never 
 These are intentionally separate future batches:
 
 1. Add a production-quality platform adapter interface with filesystem and in-memory adapters.
-2. Add richer authored content lanes and human review artifacts.
-3. Add external eval runners behind an injected adapter.
-4. Add package signing and publication registry integration.
+2. Add external eval runners behind an injected adapter.
+3. Add package signing and publication registry integration.

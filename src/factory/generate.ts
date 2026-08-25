@@ -7,6 +7,7 @@ import type {
   NodeProtocol,
   WorkflowProtocol,
 } from "../types.js";
+import { buildAuthoringPlan } from "../authoring/lifecycle.js";
 import {
   atomicWrite,
   copyDirectory,
@@ -21,6 +22,7 @@ export interface GeneratedPackage {
   packageRoot: string;
   protocolPath: string;
   evalPath: string;
+  authoringPlanPath: string;
 }
 
 function nodeSkillName(workflow: string, node: string): string {
@@ -385,6 +387,7 @@ function manifest(proposal: FactoryProposal): Record<string, unknown> {
       references: [
         `skills/${entry}/reference/resolved-skills.json`,
         `skills/${entry}/reference/workflow-protocol.json`,
+        `skills/${entry}/reference/authoring-plan.json`,
         `skills/${entry}/reference/decision-points.md`,
         `skills/${entry}/reference/recovery.md`,
         `skills/${entry}/reference/authoring-lanes.json`,
@@ -455,6 +458,7 @@ function checkScript(protocol: WorkflowProtocol): string {
     ),
     "reference/resolved-skills.json",
     "reference/workflow-protocol.json",
+    "reference/authoring-plan.json",
     "reference/decision-points.md",
     "reference/recovery.md",
     "reference/authoring-lanes.json",
@@ -961,6 +965,7 @@ export async function generatePackage(options: {
     );
 
   const protocol = options.proposal.workflow;
+  const authoringPlan = buildAuthoringPlan(protocol, entry);
   const references: Array<[string, string]> = [
     [
       "reference/resolved-skills.json",
@@ -969,6 +974,10 @@ export async function generatePackage(options: {
     [
       "reference/workflow-protocol.json",
       JSON.stringify(protocol, null, 2) + "\n",
+    ],
+    [
+      "reference/authoring-plan.json",
+      JSON.stringify(authoringPlan, null, 2) + "\n",
     ],
     [
       "reference/decision-points.md",
@@ -1008,7 +1017,7 @@ export async function generatePackage(options: {
     ],
     [
       "reference/skill-review.md",
-      "# Skill Review\n\nEvidence source: deterministic-check-only.\n\nNo LLM authoring review has been recorded for this Bundle yet. This file is an honest placeholder, not a review approval. Run the `/comet-any` skill-review lane and record its verdict via `comet creator authoring-record <name> --lane skill-review --file <review.json>` to replace this with a real multi-vote review summary.\n",
+      "# Skill Review\n\nEvidence source: deterministic-check-only.\n\nNo LLM authoring review has been recorded for this Bundle yet. This file is an honest placeholder, not a review approval. Author the review output, then record its verdict with `comet-any authoring-record <name> --lane skill-review --file <review.json>` to replace this with a current review summary.\n",
     ],
     ["reference/composition-report.md", compositionReport(options.proposal)],
     [
@@ -1089,5 +1098,10 @@ export async function generatePackage(options: {
     packageRoot,
     protocolPath: path.join(packageRoot, "reference", "workflow-protocol.json"),
     evalPath: path.join(packageRoot, "comet", "eval.yaml"),
+    authoringPlanPath: path.join(
+      packageRoot,
+      "reference",
+      "authoring-plan.json",
+    ),
   };
 }

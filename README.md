@@ -11,6 +11,7 @@ The package includes:
 - deterministic Workflow Contract normalization and validation;
 - confirmed plan/state lifecycle in the standalone `.comet-any` namespace;
 - complete local `SkillBundle` generation with an entry Skill, internal Node Skills, rules, hooks, scripts, references, guardrails, checks, and Eval declarations;
+- an explicit authoring-lane DAG with hash-bound authoring records, review output, and fail-closed readiness;
 - current-hash evaluation, review approval, publication, and distribution preview.
 
 It intentionally excludes Comet Classic, Comet Native, Comet Entry, host platform installers, ambient resume routing, and external Engine adapters.
