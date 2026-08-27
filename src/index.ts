@@ -14,7 +14,6 @@ export * from "./factory/generate.js";
 export * from "./factory/state.js";
 export * from "./eval/run.js";
 export * from "./publish/lifecycle.js";
-export * from "./authoring/lifecycle.js";
 export * from "./differential/types.js";
 export * from "./differential/fixture.js";
 export * from "./differential/observe.js";

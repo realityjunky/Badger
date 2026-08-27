@@ -141,8 +141,13 @@ export function createWorkflowKernel(
   async function buildProposal(planPath: string): Promise<FactoryProposal> {
     const plan = await readPlan(planPath);
     const normalized = normalizeWorkflow(plan.workflow);
+    const extraRoots = (plan.skillRoots ?? []).map((root) => ({
+      root: path.resolve(projectRoot, root),
+      origin: "extra" as const,
+    }));
     const candidates = await discover({
       preferences: queryEntries(plan, normalized.requiredSkills),
+      extraRoots,
     });
     const blockers = blockedCandidateMessages(candidates);
     const sourceRoot = plan.sourceRoot
@@ -214,9 +219,9 @@ export function createWorkflowKernel(
       stateOptions.proposal.name !== stateOptions.plan.workflow.name
     )
       throw new Error("Confirmed proposal does not match the Factory plan");
-    const draftPath = path.join(
-      stateRoot,
-      "drafts",
+    const draftPath = path.resolve(
+      projectRoot,
+      stateOptions.plan.artifactRoot ?? path.join(stateNamespace, "drafts"),
       stateOptions.plan.workflow.name,
     );
     const state: CreatorState = {

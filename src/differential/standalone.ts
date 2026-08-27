@@ -3,12 +3,11 @@ import path from "node:path";
 import { buildProposal } from "../factory/proposal.js";
 import { generatePackage } from "../factory/generate.js";
 import { initializeState, writeState } from "../factory/state.js";
-import { lifecycleReadiness } from "../publish/lifecycle.js";
+import { reviewState } from "../publish/lifecycle.js";
 import type { CreatorState } from "../types.js";
 import { fixturePlanForStandalone } from "./fixture.js";
 import {
   canonicalizeCandidates,
-  canonicalizeReadiness,
   inventoryDirectory,
   observationParts,
 } from "./observe.js";
@@ -64,11 +63,14 @@ export async function observeStandalone(options: {
       review: undefined,
     };
     await writeState(state);
-    generatedRoot = generated.bundleRoot ?? generated.packageRoot;
-    readiness = canonicalizeReadiness(
-      await lifecycleReadiness(state),
-      projectRoot,
-    );
+    generatedRoot = generated.packageRoot;
+    const review = reviewState(state);
+    readiness = {
+      state: review.state,
+      blockers: review.blockers,
+      warnings: [],
+      evidence: review.evidence,
+    };
   } else {
     readiness = {
       state: "blocked",
@@ -81,7 +83,7 @@ export async function observeStandalone(options: {
   return observationParts(
     canonicalizeCandidates(proposal.candidates),
     proposal.workflow,
-    await inventoryDirectory(generatedRoot, true, projectRoot),
+    await inventoryDirectory(generatedRoot, true),
     readiness,
   );
 }

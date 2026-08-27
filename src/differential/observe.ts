@@ -113,55 +113,32 @@ export function canonicalizeWorkflowProtocol(value: unknown): WorkflowProtocol {
   return protocol as unknown as WorkflowProtocol;
 }
 
-export function canonicalizeReadiness(
-  value: unknown,
-  projectRoot?: string,
-): ReadinessObservation {
+export function canonicalizeReadiness(value: unknown): ReadinessObservation {
   const document = record(value, "readiness result");
   const readiness = document.readiness
     ? record(document.readiness, "readiness")
     : document;
-  const normalize = (item: string): string => {
-    let normalized = item;
-    if (projectRoot) {
-      const root = path.resolve(projectRoot);
-      normalized = normalized
-        .replaceAll(root, "<project-root>")
-        .replaceAll(root.split(path.sep).join("/"), "<project-root>");
-    }
-    return normalized
-      .replaceAll(/\/\.comet-any\/drafts\//gu, "/<drafts>/")
-      .replaceAll(/\/\.comet\/bundle-drafts\//gu, "/<drafts>/")
-      .replaceAll(/\/\.comet-any\/eval\//gu, "/<eval>/")
-      .replaceAll(/\/\.comet\/bundle-evals\//gu, "/<eval>/");
-  };
   return {
     state: typeof readiness.state === "string" ? readiness.state : "unknown",
     blockers: Array.isArray(readiness.blockers)
-      ? readiness.blockers
-          .filter((item): item is string => typeof item === "string")
-          .map(normalize)
+      ? readiness.blockers.filter(
+          (item): item is string => typeof item === "string",
+        )
       : [],
     warnings: Array.isArray(readiness.warnings)
-      ? readiness.warnings
-          .filter((item): item is string => typeof item === "string")
-          .map(normalize)
+      ? readiness.warnings.filter(
+          (item): item is string => typeof item === "string",
+        )
       : [],
     evidence:
       readiness.evidence && typeof readiness.evidence === "object"
         ? Object.fromEntries(
-            Object.entries(readiness.evidence as Record<string, unknown>)
-              .filter(
-                (entry): entry is [string, string] =>
-                  typeof entry[1] === "string",
-              )
-              .map(
-                ([key, item]) =>
-                  [
-                    key,
-                    key === "factoryPlan" ? "<factory-plan>" : normalize(item),
-                  ] as [string, string],
-              ),
+            Object.entries(
+              readiness.evidence as Record<string, unknown>,
+            ).filter(
+              (entry): entry is [string, string] =>
+                typeof entry[1] === "string",
+            ),
           )
         : {},
   };
@@ -170,14 +147,10 @@ export function canonicalizeReadiness(
 export async function inventoryDirectory(
   root: string,
   allowMissing = false,
-  canonicalProjectRoot?: string,
 ): Promise<ArtifactInventory> {
   const absoluteRoot = path.resolve(root);
   try {
-    const snapshot = await snapshotDirectory(
-      absoluteRoot,
-      canonicalProjectRoot,
-    );
+    const snapshot = await snapshotDirectory(absoluteRoot);
     return snapshot;
   } catch (error) {
     if (
@@ -271,9 +244,6 @@ export function compareObservations(
     workflowProtocolEqual:
       JSON.stringify(stableValue(official.workflowProtocol)) ===
       JSON.stringify(stableValue(standalone.workflowProtocol)),
-    controlPlaneChecksEqual:
-      official.initialReadiness.evidence.controlPlane ===
-      standalone.initialReadiness.evidence.controlPlane,
     generatedArtifactInventoryEqual:
       artifactSignature(official.generatedArtifacts) ===
       artifactSignature(standalone.generatedArtifacts),

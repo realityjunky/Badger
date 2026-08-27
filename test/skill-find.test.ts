@@ -62,28 +62,4 @@ describe("standalone Skill discovery", () => {
     expect(result[0].status).toBe("ambiguous");
     expect(result[0].sources).toHaveLength(2);
   });
-
-  it("uses the official lexical order for nested script inventories", async () => {
-    const skill = path.join(project, ".agents", "skills", "ordered");
-    await writeSkill(skill, "ordered");
-    await fs.mkdir(path.join(skill, "scripts"));
-    await fs.writeFile(
-      path.join(skill, "scripts", "step1_extract.mjs"),
-      "one\n",
-    );
-    await fs.writeFile(
-      path.join(skill, "scripts", "step10_extract.mjs"),
-      "ten\n",
-    );
-
-    const result = await findSkills({
-      projectRoot: project,
-      preferences: [{ query: "ordered", preferenceIndex: 0 }],
-    });
-
-    expect(result[0].sources[0].scripts.map((item) => item.path)).toEqual([
-      "scripts/step10_extract.mjs",
-      "scripts/step1_extract.mjs",
-    ]);
-  });
 });

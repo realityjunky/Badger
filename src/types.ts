@@ -29,6 +29,7 @@ export interface EvidenceSchema {
 export interface OutputSchema {
   id: string;
   description: string;
+  optional?: boolean;
   artifacts: ArtifactSchema[];
   evidence: EvidenceSchema[];
 }
@@ -67,6 +68,7 @@ export interface NodeTemplate {
   augmentations?: BindingInput[];
   satisfies?: string[];
   disabled?: boolean;
+  optional?: boolean;
   operations: NodeOperation[];
   outputSchemas: string[];
   guardrails: Guardrail[];
@@ -88,6 +90,27 @@ export interface WorkflowInput {
   nodes?: Record<string, NodePatch>;
   customNodes: NodeTemplate[];
   outputSchemas?: OutputSchema[];
+  routing?: WorkflowRouting;
+}
+
+export type TransitionCondition = "success" | "failure" | "pause";
+
+export interface WorkflowTransition {
+  from: string;
+  to: string | null;
+  condition: TransitionCondition;
+  when?: string;
+}
+
+export interface WorkflowRoute {
+  id: string;
+  nodeOrder: string[];
+  requiredOutputSchemas?: string[];
+}
+
+export interface WorkflowRouting {
+  transitions: WorkflowTransition[];
+  routes?: WorkflowRoute[];
 }
 
 export interface NodeProtocol extends Omit<
@@ -111,11 +134,7 @@ export interface WorkflowProtocol {
   name: string;
   goal: string;
   nodes: NodeProtocol[];
-  edges: Array<{
-    from: string;
-    to: string | null;
-    condition: "success" | "failure" | "pause";
-  }>;
+  edges: WorkflowTransition[];
   outputSchemas: OutputSchema[];
   state: {
     kind: "workflow-run";
@@ -127,6 +146,7 @@ export interface WorkflowProtocol {
   evals: Array<{
     id: "workflow-route-conformance";
     expectedNodeOrder: string[];
+    expectedRoutes?: WorkflowRoute[];
     requiredOutputSchemas: string[];
   }>;
 }
@@ -163,6 +183,8 @@ export interface FactoryPlan {
   preferredSkills: string[];
   workflow: WorkflowInput;
   sourceRoot?: string;
+  skillRoots?: string[];
+  artifactRoot?: string;
   defaultLocale: "en";
 }
 
@@ -193,14 +215,11 @@ export interface CreatorState {
   currentHash: string | null;
   candidates: SkillCandidate[];
   generated?: {
-    bundleRoot?: string;
     packageRoot: string;
     protocolPath: string;
     evalPath: string;
-    authoringPlanPath?: string;
   };
   eval?: { hash: string; passed: boolean; resultPath: string };
-  authoring?: AuthoringStateSummary;
   review?: {
     hash: string;
     decision: "approved" | "rejected";
@@ -215,110 +234,4 @@ export interface EvalReport {
   hash: string;
   passed: boolean;
   checks: Array<{ id: string; passed: boolean; detail: string }>;
-}
-
-export type AuthoringLaneId =
-  | "script"
-  | "reference"
-  | "pause-points"
-  | "workflow-entry"
-  | "skill-core"
-  | "skill-review";
-
-export type AuthoringStatus =
-  "PENDING" | "IN_PROGRESS" | "COMPLETE" | "BLOCKED" | "NEEDS_CONTEXT";
-
-export type AuthoringClaimStatus =
-  "SUPPORTED" | "UNSUPPORTED" | "NEEDS_CONTEXT";
-
-export interface AuthoringClaimDefinition {
-  id: string;
-  statement: string;
-  required: boolean;
-}
-
-export interface AuthoringArtifactDefinition {
-  id: string;
-  path: string;
-  kind: "file" | "directory";
-  required: boolean;
-}
-
-export interface AuthoringLaneDefinition {
-  lane: AuthoringLaneId;
-  dependsOn: AuthoringLaneId[];
-  claims: AuthoringClaimDefinition[];
-  artifacts: AuthoringArtifactDefinition[];
-  reviewRequired?: boolean;
-}
-
-export interface AuthoringPlan {
-  schemaVersion: 1;
-  kind: "authoring-plan";
-  workflow: string;
-  protocolHash: string;
-  lanes: AuthoringLaneDefinition[];
-}
-
-export interface AuthoringClaimEvidence {
-  id: string;
-  status: AuthoringClaimStatus;
-  evidence: string[];
-}
-
-export interface AuthoringArtifactEvidence {
-  id: string;
-  path: string;
-  present: boolean;
-  contentHash?: string;
-}
-
-export interface AuthoringReviewOutput {
-  decision: "approved" | "rejected" | "needs_context";
-  reviewer: string;
-  summary: string;
-  blockingFindings: string[];
-  warnings: string[];
-}
-
-export interface AuthoringRecord {
-  schemaVersion: 1;
-  kind: "authoring-record";
-  workflow: string;
-  lane: AuthoringLaneId;
-  status: AuthoringStatus;
-  protocolHash: string;
-  bundleHash: string;
-  claims: AuthoringClaimEvidence[];
-  artifacts: AuthoringArtifactEvidence[];
-  review?: AuthoringReviewOutput;
-  summary?: string;
-  at: string;
-}
-
-export interface AuthoringRecordInput {
-  status: AuthoringStatus;
-  claims: AuthoringClaimEvidence[];
-  artifacts: AuthoringArtifactEvidence[];
-  review?: AuthoringReviewOutput;
-  summary?: string;
-}
-
-export interface AuthoringStateSummary {
-  planPath: string;
-  recordsPath: string;
-  records: Partial<
-    Record<
-      AuthoringLaneId,
-      { path: string; status: AuthoringStatus; bundleHash: string }
-    >
-  >;
-}
-
-export interface AuthoringReadiness {
-  state: "blocked" | "needs-context" | "ready";
-  blockers: string[];
-  warnings: string[];
-  evidence: Record<string, string>;
-  records: Partial<Record<AuthoringLaneId, AuthoringRecord>>;
 }

@@ -77,7 +77,6 @@ export interface DifferentialComparison {
   sourceHashesEqual: boolean;
   referenceInventoryEqual: boolean;
   workflowProtocolEqual: boolean;
-  controlPlaneChecksEqual: boolean;
   generatedArtifactInventoryEqual: boolean;
   initialReadinessEqual: boolean;
   officialOnlyArtifacts: string[];

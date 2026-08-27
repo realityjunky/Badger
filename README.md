@@ -10,8 +10,7 @@ The package includes:
 - real local Skill discovery with stable source hashes, strict preferences, and ambiguity reporting;
 - deterministic Workflow Contract normalization and validation;
 - confirmed plan/state lifecycle in the standalone `.comet-any` namespace;
-- official-parity `SkillBundle` generation with an entry Skill, internal Node Skills, rules, hooks, byte-preserved workflow-kernel runtime scripts, references, guardrails, checks, and Eval declarations;
-- an explicit authoring-lane DAG with hash-bound authoring records, review output, and fail-closed readiness;
+- generated entry and Node Skills with protocol/evidence references;
 - current-hash evaluation, review approval, publication, and distribution preview.
 
 It intentionally excludes Comet Classic, Comet Native, Comet Entry, host platform installers, ambient resume routing, and external Engine adapters.
@@ -33,4 +32,4 @@ node bin/comet-any.js guide --project . --json
 
 See `assets/skills/comet-any/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
 
-The pinned three-Skill differential harness is documented in `docs/differential-harness.md`. It runs both Creators only in disposable temporary projects, canonicalizes disposable project paths, and rejects protected raw-data paths.
+The pinned three-Skill differential harness is documented in `docs/differential-harness.md`. It runs both Creators only in disposable temporary projects and rejects protected raw-data paths.

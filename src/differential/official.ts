@@ -187,7 +187,7 @@ export async function observeOfficial(options: {
       ),
       { cwd: projectRoot, homeDir: options.homeDir },
     );
-    readiness = canonicalizeReadiness(reviewResult, projectRoot);
+    readiness = canonicalizeReadiness(reviewResult);
   } else {
     readiness = {
       state: "blocked",
@@ -208,7 +208,7 @@ export async function observeOfficial(options: {
   return observationParts(
     resolvedCandidates,
     workflowProtocol,
-    await inventoryDirectory(artifactRoot, true, projectRoot),
+    await inventoryDirectory(artifactRoot, true),
     readiness,
   );
 }

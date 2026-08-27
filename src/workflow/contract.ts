@@ -7,6 +7,8 @@ import type {
   WorkflowInput,
   WorkflowProtocol,
   NormalizedWorkflow,
+  WorkflowRoute,
+  WorkflowTransition,
 } from "../types.js";
 
 export interface ValidationFinding {
@@ -19,7 +21,9 @@ export interface ValidationFinding {
     | "producer-missing-output-schema"
     | "missing-output-schema"
     | "orphan-output-schema"
-    | "invalid-schema";
+    | "invalid-schema"
+    | "unknown-transition-node"
+    | "invalid-route";
   message: string;
   nodeId?: string;
 }
@@ -63,10 +67,64 @@ function cloneNode(node: NodeTemplate): NodeTemplate {
       ? { augmentations: node.augmentations.map((item) => ({ ...item })) }
       : {}),
     ...(node.satisfies ? { satisfies: [...node.satisfies] } : {}),
+    ...(node.optional !== undefined ? { optional: node.optional } : {}),
     operations: [...node.operations],
     outputSchemas: [...node.outputSchemas],
     guardrails: node.guardrails.map((item) => ({ ...item })),
   };
+}
+
+function activeNodeIds(nodes: NodeTemplate[]): Set<string> {
+  return new Set(nodes.filter((node) => !node.disabled).map((node) => node.id));
+}
+
+function validateRouting(
+  input: WorkflowInput,
+  nodes: NodeTemplate[],
+  findings: ValidationFinding[],
+): void {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const activeIds = activeNodeIds(nodes);
+  for (const transition of input.routing?.transitions ?? []) {
+    if (
+      !nodeIds.has(transition.from) ||
+      (transition.to !== null && !nodeIds.has(transition.to))
+    )
+      findings.push({
+        code: "unknown-transition-node",
+        nodeId: transition.from,
+        message: `Transition references an unknown Node: ${transition.from} -> ${transition.to ?? "(terminal)"}`,
+      });
+    if (transition.when !== undefined && !transition.when.trim())
+      findings.push({
+        code: "invalid-route",
+        nodeId: transition.from,
+        message: `${transition.from}: transition.when must not be empty`,
+      });
+  }
+  for (const route of input.routing?.routes ?? []) {
+    if (!route.id.trim() || route.nodeOrder.length === 0)
+      findings.push({
+        code: "invalid-route",
+        message: "Each route requires an id and at least one Node",
+      });
+    const seen = new Set<string>();
+    for (const nodeId of route.nodeOrder) {
+      if (!activeIds.has(nodeId))
+        findings.push({
+          code: "invalid-route",
+          nodeId,
+          message: `${route.id}: route references a disabled or unknown Node ${nodeId}`,
+        });
+      if (seen.has(nodeId))
+        findings.push({
+          code: "invalid-route",
+          nodeId,
+          message: `${route.id}: Node ${nodeId} appears more than once`,
+        });
+      seen.add(nodeId);
+    }
+  }
 }
 
 function schemaIds(schemas: OutputSchema[]): Set<string> {
@@ -207,10 +265,11 @@ export function validateWorkflow(input: WorkflowInput): ValidationFinding[] {
         });
     }
   }
+  validateRouting(input, nodes, findings);
   return findings;
 }
 
-function edges(nodes: NodeProtocol[]): WorkflowProtocol["edges"] {
+function defaultEdges(nodes: NodeProtocol[]): WorkflowProtocol["edges"] {
   return nodes.flatMap((node, index) => [
     {
       from: node.id,
@@ -220,6 +279,61 @@ function edges(nodes: NodeProtocol[]): WorkflowProtocol["edges"] {
     { from: node.id, to: node.id, condition: "failure" as const },
     { from: node.id, to: node.id, condition: "pause" as const },
   ]);
+}
+
+function routingEdges(
+  input: WorkflowInput,
+  nodes: NodeProtocol[],
+): WorkflowTransition[] {
+  if (input.routing?.transitions?.length)
+    return input.routing.transitions.map((edge) => ({ ...edge }));
+  return defaultEdges(nodes);
+}
+
+function routeSummary(
+  input: WorkflowInput,
+  nodes: NodeProtocol[],
+): WorkflowRoute[] {
+  const schemasByNode = new Map(
+    nodes.map((node) => [node.id, node.outputSchemas]),
+  );
+  const optionalSchemas = new Set(
+    (input.outputSchemas ?? [])
+      .filter((schema) => schema.optional)
+      .map((schema) => schema.id),
+  );
+  if (input.routing?.routes?.length)
+    return input.routing.routes.map((route) => ({
+      ...route,
+      nodeOrder: [...route.nodeOrder],
+      requiredOutputSchemas: [
+        ...new Set(
+          route.nodeOrder.flatMap((nodeId) => schemasByNode.get(nodeId) ?? []),
+        ),
+      ],
+    }));
+  return [
+    {
+      id: "default",
+      nodeOrder: nodes.filter((node) => !node.disabled).map((node) => node.id),
+      requiredOutputSchemas: [
+        ...new Set(
+          nodes
+            .filter((node) => !node.disabled && !node.optional)
+            .flatMap((node) => node.outputSchemas)
+            .filter((schemaId) => !optionalSchemas.has(schemaId)),
+        ),
+      ],
+    },
+  ];
+}
+
+function commonRequiredSchemas(routes: WorkflowRoute[]): string[] {
+  const [first, ...rest] = routes;
+  if (!first) return [];
+  return (first.requiredOutputSchemas ?? []).filter((schemaId) =>
+    rest.every((route) => route.requiredOutputSchemas?.includes(schemaId)),
+  );
 }
 
 export function normalizeWorkflow(input: WorkflowInput): NormalizedWorkflow {
@@ -253,18 +367,22 @@ export function normalizeWorkflow(input: WorkflowInput): NormalizedWorkflow {
         ...new Set([...(template.satisfies ?? []), ...(patch.satisfies ?? [])]),
       ],
       disabled: patch.disabled ?? template.disabled ?? false,
+      ...(template.optional !== undefined
+        ? { optional: template.optional }
+        : {}),
     };
   });
   const outputSchemas = [...(input.outputSchemas ?? [])].map((schema) =>
     structuredClone(schema),
   );
+  const routes = routeSummary(input, nodes);
   const protocol: WorkflowProtocol = {
     schemaVersion: 1,
     kind: "workflow-kernel",
     name: input.name,
     goal: input.goal,
     nodes,
-    edges: edges(nodes),
+    edges: routingEdges(input, nodes),
     outputSchemas,
     state: {
       kind: "workflow-run",
@@ -276,12 +394,9 @@ export function normalizeWorkflow(input: WorkflowInput): NormalizedWorkflow {
     evals: [
       {
         id: "workflow-route-conformance",
-        expectedNodeOrder: nodes
-          .filter((node) => !node.disabled)
-          .map((node) => node.id),
-        requiredOutputSchemas: [
-          ...new Set(nodes.flatMap((node) => node.outputSchemas)),
-        ],
+        expectedNodeOrder: routes[0].nodeOrder,
+        expectedRoutes: routes,
+        requiredOutputSchemas: commonRequiredSchemas(routes),
       },
     ],
   };

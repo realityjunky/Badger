@@ -86,4 +86,90 @@ describe("workflow-kernel contract", () => {
       "orphan-output-schema",
     );
   });
+
+  it("normalizes conditional routes and scopes required schemas per route", () => {
+    const design = node({ id: "design", outputSchemas: ["design.v1"] });
+    const pool = node({
+      id: "pool",
+      label: "Pool",
+      implementation: {
+        skill: "primer-pool-add",
+        operation: "default",
+        scope: "main",
+      },
+      outputSchemas: ["pool.v1"],
+    });
+    const optional = node({
+      id: "optional-qc",
+      label: "Optional QC",
+      optional: true,
+      outputSchemas: ["optional-qc.v1"],
+    });
+    const input: WorkflowInput = {
+      kind: "workflow-kernel",
+      name: "branched-primer-workflow",
+      goal: "Design primers or add candidates to a pool.",
+      customNodes: [design, optional, pool],
+      routing: {
+        transitions: [
+          {
+            from: "design",
+            to: "optional-qc",
+            condition: "success",
+            when: "qc-enabled",
+          },
+          {
+            from: "design",
+            to: "pool",
+            condition: "success",
+            when: "add-to-pool",
+          },
+          { from: "optional-qc", to: "pool", condition: "success" },
+          {
+            from: "pool",
+            to: "design",
+            condition: "success",
+            when: "start-another-cycle",
+          },
+          { from: "pool", to: null, condition: "success", when: "finish" },
+        ],
+        routes: [
+          { id: "design-pool", nodeOrder: ["design", "pool"] },
+          {
+            id: "design-qc-pool",
+            nodeOrder: ["design", "optional-qc", "pool"],
+          },
+        ],
+      },
+      outputSchemas: [
+        { ...schema, id: "design.v1" },
+        { ...schema, id: "pool.v1" },
+        { ...schema, id: "optional-qc.v1", optional: true },
+      ],
+    };
+
+    const protocol = normalizeWorkflow(input).protocol;
+    expect(protocol.edges).toContainEqual({
+      from: "pool",
+      to: "design",
+      condition: "success",
+      when: "start-another-cycle",
+    });
+    expect(protocol.evals[0].expectedRoutes).toEqual([
+      {
+        id: "design-pool",
+        nodeOrder: ["design", "pool"],
+        requiredOutputSchemas: ["design.v1", "pool.v1"],
+      },
+      {
+        id: "design-qc-pool",
+        nodeOrder: ["design", "optional-qc", "pool"],
+        requiredOutputSchemas: ["design.v1", "optional-qc.v1", "pool.v1"],
+      },
+    ]);
+    expect(protocol.evals[0].requiredOutputSchemas).toEqual([
+      "design.v1",
+      "pool.v1",
+    ]);
+  });
 });
