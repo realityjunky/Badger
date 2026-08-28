@@ -1,6 +1,6 @@
 # Standalone Comet-any
 
-This repository extracts the Comet-any Creator seam from the upstream Comet checkout. It provides a focused, filesystem-based factory for creating new `workflow-kernel` Skills and upgrading existing Skill packages.
+This repository extracts the Comet-any Creator and Engine seams from the upstream Comet checkout. It provides a focused, filesystem-based factory for creating and upgrading Skill packages, plus a private Engine foundation for loading, snapshotting, and running Engine-compatible Skills.
 
 ## Scope
 
@@ -11,9 +11,13 @@ The package includes:
 - deterministic Workflow Contract normalization and validation;
 - confirmed plan/state lifecycle in the standalone `.comet-any` namespace;
 - generated entry and Node Skills with protocol/evidence references;
-- current-hash evaluation, review approval, publication, and distribution preview.
+- current-hash evaluation, review approval, publication, and distribution preview;
+- private Skill runtime loading, validation, content identity, and immutable snapshots;
+- deterministic and adaptive Engine loop behavior with manual and standalone Run façades;
+- protected Run state, pending-action, trajectory, artifact, context, and checkpoint storage;
+- official/private differential observations for the pinned Engine behavior.
 
-It intentionally excludes Comet Classic, Comet Native, Comet Entry, host platform installers, ambient resume routing, and external Engine adapters.
+It intentionally excludes Comet Classic policy, Comet Native policy and hardening, Comet Entry, host platform installers, ambient resume routing, and external platform adapters.
 
 ## Development
 
@@ -31,5 +35,7 @@ node bin/comet-any.js guide --project . --json
 ```
 
 See `assets/skills/comet-any/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
+
+The public package façade exports the Skill runtime and Engine operations needed by callers. Run-file storage and protected filesystem implementation modules remain internal. The Engine closure is pinned to Comet `0.4.0-beta.19` at revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a` and contains no runtime import from the upstream checkout.
 
 The pinned three-Skill differential harness is documented in `docs/differential-harness.md`. It runs both Creators only in disposable temporary projects and rejects protected raw-data paths.

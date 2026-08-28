@@ -450,7 +450,12 @@ function diffValues(
   result.push({ path: currentPath, official, private: privateValue });
 }
 
-function expectedPackagingPath(currentPath: string): boolean {
+function expectedPackagingPath(
+  currentPath: string,
+  scenario: Pick<EngineScenario, "runner">,
+  official: unknown,
+  privateValue: unknown,
+): boolean {
   if (
     currentPath === "$.coordinates.projectRoot" ||
     currentPath === "$.coordinates.homeDir" ||
@@ -459,7 +464,31 @@ function expectedPackagingPath(currentPath: string): boolean {
   ) {
     return true;
   }
-  return false;
+  if (
+    /^\$\.(?:commands\[\d+\]\.error|errors\[\d+\])\.message$/u.test(
+      currentPath,
+    ) &&
+    typeof official === "string" &&
+    typeof privateValue === "string" &&
+    (official.endsWith(`\nError: ${privateValue}`) ||
+      privateValue.endsWith(`\nError: ${official}`))
+  ) {
+    return true;
+  }
+  if (
+    scenario.runner !== "manual" ||
+    typeof official !== "string" ||
+    typeof privateValue !== "string"
+  )
+    return false;
+  return [
+    /^\$\.commands\[\d+\]\.result\.state\.(?:runId|pending)$/u,
+    /^\$\.commands\[\d+\]\.result\.action\.id$/u,
+    /^\$\.run\.state\.runId$/u,
+    /^\$\.run\.pendingAction\.id$/u,
+    /^\$\.run\.outcomes\[\d+\]\.actionId$/u,
+    /^\$\.run\.trajectory\[\d+\](?:\.runId|\.data\.action\.id|\.data\.outcome\.actionId)$/u,
+  ].some((pattern) => pattern.test(currentPath));
 }
 
 export function compareEngineObservations(
@@ -498,7 +527,12 @@ export function compareEngineObservations(
     (difference) => ({
       scenarioId: official.scenario.id,
       ...difference,
-      classification: expectedPackagingPath(difference.path)
+      classification: expectedPackagingPath(
+        difference.path,
+        official.scenario,
+        difference.official,
+        difference.private,
+      )
         ? "expected-packaging"
         : "semantic",
     }),

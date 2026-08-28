@@ -31,6 +31,7 @@ node bin/comet-any.js engine-differential \
   test/fixtures/engine/engine-characterization.json \
   --repo . \
   --official-root /path/to/pinned/comet \
+  --private \
   --output /tmp/official-engine-baseline.json \
   --confirm-output \
   --json
@@ -72,6 +73,12 @@ as:
 - `semantic-mismatch` when any state, identity, ordering, evidence, artifact,
   eval, trajectory, or error classification differs.
 
-The baseline report is intentionally official-only. A later private Engine
-batch can feed its observations into the comparison functions without changing
-the scenario fixture or normalization contract.
+Without `--private`, the command records the official-only baseline. With
+`--private`, it runs the same scenarios through the extracted private Engine
+command adapter and reports exact matches, expected packaging differences, and
+semantic mismatches in one report. Manual Run UUIDs and their derived action
+identities are preserved as evidence and classified as expected packaging
+nondeterminism. The private command adapter's error envelope is also recorded
+and classified as packaging when the underlying error is identical; state,
+ordering, hashes, artifacts, evals, and safety errors remain strict comparison
+fields.

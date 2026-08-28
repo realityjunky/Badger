@@ -22,10 +22,12 @@
 | `src/eval/run.ts`                   | Current-package hash and route-conformance evidence                                                                                                   |
 | `src/publish/lifecycle.ts`          | Readiness, reviewer approval, hash-bound publication, and distribution preview                                                                        |
 | `src/cli.ts`                        | Thin Creator-facing command interface                                                                                                                 |
+| `src/skill-runtime/`                | Engine-compatible Skill types, YAML loading, validation, content identity, and immutable snapshots                                                   |
+| `src/engine/`                       | Run state, resolver, loop, guardrails, evals, protected persistence, manual and standalone Run façades                                                |
 
 ## Deliberate exclusions
 
-The upstream Creator closure also reaches `domains/comet-classic`, `domains/comet-native`, `domains/comet-entry`, `domains/engine`, `domains/skill/platform-install`, and host platform registries through the general Comet Bundle distribution path. Those modules are not copied or imported here. The standalone seam uses local package publication and preview-only distribution instead.
+The upstream Creator closure also reaches `domains/comet-classic`, `domains/comet-native`, `domains/comet-entry`, `domains/skill/platform-install`, and host platform registries through the general Comet Bundle distribution path. Those policy and platform modules are not copied or imported here. The standalone seam uses local package publication and preview-only distribution instead.
 
 The upstream `comet-five-phase-overlay` and `comet-native` built-in contracts are excluded. Only `workflow-kernel` is accepted by the standalone plan loader. The source checkout remains available for comparison and is protected from edits by the parent repository instructions.
 
@@ -49,13 +51,48 @@ and corrupt current-step rejection.
 `src/differential/engine/` records durable Run state, pending actions, outcomes,
 artifacts, trajectories, checkpoints, evals, and classified errors from the
 pinned official CLI. It verifies the official revision and compares source
-snapshots before and after each characterization. The report is official-only
-until a private Engine exists.
+snapshots before and after each run. The private command adapter executes the
+same fixture through the extracted public Engine façade, and the differential
+report classifies exact matches, expected packaging coordinates, and semantic
+mismatches.
 
 The Engine source closure is recorded as evidence in the characterization
-manifest, but `domains/engine` remains excluded from the standalone Creator
-implementation. The official checkout remains read-only, and the harness never
-reads or derives data from `primer_designer_harness/raw_data/`.
+manifest and is extracted under `src/engine/`. The official checkout remains
+read-only, and the harness never reads or derives data from
+`primer_designer_harness/raw_data/`.
+
+## Private Engine closure
+
+The extracted closure is derived from the audited imports and official
+characterization at Comet `0.4.0-beta.19`, revision
+`99fd7495f8b9217efbaae3a46d885f6fa7f4102a`:
+
+- `src/skill-runtime/` owns the `comet/v1alpha1` Skill definition, guardrail,
+  runtime-eval, YAML layout, validation, hashing, and snapshot contracts.
+- `src/engine/` owns deterministic and adaptive loop decisions, resolver
+  injection, Run state validation, eval evidence, manual/standalone adapters,
+  storage layouts, and protected Run persistence.
+- `src/engine/race-safe-read.ts`, `contained-atomic-write.ts`, and
+  `protected-project-path.ts` are private filesystem supports for bounded,
+  identity-checked reads and writes.
+
+The public façade is `src/index.ts` through `src/skill-runtime/index.ts` and
+`src/engine/index.ts`. It does not export `run-store.ts`, `state.ts`, storage
+layout adapters, or protected filesystem helpers. Classic, Native, Entry,
+platform installation, and host registry behavior remain excluded.
+
+`runEngineDifferential` runs official and private observations against one
+synthetic fixture matrix. `createPrivateEngineCommandRunner` is an injected
+command-bound adapter used by the differential harness; it is not an upstream
+CLI dependency.
+
+The copied parity responsibilities are the `comet/v1alpha1` Skill data model,
+YAML narrowing, validation messages, stable package hashing, snapshot document
+format, Run state shape, resolver contract, loop transitions, guardrails, eval
+evidence, and storage references. Private packaging adaptations are module
+locality under `src/`, the public façade, the command adapter, and explicit
+classification of process-generated manual identities. These adaptations do
+not import or modify the upstream checkout.
 
 ## Follow-up candidates
 

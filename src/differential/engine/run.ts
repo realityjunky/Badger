@@ -17,10 +17,12 @@ import {
 } from "./fixture.js";
 import {
   classifyEngineError,
+  compareEngineObservationSets,
   normalizeEngineObservation,
   normalizedSnapshot,
   observeEngineRun,
 } from "./observe.js";
+import { createPrivateEngineCommandRunner } from "./private.js";
 import type {
   ClassifiedEngineError,
   EngineBaselineOptions,
@@ -28,6 +30,8 @@ import type {
   EngineCharacterizationFixture,
   EngineCommandObservation,
   EngineCommandRunner,
+  EngineDifferentialOptions,
+  EngineDifferentialReport,
   EngineExpectedError,
   EngineScenario,
   EngineScenarioOperation,
@@ -476,4 +480,78 @@ export async function runOfficialEngineBaseline(
   } finally {
     await fs.rm(temporaryRoot, { recursive: true, force: true });
   }
+}
+
+async function runPrivateEngineScenarios(options: {
+  repositoryRoot: string;
+  fixturePath: string;
+  runner: EngineCommandRunner;
+}): Promise<EngineScenarioObservation[]> {
+  const repositoryRoot = path.resolve(options.repositoryRoot);
+  const fixturePath = path.resolve(options.fixturePath);
+  const fixture = await readEngineFixture(fixturePath, { repositoryRoot });
+  const fixtureBefore = await snapshotEngineFixtureSkills(
+    repositoryRoot,
+    fixturePath,
+    fixture.skills,
+  );
+  const temporaryRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), "comet-private-engine-"),
+  );
+  try {
+    const scenarios: EngineScenarioObservation[] = [];
+    for (const scenario of fixture.scenarios) {
+      scenarios.push(
+        await observeScenario({
+          fixture,
+          scenario,
+          repositoryRoot,
+          fixturePath,
+          temporaryRoot,
+          runner: options.runner,
+        }),
+      );
+    }
+    const fixtureAfter = await snapshotEngineFixtureSkills(
+      repositoryRoot,
+      fixturePath,
+      fixture.skills,
+    );
+    const unchanged =
+      fixtureBefore.length === fixtureAfter.length &&
+      fixtureBefore.every((snapshot, index) =>
+        snapshotsEqual(snapshot, fixtureAfter[index]),
+      );
+    if (!unchanged) {
+      throw new Error(
+        "Engine fixture source changed during private characterization",
+      );
+    }
+    return scenarios;
+  } finally {
+    await fs.rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+export async function runEngineDifferential(
+  options: EngineDifferentialOptions,
+): Promise<EngineDifferentialReport> {
+  const official = await runOfficialEngineBaseline(options);
+  const privateScenarios = await runPrivateEngineScenarios({
+    repositoryRoot: options.repositoryRoot,
+    fixturePath: options.fixturePath,
+    runner: options.privateRunner ?? createPrivateEngineCommandRunner(),
+  });
+  return {
+    schemaVersion: 1,
+    kind: "official-private-engine-differential",
+    official: official.official,
+    fixture: official.fixture,
+    officialScenarios: official.scenarios,
+    privateScenarios,
+    comparison: compareEngineObservationSets(
+      official.scenarios,
+      privateScenarios,
+    ),
+  };
 }

@@ -287,6 +287,39 @@ describe("official Engine characterization harness", () => {
   ])("classifies official error %s", (message, category) => {
     expect(classifyEngineError(new Error(message)).category).toBe(category);
   });
+
+  it("preserves manual identity evidence without hiding semantic state drift", () => {
+    const official = manualObservation(
+      "<official-project>",
+      "run-a",
+      "action-a",
+    );
+    const privateObservation = manualObservation(
+      "<private-project>",
+      "run-b",
+      "action-b",
+    );
+    const packagingComparison = compareEngineObservations(
+      official,
+      privateObservation,
+    );
+    expect(packagingComparison.status).toBe("expected-packaging-difference");
+    expect(packagingComparison.semanticMismatches).toEqual([]);
+
+    const semantic = manualObservation(
+      "<private-project>",
+      "run-b",
+      "action-b",
+    );
+    semantic.run.state = { status: "failed" };
+    const semanticComparison = compareEngineObservations(official, semantic);
+    expect(semanticComparison.status).toBe("semantic-mismatch");
+    expect(semanticComparison.semanticMismatches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "$.run.state.status" }),
+      ]),
+    );
+  });
 });
 
 function fakeOfficialRunner(): EngineCommandRunner {
@@ -457,6 +490,51 @@ function observation(
       outcomes: [],
       artifacts: {},
       trajectory: [],
+      checkpoint: null,
+      evals: [],
+      errors: [],
+    },
+    errors: [],
+  };
+}
+
+function manualObservation(
+  projectRoot: string,
+  runId: string,
+  actionId: string,
+): EngineScenarioObservation {
+  return {
+    scenario: {
+      id: "manual-identity",
+      description: "manual",
+      skill: "demo",
+      runner: "manual",
+      runId: null,
+    },
+    coordinates: {
+      projectRoot,
+      homeDir: "<home>",
+      skillRoot: "<skill>",
+      runRoot: "<run>",
+    },
+    commands: [
+      {
+        operation: "start",
+        args: [],
+        result: {
+          state: { runId, pending: actionId },
+          action: { id: actionId },
+        },
+      },
+    ],
+    run: {
+      state: { runId, status: "completed" },
+      pendingAction: null,
+      outcomes: [{ actionId }],
+      artifacts: {},
+      trajectory: [
+        { runId, data: { action: { id: actionId }, outcome: { actionId } } },
+      ],
       checkpoint: null,
       evals: [],
       errors: [],

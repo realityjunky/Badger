@@ -194,6 +194,16 @@ export interface EngineBaselineReport {
   comparison: EngineComparison;
 }
 
+export interface EngineDifferentialReport {
+  schemaVersion: 1;
+  kind: "official-private-engine-differential";
+  official: EngineBaselineReport["official"];
+  fixture: EngineBaselineReport["fixture"];
+  officialScenarios: EngineScenarioObservation[];
+  privateScenarios: EngineScenarioObservation[];
+  comparison: EngineComparison;
+}
+
 export interface EngineCommandRunner {
   run(
     args: string[],
@@ -207,4 +217,8 @@ export interface EngineBaselineOptions {
   officialRoot: string;
   officialCli?: string;
   officialRunner?: EngineCommandRunner;
+}
+
+export interface EngineDifferentialOptions extends EngineBaselineOptions {
+  privateRunner?: EngineCommandRunner;
 }

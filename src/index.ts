@@ -24,3 +24,5 @@ export * from "./differential/engine/types.js";
 export * from "./differential/engine/fixture.js";
 export * from "./differential/engine/observe.js";
 export * from "./differential/engine/run.js";
+export * from "./skill-runtime/index.js";
+export * from "./engine/index.js";
