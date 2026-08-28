@@ -130,6 +130,48 @@ describe("manual Skill run service", () => {
     expect(resumed.state.skillVersion).toBe("1.0.0");
   });
 
+  it("completes from the snapshot after the source Skill changes", async () => {
+    const pkg = await loadSkillPackage(skillRoot);
+    const started = await startManualRun(pkg, changeDir);
+    await writeSkill(skillRoot, { version: "9.0.0", secondStep: "changed" });
+
+    const resumed = await resumeManualRun(changeDir, {
+      outcome: {
+        status: "succeeded",
+        summary: "Draft written",
+        artifacts: { draft: "draft.md" },
+      },
+    });
+
+    expect(resumed.state.skillHash).toBe(started.state.skillHash);
+    expect(resumed.state.skillVersion).toBe("1.0.0");
+    expect(resumed.action).toMatchObject({ stepId: "finish" });
+  });
+
+  it("records failed outcomes and leaves the action available for retry", async () => {
+    const pkg = await loadSkillPackage(skillRoot);
+    const started = await startManualRun(pkg, changeDir);
+
+    const failed = await resumeManualRun(changeDir, {
+      outcome: { status: "failed", summary: "Transient failure" },
+    });
+
+    expect(failed.state.status).toBe("waiting");
+    expect(failed.state.retries).toEqual({ [started.action!.id]: 1 });
+    expect(failed.action).toEqual(started.action);
+    expect(await readPendingAction(changeDir, failed.state.pendingRef)).toEqual(
+      started.action,
+    );
+    expect(
+      (await readTrajectory(changeDir, failed.state.trajectoryRef)).find(
+        (event) => event.type === "action_completed",
+      ),
+    ).toMatchObject({
+      type: "action_completed",
+      data: { outcome: { status: "failed", actionId: started.action!.id } },
+    });
+  });
+
   it("records outcomes, merges artifacts, evaluates, and advances to completion", async () => {
     const pkg = await loadSkillPackage(skillRoot);
     const started = await startManualRun(pkg, changeDir);
@@ -187,11 +229,11 @@ describe("manual Skill run service", () => {
     expect(
       await readPendingAction(changeDir, completed.state.pendingRef),
     ).toBeNull();
-    expect(
-      (await readTrajectory(changeDir, completed.state.trajectoryRef)).map(
-        (event) => event.type,
-      ),
-    ).toEqual([
+    const trajectory = await readTrajectory(
+      changeDir,
+      completed.state.trajectoryRef,
+    );
+    expect(trajectory.map((event) => event.type)).toEqual([
       "run_started",
       "action_proposed",
       "action_completed",
@@ -200,6 +242,42 @@ describe("manual Skill run service", () => {
       "action_completed",
       "eval_completed",
       "eval_completed",
+    ]);
+    expect(
+      trajectory
+        .filter((event) => event.type === "eval_completed")
+        .map((event) => event.data),
+    ).toEqual([
+      {
+        scope: "step",
+        results: [
+          {
+            evalId: "draft-artifact",
+            passed: true,
+            evidence: "artifact draft -> draft.md",
+          },
+        ],
+      },
+      {
+        scope: "step",
+        results: [
+          {
+            evalId: "draft-artifact",
+            passed: true,
+            evidence: "artifact draft -> draft.md",
+          },
+        ],
+      },
+      {
+        scope: "completion",
+        results: [
+          {
+            evalId: "report-artifact",
+            passed: true,
+            evidence: "artifact report -> report.md",
+          },
+        ],
+      },
     ]);
   });
 
@@ -225,6 +303,83 @@ describe("manual Skill run service", () => {
         outcome: { status: "succeeded", summary: "Duplicate" },
       }),
     ).rejects.toThrow("No pending action accepts an outcome");
+  });
+
+  it("rejects outcomes from a stale pending action without changing the Run", async () => {
+    const pkg = await loadSkillPackage(skillRoot);
+    const started = await startManualRun(pkg, changeDir);
+
+    await expect(
+      resumeManualRun(changeDir, {
+        outcome: {
+          actionId: "stale-action",
+          status: "succeeded",
+          summary: "Stale outcome",
+        },
+      }),
+    ).rejects.toThrow("Outcome does not match pending action: stale-action");
+
+    expect(await readRunState(changeDir)).toEqual(started.state);
+    expect(
+      await readTrajectory(changeDir, started.state.trajectoryRef),
+    ).toHaveLength(2);
+  });
+
+  it("rejects malformed outcomes without changing the Run", async () => {
+    const pkg = await loadSkillPackage(skillRoot);
+    const started = await startManualRun(pkg, changeDir);
+
+    await expect(
+      resumeManualRun(changeDir, {
+        outcome: { status: "succeeded", summary: "" },
+      }),
+    ).rejects.toThrow("Outcome summary must be a non-empty string");
+
+    expect(await readRunState(changeDir)).toEqual(started.state);
+    expect(
+      await readTrajectory(changeDir, started.state.trajectoryRef),
+    ).toHaveLength(2);
+    expect(await readArtifacts(changeDir, started.state.artifactsRef)).toEqual(
+      {},
+    );
+  });
+
+  it("rejects a pending action attached to a terminal Run", async () => {
+    const pkg = await loadSkillPackage(skillRoot);
+    const started = await startManualRun(pkg, changeDir);
+    const statePath = path.join(changeDir, ".comet", "run-state.json");
+    const state = JSON.parse(await fs.readFile(statePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    state.status = "completed";
+    await fs.writeFile(statePath, JSON.stringify(state, null, 2) + "\n");
+
+    await expect(resumeManualRun(changeDir)).rejects.toThrow(
+      "Run state cannot have a pending action while status is completed",
+    );
+    expect(
+      await readPendingAction(changeDir, started.state.pendingRef),
+    ).not.toBeNull();
+  });
+
+  it("rejects Run state that does not match its Skill snapshot", async () => {
+    const pkg = await loadSkillPackage(skillRoot);
+    const started = await startManualRun(pkg, changeDir);
+    const statePath = path.join(changeDir, ".comet", "run-state.json");
+    const state = JSON.parse(await fs.readFile(statePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    state.skillVersion = "9.0.0";
+    await fs.writeFile(statePath, JSON.stringify(state, null, 2) + "\n");
+
+    await expect(resumeManualRun(changeDir)).rejects.toThrow(
+      "Run state does not match Skill snapshot",
+    );
+    expect(
+      await readPendingAction(changeDir, started.state.pendingRef),
+    ).toEqual(started.action);
   });
 
   it("evaluates the current snapshot on demand", async () => {

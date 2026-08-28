@@ -41,7 +41,7 @@ export interface StartManualRunOptions {
 }
 
 export interface ResumeManualRunOptions {
-  outcome?: Omit<ActionOutcome, "actionId">;
+  outcome?: Omit<ActionOutcome, "actionId"> & { actionId?: string };
   confirmations?: Iterable<string>;
 }
 
@@ -69,6 +69,65 @@ async function requiredRun(changeDir: string): Promise<RunState> {
   const state = await existingRun(changeDir);
   if (!state) throw new Error(`No Comet Run found in: ${changeDir}`);
   return state;
+}
+
+function validateStringRecord(value: unknown, label: string): void {
+  if (value === undefined) return;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  for (const item of Object.values(value as Record<string, unknown>)) {
+    if (typeof item !== "string") {
+      throw new Error(`${label} values must be strings`);
+    }
+  }
+}
+
+function validateOutcome(outcome: ResumeManualRunOptions["outcome"]): void {
+  if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+    throw new Error("Outcome must be an object");
+  }
+  if (outcome.actionId !== undefined && typeof outcome.actionId !== "string") {
+    throw new Error("Outcome actionId must be a string");
+  }
+  if (outcome.status !== "succeeded" && outcome.status !== "failed") {
+    throw new Error("Outcome status must be succeeded or failed");
+  }
+  if (typeof outcome.summary !== "string" || outcome.summary.length === 0) {
+    throw new Error("Outcome summary must be a non-empty string");
+  }
+  validateStringRecord(outcome.artifacts, "Outcome artifacts");
+  validateStringRecord(outcome.state, "Outcome state");
+}
+
+function validatePendingState(
+  state: RunState,
+  pending: EngineAction | null,
+): void {
+  if (pending) {
+    if (!state.pending || state.pending !== pending.id) {
+      throw new Error("Pending action file does not match Run state");
+    }
+    if (state.status !== "waiting") {
+      throw new Error(
+        `Run state cannot have a pending action while status is ${state.status}`,
+      );
+    }
+    return;
+  }
+  if (state.pending || state.status === "waiting") {
+    throw new Error("Run state references a missing pending action");
+  }
+}
+
+function validateSnapshotState(pkg: SkillPackage, state: RunState): void {
+  if (
+    pkg.definition.metadata.name !== state.skill ||
+    pkg.definition.metadata.version !== state.skillVersion ||
+    pkg.definition.orchestration.mode !== state.orchestration
+  ) {
+    throw new Error("Run state does not match Skill snapshot");
+  }
 }
 
 async function appendEvent(
@@ -181,20 +240,16 @@ export async function resumeManualRun(
 ): Promise<ManualRunResult> {
   const state = await requiredRun(changeDir);
   const pkg = await readSkillSnapshot(changeDir, state.skillHash);
+  validateSnapshotState(pkg, state);
   if (pkg.definition.orchestration.mode === "adaptive") {
     throw new Error("Adaptive orchestration requires an Agent candidate");
   }
 
   const pending = await readPendingAction(changeDir, state.pendingRef);
   if (!options.outcome) {
+    validatePendingState(state, pending);
     if (pending) {
-      if (state.pending !== pending.id) {
-        throw new Error("Pending action file does not match Run state");
-      }
       return { state, action: pending, evals: [] };
-    }
-    if (state.pending || state.status === "waiting") {
-      throw new Error("Run state references a missing pending action");
     }
     if (state.status !== "running") {
       return {
@@ -213,7 +268,17 @@ export async function resumeManualRun(
   if (state.pending !== pending.id) {
     throw new Error("Pending action file does not match Run state");
   }
+  validatePendingState(state, pending);
 
+  validateOutcome(options.outcome);
+  if (
+    options.outcome.actionId !== undefined &&
+    options.outcome.actionId !== pending.id
+  ) {
+    throw new Error(
+      `Outcome does not match pending action: ${options.outcome.actionId}`,
+    );
+  }
   const outcome: ActionOutcome = { ...options.outcome, actionId: pending.id };
   const artifacts = {
     ...(await readArtifacts(changeDir, state.artifactsRef)),
@@ -272,6 +337,7 @@ export async function evaluateManualRun(
 ): Promise<ManualRunEvaluation> {
   const state = await requiredRun(changeDir);
   const pkg = await readSkillSnapshot(changeDir, state.skillHash);
+  validateSnapshotState(pkg, state);
   const artifacts = await readArtifacts(changeDir, state.artifactsRef);
   return {
     state,
@@ -293,6 +359,7 @@ export async function upgradeManualRun(
 
   const state = await requiredRun(changeDir);
   const current = await readSkillSnapshot(changeDir, state.skillHash);
+  validateSnapshotState(current, state);
   const pending = await readPendingAction(changeDir, state.pendingRef);
   if (state.pending || pending || state.status === "waiting") {
     throw new Error("Cannot upgrade while an action is pending");
