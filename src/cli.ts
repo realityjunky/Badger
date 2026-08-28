@@ -260,6 +260,9 @@ program
       );
     }
     emit(report, options.json);
+    if (options.private && report.certification.status !== "certified") {
+      process.exitCode = 1;
+    }
   });
 
 async function safeStates(root: string) {

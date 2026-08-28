@@ -2,16 +2,16 @@ import {
   evaluateManualRun,
   resumeManualRun,
   startManualRun,
-  type ManualRunEvaluation,
-  type ManualRunResult,
-  type ResumeManualRunOptions,
-} from "../../engine/manual-run.js";
-import {
+  upgradeManualRun,
   evaluateStandaloneRun,
   resumeStandaloneRun,
   startStandaloneRun,
-} from "../../engine/standalone-run.js";
-import { loadSkillPackage } from "../../skill-runtime/load.js";
+  upgradeStandaloneRun,
+  type ManualRunEvaluation,
+  type ManualRunResult,
+  type ResumeManualRunOptions,
+} from "../../engine/index.js";
+import { loadSkillPackage } from "../../skill-runtime/index.js";
 import type { EngineCommandRunner } from "./types.js";
 
 type RunTarget =
@@ -114,6 +114,17 @@ function resumeOptions(args: string[]): ResumeManualRunOptions {
   };
 }
 
+function assertUpgradeArgs(args: string[]): void {
+  if (
+    statusOption(args) ||
+    optionValue(args, "--summary") ||
+    repeatedOption(args, "--artifact").length > 0 ||
+    repeatedOption(args, "--state").length > 0
+  ) {
+    throw new Error("--upgrade cannot be combined with outcome options");
+  }
+}
+
 export function createPrivateEngineCommandRunner(): EngineCommandRunner {
   return {
     async run(args, options) {
@@ -148,6 +159,14 @@ export function createPrivateEngineCommandRunner(): EngineCommandRunner {
 
       if (args[1] === "continue") {
         const target = targetFromArgs(args, options);
+        const upgradeRoot = optionValue(args, "--upgrade");
+        if (upgradeRoot) {
+          assertUpgradeArgs(args);
+          const pkg = await loadSkillPackage(upgradeRoot);
+          return target.kind === "standalone"
+            ? upgradeStandaloneRun(target.projectRoot, target.runId, pkg)
+            : upgradeManualRun(target.changeDir, pkg);
+        }
         const continuation =
           target.kind === "standalone"
             ? await resumeStandaloneRun(

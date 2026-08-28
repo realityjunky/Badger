@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { DirectorySnapshot } from "../fixture.js";
+import { snapshotDirectory, type DirectorySnapshot } from "../fixture.js";
 import { sha256 } from "../../util.js";
 import type {
   ClassifiedEngineError,
@@ -63,6 +63,8 @@ export function classifyEngineError(
     )
   ) {
     category = "guardrail-rejection";
+  } else if (/Cannot upgrade|incompatible|replacement Skill/iu.test(message)) {
+    category = "incompatible-upgrade";
   } else if (/Unknown current step|Resolver returned unknown/iu.test(message)) {
     category = "unknown-step";
   } else if (/Invalid Trajectory event|trajectory.*line/iu.test(message)) {
@@ -206,6 +208,34 @@ async function readTrajectory(
   return events;
 }
 
+async function readSkillSnapshot(
+  runRoot: string,
+  state: RecordValue | null,
+  errors: ClassifiedEngineError[],
+): Promise<DirectorySnapshot | null> {
+  const hash = state?.skillHash;
+  if (hash === undefined || hash === null) return null;
+  if (typeof hash !== "string" || !/^[a-f0-9]{64}$/u.test(hash)) {
+    errors.push(
+      classifyEngineError(
+        new Error("Invalid Run state: skillHash must be a SHA-256 hash"),
+        "inspect-snapshot",
+      ),
+    );
+    return null;
+  }
+  try {
+    return await snapshotDirectory(
+      path.join(runRoot, ".comet", "skill-snapshots", hash),
+    );
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    errors.push(classifyEngineError(error, "inspect-snapshot"));
+    return null;
+  }
+}
+
 function trajectoryOutcomes(trajectory: unknown[]): unknown[] {
   return trajectory.flatMap((event) => {
     const document = record(event);
@@ -338,6 +368,11 @@ export async function observeEngineRun(options: {
   const checkpoint = checkpointPath
     ? await readOptionalJson(checkpointPath, "checkpoint", 256 * 1024, errors)
     : null;
+  const snapshot = await readSkillSnapshot(
+    options.coordinates.runRoot,
+    stateDocument,
+    errors,
+  );
   const artifacts = rawArtifacts === null ? {} : rawArtifacts;
   const run: EngineRunFilesObservation = {
     state,
@@ -346,6 +381,7 @@ export async function observeEngineRun(options: {
     artifacts,
     trajectory,
     checkpoint,
+    snapshot,
     evals: [...trajectoryEvals(trajectory), ...commandEvals(options.commands)],
     errors,
   };
@@ -359,6 +395,9 @@ export async function observeEngineRun(options: {
       skill: options.scenario.skill,
       runner: options.scenario.runner,
       runId: options.scenario.runId ?? null,
+      ...(options.scenario.coverage
+        ? { coverage: [...options.scenario.coverage] }
+        : {}),
     },
     coordinates: options.coordinates,
     commands: options.commands,
@@ -399,6 +438,9 @@ export function normalizeEngineObservation(
     run: {
       ...observation.run,
       trajectory: observation.run.trajectory.map(normalizeTimestamp),
+      snapshot: observation.run.snapshot
+        ? normalizedSnapshot(observation.run.snapshot, "<snapshot-root>")
+        : null,
       errors: observation.run.errors.map((error) => ({
         ...error,
         message: replaceCoordinates(error.message, coordinates),

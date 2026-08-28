@@ -5,7 +5,16 @@
   "skills": [
     { "name": "engine-single", "path": "skills/engine-single" },
     { "name": "engine-multi", "path": "skills/engine-multi" },
-    { "name": "engine-guarded", "path": "skills/engine-guarded" }
+    { "name": "engine-guarded", "path": "skills/engine-guarded" },
+    { "name": "engine-adaptive", "path": "skills/engine-adaptive" },
+    {
+      "name": "engine-single-upgrade",
+      "path": "skills/engine-single-upgrade"
+    },
+    {
+      "name": "engine-incompatible",
+      "path": "skills/engine-incompatible"
+    }
   ],
   "scenarios": [
     {
@@ -14,6 +23,12 @@
       "skill": "engine-single",
       "runner": "standalone",
       "runId": "single-run",
+      "coverage": [
+        "deterministic-single-step",
+        "evals",
+        "trajectories",
+        "snapshot-identity"
+      ],
       "operations": [
         { "type": "start" },
         {
@@ -32,6 +47,7 @@
       "skill": "engine-multi",
       "runner": "standalone",
       "runId": "multi-run",
+      "coverage": ["deterministic-multi-step", "standalone-runs"],
       "operations": [
         { "type": "start" },
         {
@@ -54,6 +70,7 @@
       "skill": "engine-multi",
       "runner": "standalone",
       "runId": "retry-run",
+      "coverage": ["failed-outcome-retry"],
       "operations": [
         { "type": "start" },
         {
@@ -80,6 +97,7 @@
       "skill": "engine-single",
       "runner": "standalone",
       "runId": "waiting-run",
+      "coverage": ["pending-action-recovery"],
       "operations": [
         { "type": "start" },
         { "type": "resume" },
@@ -95,6 +113,7 @@
       "description": "A confirmation-required tool is rejected until the reference is explicitly confirmed.",
       "skill": "engine-guarded",
       "runner": "manual",
+      "coverage": ["confirmation-guardrails", "manual-runs"],
       "operations": [
         {
           "type": "start",
@@ -118,6 +137,7 @@
       "skill": "engine-single",
       "runner": "standalone",
       "runId": "unsafe-run",
+      "coverage": ["unsafe-paths"],
       "operations": [
         { "type": "start" },
         { "type": "patch-state", "patch": { "pendingRef": "../outside.json" } },
@@ -135,6 +155,7 @@
       "description": "A manual change-bound Run persists a pending action and completes through the same loop.",
       "skill": "engine-single",
       "runner": "manual",
+      "coverage": ["manual-runs"],
       "operations": [
         { "type": "start" },
         {
@@ -151,6 +172,7 @@
       "skill": "engine-single",
       "runner": "standalone",
       "runId": "corrupt-step-run",
+      "coverage": ["unknown-resolver-steps"],
       "operations": [
         { "type": "start" },
         { "type": "patch-state", "patch": { "currentStep": "missing" } },
@@ -161,6 +183,136 @@
           "expectError": {
             "category": "unknown-step",
             "messageIncludes": "Unknown current step"
+          }
+        }
+      ]
+    },
+    {
+      "id": "adaptive-guardrail-rejection",
+      "description": "An adaptive Skill cannot be started through the deterministic command adapter without an Agent candidate.",
+      "skill": "engine-adaptive",
+      "runner": "manual",
+      "coverage": ["adaptive-guardrails"],
+      "operations": [
+        {
+          "type": "start",
+          "expectError": {
+            "category": "guardrail-rejection",
+            "messageIncludes": "Agent candidate"
+          }
+        }
+      ]
+    },
+    {
+      "id": "checkpoint-recovery",
+      "description": "A checkpoint written at a pending-action boundary survives recovery and completion.",
+      "skill": "engine-single",
+      "runner": "standalone",
+      "runId": "checkpoint-run",
+      "coverage": ["checkpoints"],
+      "operations": [
+        { "type": "start" },
+        {
+          "type": "write-checkpoint",
+          "checkpoint": {
+            "runId": "checkpoint-run",
+            "stateVersion": 1,
+            "trajectoryOffset": 2,
+            "contextHash": null,
+            "artifactsHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "createdAt": "2026-08-29T00:00:00.000Z"
+          }
+        },
+        { "type": "resume" },
+        {
+          "type": "outcome",
+          "status": "succeeded",
+          "summary": "Checkpointed action completed"
+        }
+      ]
+    },
+    {
+      "id": "unsafe-run-id",
+      "description": "An unsafe standalone Run id is rejected before any Run path is resolved.",
+      "skill": "engine-single",
+      "runner": "standalone",
+      "coverage": ["unsafe-run-ids"],
+      "operations": [
+        {
+          "type": "start",
+          "runId": "../escape",
+          "expectError": {
+            "category": "invalid-run-id",
+            "messageIncludes": "Invalid standalone Run id"
+          }
+        }
+      ]
+    },
+    {
+      "id": "source-drift",
+      "description": "A source Skill changed after start does not alter the pending action or resumed snapshot.",
+      "skill": "engine-single",
+      "runner": "standalone",
+      "runId": "source-drift-run",
+      "coverage": ["source-drift", "snapshot-identity"],
+      "operations": [
+        { "type": "start" },
+        {
+          "type": "mutate-skill",
+          "path": "SKILL.md",
+          "content": "# Changed after Run start\n"
+        },
+        { "type": "resume" },
+        {
+          "type": "outcome",
+          "status": "succeeded",
+          "summary": "Snapshot action completed"
+        }
+      ]
+    },
+    {
+      "id": "compatible-upgrade",
+      "description": "A completed Run accepts a same-name, same-mode Skill upgrade and records the new snapshot.",
+      "skill": "engine-single",
+      "runner": "standalone",
+      "runId": "upgrade-run",
+      "coverage": ["compatible-upgrades"],
+      "operations": [
+        { "type": "start" },
+        {
+          "type": "outcome",
+          "status": "succeeded",
+          "summary": "Initial action completed"
+        },
+        {
+          "type": "upgrade",
+          "replacementSkill": "engine-single-upgrade",
+          "expectResult": {
+            "state": { "status": "completed", "currentStep": null }
+          }
+        }
+      ]
+    },
+    {
+      "id": "incompatible-upgrade",
+      "description": "A completed Run rejects a replacement Skill with a different identity.",
+      "skill": "engine-single",
+      "runner": "standalone",
+      "runId": "incompatible-upgrade-run",
+      "coverage": ["incompatible-upgrades"],
+      "operations": [
+        { "type": "start" },
+        {
+          "type": "outcome",
+          "status": "succeeded",
+          "summary": "Initial action completed"
+        },
+        {
+          "type": "upgrade",
+          "replacementSkill": "engine-incompatible",
+          "expectError": {
+            "category": "incompatible-upgrade",
+            "messageIncludes": "Skill name is incompatible"
           }
         }
       ]

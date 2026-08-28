@@ -1,0 +1,1 @@
+# Synthetic adaptive Engine fixture

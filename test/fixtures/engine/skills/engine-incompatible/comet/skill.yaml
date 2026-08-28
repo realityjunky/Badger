@@ -1,0 +1,22 @@
+apiVersion: comet/v1alpha1
+kind: Skill
+metadata:
+  name: engine-incompatible
+  version: "1.0.0"
+  description: Synthetic incompatible Engine fixture
+goal:
+  statement: Complete an incompatible synthetic action
+  inputs: []
+  outputs: []
+  success:
+    - The action completed
+orchestration:
+  mode: deterministic
+  entry: finish
+  steps:
+    - id: finish
+      action:
+        type: checkpoint
+skills: []
+agents: []
+tools: []

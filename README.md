@@ -55,6 +55,6 @@ node bin/comet-any.js guide --project . --json
 
 See `assets/skills/comet-any/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
 
-The public package façade exports the Skill runtime and Engine operations needed by callers. Run-file storage and protected filesystem implementation modules remain internal. The Engine closure is pinned to Comet `0.4.0-beta.19` at revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a` and contains no runtime import from the upstream checkout.
+The public package façade and `@rpamis/comet-any-private/engine` subpath export the Skill runtime and Engine operations needed by callers. Run-file storage and protected filesystem implementation modules remain internal. The Engine closure is pinned to Comet `0.4.0-beta.19` at revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a` and contains no runtime import from the upstream checkout.
 
-The pinned three-Skill differential harness is documented in `docs/differential-harness.md`. It runs both Creators only in disposable temporary projects and rejects protected raw-data paths.
+The pinned three-Skill differential harness is documented in `docs/differential-harness.md`. The Engine parity matrix and certification gate are documented in `docs/engine-phase-1-certification.md`. Both harnesses run only in disposable temporary projects and reject protected raw-data paths.

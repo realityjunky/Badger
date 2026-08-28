@@ -62,6 +62,12 @@ describe("official Engine characterization harness", () => {
       "unsafe-run-state",
       "manual-run-persistence",
       "corrupt-current-step",
+      "adaptive-guardrail-rejection",
+      "checkpoint-recovery",
+      "unsafe-run-id",
+      "source-drift",
+      "compatible-upgrade",
+      "incompatible-upgrade",
     ]);
     expect(manifest.official.revision).toBe(
       "99fd7495f8b9217efbaae3a46d885f6fa7f4102a",

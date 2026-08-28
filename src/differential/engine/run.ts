@@ -23,6 +23,11 @@ import {
   observeEngineRun,
 } from "./observe.js";
 import { createPrivateEngineCommandRunner } from "./private.js";
+import {
+  certifyEngineDifferential,
+  getEngineParityCoverage,
+} from "./certification.js";
+import type { Checkpoint } from "../../engine/types.js";
 import type {
   ClassifiedEngineError,
   EngineBaselineOptions,
@@ -52,10 +57,11 @@ function targetArgs(
   scenario: EngineScenario,
   projectRoot: string,
   runRoot: string,
+  runId = scenario.runId ?? scenario.id,
 ): string[] {
   return scenario.runner === "manual"
     ? ["--change", runRoot, "--project", projectRoot]
-    : ["--run-id", scenario.runId ?? scenario.id, "--project", projectRoot];
+    : ["--run-id", runId, "--project", projectRoot];
 }
 
 function confirmations(values: string[] | undefined): string[] {
@@ -69,15 +75,19 @@ function commandForOperation(
   skillRoot: string,
   operation: Exclude<
     EngineScenarioOperation,
-    { type: "patch-state" | "remove-pending" }
+    {
+      type:
+        "patch-state" | "remove-pending" | "mutate-skill" | "write-checkpoint";
+    }
   >,
+  replacementSkillRoots: ReadonlyMap<string, string>,
 ): string[] {
   if (operation.type === "start") {
     return [
       "skill",
       "run",
       skillRoot,
-      ...targetArgs(scenario, projectRoot, runRoot),
+      ...targetArgs(scenario, projectRoot, runRoot, operation.runId),
       ...confirmations(operation.confirmations),
       "--json",
     ];
@@ -109,6 +119,24 @@ function commandForOperation(
         `${key}=${value}`,
       ]),
       ...confirmations(operation.confirmations),
+      "--json",
+    ];
+  }
+  if (operation.type === "upgrade") {
+    const replacementRoot = replacementSkillRoots.get(
+      operation.replacementSkill,
+    );
+    if (!replacementRoot) {
+      throw new Error(
+        `Engine fixture replacement Skill is missing: ${operation.replacementSkill}`,
+      );
+    }
+    return [
+      "skill",
+      "continue",
+      ...targetArgs(scenario, projectRoot, runRoot),
+      "--upgrade",
+      replacementRoot,
       "--json",
     ];
   }
@@ -212,7 +240,10 @@ async function runOfficialCommand(
   scenario: EngineScenario,
   operation: Exclude<
     EngineScenarioOperation,
-    { type: "patch-state" | "remove-pending" }
+    {
+      type:
+        "patch-state" | "remove-pending" | "mutate-skill" | "write-checkpoint";
+    }
   >,
   args: string[],
   projectRoot: string,
@@ -252,7 +283,10 @@ async function runMutation(
   scenario: EngineScenario,
   operation: Extract<
     EngineScenarioOperation,
-    { type: "patch-state" | "remove-pending" }
+    {
+      type:
+        "patch-state" | "remove-pending" | "mutate-skill" | "write-checkpoint";
+    }
   >,
   mutate: () => Promise<RecordValue>,
 ): Promise<EngineCommandObservation> {
@@ -276,6 +310,36 @@ async function removePending(runRoot: string): Promise<RecordValue> {
     force: true,
   });
   return { removed: ".comet/pending-action.json" };
+}
+
+async function mutateSkill(
+  skillRoot: string,
+  relativePath: string,
+  content: string,
+): Promise<RecordValue> {
+  const normalized = relativePath.replaceAll("\\", "/");
+  const target = path.resolve(skillRoot, ...normalized.split("/"));
+  const relative = path.relative(path.resolve(skillRoot), target);
+  if (
+    path.isAbsolute(relative) ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`)
+  ) {
+    throw new Error(
+      `Skill mutation must stay inside the Skill package: ${relativePath}`,
+    );
+  }
+  await fs.writeFile(target, content, "utf8");
+  return { modified: normalized };
+}
+
+async function writeCheckpoint(
+  runRoot: string,
+  checkpoint: Checkpoint,
+): Promise<RecordValue> {
+  const file = path.join(runRoot, ".comet", "checkpoint.json");
+  await fs.writeFile(file, JSON.stringify(checkpoint, null, 2) + "\n", "utf8");
+  return { written: ".comet/checkpoint.json" };
 }
 
 async function observeScenario(options: {
@@ -314,6 +378,31 @@ async function observeScenario(options: {
     skill,
     skillRoot,
   );
+  const replacementSkillRoots = new Map<string, string>();
+  for (const operation of options.scenario.operations) {
+    if (operation.type !== "upgrade") continue;
+    if (replacementSkillRoots.has(operation.replacementSkill)) continue;
+    const replacement = options.fixture.skills.find(
+      (candidate) => candidate.name === operation.replacementSkill,
+    );
+    if (!replacement) {
+      throw new Error(
+        `Engine fixture replacement Skill is missing: ${operation.replacementSkill}`,
+      );
+    }
+    const replacementRoot = path.join(
+      projectRoot,
+      "replacement-skills",
+      replacement.name,
+    );
+    await copyEngineFixtureSkill(
+      options.repositoryRoot,
+      options.fixturePath,
+      replacement,
+      replacementRoot,
+    );
+    replacementSkillRoots.set(replacement.name, replacementRoot);
+  }
 
   const commands: EngineCommandObservation[] = [];
   for (const operation of options.scenario.operations) {
@@ -333,12 +422,29 @@ async function observeScenario(options: {
       );
       continue;
     }
+    if (operation.type === "mutate-skill") {
+      commands.push(
+        await runMutation(options.scenario, operation, () =>
+          mutateSkill(skillRoot, operation.path, operation.content),
+        ),
+      );
+      continue;
+    }
+    if (operation.type === "write-checkpoint") {
+      commands.push(
+        await runMutation(options.scenario, operation, () =>
+          writeCheckpoint(runRoot, operation.checkpoint),
+        ),
+      );
+      continue;
+    }
     const args = commandForOperation(
       options.scenario,
       projectRoot,
       runRoot,
       skillRoot,
       operation,
+      replacementSkillRoots,
     );
     commands.push(
       await runOfficialCommand(
@@ -451,6 +557,13 @@ export async function runOfficialEngineBaseline(
       throw new Error("Official Engine source changed during characterization");
     if (!fixtureUnchanged)
       throw new Error("Engine fixture source changed during characterization");
+    const comparison = {
+      status: "official-baseline" as const,
+      exactMatches: [],
+      expectedPackagingDifferences: [],
+      semanticMismatches: [],
+    };
+    const coverage = getEngineParityCoverage(fixture);
     return {
       schemaVersion: 1,
       kind: "official-engine-baseline",
@@ -470,12 +583,17 @@ export async function runOfficialEngineBaseline(
         unchanged: fixtureUnchanged,
       },
       scenarios,
-      comparison: {
-        status: "official-baseline",
-        exactMatches: [],
-        expectedPackagingDifferences: [],
-        semanticMismatches: [],
-      },
+      comparison,
+      coverage,
+      certification: certifyEngineDifferential({
+        official: {
+          verified: true,
+          unchanged: officialUnchanged,
+        },
+        fixture: { unchanged: fixtureUnchanged },
+        comparison,
+        coverage,
+      }),
     };
   } finally {
     await fs.rm(temporaryRoot, { recursive: true, force: true });
@@ -542,6 +660,16 @@ export async function runEngineDifferential(
     fixturePath: options.fixturePath,
     runner: options.privateRunner ?? createPrivateEngineCommandRunner(),
   });
+  const comparison = compareEngineObservationSets(
+    official.scenarios,
+    privateScenarios,
+  );
+  const certification = certifyEngineDifferential({
+    official: official.official,
+    fixture: official.fixture,
+    comparison,
+    coverage: official.coverage,
+  });
   return {
     schemaVersion: 1,
     kind: "official-private-engine-differential",
@@ -549,9 +677,8 @@ export async function runEngineDifferential(
     fixture: official.fixture,
     officialScenarios: official.scenarios,
     privateScenarios,
-    comparison: compareEngineObservationSets(
-      official.scenarios,
-      privateScenarios,
-    ),
+    comparison,
+    coverage: official.coverage,
+    certification,
   };
 }

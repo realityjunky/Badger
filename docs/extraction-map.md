@@ -5,7 +5,7 @@
 - Upstream checkout: `comet-any-private/comet`
 - Upstream remote: `git@github.com:rpamis/comet.git`
 - Audited upstream commit: `99fd749` (`0.4.0-beta.19`)
-- Source scenario: `assets/skills/comet-any/SKILL.md`, `domains/workflow-contract/`, `domains/bundle/`, `domains/factory/`, and the Creator CLI facade.
+- Source scenario: `assets/skills/comet-any/SKILL.md`, `domains/workflow-contract/`, `domains/bundle/`, `domains/factory/`, the Creator CLI facade, and the audited Engine closure in `domains/engine/`.
 
 ## Standalone seam
 
@@ -46,15 +46,19 @@ The differential runner uses disposable projects and home directories. It never 
 baseline. The fixture contains only synthetic Skills and exercises deterministic
 single-step and multi-step Runs, failed outcomes and retries, pending-action
 recovery, confirmation guardrails, unsafe state, manual Runs, standalone Runs,
-and corrupt current-step rejection.
+and corrupt current-step rejection. The completed Phase 1 fixture extends that
+matrix with adaptive guardrail rejection, checkpoint recovery, unsafe Run ids,
+source drift, snapshot identity, compatible upgrades, and incompatible upgrades.
 
 `src/differential/engine/` records durable Run state, pending actions, outcomes,
-artifacts, trajectories, checkpoints, evals, and classified errors from the
-pinned official CLI. It verifies the official revision and compares source
-snapshots before and after each run. The private command adapter executes the
-same fixture through the extracted public Engine façade, and the differential
-report classifies exact matches, expected packaging coordinates, and semantic
-mismatches.
+artifacts, trajectories, checkpoints, Skill snapshots, evals, and classified
+errors from the pinned official CLI. It verifies the official revision and
+compares source snapshots before and after each run. The private command
+adapter executes the same fixture through the extracted public Engine façade,
+and the differential report records matrix coverage and classifies exact
+matches, expected packaging coordinates, and semantic mismatches. Missing
+coverage or a semantic mismatch blocks certification and makes the CLI return
+a non-zero exit status.
 
 The Engine source closure is recorded as evidence in the characterization
 manifest and is extracted under `src/engine/`. The official checkout remains
@@ -86,6 +90,13 @@ the `<projectRoot>/.comet/runs/<run-id>` location, checks recovered state
 identity, and delegates all execution operations to the manual Run service.
 This keeps storage coordinates and caller inputs separate from the shared
 Engine loop and its persisted semantics.
+
+Phase 1 certification is the stop/go gate for the next runtime phase. The
+Engine report must have `certification.status` equal to `certified`, no missing
+matrix capabilities, unchanged official and fixture sources, and no semantic
+mismatches. WorkflowRuntime, decisions, conditional edges, cycles, Native
+hardening, and Primer Designer migration require a separate proposal and
+explicit approval.
 
 `runEngineDifferential` runs official and private observations against one
 synthetic fixture matrix. `createPrivateEngineCommandRunner` is an injected

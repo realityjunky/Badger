@@ -19,6 +19,14 @@
       "types": "./dist/src/index.d.ts",
       "import": "./dist/src/index.js"
     },
+    "./engine": {
+      "types": "./dist/src/engine/index.d.ts",
+      "import": "./dist/src/engine/index.js"
+    },
+    "./skill-runtime": {
+      "types": "./dist/src/skill-runtime/index.d.ts",
+      "import": "./dist/src/skill-runtime/index.js"
+    },
     "./cli": "./dist/src/cli.js"
   },
   "scripts": {

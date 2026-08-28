@@ -1,0 +1,17 @@
+apiVersion: comet/v1alpha1
+kind: Skill
+metadata:
+  name: engine-adaptive
+  version: "1.0.0"
+  description: Synthetic adaptive Engine fixture
+goal:
+  statement: Accept one adaptive Engine action
+  inputs: []
+  outputs: []
+  success:
+    - The adaptive action completed
+orchestration:
+  mode: adaptive
+skills: []
+agents: []
+tools: []

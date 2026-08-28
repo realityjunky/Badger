@@ -13,6 +13,7 @@ import type {
   EngineFixtureSkill,
   EngineSourceManifest,
 } from "./types.js";
+import { ENGINE_PARITY_REQUIREMENTS } from "./types.js";
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const ENGINE_ERROR_CATEGORIES = new Set([
@@ -26,6 +27,7 @@ const ENGINE_ERROR_CATEGORIES = new Set([
   "unknown-step",
   "malformed-trajectory",
   "file-too-large",
+  "incompatible-upgrade",
   "terminal-run",
   "command-failure",
   "unknown",
@@ -140,6 +142,9 @@ function validateOperation(value: unknown, label: string): void {
       "check",
       "patch-state",
       "remove-pending",
+      "upgrade",
+      "mutate-skill",
+      "write-checkpoint",
     ].includes(type)
   ) {
     throw new Error(`${label}.type is invalid: ${type}`);
@@ -218,6 +223,48 @@ function validateOperation(value: unknown, label: string): void {
     }
   }
   if (type === "patch-state") record(operation.patch, `${label}.patch`);
+  if (type === "start" && operation.runId !== undefined) {
+    if (typeof operation.runId !== "string") {
+      throw new Error(`${label}.runId must be a string`);
+    }
+  }
+  if (type === "upgrade") {
+    requiredString(operation.replacementSkill, `${label}.replacementSkill`);
+  }
+  if (type === "mutate-skill") {
+    safeRelativePath(operation.path, `${label}.path`);
+    if (typeof operation.content !== "string") {
+      throw new Error(`${label}.content must be a string`);
+    }
+  }
+  if (type === "write-checkpoint") {
+    const checkpoint = record(operation.checkpoint, `${label}.checkpoint`);
+    requiredString(checkpoint.runId, `${label}.checkpoint.runId`);
+    for (const field of ["stateVersion", "trajectoryOffset"]) {
+      if (
+        typeof checkpoint[field] !== "number" ||
+        !Number.isSafeInteger(checkpoint[field]) ||
+        checkpoint[field] < 0
+      ) {
+        throw new Error(
+          `${label}.checkpoint.${field} must be a non-negative integer`,
+        );
+      }
+    }
+    if (
+      checkpoint.contextHash !== null &&
+      typeof checkpoint.contextHash !== "string"
+    ) {
+      throw new Error(
+        `${label}.checkpoint.contextHash must be a string or null`,
+      );
+    }
+    requiredString(
+      checkpoint.artifactsHash,
+      `${label}.checkpoint.artifactsHash`,
+    );
+    requiredString(checkpoint.createdAt, `${label}.checkpoint.createdAt`);
+  }
   for (const field of ["confirmations"]) {
     const values = operation[field];
     if (values === undefined) continue;
@@ -264,6 +311,23 @@ function validateScenario(
       throw new Error(`fixture.scenarios[${index}].runId is invalid: ${runId}`);
     }
   }
+  if (scenario.coverage !== undefined) {
+    if (!Array.isArray(scenario.coverage)) {
+      throw new Error(`fixture.scenarios[${index}].coverage must be an array`);
+    }
+    for (const [coverageIndex, coverage] of scenario.coverage.entries()) {
+      if (
+        typeof coverage !== "string" ||
+        !ENGINE_PARITY_REQUIREMENTS.includes(
+          coverage as (typeof ENGINE_PARITY_REQUIREMENTS)[number],
+        )
+      ) {
+        throw new Error(
+          `fixture.scenarios[${index}].coverage[${coverageIndex}] is invalid`,
+        );
+      }
+    }
+  }
   if (!Array.isArray(scenario.operations) || scenario.operations.length === 0) {
     throw new Error(`fixture.scenarios[${index}].operations must not be empty`);
   }
@@ -273,6 +337,16 @@ function validateScenario(
       `fixture.scenarios[${index}].operations[${operationIndex}]`,
     ),
   );
+  for (const [operationIndex, operation] of scenario.operations.entries()) {
+    if (
+      operation.type === "upgrade" &&
+      !skillNames.has(operation.replacementSkill)
+    ) {
+      throw new Error(
+        `fixture.scenarios[${index}].operations[${operationIndex}] references unknown replacement Skill: ${operation.replacementSkill}`,
+      );
+    }
+  }
 }
 
 export async function readEngineFixture(

@@ -1,0 +1,22 @@
+apiVersion: comet/v1alpha1
+kind: Skill
+metadata:
+  name: engine-single
+  version: "2.0.0"
+  description: Synthetic upgraded single-step Engine fixture
+goal:
+  statement: Complete one synthetic Engine action
+  inputs: []
+  outputs: []
+  success:
+    - The action completed
+orchestration:
+  mode: deterministic
+  entry: finish
+  steps:
+    - id: finish
+      action:
+        type: checkpoint
+skills: []
+agents: []
+tools: []

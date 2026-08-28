@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { createPrivateEngineCommandRunner } from "../src/differential/engine/private.js";
 import { runEngineDifferential } from "../src/differential/engine/run.js";
+import { readEngineManifest } from "../src/differential/engine/fixture.js";
 import type { EngineSourceManifest } from "../src/differential/engine/types.js";
 
 const execFileAsync = promisify(execFile);
@@ -151,5 +152,86 @@ describe("private Engine differential runner", () => {
     expect(report.officialScenarios).toHaveLength(1);
     expect(report.privateScenarios).toHaveLength(1);
     expect(report.fixture.unchanged).toBe(true);
+  });
+
+  it("runs the complete canonical matrix through the public private seam", async () => {
+    const packageRoot = path.resolve(process.cwd());
+    const repositoryRoot = path.resolve(packageRoot, "..");
+    const fixtureRoot = path.join(root, "fixture");
+    await fs.cp(
+      path.join(packageRoot, "test", "fixtures", "engine"),
+      fixtureRoot,
+      { recursive: true },
+    );
+    const fixturePath = path.join(fixtureRoot, "engine-characterization.json");
+    const manifestPath = path.join(fixtureRoot, "manifest.json");
+    const manifest = await readEngineManifest(manifestPath, { repositoryRoot });
+    const officialRoot = path.join(root, "official");
+    for (const sourcePath of manifest.official.sourcePaths) {
+      const target = path.join(officialRoot, sourcePath);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, `${sourcePath}\n`);
+    }
+    await execFileAsync("git", ["init", "--quiet", officialRoot]);
+    await execFileAsync("git", [
+      "-C",
+      officialRoot,
+      "config",
+      "user.email",
+      "engine-test@example.invalid",
+    ]);
+    await execFileAsync("git", [
+      "-C",
+      officialRoot,
+      "config",
+      "user.name",
+      "Engine Test",
+    ]);
+    await execFileAsync("git", ["-C", officialRoot, "add", "."]);
+    await execFileAsync("git", [
+      "-C",
+      officialRoot,
+      "commit",
+      "--quiet",
+      "-m",
+      "baseline",
+    ]);
+    const manifestDocument = JSON.parse(
+      await fs.readFile(manifestPath, "utf8"),
+    ) as { official: { revision: string } };
+    manifestDocument.official.revision = (
+      await execFileAsync("git", ["-C", officialRoot, "rev-parse", "HEAD"])
+    ).stdout.trim();
+    await fs.writeFile(
+      manifestPath,
+      JSON.stringify(manifestDocument, null, 2) + "\n",
+      "utf8",
+    );
+    const runner = createPrivateEngineCommandRunner();
+    const report = await runEngineDifferential({
+      repositoryRoot,
+      fixturePath,
+      officialRoot,
+      officialRunner: runner,
+      privateRunner: runner,
+    });
+
+    expect(report.coverage.missing).toEqual([]);
+    expect(report.certification).toEqual({ status: "certified", blockers: [] });
+    expect(report.comparison.semanticMismatches).toEqual([]);
+    expect(report.officialScenarios).toHaveLength(14);
+    expect(report.privateScenarios).toHaveLength(14);
+    expect(
+      report.privateScenarios.find(
+        (scenario) => scenario.scenario.id === "source-drift",
+      )?.run.snapshot,
+    ).toEqual(expect.objectContaining({ files: expect.any(Array) }));
+    expect(
+      report.privateScenarios.find(
+        (scenario) => scenario.scenario.id === "checkpoint-recovery",
+      )?.run.checkpoint,
+    ).toEqual(
+      expect.objectContaining({ runId: "checkpoint-run", stateVersion: 1 }),
+    );
   });
 });

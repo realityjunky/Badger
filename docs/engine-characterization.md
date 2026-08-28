@@ -1,8 +1,9 @@
-# Official Engine Characterization
+# Official Engine Characterization and Phase 1 Parity
 
 The Engine characterization harness records a read-only behavioral baseline for
-the pinned official Comet Engine before a private Engine implementation exists.
-It is evidence infrastructure, not an Engine extraction.
+the pinned official Comet Engine and compares it with the extracted private
+Engine. The complete Phase 1 certification contract is in
+`docs/engine-phase-1-certification.md`.
 
 ## Safety boundary
 
@@ -39,7 +40,7 @@ node bin/comet-any.js engine-differential \
 
 ## Scenario matrix
 
-The fixture currently covers:
+The fixture covers:
 
 1. deterministic single-step completion with artifacts and completion evals;
 2. deterministic multi-step progression and ordering;
@@ -48,11 +49,17 @@ The fixture currently covers:
 5. confirmation-required guardrail rejection and confirmed continuation;
 6. unsafe Run-state references that escape the Run root;
 7. change-bound manual Runs;
-8. corrupt current-step rejection during outcome recording.
+8. corrupt current-step rejection during outcome recording;
+9. adaptive guardrail rejection;
+10. checkpoint persistence and recovery;
+11. unsafe standalone Run ids;
+12. source drift after Run start;
+13. Skill snapshot identity;
+14. compatible and incompatible Skill upgrades.
 
 Each scenario records the command observations and the durable Run files:
-Run state, pending action, outcomes, artifacts, trajectory, checkpoint, evals,
-and classified errors.
+Run state, pending action, outcomes, artifacts, trajectory, checkpoint, Skill
+snapshot, evals, and classified errors.
 
 ## Comparison contract
 
@@ -75,10 +82,11 @@ as:
 
 Without `--private`, the command records the official-only baseline. With
 `--private`, it runs the same scenarios through the extracted private Engine
-command adapter and reports exact matches, expected packaging differences, and
-semantic mismatches in one report. Manual Run UUIDs and their derived action
-identities are preserved as evidence and classified as expected packaging
-nondeterminism. The private command adapter's error envelope is also recorded
-and classified as packaging when the underlying error is identical; state,
-ordering, hashes, artifacts, evals, and safety errors remain strict comparison
-fields.
+command adapter and reports exact matches, expected packaging differences,
+semantic mismatches, matrix coverage, and certification status in one report.
+Manual Run UUIDs and their derived action identities are preserved as evidence
+and classified as expected packaging nondeterminism. The private command
+adapter's error envelope is also recorded and classified as packaging when the
+underlying error is identical; state, ordering, hashes, snapshots, artifacts,
+evals, and safety errors remain strict comparison fields. The CLI returns a
+non-zero status when certification is blocked.

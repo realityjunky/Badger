@@ -21,6 +21,7 @@ export * from "./differential/official.js";
 export * from "./differential/run.js";
 export * from "./differential/standalone.js";
 export * from "./differential/engine/types.js";
+export * from "./differential/engine/certification.js";
 export * from "./differential/engine/fixture.js";
 export * from "./differential/engine/observe.js";
 export * from "./differential/engine/run.js";

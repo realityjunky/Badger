@@ -1,6 +1,31 @@
 import type { DirectorySnapshot } from "../fixture.js";
+import type { Checkpoint } from "../../engine/types.js";
 
 export type EngineRunnerMode = "manual" | "standalone";
+
+export const ENGINE_PARITY_REQUIREMENTS = [
+  "deterministic-single-step",
+  "deterministic-multi-step",
+  "failed-outcome-retry",
+  "pending-action-recovery",
+  "adaptive-guardrails",
+  "confirmation-guardrails",
+  "manual-runs",
+  "standalone-runs",
+  "evals",
+  "trajectories",
+  "checkpoints",
+  "unsafe-paths",
+  "unsafe-run-ids",
+  "source-drift",
+  "snapshot-identity",
+  "compatible-upgrades",
+  "incompatible-upgrades",
+  "unknown-resolver-steps",
+] as const;
+
+export type EngineParityRequirement =
+  (typeof ENGINE_PARITY_REQUIREMENTS)[number];
 
 export type EngineErrorCategory =
   | "revision-mismatch"
@@ -13,6 +38,7 @@ export type EngineErrorCategory =
   | "unknown-step"
   | "malformed-trajectory"
   | "file-too-large"
+  | "incompatible-upgrade"
   | "terminal-run"
   | "command-failure"
   | "unknown";
@@ -46,6 +72,7 @@ export type EngineScenarioOperation =
   | (EngineScenarioOperationBase & {
       type: "start";
       confirmations?: string[];
+      runId?: string;
     })
   | (EngineScenarioOperationBase & {
       type: "resume";
@@ -69,6 +96,19 @@ export type EngineScenarioOperation =
     })
   | (EngineScenarioOperationBase & {
       type: "remove-pending";
+    })
+  | (EngineScenarioOperationBase & {
+      type: "upgrade";
+      replacementSkill: string;
+    })
+  | (EngineScenarioOperationBase & {
+      type: "mutate-skill";
+      path: string;
+      content: string;
+    })
+  | (EngineScenarioOperationBase & {
+      type: "write-checkpoint";
+      checkpoint: Checkpoint;
     });
 
 export interface EngineFixtureSkill {
@@ -82,6 +122,7 @@ export interface EngineScenario {
   skill: string;
   runner: EngineRunnerMode;
   runId?: string;
+  coverage?: EngineParityRequirement[];
   operations: EngineScenarioOperation[];
 }
 
@@ -132,6 +173,7 @@ export interface EngineRunFilesObservation {
   artifacts: unknown;
   trajectory: unknown[];
   checkpoint: unknown | null;
+  snapshot?: DirectorySnapshot | null;
   evals: EngineEvalObservation[];
   errors: ClassifiedEngineError[];
 }
@@ -139,6 +181,7 @@ export interface EngineRunFilesObservation {
 export interface EngineScenarioObservation {
   scenario: Pick<EngineScenario, "id" | "description" | "skill" | "runner"> & {
     runId: string | null;
+    coverage?: EngineParityRequirement[];
   };
   coordinates: {
     projectRoot: string;
@@ -172,6 +215,21 @@ export interface EngineComparison {
   semanticMismatches: EngineComparisonDifference[];
 }
 
+export interface EngineCoverageReport {
+  required: EngineParityRequirement[];
+  covered: EngineParityRequirement[];
+  missing: EngineParityRequirement[];
+  scenarios: Record<string, string[]>;
+}
+
+export type EngineCertificationStatus =
+  "official-baseline" | "certified" | "blocked";
+
+export interface EngineCertification {
+  status: EngineCertificationStatus;
+  blockers: string[];
+}
+
 export interface EngineBaselineReport {
   schemaVersion: 1;
   kind: "official-engine-baseline";
@@ -192,6 +250,8 @@ export interface EngineBaselineReport {
   };
   scenarios: EngineScenarioObservation[];
   comparison: EngineComparison;
+  coverage: EngineCoverageReport;
+  certification: EngineCertification;
 }
 
 export interface EngineDifferentialReport {
@@ -202,6 +262,8 @@ export interface EngineDifferentialReport {
   officialScenarios: EngineScenarioObservation[];
   privateScenarios: EngineScenarioObservation[];
   comparison: EngineComparison;
+  coverage: EngineCoverageReport;
+  certification: EngineCertification;
 }
 
 export interface EngineCommandRunner {
