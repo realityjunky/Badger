@@ -33,11 +33,21 @@ export const NATIVE_RUN_STORAGE: Readonly<RunStorageLayout> =
   });
 
 export function assertRunStorageRef(value: string): void {
+  const normalized =
+    typeof value === "string" ? value.replaceAll("\\", "/") : "";
   if (
-    value.length === 0 ||
-    path.isAbsolute(value) ||
+    typeof value !== "string" ||
+    normalized.length === 0 ||
+    path.posix.isAbsolute(normalized) ||
+    path.win32.isAbsolute(value) ||
     /^(?:[A-Za-z]:|[\\/]|~)/u.test(value) ||
-    value.split(/[\\/]/u).includes("..")
+    /[*?]/u.test(value) ||
+    normalized
+      .split("/")
+      .some(
+        (segment) =>
+          segment.length === 0 || segment === "." || segment === "..",
+      )
   ) {
     throw new Error("Run storage ref must stay inside the Run root");
   }
@@ -46,5 +56,18 @@ export function assertRunStorageRef(value: string): void {
 export function assertRunStorageLayout(
   storage: Readonly<RunStorageLayout>,
 ): void {
-  for (const value of Object.values(storage)) assertRunStorageRef(value);
+  const keys: (keyof RunStorageLayout)[] = [
+    "stateRef",
+    "pendingRef",
+    "trajectoryRef",
+    "contextRef",
+    "artifactsRef",
+    "checkpointRef",
+    "snapshotsRef",
+  ];
+  for (const key of keys) assertRunStorageRef(storage[key]);
+  const normalizedRefs = keys.map((key) => storage[key].replaceAll("\\", "/"));
+  if (new Set(normalizedRefs).size !== keys.length) {
+    throw new Error("Run storage refs must be distinct");
+  }
 }

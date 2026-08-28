@@ -19,6 +19,15 @@ The package includes:
 
 It intentionally excludes Comet Classic policy, Comet Native policy and hardening, Comet Entry, host platform installers, ambient resume routing, and external platform adapters.
 
+## Run persistence
+
+Run files are stored through protected, bounded, atomic adapters. Missing Run
+state returns `null`; missing trajectory, pending-action, and checkpoint files
+return `[]`, `null`, and `null`, respectively; missing artifacts return `{}`;
+missing context returns `null`. Existing files are validated before recovery,
+and unsafe references, path escapes, link traversal, oversized content, and
+failed writes are rejected without replacing the last valid state.
+
 ## Development
 
 ```bash

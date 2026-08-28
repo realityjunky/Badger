@@ -191,6 +191,35 @@ describe("engine state projection", () => {
     );
   });
 
+  it("validates state values before replacing a valid persisted state", async () => {
+    const current = state();
+    await writeRunState(changeDir, current);
+
+    await expect(
+      writeRunState(changeDir, {
+        ...current,
+        iteration: "1",
+      } as unknown as RunState),
+    ).rejects.toThrow(
+      "Invalid Run state: iteration must be a non-negative integer",
+    );
+
+    expect(await readRunState(changeDir)).toEqual(current);
+  });
+
+  it("rejects non-string nullable fields during recovery", async () => {
+    await writeRunState(changeDir, state());
+    const file = path.join(changeDir, RUN_STATE_FILE);
+    const raw = await fs.readFile(file, "utf8");
+    const json = JSON.parse(raw);
+
+    await fs.writeFile(file, JSON.stringify({ ...json, currentStep: 42 }));
+
+    await expect(readRunState(changeDir)).rejects.toThrow(
+      "Invalid Run state: currentStep must be a non-empty string or null",
+    );
+  });
+
   it.each([
     ["absolute", "pendingRef", "pending_ref", "/tmp/pending.json"],
     ["traversal", "contextRef", "context_ref", "../context.md"],

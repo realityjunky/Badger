@@ -26,16 +26,28 @@ function requiredString(doc: StateDocument, key: string): string {
 
 function requiredRunReference(doc: StateDocument, key: string): string {
   const value = requiredString(doc, key);
+  assertSafeRunReference(value, key);
+  return value;
+}
+
+function assertSafeRunReference(value: string, key: string): void {
+  const normalized = value.replaceAll("\\", "/");
   if (
-    path.isAbsolute(value) ||
+    path.posix.isAbsolute(normalized) ||
+    path.win32.isAbsolute(value) ||
     /^(?:[A-Za-z]:|[\\/]|~)/u.test(value) ||
-    value.split(/[\\/]/u).includes("..")
+    /[*?]/u.test(value) ||
+    normalized
+      .split("/")
+      .some(
+        (segment) =>
+          segment.length === 0 || segment === "." || segment === "..",
+      )
   ) {
     throw new Error(
       `Invalid Run state: ${key} must stay inside the change directory`,
     );
   }
-  return value;
 }
 
 function retries(doc: StateDocument): Record<string, number> {
@@ -52,7 +64,7 @@ function retries(doc: StateDocument): Record<string, number> {
     throw new Error("Invalid Run state: run_retries must be a JSON object");
   }
   for (const count of Object.values(value)) {
-    if (!Number.isInteger(count) || Number(count) < 0) {
+    if (!Number.isSafeInteger(count) || count < 0) {
       throw new Error(
         "Invalid Run state: retry counts must be non-negative integers",
       );
@@ -126,7 +138,7 @@ export function applyRunStateToDocument(
 }
 
 export const RUN_STATE_FILE = ".comet/run-state.json";
-const RUN_STATE_MAX_BYTES = 256 * 1024;
+export const RUN_STATE_MAX_BYTES = 256 * 1024;
 
 interface RunStateJson {
   runId: string;
@@ -146,46 +158,135 @@ interface RunStateJson {
   retries: Record<string, number>;
 }
 
-function runStateToJson(state: RunState): RunStateJson {
+const RUN_STATE_JSON_KEYS = new Set<keyof RunStateJson>([
+  "runId",
+  "skill",
+  "skillVersion",
+  "skillHash",
+  "orchestration",
+  "currentStep",
+  "iteration",
+  "pending",
+  "pendingRef",
+  "trajectoryRef",
+  "contextRef",
+  "artifactsRef",
+  "checkpointRef",
+  "status",
+  "retries",
+]);
+
+function requiredJsonString(value: unknown, key: keyof RunStateJson): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`Invalid Run state: ${key} must be a non-empty string`);
+  }
+  return value;
+}
+
+function nullableJsonString(
+  value: unknown,
+  key: "currentStep" | "pending",
+): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(
+      `Invalid Run state: ${key} must be a non-empty string or null`,
+    );
+  }
+  return value;
+}
+
+function parseRunStateJson(value: unknown): RunStateJson {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid Run state: stored value must be an object");
+  }
+  const json = value as Record<string, unknown>;
+  const unknown = Object.keys(json).find(
+    (key) => !RUN_STATE_JSON_KEYS.has(key as keyof RunStateJson),
+  );
+  if (unknown) throw new Error(`Invalid Run state: unknown field ${unknown}`);
+  const runId = requiredJsonString(json.runId, "runId");
+  const skill = requiredJsonString(json.skill, "skill");
+  const skillVersion = requiredJsonString(json.skillVersion, "skillVersion");
+  const skillHash = requiredJsonString(json.skillHash, "skillHash");
+  if (
+    json.orchestration !== "deterministic" &&
+    json.orchestration !== "adaptive"
+  ) {
+    throw new Error(
+      "Invalid Run state: orchestration must be deterministic or adaptive",
+    );
+  }
+  const currentStep = nullableJsonString(json.currentStep, "currentStep");
+  const iteration = json.iteration;
+  if (
+    typeof iteration !== "number" ||
+    !Number.isSafeInteger(iteration) ||
+    iteration < 0
+  ) {
+    throw new Error(
+      "Invalid Run state: iteration must be a non-negative integer",
+    );
+  }
+  const pending = nullableJsonString(json.pending, "pending");
+  const pendingRef = requiredJsonString(json.pendingRef, "pendingRef");
+  const trajectoryRef = requiredJsonString(json.trajectoryRef, "trajectoryRef");
+  const contextRef = requiredJsonString(json.contextRef, "contextRef");
+  const artifactsRef = requiredJsonString(json.artifactsRef, "artifactsRef");
+  const checkpointRef = requiredJsonString(json.checkpointRef, "checkpointRef");
+  assertSafeRunReference(pendingRef, "pending_ref");
+  assertSafeRunReference(trajectoryRef, "trajectory_ref");
+  assertSafeRunReference(contextRef, "context_ref");
+  assertSafeRunReference(artifactsRef, "artifacts_ref");
+  assertSafeRunReference(checkpointRef, "checkpoint_ref");
+  if (
+    json.status !== "running" &&
+    json.status !== "waiting" &&
+    json.status !== "completed" &&
+    json.status !== "failed"
+  ) {
+    throw new Error("Invalid Run state: run_status is invalid");
+  }
+  if (
+    !json.retries ||
+    typeof json.retries !== "object" ||
+    Array.isArray(json.retries)
+  ) {
+    throw new Error("Invalid Run state: run_retries must be a JSON object");
+  }
+  for (const count of Object.values(json.retries)) {
+    if (!Number.isSafeInteger(count) || count < 0) {
+      throw new Error(
+        "Invalid Run state: retry counts must be non-negative integers",
+      );
+    }
+  }
+
   return {
-    runId: state.runId,
-    skill: state.skill,
-    skillVersion: state.skillVersion,
-    skillHash: state.skillHash,
-    orchestration: state.orchestration,
-    currentStep: state.currentStep,
-    iteration: state.iteration,
-    pending: state.pending,
-    pendingRef: state.pendingRef,
-    trajectoryRef: state.trajectoryRef,
-    contextRef: state.contextRef,
-    artifactsRef: state.artifactsRef,
-    checkpointRef: state.checkpointRef,
-    status: state.status,
-    retries: state.retries,
+    runId,
+    skill,
+    skillVersion,
+    skillHash,
+    orchestration: json.orchestration,
+    currentStep,
+    iteration,
+    pending,
+    pendingRef,
+    trajectoryRef,
+    contextRef,
+    artifactsRef,
+    checkpointRef,
+    status: json.status,
+    retries: json.retries as Record<string, number>,
   };
 }
 
-function runStateFromJson(json: RunStateJson): RunState {
-  // Validate by round-tripping through the document parser
-  const doc: StateDocument = {
-    run_id: json.runId,
-    skill: json.skill,
-    skill_version: json.skillVersion,
-    skill_hash: json.skillHash,
-    orchestration: json.orchestration,
-    current_step: json.currentStep,
-    iteration: json.iteration,
-    pending: json.pending,
-    pending_ref: json.pendingRef,
-    trajectory_ref: json.trajectoryRef,
-    context_ref: json.contextRef,
-    artifacts_ref: json.artifactsRef,
-    checkpoint_ref: json.checkpointRef,
-    run_status: json.status,
-    run_retries: JSON.stringify(json.retries),
-  };
-  return runStateFromDocument(doc)!;
+export function parseRunStateValue(value: unknown): RunState {
+  return parseRunStateJson(value);
+}
+
+export function serializeRunState(state: RunState): string {
+  return JSON.stringify(parseRunStateJson(state), null, 2);
 }
 
 export async function readRunState(
@@ -200,8 +301,7 @@ export async function readRunState(
     options,
   );
   if (raw === null) return null;
-  const json = JSON.parse(raw) as RunStateJson;
-  return runStateFromJson(json);
+  return parseRunStateValue(JSON.parse(raw) as unknown);
 }
 
 export async function writeRunState(
@@ -209,10 +309,11 @@ export async function writeRunState(
   state: RunState,
   options: EngineRunWriteOptions = {},
 ): Promise<void> {
+  const serialized = serializeRunState(state);
   await writeEngineRunText(
     changeDir,
     RUN_STATE_FILE,
-    JSON.stringify(runStateToJson(state), null, 2),
+    serialized,
     RUN_STATE_MAX_BYTES,
     "Run state",
     options,

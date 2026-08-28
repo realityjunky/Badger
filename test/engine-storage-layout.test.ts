@@ -130,6 +130,56 @@ describe("Engine Run storage layouts", () => {
     ).toThrow("Run storage ref must stay inside the Run root");
   });
 
+  it("rejects storage refs with unsafe segments", () => {
+    expect(() =>
+      startRunWithStorage(runtimePackage(), "bad-run", "c".repeat(64), {
+        ...NATIVE_RUN_STORAGE,
+        stateRef: "runtime/./run-state.json",
+      }),
+    ).toThrow("Run storage ref must stay inside the Run root");
+  });
+
+  it("protects custom-layout state I/O from a symlinked parent", async () => {
+    const state = startRunWithStorage(
+      runtimePackage(),
+      "native-run",
+      "e".repeat(64),
+      NATIVE_RUN_STORAGE,
+    );
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), "comet-engine-storage-outside-"),
+    );
+    const runtime = path.join(changeDir, "runtime");
+
+    try {
+      await fs.symlink(
+        outside,
+        runtime,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+
+      await expect(
+        writeRunStateAt(changeDir, state, NATIVE_RUN_STORAGE),
+      ).rejects.toThrow(/symbolic link|junction|outside/iu);
+      await expect(
+        fs.access(path.join(outside, "run-state.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await fs.rm(runtime, { recursive: true, force: true });
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("enforces bounded reads for custom-layout state", async () => {
+    const file = path.join(changeDir, NATIVE_RUN_STORAGE.stateRef);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, "x".repeat(256 * 1024 + 1));
+
+    await expect(readRunStateAt(changeDir, NATIVE_RUN_STORAGE)).rejects.toThrow(
+      "Run state exceeds 262144 bytes",
+    );
+  });
+
   it("validates every persisted RunState field before a journal can reuse it", () => {
     const state = startRunWithStorage(
       runtimePackage(),

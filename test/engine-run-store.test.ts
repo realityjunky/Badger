@@ -109,11 +109,103 @@ describe("run store", () => {
   it("reports the malformed Trajectory line during recovery", async () => {
     const file = path.join(changeDir, ".comet", "trajectory.jsonl");
     await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, '{"sequence":1}\nnot-json\n');
+    await fs.writeFile(
+      file,
+      '{"sequence":1,"timestamp":"2026-06-13T00:00:00.000Z","type":"run_started","runId":"run-1","data":{}}\nnot-json\n',
+    );
 
     await expect(
       readTrajectory(changeDir, ".comet/trajectory.jsonl"),
     ).rejects.toThrow("Invalid Trajectory event at line 2");
+  });
+
+  it("rejects trajectory records that are not the next stable sequence", async () => {
+    const first: TrajectoryEvent = {
+      sequence: 1,
+      timestamp: "2026-06-13T00:00:00.000Z",
+      type: "run_started",
+      runId: "run-1",
+      data: {},
+    };
+    await appendTrajectory(changeDir, ".comet/trajectory.jsonl", first);
+
+    await expect(
+      appendTrajectory(changeDir, ".comet/trajectory.jsonl", {
+        ...first,
+        sequence: 3,
+      }),
+    ).rejects.toThrow("Run trajectory sequence must be 2, got 3");
+
+    expect(await readTrajectory(changeDir, ".comet/trajectory.jsonl")).toEqual([
+      first,
+    ]);
+  });
+
+  it("serializes concurrent trajectory appends without duplicate sequences", async () => {
+    const first: TrajectoryEvent = {
+      sequence: 1,
+      timestamp: "2026-06-13T00:00:00.000Z",
+      type: "run_started",
+      runId: "run-1",
+      data: {},
+    };
+    await appendTrajectory(changeDir, ".comet/trajectory.jsonl", first);
+
+    const results = await Promise.allSettled([
+      appendTrajectory(changeDir, ".comet/trajectory.jsonl", {
+        ...first,
+        sequence: 2,
+        data: { branch: "one" },
+      }),
+      appendTrajectory(changeDir, ".comet/trajectory.jsonl", {
+        ...first,
+        sequence: 2,
+        data: { branch: "two" },
+      }),
+    ]);
+
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      await readTrajectory(changeDir, ".comet/trajectory.jsonl"),
+    ).toHaveLength(2);
+  });
+
+  it("validates pending actions, artifacts, and checkpoints during recovery", async () => {
+    await fs.mkdir(path.join(changeDir, ".comet"), { recursive: true });
+    await fs.writeFile(
+      path.join(changeDir, ".comet", "pending-action.json"),
+      JSON.stringify({ id: "action-1", stepId: null, type: "unknown" }),
+    );
+    await expect(
+      readPendingAction(changeDir, ".comet/pending-action.json"),
+    ).rejects.toThrow("Invalid Run pending action: type is invalid");
+
+    await fs.writeFile(
+      path.join(changeDir, ".comet", "artifacts.json"),
+      JSON.stringify({ report: 42 }),
+    );
+    await expect(
+      readArtifacts(changeDir, ".comet/artifacts.json"),
+    ).rejects.toThrow("Invalid Run artifacts: artifact values must be strings");
+
+    await fs.writeFile(
+      path.join(changeDir, ".comet", "checkpoint.json"),
+      JSON.stringify({
+        runId: "run-1",
+        stateVersion: "1",
+        trajectoryOffset: 0,
+        contextHash: null,
+        artifactsHash: "a".repeat(64),
+        createdAt: "2026-06-13T00:00:00.000Z",
+      }),
+    );
+    await expect(
+      readCheckpoint(changeDir, ".comet/checkpoint.json"),
+    ).rejects.toThrow(
+      "Invalid Run checkpoint: stateVersion must be a non-negative integer",
+    );
   });
 
   it("rejects paths outside the change directory", async () => {
