@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import path from "node:path";
+import { promises as fs } from "node:fs";
 import { readPreferenceEntries, findSkills } from "./skill/find.js";
 import { buildProposal, readPlan } from "./factory/proposal.js";
 import { generatePackage } from "./factory/generate.js";
@@ -12,6 +13,7 @@ import {
   reviewState,
 } from "./publish/lifecycle.js";
 import { runDifferentialHarness } from "./differential/run.js";
+import { runOfficialEngineBaseline } from "./differential/engine/run.js";
 
 const program = new Command();
 program
@@ -219,6 +221,38 @@ program
       }),
       options.json,
     );
+  });
+
+program
+  .command("engine-differential <fixture>")
+  .description("Characterize the pinned official Engine in disposable Runs")
+  .requiredOption("--official-root <dir>", "Pinned official Comet checkout")
+  .option("--official-cli <file>", "Official Comet CLI entrypoint")
+  .option("--repo <dir>", "Skill harness repository root", ".")
+  .option("--confirm-output", "Confirm writing the baseline report")
+  .option("--output <file>", "Write the baseline report to a JSON file")
+  .option("--json", "JSON output")
+  .action(async (fixture, options) => {
+    const root = projectRoot(options.repo);
+    if (options.output && !options.confirmOutput) {
+      throw new Error("Writing a baseline report requires --confirm-output");
+    }
+    const report = await runOfficialEngineBaseline({
+      repositoryRoot: root,
+      fixturePath: path.resolve(root, fixture),
+      officialRoot: path.resolve(root, options.officialRoot),
+      officialCli: options.officialCli
+        ? path.resolve(root, options.officialCli)
+        : undefined,
+    });
+    if (options.output) {
+      await fs.writeFile(
+        path.resolve(root, options.output),
+        JSON.stringify(report, null, 2) + "\n",
+        "utf8",
+      );
+    }
+    emit(report, options.json);
   });
 
 async function safeStates(root: string) {

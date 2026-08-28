@@ -9,19 +9,19 @@
 
 ## Standalone seam
 
-| Standalone module | Upstream responsibility retained |
-| --- | --- |
-| `src/workflow-kernel/discovery.ts` | Real local Skill roots, frontmatter description, reference/script inventory, content hash, strict preference resolution, and missing/ambiguous status |
-| `src/workflow-kernel/hash.ts` | Stable source-tree fingerprints over sorted regular files and supported symbolic links |
-| `src/workflow/contract.ts` | Workflow-kernel Node vocabulary, binding enforcement, Output Schema validation, canonical edges, run-state contract, route eval metadata |
-| `src/workflow-kernel/foundation.ts` | Shared plan loading, candidate resolution, proposal normalization, blockers, plan hash, confirmed state, and atomic state persistence |
-| `src/skill/find.ts` | Compatibility adapter to the shared discovery seam |
-| `src/factory/proposal.ts` | Standalone compatibility adapter to the shared proposal seam |
-| `src/factory/generate.ts` | Deterministic entry/Node package generation and protocol/evidence artifacts |
-| `src/factory/state.ts` | Standalone compatibility adapter to the shared state seam and `.comet-any` namespace |
-| `src/eval/run.ts` | Current-package hash and route-conformance evidence |
-| `src/publish/lifecycle.ts` | Readiness, reviewer approval, hash-bound publication, and distribution preview |
-| `src/cli.ts` | Thin Creator-facing command interface |
+| Standalone module                   | Upstream responsibility retained                                                                                                                      |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/workflow-kernel/discovery.ts`  | Real local Skill roots, frontmatter description, reference/script inventory, content hash, strict preference resolution, and missing/ambiguous status |
+| `src/workflow-kernel/hash.ts`       | Stable source-tree fingerprints over sorted regular files and supported symbolic links                                                                |
+| `src/workflow/contract.ts`          | Workflow-kernel Node vocabulary, binding enforcement, Output Schema validation, canonical edges, run-state contract, route eval metadata              |
+| `src/workflow-kernel/foundation.ts` | Shared plan loading, candidate resolution, proposal normalization, blockers, plan hash, confirmed state, and atomic state persistence                 |
+| `src/skill/find.ts`                 | Compatibility adapter to the shared discovery seam                                                                                                    |
+| `src/factory/proposal.ts`           | Standalone compatibility adapter to the shared proposal seam                                                                                          |
+| `src/factory/generate.ts`           | Deterministic entry/Node package generation and protocol/evidence artifacts                                                                           |
+| `src/factory/state.ts`              | Standalone compatibility adapter to the shared state seam and `.comet-any` namespace                                                                  |
+| `src/eval/run.ts`                   | Current-package hash and route-conformance evidence                                                                                                   |
+| `src/publish/lifecycle.ts`          | Readiness, reviewer approval, hash-bound publication, and distribution preview                                                                        |
+| `src/cli.ts`                        | Thin Creator-facing command interface                                                                                                                 |
 
 ## Deliberate exclusions
 
@@ -31,11 +31,31 @@ The upstream `comet-five-phase-overlay` and `comet-native` built-in contracts ar
 
 The extracted foundation accepts a project root, optional home directory, and state namespace. The standalone adapter fixes the namespace to `.comet-any`; it does not change the workflow contract or candidate-resolution semantics. Strict preference resolution is fail-closed: a missing or ambiguous source remains a proposal blocker.
 
-## Differential baseline
+## Creator differential baseline
 
 `primer_designer_harness/differential/primer-designer-workflow.json` is the pinned three-Skill fixture for comparing candidate resolution, source/reference evidence, source hashes, normalized workflow protocol, generated artifact inventory, and initial readiness. `primer_designer_harness/differential/extraction-manifest.json` records the reusable workflow-kernel closure and the deliberate Classic, Native, installer, Engine, and host-platform exclusions.
 
 The differential runner uses disposable projects and home directories. It never builds or writes the upstream checkout, reads `primer_designer_harness/raw_data/`, executes biological resources, submits schedulers, or installs host-platform files.
+
+## Official Engine characterization
+
+`test/fixtures/engine/engine-characterization.json` and
+`test/fixtures/engine/manifest.json` provide the Phase 0 official Engine
+baseline. The fixture contains only synthetic Skills and exercises deterministic
+single-step and multi-step Runs, failed outcomes and retries, pending-action
+recovery, confirmation guardrails, unsafe state, manual Runs, standalone Runs,
+and corrupt current-step rejection.
+
+`src/differential/engine/` records durable Run state, pending actions, outcomes,
+artifacts, trajectories, checkpoints, evals, and classified errors from the
+pinned official CLI. It verifies the official revision and compares source
+snapshots before and after each characterization. The report is official-only
+until a private Engine exists.
+
+The Engine source closure is recorded as evidence in the characterization
+manifest, but `domains/engine` remains excluded from the standalone Creator
+implementation. The official checkout remains read-only, and the harness never
+reads or derives data from `primer_designer_harness/raw_data/`.
 
 ## Follow-up candidates
 

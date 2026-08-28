@@ -1,0 +1,10 @@
+runtime:
+  - id: report-artifact
+    scope: completion
+    type: artifact_exists
+    artifact: report
+  - id: completed-state
+    scope: completion
+    type: state_equals
+    field: status
+    equals: completed

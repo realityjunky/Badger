@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "kind": "official-engine-characterization",
+  "official": {
+    "remote": "git@github.com:rpamis/comet.git",
+    "revision": "99fd7495f8b9217efbaae3a46d885f6fa7f4102a",
+    "version": "0.4.0-beta.19",
+    "checkout": "comet-any-private/comet",
+    "readOnly": true,
+    "sourcePaths": [
+      "domains/engine/evals.ts",
+      "domains/engine/guardrails.ts",
+      "domains/engine/loop.ts",
+      "domains/engine/manual-run.ts",
+      "domains/engine/protected-run-file.ts",
+      "domains/engine/resolver.ts",
+      "domains/engine/run-store.ts",
+      "domains/engine/runtime-types.ts",
+      "domains/engine/standalone-run.ts",
+      "domains/engine/state.ts",
+      "domains/engine/storage-layout.ts",
+      "domains/engine/storage-run.ts",
+      "domains/engine/types.ts",
+      "domains/skill/load.ts",
+      "domains/skill/snapshot.ts",
+      "domains/skill/types.ts",
+      "domains/skill/validate.ts",
+      "domains/workflow-contract/contained-atomic-write.ts",
+      "domains/workflow-contract/index.ts",
+      "domains/workflow-contract/protected-project-path.ts",
+      "platform/fs/file-identity.ts",
+      "platform/fs/race-safe-read.ts"
+    ]
+  },
+  "closure": {
+    "engine": [
+      "domains/engine/evals.ts",
+      "domains/engine/guardrails.ts",
+      "domains/engine/loop.ts",
+      "domains/engine/manual-run.ts",
+      "domains/engine/protected-run-file.ts",
+      "domains/engine/resolver.ts",
+      "domains/engine/run-store.ts",
+      "domains/engine/runtime-types.ts",
+      "domains/engine/standalone-run.ts",
+      "domains/engine/state.ts",
+      "domains/engine/storage-layout.ts",
+      "domains/engine/storage-run.ts",
+      "domains/engine/types.ts"
+    ],
+    "skillRuntime": [
+      "domains/skill/load.ts",
+      "domains/skill/snapshot.ts",
+      "domains/skill/types.ts",
+      "domains/skill/validate.ts"
+    ],
+    "protectedFilesystem": [
+      "domains/workflow-contract/contained-atomic-write.ts",
+      "domains/workflow-contract/index.ts",
+      "domains/workflow-contract/protected-project-path.ts",
+      "platform/fs/file-identity.ts",
+      "platform/fs/race-safe-read.ts"
+    ]
+  },
+  "excluded": [
+    "domains/comet-classic",
+    "domains/comet-native",
+    "domains/comet-entry",
+    "domains/skill/platform-install.ts",
+    "platform",
+    "primer_designer_harness/raw_data"
+  ]
+}
