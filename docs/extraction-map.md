@@ -81,6 +81,12 @@ The public façade is `src/index.ts` through `src/skill-runtime/index.ts` and
 layout adapters, or protected filesystem helpers. Classic, Native, Entry,
 platform installation, and host registry behavior remain excluded.
 
+The standalone Run façade validates the caller-provided Run id before deriving
+the `<projectRoot>/.comet/runs/<run-id>` location, checks recovered state
+identity, and delegates all execution operations to the manual Run service.
+This keeps storage coordinates and caller inputs separate from the shared
+Engine loop and its persisted semantics.
+
 `runEngineDifferential` runs official and private observations against one
 synthetic fixture matrix. `createPrivateEngineCommandRunner` is an injected
 command-bound adapter used by the differential harness; it is not an upstream

@@ -28,6 +28,16 @@ missing context returns `null`. Existing files are validated before recovery,
 and unsafe references, path escapes, link traversal, oversized content, and
 failed writes are rejected without replacing the last valid state.
 
+## Standalone Run locations
+
+Use `startStandaloneRun`, `resumeStandaloneRun`, `evaluateStandaloneRun`, and
+`upgradeStandaloneRun` with a project root and a validated Run id. The adapter
+maps each Run to `<projectRoot>/.comet/runs/<run-id>` and keeps the manual
+Engine storage layout inside that location. It validates the id before
+resolving or creating any Run path, and verifies that recovered state belongs
+to the requested id. Execution, retry, snapshot, artifact, trajectory, eval,
+and terminal behavior remains shared with the manual adapter.
+
 ## Development
 
 ```bash

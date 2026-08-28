@@ -2,13 +2,19 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
+import { resumeManualRun, startManualRun } from "../src/engine/manual-run.js";
 import {
   evaluateStandaloneRun,
   resumeStandaloneRun,
   standaloneRunDir,
   startStandaloneRun,
+  upgradeStandaloneRun,
 } from "../src/engine/standalone-run.js";
-import { readArtifacts, readPendingAction } from "../src/engine/run-store.js";
+import {
+  readArtifacts,
+  readPendingAction,
+  readTrajectory,
+} from "../src/engine/run-store.js";
 import { readRunState } from "../src/engine/state.js";
 import { loadSkillPackage } from "../src/skill-runtime/load.js";
 
@@ -115,5 +121,187 @@ describe("standalone Skill runs", () => {
     expect(() => standaloneRunDir(projectRoot, "nested/path")).toThrow(
       /Invalid standalone Run id/u,
     );
+  });
+
+  it("rejects non-string Run ids before creating project storage", async () => {
+    const invalidRunId = 123 as unknown as string;
+    const pkg = await loadSkillPackage(skillRoot);
+
+    await expect(
+      startStandaloneRun(pkg, {
+        projectRoot,
+        runId: invalidRunId,
+      }),
+    ).rejects.toThrow("Invalid standalone Run id: 123");
+    await expect(fs.access(projectRoot)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("rejects state copied from a different standalone Run", async () => {
+    const pkg = await loadSkillPackage(skillRoot);
+    const started = await startStandaloneRun(pkg, {
+      projectRoot,
+      runId: "demo-run",
+    });
+    const statePath = path.join(
+      standaloneRunDir(projectRoot, "demo-run"),
+      ".comet",
+      "run-state.json",
+    );
+    const state = JSON.parse(await fs.readFile(statePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    state.runId = "other-run";
+    await fs.writeFile(statePath, JSON.stringify(state, null, 2) + "\n");
+
+    await expect(resumeStandaloneRun(projectRoot, "demo-run")).rejects.toThrow(
+      "Standalone Run state does not match requested Run id: demo-run",
+    );
+    expect(
+      await readRunState(standaloneRunDir(projectRoot, "demo-run")),
+    ).toEqual(expect.objectContaining({ runId: "other-run" }));
+    expect(started.state.runId).toBe("demo-run");
+  });
+
+  it("keeps multiple Runs isolated through failure recovery and completion", async () => {
+    const pkg = await loadSkillPackage(skillRoot);
+    const first = await startStandaloneRun(pkg, {
+      projectRoot,
+      runId: "first-run",
+    });
+    const second = await startStandaloneRun(pkg, {
+      projectRoot,
+      runId: "second-run",
+    });
+
+    expect(first.action?.id).not.toBe(second.action?.id);
+
+    const failed = await resumeStandaloneRun(projectRoot, "first-run", {
+      outcome: { status: "failed", summary: "Retry me" },
+    });
+    expect(failed.state.status).toBe("waiting");
+    expect(failed.state.retries).toEqual({ [first.action!.id]: 1 });
+    expect(failed.action).toEqual(first.action);
+
+    const recovered = await resumeStandaloneRun(projectRoot, "first-run");
+    expect(recovered.action).toEqual(first.action);
+
+    const firstCompleted = await resumeStandaloneRun(projectRoot, "first-run", {
+      outcome: {
+        status: "succeeded",
+        summary: "First complete",
+        artifacts: { first: "first.md" },
+      },
+    });
+    const secondCompleted = await resumeStandaloneRun(
+      projectRoot,
+      "second-run",
+      {
+        outcome: {
+          status: "succeeded",
+          summary: "Second complete",
+          artifacts: { second: "second.md" },
+        },
+      },
+    );
+
+    expect(firstCompleted.state.status).toBe("completed");
+    expect(secondCompleted.state.status).toBe("completed");
+    expect(
+      await readArtifacts(
+        standaloneRunDir(projectRoot, "first-run"),
+        firstCompleted.state.artifactsRef,
+      ),
+    ).toEqual({ first: "first.md" });
+    expect(
+      await readArtifacts(
+        standaloneRunDir(projectRoot, "second-run"),
+        secondCompleted.state.artifactsRef,
+      ),
+    ).toEqual({ second: "second.md" });
+    expect(
+      (
+        await readTrajectory(
+          standaloneRunDir(projectRoot, "first-run"),
+          firstCompleted.state.trajectoryRef,
+        )
+      ).every((event) => event.runId === "first-run"),
+    ).toBe(true);
+    expect(
+      (
+        await readTrajectory(
+          standaloneRunDir(projectRoot, "second-run"),
+          secondCompleted.state.trajectoryRef,
+        )
+      ).every((event) => event.runId === "second-run"),
+    ).toBe(true);
+  });
+
+  it("preserves manual Run state and action semantics at the standalone location", async () => {
+    const pkg = await loadSkillPackage(skillRoot);
+    const manualDir = path.join(root, "manual-run");
+    const standalone = await startStandaloneRun(pkg, {
+      projectRoot,
+      runId: "parity-run",
+    });
+    const manual = await startManualRun(pkg, manualDir, {
+      runId: "parity-run",
+    });
+
+    expect(standalone.state).toEqual(manual.state);
+    expect(standalone.action).toEqual(manual.action);
+
+    const standaloneCompleted = await resumeStandaloneRun(
+      projectRoot,
+      "parity-run",
+      {
+        outcome: {
+          status: "succeeded",
+          summary: "Parity complete",
+          artifacts: { report: "report.md" },
+        },
+      },
+    );
+    const manualCompleted = await resumeManualRun(manualDir, {
+      outcome: {
+        status: "succeeded",
+        summary: "Parity complete",
+        artifacts: { report: "report.md" },
+      },
+    });
+
+    expect(standaloneCompleted.state).toEqual(manualCompleted.state);
+    expect(standaloneCompleted.action).toEqual(manualCompleted.action);
+    expect(standaloneCompleted.evals).toEqual(manualCompleted.evals);
+  });
+
+  it.each([
+    "",
+    ".",
+    "..",
+    "../escape",
+    "/tmp/escape",
+    "C:\\escape",
+    "nested/path",
+    "nested\\path",
+    "~escape",
+  ])("rejects invalid Run id %j before any operation writes", async (runId) => {
+    const pkg = await loadSkillPackage(skillRoot);
+    const expected = `Invalid standalone Run id: ${runId}`;
+    const operations = [
+      () => startStandaloneRun(pkg, { projectRoot, runId }),
+      () => resumeStandaloneRun(projectRoot, runId),
+      () => evaluateStandaloneRun(projectRoot, runId, "step"),
+      () => upgradeStandaloneRun(projectRoot, runId, pkg),
+    ];
+
+    for (const operation of operations) {
+      await expect(operation()).rejects.toThrow(expected);
+    }
+    await expect(fs.access(projectRoot)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 });
