@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   acceptAdaptiveAction,
   decide,
+  decideWithResolver,
   recordOutcome,
+  recordOutcomeWithResolver,
   startRun,
 } from "../src/engine/loop.js";
+import type { DeterministicResolver } from "../src/engine/resolver.js";
 import type { SkillPackage } from "../src/skill-runtime/types.js";
 
 function deterministic(): SkillPackage {
@@ -63,6 +66,77 @@ describe("Skill Engine loop", () => {
     expect(state.iteration).toBe(1);
   });
 
+  it("keeps failed actions resumable until the retry budget is exhausted", () => {
+    const pkg = deterministic();
+    let state = startRun(pkg, "run-retry", "r".repeat(64));
+    const first = decide(pkg, state, new Set());
+    const action = first.action!;
+
+    state = recordOutcome(pkg, first.state, {
+      actionId: action.id,
+      status: "failed",
+      summary: "transient failure",
+    });
+    expect(state).toMatchObject({
+      status: "running",
+      pending: null,
+      retries: { [action.id]: 1 },
+    });
+
+    const retry = decide(pkg, state, new Set());
+    expect(retry.action).toEqual(action);
+    state = recordOutcome(pkg, retry.state, {
+      actionId: action.id,
+      status: "failed",
+      summary: "retry failed",
+    });
+
+    const exhausted = decide(pkg, state, new Set());
+    expect(exhausted.action).toBeNull();
+    expect(exhausted.reason).toBe(
+      `Retry budget exhausted for action: ${action.id}`,
+    );
+    expect(exhausted.state).toEqual(state);
+  });
+
+  it("completes when an injected resolver returns no next step", () => {
+    const pkg = deterministic();
+    const state = startRun(pkg, "run-resolver-complete", "c".repeat(64));
+    const resolver: DeterministicResolver<undefined> = {
+      resolveStep: ({ pkg: resolvedPackage, state: resolvedState }) =>
+        resolvedPackage.definition.orchestration.steps?.find(
+          (step) => step.id === resolvedState.currentStep,
+        ),
+      resolveNext: () => null,
+    };
+    const decision = decideWithResolver(
+      pkg,
+      state,
+      new Set(),
+      resolver,
+      undefined,
+    );
+
+    const completed = recordOutcomeWithResolver(
+      pkg,
+      decision.state,
+      {
+        actionId: decision.action!.id,
+        status: "succeeded",
+        summary: "completed by resolver",
+      },
+      resolver,
+      undefined,
+    );
+
+    expect(completed).toMatchObject({
+      currentStep: null,
+      iteration: 1,
+      pending: null,
+      status: "completed",
+    });
+  });
+
   it("accepts a guardrail-checked adaptive candidate", () => {
     const pkg = deterministic();
     pkg.definition.orchestration = { mode: "adaptive" };
@@ -108,6 +182,32 @@ describe("Skill Engine loop", () => {
     expect(result.reason).toBe("Unknown current step: missing");
   });
 
+  it("preserves the original state when resolver action acceptance is rejected", () => {
+    const pkg = deterministic();
+    pkg.guardrails.confirmationRequiredFor = ["writing-plans"];
+    const state = startRun(pkg, "run-guarded-resolver", "g".repeat(64));
+    state.currentStep = "finish";
+    const resolver: DeterministicResolver<undefined> = {
+      resolveStep: ({ pkg: resolvedPackage }) =>
+        resolvedPackage.definition.orchestration.steps?.find(
+          (step) => step.id === "plan",
+        ),
+      resolveNext: () => null,
+    };
+
+    const result = decideWithResolver(
+      pkg,
+      state,
+      new Set(),
+      resolver,
+      undefined,
+    );
+
+    expect(result.action).toBeNull();
+    expect(result.reason).toBe("User confirmation required for: writing-plans");
+    expect(result.state).toEqual(state);
+  });
+
   it("rejects outcomes when the deterministic current step is corrupt", () => {
     const pkg = deterministic();
     const state = startRun(pkg, "run-5", "e".repeat(64));
@@ -143,6 +243,21 @@ describe("Skill Engine loop", () => {
 
     expect(result.action).toBeNull();
     expect(result.reason).toBe("Run is completed");
+  });
+
+  it("rejects outcomes for terminal Runs with stale pending state", () => {
+    const pkg = deterministic();
+    const state = startRun(pkg, "run-terminal-pending", "t".repeat(64));
+    state.status = "completed";
+    state.pending = "stale-action";
+
+    expect(() =>
+      recordOutcome(pkg, state, {
+        actionId: "stale-action",
+        status: "succeeded",
+        summary: "must not reopen",
+      }),
+    ).toThrow("Run is completed");
   });
 
   it("does not overwrite an existing pending adaptive action", () => {

@@ -116,7 +116,7 @@ export function decideWithResolver<TContext>(
     id: actionId(resolvedState.runId, resolvedState.iteration, step.id),
     stepId: step.id,
   };
-  return acceptAction(pkg, resolvedState, action, confirmations);
+  return acceptAction(pkg, resolvedState, action, confirmations, state);
 }
 
 function acceptAction(
@@ -124,9 +124,12 @@ function acceptAction(
   state: RunState,
   action: EngineAction,
   confirmations: ReadonlySet<string>,
+  rejectedState: RunState = state,
 ): Decision {
   const guard = checkAction(action, state, pkg.guardrails, confirmations);
-  if (!guard.allowed) return { state, action: null, reason: guard.reason };
+  if (!guard.allowed) {
+    return { state: rejectedState, action: null, reason: guard.reason };
+  }
   return { state: { ...state, pending: action.id, status: "waiting" }, action };
 }
 
@@ -177,6 +180,9 @@ export function recordOutcomeWithResolver<TContext>(
     throw new Error(
       `Outcome does not match pending action: ${outcome.actionId}`,
     );
+  }
+  if (state.status === "completed" || state.status === "failed") {
+    throw new Error(`Run is ${state.status}`);
   }
   const resolvedStep =
     state.orchestration === "deterministic"
