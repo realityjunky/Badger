@@ -99,11 +99,14 @@ Conditional routes, ambiguous routes, cycles, and repeated Node visits are
 rejected before Run state is created.
 
 Generated workflow packages include `scripts/workflow-runtime.mjs`, a bundled
-WorkflowRuntime implementation, and `scripts/workflow-state.mjs`, a thin
-compatibility adapter for `init`, `status`, `next`, and `record`. The adapter
-uses the runtime's persisted action and current Node, never routes from a
-completed-Node list, and maintains the legacy state document only as a
-rebuildable projection. `status` and `next` are read-only; rebuild a deleted
-or stale projection with `status --rebuild --confirm legacy-state`. Use
-`COMET_RUN_ROOT` or `--run-root` for manual Runs; use
+WorkflowRuntime implementation, and thin `workflow-state.mjs`,
+`workflow-guard.mjs`, and `workflow-handoff.mjs` adapters. State commands use
+the runtime's persisted action and current Node, never route from a completed-
+Node list, and maintain the legacy state document only as a rebuildable
+projection. Guard verification, entry checks, completion validation, and
+explicit apply all use the runtime's protocol and pending-action identity;
+handoff only reads protocol metadata and the current continuation. `status`,
+`next`, guard entry, dry guard exit, and handoff are read-only. Rebuild a
+deleted or stale projection with `status --rebuild --confirm legacy-state`.
+Use `COMET_RUN_ROOT` or `--run-root` for manual Runs; use
 `--project <dir> --run-id <id>` for standalone Runs.

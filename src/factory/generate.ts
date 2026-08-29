@@ -54,6 +54,11 @@ ${nodes}
 - Start a run only when status is \`not-started\`: \`node scripts/workflow-state.mjs init\`.
 - Read the persisted action and Node: \`node scripts/workflow-state.mjs next\`.
 - Submit characterized Node evidence: \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
+- Verify the generated protocol and runtime: \`node scripts/workflow-guard.mjs verify\`.
+- Verify the current Node before entry: \`node scripts/workflow-guard.mjs entry <node>\`.
+- Validate Node completion without advancing: \`node scripts/workflow-guard.mjs exit <node> '<json evidence>'\`.
+- Apply validated completion explicitly: \`node scripts/workflow-guard.mjs exit <node> '<json evidence>' --apply\`.
+- Produce a read-only workflow handoff: \`node scripts/workflow-handoff.mjs --json\`.
 - Rebuild a deleted or stale compatibility projection explicitly: \`node scripts/workflow-state.mjs status --rebuild --confirm legacy-state\`.
 - Use \`COMET_RUN_ROOT\` or \`--run-root\` for a change-bound Run; use \`--project <dir> --run-id <id>\` for a standalone Run.
 
@@ -160,6 +165,14 @@ export async function generatePackage(options: {
   await atomicWrite(
     path.join(root, "scripts", "workflow-state.mjs"),
     await runtimeAsset("workflow-state.mjs"),
+  );
+  await atomicWrite(
+    path.join(root, "scripts", "workflow-guard.mjs"),
+    await runtimeAsset("workflow-guard.mjs"),
+  );
+  await atomicWrite(
+    path.join(root, "scripts", "workflow-handoff.mjs"),
+    await runtimeAsset("workflow-handoff.mjs"),
   );
   return {
     packageRoot: root,

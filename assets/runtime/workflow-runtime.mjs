@@ -3107,6 +3107,9 @@ function sameStringRecord(left, right) {
   );
   return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
 }
+function sameExecutionIdentity(left, right) {
+  return left.protocolHash === right.protocolHash && left.packageHash === right.packageHash && left.snapshotHash === right.snapshotHash && sameStringRecord(left.nodeToStep, right.nodeToStep);
+}
 function validateSubmission(submission) {
   if (!submission || typeof submission !== "object") {
     throw new Error("Submission must be an object");
@@ -3311,6 +3314,115 @@ async function verifyStoredRun(location) {
   );
   return { state, ...verified, pending };
 }
+function continuationFromVerifiedRun(verified) {
+  return continuation(
+    {
+      state: verified.state,
+      action: verified.pending,
+      evals: [],
+      ...verified.pending ? {} : {
+        reason: verified.state.status === "running" ? "Run has no pending action" : `Run is ${verified.state.status}`
+      }
+    },
+    verified.identity
+  );
+}
+async function inspectWorkflowRun(target) {
+  const location = resolveWorkflowRunLocation(target);
+  try {
+    if (!await location.readState()) return null;
+  } catch (error) {
+    const code = error.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw error;
+  }
+  return continuationFromVerifiedRun(await verifyStoredRun(location));
+}
+async function prepareWorkflowSubmission(target, submission) {
+  const location = resolveWorkflowRunLocation(target);
+  const verified = await verifyStoredRun(location);
+  const pending = verified.pending;
+  if (!pending || !verified.state.pending || verified.state.status !== "waiting") {
+    throw new Error(`Run is ${verified.state.status}`);
+  }
+  if (submission.actionId !== pending.id) {
+    throw new Error(
+      `Outcome does not match pending action: ${submission.actionId}`
+    );
+  }
+  const node = currentNode(verified.state, verified.identity, pending);
+  if (submission.nodeId !== void 0 && submission.nodeId !== node) {
+    throw new Error(
+      `Submission Node does not match pending Node: ${submission.nodeId}`
+    );
+  }
+  return { location, verified, pending, node };
+}
+async function completionBlockers(prepared, submission) {
+  if (submission.status !== "succeeded" || !prepared.node) return [];
+  const workflowNode = prepared.verified.package.runtime.protocol.nodes.find(
+    (candidate) => candidate.id === prepared.node
+  );
+  if (!workflowNode) {
+    throw new Error(`WorkflowRuntime Node is missing: ${prepared.node}`);
+  }
+  const plan = prepared.verified.package.runtime.completionPlans?.[prepared.node] ?? createCompletionPlan(workflowNode);
+  if (JSON.stringify(stableValue(plan)) !== JSON.stringify(stableValue(createCompletionPlan(workflowNode)))) {
+    throw new Error(
+      `WorkflowRuntime completion plan does not match Node: ${prepared.node}`
+    );
+  }
+  return validateSuccessfulSubmission(
+    prepared.location.runRoot,
+    prepared.verified.package.runtime.protocol,
+    workflowNode,
+    plan,
+    submission
+  );
+}
+async function validateWorkflowSubmission(target, submission) {
+  validateSubmission(submission);
+  const prepared = await prepareWorkflowSubmission(target, submission);
+  const blockers = await completionBlockers(prepared, submission);
+  if (blockers.length > 0) {
+    return {
+      disposition: "blocked",
+      runId: prepared.verified.state.runId,
+      currentNode: prepared.node,
+      pendingAction: prepared.pending,
+      execution: structuredClone(prepared.verified.identity),
+      blockers
+    };
+  }
+  return continuationFromVerifiedRun(prepared.verified);
+}
+async function verifyWorkflowProtocol(protocol) {
+  const compiled = await compileWorkflow(protocol);
+  return {
+    ...compiled.identity,
+    snapshotHash: compiled.identity.packageHash
+  };
+}
+async function projectWorkflowHandoff(protocol, current) {
+  const execution = await verifyWorkflowProtocol(protocol);
+  if (current && !sameExecutionIdentity(current.execution, execution)) {
+    throw new Error(
+      "WorkflowRuntime handoff identity does not match generated protocol"
+    );
+  }
+  return {
+    schemaVersion: 1,
+    workflow: {
+      name: protocol.name,
+      goal: protocol.goal,
+      protocolHash: execution.protocolHash
+    },
+    execution,
+    nodes: structuredClone(protocol.nodes),
+    outputSchemas: structuredClone(protocol.outputSchemas),
+    continuation: current ? structuredClone(current) : null
+  };
+}
 async function resumeStoredRun(location, options) {
   const verified = await verifyStoredRun(location);
   const result = await location.resume({
@@ -3396,55 +3508,19 @@ function createWorkflowRuntime() {
     },
     async submit(target, submission) {
       validateSubmission(submission);
-      const location = resolveWorkflowRunLocation(target);
-      const verified = await verifyStoredRun(location);
-      const pending = verified.pending;
-      if (!pending || !verified.state.pending || verified.state.status !== "waiting") {
-        throw new Error(`Run is ${verified.state.status}`);
+      const prepared = await prepareWorkflowSubmission(target, submission);
+      const blockers = await completionBlockers(prepared, submission);
+      if (blockers.length > 0) {
+        return {
+          disposition: "blocked",
+          runId: prepared.verified.state.runId,
+          currentNode: prepared.node,
+          pendingAction: prepared.pending,
+          execution: structuredClone(prepared.verified.identity),
+          blockers
+        };
       }
-      if (submission.actionId !== pending.id) {
-        throw new Error(
-          `Outcome does not match pending action: ${submission.actionId}`
-        );
-      }
-      const node = currentNode(verified.state, verified.identity, pending);
-      if (submission.nodeId !== void 0 && submission.nodeId !== node) {
-        throw new Error(
-          `Submission Node does not match pending Node: ${submission.nodeId}`
-        );
-      }
-      if (submission.status === "succeeded" && node) {
-        const workflowNode = verified.package.runtime.protocol.nodes.find(
-          (candidate) => candidate.id === node
-        );
-        if (!workflowNode) {
-          throw new Error(`WorkflowRuntime Node is missing: ${node}`);
-        }
-        const plan = verified.package.runtime.completionPlans?.[node] ?? createCompletionPlan(workflowNode);
-        if (JSON.stringify(stableValue(plan)) !== JSON.stringify(stableValue(createCompletionPlan(workflowNode)))) {
-          throw new Error(
-            `WorkflowRuntime completion plan does not match Node: ${node}`
-          );
-        }
-        const blockers = await validateSuccessfulSubmission(
-          location.runRoot,
-          verified.package.runtime.protocol,
-          workflowNode,
-          plan,
-          submission
-        );
-        if (blockers.length > 0) {
-          return {
-            disposition: "blocked",
-            runId: verified.state.runId,
-            currentNode: node,
-            pendingAction: pending,
-            execution: structuredClone(verified.identity),
-            blockers
-          };
-        }
-      }
-      const result = await location.resume({
+      const result = await prepared.location.resume({
         outcome: {
           actionId: submission.actionId,
           status: submission.status,
@@ -3454,7 +3530,7 @@ function createWorkflowRuntime() {
           ...submission.evidence ? { evidence: submission.evidence } : {}
         }
       });
-      return continuation(result, verified.identity);
+      return continuation(result, prepared.verified.identity);
     },
     async recover(target, options = {}) {
       const location = resolveWorkflowRunLocation(target);
@@ -3469,10 +3545,14 @@ var submitWorkflowRun = defaultRuntime.submit;
 var recoverWorkflowRun = defaultRuntime.recover;
 export {
   createWorkflowRuntime,
+  inspectWorkflowRun,
+  projectWorkflowHandoff,
   projectWorkflowState,
   recoverWorkflowRun,
   resumeWorkflowRun,
   startWorkflowRun,
   submitWorkflowRun,
+  validateWorkflowSubmission,
+  verifyWorkflowProtocol,
   writeWorkflowStateProjection
 };

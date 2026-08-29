@@ -3,7 +3,7 @@ import type {
   EngineAction,
   RuntimeIdentity,
 } from "../engine/types.js";
-import type { WorkflowProtocol } from "../types.js";
+import type { NodeProtocol, OutputSchema, WorkflowProtocol } from "../types.js";
 
 export type WorkflowExecutionIdentity = RuntimeIdentity;
 
@@ -32,6 +32,19 @@ export interface WorkflowContinuation {
   pendingAction: WorkflowPendingAction | null;
   execution: WorkflowExecutionIdentity;
   blockers: string[];
+}
+
+export interface WorkflowHandoff {
+  schemaVersion: 1;
+  workflow: {
+    name: string;
+    goal: string;
+    protocolHash: string;
+  };
+  execution: WorkflowExecutionIdentity;
+  nodes: NodeProtocol[];
+  outputSchemas: OutputSchema[];
+  continuation: WorkflowContinuation | null;
 }
 
 export type WorkflowStateProjectionStatus =
