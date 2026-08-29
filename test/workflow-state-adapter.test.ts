@@ -166,11 +166,24 @@ describe("generated WorkflowRuntime state adapter", () => {
     );
     await fs.rm(legacyPath);
     await run(["next"]);
+    await expect(fs.access(legacyPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(run(["status", "--rebuild"])).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Rebuilding the legacy state projection requires --confirm legacy-state.",
+      ),
+    });
+    await run(["next", "--rebuild", "--confirm", "legacy-state"]);
     await fs.writeFile(legacyPath, '{"status":"stale"}\n', "utf8");
     expect(JSON.parse((await run(["status"])).stdout)).toMatchObject({
       status: "waiting",
       currentNode: "prepare",
     });
+    expect(JSON.parse(await fs.readFile(legacyPath, "utf8"))).toEqual({
+      status: "stale",
+    });
+    await run(["status", "--rebuild", "--confirm", "legacy-state"]);
 
     const recorded = await run([
       "record",
@@ -303,6 +316,73 @@ describe("generated WorkflowRuntime state adapter", () => {
       status: "waiting",
       currentNode: "prepare",
     });
+  });
+
+  it("preserves a blocked completion submission for the same action", async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-adapter-"));
+    const projectRoot = path.join(root, "project");
+    await fs.mkdir(projectRoot, { recursive: true });
+    const fixture = proposal();
+    fixture.plan.workflow.outputSchemas = [
+      {
+        id: "prepare.v1",
+        description: "Preparation output.",
+        artifacts: [
+          {
+            id: "result",
+            kind: "file",
+            required: true,
+            paths: ["result.txt"],
+            validations: ["artifact-exists"],
+          },
+        ],
+        evidence: [{ id: "summary", required: true }],
+      },
+    ];
+    fixture.plan.workflow.customNodes[0].outputSchemas = ["prepare.v1"];
+    fixture.proposal.workflow = normalizeWorkflow(
+      fixture.plan.workflow,
+    ).protocol;
+    const generated = await generatePackage({
+      ...fixture,
+      destination: path.join(projectRoot, "generated"),
+    });
+    const scriptPath = path.join(
+      generated.packageRoot,
+      "scripts",
+      "workflow-state.mjs",
+    );
+    const run = (args: string[]) =>
+      execFileAsync(process.execPath, [scriptPath, ...args], {
+        cwd: projectRoot,
+        env: process.env,
+      });
+
+    await run(["init", "--run-id", "evidence-run"]);
+    const blocked = await run(["record", "prepare", "{}"]);
+    expect(blocked.stdout).toContain("NEXT: blocked");
+    expect(blocked.stdout).toContain("ACTION:");
+    expect(blocked.stdout).toContain(
+      "Missing Output Schema evidence: prepare.v1.summary",
+    );
+
+    const status = JSON.parse((await run(["status"])).stdout) as {
+      status: string;
+      currentNode: string;
+      pendingAction: { id: string };
+    };
+    expect(status).toMatchObject({
+      status: "waiting",
+      currentNode: "prepare",
+    });
+    await fs.writeFile(path.join(projectRoot, "result.txt"), "ready\n");
+    const completed = await run([
+      "record",
+      "prepare",
+      '{"summary":"Prepared with the required result."}',
+    ]);
+    expect(completed.stdout).toContain("NEXT: done");
+    expect((await run(["status"])).stdout).toContain('"status": "completed"');
   });
 
   it("reports an absent Run without creating compatibility state", async () => {

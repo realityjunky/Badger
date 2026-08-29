@@ -103,5 +103,7 @@ WorkflowRuntime implementation, and `scripts/workflow-state.mjs`, a thin
 compatibility adapter for `init`, `status`, `next`, and `record`. The adapter
 uses the runtime's persisted action and current Node, never routes from a
 completed-Node list, and maintains the legacy state document only as a
-rebuildable projection. Use `COMET_RUN_ROOT` or `--run-root` for manual Runs;
-use `--project <dir> --run-id <id>` for standalone Runs.
+rebuildable projection. `status` and `next` are read-only; rebuild a deleted
+or stale projection with `status --rebuild --confirm legacy-state`. Use
+`COMET_RUN_ROOT` or `--run-root` for manual Runs; use
+`--project <dir> --run-id <id>` for standalone Runs.

@@ -45,6 +45,10 @@ function parseArguments(argv) {
       options.json = true;
       continue;
     }
+    if (argument === "--rebuild") {
+      options.rebuild = true;
+      continue;
+    }
     if (argument === "--confirm") {
       options.confirmations.push(requiredOptionValue(argv, index, "--confirm"));
       index += 1;
@@ -115,27 +119,19 @@ async function syncProjection(target, projection) {
   return projection;
 }
 
+function requireProjectionConfirmation(options) {
+  if (options.rebuild && !options.confirmations.includes("legacy-state")) {
+    throw new Error(
+      "Rebuilding the legacy state projection requires --confirm legacy-state.",
+    );
+  }
+}
+
 function printJson(value) {
   console.log(JSON.stringify(value, null, 2));
 }
 
-function printNext(value) {
-  if (value.disposition === "done" || value.status === "completed") {
-    console.log("NEXT: done");
-    return;
-  }
-  if (value.disposition === "blocked" && !value.pendingAction) {
-    console.log("NEXT: blocked");
-    for (const blocker of value.blockers ?? [])
-      console.log(`REASON: ${blocker}`);
-    return;
-  }
-  if (!value.pendingAction) {
-    console.log("NEXT: unavailable");
-    for (const blocker of value.blockers ?? [])
-      console.log(`REASON: ${blocker}`);
-    return;
-  }
+function printPendingAction(value) {
   if (value.pendingAction.type === "checkpoint") {
     console.log("NEXT: checkpoint");
     console.log(`ACTION: ${value.pendingAction.id}`);
@@ -146,6 +142,27 @@ function printNext(value) {
   if (value.currentNode) console.log(`NODE: ${value.currentNode}`);
   if (value.pendingAction.ref) console.log(`SKILL: ${value.pendingAction.ref}`);
   console.log(`ACTION: ${value.pendingAction.id}`);
+}
+
+function printNext(value) {
+  if (value.disposition === "done" || value.status === "completed") {
+    console.log("NEXT: done");
+    return;
+  }
+  if (value.disposition === "blocked" || value.status === "blocked") {
+    console.log("NEXT: blocked");
+    if (value.pendingAction) printPendingAction(value);
+    for (const blocker of value.blockers ?? [])
+      console.log(`REASON: ${blocker}`);
+    return;
+  }
+  if (!value.pendingAction) {
+    console.log("NEXT: unavailable");
+    for (const blocker of value.blockers ?? [])
+      console.log(`REASON: ${blocker}`);
+    return;
+  }
+  printPendingAction(value);
 }
 
 function parseEvidence(raw) {
@@ -195,10 +212,9 @@ async function main() {
   const protocol = await readProtocol();
 
   if (command === "status") {
-    const projection = await syncProjection(
-      target,
-      await readProjection(target),
-    );
+    requireProjectionConfirmation(options);
+    const projection = await readProjection(target);
+    if (options.rebuild) await syncProjection(target, projection);
     if (options.json) {
       printJson(projection ?? { status: "not-started" });
     } else {
@@ -225,15 +241,14 @@ async function main() {
   }
 
   if (command === "next") {
-    const projection = await syncProjection(
-      target,
-      await readProjection(target),
-    );
+    requireProjectionConfirmation(options);
+    const projection = await readProjection(target);
     if (!projection) {
       throw new Error(
         "Missing workflow state. Run workflow-state.mjs init first.",
       );
     }
+    if (options.rebuild) await syncProjection(target, projection);
     if (options.json) printJson(projection);
     else printNext(projection);
     return;

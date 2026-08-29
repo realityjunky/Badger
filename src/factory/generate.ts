@@ -54,6 +54,7 @@ ${nodes}
 - Start a run only when status is \`not-started\`: \`node scripts/workflow-state.mjs init\`.
 - Read the persisted action and Node: \`node scripts/workflow-state.mjs next\`.
 - Submit characterized Node evidence: \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
+- Rebuild a deleted or stale compatibility projection explicitly: \`node scripts/workflow-state.mjs status --rebuild --confirm legacy-state\`.
 - Use \`COMET_RUN_ROOT\` or \`--run-root\` for a change-bound Run; use \`--project <dir> --run-id <id>\` for a standalone Run.
 
 The state document at \`${proposal.workflow.state.statePath}\` is a derived compatibility projection. It is never used for routing or recovery and may be rebuilt from the authoritative Run.
