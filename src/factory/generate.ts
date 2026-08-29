@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { FactoryPlan, FactoryProposal, NodeProtocol } from "../types.js";
 import {
   copyDirectory,
@@ -28,7 +29,42 @@ function entryMarkdown(proposal: FactoryProposal): string {
         `- **${route.id}**: ${route.nodeOrder.map((node) => `\`${node}\``).join(" → ")}`,
     )
     .join("\n");
-  return `---\nname: ${proposal.name}\ndescription: ${JSON.stringify(`Run the ${proposal.name} workflow: ${descriptionGoal}.`)}\n---\n\n# ${proposal.workflow.name}\n\n## Decision Core\n\nRead the workflow protocol and persisted run state before selecting a Node. Resolve the requested route from the preparation and scenario evidence, follow only transitions declared by the protocol, execute exactly one Node at a time, and pause when evidence or a guardrail is missing. A completed handoff may start another cycle only through an explicit transition back to scenario selection.\n\n## Workflow Routes\n\n${routes || "- **default**: follow the active Node order in the workflow protocol."}\n\n## Workflow Nodes\n\n${nodes}\n\n## Runtime contract\n\n- Protocol: \`reference/workflow-protocol.json\`\n- Resolved source evidence: \`reference/resolved-skills.json\`\n- State: \`${proposal.workflow.state.statePath}\`\n- Eval manifest: \`comet/eval.yaml\`\n`;
+  return `---
+name: ${proposal.name}
+description: ${JSON.stringify(`Run the ${proposal.name} workflow: ${descriptionGoal}.`)}
+---
+
+# ${proposal.workflow.name}
+
+## Decision Core
+
+Read the WorkflowRuntime continuation before entering a Node. The runtime owns route selection, pending actions, evidence submission, and state transitions. Load only the Node named by the persisted pending action and stop when the runtime reports a blocker.
+
+## Declared Routes
+
+${routes || "- **default**: the runtime validates the active Node route before starting."}
+
+## Workflow Nodes
+
+${nodes}
+
+## Runtime Commands
+
+- Check the authoritative run: \`node scripts/workflow-state.mjs status\`.
+- Start a run only when status is \`not-started\`: \`node scripts/workflow-state.mjs init\`.
+- Read the persisted action and Node: \`node scripts/workflow-state.mjs next\`.
+- Submit characterized Node evidence: \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
+- Use \`COMET_RUN_ROOT\` or \`--run-root\` for a change-bound Run; use \`--project <dir> --run-id <id>\` for a standalone Run.
+
+The state document at \`${proposal.workflow.state.statePath}\` is a derived compatibility projection. It is never used for routing or recovery and may be rebuilt from the authoritative Run.
+
+## Runtime Contract
+
+- Reusable runtime: \`scripts/workflow-runtime.mjs\`
+- Protocol: \`reference/workflow-protocol.json\`
+- Resolved source evidence: \`reference/resolved-skills.json\`
+- Eval manifest: \`comet/eval.yaml\`
+`;
 }
 
 function nodeMarkdown(workflow: string, node: NodeProtocol): string {
@@ -43,6 +79,22 @@ function nodeMarkdown(workflow: string, node: NodeProtocol): string {
       .map((item) => `- Output Schema: \`${item}\``)
       .join("\n") || "- Output Schemas: none";
   return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}\n\nRecord completion evidence before advancing to the next Node.\n`;
+}
+
+async function runtimeAsset(name: string): Promise<string> {
+  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(moduleDirectory, "../../assets/runtime", name),
+    path.resolve(moduleDirectory, "../../../assets/runtime", name),
+  ];
+  for (const candidate of candidates) {
+    try {
+      return await fs.readFile(candidate, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  throw new Error(`Runtime asset not found: ${name}`);
 }
 
 export async function generatePackage(options: {
@@ -67,6 +119,7 @@ export async function generatePackage(options: {
   }
   await ensureDirectory(path.join(root, "reference"));
   await ensureDirectory(path.join(root, "comet"));
+  await ensureDirectory(path.join(root, "scripts"));
   await atomicWrite(path.join(root, "SKILL.md"), entryMarkdown(proposal));
   await atomicWrite(
     path.join(root, "reference", "workflow-protocol.json"),
@@ -98,6 +151,14 @@ export async function generatePackage(options: {
   await atomicWrite(
     path.join(root, "reference", "eval-manifest.json"),
     JSON.stringify(evalManifest, null, 2) + "\n",
+  );
+  await atomicWrite(
+    path.join(root, "scripts", "workflow-runtime.mjs"),
+    await runtimeAsset("workflow-runtime.mjs"),
+  );
+  await atomicWrite(
+    path.join(root, "scripts", "workflow-state.mjs"),
+    await runtimeAsset("workflow-state.mjs"),
   );
   return {
     packageRoot: root,

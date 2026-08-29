@@ -34,6 +34,29 @@ export interface WorkflowContinuation {
   blockers: string[];
 }
 
+export type WorkflowStateProjectionStatus =
+  "not-started" | "running" | "waiting" | "blocked" | "completed";
+
+export interface WorkflowStateProjection {
+  schemaVersion: 1;
+  workflow: string;
+  statePath: string;
+  status: Exclude<WorkflowStateProjectionStatus, "not-started">;
+  runId: string;
+  currentNode: string | null;
+  completedNodes: string[];
+  evidence: Record<string, Record<string, unknown>>;
+  history: Array<{
+    event: "outcome-recorded";
+    node: string;
+    status: "succeeded" | "failed";
+    at: string;
+  }>;
+  pendingAction: WorkflowPendingAction | null;
+  execution: WorkflowExecutionIdentity;
+  blockers: string[];
+}
+
 export type StartWorkflowRunOptions =
   | {
       protocol: WorkflowProtocol;

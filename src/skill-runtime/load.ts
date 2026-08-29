@@ -1,6 +1,5 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { parse } from "yaml";
 import type {
   GuardrailDefinition,
   RuntimeCompletionPlan,
@@ -393,6 +392,7 @@ function narrowRuntimeEvals(
 async function readYaml(filePath: string): Promise<unknown> {
   const source = await fs.readFile(filePath, "utf8");
   try {
+    const { parse } = await import("yaml");
     return parse(source) as unknown;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

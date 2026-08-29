@@ -1,9 +1,17 @@
+import path from "node:path";
+import { atomicWriteContainedText } from "../engine/contained-atomic-write.js";
+import {
+  ensureProtectedProjectDirectory,
+  inspectProtectedProjectPath,
+  readProtectedProjectFile,
+} from "../engine/protected-project-path.js";
+import { normalizeWorkflowRelativePath } from "../engine/project-config.js";
 import {
   hashSkillPackage,
   readSkillSnapshot,
 } from "../skill-runtime/snapshot.js";
 import { type ManualRunResult } from "../engine/manual-run.js";
-import { readPendingAction } from "../engine/run-store.js";
+import { readPendingAction, readTrajectory } from "../engine/run-store.js";
 import type { EngineAction, RunState } from "../engine/types.js";
 import { stableValue } from "../util.js";
 import { compileWorkflow } from "./compiler.js";
@@ -24,6 +32,8 @@ import type {
   WorkflowExecutionIdentity,
   WorkflowRuntime,
   WorkflowRunTarget,
+  WorkflowStateProjection,
+  WorkflowStateProjectionStatus,
   Submission,
   WorkflowSubmission,
 } from "./types.js";
@@ -39,6 +49,8 @@ export type {
   WorkflowRunLocation,
   WorkflowRuntime,
   WorkflowRunTarget,
+  WorkflowStateProjection,
+  WorkflowStateProjectionStatus,
   Submission,
   WorkflowSubmission,
 } from "./types.js";
@@ -149,6 +161,149 @@ function continuation(
     execution: structuredClone(identity),
     blockers: disposition === "blocked" && result.reason ? [result.reason] : [],
   };
+}
+
+const LEGACY_STATE_MAX_BYTES = 256 * 1024;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function projectionStatus(
+  state: RunState,
+  pending: EngineAction | null,
+  maxRetriesPerAction: number,
+): Exclude<WorkflowStateProjectionStatus, "not-started"> {
+  const retriesExhausted = Object.values(state.retries).some(
+    (count) => count > maxRetriesPerAction,
+  );
+  return state.status === "failed" || (!pending && retriesExhausted)
+    ? "blocked"
+    : state.status;
+}
+
+export async function projectWorkflowState(
+  target: WorkflowRunTarget,
+): Promise<WorkflowStateProjection | null> {
+  const location = resolveWorkflowRunLocation(target);
+  const state = await location.readState();
+  if (!state) return null;
+
+  const verified = await verifyStoredRun(location);
+  const nodeByStep = new Map(
+    Object.entries(verified.identity.nodeToStep).map(([nodeId, stepId]) => [
+      stepId,
+      nodeId,
+    ]),
+  );
+  const completedNodes: string[] = [];
+  const evidence: Record<string, Record<string, unknown>> = {};
+  const history: WorkflowStateProjection["history"] = [];
+  const trajectory = await readTrajectory(
+    location.runRoot,
+    state.trajectoryRef,
+  );
+
+  for (const event of trajectory) {
+    if (event.type !== "action_completed") continue;
+    if (!isRecord(event.data.action) || !isRecord(event.data.outcome)) continue;
+    const stepId = event.data.action.stepId;
+    const node =
+      typeof stepId === "string" ? nodeByStep.get(stepId) : undefined;
+    const outcomeStatus = event.data.outcome.status;
+    if (
+      !node ||
+      (outcomeStatus !== "succeeded" && outcomeStatus !== "failed")
+    ) {
+      continue;
+    }
+    history.push({
+      event: "outcome-recorded",
+      node,
+      status: outcomeStatus,
+      at: event.timestamp,
+    });
+    if (outcomeStatus !== "succeeded") continue;
+    if (!completedNodes.includes(node)) completedNodes.push(node);
+    const outcomeEvidence = event.data.outcome.evidence;
+    evidence[node] = isRecord(outcomeEvidence)
+      ? structuredClone(outcomeEvidence)
+      : {};
+  }
+
+  const protocol = verified.package.runtime!.protocol;
+  const status = projectionStatus(
+    state,
+    verified.pending,
+    verified.package.guardrails.maxRetriesPerAction,
+  );
+  const exhaustedAction = Object.entries(state.retries).find(
+    ([, count]) => count > verified.package.guardrails.maxRetriesPerAction,
+  )?.[0];
+  return {
+    schemaVersion: 1,
+    workflow: protocol.name,
+    statePath: protocol.state.statePath,
+    status,
+    runId: state.runId,
+    currentNode: currentNode(state, verified.identity, verified.pending),
+    completedNodes,
+    evidence,
+    history,
+    pendingAction: verified.pending,
+    execution: structuredClone(verified.identity),
+    blockers:
+      status === "blocked"
+        ? [
+            exhaustedAction
+              ? `Retry budget exhausted for action: ${exhaustedAction}`
+              : `Run is ${state.status}`,
+          ]
+        : [],
+  };
+}
+
+export async function writeWorkflowStateProjection(
+  target: WorkflowRunTarget,
+  projection: WorkflowStateProjection,
+): Promise<void> {
+  const projectRoot = resolveWorkflowRunLocation(target).runRoot;
+  const label = "Workflow state projection";
+  const relativePath = normalizeWorkflowRelativePath(
+    projection.statePath,
+    `${label} path`,
+  );
+  const content = JSON.stringify(projection, null, 2) + "\n";
+  if (Buffer.byteLength(content, "utf8") > LEGACY_STATE_MAX_BYTES) {
+    throw new Error(`${label} exceeds ${LEGACY_STATE_MAX_BYTES} bytes`);
+  }
+
+  let inspection = await inspectProtectedProjectPath(
+    projectRoot,
+    relativePath,
+    { label, expected: "file" },
+  );
+  if (inspection.exists) {
+    const existing = await readProtectedProjectFile(
+      projectRoot,
+      relativePath,
+      LEGACY_STATE_MAX_BYTES,
+      { label },
+    );
+    if (Buffer.from(existing.bytes).equals(Buffer.from(content))) return;
+  }
+
+  const parent = path.posix.dirname(relativePath);
+  if (parent !== ".") {
+    await ensureProtectedProjectDirectory(projectRoot, parent, { label });
+    inspection = await inspectProtectedProjectPath(projectRoot, relativePath, {
+      label,
+      expected: "file",
+    });
+  }
+  await atomicWriteContainedText(inspection.target, content, {
+    containedRoot: inspection.projectRoot,
+  });
 }
 
 async function verifyStoredPackage(

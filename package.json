@@ -34,7 +34,8 @@
     "./cli": "./dist/src/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build:runtime && tsc",
+    "build:runtime": "esbuild src/workflow-runtime/index.ts --bundle --external:yaml --platform=node --format=esm --target=node22 --outfile=assets/runtime/workflow-runtime.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "format:check": "prettier --check src test package.json tsconfig.json vitest.config.ts",
@@ -49,6 +50,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.2.0",
+    "esbuild": "^0.28.0",
     "prettier": "^3.8.3",
     "typescript": "^5.9.3",
     "vitest": "^4.1.6"

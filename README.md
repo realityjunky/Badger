@@ -96,5 +96,12 @@ may use the corresponding check identifiers in `evidence.completedChecks`.
 The returned continuation reports the current Workflow Node, pending Engine
 action, stable Node-to-step mapping, and protocol/package/snapshot identity.
 Conditional routes, ambiguous routes, cycles, and repeated Node visits are
-rejected before Run state is created. Generated command adapters remain a
-separate follow-up slice.
+rejected before Run state is created.
+
+Generated workflow packages include `scripts/workflow-runtime.mjs`, a bundled
+WorkflowRuntime implementation, and `scripts/workflow-state.mjs`, a thin
+compatibility adapter for `init`, `status`, `next`, and `record`. The adapter
+uses the runtime's persisted action and current Node, never routes from a
+completed-Node list, and maintains the legacy state document only as a
+rebuildable projection. Use `COMET_RUN_ROOT` or `--run-root` for manual Runs;
+use `--project <dir> --run-id <id>` for standalone Runs.
