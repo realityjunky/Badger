@@ -1,38 +1,44 @@
-import { randomUUID } from "node:crypto";
 import {
   hashSkillPackage,
   readSkillSnapshot,
 } from "../skill-runtime/snapshot.js";
-import {
-  resumeManualRun,
-  startManualRun,
-  type ManualRunResult,
-} from "../engine/manual-run.js";
+import { type ManualRunResult } from "../engine/manual-run.js";
 import { readPendingAction } from "../engine/run-store.js";
-import { readRunState } from "../engine/state.js";
-import type { RunState } from "../engine/types.js";
+import type { EngineAction, RunState } from "../engine/types.js";
 import { stableValue } from "../util.js";
 import { compileWorkflow } from "./compiler.js";
 import {
   createCompletionPlan,
   validateSuccessfulSubmission,
 } from "./completion.js";
+import {
+  resolveWorkflowRunLocation,
+  resolveWorkflowStartLocation,
+  type ResolvedWorkflowRunLocation,
+} from "./location.js";
 import type {
+  RecoverWorkflowRunOptions,
   ResumeWorkflowRunOptions,
   StartWorkflowRunOptions,
   WorkflowContinuation,
   WorkflowExecutionIdentity,
   WorkflowRuntime,
+  WorkflowRunTarget,
   Submission,
   WorkflowSubmission,
 } from "./types.js";
 
 export type {
+  ManualWorkflowRunLocation,
   ResumeWorkflowRunOptions,
+  RecoverWorkflowRunOptions,
   StartWorkflowRunOptions,
+  StandaloneWorkflowRunLocation,
   WorkflowContinuation,
   WorkflowExecutionIdentity,
+  WorkflowRunLocation,
   WorkflowRuntime,
+  WorkflowRunTarget,
   Submission,
   WorkflowSubmission,
 } from "./types.js";
@@ -181,12 +187,41 @@ async function verifyStoredPackage(
   return { identity, package: pkg };
 }
 
+async function verifyStoredRun(location: ResolvedWorkflowRunLocation): Promise<{
+  state: RunState;
+  identity: WorkflowExecutionIdentity;
+  package: Awaited<ReturnType<typeof readSkillSnapshot>>;
+  pending: EngineAction | null;
+}> {
+  const state = await location.readState();
+  if (!state) throw new Error(`No Comet Run found in: ${location.runRoot}`);
+  const verified = await verifyStoredPackage(location.runRoot, state);
+  const pending = await verifyStoredAction(
+    location.runRoot,
+    state,
+    verified.identity,
+    verified.package,
+  );
+  return { state, ...verified, pending };
+}
+
+async function resumeStoredRun(
+  location: ResolvedWorkflowRunLocation,
+  options: ResumeWorkflowRunOptions,
+): Promise<WorkflowContinuation> {
+  const verified = await verifyStoredRun(location);
+  const result = await location.resume({
+    confirmations: options.confirmations ?? [],
+  });
+  return continuation(result, verified.identity);
+}
+
 async function verifyStoredAction(
   runRoot: string,
   state: RunState,
   identity: WorkflowExecutionIdentity,
   pkg: Awaited<ReturnType<typeof readSkillSnapshot>>,
-): Promise<void> {
+): Promise<EngineAction | null> {
   const action = await readPendingAction(runRoot, state.pendingRef);
   if (state.status === "waiting") {
     if (!state.pending || !action || action.id !== state.pending) {
@@ -232,7 +267,7 @@ async function verifyStoredAction(
         "WorkflowRuntime pending action does not match compiled step",
       );
     }
-    return;
+    return action;
   }
   if (action || state.pending) {
     throw new Error("WorkflowRuntime non-waiting Run has a pending action");
@@ -249,6 +284,7 @@ async function verifyStoredAction(
       "WorkflowRuntime current Node is not in the compiled route",
     );
   }
+  return null;
 }
 
 export function createWorkflowRuntime(): WorkflowRuntime {
@@ -256,9 +292,10 @@ export function createWorkflowRuntime(): WorkflowRuntime {
     async start(
       options: StartWorkflowRunOptions,
     ): Promise<WorkflowContinuation> {
+      const resolved = resolveWorkflowStartLocation(options);
       const compiled = await compileWorkflow(options.protocol);
-      const result = await startManualRun(compiled.package, options.runRoot, {
-        runId: options.runId ?? randomUUID(),
+      const result = await resolved.location.start(compiled.package, {
+        runId: resolved.runId,
         confirmations: options.confirmations ?? [],
         runtimeIdentity: {
           ...compiled.identity,
@@ -275,48 +312,34 @@ export function createWorkflowRuntime(): WorkflowRuntime {
     },
 
     async resume(
-      runRoot: string,
+      target: WorkflowRunTarget,
       options: ResumeWorkflowRunOptions = {},
     ): Promise<WorkflowContinuation> {
-      const stored = await readRunState(runRoot);
-      if (!stored) throw new Error(`No Comet Run found in: ${runRoot}`);
-      const verified = await verifyStoredPackage(runRoot, stored);
-      await verifyStoredAction(
-        runRoot,
-        stored,
-        verified.identity,
-        verified.package,
-      );
-      const result = await resumeManualRun(runRoot, {
-        confirmations: options.confirmations ?? [],
-      });
-      return continuation(result, verified.identity);
+      const location = resolveWorkflowRunLocation(target);
+      return resumeStoredRun(location, options);
     },
 
     async submit(
-      runRoot: string,
+      target: WorkflowRunTarget,
       submission: WorkflowSubmission,
     ): Promise<WorkflowContinuation> {
       validateSubmission(submission);
-      const stored = await readRunState(runRoot);
-      if (!stored) throw new Error(`No Comet Run found in: ${runRoot}`);
-      const verified = await verifyStoredPackage(runRoot, stored);
-      await verifyStoredAction(
-        runRoot,
-        stored,
-        verified.identity,
-        verified.package,
-      );
-      const pending = await readPendingAction(runRoot, stored.pendingRef);
-      if (!pending || !stored.pending || stored.status !== "waiting") {
-        throw new Error(`Run is ${stored.status}`);
+      const location = resolveWorkflowRunLocation(target);
+      const verified = await verifyStoredRun(location);
+      const pending = verified.pending;
+      if (
+        !pending ||
+        !verified.state.pending ||
+        verified.state.status !== "waiting"
+      ) {
+        throw new Error(`Run is ${verified.state.status}`);
       }
       if (submission.actionId !== pending.id) {
         throw new Error(
           `Outcome does not match pending action: ${submission.actionId}`,
         );
       }
-      const node = currentNode(stored, verified.identity, pending);
+      const node = currentNode(verified.state, verified.identity, pending);
       if (submission.nodeId !== undefined && submission.nodeId !== node) {
         throw new Error(
           `Submission Node does not match pending Node: ${submission.nodeId}`,
@@ -341,7 +364,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
           );
         }
         const blockers = await validateSuccessfulSubmission(
-          runRoot,
+          location.runRoot,
           verified.package.runtime!.protocol,
           workflowNode,
           plan,
@@ -350,7 +373,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
         if (blockers.length > 0) {
           return {
             disposition: "blocked",
-            runId: stored.runId,
+            runId: verified.state.runId,
             currentNode: node,
             pendingAction: pending,
             execution: structuredClone(verified.identity),
@@ -358,7 +381,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
           };
         }
       }
-      const result = await resumeManualRun(runRoot, {
+      const result = await location.resume({
         outcome: {
           actionId: submission.actionId,
           status: submission.status,
@@ -370,6 +393,14 @@ export function createWorkflowRuntime(): WorkflowRuntime {
       });
       return continuation(result, verified.identity);
     },
+
+    async recover(
+      target: WorkflowRunTarget,
+      options: RecoverWorkflowRunOptions = {},
+    ): Promise<WorkflowContinuation> {
+      const location = resolveWorkflowRunLocation(target);
+      return resumeStoredRun(location, options);
+    },
   };
 }
 
@@ -378,3 +409,4 @@ const defaultRuntime = createWorkflowRuntime();
 export const startWorkflowRun = defaultRuntime.start;
 export const resumeWorkflowRun = defaultRuntime.resume;
 export const submitWorkflowRun = defaultRuntime.submit;
+export const recoverWorkflowRun = defaultRuntime.recover;

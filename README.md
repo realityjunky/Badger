@@ -15,7 +15,7 @@ The package includes:
 - private Skill runtime loading, validation, content identity, and immutable snapshots;
 - deterministic and adaptive Engine loop behavior with manual and standalone Run façades;
 - protected Run state, pending-action, trajectory, artifact, context, and checkpoint storage;
-- a public WorkflowRuntime for deterministic linear workflow start, resume, and outcome submission;
+- a public WorkflowRuntime for deterministic linear workflow start, resume, outcome submission, and recovery;
 - official/private differential observations for the pinned Engine behavior.
 
 It intentionally excludes Comet Classic policy, Comet Native policy and hardening, Comet Entry, host platform installers, ambient resume routing, and external platform adapters.
@@ -68,15 +68,26 @@ The pinned three-Skill differential harness is documented in `docs/differential-
 ## WorkflowRuntime
 
 `createWorkflowRuntime()` accepts a normalized `WorkflowProtocol` and exposes
-`start`, `resume`, and `submit` operations over a change-bound Run root. Phase 2
-compiles active Nodes into one deterministic Engine action per Node, excludes
-disabled Nodes, and uses an explicit checkpoint for an empty route. A
+`start`, `resume`, `submit`, and `recover` operations. A Run location is either
+`{ kind: "manual", runRoot }` or
+`{ kind: "standalone", projectRoot, runId }`; the older `runRoot` start and
+target forms remain supported for manual compatibility. Both locations use
+the same compiled route, completion validation, identity checks, continuation
+projection, retry behavior, and recovery semantics.
+
+Phase 2 compiles active Nodes into one deterministic Engine action per Node,
+excludes disabled Nodes, and uses an explicit checkpoint for an empty route. A
 successful submission checks the current Node's required Output Schema
 artifacts and evidence, required Skill calls, enforced augmentations, and
 guardrail evidence before advancing. Advisory augmentations remain
 non-blocking. Missing prerequisites return a bounded `blocked` continuation
 with the same pending action so corrected evidence can be submitted without
 re-executing the Node; failed submissions use the Engine retry policy.
+
+`recover` reconstructs the continuation from the persisted identity, Skill
+snapshot, Run state, and pending action. It does not use conversation context
+or generated source files, and rejects Run-id, protocol, package, snapshot, or
+pending-action drift before returning a continuation.
 
 Submissions are bound to the pending action with `actionId` and may identify
 the expected Workflow Node with `nodeId`. Output Schema evidence is supplied
@@ -85,5 +96,5 @@ may use the corresponding check identifiers in `evidence.completedChecks`.
 The returned continuation reports the current Workflow Node, pending Engine
 action, stable Node-to-step mapping, and protocol/package/snapshot identity.
 Conditional routes, ambiguous routes, cycles, and repeated Node visits are
-rejected before Run state is created. Standalone locations, recovery, and
-generated command adapters are separate follow-up slices.
+rejected before Run state is created. Generated command adapters remain a
+separate follow-up slice.

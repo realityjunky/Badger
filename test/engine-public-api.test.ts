@@ -13,6 +13,7 @@ describe("public Engine package boundary", () => {
     expect(api.startWorkflowRun).toBeTypeOf("function");
     expect(api.resumeWorkflowRun).toBeTypeOf("function");
     expect(api.submitWorkflowRun).toBeTypeOf("function");
+    expect(api.recoverWorkflowRun).toBeTypeOf("function");
     expect(api.runEngineDifferential).toBeTypeOf("function");
     expect(api.getEngineParityCoverage).toBeTypeOf("function");
     expect(api.certifyEngineDifferential).toBeTypeOf("function");
@@ -44,5 +45,6 @@ describe("public Engine package boundary", () => {
     expect(publicApi.readCheckpoint).toBeUndefined();
     expect(publicApi.writeCheckpoint).toBeUndefined();
     expect(publicApi.compileWorkflow).toBeUndefined();
+    expect(publicApi.resolveWorkflowRunLocation).toBeUndefined();
   });
 });

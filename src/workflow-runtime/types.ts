@@ -9,6 +9,22 @@ export type WorkflowExecutionIdentity = RuntimeIdentity;
 
 export type WorkflowPendingAction = EngineAction;
 
+export interface ManualWorkflowRunLocation {
+  kind: "manual";
+  runRoot: string;
+}
+
+export interface StandaloneWorkflowRunLocation {
+  kind: "standalone";
+  projectRoot: string;
+  runId: string;
+}
+
+export type WorkflowRunLocation =
+  ManualWorkflowRunLocation | StandaloneWorkflowRunLocation;
+
+export type WorkflowRunTarget = WorkflowRunLocation | string;
+
 export interface WorkflowContinuation {
   disposition: "continue" | "blocked" | "done";
   runId: string;
@@ -18,16 +34,30 @@ export interface WorkflowContinuation {
   blockers: string[];
 }
 
-export interface StartWorkflowRunOptions {
-  protocol: WorkflowProtocol;
-  runRoot: string;
-  runId?: string;
-  confirmations?: Iterable<string>;
-}
+export type StartWorkflowRunOptions =
+  | {
+      protocol: WorkflowProtocol;
+      location: ManualWorkflowRunLocation;
+      runId?: string;
+      confirmations?: Iterable<string>;
+    }
+  | {
+      protocol: WorkflowProtocol;
+      location: StandaloneWorkflowRunLocation;
+      confirmations?: Iterable<string>;
+    }
+  | {
+      protocol: WorkflowProtocol;
+      runRoot: string;
+      runId?: string;
+      confirmations?: Iterable<string>;
+    };
 
 export interface ResumeWorkflowRunOptions {
   confirmations?: Iterable<string>;
 }
+
+export type RecoverWorkflowRunOptions = ResumeWorkflowRunOptions;
 
 export interface WorkflowSubmission extends ActionOutcome {
   nodeId?: string | null;
@@ -36,12 +66,16 @@ export interface WorkflowSubmission extends ActionOutcome {
 export interface WorkflowRuntime {
   start(options: StartWorkflowRunOptions): Promise<WorkflowContinuation>;
   resume(
-    runRoot: string,
+    target: WorkflowRunTarget,
     options?: ResumeWorkflowRunOptions,
   ): Promise<WorkflowContinuation>;
   submit(
-    runRoot: string,
+    target: WorkflowRunTarget,
     submission: WorkflowSubmission,
+  ): Promise<WorkflowContinuation>;
+  recover(
+    target: WorkflowRunTarget,
+    options?: RecoverWorkflowRunOptions,
   ): Promise<WorkflowContinuation>;
 }
 
