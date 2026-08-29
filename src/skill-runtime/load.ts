@@ -4,10 +4,12 @@ import { parse } from "yaml";
 import type {
   GuardrailDefinition,
   RuntimeEvalDefinition,
+  RuntimePackageMetadata,
   SkillDefinition,
   SkillPackageKind,
   SkillPackage,
 } from "./types.js";
+import type { WorkflowProtocol } from "../types.js";
 
 type YamlObject = Record<string, unknown>;
 
@@ -285,6 +287,44 @@ function narrowGuardrails(
   return document as Partial<GuardrailDefinition>;
 }
 
+function narrowRuntimeMetadata(
+  value: unknown,
+  filePath: string,
+): RuntimePackageMetadata | undefined {
+  if (value === undefined) return undefined;
+  assertObject(value, filePath, "runtime");
+  assertString(value.protocolHash, filePath, "runtime.protocolHash");
+  if (!/^[a-f0-9]{64}$/u.test(value.protocolHash)) {
+    throw invalidDocument(
+      filePath,
+      "runtime.protocolHash",
+      "must be a SHA-256 hash",
+    );
+  }
+  assertObject(value.protocol, filePath, "runtime.protocol");
+  if (value.protocol.schemaVersion !== 1) {
+    throw invalidDocument(
+      filePath,
+      "runtime.protocol.schemaVersion",
+      "must be 1",
+    );
+  }
+  assertObject(value.nodeToStep, filePath, "runtime.nodeToStep");
+  for (const [nodeId, stepId] of Object.entries(value.nodeToStep)) {
+    assertString(stepId, filePath, `runtime.nodeToStep.${nodeId}`);
+  }
+  return {
+    protocolHash: value.protocolHash,
+    protocol: value.protocol as unknown as WorkflowProtocol,
+    nodeToStep: Object.fromEntries(
+      Object.entries(value.nodeToStep).map(([nodeId, stepId]) => [
+        nodeId,
+        stepId as string,
+      ]),
+    ),
+  };
+}
+
 function narrowEvalDocument(
   document: unknown,
   filePath: string,
@@ -411,6 +451,7 @@ async function loadPackageFromLayout(options: {
   return {
     root: packageRoot,
     packageKind: options.packageKind === "runtime" ? "runtime" : undefined,
+    runtime: undefined,
     definition,
     guardrails: {
       ...defaultGuardrails,
@@ -448,6 +489,7 @@ export function loadSkillPackageDocument(
   assertObject(document, filePath);
   const packageKind =
     document.packageKind === "runtime" ? "runtime" : undefined;
+  const runtime = narrowRuntimeMetadata(document.runtime, filePath);
   const definition = narrowSkillDefinition(document.definition, filePath);
   const guardrailDocument = narrowGuardrails(document.guardrails, filePath);
   const evals = narrowRuntimeEvals(document.evals, filePath, "evals");
@@ -465,6 +507,7 @@ export function loadSkillPackageDocument(
   return {
     root: path.resolve(root),
     packageKind,
+    runtime,
     definition,
     guardrails: {
       ...defaultGuardrails,

@@ -15,6 +15,7 @@ The package includes:
 - private Skill runtime loading, validation, content identity, and immutable snapshots;
 - deterministic and adaptive Engine loop behavior with manual and standalone Run façades;
 - protected Run state, pending-action, trajectory, artifact, context, and checkpoint storage;
+- a public WorkflowRuntime for deterministic linear workflow start and resume;
 - official/private differential observations for the pinned Engine behavior.
 
 It intentionally excludes Comet Classic policy, Comet Native policy and hardening, Comet Entry, host platform installers, ambient resume routing, and external platform adapters.
@@ -55,6 +56,23 @@ node bin/comet-any.js guide --project . --json
 
 See `assets/skills/comet-any/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
 
-The public package façade and `@rpamis/comet-any-private/engine` subpath export the Skill runtime and Engine operations needed by callers. Run-file storage and protected filesystem implementation modules remain internal. The Engine closure is pinned to Comet `0.4.0-beta.19` at revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a` and contains no runtime import from the upstream checkout.
+The public package façade plus the `@rpamis/comet-any-private/engine` and
+`@rpamis/comet-any-private/workflow-runtime` subpaths export the runtime
+operations needed by callers. Run-file storage and protected filesystem
+implementation modules remain internal. The Engine closure is pinned to Comet
+`0.4.0-beta.19` at revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a` and
+contains no runtime import from the upstream checkout.
 
 The pinned three-Skill differential harness is documented in `docs/differential-harness.md`. The Engine parity matrix and certification gate are documented in `docs/engine-phase-1-certification.md`. Both harnesses run only in disposable temporary projects and reject protected raw-data paths.
+
+## WorkflowRuntime
+
+`createWorkflowRuntime()` accepts a normalized `WorkflowProtocol` and exposes
+`start` and `resume` operations over a change-bound Run root. Phase 2 compiles
+active Nodes into one deterministic Engine action per Node, excludes disabled
+Nodes, and uses an explicit checkpoint for an empty route. The returned
+continuation reports the current Workflow Node, pending Engine action, stable
+Node-to-step mapping, and protocol/package/snapshot identity. Conditional
+routes, ambiguous routes, cycles, and repeated Node visits are rejected before
+Run state is created. Outcome submission, standalone locations, recovery, and
+generated command adapters are separate follow-up slices.

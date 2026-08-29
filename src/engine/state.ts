@@ -7,7 +7,7 @@ import {
   type EngineRunRemoveOptions,
   type EngineRunWriteOptions,
 } from "./protected-run-file.js";
-import type { RunState } from "./types.js";
+import type { RunState, RuntimeIdentity } from "./types.js";
 
 export type StateDocument = Record<string, unknown>;
 
@@ -156,6 +156,7 @@ interface RunStateJson {
   checkpointRef: string;
   status: "running" | "waiting" | "completed" | "failed";
   retries: Record<string, number>;
+  runtimeIdentity?: RuntimeIdentity;
 }
 
 const RUN_STATE_JSON_KEYS = new Set<keyof RunStateJson>([
@@ -174,6 +175,7 @@ const RUN_STATE_JSON_KEYS = new Set<keyof RunStateJson>([
   "checkpointRef",
   "status",
   "retries",
+  "runtimeIdentity",
 ]);
 
 function requiredJsonString(value: unknown, key: keyof RunStateJson): string {
@@ -262,6 +264,63 @@ function parseRunStateJson(value: unknown): RunStateJson {
     }
   }
 
+  let runtimeIdentity: RuntimeIdentity | undefined;
+  if (json.runtimeIdentity !== undefined) {
+    if (
+      !json.runtimeIdentity ||
+      typeof json.runtimeIdentity !== "object" ||
+      Array.isArray(json.runtimeIdentity)
+    ) {
+      throw new Error("Invalid Run state: runtimeIdentity must be an object");
+    }
+    const identity = json.runtimeIdentity as Record<string, unknown>;
+    const identityKeys = new Set([
+      "protocolHash",
+      "packageHash",
+      "snapshotHash",
+      "nodeToStep",
+    ]);
+    const unknownIdentityKey = Object.keys(identity).find(
+      (key) => !identityKeys.has(key),
+    );
+    if (unknownIdentityKey) {
+      throw new Error(
+        `Invalid Run state: runtimeIdentity unknown field ${unknownIdentityKey}`,
+      );
+    }
+    if (
+      typeof identity.protocolHash !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(identity.protocolHash) ||
+      typeof identity.packageHash !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(identity.packageHash) ||
+      typeof identity.snapshotHash !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(identity.snapshotHash) ||
+      !identity.nodeToStep ||
+      typeof identity.nodeToStep !== "object" ||
+      Array.isArray(identity.nodeToStep)
+    ) {
+      throw new Error("Invalid Run state: runtimeIdentity is invalid");
+    }
+    for (const [nodeId, stepId] of Object.entries(identity.nodeToStep)) {
+      if (!nodeId || typeof stepId !== "string" || !stepId) {
+        throw new Error(
+          "Invalid Run state: runtimeIdentity mapping is invalid",
+        );
+      }
+    }
+    runtimeIdentity = {
+      protocolHash: identity.protocolHash,
+      packageHash: identity.packageHash,
+      snapshotHash: identity.snapshotHash,
+      nodeToStep: Object.fromEntries(
+        Object.entries(identity.nodeToStep).map(([nodeId, stepId]) => [
+          nodeId,
+          stepId as string,
+        ]),
+      ),
+    };
+  }
+
   return {
     runId,
     skill,
@@ -278,6 +337,7 @@ function parseRunStateJson(value: unknown): RunStateJson {
     checkpointRef,
     status: json.status,
     retries: json.retries as Record<string, number>,
+    ...(runtimeIdentity ? { runtimeIdentity } : {}),
   };
 }
 

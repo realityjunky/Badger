@@ -23,6 +23,10 @@
       "types": "./dist/src/engine/index.d.ts",
       "import": "./dist/src/engine/index.js"
     },
+    "./workflow-runtime": {
+      "types": "./dist/src/workflow-runtime/index.d.ts",
+      "import": "./dist/src/workflow-runtime/index.js"
+    },
     "./skill-runtime": {
       "types": "./dist/src/skill-runtime/index.d.ts",
       "import": "./dist/src/skill-runtime/index.js"

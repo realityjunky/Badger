@@ -2,6 +2,13 @@ import type { OrchestrationMode, StepAction } from "../skill-runtime/types.js";
 
 export type RunStatus = "running" | "waiting" | "completed" | "failed";
 
+export interface RuntimeIdentity {
+  protocolHash: string;
+  packageHash: string;
+  snapshotHash: string;
+  nodeToStep: Record<string, string>;
+}
+
 export interface RunState {
   runId: string;
   skill: string;
@@ -18,6 +25,7 @@ export interface RunState {
   checkpointRef: string;
   status: RunStatus;
   retries: Record<string, number>;
+  runtimeIdentity?: RuntimeIdentity;
 }
 
 export interface EngineAction extends StepAction {

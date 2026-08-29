@@ -1,3 +1,5 @@
+import type { WorkflowProtocol } from "../types.js";
+
 export type OrchestrationMode = "deterministic" | "adaptive";
 export type ActionType =
   "invoke_skill" | "call_tool" | "handoff" | "ask_user" | "checkpoint";
@@ -89,7 +91,14 @@ export interface RuntimeEvalDefinition {
 export interface SkillPackage {
   root: string;
   packageKind?: SkillPackageKind;
+  runtime?: RuntimePackageMetadata;
   definition: SkillDefinition;
   guardrails: GuardrailDefinition;
   evals: RuntimeEvalDefinition[];
+}
+
+export interface RuntimePackageMetadata {
+  protocolHash: string;
+  protocol: WorkflowProtocol;
+  nodeToStep: Record<string, string>;
 }

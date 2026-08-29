@@ -4,27 +4,17 @@ import path from "path";
 import { loadSkillPackageDocument } from "./load.js";
 import type { SkillPackage } from "./types.js";
 import { validateSkillPackage } from "./validate.js";
+import { stableValue } from "../util.js";
 
 interface SnapshotFile {
   path: string;
   content: Buffer;
 }
 
-function stable(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stable);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, item]) => [key, stable(item)]),
-    );
-  }
-  return value;
-}
-
 function packageDocument(pkg: SkillPackage): unknown {
-  return stable({
+  return stableValue({
     ...(pkg.packageKind === "runtime" ? { packageKind: "runtime" } : {}),
+    ...(pkg.runtime ? { runtime: pkg.runtime } : {}),
     definition: pkg.definition,
     guardrails: pkg.guardrails,
     evals: pkg.evals,
@@ -103,7 +93,9 @@ function hashSnapshot(document: unknown, files: SnapshotFile[]): string {
     sha256: createHash("sha256").update(file.content).digest("hex"),
   }));
   return createHash("sha256")
-    .update(JSON.stringify(stable({ package: document, files: fileDigests })))
+    .update(
+      JSON.stringify(stableValue({ package: document, files: fileDigests })),
+    )
     .digest("hex");
 }
 

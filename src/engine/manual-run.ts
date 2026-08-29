@@ -16,6 +16,7 @@ import type {
   EngineAction,
   EvalResult,
   RunState,
+  RuntimeIdentity,
   TrajectoryEvent,
 } from "./types.js";
 import {
@@ -38,6 +39,7 @@ export interface ManualRunResult {
 export interface StartManualRunOptions {
   confirmations?: Iterable<string>;
   runId?: string;
+  runtimeIdentity?: RuntimeIdentity;
 }
 
 export interface ResumeManualRunOptions {
@@ -194,7 +196,7 @@ function normalizeStartOptions(
   if (
     value &&
     typeof value === "object" &&
-    ("confirmations" in value || "runId" in value)
+    ("confirmations" in value || "runId" in value || "runtimeIdentity" in value)
   ) {
     return value;
   }
@@ -215,16 +217,29 @@ export async function startManualRun(
   }
 
   const snapshot = await createSkillSnapshot(pkg, changeDir);
+  if (
+    startOptions.runtimeIdentity &&
+    (startOptions.runtimeIdentity.snapshotHash !== snapshot.hash ||
+      startOptions.runtimeIdentity.packageHash !== snapshot.hash)
+  ) {
+    throw new Error("Runtime identity hashes do not match the Skill snapshot");
+  }
   const state = startRun(
     pkg,
     startOptions.runId ?? randomUUID(),
     snapshot.hash,
   );
+  if (startOptions.runtimeIdentity) {
+    state.runtimeIdentity = structuredClone(startOptions.runtimeIdentity);
+  }
   await writeRunState(changeDir, state);
   await appendEvent(changeDir, state, "run_started", {
     skill: state.skill,
     skillVersion: state.skillVersion,
     skillHash: state.skillHash,
+    ...(state.runtimeIdentity
+      ? { runtimeIdentity: structuredClone(state.runtimeIdentity) }
+      : {}),
   });
   return persistDecision(
     changeDir,
