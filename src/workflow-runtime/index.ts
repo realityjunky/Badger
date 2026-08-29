@@ -11,13 +11,20 @@ import {
 import { readPendingAction } from "../engine/run-store.js";
 import { readRunState } from "../engine/state.js";
 import type { RunState } from "../engine/types.js";
+import { stableValue } from "../util.js";
 import { compileWorkflow } from "./compiler.js";
+import {
+  createCompletionPlan,
+  validateSuccessfulSubmission,
+} from "./completion.js";
 import type {
   ResumeWorkflowRunOptions,
   StartWorkflowRunOptions,
   WorkflowContinuation,
   WorkflowExecutionIdentity,
   WorkflowRuntime,
+  Submission,
+  WorkflowSubmission,
 } from "./types.js";
 
 export type {
@@ -26,6 +33,8 @@ export type {
   WorkflowContinuation,
   WorkflowExecutionIdentity,
   WorkflowRuntime,
+  Submission,
+  WorkflowSubmission,
 } from "./types.js";
 
 function identityFromState(state: RunState): WorkflowExecutionIdentity {
@@ -65,6 +74,56 @@ function sameStringRecord(
     a.localeCompare(b),
   );
   return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
+}
+
+function validateSubmission(submission: WorkflowSubmission): void {
+  if (!submission || typeof submission !== "object") {
+    throw new Error("Submission must be an object");
+  }
+  if (typeof submission.actionId !== "string" || !submission.actionId) {
+    throw new Error("Submission actionId must be a non-empty string");
+  }
+  if (
+    submission.nodeId !== undefined &&
+    submission.nodeId !== null &&
+    (typeof submission.nodeId !== "string" || !submission.nodeId)
+  ) {
+    throw new Error("Submission nodeId must be a non-empty string or null");
+  }
+  if (submission.status !== "succeeded" && submission.status !== "failed") {
+    throw new Error("Submission status must be succeeded or failed");
+  }
+  if (typeof submission.summary !== "string" || !submission.summary) {
+    throw new Error("Submission summary must be a non-empty string");
+  }
+  for (const [label, value] of [
+    ["Submission artifacts", submission.artifacts],
+    ["Submission state", submission.state],
+  ] as const) {
+    if (value === undefined) continue;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`${label} must be an object`);
+    }
+    if (Object.values(value).some((item) => typeof item !== "string")) {
+      throw new Error(`${label} values must be strings`);
+    }
+  }
+  if (submission.evidence !== undefined) {
+    if (
+      !submission.evidence ||
+      typeof submission.evidence !== "object" ||
+      Array.isArray(submission.evidence)
+    ) {
+      throw new Error("Submission evidence must be an object");
+    }
+    try {
+      JSON.stringify(submission.evidence);
+    } catch (error) {
+      throw new Error("Submission evidence must be JSON-serializable", {
+        cause: error,
+      });
+    }
+  }
 }
 
 function continuation(
@@ -233,6 +292,84 @@ export function createWorkflowRuntime(): WorkflowRuntime {
       });
       return continuation(result, verified.identity);
     },
+
+    async submit(
+      runRoot: string,
+      submission: WorkflowSubmission,
+    ): Promise<WorkflowContinuation> {
+      validateSubmission(submission);
+      const stored = await readRunState(runRoot);
+      if (!stored) throw new Error(`No Comet Run found in: ${runRoot}`);
+      const verified = await verifyStoredPackage(runRoot, stored);
+      await verifyStoredAction(
+        runRoot,
+        stored,
+        verified.identity,
+        verified.package,
+      );
+      const pending = await readPendingAction(runRoot, stored.pendingRef);
+      if (!pending || !stored.pending || stored.status !== "waiting") {
+        throw new Error(`Run is ${stored.status}`);
+      }
+      if (submission.actionId !== pending.id) {
+        throw new Error(
+          `Outcome does not match pending action: ${submission.actionId}`,
+        );
+      }
+      const node = currentNode(stored, verified.identity, pending);
+      if (submission.nodeId !== undefined && submission.nodeId !== node) {
+        throw new Error(
+          `Submission Node does not match pending Node: ${submission.nodeId}`,
+        );
+      }
+      if (submission.status === "succeeded" && node) {
+        const workflowNode = verified.package.runtime!.protocol.nodes.find(
+          (candidate) => candidate.id === node,
+        );
+        if (!workflowNode) {
+          throw new Error(`WorkflowRuntime Node is missing: ${node}`);
+        }
+        const plan =
+          verified.package.runtime!.completionPlans?.[node] ??
+          createCompletionPlan(workflowNode);
+        if (
+          JSON.stringify(stableValue(plan)) !==
+          JSON.stringify(stableValue(createCompletionPlan(workflowNode)))
+        ) {
+          throw new Error(
+            `WorkflowRuntime completion plan does not match Node: ${node}`,
+          );
+        }
+        const blockers = await validateSuccessfulSubmission(
+          runRoot,
+          verified.package.runtime!.protocol,
+          workflowNode,
+          plan,
+          submission,
+        );
+        if (blockers.length > 0) {
+          return {
+            disposition: "blocked",
+            runId: stored.runId,
+            currentNode: node,
+            pendingAction: pending,
+            execution: structuredClone(verified.identity),
+            blockers,
+          };
+        }
+      }
+      const result = await resumeManualRun(runRoot, {
+        outcome: {
+          actionId: submission.actionId,
+          status: submission.status,
+          summary: submission.summary,
+          ...(submission.artifacts ? { artifacts: submission.artifacts } : {}),
+          ...(submission.state ? { state: submission.state } : {}),
+          ...(submission.evidence ? { evidence: submission.evidence } : {}),
+        },
+      });
+      return continuation(result, verified.identity);
+    },
   };
 }
 
@@ -240,3 +377,4 @@ const defaultRuntime = createWorkflowRuntime();
 
 export const startWorkflowRun = defaultRuntime.start;
 export const resumeWorkflowRun = defaultRuntime.resume;
+export const submitWorkflowRun = defaultRuntime.submit;

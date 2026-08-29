@@ -7,6 +7,7 @@ import type {
 import type {
   GuardrailDefinition,
   RuntimePackageMetadata,
+  RuntimeCompletionPlan,
   SkillDefinition,
   SkillPackage,
   SkillReference,
@@ -16,6 +17,7 @@ import { hashSkillPackage } from "../skill-runtime/snapshot.js";
 import { validateSkillPackage } from "../skill-runtime/validate.js";
 import { sha256, slug, stableValue } from "../util.js";
 import type { WorkflowExecutionIdentity } from "./types.js";
+import { createCompletionPlan } from "./completion.js";
 
 interface CompiledWorkflow {
   package: SkillPackage;
@@ -96,6 +98,63 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
   if (!Array.isArray(protocol.edges)) {
     throw new Error("Workflow Protocol edges must be an array");
   }
+  if (!Array.isArray(protocol.outputSchemas)) {
+    throw new Error("Workflow Protocol Output Schemas must be an array");
+  }
+  const schemaIds = new Set<string>();
+  for (const schema of protocol.outputSchemas) {
+    if (
+      !schema ||
+      typeof schema !== "object" ||
+      typeof schema.id !== "string" ||
+      schema.id.length === 0 ||
+      typeof schema.description !== "string" ||
+      schema.description.length === 0 ||
+      !Array.isArray(schema.artifacts) ||
+      !Array.isArray(schema.evidence)
+    ) {
+      throw new Error(
+        "Workflow Protocol Output Schemas must have ids, descriptions, artifacts, and evidence",
+      );
+    }
+    if (schemaIds.has(schema.id)) {
+      throw new Error(
+        `Workflow Protocol has duplicate Output Schema: ${schema.id}`,
+      );
+    }
+    schemaIds.add(schema.id);
+    for (const artifact of schema.artifacts) {
+      if (
+        !artifact ||
+        typeof artifact !== "object" ||
+        typeof artifact.id !== "string" ||
+        artifact.id.length === 0 ||
+        typeof artifact.required !== "boolean" ||
+        !Array.isArray(artifact.paths) ||
+        artifact.paths.some(
+          (artifactPath) => typeof artifactPath !== "string",
+        ) ||
+        !Array.isArray(artifact.validations)
+      ) {
+        throw new Error(
+          `Workflow Protocol Output Schema ${schema.id} has an invalid artifact`,
+        );
+      }
+    }
+    for (const evidence of schema.evidence) {
+      if (
+        !evidence ||
+        typeof evidence !== "object" ||
+        typeof evidence.id !== "string" ||
+        evidence.id.length === 0 ||
+        typeof evidence.required !== "boolean"
+      ) {
+        throw new Error(
+          `Workflow Protocol Output Schema ${schema.id} has invalid evidence`,
+        );
+      }
+    }
+  }
   const nodeIds = new Set<string>();
   for (const node of protocol.nodes) {
     if (!node || typeof node !== "object") {
@@ -124,11 +183,42 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
         `Workflow Protocol Node ${node.id} augmentations must be an array`,
       );
     }
+    if (!Array.isArray(node.outputSchemas)) {
+      throw new Error(
+        `Workflow Protocol Node ${node.id} Output Schemas must be an array`,
+      );
+    }
+    if (!Array.isArray(node.guardrails)) {
+      throw new Error(
+        `Workflow Protocol Node ${node.id} guardrails must be an array`,
+      );
+    }
     for (const binding of node.requiredSkillCalls) {
       bindingIsValid(binding, node.id, "required Skill call");
     }
     for (const binding of node.augmentations) {
       bindingIsValid(binding, node.id, "augmentation");
+    }
+    for (const guardrail of node.guardrails) {
+      if (
+        !guardrail ||
+        typeof guardrail !== "object" ||
+        typeof guardrail.id !== "string" ||
+        guardrail.id.length === 0 ||
+        typeof guardrail.label !== "string" ||
+        guardrail.label.length === 0
+      ) {
+        throw new Error(
+          `Workflow Protocol Node ${node.id} guardrail must have an id and label`,
+        );
+      }
+    }
+    for (const schemaId of node.outputSchemas) {
+      if (!schemaIds.has(schemaId)) {
+        throw new Error(
+          `Workflow Protocol Node ${node.id} references missing Output Schema: ${schemaId}`,
+        );
+      }
     }
   }
   for (const transition of protocol.edges) {
@@ -367,6 +457,14 @@ function compileGuardrails(
   };
 }
 
+function compileCompletionPlans(
+  nodes: readonly NodeProtocol[],
+): Record<string, RuntimeCompletionPlan> {
+  return Object.fromEntries(
+    nodes.map((node) => [node.id, createCompletionPlan(node)]),
+  );
+}
+
 export async function compileWorkflow(
   protocol: WorkflowProtocol,
 ): Promise<CompiledWorkflow> {
@@ -381,6 +479,7 @@ export async function compileWorkflow(
     protocolHash,
     protocol: structuredClone(protocol),
     nodeToStep: { ...nodeToStep },
+    completionPlans: compileCompletionPlans(nodes),
   };
   const pkg: SkillPackage = {
     root: process.cwd(),

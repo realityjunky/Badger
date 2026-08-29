@@ -3,6 +3,7 @@ import path from "path";
 import { parse } from "yaml";
 import type {
   GuardrailDefinition,
+  RuntimeCompletionPlan,
   RuntimeEvalDefinition,
   RuntimePackageMetadata,
   SkillDefinition,
@@ -313,6 +314,39 @@ function narrowRuntimeMetadata(
   for (const [nodeId, stepId] of Object.entries(value.nodeToStep)) {
     assertString(stepId, filePath, `runtime.nodeToStep.${nodeId}`);
   }
+  let completionPlans: Record<string, RuntimeCompletionPlan> | undefined;
+  if (value.completionPlans !== undefined) {
+    assertObject(value.completionPlans, filePath, "runtime.completionPlans");
+    completionPlans = {};
+    for (const [nodeId, rawPlan] of Object.entries(value.completionPlans)) {
+      assertObject(rawPlan, filePath, `runtime.completionPlans.${nodeId}`);
+      assertString(
+        rawPlan.nodeId,
+        filePath,
+        `runtime.completionPlans.${nodeId}.nodeId`,
+      );
+      if (rawPlan.nodeId !== nodeId) {
+        throw invalidDocument(
+          filePath,
+          `runtime.completionPlans.${nodeId}.nodeId`,
+          "must match its map key",
+        );
+      }
+      for (const field of [
+        "outputSchemas",
+        "requiredSkillCalls",
+        "enforcedAugmentations",
+        "guardrails",
+      ]) {
+        assertStringArray(
+          rawPlan[field],
+          filePath,
+          `runtime.completionPlans.${nodeId}.${field}`,
+        );
+      }
+      completionPlans[nodeId] = rawPlan as unknown as RuntimeCompletionPlan;
+    }
+  }
   return {
     protocolHash: value.protocolHash,
     protocol: value.protocol as unknown as WorkflowProtocol,
@@ -322,6 +356,7 @@ function narrowRuntimeMetadata(
         stepId as string,
       ]),
     ),
+    ...(completionPlans ? { completionPlans } : {}),
   };
 }
 

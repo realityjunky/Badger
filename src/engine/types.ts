@@ -39,6 +39,7 @@ export interface ActionOutcome {
   summary: string;
   artifacts?: Record<string, string>;
   state?: Record<string, string>;
+  evidence?: Record<string, unknown>;
 }
 
 export interface TrajectoryEvent {

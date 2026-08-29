@@ -85,6 +85,18 @@ function validateStringRecord(value: unknown, label: string): void {
   }
 }
 
+function validateEvidenceRecord(value: unknown, label: string): void {
+  if (value === undefined) return;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  try {
+    JSON.stringify(value);
+  } catch (error) {
+    throw new Error(`${label} must be JSON-serializable`, { cause: error });
+  }
+}
+
 function validateOutcome(outcome: ResumeManualRunOptions["outcome"]): void {
   if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
     throw new Error("Outcome must be an object");
@@ -100,6 +112,7 @@ function validateOutcome(outcome: ResumeManualRunOptions["outcome"]): void {
   }
   validateStringRecord(outcome.artifacts, "Outcome artifacts");
   validateStringRecord(outcome.state, "Outcome state");
+  validateEvidenceRecord(outcome.evidence, "Outcome evidence");
 }
 
 function validatePendingState(

@@ -101,4 +101,13 @@ export interface RuntimePackageMetadata {
   protocolHash: string;
   protocol: WorkflowProtocol;
   nodeToStep: Record<string, string>;
+  completionPlans?: Record<string, RuntimeCompletionPlan>;
+}
+
+export interface RuntimeCompletionPlan {
+  nodeId: string;
+  outputSchemas: string[];
+  requiredSkillCalls: string[];
+  enforcedAugmentations: string[];
+  guardrails: string[];
 }
