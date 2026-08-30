@@ -34,6 +34,33 @@ function validatesAction(
   if (action.type === "ask_user" && !action.question) {
     errors.push(`step ${stepId} ask_user action requires question`);
   }
+  if (action.type === "ask_user" && pkg.runtime?.capabilityVersion === 3) {
+    if (!action.decisionId) {
+      errors.push(`step ${stepId} decision action requires decisionId`);
+    }
+    if (!action.choices || action.choices.length === 0) {
+      errors.push(`step ${stepId} decision action requires choices`);
+    }
+    if (!action.requiredInputs) {
+      errors.push(`step ${stepId} decision action requires requiredInputs`);
+    }
+    if (!action.rationale) {
+      errors.push(`step ${stepId} decision action requires rationale policy`);
+    }
+    if (!action.reviewer) {
+      errors.push(`step ${stepId} decision action requires reviewer policy`);
+    }
+  }
+  if (
+    action.type !== "ask_user" &&
+    (action.decisionId !== undefined ||
+      action.choices !== undefined ||
+      action.requiredInputs !== undefined ||
+      action.rationale !== undefined ||
+      action.reviewer !== undefined)
+  ) {
+    errors.push(`step ${stepId} decision metadata requires ask_user action`);
+  }
 }
 
 export function validateSkillPackage(pkg: SkillPackage): string[] {

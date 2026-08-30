@@ -353,9 +353,13 @@ export async function resumeManualRun(
     ...(outcome.artifacts ?? {}),
   };
   await writeArtifacts(changeDir, state.artifactsRef, artifacts);
+  const decisionReceipt = advanced.workflowRuntime?.decisionReceipts.find(
+    (receipt) => receipt.actionId === pending.id,
+  );
   await appendEvent(changeDir, state, "action_completed", {
     action: pending,
     outcome,
+    ...(decisionReceipt ? { decisionReceipt } : {}),
   });
 
   await clearPendingAction(changeDir, advanced.pendingRef);

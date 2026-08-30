@@ -666,6 +666,88 @@ function validateTool(value, filePath, fieldPath) {
   );
   assertOptionalBoolean(value, "requiresConfirmation", filePath, fieldPath);
 }
+function validateDecisionInputSchema(value, filePath, fieldPath) {
+  assertObject(value, filePath, fieldPath);
+  assertEnum(value.type, ["object"], filePath, `${fieldPath}.type`);
+  assertArray(value.fields, filePath, `${fieldPath}.fields`);
+  value.fields.forEach((entry, index) => {
+    const entryPath = `${fieldPath}.fields[${index}]`;
+    assertObject(entry, filePath, entryPath);
+    assertString(entry.id, filePath, `${entryPath}.id`);
+    assertEnum(
+      entry.type,
+      ["string", "number", "boolean"],
+      filePath,
+      `${entryPath}.type`
+    );
+    assertOptionalBoolean(entry, "required", filePath, entryPath);
+    if ("values" in entry && "enum" in entry) {
+      throw invalidDocument(
+        filePath,
+        entryPath,
+        "must not contain both values and enum"
+      );
+    }
+    for (const key of ["values", "enum"]) {
+      if (!(key in entry)) continue;
+      assertArray(entry[key], filePath, `${entryPath}.${key}`);
+      entry[key].forEach((item, itemIndex) => {
+        if (entry.type === "string" && typeof item !== "string" || entry.type === "number" && (typeof item !== "number" || !Number.isFinite(item)) || entry.type === "boolean" && typeof item !== "boolean") {
+          throw invalidDocument(
+            filePath,
+            `${entryPath}.${key}[${itemIndex}]`,
+            "has the wrong scalar type"
+          );
+        }
+      });
+    }
+  });
+}
+function validateDecisionAction(value, filePath, fieldPath) {
+  assertString(value.decisionId, filePath, `${fieldPath}.decisionId`);
+  assertArray(value.choices, filePath, `${fieldPath}.choices`);
+  value.choices.forEach((entry, index) => {
+    const choicePath = `${fieldPath}.choices[${index}]`;
+    assertObject(entry, filePath, choicePath);
+    assertString(entry.id, filePath, `${choicePath}.id`);
+    assertString(entry.label, filePath, `${choicePath}.label`);
+    if ("requiredInputs" in entry) {
+      validateDecisionInputSchema(
+        entry.requiredInputs,
+        filePath,
+        `${choicePath}.requiredInputs`
+      );
+    }
+  });
+  if ("requiredInputs" in value) {
+    validateDecisionInputSchema(
+      value.requiredInputs,
+      filePath,
+      `${fieldPath}.requiredInputs`
+    );
+  }
+  if ("rationale" in value) {
+    assertObject(value.rationale, filePath, `${fieldPath}.rationale`);
+    assertOptionalBoolean(
+      value.rationale,
+      "required",
+      filePath,
+      `${fieldPath}.rationale`
+    );
+  }
+  if ("reviewer" in value) {
+    assertObject(value.reviewer, filePath, `${fieldPath}.reviewer`);
+    for (const key of ["subjects", "authorities"]) {
+      if (key in value.reviewer) {
+        assertStringArray(
+          value.reviewer[key],
+          filePath,
+          `${fieldPath}.reviewer.${key}`
+        );
+      }
+    }
+  }
+}
 function validateAction(value, filePath, fieldPath) {
   assertObject(value, filePath, fieldPath);
   assertEnum(value.type, ACTION_TYPES, filePath, `${fieldPath}.type`);
@@ -674,6 +756,9 @@ function validateAction(value, filePath, fieldPath) {
   assertOptionalString(value, "question", filePath, fieldPath);
   if ("options" in value) {
     assertStringArray(value.options, filePath, `${fieldPath}.options`);
+  }
+  if ("decisionId" in value) {
+    validateDecisionAction(value, filePath, fieldPath);
   }
 }
 function validateStep(value, filePath, fieldPath) {
@@ -907,6 +992,26 @@ function validatesAction(action, pkg, errors, stepId2) {
   }
   if (action.type === "ask_user" && !action.question) {
     errors.push(`step ${stepId2} ask_user action requires question`);
+  }
+  if (action.type === "ask_user" && pkg.runtime?.capabilityVersion === 3) {
+    if (!action.decisionId) {
+      errors.push(`step ${stepId2} decision action requires decisionId`);
+    }
+    if (!action.choices || action.choices.length === 0) {
+      errors.push(`step ${stepId2} decision action requires choices`);
+    }
+    if (!action.requiredInputs) {
+      errors.push(`step ${stepId2} decision action requires requiredInputs`);
+    }
+    if (!action.rationale) {
+      errors.push(`step ${stepId2} decision action requires rationale policy`);
+    }
+    if (!action.reviewer) {
+      errors.push(`step ${stepId2} decision action requires reviewer policy`);
+    }
+  }
+  if (action.type !== "ask_user" && (action.decisionId !== void 0 || action.choices !== void 0 || action.requiredInputs !== void 0 || action.rationale !== void 0 || action.reviewer !== void 0)) {
+    errors.push(`step ${stepId2} decision metadata requires ask_user action`);
   }
 }
 function validateSkillPackage(pkg) {
@@ -1292,6 +1397,11 @@ var ACTION_KEYS = /* @__PURE__ */ new Set([
   "prompt",
   "question",
   "options",
+  "decisionId",
+  "choices",
+  "requiredInputs",
+  "rationale",
+  "reviewer",
   "attemptId",
   "cycleId",
   "visitOrdinal",
@@ -1381,6 +1491,42 @@ function parseAction(value) {
     }
     action.options = value.options;
   }
+  if (Object.prototype.hasOwnProperty.call(value, "decisionId")) {
+    action.decisionId = requiredText(
+      value.decisionId,
+      "decisionId",
+      "Run pending action"
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "choices")) {
+    if (!Array.isArray(value.choices)) {
+      throw new Error("Invalid Run pending action: choices must be an array");
+    }
+    action.choices = value.choices.map(
+      (choice, index) => parseDecisionChoiceSummary(
+        choice,
+        `Run pending action choices[${index}]`
+      )
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "requiredInputs")) {
+    action.requiredInputs = parseDecisionInputSchema(
+      value.requiredInputs,
+      "Run pending action requiredInputs"
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "rationale")) {
+    action.rationale = parseRationalePolicy(
+      value.rationale,
+      "Run pending action rationale"
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "reviewer")) {
+    action.reviewer = parseReviewerPolicy(
+      value.reviewer,
+      "Run pending action reviewer"
+    );
+  }
   if (Object.prototype.hasOwnProperty.call(value, "attemptId")) {
     action.attemptId = requiredText(
       value.attemptId,
@@ -1406,6 +1552,108 @@ function parseAction(value) {
     action[key] = ordinal;
   }
   return action;
+}
+function parseDecisionScalarType(value, label) {
+  if (value !== "string" && value !== "number" && value !== "boolean") {
+    throw new Error(`Invalid ${label}: type is invalid`);
+  }
+  return value;
+}
+function parseDecisionInputSchema(value, label) {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid ${label}: must be an object`);
+  }
+  assertKnownFields(value, /* @__PURE__ */ new Set(["type", "fields"]), label);
+  if (value.type !== "object") {
+    throw new Error(`Invalid ${label}: type must be object`);
+  }
+  if (!Array.isArray(value.fields)) {
+    throw new Error(`Invalid ${label}: fields must be an array`);
+  }
+  const ids = /* @__PURE__ */ new Set();
+  const fields = value.fields.map((entry, index) => {
+    const fieldLabel = `${label}.fields[${index}]`;
+    if (!isRecord(entry)) {
+      throw new Error(`Invalid ${fieldLabel}: must be an object`);
+    }
+    assertKnownFields(
+      entry,
+      /* @__PURE__ */ new Set(["id", "type", "required", "values", "enum"]),
+      fieldLabel
+    );
+    const id = requiredText(entry.id, "id", fieldLabel);
+    if (ids.has(id)) throw new Error(`Invalid ${label}: duplicate field ${id}`);
+    ids.add(id);
+    const type = parseDecisionScalarType(entry.type, `${fieldLabel}.type`);
+    if (entry.required !== void 0 && typeof entry.required !== "boolean") {
+      throw new Error(`Invalid ${fieldLabel}: required must be a boolean`);
+    }
+    if (entry.values !== void 0 && entry.enum !== void 0) {
+      throw new Error(`Invalid ${fieldLabel}: values and enum are exclusive`);
+    }
+    const rawValues = entry.values ?? entry.enum;
+    let values;
+    if (rawValues !== void 0) {
+      if (!Array.isArray(rawValues) || rawValues.length === 0) {
+        throw new Error(`Invalid ${fieldLabel}: values must be non-empty`);
+      }
+      const seen = /* @__PURE__ */ new Set();
+      values = rawValues.map((rawValue) => {
+        const valid = type === "string" && typeof rawValue === "string" || type === "number" && typeof rawValue === "number" && Number.isFinite(rawValue) || type === "boolean" && typeof rawValue === "boolean";
+        if (!valid) throw new Error(`Invalid ${fieldLabel}: enum value type`);
+        const key = JSON.stringify(rawValue);
+        if (seen.has(key))
+          throw new Error(`Invalid ${fieldLabel}: duplicate enum value`);
+        seen.add(key);
+        return rawValue;
+      });
+    }
+    return {
+      id,
+      type,
+      ...entry.required !== void 0 ? { required: entry.required } : {},
+      ...values ? entry.values !== void 0 ? { values } : { enum: values } : {}
+    };
+  });
+  return { type: "object", fields };
+}
+function parseDecisionChoiceSummary(value, label) {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(value, /* @__PURE__ */ new Set(["id", "label", "requiredInputs"]), label);
+  const result = {
+    id: requiredText(value.id, "id", label),
+    label: requiredText(value.label, "label", label)
+  };
+  if (value.requiredInputs !== void 0) {
+    result.requiredInputs = parseDecisionInputSchema(
+      value.requiredInputs,
+      `${label}.requiredInputs`
+    );
+  }
+  return result;
+}
+function parseRationalePolicy(value, label) {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(value, /* @__PURE__ */ new Set(["required"]), label);
+  if (value.required !== void 0 && typeof value.required !== "boolean") {
+    throw new Error(`Invalid ${label}: required must be a boolean`);
+  }
+  return { required: value.required === true };
+}
+function parseReviewerPolicy(value, label) {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(value, /* @__PURE__ */ new Set(["subjects", "authorities"]), label);
+  const result = {};
+  for (const key of ["subjects", "authorities"]) {
+    if (value[key] === void 0) continue;
+    if (!Array.isArray(value[key]) || value[key].some(
+      (entry) => typeof entry !== "string" || entry.length === 0
+    )) {
+      throw new Error(`Invalid ${label}: ${key} must be a string array`);
+    }
+    result[key] = [...value[key]];
+  }
+  return result;
 }
 function parseArtifacts(value) {
   if (!isRecord(value)) {
@@ -1821,6 +2069,7 @@ function boundBlockers(blockers) {
   );
 }
 async function validateSuccessfulSubmission(runRoot, protocol, node, plan, submission) {
+  if (submission.kind === "decision") return [];
   const evidence = submission.evidence ?? {};
   const blockers = [];
   for (const schemaId of plan.outputSchemas) {
@@ -1882,21 +2131,32 @@ function fieldValues(field) {
   if (!field || typeof field !== "object") return void 0;
   return field.values ?? field.allowedValues;
 }
+function decisionChoiceTarget(choice) {
+  return choice.to !== void 0 ? choice.to : choice.target !== void 0 ? choice.target : choice.transition;
+}
+function decisionNode(protocol, nodeId) {
+  return protocol.nodes.find(
+    (node) => node.id === nodeId && node.kind === "decision"
+  );
+}
 function routingFields(protocol) {
   const fields = protocol.routing?.fields ?? protocol.routing?.routingFields;
-  if (!fields) return [];
-  if (Array.isArray(fields)) {
-    return fields.map((field) => ({
-      id: fieldId(field) ?? "",
-      values: [...fieldValues(field) ?? []]
-    }));
-  }
-  return Object.entries(fields).map(([id, values]) => {
+  const declared = !fields ? [] : Array.isArray(fields) ? fields.map((field) => ({
+    id: fieldId(field) ?? "",
+    values: [...fieldValues(field) ?? []]
+  })) : Object.entries(fields).map(([id, values]) => {
     if (!Array.isArray(values)) {
       throw new Error(`Workflow routing field values are invalid: ${id}`);
     }
     return { id, values: [...values] };
   });
+  const decisions = protocol.nodes.filter(
+    (node) => !node.disabled && node.kind === "decision" && node.decision
+  ).map((node) => ({
+    id: node.decision.id,
+    values: node.decision.choices.map((choice) => choice.id)
+  }));
+  return [...declared, ...decisions];
 }
 function predicate(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || typeof value.field !== "string" || typeof value.equals !== "string") {
@@ -2007,13 +2267,48 @@ function activeNodes(protocol) {
   );
 }
 function transitionsFrom(protocol, nodeId) {
-  return protocol.edges.filter(
+  const declared = protocol.edges.filter(
     (transition) => transition.from === nodeId && transition.condition === "success"
   );
+  const node = decisionNode(protocol, nodeId);
+  if (!node?.decision) return declared;
+  const choices = node.decision.choices;
+  if (declared.length > 0 && declared.length !== choices.length) {
+    throw new Error(
+      `Workflow Protocol decision Node ${nodeId} must have one transition per choice`
+    );
+  }
+  return choices.map((choice) => {
+    const target = decisionChoiceTarget(choice);
+    if (target === void 0 || target === "") {
+      throw new Error(
+        `Workflow Protocol decision choice ${choice.id} has no transition target`
+      );
+    }
+    const matches = declared.filter((transition) => transition.to === target);
+    if (declared.length > 0 && matches.length !== 1) {
+      throw new Error(
+        `Workflow Protocol decision choice ${choice.id} does not map to exactly one transition`
+      );
+    }
+    if (matches[0]?.when !== void 0) {
+      throw new Error(
+        `Workflow Protocol decision Node ${nodeId} must not use hidden conditional exits`
+      );
+    }
+    return {
+      ...matches[0] ?? {
+        from: nodeId,
+        to: target,
+        condition: "success"
+      },
+      when: { field: node.decision.id, equals: choice.id }
+    };
+  });
 }
 function isRevisionedWorkflowProtocol(protocol) {
   return Boolean(
-    protocol.capabilities?.version === 3 || protocol.routing?.fields !== void 0 || protocol.routing?.routingFields !== void 0
+    protocol.capabilities?.version === 3 || protocol.routing?.fields !== void 0 || protocol.routing?.routingFields !== void 0 || protocol.nodes.some((node) => node.kind === "decision")
   );
 }
 function validateRevisionedWorkflow(protocol) {
@@ -2049,8 +2344,31 @@ function validateRevisionedWorkflow(protocol) {
     const predicates = validatePredicates(transition, fields);
     if (predicates) predicatesByTransition.set(transition, predicates);
   }
+  for (const node of protocol.nodes.filter(
+    (candidate) => candidate.kind === "decision"
+  )) {
+    if (!node.decision) {
+      throw new Error(
+        `Workflow Protocol decision Node ${node.id} is missing a definition`
+      );
+    }
+    for (const choice of node.decision.choices) {
+      const target = decisionChoiceTarget(choice);
+      if (target === void 0 || target !== null && !nodeIds.has(target)) {
+        throw new Error(
+          `Workflow Protocol decision choice ${choice.id} references unknown Node: ${target ?? "(missing)"}`
+        );
+      }
+      if (target !== null && !active.has(target)) {
+        throw new Error(
+          `Workflow Protocol decision choice ${choice.id} targets disabled Node: ${target}`
+        );
+      }
+    }
+  }
   for (const nodeId of active) {
     const transitions = transitionsFrom(protocol, nodeId);
+    if (decisionNode(protocol, nodeId)?.decision) continue;
     const defaults = transitions.filter(
       (transition) => transition.when === void 0
     );
@@ -2158,10 +2476,233 @@ function resolverHash(protocol) {
       stableValue({
         capabilities: protocol.capabilities,
         routing: protocol.routing,
-        edges: protocol.edges
+        edges: protocol.edges,
+        decisions: protocol.nodes.filter((node) => node.kind === "decision").map((node) => ({ id: node.id, decision: node.decision }))
       })
     )
   );
+}
+
+// src/workflow/contract.ts
+function isRecord3(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function decisionChoiceTarget2(choice) {
+  return choice.to !== void 0 ? choice.to : choice.target !== void 0 ? choice.target : choice.transition;
+}
+function decisionScalarType(value) {
+  return value === "string" || value === "number" || value === "boolean";
+}
+function scalarMatchesType(value, type) {
+  if (type === "string") return typeof value === "string";
+  if (type === "number")
+    return typeof value === "number" && Number.isFinite(value);
+  return typeof value === "boolean";
+}
+function decisionInputErrors(schema, label) {
+  const errors = [];
+  if (!isRecord3(schema)) return [`${label} must be an object`];
+  const schemaKeys = /* @__PURE__ */ new Set(["type", "fields"]);
+  const unknownSchemaKey = Object.keys(schema).find(
+    (key) => !schemaKeys.has(key)
+  );
+  if (unknownSchemaKey) {
+    errors.push(`${label} has unsupported field: ${unknownSchemaKey}`);
+  }
+  if (schema.type !== "object") {
+    errors.push(`${label}.type must be object`);
+  }
+  if (!Array.isArray(schema.fields)) {
+    errors.push(`${label}.fields must be an array`);
+    return errors;
+  }
+  const ids = /* @__PURE__ */ new Set();
+  for (const [index, field] of schema.fields.entries()) {
+    const fieldLabel = `${label}.fields[${index}]`;
+    if (!isRecord3(field)) {
+      errors.push(`${fieldLabel} must be an object`);
+      continue;
+    }
+    const fieldKeys = /* @__PURE__ */ new Set(["id", "type", "required", "values", "enum"]);
+    const unknownFieldKey = Object.keys(field).find(
+      (key) => !fieldKeys.has(key)
+    );
+    if (unknownFieldKey) {
+      errors.push(`${fieldLabel} has unsupported field: ${unknownFieldKey}`);
+    }
+    if (typeof field.id !== "string" || field.id.length === 0) {
+      errors.push(`${fieldLabel}.id must be a non-empty string`);
+    } else if (ids.has(field.id)) {
+      errors.push(`${label} has duplicate input field: ${field.id}`);
+    } else {
+      ids.add(field.id);
+    }
+    if (!decisionScalarType(field.type)) {
+      errors.push(`${fieldLabel}.type must be string, number, or boolean`);
+    }
+    if (field.required !== void 0 && typeof field.required !== "boolean") {
+      errors.push(`${fieldLabel}.required must be a boolean`);
+    }
+    const values = field.values ?? field.enum;
+    if (field.values !== void 0 && field.enum !== void 0) {
+      errors.push(`${fieldLabel} must use either values or enum, not both`);
+    }
+    if (values !== void 0) {
+      if (!Array.isArray(values) || values.length === 0) {
+        errors.push(`${fieldLabel}.values must be a non-empty array`);
+      } else {
+        const seenValues = /* @__PURE__ */ new Set();
+        for (const value of values) {
+          if (!scalarMatchesType(value, String(field.type))) {
+            errors.push(
+              `${fieldLabel}.values contains a value with the wrong type`
+            );
+            continue;
+          }
+          const key = JSON.stringify(value);
+          if (seenValues.has(key)) {
+            errors.push(`${fieldLabel}.values must not contain duplicates`);
+          }
+          seenValues.add(key);
+        }
+      }
+    }
+  }
+  return errors;
+}
+function decisionErrors(decision, nodeId) {
+  const label = `Decision Node ${nodeId}`;
+  const errors = [];
+  if (!isRecord3(decision)) return [`${label} requires a decision definition`];
+  const keys = /* @__PURE__ */ new Set([
+    "id",
+    "question",
+    "choices",
+    "inputs",
+    "rationale",
+    "reviewer"
+  ]);
+  const unknown = Object.keys(decision).find((key) => !keys.has(key));
+  if (unknown) errors.push(`${label} has unsupported field: ${unknown}`);
+  if (typeof decision.id !== "string" || decision.id.length === 0) {
+    errors.push(`${label} id must be a non-empty string`);
+  }
+  if (typeof decision.question !== "string" || decision.question.length === 0) {
+    errors.push(`${label} question must be a non-empty string`);
+  }
+  if (!Array.isArray(decision.choices) || decision.choices.length === 0) {
+    errors.push(`${label} choices must be a non-empty array`);
+  } else {
+    const choiceIds = /* @__PURE__ */ new Set();
+    const targets = /* @__PURE__ */ new Set();
+    for (const [index, choice] of decision.choices.entries()) {
+      const choiceLabel = `${label}.choices[${index}]`;
+      if (!isRecord3(choice)) {
+        errors.push(`${choiceLabel} must be an object`);
+        continue;
+      }
+      const choiceKeys = /* @__PURE__ */ new Set([
+        "id",
+        "label",
+        "to",
+        "target",
+        "transition",
+        "inputs",
+        "routing"
+      ]);
+      const unknownChoice = Object.keys(choice).find(
+        (key) => !choiceKeys.has(key)
+      );
+      if (unknownChoice) {
+        errors.push(`${choiceLabel} has unsupported field: ${unknownChoice}`);
+      }
+      if (typeof choice.id !== "string" || choice.id.length === 0) {
+        errors.push(`${choiceLabel}.id must be a non-empty string`);
+      } else if (choiceIds.has(choice.id)) {
+        errors.push(`${label} has duplicate choice id: ${choice.id}`);
+      } else {
+        choiceIds.add(choice.id);
+      }
+      if (typeof choice.label !== "string" || choice.label.length === 0) {
+        errors.push(`${choiceLabel}.label must be a non-empty string`);
+      }
+      const targetProperties = ["to", "target", "transition"].filter(
+        (key) => Object.prototype.hasOwnProperty.call(choice, key)
+      );
+      if (targetProperties.length !== 1) {
+        errors.push(
+          `${choiceLabel} must declare exactly one transition target field`
+        );
+      }
+      const target = decisionChoiceTarget2(
+        choice
+      );
+      if (target === void 0 || target === "") {
+        errors.push(`${choiceLabel} requires a transition target`);
+      } else if (targets.has(target)) {
+        errors.push(`${label} has duplicate choice mapping to: ${target}`);
+      } else {
+        targets.add(target);
+      }
+      if (choice.inputs !== void 0) {
+        errors.push(
+          ...decisionInputErrors(choice.inputs, `${choiceLabel}.inputs`)
+        );
+      }
+      if (choice.routing !== void 0) {
+        if (!isRecord3(choice.routing)) {
+          errors.push(`${choiceLabel}.routing must be an object`);
+        } else if (Object.entries(choice.routing).some(
+          ([field, value]) => field.length === 0 || typeof value !== "string" || value.length === 0
+        )) {
+          errors.push(`${choiceLabel}.routing must contain non-empty strings`);
+        }
+      }
+    }
+  }
+  if (decision.inputs !== void 0) {
+    errors.push(...decisionInputErrors(decision.inputs, `${label}.inputs`));
+  }
+  if (decision.rationale !== void 0) {
+    if (!isRecord3(decision.rationale)) {
+      errors.push(`${label}.rationale must be an object`);
+    } else if (Object.keys(decision.rationale).some((key) => key !== "required") || decision.rationale.required !== void 0 && typeof decision.rationale.required !== "boolean") {
+      errors.push(`${label}.rationale.required must be a boolean`);
+    }
+  }
+  if (decision.reviewer !== void 0) {
+    if (!isRecord3(decision.reviewer)) {
+      errors.push(`${label}.reviewer must be an object`);
+    } else {
+      const reviewerKeys = /* @__PURE__ */ new Set(["subjects", "authorities"]);
+      const unknownReviewer = Object.keys(decision.reviewer).find(
+        (key) => !reviewerKeys.has(key)
+      );
+      if (unknownReviewer) {
+        errors.push(
+          `${label}.reviewer has unsupported field: ${unknownReviewer}`
+        );
+      }
+      for (const key of ["subjects", "authorities"]) {
+        const values = decision.reviewer[key];
+        if (values === void 0) continue;
+        if (!Array.isArray(values) || values.length === 0 || values.some(
+          (value) => typeof value !== "string" || value.length === 0
+        )) {
+          errors.push(
+            `${label}.reviewer.${key} must be a non-empty string array`
+          );
+        } else if (new Set(values).size !== values.length) {
+          errors.push(`${label}.reviewer.${key} must not contain duplicates`);
+        }
+      }
+    }
+  }
+  return errors;
+}
+function validateDecisionDefinition(decision, nodeId) {
+  const errors = decisionErrors(decision, nodeId);
+  if (errors.length > 0) throw new Error(errors.join("\n"));
 }
 
 // src/workflow-runtime/compiler.ts
@@ -2233,7 +2774,7 @@ function validateProtocolShape(protocol) {
   }
   if (protocol.capabilities !== void 0) {
     if (!protocol.capabilities || protocol.capabilities.version !== 3 || !Array.isArray(protocol.capabilities.features) || protocol.capabilities.features.some(
-      (feature) => feature !== "conditional-routing" && feature !== "revisioned-attempts"
+      (feature) => feature !== "conditional-routing" && feature !== "revisioned-attempts" && feature !== "decision-nodes"
     ) || !protocol.capabilities.features.includes("conditional-routing") || !protocol.capabilities.features.includes("revisioned-attempts")) {
       throw new Error("Workflow Protocol capabilities are invalid");
     }
@@ -2269,6 +2810,7 @@ function validateProtocolShape(protocol) {
     }
   }
   const nodeIds = /* @__PURE__ */ new Set();
+  const decisionIds = /* @__PURE__ */ new Set();
   for (const node of protocol.nodes) {
     if (!node || typeof node !== "object") {
       throw new Error("Workflow Protocol Nodes must be objects");
@@ -2325,6 +2867,20 @@ function validateProtocolShape(protocol) {
           `Workflow Protocol Node ${node.id} references missing Output Schema: ${schemaId}`
         );
       }
+    }
+    if (node.kind === "decision") {
+      validateDecisionDefinition(node.decision, node.id);
+      const decisionId = node.decision.id;
+      if (decisionIds.has(decisionId)) {
+        throw new Error(
+          `Workflow Protocol has duplicate decision id: ${decisionId}`
+        );
+      }
+      decisionIds.add(decisionId);
+    } else if (node.decision !== void 0) {
+      throw new Error(
+        `Workflow Protocol Node ${node.id} has a decision definition but is not a decision Node`
+      );
     }
   }
   for (const transition of protocol.edges) {
@@ -2476,8 +3032,29 @@ function compileDefinition(protocol, nodes, linear) {
   const steps = nodes.map((node, index) => ({
     id: stepId(index, node.id),
     action: {
-      type: "invoke_skill",
-      ref: nodeSkillName(protocol.name, node.id)
+      ...node.decision ? {
+        type: "ask_user",
+        decisionId: node.decision.id,
+        question: node.decision.question,
+        choices: node.decision.choices.map((choice) => ({
+          id: choice.id,
+          label: choice.label,
+          ...choice.inputs ? { requiredInputs: structuredClone(choice.inputs) } : {}
+        })),
+        requiredInputs: structuredClone(
+          node.decision.inputs ?? { type: "object", fields: [] }
+        ),
+        rationale: {
+          required: node.decision.rationale?.required ?? false
+        },
+        reviewer: {
+          subjects: [...node.decision.reviewer?.subjects ?? []],
+          authorities: [...node.decision.reviewer?.authorities ?? []]
+        }
+      } : {
+        type: "invoke_skill",
+        ref: nodeSkillName(protocol.name, node.id)
+      }
     },
     ...linear && nodes[index + 1] ? { next: stepId(index + 1, nodes[index + 1].id) } : {}
   }));
@@ -2759,6 +3336,7 @@ function enterAttempt(state, stepId2) {
   const workflowRuntime = structuredClone(
     state.workflowRuntime
   );
+  workflowRuntime.decisionReceipts ??= [];
   const visitOrdinal = workflowRuntime.nextVisitOrdinal + 1;
   const currentAttempt = {
     id: attemptId(state.runId, stepId2, visitOrdinal),
@@ -2778,11 +3356,12 @@ function enterAttempt(state, stepId2) {
   });
   return { ...state, workflowRuntime };
 }
-function recordWorkflowOutcome(state, outcome) {
+function recordWorkflowOutcome(pkg, state, outcome) {
   if (!state.workflowRuntime) return void 0;
   const workflowRuntime = structuredClone(
     state.workflowRuntime
   );
+  workflowRuntime.decisionReceipts ??= [];
   const attempt = workflowRuntime.currentAttempt;
   if (!attempt) {
     throw new Error("WorkflowRuntime current Attempt is missing");
@@ -2795,6 +3374,7 @@ function recordWorkflowOutcome(state, outcome) {
       "WorkflowRuntime current Attempt is not in the visit ledger"
     );
   }
+  const receipt = decisionReceipt(pkg, state, outcome);
   const visitOutcome = {
     actionId: outcome.actionId,
     status: outcome.status,
@@ -2805,12 +3385,66 @@ function recordWorkflowOutcome(state, outcome) {
   };
   visit.outcomes.push(visitOutcome);
   workflowRuntime.revision += 1;
+  if (receipt) workflowRuntime.decisionReceipts.push(receipt);
   if (outcome.status === "failed") {
     attempt.retryOrdinal += 1;
   } else {
     workflowRuntime.currentAttempt = null;
   }
   return workflowRuntime;
+}
+function decisionReceipt(pkg, state, outcome) {
+  if (outcome.kind !== "decision") return void 0;
+  if (outcome.status !== "succeeded") {
+    throw new Error("Decision responses must succeed");
+  }
+  const runtimeState = state.workflowRuntime;
+  const attempt = runtimeState?.currentAttempt;
+  const identity = state.runtimeIdentity;
+  if (!runtimeState || !attempt || !identity || !pkg.runtime) {
+    throw new Error(
+      "Decision receipt requires WorkflowRuntime identity and Attempt"
+    );
+  }
+  if (outcome.revision !== runtimeState.revision) {
+    throw new Error("Decision response revision does not match Run revision");
+  }
+  if (outcome.nodeId === void 0 || outcome.nodeId !== nodeIdForStep(pkg, attempt.stepId)) {
+    throw new Error("Decision receipt Node identity is invalid");
+  }
+  if (outcome.attemptId !== attempt.id) {
+    throw new Error("Decision receipt Attempt identity is invalid");
+  }
+  if ((outcome.cycleId ?? null) !== attempt.cycleId) {
+    throw new Error("Decision receipt Cycle identity is invalid");
+  }
+  if (!outcome.decisionId || !outcome.choiceId || !outcome.reviewer) {
+    throw new Error("Decision receipt fields are incomplete");
+  }
+  return {
+    runId: state.runId,
+    revision: runtimeState.revision,
+    resultingRevision: runtimeState.revision + 1,
+    actionId: outcome.actionId,
+    decisionId: outcome.decisionId,
+    nodeId: outcome.nodeId,
+    cycleId: attempt.cycleId,
+    attemptId: attempt.id,
+    choiceId: outcome.choiceId,
+    reviewer: structuredClone(outcome.reviewer),
+    inputs: structuredClone(outcome.inputs ?? {}),
+    ...outcome.rationale !== void 0 ? { rationale: outcome.rationale } : {},
+    ...outcome.evidenceReferences ? { evidenceReferences: [...outcome.evidenceReferences] } : {},
+    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+    protocolHash: identity.protocolHash,
+    packageHash: identity.packageHash,
+    snapshotHash: identity.snapshotHash
+  };
+}
+function nodeIdForStep(pkg, stepId2) {
+  return Object.entries(pkg.runtime?.nodeToStep ?? {}).find(
+    ([, candidate]) => candidate === stepId2
+  )?.[0];
 }
 function stepFor2(pkg, id) {
   return pkg.definition.orchestration.steps?.find((step) => step.id === id);
@@ -2918,13 +3552,21 @@ function recordOutcomeWithResolver(pkg, state, outcome, resolver, context) {
       `Resolver returned unknown current step: ${resolvedStep.id}`
     );
   }
+  if (step?.action.type === "ask_user" && outcome.kind !== "decision") {
+    throw new Error("Decision response required for pending ask_user action");
+  }
+  if (step?.action.type !== "ask_user" && outcome.kind === "decision") {
+    throw new Error(
+      `Decision response cannot satisfy ${step?.action.type ?? "unknown"} action`
+    );
+  }
   if (outcome.status === "failed") {
     const retryKey = state.workflowRuntime?.currentAttempt?.id ?? outcome.actionId;
     const retries = {
       ...state.retries,
       [retryKey]: (state.retries[retryKey] ?? 0) + 1
     };
-    const workflowRuntime2 = recordWorkflowOutcome(state, outcome);
+    const workflowRuntime2 = recordWorkflowOutcome(pkg, state, outcome);
     return {
       ...state,
       pending: null,
@@ -2937,7 +3579,7 @@ function recordOutcomeWithResolver(pkg, state, outcome, resolver, context) {
   if (next !== null && state.orchestration === "deterministic" && !stepFor2(pkg, next)) {
     throw new Error(`Resolver returned unknown next step: ${next}`);
   }
-  const workflowRuntime = recordWorkflowOutcome(state, outcome);
+  const workflowRuntime = recordWorkflowOutcome(pkg, state, outcome);
   return {
     ...state,
     currentStep: next,
@@ -3021,6 +3663,154 @@ function parseJsonRecord(value, label) {
     });
   }
   return structuredClone(value);
+}
+function parseDecisionScalarRecord(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const result = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key || entry === null) {
+      throw new Error(`Invalid Run state: ${label} must contain scalar values`);
+    }
+    if (typeof entry !== "string" && typeof entry !== "number" && typeof entry !== "boolean") {
+      throw new Error(`Invalid Run state: ${label} must contain scalar values`);
+    }
+    if (typeof entry === "number" && !Number.isFinite(entry)) {
+      throw new Error(
+        `Invalid Run state: ${label} must contain finite numbers`
+      );
+    }
+    result[key] = entry;
+  }
+  return result;
+}
+function parseReviewerAttestation(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const reviewer = value;
+  const unknown = Object.keys(reviewer).find(
+    (key) => key !== "subject" && key !== "authorities"
+  );
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const subject = reviewer.subject;
+  if (typeof subject !== "string" || subject.length === 0) {
+    throw new Error(`Invalid Run state: ${label}.subject must be non-empty`);
+  }
+  if (!Array.isArray(reviewer.authorities) || reviewer.authorities.length === 0 || reviewer.authorities.some(
+    (authority) => typeof authority !== "string" || authority.length === 0
+  )) {
+    throw new Error(`Invalid Run state: ${label}.authorities must be strings`);
+  }
+  if (new Set(reviewer.authorities).size !== reviewer.authorities.length) {
+    throw new Error(
+      `Invalid Run state: ${label}.authorities must not contain duplicates`
+    );
+  }
+  return {
+    subject,
+    authorities: [...reviewer.authorities]
+  };
+}
+function parseDecisionReceipt(value, index) {
+  const label = `workflowRuntime.decisionReceipts[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const receipt = value;
+  const keys = /* @__PURE__ */ new Set([
+    "runId",
+    "revision",
+    "resultingRevision",
+    "actionId",
+    "decisionId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "choiceId",
+    "reviewer",
+    "inputs",
+    "rationale",
+    "evidenceReferences",
+    "timestamp",
+    "protocolHash",
+    "packageHash",
+    "snapshotHash"
+  ]);
+  const unknown = Object.keys(receipt).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const integer = (key) => {
+    const entry = receipt[key];
+    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 0) {
+      throw new Error(
+        `Invalid Run state: ${label}.${key} must be a non-negative integer`
+      );
+    }
+    return entry;
+  };
+  const revision = integer("revision");
+  const resultingRevision = integer("resultingRevision");
+  if (resultingRevision !== revision + 1) {
+    throw new Error(
+      `Invalid Run state: ${label} revisions are not consecutive`
+    );
+  }
+  const cycleId = receipt.cycleId;
+  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`
+    );
+  }
+  const protocolHash = requiredJsonString(receipt.protocolHash, "protocolHash");
+  const packageHash = requiredJsonString(receipt.packageHash, "packageHash");
+  const snapshotHash = requiredJsonString(receipt.snapshotHash, "snapshotHash");
+  for (const [key, hash] of [
+    ["protocolHash", protocolHash],
+    ["packageHash", packageHash],
+    ["snapshotHash", snapshotHash]
+  ]) {
+    if (!/^[a-f0-9]{64}$/u.test(hash)) {
+      throw new Error(
+        `Invalid Run state: ${label}.${key} must be a SHA-256 hash`
+      );
+    }
+  }
+  if (receipt.rationale !== void 0 && typeof receipt.rationale !== "string") {
+    throw new Error(`Invalid Run state: ${label}.rationale must be a string`);
+  }
+  let evidenceReferences;
+  if (receipt.evidenceReferences !== void 0) {
+    if (!Array.isArray(receipt.evidenceReferences) || receipt.evidenceReferences.some(
+      (reference) => typeof reference !== "string" || reference.length === 0
+    )) {
+      throw new Error(
+        `Invalid Run state: ${label}.evidenceReferences must be strings`
+      );
+    }
+    evidenceReferences = [...receipt.evidenceReferences];
+  }
+  return {
+    runId: requiredJsonString(receipt.runId, "runId"),
+    revision,
+    resultingRevision,
+    actionId: requiredJsonString(receipt.actionId, "actionId"),
+    decisionId: requiredJsonString(receipt.decisionId, "decisionId"),
+    nodeId: requiredJsonString(receipt.nodeId, "nodeId"),
+    cycleId,
+    attemptId: requiredJsonString(receipt.attemptId, "attemptId"),
+    choiceId: requiredJsonString(receipt.choiceId, "choiceId"),
+    reviewer: parseReviewerAttestation(receipt.reviewer, `${label}.reviewer`),
+    inputs: parseDecisionScalarRecord(receipt.inputs, `${label}.inputs`),
+    ...receipt.rationale !== void 0 ? { rationale: receipt.rationale } : {},
+    ...evidenceReferences ? { evidenceReferences } : {},
+    timestamp: requiredJsonString(receipt.timestamp, "timestamp"),
+    protocolHash,
+    packageHash,
+    snapshotHash
+  };
 }
 function parseWorkflowAttempt(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -3161,7 +3951,8 @@ function parseWorkflowRuntime(value) {
     "revision",
     "nextVisitOrdinal",
     "currentAttempt",
-    "visits"
+    "visits",
+    "decisionReceipts"
   ]);
   const unknown = Object.keys(runtime).find((key) => !keys.has(key));
   if (unknown) {
@@ -3185,8 +3976,22 @@ function parseWorkflowRuntime(value) {
     );
   }
   const visits = runtime.visits.map(parseWorkflowVisit);
+  const decisionReceipts = runtime.decisionReceipts === void 0 ? [] : Array.isArray(runtime.decisionReceipts) ? runtime.decisionReceipts.map(parseDecisionReceipt) : (() => {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime decisionReceipts must be an array"
+    );
+  })();
   const attemptIds = /* @__PURE__ */ new Set();
   const visitOrdinals = /* @__PURE__ */ new Set();
+  const receiptActionIds = /* @__PURE__ */ new Set();
+  for (const receipt of decisionReceipts) {
+    if (receiptActionIds.has(receipt.actionId)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime Decision Receipt ${receipt.actionId}`
+      );
+    }
+    receiptActionIds.add(receipt.actionId);
+  }
   let outcomeCount = 0;
   for (const visit of visits) {
     if (attemptIds.has(visit.attemptId)) {
@@ -3243,7 +4048,8 @@ function parseWorkflowRuntime(value) {
     revision,
     nextVisitOrdinal,
     currentAttempt,
-    visits
+    visits,
+    decisionReceipts
   };
 }
 function parseRunStateJson(value) {
@@ -3609,9 +4415,13 @@ async function resumeManualRun(changeDir, options = {}) {
     ...outcome.artifacts ?? {}
   };
   await writeArtifacts(changeDir, state.artifactsRef, artifacts);
+  const decisionReceipt2 = advanced.workflowRuntime?.decisionReceipts.find(
+    (receipt) => receipt.actionId === pending.id
+  );
   await appendEvent(changeDir, state, "action_completed", {
     action: pending,
-    outcome
+    outcome,
+    ...decisionReceipt2 ? { decisionReceipt: decisionReceipt2 } : {}
   });
   await clearPendingAction(changeDir, advanced.pendingRef);
   await writeRunState(changeDir, advanced);
@@ -3882,6 +4692,88 @@ function sameStringRecord(left, right) {
 function sameExecutionIdentity(left, right) {
   return left.protocolHash === right.protocolHash && left.packageHash === right.packageHash && left.snapshotHash === right.snapshotHash && sameStringRecord(left.nodeToStep, right.nodeToStep) && left.capabilityVersion === right.capabilityVersion && left.resolverHash === right.resolverHash;
 }
+function isDecisionSubmission(submission) {
+  return submission.kind === "decision";
+}
+function validateScalarRecord(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key || entry === null) {
+      throw new Error(`${label} must contain scalar values`);
+    }
+    if (typeof entry !== "string" && typeof entry !== "number" && typeof entry !== "boolean") {
+      throw new Error(`${label} must contain scalar values`);
+    }
+    if (typeof entry === "number" && !Number.isFinite(entry)) {
+      throw new Error(`${label} must contain finite numbers`);
+    }
+  }
+}
+function validateDecisionInputSchema2(schema, inputs) {
+  const fields = new Map(schema.fields.map((field) => [field.id, field]));
+  for (const key of Object.keys(inputs)) {
+    if (!fields.has(key)) {
+      throw new Error(`Decision input is not declared: ${key}`);
+    }
+  }
+  for (const field of schema.fields) {
+    const value = inputs[field.id];
+    if (value === void 0) {
+      if (field.required) {
+        throw new Error(`Missing required decision input: ${field.id}`);
+      }
+      continue;
+    }
+    if (field.type === "string" && typeof value !== "string" || field.type === "number" && (typeof value !== "number" || !Number.isFinite(value)) || field.type === "boolean" && typeof value !== "boolean") {
+      throw new Error(`Decision input has the wrong type: ${field.id}`);
+    }
+    const allowed = field.values ?? field.enum;
+    if (allowed && !allowed.some((candidate) => candidate === value)) {
+      throw new Error(`Decision input has an invalid value: ${field.id}`);
+    }
+  }
+}
+function validateReviewer(reviewer, policy) {
+  if (!reviewer || typeof reviewer !== "object" || Array.isArray(reviewer)) {
+    throw new Error("Decision reviewer attestation must be an object");
+  }
+  const attestation = reviewer;
+  const unknown = Object.keys(reviewer).find(
+    (key) => key !== "subject" && key !== "authorities"
+  );
+  if (unknown) {
+    throw new Error(
+      `Decision reviewer attestation has unknown field: ${unknown}`
+    );
+  }
+  if (typeof attestation.subject !== "string" || !attestation.subject) {
+    throw new Error("Decision reviewer subject must be non-empty");
+  }
+  if (!Array.isArray(attestation.authorities) || attestation.authorities.length === 0 || attestation.authorities.some(
+    (authority) => typeof authority !== "string" || !authority
+  )) {
+    throw new Error("Decision reviewer authorities must be non-empty strings");
+  }
+  if (new Set(attestation.authorities).size !== attestation.authorities.length) {
+    throw new Error(
+      "Decision reviewer authorities must not contain duplicates"
+    );
+  }
+  const subjects = policy?.subjects ?? [];
+  if (subjects.length > 0 && !subjects.includes(attestation.subject)) {
+    throw new Error(
+      `Decision reviewer subject is not authorized: ${attestation.subject}`
+    );
+  }
+  const authorities = attestation.authorities;
+  for (const required of policy?.authorities ?? []) {
+    if (!authorities.includes(required)) {
+      throw new Error(`Decision reviewer lacks authority: ${required}`);
+    }
+  }
+}
 function validateSubmission(submission) {
   if (!submission || typeof submission !== "object") {
     throw new Error("Submission must be an object");
@@ -3889,8 +4781,45 @@ function validateSubmission(submission) {
   if (typeof submission.actionId !== "string" || !submission.actionId) {
     throw new Error("Submission actionId must be a non-empty string");
   }
+  if (isDecisionSubmission(submission)) {
+    if (!Number.isSafeInteger(submission.revision) || submission.revision < 0) {
+      throw new Error("Decision revision must be a non-negative integer");
+    }
+    if (!submission.nodeId) {
+      throw new Error("Decision Node id must be a non-empty string");
+    }
+    if (submission.cycleId !== null && (typeof submission.cycleId !== "string" || !submission.cycleId)) {
+      throw new Error("Decision cycle id must be a string or null");
+    }
+    if (!submission.attemptId) {
+      throw new Error("Decision Attempt id must be a non-empty string");
+    }
+    if (!submission.choiceId) {
+      throw new Error("Decision choice id must be a non-empty string");
+    }
+    if (submission.decisionId !== void 0 && !submission.decisionId) {
+      throw new Error("Decision id must be a non-empty string");
+    }
+    if (submission.inputs !== void 0) {
+      validateScalarRecord(submission.inputs, "Decision inputs");
+    }
+    if (submission.rationale !== void 0 && (typeof submission.rationale !== "string" || !submission.rationale)) {
+      throw new Error("Decision rationale must be a non-empty string");
+    }
+    if (submission.evidenceReferences !== void 0) {
+      if (!Array.isArray(submission.evidenceReferences) || submission.evidenceReferences.some(
+        (reference) => typeof reference !== "string" || !reference
+      )) {
+        throw new Error("Decision evidence references must be strings");
+      }
+    }
+    return;
+  }
   if (submission.nodeId !== void 0 && submission.nodeId !== null && (typeof submission.nodeId !== "string" || !submission.nodeId)) {
     throw new Error("Submission nodeId must be a non-empty string or null");
+  }
+  if (submission.kind !== void 0 && submission.kind !== "machine") {
+    throw new Error("Machine submission kind is invalid");
   }
   if (submission.status !== "succeeded" && submission.status !== "failed") {
     throw new Error("Submission status must be succeeded or failed");
@@ -3936,7 +4865,7 @@ function validateSubmission(submission) {
 function continuation(result, identity) {
   const runtimeState = result.state.workflowRuntime;
   const currentAttempt = runtimeState?.currentAttempt ?? null;
-  const disposition = result.action ? "continue" : result.state.status === "completed" ? "done" : "blocked";
+  const disposition = result.action ? result.action.type === "ask_user" ? "await-user" : "continue" : result.state.status === "completed" ? "done" : "blocked";
   return {
     disposition,
     runId: result.state.runId,
@@ -3948,11 +4877,12 @@ function continuation(result, identity) {
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     pendingAction: result.action,
     execution: structuredClone(identity),
+    decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     blockers: disposition === "blocked" && result.reason ? [result.reason] : []
   };
 }
 var LEGACY_STATE_MAX_BYTES = 256 * 1024;
-function isRecord3(value) {
+function isRecord4(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function projectionStatus(state, pending, maxRetriesPerAction) {
@@ -3981,7 +4911,7 @@ async function projectWorkflowState(target) {
   );
   for (const event of trajectory) {
     if (event.type !== "action_completed") continue;
-    if (!isRecord3(event.data.action) || !isRecord3(event.data.outcome)) continue;
+    if (!isRecord4(event.data.action) || !isRecord4(event.data.outcome)) continue;
     const stepId2 = event.data.action.stepId;
     const node = typeof stepId2 === "string" ? nodeByStep.get(stepId2) : void 0;
     const outcomeStatus = event.data.outcome.status;
@@ -3997,7 +4927,7 @@ async function projectWorkflowState(target) {
     if (outcomeStatus !== "succeeded") continue;
     if (!completedNodes.includes(node)) completedNodes.push(node);
     const outcomeEvidence = event.data.outcome.evidence;
-    evidence[node] = isRecord3(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
+    evidence[node] = isRecord4(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
   }
   const protocol = verified.package.runtime.protocol;
   const runtimeState = state.workflowRuntime;
@@ -4027,6 +4957,7 @@ async function projectWorkflowState(target) {
     history,
     pendingAction: verified.pending,
     execution: structuredClone(verified.identity),
+    decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     visits: structuredClone(runtimeState?.visits ?? []),
     blockers: status === "blocked" ? [
       exhaustedAction ? `Retry budget exhausted for action: ${exhaustedAction}` : `Run is ${state.status}`
@@ -4120,6 +5051,35 @@ async function verifyStoredPackage(runRoot, state) {
       "WorkflowRuntime revisioned state is not valid for a legacy Run"
     );
   }
+  for (const receipt of state.workflowRuntime?.decisionReceipts ?? []) {
+    if (receipt.runId !== state.runId || receipt.protocolHash !== identity.protocolHash || receipt.packageHash !== identity.packageHash || receipt.snapshotHash !== identity.snapshotHash || receipt.resultingRevision !== receipt.revision + 1 || receipt.resultingRevision > (state.workflowRuntime?.revision ?? 0)) {
+      throw new Error("WorkflowRuntime Decision Receipt identity is invalid");
+    }
+    const visit = state.workflowRuntime?.visits.find(
+      (candidate) => candidate.attemptId === receipt.attemptId
+    );
+    const nodeId = visit ? Object.entries(identity.nodeToStep).find(
+      ([, stepId2]) => stepId2 === visit.stepId
+    )?.[0] : void 0;
+    const outcome = visit?.outcomes.find(
+      (candidate) => candidate.actionId === receipt.actionId
+    );
+    const node = nodeId ? pkg.runtime.protocol.nodes.find((candidate) => candidate.id === nodeId) : void 0;
+    const choice = node?.decision?.choices.find(
+      (candidate) => candidate.id === receipt.choiceId
+    );
+    if (!visit || !nodeId || receipt.nodeId !== nodeId || !outcome || outcome.status !== "succeeded" || !node?.decision || receipt.decisionId !== node.decision.id || !choice) {
+      throw new Error("WorkflowRuntime Decision Receipt context is invalid");
+    }
+    validateReviewer(receipt.reviewer, node.decision.reviewer);
+    validateDecisionInputSchema2(
+      choice.inputs ?? node.decision.inputs ?? { type: "object", fields: [] },
+      receipt.inputs
+    );
+    if (node.decision.rationale?.required && !receipt.rationale) {
+      throw new Error("WorkflowRuntime Decision Receipt rationale is invalid");
+    }
+  }
   return { identity, package: pkg };
 }
 async function verifyStoredRun(location) {
@@ -4171,14 +5131,131 @@ async function prepareWorkflowSubmission(target, submission) {
     );
   }
   const node = currentNode(verified.state, verified.identity, pending);
+  if (pending.type === "ask_user" && !isDecisionSubmission(submission)) {
+    throw new Error("Decision response required for pending ask_user action");
+  }
+  if (pending.type !== "ask_user" && isDecisionSubmission(submission)) {
+    throw new Error(`Decision response cannot satisfy ${pending.type} action`);
+  }
   if (submission.nodeId !== void 0 && submission.nodeId !== node) {
     throw new Error(
       `Submission Node does not match pending Node: ${submission.nodeId}`
     );
   }
+  if (isDecisionSubmission(submission)) {
+    validateDecisionResponse(verified, pending, node, submission);
+  }
   return { location, verified, pending, node };
 }
+function validateDecisionResponse(verified, pending, node, submission) {
+  if (pending.type !== "ask_user") {
+    throw new Error(`Decision response cannot satisfy ${pending.type} action`);
+  }
+  const runtimeState = verified.state.workflowRuntime;
+  if (!runtimeState) {
+    throw new Error(
+      "Decision response requires revisioned WorkflowRuntime state"
+    );
+  }
+  if (submission.revision !== runtimeState.revision) {
+    throw new Error(
+      `Decision response revision does not match Run revision: ${submission.revision}`
+    );
+  }
+  if (submission.nodeId !== node) {
+    throw new Error(
+      `Decision Node does not match pending Node: ${submission.nodeId}`
+    );
+  }
+  if (submission.attemptId !== pending.attemptId) {
+    throw new Error(
+      `Decision Attempt does not match pending Attempt: ${submission.attemptId}`
+    );
+  }
+  if (submission.cycleId !== (pending.cycleId ?? null)) {
+    throw new Error(
+      `Decision Cycle does not match pending Cycle: ${submission.cycleId}`
+    );
+  }
+  const workflowNode = verified.package.runtime.protocol.nodes.find(
+    (candidate) => candidate.id === node
+  );
+  if (!workflowNode?.decision) {
+    throw new Error(
+      `WorkflowRuntime decision Node is missing: ${node ?? "(none)"}`
+    );
+  }
+  if (submission.decisionId && submission.decisionId !== workflowNode.decision.id) {
+    throw new Error(
+      `Decision id does not match pending decision: ${submission.decisionId}`
+    );
+  }
+  const choice = workflowNode.decision.choices.find(
+    (candidate) => candidate.id === submission.choiceId
+  );
+  if (!choice) {
+    throw new Error(`Decision choice is not declared: ${submission.choiceId}`);
+  }
+  if (pending.decisionId !== workflowNode.decision.id) {
+    throw new Error("WorkflowRuntime pending decision identity is invalid");
+  }
+  if (!pending.choices?.some((candidate) => candidate.id === choice.id)) {
+    throw new Error(
+      `Decision choice is not accepted by pending action: ${choice.id}`
+    );
+  }
+  validateReviewer(submission.reviewer, workflowNode.decision.reviewer);
+  const inputs = submission.inputs ?? {};
+  validateDecisionInputSchema2(
+    choice.inputs ?? workflowNode.decision.inputs ?? { type: "object", fields: [] },
+    inputs
+  );
+  if (pending.rationale?.required && !submission.rationale) {
+    throw new Error("Decision rationale is required");
+  }
+}
+function engineOutcome(prepared, submission) {
+  if (!isDecisionSubmission(submission)) {
+    return {
+      actionId: prepared.pending.id,
+      status: submission.status,
+      summary: submission.summary,
+      ...submission.artifacts ? { artifacts: submission.artifacts } : {},
+      ...submission.state ? { state: submission.state } : {},
+      ...submission.evidence ? { evidence: submission.evidence } : {},
+      ...submission.routing ? { routing: submission.routing } : {}
+    };
+  }
+  const node = prepared.verified.package.runtime.protocol.nodes.find(
+    (candidate) => candidate.id === prepared.node
+  );
+  const decision = node.decision;
+  const choice = decision.choices.find(
+    (candidate) => candidate.id === submission.choiceId
+  );
+  return {
+    actionId: prepared.pending.id,
+    status: "succeeded",
+    summary: `Decision ${decision.id}: ${choice.id}`,
+    kind: "decision",
+    revision: submission.revision,
+    nodeId: submission.nodeId,
+    cycleId: submission.cycleId,
+    attemptId: submission.attemptId,
+    decisionId: decision.id,
+    choiceId: choice.id,
+    reviewer: structuredClone(submission.reviewer),
+    inputs: structuredClone(submission.inputs ?? {}),
+    ...submission.rationale !== void 0 ? { rationale: submission.rationale } : {},
+    ...submission.evidenceReferences ? { evidenceReferences: [...submission.evidenceReferences] } : {},
+    routing: {
+      [decision.id]: choice.id,
+      ...choice.routing ?? {}
+    }
+  };
+}
 async function completionBlockers(prepared, submission) {
+  if (isDecisionSubmission(submission)) return [];
   if (submission.status !== "succeeded" || !prepared.node) return [];
   const workflowNode = prepared.verified.package.runtime.protocol.nodes.find(
     (candidate) => candidate.id === prepared.node
@@ -4202,11 +5279,15 @@ async function completionBlockers(prepared, submission) {
 }
 function routeBlockers(prepared, submission) {
   const protocol = prepared.verified.package.runtime.protocol;
-  if (submission.status !== "succeeded" || !prepared.node || !isRevisionedWorkflowProtocol(protocol)) {
+  if (!isDecisionSubmission(submission) && submission.status !== "succeeded" || !prepared.node || !isRevisionedWorkflowProtocol(protocol)) {
     return [];
   }
   try {
-    resolveWorkflowNext(protocol, prepared.node, submission);
+    resolveWorkflowNext(
+      protocol,
+      prepared.node,
+      engineOutcome(prepared, submission)
+    );
     return [];
   } catch (error) {
     if (error instanceof WorkflowRouteResolutionError) {
@@ -4227,6 +5308,9 @@ function blockedContinuation(prepared, blockers) {
     retryOrdinal: prepared.verified.state.workflowRuntime?.currentAttempt?.retryOrdinal ?? null,
     pendingAction: prepared.pending,
     execution: structuredClone(prepared.verified.identity),
+    decisionReceipts: structuredClone(
+      prepared.verified.state.workflowRuntime?.decisionReceipts ?? []
+    ),
     blockers: [...blockers]
   };
 }
@@ -4267,6 +5351,7 @@ async function projectWorkflowHandoff(protocol, current) {
     execution,
     nodes: structuredClone(protocol.nodes),
     outputSchemas: structuredClone(protocol.outputSchemas),
+    decisionReceipts: structuredClone(current?.decisionReceipts ?? []),
     continuation: current ? structuredClone(current) : null
   };
 }
@@ -4286,7 +5371,7 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
         "WorkflowRuntime pending action does not match Run state"
       );
     }
-    if (action.type === "invoke_skill") {
+    if (action.type === "invoke_skill" || action.type === "ask_user") {
       if (!action.stepId || !Object.values(identity.nodeToStep).includes(action.stepId)) {
         throw new Error(
           "WorkflowRuntime pending action has an unknown workflow step"
@@ -4309,7 +5394,7 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
     const step = pkg.definition.orchestration.steps?.find(
       (candidate) => candidate.id === action.stepId
     );
-    if (!step || step.action.type !== action.type || step.action.ref !== action.ref || step.action.prompt !== action.prompt || step.action.question !== action.question || JSON.stringify(step.action.options) !== JSON.stringify(action.options)) {
+    if (!step || step.action.type !== action.type || step.action.ref !== action.ref || step.action.prompt !== action.prompt || step.action.question !== action.question || JSON.stringify(stableValue(step.action.options)) !== JSON.stringify(stableValue(action.options)) || step.action.decisionId !== action.decisionId || JSON.stringify(stableValue(step.action.choices)) !== JSON.stringify(stableValue(action.choices)) || JSON.stringify(stableValue(step.action.requiredInputs)) !== JSON.stringify(stableValue(action.requiredInputs)) || JSON.stringify(stableValue(step.action.rationale)) !== JSON.stringify(stableValue(action.rationale)) || JSON.stringify(stableValue(step.action.reviewer)) !== JSON.stringify(stableValue(action.reviewer))) {
       throw new Error(
         "WorkflowRuntime pending action does not match compiled step"
       );
@@ -4356,7 +5441,8 @@ function createWorkflowRuntime() {
             revision: 0,
             nextVisitOrdinal: 0,
             currentAttempt: null,
-            visits: []
+            visits: [],
+            decisionReceipts: []
           }
         } : {}
       });
@@ -4385,15 +5471,7 @@ function createWorkflowRuntime() {
       }
       const result = await prepared.location.resume({
         resolver: resolverForPackage(),
-        outcome: {
-          actionId: submission.actionId,
-          status: submission.status,
-          summary: submission.summary,
-          ...submission.artifacts ? { artifacts: submission.artifacts } : {},
-          ...submission.state ? { state: submission.state } : {},
-          ...submission.evidence ? { evidence: submission.evidence } : {},
-          ...submission.routing ? { routing: submission.routing } : {}
-        }
+        outcome: engineOutcome(prepared, submission)
       });
       return continuation(result, prepared.verified.identity);
     },

@@ -23,6 +23,7 @@ import {
   resolverHash,
   validateRevisionedWorkflow,
 } from "./routing.js";
+import { validateDecisionDefinition } from "../workflow/contract.js";
 
 interface CompiledWorkflow {
   package: SkillPackage;
@@ -114,7 +115,8 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
       protocol.capabilities.features.some(
         (feature) =>
           feature !== "conditional-routing" &&
-          feature !== "revisioned-attempts",
+          feature !== "revisioned-attempts" &&
+          feature !== "decision-nodes",
       ) ||
       !protocol.capabilities.features.includes("conditional-routing") ||
       !protocol.capabilities.features.includes("revisioned-attempts")
@@ -177,6 +179,7 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
     }
   }
   const nodeIds = new Set<string>();
+  const decisionIds = new Set<string>();
   for (const node of protocol.nodes) {
     if (!node || typeof node !== "object") {
       throw new Error("Workflow Protocol Nodes must be objects");
@@ -240,6 +243,20 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
           `Workflow Protocol Node ${node.id} references missing Output Schema: ${schemaId}`,
         );
       }
+    }
+    if (node.kind === "decision") {
+      validateDecisionDefinition(node.decision, node.id);
+      const decisionId = node.decision!.id;
+      if (decisionIds.has(decisionId)) {
+        throw new Error(
+          `Workflow Protocol has duplicate decision id: ${decisionId}`,
+        );
+      }
+      decisionIds.add(decisionId);
+    } else if (node.decision !== undefined) {
+      throw new Error(
+        `Workflow Protocol Node ${node.id} has a decision definition but is not a decision Node`,
+      );
     }
   }
   for (const transition of protocol.edges) {
@@ -424,8 +441,33 @@ function compileDefinition(
   const steps: SkillStep[] = nodes.map((node, index) => ({
     id: stepId(index, node.id),
     action: {
-      type: "invoke_skill",
-      ref: nodeSkillName(protocol.name, node.id),
+      ...(node.decision
+        ? {
+            type: "ask_user" as const,
+            decisionId: node.decision.id,
+            question: node.decision.question,
+            choices: node.decision.choices.map((choice) => ({
+              id: choice.id,
+              label: choice.label,
+              ...(choice.inputs
+                ? { requiredInputs: structuredClone(choice.inputs) }
+                : {}),
+            })),
+            requiredInputs: structuredClone(
+              node.decision.inputs ?? { type: "object" as const, fields: [] },
+            ),
+            rationale: {
+              required: node.decision.rationale?.required ?? false,
+            },
+            reviewer: {
+              subjects: [...(node.decision.reviewer?.subjects ?? [])],
+              authorities: [...(node.decision.reviewer?.authorities ?? [])],
+            },
+          }
+        : {
+            type: "invoke_skill" as const,
+            ref: nodeSkillName(protocol.name, node.id),
+          }),
     },
     ...(linear && nodes[index + 1]
       ? { next: stepId(index + 1, nodes[index + 1].id) }

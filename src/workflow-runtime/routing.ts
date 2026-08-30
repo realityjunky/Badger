@@ -1,6 +1,7 @@
 import type { ActionOutcome } from "../engine/types.js";
 import type {
   WorkflowProtocol,
+  WorkflowDecisionChoice,
   WorkflowRoutingCondition,
   WorkflowRoutingField,
   WorkflowRoutingPredicate,
@@ -33,23 +34,51 @@ function fieldValues(field: WorkflowRoutingField): string[] | undefined {
   return field.values ?? field.allowedValues;
 }
 
+function decisionChoiceTarget(
+  choice: WorkflowDecisionChoice,
+): string | null | undefined {
+  return choice.to !== undefined
+    ? choice.to
+    : choice.target !== undefined
+      ? choice.target
+      : choice.transition;
+}
+
+function decisionNode(
+  protocol: WorkflowProtocol,
+  nodeId: string,
+): WorkflowProtocol["nodes"][number] | undefined {
+  return protocol.nodes.find(
+    (node) => node.id === nodeId && node.kind === "decision",
+  );
+}
+
 export function routingFields(
   protocol: WorkflowProtocol,
 ): RoutingFieldDefinition[] {
   const fields = protocol.routing?.fields ?? protocol.routing?.routingFields;
-  if (!fields) return [];
-  if (Array.isArray(fields)) {
-    return fields.map((field) => ({
-      id: fieldId(field) ?? "",
-      values: [...(fieldValues(field) ?? [])],
+  const declared = !fields
+    ? []
+    : Array.isArray(fields)
+      ? fields.map((field) => ({
+          id: fieldId(field) ?? "",
+          values: [...(fieldValues(field) ?? [])],
+        }))
+      : Object.entries(fields).map(([id, values]) => {
+          if (!Array.isArray(values)) {
+            throw new Error(`Workflow routing field values are invalid: ${id}`);
+          }
+          return { id, values: [...values] };
+        });
+  const decisions = protocol.nodes
+    .filter(
+      (node) => !node.disabled && node.kind === "decision" && node.decision,
+    )
+    .map((node) => ({
+      id: node.decision!.id,
+      values: node.decision!.choices.map((choice) => choice.id),
     }));
-  }
-  return Object.entries(fields).map(([id, values]) => {
-    if (!Array.isArray(values)) {
-      throw new Error(`Workflow routing field values are invalid: ${id}`);
-    }
-    return { id, values: [...values] };
-  });
+  return [...declared, ...decisions];
 }
 
 function predicate(value: unknown): WorkflowRoutingPredicate {
@@ -197,10 +226,45 @@ function transitionsFrom(
   protocol: WorkflowProtocol,
   nodeId: string,
 ): WorkflowTransition[] {
-  return protocol.edges.filter(
+  const declared = protocol.edges.filter(
     (transition) =>
       transition.from === nodeId && transition.condition === "success",
   );
+  const node = decisionNode(protocol, nodeId);
+  if (!node?.decision) return declared;
+  const choices = node.decision.choices;
+  if (declared.length > 0 && declared.length !== choices.length) {
+    throw new Error(
+      `Workflow Protocol decision Node ${nodeId} must have one transition per choice`,
+    );
+  }
+  return choices.map((choice) => {
+    const target = decisionChoiceTarget(choice);
+    if (target === undefined || target === "") {
+      throw new Error(
+        `Workflow Protocol decision choice ${choice.id} has no transition target`,
+      );
+    }
+    const matches = declared.filter((transition) => transition.to === target);
+    if (declared.length > 0 && matches.length !== 1) {
+      throw new Error(
+        `Workflow Protocol decision choice ${choice.id} does not map to exactly one transition`,
+      );
+    }
+    if (matches[0]?.when !== undefined) {
+      throw new Error(
+        `Workflow Protocol decision Node ${nodeId} must not use hidden conditional exits`,
+      );
+    }
+    return {
+      ...(matches[0] ?? {
+        from: nodeId,
+        to: target,
+        condition: "success" as const,
+      }),
+      when: { field: node.decision!.id, equals: choice.id },
+    };
+  });
 }
 
 export function isRevisionedWorkflowProtocol(
@@ -209,7 +273,8 @@ export function isRevisionedWorkflowProtocol(
   return Boolean(
     protocol.capabilities?.version === 3 ||
     protocol.routing?.fields !== undefined ||
-    protocol.routing?.routingFields !== undefined,
+    protocol.routing?.routingFields !== undefined ||
+    protocol.nodes.some((node) => node.kind === "decision"),
   );
 }
 
@@ -255,8 +320,32 @@ export function validateRevisionedWorkflow(protocol: WorkflowProtocol): void {
     if (predicates) predicatesByTransition.set(transition, predicates);
   }
 
+  for (const node of protocol.nodes.filter(
+    (candidate) => candidate.kind === "decision",
+  )) {
+    if (!node.decision) {
+      throw new Error(
+        `Workflow Protocol decision Node ${node.id} is missing a definition`,
+      );
+    }
+    for (const choice of node.decision.choices) {
+      const target = decisionChoiceTarget(choice);
+      if (target === undefined || (target !== null && !nodeIds.has(target))) {
+        throw new Error(
+          `Workflow Protocol decision choice ${choice.id} references unknown Node: ${target ?? "(missing)"}`,
+        );
+      }
+      if (target !== null && !active.has(target)) {
+        throw new Error(
+          `Workflow Protocol decision choice ${choice.id} targets disabled Node: ${target}`,
+        );
+      }
+    }
+  }
+
   for (const nodeId of active) {
     const transitions = transitionsFrom(protocol, nodeId);
+    if (decisionNode(protocol, nodeId)?.decision) continue;
     const defaults = transitions.filter(
       (transition) => transition.when === undefined,
     );
@@ -380,6 +469,9 @@ export function resolverHash(protocol: WorkflowProtocol): string {
         capabilities: protocol.capabilities,
         routing: protocol.routing,
         edges: protocol.edges,
+        decisions: protocol.nodes
+          .filter((node) => node.kind === "decision")
+          .map((node) => ({ id: node.id, decision: node.decision })),
       }),
     ),
   );

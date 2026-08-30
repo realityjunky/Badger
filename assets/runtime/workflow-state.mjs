@@ -54,6 +54,11 @@ function parseArguments(argv) {
       index += 1;
       continue;
     }
+    if (argument === "--response") {
+      options.response = requiredOptionValue(argv, index, "--response");
+      index += 1;
+      continue;
+    }
     if (
       argument === "--run-root" ||
       argument === "--project" ||
@@ -138,6 +143,21 @@ function printPendingAction(value) {
     console.log("TYPE: checkpoint");
     return;
   }
+  if (value.pendingAction.type === "ask_user") {
+    console.log("NEXT: await-user");
+    if (value.currentNode) console.log(`NODE: ${value.currentNode}`);
+    console.log(`DECISION: ${value.pendingAction.decisionId}`);
+    console.log(`ACTION: ${value.pendingAction.id}`);
+    console.log(`QUESTION: ${value.pendingAction.question}`);
+    console.log(`CHOICES: ${JSON.stringify(value.pendingAction.choices ?? [])}`);
+    console.log(
+      `REQUIRED_INPUTS: ${JSON.stringify(value.pendingAction.requiredInputs ?? { type: "object", fields: [] })}`,
+    );
+    console.log(
+      `REVIEWER: ${JSON.stringify(value.pendingAction.reviewer ?? { subjects: [], authorities: [] })}`,
+    );
+    return;
+  }
   console.log("NEXT: auto");
   if (value.currentNode) console.log(`NODE: ${value.currentNode}`);
   if (value.pendingAction.ref) console.log(`SKILL: ${value.pendingAction.ref}`);
@@ -175,6 +195,22 @@ function parseEvidence(raw) {
   } catch {
     return { summary: raw };
   }
+}
+
+function parseDecisionResponse(raw) {
+  if (!raw || raw.trim().length === 0) {
+    throw new Error("decide requires a JSON response object.");
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error("decide requires valid JSON.", { cause: error });
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("decide requires a JSON response object.");
+  }
+  return parsed;
 }
 
 function submissionSummary(evidence, raw, nodeId) {
@@ -308,6 +344,33 @@ async function main() {
       if (nodeId) console.log(`EVIDENCE: ${nodeId}`);
       printNext(continuation);
     }
+    return;
+  }
+
+  if (command === "decide" || command === "decision") {
+    const projection = await readProjection(target);
+    if (!projection) {
+      throw new Error(
+        "Missing workflow state. Run workflow-state.mjs init first.",
+      );
+    }
+    if (!projection.pendingAction) {
+      throw new Error(`Run is ${projection.status}`);
+    }
+    const nodeId = ensureCurrentNode(nodeArgument, projection);
+    const response = parseDecisionResponse(options.response ?? evidenceRaw);
+    const continuation = await createWorkflowRuntime().submit(target, {
+      ...response,
+      kind: "decision",
+      actionId: projection.pendingAction.id,
+      revision: projection.revision,
+      nodeId,
+      cycleId: projection.cycleId,
+      attemptId: projection.attemptId,
+    });
+    await syncProjection(target, await readProjection(target));
+    if (options.json) printJson(continuation);
+    else printNext(continuation);
     return;
   }
 

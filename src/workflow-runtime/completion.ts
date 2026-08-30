@@ -287,6 +287,7 @@ export async function validateSuccessfulSubmission(
   plan: RuntimeCompletionPlan,
   submission: WorkflowSubmission,
 ): Promise<string[]> {
+  if (submission.kind === "decision") return [];
   const evidence = submission.evidence ?? {};
   const blockers: string[] = [];
 

@@ -12,6 +12,8 @@ export type {
   ResumeWorkflowRunOptions,
   StandaloneWorkflowRunLocation,
   StartWorkflowRunOptions,
+  WorkflowDecisionSubmission,
+  WorkflowMachineSubmission,
   Submission,
   WorkflowContinuation,
   WorkflowExecutionIdentity,

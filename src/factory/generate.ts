@@ -73,11 +73,13 @@ ${nodes}
 - Resume a persisted Run: \`node scripts/workflow-state.mjs resume\`.
 - Read the persisted action and Node: \`node scripts/workflow-state.mjs next\`.
 - Submit characterized Node evidence: \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
+- Submit a declared human decision: \`node scripts/workflow-state.mjs decide <node> '<json response>'\`.
 - For branched workflows, include declared route values in the submission's top-level \`routing\` object; summaries and evidence do not select edges.
 - Verify the generated protocol and runtime: \`node scripts/workflow-guard.mjs verify\`.
 - Verify the current Node before entry: \`node scripts/workflow-guard.mjs entry <node>\`.
 - Validate Node completion without advancing: \`node scripts/workflow-guard.mjs exit <node> '<json evidence>'\`.
 - Apply validated completion explicitly: \`node scripts/workflow-guard.mjs exit <node> '<json evidence>' --apply\`.
+- Validate and apply a decision through the runtime: \`node scripts/workflow-guard.mjs decision <node> '<json response>' --apply\`.
 - Produce a read-only workflow handoff: \`node scripts/workflow-handoff.mjs --json\`.
 - Rebuild a deleted or stale compatibility projection explicitly: \`node scripts/workflow-state.mjs status --rebuild --confirm legacy-state\`.
 - Use \`COMET_RUN_ROOT\` or \`--run-root\` for a change-bound Run; use \`--project <dir> --run-id <id>\` for a standalone Run.
@@ -104,7 +106,14 @@ function nodeMarkdown(workflow: string, node: NodeProtocol): string {
     node.outputSchemas
       .map((item) => `- Output Schema: \`${item}\``)
       .join("\n") || "- Output Schemas: none";
-  return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}\n\nRecord completion evidence before advancing to the next Node.\n`;
+  const decision = node.decision
+    ? `\n## Decision\n\nQuestion: ${node.decision.question}\n\n${node.decision.choices
+        .map((choice) => `- \`${choice.id}\`: ${choice.label}`)
+        .join(
+          "\n",
+        )}\n\nSubmit the typed response through \`scripts/workflow-state.mjs decide\`; WorkflowRuntime validates the choice, inputs, rationale, and reviewer attestation.\n`
+    : "";
+  return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}\n${decision}\nRecord completion evidence before advancing to the next Node.\n`;
 }
 
 async function runtimeAsset(name: string): Promise<string> {

@@ -1,7 +1,7 @@
 export type CreatorIntent = "new-skill" | "upgrade-existing";
 
 export type NodeKind =
-  "control" | "producer" | "action" | "handoff" | "guardrail";
+  "control" | "producer" | "action" | "decision" | "handoff" | "guardrail";
 export type NodeOperation = "require" | "augment" | "override" | "disable";
 export type BindingOperation = "default" | NodeOperation;
 export type Enforcement =
@@ -55,6 +55,61 @@ export interface Guardrail {
   validation: ValidationKind;
 }
 
+export type DecisionScalarType = "string" | "number" | "boolean";
+export type DecisionScalar = string | number | boolean;
+
+export interface WorkflowDecisionInputField {
+  id: string;
+  type: DecisionScalarType;
+  required?: boolean;
+  values?: DecisionScalar[];
+  enum?: DecisionScalar[];
+}
+
+export interface WorkflowDecisionInputSchema {
+  type: "object";
+  fields: WorkflowDecisionInputField[];
+}
+
+export interface WorkflowRationalePolicy {
+  required?: boolean;
+}
+
+export interface WorkflowReviewerPolicy {
+  subjects?: string[];
+  authorities?: string[];
+}
+
+export interface WorkflowReviewerAttestation {
+  subject: string;
+  authorities: string[];
+}
+
+export interface WorkflowDecisionChoice {
+  id: string;
+  label: string;
+  to?: string | null;
+  target?: string | null;
+  transition?: string | null;
+  inputs?: WorkflowDecisionInputSchema;
+  routing?: Record<string, string>;
+}
+
+export interface WorkflowDecisionDefinition {
+  id: string;
+  question: string;
+  choices: WorkflowDecisionChoice[];
+  inputs?: WorkflowDecisionInputSchema;
+  rationale?: WorkflowRationalePolicy;
+  reviewer?: WorkflowReviewerPolicy;
+}
+
+export interface WorkflowDecisionChoiceSummary {
+  id: string;
+  label: string;
+  requiredInputs?: WorkflowDecisionInputSchema;
+}
+
 export interface NodeTemplate {
   id: string;
   label: string;
@@ -72,6 +127,7 @@ export interface NodeTemplate {
   operations: NodeOperation[];
   outputSchemas: string[];
   guardrails: Guardrail[];
+  decision?: WorkflowDecisionDefinition;
 }
 
 export interface NodePatch {
@@ -139,7 +195,7 @@ export interface WorkflowRouting {
 }
 
 export type WorkflowProtocolCapability =
-  "conditional-routing" | "revisioned-attempts";
+  "conditional-routing" | "revisioned-attempts" | "decision-nodes";
 
 export interface WorkflowProtocolCapabilities {
   version: 3;
@@ -304,4 +360,24 @@ export interface WorkflowRuntimeCertificationEvidence {
   freshProcessRecovered: boolean;
   publicRuntimeCompleted: boolean;
   reverseAdapterCompleted: boolean;
+}
+
+export interface WorkflowDecisionReceipt {
+  runId: string;
+  revision: number;
+  resultingRevision: number;
+  actionId: string;
+  decisionId: string;
+  nodeId: string;
+  cycleId: string | null;
+  attemptId: string;
+  choiceId: string;
+  reviewer: WorkflowReviewerAttestation;
+  inputs: Record<string, DecisionScalar>;
+  rationale?: string;
+  evidenceReferences?: string[];
+  timestamp: string;
+  protocolHash: string;
+  packageHash: string;
+  snapshotHash: string;
 }

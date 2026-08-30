@@ -77,14 +77,24 @@ target forms remain supported for manual compatibility. Both locations use
 the same compiled route, completion validation, identity checks, continuation
 projection, retry behavior, and recovery semantics.
 
-Phase 2 compiles active Nodes into one deterministic Engine action per Node,
-excludes disabled Nodes, and uses an explicit checkpoint for an empty route. A
-successful submission checks the current Node's required Output Schema
+The runtime compiles active Nodes into deterministic Engine actions, excludes
+disabled Nodes, and uses an explicit checkpoint for an empty route. A
+successful machine submission checks the current Node's required Output Schema
 artifacts and evidence, required Skill calls, enforced augmentations, and
 guardrail evidence before advancing. Advisory augmentations remain
 non-blocking. Missing prerequisites return a bounded `blocked` continuation
 with the same pending action so corrected evidence can be submitted without
 re-executing the Node; failed submissions use the Engine retry policy.
+
+Explicit decision Nodes compile to persisted `ask_user` actions. Their
+continuation uses `await-user` and includes the stable decision question,
+choices, bounded required-input schema, rationale policy, reviewer requirement
+summary, revision, and Attempt identity. A typed decision response must match
+the current revision, action, Node, Cycle, Attempt, choice, reviewer
+attestation, input schema, and rationale policy. Accepted responses route only
+through declared choice transitions and create one runtime-timestamped,
+identity-bound Decision Receipt. Invalid, stale, replayed, and cross-kind
+submissions do not mutate the Run.
 
 `recover` reconstructs the continuation from the persisted identity, Skill
 snapshot, Run state, and pending action. It does not use conversation context
@@ -101,12 +111,12 @@ Opted-in branch protocols declare routing fields and allowed scalar values. The
 runtime supports exact equality, conjunction, one fallback edge, revisioned
 outcomes, deterministic visit ordinals, and append-only Attempt evidence.
 Ambiguous routes, undeclared values, graph cycles, and unreachable required
-Nodes are rejected before Run state is created. Cycle allocation, artifact
-versions, and decision receipts remain separate follow-up capabilities.
+Nodes are rejected before Run state is created. Cycle allocation and artifact
+versions remain separate follow-up capabilities.
 
-Revisioned Runs start at logical revision `0`. Each accepted machine outcome
-advances it once; route blockers, invalid submissions, and stale submissions do
-not advance it.
+Revisioned Runs start at logical revision `0`. Each accepted machine outcome or
+decision response advances it once; route blockers, invalid submissions, and
+stale submissions do not advance it.
 
 Generated workflow packages include `scripts/workflow-runtime.mjs`, a bundled
 WorkflowRuntime implementation, and thin `workflow-state.mjs`,
@@ -126,9 +136,9 @@ package, including both generated-adapter and public-runtime entry paths. Its
 report binds the generated-package hash to the normalized protocol hash,
 compiled package hash, Engine snapshot hash, declared and observed Node order,
 recovery evidence, and terminal completion. Review readiness requires this
-evidence to remain current. Phase 3 branch/Attempt execution is covered by
-focused runtime tests; decisions, declared Cycles, artifact versions, receipts,
-Native-derived durability, and Primer Designer migration remain separate
-follow-up tickets.
+evidence to remain current. Phase 3 branch/Attempt and decision/receipt
+behavior is covered by focused synthetic runtime tests; declared Cycles,
+artifact versions, Native-derived durability, and Primer Designer migration
+remain separate follow-up tickets.
 
 See `docs/workflow-runtime-certification.md` for the certification contract.

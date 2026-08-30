@@ -9,6 +9,14 @@ import {
   type EngineRunWriteOptions,
 } from "./protected-run-file.js";
 import type { Checkpoint, EngineAction, TrajectoryEvent } from "./types.js";
+import type {
+  DecisionScalarType,
+  WorkflowDecisionChoiceSummary,
+  WorkflowDecisionInputField,
+  WorkflowDecisionInputSchema,
+  WorkflowRationalePolicy,
+  WorkflowReviewerPolicy,
+} from "../types.js";
 
 const RUN_FILE_LIMITS = {
   trajectory: 8 * 1024 * 1024,
@@ -46,6 +54,11 @@ const ACTION_KEYS = new Set([
   "prompt",
   "question",
   "options",
+  "decisionId",
+  "choices",
+  "requiredInputs",
+  "rationale",
+  "reviewer",
   "attemptId",
   "cycleId",
   "visitOrdinal",
@@ -191,6 +204,42 @@ function parseAction(value: unknown): EngineAction {
     }
     action.options = value.options as string[];
   }
+  if (Object.prototype.hasOwnProperty.call(value, "decisionId")) {
+    action.decisionId = requiredText(
+      value.decisionId,
+      "decisionId",
+      "Run pending action",
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "choices")) {
+    if (!Array.isArray(value.choices)) {
+      throw new Error("Invalid Run pending action: choices must be an array");
+    }
+    action.choices = value.choices.map((choice, index) =>
+      parseDecisionChoiceSummary(
+        choice,
+        `Run pending action choices[${index}]`,
+      ),
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "requiredInputs")) {
+    action.requiredInputs = parseDecisionInputSchema(
+      value.requiredInputs,
+      "Run pending action requiredInputs",
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "rationale")) {
+    action.rationale = parseRationalePolicy(
+      value.rationale,
+      "Run pending action rationale",
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "reviewer")) {
+    action.reviewer = parseReviewerPolicy(
+      value.reviewer,
+      "Run pending action reviewer",
+    );
+  }
   if (Object.prototype.hasOwnProperty.call(value, "attemptId")) {
     action.attemptId = requiredText(
       value.attemptId,
@@ -220,6 +269,140 @@ function parseAction(value: unknown): EngineAction {
     action[key] = ordinal;
   }
   return action;
+}
+
+function parseDecisionScalarType(
+  value: unknown,
+  label: string,
+): DecisionScalarType {
+  if (value !== "string" && value !== "number" && value !== "boolean") {
+    throw new Error(`Invalid ${label}: type is invalid`);
+  }
+  return value;
+}
+
+function parseDecisionInputSchema(
+  value: unknown,
+  label: string,
+): WorkflowDecisionInputSchema {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid ${label}: must be an object`);
+  }
+  assertKnownFields(value, new Set(["type", "fields"]), label);
+  if (value.type !== "object") {
+    throw new Error(`Invalid ${label}: type must be object`);
+  }
+  if (!Array.isArray(value.fields)) {
+    throw new Error(`Invalid ${label}: fields must be an array`);
+  }
+  const ids = new Set<string>();
+  const fields = value.fields.map((entry, index) => {
+    const fieldLabel = `${label}.fields[${index}]`;
+    if (!isRecord(entry)) {
+      throw new Error(`Invalid ${fieldLabel}: must be an object`);
+    }
+    assertKnownFields(
+      entry,
+      new Set(["id", "type", "required", "values", "enum"]),
+      fieldLabel,
+    );
+    const id = requiredText(entry.id, "id", fieldLabel);
+    if (ids.has(id)) throw new Error(`Invalid ${label}: duplicate field ${id}`);
+    ids.add(id);
+    const type = parseDecisionScalarType(entry.type, `${fieldLabel}.type`);
+    if (entry.required !== undefined && typeof entry.required !== "boolean") {
+      throw new Error(`Invalid ${fieldLabel}: required must be a boolean`);
+    }
+    if (entry.values !== undefined && entry.enum !== undefined) {
+      throw new Error(`Invalid ${fieldLabel}: values and enum are exclusive`);
+    }
+    const rawValues = entry.values ?? entry.enum;
+    let values: WorkflowDecisionInputField["values"];
+    if (rawValues !== undefined) {
+      if (!Array.isArray(rawValues) || rawValues.length === 0) {
+        throw new Error(`Invalid ${fieldLabel}: values must be non-empty`);
+      }
+      const seen = new Set<string>();
+      values = rawValues.map((rawValue) => {
+        const valid =
+          (type === "string" && typeof rawValue === "string") ||
+          (type === "number" &&
+            typeof rawValue === "number" &&
+            Number.isFinite(rawValue)) ||
+          (type === "boolean" && typeof rawValue === "boolean");
+        if (!valid) throw new Error(`Invalid ${fieldLabel}: enum value type`);
+        const key = JSON.stringify(rawValue);
+        if (seen.has(key))
+          throw new Error(`Invalid ${fieldLabel}: duplicate enum value`);
+        seen.add(key);
+        return rawValue;
+      });
+    }
+    return {
+      id,
+      type,
+      ...(entry.required !== undefined ? { required: entry.required } : {}),
+      ...(values
+        ? entry.values !== undefined
+          ? { values }
+          : { enum: values }
+        : {}),
+    };
+  });
+  return { type: "object", fields };
+}
+
+function parseDecisionChoiceSummary(
+  value: unknown,
+  label: string,
+): WorkflowDecisionChoiceSummary {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(value, new Set(["id", "label", "requiredInputs"]), label);
+  const result: WorkflowDecisionChoiceSummary = {
+    id: requiredText(value.id, "id", label),
+    label: requiredText(value.label, "label", label),
+  };
+  if (value.requiredInputs !== undefined) {
+    result.requiredInputs = parseDecisionInputSchema(
+      value.requiredInputs,
+      `${label}.requiredInputs`,
+    );
+  }
+  return result;
+}
+
+function parseRationalePolicy(
+  value: unknown,
+  label: string,
+): WorkflowRationalePolicy {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(value, new Set(["required"]), label);
+  if (value.required !== undefined && typeof value.required !== "boolean") {
+    throw new Error(`Invalid ${label}: required must be a boolean`);
+  }
+  return { required: value.required === true };
+}
+
+function parseReviewerPolicy(
+  value: unknown,
+  label: string,
+): WorkflowReviewerPolicy {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(value, new Set(["subjects", "authorities"]), label);
+  const result: WorkflowReviewerPolicy = {};
+  for (const key of ["subjects", "authorities"] as const) {
+    if (value[key] === undefined) continue;
+    if (
+      !Array.isArray(value[key]) ||
+      value[key].some(
+        (entry) => typeof entry !== "string" || entry.length === 0,
+      )
+    ) {
+      throw new Error(`Invalid ${label}: ${key} must be a string array`);
+    }
+    result[key] = [...(value[key] as string[])];
+  }
+  return result;
 }
 
 function parseArtifacts(value: unknown): Record<string, string> {

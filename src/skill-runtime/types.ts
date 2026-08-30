@@ -1,4 +1,10 @@
-import type { WorkflowProtocol } from "../types.js";
+import type {
+  WorkflowDecisionChoiceSummary,
+  WorkflowDecisionInputSchema,
+  WorkflowProtocol,
+  WorkflowRationalePolicy,
+  WorkflowReviewerPolicy,
+} from "../types.js";
 
 export type OrchestrationMode = "deterministic" | "adaptive";
 export type ActionType =
@@ -37,6 +43,11 @@ export interface StepAction {
   prompt?: string;
   question?: string;
   options?: string[];
+  decisionId?: string;
+  choices?: WorkflowDecisionChoiceSummary[];
+  requiredInputs?: WorkflowDecisionInputSchema;
+  rationale?: WorkflowRationalePolicy;
+  reviewer?: WorkflowReviewerPolicy;
 }
 
 export interface SkillStep {

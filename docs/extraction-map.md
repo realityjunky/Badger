@@ -97,15 +97,18 @@ construction and the `start`, `resume`, `submit`, and `recover` operations.
 Compiler, Run-location, projection, storage, and protected filesystem modules
 remain private. Creator evaluation uses that public seam for its synthetic
 linear certification and stores the resulting identity and recovery evidence
-for readiness.
+for readiness. Explicit decision Nodes use the same seam: generated adapters
+project and forward their `ask_user` contracts without authenticating
+reviewers, validating policy, selecting transitions, or writing receipts.
 
 Phase 1 certification is the stop/go gate for the next runtime phase. The
 Engine report must have `certification.status` equal to `certified`, no missing
 matrix capabilities, unchanged official and fixture sources, and no semantic
 mismatches. The deterministic linear WorkflowRuntime is delivered under Phase
 2, and issue #24 extends it with versioned acyclic conditional routing and
-revisioned Attempts. Decisions, declared Cycles, artifact versions, receipts,
-Native hardening, and Primer Designer migration remain separately scoped.
+revisioned Attempts and first-class decision Nodes with identity-bound receipts.
+Declared Cycles, artifact versions, Native hardening, and Primer Designer
+migration remain separately scoped.
 
 `runEngineDifferential` runs official and private observations against one
 synthetic fixture matrix. `createPrivateEngineCommandRunner` is an injected

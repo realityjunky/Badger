@@ -1,4 +1,9 @@
 import type { OrchestrationMode, StepAction } from "../skill-runtime/types.js";
+import type {
+  DecisionScalar,
+  WorkflowDecisionReceipt,
+  WorkflowReviewerAttestation,
+} from "../types.js";
 
 export type RunStatus = "running" | "waiting" | "completed" | "failed";
 
@@ -41,6 +46,7 @@ export interface WorkflowRuntimeState {
   nextVisitOrdinal: number;
   currentAttempt: WorkflowAttemptState | null;
   visits: WorkflowVisitState[];
+  decisionReceipts: WorkflowDecisionReceipt[];
 }
 
 export interface RunState {
@@ -80,6 +86,17 @@ export interface ActionOutcome {
   state?: Record<string, string>;
   evidence?: Record<string, unknown>;
   routing?: Record<string, string>;
+  kind?: "machine" | "decision";
+  revision?: number;
+  nodeId?: string | null;
+  cycleId?: string | null;
+  attemptId?: string;
+  decisionId?: string;
+  choiceId?: string;
+  reviewer?: WorkflowReviewerAttestation;
+  inputs?: Record<string, DecisionScalar>;
+  rationale?: string;
+  evidenceReferences?: string[];
 }
 
 export interface TrajectoryEvent {

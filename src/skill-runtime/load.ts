@@ -167,6 +167,103 @@ function validateTool(
   assertOptionalBoolean(value, "requiresConfirmation", filePath, fieldPath);
 }
 
+function validateDecisionInputSchema(
+  value: unknown,
+  filePath: string,
+  fieldPath: string,
+): void {
+  assertObject(value, filePath, fieldPath);
+  assertEnum(value.type, ["object"], filePath, `${fieldPath}.type`);
+  assertArray(value.fields, filePath, `${fieldPath}.fields`);
+  value.fields.forEach((entry, index) => {
+    const entryPath = `${fieldPath}.fields[${index}]`;
+    assertObject(entry, filePath, entryPath);
+    assertString(entry.id, filePath, `${entryPath}.id`);
+    assertEnum(
+      entry.type,
+      ["string", "number", "boolean"],
+      filePath,
+      `${entryPath}.type`,
+    );
+    assertOptionalBoolean(entry, "required", filePath, entryPath);
+    if ("values" in entry && "enum" in entry) {
+      throw invalidDocument(
+        filePath,
+        entryPath,
+        "must not contain both values and enum",
+      );
+    }
+    for (const key of ["values", "enum"]) {
+      if (!(key in entry)) continue;
+      assertArray(entry[key], filePath, `${entryPath}.${key}`);
+      entry[key].forEach((item, itemIndex) => {
+        if (
+          (entry.type === "string" && typeof item !== "string") ||
+          (entry.type === "number" &&
+            (typeof item !== "number" || !Number.isFinite(item))) ||
+          (entry.type === "boolean" && typeof item !== "boolean")
+        ) {
+          throw invalidDocument(
+            filePath,
+            `${entryPath}.${key}[${itemIndex}]`,
+            "has the wrong scalar type",
+          );
+        }
+      });
+    }
+  });
+}
+
+function validateDecisionAction(
+  value: YamlObject,
+  filePath: string,
+  fieldPath: string,
+): void {
+  assertString(value.decisionId, filePath, `${fieldPath}.decisionId`);
+  assertArray(value.choices, filePath, `${fieldPath}.choices`);
+  value.choices.forEach((entry, index) => {
+    const choicePath = `${fieldPath}.choices[${index}]`;
+    assertObject(entry, filePath, choicePath);
+    assertString(entry.id, filePath, `${choicePath}.id`);
+    assertString(entry.label, filePath, `${choicePath}.label`);
+    if ("requiredInputs" in entry) {
+      validateDecisionInputSchema(
+        entry.requiredInputs,
+        filePath,
+        `${choicePath}.requiredInputs`,
+      );
+    }
+  });
+  if ("requiredInputs" in value) {
+    validateDecisionInputSchema(
+      value.requiredInputs,
+      filePath,
+      `${fieldPath}.requiredInputs`,
+    );
+  }
+  if ("rationale" in value) {
+    assertObject(value.rationale, filePath, `${fieldPath}.rationale`);
+    assertOptionalBoolean(
+      value.rationale,
+      "required",
+      filePath,
+      `${fieldPath}.rationale`,
+    );
+  }
+  if ("reviewer" in value) {
+    assertObject(value.reviewer, filePath, `${fieldPath}.reviewer`);
+    for (const key of ["subjects", "authorities"]) {
+      if (key in value.reviewer) {
+        assertStringArray(
+          value.reviewer[key],
+          filePath,
+          `${fieldPath}.reviewer.${key}`,
+        );
+      }
+    }
+  }
+}
+
 function validateAction(
   value: unknown,
   filePath: string,
@@ -179,6 +276,9 @@ function validateAction(
   assertOptionalString(value, "question", filePath, fieldPath);
   if ("options" in value) {
     assertStringArray(value.options, filePath, `${fieldPath}.options`);
+  }
+  if ("decisionId" in value) {
+    validateDecisionAction(value, filePath, fieldPath);
   }
 }
 

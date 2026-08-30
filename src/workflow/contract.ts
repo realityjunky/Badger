@@ -7,6 +7,8 @@ import type {
   WorkflowInput,
   WorkflowProtocol,
   WorkflowProtocolCapabilities,
+  WorkflowDecisionDefinition,
+  WorkflowDecisionChoice,
   WorkflowRoutingCondition,
   WorkflowRoutingField,
   NormalizedWorkflow,
@@ -26,12 +28,262 @@ export interface ValidationFinding {
     | "orphan-output-schema"
     | "invalid-schema"
     | "unknown-transition-node"
-    | "invalid-route";
+    | "invalid-route"
+    | "invalid-decision";
   message: string;
   nodeId?: string;
 }
 
 const idPattern = /^[a-z][a-z0-9-]{1,63}$/u;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function decisionChoiceTarget(
+  choice: WorkflowDecisionChoice,
+): string | null | undefined {
+  return choice.to !== undefined
+    ? choice.to
+    : choice.target !== undefined
+      ? choice.target
+      : choice.transition;
+}
+
+function decisionScalarType(value: unknown): boolean {
+  return value === "string" || value === "number" || value === "boolean";
+}
+
+function scalarMatchesType(value: unknown, type: string): boolean {
+  if (type === "string") return typeof value === "string";
+  if (type === "number")
+    return typeof value === "number" && Number.isFinite(value);
+  return typeof value === "boolean";
+}
+
+function decisionInputErrors(schema: unknown, label: string): string[] {
+  const errors: string[] = [];
+  if (!isRecord(schema)) return [`${label} must be an object`];
+  const schemaKeys = new Set(["type", "fields"]);
+  const unknownSchemaKey = Object.keys(schema).find(
+    (key) => !schemaKeys.has(key),
+  );
+  if (unknownSchemaKey) {
+    errors.push(`${label} has unsupported field: ${unknownSchemaKey}`);
+  }
+  if (schema.type !== "object") {
+    errors.push(`${label}.type must be object`);
+  }
+  if (!Array.isArray(schema.fields)) {
+    errors.push(`${label}.fields must be an array`);
+    return errors;
+  }
+  const ids = new Set<string>();
+  for (const [index, field] of schema.fields.entries()) {
+    const fieldLabel = `${label}.fields[${index}]`;
+    if (!isRecord(field)) {
+      errors.push(`${fieldLabel} must be an object`);
+      continue;
+    }
+    const fieldKeys = new Set(["id", "type", "required", "values", "enum"]);
+    const unknownFieldKey = Object.keys(field).find(
+      (key) => !fieldKeys.has(key),
+    );
+    if (unknownFieldKey) {
+      errors.push(`${fieldLabel} has unsupported field: ${unknownFieldKey}`);
+    }
+    if (typeof field.id !== "string" || field.id.length === 0) {
+      errors.push(`${fieldLabel}.id must be a non-empty string`);
+    } else if (ids.has(field.id)) {
+      errors.push(`${label} has duplicate input field: ${field.id}`);
+    } else {
+      ids.add(field.id);
+    }
+    if (!decisionScalarType(field.type)) {
+      errors.push(`${fieldLabel}.type must be string, number, or boolean`);
+    }
+    if (field.required !== undefined && typeof field.required !== "boolean") {
+      errors.push(`${fieldLabel}.required must be a boolean`);
+    }
+    const values = field.values ?? field.enum;
+    if (field.values !== undefined && field.enum !== undefined) {
+      errors.push(`${fieldLabel} must use either values or enum, not both`);
+    }
+    if (values !== undefined) {
+      if (!Array.isArray(values) || values.length === 0) {
+        errors.push(`${fieldLabel}.values must be a non-empty array`);
+      } else {
+        const seenValues = new Set<string>();
+        for (const value of values) {
+          if (!scalarMatchesType(value, String(field.type))) {
+            errors.push(
+              `${fieldLabel}.values contains a value with the wrong type`,
+            );
+            continue;
+          }
+          const key = JSON.stringify(value);
+          if (seenValues.has(key)) {
+            errors.push(`${fieldLabel}.values must not contain duplicates`);
+          }
+          seenValues.add(key);
+        }
+      }
+    }
+  }
+  return errors;
+}
+
+function decisionErrors(decision: unknown, nodeId: string): string[] {
+  const label = `Decision Node ${nodeId}`;
+  const errors: string[] = [];
+  if (!isRecord(decision)) return [`${label} requires a decision definition`];
+  const keys = new Set([
+    "id",
+    "question",
+    "choices",
+    "inputs",
+    "rationale",
+    "reviewer",
+  ]);
+  const unknown = Object.keys(decision).find((key) => !keys.has(key));
+  if (unknown) errors.push(`${label} has unsupported field: ${unknown}`);
+  if (typeof decision.id !== "string" || decision.id.length === 0) {
+    errors.push(`${label} id must be a non-empty string`);
+  }
+  if (typeof decision.question !== "string" || decision.question.length === 0) {
+    errors.push(`${label} question must be a non-empty string`);
+  }
+  if (!Array.isArray(decision.choices) || decision.choices.length === 0) {
+    errors.push(`${label} choices must be a non-empty array`);
+  } else {
+    const choiceIds = new Set<string>();
+    const targets = new Set<string | null>();
+    for (const [index, choice] of decision.choices.entries()) {
+      const choiceLabel = `${label}.choices[${index}]`;
+      if (!isRecord(choice)) {
+        errors.push(`${choiceLabel} must be an object`);
+        continue;
+      }
+      const choiceKeys = new Set([
+        "id",
+        "label",
+        "to",
+        "target",
+        "transition",
+        "inputs",
+        "routing",
+      ]);
+      const unknownChoice = Object.keys(choice).find(
+        (key) => !choiceKeys.has(key),
+      );
+      if (unknownChoice) {
+        errors.push(`${choiceLabel} has unsupported field: ${unknownChoice}`);
+      }
+      if (typeof choice.id !== "string" || choice.id.length === 0) {
+        errors.push(`${choiceLabel}.id must be a non-empty string`);
+      } else if (choiceIds.has(choice.id)) {
+        errors.push(`${label} has duplicate choice id: ${choice.id}`);
+      } else {
+        choiceIds.add(choice.id);
+      }
+      if (typeof choice.label !== "string" || choice.label.length === 0) {
+        errors.push(`${choiceLabel}.label must be a non-empty string`);
+      }
+      const targetProperties = ["to", "target", "transition"].filter((key) =>
+        Object.prototype.hasOwnProperty.call(choice, key),
+      );
+      if (targetProperties.length !== 1) {
+        errors.push(
+          `${choiceLabel} must declare exactly one transition target field`,
+        );
+      }
+      const target = decisionChoiceTarget(
+        choice as unknown as WorkflowDecisionChoice,
+      );
+      if (target === undefined || target === "") {
+        errors.push(`${choiceLabel} requires a transition target`);
+      } else if (targets.has(target)) {
+        errors.push(`${label} has duplicate choice mapping to: ${target}`);
+      } else {
+        targets.add(target);
+      }
+      if (choice.inputs !== undefined) {
+        errors.push(
+          ...decisionInputErrors(choice.inputs, `${choiceLabel}.inputs`),
+        );
+      }
+      if (choice.routing !== undefined) {
+        if (!isRecord(choice.routing)) {
+          errors.push(`${choiceLabel}.routing must be an object`);
+        } else if (
+          Object.entries(choice.routing).some(
+            ([field, value]) =>
+              field.length === 0 ||
+              typeof value !== "string" ||
+              value.length === 0,
+          )
+        ) {
+          errors.push(`${choiceLabel}.routing must contain non-empty strings`);
+        }
+      }
+    }
+  }
+  if (decision.inputs !== undefined) {
+    errors.push(...decisionInputErrors(decision.inputs, `${label}.inputs`));
+  }
+  if (decision.rationale !== undefined) {
+    if (!isRecord(decision.rationale)) {
+      errors.push(`${label}.rationale must be an object`);
+    } else if (
+      Object.keys(decision.rationale).some((key) => key !== "required") ||
+      (decision.rationale.required !== undefined &&
+        typeof decision.rationale.required !== "boolean")
+    ) {
+      errors.push(`${label}.rationale.required must be a boolean`);
+    }
+  }
+  if (decision.reviewer !== undefined) {
+    if (!isRecord(decision.reviewer)) {
+      errors.push(`${label}.reviewer must be an object`);
+    } else {
+      const reviewerKeys = new Set(["subjects", "authorities"]);
+      const unknownReviewer = Object.keys(decision.reviewer).find(
+        (key) => !reviewerKeys.has(key),
+      );
+      if (unknownReviewer) {
+        errors.push(
+          `${label}.reviewer has unsupported field: ${unknownReviewer}`,
+        );
+      }
+      for (const key of ["subjects", "authorities"] as const) {
+        const values = decision.reviewer[key];
+        if (values === undefined) continue;
+        if (
+          !Array.isArray(values) ||
+          values.length === 0 ||
+          values.some(
+            (value) => typeof value !== "string" || value.length === 0,
+          )
+        ) {
+          errors.push(
+            `${label}.reviewer.${key} must be a non-empty string array`,
+          );
+        } else if (new Set(values).size !== values.length) {
+          errors.push(`${label}.reviewer.${key} must not contain duplicates`);
+        }
+      }
+    }
+  }
+  return errors;
+}
+
+export function validateDecisionDefinition(
+  decision: WorkflowDecisionDefinition | undefined,
+  nodeId: string,
+): void {
+  const errors = decisionErrors(decision, nodeId);
+  if (errors.length > 0) throw new Error(errors.join("\n"));
+}
 
 function binding(
   input: BindingInput,
@@ -74,6 +326,7 @@ function cloneNode(node: NodeTemplate): NodeTemplate {
     operations: [...node.operations],
     outputSchemas: [...node.outputSchemas],
     guardrails: node.guardrails.map((item) => ({ ...item })),
+    ...(node.decision ? { decision: structuredClone(node.decision) } : {}),
   };
 }
 
@@ -148,6 +401,7 @@ export function validateWorkflow(input: WorkflowInput): ValidationFinding[] {
     });
   const nodes = input.customNodes ?? [];
   const byId = new Map<string, NodeTemplate>();
+  const decisionIds = new Set<string>();
   for (const node of nodes) {
     if (byId.has(node.id))
       findings.push({
@@ -198,6 +452,27 @@ export function validateWorkflow(input: WorkflowInput): ValidationFinding[] {
       );
     for (const item of node.augmentations ?? [])
       checkOperation(item.skill, item.operation ?? "augment", "augmentation");
+    if (node.kind === "decision") {
+      const errors = decisionErrors(node.decision, node.id);
+      if (node.decision?.id) {
+        if (decisionIds.has(node.decision.id)) {
+          errors.push(`Decision id is duplicated: ${node.decision.id}`);
+        }
+        decisionIds.add(node.decision.id);
+      }
+      for (const message of errors)
+        findings.push({
+          code: "invalid-decision",
+          nodeId: node.id,
+          message,
+        });
+    } else if (node.decision !== undefined) {
+      findings.push({
+        code: "invalid-decision",
+        nodeId: node.id,
+        message: `${node.id}: only decision Nodes may declare a decision definition`,
+      });
+    }
   }
   for (const [nodeId, patch] of Object.entries(input.nodes ?? {})) {
     const node = byId.get(nodeId);
@@ -273,15 +548,26 @@ export function validateWorkflow(input: WorkflowInput): ValidationFinding[] {
 }
 
 function defaultEdges(nodes: NodeProtocol[]): WorkflowProtocol["edges"] {
-  return nodes.flatMap((node, index) => [
-    {
-      from: node.id,
-      to: nodes[index + 1]?.id ?? null,
-      condition: "success" as const,
-    },
-    { from: node.id, to: node.id, condition: "failure" as const },
-    { from: node.id, to: node.id, condition: "pause" as const },
-  ]);
+  return nodes.flatMap((node, index) => {
+    const successEdges = node.decision
+      ? node.decision.choices.map((choice) => ({
+          from: node.id,
+          to: decisionChoiceTarget(choice) ?? null,
+          condition: "success" as const,
+        }))
+      : [
+          {
+            from: node.id,
+            to: nodes[index + 1]?.id ?? null,
+            condition: "success" as const,
+          },
+        ];
+    return [
+      ...successEdges,
+      { from: node.id, to: node.id, condition: "failure" as const },
+      { from: node.id, to: node.id, condition: "pause" as const },
+    ];
+  });
 }
 
 function routingFields(
@@ -324,7 +610,8 @@ function phase3Enabled(input: WorkflowInput): boolean {
   return Boolean(
     input.capabilities?.version === 3 ||
     input.routing?.fields !== undefined ||
-    input.routing?.routingFields !== undefined,
+    input.routing?.routingFields !== undefined ||
+    input.customNodes.some((node) => node.kind === "decision"),
   );
 }
 
@@ -353,6 +640,9 @@ function protocolCapabilities(
   const features = new Set(input.capabilities?.features ?? []);
   features.add("conditional-routing");
   features.add("revisioned-attempts");
+  if (input.customNodes.some((node) => node.kind === "decision")) {
+    features.add("decision-nodes");
+  }
   return {
     version: 3,
     features: [...features],

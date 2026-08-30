@@ -4,11 +4,38 @@ import type {
   RuntimeIdentity,
   WorkflowVisitState,
 } from "../engine/types.js";
-import type { NodeProtocol, OutputSchema, WorkflowProtocol } from "../types.js";
+import type {
+  DecisionScalar,
+  NodeProtocol,
+  OutputSchema,
+  WorkflowDecisionReceipt,
+  WorkflowProtocol,
+  WorkflowReviewerAttestation,
+} from "../types.js";
 
 export type WorkflowExecutionIdentity = RuntimeIdentity;
 
 export type WorkflowPendingAction = EngineAction;
+
+export interface WorkflowMachineSubmission extends ActionOutcome {
+  kind?: "machine";
+  nodeId?: string | null;
+}
+
+export interface WorkflowDecisionSubmission {
+  kind: "decision";
+  actionId: string;
+  revision: number;
+  nodeId: string;
+  cycleId: string | null;
+  attemptId: string;
+  decisionId?: string;
+  choiceId: string;
+  reviewer: WorkflowReviewerAttestation;
+  inputs?: Record<string, DecisionScalar>;
+  rationale?: string;
+  evidenceReferences?: string[];
+}
 
 export interface ManualWorkflowRunLocation {
   kind: "manual";
@@ -27,7 +54,7 @@ export type WorkflowRunLocation =
 export type WorkflowRunTarget = WorkflowRunLocation | string;
 
 export interface WorkflowContinuation {
-  disposition: "continue" | "blocked" | "done";
+  disposition: "continue" | "await-user" | "blocked" | "done";
   runId: string;
   revision: number;
   currentNode: string | null;
@@ -37,6 +64,7 @@ export interface WorkflowContinuation {
   retryOrdinal: number | null;
   pendingAction: WorkflowPendingAction | null;
   execution: WorkflowExecutionIdentity;
+  decisionReceipts: WorkflowDecisionReceipt[];
   blockers: string[];
 }
 
@@ -50,6 +78,7 @@ export interface WorkflowHandoff {
   execution: WorkflowExecutionIdentity;
   nodes: NodeProtocol[];
   outputSchemas: OutputSchema[];
+  decisionReceipts: WorkflowDecisionReceipt[];
   continuation: WorkflowContinuation | null;
 }
 
@@ -79,6 +108,7 @@ export interface WorkflowStateProjection {
   pendingAction: WorkflowPendingAction | null;
   execution: WorkflowExecutionIdentity;
   visits: WorkflowVisitState[];
+  decisionReceipts: WorkflowDecisionReceipt[];
   blockers: string[];
 }
 
@@ -107,9 +137,8 @@ export interface ResumeWorkflowRunOptions {
 
 export type RecoverWorkflowRunOptions = ResumeWorkflowRunOptions;
 
-export interface WorkflowSubmission extends ActionOutcome {
-  nodeId?: string | null;
-}
+export type WorkflowSubmission =
+  WorkflowMachineSubmission | WorkflowDecisionSubmission;
 
 export interface WorkflowRuntime {
   start(options: StartWorkflowRunOptions): Promise<WorkflowContinuation>;

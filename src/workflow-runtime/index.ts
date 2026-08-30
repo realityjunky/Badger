@@ -13,7 +13,12 @@ import {
 import { type ManualRunResult } from "../engine/manual-run.js";
 import { readPendingAction, readTrajectory } from "../engine/run-store.js";
 import type { EngineAction, RunState } from "../engine/types.js";
-import type { WorkflowProtocol } from "../types.js";
+import type {
+  DecisionScalar,
+  WorkflowDecisionInputSchema,
+  WorkflowProtocol,
+  WorkflowReviewerPolicy,
+} from "../types.js";
 import { stableValue } from "../util.js";
 import { compileWorkflow } from "./compiler.js";
 import {
@@ -42,6 +47,7 @@ import type {
   WorkflowRunTarget,
   WorkflowStateProjection,
   WorkflowStateProjectionStatus,
+  WorkflowDecisionSubmission,
   Submission,
   WorkflowSubmission,
 } from "./types.js";
@@ -60,6 +66,8 @@ export type {
   WorkflowRunTarget,
   WorkflowStateProjection,
   WorkflowStateProjectionStatus,
+  WorkflowDecisionSubmission,
+  WorkflowMachineSubmission,
   Submission,
   WorkflowSubmission,
 } from "./types.js";
@@ -123,6 +131,121 @@ function sameExecutionIdentity(
   );
 }
 
+function isDecisionSubmission(
+  submission: WorkflowSubmission,
+): submission is WorkflowDecisionSubmission {
+  return submission.kind === "decision";
+}
+
+function validateScalarRecord(
+  value: unknown,
+  label: string,
+): asserts value is Record<string, DecisionScalar> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key || entry === null) {
+      throw new Error(`${label} must contain scalar values`);
+    }
+    if (
+      typeof entry !== "string" &&
+      typeof entry !== "number" &&
+      typeof entry !== "boolean"
+    ) {
+      throw new Error(`${label} must contain scalar values`);
+    }
+    if (typeof entry === "number" && !Number.isFinite(entry)) {
+      throw new Error(`${label} must contain finite numbers`);
+    }
+  }
+}
+
+function validateDecisionInputSchema(
+  schema: WorkflowDecisionInputSchema,
+  inputs: Record<string, DecisionScalar>,
+): void {
+  const fields = new Map(schema.fields.map((field) => [field.id, field]));
+  for (const key of Object.keys(inputs)) {
+    if (!fields.has(key)) {
+      throw new Error(`Decision input is not declared: ${key}`);
+    }
+  }
+  for (const field of schema.fields) {
+    const value = inputs[field.id];
+    if (value === undefined) {
+      if (field.required) {
+        throw new Error(`Missing required decision input: ${field.id}`);
+      }
+      continue;
+    }
+    if (
+      (field.type === "string" && typeof value !== "string") ||
+      (field.type === "number" &&
+        (typeof value !== "number" || !Number.isFinite(value))) ||
+      (field.type === "boolean" && typeof value !== "boolean")
+    ) {
+      throw new Error(`Decision input has the wrong type: ${field.id}`);
+    }
+    const allowed = field.values ?? field.enum;
+    if (allowed && !allowed.some((candidate) => candidate === value)) {
+      throw new Error(`Decision input has an invalid value: ${field.id}`);
+    }
+  }
+}
+
+function validateReviewer(
+  reviewer: unknown,
+  policy: WorkflowReviewerPolicy | undefined,
+): void {
+  if (!reviewer || typeof reviewer !== "object" || Array.isArray(reviewer)) {
+    throw new Error("Decision reviewer attestation must be an object");
+  }
+  const attestation = reviewer as {
+    subject?: unknown;
+    authorities?: unknown;
+  };
+  const unknown = Object.keys(reviewer as Record<string, unknown>).find(
+    (key) => key !== "subject" && key !== "authorities",
+  );
+  if (unknown) {
+    throw new Error(
+      `Decision reviewer attestation has unknown field: ${unknown}`,
+    );
+  }
+  if (typeof attestation.subject !== "string" || !attestation.subject) {
+    throw new Error("Decision reviewer subject must be non-empty");
+  }
+  if (
+    !Array.isArray(attestation.authorities) ||
+    attestation.authorities.length === 0 ||
+    attestation.authorities.some(
+      (authority) => typeof authority !== "string" || !authority,
+    )
+  ) {
+    throw new Error("Decision reviewer authorities must be non-empty strings");
+  }
+  if (
+    new Set(attestation.authorities).size !== attestation.authorities.length
+  ) {
+    throw new Error(
+      "Decision reviewer authorities must not contain duplicates",
+    );
+  }
+  const subjects = policy?.subjects ?? [];
+  if (subjects.length > 0 && !subjects.includes(attestation.subject)) {
+    throw new Error(
+      `Decision reviewer subject is not authorized: ${attestation.subject}`,
+    );
+  }
+  const authorities = attestation.authorities as string[];
+  for (const required of policy?.authorities ?? []) {
+    if (!authorities.includes(required)) {
+      throw new Error(`Decision reviewer lacks authority: ${required}`);
+    }
+  }
+}
+
 function validateSubmission(submission: WorkflowSubmission): void {
   if (!submission || typeof submission !== "object") {
     throw new Error("Submission must be an object");
@@ -130,12 +253,58 @@ function validateSubmission(submission: WorkflowSubmission): void {
   if (typeof submission.actionId !== "string" || !submission.actionId) {
     throw new Error("Submission actionId must be a non-empty string");
   }
+  if (isDecisionSubmission(submission)) {
+    if (!Number.isSafeInteger(submission.revision) || submission.revision < 0) {
+      throw new Error("Decision revision must be a non-negative integer");
+    }
+    if (!submission.nodeId) {
+      throw new Error("Decision Node id must be a non-empty string");
+    }
+    if (
+      submission.cycleId !== null &&
+      (typeof submission.cycleId !== "string" || !submission.cycleId)
+    ) {
+      throw new Error("Decision cycle id must be a string or null");
+    }
+    if (!submission.attemptId) {
+      throw new Error("Decision Attempt id must be a non-empty string");
+    }
+    if (!submission.choiceId) {
+      throw new Error("Decision choice id must be a non-empty string");
+    }
+    if (submission.decisionId !== undefined && !submission.decisionId) {
+      throw new Error("Decision id must be a non-empty string");
+    }
+    if (submission.inputs !== undefined) {
+      validateScalarRecord(submission.inputs, "Decision inputs");
+    }
+    if (
+      submission.rationale !== undefined &&
+      (typeof submission.rationale !== "string" || !submission.rationale)
+    ) {
+      throw new Error("Decision rationale must be a non-empty string");
+    }
+    if (submission.evidenceReferences !== undefined) {
+      if (
+        !Array.isArray(submission.evidenceReferences) ||
+        submission.evidenceReferences.some(
+          (reference) => typeof reference !== "string" || !reference,
+        )
+      ) {
+        throw new Error("Decision evidence references must be strings");
+      }
+    }
+    return;
+  }
   if (
     submission.nodeId !== undefined &&
     submission.nodeId !== null &&
     (typeof submission.nodeId !== "string" || !submission.nodeId)
   ) {
     throw new Error("Submission nodeId must be a non-empty string or null");
+  }
+  if (submission.kind !== undefined && submission.kind !== "machine") {
+    throw new Error("Machine submission kind is invalid");
   }
   if (submission.status !== "succeeded" && submission.status !== "failed") {
     throw new Error("Submission status must be succeeded or failed");
@@ -196,7 +365,9 @@ function continuation(
   const runtimeState = result.state.workflowRuntime;
   const currentAttempt = runtimeState?.currentAttempt ?? null;
   const disposition = result.action
-    ? "continue"
+    ? result.action.type === "ask_user"
+      ? "await-user"
+      : "continue"
     : result.state.status === "completed"
       ? "done"
       : "blocked";
@@ -211,6 +382,7 @@ function continuation(
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     pendingAction: result.action,
     execution: structuredClone(identity),
+    decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     blockers: disposition === "blocked" && result.reason ? [result.reason] : [],
   };
 }
@@ -311,6 +483,7 @@ export async function projectWorkflowState(
     history,
     pendingAction: verified.pending,
     execution: structuredClone(verified.identity),
+    decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     visits: structuredClone(runtimeState?.visits ?? []),
     blockers:
       status === "blocked"
@@ -426,6 +599,55 @@ async function verifyStoredPackage(
       "WorkflowRuntime revisioned state is not valid for a legacy Run",
     );
   }
+  for (const receipt of state.workflowRuntime?.decisionReceipts ?? []) {
+    if (
+      receipt.runId !== state.runId ||
+      receipt.protocolHash !== identity.protocolHash ||
+      receipt.packageHash !== identity.packageHash ||
+      receipt.snapshotHash !== identity.snapshotHash ||
+      receipt.resultingRevision !== receipt.revision + 1 ||
+      receipt.resultingRevision > (state.workflowRuntime?.revision ?? 0)
+    ) {
+      throw new Error("WorkflowRuntime Decision Receipt identity is invalid");
+    }
+    const visit = state.workflowRuntime?.visits.find(
+      (candidate) => candidate.attemptId === receipt.attemptId,
+    );
+    const nodeId = visit
+      ? Object.entries(identity.nodeToStep).find(
+          ([, stepId]) => stepId === visit.stepId,
+        )?.[0]
+      : undefined;
+    const outcome = visit?.outcomes.find(
+      (candidate) => candidate.actionId === receipt.actionId,
+    );
+    const node = nodeId
+      ? pkg.runtime.protocol.nodes.find((candidate) => candidate.id === nodeId)
+      : undefined;
+    const choice = node?.decision?.choices.find(
+      (candidate) => candidate.id === receipt.choiceId,
+    );
+    if (
+      !visit ||
+      !nodeId ||
+      receipt.nodeId !== nodeId ||
+      !outcome ||
+      outcome.status !== "succeeded" ||
+      !node?.decision ||
+      receipt.decisionId !== node.decision.id ||
+      !choice
+    ) {
+      throw new Error("WorkflowRuntime Decision Receipt context is invalid");
+    }
+    validateReviewer(receipt.reviewer, node.decision.reviewer);
+    validateDecisionInputSchema(
+      choice.inputs ?? node.decision.inputs ?? { type: "object", fields: [] },
+      receipt.inputs,
+    );
+    if (node.decision.rationale?.required && !receipt.rationale) {
+      throw new Error("WorkflowRuntime Decision Receipt rationale is invalid");
+    }
+  }
   return { identity, package: pkg };
 }
 
@@ -511,18 +733,153 @@ async function prepareWorkflowSubmission(
     );
   }
   const node = currentNode(verified.state, verified.identity, pending);
+  if (pending.type === "ask_user" && !isDecisionSubmission(submission)) {
+    throw new Error("Decision response required for pending ask_user action");
+  }
+  if (pending.type !== "ask_user" && isDecisionSubmission(submission)) {
+    throw new Error(`Decision response cannot satisfy ${pending.type} action`);
+  }
   if (submission.nodeId !== undefined && submission.nodeId !== node) {
     throw new Error(
       `Submission Node does not match pending Node: ${submission.nodeId}`,
     );
   }
+  if (isDecisionSubmission(submission)) {
+    validateDecisionResponse(verified, pending, node, submission);
+  }
   return { location, verified, pending, node };
+}
+
+function validateDecisionResponse(
+  verified: VerifiedWorkflowRun,
+  pending: EngineAction,
+  node: string | null,
+  submission: WorkflowDecisionSubmission,
+): void {
+  if (pending.type !== "ask_user") {
+    throw new Error(`Decision response cannot satisfy ${pending.type} action`);
+  }
+  const runtimeState = verified.state.workflowRuntime;
+  if (!runtimeState) {
+    throw new Error(
+      "Decision response requires revisioned WorkflowRuntime state",
+    );
+  }
+  if (submission.revision !== runtimeState.revision) {
+    throw new Error(
+      `Decision response revision does not match Run revision: ${submission.revision}`,
+    );
+  }
+  if (submission.nodeId !== node) {
+    throw new Error(
+      `Decision Node does not match pending Node: ${submission.nodeId}`,
+    );
+  }
+  if (submission.attemptId !== pending.attemptId) {
+    throw new Error(
+      `Decision Attempt does not match pending Attempt: ${submission.attemptId}`,
+    );
+  }
+  if (submission.cycleId !== (pending.cycleId ?? null)) {
+    throw new Error(
+      `Decision Cycle does not match pending Cycle: ${submission.cycleId}`,
+    );
+  }
+  const workflowNode = verified.package.runtime!.protocol.nodes.find(
+    (candidate) => candidate.id === node,
+  );
+  if (!workflowNode?.decision) {
+    throw new Error(
+      `WorkflowRuntime decision Node is missing: ${node ?? "(none)"}`,
+    );
+  }
+  if (
+    submission.decisionId &&
+    submission.decisionId !== workflowNode.decision.id
+  ) {
+    throw new Error(
+      `Decision id does not match pending decision: ${submission.decisionId}`,
+    );
+  }
+  const choice = workflowNode.decision.choices.find(
+    (candidate) => candidate.id === submission.choiceId,
+  );
+  if (!choice) {
+    throw new Error(`Decision choice is not declared: ${submission.choiceId}`);
+  }
+  if (pending.decisionId !== workflowNode.decision.id) {
+    throw new Error("WorkflowRuntime pending decision identity is invalid");
+  }
+  if (!pending.choices?.some((candidate) => candidate.id === choice.id)) {
+    throw new Error(
+      `Decision choice is not accepted by pending action: ${choice.id}`,
+    );
+  }
+  validateReviewer(submission.reviewer, workflowNode.decision.reviewer);
+  const inputs = submission.inputs ?? {};
+  validateDecisionInputSchema(
+    choice.inputs ??
+      workflowNode.decision.inputs ?? { type: "object", fields: [] },
+    inputs,
+  );
+  if (pending.rationale?.required && !submission.rationale) {
+    throw new Error("Decision rationale is required");
+  }
+}
+
+function engineOutcome(
+  prepared: PreparedWorkflowSubmission,
+  submission: WorkflowSubmission,
+): import("../engine/types.js").ActionOutcome {
+  if (!isDecisionSubmission(submission)) {
+    return {
+      actionId: prepared.pending.id,
+      status: submission.status,
+      summary: submission.summary,
+      ...(submission.artifacts ? { artifacts: submission.artifacts } : {}),
+      ...(submission.state ? { state: submission.state } : {}),
+      ...(submission.evidence ? { evidence: submission.evidence } : {}),
+      ...(submission.routing ? { routing: submission.routing } : {}),
+    };
+  }
+  const node = prepared.verified.package.runtime!.protocol.nodes.find(
+    (candidate) => candidate.id === prepared.node,
+  )!;
+  const decision = node.decision!;
+  const choice = decision.choices.find(
+    (candidate) => candidate.id === submission.choiceId,
+  )!;
+  return {
+    actionId: prepared.pending.id,
+    status: "succeeded",
+    summary: `Decision ${decision.id}: ${choice.id}`,
+    kind: "decision",
+    revision: submission.revision,
+    nodeId: submission.nodeId,
+    cycleId: submission.cycleId,
+    attemptId: submission.attemptId,
+    decisionId: decision.id,
+    choiceId: choice.id,
+    reviewer: structuredClone(submission.reviewer),
+    inputs: structuredClone(submission.inputs ?? {}),
+    ...(submission.rationale !== undefined
+      ? { rationale: submission.rationale }
+      : {}),
+    ...(submission.evidenceReferences
+      ? { evidenceReferences: [...submission.evidenceReferences] }
+      : {}),
+    routing: {
+      [decision.id]: choice.id,
+      ...(choice.routing ?? {}),
+    },
+  };
 }
 
 async function completionBlockers(
   prepared: PreparedWorkflowSubmission,
   submission: WorkflowSubmission,
 ): Promise<string[]> {
+  if (isDecisionSubmission(submission)) return [];
   if (submission.status !== "succeeded" || !prepared.node) return [];
   const workflowNode = prepared.verified.package.runtime!.protocol.nodes.find(
     (candidate) => candidate.id === prepared.node,
@@ -556,14 +913,18 @@ function routeBlockers(
 ): string[] {
   const protocol = prepared.verified.package.runtime!.protocol;
   if (
-    submission.status !== "succeeded" ||
+    (!isDecisionSubmission(submission) && submission.status !== "succeeded") ||
     !prepared.node ||
     !isRevisionedWorkflowProtocol(protocol)
   ) {
     return [];
   }
   try {
-    resolveWorkflowNext(protocol, prepared.node, submission);
+    resolveWorkflowNext(
+      protocol,
+      prepared.node,
+      engineOutcome(prepared, submission),
+    );
     return [];
   } catch (error) {
     if (error instanceof WorkflowRouteResolutionError) {
@@ -594,6 +955,9 @@ function blockedContinuation(
       null,
     pendingAction: prepared.pending,
     execution: structuredClone(prepared.verified.identity),
+    decisionReceipts: structuredClone(
+      prepared.verified.state.workflowRuntime?.decisionReceipts ?? [],
+    ),
     blockers: [...blockers],
   };
 }
@@ -645,6 +1009,7 @@ export async function projectWorkflowHandoff(
     execution,
     nodes: structuredClone(protocol.nodes),
     outputSchemas: structuredClone(protocol.outputSchemas),
+    decisionReceipts: structuredClone(current?.decisionReceipts ?? []),
     continuation: current ? structuredClone(current) : null,
   };
 }
@@ -674,7 +1039,7 @@ async function verifyStoredAction(
         "WorkflowRuntime pending action does not match Run state",
       );
     }
-    if (action.type === "invoke_skill") {
+    if (action.type === "invoke_skill" || action.type === "ask_user") {
       if (
         !action.stepId ||
         !Object.values(identity.nodeToStep).includes(action.stepId)
@@ -706,7 +1071,17 @@ async function verifyStoredAction(
       step.action.ref !== action.ref ||
       step.action.prompt !== action.prompt ||
       step.action.question !== action.question ||
-      JSON.stringify(step.action.options) !== JSON.stringify(action.options)
+      JSON.stringify(stableValue(step.action.options)) !==
+        JSON.stringify(stableValue(action.options)) ||
+      step.action.decisionId !== action.decisionId ||
+      JSON.stringify(stableValue(step.action.choices)) !==
+        JSON.stringify(stableValue(action.choices)) ||
+      JSON.stringify(stableValue(step.action.requiredInputs)) !==
+        JSON.stringify(stableValue(action.requiredInputs)) ||
+      JSON.stringify(stableValue(step.action.rationale)) !==
+        JSON.stringify(stableValue(action.rationale)) ||
+      JSON.stringify(stableValue(step.action.reviewer)) !==
+        JSON.stringify(stableValue(action.reviewer))
     ) {
       throw new Error(
         "WorkflowRuntime pending action does not match compiled step",
@@ -769,6 +1144,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 nextVisitOrdinal: 0,
                 currentAttempt: null,
                 visits: [],
+                decisionReceipts: [],
               },
             }
           : {}),
@@ -806,15 +1182,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
       }
       const result = await prepared.location.resume({
         resolver: resolverForPackage(),
-        outcome: {
-          actionId: submission.actionId,
-          status: submission.status,
-          summary: submission.summary,
-          ...(submission.artifacts ? { artifacts: submission.artifacts } : {}),
-          ...(submission.state ? { state: submission.state } : {}),
-          ...(submission.evidence ? { evidence: submission.evidence } : {}),
-          ...(submission.routing ? { routing: submission.routing } : {}),
-        },
+        outcome: engineOutcome(prepared, submission),
       });
       return continuation(result, prepared.verified.identity);
     },

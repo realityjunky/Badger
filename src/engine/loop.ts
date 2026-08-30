@@ -15,6 +15,7 @@ import {
   type DeterministicResolver,
 } from "./resolver.js";
 import type { SkillPackage, SkillStep } from "../skill-runtime/types.js";
+import type { WorkflowDecisionReceipt } from "../types.js";
 
 export interface Decision {
   state: RunState;
@@ -58,6 +59,7 @@ function enterAttempt(state: RunState, stepId: string): RunState {
   const workflowRuntime: WorkflowRuntimeState = structuredClone(
     state.workflowRuntime,
   );
+  workflowRuntime.decisionReceipts ??= [];
   const visitOrdinal = workflowRuntime.nextVisitOrdinal + 1;
   const currentAttempt: WorkflowAttemptState = {
     id: attemptId(state.runId, stepId, visitOrdinal),
@@ -79,6 +81,7 @@ function enterAttempt(state: RunState, stepId: string): RunState {
 }
 
 function recordWorkflowOutcome(
+  pkg: SkillPackage,
   state: RunState,
   outcome: ActionOutcome,
 ): WorkflowRuntimeState | undefined {
@@ -86,6 +89,7 @@ function recordWorkflowOutcome(
   const workflowRuntime: WorkflowRuntimeState = structuredClone(
     state.workflowRuntime,
   );
+  workflowRuntime.decisionReceipts ??= [];
   const attempt = workflowRuntime.currentAttempt;
   if (!attempt) {
     throw new Error("WorkflowRuntime current Attempt is missing");
@@ -98,6 +102,7 @@ function recordWorkflowOutcome(
       "WorkflowRuntime current Attempt is not in the visit ledger",
     );
   }
+  const receipt = decisionReceipt(pkg, state, outcome);
   const visitOutcome: WorkflowVisitOutcome = {
     actionId: outcome.actionId,
     status: outcome.status,
@@ -110,12 +115,79 @@ function recordWorkflowOutcome(
   };
   visit.outcomes.push(visitOutcome);
   workflowRuntime.revision += 1;
+  if (receipt) workflowRuntime.decisionReceipts.push(receipt);
   if (outcome.status === "failed") {
     attempt.retryOrdinal += 1;
   } else {
     workflowRuntime.currentAttempt = null;
   }
   return workflowRuntime;
+}
+
+function decisionReceipt(
+  pkg: SkillPackage,
+  state: RunState,
+  outcome: ActionOutcome,
+): WorkflowDecisionReceipt | undefined {
+  if (outcome.kind !== "decision") return undefined;
+  if (outcome.status !== "succeeded") {
+    throw new Error("Decision responses must succeed");
+  }
+  const runtimeState = state.workflowRuntime;
+  const attempt = runtimeState?.currentAttempt;
+  const identity = state.runtimeIdentity;
+  if (!runtimeState || !attempt || !identity || !pkg.runtime) {
+    throw new Error(
+      "Decision receipt requires WorkflowRuntime identity and Attempt",
+    );
+  }
+  if (outcome.revision !== runtimeState.revision) {
+    throw new Error("Decision response revision does not match Run revision");
+  }
+  if (
+    outcome.nodeId === undefined ||
+    outcome.nodeId !== nodeIdForStep(pkg, attempt.stepId)
+  ) {
+    throw new Error("Decision receipt Node identity is invalid");
+  }
+  if (outcome.attemptId !== attempt.id) {
+    throw new Error("Decision receipt Attempt identity is invalid");
+  }
+  if ((outcome.cycleId ?? null) !== attempt.cycleId) {
+    throw new Error("Decision receipt Cycle identity is invalid");
+  }
+  if (!outcome.decisionId || !outcome.choiceId || !outcome.reviewer) {
+    throw new Error("Decision receipt fields are incomplete");
+  }
+  return {
+    runId: state.runId,
+    revision: runtimeState.revision,
+    resultingRevision: runtimeState.revision + 1,
+    actionId: outcome.actionId,
+    decisionId: outcome.decisionId,
+    nodeId: outcome.nodeId,
+    cycleId: attempt.cycleId,
+    attemptId: attempt.id,
+    choiceId: outcome.choiceId,
+    reviewer: structuredClone(outcome.reviewer),
+    inputs: structuredClone(outcome.inputs ?? {}),
+    ...(outcome.rationale !== undefined
+      ? { rationale: outcome.rationale }
+      : {}),
+    ...(outcome.evidenceReferences
+      ? { evidenceReferences: [...outcome.evidenceReferences] }
+      : {}),
+    timestamp: new Date().toISOString(),
+    protocolHash: identity.protocolHash,
+    packageHash: identity.packageHash,
+    snapshotHash: identity.snapshotHash,
+  };
+}
+
+function nodeIdForStep(pkg: SkillPackage, stepId: string): string | undefined {
+  return Object.entries(pkg.runtime?.nodeToStep ?? {}).find(
+    ([, candidate]) => candidate === stepId,
+  )?.[0];
 }
 
 function stepFor(pkg: SkillPackage, id: string | null): SkillStep | undefined {
@@ -311,6 +383,14 @@ export function recordOutcomeWithResolver<TContext>(
       `Resolver returned unknown current step: ${resolvedStep!.id}`,
     );
   }
+  if (step?.action.type === "ask_user" && outcome.kind !== "decision") {
+    throw new Error("Decision response required for pending ask_user action");
+  }
+  if (step?.action.type !== "ask_user" && outcome.kind === "decision") {
+    throw new Error(
+      `Decision response cannot satisfy ${step?.action.type ?? "unknown"} action`,
+    );
+  }
   if (outcome.status === "failed") {
     const retryKey =
       state.workflowRuntime?.currentAttempt?.id ?? outcome.actionId;
@@ -318,7 +398,7 @@ export function recordOutcomeWithResolver<TContext>(
       ...state.retries,
       [retryKey]: (state.retries[retryKey] ?? 0) + 1,
     };
-    const workflowRuntime = recordWorkflowOutcome(state, outcome);
+    const workflowRuntime = recordWorkflowOutcome(pkg, state, outcome);
     return {
       ...state,
       pending: null,
@@ -338,7 +418,7 @@ export function recordOutcomeWithResolver<TContext>(
   ) {
     throw new Error(`Resolver returned unknown next step: ${next}`);
   }
-  const workflowRuntime = recordWorkflowOutcome(state, outcome);
+  const workflowRuntime = recordWorkflowOutcome(pkg, state, outcome);
   return {
     ...state,
     currentStep: next,

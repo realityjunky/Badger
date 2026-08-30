@@ -15,6 +15,10 @@ import type {
   WorkflowVisitOutcome,
   WorkflowVisitState,
 } from "./types.js";
+import type {
+  WorkflowDecisionReceipt,
+  WorkflowReviewerAttestation,
+} from "../types.js";
 
 export type StateDocument = Record<string, unknown>;
 
@@ -187,7 +191,7 @@ const RUN_STATE_JSON_KEYS = new Set<keyof RunStateJson>([
   "workflowRuntime",
 ]);
 
-function requiredJsonString(value: unknown, key: keyof RunStateJson): string {
+function requiredJsonString(value: unknown, key: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`Invalid Run state: ${key} must be a non-empty string`);
   }
@@ -239,6 +243,189 @@ function parseJsonRecord(
     });
   }
   return structuredClone(value) as Record<string, unknown>;
+}
+
+function parseDecisionScalarRecord(
+  value: unknown,
+  label: string,
+): Record<string, string | number | boolean> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const result: Record<string, string | number | boolean> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key || entry === null) {
+      throw new Error(`Invalid Run state: ${label} must contain scalar values`);
+    }
+    if (
+      typeof entry !== "string" &&
+      typeof entry !== "number" &&
+      typeof entry !== "boolean"
+    ) {
+      throw new Error(`Invalid Run state: ${label} must contain scalar values`);
+    }
+    if (typeof entry === "number" && !Number.isFinite(entry)) {
+      throw new Error(
+        `Invalid Run state: ${label} must contain finite numbers`,
+      );
+    }
+    result[key] = entry;
+  }
+  return result;
+}
+
+function parseReviewerAttestation(
+  value: unknown,
+  label: string,
+): WorkflowReviewerAttestation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const reviewer = value as Record<string, unknown>;
+  const unknown = Object.keys(reviewer).find(
+    (key) => key !== "subject" && key !== "authorities",
+  );
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const subject = reviewer.subject;
+  if (typeof subject !== "string" || subject.length === 0) {
+    throw new Error(`Invalid Run state: ${label}.subject must be non-empty`);
+  }
+  if (
+    !Array.isArray(reviewer.authorities) ||
+    reviewer.authorities.length === 0 ||
+    reviewer.authorities.some(
+      (authority) => typeof authority !== "string" || authority.length === 0,
+    )
+  ) {
+    throw new Error(`Invalid Run state: ${label}.authorities must be strings`);
+  }
+  if (new Set(reviewer.authorities).size !== reviewer.authorities.length) {
+    throw new Error(
+      `Invalid Run state: ${label}.authorities must not contain duplicates`,
+    );
+  }
+  return {
+    subject,
+    authorities: [...(reviewer.authorities as string[])],
+  };
+}
+
+function parseDecisionReceipt(
+  value: unknown,
+  index: number,
+): WorkflowDecisionReceipt {
+  const label = `workflowRuntime.decisionReceipts[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const receipt = value as Record<string, unknown>;
+  const keys = new Set([
+    "runId",
+    "revision",
+    "resultingRevision",
+    "actionId",
+    "decisionId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "choiceId",
+    "reviewer",
+    "inputs",
+    "rationale",
+    "evidenceReferences",
+    "timestamp",
+    "protocolHash",
+    "packageHash",
+    "snapshotHash",
+  ]);
+  const unknown = Object.keys(receipt).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const integer = (key: "revision" | "resultingRevision"): number => {
+    const entry = receipt[key];
+    if (
+      typeof entry !== "number" ||
+      !Number.isSafeInteger(entry) ||
+      entry < 0
+    ) {
+      throw new Error(
+        `Invalid Run state: ${label}.${key} must be a non-negative integer`,
+      );
+    }
+    return entry;
+  };
+  const revision = integer("revision");
+  const resultingRevision = integer("resultingRevision");
+  if (resultingRevision !== revision + 1) {
+    throw new Error(
+      `Invalid Run state: ${label} revisions are not consecutive`,
+    );
+  }
+  const cycleId = receipt.cycleId;
+  if (
+    cycleId !== null &&
+    (typeof cycleId !== "string" || cycleId.length === 0)
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`,
+    );
+  }
+  const protocolHash = requiredJsonString(receipt.protocolHash, "protocolHash");
+  const packageHash = requiredJsonString(receipt.packageHash, "packageHash");
+  const snapshotHash = requiredJsonString(receipt.snapshotHash, "snapshotHash");
+  for (const [key, hash] of [
+    ["protocolHash", protocolHash],
+    ["packageHash", packageHash],
+    ["snapshotHash", snapshotHash],
+  ] as const) {
+    if (!/^[a-f0-9]{64}$/u.test(hash)) {
+      throw new Error(
+        `Invalid Run state: ${label}.${key} must be a SHA-256 hash`,
+      );
+    }
+  }
+  if (
+    receipt.rationale !== undefined &&
+    typeof receipt.rationale !== "string"
+  ) {
+    throw new Error(`Invalid Run state: ${label}.rationale must be a string`);
+  }
+  let evidenceReferences: string[] | undefined;
+  if (receipt.evidenceReferences !== undefined) {
+    if (
+      !Array.isArray(receipt.evidenceReferences) ||
+      receipt.evidenceReferences.some(
+        (reference) => typeof reference !== "string" || reference.length === 0,
+      )
+    ) {
+      throw new Error(
+        `Invalid Run state: ${label}.evidenceReferences must be strings`,
+      );
+    }
+    evidenceReferences = [...(receipt.evidenceReferences as string[])];
+  }
+  return {
+    runId: requiredJsonString(receipt.runId, "runId"),
+    revision,
+    resultingRevision,
+    actionId: requiredJsonString(receipt.actionId, "actionId"),
+    decisionId: requiredJsonString(receipt.decisionId, "decisionId"),
+    nodeId: requiredJsonString(receipt.nodeId, "nodeId"),
+    cycleId: cycleId as string | null,
+    attemptId: requiredJsonString(receipt.attemptId, "attemptId"),
+    choiceId: requiredJsonString(receipt.choiceId, "choiceId"),
+    reviewer: parseReviewerAttestation(receipt.reviewer, `${label}.reviewer`),
+    inputs: parseDecisionScalarRecord(receipt.inputs, `${label}.inputs`),
+    ...(receipt.rationale !== undefined
+      ? { rationale: receipt.rationale }
+      : {}),
+    ...(evidenceReferences ? { evidenceReferences } : {}),
+    timestamp: requiredJsonString(receipt.timestamp, "timestamp"),
+    protocolHash,
+    packageHash,
+    snapshotHash,
+  };
 }
 
 function parseWorkflowAttempt(
@@ -412,6 +599,7 @@ function parseWorkflowRuntime(
     "nextVisitOrdinal",
     "currentAttempt",
     "visits",
+    "decisionReceipts",
   ]);
   const unknown = Object.keys(runtime).find((key) => !keys.has(key));
   if (unknown) {
@@ -439,8 +627,27 @@ function parseWorkflowRuntime(
     );
   }
   const visits = runtime.visits.map(parseWorkflowVisit);
+  const decisionReceipts =
+    runtime.decisionReceipts === undefined
+      ? []
+      : Array.isArray(runtime.decisionReceipts)
+        ? runtime.decisionReceipts.map(parseDecisionReceipt)
+        : (() => {
+            throw new Error(
+              "Invalid Run state: WorkflowRuntime decisionReceipts must be an array",
+            );
+          })();
   const attemptIds = new Set<string>();
   const visitOrdinals = new Set<number>();
+  const receiptActionIds = new Set<string>();
+  for (const receipt of decisionReceipts) {
+    if (receiptActionIds.has(receipt.actionId)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime Decision Receipt ${receipt.actionId}`,
+      );
+    }
+    receiptActionIds.add(receipt.actionId);
+  }
   let outcomeCount = 0;
   for (const visit of visits) {
     if (attemptIds.has(visit.attemptId)) {
@@ -505,6 +712,7 @@ function parseWorkflowRuntime(
     nextVisitOrdinal,
     currentAttempt,
     visits,
+    decisionReceipts,
   };
 }
 

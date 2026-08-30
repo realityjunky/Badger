@@ -51,6 +51,11 @@ function parseArguments(argv) {
       index += 1;
       continue;
     }
+    if (argument === "--response") {
+      options.response = requiredOptionValue(argv, index, "--response");
+      index += 1;
+      continue;
+    }
     if (argument === "--action-id") {
       options.actionid = requiredOptionValue(argv, index, "--action-id");
       index += 1;
@@ -133,6 +138,22 @@ function parseEvidence(raw) {
   }
 }
 
+function parseDecisionResponse(raw) {
+  if (!raw || raw.trim().length === 0) {
+    throw new Error("decision requires a JSON response object.");
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error("decision requires valid JSON.", { cause: error });
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("decision requires a JSON response object.");
+  }
+  return parsed;
+}
+
 function submissionSummary(evidence, raw, nodeId) {
   if (typeof evidence.summary === "string" && evidence.summary.length > 0) {
     return evidence.summary;
@@ -168,6 +189,18 @@ function printContinuation(value) {
   if (value.disposition === "blocked") {
     console.log("NEXT: blocked");
     for (const blocker of value.blockers) console.log(`REASON: ${blocker}`);
+    return;
+  }
+  if (value.disposition === "await-user") {
+    console.log("NEXT: await-user");
+    if (value.currentNode) console.log(`NODE: ${value.currentNode}`);
+    if (value.pendingAction?.decisionId) {
+      console.log(`DECISION: ${value.pendingAction.decisionId}`);
+    }
+    if (value.pendingAction?.question) {
+      console.log(`QUESTION: ${value.pendingAction.question}`);
+    }
+    if (value.pendingAction) console.log(`ACTION: ${value.pendingAction.id}`);
     return;
   }
   console.log("NEXT: auto");
@@ -226,7 +259,12 @@ async function main() {
     else console.log("workflow-guard-ok");
     return;
   }
-  if (command !== "entry" && command !== "exit") {
+  if (
+    command !== "entry" &&
+    command !== "exit" &&
+    command !== "decision" &&
+    command !== "decide"
+  ) {
     throw new Error(`Unknown command: ${command}`);
   }
 
@@ -245,6 +283,41 @@ async function main() {
   if (command === "entry") {
     if (options.json) printJson(continuation);
     else console.log(`ENTRY OK: ${continuation.currentNode ?? "checkpoint"}`);
+    return;
+  }
+
+  if (command === "decision" || command === "decide") {
+    const response = parseDecisionResponse(options.response ?? evidenceRaw);
+    const submission = {
+      ...response,
+      kind: "decision",
+      actionId: continuation.pendingAction.id,
+      revision: continuation.revision,
+      nodeId: continuation.currentNode,
+      cycleId: continuation.cycleId,
+      attemptId: continuation.attemptId,
+    };
+    const validation = await validateWorkflowSubmission(target, submission);
+    if (validation.disposition === "blocked") {
+      throw blockedError(validation.blockers);
+    }
+    if (!options.apply) {
+      if (options.json) printJson(validation);
+      else {
+        console.log("ALL CHECKS PASSED");
+        console.log("APPLY: rerun with --apply to submit the decision");
+      }
+      return;
+    }
+    const applied = await createWorkflowRuntime().submit(target, submission);
+    if (applied.disposition === "blocked") {
+      throw blockedError(applied.blockers);
+    }
+    if (options.json) printJson(applied);
+    else {
+      console.log("ALL CHECKS PASSED");
+      printContinuation(applied);
+    }
     return;
   }
 
