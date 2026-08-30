@@ -35,10 +35,13 @@ An opted-in revisioned workflow adds `routing.fields` (or a field map) with
 allowed scalar values and uses structured `when` predicates on success edges.
 Predicates support exact equality and conjunction. The runtime selects one
 matching edge or one edge without `when` as the fallback; it rejects ambiguity,
-unknown values, graph cycles, and unreachable required Nodes before Run
-creation. Machine submissions provide route values in a separate `routing`
+unknown values, undeclared graph cycles, and unreachable required Nodes before
+Run creation. Machine submissions provide route values in a separate `routing`
 object. Attempt identity, revision, retry ordinal, and append-only visit
-outcomes are persisted by WorkflowRuntime. An explicit decision Node uses
+outcomes are persisted by WorkflowRuntime. Declared Cycles name a stable key,
+entry Node, explicit repeat transitions, and a finite `maxInstances` budget.
+First entry and accepted repeat transitions allocate stable Cycle identities;
+an exhausted budget blocks without mutation. An explicit decision Node uses
 `kind: "decision"` and declares a stable id, question, choices with stable
 ids, human labels, and one transition target per choice. It may also declare
 an object input schema with scalar fields and enumerated values, a rationale
@@ -54,5 +57,5 @@ revision, action, Node, Cycle, Attempt, choice, reviewer attestation, inputs,
 and rationale. WorkflowRuntime validates the response, selects the declared
 choice transition, and writes one identity-bound Decision Receipt with a
 runtime timestamp. Generated adapters render and forward this contract but do
-not perform policy validation or receipt writes. Declared Cycles and artifact
-versions remain separate follow-up capabilities.
+not perform policy validation, Cycle allocation, route selection, or receipt
+writes. Artifact versions remain a separate follow-up capability.

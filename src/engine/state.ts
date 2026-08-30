@@ -11,6 +11,7 @@ import type {
   RunState,
   RuntimeIdentity,
   WorkflowAttemptState,
+  WorkflowCycleState,
   WorkflowRuntimeState,
   WorkflowVisitOutcome,
   WorkflowVisitState,
@@ -428,6 +429,32 @@ function parseDecisionReceipt(
   };
 }
 
+function parseWorkflowCycle(value: unknown, label: string): WorkflowCycleState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const cycle = value as Record<string, unknown>;
+  const keys = new Set(["id", "key", "instanceOrdinal"]);
+  const unknown = Object.keys(cycle).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const instanceOrdinal = cycle.instanceOrdinal;
+  if (
+    typeof instanceOrdinal !== "number" ||
+    !Number.isSafeInteger(instanceOrdinal) ||
+    instanceOrdinal < 1
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label}.instanceOrdinal must be a positive integer`,
+    );
+  }
+  return {
+    id: requiredJsonString(cycle.id, `${label}.id` as keyof RunStateJson),
+    key: requiredJsonString(cycle.key, `${label}.key` as keyof RunStateJson),
+    instanceOrdinal,
+  };
+}
+
 function parseWorkflowAttempt(
   value: unknown,
   label: string,
@@ -454,9 +481,14 @@ function parseWorkflowAttempt(
     attempt.stepId,
     `${label}.stepId` as keyof RunStateJson,
   );
-  const cycleId = attempt.cycleId;
-  if (cycleId !== null) {
-    throw new Error(`Invalid Run state: ${label}.cycleId must be null`);
+  const cycleId = attempt.cycleId === undefined ? null : attempt.cycleId;
+  if (
+    cycleId !== null &&
+    (typeof cycleId !== "string" || cycleId.length === 0)
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`,
+    );
   }
   const visitOrdinal = attempt.visitOrdinal;
   const retryOrdinal = attempt.retryOrdinal;
@@ -478,7 +510,13 @@ function parseWorkflowAttempt(
       `Invalid Run state: ${label}.retryOrdinal must be a non-negative integer`,
     );
   }
-  return { id, stepId, cycleId: null, visitOrdinal, retryOrdinal };
+  return {
+    id,
+    stepId,
+    cycleId: cycleId as string | null,
+    visitOrdinal,
+    retryOrdinal,
+  };
 }
 
 function parseWorkflowOutcome(
@@ -559,8 +597,14 @@ function parseWorkflowVisit(value: unknown, index: number): WorkflowVisitState {
     visit.stepId,
     `${label}.stepId` as keyof RunStateJson,
   );
-  if (visit.cycleId !== null) {
-    throw new Error(`Invalid Run state: ${label}.cycleId must be null`);
+  const cycleId = visit.cycleId === undefined ? null : visit.cycleId;
+  if (
+    cycleId !== null &&
+    (typeof cycleId !== "string" || cycleId.length === 0)
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`,
+    );
   }
   const visitOrdinal = visit.visitOrdinal;
   if (
@@ -578,7 +622,7 @@ function parseWorkflowVisit(value: unknown, index: number): WorkflowVisitState {
   return {
     attemptId,
     stepId,
-    cycleId: null,
+    cycleId: cycleId as string | null,
     visitOrdinal,
     outcomes: visit.outcomes.map((outcome, outcomeIndex) =>
       parseWorkflowOutcome(outcome, `${label}.outcomes[${outcomeIndex}]`),
@@ -598,6 +642,8 @@ function parseWorkflowRuntime(
     "revision",
     "nextVisitOrdinal",
     "currentAttempt",
+    "currentCycle",
+    "cycles",
     "visits",
     "decisionReceipts",
   ]);
@@ -627,6 +673,47 @@ function parseWorkflowRuntime(
     );
   }
   const visits = runtime.visits.map(parseWorkflowVisit);
+  const cycles =
+    runtime.cycles === undefined
+      ? []
+      : Array.isArray(runtime.cycles)
+        ? runtime.cycles.map((cycle, index) =>
+            parseWorkflowCycle(cycle, `workflowRuntime.cycles[${index}]`),
+          )
+        : (() => {
+            throw new Error(
+              "Invalid Run state: workflowRuntime.cycles must be an array",
+            );
+          })();
+  const cycleIds = new Set<string>();
+  const cycleOrdinals = new Map<string, number>();
+  for (const cycle of cycles) {
+    if (cycleIds.has(cycle.id)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime Cycle ${cycle.id}`,
+      );
+    }
+    cycleIds.add(cycle.id);
+    const expectedOrdinal = (cycleOrdinals.get(cycle.key) ?? 0) + 1;
+    if (cycle.instanceOrdinal !== expectedOrdinal) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime Cycle ordinal is invalid for ${cycle.key}`,
+      );
+    }
+    cycleOrdinals.set(cycle.key, cycle.instanceOrdinal);
+  }
+  const currentCycle =
+    runtime.currentCycle === undefined || runtime.currentCycle === null
+      ? null
+      : parseWorkflowCycle(
+          runtime.currentCycle,
+          "workflowRuntime.currentCycle",
+        );
+  if (currentCycle && !cycleIds.has(currentCycle.id)) {
+    throw new Error(
+      "Invalid Run state: current WorkflowRuntime Cycle is not in cycles",
+    );
+  }
   const decisionReceipts =
     runtime.decisionReceipts === undefined
       ? []
@@ -661,6 +748,11 @@ function parseWorkflowRuntime(
         `Invalid Run state: duplicate WorkflowRuntime visit ordinal ${visit.visitOrdinal}`,
       );
     }
+    if (visit.cycleId !== null && !cycleIds.has(visit.cycleId)) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime visit references unknown Cycle ${visit.cycleId}`,
+      );
+    }
     visitOrdinals.add(visit.visitOrdinal);
     outcomeCount += visit.outcomes.length;
     if (visit.visitOrdinal > nextVisitOrdinal) {
@@ -679,6 +771,11 @@ function parseWorkflowRuntime(
   if (currentAttempt && !attemptIds.has(currentAttempt.id)) {
     throw new Error(
       "Invalid Run state: current WorkflowRuntime Attempt is not in visits",
+    );
+  }
+  if (currentAttempt && currentAttempt.cycleId !== (currentCycle?.id ?? null)) {
+    throw new Error(
+      "Invalid Run state: current WorkflowRuntime Attempt does not match current Cycle",
     );
   }
   if (revision !== outcomeCount) {
@@ -711,6 +808,8 @@ function parseWorkflowRuntime(
     revision,
     nextVisitOrdinal,
     currentAttempt,
+    currentCycle,
+    cycles,
     visits,
     decisionReceipts,
   };

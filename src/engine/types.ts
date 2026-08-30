@@ -16,6 +16,17 @@ export interface RuntimeIdentity {
   resolverHash?: string;
 }
 
+export interface WorkflowCycleState {
+  id: string;
+  key: string;
+  instanceOrdinal: number;
+}
+
+export interface WorkflowCycleTransitionState {
+  currentCycle: WorkflowCycleState | null;
+  cycles: WorkflowCycleState[];
+}
+
 export interface WorkflowAttemptState {
   id: string;
   stepId: string;
@@ -45,6 +56,8 @@ export interface WorkflowRuntimeState {
   revision: number;
   nextVisitOrdinal: number;
   currentAttempt: WorkflowAttemptState | null;
+  currentCycle: WorkflowCycleState | null;
+  cycles: WorkflowCycleState[];
   visits: WorkflowVisitState[];
   decisionReceipts: WorkflowDecisionReceipt[];
 }

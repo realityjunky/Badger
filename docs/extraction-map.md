@@ -105,10 +105,11 @@ Phase 1 certification is the stop/go gate for the next runtime phase. The
 Engine report must have `certification.status` equal to `certified`, no missing
 matrix capabilities, unchanged official and fixture sources, and no semantic
 mismatches. The deterministic linear WorkflowRuntime is delivered under Phase
-2, and issue #24 extends it with versioned acyclic conditional routing and
-revisioned Attempts and first-class decision Nodes with identity-bound receipts.
-Declared Cycles, artifact versions, Native hardening, and Primer Designer
-migration remain separately scoped.
+2, and issue #24 extends it with versioned conditional routing and revisioned
+Attempts. Issue #25 adds first-class decision Nodes with identity-bound
+receipts, and issue #26 adds bounded declared Cycles with stable identities and
+append-only repeated-visit evidence. Artifact versions, Native hardening, and
+Primer Designer migration remain separately scoped.
 
 `runEngineDifferential` runs official and private observations against one
 synthetic fixture matrix. `createPrivateEngineCommandRunner` is an injected

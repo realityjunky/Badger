@@ -2,6 +2,7 @@ import type {
   ActionOutcome,
   EngineAction,
   RuntimeIdentity,
+  WorkflowCycleState,
   WorkflowVisitState,
 } from "../engine/types.js";
 import type {
@@ -65,6 +66,8 @@ export interface WorkflowContinuation {
   pendingAction: WorkflowPendingAction | null;
   execution: WorkflowExecutionIdentity;
   decisionReceipts: WorkflowDecisionReceipt[];
+  cycles: WorkflowCycleState[];
+  visits: WorkflowVisitState[];
   blockers: string[];
 }
 
@@ -79,6 +82,8 @@ export interface WorkflowHandoff {
   nodes: NodeProtocol[];
   outputSchemas: OutputSchema[];
   decisionReceipts: WorkflowDecisionReceipt[];
+  cycles: WorkflowCycleState[];
+  visits: WorkflowVisitState[];
   continuation: WorkflowContinuation | null;
 }
 
@@ -108,6 +113,7 @@ export interface WorkflowStateProjection {
   pendingAction: WorkflowPendingAction | null;
   execution: WorkflowExecutionIdentity;
   visits: WorkflowVisitState[];
+  cycles: WorkflowCycleState[];
   decisionReceipts: WorkflowDecisionReceipt[];
   blockers: string[];
 }

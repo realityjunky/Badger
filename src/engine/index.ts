@@ -12,9 +12,12 @@ export {
 } from "./loop.js";
 export {
   resolveDeterministicNext,
+  resolveDeterministicTransition,
   resolveDeterministicStep,
+  prepareDeterministicStep,
   staticDeterministicResolver,
   type DeterministicResolver,
+  type DeterministicTransition,
 } from "./resolver.js";
 export {
   evaluateManualRun,

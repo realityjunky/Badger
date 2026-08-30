@@ -20,6 +20,7 @@ import type { WorkflowExecutionIdentity } from "./types.js";
 import { createCompletionPlan } from "./completion.js";
 import {
   isRevisionedWorkflowProtocol,
+  maxWorkflowIterations,
   resolverHash,
   validateRevisionedWorkflow,
 } from "./routing.js";
@@ -116,13 +117,26 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
         (feature) =>
           feature !== "conditional-routing" &&
           feature !== "revisioned-attempts" &&
-          feature !== "decision-nodes",
+          feature !== "decision-nodes" &&
+          feature !== "bounded-cycles",
       ) ||
       !protocol.capabilities.features.includes("conditional-routing") ||
       !protocol.capabilities.features.includes("revisioned-attempts")
     ) {
       throw new Error("Workflow Protocol capabilities are invalid");
     }
+    if (
+      protocol.cycles !== undefined &&
+      !protocol.capabilities.features.includes("bounded-cycles")
+    ) {
+      throw new Error(
+        "Workflow Protocol cycle declarations require bounded-cycles capability",
+      );
+    }
+  } else if (protocol.cycles !== undefined) {
+    throw new Error(
+      "Workflow Protocol cycle declarations require versioned capabilities",
+    );
   }
   const schemaIds = new Set<string>();
   for (const schema of protocol.outputSchemas) {
@@ -277,6 +291,63 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
       throw new Error(
         `Workflow Protocol transition condition is unsupported: ${String(transition.condition)}`,
       );
+    }
+  }
+  if (protocol.cycles !== undefined && !Array.isArray(protocol.cycles)) {
+    throw new Error("Workflow Protocol cycles must be an array");
+  }
+  for (const cycle of protocol.cycles ?? []) {
+    if (!cycle || typeof cycle !== "object") {
+      throw new Error("Workflow Protocol Cycle declarations must be objects");
+    }
+    const cycleKeys = new Set([
+      "key",
+      "entry",
+      "repeatTransitions",
+      "maxInstances",
+    ]);
+    const unknown = Object.keys(cycle).find((key) => !cycleKeys.has(key));
+    if (unknown) {
+      throw new Error(`Workflow Protocol Cycle has unknown field: ${unknown}`);
+    }
+    if (typeof cycle.key !== "string" || cycle.key.length === 0) {
+      throw new Error("Workflow Protocol Cycle key is required");
+    }
+    if (typeof cycle.entry !== "string" || cycle.entry.length === 0) {
+      throw new Error(
+        `Workflow Protocol Cycle ${cycle.key} entry Node is required`,
+      );
+    }
+    if (!Array.isArray(cycle.repeatTransitions)) {
+      throw new Error(
+        `Workflow Protocol Cycle ${cycle.key} repeatTransitions must be an array`,
+      );
+    }
+    if (!Number.isSafeInteger(cycle.maxInstances) || cycle.maxInstances < 1) {
+      throw new Error(
+        `Workflow Protocol Cycle ${cycle.key} maxInstances must be a finite positive integer`,
+      );
+    }
+    for (const repeat of cycle.repeatTransitions) {
+      if (
+        !repeat ||
+        typeof repeat !== "object" ||
+        typeof repeat.from !== "string" ||
+        typeof repeat.to !== "string"
+      ) {
+        throw new Error(
+          `Workflow Protocol Cycle ${cycle.key} repeat transitions must name from and to Nodes`,
+        );
+      }
+      const repeatKeys = new Set(["from", "to"]);
+      const unknownRepeat = Object.keys(repeat).find(
+        (key) => !repeatKeys.has(key),
+      );
+      if (unknownRepeat) {
+        throw new Error(
+          `Workflow Protocol Cycle ${cycle.key} repeat transition has unknown field: ${unknownRepeat}`,
+        );
+      }
     }
   }
 }
@@ -515,7 +586,7 @@ function compileGuardrails(
     allowedSkills: compiledSkillIds(protocol, nodes),
     allowedAgents: [],
     allowedTools: [],
-    maxIterations: Math.max(nodes.length, 1),
+    maxIterations: maxWorkflowIterations(protocol),
     maxRetriesPerAction: 3,
     confirmationRequiredFor: [],
   };

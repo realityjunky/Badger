@@ -248,10 +248,11 @@ function parseAction(value: unknown): EngineAction {
     );
   }
   if (Object.prototype.hasOwnProperty.call(value, "cycleId")) {
-    if (value.cycleId !== null) {
-      throw new Error("Invalid Run pending action: cycleId must be null");
-    }
-    action.cycleId = null;
+    action.cycleId = nullableText(
+      value.cycleId,
+      "cycleId",
+      "Run pending action",
+    );
   }
   for (const key of ["visitOrdinal", "retryOrdinal"] as const) {
     if (!Object.prototype.hasOwnProperty.call(value, key)) continue;

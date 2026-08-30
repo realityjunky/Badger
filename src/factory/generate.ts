@@ -40,6 +40,14 @@ function entryMarkdown(proposal: FactoryProposal): string {
         `- **${route.id}**: ${route.nodeOrder.map((node) => `\`${node}\``).join(" → ")}`,
     )
     .join("\n");
+  const cycles = (proposal.workflow.cycles ?? [])
+    .map(
+      (cycle) =>
+        `- **${cycle.key}**: entry \`${cycle.entry}\`, maximum \`${cycle.maxInstances}\` instance(s), repeat ${cycle.repeatTransitions
+          .map((transition) => `\`${transition.from}\` → \`${transition.to}\``)
+          .join(", ")}`,
+    )
+    .join("\n");
   const executableNodeOrder = executableNodeIds
     .map((nodeId) => `\`${nodeId}\``)
     .join(" → ");
@@ -57,6 +65,14 @@ Read the WorkflowRuntime continuation before entering a Node. The runtime owns r
 ## Declared Routes
 
 ${routes || "- **default**: the runtime validates the active Node route before starting."}
+
+## Declared Cycles
+
+${cycles || "- None. The workflow is not cyclic."}
+
+Cycle and Attempt identities come from the authoritative WorkflowRuntime. A
+repeat transition allocates the next Cycle only when the declared finite budget
+allows it; an exhausted budget is a blocker and does not create new state.
 
 ## Executable Node Order
 

@@ -147,6 +147,7 @@ export interface WorkflowInput {
   customNodes: NodeTemplate[];
   outputSchemas?: OutputSchema[];
   routing?: WorkflowRouting;
+  cycles?: WorkflowCycleDefinition[];
   capabilities?: WorkflowProtocolCapabilities;
 }
 
@@ -181,6 +182,18 @@ export interface WorkflowTransition {
   when?: WorkflowRoutingCondition;
 }
 
+export interface WorkflowCycleRepeatTransition {
+  from: string;
+  to: string;
+}
+
+export interface WorkflowCycleDefinition {
+  key: string;
+  entry: string;
+  repeatTransitions: WorkflowCycleRepeatTransition[];
+  maxInstances: number;
+}
+
 export interface WorkflowRoute {
   id: string;
   nodeOrder: string[];
@@ -195,7 +208,10 @@ export interface WorkflowRouting {
 }
 
 export type WorkflowProtocolCapability =
-  "conditional-routing" | "revisioned-attempts" | "decision-nodes";
+  | "conditional-routing"
+  | "revisioned-attempts"
+  | "decision-nodes"
+  | "bounded-cycles";
 
 export interface WorkflowProtocolCapabilities {
   version: 3;
@@ -227,6 +243,7 @@ export interface WorkflowProtocol {
   outputSchemas: OutputSchema[];
   capabilities?: WorkflowProtocolCapabilities;
   routing?: WorkflowRouting;
+  cycles?: WorkflowCycleDefinition[];
   state: {
     kind: "workflow-run";
     statePath: string;

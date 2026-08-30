@@ -28,7 +28,9 @@ import {
 import {
   WorkflowRouteResolutionError,
   isRevisionedWorkflowProtocol,
-  resolveWorkflowNext,
+  resolveWorkflowTransition,
+  validateWorkflowCycleState,
+  workflowCycleOwnsNode,
 } from "./routing.js";
 import { resolverForPackage } from "./resolver.js";
 import {
@@ -376,13 +378,15 @@ function continuation(
     runId: result.state.runId,
     revision: runtimeState?.revision ?? 0,
     currentNode: currentNode(result.state, identity, result.action),
-    cycleId: currentAttempt?.cycleId ?? null,
+    cycleId: runtimeState?.currentCycle?.id ?? currentAttempt?.cycleId ?? null,
     attemptId: currentAttempt?.id ?? null,
     visitOrdinal: currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     pendingAction: result.action,
     execution: structuredClone(identity),
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
+    cycles: structuredClone(runtimeState?.cycles ?? []),
+    visits: structuredClone(runtimeState?.visits ?? []),
     blockers: disposition === "blocked" && result.reason ? [result.reason] : [],
   };
 }
@@ -474,7 +478,7 @@ export async function projectWorkflowState(
     runId: state.runId,
     revision: runtimeState?.revision ?? 0,
     currentNode: currentNode(state, verified.identity, verified.pending),
-    cycleId: currentAttempt?.cycleId ?? null,
+    cycleId: runtimeState?.currentCycle?.id ?? currentAttempt?.cycleId ?? null,
     attemptId: currentAttempt?.id ?? null,
     visitOrdinal: currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
@@ -485,6 +489,7 @@ export async function projectWorkflowState(
     execution: structuredClone(verified.identity),
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     visits: structuredClone(runtimeState?.visits ?? []),
+    cycles: structuredClone(runtimeState?.cycles ?? []),
     blockers:
       status === "blocked"
         ? [
@@ -599,6 +604,64 @@ async function verifyStoredPackage(
       "WorkflowRuntime revisioned state is not valid for a legacy Run",
     );
   }
+  if (pkg.runtime.capabilityVersion === 3 && state.workflowRuntime) {
+    validateWorkflowCycleState(
+      pkg.runtime.protocol,
+      state.runId,
+      state.workflowRuntime,
+    );
+    const cycleById = new Map(
+      state.workflowRuntime.cycles.map((cycle) => [cycle.id, cycle]),
+    );
+    for (const visit of state.workflowRuntime.visits) {
+      const nodeId = Object.entries(identity.nodeToStep).find(
+        ([, stepId]) => stepId === visit.stepId,
+      )?.[0];
+      if (!nodeId) {
+        throw new Error("WorkflowRuntime visit has an unknown Node identity");
+      }
+      if (visit.cycleId !== null) {
+        const cycle = cycleById.get(visit.cycleId);
+        const plan = pkg.runtime.protocol.cycles?.find(
+          (candidate) => candidate.key === cycle?.key,
+        );
+        if (!cycle || !plan) {
+          throw new Error(
+            "WorkflowRuntime visit has an unknown Cycle identity",
+          );
+        }
+        if (!workflowCycleOwnsNode(pkg.runtime.protocol, cycle.key, nodeId)) {
+          throw new Error("WorkflowRuntime visit has an invalid Cycle Node");
+        }
+      }
+    }
+    if (state.currentStep !== null) {
+      const currentNodeId = Object.entries(identity.nodeToStep).find(
+        ([, stepId]) => stepId === state.currentStep,
+      )?.[0];
+      if (!currentNodeId) {
+        throw new Error("WorkflowRuntime current Node identity is invalid");
+      }
+      const inCycle = state.workflowRuntime.cycles.some((cycle) =>
+        workflowCycleOwnsNode(pkg.runtime!.protocol, cycle.key, currentNodeId),
+      );
+      if (inCycle !== Boolean(state.workflowRuntime.currentCycle)) {
+        throw new Error("WorkflowRuntime current Cycle position is invalid");
+      }
+      if (
+        state.workflowRuntime.currentCycle &&
+        !workflowCycleOwnsNode(
+          pkg.runtime.protocol,
+          state.workflowRuntime.currentCycle.key,
+          currentNodeId,
+        )
+      ) {
+        throw new Error("WorkflowRuntime current Cycle position is invalid");
+      }
+    } else if (state.workflowRuntime.currentCycle) {
+      throw new Error("WorkflowRuntime current Cycle position is invalid");
+    }
+  }
   for (const receipt of state.workflowRuntime?.decisionReceipts ?? []) {
     if (
       receipt.runId !== state.runId ||
@@ -638,6 +701,9 @@ async function verifyStoredPackage(
       !choice
     ) {
       throw new Error("WorkflowRuntime Decision Receipt context is invalid");
+    }
+    if (receipt.cycleId !== visit.cycleId) {
+      throw new Error("WorkflowRuntime Decision Receipt Cycle is invalid");
     }
     validateReviewer(receipt.reviewer, node.decision.reviewer);
     validateDecisionInputSchema(
@@ -920,10 +986,12 @@ function routeBlockers(
     return [];
   }
   try {
-    resolveWorkflowNext(
+    resolveWorkflowTransition(
       protocol,
       prepared.node,
       engineOutcome(prepared, submission),
+      prepared.verified.state.workflowRuntime,
+      prepared.verified.state.runId,
     );
     return [];
   } catch (error) {
@@ -944,7 +1012,9 @@ function blockedContinuation(
     revision: prepared.verified.state.workflowRuntime?.revision ?? 0,
     currentNode: prepared.node,
     cycleId:
-      prepared.verified.state.workflowRuntime?.currentAttempt?.cycleId ?? null,
+      prepared.verified.state.workflowRuntime?.currentCycle?.id ??
+      prepared.verified.state.workflowRuntime?.currentAttempt?.cycleId ??
+      null,
     attemptId:
       prepared.verified.state.workflowRuntime?.currentAttempt?.id ?? null,
     visitOrdinal:
@@ -957,6 +1027,12 @@ function blockedContinuation(
     execution: structuredClone(prepared.verified.identity),
     decisionReceipts: structuredClone(
       prepared.verified.state.workflowRuntime?.decisionReceipts ?? [],
+    ),
+    cycles: structuredClone(
+      prepared.verified.state.workflowRuntime?.cycles ?? [],
+    ),
+    visits: structuredClone(
+      prepared.verified.state.workflowRuntime?.visits ?? [],
     ),
     blockers: [...blockers],
   };
@@ -1010,6 +1086,8 @@ export async function projectWorkflowHandoff(
     nodes: structuredClone(protocol.nodes),
     outputSchemas: structuredClone(protocol.outputSchemas),
     decisionReceipts: structuredClone(current?.decisionReceipts ?? []),
+    cycles: structuredClone(current?.cycles ?? []),
+    visits: structuredClone(current?.visits ?? []),
     continuation: current ? structuredClone(current) : null,
   };
 }
@@ -1143,6 +1221,8 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 revision: 0,
                 nextVisitOrdinal: 0,
                 currentAttempt: null,
+                currentCycle: null,
+                cycles: [],
                 visits: [],
                 decisionReceipts: [],
               },

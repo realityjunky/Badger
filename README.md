@@ -16,6 +16,7 @@ The package includes:
 - deterministic and adaptive Engine loop behavior with manual and standalone Run façades;
 - protected Run state, pending-action, trajectory, artifact, context, and checkpoint storage;
 - a public WorkflowRuntime for deterministic workflow start, resume, revisioned outcome submission, and recovery;
+- bounded declared Cycle execution with stable identities and append-only repeated-visit evidence;
 - official/private differential observations for the pinned Engine behavior.
 
 It intentionally excludes Comet Classic policy, Comet Native policy and hardening, Comet Entry, host platform installers, ambient resume routing, and external platform adapters.
@@ -106,13 +107,18 @@ the expected Workflow Node with `nodeId`. Output Schema evidence is supplied
 under `evidence`, while required Skill-call, augmentation, and guardrail proof
 may use the corresponding check identifiers in `evidence.completedChecks`.
 The returned continuation reports the current Workflow Node, pending Engine
-action, stable Node-to-step mapping, and protocol/package/snapshot identity.
+action, current Cycle and Attempt, full Cycle and visit ledgers, stable
+Node-to-step mapping, and protocol/package/snapshot identity.
 Opted-in branch protocols declare routing fields and allowed scalar values. The
 runtime supports exact equality, conjunction, one fallback edge, revisioned
 outcomes, deterministic visit ordinals, and append-only Attempt evidence.
-Ambiguous routes, undeclared values, graph cycles, and unreachable required
-Nodes are rejected before Run state is created. Cycle allocation and artifact
-versions remain separate follow-up capabilities.
+Ambiguous routes, undeclared values, undeclared graph cycles, and unreachable
+required Nodes are rejected before Run state is created. Declared Cycles require
+an entry Node, explicit repeat transitions, and a finite `maxInstances` budget.
+First entry and accepted repeat transitions allocate stable Cycle identities
+before the target Node is entered; exhausting the budget returns a non-mutating
+blocker. Re-entered Nodes receive new Attempts, while Engine retries remain
+within the existing Attempt.
 
 Revisioned Runs start at logical revision `0`. Each accepted machine outcome or
 decision response advances it once; route blockers, invalid submissions, and
@@ -136,9 +142,9 @@ package, including both generated-adapter and public-runtime entry paths. Its
 report binds the generated-package hash to the normalized protocol hash,
 compiled package hash, Engine snapshot hash, declared and observed Node order,
 recovery evidence, and terminal completion. Review readiness requires this
-evidence to remain current. Phase 3 branch/Attempt and decision/receipt
-behavior is covered by focused synthetic runtime tests; declared Cycles,
-artifact versions, Native-derived durability, and Primer Designer migration
-remain separate follow-up tickets.
+evidence to remain current. Phase 3 branch/Attempt, decision/receipt, and
+declared-Cycle behavior is covered by focused synthetic runtime tests; artifact
+versions, Native-derived durability, and Primer Designer migration remain
+separate follow-up tickets.
 
 See `docs/workflow-runtime-certification.md` for the certification contract.

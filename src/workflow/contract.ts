@@ -5,6 +5,7 @@ import type {
   NodeTemplate,
   OutputSchema,
   WorkflowInput,
+  WorkflowCycleDefinition,
   WorkflowProtocol,
   WorkflowProtocolCapabilities,
   WorkflowDecisionDefinition,
@@ -29,7 +30,8 @@ export interface ValidationFinding {
     | "invalid-schema"
     | "unknown-transition-node"
     | "invalid-route"
-    | "invalid-decision";
+    | "invalid-decision"
+    | "invalid-cycle";
   message: string;
   nodeId?: string;
 }
@@ -330,6 +332,17 @@ function cloneNode(node: NodeTemplate): NodeTemplate {
   };
 }
 
+function cloneCycles(
+  cycles: WorkflowCycleDefinition[] | undefined,
+): WorkflowCycleDefinition[] | undefined {
+  return cycles?.map((cycle) => ({
+    ...cycle,
+    repeatTransitions: cycle.repeatTransitions.map((transition) => ({
+      ...transition,
+    })),
+  }));
+}
+
 function activeNodeIds(nodes: NodeTemplate[]): Set<string> {
   return new Set(nodes.filter((node) => !node.disabled).map((node) => node.id));
 }
@@ -379,6 +392,62 @@ function validateRouting(
           message: `${route.id}: Node ${nodeId} appears more than once`,
         });
       seen.add(nodeId);
+    }
+  }
+}
+
+function validateCycles(
+  input: WorkflowInput,
+  nodes: NodeTemplate[],
+  findings: ValidationFinding[],
+): void {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const keys = new Set<string>();
+  for (const cycle of input.cycles ?? []) {
+    const invalid = (message: string, nodeId?: string): void => {
+      findings.push({ code: "invalid-cycle", message, nodeId });
+    };
+    if (!idPattern.test(cycle.key) || keys.has(cycle.key)) {
+      invalid(`Invalid or duplicate Cycle key: ${cycle.key}`);
+    }
+    keys.add(cycle.key);
+    const entry = byId.get(cycle.entry);
+    if (!entry || entry.disabled) {
+      invalid(
+        `Cycle ${cycle.key} references an unknown or disabled entry Node: ${cycle.entry}`,
+        cycle.entry,
+      );
+    }
+    if (!Number.isSafeInteger(cycle.maxInstances) || cycle.maxInstances < 1) {
+      invalid(
+        `Cycle ${cycle.key} maxInstances must be a finite positive integer`,
+      );
+    }
+    if (
+      !Array.isArray(cycle.repeatTransitions) ||
+      cycle.repeatTransitions.length === 0
+    ) {
+      invalid(`Cycle ${cycle.key} repeatTransitions must be non-empty`);
+      continue;
+    }
+    const repeatKeys = new Set<string>();
+    for (const repeat of cycle.repeatTransitions) {
+      const from = byId.get(repeat.from);
+      const to = byId.get(repeat.to);
+      const repeatKey = `${repeat.from}\u0000${repeat.to}`;
+      if (repeatKeys.has(repeatKey)) {
+        invalid(
+          `Cycle ${cycle.key} repeats the same transition: ${repeat.from} -> ${repeat.to}`,
+          repeat.from,
+        );
+      }
+      repeatKeys.add(repeatKey);
+      if (!from || from.disabled || !to || to.disabled) {
+        invalid(
+          `Cycle ${cycle.key} references an unknown or disabled repeat Node: ${repeat.from} -> ${repeat.to}`,
+          !from || from.disabled ? repeat.from : repeat.to,
+        );
+      }
     }
   }
 }
@@ -544,6 +613,7 @@ export function validateWorkflow(input: WorkflowInput): ValidationFinding[] {
     }
   }
   validateRouting(input, nodes, findings);
+  validateCycles(input, nodes, findings);
   return findings;
 }
 
@@ -611,7 +681,8 @@ function phase3Enabled(input: WorkflowInput): boolean {
     input.capabilities?.version === 3 ||
     input.routing?.fields !== undefined ||
     input.routing?.routingFields !== undefined ||
-    input.customNodes.some((node) => node.kind === "decision"),
+    input.customNodes.some((node) => node.kind === "decision") ||
+    input.cycles !== undefined,
   );
 }
 
@@ -643,6 +714,7 @@ function protocolCapabilities(
   if (input.customNodes.some((node) => node.kind === "decision")) {
     features.add("decision-nodes");
   }
+  if (input.cycles !== undefined) features.add("bounded-cycles");
   return {
     version: 3,
     features: [...features],
@@ -766,6 +838,7 @@ export function normalizeWorkflow(input: WorkflowInput): NormalizedWorkflow {
           },
         }
       : {}),
+    ...(input.cycles ? { cycles: cloneCycles(input.cycles) } : {}),
     state: {
       kind: "workflow-run",
       statePath: `.comet/runs/${input.name}/state.json`,

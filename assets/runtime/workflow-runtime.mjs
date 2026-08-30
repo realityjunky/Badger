@@ -1535,10 +1535,11 @@ function parseAction(value) {
     );
   }
   if (Object.prototype.hasOwnProperty.call(value, "cycleId")) {
-    if (value.cycleId !== null) {
-      throw new Error("Invalid Run pending action: cycleId must be null");
-    }
-    action.cycleId = null;
+    action.cycleId = nullableText(
+      value.cycleId,
+      "cycleId",
+      "Run pending action"
+    );
   }
   for (const key of ["visitOrdinal", "retryOrdinal"]) {
     if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
@@ -2123,6 +2124,14 @@ var WorkflowRouteResolutionError = class extends Error {
     this.blockers = [message];
   }
 };
+var WorkflowCycleBudgetError = class extends WorkflowRouteResolutionError {
+  constructor(key, maxInstances) {
+    super(
+      `Cycle budget exhausted for ${key}: maximum ${maxInstances} instances reached`
+    );
+    this.name = "WorkflowCycleBudgetError";
+  }
+};
 function fieldId(field) {
   if (!field || typeof field !== "object") return void 0;
   return field.id ?? field.name;
@@ -2306,13 +2315,411 @@ function transitionsFrom(protocol, nodeId) {
     };
   });
 }
+function transitionKey(from, to) {
+  return `${from}\0${to}`;
+}
+function activeSuccessGraph(protocol) {
+  const active = activeNodes(protocol);
+  const activeIds = new Set(active);
+  return new Map(
+    [...active].map((nodeId) => [
+      nodeId,
+      transitionsFrom(protocol, nodeId).filter(
+        (transition) => transition.to !== null && activeIds.has(transition.to)
+      )
+    ])
+  );
+}
+function stronglyConnectedComponents(graph) {
+  let nextIndex = 0;
+  const indices = /* @__PURE__ */ new Map();
+  const lowLinks = /* @__PURE__ */ new Map();
+  const stack = [];
+  const onStack = /* @__PURE__ */ new Set();
+  const components = [];
+  const connect = (nodeId) => {
+    indices.set(nodeId, nextIndex);
+    lowLinks.set(nodeId, nextIndex);
+    nextIndex += 1;
+    stack.push(nodeId);
+    onStack.add(nodeId);
+    for (const transition of graph.get(nodeId) ?? []) {
+      const target = transition.to;
+      if (!indices.has(target)) {
+        connect(target);
+        lowLinks.set(
+          nodeId,
+          Math.min(lowLinks.get(nodeId), lowLinks.get(target))
+        );
+      } else if (onStack.has(target)) {
+        lowLinks.set(
+          nodeId,
+          Math.min(lowLinks.get(nodeId), indices.get(target))
+        );
+      }
+    }
+    if (lowLinks.get(nodeId) !== indices.get(nodeId)) return;
+    const component = [];
+    let member;
+    do {
+      member = stack.pop();
+      onStack.delete(member);
+      component.push(member);
+    } while (member !== nodeId);
+    components.push(component);
+  };
+  for (const nodeId of graph.keys()) {
+    if (!indices.has(nodeId)) connect(nodeId);
+  }
+  return components;
+}
+function cyclicComponents(graph) {
+  const components = stronglyConnectedComponents(graph);
+  const componentByNode = /* @__PURE__ */ new Map();
+  for (const component of components) {
+    const members = new Set(component);
+    const cyclic = component.length > 1 || (graph.get(component[0]) ?? []).some(
+      (transition) => transition.to === component[0]
+    );
+    if (!cyclic) continue;
+    for (const nodeId of members) componentByNode.set(nodeId, component);
+  }
+  return componentByNode;
+}
+function componentKey(component) {
+  return [...component].sort().join("\0");
+}
+function hasCycleWithoutRepeats(graph, component, repeatTransitions) {
+  const reduced = new Map(
+    [...component].map((nodeId) => [
+      nodeId,
+      (graph.get(nodeId) ?? []).filter(
+        (transition) => !repeatTransitions.has(transitionKey(nodeId, transition.to))
+      )
+    ])
+  );
+  return cyclicComponents(reduced).size > 0;
+}
+function cycleDefinitionError(definition, message) {
+  return new Error(`Workflow Protocol Cycle ${definition.key}: ${message}`);
+}
+function cycleAnalysis(protocol) {
+  const graph = activeSuccessGraph(protocol);
+  const activeIds = new Set(graph.keys());
+  const cyclicByNode = cyclicComponents(graph);
+  const componentDefinitions = /* @__PURE__ */ new Map();
+  const plans = [];
+  const planByKey = /* @__PURE__ */ new Map();
+  for (const definition of protocol.cycles ?? []) {
+    if (planByKey.has(definition.key)) {
+      throw cycleDefinitionError(definition, "cycle key must be unique");
+    }
+    if (typeof definition.key !== "string" || definition.key.length === 0) {
+      throw new Error("Workflow Protocol Cycle key must be a non-empty string");
+    }
+    if (!activeIds.has(definition.entry)) {
+      throw cycleDefinitionError(
+        definition,
+        `entry Node is unknown or disabled: ${definition.entry}`
+      );
+    }
+    if (!Number.isSafeInteger(definition.maxInstances) || definition.maxInstances < 1) {
+      throw cycleDefinitionError(
+        definition,
+        "maxInstances must be a finite positive integer"
+      );
+    }
+    if (!Array.isArray(definition.repeatTransitions) || definition.repeatTransitions.length === 0) {
+      throw cycleDefinitionError(
+        definition,
+        "repeatTransitions must be a non-empty array"
+      );
+    }
+    const component = cyclicByNode.get(definition.entry);
+    if (!component) {
+      throw cycleDefinitionError(
+        definition,
+        "entry Node does not belong to a graph cycle"
+      );
+    }
+    const componentId = componentKey(component);
+    const declarations = componentDefinitions.get(componentId) ?? [];
+    declarations.push(definition);
+    componentDefinitions.set(componentId, declarations);
+    const members = new Set(component);
+    const repeats = /* @__PURE__ */ new Set();
+    for (const repeat of definition.repeatTransitions) {
+      if (!activeIds.has(repeat.from) || !activeIds.has(repeat.to) || !members.has(repeat.from) || !members.has(repeat.to)) {
+        throw cycleDefinitionError(
+          definition,
+          `repeat transition is outside its cycle: ${repeat.from} -> ${repeat.to}`
+        );
+      }
+      const matches = (graph.get(repeat.from) ?? []).filter(
+        (transition) => transition.to === repeat.to
+      );
+      if (matches.length === 0) {
+        throw cycleDefinitionError(
+          definition,
+          `repeat transition is not a declared success edge: ${repeat.from} -> ${repeat.to}`
+        );
+      }
+      if (matches.length > 1) {
+        throw cycleDefinitionError(
+          definition,
+          `repeat transition is ambiguous: ${repeat.from} -> ${repeat.to}`
+        );
+      }
+      const key = transitionKey(repeat.from, repeat.to);
+      if (repeats.has(key)) {
+        throw cycleDefinitionError(
+          definition,
+          `repeat transition is duplicated: ${repeat.from} -> ${repeat.to}`
+        );
+      }
+      repeats.add(key);
+    }
+    if (hasCycleWithoutRepeats(graph, members, repeats)) {
+      throw cycleDefinitionError(
+        definition,
+        "contains an unbounded path without a declared repeat transition"
+      );
+    }
+    const plan = {
+      definition,
+      nodes: members,
+      repeatTransitions: repeats
+    };
+    plans.push(plan);
+    planByKey.set(definition.key, plan);
+  }
+  for (const [nodeId, component] of cyclicByNode) {
+    const definitions = componentDefinitions.get(componentKey(component)) ?? [];
+    if (definitions.length === 0) {
+      throw new Error(
+        "Workflow Protocol success route contains an undeclared cycle"
+      );
+    }
+    if (definitions.length > 1) {
+      throw new Error(
+        `Workflow Protocol has overlapping ambiguous Cycle ownership: ${componentKey(component)}`
+      );
+    }
+    const entry = definitions[0].entry;
+    for (const incoming of graph) {
+      if (component.includes(incoming[0])) continue;
+      for (const transition of incoming[1]) {
+        if (transition.to === nodeId && nodeId !== entry) {
+          throw cycleDefinitionError(
+            definitions[0],
+            `cycle component must be entered through ${entry}`
+          );
+        }
+      }
+    }
+  }
+  const workflowEntry = [...graph.keys()][0];
+  for (const plan of plans) {
+    if (workflowEntry && plan.nodes.has(workflowEntry) && plan.definition.entry !== workflowEntry) {
+      throw cycleDefinitionError(
+        plan.definition,
+        `workflow entry must be ${plan.definition.entry}`
+      );
+    }
+  }
+  const ownerByNode = /* @__PURE__ */ new Map();
+  for (const plan of plans) {
+    for (const nodeId of plan.nodes) {
+      if (ownerByNode.has(nodeId)) {
+        throw new Error(
+          `Workflow Protocol has overlapping ambiguous Cycle ownership: ${nodeId}`
+        );
+      }
+      ownerByNode.set(nodeId, plan);
+    }
+  }
+  return { plans, ownerByNode, planByKey };
+}
+function validateWorkflowCycleState(protocol, runId, runtime) {
+  const analysis = cycleAnalysis(protocol);
+  const seenIds = /* @__PURE__ */ new Set();
+  const counts = /* @__PURE__ */ new Map();
+  for (const cycle of runtime.cycles) {
+    const plan = analysis.planByKey.get(cycle.key);
+    if (!plan) {
+      throw new Error(
+        `WorkflowRuntime persisted Cycle is not declared: ${cycle.key}`
+      );
+    }
+    if (seenIds.has(cycle.id)) {
+      throw new Error(
+        `WorkflowRuntime persisted Cycle identity is duplicated: ${cycle.id}`
+      );
+    }
+    seenIds.add(cycle.id);
+    const expectedOrdinal = (counts.get(cycle.key) ?? 0) + 1;
+    if (cycle.instanceOrdinal !== expectedOrdinal) {
+      throw new Error(
+        `WorkflowRuntime persisted Cycle ordinal is invalid for ${cycle.key}`
+      );
+    }
+    if (cycle.instanceOrdinal > plan.definition.maxInstances) {
+      throw new Error(
+        `WorkflowRuntime persisted Cycle exceeds its budget: ${cycle.key}`
+      );
+    }
+    if (cycle.id !== cycleIdentity(runId, cycle.key, cycle.instanceOrdinal)) {
+      throw new Error(
+        `WorkflowRuntime persisted Cycle identity is invalid: ${cycle.key}`
+      );
+    }
+    counts.set(cycle.key, cycle.instanceOrdinal);
+  }
+  if (runtime.currentCycle && !seenIds.has(runtime.currentCycle.id)) {
+    throw new Error(
+      "WorkflowRuntime current Cycle is not present in the Cycle ledger"
+    );
+  }
+  if (runtime.currentCycle && (runtime.currentCycle.id !== cycleIdentity(
+    runId,
+    runtime.currentCycle.key,
+    runtime.currentCycle.instanceOrdinal
+  ) || !analysis.planByKey.has(runtime.currentCycle.key))) {
+    throw new Error("WorkflowRuntime current Cycle identity is invalid");
+  }
+}
+function workflowCycleOwnsNode(protocol, key, nodeId) {
+  return cycleAnalysis(protocol).planByKey.get(key)?.nodes.has(nodeId) ?? false;
+}
+function cycleIdentity(runId, key, instanceOrdinal) {
+  return `cycle-${sha256(`${runId}:${key}:${instanceOrdinal}`).slice(0, 24)}`;
+}
+function allocateCycle(runId, plan, cycles) {
+  const instanceOrdinal = cycles.filter((cycle) => cycle.key === plan.definition.key).length + 1;
+  if (instanceOrdinal > plan.definition.maxInstances) {
+    throw new WorkflowCycleBudgetError(
+      plan.definition.key,
+      plan.definition.maxInstances
+    );
+  }
+  return {
+    id: cycleIdentity(runId, plan.definition.key, instanceOrdinal),
+    key: plan.definition.key,
+    instanceOrdinal
+  };
+}
+function copyCycleTransitionState(runtime) {
+  return {
+    currentCycle: runtime.currentCycle ? structuredClone(runtime.currentCycle) : null,
+    cycles: structuredClone(runtime.cycles ?? [])
+  };
+}
+function prepareWorkflowCycleEntry(protocol, runId, runtime, nodeId) {
+  const analysis = cycleAnalysis(protocol);
+  const next = copyCycleTransitionState(runtime);
+  const owner = analysis.ownerByNode.get(nodeId);
+  if (next.currentCycle) {
+    const activePlan = analysis.planByKey.get(next.currentCycle.key);
+    if (!activePlan) {
+      throw new Error(
+        `WorkflowRuntime current Cycle is not declared: ${next.currentCycle.key}`
+      );
+    }
+    if (activePlan.nodes.has(nodeId)) return next;
+    if (!owner) {
+      next.currentCycle = null;
+      return next;
+    }
+    if (nodeId !== owner.definition.entry) {
+      throw cycleDefinitionError(
+        owner.definition,
+        `Node ${nodeId} cannot be entered except through ${owner.definition.entry}`
+      );
+    }
+    const allocated2 = allocateCycle(runId, owner, next.cycles);
+    next.cycles.push(allocated2);
+    next.currentCycle = allocated2;
+    return next;
+  }
+  if (!owner) return next;
+  if (nodeId !== owner.definition.entry) {
+    throw cycleDefinitionError(
+      owner.definition,
+      `Node ${nodeId} cannot be entered without its entry Node`
+    );
+  }
+  const allocated = allocateCycle(runId, owner, next.cycles);
+  next.cycles.push(allocated);
+  next.currentCycle = allocated;
+  return next;
+}
+function resolveWorkflowCycleTransition(protocol, runId, runtime, transition, nextNode) {
+  const analysis = cycleAnalysis(protocol);
+  const next = copyCycleTransitionState(runtime);
+  if (nextNode === null) {
+    next.currentCycle = null;
+    return next;
+  }
+  const owner = analysis.ownerByNode.get(nextNode);
+  if (next.currentCycle) {
+    const activePlan = analysis.planByKey.get(next.currentCycle.key);
+    if (!activePlan) {
+      throw new Error(
+        `WorkflowRuntime current Cycle is not declared: ${next.currentCycle.key}`
+      );
+    }
+    if (activePlan.repeatTransitions.has(transitionKey(transition.from, nextNode))) {
+      const allocated3 = allocateCycle(runId, activePlan, next.cycles);
+      next.cycles.push(allocated3);
+      next.currentCycle = allocated3;
+      return next;
+    }
+    if (activePlan.nodes.has(nextNode)) return next;
+    if (!owner) {
+      next.currentCycle = null;
+      return next;
+    }
+    if (nextNode !== owner.definition.entry) {
+      throw cycleDefinitionError(
+        owner.definition,
+        `Node ${nextNode} cannot be entered except through ${owner.definition.entry}`
+      );
+    }
+    const allocated2 = allocateCycle(runId, owner, next.cycles);
+    next.cycles.push(allocated2);
+    next.currentCycle = allocated2;
+    return next;
+  }
+  if (!owner) return next;
+  if (nextNode !== owner.definition.entry) {
+    throw cycleDefinitionError(
+      owner.definition,
+      `Node ${nextNode} cannot be entered without its entry Node`
+    );
+  }
+  const allocated = allocateCycle(runId, owner, next.cycles);
+  next.cycles.push(allocated);
+  next.currentCycle = allocated;
+  return next;
+}
+function maxWorkflowIterations(protocol) {
+  if (!protocol.cycles?.length) return Math.max(protocol.nodes.length, 1);
+  const analysis = cycleAnalysis(protocol);
+  const cycleBudget = analysis.plans.reduce(
+    (total, plan) => total + plan.definition.maxInstances,
+    0
+  );
+  const bound = Math.max(protocol.nodes.length, 1) * (cycleBudget + 1);
+  return Number.isSafeInteger(bound) ? bound : Number.MAX_SAFE_INTEGER;
+}
 function isRevisionedWorkflowProtocol(protocol) {
   return Boolean(
-    protocol.capabilities?.version === 3 || protocol.routing?.fields !== void 0 || protocol.routing?.routingFields !== void 0 || protocol.nodes.some((node) => node.kind === "decision")
+    protocol.capabilities?.version === 3 || protocol.routing?.fields !== void 0 || protocol.routing?.routingFields !== void 0 || protocol.nodes.some((node) => node.kind === "decision") || protocol.cycles !== void 0
   );
 }
 function validateRevisionedWorkflow(protocol) {
   const active = activeNodes(protocol);
+  cycleAnalysis(protocol);
   if (active.size === 0) return;
   const nodeIds = new Set(protocol.nodes.map((node) => node.id));
   const fields = fieldMap(routingFields(protocol));
@@ -2394,21 +2801,13 @@ function validateRevisionedWorkflow(protocol) {
   }
   const entry = protocol.nodes.find((node) => !node.disabled)?.id;
   if (!entry) return;
-  const visiting = /* @__PURE__ */ new Set();
   const visited = /* @__PURE__ */ new Set();
   const visit = (nodeId) => {
-    if (visiting.has(nodeId)) {
-      throw new Error(
-        "Workflow Protocol success route contains an undeclared cycle"
-      );
-    }
     if (visited.has(nodeId)) return;
-    visiting.add(nodeId);
+    visited.add(nodeId);
     for (const transition of transitionsFrom(protocol, nodeId)) {
       if (transition.to !== null) visit(transition.to);
     }
-    visiting.delete(nodeId);
-    visited.add(nodeId);
   };
   visit(entry);
   for (const node of protocol.nodes) {
@@ -2445,7 +2844,7 @@ function validateRoutingValues(protocol, routing) {
   }
   return values;
 }
-function resolveWorkflowNext(protocol, nodeId, outcome) {
+function resolveWorkflowTransition(protocol, nodeId, outcome, runtime, runId) {
   const transitions = transitionsFrom(protocol, nodeId);
   const defaults = transitions.filter(
     (transition) => transition.when === void 0
@@ -2468,7 +2867,19 @@ function resolveWorkflowNext(protocol, nodeId, outcome) {
       `Route blocker: no matching success transition from Node ${nodeId}`
     );
   }
-  return selected.to;
+  return {
+    next: selected.to,
+    transition: selected,
+    ...runtime && runId ? {
+      workflowRuntime: resolveWorkflowCycleTransition(
+        protocol,
+        runId,
+        runtime,
+        selected,
+        selected.to
+      )
+    } : {}
+  };
 }
 function resolverHash(protocol) {
   return sha256(
@@ -2477,6 +2888,7 @@ function resolverHash(protocol) {
         capabilities: protocol.capabilities,
         routing: protocol.routing,
         edges: protocol.edges,
+        cycles: protocol.cycles,
         decisions: protocol.nodes.filter((node) => node.kind === "decision").map((node) => ({ id: node.id, decision: node.decision }))
       })
     )
@@ -2774,10 +3186,19 @@ function validateProtocolShape(protocol) {
   }
   if (protocol.capabilities !== void 0) {
     if (!protocol.capabilities || protocol.capabilities.version !== 3 || !Array.isArray(protocol.capabilities.features) || protocol.capabilities.features.some(
-      (feature) => feature !== "conditional-routing" && feature !== "revisioned-attempts" && feature !== "decision-nodes"
+      (feature) => feature !== "conditional-routing" && feature !== "revisioned-attempts" && feature !== "decision-nodes" && feature !== "bounded-cycles"
     ) || !protocol.capabilities.features.includes("conditional-routing") || !protocol.capabilities.features.includes("revisioned-attempts")) {
       throw new Error("Workflow Protocol capabilities are invalid");
     }
+    if (protocol.cycles !== void 0 && !protocol.capabilities.features.includes("bounded-cycles")) {
+      throw new Error(
+        "Workflow Protocol cycle declarations require bounded-cycles capability"
+      );
+    }
+  } else if (protocol.cycles !== void 0) {
+    throw new Error(
+      "Workflow Protocol cycle declarations require versioned capabilities"
+    );
   }
   const schemaIds = /* @__PURE__ */ new Set();
   for (const schema of protocol.outputSchemas) {
@@ -2897,6 +3318,58 @@ function validateProtocolShape(protocol) {
       throw new Error(
         `Workflow Protocol transition condition is unsupported: ${String(transition.condition)}`
       );
+    }
+  }
+  if (protocol.cycles !== void 0 && !Array.isArray(protocol.cycles)) {
+    throw new Error("Workflow Protocol cycles must be an array");
+  }
+  for (const cycle of protocol.cycles ?? []) {
+    if (!cycle || typeof cycle !== "object") {
+      throw new Error("Workflow Protocol Cycle declarations must be objects");
+    }
+    const cycleKeys = /* @__PURE__ */ new Set([
+      "key",
+      "entry",
+      "repeatTransitions",
+      "maxInstances"
+    ]);
+    const unknown = Object.keys(cycle).find((key) => !cycleKeys.has(key));
+    if (unknown) {
+      throw new Error(`Workflow Protocol Cycle has unknown field: ${unknown}`);
+    }
+    if (typeof cycle.key !== "string" || cycle.key.length === 0) {
+      throw new Error("Workflow Protocol Cycle key is required");
+    }
+    if (typeof cycle.entry !== "string" || cycle.entry.length === 0) {
+      throw new Error(
+        `Workflow Protocol Cycle ${cycle.key} entry Node is required`
+      );
+    }
+    if (!Array.isArray(cycle.repeatTransitions)) {
+      throw new Error(
+        `Workflow Protocol Cycle ${cycle.key} repeatTransitions must be an array`
+      );
+    }
+    if (!Number.isSafeInteger(cycle.maxInstances) || cycle.maxInstances < 1) {
+      throw new Error(
+        `Workflow Protocol Cycle ${cycle.key} maxInstances must be a finite positive integer`
+      );
+    }
+    for (const repeat of cycle.repeatTransitions) {
+      if (!repeat || typeof repeat !== "object" || typeof repeat.from !== "string" || typeof repeat.to !== "string") {
+        throw new Error(
+          `Workflow Protocol Cycle ${cycle.key} repeat transitions must name from and to Nodes`
+        );
+      }
+      const repeatKeys = /* @__PURE__ */ new Set(["from", "to"]);
+      const unknownRepeat = Object.keys(repeat).find(
+        (key) => !repeatKeys.has(key)
+      );
+      if (unknownRepeat) {
+        throw new Error(
+          `Workflow Protocol Cycle ${cycle.key} repeat transition has unknown field: ${unknownRepeat}`
+        );
+      }
     }
   }
 }
@@ -3096,7 +3569,7 @@ function compileGuardrails(protocol, nodes) {
     allowedSkills: compiledSkillIds(protocol, nodes),
     allowedAgents: [],
     allowedTools: [],
-    maxIterations: Math.max(nodes.length, 1),
+    maxIterations: maxWorkflowIterations(protocol),
     maxRetriesPerAction: 3,
     confirmationRequiredFor: []
   };
@@ -3176,28 +3649,70 @@ var workflowDeterministicResolver = {
   }) {
     return stepFor(pkg, state.currentStep);
   },
-  resolveNext({
+  prepareStep({ pkg, state, step }) {
+    if (!pkg.runtime?.protocol.cycles || !state.workflowRuntime) {
+      return void 0;
+    }
+    const nodeId = nodeForStep(pkg, step.id);
+    if (!nodeId) {
+      throw new Error(`WorkflowRuntime step has no Node identity: ${step.id}`);
+    }
+    return prepareWorkflowCycleEntry(
+      pkg.runtime.protocol,
+      state.runId,
+      state.workflowRuntime,
+      nodeId
+    );
+  },
+  resolveTransition({
     pkg,
+    state,
     step,
     outcome
   }) {
     if (!pkg.runtime || !isRevisionedWorkflowProtocol(pkg.runtime.protocol)) {
-      return step.next ?? null;
+      return { next: step.next ?? null };
     }
     const nodeId = nodeForStep(pkg, step.id);
     if (!nodeId) {
-      if (step.action.type === "checkpoint") return null;
+      if (step.action.type === "checkpoint") return { next: null };
       throw new Error(`WorkflowRuntime step has no Node identity: ${step.id}`);
     }
-    const nextNode = resolveWorkflowNext(pkg.runtime.protocol, nodeId, outcome);
-    if (nextNode === null) return null;
+    const resolved = resolveWorkflowTransition(
+      pkg.runtime.protocol,
+      nodeId,
+      outcome,
+      state.workflowRuntime,
+      state.runId
+    );
+    const nextNode = resolved.next;
+    const workflowRuntime = resolved.workflowRuntime;
+    if (nextNode === null) {
+      return {
+        next: null,
+        ...workflowRuntime ? { workflowRuntime } : {}
+      };
+    }
     const nextStep = pkg.runtime.nodeToStep[nextNode];
     if (!nextStep) {
       throw new Error(
         `WorkflowRuntime next Node has no step identity: ${nextNode}`
       );
     }
-    return nextStep;
+    return {
+      next: nextStep,
+      ...workflowRuntime ? { workflowRuntime } : {}
+    };
+  },
+  resolveNext({ pkg, state, step, outcome }) {
+    const transition = this.resolveTransition({
+      pkg,
+      state,
+      step,
+      outcome,
+      context: void 0
+    });
+    return transition.next;
   }
 };
 function resolverForPackage() {
@@ -3295,14 +3810,24 @@ function resolveDeterministicStep(resolver, pkg, state, context) {
     context: readonlyCopy(context)
   });
 }
-function resolveDeterministicNext(resolver, pkg, state, step, outcome, context) {
-  return resolver.resolveNext({
+function prepareDeterministicStep(resolver, pkg, state, step, context) {
+  if (!resolver.prepareStep) return void 0;
+  return resolver.prepareStep({
+    pkg: readonlyCopy(pkg),
+    state: readonlyCopy(state),
+    step: readonlyCopy(step),
+    context: readonlyCopy(context)
+  });
+}
+function resolveDeterministicTransition(resolver, pkg, state, step, outcome, context) {
+  const input = {
     pkg: readonlyCopy(pkg),
     state: readonlyCopy(state),
     step: readonlyCopy(step),
     outcome: readonlyCopy(outcome),
     context: readonlyCopy(context)
-  });
+  };
+  return resolver.resolveTransition ? resolver.resolveTransition(input) : { next: resolver.resolveNext(input) };
 }
 var staticDeterministicResolver = {
   resolveStep({ pkg, state }) {
@@ -3320,8 +3845,24 @@ function actionId(runId, iteration, stepId2, attempt) {
   const context = attempt ? `${runId}:${iteration}:${stepId2 ?? "adaptive"}:${attempt.id}:retry:${attempt.retryOrdinal}` : `${runId}:${iteration}:${stepId2 ?? "adaptive"}`;
   return createHash3("sha256").update(context).digest("hex").slice(0, 16);
 }
-function attemptId(runId, stepId2, visitOrdinal) {
-  return `attempt-${createHash3("sha256").update(`${runId}:${stepId2}:${visitOrdinal}:cycle:none`).digest("hex").slice(0, 24)}`;
+function attemptId(runId, stepId2, visitOrdinal, cycleId) {
+  return `attempt-${createHash3("sha256").update(`${runId}:${stepId2}:${visitOrdinal}:cycle:${cycleId ?? "none"}`).digest("hex").slice(0, 24)}`;
+}
+function applyPreparedWorkflowState(state, prepared) {
+  if (!state.workflowRuntime) return state;
+  return {
+    ...state,
+    workflowRuntime: {
+      ...state.workflowRuntime,
+      currentCycle: prepared.currentCycle,
+      cycles: prepared.cycles
+    }
+  };
+}
+function nodeIdForStep(pkg, stepId2) {
+  return Object.entries(pkg.runtime?.nodeToStep ?? {}).find(
+    ([, candidate]) => candidate === stepId2
+  )?.[0];
 }
 function enterAttempt(state, stepId2) {
   if (!state.workflowRuntime) {
@@ -3337,11 +3878,18 @@ function enterAttempt(state, stepId2) {
     state.workflowRuntime
   );
   workflowRuntime.decisionReceipts ??= [];
+  workflowRuntime.currentCycle ??= null;
+  workflowRuntime.cycles ??= [];
   const visitOrdinal = workflowRuntime.nextVisitOrdinal + 1;
   const currentAttempt = {
-    id: attemptId(state.runId, stepId2, visitOrdinal),
+    id: attemptId(
+      state.runId,
+      stepId2,
+      visitOrdinal,
+      workflowRuntime.currentCycle?.id ?? null
+    ),
     stepId: stepId2,
-    cycleId: null,
+    cycleId: workflowRuntime.currentCycle?.id ?? null,
     visitOrdinal,
     retryOrdinal: 0
   };
@@ -3350,7 +3898,7 @@ function enterAttempt(state, stepId2) {
   workflowRuntime.visits.push({
     attemptId: currentAttempt.id,
     stepId: stepId2,
-    cycleId: null,
+    cycleId: currentAttempt.cycleId,
     visitOrdinal,
     outcomes: []
   });
@@ -3362,6 +3910,8 @@ function recordWorkflowOutcome(pkg, state, outcome) {
     state.workflowRuntime
   );
   workflowRuntime.decisionReceipts ??= [];
+  workflowRuntime.currentCycle ??= null;
+  workflowRuntime.cycles ??= [];
   const attempt = workflowRuntime.currentAttempt;
   if (!attempt) {
     throw new Error("WorkflowRuntime current Attempt is missing");
@@ -3409,7 +3959,8 @@ function decisionReceipt(pkg, state, outcome) {
   if (outcome.revision !== runtimeState.revision) {
     throw new Error("Decision response revision does not match Run revision");
   }
-  if (outcome.nodeId === void 0 || outcome.nodeId !== nodeIdForStep(pkg, attempt.stepId)) {
+  const nodeId = outcome.nodeId;
+  if (nodeId === void 0 || nodeId !== nodeIdForStep(pkg, attempt.stepId)) {
     throw new Error("Decision receipt Node identity is invalid");
   }
   if (outcome.attemptId !== attempt.id) {
@@ -3427,7 +3978,7 @@ function decisionReceipt(pkg, state, outcome) {
     resultingRevision: runtimeState.revision + 1,
     actionId: outcome.actionId,
     decisionId: outcome.decisionId,
-    nodeId: outcome.nodeId,
+    nodeId,
     cycleId: attempt.cycleId,
     attemptId: attempt.id,
     choiceId: outcome.choiceId,
@@ -3440,11 +3991,6 @@ function decisionReceipt(pkg, state, outcome) {
     packageHash: identity.packageHash,
     snapshotHash: identity.snapshotHash
   };
-}
-function nodeIdForStep(pkg, stepId2) {
-  return Object.entries(pkg.runtime?.nodeToStep ?? {}).find(
-    ([, candidate]) => candidate === stepId2
-  )?.[0];
 }
 function stepFor2(pkg, id) {
   return pkg.definition.orchestration.steps?.find((step) => step.id === id);
@@ -3505,7 +4051,17 @@ function decideWithResolver(pkg, state, confirmations, resolver, context) {
     };
   }
   const resolvedState = state.currentStep === step.id ? state : { ...state, currentStep: step.id };
-  const attemptState = enterAttempt(resolvedState, step.id);
+  const prepared = prepareDeterministicStep(
+    resolver,
+    pkg,
+    resolvedState,
+    step,
+    context
+  );
+  const attemptState = enterAttempt(
+    prepared ? applyPreparedWorkflowState(resolvedState, prepared) : resolvedState,
+    step.id
+  );
   const action = {
     ...step.action,
     id: actionId(
@@ -3575,11 +4131,25 @@ function recordOutcomeWithResolver(pkg, state, outcome, resolver, context) {
       ...workflowRuntime2 ? { workflowRuntime: workflowRuntime2 } : {}
     };
   }
-  const next = state.orchestration === "deterministic" ? resolveDeterministicNext(resolver, pkg, state, step, outcome, context) : state.currentStep;
+  const transition = state.orchestration === "deterministic" ? resolveDeterministicTransition(
+    resolver,
+    pkg,
+    state,
+    step,
+    outcome,
+    context
+  ) : { next: state.currentStep };
+  const next = transition.next;
   if (next !== null && state.orchestration === "deterministic" && !stepFor2(pkg, next)) {
     throw new Error(`Resolver returned unknown next step: ${next}`);
   }
   const workflowRuntime = recordWorkflowOutcome(pkg, state, outcome);
+  if (workflowRuntime && transition.workflowRuntime) {
+    workflowRuntime.currentCycle = structuredClone(
+      transition.workflowRuntime.currentCycle
+    );
+    workflowRuntime.cycles = structuredClone(transition.workflowRuntime.cycles);
+  }
   return {
     ...state,
     currentStep: next,
@@ -3812,6 +4382,27 @@ function parseDecisionReceipt(value, index) {
     snapshotHash
   };
 }
+function parseWorkflowCycle(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const cycle = value;
+  const keys = /* @__PURE__ */ new Set(["id", "key", "instanceOrdinal"]);
+  const unknown = Object.keys(cycle).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const instanceOrdinal = cycle.instanceOrdinal;
+  if (typeof instanceOrdinal !== "number" || !Number.isSafeInteger(instanceOrdinal) || instanceOrdinal < 1) {
+    throw new Error(
+      `Invalid Run state: ${label}.instanceOrdinal must be a positive integer`
+    );
+  }
+  return {
+    id: requiredJsonString(cycle.id, `${label}.id`),
+    key: requiredJsonString(cycle.key, `${label}.key`),
+    instanceOrdinal
+  };
+}
 function parseWorkflowAttempt(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`Invalid Run state: ${label} must be an object`);
@@ -3835,9 +4426,11 @@ function parseWorkflowAttempt(value, label) {
     attempt.stepId,
     `${label}.stepId`
   );
-  const cycleId = attempt.cycleId;
-  if (cycleId !== null) {
-    throw new Error(`Invalid Run state: ${label}.cycleId must be null`);
+  const cycleId = attempt.cycleId === void 0 ? null : attempt.cycleId;
+  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`
+    );
   }
   const visitOrdinal = attempt.visitOrdinal;
   const retryOrdinal = attempt.retryOrdinal;
@@ -3851,7 +4444,13 @@ function parseWorkflowAttempt(value, label) {
       `Invalid Run state: ${label}.retryOrdinal must be a non-negative integer`
     );
   }
-  return { id, stepId: stepId2, cycleId: null, visitOrdinal, retryOrdinal };
+  return {
+    id,
+    stepId: stepId2,
+    cycleId,
+    visitOrdinal,
+    retryOrdinal
+  };
 }
 function parseWorkflowOutcome(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -3919,8 +4518,11 @@ function parseWorkflowVisit(value, index) {
     visit.stepId,
     `${label}.stepId`
   );
-  if (visit.cycleId !== null) {
-    throw new Error(`Invalid Run state: ${label}.cycleId must be null`);
+  const cycleId = visit.cycleId === void 0 ? null : visit.cycleId;
+  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`
+    );
   }
   const visitOrdinal = visit.visitOrdinal;
   if (typeof visitOrdinal !== "number" || !Number.isSafeInteger(visitOrdinal) || visitOrdinal < 1) {
@@ -3934,7 +4536,7 @@ function parseWorkflowVisit(value, index) {
   return {
     attemptId: attemptId2,
     stepId: stepId2,
-    cycleId: null,
+    cycleId,
     visitOrdinal,
     outcomes: visit.outcomes.map(
       (outcome, outcomeIndex) => parseWorkflowOutcome(outcome, `${label}.outcomes[${outcomeIndex}]`)
@@ -3951,6 +4553,8 @@ function parseWorkflowRuntime(value) {
     "revision",
     "nextVisitOrdinal",
     "currentAttempt",
+    "currentCycle",
+    "cycles",
     "visits",
     "decisionReceipts"
   ]);
@@ -3976,6 +4580,39 @@ function parseWorkflowRuntime(value) {
     );
   }
   const visits = runtime.visits.map(parseWorkflowVisit);
+  const cycles = runtime.cycles === void 0 ? [] : Array.isArray(runtime.cycles) ? runtime.cycles.map(
+    (cycle, index) => parseWorkflowCycle(cycle, `workflowRuntime.cycles[${index}]`)
+  ) : (() => {
+    throw new Error(
+      "Invalid Run state: workflowRuntime.cycles must be an array"
+    );
+  })();
+  const cycleIds = /* @__PURE__ */ new Set();
+  const cycleOrdinals = /* @__PURE__ */ new Map();
+  for (const cycle of cycles) {
+    if (cycleIds.has(cycle.id)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime Cycle ${cycle.id}`
+      );
+    }
+    cycleIds.add(cycle.id);
+    const expectedOrdinal = (cycleOrdinals.get(cycle.key) ?? 0) + 1;
+    if (cycle.instanceOrdinal !== expectedOrdinal) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime Cycle ordinal is invalid for ${cycle.key}`
+      );
+    }
+    cycleOrdinals.set(cycle.key, cycle.instanceOrdinal);
+  }
+  const currentCycle = runtime.currentCycle === void 0 || runtime.currentCycle === null ? null : parseWorkflowCycle(
+    runtime.currentCycle,
+    "workflowRuntime.currentCycle"
+  );
+  if (currentCycle && !cycleIds.has(currentCycle.id)) {
+    throw new Error(
+      "Invalid Run state: current WorkflowRuntime Cycle is not in cycles"
+    );
+  }
   const decisionReceipts = runtime.decisionReceipts === void 0 ? [] : Array.isArray(runtime.decisionReceipts) ? runtime.decisionReceipts.map(parseDecisionReceipt) : (() => {
     throw new Error(
       "Invalid Run state: WorkflowRuntime decisionReceipts must be an array"
@@ -4005,6 +4642,11 @@ function parseWorkflowRuntime(value) {
         `Invalid Run state: duplicate WorkflowRuntime visit ordinal ${visit.visitOrdinal}`
       );
     }
+    if (visit.cycleId !== null && !cycleIds.has(visit.cycleId)) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime visit references unknown Cycle ${visit.cycleId}`
+      );
+    }
     visitOrdinals.add(visit.visitOrdinal);
     outcomeCount += visit.outcomes.length;
     if (visit.visitOrdinal > nextVisitOrdinal) {
@@ -4020,6 +4662,11 @@ function parseWorkflowRuntime(value) {
   if (currentAttempt && !attemptIds.has(currentAttempt.id)) {
     throw new Error(
       "Invalid Run state: current WorkflowRuntime Attempt is not in visits"
+    );
+  }
+  if (currentAttempt && currentAttempt.cycleId !== (currentCycle?.id ?? null)) {
+    throw new Error(
+      "Invalid Run state: current WorkflowRuntime Attempt does not match current Cycle"
     );
   }
   if (revision !== outcomeCount) {
@@ -4048,6 +4695,8 @@ function parseWorkflowRuntime(value) {
     revision,
     nextVisitOrdinal,
     currentAttempt,
+    currentCycle,
+    cycles,
     visits,
     decisionReceipts
   };
@@ -4871,13 +5520,15 @@ function continuation(result, identity) {
     runId: result.state.runId,
     revision: runtimeState?.revision ?? 0,
     currentNode: currentNode(result.state, identity, result.action),
-    cycleId: currentAttempt?.cycleId ?? null,
+    cycleId: runtimeState?.currentCycle?.id ?? currentAttempt?.cycleId ?? null,
     attemptId: currentAttempt?.id ?? null,
     visitOrdinal: currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     pendingAction: result.action,
     execution: structuredClone(identity),
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
+    cycles: structuredClone(runtimeState?.cycles ?? []),
+    visits: structuredClone(runtimeState?.visits ?? []),
     blockers: disposition === "blocked" && result.reason ? [result.reason] : []
   };
 }
@@ -4948,7 +5599,7 @@ async function projectWorkflowState(target) {
     runId: state.runId,
     revision: runtimeState?.revision ?? 0,
     currentNode: currentNode(state, verified.identity, verified.pending),
-    cycleId: currentAttempt?.cycleId ?? null,
+    cycleId: runtimeState?.currentCycle?.id ?? currentAttempt?.cycleId ?? null,
     attemptId: currentAttempt?.id ?? null,
     visitOrdinal: currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
@@ -4959,6 +5610,7 @@ async function projectWorkflowState(target) {
     execution: structuredClone(verified.identity),
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     visits: structuredClone(runtimeState?.visits ?? []),
+    cycles: structuredClone(runtimeState?.cycles ?? []),
     blockers: status === "blocked" ? [
       exhaustedAction ? `Retry budget exhausted for action: ${exhaustedAction}` : `Run is ${state.status}`
     ] : []
@@ -5051,6 +5703,61 @@ async function verifyStoredPackage(runRoot, state) {
       "WorkflowRuntime revisioned state is not valid for a legacy Run"
     );
   }
+  if (pkg.runtime.capabilityVersion === 3 && state.workflowRuntime) {
+    validateWorkflowCycleState(
+      pkg.runtime.protocol,
+      state.runId,
+      state.workflowRuntime
+    );
+    const cycleById = new Map(
+      state.workflowRuntime.cycles.map((cycle) => [cycle.id, cycle])
+    );
+    for (const visit of state.workflowRuntime.visits) {
+      const nodeId = Object.entries(identity.nodeToStep).find(
+        ([, stepId2]) => stepId2 === visit.stepId
+      )?.[0];
+      if (!nodeId) {
+        throw new Error("WorkflowRuntime visit has an unknown Node identity");
+      }
+      if (visit.cycleId !== null) {
+        const cycle = cycleById.get(visit.cycleId);
+        const plan = pkg.runtime.protocol.cycles?.find(
+          (candidate) => candidate.key === cycle?.key
+        );
+        if (!cycle || !plan) {
+          throw new Error(
+            "WorkflowRuntime visit has an unknown Cycle identity"
+          );
+        }
+        if (!workflowCycleOwnsNode(pkg.runtime.protocol, cycle.key, nodeId)) {
+          throw new Error("WorkflowRuntime visit has an invalid Cycle Node");
+        }
+      }
+    }
+    if (state.currentStep !== null) {
+      const currentNodeId = Object.entries(identity.nodeToStep).find(
+        ([, stepId2]) => stepId2 === state.currentStep
+      )?.[0];
+      if (!currentNodeId) {
+        throw new Error("WorkflowRuntime current Node identity is invalid");
+      }
+      const inCycle = state.workflowRuntime.cycles.some(
+        (cycle) => workflowCycleOwnsNode(pkg.runtime.protocol, cycle.key, currentNodeId)
+      );
+      if (inCycle !== Boolean(state.workflowRuntime.currentCycle)) {
+        throw new Error("WorkflowRuntime current Cycle position is invalid");
+      }
+      if (state.workflowRuntime.currentCycle && !workflowCycleOwnsNode(
+        pkg.runtime.protocol,
+        state.workflowRuntime.currentCycle.key,
+        currentNodeId
+      )) {
+        throw new Error("WorkflowRuntime current Cycle position is invalid");
+      }
+    } else if (state.workflowRuntime.currentCycle) {
+      throw new Error("WorkflowRuntime current Cycle position is invalid");
+    }
+  }
   for (const receipt of state.workflowRuntime?.decisionReceipts ?? []) {
     if (receipt.runId !== state.runId || receipt.protocolHash !== identity.protocolHash || receipt.packageHash !== identity.packageHash || receipt.snapshotHash !== identity.snapshotHash || receipt.resultingRevision !== receipt.revision + 1 || receipt.resultingRevision > (state.workflowRuntime?.revision ?? 0)) {
       throw new Error("WorkflowRuntime Decision Receipt identity is invalid");
@@ -5070,6 +5777,9 @@ async function verifyStoredPackage(runRoot, state) {
     );
     if (!visit || !nodeId || receipt.nodeId !== nodeId || !outcome || outcome.status !== "succeeded" || !node?.decision || receipt.decisionId !== node.decision.id || !choice) {
       throw new Error("WorkflowRuntime Decision Receipt context is invalid");
+    }
+    if (receipt.cycleId !== visit.cycleId) {
+      throw new Error("WorkflowRuntime Decision Receipt Cycle is invalid");
     }
     validateReviewer(receipt.reviewer, node.decision.reviewer);
     validateDecisionInputSchema2(
@@ -5283,10 +5993,12 @@ function routeBlockers(prepared, submission) {
     return [];
   }
   try {
-    resolveWorkflowNext(
+    resolveWorkflowTransition(
       protocol,
       prepared.node,
-      engineOutcome(prepared, submission)
+      engineOutcome(prepared, submission),
+      prepared.verified.state.workflowRuntime,
+      prepared.verified.state.runId
     );
     return [];
   } catch (error) {
@@ -5302,7 +6014,7 @@ function blockedContinuation(prepared, blockers) {
     runId: prepared.verified.state.runId,
     revision: prepared.verified.state.workflowRuntime?.revision ?? 0,
     currentNode: prepared.node,
-    cycleId: prepared.verified.state.workflowRuntime?.currentAttempt?.cycleId ?? null,
+    cycleId: prepared.verified.state.workflowRuntime?.currentCycle?.id ?? prepared.verified.state.workflowRuntime?.currentAttempt?.cycleId ?? null,
     attemptId: prepared.verified.state.workflowRuntime?.currentAttempt?.id ?? null,
     visitOrdinal: prepared.verified.state.workflowRuntime?.currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: prepared.verified.state.workflowRuntime?.currentAttempt?.retryOrdinal ?? null,
@@ -5310,6 +6022,12 @@ function blockedContinuation(prepared, blockers) {
     execution: structuredClone(prepared.verified.identity),
     decisionReceipts: structuredClone(
       prepared.verified.state.workflowRuntime?.decisionReceipts ?? []
+    ),
+    cycles: structuredClone(
+      prepared.verified.state.workflowRuntime?.cycles ?? []
+    ),
+    visits: structuredClone(
+      prepared.verified.state.workflowRuntime?.visits ?? []
     ),
     blockers: [...blockers]
   };
@@ -5352,6 +6070,8 @@ async function projectWorkflowHandoff(protocol, current) {
     nodes: structuredClone(protocol.nodes),
     outputSchemas: structuredClone(protocol.outputSchemas),
     decisionReceipts: structuredClone(current?.decisionReceipts ?? []),
+    cycles: structuredClone(current?.cycles ?? []),
+    visits: structuredClone(current?.visits ?? []),
     continuation: current ? structuredClone(current) : null
   };
 }
@@ -5441,6 +6161,8 @@ function createWorkflowRuntime() {
             revision: 0,
             nextVisitOrdinal: 0,
             currentAttempt: null,
+            currentCycle: null,
+            cycles: [],
             visits: [],
             decisionReceipts: []
           }

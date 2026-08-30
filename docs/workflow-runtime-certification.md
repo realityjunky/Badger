@@ -5,7 +5,8 @@ WorkflowRuntime authority.
 
 ## Supported contract
 
-The package supports deterministic, acyclic routes. Legacy protocols retain
+The package supports deterministic routes, including explicitly declared
+bounded Cycles. Legacy protocols retain
 their linear action identity. Opted-in branch protocols declare routing fields
 and allowed scalar values; exact equality and conjunction select one matching
 success edge or one declared fallback. Ordinary active Nodes compile to
@@ -15,8 +16,11 @@ Decision responses are revision-, action-, Node-, Attempt-, choice-, and
 attestation-bound. Each accepted decision creates one identity-bound receipt;
 invalid and replayed responses do not mutate state. Each entry gets a
 deterministic Attempt and visit ordinal; Engine retries retain the Attempt and
-increment its retry ordinal. Cycles, artifact versions, and Native-derived
-durability remain separate capabilities.
+increment its retry ordinal. Declared Cycles require an entry Node, explicit
+repeat transitions, and a finite `maxInstances` budget. Cycle identities are
+stable per Run, key, and instance ordinal; an exhausted repeat returns a
+non-mutating blocker. Artifact versions and Native-derived durability remain
+separate capabilities.
 
 ## Identity
 
@@ -28,8 +32,8 @@ Every Run carries one execution identity containing:
 - the deterministic Workflow Node-to-Engine-step mapping.
 
 Revisioned branch packages additionally carry capability version and resolver
-plan identities. The Run state retains the logical revision, current Attempt,
-visit ledger, and retry context.
+plan identities. The Run state retains the logical revision, current Cycle,
+current Attempt, Cycle ledger, visit ledger, and retry context.
 
 The logical revision starts at `0` and advances exactly once for each accepted
 machine outcome or decision response. Rejected, stale, or route-blocked
@@ -66,7 +70,7 @@ Run can be resumed and completed through the generated adapter.
 The public `@rpamis/comet-any-private/workflow-runtime` package seam exposes
 only runtime construction and the four operations `start`, `resume`, `submit`,
 and `recover`. Revisioned continuations add `revision`, `attemptId`,
-`visitOrdinal`, `retryOrdinal`, a null `cycleId`, and decision receipt
-projections. Compiler, Run-location,
+`visitOrdinal`, `retryOrdinal`, `cycleId`, Cycle and visit ledgers, and
+decision receipt projections. Compiler, Run-location,
 projection, storage, and protected filesystem modules remain private
 implementation details.

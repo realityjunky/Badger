@@ -1,4 +1,8 @@
-import type { ActionOutcome, RunState } from "./types.js";
+import type {
+  ActionOutcome,
+  RunState,
+  WorkflowCycleTransitionState,
+} from "./types.js";
 import type { SkillPackage, SkillStep } from "../skill-runtime/types.js";
 
 export interface DeterministicResolver<TContext> {
@@ -8,6 +12,13 @@ export interface DeterministicResolver<TContext> {
     context: Readonly<TContext>;
   }): SkillStep | undefined;
 
+  prepareStep?(input: {
+    pkg: Readonly<SkillPackage>;
+    state: Readonly<RunState>;
+    step: Readonly<SkillStep>;
+    context: Readonly<TContext>;
+  }): WorkflowCycleTransitionState | undefined;
+
   resolveNext(input: {
     pkg: Readonly<SkillPackage>;
     state: Readonly<RunState>;
@@ -15,6 +26,19 @@ export interface DeterministicResolver<TContext> {
     outcome: Readonly<ActionOutcome>;
     context: Readonly<TContext>;
   }): string | null;
+
+  resolveTransition?(input: {
+    pkg: Readonly<SkillPackage>;
+    state: Readonly<RunState>;
+    step: Readonly<SkillStep>;
+    outcome: Readonly<ActionOutcome>;
+    context: Readonly<TContext>;
+  }): DeterministicTransition;
+}
+
+export interface DeterministicTransition {
+  next: string | null;
+  workflowRuntime?: WorkflowCycleTransitionState;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -58,6 +82,42 @@ export function resolveDeterministicNext<TContext>(
     outcome: readonlyCopy(outcome),
     context: readonlyCopy(context),
   });
+}
+
+export function prepareDeterministicStep<TContext>(
+  resolver: DeterministicResolver<TContext>,
+  pkg: SkillPackage,
+  state: RunState,
+  step: SkillStep,
+  context: TContext,
+): WorkflowCycleTransitionState | undefined {
+  if (!resolver.prepareStep) return undefined;
+  return resolver.prepareStep({
+    pkg: readonlyCopy(pkg),
+    state: readonlyCopy(state),
+    step: readonlyCopy(step),
+    context: readonlyCopy(context),
+  });
+}
+
+export function resolveDeterministicTransition<TContext>(
+  resolver: DeterministicResolver<TContext>,
+  pkg: SkillPackage,
+  state: RunState,
+  step: SkillStep,
+  outcome: ActionOutcome,
+  context: TContext,
+): DeterministicTransition {
+  const input = {
+    pkg: readonlyCopy(pkg),
+    state: readonlyCopy(state),
+    step: readonlyCopy(step),
+    outcome: readonlyCopy(outcome),
+    context: readonlyCopy(context),
+  };
+  return resolver.resolveTransition
+    ? resolver.resolveTransition(input)
+    : { next: resolver.resolveNext(input) };
 }
 
 export const staticDeterministicResolver: DeterministicResolver<undefined> = {

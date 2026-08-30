@@ -4,12 +4,14 @@ import type {
   EngineAction,
   RunState,
   WorkflowAttemptState,
+  WorkflowCycleTransitionState,
   WorkflowRuntimeState,
   WorkflowVisitOutcome,
 } from "./types.js";
 import { checkAction } from "./guardrails.js";
 import {
-  resolveDeterministicNext,
+  prepareDeterministicStep,
+  resolveDeterministicTransition,
   resolveDeterministicStep,
   staticDeterministicResolver,
   type DeterministicResolver,
@@ -39,11 +41,33 @@ function attemptId(
   runId: string,
   stepId: string,
   visitOrdinal: number,
+  cycleId: string | null,
 ): string {
   return `attempt-${createHash("sha256")
-    .update(`${runId}:${stepId}:${visitOrdinal}:cycle:none`)
+    .update(`${runId}:${stepId}:${visitOrdinal}:cycle:${cycleId ?? "none"}`)
     .digest("hex")
     .slice(0, 24)}`;
+}
+
+function applyPreparedWorkflowState(
+  state: RunState,
+  prepared: WorkflowCycleTransitionState,
+): RunState {
+  if (!state.workflowRuntime) return state;
+  return {
+    ...state,
+    workflowRuntime: {
+      ...state.workflowRuntime,
+      currentCycle: prepared.currentCycle,
+      cycles: prepared.cycles,
+    },
+  };
+}
+
+function nodeIdForStep(pkg: SkillPackage, stepId: string): string | undefined {
+  return Object.entries(pkg.runtime?.nodeToStep ?? {}).find(
+    ([, candidate]) => candidate === stepId,
+  )?.[0];
 }
 
 function enterAttempt(state: RunState, stepId: string): RunState {
@@ -60,11 +84,18 @@ function enterAttempt(state: RunState, stepId: string): RunState {
     state.workflowRuntime,
   );
   workflowRuntime.decisionReceipts ??= [];
+  workflowRuntime.currentCycle ??= null;
+  workflowRuntime.cycles ??= [];
   const visitOrdinal = workflowRuntime.nextVisitOrdinal + 1;
   const currentAttempt: WorkflowAttemptState = {
-    id: attemptId(state.runId, stepId, visitOrdinal),
+    id: attemptId(
+      state.runId,
+      stepId,
+      visitOrdinal,
+      workflowRuntime.currentCycle?.id ?? null,
+    ),
     stepId,
-    cycleId: null,
+    cycleId: workflowRuntime.currentCycle?.id ?? null,
     visitOrdinal,
     retryOrdinal: 0,
   };
@@ -73,7 +104,7 @@ function enterAttempt(state: RunState, stepId: string): RunState {
   workflowRuntime.visits.push({
     attemptId: currentAttempt.id,
     stepId,
-    cycleId: null,
+    cycleId: currentAttempt.cycleId,
     visitOrdinal,
     outcomes: [],
   });
@@ -90,6 +121,8 @@ function recordWorkflowOutcome(
     state.workflowRuntime,
   );
   workflowRuntime.decisionReceipts ??= [];
+  workflowRuntime.currentCycle ??= null;
+  workflowRuntime.cycles ??= [];
   const attempt = workflowRuntime.currentAttempt;
   if (!attempt) {
     throw new Error("WorkflowRuntime current Attempt is missing");
@@ -144,10 +177,8 @@ function decisionReceipt(
   if (outcome.revision !== runtimeState.revision) {
     throw new Error("Decision response revision does not match Run revision");
   }
-  if (
-    outcome.nodeId === undefined ||
-    outcome.nodeId !== nodeIdForStep(pkg, attempt.stepId)
-  ) {
+  const nodeId = outcome.nodeId;
+  if (nodeId === undefined || nodeId !== nodeIdForStep(pkg, attempt.stepId)) {
     throw new Error("Decision receipt Node identity is invalid");
   }
   if (outcome.attemptId !== attempt.id) {
@@ -165,7 +196,7 @@ function decisionReceipt(
     resultingRevision: runtimeState.revision + 1,
     actionId: outcome.actionId,
     decisionId: outcome.decisionId,
-    nodeId: outcome.nodeId,
+    nodeId,
     cycleId: attempt.cycleId,
     attemptId: attempt.id,
     choiceId: outcome.choiceId,
@@ -182,12 +213,6 @@ function decisionReceipt(
     packageHash: identity.packageHash,
     snapshotHash: identity.snapshotHash,
   };
-}
-
-function nodeIdForStep(pkg: SkillPackage, stepId: string): string | undefined {
-  return Object.entries(pkg.runtime?.nodeToStep ?? {}).find(
-    ([, candidate]) => candidate === stepId,
-  )?.[0];
 }
 
 function stepFor(pkg: SkillPackage, id: string | null): SkillStep | undefined {
@@ -279,7 +304,19 @@ export function decideWithResolver<TContext>(
   }
   const resolvedState =
     state.currentStep === step.id ? state : { ...state, currentStep: step.id };
-  const attemptState = enterAttempt(resolvedState, step.id);
+  const prepared = prepareDeterministicStep(
+    resolver,
+    pkg,
+    resolvedState,
+    step,
+    context,
+  );
+  const attemptState = enterAttempt(
+    prepared
+      ? applyPreparedWorkflowState(resolvedState, prepared)
+      : resolvedState,
+    step.id,
+  );
   const action: EngineAction = {
     ...step.action,
     id: actionId(
@@ -407,10 +444,18 @@ export function recordOutcomeWithResolver<TContext>(
       ...(workflowRuntime ? { workflowRuntime } : {}),
     };
   }
-  const next =
+  const transition =
     state.orchestration === "deterministic"
-      ? resolveDeterministicNext(resolver, pkg, state, step!, outcome, context)
-      : state.currentStep;
+      ? resolveDeterministicTransition(
+          resolver,
+          pkg,
+          state,
+          step!,
+          outcome,
+          context,
+        )
+      : { next: state.currentStep };
+  const next = transition.next;
   if (
     next !== null &&
     state.orchestration === "deterministic" &&
@@ -419,6 +464,12 @@ export function recordOutcomeWithResolver<TContext>(
     throw new Error(`Resolver returned unknown next step: ${next}`);
   }
   const workflowRuntime = recordWorkflowOutcome(pkg, state, outcome);
+  if (workflowRuntime && transition.workflowRuntime) {
+    workflowRuntime.currentCycle = structuredClone(
+      transition.workflowRuntime.currentCycle,
+    );
+    workflowRuntime.cycles = structuredClone(transition.workflowRuntime.cycles);
+  }
   return {
     ...state,
     currentStep: next,
