@@ -2,6 +2,7 @@ import type {
   ActionOutcome,
   EngineAction,
   RuntimeIdentity,
+  WorkflowVisitState,
 } from "../engine/types.js";
 import type { NodeProtocol, OutputSchema, WorkflowProtocol } from "../types.js";
 
@@ -28,7 +29,12 @@ export type WorkflowRunTarget = WorkflowRunLocation | string;
 export interface WorkflowContinuation {
   disposition: "continue" | "blocked" | "done";
   runId: string;
+  revision: number;
   currentNode: string | null;
+  cycleId: string | null;
+  attemptId: string | null;
+  visitOrdinal: number | null;
+  retryOrdinal: number | null;
   pendingAction: WorkflowPendingAction | null;
   execution: WorkflowExecutionIdentity;
   blockers: string[];
@@ -56,7 +62,12 @@ export interface WorkflowStateProjection {
   statePath: string;
   status: Exclude<WorkflowStateProjectionStatus, "not-started">;
   runId: string;
+  revision: number;
   currentNode: string | null;
+  cycleId: string | null;
+  attemptId: string | null;
+  visitOrdinal: number | null;
+  retryOrdinal: number | null;
   completedNodes: string[];
   evidence: Record<string, Record<string, unknown>>;
   history: Array<{
@@ -67,6 +78,7 @@ export interface WorkflowStateProjection {
   }>;
   pendingAction: WorkflowPendingAction | null;
   execution: WorkflowExecutionIdentity;
+  visits: WorkflowVisitState[];
   blockers: string[];
 }
 

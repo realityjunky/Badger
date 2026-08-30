@@ -18,6 +18,11 @@ import { validateSkillPackage } from "../skill-runtime/validate.js";
 import { sha256, slug, stableValue } from "../util.js";
 import type { WorkflowExecutionIdentity } from "./types.js";
 import { createCompletionPlan } from "./completion.js";
+import {
+  isRevisionedWorkflowProtocol,
+  resolverHash,
+  validateRevisionedWorkflow,
+} from "./routing.js";
 
 interface CompiledWorkflow {
   package: SkillPackage;
@@ -100,6 +105,22 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
   }
   if (!Array.isArray(protocol.outputSchemas)) {
     throw new Error("Workflow Protocol Output Schemas must be an array");
+  }
+  if (protocol.capabilities !== undefined) {
+    if (
+      !protocol.capabilities ||
+      protocol.capabilities.version !== 3 ||
+      !Array.isArray(protocol.capabilities.features) ||
+      protocol.capabilities.features.some(
+        (feature) =>
+          feature !== "conditional-routing" &&
+          feature !== "revisioned-attempts",
+      ) ||
+      !protocol.capabilities.features.includes("conditional-routing") ||
+      !protocol.capabilities.features.includes("revisioned-attempts")
+    ) {
+      throw new Error("Workflow Protocol capabilities are invalid");
+    }
   }
   const schemaIds = new Set<string>();
   for (const schema of protocol.outputSchemas) {
@@ -398,6 +419,7 @@ function validateLinearRoute(protocol: WorkflowProtocol): NodeProtocol[] {
 function compileDefinition(
   protocol: WorkflowProtocol,
   nodes: readonly NodeProtocol[],
+  linear: boolean,
 ): SkillDefinition {
   const steps: SkillStep[] = nodes.map((node, index) => ({
     id: stepId(index, node.id),
@@ -405,7 +427,7 @@ function compileDefinition(
       type: "invoke_skill",
       ref: nodeSkillName(protocol.name, node.id),
     },
-    ...(nodes[index + 1]
+    ...(linear && nodes[index + 1]
       ? { next: stepId(index + 1, nodes[index + 1].id) }
       : {}),
   }));
@@ -469,8 +491,17 @@ export async function compileWorkflow(
   protocol: WorkflowProtocol,
 ): Promise<CompiledWorkflow> {
   validateProtocolShape(protocol);
-  const nodes = validateLinearRoute(protocol);
-  const definition = compileDefinition(protocol, nodes);
+  const revisioned = isRevisionedWorkflowProtocol(protocol);
+  if (revisioned && protocol.capabilities?.version !== 3) {
+    throw new Error(
+      "Workflow Protocol revisioned capabilities are required for branch routing",
+    );
+  }
+  if (revisioned) validateRevisionedWorkflow(protocol);
+  const nodes = revisioned
+    ? activeNodes(protocol)
+    : validateLinearRoute(protocol);
+  const definition = compileDefinition(protocol, nodes, !revisioned);
   const nodeToStep = Object.fromEntries(
     nodes.map((node, index) => [node.id, stepId(index, node.id)]),
   );
@@ -479,6 +510,9 @@ export async function compileWorkflow(
     protocolHash,
     protocol: structuredClone(protocol),
     nodeToStep: { ...nodeToStep },
+    ...(revisioned
+      ? { capabilityVersion: 3 as const, resolverHash: resolverHash(protocol) }
+      : {}),
     completionPlans: compileCompletionPlans(nodes),
   };
   const pkg: SkillPackage = {
@@ -503,6 +537,12 @@ export async function compileWorkflow(
       packageHash,
       snapshotHash: "",
       nodeToStep,
+      ...(revisioned
+        ? {
+            capabilityVersion: 3 as const,
+            resolverHash: resolverHash(protocol),
+          }
+        : {}),
     },
   };
 }

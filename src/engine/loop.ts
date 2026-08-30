@@ -1,5 +1,12 @@
 import { createHash } from "crypto";
-import type { ActionOutcome, EngineAction, RunState } from "./types.js";
+import type {
+  ActionOutcome,
+  EngineAction,
+  RunState,
+  WorkflowAttemptState,
+  WorkflowRuntimeState,
+  WorkflowVisitOutcome,
+} from "./types.js";
 import { checkAction } from "./guardrails.js";
 import {
   resolveDeterministicNext,
@@ -19,11 +26,96 @@ function actionId(
   runId: string,
   iteration: number,
   stepId: string | null,
+  attempt: WorkflowAttemptState | null,
 ): string {
-  return createHash("sha256")
-    .update(`${runId}:${iteration}:${stepId ?? "adaptive"}`)
+  const context = attempt
+    ? `${runId}:${iteration}:${stepId ?? "adaptive"}:${attempt.id}:retry:${attempt.retryOrdinal}`
+    : `${runId}:${iteration}:${stepId ?? "adaptive"}`;
+  return createHash("sha256").update(context).digest("hex").slice(0, 16);
+}
+
+function attemptId(
+  runId: string,
+  stepId: string,
+  visitOrdinal: number,
+): string {
+  return `attempt-${createHash("sha256")
+    .update(`${runId}:${stepId}:${visitOrdinal}:cycle:none`)
     .digest("hex")
-    .slice(0, 16);
+    .slice(0, 24)}`;
+}
+
+function enterAttempt(state: RunState, stepId: string): RunState {
+  if (!state.workflowRuntime) {
+    return state;
+  }
+  if (state.workflowRuntime.currentAttempt) {
+    if (state.workflowRuntime.currentAttempt.stepId !== stepId) {
+      throw new Error("WorkflowRuntime current Attempt does not match step");
+    }
+    return state;
+  }
+  const workflowRuntime: WorkflowRuntimeState = structuredClone(
+    state.workflowRuntime,
+  );
+  const visitOrdinal = workflowRuntime.nextVisitOrdinal + 1;
+  const currentAttempt: WorkflowAttemptState = {
+    id: attemptId(state.runId, stepId, visitOrdinal),
+    stepId,
+    cycleId: null,
+    visitOrdinal,
+    retryOrdinal: 0,
+  };
+  workflowRuntime.nextVisitOrdinal = visitOrdinal;
+  workflowRuntime.currentAttempt = currentAttempt;
+  workflowRuntime.visits.push({
+    attemptId: currentAttempt.id,
+    stepId,
+    cycleId: null,
+    visitOrdinal,
+    outcomes: [],
+  });
+  return { ...state, workflowRuntime };
+}
+
+function recordWorkflowOutcome(
+  state: RunState,
+  outcome: ActionOutcome,
+): WorkflowRuntimeState | undefined {
+  if (!state.workflowRuntime) return undefined;
+  const workflowRuntime: WorkflowRuntimeState = structuredClone(
+    state.workflowRuntime,
+  );
+  const attempt = workflowRuntime.currentAttempt;
+  if (!attempt) {
+    throw new Error("WorkflowRuntime current Attempt is missing");
+  }
+  const visit = workflowRuntime.visits.find(
+    (candidate) => candidate.attemptId === attempt.id,
+  );
+  if (!visit) {
+    throw new Error(
+      "WorkflowRuntime current Attempt is not in the visit ledger",
+    );
+  }
+  const visitOutcome: WorkflowVisitOutcome = {
+    actionId: outcome.actionId,
+    status: outcome.status,
+    summary: outcome.summary,
+    retryOrdinal: attempt.retryOrdinal,
+    ...(outcome.routing ? { routing: { ...outcome.routing } } : {}),
+    ...(outcome.evidence
+      ? { evidence: structuredClone(outcome.evidence) }
+      : {}),
+  };
+  visit.outcomes.push(visitOutcome);
+  workflowRuntime.revision += 1;
+  if (outcome.status === "failed") {
+    attempt.retryOrdinal += 1;
+  } else {
+    workflowRuntime.currentAttempt = null;
+  }
+  return workflowRuntime;
 }
 
 function stepFor(pkg: SkillPackage, id: string | null): SkillStep | undefined {
@@ -34,6 +126,7 @@ export function startRun(
   pkg: SkillPackage,
   runId: string,
   skillHash: string,
+  workflowRuntime?: WorkflowRuntimeState,
 ): RunState {
   return {
     runId,
@@ -51,6 +144,9 @@ export function startRun(
     checkpointRef: ".comet/checkpoint.json",
     status: "running",
     retries: {},
+    ...(workflowRuntime
+      ? { workflowRuntime: structuredClone(workflowRuntime) }
+      : {}),
   };
 }
 
@@ -111,12 +207,28 @@ export function decideWithResolver<TContext>(
   }
   const resolvedState =
     state.currentStep === step.id ? state : { ...state, currentStep: step.id };
+  const attemptState = enterAttempt(resolvedState, step.id);
   const action: EngineAction = {
     ...step.action,
-    id: actionId(resolvedState.runId, resolvedState.iteration, step.id),
+    id: actionId(
+      attemptState.runId,
+      attemptState.iteration,
+      step.id,
+      attemptState.workflowRuntime?.currentAttempt ?? null,
+    ),
     stepId: step.id,
+    ...(attemptState.workflowRuntime?.currentAttempt
+      ? {
+          attemptId: attemptState.workflowRuntime.currentAttempt.id,
+          cycleId: attemptState.workflowRuntime.currentAttempt.cycleId,
+          visitOrdinal:
+            attemptState.workflowRuntime.currentAttempt.visitOrdinal,
+          retryOrdinal:
+            attemptState.workflowRuntime.currentAttempt.retryOrdinal,
+        }
+      : {}),
   };
-  return acceptAction(pkg, resolvedState, action, confirmations, state);
+  return acceptAction(pkg, attemptState, action, confirmations, state);
 }
 
 function acceptAction(
@@ -200,11 +312,20 @@ export function recordOutcomeWithResolver<TContext>(
     );
   }
   if (outcome.status === "failed") {
+    const retryKey =
+      state.workflowRuntime?.currentAttempt?.id ?? outcome.actionId;
     const retries = {
       ...state.retries,
-      [outcome.actionId]: (state.retries[outcome.actionId] ?? 0) + 1,
+      [retryKey]: (state.retries[retryKey] ?? 0) + 1,
     };
-    return { ...state, pending: null, status: "running", retries };
+    const workflowRuntime = recordWorkflowOutcome(state, outcome);
+    return {
+      ...state,
+      pending: null,
+      status: "running",
+      retries,
+      ...(workflowRuntime ? { workflowRuntime } : {}),
+    };
   }
   const next =
     state.orchestration === "deterministic"
@@ -217,6 +338,7 @@ export function recordOutcomeWithResolver<TContext>(
   ) {
     throw new Error(`Resolver returned unknown next step: ${next}`);
   }
+  const workflowRuntime = recordWorkflowOutcome(state, outcome);
   return {
     ...state,
     currentStep: next,
@@ -226,5 +348,6 @@ export function recordOutcomeWithResolver<TContext>(
       next === null && state.orchestration === "deterministic"
         ? "completed"
         : "running",
+    ...(workflowRuntime ? { workflowRuntime } : {}),
   };
 }

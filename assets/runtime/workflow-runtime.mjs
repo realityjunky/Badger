@@ -781,6 +781,23 @@ function narrowRuntimeMetadata(value, filePath) {
   for (const [nodeId, stepId2] of Object.entries(value.nodeToStep)) {
     assertString(stepId2, filePath, `runtime.nodeToStep.${nodeId}`);
   }
+  if (value.capabilityVersion !== void 0 && value.capabilityVersion !== 3) {
+    throw invalidDocument(
+      filePath,
+      "runtime.capabilityVersion",
+      "must be 3 when present"
+    );
+  }
+  if (value.resolverHash !== void 0) {
+    assertString(value.resolverHash, filePath, "runtime.resolverHash");
+    if (!/^[a-f0-9]{64}$/u.test(value.resolverHash)) {
+      throw invalidDocument(
+        filePath,
+        "runtime.resolverHash",
+        "must be a SHA-256 hash"
+      );
+    }
+  }
   let completionPlans;
   if (value.completionPlans !== void 0) {
     assertObject(value.completionPlans, filePath, "runtime.completionPlans");
@@ -823,6 +840,8 @@ function narrowRuntimeMetadata(value, filePath) {
         stepId2
       ])
     ),
+    ...value.capabilityVersion === 3 ? { capabilityVersion: 3 } : {},
+    ...typeof value.resolverHash === "string" ? { resolverHash: value.resolverHash } : {},
     ...completionPlans ? { completionPlans } : {}
   };
 }
@@ -1272,7 +1291,11 @@ var ACTION_KEYS = /* @__PURE__ */ new Set([
   "ref",
   "prompt",
   "question",
-  "options"
+  "options",
+  "attemptId",
+  "cycleId",
+  "visitOrdinal",
+  "retryOrdinal"
 ]);
 var appendLocks = /* @__PURE__ */ new Map();
 function assertRunPath(changeDir, relativePath) {
@@ -1357,6 +1380,30 @@ function parseAction(value) {
       );
     }
     action.options = value.options;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "attemptId")) {
+    action.attemptId = requiredText(
+      value.attemptId,
+      "attemptId",
+      "Run pending action"
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "cycleId")) {
+    if (value.cycleId !== null) {
+      throw new Error("Invalid Run pending action: cycleId must be null");
+    }
+    action.cycleId = null;
+  }
+  for (const key of ["visitOrdinal", "retryOrdinal"]) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+    const ordinal = value[key];
+    const minimum = key === "visitOrdinal" ? 1 : 0;
+    if (typeof ordinal !== "number" || !Number.isSafeInteger(ordinal) || ordinal < minimum) {
+      throw new Error(
+        `Invalid Run pending action: ${key} must be an integer at least ${minimum}`
+      );
+    }
+    action[key] = ordinal;
   }
   return action;
 }
@@ -1818,6 +1865,305 @@ async function validateSuccessfulSubmission(runRoot, protocol, node, plan, submi
   return boundBlockers(blockers);
 }
 
+// src/workflow-runtime/routing.ts
+var WorkflowRouteResolutionError = class extends Error {
+  blockers;
+  constructor(message) {
+    super(message);
+    this.name = "WorkflowRouteResolutionError";
+    this.blockers = [message];
+  }
+};
+function fieldId(field) {
+  if (!field || typeof field !== "object") return void 0;
+  return field.id ?? field.name;
+}
+function fieldValues(field) {
+  if (!field || typeof field !== "object") return void 0;
+  return field.values ?? field.allowedValues;
+}
+function routingFields(protocol) {
+  const fields = protocol.routing?.fields ?? protocol.routing?.routingFields;
+  if (!fields) return [];
+  if (Array.isArray(fields)) {
+    return fields.map((field) => ({
+      id: fieldId(field) ?? "",
+      values: [...fieldValues(field) ?? []]
+    }));
+  }
+  return Object.entries(fields).map(([id, values]) => {
+    if (!Array.isArray(values)) {
+      throw new Error(`Workflow routing field values are invalid: ${id}`);
+    }
+    return { id, values: [...values] };
+  });
+}
+function predicate(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || typeof value.field !== "string" || typeof value.equals !== "string") {
+    throw new Error(
+      "Workflow route conditions must contain a field and exact scalar equals value"
+    );
+  }
+  return {
+    field: value.field,
+    equals: value.equals
+  };
+}
+function routingPredicates(condition, fields) {
+  if (typeof condition === "string") {
+    if (fields.length === 1) {
+      return [{ field: fields[0].id, equals: condition }];
+    }
+    const separator = condition.indexOf("=");
+    if (separator > 0 && separator < condition.length - 1) {
+      return [
+        {
+          field: condition.slice(0, separator),
+          equals: condition.slice(separator + 1)
+        }
+      ];
+    }
+    if (fields.length !== 1) {
+      throw new Error(
+        "Workflow route text conditions require exactly one declared routing field"
+      );
+    }
+  }
+  if (Array.isArray(condition)) {
+    if (condition.length === 0) {
+      throw new Error("Workflow route conjunction must not be empty");
+    }
+    return condition.map(predicate);
+  }
+  if (!condition || typeof condition !== "object") {
+    throw new Error("Workflow route condition must be an object or string");
+  }
+  if ("all" in condition) {
+    if (!Array.isArray(condition.all) || condition.all.length === 0) {
+      throw new Error("Workflow route conjunction must not be empty");
+    }
+    return condition.all.map(predicate);
+  }
+  return [predicate(condition)];
+}
+function fieldMap(fields) {
+  const result = /* @__PURE__ */ new Map();
+  for (const field of fields) {
+    if (!field.id || !Array.isArray(field.values) || field.values.length === 0 || field.values.some((value) => typeof value !== "string")) {
+      throw new Error("Workflow routing fields require an id and values");
+    }
+    if (result.has(field.id)) {
+      throw new Error(`Workflow routing field is duplicated: ${field.id}`);
+    }
+    const values = new Set(field.values);
+    if (values.size !== field.values.length || [...values].some((value) => !value)) {
+      throw new Error(`Workflow routing field has invalid values: ${field.id}`);
+    }
+    result.set(field.id, values);
+  }
+  return result;
+}
+function validatePredicates(transition, fields) {
+  if (transition.when === void 0) return void 0;
+  const predicates = routingPredicates(
+    transition.when,
+    [...fields].map(([id, values]) => ({
+      id,
+      values: [...values]
+    }))
+  );
+  const seen = /* @__PURE__ */ new Map();
+  for (const item of predicates) {
+    const values = fields.get(item.field);
+    if (!values) {
+      throw new Error(
+        `Workflow route condition references unknown routing field: ${item.field}`
+      );
+    }
+    if (!values.has(item.equals)) {
+      throw new Error(
+        `Workflow route condition references unknown value for ${item.field}: ${item.equals}`
+      );
+    }
+    const previous = seen.get(item.field);
+    if (previous !== void 0 && previous !== item.equals) {
+      throw new Error(
+        `Workflow route conjunction has conflicting values for field: ${item.field}`
+      );
+    }
+    seen.set(item.field, item.equals);
+  }
+  return predicates;
+}
+function predicatesOverlap(left, right) {
+  const rightValues = new Map(right.map((item) => [item.field, item.equals]));
+  return left.every(
+    (item) => !rightValues.has(item.field) || rightValues.get(item.field) === item.equals
+  );
+}
+function activeNodes(protocol) {
+  return new Set(
+    protocol.nodes.filter((node) => !node.disabled).map((node) => node.id)
+  );
+}
+function transitionsFrom(protocol, nodeId) {
+  return protocol.edges.filter(
+    (transition) => transition.from === nodeId && transition.condition === "success"
+  );
+}
+function isRevisionedWorkflowProtocol(protocol) {
+  return Boolean(
+    protocol.capabilities?.version === 3 || protocol.routing?.fields !== void 0 || protocol.routing?.routingFields !== void 0
+  );
+}
+function validateRevisionedWorkflow(protocol) {
+  const active = activeNodes(protocol);
+  if (active.size === 0) return;
+  const nodeIds = new Set(protocol.nodes.map((node) => node.id));
+  const fields = fieldMap(routingFields(protocol));
+  const predicatesByTransition = /* @__PURE__ */ new Map();
+  for (const transition of protocol.edges) {
+    if (!nodeIds.has(transition.from)) {
+      throw new Error(
+        `Workflow Protocol transition references unknown Node: ${transition.from}`
+      );
+    }
+    if (transition.to !== null && !nodeIds.has(transition.to)) {
+      throw new Error(
+        `Workflow Protocol transition references unknown Node: ${transition.to}`
+      );
+    }
+    if (transition.to !== null && !active.has(transition.to)) {
+      throw new Error(
+        `Workflow Protocol transition targets disabled Node: ${transition.to}`
+      );
+    }
+    if ((transition.condition === "failure" || transition.condition === "pause") && transition.to !== transition.from) {
+      throw new Error(
+        `Workflow Protocol ${transition.condition} transition from Node ${transition.from} must self-loop`
+      );
+    }
+    if (transition.condition !== "success" || transition.when === void 0) {
+      continue;
+    }
+    const predicates = validatePredicates(transition, fields);
+    if (predicates) predicatesByTransition.set(transition, predicates);
+  }
+  for (const nodeId of active) {
+    const transitions = transitionsFrom(protocol, nodeId);
+    const defaults = transitions.filter(
+      (transition) => transition.when === void 0
+    );
+    if (defaults.length > 1) {
+      throw new Error(
+        `Workflow Protocol has multiple default transitions from Node ${nodeId}`
+      );
+    }
+    const conditional = transitions.filter(
+      (transition) => transition.when !== void 0
+    );
+    for (let leftIndex = 0; leftIndex < conditional.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < conditional.length; rightIndex += 1) {
+        const left = predicatesByTransition.get(conditional[leftIndex]);
+        const right = predicatesByTransition.get(conditional[rightIndex]);
+        if (left && right && predicatesOverlap(left, right)) {
+          throw new Error(
+            `Workflow Protocol has ambiguous conditional transitions from Node ${nodeId}`
+          );
+        }
+      }
+    }
+  }
+  const entry = protocol.nodes.find((node) => !node.disabled)?.id;
+  if (!entry) return;
+  const visiting = /* @__PURE__ */ new Set();
+  const visited = /* @__PURE__ */ new Set();
+  const visit = (nodeId) => {
+    if (visiting.has(nodeId)) {
+      throw new Error(
+        "Workflow Protocol success route contains an undeclared cycle"
+      );
+    }
+    if (visited.has(nodeId)) return;
+    visiting.add(nodeId);
+    for (const transition of transitionsFrom(protocol, nodeId)) {
+      if (transition.to !== null) visit(transition.to);
+    }
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+  };
+  visit(entry);
+  for (const node of protocol.nodes) {
+    if (!node.disabled && !node.optional && !visited.has(node.id)) {
+      throw new Error(
+        `Workflow Protocol required Node is unreachable: ${node.id}`
+      );
+    }
+  }
+  for (const nodeId of visited) {
+    if (transitionsFrom(protocol, nodeId).length === 0) {
+      throw new Error(
+        `Workflow Protocol Node ${nodeId} has no success transition`
+      );
+    }
+  }
+}
+function validateRoutingValues(protocol, routing) {
+  const fields = fieldMap(routingFields(protocol));
+  const values = /* @__PURE__ */ new Map();
+  for (const [field, value] of Object.entries(routing ?? {})) {
+    const allowed = fields.get(field);
+    if (!allowed) {
+      throw new WorkflowRouteResolutionError(
+        `Route blocker: unknown routing field: ${field}`
+      );
+    }
+    if (!allowed.has(value)) {
+      throw new WorkflowRouteResolutionError(
+        `Route blocker: invalid routing value for ${field}: ${value}`
+      );
+    }
+    values.set(field, value);
+  }
+  return values;
+}
+function resolveWorkflowNext(protocol, nodeId, outcome) {
+  const transitions = transitionsFrom(protocol, nodeId);
+  const defaults = transitions.filter(
+    (transition) => transition.when === void 0
+  );
+  const values = validateRoutingValues(protocol, outcome.routing);
+  const fields = routingFields(protocol);
+  const matches = transitions.filter((transition) => {
+    if (transition.when === void 0) return false;
+    const predicates = routingPredicates(transition.when, fields);
+    return predicates.every((item) => values.get(item.field) === item.equals);
+  });
+  if (matches.length > 1) {
+    throw new WorkflowRouteResolutionError(
+      `Route blocker: ambiguous success transitions from Node ${nodeId}`
+    );
+  }
+  const selected = matches[0] ?? defaults[0];
+  if (!selected) {
+    throw new WorkflowRouteResolutionError(
+      `Route blocker: no matching success transition from Node ${nodeId}`
+    );
+  }
+  return selected.to;
+}
+function resolverHash(protocol) {
+  return sha256(
+    JSON.stringify(
+      stableValue({
+        capabilities: protocol.capabilities,
+        routing: protocol.routing,
+        edges: protocol.edges
+      })
+    )
+  );
+}
+
 // src/workflow-runtime/compiler.ts
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) {
@@ -1831,7 +2177,7 @@ function deepFreeze(value) {
 function hashProtocol(protocol) {
   return sha256(JSON.stringify(stableValue(protocol)));
 }
-function activeNodes(protocol) {
+function activeNodes2(protocol) {
   return protocol.nodes.filter((node) => !node.disabled);
 }
 function stepId(index, nodeId) {
@@ -1884,6 +2230,13 @@ function validateProtocolShape(protocol) {
   }
   if (!Array.isArray(protocol.outputSchemas)) {
     throw new Error("Workflow Protocol Output Schemas must be an array");
+  }
+  if (protocol.capabilities !== void 0) {
+    if (!protocol.capabilities || protocol.capabilities.version !== 3 || !Array.isArray(protocol.capabilities.features) || protocol.capabilities.features.some(
+      (feature) => feature !== "conditional-routing" && feature !== "revisioned-attempts"
+    ) || !protocol.capabilities.features.includes("conditional-routing") || !protocol.capabilities.features.includes("revisioned-attempts")) {
+      throw new Error("Workflow Protocol capabilities are invalid");
+    }
   }
   const schemaIds = /* @__PURE__ */ new Set();
   for (const schema of protocol.outputSchemas) {
@@ -2003,7 +2356,7 @@ function transitionFor(transitions, from, condition) {
   return matches[0];
 }
 function validateLinearRoute(protocol) {
-  const active = activeNodes(protocol);
+  const active = activeNodes2(protocol);
   const activeIds = new Set(active.map((node) => node.id));
   const evaluation = protocol.evals?.[0];
   if ((protocol.evals?.length ?? 0) > 1) {
@@ -2119,14 +2472,14 @@ function validateLinearRoute(protocol) {
   }
   return ordered;
 }
-function compileDefinition(protocol, nodes) {
+function compileDefinition(protocol, nodes, linear) {
   const steps = nodes.map((node, index) => ({
     id: stepId(index, node.id),
     action: {
       type: "invoke_skill",
       ref: nodeSkillName(protocol.name, node.id)
     },
-    ...nodes[index + 1] ? { next: stepId(index + 1, nodes[index + 1].id) } : {}
+    ...linear && nodes[index + 1] ? { next: stepId(index + 1, nodes[index + 1].id) } : {}
   }));
   if (steps.length === 0) {
     steps.push({
@@ -2178,8 +2531,15 @@ function compileCompletionPlans(nodes) {
 }
 async function compileWorkflow(protocol) {
   validateProtocolShape(protocol);
-  const nodes = validateLinearRoute(protocol);
-  const definition = compileDefinition(protocol, nodes);
+  const revisioned = isRevisionedWorkflowProtocol(protocol);
+  if (revisioned && protocol.capabilities?.version !== 3) {
+    throw new Error(
+      "Workflow Protocol revisioned capabilities are required for branch routing"
+    );
+  }
+  if (revisioned) validateRevisionedWorkflow(protocol);
+  const nodes = revisioned ? activeNodes2(protocol) : validateLinearRoute(protocol);
+  const definition = compileDefinition(protocol, nodes, !revisioned);
   const nodeToStep = Object.fromEntries(
     nodes.map((node, index) => [node.id, stepId(index, node.id)])
   );
@@ -2188,6 +2548,7 @@ async function compileWorkflow(protocol) {
     protocolHash,
     protocol: structuredClone(protocol),
     nodeToStep: { ...nodeToStep },
+    ...revisioned ? { capabilityVersion: 3, resolverHash: resolverHash(protocol) } : {},
     completionPlans: compileCompletionPlans(nodes)
   };
   const pkg = {
@@ -2212,9 +2573,58 @@ ${packageErrors.map((error) => `  - ${error}`).join("\n")}`
       protocolHash,
       packageHash,
       snapshotHash: "",
-      nodeToStep
+      nodeToStep,
+      ...revisioned ? {
+        capabilityVersion: 3,
+        resolverHash: resolverHash(protocol)
+      } : {}
     }
   };
+}
+
+// src/workflow-runtime/resolver.ts
+function stepFor(pkg, stepId2) {
+  return pkg.definition.orchestration.steps?.find((step) => step.id === stepId2);
+}
+function nodeForStep(pkg, stepId2) {
+  if (!pkg.runtime || !stepId2) return void 0;
+  return Object.entries(pkg.runtime.nodeToStep).find(
+    ([, compiledStepId]) => compiledStepId === stepId2
+  )?.[0];
+}
+var workflowDeterministicResolver = {
+  resolveStep({
+    pkg,
+    state
+  }) {
+    return stepFor(pkg, state.currentStep);
+  },
+  resolveNext({
+    pkg,
+    step,
+    outcome
+  }) {
+    if (!pkg.runtime || !isRevisionedWorkflowProtocol(pkg.runtime.protocol)) {
+      return step.next ?? null;
+    }
+    const nodeId = nodeForStep(pkg, step.id);
+    if (!nodeId) {
+      if (step.action.type === "checkpoint") return null;
+      throw new Error(`WorkflowRuntime step has no Node identity: ${step.id}`);
+    }
+    const nextNode = resolveWorkflowNext(pkg.runtime.protocol, nodeId, outcome);
+    if (nextNode === null) return null;
+    const nextStep = pkg.runtime.nodeToStep[nextNode];
+    if (!nextStep) {
+      throw new Error(
+        `WorkflowRuntime next Node has no step identity: ${nextNode}`
+      );
+    }
+    return nextStep;
+  }
+};
+function resolverForPackage() {
+  return workflowDeterministicResolver;
 }
 
 // src/workflow-runtime/location.ts
@@ -2278,11 +2688,12 @@ function checkAction(action, state, guardrails, confirmations) {
       reason: `User confirmation required for: ${action.ref}`
     };
   }
-  const retries = state.retries[action.id] ?? 0;
+  const retryKey = action.attemptId ?? action.id;
+  const retries = state.retries[retryKey] ?? 0;
   if (retries > guardrails.maxRetriesPerAction) {
     return {
       allowed: false,
-      reason: `Retry budget exhausted for action: ${action.id}`
+      reason: `Retry budget exhausted for action: ${retryKey}`
     };
   }
   return { allowed: true };
@@ -2328,13 +2739,83 @@ var staticDeterministicResolver = {
 };
 
 // src/engine/loop.ts
-function actionId(runId, iteration, stepId2) {
-  return createHash3("sha256").update(`${runId}:${iteration}:${stepId2 ?? "adaptive"}`).digest("hex").slice(0, 16);
+function actionId(runId, iteration, stepId2, attempt) {
+  const context = attempt ? `${runId}:${iteration}:${stepId2 ?? "adaptive"}:${attempt.id}:retry:${attempt.retryOrdinal}` : `${runId}:${iteration}:${stepId2 ?? "adaptive"}`;
+  return createHash3("sha256").update(context).digest("hex").slice(0, 16);
 }
-function stepFor(pkg, id) {
+function attemptId(runId, stepId2, visitOrdinal) {
+  return `attempt-${createHash3("sha256").update(`${runId}:${stepId2}:${visitOrdinal}:cycle:none`).digest("hex").slice(0, 24)}`;
+}
+function enterAttempt(state, stepId2) {
+  if (!state.workflowRuntime) {
+    return state;
+  }
+  if (state.workflowRuntime.currentAttempt) {
+    if (state.workflowRuntime.currentAttempt.stepId !== stepId2) {
+      throw new Error("WorkflowRuntime current Attempt does not match step");
+    }
+    return state;
+  }
+  const workflowRuntime = structuredClone(
+    state.workflowRuntime
+  );
+  const visitOrdinal = workflowRuntime.nextVisitOrdinal + 1;
+  const currentAttempt = {
+    id: attemptId(state.runId, stepId2, visitOrdinal),
+    stepId: stepId2,
+    cycleId: null,
+    visitOrdinal,
+    retryOrdinal: 0
+  };
+  workflowRuntime.nextVisitOrdinal = visitOrdinal;
+  workflowRuntime.currentAttempt = currentAttempt;
+  workflowRuntime.visits.push({
+    attemptId: currentAttempt.id,
+    stepId: stepId2,
+    cycleId: null,
+    visitOrdinal,
+    outcomes: []
+  });
+  return { ...state, workflowRuntime };
+}
+function recordWorkflowOutcome(state, outcome) {
+  if (!state.workflowRuntime) return void 0;
+  const workflowRuntime = structuredClone(
+    state.workflowRuntime
+  );
+  const attempt = workflowRuntime.currentAttempt;
+  if (!attempt) {
+    throw new Error("WorkflowRuntime current Attempt is missing");
+  }
+  const visit = workflowRuntime.visits.find(
+    (candidate) => candidate.attemptId === attempt.id
+  );
+  if (!visit) {
+    throw new Error(
+      "WorkflowRuntime current Attempt is not in the visit ledger"
+    );
+  }
+  const visitOutcome = {
+    actionId: outcome.actionId,
+    status: outcome.status,
+    summary: outcome.summary,
+    retryOrdinal: attempt.retryOrdinal,
+    ...outcome.routing ? { routing: { ...outcome.routing } } : {},
+    ...outcome.evidence ? { evidence: structuredClone(outcome.evidence) } : {}
+  };
+  visit.outcomes.push(visitOutcome);
+  workflowRuntime.revision += 1;
+  if (outcome.status === "failed") {
+    attempt.retryOrdinal += 1;
+  } else {
+    workflowRuntime.currentAttempt = null;
+  }
+  return workflowRuntime;
+}
+function stepFor2(pkg, id) {
   return pkg.definition.orchestration.steps?.find((step) => step.id === id);
 }
-function startRun(pkg, runId, skillHash) {
+function startRun(pkg, runId, skillHash, workflowRuntime) {
   return {
     runId,
     skill: pkg.definition.metadata.name,
@@ -2350,17 +2831,9 @@ function startRun(pkg, runId, skillHash) {
     artifactsRef: ".comet/artifacts.json",
     checkpointRef: ".comet/checkpoint.json",
     status: "running",
-    retries: {}
+    retries: {},
+    ...workflowRuntime ? { workflowRuntime: structuredClone(workflowRuntime) } : {}
   };
-}
-function decide(pkg, state, confirmations) {
-  return decideWithResolver(
-    pkg,
-    state,
-    confirmations,
-    staticDeterministicResolver,
-    void 0
-  );
 }
 function decideWithResolver(pkg, state, confirmations, resolver, context) {
   if (state.status !== "running")
@@ -2389,7 +2862,7 @@ function decideWithResolver(pkg, state, confirmations, resolver, context) {
       reason: `Unknown current step: ${state.currentStep}`
     };
   }
-  const step = stepFor(pkg, resolvedStep.id);
+  const step = stepFor2(pkg, resolvedStep.id);
   if (!step) {
     return {
       state: { ...state, status: "failed" },
@@ -2398,12 +2871,24 @@ function decideWithResolver(pkg, state, confirmations, resolver, context) {
     };
   }
   const resolvedState = state.currentStep === step.id ? state : { ...state, currentStep: step.id };
+  const attemptState = enterAttempt(resolvedState, step.id);
   const action = {
     ...step.action,
-    id: actionId(resolvedState.runId, resolvedState.iteration, step.id),
-    stepId: step.id
+    id: actionId(
+      attemptState.runId,
+      attemptState.iteration,
+      step.id,
+      attemptState.workflowRuntime?.currentAttempt ?? null
+    ),
+    stepId: step.id,
+    ...attemptState.workflowRuntime?.currentAttempt ? {
+      attemptId: attemptState.workflowRuntime.currentAttempt.id,
+      cycleId: attemptState.workflowRuntime.currentAttempt.cycleId,
+      visitOrdinal: attemptState.workflowRuntime.currentAttempt.visitOrdinal,
+      retryOrdinal: attemptState.workflowRuntime.currentAttempt.retryOrdinal
+    } : {}
   };
-  return acceptAction(pkg, resolvedState, action, confirmations, state);
+  return acceptAction(pkg, attemptState, action, confirmations, state);
 }
 function acceptAction(pkg, state, action, confirmations, rejectedState = state) {
   const guard = checkAction(action, state, pkg.guardrails, confirmations);
@@ -2411,15 +2896,6 @@ function acceptAction(pkg, state, action, confirmations, rejectedState = state) 
     return { state: rejectedState, action: null, reason: guard.reason };
   }
   return { state: { ...state, pending: action.id, status: "waiting" }, action };
-}
-function recordOutcome(pkg, state, outcome) {
-  return recordOutcomeWithResolver(
-    pkg,
-    state,
-    outcome,
-    staticDeterministicResolver,
-    void 0
-  );
 }
 function recordOutcomeWithResolver(pkg, state, outcome, resolver, context) {
   if (!state.pending || state.pending !== outcome.actionId) {
@@ -2431,7 +2907,7 @@ function recordOutcomeWithResolver(pkg, state, outcome, resolver, context) {
     throw new Error(`Run is ${state.status}`);
   }
   const resolvedStep = state.orchestration === "deterministic" ? resolveDeterministicStep(resolver, pkg, state, context) : void 0;
-  const step = resolvedStep ? stepFor(pkg, resolvedStep.id) : void 0;
+  const step = resolvedStep ? stepFor2(pkg, resolvedStep.id) : void 0;
   if (state.orchestration === "deterministic" && !resolvedStep) {
     throw new Error(
       `Unknown current step: ${state.currentStep ?? "(missing)"}`
@@ -2443,22 +2919,32 @@ function recordOutcomeWithResolver(pkg, state, outcome, resolver, context) {
     );
   }
   if (outcome.status === "failed") {
+    const retryKey = state.workflowRuntime?.currentAttempt?.id ?? outcome.actionId;
     const retries = {
       ...state.retries,
-      [outcome.actionId]: (state.retries[outcome.actionId] ?? 0) + 1
+      [retryKey]: (state.retries[retryKey] ?? 0) + 1
     };
-    return { ...state, pending: null, status: "running", retries };
+    const workflowRuntime2 = recordWorkflowOutcome(state, outcome);
+    return {
+      ...state,
+      pending: null,
+      status: "running",
+      retries,
+      ...workflowRuntime2 ? { workflowRuntime: workflowRuntime2 } : {}
+    };
   }
   const next = state.orchestration === "deterministic" ? resolveDeterministicNext(resolver, pkg, state, step, outcome, context) : state.currentStep;
-  if (next !== null && state.orchestration === "deterministic" && !stepFor(pkg, next)) {
+  if (next !== null && state.orchestration === "deterministic" && !stepFor2(pkg, next)) {
     throw new Error(`Resolver returned unknown next step: ${next}`);
   }
+  const workflowRuntime = recordWorkflowOutcome(state, outcome);
   return {
     ...state,
     currentStep: next,
     iteration: state.iteration + 1,
     pending: null,
-    status: next === null && state.orchestration === "deterministic" ? "completed" : "running"
+    status: next === null && state.orchestration === "deterministic" ? "completed" : "running",
+    ...workflowRuntime ? { workflowRuntime } : {}
   };
 }
 
@@ -2492,7 +2978,8 @@ var RUN_STATE_JSON_KEYS = /* @__PURE__ */ new Set([
   "checkpointRef",
   "status",
   "retries",
-  "runtimeIdentity"
+  "runtimeIdentity",
+  "workflowRuntime"
 ]);
 function requiredJsonString(value, key) {
   if (typeof value !== "string" || value.length === 0) {
@@ -2508,6 +2995,256 @@ function nullableJsonString(value, key) {
     );
   }
   return value;
+}
+function parseStringRecord(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key || typeof entry !== "string" || entry.length === 0) {
+      throw new Error(`Invalid Run state: ${label} must contain strings`);
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, entry])
+  );
+}
+function parseJsonRecord(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  try {
+    JSON.stringify(value);
+  } catch (error) {
+    throw new Error(`Invalid Run state: ${label} must be JSON-serializable`, {
+      cause: error
+    });
+  }
+  return structuredClone(value);
+}
+function parseWorkflowAttempt(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const attempt = value;
+  const keys = /* @__PURE__ */ new Set([
+    "id",
+    "stepId",
+    "cycleId",
+    "visitOrdinal",
+    "retryOrdinal"
+  ]);
+  const unknown = Object.keys(attempt).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const id = requiredJsonString(
+    attempt.id,
+    `${label}.id`
+  );
+  const stepId2 = requiredJsonString(
+    attempt.stepId,
+    `${label}.stepId`
+  );
+  const cycleId = attempt.cycleId;
+  if (cycleId !== null) {
+    throw new Error(`Invalid Run state: ${label}.cycleId must be null`);
+  }
+  const visitOrdinal = attempt.visitOrdinal;
+  const retryOrdinal = attempt.retryOrdinal;
+  if (typeof visitOrdinal !== "number" || !Number.isSafeInteger(visitOrdinal) || visitOrdinal < 1) {
+    throw new Error(
+      `Invalid Run state: ${label}.visitOrdinal must be a positive integer`
+    );
+  }
+  if (typeof retryOrdinal !== "number" || !Number.isSafeInteger(retryOrdinal) || retryOrdinal < 0) {
+    throw new Error(
+      `Invalid Run state: ${label}.retryOrdinal must be a non-negative integer`
+    );
+  }
+  return { id, stepId: stepId2, cycleId: null, visitOrdinal, retryOrdinal };
+}
+function parseWorkflowOutcome(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const outcome = value;
+  const keys = /* @__PURE__ */ new Set([
+    "actionId",
+    "status",
+    "summary",
+    "retryOrdinal",
+    "routing",
+    "evidence"
+  ]);
+  const unknown = Object.keys(outcome).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const actionId2 = requiredJsonString(
+    outcome.actionId,
+    `${label}.actionId`
+  );
+  const summary = requiredJsonString(
+    outcome.summary,
+    `${label}.summary`
+  );
+  if (outcome.status !== "succeeded" && outcome.status !== "failed") {
+    throw new Error(`Invalid Run state: ${label}.status is invalid`);
+  }
+  const retryOrdinal = outcome.retryOrdinal;
+  if (typeof retryOrdinal !== "number" || !Number.isSafeInteger(retryOrdinal) || retryOrdinal < 0) {
+    throw new Error(
+      `Invalid Run state: ${label}.retryOrdinal must be a non-negative integer`
+    );
+  }
+  return {
+    actionId: actionId2,
+    status: outcome.status,
+    summary,
+    retryOrdinal,
+    ...outcome.routing !== void 0 ? { routing: parseStringRecord(outcome.routing, `${label}.routing`) } : {},
+    ...outcome.evidence !== void 0 ? { evidence: parseJsonRecord(outcome.evidence, `${label}.evidence`) } : {}
+  };
+}
+function parseWorkflowVisit(value, index) {
+  const label = `workflowRuntime.visits[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const visit = value;
+  const keys = /* @__PURE__ */ new Set([
+    "attemptId",
+    "stepId",
+    "cycleId",
+    "visitOrdinal",
+    "outcomes"
+  ]);
+  const unknown = Object.keys(visit).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const attemptId2 = requiredJsonString(
+    visit.attemptId,
+    `${label}.attemptId`
+  );
+  const stepId2 = requiredJsonString(
+    visit.stepId,
+    `${label}.stepId`
+  );
+  if (visit.cycleId !== null) {
+    throw new Error(`Invalid Run state: ${label}.cycleId must be null`);
+  }
+  const visitOrdinal = visit.visitOrdinal;
+  if (typeof visitOrdinal !== "number" || !Number.isSafeInteger(visitOrdinal) || visitOrdinal < 1) {
+    throw new Error(
+      `Invalid Run state: ${label}.visitOrdinal must be a positive integer`
+    );
+  }
+  if (!Array.isArray(visit.outcomes)) {
+    throw new Error(`Invalid Run state: ${label}.outcomes must be an array`);
+  }
+  return {
+    attemptId: attemptId2,
+    stepId: stepId2,
+    cycleId: null,
+    visitOrdinal,
+    outcomes: visit.outcomes.map(
+      (outcome, outcomeIndex) => parseWorkflowOutcome(outcome, `${label}.outcomes[${outcomeIndex}]`)
+    )
+  };
+}
+function parseWorkflowRuntime(value) {
+  if (value === void 0) return void 0;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid Run state: workflowRuntime must be an object");
+  }
+  const runtime = value;
+  const keys = /* @__PURE__ */ new Set([
+    "revision",
+    "nextVisitOrdinal",
+    "currentAttempt",
+    "visits"
+  ]);
+  const unknown = Object.keys(runtime).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(
+      `Invalid Run state: workflowRuntime has unknown field ${unknown}`
+    );
+  }
+  for (const key of ["revision", "nextVisitOrdinal"]) {
+    const entry = runtime[key];
+    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 0) {
+      throw new Error(
+        `Invalid Run state: workflowRuntime.${key} must be a non-negative integer`
+      );
+    }
+  }
+  const revision = runtime.revision;
+  const nextVisitOrdinal = runtime.nextVisitOrdinal;
+  if (!Array.isArray(runtime.visits)) {
+    throw new Error(
+      "Invalid Run state: workflowRuntime.visits must be an array"
+    );
+  }
+  const visits = runtime.visits.map(parseWorkflowVisit);
+  const attemptIds = /* @__PURE__ */ new Set();
+  const visitOrdinals = /* @__PURE__ */ new Set();
+  let outcomeCount = 0;
+  for (const visit of visits) {
+    if (attemptIds.has(visit.attemptId)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime Attempt ${visit.attemptId}`
+      );
+    }
+    attemptIds.add(visit.attemptId);
+    if (visitOrdinals.has(visit.visitOrdinal)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime visit ordinal ${visit.visitOrdinal}`
+      );
+    }
+    visitOrdinals.add(visit.visitOrdinal);
+    outcomeCount += visit.outcomes.length;
+    if (visit.visitOrdinal > nextVisitOrdinal) {
+      throw new Error(
+        "Invalid Run state: WorkflowRuntime visit ordinal exceeds its counter"
+      );
+    }
+  }
+  const currentAttempt = runtime.currentAttempt === null ? null : parseWorkflowAttempt(
+    runtime.currentAttempt,
+    "workflowRuntime.currentAttempt"
+  );
+  if (currentAttempt && !attemptIds.has(currentAttempt.id)) {
+    throw new Error(
+      "Invalid Run state: current WorkflowRuntime Attempt is not in visits"
+    );
+  }
+  if (revision !== outcomeCount) {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime revision does not match visit outcomes"
+    );
+  }
+  if (currentAttempt) {
+    const currentVisit = visits.find(
+      (visit) => visit.attemptId === currentAttempt.id
+    );
+    if (currentVisit.stepId !== currentAttempt.stepId || currentVisit.cycleId !== currentAttempt.cycleId || currentVisit.visitOrdinal !== currentAttempt.visitOrdinal) {
+      throw new Error(
+        "Invalid Run state: current WorkflowRuntime Attempt does not match its visit"
+      );
+    }
+    const lastOutcome = currentVisit.outcomes.at(-1);
+    const expectedRetryOrdinal = lastOutcome ? lastOutcome.retryOrdinal + 1 : 0;
+    if (currentAttempt.retryOrdinal !== expectedRetryOrdinal) {
+      throw new Error(
+        "Invalid Run state: current WorkflowRuntime retry ordinal is invalid"
+      );
+    }
+  }
+  return {
+    revision,
+    nextVisitOrdinal,
+    currentAttempt,
+    visits
+  };
 }
 function parseRunStateJson(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -2568,7 +3305,9 @@ function parseRunStateJson(value) {
       "protocolHash",
       "packageHash",
       "snapshotHash",
-      "nodeToStep"
+      "nodeToStep",
+      "capabilityVersion",
+      "resolverHash"
     ]);
     const unknownIdentityKey = Object.keys(identity).find(
       (key) => !identityKeys.has(key)
@@ -2578,7 +3317,7 @@ function parseRunStateJson(value) {
         `Invalid Run state: runtimeIdentity unknown field ${unknownIdentityKey}`
       );
     }
-    if (typeof identity.protocolHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.protocolHash) || typeof identity.packageHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.packageHash) || typeof identity.snapshotHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.snapshotHash) || !identity.nodeToStep || typeof identity.nodeToStep !== "object" || Array.isArray(identity.nodeToStep)) {
+    if (typeof identity.protocolHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.protocolHash) || typeof identity.packageHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.packageHash) || typeof identity.snapshotHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.snapshotHash) || !identity.nodeToStep || typeof identity.nodeToStep !== "object" || Array.isArray(identity.nodeToStep) || identity.capabilityVersion !== void 0 && identity.capabilityVersion !== 3 || identity.resolverHash !== void 0 && (typeof identity.resolverHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.resolverHash))) {
       throw new Error("Invalid Run state: runtimeIdentity is invalid");
     }
     for (const [nodeId, stepId2] of Object.entries(identity.nodeToStep)) {
@@ -2597,9 +3336,12 @@ function parseRunStateJson(value) {
           nodeId,
           stepId2
         ])
-      )
+      ),
+      ...identity.capabilityVersion === 3 ? { capabilityVersion: 3 } : {},
+      ...typeof identity.resolverHash === "string" ? { resolverHash: identity.resolverHash } : {}
     };
   }
+  const workflowRuntime = parseWorkflowRuntime(json.workflowRuntime);
   return {
     runId,
     skill,
@@ -2616,7 +3358,8 @@ function parseRunStateJson(value) {
     checkpointRef,
     status: json.status,
     retries: json.retries,
-    ...runtimeIdentity ? { runtimeIdentity } : {}
+    ...runtimeIdentity ? { runtimeIdentity } : {},
+    ...workflowRuntime ? { workflowRuntime } : {}
   };
 }
 function parseRunStateValue(value) {
@@ -2699,6 +3442,7 @@ function validateOutcome(outcome) {
   }
   validateStringRecord(outcome.artifacts, "Outcome artifacts");
   validateStringRecord(outcome.state, "Outcome state");
+  validateStringRecord(outcome.routing, "Outcome routing");
   validateEvidenceRecord(outcome.evidence, "Outcome evidence");
 }
 function validatePendingState(state, pending) {
@@ -2732,8 +3476,14 @@ async function appendEvent(changeDir, state, type, data) {
     data
   });
 }
-async function persistDecision(changeDir, state, pkg, confirmations) {
-  const decision = decide(pkg, state, new Set(confirmations));
+async function persistDecision(changeDir, state, pkg, confirmations, resolver = staticDeterministicResolver) {
+  const decision = decideWithResolver(
+    pkg,
+    state,
+    new Set(confirmations),
+    resolver,
+    void 0
+  );
   if (decision.action) {
     await writePendingAction(
       changeDir,
@@ -2762,7 +3512,7 @@ async function evaluateAndRecord(changeDir, pkg, state, scope, artifacts) {
   return results;
 }
 function normalizeStartOptions(value) {
-  if (value && typeof value === "object" && ("confirmations" in value || "runId" in value || "runtimeIdentity" in value)) {
+  if (value && typeof value === "object" && ("confirmations" in value || "runId" in value || "runtimeIdentity" in value || "workflowRuntime" in value || "resolver" in value)) {
     return value;
   }
   return { confirmations: value };
@@ -2782,7 +3532,8 @@ async function startManualRun(pkg, changeDir, options = []) {
   const state = startRun(
     pkg,
     startOptions.runId ?? randomUUID3(),
-    snapshot.hash
+    snapshot.hash,
+    startOptions.workflowRuntime
   );
   if (startOptions.runtimeIdentity) {
     state.runtimeIdentity = structuredClone(startOptions.runtimeIdentity);
@@ -2798,7 +3549,8 @@ async function startManualRun(pkg, changeDir, options = []) {
     changeDir,
     state,
     pkg,
-    startOptions.confirmations ?? []
+    startOptions.confirmations ?? [],
+    startOptions.resolver
   );
 }
 async function resumeManualRun(changeDir, options = {}) {
@@ -2808,6 +3560,7 @@ async function resumeManualRun(changeDir, options = {}) {
   if (pkg.definition.orchestration.mode === "adaptive") {
     throw new Error("Adaptive orchestration requires an Agent candidate");
   }
+  const resolver = options.resolver ?? staticDeterministicResolver;
   const pending = await readPendingAction(changeDir, state.pendingRef);
   if (!options.outcome) {
     validatePendingState(state, pending);
@@ -2822,7 +3575,13 @@ async function resumeManualRun(changeDir, options = {}) {
         reason: `Run is ${state.status}`
       };
     }
-    return persistDecision(changeDir, state, pkg, options.confirmations ?? []);
+    return persistDecision(
+      changeDir,
+      state,
+      pkg,
+      options.confirmations ?? [],
+      resolver
+    );
   }
   if (!pending || !state.pending) {
     throw new Error("No pending action accepts an outcome");
@@ -2838,6 +3597,13 @@ async function resumeManualRun(changeDir, options = {}) {
     );
   }
   const outcome = { ...options.outcome, actionId: pending.id };
+  const advanced = recordOutcomeWithResolver(
+    pkg,
+    state,
+    outcome,
+    resolver,
+    void 0
+  );
   const artifacts = {
     ...await readArtifacts(changeDir, state.artifactsRef),
     ...outcome.artifacts ?? {}
@@ -2847,7 +3613,6 @@ async function resumeManualRun(changeDir, options = {}) {
     action: pending,
     outcome
   });
-  const advanced = recordOutcome(pkg, state, outcome);
   await clearPendingAction(changeDir, advanced.pendingRef);
   await writeRunState(changeDir, advanced);
   const evals = await evaluateAndRecord(
@@ -2881,7 +3646,8 @@ async function resumeManualRun(changeDir, options = {}) {
     changeDir,
     advanced,
     pkg,
-    options.confirmations ?? []
+    options.confirmations ?? [],
+    resolver
   );
   return { ...next, evals };
 }
@@ -2988,7 +3754,9 @@ async function startStandaloneRun(pkg, options) {
   return startManualRun(pkg, runDir, {
     runId: options.runId,
     confirmations: options.confirmations ?? [],
-    runtimeIdentity: options.runtimeIdentity
+    runtimeIdentity: options.runtimeIdentity,
+    workflowRuntime: options.workflowRuntime,
+    resolver: options.resolver
   });
 }
 async function resumeStandaloneRun(projectRoot, runId, options = {}) {
@@ -3040,7 +3808,9 @@ function standaloneLocation(projectRoot, runId) {
         projectRoot: validatedProjectRoot,
         runId: validatedRunId,
         confirmations: options.confirmations,
-        runtimeIdentity: options.runtimeIdentity
+        runtimeIdentity: options.runtimeIdentity,
+        workflowRuntime: options.workflowRuntime,
+        resolver: options.resolver
       });
     },
     async resume(options = {}) {
@@ -3088,7 +3858,9 @@ function identityFromState(state) {
     protocolHash: state.runtimeIdentity.protocolHash,
     packageHash: state.runtimeIdentity.packageHash,
     snapshotHash: state.runtimeIdentity.snapshotHash,
-    nodeToStep: { ...state.runtimeIdentity.nodeToStep }
+    nodeToStep: { ...state.runtimeIdentity.nodeToStep },
+    ...state.runtimeIdentity.capabilityVersion === 3 ? { capabilityVersion: 3 } : {},
+    ...state.runtimeIdentity.resolverHash ? { resolverHash: state.runtimeIdentity.resolverHash } : {}
   };
 }
 function currentNode(state, identity, action) {
@@ -3108,7 +3880,7 @@ function sameStringRecord(left, right) {
   return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
 }
 function sameExecutionIdentity(left, right) {
-  return left.protocolHash === right.protocolHash && left.packageHash === right.packageHash && left.snapshotHash === right.snapshotHash && sameStringRecord(left.nodeToStep, right.nodeToStep);
+  return left.protocolHash === right.protocolHash && left.packageHash === right.packageHash && left.snapshotHash === right.snapshotHash && sameStringRecord(left.nodeToStep, right.nodeToStep) && left.capabilityVersion === right.capabilityVersion && left.resolverHash === right.resolverHash;
 }
 function validateSubmission(submission) {
   if (!submission || typeof submission !== "object") {
@@ -3150,13 +3922,30 @@ function validateSubmission(submission) {
       });
     }
   }
+  if (submission.routing !== void 0) {
+    if (!submission.routing || typeof submission.routing !== "object" || Array.isArray(submission.routing)) {
+      throw new Error("Submission routing must be an object");
+    }
+    if (Object.entries(submission.routing).some(
+      ([field, value]) => !field || typeof value !== "string" || !value
+    )) {
+      throw new Error("Submission routing must contain non-empty strings");
+    }
+  }
 }
 function continuation(result, identity) {
+  const runtimeState = result.state.workflowRuntime;
+  const currentAttempt = runtimeState?.currentAttempt ?? null;
   const disposition = result.action ? "continue" : result.state.status === "completed" ? "done" : "blocked";
   return {
     disposition,
     runId: result.state.runId,
+    revision: runtimeState?.revision ?? 0,
     currentNode: currentNode(result.state, identity, result.action),
+    cycleId: currentAttempt?.cycleId ?? null,
+    attemptId: currentAttempt?.id ?? null,
+    visitOrdinal: currentAttempt?.visitOrdinal ?? null,
+    retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     pendingAction: result.action,
     execution: structuredClone(identity),
     blockers: disposition === "blocked" && result.reason ? [result.reason] : []
@@ -3211,6 +4000,8 @@ async function projectWorkflowState(target) {
     evidence[node] = isRecord3(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
   }
   const protocol = verified.package.runtime.protocol;
+  const runtimeState = state.workflowRuntime;
+  const currentAttempt = runtimeState?.currentAttempt ?? null;
   const status = projectionStatus(
     state,
     verified.pending,
@@ -3225,12 +4016,18 @@ async function projectWorkflowState(target) {
     statePath: protocol.state.statePath,
     status,
     runId: state.runId,
+    revision: runtimeState?.revision ?? 0,
     currentNode: currentNode(state, verified.identity, verified.pending),
+    cycleId: currentAttempt?.cycleId ?? null,
+    attemptId: currentAttempt?.id ?? null,
+    visitOrdinal: currentAttempt?.visitOrdinal ?? null,
+    retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     completedNodes,
     evidence,
     history,
     pendingAction: verified.pending,
     execution: structuredClone(verified.identity),
+    visits: structuredClone(runtimeState?.visits ?? []),
     blockers: status === "blocked" ? [
       exhaustedAction ? `Retry budget exhausted for action: ${exhaustedAction}` : `Run is ${state.status}`
     ] : []
@@ -3294,10 +4091,33 @@ async function verifyStoredPackage(runRoot, state) {
       "WorkflowRuntime Node-to-step identity does not match Skill snapshot"
     );
   }
+  if (pkg.runtime.capabilityVersion !== identity.capabilityVersion) {
+    throw new Error(
+      "WorkflowRuntime capability identity does not match Skill snapshot"
+    );
+  }
+  if (pkg.runtime.resolverHash !== identity.resolverHash) {
+    throw new Error(
+      "WorkflowRuntime resolver identity does not match Skill snapshot"
+    );
+  }
   const packageHash = await hashSkillPackage(pkg);
   if (packageHash !== identity.packageHash) {
     throw new Error(
       "WorkflowRuntime package identity does not match Skill snapshot"
+    );
+  }
+  if (pkg.runtime.capabilityVersion === 3 && !state.workflowRuntime) {
+    throw new Error(
+      "WorkflowRuntime revisioned state is missing from Run state"
+    );
+  }
+  if (pkg.runtime.capabilityVersion === 3 && state.workflowRuntime?.currentAttempt && state.workflowRuntime.currentAttempt.stepId !== state.currentStep) {
+    throw new Error("WorkflowRuntime current Attempt does not match Run step");
+  }
+  if (pkg.runtime.capabilityVersion !== 3 && state.workflowRuntime) {
+    throw new Error(
+      "WorkflowRuntime revisioned state is not valid for a legacy Run"
     );
   }
   return { identity, package: pkg };
@@ -3380,19 +4200,46 @@ async function completionBlockers(prepared, submission) {
     submission
   );
 }
+function routeBlockers(prepared, submission) {
+  const protocol = prepared.verified.package.runtime.protocol;
+  if (submission.status !== "succeeded" || !prepared.node || !isRevisionedWorkflowProtocol(protocol)) {
+    return [];
+  }
+  try {
+    resolveWorkflowNext(protocol, prepared.node, submission);
+    return [];
+  } catch (error) {
+    if (error instanceof WorkflowRouteResolutionError) {
+      return error.blockers;
+    }
+    throw error;
+  }
+}
+function blockedContinuation(prepared, blockers) {
+  return {
+    disposition: "blocked",
+    runId: prepared.verified.state.runId,
+    revision: prepared.verified.state.workflowRuntime?.revision ?? 0,
+    currentNode: prepared.node,
+    cycleId: prepared.verified.state.workflowRuntime?.currentAttempt?.cycleId ?? null,
+    attemptId: prepared.verified.state.workflowRuntime?.currentAttempt?.id ?? null,
+    visitOrdinal: prepared.verified.state.workflowRuntime?.currentAttempt?.visitOrdinal ?? null,
+    retryOrdinal: prepared.verified.state.workflowRuntime?.currentAttempt?.retryOrdinal ?? null,
+    pendingAction: prepared.pending,
+    execution: structuredClone(prepared.verified.identity),
+    blockers: [...blockers]
+  };
+}
 async function validateWorkflowSubmission(target, submission) {
   validateSubmission(submission);
   const prepared = await prepareWorkflowSubmission(target, submission);
   const blockers = await completionBlockers(prepared, submission);
   if (blockers.length > 0) {
-    return {
-      disposition: "blocked",
-      runId: prepared.verified.state.runId,
-      currentNode: prepared.node,
-      pendingAction: prepared.pending,
-      execution: structuredClone(prepared.verified.identity),
-      blockers
-    };
+    return blockedContinuation(prepared, blockers);
+  }
+  const routeFindings = routeBlockers(prepared, submission);
+  if (routeFindings.length > 0) {
+    return blockedContinuation(prepared, routeFindings);
   }
   return continuationFromVerifiedRun(prepared.verified);
 }
@@ -3426,7 +4273,8 @@ async function projectWorkflowHandoff(protocol, current) {
 async function resumeStoredRun(location, options) {
   const verified = await verifyStoredRun(location);
   const result = await location.resume({
-    confirmations: options.confirmations ?? []
+    confirmations: options.confirmations ?? [],
+    resolver: resolverForPackage()
   });
   return continuation(result, verified.identity);
 }
@@ -3466,6 +4314,14 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
         "WorkflowRuntime pending action does not match compiled step"
       );
     }
+    if (pkg.runtime?.capabilityVersion === 3) {
+      const attempt = state.workflowRuntime?.currentAttempt;
+      if (!attempt || action.attemptId !== attempt.id || action.cycleId !== attempt.cycleId || action.visitOrdinal !== attempt.visitOrdinal || action.retryOrdinal !== attempt.retryOrdinal) {
+        throw new Error(
+          "WorkflowRuntime pending action does not match current Attempt"
+        );
+      }
+    }
     return action;
   }
   if (action || state.pending) {
@@ -3486,13 +4342,23 @@ function createWorkflowRuntime() {
     async start(options) {
       const resolved = resolveWorkflowStartLocation(options);
       const compiled = await compileWorkflow(options.protocol);
+      const revisioned = compiled.package.runtime?.capabilityVersion === 3;
       const result = await resolved.location.start(compiled.package, {
         runId: resolved.runId,
         confirmations: options.confirmations ?? [],
+        resolver: resolverForPackage(),
         runtimeIdentity: {
           ...compiled.identity,
           snapshotHash: compiled.identity.packageHash
-        }
+        },
+        ...revisioned ? {
+          workflowRuntime: {
+            revision: 0,
+            nextVisitOrdinal: 0,
+            currentAttempt: null,
+            visits: []
+          }
+        } : {}
       });
       if (result.state.skillHash !== compiled.identity.packageHash) {
         throw new Error("WorkflowRuntime snapshot identity was not persisted");
@@ -3511,23 +4377,22 @@ function createWorkflowRuntime() {
       const prepared = await prepareWorkflowSubmission(target, submission);
       const blockers = await completionBlockers(prepared, submission);
       if (blockers.length > 0) {
-        return {
-          disposition: "blocked",
-          runId: prepared.verified.state.runId,
-          currentNode: prepared.node,
-          pendingAction: prepared.pending,
-          execution: structuredClone(prepared.verified.identity),
-          blockers
-        };
+        return blockedContinuation(prepared, blockers);
+      }
+      const routeFindings = routeBlockers(prepared, submission);
+      if (routeFindings.length > 0) {
+        return blockedContinuation(prepared, routeFindings);
       }
       const result = await prepared.location.resume({
+        resolver: resolverForPackage(),
         outcome: {
           actionId: submission.actionId,
           status: submission.status,
           summary: submission.summary,
           ...submission.artifacts ? { artifacts: submission.artifacts } : {},
           ...submission.state ? { state: submission.state } : {},
-          ...submission.evidence ? { evidence: submission.evidence } : {}
+          ...submission.evidence ? { evidence: submission.evidence } : {},
+          ...submission.routing ? { routing: submission.routing } : {}
         }
       });
       return continuation(result, prepared.verified.identity);

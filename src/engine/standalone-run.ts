@@ -18,12 +18,16 @@ import { readRunState } from "./state.js";
 import type { RuntimeEvalDefinition } from "../skill-runtime/types.js";
 import type { SkillPackage } from "../skill-runtime/types.js";
 import type { RunState, RuntimeIdentity } from "./types.js";
+import type { WorkflowRuntimeState } from "./types.js";
+import type { DeterministicResolver } from "./resolver.js";
 
 export interface StartStandaloneRunOptions {
   projectRoot: string;
   runId: string;
   confirmations?: Iterable<string>;
   runtimeIdentity?: RuntimeIdentity;
+  workflowRuntime?: WorkflowRuntimeState;
+  resolver?: DeterministicResolver<undefined>;
 }
 
 function validateRunId(runId: unknown): asserts runId is string {
@@ -156,6 +160,8 @@ export async function startStandaloneRun(
     runId: options.runId,
     confirmations: options.confirmations ?? [],
     runtimeIdentity: options.runtimeIdentity,
+    workflowRuntime: options.workflowRuntime,
+    resolver: options.resolver,
   });
 }
 

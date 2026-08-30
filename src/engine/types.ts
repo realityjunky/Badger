@@ -7,6 +7,40 @@ export interface RuntimeIdentity {
   packageHash: string;
   snapshotHash: string;
   nodeToStep: Record<string, string>;
+  capabilityVersion?: 3;
+  resolverHash?: string;
+}
+
+export interface WorkflowAttemptState {
+  id: string;
+  stepId: string;
+  cycleId: string | null;
+  visitOrdinal: number;
+  retryOrdinal: number;
+}
+
+export interface WorkflowVisitOutcome {
+  actionId: string;
+  status: "succeeded" | "failed";
+  summary: string;
+  retryOrdinal: number;
+  routing?: Record<string, string>;
+  evidence?: Record<string, unknown>;
+}
+
+export interface WorkflowVisitState {
+  attemptId: string;
+  stepId: string;
+  cycleId: string | null;
+  visitOrdinal: number;
+  outcomes: WorkflowVisitOutcome[];
+}
+
+export interface WorkflowRuntimeState {
+  revision: number;
+  nextVisitOrdinal: number;
+  currentAttempt: WorkflowAttemptState | null;
+  visits: WorkflowVisitState[];
 }
 
 export interface RunState {
@@ -26,11 +60,16 @@ export interface RunState {
   status: RunStatus;
   retries: Record<string, number>;
   runtimeIdentity?: RuntimeIdentity;
+  workflowRuntime?: WorkflowRuntimeState;
 }
 
 export interface EngineAction extends StepAction {
   id: string;
   stepId: string | null;
+  attemptId?: string;
+  cycleId?: string | null;
+  visitOrdinal?: number;
+  retryOrdinal?: number;
 }
 
 export interface ActionOutcome {
@@ -40,6 +79,7 @@ export interface ActionOutcome {
   artifacts?: Record<string, string>;
   state?: Record<string, string>;
   evidence?: Record<string, unknown>;
+  routing?: Record<string, string>;
 }
 
 export interface TrajectoryEvent {

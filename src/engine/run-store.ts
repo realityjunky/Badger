@@ -46,6 +46,10 @@ const ACTION_KEYS = new Set([
   "prompt",
   "question",
   "options",
+  "attemptId",
+  "cycleId",
+  "visitOrdinal",
+  "retryOrdinal",
 ]);
 
 const CHECKPOINT_KEYS = new Set([
@@ -186,6 +190,34 @@ function parseAction(value: unknown): EngineAction {
       );
     }
     action.options = value.options as string[];
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "attemptId")) {
+    action.attemptId = requiredText(
+      value.attemptId,
+      "attemptId",
+      "Run pending action",
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "cycleId")) {
+    if (value.cycleId !== null) {
+      throw new Error("Invalid Run pending action: cycleId must be null");
+    }
+    action.cycleId = null;
+  }
+  for (const key of ["visitOrdinal", "retryOrdinal"] as const) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+    const ordinal = value[key];
+    const minimum = key === "visitOrdinal" ? 1 : 0;
+    if (
+      typeof ordinal !== "number" ||
+      !Number.isSafeInteger(ordinal) ||
+      ordinal < minimum
+    ) {
+      throw new Error(
+        `Invalid Run pending action: ${key} must be an integer at least ${minimum}`,
+      );
+    }
+    action[key] = ordinal;
   }
   return action;
 }

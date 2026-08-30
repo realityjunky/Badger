@@ -141,6 +141,17 @@ function submissionSummary(evidence, raw, nodeId) {
   return `Evidence recorded for ${nodeId}`;
 }
 
+function submissionRouting(evidence) {
+  if (
+    !evidence ||
+    typeof evidence.routing !== "object" ||
+    Array.isArray(evidence.routing)
+  ) {
+    return undefined;
+  }
+  return evidence.routing;
+}
+
 function blockedError(blockers) {
   return new Error(blockers.map((blocker) => `BLOCKED: ${blocker}`).join("\n"));
 }
@@ -247,6 +258,9 @@ async function main() {
       continuation.currentNode ?? "checkpoint",
     ),
     evidence,
+    ...(submissionRouting(evidence)
+      ? { routing: submissionRouting(evidence) }
+      : {}),
     nodeId: continuation.currentNode,
   };
   const validation = await validateWorkflowSubmission(target, submission);

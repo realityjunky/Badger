@@ -7,7 +7,14 @@ import {
   type EngineRunRemoveOptions,
   type EngineRunWriteOptions,
 } from "./protected-run-file.js";
-import type { RunState, RuntimeIdentity } from "./types.js";
+import type {
+  RunState,
+  RuntimeIdentity,
+  WorkflowAttemptState,
+  WorkflowRuntimeState,
+  WorkflowVisitOutcome,
+  WorkflowVisitState,
+} from "./types.js";
 
 export type StateDocument = Record<string, unknown>;
 
@@ -157,6 +164,7 @@ interface RunStateJson {
   status: "running" | "waiting" | "completed" | "failed";
   retries: Record<string, number>;
   runtimeIdentity?: RuntimeIdentity;
+  workflowRuntime?: WorkflowRuntimeState;
 }
 
 const RUN_STATE_JSON_KEYS = new Set<keyof RunStateJson>([
@@ -176,6 +184,7 @@ const RUN_STATE_JSON_KEYS = new Set<keyof RunStateJson>([
   "status",
   "retries",
   "runtimeIdentity",
+  "workflowRuntime",
 ]);
 
 function requiredJsonString(value: unknown, key: keyof RunStateJson): string {
@@ -196,6 +205,307 @@ function nullableJsonString(
     );
   }
   return value;
+}
+
+function parseStringRecord(
+  value: unknown,
+  label: string,
+): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key || typeof entry !== "string" || entry.length === 0) {
+      throw new Error(`Invalid Run state: ${label} must contain strings`);
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, entry as string]),
+  );
+}
+
+function parseJsonRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  try {
+    JSON.stringify(value);
+  } catch (error) {
+    throw new Error(`Invalid Run state: ${label} must be JSON-serializable`, {
+      cause: error,
+    });
+  }
+  return structuredClone(value) as Record<string, unknown>;
+}
+
+function parseWorkflowAttempt(
+  value: unknown,
+  label: string,
+): WorkflowAttemptState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const attempt = value as Record<string, unknown>;
+  const keys = new Set([
+    "id",
+    "stepId",
+    "cycleId",
+    "visitOrdinal",
+    "retryOrdinal",
+  ]);
+  const unknown = Object.keys(attempt).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const id = requiredJsonString(
+    attempt.id,
+    `${label}.id` as keyof RunStateJson,
+  );
+  const stepId = requiredJsonString(
+    attempt.stepId,
+    `${label}.stepId` as keyof RunStateJson,
+  );
+  const cycleId = attempt.cycleId;
+  if (cycleId !== null) {
+    throw new Error(`Invalid Run state: ${label}.cycleId must be null`);
+  }
+  const visitOrdinal = attempt.visitOrdinal;
+  const retryOrdinal = attempt.retryOrdinal;
+  if (
+    typeof visitOrdinal !== "number" ||
+    !Number.isSafeInteger(visitOrdinal) ||
+    visitOrdinal < 1
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label}.visitOrdinal must be a positive integer`,
+    );
+  }
+  if (
+    typeof retryOrdinal !== "number" ||
+    !Number.isSafeInteger(retryOrdinal) ||
+    retryOrdinal < 0
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label}.retryOrdinal must be a non-negative integer`,
+    );
+  }
+  return { id, stepId, cycleId: null, visitOrdinal, retryOrdinal };
+}
+
+function parseWorkflowOutcome(
+  value: unknown,
+  label: string,
+): WorkflowVisitOutcome {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const outcome = value as Record<string, unknown>;
+  const keys = new Set([
+    "actionId",
+    "status",
+    "summary",
+    "retryOrdinal",
+    "routing",
+    "evidence",
+  ]);
+  const unknown = Object.keys(outcome).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const actionId = requiredJsonString(
+    outcome.actionId,
+    `${label}.actionId` as keyof RunStateJson,
+  );
+  const summary = requiredJsonString(
+    outcome.summary,
+    `${label}.summary` as keyof RunStateJson,
+  );
+  if (outcome.status !== "succeeded" && outcome.status !== "failed") {
+    throw new Error(`Invalid Run state: ${label}.status is invalid`);
+  }
+  const retryOrdinal = outcome.retryOrdinal;
+  if (
+    typeof retryOrdinal !== "number" ||
+    !Number.isSafeInteger(retryOrdinal) ||
+    retryOrdinal < 0
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label}.retryOrdinal must be a non-negative integer`,
+    );
+  }
+  return {
+    actionId,
+    status: outcome.status,
+    summary,
+    retryOrdinal,
+    ...(outcome.routing !== undefined
+      ? { routing: parseStringRecord(outcome.routing, `${label}.routing`) }
+      : {}),
+    ...(outcome.evidence !== undefined
+      ? { evidence: parseJsonRecord(outcome.evidence, `${label}.evidence`) }
+      : {}),
+  };
+}
+
+function parseWorkflowVisit(value: unknown, index: number): WorkflowVisitState {
+  const label = `workflowRuntime.visits[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const visit = value as Record<string, unknown>;
+  const keys = new Set([
+    "attemptId",
+    "stepId",
+    "cycleId",
+    "visitOrdinal",
+    "outcomes",
+  ]);
+  const unknown = Object.keys(visit).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const attemptId = requiredJsonString(
+    visit.attemptId,
+    `${label}.attemptId` as keyof RunStateJson,
+  );
+  const stepId = requiredJsonString(
+    visit.stepId,
+    `${label}.stepId` as keyof RunStateJson,
+  );
+  if (visit.cycleId !== null) {
+    throw new Error(`Invalid Run state: ${label}.cycleId must be null`);
+  }
+  const visitOrdinal = visit.visitOrdinal;
+  if (
+    typeof visitOrdinal !== "number" ||
+    !Number.isSafeInteger(visitOrdinal) ||
+    visitOrdinal < 1
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label}.visitOrdinal must be a positive integer`,
+    );
+  }
+  if (!Array.isArray(visit.outcomes)) {
+    throw new Error(`Invalid Run state: ${label}.outcomes must be an array`);
+  }
+  return {
+    attemptId,
+    stepId,
+    cycleId: null,
+    visitOrdinal,
+    outcomes: visit.outcomes.map((outcome, outcomeIndex) =>
+      parseWorkflowOutcome(outcome, `${label}.outcomes[${outcomeIndex}]`),
+    ),
+  };
+}
+
+function parseWorkflowRuntime(
+  value: unknown,
+): WorkflowRuntimeState | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid Run state: workflowRuntime must be an object");
+  }
+  const runtime = value as Record<string, unknown>;
+  const keys = new Set([
+    "revision",
+    "nextVisitOrdinal",
+    "currentAttempt",
+    "visits",
+  ]);
+  const unknown = Object.keys(runtime).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(
+      `Invalid Run state: workflowRuntime has unknown field ${unknown}`,
+    );
+  }
+  for (const key of ["revision", "nextVisitOrdinal"] as const) {
+    const entry = runtime[key];
+    if (
+      typeof entry !== "number" ||
+      !Number.isSafeInteger(entry) ||
+      entry < 0
+    ) {
+      throw new Error(
+        `Invalid Run state: workflowRuntime.${key} must be a non-negative integer`,
+      );
+    }
+  }
+  const revision = runtime.revision as number;
+  const nextVisitOrdinal = runtime.nextVisitOrdinal as number;
+  if (!Array.isArray(runtime.visits)) {
+    throw new Error(
+      "Invalid Run state: workflowRuntime.visits must be an array",
+    );
+  }
+  const visits = runtime.visits.map(parseWorkflowVisit);
+  const attemptIds = new Set<string>();
+  const visitOrdinals = new Set<number>();
+  let outcomeCount = 0;
+  for (const visit of visits) {
+    if (attemptIds.has(visit.attemptId)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime Attempt ${visit.attemptId}`,
+      );
+    }
+    attemptIds.add(visit.attemptId);
+    if (visitOrdinals.has(visit.visitOrdinal)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime visit ordinal ${visit.visitOrdinal}`,
+      );
+    }
+    visitOrdinals.add(visit.visitOrdinal);
+    outcomeCount += visit.outcomes.length;
+    if (visit.visitOrdinal > nextVisitOrdinal) {
+      throw new Error(
+        "Invalid Run state: WorkflowRuntime visit ordinal exceeds its counter",
+      );
+    }
+  }
+  const currentAttempt =
+    runtime.currentAttempt === null
+      ? null
+      : parseWorkflowAttempt(
+          runtime.currentAttempt,
+          "workflowRuntime.currentAttempt",
+        );
+  if (currentAttempt && !attemptIds.has(currentAttempt.id)) {
+    throw new Error(
+      "Invalid Run state: current WorkflowRuntime Attempt is not in visits",
+    );
+  }
+  if (revision !== outcomeCount) {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime revision does not match visit outcomes",
+    );
+  }
+  if (currentAttempt) {
+    const currentVisit = visits.find(
+      (visit) => visit.attemptId === currentAttempt.id,
+    )!;
+    if (
+      currentVisit.stepId !== currentAttempt.stepId ||
+      currentVisit.cycleId !== currentAttempt.cycleId ||
+      currentVisit.visitOrdinal !== currentAttempt.visitOrdinal
+    ) {
+      throw new Error(
+        "Invalid Run state: current WorkflowRuntime Attempt does not match its visit",
+      );
+    }
+    const lastOutcome = currentVisit.outcomes.at(-1);
+    const expectedRetryOrdinal = lastOutcome ? lastOutcome.retryOrdinal + 1 : 0;
+    if (currentAttempt.retryOrdinal !== expectedRetryOrdinal) {
+      throw new Error(
+        "Invalid Run state: current WorkflowRuntime retry ordinal is invalid",
+      );
+    }
+  }
+  return {
+    revision,
+    nextVisitOrdinal,
+    currentAttempt,
+    visits,
+  };
 }
 
 function parseRunStateJson(value: unknown): RunStateJson {
@@ -279,6 +589,8 @@ function parseRunStateJson(value: unknown): RunStateJson {
       "packageHash",
       "snapshotHash",
       "nodeToStep",
+      "capabilityVersion",
+      "resolverHash",
     ]);
     const unknownIdentityKey = Object.keys(identity).find(
       (key) => !identityKeys.has(key),
@@ -297,7 +609,12 @@ function parseRunStateJson(value: unknown): RunStateJson {
       !/^[a-f0-9]{64}$/u.test(identity.snapshotHash) ||
       !identity.nodeToStep ||
       typeof identity.nodeToStep !== "object" ||
-      Array.isArray(identity.nodeToStep)
+      Array.isArray(identity.nodeToStep) ||
+      (identity.capabilityVersion !== undefined &&
+        identity.capabilityVersion !== 3) ||
+      (identity.resolverHash !== undefined &&
+        (typeof identity.resolverHash !== "string" ||
+          !/^[a-f0-9]{64}$/u.test(identity.resolverHash)))
     ) {
       throw new Error("Invalid Run state: runtimeIdentity is invalid");
     }
@@ -318,8 +635,16 @@ function parseRunStateJson(value: unknown): RunStateJson {
           stepId as string,
         ]),
       ),
+      ...(identity.capabilityVersion === 3
+        ? { capabilityVersion: 3 as const }
+        : {}),
+      ...(typeof identity.resolverHash === "string"
+        ? { resolverHash: identity.resolverHash }
+        : {}),
     };
   }
+
+  const workflowRuntime = parseWorkflowRuntime(json.workflowRuntime);
 
   return {
     runId,
@@ -338,6 +663,7 @@ function parseRunStateJson(value: unknown): RunStateJson {
     status: json.status,
     retries: json.retries as Record<string, number>,
     ...(runtimeIdentity ? { runtimeIdentity } : {}),
+    ...(workflowRuntime ? { workflowRuntime } : {}),
   };
 }
 

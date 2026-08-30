@@ -313,6 +313,23 @@ function narrowRuntimeMetadata(
   for (const [nodeId, stepId] of Object.entries(value.nodeToStep)) {
     assertString(stepId, filePath, `runtime.nodeToStep.${nodeId}`);
   }
+  if (value.capabilityVersion !== undefined && value.capabilityVersion !== 3) {
+    throw invalidDocument(
+      filePath,
+      "runtime.capabilityVersion",
+      "must be 3 when present",
+    );
+  }
+  if (value.resolverHash !== undefined) {
+    assertString(value.resolverHash, filePath, "runtime.resolverHash");
+    if (!/^[a-f0-9]{64}$/u.test(value.resolverHash)) {
+      throw invalidDocument(
+        filePath,
+        "runtime.resolverHash",
+        "must be a SHA-256 hash",
+      );
+    }
+  }
   let completionPlans: Record<string, RuntimeCompletionPlan> | undefined;
   if (value.completionPlans !== undefined) {
     assertObject(value.completionPlans, filePath, "runtime.completionPlans");
@@ -355,6 +372,10 @@ function narrowRuntimeMetadata(
         stepId as string,
       ]),
     ),
+    ...(value.capabilityVersion === 3 ? { capabilityVersion: 3 as const } : {}),
+    ...(typeof value.resolverHash === "string"
+      ? { resolverHash: value.resolverHash }
+      : {}),
     ...(completionPlans ? { completionPlans } : {}),
   };
 }

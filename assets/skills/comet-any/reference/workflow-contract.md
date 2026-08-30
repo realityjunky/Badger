@@ -30,3 +30,13 @@ Each custom Node declares:
 - optional `requiredSkillCalls`, `augmentations`, and `guardrails`.
 
 The normalizer emits success, failure self-loop, and pause self-loop edges for every Node. A workflow-kernel uses `.comet/runs/<name>/state.json` with `currentNode`, `completedNodes`, and `evidence` fields.
+
+An opted-in revisioned workflow adds `routing.fields` (or a field map) with
+allowed scalar values and uses structured `when` predicates on success edges.
+Predicates support exact equality and conjunction. The runtime selects one
+matching edge or one edge without `when` as the fallback; it rejects ambiguity,
+unknown values, graph cycles, and unreachable required Nodes before Run
+creation. Machine submissions provide route values in a separate `routing`
+object. Attempt identity, revision, retry ordinal, and append-only visit
+outcomes are persisted by WorkflowRuntime. Human decisions, declared Cycles,
+artifact versions, and Decision Receipts are separate follow-up capabilities.

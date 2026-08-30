@@ -185,6 +185,17 @@ function submissionSummary(evidence, raw, nodeId) {
   return `Evidence recorded for ${nodeId}.`;
 }
 
+function submissionRouting(evidence) {
+  if (
+    !evidence ||
+    typeof evidence.routing !== "object" ||
+    Array.isArray(evidence.routing)
+  ) {
+    return undefined;
+  }
+  return evidence.routing;
+}
+
 function ensureCurrentNode(nodeArgument, projection) {
   const pending = projection.pendingAction;
   const currentNode = projection.currentNode;
@@ -281,6 +292,9 @@ async function main() {
       status: "succeeded",
       summary: submissionSummary(evidence, evidenceRaw, nodeId ?? "checkpoint"),
       evidence,
+      ...(submissionRouting(evidence)
+        ? { routing: submissionRouting(evidence) }
+        : {}),
       ...(nodeId ? { nodeId } : {}),
     };
     const continuation = await createWorkflowRuntime().submit(

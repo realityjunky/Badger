@@ -53,11 +53,12 @@ export function checkAction(
       reason: `User confirmation required for: ${action.ref}`,
     };
   }
-  const retries = state.retries[action.id] ?? 0;
+  const retryKey = action.attemptId ?? action.id;
+  const retries = state.retries[retryKey] ?? 0;
   if (retries > guardrails.maxRetriesPerAction) {
     return {
       allowed: false,
-      reason: `Retry budget exhausted for action: ${action.id}`,
+      reason: `Retry budget exhausted for action: ${retryKey}`,
     };
   }
   return { allowed: true };

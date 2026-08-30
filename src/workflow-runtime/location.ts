@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { RuntimeIdentity, RunState } from "../engine/types.js";
+import type {
+  RuntimeIdentity,
+  RunState,
+  WorkflowRuntimeState,
+} from "../engine/types.js";
+import type { DeterministicResolver } from "../engine/resolver.js";
 import {
   resumeManualRun,
   startManualRun,
@@ -30,6 +35,8 @@ export interface ResolvedWorkflowRunLocation {
       runId: string;
       confirmations: Iterable<string>;
       runtimeIdentity: RuntimeIdentity;
+      workflowRuntime?: WorkflowRuntimeState;
+      resolver?: DeterministicResolver<undefined>;
     },
   ): Promise<ManualRunResult>;
   resume(options?: ResumeManualRunOptions): Promise<ManualRunResult>;
@@ -83,6 +90,8 @@ function standaloneLocation(
         runId: validatedRunId,
         confirmations: options.confirmations,
         runtimeIdentity: options.runtimeIdentity,
+        workflowRuntime: options.workflowRuntime,
+        resolver: options.resolver,
       });
     },
     async resume(options = {}) {

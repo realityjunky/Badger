@@ -91,15 +91,38 @@ export interface WorkflowInput {
   customNodes: NodeTemplate[];
   outputSchemas?: OutputSchema[];
   routing?: WorkflowRouting;
+  capabilities?: WorkflowProtocolCapabilities;
 }
 
 export type TransitionCondition = "success" | "failure" | "pause";
+
+export interface WorkflowRoutingPredicate {
+  field: string;
+  equals: string;
+}
+
+export interface WorkflowRoutingConjunction {
+  all: WorkflowRoutingPredicate[];
+}
+
+export type WorkflowRoutingCondition =
+  | string
+  | WorkflowRoutingPredicate
+  | WorkflowRoutingPredicate[]
+  | WorkflowRoutingConjunction;
+
+export interface WorkflowRoutingField {
+  id?: string;
+  name?: string;
+  values?: string[];
+  allowedValues?: string[];
+}
 
 export interface WorkflowTransition {
   from: string;
   to: string | null;
   condition: TransitionCondition;
-  when?: string;
+  when?: WorkflowRoutingCondition;
 }
 
 export interface WorkflowRoute {
@@ -111,6 +134,16 @@ export interface WorkflowRoute {
 export interface WorkflowRouting {
   transitions: WorkflowTransition[];
   routes?: WorkflowRoute[];
+  fields?: WorkflowRoutingField[] | Record<string, string[]>;
+  routingFields?: WorkflowRoutingField[] | Record<string, string[]>;
+}
+
+export type WorkflowProtocolCapability =
+  "conditional-routing" | "revisioned-attempts";
+
+export interface WorkflowProtocolCapabilities {
+  version: 3;
+  features: WorkflowProtocolCapability[];
 }
 
 export interface NodeProtocol extends Omit<
@@ -136,6 +169,8 @@ export interface WorkflowProtocol {
   nodes: NodeProtocol[];
   edges: WorkflowTransition[];
   outputSchemas: OutputSchema[];
+  capabilities?: WorkflowProtocolCapabilities;
+  routing?: WorkflowRouting;
   state: {
     kind: "workflow-run";
     statePath: string;

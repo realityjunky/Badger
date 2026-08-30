@@ -1,6 +1,14 @@
 import { randomUUID } from "crypto";
 import { evaluateRuntime } from "./evals.js";
-import { decide, recordOutcome, startRun } from "./loop.js";
+import {
+  decideWithResolver,
+  recordOutcomeWithResolver,
+  startRun,
+} from "./loop.js";
+import {
+  staticDeterministicResolver,
+  type DeterministicResolver,
+} from "./resolver.js";
 import {
   appendTrajectory,
   clearPendingAction,
@@ -18,6 +26,7 @@ import type {
   RunState,
   RuntimeIdentity,
   TrajectoryEvent,
+  WorkflowRuntimeState,
 } from "./types.js";
 import {
   createSkillSnapshot,
@@ -40,11 +49,14 @@ export interface StartManualRunOptions {
   confirmations?: Iterable<string>;
   runId?: string;
   runtimeIdentity?: RuntimeIdentity;
+  workflowRuntime?: WorkflowRuntimeState;
+  resolver?: DeterministicResolver<undefined>;
 }
 
 export interface ResumeManualRunOptions {
   outcome?: Omit<ActionOutcome, "actionId"> & { actionId?: string };
   confirmations?: Iterable<string>;
+  resolver?: DeterministicResolver<undefined>;
 }
 
 export interface ManualRunEvaluation {
@@ -112,6 +124,7 @@ function validateOutcome(outcome: ResumeManualRunOptions["outcome"]): void {
   }
   validateStringRecord(outcome.artifacts, "Outcome artifacts");
   validateStringRecord(outcome.state, "Outcome state");
+  validateStringRecord(outcome.routing, "Outcome routing");
   validateEvidenceRecord(outcome.evidence, "Outcome evidence");
 }
 
@@ -166,8 +179,15 @@ async function persistDecision(
   state: RunState,
   pkg: SkillPackage,
   confirmations: Iterable<string>,
+  resolver: DeterministicResolver<undefined> = staticDeterministicResolver,
 ): Promise<ManualRunResult> {
-  const decision = decide(pkg, state, new Set(confirmations));
+  const decision = decideWithResolver(
+    pkg,
+    state,
+    new Set(confirmations),
+    resolver,
+    undefined,
+  );
   if (decision.action) {
     await writePendingAction(
       changeDir,
@@ -209,7 +229,11 @@ function normalizeStartOptions(
   if (
     value &&
     typeof value === "object" &&
-    ("confirmations" in value || "runId" in value || "runtimeIdentity" in value)
+    ("confirmations" in value ||
+      "runId" in value ||
+      "runtimeIdentity" in value ||
+      "workflowRuntime" in value ||
+      "resolver" in value)
   ) {
     return value;
   }
@@ -241,6 +265,7 @@ export async function startManualRun(
     pkg,
     startOptions.runId ?? randomUUID(),
     snapshot.hash,
+    startOptions.workflowRuntime,
   );
   if (startOptions.runtimeIdentity) {
     state.runtimeIdentity = structuredClone(startOptions.runtimeIdentity);
@@ -259,6 +284,7 @@ export async function startManualRun(
     state,
     pkg,
     startOptions.confirmations ?? [],
+    startOptions.resolver,
   );
 }
 
@@ -272,6 +298,7 @@ export async function resumeManualRun(
   if (pkg.definition.orchestration.mode === "adaptive") {
     throw new Error("Adaptive orchestration requires an Agent candidate");
   }
+  const resolver = options.resolver ?? staticDeterministicResolver;
 
   const pending = await readPendingAction(changeDir, state.pendingRef);
   if (!options.outcome) {
@@ -287,7 +314,13 @@ export async function resumeManualRun(
         reason: `Run is ${state.status}`,
       };
     }
-    return persistDecision(changeDir, state, pkg, options.confirmations ?? []);
+    return persistDecision(
+      changeDir,
+      state,
+      pkg,
+      options.confirmations ?? [],
+      resolver,
+    );
   }
 
   if (!pending || !state.pending) {
@@ -308,6 +341,13 @@ export async function resumeManualRun(
     );
   }
   const outcome: ActionOutcome = { ...options.outcome, actionId: pending.id };
+  const advanced = recordOutcomeWithResolver(
+    pkg,
+    state,
+    outcome,
+    resolver,
+    undefined,
+  );
   const artifacts = {
     ...(await readArtifacts(changeDir, state.artifactsRef)),
     ...(outcome.artifacts ?? {}),
@@ -318,7 +358,6 @@ export async function resumeManualRun(
     outcome,
   });
 
-  const advanced = recordOutcome(pkg, state, outcome);
   await clearPendingAction(changeDir, advanced.pendingRef);
   await writeRunState(changeDir, advanced);
 
@@ -355,6 +394,7 @@ export async function resumeManualRun(
     advanced,
     pkg,
     options.confirmations ?? [],
+    resolver,
   );
   return { ...next, evals };
 }

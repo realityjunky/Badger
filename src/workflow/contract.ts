@@ -6,6 +6,9 @@ import type {
   OutputSchema,
   WorkflowInput,
   WorkflowProtocol,
+  WorkflowProtocolCapabilities,
+  WorkflowRoutingCondition,
+  WorkflowRoutingField,
   NormalizedWorkflow,
   WorkflowRoute,
   WorkflowTransition,
@@ -95,7 +98,7 @@ function validateRouting(
         nodeId: transition.from,
         message: `Transition references an unknown Node: ${transition.from} -> ${transition.to ?? "(terminal)"}`,
       });
-    if (transition.when !== undefined && !transition.when.trim())
+    if (typeof transition.when === "string" && !transition.when.trim())
       findings.push({
         code: "invalid-route",
         nodeId: transition.from,
@@ -281,13 +284,79 @@ function defaultEdges(nodes: NodeProtocol[]): WorkflowProtocol["edges"] {
   ]);
 }
 
+function routingFields(
+  fields: WorkflowRoutingField[] | Record<string, string[]> | undefined,
+): WorkflowRoutingField[] {
+  if (!fields) return [];
+  if (Array.isArray(fields)) return fields.map((field) => ({ ...field }));
+  return Object.entries(fields).map(([id, values]) => ({
+    id,
+    values: [...values],
+  }));
+}
+
+function routingCondition(
+  condition: WorkflowRoutingCondition | undefined,
+  fields: readonly WorkflowRoutingField[],
+): WorkflowRoutingCondition | undefined {
+  if (condition === undefined || typeof condition !== "string") {
+    if (Array.isArray(condition)) {
+      return condition.map((predicate) => ({ ...predicate }));
+    }
+    if (condition && typeof condition === "object") {
+      if ("all" in condition) {
+        return {
+          all: condition.all.map((predicate) => ({ ...predicate })),
+        };
+      }
+      return { ...condition };
+    }
+    return condition;
+  }
+  if (fields.length === 1) {
+    const field = fields[0].id ?? fields[0].name;
+    if (field) return { field, equals: condition };
+  }
+  return condition;
+}
+
+function phase3Enabled(input: WorkflowInput): boolean {
+  return Boolean(
+    input.capabilities?.version === 3 ||
+    input.routing?.fields !== undefined ||
+    input.routing?.routingFields !== undefined,
+  );
+}
+
 function routingEdges(
   input: WorkflowInput,
   nodes: NodeProtocol[],
+  phase3: boolean,
 ): WorkflowTransition[] {
-  if (input.routing?.transitions?.length)
-    return input.routing.transitions.map((edge) => ({ ...edge }));
+  if (input.routing?.transitions?.length) {
+    const fields = routingFields(
+      input.routing.fields ?? input.routing.routingFields,
+    );
+    return input.routing.transitions.map((edge) => ({
+      ...edge,
+      ...(phase3 ? { when: routingCondition(edge.when, fields) } : {}),
+    }));
+  }
   return defaultEdges(nodes);
+}
+
+function protocolCapabilities(
+  input: WorkflowInput,
+  phase3: boolean,
+): WorkflowProtocolCapabilities | undefined {
+  if (!phase3) return undefined;
+  const features = new Set(input.capabilities?.features ?? []);
+  features.add("conditional-routing");
+  features.add("revisioned-attempts");
+  return {
+    version: 3,
+    features: [...features],
+  };
 }
 
 function routeSummary(
@@ -375,6 +444,8 @@ export function normalizeWorkflow(input: WorkflowInput): NormalizedWorkflow {
   const outputSchemas = [...(input.outputSchemas ?? [])].map((schema) =>
     structuredClone(schema),
   );
+  const phase3 = phase3Enabled(input);
+  const edges = routingEdges(input, nodes, phase3);
   const routes = routeSummary(input, nodes);
   const protocol: WorkflowProtocol = {
     schemaVersion: 1,
@@ -382,8 +453,29 @@ export function normalizeWorkflow(input: WorkflowInput): NormalizedWorkflow {
     name: input.name,
     goal: input.goal,
     nodes,
-    edges: routingEdges(input, nodes),
+    edges,
     outputSchemas,
+    ...(protocolCapabilities(input, phase3)
+      ? { capabilities: protocolCapabilities(input, phase3) }
+      : {}),
+    ...(phase3
+      ? {
+          routing: {
+            transitions: structuredClone(edges),
+            ...(input.routing?.fields !== undefined ||
+            input.routing?.routingFields !== undefined
+              ? {
+                  fields: routingFields(
+                    input.routing.fields ?? input.routing.routingFields,
+                  ),
+                }
+              : {}),
+            ...(input.routing?.routes
+              ? { routes: structuredClone(input.routing.routes) }
+              : {}),
+          },
+        }
+      : {}),
     state: {
       kind: "workflow-run",
       statePath: `.comet/runs/${input.name}/state.json`,

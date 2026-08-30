@@ -15,7 +15,7 @@ The package includes:
 - private Skill runtime loading, validation, content identity, and immutable snapshots;
 - deterministic and adaptive Engine loop behavior with manual and standalone Run façades;
 - protected Run state, pending-action, trajectory, artifact, context, and checkpoint storage;
-- a public WorkflowRuntime for deterministic linear workflow start, resume, outcome submission, and recovery;
+- a public WorkflowRuntime for deterministic workflow start, resume, revisioned outcome submission, and recovery;
 - official/private differential observations for the pinned Engine behavior.
 
 It intentionally excludes Comet Classic policy, Comet Native policy and hardening, Comet Entry, host platform installers, ambient resume routing, and external platform adapters.
@@ -97,8 +97,16 @@ under `evidence`, while required Skill-call, augmentation, and guardrail proof
 may use the corresponding check identifiers in `evidence.completedChecks`.
 The returned continuation reports the current Workflow Node, pending Engine
 action, stable Node-to-step mapping, and protocol/package/snapshot identity.
-Conditional routes, ambiguous routes, cycles, and repeated Node visits are
-rejected before Run state is created.
+Opted-in branch protocols declare routing fields and allowed scalar values. The
+runtime supports exact equality, conjunction, one fallback edge, revisioned
+outcomes, deterministic visit ordinals, and append-only Attempt evidence.
+Ambiguous routes, undeclared values, graph cycles, and unreachable required
+Nodes are rejected before Run state is created. Cycle allocation, artifact
+versions, and decision receipts remain separate follow-up capabilities.
+
+Revisioned Runs start at logical revision `0`. Each accepted machine outcome
+advances it once; route blockers, invalid submissions, and stale submissions do
+not advance it.
 
 Generated workflow packages include `scripts/workflow-runtime.mjs`, a bundled
 WorkflowRuntime implementation, and thin `workflow-state.mjs`,
@@ -115,12 +123,12 @@ Use `COMET_RUN_ROOT` or `--run-root` for manual Runs; use
 
 `eval` runs a synthetic WorkflowRuntime certification over the generated
 package, including both generated-adapter and public-runtime entry paths. Its
-report binds the generated-package hash to the normalized
-protocol hash, compiled package hash, Engine snapshot hash, declared and
-observed Node order, recovery evidence, and terminal completion. Review
-readiness requires this evidence to remain current. Phase 2 supports only
-deterministic linear `invoke_skill` actions and terminal `checkpoint` actions;
-decisions, conditional branches, cycles, attempts, Native-derived durability,
-and Primer Designer migration remain separate future proposals.
+report binds the generated-package hash to the normalized protocol hash,
+compiled package hash, Engine snapshot hash, declared and observed Node order,
+recovery evidence, and terminal completion. Review readiness requires this
+evidence to remain current. Phase 3 branch/Attempt execution is covered by
+focused runtime tests; decisions, declared Cycles, artifact versions, receipts,
+Native-derived durability, and Primer Designer migration remain separate
+follow-up tickets.
 
 See `docs/workflow-runtime-certification.md` for the certification contract.

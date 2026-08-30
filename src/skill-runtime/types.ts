@@ -101,6 +101,8 @@ export interface RuntimePackageMetadata {
   protocolHash: string;
   protocol: WorkflowProtocol;
   nodeToStep: Record<string, string>;
+  capabilityVersion?: 3;
+  resolverHash?: string;
   completionPlans?: Record<string, RuntimeCompletionPlan>;
 }
 

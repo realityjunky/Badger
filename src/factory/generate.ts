@@ -73,6 +73,7 @@ ${nodes}
 - Resume a persisted Run: \`node scripts/workflow-state.mjs resume\`.
 - Read the persisted action and Node: \`node scripts/workflow-state.mjs next\`.
 - Submit characterized Node evidence: \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
+- For branched workflows, include declared route values in the submission's top-level \`routing\` object; summaries and evidence do not select edges.
 - Verify the generated protocol and runtime: \`node scripts/workflow-guard.mjs verify\`.
 - Verify the current Node before entry: \`node scripts/workflow-guard.mjs entry <node>\`.
 - Validate Node completion without advancing: \`node scripts/workflow-guard.mjs exit <node> '<json evidence>'\`.
