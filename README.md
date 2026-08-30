@@ -11,7 +11,7 @@ The package includes:
 - deterministic Workflow Contract normalization and validation;
 - confirmed plan/state lifecycle in the standalone `.comet-any` namespace;
 - generated entry and Node Skills with protocol/evidence references;
-- current-hash evaluation, review approval, publication, and distribution preview;
+- current-hash evaluation, WorkflowRuntime certification, review approval, publication, and distribution preview;
 - private Skill runtime loading, validation, content identity, and immutable snapshots;
 - deterministic and adaptive Engine loop behavior with manual and standalone Run façades;
 - protected Run state, pending-action, trajectory, artifact, context, and checkpoint storage;
@@ -58,8 +58,10 @@ See `assets/skills/comet-any/SKILL.md` for the user-facing confirmation protocol
 
 The public package façade plus the `@rpamis/comet-any-private/engine` and
 `@rpamis/comet-any-private/workflow-runtime` subpaths export the runtime
-operations needed by callers. Run-file storage and protected filesystem
-implementation modules remain internal. The Engine closure is pinned to Comet
+operations needed by callers. The WorkflowRuntime subpath exposes only one
+constructor and its four core operations; compiler, location, projection,
+Run-file storage, and protected filesystem implementation modules remain
+internal. The Engine closure is pinned to Comet
 `0.4.0-beta.19` at revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a` and
 contains no runtime import from the upstream checkout.
 
@@ -110,3 +112,15 @@ handoff only reads protocol metadata and the current continuation. `status`,
 deleted or stale projection with `status --rebuild --confirm legacy-state`.
 Use `COMET_RUN_ROOT` or `--run-root` for manual Runs; use
 `--project <dir> --run-id <id>` for standalone Runs.
+
+`eval` runs a synthetic WorkflowRuntime certification over the generated
+package, including both generated-adapter and public-runtime entry paths. Its
+report binds the generated-package hash to the normalized
+protocol hash, compiled package hash, Engine snapshot hash, declared and
+observed Node order, recovery evidence, and terminal completion. Review
+readiness requires this evidence to remain current. Phase 2 supports only
+deterministic linear `invoke_skill` actions and terminal `checkpoint` actions;
+decisions, conditional branches, cycles, attempts, Native-derived durability,
+and Primer Designer migration remain separate future proposals.
+
+See `docs/workflow-runtime-certification.md` for the certification contract.

@@ -6,7 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { generatePackage } from "../src/factory/generate.js";
 import { normalizeWorkflow } from "../src/workflow/contract.js";
-import { createWorkflowRuntime } from "../src/workflow-runtime/index.js";
+import { createWorkflowRuntime } from "../src/workflow-runtime/public.js";
 import type {
   FactoryPlan,
   FactoryProposal,
@@ -107,6 +107,10 @@ describe("generated WorkflowRuntime state adapter", () => {
     expect(stateAdapter).not.toContain("nextNode");
     expect(entrySkill).toContain("node scripts/workflow-state.mjs status");
     expect(entrySkill).toContain("node scripts/workflow-state.mjs next");
+    expect(entrySkill).toContain("Executable Node Order: `prepare`");
+    expect(
+      await fs.readFile(path.join(destination, "comet", "eval.yaml"), "utf8"),
+    ).toContain("workflow-runtime-certification");
   });
 
   it("runs manual commands through the authoritative runtime", async () => {
@@ -131,6 +135,9 @@ describe("generated WorkflowRuntime state adapter", () => {
     const initialized = await run(["init", "--run-id", "manual-run"]);
     expect(initialized.stdout).toContain("NEXT: auto");
     expect(initialized.stdout).toContain("NODE: prepare");
+    expect((await run(["resume", "--json"])).stdout).toContain(
+      '"currentNode": "prepare"',
+    );
 
     const stateFile = path.join(projectRoot, ".comet", "run-state.json");
     const stateBefore = await fs.readFile(stateFile, "utf8");
@@ -207,6 +214,74 @@ describe("generated WorkflowRuntime state adapter", () => {
       await fs.readFile(legacyPath, "utf8"),
     ) as { status: string };
     expect(legacyProjection.status).toBe("completed");
+  });
+
+  it("supports adapter and public runtime entry in either direction", async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-adapter-"));
+    const projectRoot = path.join(root, "project");
+    await fs.mkdir(projectRoot, { recursive: true });
+    const generated = await generatePackage({
+      ...proposal(),
+      destination: path.join(projectRoot, "generated"),
+    });
+    const scriptPath = path.join(
+      generated.packageRoot,
+      "scripts",
+      "workflow-state.mjs",
+    );
+    const run = (args: string[]) =>
+      execFileAsync(process.execPath, [scriptPath, ...args], {
+        cwd: projectRoot,
+        env: process.env,
+      });
+    const protocol = proposal().proposal.workflow;
+    const runtime = createWorkflowRuntime();
+
+    await run(["init", "--run-id", "adapter-start"]);
+    const adapterStarted = await runtime.recover(projectRoot);
+    const adapterResumed = await runtime.resume(projectRoot);
+    expect(adapterResumed).toEqual(adapterStarted);
+    const adapterCompleted = await runtime.submit(projectRoot, {
+      actionId: adapterStarted.pendingAction!.id,
+      nodeId: "prepare",
+      status: "succeeded",
+      summary: "Completed through the public runtime.",
+    });
+    expect(adapterCompleted.disposition).toBe("done");
+    expect((await run(["status", "--json"])).stdout).toContain(
+      '"status": "completed"',
+    );
+
+    const publicRunRoot = path.join(projectRoot, "public-start");
+    const publicStarted = await runtime.start({
+      protocol,
+      runRoot: publicRunRoot,
+      runId: "public-start",
+    });
+    expect(publicStarted.currentNode).toBe("prepare");
+    expect(
+      JSON.parse(
+        (await run(["status", "--run-root", publicRunRoot, "--json"])).stdout,
+      ),
+    ).toMatchObject({
+      status: "waiting",
+      currentNode: "prepare",
+    });
+    await run([
+      "record",
+      "prepare",
+      '{"summary":"Completed through the adapter."}',
+      "--run-root",
+      publicRunRoot,
+    ]);
+    expect(
+      JSON.parse(
+        (await run(["status", "--run-root", publicRunRoot, "--json"])).stdout,
+      ),
+    ).toMatchObject({
+      status: "completed",
+      completedNodes: ["prepare"],
+    });
   });
 
   it("runs isolated standalone commands through the same runtime", async () => {

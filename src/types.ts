@@ -219,7 +219,12 @@ export interface CreatorState {
     protocolPath: string;
     evalPath: string;
   };
-  eval?: { hash: string; passed: boolean; resultPath: string };
+  eval?: {
+    hash: string;
+    passed: boolean;
+    resultPath: string;
+    runtime?: WorkflowRuntimeCertificationEvidence;
+  };
   review?: {
     hash: string;
     decision: "approved" | "rejected";
@@ -234,4 +239,34 @@ export interface EvalReport {
   hash: string;
   passed: boolean;
   checks: Array<{ id: string; passed: boolean; detail: string }>;
+  runtime?: WorkflowRuntimeCertificationEvidence;
+}
+
+export interface WorkflowRuntimeIdentityEvidence {
+  protocolHash: string;
+  packageHash: string;
+  snapshotHash: string;
+  nodeToStep: Record<string, string>;
+}
+
+export interface WorkflowRuntimeCertificationEvidence {
+  authority: "WorkflowRuntime";
+  generatedPackageHash: string;
+  identity: WorkflowRuntimeIdentityEvidence;
+  declaredNodeOrder: string[];
+  compiledNodeOrder: string[];
+  observedNodeOrder: string[];
+  runId: string;
+  reverseRunId: string;
+  recoveryCount: number;
+  recovered: boolean;
+  completed: boolean;
+  identityConsistent: boolean;
+  guardVerified: boolean;
+  handoffConsistent: boolean;
+  entryAdapterStarted: boolean;
+  compatibilityAdapterResumed: boolean;
+  freshProcessRecovered: boolean;
+  publicRuntimeCompleted: boolean;
+  reverseAdapterCompleted: boolean;
 }

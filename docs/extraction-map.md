@@ -19,10 +19,10 @@
 | `src/factory/proposal.ts`           | Standalone compatibility adapter to the shared proposal seam                                                                                          |
 | `src/factory/generate.ts`           | Deterministic entry/Node package generation and protocol/evidence artifacts                                                                           |
 | `src/factory/state.ts`              | Standalone compatibility adapter to the shared state seam and `.comet-any` namespace                                                                  |
-| `src/eval/run.ts`                   | Current-package hash and route-conformance evidence                                                                                                   |
+| `src/eval/run.ts`                   | Current-package hash, route-conformance evidence, and WorkflowRuntime certification                                                                   |
 | `src/publish/lifecycle.ts`          | Readiness, reviewer approval, hash-bound publication, and distribution preview                                                                        |
 | `src/cli.ts`                        | Thin Creator-facing command interface                                                                                                                 |
-| `src/skill-runtime/`                | Engine-compatible Skill types, YAML loading, validation, content identity, and immutable snapshots                                                   |
+| `src/skill-runtime/`                | Engine-compatible Skill types, YAML loading, validation, content identity, and immutable snapshots                                                    |
 | `src/engine/`                       | Run state, resolver, loop, guardrails, evals, protected persistence, manual and standalone Run façades                                                |
 
 ## Deliberate exclusions
@@ -91,11 +91,20 @@ identity, and delegates all execution operations to the manual Run service.
 This keeps storage coordinates and caller inputs separate from the shared
 Engine loop and its persisted semantics.
 
+The WorkflowRuntime façade is exposed through `src/workflow-runtime/public.ts`
+and the package `./workflow-runtime` export. It contains only runtime
+construction and the `start`, `resume`, `submit`, and `recover` operations.
+Compiler, Run-location, projection, storage, and protected filesystem modules
+remain private. Creator evaluation uses that public seam for its synthetic
+linear certification and stores the resulting identity and recovery evidence
+for readiness.
+
 Phase 1 certification is the stop/go gate for the next runtime phase. The
 Engine report must have `certification.status` equal to `certified`, no missing
 matrix capabilities, unchanged official and fixture sources, and no semantic
-mismatches. WorkflowRuntime, decisions, conditional edges, cycles, Native
-hardening, and Primer Designer migration require a separate proposal and
+mismatches. The deterministic linear WorkflowRuntime is now delivered under a
+separate Phase 2 proposal. Decisions, conditional edges, cycles, Native
+hardening, and Primer Designer migration require separate proposals and
 explicit approval.
 
 `runEngineDifferential` runs official and private observations against one

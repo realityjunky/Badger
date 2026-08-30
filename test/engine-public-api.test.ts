@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as api from "../src/index.js";
+import * as workflowRuntime from "../src/workflow-runtime/public.js";
 
 describe("public Engine package boundary", () => {
   it("exports the coherent runtime while hiding storage implementation details", () => {
@@ -46,5 +47,41 @@ describe("public Engine package boundary", () => {
     expect(publicApi.writeCheckpoint).toBeUndefined();
     expect(publicApi.compileWorkflow).toBeUndefined();
     expect(publicApi.resolveWorkflowRunLocation).toBeUndefined();
+    for (const operation of [
+      "inspectWorkflowRun",
+      "projectWorkflowHandoff",
+      "projectWorkflowState",
+      "validateWorkflowSubmission",
+      "verifyWorkflowProtocol",
+      "writeWorkflowStateProjection",
+    ]) {
+      expect(publicApi[operation], operation).toBeUndefined();
+    }
+  });
+
+  it("keeps the WorkflowRuntime package seam limited to core operations", () => {
+    const runtimeApi = workflowRuntime as Record<string, unknown>;
+    for (const operation of [
+      "createWorkflowRuntime",
+      "startWorkflowRun",
+      "resumeWorkflowRun",
+      "submitWorkflowRun",
+      "recoverWorkflowRun",
+    ]) {
+      expect(runtimeApi[operation], operation).toBeTypeOf("function");
+    }
+    for (const operation of [
+      "inspectWorkflowRun",
+      "projectWorkflowHandoff",
+      "projectWorkflowState",
+      "validateWorkflowSubmission",
+      "verifyWorkflowProtocol",
+      "writeWorkflowStateProjection",
+    ]) {
+      expect(
+        (workflowRuntime as Record<string, unknown>)[operation],
+        operation,
+      ).toBeUndefined();
+    }
   });
 });

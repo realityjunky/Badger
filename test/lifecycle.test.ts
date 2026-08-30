@@ -57,7 +57,15 @@ describe("standalone Creator lifecycle", () => {
           {
             id: "design.v1",
             description: "Design output.",
-            artifacts: [],
+            artifacts: [
+              {
+                id: "result",
+                kind: "file",
+                required: true,
+                paths: ["design.txt"],
+                validations: ["artifact-exists"],
+              },
+            ],
             evidence: [{ id: "summary", required: true }],
           },
         ],
@@ -97,6 +105,42 @@ describe("standalone Creator lifecycle", () => {
     initial.generated = generated;
     const report = await evaluatePackage(initial);
     expect(report.passed).toBe(true);
+    expect(report.runtime).toMatchObject({
+      authority: "WorkflowRuntime",
+      generatedPackageHash: report.hash,
+      identity: {
+        protocolHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        packageHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        snapshotHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        nodeToStep: { design: "node-1-design" },
+      },
+      declaredNodeOrder: ["design"],
+      compiledNodeOrder: ["design"],
+      observedNodeOrder: ["design"],
+      runId: expect.stringMatching(/^certification-[a-f0-9]{16}$/u),
+      reverseRunId: expect.stringMatching(
+        /^certification-[a-f0-9]{16}-reverse$/u,
+      ),
+      recoveryCount: 3,
+      recovered: true,
+      completed: true,
+      identityConsistent: true,
+      guardVerified: true,
+      handoffConsistent: true,
+      entryAdapterStarted: true,
+      compatibilityAdapterResumed: true,
+      freshProcessRecovered: true,
+      publicRuntimeCompleted: true,
+      reverseAdapterCompleted: true,
+    });
+    expect((await readState(project, initial.name)).eval?.runtime).toEqual(
+      report.runtime,
+    );
+    const stale = structuredClone(await readState(project, initial.name));
+    stale.eval!.runtime!.identity.packageHash = "0".repeat(64);
+    expect(reviewState(stale).blockers).toContain(
+      "WorkflowRuntime package and snapshot identities differ",
+    );
     expect(reviewState(await readState(project, initial.name)).state).toBe(
       "reviewable",
     );

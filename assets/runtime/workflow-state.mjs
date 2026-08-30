@@ -240,6 +240,16 @@ async function main() {
     return;
   }
 
+  if (command === "resume") {
+    const continuation = await createWorkflowRuntime().resume(target, {
+      confirmations: options.confirmations,
+    });
+    await syncProjection(target, await readProjection(target));
+    if (options.json) printJson(continuation);
+    else printNext(continuation);
+    return;
+  }
+
   if (command === "next") {
     requireProjectionConfirmation(options);
     const projection = await readProjection(target);

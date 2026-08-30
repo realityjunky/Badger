@@ -4,6 +4,94 @@ import type { CreatorState } from "../types.js";
 import { copyDirectory, ensureDirectory } from "../util.js";
 import { writeState } from "../factory/state.js";
 
+function sameStrings(left: unknown, right: unknown): boolean {
+  return (
+    Array.isArray(left) &&
+    Array.isArray(right) &&
+    JSON.stringify(left) === JSON.stringify(right)
+  );
+}
+
+function runtimeEvidenceBlockers(state: CreatorState): string[] {
+  const runtime = state.eval?.runtime;
+  if (!runtime) return ["WorkflowRuntime certification evidence is missing"];
+  const blockers: string[] = [];
+  const hashPattern = /^[a-f0-9]{64}$/u;
+  if (runtime.authority !== "WorkflowRuntime") {
+    blockers.push("WorkflowRuntime certification authority is invalid");
+  }
+  if (
+    !hashPattern.test(state.currentHash ?? "") ||
+    !hashPattern.test(runtime.generatedPackageHash)
+  ) {
+    blockers.push("WorkflowRuntime package hash evidence is invalid");
+  } else if (state.currentHash !== runtime.generatedPackageHash) {
+    blockers.push(
+      "WorkflowRuntime evidence is stale for the generated package",
+    );
+  }
+  if (
+    !runtime.identity ||
+    !hashPattern.test(runtime.identity.protocolHash) ||
+    !hashPattern.test(runtime.identity.packageHash) ||
+    !hashPattern.test(runtime.identity.snapshotHash) ||
+    !runtime.identity.nodeToStep ||
+    typeof runtime.identity.nodeToStep !== "object" ||
+    Array.isArray(runtime.identity.nodeToStep)
+  ) {
+    blockers.push("WorkflowRuntime execution identity is missing");
+  } else if (runtime.identity.packageHash !== runtime.identity.snapshotHash) {
+    blockers.push("WorkflowRuntime package and snapshot identities differ");
+  } else if (
+    Object.values(runtime.identity.nodeToStep).some(
+      (stepId) => typeof stepId !== "string" || stepId.length === 0,
+    ) ||
+    !sameStrings(
+      Object.keys(runtime.identity.nodeToStep),
+      runtime.compiledNodeOrder,
+    )
+  ) {
+    blockers.push("WorkflowRuntime Node-to-step identity is invalid");
+  }
+  if (!sameStrings(runtime.declaredNodeOrder, runtime.compiledNodeOrder)) {
+    blockers.push("WorkflowRuntime declared and compiled Node orders differ");
+  }
+  if (!sameStrings(runtime.compiledNodeOrder, runtime.observedNodeOrder)) {
+    blockers.push("WorkflowRuntime compiled and observed Node orders differ");
+  }
+  if (runtime.recovered !== true) {
+    blockers.push("WorkflowRuntime recovery evidence is missing");
+  }
+  if (runtime.completed !== true) {
+    blockers.push("WorkflowRuntime terminal evidence is missing");
+  }
+  if (runtime.identityConsistent !== true) {
+    blockers.push("WorkflowRuntime execution identity consistency is missing");
+  }
+  if (runtime.entryAdapterStarted !== true) {
+    blockers.push("WorkflowRuntime entry adapter evidence is missing");
+  }
+  if (runtime.compatibilityAdapterResumed !== true) {
+    blockers.push("WorkflowRuntime compatibility adapter evidence is missing");
+  }
+  if (runtime.freshProcessRecovered !== true) {
+    blockers.push("WorkflowRuntime fresh-process evidence is missing");
+  }
+  if (runtime.publicRuntimeCompleted !== true) {
+    blockers.push("WorkflowRuntime public completion evidence is missing");
+  }
+  if (runtime.reverseAdapterCompleted !== true) {
+    blockers.push("WorkflowRuntime reverse adapter evidence is missing");
+  }
+  if (
+    !Number.isSafeInteger(runtime.recoveryCount) ||
+    runtime.recoveryCount < 1
+  ) {
+    blockers.push("WorkflowRuntime recovery count is invalid");
+  }
+  return blockers;
+}
+
 export function reviewState(state: CreatorState): {
   state: "blocked" | "reviewable" | "publishable";
   blockers: string[];
@@ -22,6 +110,7 @@ export function reviewState(state: CreatorState): {
     blockers.push(
       "Passing evaluation evidence for the current package hash is missing",
     );
+  blockers.push(...runtimeEvidenceBlockers(state));
   if (state.review && state.review.hash !== state.currentHash)
     blockers.push("Review evidence is stale");
   const publishable =

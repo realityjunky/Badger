@@ -24,8 +24,8 @@
       "import": "./dist/src/engine/index.js"
     },
     "./workflow-runtime": {
-      "types": "./dist/src/workflow-runtime/index.d.ts",
-      "import": "./dist/src/workflow-runtime/index.js"
+      "types": "./dist/src/workflow-runtime/public.d.ts",
+      "import": "./dist/src/workflow-runtime/public.js"
     },
     "./skill-runtime": {
       "types": "./dist/src/skill-runtime/index.d.ts",

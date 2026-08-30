@@ -14,10 +14,21 @@ function nodeSkillName(workflow: string, node: string): string {
   return `${slug(workflow) || "workflow"}-${slug(node) || "node"}`;
 }
 
+const WORKFLOW_RUNTIME_CERTIFICATION_TASK = "workflow-runtime-certification";
+
 function entryMarkdown(proposal: FactoryProposal): string {
   const descriptionGoal = proposal.goal.replace(/[.!?]+$/u, "");
-  const nodes = proposal.workflow.nodes
-    .filter((node) => !node.disabled)
+  const executableNodeIds =
+    proposal.workflow.evals[0]?.expectedNodeOrder ??
+    proposal.workflow.nodes
+      .filter((node) => !node.disabled)
+      .map((node) => node.id);
+  const nodesById = new Map(
+    proposal.workflow.nodes.map((node) => [node.id, node]),
+  );
+  const nodes = executableNodeIds
+    .map((nodeId) => nodesById.get(nodeId))
+    .filter((node): node is NodeProtocol => Boolean(node))
     .map(
       (node, index) =>
         `${index + 1}. **${node.label}** (Node ${node.id}, ${node.kind}) — ${node.responsibility}`,
@@ -29,6 +40,9 @@ function entryMarkdown(proposal: FactoryProposal): string {
         `- **${route.id}**: ${route.nodeOrder.map((node) => `\`${node}\``).join(" → ")}`,
     )
     .join("\n");
+  const executableNodeOrder = executableNodeIds
+    .map((nodeId) => `\`${nodeId}\``)
+    .join(" → ");
   return `---
 name: ${proposal.name}
 description: ${JSON.stringify(`Run the ${proposal.name} workflow: ${descriptionGoal}.`)}
@@ -44,6 +58,10 @@ Read the WorkflowRuntime continuation before entering a Node. The runtime owns r
 
 ${routes || "- **default**: the runtime validates the active Node route before starting."}
 
+## Executable Node Order
+
+Executable Node Order: ${executableNodeOrder || "(empty)"}
+
 ## Workflow Nodes
 
 ${nodes}
@@ -52,6 +70,7 @@ ${nodes}
 
 - Check the authoritative run: \`node scripts/workflow-state.mjs status\`.
 - Start a run only when status is \`not-started\`: \`node scripts/workflow-state.mjs init\`.
+- Resume a persisted Run: \`node scripts/workflow-state.mjs resume\`.
 - Read the persisted action and Node: \`node scripts/workflow-state.mjs next\`.
 - Submit characterized Node evidence: \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
 - Verify the generated protocol and runtime: \`node scripts/workflow-guard.mjs verify\`.
@@ -148,11 +167,16 @@ export async function generatePackage(options: {
     kind: "SkillEvalManifest",
     metadata: { name: proposal.name },
     skill: { name: proposal.name, source: root },
-    evaluation: { tasks: ["workflow-route-conformance"] },
+    evaluation: {
+      tasks: [
+        "workflow-route-conformance",
+        WORKFLOW_RUNTIME_CERTIFICATION_TASK,
+      ],
+    },
   };
   await atomicWrite(
     path.join(root, "comet", "eval.yaml"),
-    `apiVersion: comet.eval/v1alpha1\nkind: SkillEvalManifest\nmetadata:\n  name: ${proposal.name}\nskill:\n  name: ${proposal.name}\n  source: ..\nevaluation:\n  tasks:\n    - workflow-route-conformance\n`,
+    `apiVersion: comet.eval/v1alpha1\nkind: SkillEvalManifest\nmetadata:\n  name: ${proposal.name}\nskill:\n  name: ${proposal.name}\n  source: ..\nevaluation:\n  tasks:\n    - workflow-route-conformance\n    - ${WORKFLOW_RUNTIME_CERTIFICATION_TASK}\n`,
   );
   await atomicWrite(
     path.join(root, "reference", "eval-manifest.json"),

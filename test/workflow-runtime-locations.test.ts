@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { normalizeWorkflow } from "../src/workflow/contract.js";
-import { createWorkflowRuntime } from "../src/workflow-runtime/index.js";
+import { createWorkflowRuntime } from "../src/workflow-runtime/public.js";
 import type { WorkflowInput, WorkflowProtocol } from "../src/types.js";
 import type {
   StartWorkflowRunOptions,
@@ -132,7 +132,7 @@ async function recoverInFreshProcess(
     "test",
     `workflow-runtime-fresh-process-${randomUUID()}.test.ts`,
   );
-  const sourceEntry = path.resolve("src/workflow-runtime/index.ts");
+  const sourceEntry = path.resolve("src/workflow-runtime/public.ts");
   const configPath = path.resolve("vitest.config.ts");
   try {
     await fs.writeFile(

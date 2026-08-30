@@ -27,4 +27,4 @@ export * from "./differential/engine/observe.js";
 export * from "./differential/engine/run.js";
 export * from "./skill-runtime/index.js";
 export * from "./engine/index.js";
-export * from "./workflow-runtime/index.js";
+export * from "./workflow-runtime/public.js";
