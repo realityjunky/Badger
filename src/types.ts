@@ -403,6 +403,7 @@ export interface WorkflowRuntimeIdentityEvidence {
 
 export interface WorkflowRuntimeCertificationEvidence {
   authority: "WorkflowRuntime";
+  phase2Applicable?: boolean;
   generatedPackageHash: string;
   identity: WorkflowRuntimeIdentityEvidence;
   declaredNodeOrder: string[];
@@ -421,6 +422,107 @@ export interface WorkflowRuntimeCertificationEvidence {
   freshProcessRecovered: boolean;
   publicRuntimeCompleted: boolean;
   reverseAdapterCompleted: boolean;
+  phase3?: WorkflowRuntimePhase3CertificationEvidence;
+}
+
+export const WORKFLOW_RUNTIME_PHASE3_NEGATIVE_CASES = [
+  "stale-revision",
+  "unrelated-action",
+  "wrong-node",
+  "wrong-cycle",
+  "wrong-attempt",
+  "invalid-choice",
+  "unauthorized-reviewer",
+  "missing-input",
+  "missing-rationale",
+  "stale-evidence-scope",
+  "content-drift",
+  "exact-replay",
+  "cross-run-copy",
+  "route-ambiguity",
+  "route-no-match",
+  "exhausted-cycle",
+] as const;
+
+export type WorkflowRuntimePhase3NegativeCase =
+  (typeof WORKFLOW_RUNTIME_PHASE3_NEGATIVE_CASES)[number];
+
+export interface WorkflowRuntimePhase3IdentityEvidence extends WorkflowRuntimeIdentityEvidence {
+  capabilityVersion: 3;
+  resolverHash: string;
+}
+
+export interface WorkflowRuntimePhase3CertificationEvidence {
+  status: "certified" | "failed";
+  fixtureName: string;
+  generatedPackageHash: string;
+  evaluatedPackageHash: string;
+  fixturePackageHash: string;
+  identity: WorkflowRuntimePhase3IdentityEvidence;
+  expectedVisitOrder: string[];
+  observedVisitOrder: string[];
+  runId: string;
+  reverseRunId: string;
+  manualRunId: string;
+  standaloneRunId: string;
+  recoveryCount: number;
+  dispositions: {
+    continue: boolean;
+    awaitUser: boolean;
+    blocked: boolean;
+    done: boolean;
+  };
+  recovery: {
+    pendingMachine: boolean;
+    awaitingDecision: boolean;
+    acceptedBranch: boolean;
+    afterScopedReceipt: boolean;
+    betweenCycles: boolean;
+    terminal: boolean;
+    freshProcess: boolean;
+  };
+  branch: {
+    conditional: boolean;
+    selected: string;
+    defaultRoute: boolean;
+    terminalChoice: boolean;
+  };
+  cycle: {
+    declared: boolean;
+    repeatTransition: boolean;
+    repeatedNodeVisits: number;
+    instances: number;
+    budgetRejected: boolean;
+  };
+  attempts: {
+    rework: boolean;
+    retryStable: boolean;
+    uniqueVisits: boolean;
+  };
+  artifacts: {
+    attemptVersion: boolean;
+    runVersion: boolean;
+    carryForward: boolean;
+    immutable: boolean;
+  };
+  decisions: {
+    authorized: boolean;
+    receiptCount: number;
+    scopeBound: boolean;
+    replayRejected: boolean;
+  };
+  entryDirections: {
+    generatedToPublic: boolean;
+    publicToGenerated: boolean;
+    manualStandalone: boolean;
+  };
+  negativeCases: Record<WorkflowRuntimePhase3NegativeCase, boolean>;
+  allNegativeCases: boolean;
+  generatedAdaptersThin: boolean;
+  identityReconciled: boolean;
+  projectionsConsistent: boolean;
+  sourceIntegrity: boolean;
+  completed: boolean;
 }
 
 export interface WorkflowDecisionReceipt {

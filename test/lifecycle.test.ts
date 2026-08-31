@@ -133,8 +133,39 @@ describe("standalone Creator lifecycle", () => {
       publicRuntimeCompleted: true,
       reverseAdapterCompleted: true,
     });
+    expect(report.runtime?.phase3).toMatchObject({
+      status: "certified",
+      generatedPackageHash: report.hash,
+      evaluatedPackageHash: report.hash,
+      fixturePackageHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      identity: {
+        capabilityVersion: 3,
+        resolverHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      },
+    });
     expect((await readState(project, initial.name)).eval?.runtime).toEqual(
       report.runtime,
+    );
+    const missingPhase3 = structuredClone(
+      await readState(project, initial.name),
+    );
+    delete missingPhase3.eval!.runtime!.phase3;
+    expect(reviewState(missingPhase3).blockers).toContain(
+      "WorkflowRuntime Phase 3 certification evidence is missing",
+    );
+    const malformedPhase3 = structuredClone(
+      await readState(project, initial.name),
+    );
+    malformedPhase3.eval!.runtime!.phase3 = {} as NonNullable<
+      typeof malformedPhase3.eval.runtime.phase3
+    >;
+    expect(reviewState(malformedPhase3).blockers).toContain(
+      "WorkflowRuntime Phase 3 certification evidence is invalid",
+    );
+    const stalePhase3 = structuredClone(await readState(project, initial.name));
+    stalePhase3.eval!.runtime!.phase3!.generatedPackageHash = "0".repeat(64);
+    expect(reviewState(stalePhase3).blockers).toContain(
+      "WorkflowRuntime Phase 3 evidence is stale for the generated package",
     );
     const stale = structuredClone(await readState(project, initial.name));
     stale.eval!.runtime!.identity.packageHash = "0".repeat(64);
@@ -160,7 +191,7 @@ describe("standalone Creator lifecycle", () => {
     expect(preview.files).toContain(
       path.join(project, "install-preview", "SKILL.md"),
     );
-  });
+  }, 15_000);
 
   it("resolves shared Skill roots and isolates generated artifacts", async () => {
     const sharedRoot = path.join(project, "shared-skills");

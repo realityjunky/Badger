@@ -12,6 +12,7 @@ import type {
 } from "../types.js";
 import { createCompletionPlan } from "../workflow-runtime/completion.js";
 import { createWorkflowRuntime } from "../workflow-runtime/public.js";
+import { certifyPhase3Workflow } from "./phase3-certification.js";
 import type {
   WorkflowContinuation,
   WorkflowExecutionIdentity,
@@ -267,11 +268,94 @@ function certificationFailure(error: unknown): string {
   }`;
 }
 
+async function certifyRevisionedWorkflow(options: {
+  generatedPackageHash: string;
+  packageRoot: string;
+}): Promise<WorkflowRuntimeCertificationResult> {
+  const phase3 = await certifyPhase3Workflow({
+    generatedPackageHash: options.generatedPackageHash,
+  });
+  const temporaryRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), "comet-workflow-revisioned-certification-"),
+  );
+  const runRoot = path.join(temporaryRoot, "run");
+  const runId = `certification-${options.generatedPackageHash.slice(0, 16)}`;
+  const reverseRunId = `${runId}-reverse`;
+  try {
+    const started = await runGeneratedState(options.packageRoot, [
+      "init",
+      "--run-root",
+      runRoot,
+      "--run-id",
+      runId,
+      "--json",
+    ]);
+    const nodeOrder = Object.keys(started.execution.nodeToStep);
+    const evidence: WorkflowRuntimeCertificationEvidence = {
+      authority: "WorkflowRuntime",
+      phase2Applicable: false,
+      generatedPackageHash: options.generatedPackageHash,
+      identity: structuredClone(started.execution),
+      declaredNodeOrder: nodeOrder,
+      compiledNodeOrder: nodeOrder,
+      observedNodeOrder: nodeOrder,
+      runId,
+      reverseRunId,
+      recoveryCount: 1,
+      recovered: false,
+      completed: false,
+      identityConsistent: true,
+      guardVerified: false,
+      handoffConsistent: false,
+      entryAdapterStarted:
+        started.disposition === "continue" && Boolean(started.pendingAction),
+      compatibilityAdapterResumed: false,
+      freshProcessRecovered: false,
+      publicRuntimeCompleted: false,
+      reverseAdapterCompleted: false,
+      phase3: phase3.evidence,
+    };
+    return { evidence, blockers: phase3.blockers };
+  } catch (error) {
+    return {
+      evidence: {
+        authority: "WorkflowRuntime",
+        phase2Applicable: false,
+        generatedPackageHash: options.generatedPackageHash,
+        identity: structuredClone(phase3.evidence.identity),
+        declaredNodeOrder: [],
+        compiledNodeOrder: [],
+        observedNodeOrder: [],
+        runId,
+        reverseRunId,
+        recoveryCount: 0,
+        recovered: false,
+        completed: false,
+        identityConsistent: false,
+        guardVerified: false,
+        handoffConsistent: false,
+        entryAdapterStarted: false,
+        compatibilityAdapterResumed: false,
+        freshProcessRecovered: false,
+        publicRuntimeCompleted: false,
+        reverseAdapterCompleted: false,
+        phase3: phase3.evidence,
+      },
+      blockers: [certificationFailure(error), ...phase3.blockers],
+    };
+  } finally {
+    await fs.rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
 export async function certifyWorkflowRuntime(options: {
   protocol: WorkflowProtocol;
   generatedPackageHash: string;
   packageRoot: string;
 }): Promise<WorkflowRuntimeCertificationResult> {
+  if (options.protocol.capabilities?.version === 3) {
+    return certifyRevisionedWorkflow(options);
+  }
   const temporaryRoot = await fs.mkdtemp(
     path.join(os.tmpdir(), "comet-workflow-runtime-certification-"),
   );
@@ -299,6 +383,7 @@ export async function certifyWorkflowRuntime(options: {
     const observed: string[] = [];
     evidence = {
       authority: "WorkflowRuntime",
+      phase2Applicable: true,
       generatedPackageHash: options.generatedPackageHash,
       identity: structuredClone(entryStarted.execution),
       declaredNodeOrder: declared,
@@ -441,6 +526,11 @@ export async function certifyWorkflowRuntime(options: {
       evidence.identityConsistent && reverse.identityConsistent;
 
     const blockers: string[] = [];
+    const phase3 = await certifyPhase3Workflow({
+      generatedPackageHash: options.generatedPackageHash,
+    });
+    evidence.phase3 = phase3.evidence;
+    blockers.push(...phase3.blockers);
     if (!sameStrings(declared, compiled)) {
       blockers.push("Declared Node order does not match compiled Node order");
     }

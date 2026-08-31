@@ -91,7 +91,7 @@ export async function evaluatePackage(
     detail:
       runtime.blockers.length > 0
         ? runtime.blockers.join("; ")
-        : "WorkflowRuntime completed the generated linear route",
+        : "WorkflowRuntime completed generated compatibility and synthetic Phase 3 certification",
   });
   const passed = checks.every((check) => check.passed);
   const report: EvalReport = {

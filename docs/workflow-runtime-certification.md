@@ -54,24 +54,35 @@ identity evidence.
 
 ## Certification run
 
-`eval` creates synthetic disposable Runs. It starts one through the generated
-state adapter, resumes it through the generated compatibility command, checks
-the generated guard and handoff identity, recovers it in a fresh process, then
-resumes, submits, and completes it through the public WorkflowRuntime. It
-starts a second Run through the public runtime and completes it through the
-generated adapter. Required Output Schema artifacts are synthetic files in
-those temporary Runs only; no biological inputs or external tools are used.
+`eval` retains the Phase 2 certification for the generated package and adds a
+separate synthetic Phase 3 package. The fixture is generated in a disposable
+temporary directory and contains a machine-derived conditional branch, a
+scoped authorized decision, a terminal choice, a declared bounded Cycle, a
+repeated review Node, a rework Attempt, and Attempt- and Run-lifetime artifacts.
+It has no biological inputs, host services, network access, or dependency on
+the protected upstream checkout.
 
-The certification passes only when all three Node orders match, package and
-snapshot hashes match, generated guard and handoff identities match, every
-recovery reproduces the prior continuation, both entry directions complete,
-and the primary Run reaches a recovered `done` continuation.
+The Phase 3 run starts through a generated state adapter and completes through
+the public WorkflowRuntime at a manual location. A second Run starts through
+the public runtime and completes through generated adapters at a standalone
+location. Equivalent manual and standalone Runs are also compared. Fresh
+process recovery is checked at a pending machine action, an awaiting decision,
+after the accepted scoped receipt and branch, between Cycle instances, and at
+terminal completion.
 
-Issue #27 adds focused synthetic public-runtime, both-location, fresh-process,
-and generated-adapter tests for artifact provenance. The existing Creator
-certification fixture remains linear until the combined Phase 3 lifecycle gate
-owned by #29; this document does not treat focused artifact coverage alone as
-complete Phase 3 certification.
+The certification records every continuation disposition, route and identity
+reconciliation, Cycle and Attempt ledger, immutable artifact version and
+carry-forward selection, Decision Receipt, generated projection, and required
+negative case. It records the evaluated package tree hash separately from the
+generated fixture tree and fixture execution identity; neither identity is
+silently substituted for the other. Rejected submissions must preserve the
+committed continuation. Readiness requires all evidence to be complete and
+current for the evaluated package hash.
+
+The Phase 2 linear certification remains the compatibility gate for legacy
+packages. Phase 3 certification does not publish or install generated Skills,
+authorize biological execution, start Native-derived durability work, or
+migrate Primer Designer.
 
 ## Compatibility
 

@@ -37,4 +37,5 @@ The standalone package deliberately excludes Classic customization, Native workf
 - Decision Nodes may declare optional or required artifact/evidence scope entries. WorkflowRuntime captures accepted version ids, hashes, and producer identities; adapters render and forward those references without exposing contents or storing attachments.
 - Control Nodes cannot be overridden. Producer overrides must declare every Output Schema they satisfy.
 - Unresolved or ambiguous Skill candidates, stale hashes, failed eval, missing review, and missing confirmation block the next mutating step.
+- `comet-any eval` includes a current-hash synthetic Phase 3 decision-and-cycle certification; passing it does not authorize biological execution, package installation, Native-derived durability, or Primer Designer migration.
 - Generated packages and published copies are local filesystem artifacts. Review the preview before copying them elsewhere.

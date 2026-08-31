@@ -160,16 +160,18 @@ deleted or stale projection with `status --rebuild --confirm legacy-state`.
 Use `COMET_RUN_ROOT` or `--run-root` for manual Runs; use
 `--project <dir> --run-id <id>` for standalone Runs.
 
-`eval` runs a synthetic WorkflowRuntime certification over the generated
-package, including both generated-adapter and public-runtime entry paths. Its
-report binds the generated-package hash to the normalized protocol hash,
-compiled package hash, Engine snapshot hash, declared and observed Node order,
-recovery evidence, and terminal completion. Review readiness requires this
-evidence to remain current. Phase 3 branch/Attempt, decision/receipt, and
-declared-Cycle behavior is covered by focused synthetic runtime tests. Artifact
-versioning and scoped Decision Receipt evidence have focused public-runtime and
-generated-adapter coverage; complete Phase 3 lifecycle certification,
-Native-derived durability, and Primer Designer migration remain separate
-follow-up tickets.
+`eval` runs the Phase 2 certification over the generated package and a separate
+synthetic Phase 3 lifecycle certification. The report binds the generated
+package hash to the normalized protocol hash, compiled package hash, immutable
+Engine snapshot hash, resolver-plan identity, capability version, Node/action
+mapping, route and visit evidence, Cycle and Attempt ledgers, artifact versions,
+Decision Receipts, generated projections, fresh-process recovery, and terminal
+completion. Evaluated-package and synthetic-fixture tree hashes are recorded
+separately, while the fixture identity remains bound to its own compiled
+protocol. Review readiness requires every Phase 3 disposition, recovery,
+identity, adapter, source-integrity, and negative-case flag to remain current.
+The fixture uses only disposable synthetic files and does not authorize
+biological execution, package installation, Native-derived durability, or
+Primer Designer migration.
 
 See `docs/workflow-runtime-certification.md` for the certification contract.
