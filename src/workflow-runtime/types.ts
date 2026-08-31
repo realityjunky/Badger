@@ -14,6 +14,8 @@ import type {
   WorkflowArtifactVersionId,
   WorkflowArtifactVersion,
   WorkflowDecisionReceipt,
+  WorkflowDecisionScopeSelection,
+  WorkflowDecisionScopeSnapshot,
   WorkflowProtocol,
   WorkflowReviewerAttestation,
 } from "../types.js";
@@ -40,6 +42,11 @@ export interface WorkflowDecisionSubmission {
   inputs?: Record<string, DecisionScalar>;
   rationale?: string;
   evidenceReferences?: string[];
+  scope?: WorkflowDecisionScopeSelection;
+  execution?: WorkflowExecutionIdentity;
+  protocolHash?: string;
+  packageHash?: string;
+  snapshotHash?: string;
 }
 
 export interface ManualWorkflowRunLocation {

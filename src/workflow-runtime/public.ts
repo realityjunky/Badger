@@ -24,6 +24,17 @@ export type {
 } from "./types.js";
 
 export type {
+  WorkflowDecisionScope,
+  WorkflowDecisionScopeDefinition,
+  WorkflowDecisionScopeEntry,
+  WorkflowDecisionScopeReference,
+  WorkflowDecisionScopeSelection,
+  WorkflowDecisionScopeSelectionReference,
+  WorkflowDecisionScopeSummary,
+  WorkflowDecisionScopeSnapshot,
+} from "../types.js";
+
+export type {
   WorkflowArtifactId,
   WorkflowArtifactLifetime,
   WorkflowArtifactPath,

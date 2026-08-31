@@ -10,6 +10,7 @@ import {
   resumeManualWorkflowRun,
   startManualRun,
   type ManualRunResult,
+  type PreparePendingAction,
   type ResumeManualRunOptions,
 } from "../engine/manual-run.js";
 import { readRunState } from "../engine/state.js";
@@ -40,6 +41,7 @@ export interface ResolvedWorkflowRunLocation {
       runtimeIdentity: RuntimeIdentity;
       workflowRuntime?: WorkflowRuntimeState;
       resolver?: DeterministicResolver<undefined>;
+      prepareAction?: PreparePendingAction;
     },
   ): Promise<ManualRunResult>;
   resume(

@@ -215,6 +215,7 @@ function decisionReceipt(
     ...(outcome.evidenceReferences
       ? { evidenceReferences: [...outcome.evidenceReferences] }
       : {}),
+    ...(outcome.scope ? { scope: structuredClone(outcome.scope) } : {}),
     timestamp: new Date().toISOString(),
     protocolHash: identity.protocolHash,
     packageHash: identity.packageHash,

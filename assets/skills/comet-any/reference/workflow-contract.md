@@ -47,7 +47,11 @@ ids, human labels, and one transition target per choice. It may also declare
 an object input schema with scalar fields and enumerated values, a rationale
 requirement, and reviewer subjects or authorities. Executable validators,
 remote references, and arbitrary nested values are rejected before Run
-creation.
+creation. A decision may also declare `scope.artifacts` and
+`scope.evidence` entries by schema-qualified logical id, with `required`
+defaulting to false. WorkflowRuntime captures only accepted version ids,
+content hashes, and producer identities for those entries. Optional captured
+references may be omitted from a response; required references may not.
 
 A versioned workflow may add `versioned-artifacts`. Each Output Schema artifact
 keeps its stable schema-qualified logical id and may declare `lifetime` as
@@ -73,6 +77,7 @@ and rationale. WorkflowRuntime validates the response, selects the declared
 choice transition, and writes one identity-bound Decision Receipt with a
 runtime timestamp. Generated adapters render and forward this contract but do
 not perform policy validation, Cycle allocation, route selection, or receipt
-writes. Generated state and handoff output projects artifact versions and
-current selections, while allocation, hashing, carry-forward, and authoritative
+writes. Generated state and handoff output projects the bounded decision
+scope, receipt references, artifact versions, and current selections, while
+allocation, hashing, carry-forward, scope validation, and authoritative
 storage remain inside WorkflowRuntime.

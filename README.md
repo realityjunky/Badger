@@ -18,6 +18,7 @@ The package includes:
 - a public WorkflowRuntime for deterministic workflow start, resume, revisioned outcome submission, and recovery;
 - bounded declared Cycle execution with stable identities and append-only repeated-visit evidence;
 - immutable Attempt-, Cycle-, and Run-lifetime artifact versions with protected content hashes and explicit carry-forward;
+- bounded Decision Receipt scope references tied to accepted artifact and evidence versions;
 - official/private differential observations for the pinned Engine behavior.
 
 It intentionally excludes Comet Classic policy, Comet Native policy and hardening, Comet Entry, host platform installers, ambient resume routing, and external platform adapters.
@@ -96,7 +97,12 @@ the current revision, action, Node, Cycle, Attempt, choice, reviewer
 attestation, input schema, and rationale policy. Accepted responses route only
 through declared choice transitions and create one runtime-timestamped,
 identity-bound Decision Receipt. Invalid, stale, replayed, and cross-kind
-submissions do not mutate the Run.
+submissions do not mutate the Run. A decision may declare optional or required
+artifact and evidence scope entries. The pending action exposes only accepted
+version ids, hashes, and producer identities; responses must echo required
+references and may omit optional ones. Physical artifact drift and changed
+append-only evidence reject the response before mutation. Scope data is
+reference-only and does not add attachment storage or generalized snapshots.
 
 `recover` reconstructs the continuation from the persisted identity, Skill
 snapshot, Run state, and pending action. It does not use conversation context
@@ -160,8 +166,8 @@ compiled package hash, Engine snapshot hash, declared and observed Node order,
 recovery evidence, and terminal completion. Review readiness requires this
 evidence to remain current. Phase 3 branch/Attempt, decision/receipt, and
 declared-Cycle behavior is covered by focused synthetic runtime tests. Artifact
-versioning has focused public-runtime and generated-adapter coverage; scoped
-Decision Receipt evidence, complete Phase 3 lifecycle certification,
+versioning and scoped Decision Receipt evidence have focused public-runtime and
+generated-adapter coverage; complete Phase 3 lifecycle certification,
 Native-derived durability, and Primer Designer migration remain separate
 follow-up tickets.
 

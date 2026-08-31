@@ -158,6 +158,9 @@ function printPendingAction(value) {
     console.log(
       `REVIEWER: ${JSON.stringify(value.pendingAction.reviewer ?? { subjects: [], authorities: [] })}`,
     );
+    if (value.pendingAction.scope) {
+      console.log(`SCOPE: ${JSON.stringify(value.pendingAction.scope)}`);
+    }
     return;
   }
   console.log("NEXT: auto");
@@ -379,6 +382,7 @@ async function main() {
       nodeId,
       cycleId: projection.cycleId,
       attemptId: projection.attemptId,
+      execution: projection.execution,
     });
     await syncProjection(target, await readProjection(target));
     if (options.json) printJson(continuation);

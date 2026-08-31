@@ -10,6 +10,7 @@ import type {
   WorkflowProtocolCapabilities,
   WorkflowDecisionDefinition,
   WorkflowDecisionChoice,
+  WorkflowDecisionScope,
   WorkflowRoutingCondition,
   WorkflowRoutingField,
   NormalizedWorkflow,
@@ -135,6 +136,52 @@ function decisionInputErrors(schema: unknown, label: string): string[] {
   return errors;
 }
 
+function decisionScopeErrors(scope: unknown, label: string): string[] {
+  const errors: string[] = [];
+  if (!isRecord(scope)) return [`${label} must be an object`];
+  const scopeKeys = new Set(["artifacts", "evidence"]);
+  const unknown = Object.keys(scope).find((key) => !scopeKeys.has(key));
+  if (unknown) errors.push(`${label} has unsupported field: ${unknown}`);
+  let entryCount = 0;
+  for (const kind of ["artifacts", "evidence"] as const) {
+    const entries = scope[kind];
+    if (entries === undefined) continue;
+    if (!Array.isArray(entries)) {
+      errors.push(`${label}.${kind} must be an array`);
+      continue;
+    }
+    const ids = new Set<string>();
+    for (const [index, entry] of entries.entries()) {
+      const entryLabel = `${label}.${kind}[${index}]`;
+      if (!isRecord(entry)) {
+        errors.push(`${entryLabel} must be an object`);
+        continue;
+      }
+      const unknownEntry = Object.keys(entry).find(
+        (key) => key !== "id" && key !== "required",
+      );
+      if (unknownEntry) {
+        errors.push(`${entryLabel} has unsupported field: ${unknownEntry}`);
+      }
+      if (typeof entry.id !== "string" || entry.id.length === 0) {
+        errors.push(`${entryLabel}.id must be a non-empty string`);
+      } else if (ids.has(entry.id)) {
+        errors.push(`${label}.${kind} has duplicate entry: ${entry.id}`);
+      } else {
+        ids.add(entry.id);
+      }
+      if (entry.required !== undefined && typeof entry.required !== "boolean") {
+        errors.push(`${entryLabel}.required must be a boolean`);
+      }
+      entryCount += 1;
+    }
+  }
+  if (entryCount > 64) {
+    errors.push(`${label} must not contain more than 64 entries`);
+  }
+  return errors;
+}
+
 function decisionErrors(decision: unknown, nodeId: string): string[] {
   const label = `Decision Node ${nodeId}`;
   const errors: string[] = [];
@@ -146,6 +193,7 @@ function decisionErrors(decision: unknown, nodeId: string): string[] {
     "inputs",
     "rationale",
     "reviewer",
+    "scope",
   ]);
   const unknown = Object.keys(decision).find((key) => !keys.has(key));
   if (unknown) errors.push(`${label} has unsupported field: ${unknown}`);
@@ -275,6 +323,9 @@ function decisionErrors(decision: unknown, nodeId: string): string[] {
         }
       }
     }
+  }
+  if (decision.scope !== undefined) {
+    errors.push(...decisionScopeErrors(decision.scope, `${label}.scope`));
   }
   return errors;
 }
@@ -454,6 +505,78 @@ function validateCycles(
 
 function schemaIds(schemas: OutputSchema[]): Set<string> {
   return new Set(schemas.map((schema) => schema.id));
+}
+
+function declaredScopeIds(
+  schemas: readonly OutputSchema[],
+  kind: "artifacts" | "evidence",
+): string[] {
+  return schemas.flatMap((schema) =>
+    schema[kind].map((entry) => `${schema.id}.${entry.id}`),
+  );
+}
+
+function resolveDeclaredScopeId(
+  requested: string,
+  declared: readonly string[],
+): string | null {
+  if (declared.includes(requested)) return requested;
+  const matches = declared.filter(
+    (candidate) =>
+      candidate.slice(candidate.lastIndexOf(".") + 1) === requested,
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function validateDecisionScopes(
+  nodes: readonly NodeTemplate[],
+  schemas: readonly OutputSchema[],
+  findings: ValidationFinding[],
+): void {
+  const declared = {
+    artifacts: declaredScopeIds(schemas, "artifacts"),
+    evidence: declaredScopeIds(schemas, "evidence"),
+  } as const;
+  for (const node of nodes) {
+    for (const kind of ["artifacts", "evidence"] as const) {
+      const seen = new Set<string>();
+      for (const entry of node.decision?.scope?.[kind] ?? []) {
+        const resolved = resolveDeclaredScopeId(entry.id, declared[kind]);
+        if (!resolved) {
+          findings.push({
+            code: "invalid-decision",
+            nodeId: node.id,
+            message: `Decision Node ${node.id} scope ${kind} is not declared: ${entry.id}`,
+          });
+        } else if (seen.has(resolved)) {
+          findings.push({
+            code: "invalid-decision",
+            nodeId: node.id,
+            message: `Decision Node ${node.id} scope ${kind} has duplicate entry: ${resolved}`,
+          });
+        } else {
+          seen.add(resolved);
+        }
+      }
+    }
+  }
+}
+
+function normalizeDecisionScope(
+  scope: WorkflowDecisionScope,
+  schemas: readonly OutputSchema[],
+): WorkflowDecisionScope {
+  const normalized: WorkflowDecisionScope = {};
+  for (const kind of ["artifacts", "evidence"] as const) {
+    const entries = scope[kind];
+    if (!entries) continue;
+    const declared = declaredScopeIds(schemas, kind);
+    normalized[kind] = entries.map((entry) => ({
+      id: resolveDeclaredScopeId(entry.id, declared) ?? entry.id,
+      required: entry.required === true,
+    }));
+  }
+  return normalized;
 }
 
 export function validateWorkflow(input: WorkflowInput): ValidationFinding[] {
@@ -640,6 +763,7 @@ export function validateWorkflow(input: WorkflowInput): ValidationFinding[] {
       }
     }
   }
+  validateDecisionScopes(nodes, input.outputSchemas ?? [], findings);
   validateRouting(input, nodes, findings);
   validateCycles(input, nodes, findings);
   return findings;
@@ -815,7 +939,7 @@ export function normalizeWorkflow(input: WorkflowInput): NormalizedWorkflow {
   const patches = input.nodes ?? {};
   const nodes = (input.customNodes ?? []).map((template): NodeProtocol => {
     const patch = patches[template.id] ?? {};
-    return {
+    const node: NodeProtocol = {
       ...cloneNode(template),
       implementation: binding(
         patch.implementation ?? template.implementation,
@@ -843,6 +967,13 @@ export function normalizeWorkflow(input: WorkflowInput): NormalizedWorkflow {
         ? { optional: template.optional }
         : {}),
     };
+    if (node.decision?.scope) {
+      node.decision.scope = normalizeDecisionScope(
+        node.decision.scope,
+        input.outputSchemas ?? [],
+      );
+    }
+    return node;
   });
   const outputSchemas = [...(input.outputSchemas ?? [])].map((schema) =>
     structuredClone(schema),

@@ -7,6 +7,7 @@ import type {
   WorkflowArtifactVersionId,
   WorkflowArtifactVersion,
   WorkflowDecisionReceipt,
+  WorkflowDecisionScopeSnapshot,
   WorkflowReviewerAttestation,
 } from "../types.js";
 
@@ -118,6 +119,7 @@ export interface ActionOutcome {
   inputs?: Record<string, DecisionScalar>;
   rationale?: string;
   evidenceReferences?: string[];
+  scope?: WorkflowDecisionScopeSnapshot;
   artifactVersions?: Record<WorkflowArtifactId, WorkflowArtifactVersionId>;
 }
 

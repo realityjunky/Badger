@@ -1402,6 +1402,7 @@ var ACTION_KEYS = /* @__PURE__ */ new Set([
   "requiredInputs",
   "rationale",
   "reviewer",
+  "scope",
   "attemptId",
   "cycleId",
   "visitOrdinal",
@@ -1446,12 +1447,87 @@ function requiredFields(value, keys, label) {
     }
   }
 }
+function nonNegativeInteger(value, key, label) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
+  }
+  return value;
+}
 function parseJson(raw, label) {
   try {
     return JSON.parse(raw);
   } catch (error) {
     throw new Error(`${label} is not valid JSON`, { cause: error });
   }
+}
+function parseScopeProducer(value, label) {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(
+    value,
+    /* @__PURE__ */ new Set([
+      "runId",
+      "nodeId",
+      "cycleId",
+      "attemptId",
+      "actionId",
+      "revision"
+    ]),
+    label
+  );
+  const cycleId = value.cycleId;
+  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
+    throw new Error(`Invalid ${label}: cycleId must be a string or null`);
+  }
+  return {
+    runId: requiredText(value.runId, "runId", label),
+    nodeId: requiredText(value.nodeId, "nodeId", label),
+    cycleId,
+    attemptId: requiredText(value.attemptId, "attemptId", label),
+    actionId: requiredText(value.actionId, "actionId", label),
+    revision: nonNegativeInteger(value.revision, "revision", label)
+  };
+}
+function parseScopeReference(value, label) {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(
+    value,
+    /* @__PURE__ */ new Set(["id", "required", "versionId", "contentHash", "producer"]),
+    label
+  );
+  const contentHash2 = requiredText(value.contentHash, "contentHash", label);
+  if (!/^[a-f0-9]{64}$/u.test(contentHash2)) {
+    throw new Error(`Invalid ${label}: contentHash must be a SHA-256 hash`);
+  }
+  if (typeof value.required !== "boolean") {
+    throw new Error(`Invalid ${label}: required must be a boolean`);
+  }
+  return {
+    id: requiredText(value.id, "id", label),
+    required: value.required,
+    versionId: requiredText(value.versionId, "versionId", label),
+    contentHash: contentHash2,
+    producer: parseScopeProducer(value.producer, `${label}.producer`)
+  };
+}
+function parseDecisionScope(value, label) {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(value, /* @__PURE__ */ new Set(["artifacts", "evidence"]), label);
+  const parseEntries = (kind) => {
+    const entries = value[kind];
+    if (!Array.isArray(entries)) {
+      throw new Error(`Invalid ${label}.${kind}: must be an array`);
+    }
+    if (entries.length > 64) {
+      throw new Error(`Invalid ${label}.${kind}: too many entries`);
+    }
+    return entries.map(
+      (entry, index) => parseScopeReference(entry, `${label}.${kind}[${index}]`)
+    );
+  };
+  return {
+    artifacts: parseEntries("artifacts"),
+    evidence: parseEntries("evidence")
+  };
 }
 function parseAction(value) {
   if (!isRecord(value)) {
@@ -1526,6 +1602,12 @@ function parseAction(value) {
       value.reviewer,
       "Run pending action reviewer"
     );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "scope")) {
+    if (action.type !== "ask_user") {
+      throw new Error("Invalid Run pending action: scope requires ask_user");
+    }
+    action.scope = parseDecisionScope(value.scope, "Run pending action scope");
   }
   if (Object.prototype.hasOwnProperty.call(value, "attemptId")) {
     action.attemptId = requiredText(
@@ -2101,6 +2183,23 @@ async function hashArtifactPath(runRoot, declaration, relativePath) {
   );
   return sha256(result.bytes);
 }
+async function validateWorkflowArtifactVersion(runRoot, protocol, version) {
+  const declaration = declarationFor(
+    version.artifactId,
+    declarations(protocol)
+  );
+  if (version.schemaId !== declaration.schemaId || version.lifetime !== artifactLifetime(declaration) || !artifactPathMatches(version.path, declaration.artifact.paths)) {
+    fail(`Workflow artifact version identity is invalid: ${version.id}`);
+  }
+  const currentHash = await hashArtifactPath(
+    runRoot,
+    declaration,
+    version.path
+  );
+  if (currentHash !== version.contentHash) {
+    fail(`Workflow artifact content drift detected: ${version.id}`);
+  }
+}
 function artifactLifetime(declaration) {
   return declaration.artifact.lifetime ?? "attempt";
 }
@@ -2133,6 +2232,19 @@ function selection(artifactId, versionId, state, nodeId, actionId2, timestamp) {
     revision: runtime.revision,
     timestamp
   };
+}
+function artifactVersionId(artifactId, contentHash2, pathValue, producer, scopeId) {
+  return `artifact-version-${sha256(
+    JSON.stringify(
+      stableValue({
+        artifactId,
+        contentHash: contentHash2,
+        path: pathValue,
+        producer,
+        scopeId
+      })
+    )
+  ).slice(0, 24)}`;
 }
 function assertSelectionScope(version, state) {
   const attempt = state.workflowRuntime?.currentAttempt;
@@ -2229,7 +2341,7 @@ async function prepareWorkflowArtifactMutation(options) {
         `Attempt artifact path must include the current Attempt id: ${declaration.artifactId}`
       );
     }
-    const contentHash = await hashArtifactPath(
+    const contentHash2 = await hashArtifactPath(
       options.runRoot,
       declaration,
       artifactPath
@@ -2243,17 +2355,13 @@ async function prepareWorkflowArtifactMutation(options) {
       actionId: options.actionId,
       revision: runtime.revision
     };
-    const id = `artifact-version-${sha256(
-      JSON.stringify(
-        stableValue({
-          artifactId: declaration.artifactId,
-          contentHash,
-          path: artifactPath,
-          producer,
-          scopeId
-        })
-      )
-    ).slice(0, 24)}`;
+    const id = artifactVersionId(
+      declaration.artifactId,
+      contentHash2,
+      artifactPath,
+      producer,
+      scopeId
+    );
     if (runtime.artifactVersions.some((version2) => version2.id === id)) {
       fail(`Workflow artifact version already exists: ${id}`);
     }
@@ -2263,7 +2371,7 @@ async function prepareWorkflowArtifactMutation(options) {
       schemaId: declaration.schemaId,
       lifetime,
       scopeId,
-      contentHash,
+      contentHash: contentHash2,
       path: artifactPath,
       producer,
       timestamp
@@ -2301,12 +2409,12 @@ async function prepareWorkflowArtifactMutation(options) {
       );
     }
     assertSelectionScope(version, options.state);
-    const contentHash = await hashArtifactPath(
+    const contentHash2 = await hashArtifactPath(
       options.runRoot,
       declaration,
       version.path
     );
-    if (contentHash !== version.contentHash) {
+    if (contentHash2 !== version.contentHash) {
       fail(`Workflow artifact content drift detected: ${version.id}`);
     }
     mutation.selections.push(
@@ -2370,6 +2478,17 @@ function validateWorkflowArtifactState(protocol, runId, nodeToStep, runtime) {
     if (!stepId2 || !visit || visit.stepId !== stepId2 || visit.cycleId !== version.producer.cycleId || !outcome || outcome.status !== "succeeded" || outcome.artifactVersions?.[version.artifactId] !== version.id) {
       throw new Error(
         `WorkflowRuntime artifact producer is invalid: ${version.id}`
+      );
+    }
+    if (version.id !== artifactVersionId(
+      version.artifactId,
+      version.contentHash,
+      version.path,
+      version.producer,
+      version.scopeId
+    )) {
+      throw new Error(
+        `WorkflowRuntime artifact version identity is invalid: ${version.id}`
       );
     }
     if (!selections.some(
@@ -3444,6 +3563,51 @@ function decisionInputErrors(schema, label) {
   }
   return errors;
 }
+function decisionScopeErrors(scope, label) {
+  const errors = [];
+  if (!isRecord3(scope)) return [`${label} must be an object`];
+  const scopeKeys = /* @__PURE__ */ new Set(["artifacts", "evidence"]);
+  const unknown = Object.keys(scope).find((key) => !scopeKeys.has(key));
+  if (unknown) errors.push(`${label} has unsupported field: ${unknown}`);
+  let entryCount = 0;
+  for (const kind of ["artifacts", "evidence"]) {
+    const entries = scope[kind];
+    if (entries === void 0) continue;
+    if (!Array.isArray(entries)) {
+      errors.push(`${label}.${kind} must be an array`);
+      continue;
+    }
+    const ids = /* @__PURE__ */ new Set();
+    for (const [index, entry] of entries.entries()) {
+      const entryLabel = `${label}.${kind}[${index}]`;
+      if (!isRecord3(entry)) {
+        errors.push(`${entryLabel} must be an object`);
+        continue;
+      }
+      const unknownEntry = Object.keys(entry).find(
+        (key) => key !== "id" && key !== "required"
+      );
+      if (unknownEntry) {
+        errors.push(`${entryLabel} has unsupported field: ${unknownEntry}`);
+      }
+      if (typeof entry.id !== "string" || entry.id.length === 0) {
+        errors.push(`${entryLabel}.id must be a non-empty string`);
+      } else if (ids.has(entry.id)) {
+        errors.push(`${label}.${kind} has duplicate entry: ${entry.id}`);
+      } else {
+        ids.add(entry.id);
+      }
+      if (entry.required !== void 0 && typeof entry.required !== "boolean") {
+        errors.push(`${entryLabel}.required must be a boolean`);
+      }
+      entryCount += 1;
+    }
+  }
+  if (entryCount > 64) {
+    errors.push(`${label} must not contain more than 64 entries`);
+  }
+  return errors;
+}
 function decisionErrors(decision, nodeId) {
   const label = `Decision Node ${nodeId}`;
   const errors = [];
@@ -3454,7 +3618,8 @@ function decisionErrors(decision, nodeId) {
     "choices",
     "inputs",
     "rationale",
-    "reviewer"
+    "reviewer",
+    "scope"
   ]);
   const unknown = Object.keys(decision).find((key) => !keys.has(key));
   if (unknown) errors.push(`${label} has unsupported field: ${unknown}`);
@@ -3572,11 +3737,539 @@ function decisionErrors(decision, nodeId) {
       }
     }
   }
+  if (decision.scope !== void 0) {
+    errors.push(...decisionScopeErrors(decision.scope, `${label}.scope`));
+  }
   return errors;
 }
 function validateDecisionDefinition(decision, nodeId) {
   const errors = decisionErrors(decision, nodeId);
   if (errors.length > 0) throw new Error(errors.join("\n"));
+}
+
+// src/workflow-runtime/decision-scope.ts
+var WorkflowDecisionScopeError = class extends Error {
+  blockers;
+  constructor(message) {
+    super(message);
+    this.name = "WorkflowDecisionScopeError";
+    this.blockers = [message];
+  }
+};
+function fail2(message) {
+  throw new WorkflowDecisionScopeError(message);
+}
+function isRecord4(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function protocolNodeForAction(pkg, action) {
+  const nodeId = Object.entries(pkg.runtime?.nodeToStep ?? {}).find(
+    ([, stepId2]) => stepId2 === action.stepId
+  )?.[0];
+  return pkg.runtime?.protocol.nodes.find((node) => node.id === nodeId);
+}
+function artifactDeclarations(protocol) {
+  return protocol.outputSchemas.flatMap(
+    (schema) => schema.artifacts.map((artifact) => ({
+      id: `${schema.id}.${artifact.id}`,
+      schemaId: schema.id,
+      artifact
+    }))
+  );
+}
+function evidenceDeclarations(protocol) {
+  return protocol.outputSchemas.flatMap(
+    (schema) => schema.evidence.map((evidence) => ({
+      id: `${schema.id}.${evidence.id}`,
+      schemaId: schema.id,
+      evidenceId: evidence.id
+    }))
+  );
+}
+function resolveDeclaration(requested, declarations2, label) {
+  const exact = declarations2.find(
+    (declaration) => declaration.id === requested
+  );
+  if (exact) return exact;
+  const matches = declarations2.filter(
+    (declaration) => declaration.id.slice(declaration.id.lastIndexOf(".") + 1) === requested
+  );
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    fail2(`${label} requires a schema-qualified id: ${requested}`);
+  }
+  fail2(`${label} is not declared: ${requested}`);
+}
+function referenceKey(reference) {
+  return `${reference.id}\0${reference.versionId}`;
+}
+function producerEqual(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+}
+function contentHash(value) {
+  return sha256(JSON.stringify(stableValue(value)) ?? "undefined");
+}
+function evidenceValue(evidence, declaration) {
+  if (!evidence) return { found: false };
+  const logicalId = declaration.id;
+  for (const key of [logicalId, declaration.evidenceId]) {
+    if (Object.prototype.hasOwnProperty.call(evidence, key)) {
+      return { found: true, value: evidence[key] };
+    }
+  }
+  const scoped = evidence.schemaEvidence;
+  if (!isRecord4(scoped)) return { found: false };
+  if (Object.prototype.hasOwnProperty.call(scoped, logicalId)) {
+    return { found: true, value: scoped[logicalId] };
+  }
+  const schemaEvidence = scoped[declaration.schemaId];
+  if (isRecord4(schemaEvidence)) {
+    if (Object.prototype.hasOwnProperty.call(
+      schemaEvidence,
+      declaration.evidenceId
+    )) {
+      return {
+        found: true,
+        value: schemaEvidence[declaration.evidenceId]
+      };
+    }
+  }
+  return { found: false };
+}
+function outcomeRevision(runtime, visit, outcome) {
+  if (!runtime) fail2("Decision evidence requires WorkflowRuntime state");
+  let revision = 0;
+  for (const candidate of runtime.visits) {
+    for (const candidateOutcome of candidate.outcomes) {
+      if (candidate.attemptId === visit.attemptId && candidateOutcome.actionId === outcome.actionId) {
+        return revision;
+      }
+      revision += 1;
+    }
+  }
+  fail2(`Decision evidence outcome is not accepted: ${outcome.actionId}`);
+}
+function evidenceProducer(state, visit, outcome) {
+  return {
+    runId: state.runId,
+    nodeId: Object.entries(state.runtimeIdentity?.nodeToStep ?? {}).find(
+      ([, stepId2]) => stepId2 === visit.stepId
+    )?.[0] ?? visit.stepId,
+    cycleId: visit.cycleId,
+    attemptId: visit.attemptId,
+    actionId: outcome.actionId,
+    revision: outcomeRevision(state.workflowRuntime, visit, outcome)
+  };
+}
+function evidenceVersionId(evidenceId, hash, producer) {
+  return `evidence-version-${sha256(
+    JSON.stringify(stableValue({ evidenceId, hash, producer }))
+  ).slice(0, 24)}`;
+}
+function evidenceReference(state, declaration, visit, outcome, value, required) {
+  const producer = evidenceProducer(state, visit, outcome);
+  const hash = contentHash(value);
+  return {
+    id: declaration.id,
+    required,
+    versionId: evidenceVersionId(declaration.id, hash, producer),
+    contentHash: hash,
+    producer
+  };
+}
+function nodeAllowsEvidence(protocol, nodeId, schemaId) {
+  return protocol.nodes.find((node) => node.id === nodeId)?.outputSchemas.includes(schemaId) ?? false;
+}
+function acceptedEvidenceReference(protocol, state, declaration, required, producer) {
+  const runtime = state.workflowRuntime;
+  if (!runtime) fail2("Decision evidence requires WorkflowRuntime state");
+  const nodeByStep = new Map(
+    Object.entries(state.runtimeIdentity?.nodeToStep ?? {}).map(
+      ([nodeId, stepId2]) => [stepId2, nodeId]
+    )
+  );
+  const visits = [...runtime.visits].reverse();
+  for (const visit of visits) {
+    const nodeId = nodeByStep.get(visit.stepId);
+    if (!nodeId || !nodeAllowsEvidence(protocol, nodeId, declaration.schemaId)) {
+      continue;
+    }
+    for (const outcome of [...visit.outcomes].reverse()) {
+      if (outcome.status !== "succeeded") continue;
+      const value = evidenceValue(outcome.evidence, declaration);
+      if (!value.found) continue;
+      const reference = evidenceReference(
+        state,
+        declaration,
+        visit,
+        outcome,
+        value.value,
+        required
+      );
+      if (!producer || producerEqual(reference.producer, producer)) {
+        return reference;
+      }
+    }
+  }
+  return void 0;
+}
+function artifactIsUsable(state, version) {
+  if (version.producer.runId !== state.runId) return false;
+  const currentCycleId = state.workflowRuntime?.currentCycle?.id ?? null;
+  if (version.lifetime === "run") return version.scopeId === state.runId;
+  if (version.lifetime === "cycle") return version.scopeId === currentCycleId;
+  return version.scopeId === state.workflowRuntime?.currentAttempt?.id;
+}
+function acceptedArtifactVersion(state, artifactId) {
+  const runtime = state.workflowRuntime;
+  if (!runtime) fail2("Decision artifact scope requires WorkflowRuntime state");
+  const versions = new Map(
+    runtime.artifactVersions.map((version) => [version.id, version])
+  );
+  for (const selection2 of [...runtime.artifactSelections].reverse()) {
+    if (selection2.artifactId !== artifactId) continue;
+    const version = versions.get(selection2.versionId);
+    if (version && artifactIsUsable(state, version)) return version;
+  }
+  return void 0;
+}
+function artifactReference(state, version, required) {
+  return {
+    id: version.artifactId,
+    required,
+    versionId: version.id,
+    contentHash: version.contentHash,
+    producer: structuredClone(version.producer)
+  };
+}
+function validateScopeDefinition(pkg, action, scope) {
+  const node = protocolNodeForAction(pkg, action);
+  validateWorkflowDecisionScopeDefinitionForNode(pkg, node?.id, scope);
+}
+function validateWorkflowDecisionScopeDefinitionForNode(pkg, nodeId, scope) {
+  const definition = pkg.runtime?.protocol.nodes.find(
+    (candidate) => candidate.id === nodeId
+  )?.decision?.scope;
+  if (!definition) fail2("Decision action has an undeclared scope");
+  const validateKind = (kind, references) => {
+    const definitionEntries = (definition[kind] ?? []).map((entry) => ({
+      ...entry,
+      id: (kind === "artifacts" ? resolveDeclaration(
+        entry.id,
+        artifactDeclarations(pkg.runtime.protocol),
+        `Decision ${kind} scope`
+      ) : resolveDeclaration(
+        entry.id,
+        evidenceDeclarations(pkg.runtime.protocol),
+        `Decision ${kind} scope`
+      )).id
+    }));
+    const declarationById = new Map(
+      definitionEntries.map((entry) => [entry.id, entry])
+    );
+    for (const reference of references) {
+      const entry = declarationById.get(reference.id);
+      if (!entry) {
+        fail2(`Decision ${kind} scope reference is undeclared: ${reference.id}`);
+      }
+      if (reference.required !== (entry.required === true)) {
+        fail2(`Decision ${kind} scope requiredness is invalid: ${reference.id}`);
+      }
+    }
+    for (const entry of definitionEntries) {
+      if (entry.required && !references.some((reference) => reference.id === entry.id)) {
+        fail2(`Required decision ${kind} scope is missing: ${entry.id}`);
+      }
+    }
+  };
+  validateKind("artifacts", scope.artifacts ?? []);
+  validateKind("evidence", scope.evidence ?? []);
+}
+async function captureWorkflowDecisionScope(runRoot, pkg, state, action) {
+  if (action.type !== "ask_user") return action;
+  const node = protocolNodeForAction(pkg, action);
+  const scope = node?.decision?.scope;
+  if (!scope) return action;
+  const snapshot = {
+    artifacts: [],
+    evidence: []
+  };
+  for (const entry of scope.artifacts ?? []) {
+    const declaration = resolveDeclaration(
+      entry.id,
+      artifactDeclarations(pkg.runtime.protocol),
+      "Decision artifact scope"
+    );
+    const version = acceptedArtifactVersion(state, declaration.id);
+    if (!version) {
+      if (entry.required) {
+        fail2(
+          `Required decision artifact scope is unavailable: ${declaration.id}`
+        );
+      }
+      continue;
+    }
+    try {
+      await validateWorkflowArtifactVersion(
+        runRoot,
+        pkg.runtime.protocol,
+        version
+      );
+    } catch (error) {
+      fail2(
+        `Decision artifact scope is unavailable: ${declaration.id} (${String(
+          error instanceof Error ? error.message : error
+        )})`
+      );
+    }
+    snapshot.artifacts.push(
+      artifactReference(state, version, entry.required === true)
+    );
+  }
+  for (const entry of scope.evidence ?? []) {
+    const declaration = resolveDeclaration(
+      entry.id,
+      evidenceDeclarations(pkg.runtime.protocol),
+      "Decision evidence scope"
+    );
+    const reference = acceptedEvidenceReference(
+      pkg.runtime.protocol,
+      state,
+      declaration,
+      entry.required === true
+    );
+    if (!reference) {
+      if (entry.required) {
+        fail2(
+          `Required decision evidence scope is unavailable: ${declaration.id}`
+        );
+      }
+      continue;
+    }
+    snapshot.evidence.push(reference);
+  }
+  return { ...action, scope: snapshot };
+}
+function scopeReferenceEqual(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+}
+function pendingReference(references, id) {
+  const matches = references.filter((reference) => reference.id === id);
+  if (matches.length !== 1) {
+    fail2(`Decision scope reference is not pending: ${id}`);
+  }
+  return matches[0];
+}
+function validateScopeList(references, pending, label) {
+  const keys = /* @__PURE__ */ new Set();
+  for (const reference of references) {
+    if (!isRecord4(reference)) fail2(`${label} entries must be objects`);
+    const unknown = Object.keys(reference).find(
+      (key2) => !["id", "required", "versionId", "contentHash", "producer"].includes(
+        key2
+      )
+    );
+    if (unknown) fail2(`${label} has unsupported field: ${unknown}`);
+    if (typeof reference.id !== "string" || typeof reference.versionId !== "string" || typeof reference.contentHash !== "string" || !/^[a-f0-9]{64}$/u.test(reference.contentHash) || reference.required !== void 0 && typeof reference.required !== "boolean" || reference.producer !== void 0 && !isRecord4(reference.producer)) {
+      fail2(`${label} contains an invalid reference`);
+    }
+    const key = referenceKey(reference);
+    if (keys.has(key))
+      fail2(`${label} contains a duplicate reference: ${reference.id}`);
+    keys.add(key);
+    const expected = pendingReference(pending, reference.id);
+    if (reference.required !== void 0 && reference.required !== expected.required) {
+      fail2(
+        `Decision scope requiredness does not match pending scope: ${reference.id}`
+      );
+    }
+    if (reference.producer !== void 0 && !producerEqual(reference.producer, expected.producer)) {
+      fail2(
+        `Decision scope producer does not match pending scope: ${reference.id}`
+      );
+    }
+    if (reference.id !== expected.id || reference.versionId !== expected.versionId || reference.contentHash !== expected.contentHash) {
+      fail2(
+        `Decision scope reference does not match pending scope: ${reference.id}`
+      );
+    }
+  }
+}
+function validateWorkflowDecisionScopeResponse(pending, submitted, evidenceReferences) {
+  let submittedScope;
+  if (submitted) {
+    const submittedValue = submitted;
+    if (!isRecord4(submittedValue)) {
+      fail2("Decision response scope must be an object");
+    }
+    const unknown = Object.keys(submittedValue).find(
+      (key) => key !== "artifacts" && key !== "evidence"
+    );
+    if (unknown)
+      fail2(`Decision response scope has unsupported field: ${unknown}`);
+    if (submittedValue.artifacts !== void 0 && !Array.isArray(submittedValue.artifacts) || submittedValue.evidence !== void 0 && !Array.isArray(submittedValue.evidence)) {
+      fail2("Decision response scope entries must be arrays");
+    }
+    if ((submittedValue.artifacts?.length ?? 0) > 64 || (submittedValue.evidence?.length ?? 0) > 64) {
+      fail2("Decision response scope contains too many entries");
+    }
+    submittedScope = {
+      artifacts: submittedValue.artifacts,
+      evidence: submittedValue.evidence
+    };
+  }
+  if (!pending) {
+    if (submitted && ((submitted.artifacts?.length ?? 0) > 0 || (submitted.evidence?.length ?? 0) > 0) || evidenceReferences && evidenceReferences.length > 0) {
+      fail2("Decision response includes scope that was not declared");
+    }
+    return;
+  }
+  const selected = submittedScope ? {
+    artifacts: submittedScope.artifacts ?? [],
+    evidence: submittedScope.evidence ?? []
+  } : {
+    artifacts: [],
+    evidence: (pending.evidence ?? []).filter(
+      (candidate) => evidenceReferences?.some(
+        (reference) => reference === candidate.id || reference === candidate.versionId
+      )
+    )
+  };
+  validateScopeList(
+    selected.artifacts ?? [],
+    pending.artifacts,
+    "Decision artifact scope"
+  );
+  validateScopeList(
+    selected.evidence ?? [],
+    pending.evidence,
+    "Decision evidence scope"
+  );
+  if (evidenceReferences) {
+    const selectedEvidence = new Set(
+      (selected.evidence ?? []).map((reference) => reference.versionId)
+    );
+    for (const reference of evidenceReferences) {
+      const pendingReferenceValue = pending.evidence.find(
+        (candidate) => candidate.versionId === reference || candidate.id === reference
+      );
+      if (!pendingReferenceValue) {
+        fail2(`Decision evidence reference is not pending: ${reference}`);
+      }
+      if (!selectedEvidence.has(pendingReferenceValue.versionId)) {
+        fail2(`Decision evidence reference is not selected: ${reference}`);
+      }
+    }
+  }
+  for (const reference of pending.artifacts) {
+    if (reference.required && !selected.artifacts.some((item) => item.id === reference.id)) {
+      fail2(`Required decision artifact scope is missing: ${reference.id}`);
+    }
+  }
+  for (const reference of pending.evidence) {
+    if (reference.required && !selected.evidence.some((item) => item.id === reference.id)) {
+      fail2(`Required decision evidence scope is missing: ${reference.id}`);
+    }
+  }
+}
+async function validateArtifactReference(runRoot, protocol, state, reference, requireCurrentScope, verifyContent) {
+  const version = state.workflowRuntime?.artifactVersions.find(
+    (candidate) => candidate.id === reference.versionId
+  );
+  if (!version)
+    fail2(`Decision artifact version is missing: ${reference.versionId}`);
+  if (version.artifactId !== reference.id || version.contentHash !== reference.contentHash || !producerEqual(version.producer, reference.producer) || requireCurrentScope && !artifactIsUsable(state, version)) {
+    fail2(`Decision artifact scope is stale: ${reference.id}`);
+  }
+  if (verifyContent) {
+    await validateWorkflowArtifactVersion(runRoot, protocol, version);
+  }
+}
+function findEvidenceOutcome(state, reference) {
+  for (const visit of state.workflowRuntime?.visits ?? []) {
+    if (visit.attemptId !== reference.producer.attemptId) continue;
+    const outcome = visit.outcomes.find(
+      (candidate) => candidate.actionId === reference.producer.actionId
+    );
+    if (outcome) return { visit, outcome };
+  }
+  return void 0;
+}
+function validateEvidenceReference(protocol, state, reference) {
+  const declaration = resolveDeclaration(
+    reference.id,
+    evidenceDeclarations(protocol),
+    "Decision evidence scope"
+  );
+  const found = findEvidenceOutcome(state, reference);
+  if (!found || found.outcome.status !== "succeeded") {
+    fail2(`Decision evidence version is missing: ${reference.versionId}`);
+  }
+  const nodeId = Object.entries(state.runtimeIdentity?.nodeToStep ?? {}).find(
+    ([, stepId2]) => stepId2 === found.visit.stepId
+  )?.[0];
+  if (!nodeId || !nodeAllowsEvidence(protocol, nodeId, declaration.schemaId)) {
+    fail2(`Decision evidence producer is invalid: ${reference.versionId}`);
+  }
+  const value = evidenceValue(found.outcome.evidence, declaration);
+  if (!value.found)
+    fail2(`Decision evidence version is stale: ${reference.versionId}`);
+  const expected = evidenceReference(
+    state,
+    declaration,
+    found.visit,
+    found.outcome,
+    value.value,
+    reference.required
+  );
+  if (!scopeReferenceEqual(expected, reference)) {
+    fail2(`Decision evidence scope is stale: ${reference.id}`);
+  }
+}
+async function validateWorkflowDecisionScope(runRoot, pkg, state, action) {
+  const scope = action.scope;
+  if (!scope) return;
+  validateScopeDefinition(pkg, action, scope);
+  await validateWorkflowDecisionScopeSnapshot(runRoot, pkg, state, scope);
+}
+async function validateWorkflowDecisionScopeSnapshot(runRoot, pkg, state, scope, options = {}) {
+  for (const reference of scope.artifacts ?? []) {
+    await validateArtifactReference(
+      runRoot,
+      pkg.runtime.protocol,
+      state,
+      reference,
+      options.requireCurrentScope !== false,
+      options.verifyArtifactContent !== false
+    );
+  }
+  for (const reference of scope.evidence ?? []) {
+    validateEvidenceReference(pkg.runtime.protocol, state, reference);
+  }
+}
+function validateWorkflowDecisionScopeDefinition(protocol) {
+  const artifacts = artifactDeclarations(protocol);
+  const evidence = evidenceDeclarations(protocol);
+  for (const node of protocol.nodes) {
+    if (!node.decision?.scope) continue;
+    for (const kind of ["artifacts", "evidence"]) {
+      const seen = /* @__PURE__ */ new Set();
+      for (const entry of node.decision.scope[kind] ?? []) {
+        const declaration = kind === "artifacts" ? resolveDeclaration(entry.id, artifacts, `Decision ${kind} scope`) : resolveDeclaration(entry.id, evidence, `Decision ${kind} scope`);
+        if (seen.has(declaration.id)) {
+          fail2(
+            `Decision ${kind} scope repeats a declaration: ${declaration.id}`
+          );
+        }
+        seen.add(declaration.id);
+        if (kind === "artifacts" && !protocol.capabilities?.features.includes("versioned-artifacts")) {
+          fail2(
+            `Decision artifact scope requires versioned-artifacts capability: ${declaration.id}`
+          );
+        }
+      }
+    }
+  }
 }
 
 // src/workflow-runtime/compiler.ts
@@ -4063,6 +4756,7 @@ function compileCompletionPlans(nodes) {
 }
 async function compileWorkflow(protocol) {
   validateProtocolShape(protocol);
+  validateWorkflowDecisionScopeDefinition(protocol);
   const revisioned = isRevisionedWorkflowProtocol(protocol);
   if (revisioned && protocol.capabilities?.version !== 3) {
     throw new Error(
@@ -4473,6 +5167,7 @@ function decisionReceipt(pkg, state, outcome) {
     inputs: structuredClone(outcome.inputs ?? {}),
     ...outcome.rationale !== void 0 ? { rationale: outcome.rationale } : {},
     ...outcome.evidenceReferences ? { evidenceReferences: [...outcome.evidenceReferences] } : {},
+    ...outcome.scope ? { scope: structuredClone(outcome.scope) } : {},
     timestamp: (/* @__PURE__ */ new Date()).toISOString(),
     protocolHash: identity.protocolHash,
     packageHash: identity.packageHash,
@@ -4771,6 +5466,91 @@ function parseReviewerAttestation(value, label) {
     authorities: [...reviewer.authorities]
   };
 }
+function parseDecisionScopeReference(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const reference = value;
+  const keys = /* @__PURE__ */ new Set([
+    "id",
+    "required",
+    "versionId",
+    "contentHash",
+    "producer"
+  ]);
+  const unknown = Object.keys(reference).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const contentHash2 = requiredJsonString(
+    reference.contentHash,
+    `${label}.contentHash`
+  );
+  if (!/^[a-f0-9]{64}$/u.test(contentHash2)) {
+    throw new Error(
+      `Invalid Run state: ${label}.contentHash must be a SHA-256 hash`
+    );
+  }
+  if (typeof reference.required !== "boolean") {
+    throw new Error(`Invalid Run state: ${label}.required must be a boolean`);
+  }
+  if (!reference.producer || typeof reference.producer !== "object" || Array.isArray(reference.producer)) {
+    throw new Error(`Invalid Run state: ${label}.producer must be an object`);
+  }
+  const producer = reference.producer;
+  const producerKeys = /* @__PURE__ */ new Set([
+    "runId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "actionId",
+    "revision"
+  ]);
+  const unknownProducer = Object.keys(producer).find(
+    (key) => !producerKeys.has(key)
+  );
+  if (unknownProducer) {
+    throw new Error(
+      `Invalid Run state: ${label}.producer has unknown field ${unknownProducer}`
+    );
+  }
+  return {
+    id: requiredJsonString(reference.id, `${label}.id`),
+    required: reference.required,
+    versionId: requiredJsonString(reference.versionId, `${label}.versionId`),
+    contentHash: contentHash2,
+    producer: parseWorkflowArtifactCoordinate(producer, `${label}.producer`)
+  };
+}
+function parseDecisionScope2(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const scope = value;
+  const unknown = Object.keys(scope).find(
+    (key) => key !== "artifacts" && key !== "evidence"
+  );
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const parseEntries = (kind) => {
+    if (!Array.isArray(scope[kind])) {
+      throw new Error(`Invalid Run state: ${label}.${kind} must be an array`);
+    }
+    if (scope[kind].length > 64) {
+      throw new Error(
+        `Invalid Run state: ${label}.${kind} has too many entries`
+      );
+    }
+    return scope[kind].map(
+      (entry, index) => parseDecisionScopeReference(entry, `${label}.${kind}[${index}]`)
+    );
+  };
+  return {
+    artifacts: parseEntries("artifacts"),
+    evidence: parseEntries("evidence")
+  };
+}
 function parseDecisionReceipt(value, index) {
   const label = `workflowRuntime.decisionReceipts[${index}]`;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -4791,6 +5571,7 @@ function parseDecisionReceipt(value, index) {
     "inputs",
     "rationale",
     "evidenceReferences",
+    "scope",
     "timestamp",
     "protocolHash",
     "packageHash",
@@ -4849,6 +5630,7 @@ function parseDecisionReceipt(value, index) {
     }
     evidenceReferences = [...receipt.evidenceReferences];
   }
+  const scope = receipt.scope === void 0 ? void 0 : parseDecisionScope2(receipt.scope, `${label}.scope`);
   return {
     runId: requiredJsonString(receipt.runId, "runId"),
     revision,
@@ -4863,6 +5645,7 @@ function parseDecisionReceipt(value, index) {
     inputs: parseDecisionScalarRecord(receipt.inputs, `${label}.inputs`),
     ...receipt.rationale !== void 0 ? { rationale: receipt.rationale } : {},
     ...evidenceReferences ? { evidenceReferences } : {},
+    ...scope ? { scope } : {},
     timestamp: requiredJsonString(receipt.timestamp, "timestamp"),
     protocolHash,
     packageHash,
@@ -5105,11 +5888,11 @@ function parseWorkflowArtifactVersion(value, index) {
   if (unknown) {
     throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
   }
-  const contentHash = requiredJsonString(
+  const contentHash2 = requiredJsonString(
     version.contentHash,
     `${label}.contentHash`
   );
-  if (!/^[a-f0-9]{64}$/u.test(contentHash)) {
+  if (!/^[a-f0-9]{64}$/u.test(contentHash2)) {
     throw new Error(
       `Invalid Run state: ${label}.contentHash must be a SHA-256 hash`
     );
@@ -5125,7 +5908,7 @@ function parseWorkflowArtifactVersion(value, index) {
       `${label}.lifetime`
     ),
     scopeId: requiredJsonString(version.scopeId, `${label}.scopeId`),
-    contentHash,
+    contentHash: contentHash2,
     path: artifactPath,
     producer: parseWorkflowArtifactProducer(
       version.producer,
@@ -5638,7 +6421,7 @@ async function appendEvent(changeDir, state, type, data) {
     data
   });
 }
-async function persistDecision(changeDir, state, pkg, confirmations, resolver = staticDeterministicResolver) {
+async function persistDecision(changeDir, state, pkg, confirmations, resolver = staticDeterministicResolver, prepareAction) {
   const decision = decideWithResolver(
     pkg,
     state,
@@ -5646,22 +6429,36 @@ async function persistDecision(changeDir, state, pkg, confirmations, resolver = 
     resolver,
     void 0
   );
-  if (decision.action) {
-    await writePendingAction(
+  let action = decision.action;
+  if (action && prepareAction) {
+    const prepared = await prepareAction(
       changeDir,
-      decision.state.pendingRef,
-      decision.action
+      pkg,
+      decision.state,
+      action
     );
+    if (!prepared.action) {
+      return {
+        state,
+        action: null,
+        evals: [],
+        reason: prepared.reason ?? "Pending action preparation was blocked"
+      };
+    }
+    action = prepared.action;
   }
-  await writeRunState(changeDir, decision.state);
-  if (decision.action) {
+  if (action) {
+    await writePendingAction(changeDir, decision.state.pendingRef, action);
+  }
+  await writeRunState(changeDir, action ? decision.state : state);
+  if (action) {
     await appendEvent(changeDir, decision.state, "action_proposed", {
-      action: decision.action
+      action
     });
   }
   return {
-    state: decision.state,
-    action: decision.action,
+    state: action ? decision.state : state,
+    action,
     evals: [],
     reason: decision.reason
   };
@@ -5674,7 +6471,7 @@ async function evaluateAndRecord(changeDir, pkg, state, scope, artifacts) {
   return results;
 }
 function normalizeStartOptions(value) {
-  if (value && typeof value === "object" && ("confirmations" in value || "runId" in value || "runtimeIdentity" in value || "workflowRuntime" in value || "resolver" in value)) {
+  if (value && typeof value === "object" && ("confirmations" in value || "runId" in value || "runtimeIdentity" in value || "workflowRuntime" in value || "resolver" in value || "prepareAction" in value)) {
     return value;
   }
   return { confirmations: value };
@@ -5712,7 +6509,8 @@ async function startManualRun(pkg, changeDir, options = []) {
     state,
     pkg,
     startOptions.confirmations ?? [],
-    startOptions.resolver
+    startOptions.resolver,
+    startOptions.prepareAction
   );
 }
 async function resumeManualRunInternal(changeDir, options = {}) {
@@ -5742,7 +6540,8 @@ async function resumeManualRunInternal(changeDir, options = {}) {
       state,
       pkg,
       options.confirmations ?? [],
-      resolver
+      resolver,
+      options.prepareAction
     );
   }
   if (!pending || !state.pending) {
@@ -5811,7 +6610,8 @@ async function resumeManualRunInternal(changeDir, options = {}) {
     advanced,
     pkg,
     options.confirmations ?? [],
-    resolver
+    resolver,
+    options.prepareAction
   );
   return { ...next, evals };
 }
@@ -5929,7 +6729,8 @@ async function startStandaloneRun(pkg, options) {
     confirmations: options.confirmations ?? [],
     runtimeIdentity: options.runtimeIdentity,
     workflowRuntime: options.workflowRuntime,
-    resolver: options.resolver
+    resolver: options.resolver,
+    prepareAction: options.prepareAction
   });
 }
 async function resumeStandaloneRun(projectRoot, runId, options = {}) {
@@ -6070,6 +6871,16 @@ function sameExecutionIdentity(left, right) {
 function isDecisionSubmission(submission) {
   return submission.kind === "decision";
 }
+function redactVisitEvidence(visits) {
+  return visits.map((visit) => ({
+    ...visit,
+    outcomes: visit.outcomes.map((outcome) => {
+      const redacted = { ...outcome };
+      delete redacted.evidence;
+      return redacted;
+    })
+  }));
+}
 function validateScalarRecord(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);
@@ -6196,6 +7007,9 @@ function validateSubmission(submission) {
   if (submission.kind !== void 0 && submission.kind !== "machine") {
     throw new Error("Machine submission kind is invalid");
   }
+  if (submission.scope !== void 0) {
+    throw new Error("Decision scope is only valid for decision submissions");
+  }
   if (submission.status !== "succeeded" && submission.status !== "failed") {
     throw new Error("Submission status must be succeeded or failed");
   }
@@ -6241,6 +7055,36 @@ function validateSubmission(submission) {
     throw new Error("Failed submissions cannot select artifact versions");
   }
 }
+function validateDecisionExecution(submission, expected, required) {
+  const flatIdentity = {
+    protocolHash: submission.protocolHash,
+    packageHash: submission.packageHash,
+    snapshotHash: submission.snapshotHash
+  };
+  const hasFlatIdentity = Object.values(flatIdentity).some(
+    (value) => value !== void 0
+  );
+  if (hasFlatIdentity) {
+    if (Object.values(flatIdentity).some(
+      (value) => typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)
+    ) || flatIdentity.protocolHash !== expected.protocolHash || flatIdentity.packageHash !== expected.packageHash || flatIdentity.snapshotHash !== expected.snapshotHash) {
+      throw new Error(
+        "Decision response execution identity does not match Run"
+      );
+    }
+  }
+  if (submission.execution !== void 0) {
+    if (!sameExecutionIdentity(submission.execution, expected)) {
+      throw new Error(
+        "Decision response execution identity does not match Run"
+      );
+    }
+    return;
+  }
+  if (required && !hasFlatIdentity) {
+    throw new Error("Decision response execution identity is required");
+  }
+}
 function continuation(result, identity) {
   const runtimeState = result.state.workflowRuntime;
   const currentAttempt = runtimeState?.currentAttempt ?? null;
@@ -6258,7 +7102,7 @@ function continuation(result, identity) {
     execution: structuredClone(identity),
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     cycles: structuredClone(runtimeState?.cycles ?? []),
-    visits: structuredClone(runtimeState?.visits ?? []),
+    visits: result.action?.type === "ask_user" ? redactVisitEvidence(runtimeState?.visits ?? []) : structuredClone(runtimeState?.visits ?? []),
     artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
     artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
@@ -6266,7 +7110,7 @@ function continuation(result, identity) {
   };
 }
 var LEGACY_STATE_MAX_BYTES = 256 * 1024;
-function isRecord4(value) {
+function isRecord5(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function projectionStatus(state, pending, maxRetriesPerAction) {
@@ -6295,7 +7139,7 @@ async function projectWorkflowState(target) {
   );
   for (const event of trajectory) {
     if (event.type !== "action_completed") continue;
-    if (!isRecord4(event.data.action) || !isRecord4(event.data.outcome)) continue;
+    if (!isRecord5(event.data.action) || !isRecord5(event.data.outcome)) continue;
     const stepId2 = event.data.action.stepId;
     const node = typeof stepId2 === "string" ? nodeByStep.get(stepId2) : void 0;
     const outcomeStatus = event.data.outcome.status;
@@ -6311,7 +7155,7 @@ async function projectWorkflowState(target) {
     if (outcomeStatus !== "succeeded") continue;
     if (!completedNodes.includes(node)) completedNodes.push(node);
     const outcomeEvidence = event.data.outcome.evidence;
-    evidence[node] = isRecord4(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
+    evidence[node] = isRecord5(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
   }
   const protocol = verified.package.runtime.protocol;
   const runtimeState = state.workflowRuntime;
@@ -6337,12 +7181,12 @@ async function projectWorkflowState(target) {
     visitOrdinal: currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     completedNodes,
-    evidence,
+    evidence: verified.pending?.type === "ask_user" ? {} : evidence,
     history,
     pendingAction: verified.pending,
     execution: structuredClone(verified.identity),
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
-    visits: structuredClone(runtimeState?.visits ?? []),
+    visits: verified.pending?.type === "ask_user" ? redactVisitEvidence(runtimeState?.visits ?? []) : structuredClone(runtimeState?.visits ?? []),
     cycles: structuredClone(runtimeState?.cycles ?? []),
     artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
     artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
@@ -6531,6 +7375,20 @@ async function verifyStoredPackage(runRoot, state) {
     if (node.decision.rationale?.required && !receipt.rationale) {
       throw new Error("WorkflowRuntime Decision Receipt rationale is invalid");
     }
+    if (receipt.scope) {
+      validateWorkflowDecisionScopeDefinitionForNode(
+        pkg,
+        receipt.nodeId,
+        receipt.scope
+      );
+      await validateWorkflowDecisionScopeSnapshot(
+        runRoot,
+        pkg,
+        state,
+        receipt.scope,
+        { requireCurrentScope: false, verifyArtifactContent: false }
+      );
+    }
   }
   return { identity, package: pkg };
 }
@@ -6629,6 +7487,11 @@ function validateDecisionResponse(verified, pending, node, submission) {
       `Decision Cycle does not match pending Cycle: ${submission.cycleId}`
     );
   }
+  validateDecisionExecution(
+    submission,
+    verified.identity,
+    pending.scope !== void 0
+  );
   const workflowNode = verified.package.runtime.protocol.nodes.find(
     (candidate) => candidate.id === node
   );
@@ -6656,6 +7519,11 @@ function validateDecisionResponse(verified, pending, node, submission) {
       `Decision choice is not accepted by pending action: ${choice.id}`
     );
   }
+  validateWorkflowDecisionScopeResponse(
+    pending.scope,
+    submission.scope,
+    submission.evidenceReferences
+  );
   validateReviewer(submission.reviewer, workflowNode.decision.reviewer);
   const inputs = submission.inputs ?? {};
   validateDecisionInputSchema2(
@@ -6702,6 +7570,7 @@ function engineOutcome(prepared, submission, artifactMutation) {
     inputs: structuredClone(submission.inputs ?? {}),
     ...submission.rationale !== void 0 ? { rationale: submission.rationale } : {},
     ...submission.evidenceReferences ? { evidenceReferences: [...submission.evidenceReferences] } : {},
+    ...prepared.pending.scope ? { scope: structuredClone(prepared.pending.scope) } : {},
     routing: {
       [decision.id]: choice.id,
       ...choice.routing ?? {}
@@ -6867,7 +7736,7 @@ async function projectWorkflowHandoff(protocol, current) {
     outputSchemas: structuredClone(protocol.outputSchemas),
     decisionReceipts: structuredClone(current?.decisionReceipts ?? []),
     cycles: structuredClone(current?.cycles ?? []),
-    visits: structuredClone(current?.visits ?? []),
+    visits: current?.disposition === "await-user" ? redactVisitEvidence(current.visits) : structuredClone(current?.visits ?? []),
     artifactVersions: structuredClone(current?.artifactVersions ?? []),
     artifactSelections: structuredClone(current?.artifactSelections ?? []),
     currentArtifactVersions: structuredClone(
@@ -6880,9 +7749,22 @@ async function resumeStoredRun(location, options) {
   const verified = await verifyStoredRun(location);
   const result = await location.resume({
     confirmations: options.confirmations ?? [],
-    resolver: resolverForPackage()
+    resolver: resolverForPackage(),
+    prepareAction: prepareWorkflowAction
   });
   return continuation(result, verified.identity);
+}
+async function prepareWorkflowAction(runRoot, pkg, state, action) {
+  try {
+    return {
+      action: await captureWorkflowDecisionScope(runRoot, pkg, state, action)
+    };
+  } catch (error) {
+    if (error instanceof WorkflowDecisionScopeError) {
+      return { action: null, reason: error.message };
+    }
+    throw error;
+  }
 }
 async function verifyStoredAction(runRoot, state, identity, pkg) {
   const action = await readPendingAction(runRoot, state.pendingRef);
@@ -6928,6 +7810,9 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
         );
       }
     }
+    if (action.type === "ask_user") {
+      await validateWorkflowDecisionScope(runRoot, pkg, state, action);
+    }
     return action;
   }
   if (action || state.pending) {
@@ -6969,7 +7854,8 @@ function createWorkflowRuntime() {
             artifactVersions: [],
             artifactSelections: []
           }
-        } : {}
+        } : {},
+        prepareAction: prepareWorkflowAction
       });
       if (result.state.skillHash !== compiled.identity.packageHash) {
         throw new Error("WorkflowRuntime snapshot identity was not persisted");
@@ -7004,7 +7890,8 @@ function createWorkflowRuntime() {
       const result = await prepared.location.resume(
         {
           resolver: resolverForPackage(),
-          outcome: engineOutcome(prepared, submission, artifact.mutation)
+          outcome: engineOutcome(prepared, submission, artifact.mutation),
+          prepareAction: prepareWorkflowAction
         },
         artifact.mutation
       );

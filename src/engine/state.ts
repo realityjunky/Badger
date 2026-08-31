@@ -22,6 +22,8 @@ import type {
   WorkflowArtifactSelection,
   WorkflowArtifactVersion,
   WorkflowDecisionReceipt,
+  WorkflowDecisionScopeReference,
+  WorkflowDecisionScopeSnapshot,
   WorkflowReviewerAttestation,
 } from "../types.js";
 
@@ -316,6 +318,103 @@ function parseReviewerAttestation(
   };
 }
 
+function parseDecisionScopeReference(
+  value: unknown,
+  label: string,
+): WorkflowDecisionScopeReference {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const reference = value as Record<string, unknown>;
+  const keys = new Set([
+    "id",
+    "required",
+    "versionId",
+    "contentHash",
+    "producer",
+  ]);
+  const unknown = Object.keys(reference).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const contentHash = requiredJsonString(
+    reference.contentHash,
+    `${label}.contentHash`,
+  );
+  if (!/^[a-f0-9]{64}$/u.test(contentHash)) {
+    throw new Error(
+      `Invalid Run state: ${label}.contentHash must be a SHA-256 hash`,
+    );
+  }
+  if (typeof reference.required !== "boolean") {
+    throw new Error(`Invalid Run state: ${label}.required must be a boolean`);
+  }
+  if (
+    !reference.producer ||
+    typeof reference.producer !== "object" ||
+    Array.isArray(reference.producer)
+  ) {
+    throw new Error(`Invalid Run state: ${label}.producer must be an object`);
+  }
+  const producer = reference.producer as Record<string, unknown>;
+  const producerKeys = new Set([
+    "runId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "actionId",
+    "revision",
+  ]);
+  const unknownProducer = Object.keys(producer).find(
+    (key) => !producerKeys.has(key),
+  );
+  if (unknownProducer) {
+    throw new Error(
+      `Invalid Run state: ${label}.producer has unknown field ${unknownProducer}`,
+    );
+  }
+  return {
+    id: requiredJsonString(reference.id, `${label}.id`),
+    required: reference.required,
+    versionId: requiredJsonString(reference.versionId, `${label}.versionId`),
+    contentHash,
+    producer: parseWorkflowArtifactCoordinate(producer, `${label}.producer`),
+  };
+}
+
+function parseDecisionScope(
+  value: unknown,
+  label: string,
+): WorkflowDecisionScopeSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const scope = value as Record<string, unknown>;
+  const unknown = Object.keys(scope).find(
+    (key) => key !== "artifacts" && key !== "evidence",
+  );
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const parseEntries = (kind: "artifacts" | "evidence") => {
+    if (!Array.isArray(scope[kind])) {
+      throw new Error(`Invalid Run state: ${label}.${kind} must be an array`);
+    }
+    if (scope[kind].length > 64) {
+      throw new Error(
+        `Invalid Run state: ${label}.${kind} has too many entries`,
+      );
+    }
+    return scope[kind].map((entry, index) =>
+      parseDecisionScopeReference(entry, `${label}.${kind}[${index}]`),
+    );
+  };
+  return {
+    artifacts: parseEntries("artifacts"),
+    evidence: parseEntries("evidence"),
+  };
+}
+
 function parseDecisionReceipt(
   value: unknown,
   index: number,
@@ -339,6 +438,7 @@ function parseDecisionReceipt(
     "inputs",
     "rationale",
     "evidenceReferences",
+    "scope",
     "timestamp",
     "protocolHash",
     "packageHash",
@@ -410,6 +510,10 @@ function parseDecisionReceipt(
     }
     evidenceReferences = [...(receipt.evidenceReferences as string[])];
   }
+  const scope =
+    receipt.scope === undefined
+      ? undefined
+      : parseDecisionScope(receipt.scope, `${label}.scope`);
   return {
     runId: requiredJsonString(receipt.runId, "runId"),
     revision,
@@ -426,6 +530,7 @@ function parseDecisionReceipt(
       ? { rationale: receipt.rationale }
       : {}),
     ...(evidenceReferences ? { evidenceReferences } : {}),
+    ...(scope ? { scope } : {}),
     timestamp: requiredJsonString(receipt.timestamp, "timestamp"),
     protocolHash,
     packageHash,

@@ -25,6 +25,7 @@ import {
   validateRevisionedWorkflow,
 } from "./routing.js";
 import { validateDecisionDefinition } from "../workflow/contract.js";
+import { validateWorkflowDecisionScopeDefinition } from "./decision-scope.js";
 
 interface CompiledWorkflow {
   package: SkillPackage;
@@ -632,6 +633,7 @@ export async function compileWorkflow(
   protocol: WorkflowProtocol,
 ): Promise<CompiledWorkflow> {
   validateProtocolShape(protocol);
+  validateWorkflowDecisionScopeDefinition(protocol);
   const revisioned = isRevisionedWorkflowProtocol(protocol);
   if (revisioned && protocol.capabilities?.version !== 3) {
     throw new Error(

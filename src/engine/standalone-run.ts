@@ -7,6 +7,7 @@ import {
   startManualRun,
   upgradeManualRun,
   type ManualRunEvaluation,
+  type PreparePendingAction,
   type ManualRunResult,
   type ManualRunUpgrade,
   type ResumeManualRunOptions,
@@ -30,6 +31,7 @@ export interface StartStandaloneRunOptions {
   runtimeIdentity?: RuntimeIdentity;
   workflowRuntime?: WorkflowRuntimeState;
   resolver?: DeterministicResolver<undefined>;
+  prepareAction?: PreparePendingAction;
 }
 
 function validateRunId(runId: unknown): asserts runId is string {
@@ -164,6 +166,7 @@ export async function startStandaloneRun(
     runtimeIdentity: options.runtimeIdentity,
     workflowRuntime: options.workflowRuntime,
     resolver: options.resolver,
+    prepareAction: options.prepareAction,
   });
 }
 

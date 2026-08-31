@@ -12,7 +12,11 @@ import {
 } from "../skill-runtime/snapshot.js";
 import { type ManualRunResult } from "../engine/manual-run.js";
 import { readPendingAction, readTrajectory } from "../engine/run-store.js";
-import type { EngineAction, RunState } from "../engine/types.js";
+import type {
+  EngineAction,
+  RunState,
+  WorkflowVisitState,
+} from "../engine/types.js";
 import type { WorkflowArtifactMutation } from "../engine/runtime-types.js";
 import type {
   DecisionScalar,
@@ -40,6 +44,14 @@ import {
   validateWorkflowCycleState,
   workflowCycleOwnsNode,
 } from "./routing.js";
+import {
+  captureWorkflowDecisionScope,
+  validateWorkflowDecisionScope,
+  validateWorkflowDecisionScopeDefinitionForNode,
+  validateWorkflowDecisionScopeResponse,
+  validateWorkflowDecisionScopeSnapshot,
+  WorkflowDecisionScopeError,
+} from "./decision-scope.js";
 import { resolverForPackage } from "./resolver.js";
 import {
   resolveWorkflowRunLocation,
@@ -81,6 +93,17 @@ export type {
   Submission,
   WorkflowSubmission,
 } from "./types.js";
+
+export type {
+  WorkflowDecisionScope,
+  WorkflowDecisionScopeDefinition,
+  WorkflowDecisionScopeEntry,
+  WorkflowDecisionScopeReference,
+  WorkflowDecisionScopeSelection,
+  WorkflowDecisionScopeSelectionReference,
+  WorkflowDecisionScopeSummary,
+  WorkflowDecisionScopeSnapshot,
+} from "../types.js";
 
 function identityFromState(state: RunState): WorkflowExecutionIdentity {
   if (!state.runtimeIdentity) {
@@ -145,6 +168,19 @@ function isDecisionSubmission(
   submission: WorkflowSubmission,
 ): submission is WorkflowDecisionSubmission {
   return submission.kind === "decision";
+}
+
+function redactVisitEvidence(
+  visits: readonly WorkflowVisitState[],
+): WorkflowVisitState[] {
+  return visits.map((visit) => ({
+    ...visit,
+    outcomes: visit.outcomes.map((outcome) => {
+      const redacted = { ...outcome };
+      delete redacted.evidence;
+      return redacted;
+    }),
+  }));
 }
 
 function validateScalarRecord(
@@ -316,6 +352,9 @@ function validateSubmission(submission: WorkflowSubmission): void {
   if (submission.kind !== undefined && submission.kind !== "machine") {
     throw new Error("Machine submission kind is invalid");
   }
+  if (submission.scope !== undefined) {
+    throw new Error("Decision scope is only valid for decision submissions");
+  }
   if (submission.status !== "succeeded" && submission.status !== "failed") {
     throw new Error("Submission status must be succeeded or failed");
   }
@@ -375,6 +414,46 @@ function validateSubmission(submission: WorkflowSubmission): void {
   }
 }
 
+function validateDecisionExecution(
+  submission: WorkflowDecisionSubmission,
+  expected: WorkflowExecutionIdentity,
+  required: boolean,
+): void {
+  const flatIdentity = {
+    protocolHash: submission.protocolHash,
+    packageHash: submission.packageHash,
+    snapshotHash: submission.snapshotHash,
+  };
+  const hasFlatIdentity = Object.values(flatIdentity).some(
+    (value) => value !== undefined,
+  );
+  if (hasFlatIdentity) {
+    if (
+      Object.values(flatIdentity).some(
+        (value) => typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value),
+      ) ||
+      flatIdentity.protocolHash !== expected.protocolHash ||
+      flatIdentity.packageHash !== expected.packageHash ||
+      flatIdentity.snapshotHash !== expected.snapshotHash
+    ) {
+      throw new Error(
+        "Decision response execution identity does not match Run",
+      );
+    }
+  }
+  if (submission.execution !== undefined) {
+    if (!sameExecutionIdentity(submission.execution, expected)) {
+      throw new Error(
+        "Decision response execution identity does not match Run",
+      );
+    }
+    return;
+  }
+  if (required && !hasFlatIdentity) {
+    throw new Error("Decision response execution identity is required");
+  }
+}
+
 function continuation(
   result: ManualRunResult,
   identity: WorkflowExecutionIdentity,
@@ -401,7 +480,10 @@ function continuation(
     execution: structuredClone(identity),
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     cycles: structuredClone(runtimeState?.cycles ?? []),
-    visits: structuredClone(runtimeState?.visits ?? []),
+    visits:
+      result.action?.type === "ask_user"
+        ? redactVisitEvidence(runtimeState?.visits ?? [])
+        : structuredClone(runtimeState?.visits ?? []),
     artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
     artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
@@ -501,12 +583,15 @@ export async function projectWorkflowState(
     visitOrdinal: currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     completedNodes,
-    evidence,
+    evidence: verified.pending?.type === "ask_user" ? {} : evidence,
     history,
     pendingAction: verified.pending,
     execution: structuredClone(verified.identity),
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
-    visits: structuredClone(runtimeState?.visits ?? []),
+    visits:
+      verified.pending?.type === "ask_user"
+        ? redactVisitEvidence(runtimeState?.visits ?? [])
+        : structuredClone(runtimeState?.visits ?? []),
     cycles: structuredClone(runtimeState?.cycles ?? []),
     artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
     artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
@@ -740,6 +825,20 @@ async function verifyStoredPackage(
     if (node.decision.rationale?.required && !receipt.rationale) {
       throw new Error("WorkflowRuntime Decision Receipt rationale is invalid");
     }
+    if (receipt.scope) {
+      validateWorkflowDecisionScopeDefinitionForNode(
+        pkg,
+        receipt.nodeId,
+        receipt.scope,
+      );
+      await validateWorkflowDecisionScopeSnapshot(
+        runRoot,
+        pkg,
+        state,
+        receipt.scope,
+        { requireCurrentScope: false, verifyArtifactContent: false },
+      );
+    }
   }
   return { identity, package: pkg };
 }
@@ -878,6 +977,11 @@ function validateDecisionResponse(
       `Decision Cycle does not match pending Cycle: ${submission.cycleId}`,
     );
   }
+  validateDecisionExecution(
+    submission,
+    verified.identity,
+    pending.scope !== undefined,
+  );
   const workflowNode = verified.package.runtime!.protocol.nodes.find(
     (candidate) => candidate.id === node,
   );
@@ -908,6 +1012,11 @@ function validateDecisionResponse(
       `Decision choice is not accepted by pending action: ${choice.id}`,
     );
   }
+  validateWorkflowDecisionScopeResponse(
+    pending.scope,
+    submission.scope,
+    submission.evidenceReferences,
+  );
   validateReviewer(submission.reviewer, workflowNode.decision.reviewer);
   const inputs = submission.inputs ?? {};
   validateDecisionInputSchema(
@@ -970,6 +1079,9 @@ function engineOutcome(
       : {}),
     ...(submission.evidenceReferences
       ? { evidenceReferences: [...submission.evidenceReferences] }
+      : {}),
+    ...(prepared.pending.scope
+      ? { scope: structuredClone(prepared.pending.scope) }
       : {}),
     routing: {
       [decision.id]: choice.id,
@@ -1190,7 +1302,10 @@ export async function projectWorkflowHandoff(
     outputSchemas: structuredClone(protocol.outputSchemas),
     decisionReceipts: structuredClone(current?.decisionReceipts ?? []),
     cycles: structuredClone(current?.cycles ?? []),
-    visits: structuredClone(current?.visits ?? []),
+    visits:
+      current?.disposition === "await-user"
+        ? redactVisitEvidence(current.visits)
+        : structuredClone(current?.visits ?? []),
     artifactVersions: structuredClone(current?.artifactVersions ?? []),
     artifactSelections: structuredClone(current?.artifactSelections ?? []),
     currentArtifactVersions: structuredClone(
@@ -1208,8 +1323,27 @@ async function resumeStoredRun(
   const result = await location.resume({
     confirmations: options.confirmations ?? [],
     resolver: resolverForPackage(),
+    prepareAction: prepareWorkflowAction,
   });
   return continuation(result, verified.identity);
+}
+
+async function prepareWorkflowAction(
+  runRoot: string,
+  pkg: Awaited<ReturnType<typeof readSkillSnapshot>>,
+  state: RunState,
+  action: EngineAction,
+): Promise<{ action: EngineAction | null; reason?: string }> {
+  try {
+    return {
+      action: await captureWorkflowDecisionScope(runRoot, pkg, state, action),
+    };
+  } catch (error) {
+    if (error instanceof WorkflowDecisionScopeError) {
+      return { action: null, reason: error.message };
+    }
+    throw error;
+  }
 }
 
 async function verifyStoredAction(
@@ -1287,6 +1421,9 @@ async function verifyStoredAction(
         );
       }
     }
+    if (action.type === "ask_user") {
+      await validateWorkflowDecisionScope(runRoot, pkg, state, action);
+    }
     return action;
   }
   if (action || state.pending) {
@@ -1338,6 +1475,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               },
             }
           : {}),
+        prepareAction: prepareWorkflowAction,
       });
       if (result.state.skillHash !== compiled.identity.packageHash) {
         throw new Error("WorkflowRuntime snapshot identity was not persisted");
@@ -1381,6 +1519,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
         {
           resolver: resolverForPackage(),
           outcome: engineOutcome(prepared, submission, artifact.mutation),
+          prepareAction: prepareWorkflowAction,
         },
         artifact.mutation,
       );

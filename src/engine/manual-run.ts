@@ -52,13 +52,27 @@ export interface StartManualRunOptions {
   runtimeIdentity?: RuntimeIdentity;
   workflowRuntime?: WorkflowRuntimeState;
   resolver?: DeterministicResolver<undefined>;
+  prepareAction?: PreparePendingAction;
 }
 
 export interface ResumeManualRunOptions {
   outcome?: Omit<ActionOutcome, "actionId"> & { actionId?: string };
   confirmations?: Iterable<string>;
   resolver?: DeterministicResolver<undefined>;
+  prepareAction?: PreparePendingAction;
 }
+
+export interface PendingActionPreparation {
+  action: EngineAction | null;
+  reason?: string;
+}
+
+export type PreparePendingAction = (
+  changeDir: string,
+  pkg: SkillPackage,
+  state: RunState,
+  action: EngineAction,
+) => Promise<PendingActionPreparation>;
 
 interface ResumeManualWorkflowRunOptions extends ResumeManualRunOptions {
   artifactMutation?: WorkflowArtifactMutation;
@@ -210,6 +224,7 @@ async function persistDecision(
   pkg: SkillPackage,
   confirmations: Iterable<string>,
   resolver: DeterministicResolver<undefined> = staticDeterministicResolver,
+  prepareAction?: PreparePendingAction,
 ): Promise<ManualRunResult> {
   const decision = decideWithResolver(
     pkg,
@@ -218,22 +233,36 @@ async function persistDecision(
     resolver,
     undefined,
   );
-  if (decision.action) {
-    await writePendingAction(
+  let action = decision.action;
+  if (action && prepareAction) {
+    const prepared = await prepareAction(
       changeDir,
-      decision.state.pendingRef,
-      decision.action,
+      pkg,
+      decision.state,
+      action,
     );
+    if (!prepared.action) {
+      return {
+        state,
+        action: null,
+        evals: [],
+        reason: prepared.reason ?? "Pending action preparation was blocked",
+      };
+    }
+    action = prepared.action;
   }
-  await writeRunState(changeDir, decision.state);
-  if (decision.action) {
+  if (action) {
+    await writePendingAction(changeDir, decision.state.pendingRef, action);
+  }
+  await writeRunState(changeDir, action ? decision.state : state);
+  if (action) {
     await appendEvent(changeDir, decision.state, "action_proposed", {
-      action: decision.action,
+      action,
     });
   }
   return {
-    state: decision.state,
-    action: decision.action,
+    state: action ? decision.state : state,
+    action,
     evals: [],
     reason: decision.reason,
   };
@@ -263,7 +292,8 @@ function normalizeStartOptions(
       "runId" in value ||
       "runtimeIdentity" in value ||
       "workflowRuntime" in value ||
-      "resolver" in value)
+      "resolver" in value ||
+      "prepareAction" in value)
   ) {
     return value;
   }
@@ -315,6 +345,7 @@ export async function startManualRun(
     pkg,
     startOptions.confirmations ?? [],
     startOptions.resolver,
+    startOptions.prepareAction,
   );
 }
 
@@ -350,6 +381,7 @@ async function resumeManualRunInternal(
       pkg,
       options.confirmations ?? [],
       resolver,
+      options.prepareAction,
     );
   }
 
@@ -427,6 +459,7 @@ async function resumeManualRunInternal(
     pkg,
     options.confirmations ?? [],
     resolver,
+    options.prepareAction,
   );
   return { ...next, evals };
 }

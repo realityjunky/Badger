@@ -23,7 +23,11 @@ non-mutating blocker. Versioned artifact declarations use Attempt lifetime by
 default and may opt into Cycle or Run lifetime. Accepted updates append
 content-bound versions, and later work selects exact accepted ids; incompatible
 scope, stale references, and content drift block before mutation. Decision
-evidence scope and Native-derived durability remain separate capabilities.
+Nodes may declare bounded artifact and evidence scope. Pending actions and
+receipts carry only accepted version ids, hashes, and producer identities;
+required references must be echoed by the response, optional references may be
+omitted, and drift blocks acceptance before mutation. Scope references do not
+add attachment storage or generalized content snapshots.
 
 ## Identity
 
@@ -82,7 +86,8 @@ only runtime construction and the four operations `start`, `resume`, `submit`,
 and `recover`. Revisioned continuations add `revision`, `attemptId`,
 `visitOrdinal`, `retryOrdinal`, `cycleId`, Cycle and visit ledgers, and
 decision receipt projections. Versioned continuations also project immutable
-artifact versions, selection evidence, and current scope-valid selections.
-Compiler, Run-location,
+artifact versions, selection evidence, current scope-valid selections, and
+bounded pending decision scope references. Awaiting decisions redact prior
+evidence payloads from continuation and state projections. Compiler, Run-location,
 projection, storage, and protected filesystem modules remain private
 implementation details.

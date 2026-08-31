@@ -96,6 +96,12 @@ Attempt-lifetime paths include the current Attempt id as a path segment. Later
 work must select an exact accepted version; generated scripts never infer or
 allocate a latest artifact version.
 
+Decision Nodes may declare bounded artifact and evidence scope entries. The
+runtime captures only accepted version ids, hashes, and producer identities for
+those entries when it creates the pending question. Generated scripts render
+and forward that scope without exposing artifact contents or validating the
+references themselves.
+
 ## Executable Node Order
 
 Executable Node Order: ${executableNodeOrder || "(empty)"}
@@ -145,12 +151,24 @@ function nodeMarkdown(workflow: string, node: NodeProtocol): string {
     node.outputSchemas
       .map((item) => `- Output Schema: \`${item}\``)
       .join("\n") || "- Output Schemas: none";
+  const decisionScope = node.decision
+    ? [
+        ...(node.decision.scope?.artifacts ?? []).map(
+          (entry) =>
+            `- Artifact scope: \`${entry.id}\`${entry.required ? " (required)" : " (optional)"}`,
+        ),
+        ...(node.decision.scope?.evidence ?? []).map(
+          (entry) =>
+            `- Evidence scope: \`${entry.id}\`${entry.required ? " (required)" : " (optional)"}`,
+        ),
+      ].join("\n") || "- Decision scope: none"
+    : "";
   const decision = node.decision
     ? `\n## Decision\n\nQuestion: ${node.decision.question}\n\n${node.decision.choices
         .map((choice) => `- \`${choice.id}\`: ${choice.label}`)
         .join(
           "\n",
-        )}\n\nSubmit the typed response through \`scripts/workflow-state.mjs decide\`; WorkflowRuntime validates the choice, inputs, rationale, and reviewer attestation.\n`
+        )}\n\n${decisionScope}\n\nSubmit the typed response through \`scripts/workflow-state.mjs decide\`; WorkflowRuntime validates the choice, inputs, rationale, reviewer attestation, and immutable scope references.\n`
     : "";
   return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}\n${decision}\nRecord completion evidence before advancing to the next Node.\n`;
 }

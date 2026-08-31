@@ -34,6 +34,7 @@ The standalone package deliberately excludes Classic customization, Native workf
 - Every custom Node declares a responsibility and implementation Skill. Required calls augment an implementation; they never replace it.
 - Human choices are explicit `decision` Nodes with stable choice ids and declared transition targets; generated guidance cannot create hidden decision exits.
 - Decision Nodes wait through Engine `ask_user` actions. Hosts forward typed responses with reviewer attestation through WorkflowRuntime; adapters do not authenticate, route, or write receipts.
+- Decision Nodes may declare optional or required artifact/evidence scope entries. WorkflowRuntime captures accepted version ids, hashes, and producer identities; adapters render and forward those references without exposing contents or storing attachments.
 - Control Nodes cannot be overridden. Producer overrides must declare every Output Schema they satisfy.
 - Unresolved or ambiguous Skill candidates, stale hashes, failed eval, missing review, and missing confirmation block the next mutating step.
 - Generated packages and published copies are local filesystem artifacts. Review the preview before copying them elsewhere.

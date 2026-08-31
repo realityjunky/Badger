@@ -14,6 +14,9 @@ import type {
   WorkflowDecisionChoiceSummary,
   WorkflowDecisionInputField,
   WorkflowDecisionInputSchema,
+  WorkflowDecisionScopeReference,
+  WorkflowDecisionScopeSnapshot,
+  WorkflowArtifactProducer,
   WorkflowRationalePolicy,
   WorkflowReviewerPolicy,
 } from "../types.js";
@@ -59,6 +62,7 @@ const ACTION_KEYS = new Set([
   "requiredInputs",
   "rationale",
   "reviewer",
+  "scope",
   "attemptId",
   "cycleId",
   "visitOrdinal",
@@ -162,6 +166,90 @@ function parseJson(raw: string, label: string): unknown {
   }
 }
 
+function parseScopeProducer(
+  value: unknown,
+  label: string,
+): WorkflowArtifactProducer {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(
+    value,
+    new Set([
+      "runId",
+      "nodeId",
+      "cycleId",
+      "attemptId",
+      "actionId",
+      "revision",
+    ]),
+    label,
+  );
+  const cycleId = value.cycleId;
+  if (
+    cycleId !== null &&
+    (typeof cycleId !== "string" || cycleId.length === 0)
+  ) {
+    throw new Error(`Invalid ${label}: cycleId must be a string or null`);
+  }
+  return {
+    runId: requiredText(value.runId, "runId", label),
+    nodeId: requiredText(value.nodeId, "nodeId", label),
+    cycleId: cycleId as string | null,
+    attemptId: requiredText(value.attemptId, "attemptId", label),
+    actionId: requiredText(value.actionId, "actionId", label),
+    revision: nonNegativeInteger(value.revision, "revision", label),
+  };
+}
+
+function parseScopeReference(
+  value: unknown,
+  label: string,
+): WorkflowDecisionScopeReference {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(
+    value,
+    new Set(["id", "required", "versionId", "contentHash", "producer"]),
+    label,
+  );
+  const contentHash = requiredText(value.contentHash, "contentHash", label);
+  if (!/^[a-f0-9]{64}$/u.test(contentHash)) {
+    throw new Error(`Invalid ${label}: contentHash must be a SHA-256 hash`);
+  }
+  if (typeof value.required !== "boolean") {
+    throw new Error(`Invalid ${label}: required must be a boolean`);
+  }
+  return {
+    id: requiredText(value.id, "id", label),
+    required: value.required,
+    versionId: requiredText(value.versionId, "versionId", label),
+    contentHash,
+    producer: parseScopeProducer(value.producer, `${label}.producer`),
+  };
+}
+
+function parseDecisionScope(
+  value: unknown,
+  label: string,
+): WorkflowDecisionScopeSnapshot {
+  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields(value, new Set(["artifacts", "evidence"]), label);
+  const parseEntries = (kind: "artifacts" | "evidence") => {
+    const entries = value[kind];
+    if (!Array.isArray(entries)) {
+      throw new Error(`Invalid ${label}.${kind}: must be an array`);
+    }
+    if (entries.length > 64) {
+      throw new Error(`Invalid ${label}.${kind}: too many entries`);
+    }
+    return entries.map((entry, index) =>
+      parseScopeReference(entry, `${label}.${kind}[${index}]`),
+    );
+  };
+  return {
+    artifacts: parseEntries("artifacts"),
+    evidence: parseEntries("evidence"),
+  };
+}
+
 function parseAction(value: unknown): EngineAction {
   if (!isRecord(value)) {
     throw new Error(
@@ -239,6 +327,12 @@ function parseAction(value: unknown): EngineAction {
       value.reviewer,
       "Run pending action reviewer",
     );
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "scope")) {
+    if (action.type !== "ask_user") {
+      throw new Error("Invalid Run pending action: scope requires ask_user");
+    }
+    action.scope = parseDecisionScope(value.scope, "Run pending action scope");
   }
   if (Object.prototype.hasOwnProperty.call(value, "attemptId")) {
     action.attemptId = requiredText(

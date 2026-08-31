@@ -108,6 +108,7 @@ export interface WorkflowDecisionDefinition {
   inputs?: WorkflowDecisionInputSchema;
   rationale?: WorkflowRationalePolicy;
   reviewer?: WorkflowReviewerPolicy;
+  scope?: WorkflowDecisionScope;
 }
 
 export interface WorkflowDecisionChoiceSummary {
@@ -115,6 +116,45 @@ export interface WorkflowDecisionChoiceSummary {
   label: string;
   requiredInputs?: WorkflowDecisionInputSchema;
 }
+
+export interface WorkflowDecisionScopeEntry {
+  id: string;
+  required?: boolean;
+}
+
+export interface WorkflowDecisionScope {
+  artifacts?: WorkflowDecisionScopeEntry[];
+  evidence?: WorkflowDecisionScopeEntry[];
+}
+
+export interface WorkflowDecisionScopeReference {
+  id: string;
+  required: boolean;
+  versionId: string;
+  contentHash: string;
+  producer: WorkflowArtifactProducer;
+}
+
+export interface WorkflowDecisionScopeSnapshot {
+  artifacts: WorkflowDecisionScopeReference[];
+  evidence: WorkflowDecisionScopeReference[];
+}
+
+export interface WorkflowDecisionScopeSelectionReference {
+  id: string;
+  versionId: string;
+  contentHash: string;
+  required?: boolean;
+  producer?: WorkflowArtifactProducer;
+}
+
+export interface WorkflowDecisionScopeSelection {
+  artifacts?: WorkflowDecisionScopeSelectionReference[];
+  evidence?: WorkflowDecisionScopeSelectionReference[];
+}
+
+export type WorkflowDecisionScopeDefinition = WorkflowDecisionScope;
+export type WorkflowDecisionScopeSummary = WorkflowDecisionScopeSnapshot;
 
 export interface NodeTemplate {
   id: string;
@@ -400,6 +440,7 @@ export interface WorkflowDecisionReceipt {
   inputs: Record<string, DecisionScalar>;
   rationale?: string;
   evidenceReferences?: string[];
+  scope?: WorkflowDecisionScopeSnapshot;
   timestamp: string;
   protocolHash: string;
   packageHash: string;

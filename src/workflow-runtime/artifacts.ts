@@ -329,6 +329,32 @@ async function hashArtifactPath(
   return sha256(result.bytes);
 }
 
+export async function validateWorkflowArtifactVersion(
+  runRoot: string,
+  protocol: WorkflowProtocol,
+  version: WorkflowArtifactVersion,
+): Promise<void> {
+  const declaration = declarationFor(
+    version.artifactId,
+    declarations(protocol),
+  );
+  if (
+    version.schemaId !== declaration.schemaId ||
+    version.lifetime !== artifactLifetime(declaration) ||
+    !artifactPathMatches(version.path, declaration.artifact.paths)
+  ) {
+    fail(`Workflow artifact version identity is invalid: ${version.id}`);
+  }
+  const currentHash = await hashArtifactPath(
+    runRoot,
+    declaration,
+    version.path,
+  );
+  if (currentHash !== version.contentHash) {
+    fail(`Workflow artifact content drift detected: ${version.id}`);
+  }
+}
+
 function artifactLifetime(
   declaration: WorkflowArtifactDeclaration,
 ): WorkflowArtifactLifetime {
@@ -375,6 +401,26 @@ function selection(
     revision: runtime.revision,
     timestamp,
   };
+}
+
+function artifactVersionId(
+  artifactId: string,
+  contentHash: string,
+  pathValue: string,
+  producer: WorkflowArtifactVersion["producer"],
+  scopeId: string,
+): WorkflowArtifactVersionId {
+  return `artifact-version-${sha256(
+    JSON.stringify(
+      stableValue({
+        artifactId,
+        contentHash,
+        path: pathValue,
+        producer,
+        scopeId,
+      }),
+    ),
+  ).slice(0, 24)}`;
 }
 
 function assertSelectionScope(
@@ -517,17 +563,13 @@ export async function prepareWorkflowArtifactMutation(options: {
       actionId: options.actionId,
       revision: runtime.revision,
     };
-    const id = `artifact-version-${sha256(
-      JSON.stringify(
-        stableValue({
-          artifactId: declaration.artifactId,
-          contentHash,
-          path: artifactPath,
-          producer,
-          scopeId,
-        }),
-      ),
-    ).slice(0, 24)}`;
+    const id = artifactVersionId(
+      declaration.artifactId,
+      contentHash,
+      artifactPath,
+      producer,
+      scopeId,
+    );
     if (runtime.artifactVersions.some((version) => version.id === id)) {
       fail(`Workflow artifact version already exists: ${id}`);
     }
@@ -673,6 +715,20 @@ export function validateWorkflowArtifactState(
     ) {
       throw new Error(
         `WorkflowRuntime artifact producer is invalid: ${version.id}`,
+      );
+    }
+    if (
+      version.id !==
+      artifactVersionId(
+        version.artifactId,
+        version.contentHash,
+        version.path,
+        version.producer,
+        version.scopeId,
+      )
+    ) {
+      throw new Error(
+        `WorkflowRuntime artifact version identity is invalid: ${version.id}`,
       );
     }
     if (

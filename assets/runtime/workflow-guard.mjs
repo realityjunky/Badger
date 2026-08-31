@@ -206,6 +206,9 @@ function printContinuation(value) {
     if (value.pendingAction?.question) {
       console.log(`QUESTION: ${value.pendingAction.question}`);
     }
+    if (value.pendingAction?.scope) {
+      console.log(`SCOPE: ${JSON.stringify(value.pendingAction.scope)}`);
+    }
     if (value.pendingAction) console.log(`ACTION: ${value.pendingAction.id}`);
     return;
   }
@@ -302,6 +305,7 @@ async function main() {
       nodeId: continuation.currentNode,
       cycleId: continuation.cycleId,
       attemptId: continuation.attemptId,
+      execution: continuation.execution,
     };
     const validation = await validateWorkflowSubmission(target, submission);
     if (validation.disposition === "blocked") {

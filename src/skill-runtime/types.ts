@@ -1,6 +1,7 @@
 import type {
   WorkflowDecisionChoiceSummary,
   WorkflowDecisionInputSchema,
+  WorkflowDecisionScopeSnapshot,
   WorkflowProtocol,
   WorkflowRationalePolicy,
   WorkflowReviewerPolicy,
@@ -48,6 +49,7 @@ export interface StepAction {
   requiredInputs?: WorkflowDecisionInputSchema;
   rationale?: WorkflowRationalePolicy;
   reviewer?: WorkflowReviewerPolicy;
+  scope?: WorkflowDecisionScopeSnapshot;
 }
 
 export interface SkillStep {

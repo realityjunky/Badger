@@ -111,8 +111,10 @@ receipts, and issue #26 adds bounded declared Cycles with stable identities and
 append-only repeated-visit evidence. Issue #27 adds immutable Attempt-, Cycle-,
 and Run-lifetime artifact versions, protected content hashing, explicit
 carry-forward selections, and generated projections through the same runtime
-authority. Decision evidence scope, complete Phase 3 certification, Native
-hardening, and Primer Designer migration remain separately scoped.
+authority. Issue #28 binds Decision Receipts to immutable artifact and
+append-only evidence scope references without introducing attachment storage or
+a second receipt store. Complete Phase 3 certification, Native hardening, and
+Primer Designer migration remain separately scoped.
 
 `runEngineDifferential` runs official and private observations against one
 synthetic fixture matrix. `createPrivateEngineCommandRunner` is an injected
