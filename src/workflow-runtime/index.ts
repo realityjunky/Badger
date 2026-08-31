@@ -1472,7 +1472,40 @@ async function verifyStoredAction(
       }
     }
     if (action.type === "ask_user") {
-      await validateWorkflowDecisionScope(runRoot, pkg, state, action);
+      const nodeId = Object.entries(identity.nodeToStep).find(
+        ([, stepId]) => stepId === action.stepId,
+      )?.[0];
+      const node = pkg.runtime?.protocol.nodes.find(
+        (candidate) => candidate.id === nodeId,
+      );
+      if (node?.decision?.scope) {
+        await validateWorkflowDecisionScope(runRoot, pkg, state, action);
+        const trajectory = await readTrajectory(runRoot, state.trajectoryRef);
+        const proposal = trajectory
+          .slice()
+          .reverse()
+          .find(
+            (event) =>
+              event.type === "action_proposed" &&
+              isRecord(event.data.action) &&
+              event.data.action.id === action.id,
+          );
+        if (!proposal || !isRecord(proposal.data.action)) {
+          throw new Error(
+            "WorkflowRuntime scoped decision has no durable action proposal",
+          );
+        }
+        if (
+          JSON.stringify(stableValue(proposal.data.action)) !==
+          JSON.stringify(stableValue(action))
+        ) {
+          throw new Error(
+            "WorkflowRuntime scoped decision does not match its durable action proposal",
+          );
+        }
+      } else {
+        await validateWorkflowDecisionScope(runRoot, pkg, state, action);
+      }
     }
     return action;
   }

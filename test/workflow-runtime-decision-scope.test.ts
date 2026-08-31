@@ -895,6 +895,50 @@ describe("WorkflowRuntime decision evidence scope", () => {
     );
   });
 
+  it("rejects a schema-valid replacement of the pending scope", async () => {
+    const protocol = scopedDecisionProtocol();
+    protocol.outputSchemas[0].evidence.push({
+      id: "second-basis",
+      required: true,
+    });
+    protocol.nodes
+      .find((node) => node.id === "review")!
+      .decision!.scope!.evidence!.push({
+        id: "review-output.second-basis",
+        required: true,
+      });
+    const runtime = createWorkflowRuntime();
+    const reportPath = path.join(runRoot, "artifacts", "report.txt");
+    await fs.mkdir(path.dirname(reportPath), { recursive: true });
+    await fs.writeFile(reportPath, "synthetic report\n", "utf8");
+    const started = await runtime.start({
+      protocol,
+      runRoot,
+      runId: "replacement-scope-run",
+    });
+    const awaiting = await runtime.submit(runRoot, {
+      actionId: started.pendingAction!.id,
+      nodeId: "produce",
+      status: "succeeded",
+      summary: "Evidence is ready.",
+      artifacts: { report: "artifacts/report.txt" },
+      evidence: {
+        basis: { source: "synthetic report" },
+        "review-output.second-basis": { source: "second basis" },
+      },
+    });
+    const state = await readRunState(runRoot);
+    const pending = await readPendingAction(runRoot, state!.pendingRef);
+    pending!.scope!.evidence.reverse();
+    await writePendingAction(runRoot, state!.pendingRef, pending!);
+    await expect(runtime.recover(runRoot)).rejects.toThrow(
+      "does not match its durable action proposal",
+    );
+    expect((await readRunState(runRoot))?.pending).toBe(
+      awaiting.pendingAction!.id,
+    );
+  });
+
   it("captures optional initial decision scope in both locations", async () => {
     const runtime = createWorkflowRuntime();
     const manual = {
