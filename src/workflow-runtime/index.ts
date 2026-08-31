@@ -96,12 +96,10 @@ export type {
 
 export type {
   WorkflowDecisionScope,
-  WorkflowDecisionScopeDefinition,
   WorkflowDecisionScopeEntry,
   WorkflowDecisionScopeReference,
   WorkflowDecisionScopeSelection,
   WorkflowDecisionScopeSelectionReference,
-  WorkflowDecisionScopeSummary,
   WorkflowDecisionScopeSnapshot,
 } from "../types.js";
 
@@ -170,6 +168,26 @@ function isDecisionSubmission(
   return submission.kind === "decision";
 }
 
+const DECISION_SUBMISSION_KEYS = new Set([
+  "kind",
+  "actionId",
+  "revision",
+  "nodeId",
+  "cycleId",
+  "attemptId",
+  "decisionId",
+  "choiceId",
+  "reviewer",
+  "inputs",
+  "rationale",
+  "evidenceReferences",
+  "scope",
+  "execution",
+  "protocolHash",
+  "packageHash",
+  "snapshotHash",
+]);
+
 function redactVisitEvidence(
   visits: readonly WorkflowVisitState[],
 ): WorkflowVisitState[] {
@@ -181,6 +199,25 @@ function redactVisitEvidence(
       return redacted;
     }),
   }));
+}
+
+const MAX_PROJECTED_LEDGER_ENTRIES = 256;
+
+function boundProjectedLedger<T>(values: readonly T[]): T[] {
+  return structuredClone(values.slice(-MAX_PROJECTED_LEDGER_ENTRIES)) as T[];
+}
+
+function boundedContinuation(
+  value: WorkflowContinuation,
+): WorkflowContinuation {
+  return {
+    ...structuredClone(value),
+    decisionReceipts: boundProjectedLedger(value.decisionReceipts),
+    cycles: boundProjectedLedger(value.cycles),
+    visits: boundProjectedLedger(value.visits),
+    artifactVersions: boundProjectedLedger(value.artifactVersions),
+    artifactSelections: boundProjectedLedger(value.artifactSelections),
+  };
 }
 
 function validateScalarRecord(
@@ -300,6 +337,12 @@ function validateSubmission(submission: WorkflowSubmission): void {
     throw new Error("Submission actionId must be a non-empty string");
   }
   if (isDecisionSubmission(submission)) {
+    const unknown = Object.keys(submission).find(
+      (key) => !DECISION_SUBMISSION_KEYS.has(key),
+    );
+    if (unknown) {
+      throw new Error(`Decision submission has unknown field: ${unknown}`);
+    }
     if (!Number.isSafeInteger(submission.revision) || submission.revision < 0) {
       throw new Error("Decision revision must be a non-negative integer");
     }
@@ -417,7 +460,6 @@ function validateSubmission(submission: WorkflowSubmission): void {
 function validateDecisionExecution(
   submission: WorkflowDecisionSubmission,
   expected: WorkflowExecutionIdentity,
-  required: boolean,
 ): void {
   const flatIdentity = {
     protocolHash: submission.protocolHash,
@@ -449,7 +491,7 @@ function validateDecisionExecution(
     }
     return;
   }
-  if (required && !hasFlatIdentity) {
+  if (!hasFlatIdentity) {
     throw new Error("Decision response execution identity is required");
   }
 }
@@ -478,14 +520,20 @@ function continuation(
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     pendingAction: result.action,
     execution: structuredClone(identity),
-    decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
-    cycles: structuredClone(runtimeState?.cycles ?? []),
+    decisionReceipts: boundProjectedLedger(
+      runtimeState?.decisionReceipts ?? [],
+    ),
+    cycles: boundProjectedLedger(runtimeState?.cycles ?? []),
     visits:
       result.action?.type === "ask_user"
-        ? redactVisitEvidence(runtimeState?.visits ?? [])
-        : structuredClone(runtimeState?.visits ?? []),
-    artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
-    artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
+        ? boundProjectedLedger(redactVisitEvidence(runtimeState?.visits ?? []))
+        : boundProjectedLedger(runtimeState?.visits ?? []),
+    artifactVersions: boundProjectedLedger(
+      runtimeState?.artifactVersions ?? [],
+    ),
+    artifactSelections: boundProjectedLedger(
+      runtimeState?.artifactSelections ?? [],
+    ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
     blockers: disposition === "blocked" && result.reason ? [result.reason] : [],
   };
@@ -587,14 +635,20 @@ export async function projectWorkflowState(
     history,
     pendingAction: verified.pending,
     execution: structuredClone(verified.identity),
-    decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
+    decisionReceipts: boundProjectedLedger(
+      runtimeState?.decisionReceipts ?? [],
+    ),
     visits:
       verified.pending?.type === "ask_user"
-        ? redactVisitEvidence(runtimeState?.visits ?? [])
-        : structuredClone(runtimeState?.visits ?? []),
-    cycles: structuredClone(runtimeState?.cycles ?? []),
-    artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
-    artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
+        ? boundProjectedLedger(redactVisitEvidence(runtimeState?.visits ?? []))
+        : boundProjectedLedger(runtimeState?.visits ?? []),
+    cycles: boundProjectedLedger(runtimeState?.cycles ?? []),
+    artifactVersions: boundProjectedLedger(
+      runtimeState?.artifactVersions ?? [],
+    ),
+    artifactSelections: boundProjectedLedger(
+      runtimeState?.artifactSelections ?? [],
+    ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
     blockers:
       status === "blocked"
@@ -977,11 +1031,7 @@ function validateDecisionResponse(
       `Decision Cycle does not match pending Cycle: ${submission.cycleId}`,
     );
   }
-  validateDecisionExecution(
-    submission,
-    verified.identity,
-    pending.scope !== undefined,
-  );
+  validateDecisionExecution(submission, verified.identity);
   const workflowNode = verified.package.runtime!.protocol.nodes.find(
     (candidate) => candidate.id === node,
   );
@@ -1300,18 +1350,18 @@ export async function projectWorkflowHandoff(
     execution,
     nodes: structuredClone(protocol.nodes),
     outputSchemas: structuredClone(protocol.outputSchemas),
-    decisionReceipts: structuredClone(current?.decisionReceipts ?? []),
-    cycles: structuredClone(current?.cycles ?? []),
+    decisionReceipts: boundProjectedLedger(current?.decisionReceipts ?? []),
+    cycles: boundProjectedLedger(current?.cycles ?? []),
     visits:
       current?.disposition === "await-user"
-        ? redactVisitEvidence(current.visits)
-        : structuredClone(current?.visits ?? []),
-    artifactVersions: structuredClone(current?.artifactVersions ?? []),
-    artifactSelections: structuredClone(current?.artifactSelections ?? []),
+        ? boundProjectedLedger(redactVisitEvidence(current.visits))
+        : boundProjectedLedger(current?.visits ?? []),
+    artifactVersions: boundProjectedLedger(current?.artifactVersions ?? []),
+    artifactSelections: boundProjectedLedger(current?.artifactSelections ?? []),
     currentArtifactVersions: structuredClone(
       current?.currentArtifactVersions ?? {},
     ),
-    continuation: current ? structuredClone(current) : null,
+    continuation: current ? boundedContinuation(current) : null,
   };
 }
 

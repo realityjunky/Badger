@@ -113,6 +113,7 @@ function decisionResponse(
     },
     inputs: { ticket: "REL-25" },
     rationale: "The release checks are complete.",
+    execution: continuation.execution,
     ...overrides,
   };
 }
@@ -197,6 +198,7 @@ describe("WorkflowRuntime decision Nodes", () => {
       },
       inputs: { ticket: "REL-25" },
       rationale: "The release checks are complete.",
+      execution: awaiting.execution,
     });
 
     expect(completed).toMatchObject({

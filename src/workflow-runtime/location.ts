@@ -102,6 +102,7 @@ function standaloneLocation(
         runtimeIdentity: options.runtimeIdentity,
         workflowRuntime: options.workflowRuntime,
         resolver: options.resolver,
+        prepareAction: options.prepareAction,
       });
     },
     async resume(options = {}, artifactMutation) {

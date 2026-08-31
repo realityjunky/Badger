@@ -153,9 +153,6 @@ export interface WorkflowDecisionScopeSelection {
   evidence?: WorkflowDecisionScopeSelectionReference[];
 }
 
-export type WorkflowDecisionScopeDefinition = WorkflowDecisionScope;
-export type WorkflowDecisionScopeSummary = WorkflowDecisionScopeSnapshot;
-
 export interface NodeTemplate {
   id: string;
   label: string;

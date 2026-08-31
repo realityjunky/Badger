@@ -4228,6 +4228,14 @@ function validateEvidenceReference(protocol, state, reference) {
 }
 async function validateWorkflowDecisionScope(runRoot, pkg, state, action) {
   const scope = action.scope;
+  const node = protocolNodeForAction(pkg, action);
+  const definition = node?.decision?.scope;
+  if (definition && !scope) {
+    fail2("Decision action is missing its captured scope");
+  }
+  if (!definition && scope) {
+    fail2("Decision action has an undeclared scope");
+  }
   if (!scope) return;
   validateScopeDefinition(pkg, action, scope);
   await validateWorkflowDecisionScopeSnapshot(runRoot, pkg, state, scope);
@@ -6791,7 +6799,8 @@ function standaloneLocation(projectRoot, runId) {
         confirmations: options.confirmations,
         runtimeIdentity: options.runtimeIdentity,
         workflowRuntime: options.workflowRuntime,
-        resolver: options.resolver
+        resolver: options.resolver,
+        prepareAction: options.prepareAction
       });
     },
     async resume(options = {}, artifactMutation) {
@@ -6871,6 +6880,25 @@ function sameExecutionIdentity(left, right) {
 function isDecisionSubmission(submission) {
   return submission.kind === "decision";
 }
+var DECISION_SUBMISSION_KEYS = /* @__PURE__ */ new Set([
+  "kind",
+  "actionId",
+  "revision",
+  "nodeId",
+  "cycleId",
+  "attemptId",
+  "decisionId",
+  "choiceId",
+  "reviewer",
+  "inputs",
+  "rationale",
+  "evidenceReferences",
+  "scope",
+  "execution",
+  "protocolHash",
+  "packageHash",
+  "snapshotHash"
+]);
 function redactVisitEvidence(visits) {
   return visits.map((visit) => ({
     ...visit,
@@ -6880,6 +6908,20 @@ function redactVisitEvidence(visits) {
       return redacted;
     })
   }));
+}
+var MAX_PROJECTED_LEDGER_ENTRIES = 256;
+function boundProjectedLedger(values) {
+  return structuredClone(values.slice(-MAX_PROJECTED_LEDGER_ENTRIES));
+}
+function boundedContinuation(value) {
+  return {
+    ...structuredClone(value),
+    decisionReceipts: boundProjectedLedger(value.decisionReceipts),
+    cycles: boundProjectedLedger(value.cycles),
+    visits: boundProjectedLedger(value.visits),
+    artifactVersions: boundProjectedLedger(value.artifactVersions),
+    artifactSelections: boundProjectedLedger(value.artifactSelections)
+  };
 }
 function validateScalarRecord(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -6968,6 +7010,12 @@ function validateSubmission(submission) {
     throw new Error("Submission actionId must be a non-empty string");
   }
   if (isDecisionSubmission(submission)) {
+    const unknown = Object.keys(submission).find(
+      (key) => !DECISION_SUBMISSION_KEYS.has(key)
+    );
+    if (unknown) {
+      throw new Error(`Decision submission has unknown field: ${unknown}`);
+    }
     if (!Number.isSafeInteger(submission.revision) || submission.revision < 0) {
       throw new Error("Decision revision must be a non-negative integer");
     }
@@ -7055,7 +7103,7 @@ function validateSubmission(submission) {
     throw new Error("Failed submissions cannot select artifact versions");
   }
 }
-function validateDecisionExecution(submission, expected, required) {
+function validateDecisionExecution(submission, expected) {
   const flatIdentity = {
     protocolHash: submission.protocolHash,
     packageHash: submission.packageHash,
@@ -7081,7 +7129,7 @@ function validateDecisionExecution(submission, expected, required) {
     }
     return;
   }
-  if (required && !hasFlatIdentity) {
+  if (!hasFlatIdentity) {
     throw new Error("Decision response execution identity is required");
   }
 }
@@ -7100,11 +7148,17 @@ function continuation(result, identity) {
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     pendingAction: result.action,
     execution: structuredClone(identity),
-    decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
-    cycles: structuredClone(runtimeState?.cycles ?? []),
-    visits: result.action?.type === "ask_user" ? redactVisitEvidence(runtimeState?.visits ?? []) : structuredClone(runtimeState?.visits ?? []),
-    artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
-    artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
+    decisionReceipts: boundProjectedLedger(
+      runtimeState?.decisionReceipts ?? []
+    ),
+    cycles: boundProjectedLedger(runtimeState?.cycles ?? []),
+    visits: result.action?.type === "ask_user" ? boundProjectedLedger(redactVisitEvidence(runtimeState?.visits ?? [])) : boundProjectedLedger(runtimeState?.visits ?? []),
+    artifactVersions: boundProjectedLedger(
+      runtimeState?.artifactVersions ?? []
+    ),
+    artifactSelections: boundProjectedLedger(
+      runtimeState?.artifactSelections ?? []
+    ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
     blockers: disposition === "blocked" && result.reason ? [result.reason] : []
   };
@@ -7185,11 +7239,17 @@ async function projectWorkflowState(target) {
     history,
     pendingAction: verified.pending,
     execution: structuredClone(verified.identity),
-    decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
-    visits: verified.pending?.type === "ask_user" ? redactVisitEvidence(runtimeState?.visits ?? []) : structuredClone(runtimeState?.visits ?? []),
-    cycles: structuredClone(runtimeState?.cycles ?? []),
-    artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
-    artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
+    decisionReceipts: boundProjectedLedger(
+      runtimeState?.decisionReceipts ?? []
+    ),
+    visits: verified.pending?.type === "ask_user" ? boundProjectedLedger(redactVisitEvidence(runtimeState?.visits ?? [])) : boundProjectedLedger(runtimeState?.visits ?? []),
+    cycles: boundProjectedLedger(runtimeState?.cycles ?? []),
+    artifactVersions: boundProjectedLedger(
+      runtimeState?.artifactVersions ?? []
+    ),
+    artifactSelections: boundProjectedLedger(
+      runtimeState?.artifactSelections ?? []
+    ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
     blockers: status === "blocked" ? [
       exhaustedAction ? `Retry budget exhausted for action: ${exhaustedAction}` : `Run is ${state.status}`
@@ -7487,11 +7547,7 @@ function validateDecisionResponse(verified, pending, node, submission) {
       `Decision Cycle does not match pending Cycle: ${submission.cycleId}`
     );
   }
-  validateDecisionExecution(
-    submission,
-    verified.identity,
-    pending.scope !== void 0
-  );
+  validateDecisionExecution(submission, verified.identity);
   const workflowNode = verified.package.runtime.protocol.nodes.find(
     (candidate) => candidate.id === node
   );
@@ -7734,15 +7790,15 @@ async function projectWorkflowHandoff(protocol, current) {
     execution,
     nodes: structuredClone(protocol.nodes),
     outputSchemas: structuredClone(protocol.outputSchemas),
-    decisionReceipts: structuredClone(current?.decisionReceipts ?? []),
-    cycles: structuredClone(current?.cycles ?? []),
-    visits: current?.disposition === "await-user" ? redactVisitEvidence(current.visits) : structuredClone(current?.visits ?? []),
-    artifactVersions: structuredClone(current?.artifactVersions ?? []),
-    artifactSelections: structuredClone(current?.artifactSelections ?? []),
+    decisionReceipts: boundProjectedLedger(current?.decisionReceipts ?? []),
+    cycles: boundProjectedLedger(current?.cycles ?? []),
+    visits: current?.disposition === "await-user" ? boundProjectedLedger(redactVisitEvidence(current.visits)) : boundProjectedLedger(current?.visits ?? []),
+    artifactVersions: boundProjectedLedger(current?.artifactVersions ?? []),
+    artifactSelections: boundProjectedLedger(current?.artifactSelections ?? []),
     currentArtifactVersions: structuredClone(
       current?.currentArtifactVersions ?? {}
     ),
-    continuation: current ? structuredClone(current) : null
+    continuation: current ? boundedContinuation(current) : null
   };
 }
 async function resumeStoredRun(location, options) {

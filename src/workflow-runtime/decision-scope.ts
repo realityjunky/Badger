@@ -723,6 +723,14 @@ export async function validateWorkflowDecisionScope(
   action: EngineAction,
 ): Promise<void> {
   const scope = action.scope;
+  const node = protocolNodeForAction(pkg, action);
+  const definition = node?.decision?.scope;
+  if (definition && !scope) {
+    fail("Decision action is missing its captured scope");
+  }
+  if (!definition && scope) {
+    fail("Decision action has an undeclared scope");
+  }
   if (!scope) return;
   validateScopeDefinition(pkg, action, scope);
   await validateWorkflowDecisionScopeSnapshot(runRoot, pkg, state, scope);

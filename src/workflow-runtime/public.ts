@@ -25,12 +25,10 @@ export type {
 
 export type {
   WorkflowDecisionScope,
-  WorkflowDecisionScopeDefinition,
   WorkflowDecisionScopeEntry,
   WorkflowDecisionScopeReference,
   WorkflowDecisionScopeSelection,
   WorkflowDecisionScopeSelectionReference,
-  WorkflowDecisionScopeSummary,
   WorkflowDecisionScopeSnapshot,
 } from "../types.js";
 

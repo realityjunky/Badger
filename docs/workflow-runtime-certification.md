@@ -12,8 +12,9 @@ and allowed scalar values; exact equality and conjunction select one matching
 success edge or one declared fallback. Ordinary active Nodes compile to
 `invoke_skill`; explicit decision Nodes compile to `ask_user` with a stable
 question, choices, bounded inputs, rationale policy, and reviewer policy.
-Decision responses are revision-, action-, Node-, Attempt-, choice-, and
-attestation-bound. Each accepted decision creates one identity-bound receipt;
+Decision responses are revision-, action-, Node-, Cycle-, Attempt-, execution-,
+choice-, and attestation-bound. Each accepted decision creates one
+identity-bound receipt;
 invalid and replayed responses do not mutate state. Each entry gets a
 deterministic Attempt and visit ordinal; Engine retries retain the Attempt and
 increment its retry ordinal. Declared Cycles require an entry Node, explicit

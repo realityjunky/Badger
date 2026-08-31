@@ -92,9 +92,10 @@ re-executing the Node; failed submissions use the Engine retry policy.
 Explicit decision Nodes compile to persisted `ask_user` actions. Their
 continuation uses `await-user` and includes the stable decision question,
 choices, bounded required-input schema, rationale policy, reviewer requirement
-summary, revision, and Attempt identity. A typed decision response must match
-the current revision, action, Node, Cycle, Attempt, choice, reviewer
-attestation, input schema, and rationale policy. Accepted responses route only
+summary, revision, execution identity, and Attempt identity. A typed decision
+response must match the current revision, action, Node, Cycle, Attempt,
+protocol/package/snapshot identity, choice, reviewer attestation, input schema,
+and rationale policy. Accepted responses route only
 through declared choice transitions and create one runtime-timestamped,
 identity-bound Decision Receipt. Invalid, stale, replayed, and cross-kind
 submissions do not mutate the Run. A decision may declare optional or required

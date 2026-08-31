@@ -11,6 +11,10 @@ import {
   projectWorkflowState,
 } from "../src/workflow-runtime/index.js";
 import { readRunState } from "../src/engine/state.js";
+import {
+  readPendingAction,
+  writePendingAction,
+} from "../src/engine/run-store.js";
 import type { WorkflowInput, WorkflowProtocol } from "../src/types.js";
 import { promisify } from "node:util";
 
@@ -163,6 +167,55 @@ function scopedCycleProtocol(): WorkflowProtocol {
   ];
   protocol.capabilities!.features.push("bounded-cycles");
   return protocol;
+}
+
+function initialScopedDecisionProtocol(): WorkflowProtocol {
+  const input: WorkflowInput = {
+    kind: "workflow-kernel",
+    name: "initial-scoped-decision-workflow",
+    goal: "Start with a bounded decision.",
+    capabilities: {
+      version: 3,
+      features: ["conditional-routing", "revisioned-attempts"],
+    },
+    customNodes: [
+      {
+        id: "review",
+        label: "Review",
+        kind: "decision",
+        responsibility: "Make the initial review decision.",
+        implementation: {
+          skill: "review-skill",
+          operation: "default",
+          scope: "main",
+        },
+        operations: ["require", "augment", "disable"],
+        outputSchemas: ["review-output"],
+        guardrails: [],
+        decision: {
+          id: "initial-review",
+          question: "Proceed?",
+          choices: [{ id: "proceed", label: "Proceed", to: "done" }],
+          scope: {
+            evidence: [{ id: "review-output.basis", required: false }],
+          },
+        },
+      },
+      machineNode("done"),
+    ],
+    outputSchemas: [
+      {
+        id: "review-output",
+        description: "Optional review evidence.",
+        artifacts: [],
+        evidence: [{ id: "basis", required: false }],
+      },
+    ],
+    routing: {
+      transitions: [{ from: "done", to: null, condition: "success" }],
+    },
+  };
+  return normalizeWorkflow(input).protocol;
 }
 
 describe("WorkflowRuntime decision evidence scope", () => {
@@ -735,6 +788,140 @@ describe("WorkflowRuntime decision evidence scope", () => {
     expect((await readRunState(runRoot))?.pending).toBe(
       awaiting.pendingAction!.id,
     );
+  });
+
+  it("requires execution identity for every decision response", async () => {
+    const protocol = scopedDecisionProtocol();
+    protocol.nodes.find((node) => node.id === "review")!.decision!.scope =
+      undefined;
+    const runtime = createWorkflowRuntime();
+    const reportPath = path.join(runRoot, "artifacts", "report.txt");
+    await fs.mkdir(path.dirname(reportPath), { recursive: true });
+    await fs.writeFile(reportPath, "synthetic report\n", "utf8");
+    const started = await runtime.start({
+      protocol,
+      runRoot,
+      runId: "identity-required-run",
+    });
+    const awaiting = await runtime.submit(runRoot, {
+      actionId: started.pendingAction!.id,
+      nodeId: "produce",
+      status: "succeeded",
+      summary: "Evidence is ready.",
+      artifacts: { report: "artifacts/report.txt" },
+      evidence: { basis: { source: "synthetic report" } },
+    });
+    const response = {
+      kind: "decision" as const,
+      actionId: awaiting.pendingAction!.id,
+      revision: awaiting.revision,
+      nodeId: "review",
+      cycleId: awaiting.cycleId,
+      attemptId: awaiting.attemptId!,
+      choiceId: "accept",
+      reviewer: { subject: "reviewer", authorities: ["evidence:review"] },
+    };
+    await expect(runtime.submit(runRoot, response)).rejects.toThrow(
+      "execution identity is required",
+    );
+    const completed = await runtime.submit(runRoot, {
+      ...response,
+      execution: awaiting.execution,
+    });
+    expect(completed.currentNode).toBe("done");
+  });
+
+  it("rejects unknown decision submission fields", async () => {
+    const runtime = createWorkflowRuntime();
+    const started = await runtime.start({
+      protocol: scopedDecisionProtocol(),
+      runRoot,
+      runId: "unknown-field-run",
+    });
+    const awaiting = await runtime.submit(runRoot, {
+      actionId: started.pendingAction!.id,
+      nodeId: "produce",
+      status: "succeeded",
+      summary: "Evidence is ready.",
+      artifacts: { report: "artifacts/report.txt" },
+      evidence: { basis: { source: "synthetic report" } },
+    });
+    const response = {
+      kind: "decision" as const,
+      actionId: awaiting.pendingAction!.id,
+      revision: awaiting.revision,
+      nodeId: "review",
+      cycleId: awaiting.cycleId,
+      attemptId: awaiting.attemptId!,
+      choiceId: "accept",
+      reviewer: { subject: "reviewer", authorities: ["evidence:review"] },
+      execution: awaiting.execution,
+      attachments: ["uploaded-bytes"],
+    } as unknown as Parameters<
+      ReturnType<typeof createWorkflowRuntime>["submit"]
+    >[1];
+    await expect(runtime.submit(runRoot, response)).rejects.toThrow(
+      "unknown field: attachments",
+    );
+  });
+
+  it("rejects a pending decision whose captured scope was removed", async () => {
+    const runtime = createWorkflowRuntime();
+    const reportPath = path.join(runRoot, "artifacts", "report.txt");
+    await fs.mkdir(path.dirname(reportPath), { recursive: true });
+    await fs.writeFile(reportPath, "synthetic report\n", "utf8");
+    const started = await runtime.start({
+      protocol: scopedDecisionProtocol(),
+      runRoot,
+      runId: "missing-persisted-scope-run",
+    });
+    const awaiting = await runtime.submit(runRoot, {
+      actionId: started.pendingAction!.id,
+      nodeId: "produce",
+      status: "succeeded",
+      summary: "Evidence is ready.",
+      artifacts: { report: "artifacts/report.txt" },
+      evidence: { basis: { source: "synthetic report" } },
+    });
+    const state = await readRunState(runRoot);
+    const pending = await readPendingAction(runRoot, state!.pendingRef);
+    delete pending!.scope;
+    await writePendingAction(runRoot, state!.pendingRef, pending!);
+    await expect(runtime.recover(runRoot)).rejects.toThrow(
+      "missing its captured scope",
+    );
+    expect((await readRunState(runRoot))?.pending).toBe(
+      awaiting.pendingAction!.id,
+    );
+  });
+
+  it("captures optional initial decision scope in both locations", async () => {
+    const runtime = createWorkflowRuntime();
+    const manual = {
+      kind: "manual" as const,
+      runRoot: path.join(root, "initial-manual"),
+    };
+    const standalone = {
+      kind: "standalone" as const,
+      projectRoot: path.join(root, "initial-standalone"),
+      runId: "initial-scope-run",
+    };
+    const manualStarted = await runtime.start({
+      protocol: initialScopedDecisionProtocol(),
+      location: manual,
+      runId: standalone.runId,
+    });
+    const standaloneStarted = await runtime.start({
+      protocol: initialScopedDecisionProtocol(),
+      location: standalone,
+    });
+    expect(standaloneStarted.pendingAction!.scope).toEqual(
+      manualStarted.pendingAction!.scope,
+    );
+    expect(manualStarted.pendingAction!.scope).toEqual({
+      artifacts: [],
+      evidence: [],
+    });
   });
 
   it.each([
