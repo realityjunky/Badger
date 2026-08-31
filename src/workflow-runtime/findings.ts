@@ -70,6 +70,7 @@ const WORKFLOW_FINDING_CODES = [
   "no-pending-action",
   "pending-action-invalid",
   "revision-conflict",
+  "recovery-required",
   "retry-budget-exhausted",
   "route-ambiguous",
   "route-invalid-value",
@@ -351,7 +352,7 @@ export function createWorkflowFinding(
   > = {
     execute: ["workflow.start", "workflow.resume"],
     decide: ["workflow.submit"],
-    repair: ["workflow.submit"],
+    repair: ["workflow.submit", "workflow.recover"],
     retry: ["workflow.resume"],
   };
   const expectedOperations = allowedOperations[input.requiredAction];
@@ -659,6 +660,15 @@ const blockerCatalog: Array<{
       code: "run-not-found",
       severity: "error",
       requiredAction: "stop",
+    },
+  },
+  {
+    match: /^WorkflowRuntime recovery is required/u,
+    entry: {
+      code: "recovery-required",
+      severity: "error",
+      requiredAction: "repair",
+      operationId: "workflow.recover",
     },
   },
   {
@@ -1152,6 +1162,23 @@ export function revisionConflictFinding(
     },
     currentRevision,
     currentActionId,
+  });
+}
+
+export function recoveryRequiredFinding(
+  currentRevision?: number,
+  currentActionId?: string | null,
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "recovery-required",
+    severity: "error",
+    message:
+      "WorkflowRuntime has an unfinished transition journal. Run explicit recovery before resuming or submitting.",
+    requiredAction: "repair",
+    operation: { id: "workflow.recover", args: [] },
+    path: ".comet/transition-journal.json",
+    ...(currentRevision === undefined ? {} : { currentRevision }),
+    ...(currentActionId === undefined ? {} : { currentActionId }),
   });
 }
 

@@ -13,7 +13,7 @@ const PROFILE_KEYS = new Set([
   "schemaVersions",
   "findingCatalogVersion",
 ]);
-const CAPABILITIES = new Set(["revision-fences"]);
+const CAPABILITIES = new Set(["revision-fences", "transition-journal"]);
 const BOUND_KEY_NAMES = [
   "runStateBytes",
   "pendingActionBytes",
@@ -21,7 +21,10 @@ const BOUND_KEY_NAMES = [
   "artifactsBytes",
   "claimBytes",
 ] as const;
-const BOUND_KEYS = new Set<string>(BOUND_KEY_NAMES);
+const BOUND_KEYS = new Set<string>([
+  ...BOUND_KEY_NAMES,
+  "transitionJournalBytes",
+]);
 const SCHEMA_KEY_NAMES = [
   "runState",
   "pendingAction",
@@ -29,7 +32,7 @@ const SCHEMA_KEY_NAMES = [
   "artifacts",
   "revisionClaim",
 ] as const;
-const SCHEMA_KEYS = new Set<string>(SCHEMA_KEY_NAMES);
+const SCHEMA_KEYS = new Set<string>([...SCHEMA_KEY_NAMES, "transitionJournal"]);
 const MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -76,18 +79,21 @@ export function parseWorkflowDurabilityProfile(
       "Invalid Workflow durability profile: capabilities must be a non-empty array",
     );
   }
-  const capabilities = value.capabilities.map((capability) => {
-    if (
-      typeof capability !== "string" ||
-      !CAPABILITIES.has(capability) ||
-      capability !== "revision-fences"
-    ) {
-      throw new Error(
-        `Invalid Workflow durability profile: unsupported capability ${String(capability)}`,
-      );
-    }
-    return capability as "revision-fences";
-  });
+  const capabilities = value.capabilities.map(
+    (capability): WorkflowDurabilityProfile["capabilities"][number] => {
+      if (
+        typeof capability !== "string" ||
+        !CAPABILITIES.has(capability) ||
+        (capability !== "revision-fences" &&
+          capability !== "transition-journal")
+      ) {
+        throw new Error(
+          `Invalid Workflow durability profile: unsupported capability ${String(capability)}`,
+        );
+      }
+      return capability as WorkflowDurabilityProfile["capabilities"][number];
+    },
+  );
   if (new Set(capabilities).size !== capabilities.length) {
     throw new Error(
       "Invalid Workflow durability profile: capabilities must not contain duplicates",
@@ -107,6 +113,12 @@ export function parseWorkflowDurabilityProfile(
   const bounds = Object.fromEntries(
     BOUND_KEY_NAMES.map((key) => [key, requiredBound(boundsValue[key], key)]),
   ) as unknown as WorkflowDurabilityProfile["bounds"];
+  if (boundsValue.transitionJournalBytes !== undefined) {
+    bounds.transitionJournalBytes = requiredBound(
+      boundsValue.transitionJournalBytes,
+      "transitionJournalBytes",
+    );
+  }
   if (!isRecord(value.schemaVersions)) {
     throw new Error(
       "Invalid Workflow durability profile: schemaVersions must be an object",
@@ -123,6 +135,24 @@ export function parseWorkflowDurabilityProfile(
       throw new Error(`Unsupported Workflow durability schema version: ${key}`);
     }
   }
+  const transitionJournal = value.schemaVersions.transitionJournal;
+  if (
+    transitionJournal !== undefined &&
+    transitionJournal !== WORKFLOW_DURABILITY_SCHEMA_VERSION
+  ) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: transitionJournal",
+    );
+  }
+  if (
+    capabilities.includes("transition-journal") &&
+    (bounds.transitionJournalBytes === undefined ||
+      transitionJournal !== WORKFLOW_DURABILITY_SCHEMA_VERSION)
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: transition-journal requires its bound and schema version",
+    );
+  }
   if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
     throw new Error(
       `Unsupported Workflow durability finding catalog version: ${String(value.findingCatalogVersion)}`,
@@ -138,6 +168,9 @@ export function parseWorkflowDurabilityProfile(
       trajectory: WORKFLOW_DURABILITY_SCHEMA_VERSION,
       artifacts: WORKFLOW_DURABILITY_SCHEMA_VERSION,
       revisionClaim: WORKFLOW_DURABILITY_SCHEMA_VERSION,
+      ...(transitionJournal === WORKFLOW_DURABILITY_SCHEMA_VERSION
+        ? { transitionJournal: WORKFLOW_DURABILITY_SCHEMA_VERSION }
+        : {}),
     },
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
   };

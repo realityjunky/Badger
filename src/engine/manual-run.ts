@@ -18,7 +18,10 @@ import {
   writeArtifacts,
   writePendingAction,
 } from "./run-store.js";
-import type { EngineRunWriteOptions } from "./protected-run-file.js";
+import type {
+  EngineRunMutationOverlay,
+  EngineRunWriteOptions,
+} from "./protected-run-file.js";
 import { readRunState, writeRunState } from "./state.js";
 import type {
   ActionOutcome,
@@ -40,6 +43,10 @@ import type {
   SkillPackage,
 } from "../skill-runtime/types.js";
 import { validateSkillPackage } from "../skill-runtime/validate.js";
+import {
+  createWorkflowTransition,
+  type WorkflowTransition,
+} from "../workflow-runtime/transition-journal.js";
 
 export interface ManualRunResult {
   state: RunState;
@@ -76,6 +83,7 @@ export type PreparePendingAction = (
   pkg: SkillPackage,
   state: RunState,
   action: EngineAction,
+  mutationOverlay?: EngineRunMutationOverlay,
 ) => Promise<PendingActionPreparation>;
 
 interface ResumeManualWorkflowRunOptions extends ResumeManualRunOptions {
@@ -253,6 +261,7 @@ async function persistDecision(
   confirmations: Iterable<string>,
   resolver: DeterministicResolver<undefined> = staticDeterministicResolver,
   prepareAction?: PreparePendingAction,
+  mutationOverlay?: EngineRunMutationOverlay,
 ): Promise<ManualRunResult> {
   const decision = decideWithResolver(
     pkg,
@@ -268,6 +277,7 @@ async function persistDecision(
       pkg,
       decision.state,
       action,
+      mutationOverlay,
     );
     if (!prepared.action) {
       return {
@@ -284,18 +294,24 @@ async function persistDecision(
       decision.state,
       "pendingActionBytes",
     );
-    await writePendingAction(
-      changeDir,
-      decision.state.pendingRef,
-      action,
-      pendingMaxBytes === undefined ? {} : { maxBytes: pendingMaxBytes },
-    );
-  }
-  await writeRunState(changeDir, action ? decision.state : state);
-  if (action) {
-    await appendEvent(changeDir, decision.state, "action_proposed", {
-      action,
+    await writePendingAction(changeDir, decision.state.pendingRef, action, {
+      ...(pendingMaxBytes === undefined ? {} : { maxBytes: pendingMaxBytes }),
+      ...(mutationOverlay ? { overlay: mutationOverlay } : {}),
     });
+  }
+  await writeRunState(
+    changeDir,
+    action ? decision.state : state,
+    mutationOverlay ? { overlay: mutationOverlay } : {},
+  );
+  if (action) {
+    await appendEvent(
+      changeDir,
+      decision.state,
+      "action_proposed",
+      { action },
+      mutationOverlay ? { overlay: mutationOverlay } : {},
+    );
   }
   return {
     state: action ? decision.state : state,
@@ -311,10 +327,17 @@ async function evaluateAndRecord(
   state: RunState,
   scope: RuntimeEvalDefinition["scope"],
   artifacts: Record<string, string>,
+  mutationOverlay?: EngineRunMutationOverlay,
 ): Promise<EvalResult[]> {
   const results = evaluateRuntime(pkg.evals, scope, state, artifacts);
   if (results.length > 0) {
-    await appendEvent(changeDir, state, "eval_completed", { scope, results });
+    await appendEvent(
+      changeDir,
+      state,
+      "eval_completed",
+      { scope, results },
+      mutationOverlay ? { overlay: mutationOverlay } : {},
+    );
   }
   return results;
 }
@@ -367,23 +390,54 @@ export async function startManualRun(
   if (startOptions.runtimeIdentity) {
     state.runtimeIdentity = structuredClone(startOptions.runtimeIdentity);
   }
-  await writeRunState(changeDir, state);
-  await appendEvent(changeDir, state, "run_started", {
-    skill: state.skill,
-    skillVersion: state.skillVersion,
-    skillHash: state.skillHash,
-    ...(state.runtimeIdentity
-      ? { runtimeIdentity: structuredClone(state.runtimeIdentity) }
-      : {}),
-  });
-  return persistDecision(
+  const transition: WorkflowTransition | undefined = startOptions
+    .runtimeIdentity?.durabilityProfile
+    ? createWorkflowTransition({
+        runRoot: changeDir,
+        runId: state.runId,
+        operation: "workflow.start",
+        execution: startOptions.runtimeIdentity,
+        profile: startOptions.runtimeIdentity.durabilityProfile,
+      })
+    : undefined;
+  if (!transition) {
+    await writeRunState(changeDir, state);
+    await appendEvent(changeDir, state, "run_started", {
+      skill: state.skill,
+      skillVersion: state.skillVersion,
+      skillHash: state.skillHash,
+      ...(state.runtimeIdentity
+        ? { runtimeIdentity: structuredClone(state.runtimeIdentity) }
+        : {}),
+    });
+  } else {
+    await writeRunState(changeDir, state, { overlay: transition });
+    await appendEvent(
+      changeDir,
+      state,
+      "run_started",
+      {
+        skill: state.skill,
+        skillVersion: state.skillVersion,
+        skillHash: state.skillHash,
+        ...(state.runtimeIdentity
+          ? { runtimeIdentity: structuredClone(state.runtimeIdentity) }
+          : {}),
+      },
+      { overlay: transition },
+    );
+  }
+  const result = await persistDecision(
     changeDir,
     state,
     pkg,
     startOptions.confirmations ?? [],
     startOptions.resolver,
     startOptions.prepareAction,
+    transition,
   );
+  await transition?.commit();
+  return result;
 }
 
 async function resumeManualRunInternal(
@@ -417,14 +471,26 @@ async function resumeManualRunInternal(
         reason: `Run is ${state.status}`,
       };
     }
-    return persistDecision(
+    const transition = state.runtimeIdentity?.durabilityProfile
+      ? createWorkflowTransition({
+          runRoot: changeDir,
+          runId: state.runId,
+          operation: "workflow.resume",
+          execution: state.runtimeIdentity,
+          profile: state.runtimeIdentity.durabilityProfile,
+        })
+      : undefined;
+    const result = await persistDecision(
       changeDir,
       state,
       pkg,
       options.confirmations ?? [],
       resolver,
       options.prepareAction,
+      transition,
     );
+    await transition?.commit();
+    return result;
   }
 
   if (!pending || !state.pending) {
@@ -445,13 +511,24 @@ async function resumeManualRunInternal(
     );
   }
   const outcome: ActionOutcome = { ...options.outcome, actionId: pending.id };
+  const transition = state.runtimeIdentity?.durabilityProfile
+    ? createWorkflowTransition({
+        runRoot: changeDir,
+        runId: state.runId,
+        operation: "workflow.submit",
+        execution: state.runtimeIdentity,
+        profile: state.runtimeIdentity.durabilityProfile,
+      })
+    : undefined;
   const advanced = applyArtifactMutation(
     recordOutcomeWithResolver(pkg, state, outcome, resolver, undefined),
     options.artifactMutation,
   );
   const artifactsMaxBytes = durabilityBound(state, "artifactsBytes");
-  const artifactReadOptions =
-    artifactsMaxBytes === undefined ? {} : { maxBytes: artifactsMaxBytes };
+  const artifactReadOptions = {
+    ...(artifactsMaxBytes === undefined ? {} : { maxBytes: artifactsMaxBytes }),
+    ...(transition ? { overlay: transition } : {}),
+  };
   const artifacts = {
     ...(await readArtifacts(
       changeDir,
@@ -465,6 +542,7 @@ async function resumeManualRunInternal(
   const artifactWriteOptions = {
     ...(options.revisionFence ? { beforeCommit: options.revisionFence } : {}),
     ...(artifactsMaxBytes === undefined ? {} : { maxBytes: artifactsMaxBytes }),
+    ...(transition ? { overlay: transition } : {}),
   };
   await writeArtifacts(
     changeDir,
@@ -478,6 +556,7 @@ async function resumeManualRunInternal(
     ...(trajectoryMaxBytes === undefined
       ? {}
       : { maxBytes: trajectoryMaxBytes }),
+    ...(transition ? { overlay: transition } : {}),
   };
   const decisionReceipt = advanced.workflowRuntime?.decisionReceipts.find(
     (receipt) => receipt.actionId === pending.id,
@@ -494,17 +573,15 @@ async function resumeManualRunInternal(
     trajectoryWriteOptions,
   );
 
-  await clearPendingAction(
-    changeDir,
-    advanced.pendingRef,
-    options.revisionFence ? { beforeRemove: options.revisionFence } : {},
-  );
+  await clearPendingAction(changeDir, advanced.pendingRef, {
+    ...(options.revisionFence ? { beforeRemove: options.revisionFence } : {}),
+    ...(transition ? { overlay: transition } : {}),
+  });
   const stateFence = options.revisionStateFence ?? options.revisionFence;
-  await writeRunState(
-    changeDir,
-    advanced,
-    stateFence ? { beforeCommit: stateFence } : {},
-  );
+  await writeRunState(changeDir, advanced, {
+    ...(stateFence ? { beforeCommit: stateFence } : {}),
+    ...(transition ? { overlay: transition } : {}),
+  });
 
   const evals = await evaluateAndRecord(
     changeDir,
@@ -512,6 +589,7 @@ async function resumeManualRunInternal(
     advanced,
     "step",
     artifacts,
+    transition,
   );
   if (advanced.status === "completed") {
     evals.push(
@@ -521,11 +599,14 @@ async function resumeManualRunInternal(
         advanced,
         "completion",
         artifacts,
+        transition,
       )),
     );
+    await transition?.commit();
     return { state: advanced, action: null, evals };
   }
   if (advanced.status !== "running") {
+    await transition?.commit();
     return {
       state: advanced,
       action: null,
@@ -541,7 +622,9 @@ async function resumeManualRunInternal(
     options.confirmations ?? [],
     resolver,
     options.prepareAction,
+    transition,
   );
+  await transition?.commit();
   return { ...next, evals };
 }
 

@@ -15,16 +15,34 @@ import type {
 export interface EngineRunReadOptions {
   hooks?: RaceSafeReadOptions["hooks"];
   maxBytes?: number;
+  overlay?: EngineRunMutationOverlay;
 }
 
 export interface EngineRunWriteOptions {
   beforeCommit?: () => void | Promise<void>;
   exclusive?: boolean;
   maxBytes?: number;
+  overlay?: EngineRunMutationOverlay;
 }
 
 export interface EngineRunRemoveOptions {
   beforeRemove?: () => void | Promise<void>;
+  overlay?: EngineRunMutationOverlay;
+}
+
+export interface EngineRunMutationOverlay {
+  read(
+    relativePath: string,
+    maxBytes: number,
+    label: string,
+  ): Promise<string | null>;
+  write(
+    relativePath: string,
+    content: string,
+    maxBytes: number,
+    label: string,
+  ): Promise<void>;
+  remove(relativePath: string, label: string): Promise<boolean>;
 }
 
 interface RunFileSnapshot {
@@ -95,6 +113,13 @@ export async function readOptionalEngineRunText(
   label: string,
   options: EngineRunReadOptions = {},
 ): Promise<string | null> {
+  if (options.overlay) {
+    return options.overlay.read(
+      relativePath,
+      options.maxBytes ?? maxBytes,
+      label,
+    );
+  }
   return (
     (await readSnapshot(changeDir, relativePath, maxBytes, label, options))
       ?.text ?? null
@@ -112,6 +137,15 @@ export async function writeEngineRunText(
   const effectiveMaxBytes = boundedMaxBytes(options.maxBytes, maxBytes, label);
   if (Buffer.byteLength(content, "utf8") > effectiveMaxBytes) {
     throw new Error(`${label} exceeds ${effectiveMaxBytes} bytes`);
+  }
+  if (options.overlay) {
+    await options.overlay.write(
+      relativePath,
+      content,
+      effectiveMaxBytes,
+      label,
+    );
+    return;
   }
   const expected = await readSnapshot(
     changeDir,
@@ -192,6 +226,9 @@ export async function removeEngineRunFile(
   label: string,
   options: EngineRunRemoveOptions = {},
 ): Promise<boolean> {
+  if (options.overlay) {
+    return options.overlay.remove(relativePath, label);
+  }
   const inspection = await inspectProtectedProjectPath(
     changeDir,
     relativePath,

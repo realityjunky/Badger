@@ -102,7 +102,7 @@ function hash(value: unknown, key: string, label: string): string {
   return result;
 }
 
-function parseExecutionIdentity(value: unknown): RuntimeIdentity {
+export function parseExecutionIdentity(value: unknown): RuntimeIdentity {
   const label = "Workflow revision claim execution";
   if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields(
@@ -240,7 +240,7 @@ function parseClaim(value: unknown): WorkflowRevisionClaim {
   };
 }
 
-function claimPath(input: RevisionClaimInput): string {
+export function revisionClaimPath(input: RevisionClaimInput): string {
   return `${CLAIM_DIRECTORY}/revision-${input.expectedRevision}-${sha256(input.expectedActionId).slice(0, 24)}-${input.intendedRevision}.json`;
 }
 
@@ -273,7 +273,7 @@ async function readClaim(
 ): Promise<WorkflowRevisionClaim | null> {
   const raw = await readOptionalEngineRunText(
     runRoot,
-    claimPath(input),
+    revisionClaimPath(input),
     profileForExecution(input.execution).bounds.claimBytes,
     "Workflow revision claim",
   );
@@ -346,7 +346,7 @@ export async function acquireRevisionClaim(
   input: RevisionClaimInput,
 ): Promise<RevisionClaimResult> {
   const candidate = createClaim(input);
-  const relativePath = claimPath(input);
+  const relativePath = revisionClaimPath(input);
   const maxBytes = profileForExecution(input.execution).bounds.claimBytes;
   for (;;) {
     const existing = await readClaim(runRoot, input);
@@ -372,6 +372,18 @@ export async function acquireRevisionClaim(
         acquired: true,
         claim: candidate,
         async commit() {
+          const current = await readClaim(runRoot, input);
+          if (!current) {
+            throw new Error(
+              "Workflow revision claim disappeared before commit",
+            );
+          }
+          if (current.status === "committed") {
+            if (!claimMatches(current, input)) {
+              throw new Error("Workflow revision claim identity changed");
+            }
+            return;
+          }
           const committed: WorkflowRevisionClaim = {
             ...candidate,
             status: "committed",
@@ -404,4 +416,53 @@ export async function acquireRevisionClaim(
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
   }
+}
+
+export async function commitExistingRevisionClaim(
+  runRoot: string,
+  input: RevisionClaimInput,
+): Promise<void> {
+  const existing = await readClaim(runRoot, input);
+  if (!existing) return;
+  if (existing.status === "committed") return;
+  const committed: WorkflowRevisionClaim = {
+    ...existing,
+    status: "committed",
+    committedAt: new Date().toISOString(),
+  };
+  const maxBytes = profileForExecution(input.execution).bounds.claimBytes;
+  await writeEngineRunText(
+    runRoot,
+    revisionClaimPath(input),
+    serializeClaim(committed),
+    maxBytes,
+    "Workflow revision claim",
+    {
+      beforeCommit: async () => {
+        const current = await readClaim(runRoot, input);
+        if (
+          !current ||
+          current.status !== "prepared" ||
+          current.ownerToken !== existing.ownerToken
+        ) {
+          throw new Error("Workflow revision claim changed before commit");
+        }
+      },
+    },
+  );
+}
+
+export function committedRevisionClaimText(raw: string): string {
+  let claim: WorkflowRevisionClaim;
+  try {
+    claim = parseClaim(JSON.parse(raw) as unknown);
+  } catch (error) {
+    throw new Error("Workflow revision claim is malformed", { cause: error });
+  }
+  if (claim.status === "committed") return serializeClaim(claim);
+  return serializeClaim({
+    ...claim,
+    status: "committed",
+    committedAt: new Date().toISOString(),
+  });
 }

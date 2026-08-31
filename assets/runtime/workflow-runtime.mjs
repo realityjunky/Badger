@@ -1,5 +1,5 @@
 // src/workflow-runtime/index.ts
-import path12 from "node:path";
+import path13 from "node:path";
 
 // src/engine/contained-atomic-write.ts
 import { randomUUID } from "crypto";
@@ -648,6 +648,7 @@ var WORKFLOW_FINDING_CODES = [
   "no-pending-action",
   "pending-action-invalid",
   "revision-conflict",
+  "recovery-required",
   "retry-budget-exhausted",
   "route-ambiguous",
   "route-invalid-value",
@@ -815,7 +816,7 @@ function createWorkflowFinding(input) {
   const allowedOperations = {
     execute: ["workflow.start", "workflow.resume"],
     decide: ["workflow.submit"],
-    repair: ["workflow.submit"],
+    repair: ["workflow.submit", "workflow.recover"],
     retry: ["workflow.resume"]
   };
   const expectedOperations = allowedOperations[input.requiredAction];
@@ -1049,6 +1050,15 @@ var blockerCatalog = [
       code: "run-not-found",
       severity: "error",
       requiredAction: "stop"
+    }
+  },
+  {
+    match: /^WorkflowRuntime recovery is required/u,
+    entry: {
+      code: "recovery-required",
+      severity: "error",
+      requiredAction: "repair",
+      operationId: "workflow.recover"
     }
   },
   {
@@ -1517,6 +1527,18 @@ function revisionConflictFinding(currentRevision, currentActionId) {
     currentActionId
   });
 }
+function recoveryRequiredFinding(currentRevision, currentActionId) {
+  return createWorkflowFinding({
+    code: "recovery-required",
+    severity: "error",
+    message: "WorkflowRuntime has an unfinished transition journal. Run explicit recovery before resuming or submitting.",
+    requiredAction: "repair",
+    operation: { id: "workflow.recover", args: [] },
+    path: ".comet/transition-journal.json",
+    ...currentRevision === void 0 ? {} : { currentRevision },
+    ...currentActionId === void 0 ? {} : { currentActionId }
+  });
+}
 function evaluationWarningFinding(evalId, evidence) {
   return createWorkflowFinding({
     code: "evaluation-warning",
@@ -1540,7 +1562,7 @@ var PROFILE_KEYS = /* @__PURE__ */ new Set([
   "schemaVersions",
   "findingCatalogVersion"
 ]);
-var CAPABILITIES = /* @__PURE__ */ new Set(["revision-fences"]);
+var CAPABILITIES = /* @__PURE__ */ new Set(["revision-fences", "transition-journal"]);
 var BOUND_KEY_NAMES = [
   "runStateBytes",
   "pendingActionBytes",
@@ -1548,7 +1570,10 @@ var BOUND_KEY_NAMES = [
   "artifactsBytes",
   "claimBytes"
 ];
-var BOUND_KEYS = new Set(BOUND_KEY_NAMES);
+var BOUND_KEYS = /* @__PURE__ */ new Set([
+  ...BOUND_KEY_NAMES,
+  "transitionJournalBytes"
+]);
 var SCHEMA_KEY_NAMES = [
   "runState",
   "pendingAction",
@@ -1556,7 +1581,7 @@ var SCHEMA_KEY_NAMES = [
   "artifacts",
   "revisionClaim"
 ];
-var SCHEMA_KEYS = new Set(SCHEMA_KEY_NAMES);
+var SCHEMA_KEYS = /* @__PURE__ */ new Set([...SCHEMA_KEY_NAMES, "transitionJournal"]);
 var MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
 function isRecord2(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -1588,14 +1613,16 @@ function parseWorkflowDurabilityProfile(value) {
       "Invalid Workflow durability profile: capabilities must be a non-empty array"
     );
   }
-  const capabilities = value.capabilities.map((capability) => {
-    if (typeof capability !== "string" || !CAPABILITIES.has(capability) || capability !== "revision-fences") {
-      throw new Error(
-        `Invalid Workflow durability profile: unsupported capability ${String(capability)}`
-      );
+  const capabilities = value.capabilities.map(
+    (capability) => {
+      if (typeof capability !== "string" || !CAPABILITIES.has(capability) || capability !== "revision-fences" && capability !== "transition-journal") {
+        throw new Error(
+          `Invalid Workflow durability profile: unsupported capability ${String(capability)}`
+        );
+      }
+      return capability;
     }
-    return capability;
-  });
+  );
   if (new Set(capabilities).size !== capabilities.length) {
     throw new Error(
       "Invalid Workflow durability profile: capabilities must not contain duplicates"
@@ -1615,6 +1642,12 @@ function parseWorkflowDurabilityProfile(value) {
   const bounds = Object.fromEntries(
     BOUND_KEY_NAMES.map((key) => [key, requiredBound(boundsValue[key], key)])
   );
+  if (boundsValue.transitionJournalBytes !== void 0) {
+    bounds.transitionJournalBytes = requiredBound(
+      boundsValue.transitionJournalBytes,
+      "transitionJournalBytes"
+    );
+  }
   if (!isRecord2(value.schemaVersions)) {
     throw new Error(
       "Invalid Workflow durability profile: schemaVersions must be an object"
@@ -1631,6 +1664,17 @@ function parseWorkflowDurabilityProfile(value) {
       throw new Error(`Unsupported Workflow durability schema version: ${key}`);
     }
   }
+  const transitionJournal = value.schemaVersions.transitionJournal;
+  if (transitionJournal !== void 0 && transitionJournal !== WORKFLOW_DURABILITY_SCHEMA_VERSION) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: transitionJournal"
+    );
+  }
+  if (capabilities.includes("transition-journal") && (bounds.transitionJournalBytes === void 0 || transitionJournal !== WORKFLOW_DURABILITY_SCHEMA_VERSION)) {
+    throw new Error(
+      "Invalid Workflow durability profile: transition-journal requires its bound and schema version"
+    );
+  }
   if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
     throw new Error(
       `Unsupported Workflow durability finding catalog version: ${String(value.findingCatalogVersion)}`
@@ -1645,7 +1689,8 @@ function parseWorkflowDurabilityProfile(value) {
       pendingAction: WORKFLOW_DURABILITY_SCHEMA_VERSION,
       trajectory: WORKFLOW_DURABILITY_SCHEMA_VERSION,
       artifacts: WORKFLOW_DURABILITY_SCHEMA_VERSION,
-      revisionClaim: WORKFLOW_DURABILITY_SCHEMA_VERSION
+      revisionClaim: WORKFLOW_DURABILITY_SCHEMA_VERSION,
+      ...transitionJournal === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { transitionJournal: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {}
     },
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION
   };
@@ -2328,16 +2373,16 @@ async function createSkillSnapshot(pkg, changeDir) {
   }
   return { hash: material.hash, snapshotDir };
 }
-async function readSkillSnapshot(changeDir, hash2) {
-  if (!/^[a-f0-9]{64}$/u.test(hash2)) {
-    throw new Error(`Invalid Skill snapshot hash: ${hash2}`);
+async function readSkillSnapshot(changeDir, hash3) {
+  if (!/^[a-f0-9]{64}$/u.test(hash3)) {
+    throw new Error(`Invalid Skill snapshot hash: ${hash3}`);
   }
   const snapshotsRoot = path7.resolve(changeDir, ".comet", "skill-snapshots");
-  const snapshotDir = path7.join(snapshotsRoot, hash2);
+  const snapshotDir = path7.join(snapshotsRoot, hash3);
   assertInside(snapshotsRoot, snapshotDir, "Skill snapshot");
   try {
     const storedHash = (await fs4.readFile(path7.join(snapshotDir, "sha256"), "utf8")).trim();
-    if (storedHash !== hash2) {
+    if (storedHash !== hash3) {
       throw new Error(`stored hash is ${storedHash || "(empty)"}`);
     }
     const packagePath = path7.join(snapshotDir, "package.json");
@@ -2350,12 +2395,12 @@ async function readSkillSnapshot(changeDir, hash2) {
       throw new Error(errors.map((error) => `  - ${error}`).join("\n"));
     }
     const calculated = await hashSkillPackage(pkg);
-    if (calculated !== hash2) {
+    if (calculated !== hash3) {
       throw new Error(`calculated hash is ${calculated}`);
     }
     return pkg;
   } catch (error) {
-    throw new Error(`Skill snapshot is invalid or missing: ${hash2}`, {
+    throw new Error(`Skill snapshot is invalid or missing: ${hash3}`, {
       cause: error
     });
   }
@@ -2404,12 +2449,28 @@ async function readSnapshot(changeDir, relativePath, maxBytes, label, options = 
   }
 }
 async function readOptionalEngineRunText(changeDir, relativePath, maxBytes, label, options = {}) {
+  if (options.overlay) {
+    return options.overlay.read(
+      relativePath,
+      options.maxBytes ?? maxBytes,
+      label
+    );
+  }
   return (await readSnapshot(changeDir, relativePath, maxBytes, label, options))?.text ?? null;
 }
 async function writeEngineRunText(changeDir, relativePath, content, maxBytes, label, options = {}) {
   const effectiveMaxBytes = boundedMaxBytes(options.maxBytes, maxBytes, label);
   if (Buffer.byteLength(content, "utf8") > effectiveMaxBytes) {
     throw new Error(`${label} exceeds ${effectiveMaxBytes} bytes`);
+  }
+  if (options.overlay) {
+    await options.overlay.write(
+      relativePath,
+      content,
+      effectiveMaxBytes,
+      label
+    );
+    return;
   }
   const expected = await readSnapshot(
     changeDir,
@@ -2455,6 +2516,9 @@ async function writeEngineRunText(changeDir, relativePath, content, maxBytes, la
   });
 }
 async function removeEngineRunFile(changeDir, relativePath, label, options = {}) {
+  if (options.overlay) {
+    return options.overlay.remove(relativePath, label);
+  }
   const inspection = await inspectProtectedProjectPath(
     changeDir,
     relativePath,
@@ -2742,6 +2806,9 @@ function parseAction(value) {
     action[key] = ordinal;
   }
   return action;
+}
+function parsePendingActionValue(value) {
+  return parseAction(value);
 }
 function parseDecisionScalarType(value, label) {
   if (value !== "string" && value !== "number" && value !== "boolean") {
@@ -3060,9 +3127,1009 @@ async function clearPendingAction(changeDir, relativePath, options = {}) {
   );
 }
 
+// src/engine/state.ts
+import path9 from "path";
+function assertSafeRunReference(value, key) {
+  const normalized = value.replaceAll("\\", "/");
+  if (path9.posix.isAbsolute(normalized) || path9.win32.isAbsolute(value) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(value) || /[*?]/u.test(value) || normalized.split("/").some(
+    (segment) => segment.length === 0 || segment === "." || segment === ".."
+  )) {
+    throw new Error(
+      `Invalid Run state: ${key} must stay inside the change directory`
+    );
+  }
+}
+var RUN_STATE_FILE = ".comet/run-state.json";
+var RUN_STATE_MAX_BYTES = 256 * 1024;
+var RUN_STATE_READ_MAX_BYTES = Math.max(
+  RUN_STATE_MAX_BYTES,
+  WORKFLOW_DURABILITY_MAX_RECORD_BYTES
+);
+var RUN_STATE_JSON_KEYS = /* @__PURE__ */ new Set([
+  "runId",
+  "skill",
+  "skillVersion",
+  "skillHash",
+  "orchestration",
+  "currentStep",
+  "iteration",
+  "pending",
+  "pendingRef",
+  "trajectoryRef",
+  "contextRef",
+  "artifactsRef",
+  "checkpointRef",
+  "status",
+  "retries",
+  "runtimeIdentity",
+  "workflowRuntime"
+]);
+function requiredJsonString(value, key) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`Invalid Run state: ${key} must be a non-empty string`);
+  }
+  return value;
+}
+function nullableJsonString(value, key) {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(
+      `Invalid Run state: ${key} must be a non-empty string or null`
+    );
+  }
+  return value;
+}
+function parseStringRecord(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key || typeof entry !== "string" || entry.length === 0) {
+      throw new Error(`Invalid Run state: ${label} must contain strings`);
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, entry])
+  );
+}
+function parseJsonRecord(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  try {
+    JSON.stringify(value);
+  } catch (error) {
+    throw new Error(`Invalid Run state: ${label} must be JSON-serializable`, {
+      cause: error
+    });
+  }
+  return structuredClone(value);
+}
+function parseDecisionScalarRecord(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const result = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key || entry === null) {
+      throw new Error(`Invalid Run state: ${label} must contain scalar values`);
+    }
+    if (typeof entry !== "string" && typeof entry !== "number" && typeof entry !== "boolean") {
+      throw new Error(`Invalid Run state: ${label} must contain scalar values`);
+    }
+    if (typeof entry === "number" && !Number.isFinite(entry)) {
+      throw new Error(
+        `Invalid Run state: ${label} must contain finite numbers`
+      );
+    }
+    result[key] = entry;
+  }
+  return result;
+}
+function parseReviewerAttestation(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const reviewer = value;
+  const unknown = Object.keys(reviewer).find(
+    (key) => key !== "subject" && key !== "authorities"
+  );
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const subject = reviewer.subject;
+  if (typeof subject !== "string" || subject.length === 0) {
+    throw new Error(`Invalid Run state: ${label}.subject must be non-empty`);
+  }
+  if (!Array.isArray(reviewer.authorities) || reviewer.authorities.length === 0 || reviewer.authorities.some(
+    (authority) => typeof authority !== "string" || authority.length === 0
+  )) {
+    throw new Error(`Invalid Run state: ${label}.authorities must be strings`);
+  }
+  if (new Set(reviewer.authorities).size !== reviewer.authorities.length) {
+    throw new Error(
+      `Invalid Run state: ${label}.authorities must not contain duplicates`
+    );
+  }
+  return {
+    subject,
+    authorities: [...reviewer.authorities]
+  };
+}
+function parseDecisionScopeReference(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const reference = value;
+  const keys = /* @__PURE__ */ new Set([
+    "id",
+    "required",
+    "versionId",
+    "contentHash",
+    "producer"
+  ]);
+  const unknown = Object.keys(reference).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const contentHash2 = requiredJsonString(
+    reference.contentHash,
+    `${label}.contentHash`
+  );
+  if (!/^[a-f0-9]{64}$/u.test(contentHash2)) {
+    throw new Error(
+      `Invalid Run state: ${label}.contentHash must be a SHA-256 hash`
+    );
+  }
+  if (typeof reference.required !== "boolean") {
+    throw new Error(`Invalid Run state: ${label}.required must be a boolean`);
+  }
+  if (!reference.producer || typeof reference.producer !== "object" || Array.isArray(reference.producer)) {
+    throw new Error(`Invalid Run state: ${label}.producer must be an object`);
+  }
+  const producer = reference.producer;
+  const producerKeys = /* @__PURE__ */ new Set([
+    "runId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "actionId",
+    "revision"
+  ]);
+  const unknownProducer = Object.keys(producer).find(
+    (key) => !producerKeys.has(key)
+  );
+  if (unknownProducer) {
+    throw new Error(
+      `Invalid Run state: ${label}.producer has unknown field ${unknownProducer}`
+    );
+  }
+  return {
+    id: requiredJsonString(reference.id, `${label}.id`),
+    required: reference.required,
+    versionId: requiredJsonString(reference.versionId, `${label}.versionId`),
+    contentHash: contentHash2,
+    producer: parseWorkflowArtifactCoordinate(producer, `${label}.producer`)
+  };
+}
+function parseDecisionScope2(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const scope = value;
+  const unknown = Object.keys(scope).find(
+    (key) => key !== "artifacts" && key !== "evidence"
+  );
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const parseEntries = (kind) => {
+    if (!Array.isArray(scope[kind])) {
+      throw new Error(`Invalid Run state: ${label}.${kind} must be an array`);
+    }
+    if (scope[kind].length > 64) {
+      throw new Error(
+        `Invalid Run state: ${label}.${kind} has too many entries`
+      );
+    }
+    return scope[kind].map(
+      (entry, index) => parseDecisionScopeReference(entry, `${label}.${kind}[${index}]`)
+    );
+  };
+  return {
+    artifacts: parseEntries("artifacts"),
+    evidence: parseEntries("evidence")
+  };
+}
+function parseDecisionReceipt(value, index) {
+  const label = `workflowRuntime.decisionReceipts[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const receipt = value;
+  const keys = /* @__PURE__ */ new Set([
+    "runId",
+    "revision",
+    "resultingRevision",
+    "actionId",
+    "decisionId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "choiceId",
+    "reviewer",
+    "inputs",
+    "rationale",
+    "evidenceReferences",
+    "scope",
+    "timestamp",
+    "protocolHash",
+    "packageHash",
+    "snapshotHash"
+  ]);
+  const unknown = Object.keys(receipt).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const integer = (key) => {
+    const entry = receipt[key];
+    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 0) {
+      throw new Error(
+        `Invalid Run state: ${label}.${key} must be a non-negative integer`
+      );
+    }
+    return entry;
+  };
+  const revision = integer("revision");
+  const resultingRevision = integer("resultingRevision");
+  if (resultingRevision !== revision + 1) {
+    throw new Error(
+      `Invalid Run state: ${label} revisions are not consecutive`
+    );
+  }
+  const cycleId = receipt.cycleId;
+  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`
+    );
+  }
+  const protocolHash = requiredJsonString(receipt.protocolHash, "protocolHash");
+  const packageHash = requiredJsonString(receipt.packageHash, "packageHash");
+  const snapshotHash = requiredJsonString(receipt.snapshotHash, "snapshotHash");
+  for (const [key, hash3] of [
+    ["protocolHash", protocolHash],
+    ["packageHash", packageHash],
+    ["snapshotHash", snapshotHash]
+  ]) {
+    if (!/^[a-f0-9]{64}$/u.test(hash3)) {
+      throw new Error(
+        `Invalid Run state: ${label}.${key} must be a SHA-256 hash`
+      );
+    }
+  }
+  if (receipt.rationale !== void 0 && typeof receipt.rationale !== "string") {
+    throw new Error(`Invalid Run state: ${label}.rationale must be a string`);
+  }
+  let evidenceReferences;
+  if (receipt.evidenceReferences !== void 0) {
+    if (!Array.isArray(receipt.evidenceReferences) || receipt.evidenceReferences.some(
+      (reference) => typeof reference !== "string" || reference.length === 0
+    )) {
+      throw new Error(
+        `Invalid Run state: ${label}.evidenceReferences must be strings`
+      );
+    }
+    evidenceReferences = [...receipt.evidenceReferences];
+  }
+  const scope = receipt.scope === void 0 ? void 0 : parseDecisionScope2(receipt.scope, `${label}.scope`);
+  return {
+    runId: requiredJsonString(receipt.runId, "runId"),
+    revision,
+    resultingRevision,
+    actionId: requiredJsonString(receipt.actionId, "actionId"),
+    decisionId: requiredJsonString(receipt.decisionId, "decisionId"),
+    nodeId: requiredJsonString(receipt.nodeId, "nodeId"),
+    cycleId,
+    attemptId: requiredJsonString(receipt.attemptId, "attemptId"),
+    choiceId: requiredJsonString(receipt.choiceId, "choiceId"),
+    reviewer: parseReviewerAttestation(receipt.reviewer, `${label}.reviewer`),
+    inputs: parseDecisionScalarRecord(receipt.inputs, `${label}.inputs`),
+    ...receipt.rationale !== void 0 ? { rationale: receipt.rationale } : {},
+    ...evidenceReferences ? { evidenceReferences } : {},
+    ...scope ? { scope } : {},
+    timestamp: requiredJsonString(receipt.timestamp, "timestamp"),
+    protocolHash,
+    packageHash,
+    snapshotHash
+  };
+}
+function parseWorkflowCycle(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const cycle = value;
+  const keys = /* @__PURE__ */ new Set(["id", "key", "instanceOrdinal"]);
+  const unknown = Object.keys(cycle).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const instanceOrdinal = cycle.instanceOrdinal;
+  if (typeof instanceOrdinal !== "number" || !Number.isSafeInteger(instanceOrdinal) || instanceOrdinal < 1) {
+    throw new Error(
+      `Invalid Run state: ${label}.instanceOrdinal must be a positive integer`
+    );
+  }
+  return {
+    id: requiredJsonString(cycle.id, `${label}.id`),
+    key: requiredJsonString(cycle.key, `${label}.key`),
+    instanceOrdinal
+  };
+}
+function parseWorkflowAttempt(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const attempt = value;
+  const keys = /* @__PURE__ */ new Set([
+    "id",
+    "stepId",
+    "cycleId",
+    "visitOrdinal",
+    "retryOrdinal"
+  ]);
+  const unknown = Object.keys(attempt).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const id = requiredJsonString(
+    attempt.id,
+    `${label}.id`
+  );
+  const stepId2 = requiredJsonString(
+    attempt.stepId,
+    `${label}.stepId`
+  );
+  const cycleId = attempt.cycleId === void 0 ? null : attempt.cycleId;
+  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`
+    );
+  }
+  const visitOrdinal = attempt.visitOrdinal;
+  const retryOrdinal = attempt.retryOrdinal;
+  if (typeof visitOrdinal !== "number" || !Number.isSafeInteger(visitOrdinal) || visitOrdinal < 1) {
+    throw new Error(
+      `Invalid Run state: ${label}.visitOrdinal must be a positive integer`
+    );
+  }
+  if (typeof retryOrdinal !== "number" || !Number.isSafeInteger(retryOrdinal) || retryOrdinal < 0) {
+    throw new Error(
+      `Invalid Run state: ${label}.retryOrdinal must be a non-negative integer`
+    );
+  }
+  return {
+    id,
+    stepId: stepId2,
+    cycleId,
+    visitOrdinal,
+    retryOrdinal
+  };
+}
+function parseWorkflowOutcome(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const outcome = value;
+  const keys = /* @__PURE__ */ new Set([
+    "actionId",
+    "status",
+    "summary",
+    "retryOrdinal",
+    "routing",
+    "evidence",
+    "artifactVersions"
+  ]);
+  const unknown = Object.keys(outcome).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const actionId2 = requiredJsonString(
+    outcome.actionId,
+    `${label}.actionId`
+  );
+  const summary = requiredJsonString(
+    outcome.summary,
+    `${label}.summary`
+  );
+  if (outcome.status !== "succeeded" && outcome.status !== "failed") {
+    throw new Error(`Invalid Run state: ${label}.status is invalid`);
+  }
+  const retryOrdinal = outcome.retryOrdinal;
+  if (typeof retryOrdinal !== "number" || !Number.isSafeInteger(retryOrdinal) || retryOrdinal < 0) {
+    throw new Error(
+      `Invalid Run state: ${label}.retryOrdinal must be a non-negative integer`
+    );
+  }
+  return {
+    actionId: actionId2,
+    status: outcome.status,
+    summary,
+    retryOrdinal,
+    ...outcome.routing !== void 0 ? { routing: parseStringRecord(outcome.routing, `${label}.routing`) } : {},
+    ...outcome.evidence !== void 0 ? { evidence: parseJsonRecord(outcome.evidence, `${label}.evidence`) } : {},
+    ...outcome.artifactVersions !== void 0 ? {
+      artifactVersions: parseStringRecord(
+        outcome.artifactVersions,
+        `${label}.artifactVersions`
+      )
+    } : {}
+  };
+}
+function parseWorkflowVisit(value, index) {
+  const label = `workflowRuntime.visits[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const visit = value;
+  const keys = /* @__PURE__ */ new Set([
+    "attemptId",
+    "stepId",
+    "cycleId",
+    "visitOrdinal",
+    "outcomes"
+  ]);
+  const unknown = Object.keys(visit).find((key) => !keys.has(key));
+  if (unknown)
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  const attemptId2 = requiredJsonString(
+    visit.attemptId,
+    `${label}.attemptId`
+  );
+  const stepId2 = requiredJsonString(
+    visit.stepId,
+    `${label}.stepId`
+  );
+  const cycleId = visit.cycleId === void 0 ? null : visit.cycleId;
+  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`
+    );
+  }
+  const visitOrdinal = visit.visitOrdinal;
+  if (typeof visitOrdinal !== "number" || !Number.isSafeInteger(visitOrdinal) || visitOrdinal < 1) {
+    throw new Error(
+      `Invalid Run state: ${label}.visitOrdinal must be a positive integer`
+    );
+  }
+  if (!Array.isArray(visit.outcomes)) {
+    throw new Error(`Invalid Run state: ${label}.outcomes must be an array`);
+  }
+  return {
+    attemptId: attemptId2,
+    stepId: stepId2,
+    cycleId,
+    visitOrdinal,
+    outcomes: visit.outcomes.map(
+      (outcome, outcomeIndex) => parseWorkflowOutcome(outcome, `${label}.outcomes[${outcomeIndex}]`)
+    )
+  };
+}
+function parseWorkflowArtifactLifetime(value, label) {
+  if (value !== "attempt" && value !== "cycle" && value !== "run") {
+    throw new Error(`Invalid Run state: ${label} must be a valid lifetime`);
+  }
+  return value;
+}
+function parseWorkflowArtifactProducer(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const producer = value;
+  const keys = /* @__PURE__ */ new Set([
+    "runId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "actionId",
+    "revision"
+  ]);
+  const unknown = Object.keys(producer).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  return parseWorkflowArtifactCoordinate(producer, label);
+}
+function parseWorkflowArtifactCoordinate(coordinate, label) {
+  const cycleId = coordinate.cycleId;
+  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`
+    );
+  }
+  const revision = coordinate.revision;
+  if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0) {
+    throw new Error(
+      `Invalid Run state: ${label}.revision must be a non-negative integer`
+    );
+  }
+  return {
+    runId: requiredJsonString(coordinate.runId, `${label}.runId`),
+    nodeId: requiredJsonString(coordinate.nodeId, `${label}.nodeId`),
+    cycleId,
+    attemptId: requiredJsonString(coordinate.attemptId, `${label}.attemptId`),
+    actionId: requiredJsonString(coordinate.actionId, `${label}.actionId`),
+    revision
+  };
+}
+function parseWorkflowArtifactVersion(value, index) {
+  const label = `workflowRuntime.artifactVersions[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const version = value;
+  const keys = /* @__PURE__ */ new Set([
+    "id",
+    "artifactId",
+    "schemaId",
+    "lifetime",
+    "scopeId",
+    "contentHash",
+    "path",
+    "producer",
+    "timestamp"
+  ]);
+  const unknown = Object.keys(version).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const contentHash2 = requiredJsonString(
+    version.contentHash,
+    `${label}.contentHash`
+  );
+  if (!/^[a-f0-9]{64}$/u.test(contentHash2)) {
+    throw new Error(
+      `Invalid Run state: ${label}.contentHash must be a SHA-256 hash`
+    );
+  }
+  const artifactPath = requiredJsonString(version.path, `${label}.path`);
+  assertSafeRunReference(artifactPath, `${label}.path`);
+  return {
+    id: requiredJsonString(version.id, `${label}.id`),
+    artifactId: requiredJsonString(version.artifactId, `${label}.artifactId`),
+    schemaId: requiredJsonString(version.schemaId, `${label}.schemaId`),
+    lifetime: parseWorkflowArtifactLifetime(
+      version.lifetime,
+      `${label}.lifetime`
+    ),
+    scopeId: requiredJsonString(version.scopeId, `${label}.scopeId`),
+    contentHash: contentHash2,
+    path: artifactPath,
+    producer: parseWorkflowArtifactProducer(
+      version.producer,
+      `${label}.producer`
+    ),
+    timestamp: requiredJsonString(version.timestamp, `${label}.timestamp`)
+  };
+}
+function parseWorkflowArtifactSelection(value, index) {
+  const label = `workflowRuntime.artifactSelections[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const selection2 = value;
+  const keys = /* @__PURE__ */ new Set([
+    "artifactId",
+    "versionId",
+    "runId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "actionId",
+    "revision",
+    "timestamp"
+  ]);
+  const unknown = Object.keys(selection2).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const coordinate = parseWorkflowArtifactCoordinate(selection2, label);
+  return {
+    artifactId: requiredJsonString(selection2.artifactId, `${label}.artifactId`),
+    versionId: requiredJsonString(selection2.versionId, `${label}.versionId`),
+    ...coordinate,
+    timestamp: requiredJsonString(selection2.timestamp, `${label}.timestamp`)
+  };
+}
+function parseWorkflowRuntime(value, runId) {
+  if (value === void 0) return void 0;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid Run state: workflowRuntime must be an object");
+  }
+  const runtime = value;
+  const keys = /* @__PURE__ */ new Set([
+    "revision",
+    "nextVisitOrdinal",
+    "currentAttempt",
+    "currentCycle",
+    "cycles",
+    "visits",
+    "decisionReceipts",
+    "artifactVersions",
+    "artifactSelections"
+  ]);
+  const unknown = Object.keys(runtime).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(
+      `Invalid Run state: workflowRuntime has unknown field ${unknown}`
+    );
+  }
+  for (const key of ["revision", "nextVisitOrdinal"]) {
+    const entry = runtime[key];
+    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 0) {
+      throw new Error(
+        `Invalid Run state: workflowRuntime.${key} must be a non-negative integer`
+      );
+    }
+  }
+  const revision = runtime.revision;
+  const nextVisitOrdinal = runtime.nextVisitOrdinal;
+  if (!Array.isArray(runtime.visits)) {
+    throw new Error(
+      "Invalid Run state: workflowRuntime.visits must be an array"
+    );
+  }
+  const visits = runtime.visits.map(parseWorkflowVisit);
+  const cycles = runtime.cycles === void 0 ? [] : Array.isArray(runtime.cycles) ? runtime.cycles.map(
+    (cycle, index) => parseWorkflowCycle(cycle, `workflowRuntime.cycles[${index}]`)
+  ) : (() => {
+    throw new Error(
+      "Invalid Run state: workflowRuntime.cycles must be an array"
+    );
+  })();
+  const cycleIds = /* @__PURE__ */ new Set();
+  const cycleOrdinals = /* @__PURE__ */ new Map();
+  for (const cycle of cycles) {
+    if (cycleIds.has(cycle.id)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime Cycle ${cycle.id}`
+      );
+    }
+    cycleIds.add(cycle.id);
+    const expectedOrdinal = (cycleOrdinals.get(cycle.key) ?? 0) + 1;
+    if (cycle.instanceOrdinal !== expectedOrdinal) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime Cycle ordinal is invalid for ${cycle.key}`
+      );
+    }
+    cycleOrdinals.set(cycle.key, cycle.instanceOrdinal);
+  }
+  const currentCycle = runtime.currentCycle === void 0 || runtime.currentCycle === null ? null : parseWorkflowCycle(
+    runtime.currentCycle,
+    "workflowRuntime.currentCycle"
+  );
+  if (currentCycle && !cycleIds.has(currentCycle.id)) {
+    throw new Error(
+      "Invalid Run state: current WorkflowRuntime Cycle is not in cycles"
+    );
+  }
+  const decisionReceipts = runtime.decisionReceipts === void 0 ? [] : Array.isArray(runtime.decisionReceipts) ? runtime.decisionReceipts.map(parseDecisionReceipt) : (() => {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime decisionReceipts must be an array"
+    );
+  })();
+  const artifactVersions = runtime.artifactVersions === void 0 ? [] : Array.isArray(runtime.artifactVersions) ? runtime.artifactVersions.map(parseWorkflowArtifactVersion) : (() => {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime artifactVersions must be an array"
+    );
+  })();
+  const artifactSelections = runtime.artifactSelections === void 0 ? [] : Array.isArray(runtime.artifactSelections) ? runtime.artifactSelections.map(parseWorkflowArtifactSelection) : (() => {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime artifactSelections must be an array"
+    );
+  })();
+  const artifactVersionIds = /* @__PURE__ */ new Set();
+  for (const version of artifactVersions) {
+    if (artifactVersionIds.has(version.id)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime artifact version ${version.id}`
+      );
+    }
+    artifactVersionIds.add(version.id);
+    if (version.producer.runId !== runId) {
+      throw new Error(
+        `Invalid Run state: artifact version ${version.id} belongs to another Run`
+      );
+    }
+    if (version.lifetime === "attempt" && version.scopeId !== version.producer.attemptId || version.lifetime === "cycle" && version.scopeId !== version.producer.cycleId || version.lifetime === "run" && version.scopeId !== runId) {
+      throw new Error(
+        `Invalid Run state: artifact version ${version.id} has an invalid scope`
+      );
+    }
+    if (version.producer.revision >= revision) {
+      throw new Error(
+        `Invalid Run state: artifact version ${version.id} has a future revision`
+      );
+    }
+  }
+  const artifactSelectionKeys = /* @__PURE__ */ new Set();
+  for (const selection2 of artifactSelections) {
+    const selectionKey = `${selection2.attemptId}\0${selection2.actionId}\0${selection2.artifactId}`;
+    if (artifactSelectionKeys.has(selectionKey)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime artifact selection ${selection2.artifactId}`
+      );
+    }
+    artifactSelectionKeys.add(selectionKey);
+    if (!artifactVersionIds.has(selection2.versionId)) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime selection references unknown artifact version ${selection2.versionId}`
+      );
+    }
+    const version = artifactVersions.find(
+      (candidate) => candidate.id === selection2.versionId
+    );
+    if (version.artifactId !== selection2.artifactId) {
+      throw new Error(
+        "Invalid Run state: WorkflowRuntime artifact selection id does not match its version"
+      );
+    }
+    if (selection2.runId !== runId || selection2.revision >= revision) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime artifact selection ${selection2.versionId} has an invalid Run or revision`
+      );
+    }
+  }
+  const attemptIds = /* @__PURE__ */ new Set();
+  const visitOrdinals = /* @__PURE__ */ new Set();
+  const receiptActionIds = /* @__PURE__ */ new Set();
+  for (const receipt of decisionReceipts) {
+    if (receiptActionIds.has(receipt.actionId)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime Decision Receipt ${receipt.actionId}`
+      );
+    }
+    receiptActionIds.add(receipt.actionId);
+  }
+  let outcomeCount = 0;
+  for (const visit of visits) {
+    if (attemptIds.has(visit.attemptId)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime Attempt ${visit.attemptId}`
+      );
+    }
+    attemptIds.add(visit.attemptId);
+    if (visitOrdinals.has(visit.visitOrdinal)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime visit ordinal ${visit.visitOrdinal}`
+      );
+    }
+    if (visit.cycleId !== null && !cycleIds.has(visit.cycleId)) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime visit references unknown Cycle ${visit.cycleId}`
+      );
+    }
+    visitOrdinals.add(visit.visitOrdinal);
+    outcomeCount += visit.outcomes.length;
+    if (visit.visitOrdinal > nextVisitOrdinal) {
+      throw new Error(
+        "Invalid Run state: WorkflowRuntime visit ordinal exceeds its counter"
+      );
+    }
+  }
+  const currentAttempt = runtime.currentAttempt === null ? null : parseWorkflowAttempt(
+    runtime.currentAttempt,
+    "workflowRuntime.currentAttempt"
+  );
+  if (currentAttempt && !attemptIds.has(currentAttempt.id)) {
+    throw new Error(
+      "Invalid Run state: current WorkflowRuntime Attempt is not in visits"
+    );
+  }
+  if (currentAttempt && currentAttempt.cycleId !== (currentCycle?.id ?? null)) {
+    throw new Error(
+      "Invalid Run state: current WorkflowRuntime Attempt does not match current Cycle"
+    );
+  }
+  if (revision !== outcomeCount) {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime revision does not match visit outcomes"
+    );
+  }
+  if (currentAttempt) {
+    const currentVisit = visits.find(
+      (visit) => visit.attemptId === currentAttempt.id
+    );
+    if (currentVisit.stepId !== currentAttempt.stepId || currentVisit.cycleId !== currentAttempt.cycleId || currentVisit.visitOrdinal !== currentAttempt.visitOrdinal) {
+      throw new Error(
+        "Invalid Run state: current WorkflowRuntime Attempt does not match its visit"
+      );
+    }
+    const lastOutcome = currentVisit.outcomes.at(-1);
+    const expectedRetryOrdinal = lastOutcome ? lastOutcome.retryOrdinal + 1 : 0;
+    if (currentAttempt.retryOrdinal !== expectedRetryOrdinal) {
+      throw new Error(
+        "Invalid Run state: current WorkflowRuntime retry ordinal is invalid"
+      );
+    }
+  }
+  return {
+    revision,
+    nextVisitOrdinal,
+    currentAttempt,
+    currentCycle,
+    cycles,
+    visits,
+    decisionReceipts,
+    artifactVersions,
+    artifactSelections
+  };
+}
+function parseRunStateJson(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid Run state: stored value must be an object");
+  }
+  const json = value;
+  const unknown = Object.keys(json).find(
+    (key) => !RUN_STATE_JSON_KEYS.has(key)
+  );
+  if (unknown) throw new Error(`Invalid Run state: unknown field ${unknown}`);
+  const runId = requiredJsonString(json.runId, "runId");
+  const skill = requiredJsonString(json.skill, "skill");
+  const skillVersion = requiredJsonString(json.skillVersion, "skillVersion");
+  const skillHash = requiredJsonString(json.skillHash, "skillHash");
+  if (json.orchestration !== "deterministic" && json.orchestration !== "adaptive") {
+    throw new Error(
+      "Invalid Run state: orchestration must be deterministic or adaptive"
+    );
+  }
+  const currentStep = nullableJsonString(json.currentStep, "currentStep");
+  const iteration = json.iteration;
+  if (typeof iteration !== "number" || !Number.isSafeInteger(iteration) || iteration < 0) {
+    throw new Error(
+      "Invalid Run state: iteration must be a non-negative integer"
+    );
+  }
+  const pending = nullableJsonString(json.pending, "pending");
+  const pendingRef = requiredJsonString(json.pendingRef, "pendingRef");
+  const trajectoryRef = requiredJsonString(json.trajectoryRef, "trajectoryRef");
+  const contextRef = requiredJsonString(json.contextRef, "contextRef");
+  const artifactsRef = requiredJsonString(json.artifactsRef, "artifactsRef");
+  const checkpointRef = requiredJsonString(json.checkpointRef, "checkpointRef");
+  assertSafeRunReference(pendingRef, "pending_ref");
+  assertSafeRunReference(trajectoryRef, "trajectory_ref");
+  assertSafeRunReference(contextRef, "context_ref");
+  assertSafeRunReference(artifactsRef, "artifacts_ref");
+  assertSafeRunReference(checkpointRef, "checkpoint_ref");
+  if (json.status !== "running" && json.status !== "waiting" && json.status !== "completed" && json.status !== "failed") {
+    throw new Error("Invalid Run state: run_status is invalid");
+  }
+  if (!json.retries || typeof json.retries !== "object" || Array.isArray(json.retries)) {
+    throw new Error("Invalid Run state: run_retries must be a JSON object");
+  }
+  for (const count of Object.values(json.retries)) {
+    if (!Number.isSafeInteger(count) || count < 0) {
+      throw new Error(
+        "Invalid Run state: retry counts must be non-negative integers"
+      );
+    }
+  }
+  let runtimeIdentity;
+  if (json.runtimeIdentity !== void 0) {
+    if (!json.runtimeIdentity || typeof json.runtimeIdentity !== "object" || Array.isArray(json.runtimeIdentity)) {
+      throw new Error("Invalid Run state: runtimeIdentity must be an object");
+    }
+    const identity = json.runtimeIdentity;
+    const identityKeys = /* @__PURE__ */ new Set([
+      "protocolHash",
+      "packageHash",
+      "snapshotHash",
+      "nodeToStep",
+      "capabilityVersion",
+      "resolverHash",
+      "findingCatalogVersion",
+      "durabilityProfile"
+    ]);
+    const unknownIdentityKey = Object.keys(identity).find(
+      (key) => !identityKeys.has(key)
+    );
+    if (unknownIdentityKey) {
+      throw new Error(
+        `Invalid Run state: runtimeIdentity unknown field ${unknownIdentityKey}`
+      );
+    }
+    if (typeof identity.protocolHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.protocolHash) || typeof identity.packageHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.packageHash) || typeof identity.snapshotHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.snapshotHash) || !identity.nodeToStep || typeof identity.nodeToStep !== "object" || Array.isArray(identity.nodeToStep) || identity.capabilityVersion !== void 0 && identity.capabilityVersion !== 3 || identity.resolverHash !== void 0 && (typeof identity.resolverHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.resolverHash)) || identity.findingCatalogVersion !== void 0 && identity.findingCatalogVersion !== 1) {
+      throw new Error("Invalid Run state: runtimeIdentity is invalid");
+    }
+    for (const [nodeId, stepId2] of Object.entries(identity.nodeToStep)) {
+      if (!nodeId || typeof stepId2 !== "string" || !stepId2) {
+        throw new Error(
+          "Invalid Run state: runtimeIdentity mapping is invalid"
+        );
+      }
+    }
+    const durabilityProfile = identity.durabilityProfile === void 0 ? void 0 : parseWorkflowDurabilityProfile(identity.durabilityProfile);
+    runtimeIdentity = {
+      protocolHash: identity.protocolHash,
+      packageHash: identity.packageHash,
+      snapshotHash: identity.snapshotHash,
+      nodeToStep: Object.fromEntries(
+        Object.entries(identity.nodeToStep).map(([nodeId, stepId2]) => [
+          nodeId,
+          stepId2
+        ])
+      ),
+      ...identity.capabilityVersion === 3 ? { capabilityVersion: 3 } : {},
+      ...typeof identity.resolverHash === "string" ? { resolverHash: identity.resolverHash } : {},
+      ...identity.findingCatalogVersion === 1 ? { findingCatalogVersion: 1 } : {},
+      ...durabilityProfile ? { durabilityProfile } : {}
+    };
+  }
+  const workflowRuntime = parseWorkflowRuntime(json.workflowRuntime, runId);
+  return {
+    runId,
+    skill,
+    skillVersion,
+    skillHash,
+    orchestration: json.orchestration,
+    currentStep,
+    iteration,
+    pending,
+    pendingRef,
+    trajectoryRef,
+    contextRef,
+    artifactsRef,
+    checkpointRef,
+    status: json.status,
+    retries: json.retries,
+    ...runtimeIdentity ? { runtimeIdentity } : {},
+    ...workflowRuntime ? { workflowRuntime } : {}
+  };
+}
+function parseRunStateValue(value) {
+  return parseRunStateJson(value);
+}
+function serializeRunState(state) {
+  return JSON.stringify(parseRunStateJson(state), null, 2);
+}
+async function readRunState(changeDir, options = {}) {
+  const raw = await readOptionalEngineRunText(
+    changeDir,
+    RUN_STATE_FILE,
+    RUN_STATE_READ_MAX_BYTES,
+    "Run state",
+    options
+  );
+  if (raw === null) return null;
+  let document;
+  try {
+    document = JSON.parse(raw);
+  } catch (error) {
+    if (Buffer.byteLength(raw, "utf8") > RUN_STATE_MAX_BYTES) {
+      throw new Error(`Run state exceeds ${RUN_STATE_MAX_BYTES} bytes`, {
+        cause: error
+      });
+    }
+    throw error;
+  }
+  const identity = document && typeof document === "object" && !Array.isArray(document) ? document.runtimeIdentity : void 0;
+  const profile = identity && typeof identity === "object" && !Array.isArray(identity) ? identity.durabilityProfile : void 0;
+  const maxBytes = profile === void 0 ? RUN_STATE_MAX_BYTES : parseWorkflowDurabilityProfile(profile).bounds.runStateBytes;
+  if (Buffer.byteLength(raw, "utf8") > maxBytes) {
+    throw new Error(`Run state exceeds ${maxBytes} bytes`);
+  }
+  return parseRunStateValue(document);
+}
+async function writeRunState(changeDir, state, options = {}) {
+  const serialized = serializeRunState(state);
+  const maxBytes = state.runtimeIdentity?.durabilityProfile?.bounds.runStateBytes ?? RUN_STATE_MAX_BYTES;
+  await writeEngineRunText(
+    changeDir,
+    RUN_STATE_FILE,
+    serialized,
+    maxBytes,
+    "Run state",
+    { ...options, maxBytes }
+  );
+}
+
 // src/workflow-runtime/artifacts.ts
 import { promises as fs5 } from "node:fs";
-import path9 from "node:path";
+import path10 from "node:path";
 var ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
 var ARTIFACT_MAX_ENTRIES = 256;
 var WorkflowArtifactValidationError = class extends Error {
@@ -3109,7 +4176,7 @@ function declarationFor(key, candidates) {
 }
 function artifactPatternSegments(value, label) {
   const normalized = value.trim().replaceAll("\\", "/");
-  if (normalized.length === 0 || path9.posix.isAbsolute(normalized) || path9.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
+  if (normalized.length === 0 || path10.posix.isAbsolute(normalized) || path10.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
     throw new Error(`${label} must be relative to the Run root`);
   }
   const segments = normalized.split("/");
@@ -3153,7 +4220,7 @@ async function realRunRoot(runRoot, label) {
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error(`${label} Run root must be a real directory`);
   }
-  return path9.resolve(runRoot);
+  return path10.resolve(runRoot);
 }
 async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, label, options = { maxMatches: ARTIFACT_MAX_ENTRIES }) {
   const segments = artifactPatternSegments(artifactPath, label);
@@ -3166,7 +4233,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
       });
       return inspection.exists ? [inspection.relative] : [];
     }
-    const current = relative.length === 0 ? root : path9.join(root, relative);
+    const current = relative.length === 0 ? root : path10.join(root, relative);
     if (relative.length > 0) {
       const inspection = await inspectProtectedProjectPath(runRoot, relative, {
         label,
@@ -3177,7 +4244,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
     const segment = segments[index];
     if (!segment.includes("*")) {
       return walk(
-        relative.length === 0 ? segment : path9.posix.join(relative, segment),
+        relative.length === 0 ? segment : path10.posix.join(relative, segment),
         index + 1
       );
     }
@@ -3196,7 +4263,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
     )) {
       if (entry.isSymbolicLink()) {
         throw new Error(
-          `${label} crosses a symbolic link or junction at ${path9.join(current, entry.name)}`
+          `${label} crosses a symbolic link or junction at ${path10.join(current, entry.name)}`
         );
       }
       if (!matcher.test(entry.name)) continue;
@@ -3205,7 +4272,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
       if (final && (expected === "file" && !entry.isFile() || expected === "directory" && !entry.isDirectory())) {
         continue;
       }
-      const next = relative.length === 0 ? entry.name : path9.posix.join(relative, entry.name);
+      const next = relative.length === 0 ? entry.name : path10.posix.join(relative, entry.name);
       matches.push(...await walk(next, index + 1));
       if (options.maxMatches !== void 0 && matches.length > options.maxMatches) {
         throw new Error(
@@ -3243,7 +4310,7 @@ async function hashDirectoryArtifact(runRoot, relativePath, label) {
     if (!inspection.exists) throw new Error(`${label} does not exist`);
     const entries = (await fs5.readdir(inspection.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
-      const relative = path9.posix.join(directory, entry.name);
+      const relative = path10.posix.join(directory, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error(
           `${label} crosses a symbolic link or junction at ${relative}`
@@ -3325,7 +4392,7 @@ function artifactScopeId(lifetime, state) {
   }
   return state.runId;
 }
-function selection(artifactId, versionId, state, nodeId, actionId2, timestamp2) {
+function selection(artifactId, versionId, state, nodeId, actionId2, timestamp3) {
   const runtime = state.workflowRuntime;
   const attempt = runtime?.currentAttempt;
   if (!runtime || !attempt) {
@@ -3340,7 +4407,7 @@ function selection(artifactId, versionId, state, nodeId, actionId2, timestamp2) 
     attemptId: attempt.id,
     actionId: actionId2,
     revision: runtime.revision,
-    timestamp: timestamp2
+    timestamp: timestamp3
   };
 }
 function artifactVersionId(artifactId, contentHash2, pathValue, producer, scopeId) {
@@ -3433,7 +4500,7 @@ async function prepareWorkflowArtifactMutation(options) {
     }
   }
   const mutation = structuredClone(empty);
-  const timestamp2 = (/* @__PURE__ */ new Date()).toISOString();
+  const timestamp3 = (/* @__PURE__ */ new Date()).toISOString();
   for (const { declaration, value: requested } of requestedUpdates.values()) {
     const artifactPath = await resolveArtifactPath(
       options.runRoot,
@@ -3484,7 +4551,7 @@ async function prepareWorkflowArtifactMutation(options) {
       contentHash: contentHash2,
       path: artifactPath,
       producer,
-      timestamp: timestamp2
+      timestamp: timestamp3
     };
     mutation.versions.push(version);
     mutation.selections.push(
@@ -3494,7 +4561,7 @@ async function prepareWorkflowArtifactMutation(options) {
         options.state,
         options.nodeId,
         options.actionId,
-        timestamp2
+        timestamp3
       )
     );
     mutation.artifactPaths[declaration.artifactId] = artifactPath;
@@ -3534,7 +4601,7 @@ async function prepareWorkflowArtifactMutation(options) {
         options.state,
         options.nodeId,
         options.actionId,
-        timestamp2
+        timestamp3
       )
     );
     mutation.artifactPaths[declaration.artifactId] = version.path;
@@ -4962,19 +6029,19 @@ function evidenceProducer(state, visit, outcome) {
     revision: outcomeRevision(state.workflowRuntime, visit, outcome)
   };
 }
-function evidenceVersionId(evidenceId, hash2, producer) {
+function evidenceVersionId(evidenceId, hash3, producer) {
   return `evidence-version-${sha256(
-    JSON.stringify(stableValue({ evidenceId, hash: hash2, producer }))
+    JSON.stringify(stableValue({ evidenceId, hash: hash3, producer }))
   ).slice(0, 24)}`;
 }
 function evidenceReference(state, declaration, visit, outcome, value, required) {
   const producer = evidenceProducer(state, visit, outcome);
-  const hash2 = contentHash(value);
+  const hash3 = contentHash(value);
   return {
     id: declaration.id,
     required,
-    versionId: evidenceVersionId(declaration.id, hash2, producer),
-    contentHash: hash2,
+    versionId: evidenceVersionId(declaration.id, hash3, producer),
+    contentHash: hash3,
     producer
   };
 }
@@ -6184,7 +7251,7 @@ function parseClaim(value) {
     ...committedAt ? { committedAt: timestamp(committedAt, "committedAt", label) } : {}
   };
 }
-function claimPath(input) {
+function revisionClaimPath(input) {
   return `${CLAIM_DIRECTORY}/revision-${input.expectedRevision}-${sha256(input.expectedActionId).slice(0, 24)}-${input.intendedRevision}.json`;
 }
 function profileForExecution(execution) {
@@ -6199,7 +7266,7 @@ function claimMatches(claim, input) {
 async function readClaim(runRoot, input) {
   const raw = await readOptionalEngineRunText(
     runRoot,
-    claimPath(input),
+    revisionClaimPath(input),
     profileForExecution(input.execution).bounds.claimBytes,
     "Workflow revision claim"
   );
@@ -6258,7 +7325,7 @@ async function waitForExistingClaim(runRoot, input, existing) {
 }
 async function acquireRevisionClaim(runRoot, input) {
   const candidate = createClaim(input);
-  const relativePath = claimPath(input);
+  const relativePath = revisionClaimPath(input);
   const maxBytes = profileForExecution(input.execution).bounds.claimBytes;
   for (; ; ) {
     const existing = await readClaim(runRoot, input);
@@ -6284,6 +7351,18 @@ async function acquireRevisionClaim(runRoot, input) {
         acquired: true,
         claim: candidate,
         async commit() {
+          const current = await readClaim(runRoot, input);
+          if (!current) {
+            throw new Error(
+              "Workflow revision claim disappeared before commit"
+            );
+          }
+          if (current.status === "committed") {
+            if (!claimMatches(current, input)) {
+              throw new Error("Workflow revision claim identity changed");
+            }
+            return;
+          }
           const committed = {
             ...candidate,
             status: "committed",
@@ -6297,8 +7376,8 @@ async function acquireRevisionClaim(runRoot, input) {
             "Workflow revision claim",
             {
               beforeCommit: async () => {
-                const current = await readClaim(runRoot, input);
-                if (!current || current.status !== "prepared" || current.ownerToken !== candidate.ownerToken) {
+                const current2 = await readClaim(runRoot, input);
+                if (!current2 || current2.status !== "prepared" || current2.ownerToken !== candidate.ownerToken) {
                   throw new Error(
                     "Workflow revision claim changed before commit"
                   );
@@ -6313,12 +7392,1231 @@ async function acquireRevisionClaim(runRoot, input) {
     }
   }
 }
+async function commitExistingRevisionClaim(runRoot, input) {
+  const existing = await readClaim(runRoot, input);
+  if (!existing) return;
+  if (existing.status === "committed") return;
+  const committed = {
+    ...existing,
+    status: "committed",
+    committedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const maxBytes = profileForExecution(input.execution).bounds.claimBytes;
+  await writeEngineRunText(
+    runRoot,
+    revisionClaimPath(input),
+    serializeClaim(committed),
+    maxBytes,
+    "Workflow revision claim",
+    {
+      beforeCommit: async () => {
+        const current = await readClaim(runRoot, input);
+        if (!current || current.status !== "prepared" || current.ownerToken !== existing.ownerToken) {
+          throw new Error("Workflow revision claim changed before commit");
+        }
+      }
+    }
+  );
+}
+function committedRevisionClaimText(raw) {
+  let claim;
+  try {
+    claim = parseClaim(JSON.parse(raw));
+  } catch (error) {
+    throw new Error("Workflow revision claim is malformed", { cause: error });
+  }
+  if (claim.status === "committed") return serializeClaim(claim);
+  return serializeClaim({
+    ...claim,
+    status: "committed",
+    committedAt: (/* @__PURE__ */ new Date()).toISOString()
+  });
+}
+
+// src/workflow-runtime/transition-journal.ts
+import { randomUUID as randomUUID4 } from "node:crypto";
+import path11 from "node:path";
+var WORKFLOW_TRANSITION_JOURNAL_PATH = ".comet/transition-journal.json";
+var WORKFLOW_TRANSITION_JOURNAL_SCHEMA_VERSION = 1;
+var WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS = 16;
+var MAX_IDENTIFIER_LENGTH = 256;
+var JOURNAL_LABEL = "Workflow transition journal";
+var STATE_PATH = ".comet/run-state.json";
+var TRANSITION_OPERATION_IDS = [
+  "workflow.start",
+  "workflow.resume",
+  "workflow.submit"
+];
+var RECORD_ORDER = [
+  "state",
+  "pending",
+  "artifacts",
+  "trajectory",
+  "revision-claim"
+];
+var WorkflowTransitionJournalPendingError = class extends Error {
+  constructor(journal) {
+    super("WorkflowRuntime recovery is required before another mutation");
+    this.journal = journal;
+    this.name = "WorkflowTransitionJournalPendingError";
+  }
+  journal;
+};
+var WorkflowTransitionRecordConflictError = class extends Error {
+  constructor(path14) {
+    super(`Workflow transition record changed before journaling: ${path14}`);
+    this.path = path14;
+    this.name = "WorkflowTransitionRecordConflictError";
+  }
+  path;
+};
+function isBlockedRecoveryResult(value) {
+  return value.status === "blocked";
+}
+var configuredFault;
+function isRecord8(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function assertKnownFields4(value, keys, label) {
+  const unknown = Object.keys(value).find((key) => !keys.has(key));
+  if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
+}
+function requiredText3(value, key, label) {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_IDENTIFIER_LENGTH || /[\u0000\r\n]/u.test(value)) {
+    throw new Error(`Invalid ${label}: ${key} must be a bounded string`);
+  }
+  return value;
+}
+function timestamp2(value, key, label) {
+  const result = requiredText3(value, key, label);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(result)) {
+    throw new Error(`Invalid ${label}: ${key} must be an ISO timestamp`);
+  }
+  return result;
+}
+function nonNegativeInteger3(value, key, label) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
+  }
+  return value;
+}
+function hash2(value, key, label) {
+  const result = requiredText3(value, key, label);
+  if (!/^[a-f0-9]{64}$/u.test(result)) {
+    throw new Error(`Invalid ${label}: ${key} must be a SHA-256 hash`);
+  }
+  return result;
+}
+function uuid(value, key, label) {
+  const result = requiredText3(value, key, label);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+    result
+  )) {
+    throw new Error(`Invalid ${label}: ${key} is invalid`);
+  }
+  return result;
+}
+function nullableActionId(value, key, label) {
+  return value === null ? null : requiredText3(value, key, label);
+}
+function parseMaterialIdentity(value, key, label) {
+  if (!isRecord8(value))
+    throw new Error(`Invalid ${label}: ${key} must be an object`);
+  assertKnownFields4(
+    value,
+    /* @__PURE__ */ new Set(["exists", "bytes", "sha256"]),
+    `${label}.${key}`
+  );
+  if (typeof value.exists !== "boolean") {
+    throw new Error(`Invalid ${label}: ${key}.exists must be a boolean`);
+  }
+  const bytes = nonNegativeInteger3(value.bytes, `${key}.bytes`, label);
+  const digest = value.sha256 === null ? null : hash2(value.sha256, `${key}.sha256`, label);
+  if (!value.exists && (bytes !== 0 || digest !== null) || value.exists && (bytes < 1 || digest === null)) {
+    throw new Error(`Invalid ${label}: ${key} identity is inconsistent`);
+  }
+  return { exists: value.exists, bytes, sha256: digest };
+}
+function parseMaterial(value, key, label, maxBytes) {
+  if (!isRecord8(value))
+    throw new Error(`Invalid ${label}: ${key} must be an object`);
+  assertKnownFields4(
+    value,
+    /* @__PURE__ */ new Set(["content", "exists", "bytes", "sha256"]),
+    `${label}.${key}`
+  );
+  const identity = parseMaterialIdentity(
+    {
+      exists: value.exists,
+      bytes: value.bytes,
+      sha256: value.sha256
+    },
+    key,
+    label
+  );
+  if (identity.exists !== (value.content !== null)) {
+    throw new Error(`Invalid ${label}: ${key}.content does not match exists`);
+  }
+  if (identity.exists && typeof value.content !== "string") {
+    throw new Error(`Invalid ${label}: ${key}.content must be a string`);
+  }
+  if (!identity.exists && value.content !== null) {
+    throw new Error(`Invalid ${label}: ${key}.content must be null`);
+  }
+  const content = value.content;
+  if (content !== null && (Buffer.byteLength(content, "utf8") !== identity.bytes || Buffer.byteLength(content, "utf8") > maxBytes || sha256(content) !== identity.sha256)) {
+    throw new Error(`Invalid ${label}: ${key} content identity is invalid`);
+  }
+  return { ...identity, content };
+}
+function recordKind(relativePath) {
+  if (relativePath === STATE_PATH) return "state";
+  if (relativePath.endsWith("/pending-action.json")) return "pending";
+  if (relativePath.endsWith("/artifacts.json")) return "artifacts";
+  if (relativePath.endsWith("/trajectory.jsonl")) return "trajectory";
+  if (relativePath.startsWith(".comet/revision-claims/")) {
+    return "revision-claim";
+  }
+  return "other";
+}
+function orderOf(record) {
+  const rank = record.kind === "other" ? RECORD_ORDER.length : RECORD_ORDER.indexOf(record.kind);
+  return `${String(rank).padStart(2, "0")}\0${record.path}`;
+}
+function assertSafeRecordPath(value, label) {
+  const normalized = typeof value === "string" ? value.replaceAll("\\", "/") : "";
+  if (normalized.length === 0 || normalized.length > MAX_IDENTIFIER_LENGTH || path11.posix.isAbsolute(normalized) || path11.win32.isAbsolute(String(value)) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(String(value)) || normalized.split("/").some(
+    (segment) => segment.length === 0 || segment === "." || segment === ".."
+  )) {
+    throw new Error(`Invalid ${label}: path must stay inside the Run root`);
+  }
+  if (normalized === WORKFLOW_TRANSITION_JOURNAL_PATH) {
+    throw new Error(`Invalid ${label}: journal cannot contain itself`);
+  }
+  return normalized;
+}
+function parseRevisionIdentity(value, key, label) {
+  if (!isRecord8(value))
+    throw new Error(`Invalid ${label}: ${key} must be an object`);
+  assertKnownFields4(
+    value,
+    /* @__PURE__ */ new Set(["revision", "actionId"]),
+    `${label}.${key}`
+  );
+  return {
+    revision: nonNegativeInteger3(value.revision, `${key}.revision`, label),
+    actionId: nullableActionId(value.actionId, `${key}.actionId`, label)
+  };
+}
+function parseRecoveryEvent(value) {
+  const label = "Workflow transition journal recovery event";
+  if (!isRecord8(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields4(
+    value,
+    /* @__PURE__ */ new Set(["sequence", "timestamp", "type", "runId", "data"]),
+    label
+  );
+  if (value.type !== "recovery_reconciled") {
+    throw new Error(`Invalid ${label}: type is invalid`);
+  }
+  if (!isRecord8(value.data))
+    throw new Error(`Invalid ${label}: data must be an object`);
+  const sequence = nonNegativeInteger3(value.sequence, "sequence", label);
+  if (sequence < 1) throw new Error(`Invalid ${label}: sequence is invalid`);
+  return {
+    sequence,
+    timestamp: timestamp2(value.timestamp, "timestamp", label),
+    type: "recovery_reconciled",
+    runId: requiredText3(value.runId, "runId", label),
+    data: value.data
+  };
+}
+function parseCommitEvidence(value) {
+  const label = "Workflow transition commit evidence";
+  if (!isRecord8(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields4(
+    value,
+    /* @__PURE__ */ new Set([
+      "kind",
+      "journalId",
+      "operation",
+      "runId",
+      "previousRevision",
+      "intendedRevision",
+      "recovered",
+      "committedAt"
+    ]),
+    label
+  );
+  if (value.kind !== "workflow-transition-commit") {
+    throw new Error(`Invalid ${label}: kind is invalid`);
+  }
+  if (!TRANSITION_OPERATION_IDS.includes(
+    value.operation
+  )) {
+    throw new Error(`Invalid ${label}: operation is invalid`);
+  }
+  if (typeof value.recovered !== "boolean") {
+    throw new Error(`Invalid ${label}: recovered is invalid`);
+  }
+  return {
+    kind: "workflow-transition-commit",
+    journalId: uuid(value.journalId, "journalId", label),
+    operation: value.operation,
+    runId: requiredText3(value.runId, "runId", label),
+    previousRevision: nonNegativeInteger3(
+      value.previousRevision,
+      "previousRevision",
+      label
+    ),
+    intendedRevision: nonNegativeInteger3(
+      value.intendedRevision,
+      "intendedRevision",
+      label
+    ),
+    recovered: value.recovered,
+    committedAt: timestamp2(value.committedAt, "committedAt", label)
+  };
+}
+function parseRecovery(value, maxBytes) {
+  const label = "Workflow transition journal recovery";
+  if (!isRecord8(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields4(
+    value,
+    /* @__PURE__ */ new Set([
+      "status",
+      "crashBoundary",
+      "trajectoryPath",
+      "event",
+      "intendedTrajectory"
+    ]),
+    label
+  );
+  if (value.status !== "prepared" && value.status !== "recorded") {
+    throw new Error(`Invalid ${label}: status is invalid`);
+  }
+  return {
+    status: value.status,
+    crashBoundary: requiredText3(value.crashBoundary, "crashBoundary", label),
+    trajectoryPath: assertSafeRecordPath(
+      value.trajectoryPath,
+      `${label} trajectory`
+    ),
+    event: parseRecoveryEvent(value.event),
+    intendedTrajectory: parseMaterialIdentity(
+      value.intendedTrajectory,
+      "intendedTrajectory",
+      label
+    )
+  };
+}
+function parseWorkflowTransitionJournal(value, maxBytes = WORKFLOW_DURABILITY_MAX_RECORD_BYTES) {
+  const label = "Workflow transition journal";
+  if (!isRecord8(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields4(
+    value,
+    /* @__PURE__ */ new Set([
+      "schemaVersion",
+      "kind",
+      "status",
+      "journalId",
+      "operation",
+      "runId",
+      "execution",
+      "previous",
+      "intended",
+      "records",
+      "createdAt",
+      "lastBoundary",
+      "committedAt",
+      "commitEvidence",
+      "recovery"
+    ]),
+    label
+  );
+  if (value.schemaVersion !== WORKFLOW_TRANSITION_JOURNAL_SCHEMA_VERSION || value.kind !== "workflow-transition-journal") {
+    throw new Error(`Invalid ${label}: schema identity is invalid`);
+  }
+  if (value.status !== "prepared" && value.status !== "committed") {
+    throw new Error(`Invalid ${label}: status is invalid`);
+  }
+  if (!TRANSITION_OPERATION_IDS.includes(
+    value.operation
+  )) {
+    throw new Error(`Invalid ${label}: operation is invalid`);
+  }
+  if (!Array.isArray(value.records) || value.records.length === 0 || value.records.length > WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS) {
+    throw new Error(`Invalid ${label}: records are outside the allowed bound`);
+  }
+  const records = [];
+  const paths = /* @__PURE__ */ new Set();
+  for (const [index, entry] of value.records.entries()) {
+    if (!isRecord8(entry))
+      throw new Error(`Invalid ${label}: records[${index}] must be an object`);
+    assertKnownFields4(
+      entry,
+      /* @__PURE__ */ new Set(["path", "kind", "previous", "intended"]),
+      `${label} record`
+    );
+    const recordPath = assertSafeRecordPath(entry.path, `${label} record`);
+    if (paths.has(recordPath))
+      throw new Error(`Invalid ${label}: duplicate record path ${recordPath}`);
+    paths.add(recordPath);
+    const kind = entry.kind;
+    if (kind !== "state" && kind !== "pending" && kind !== "artifacts" && kind !== "trajectory" && kind !== "revision-claim" && kind !== "other") {
+      throw new Error(`Invalid ${label}: record kind is invalid`);
+    }
+    if (kind !== recordKind(recordPath)) {
+      throw new Error(`Invalid ${label}: record kind does not match path`);
+    }
+    records.push({
+      path: recordPath,
+      kind,
+      previous: parseMaterial(entry.previous, "previous", label, maxBytes),
+      intended: parseMaterial(entry.intended, "intended", label, maxBytes)
+    });
+  }
+  if (records.map(orderOf).some((entry, index, values) => index > 0 && entry <= values[index - 1])) {
+    throw new Error(`Invalid ${label}: records are not in deterministic order`);
+  }
+  const execution = parseExecutionIdentity(value.execution);
+  const previous = parseRevisionIdentity(value.previous, "previous", label);
+  const intended = parseRevisionIdentity(value.intended, "intended", label);
+  const revisionIncrement = value.operation === "workflow.submit" ? 1 : 0;
+  if (intended.revision !== previous.revision + revisionIncrement) {
+    throw new Error(`Invalid ${label}: revisions are inconsistent`);
+  }
+  const committedAt = value.committedAt === void 0 ? void 0 : timestamp2(value.committedAt, "committedAt", label);
+  const commitEvidence = value.commitEvidence === void 0 ? void 0 : parseCommitEvidence(value.commitEvidence);
+  if (value.status === "committed" !== (committedAt !== void 0 && commitEvidence !== void 0)) {
+    throw new Error(`Invalid ${label}: commit evidence does not match status`);
+  }
+  if (commitEvidence && (commitEvidence.journalId !== value.journalId || commitEvidence.runId !== value.runId || commitEvidence.operation !== value.operation || commitEvidence.previousRevision !== previous.revision || commitEvidence.intendedRevision !== intended.revision || commitEvidence.committedAt !== committedAt)) {
+    throw new Error(`Invalid ${label}: commit evidence identity is invalid`);
+  }
+  const recovery = value.recovery === void 0 ? void 0 : parseRecovery(value.recovery, maxBytes);
+  if (recovery && recovery.event.runId !== value.runId) {
+    throw new Error(`Invalid ${label}: recovery event Run identity is invalid`);
+  }
+  if (value.status === "committed" && recovery?.status !== "recorded" && recovery !== void 0) {
+    throw new Error(
+      `Invalid ${label}: committed recovery evidence is incomplete`
+    );
+  }
+  const journal = {
+    schemaVersion: 1,
+    kind: "workflow-transition-journal",
+    status: value.status,
+    journalId: uuid(value.journalId, "journalId", label),
+    operation: value.operation,
+    runId: requiredText3(value.runId, "runId", label),
+    execution,
+    previous,
+    intended,
+    records,
+    createdAt: timestamp2(value.createdAt, "createdAt", label),
+    ...value.lastBoundary === void 0 ? {} : {
+      lastBoundary: requiredText3(value.lastBoundary, "lastBoundary", label)
+    },
+    ...committedAt ? { committedAt } : {},
+    ...commitEvidence ? { commitEvidence } : {},
+    ...recovery ? { recovery } : {}
+  };
+  return journal;
+}
+function journalMaxBytes(profile) {
+  const bounds = profile.bounds;
+  const value = bounds.transitionJournalBytes ?? bounds.runStateBytes;
+  if (!Number.isSafeInteger(value) || value < 1 || value > WORKFLOW_DURABILITY_MAX_RECORD_BYTES) {
+    throw new Error("Workflow transition journal size bound is invalid");
+  }
+  return value;
+}
+function recordMaxBytes(profile, kind) {
+  if (kind === "state") return profile.bounds.runStateBytes;
+  if (kind === "pending") return profile.bounds.pendingActionBytes;
+  if (kind === "artifacts") return profile.bounds.artifactsBytes;
+  if (kind === "trajectory") return profile.bounds.trajectoryBytes;
+  if (kind === "revision-claim") return profile.bounds.claimBytes;
+  return journalMaxBytes(profile);
+}
+function validateJournalRecordBounds(journal, profile) {
+  for (const record of journal.records) {
+    const maxBytes = recordMaxBytes(profile, record.kind);
+    for (const material of [record.previous, record.intended]) {
+      if (material.bytes > maxBytes) {
+        throw new Error(
+          `Workflow transition record ${record.path} exceeds ${maxBytes} bytes`
+        );
+      }
+    }
+  }
+}
+function validateJournalStateIdentity(journal) {
+  const record = journal.records.find(
+    (candidate) => candidate.kind === "state"
+  );
+  if (!record)
+    throw new Error("Workflow transition journal has no state record");
+  for (const material of [record.previous, record.intended]) {
+    if (material.content === null) continue;
+    const state = parseRunStateValue(JSON.parse(material.content));
+    if (state.runId !== journal.runId || !state.runtimeIdentity) {
+      throw new Error("Workflow transition journal Run identity is invalid");
+    }
+    if (JSON.stringify(stableValue(state.runtimeIdentity)) !== JSON.stringify(stableValue(journal.execution))) {
+      throw new Error(
+        "Workflow transition journal execution identity does not match Run state"
+      );
+    }
+  }
+}
+function validateJournalRevisionIdentity(journal) {
+  const record = journal.records.find(
+    (candidate) => candidate.kind === "state"
+  );
+  if (!record)
+    throw new Error("Workflow transition journal has no state record");
+  const materials = [
+    [record.previous, journal.previous],
+    [record.intended, journal.intended]
+  ];
+  for (const [material, expected] of materials) {
+    const actual = stateMetadata(material.content);
+    if (actual.revision !== expected.revision || actual.actionId !== expected.actionId) {
+      throw new Error(
+        "Workflow transition journal revision or action identity is invalid"
+      );
+    }
+  }
+}
+function validateJournalPendingIdentity(journal) {
+  const stateRecord2 = journal.records.find(
+    (candidate) => candidate.kind === "state"
+  );
+  if (!stateRecord2)
+    throw new Error("Workflow transition journal has no state record");
+  const states = [
+    [stateRecord2.previous.content, "previous"],
+    [stateRecord2.intended.content, "intended"]
+  ];
+  for (const [content, label] of states) {
+    if (content === null) continue;
+    const state = parseRunStateValue(JSON.parse(content));
+    const pendingRecord = journal.records.find(
+      (candidate) => candidate.path === state.pendingRef
+    );
+    if (state.pending === null) {
+      if (pendingRecord?.[label].content !== null) {
+        throw new Error(
+          `Workflow transition journal ${label} pending identity is invalid`
+        );
+      }
+      continue;
+    }
+    if (!pendingRecord || pendingRecord[label].content === null) {
+      throw new Error(
+        `Workflow transition journal ${label} pending action is missing`
+      );
+    }
+    const action = parsePendingActionValue(
+      JSON.parse(pendingRecord[label].content)
+    );
+    if (action.id !== state.pending) {
+      throw new Error(
+        `Workflow transition journal ${label} pending action identity is invalid`
+      );
+    }
+  }
+}
+function serializeJournal(journal) {
+  return `${JSON.stringify(stableValue(journal), null, 2)}
+`;
+}
+async function readJournal(runRoot, profile) {
+  const maxBytes = journalMaxBytes(profile);
+  const raw = await readOptionalEngineRunText(
+    runRoot,
+    WORKFLOW_TRANSITION_JOURNAL_PATH,
+    maxBytes,
+    JOURNAL_LABEL
+  );
+  if (raw === null) return null;
+  try {
+    const journal = parseWorkflowTransitionJournal(
+      JSON.parse(raw),
+      maxBytes
+    );
+    validateJournalRecordBounds(journal, profile);
+    validateJournalStateIdentity(journal);
+    validateJournalRevisionIdentity(journal);
+    validateJournalPendingIdentity(journal);
+    return journal;
+  } catch (error) {
+    throw new Error(`${JOURNAL_LABEL} is malformed`, { cause: error });
+  }
+}
+async function readWorkflowTransitionJournal(runRoot) {
+  const raw = await readOptionalEngineRunText(
+    runRoot,
+    WORKFLOW_TRANSITION_JOURNAL_PATH,
+    WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
+    JOURNAL_LABEL
+  );
+  if (raw === null) return null;
+  try {
+    const journal = parseWorkflowTransitionJournal(
+      JSON.parse(raw),
+      WORKFLOW_DURABILITY_MAX_RECORD_BYTES
+    );
+    const profile = journal.execution.durabilityProfile;
+    validateJournalRecordBounds(journal, profile);
+    validateJournalStateIdentity(journal);
+    validateJournalRevisionIdentity(journal);
+    validateJournalPendingIdentity(journal);
+    const maxBytes = journalMaxBytes(profile);
+    if (Buffer.byteLength(raw, "utf8") > maxBytes) {
+      throw new Error(`Workflow transition journal exceeds ${maxBytes} bytes`);
+    }
+    return journal;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Workflow transition journal exceeds")) {
+      throw error;
+    }
+    throw new Error(`${JOURNAL_LABEL} is malformed`, { cause: error });
+  }
+}
+async function writeJournal(runRoot, profile, journal, options = {}) {
+  const maxBytes = journalMaxBytes(profile);
+  await writeEngineRunText(
+    runRoot,
+    WORKFLOW_TRANSITION_JOURNAL_PATH,
+    serializeJournal(journal),
+    maxBytes,
+    JOURNAL_LABEL,
+    { exclusive: options.exclusive }
+  );
+}
+function materialOf(content) {
+  return content === null ? { content: null, exists: false, bytes: 0, sha256: null } : {
+    content,
+    exists: true,
+    bytes: Buffer.byteLength(content, "utf8"),
+    sha256: sha256(content)
+  };
+}
+function materialIdentityOf(content) {
+  const material = materialOf(content);
+  return {
+    exists: material.exists,
+    bytes: material.bytes,
+    sha256: material.sha256
+  };
+}
+function sameMaterialIdentity(left, right) {
+  return left.exists === right.exists && left.bytes === right.bytes && left.sha256 === right.sha256;
+}
+function sameMaterial(left, right) {
+  return sameMaterialIdentity(left, right) && left.content === right.content;
+}
+function stateMetadata(raw) {
+  if (raw === null) return { revision: 0, actionId: null };
+  const state = parseRunStateValue(JSON.parse(raw));
+  return {
+    revision: state.workflowRuntime?.revision ?? 0,
+    actionId: state.pending
+  };
+}
+function eventBoundary(boundary) {
+  return boundary.path ? `${boundary.phase}:${boundary.path}` : boundary.phase;
+}
+async function invokeConfiguredFault(boundary) {
+  const envBoundary = process.env.COMET_WORKFLOW_TEST_FAULT_BOUNDARY;
+  if (envBoundary && (envBoundary === boundary.phase || envBoundary === eventBoundary(boundary))) {
+    throw new Error("deterministic workflow transition fault");
+  }
+  await configuredFault?.(boundary);
+}
+function createJournal(input, previousState, intendedState, records, journalId) {
+  return {
+    schemaVersion: 1,
+    kind: "workflow-transition-journal",
+    status: "prepared",
+    journalId,
+    operation: input.operation,
+    runId: input.runId,
+    execution: structuredClone(input.execution),
+    previous: stateMetadata(previousState),
+    intended: stateMetadata(intendedState),
+    records,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function stagedOrder(records) {
+  return [...records].sort(
+    (left, right) => orderOf(left).localeCompare(orderOf(right))
+  );
+}
+function stateRecord(records) {
+  return records.find((record) => record.kind === "state");
+}
+function trajectoryRecord(records) {
+  return records.find((record) => record.kind === "trajectory");
+}
+function boundedRecoveryData(journal, repaired, crashBoundary) {
+  return {
+    journalId: journal.journalId,
+    operation: journal.operation,
+    crashBoundary,
+    previousRevision: journal.previous.revision,
+    intendedRevision: journal.intended.revision,
+    repairedRecords: repaired.map((record) => ({
+      path: record.path,
+      previous: record.previous.sha256,
+      intended: record.intended.sha256
+    }))
+  };
+}
+function recoveryEvent(journal, trajectory, repaired, crashBoundary) {
+  const lines = trajectory.split(/\r?\n/u).filter((line) => line.length > 0);
+  return {
+    sequence: lines.length + 1,
+    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+    type: "recovery_reconciled",
+    runId: journal.runId,
+    data: boundedRecoveryData(journal, repaired, crashBoundary)
+  };
+}
+function appendEventText(raw, event) {
+  const prefix = raw.length === 0 || raw.endsWith("\n") ? raw : `${raw}
+`;
+  return `${prefix}${JSON.stringify(stableValue(event))}
+`;
+}
+function recoveryJournal(journal, trajectoryPath, event, intendedTrajectory, crashBoundary) {
+  return {
+    ...journal,
+    recovery: {
+      status: "prepared",
+      crashBoundary,
+      trajectoryPath,
+      event,
+      intendedTrajectory
+    }
+  };
+}
+async function markBoundary(runRoot, profile, journal, boundary) {
+  const marked = { ...journal, lastBoundary: eventBoundary(boundary) };
+  await writeJournal(runRoot, profile, marked);
+  await invokeConfiguredFault(boundary);
+  return marked;
+}
+async function readRecordMaterial(runRoot, record, maxBytes) {
+  const raw = await readOptionalEngineRunText(
+    runRoot,
+    record.path,
+    maxBytes,
+    `Workflow transition record ${record.path}`
+  );
+  return materialOf(raw);
+}
+async function classifyRecords(runRoot, profile, journal) {
+  const classifications = /* @__PURE__ */ new Map();
+  for (const record of journal.records) {
+    const current = await readRecordMaterial(
+      runRoot,
+      record,
+      recordMaxBytes(profile, record.kind)
+    );
+    const recoveryTrajectory = journal.recovery?.trajectoryPath === record.path && sameMaterialIdentity(current, journal.recovery.intendedTrajectory);
+    classifications.set(
+      record.path,
+      recoveryTrajectory ? "intended" : sameMaterial(current, record.previous) ? "previous" : sameMaterial(current, record.intended) ? "intended" : "unknown"
+    );
+  }
+  return classifications;
+}
+async function verifyJournalPrevious(runRoot, profile, journal) {
+  const classifications = await classifyRecords(runRoot, profile, journal);
+  const unknown = [...classifications.entries()].filter(([, classification]) => classification !== "previous").map(([recordPath]) => recordPath);
+  if (unknown.length > 0)
+    throw new WorkflowTransitionRecordConflictError(unknown[0]);
+}
+async function applyJournalRecords(runRoot, profile, journal, recovery) {
+  const repaired = [];
+  for (const record of stagedOrder(journal.records)) {
+    const classifications = await classifyRecords(runRoot, profile, {
+      ...journal,
+      records: [record]
+    });
+    const classification = classifications.get(record.path);
+    if (classification === "unknown") {
+      throw new WorkflowTransitionRecordConflictError(record.path);
+    }
+    if (classification === "intended" || sameMaterial(record.previous, record.intended))
+      continue;
+    const phase = recovery ? "recovery-record-write" : "record-write";
+    journal = await markBoundary(runRoot, profile, journal, {
+      phase,
+      path: record.path
+    });
+    if (record.intended.content === null) {
+      await removeEngineRunFile(
+        runRoot,
+        record.path,
+        `Workflow transition record ${record.path}`
+      );
+    } else {
+      await writeEngineRunText(
+        runRoot,
+        record.path,
+        record.intended.content,
+        recordMaxBytes(profile, record.kind),
+        `Workflow transition record ${record.path}`
+      );
+    }
+    const current = await readRecordMaterial(
+      runRoot,
+      record,
+      recordMaxBytes(profile, record.kind)
+    );
+    if (!sameMaterial(current, record.intended)) {
+      throw new WorkflowTransitionRecordConflictError(record.path);
+    }
+    journal = await markBoundary(runRoot, profile, journal, {
+      phase: recovery ? "recovery-record-verification" : "record-verification",
+      path: record.path
+    });
+    repaired.push(record);
+  }
+  return repaired;
+}
+async function clearJournal(runRoot, profile, journal) {
+  await removeEngineRunFile(
+    runRoot,
+    WORKFLOW_TRANSITION_JOURNAL_PATH,
+    JOURNAL_LABEL,
+    {
+      beforeRemove: async () => {
+        const current = await readJournal(runRoot, profile);
+        if (!current || current.journalId !== journal.journalId || current.status !== "committed") {
+          throw new Error(
+            "Workflow transition journal changed before clearance"
+          );
+        }
+      }
+    }
+  );
+}
+async function settleRevisionClaim(runRoot, journal) {
+  if (journal.operation !== "workflow.submit" || !journal.previous.actionId) {
+    return;
+  }
+  const input = {
+    runId: journal.runId,
+    expectedRevision: journal.previous.revision,
+    expectedActionId: journal.previous.actionId,
+    intendedRevision: journal.intended.revision,
+    execution: journal.execution
+  };
+  await commitExistingRevisionClaim(runRoot, input);
+}
+async function finalizeCommittedJournal(runRoot, profile, journal) {
+  let active = await markBoundary(runRoot, profile, journal, {
+    phase: "commit-evidence-written"
+  });
+  await settleRevisionClaim(runRoot, active);
+  active = await markBoundary(runRoot, profile, active, {
+    phase: "journal-clearance"
+  });
+  await clearJournal(runRoot, profile, active);
+  await invokeConfiguredFault({ phase: "journal-cleared" });
+}
+var WorkflowTransitionImpl = class {
+  constructor(input) {
+    this.input = input;
+  }
+  input;
+  journalId = randomUUID4();
+  staged = /* @__PURE__ */ new Map();
+  baseline = /* @__PURE__ */ new Map();
+  committing = false;
+  committed = false;
+  async read(relativePath, maxBytes, label) {
+    const normalized = assertSafeRecordPath(relativePath, label);
+    if (this.staged.has(normalized)) return this.staged.get(normalized) ?? null;
+    if (!this.baseline.has(normalized)) {
+      this.baseline.set(
+        normalized,
+        await readOptionalEngineRunText(
+          this.input.runRoot,
+          normalized,
+          maxBytes,
+          label
+        )
+      );
+    }
+    return this.baseline.get(normalized) ?? null;
+  }
+  async write(relativePath, content, maxBytes, label) {
+    const normalized = assertSafeRecordPath(relativePath, label);
+    if (Buffer.byteLength(content, "utf8") > maxBytes) {
+      throw new Error(`${label} exceeds ${maxBytes} bytes`);
+    }
+    await this.read(normalized, maxBytes, label);
+    this.staged.set(normalized, content);
+  }
+  async remove(relativePath, label) {
+    const normalized = assertSafeRecordPath(relativePath, label);
+    await this.read(
+      normalized,
+      recordMaxBytes(this.input.profile, recordKind(normalized)),
+      label
+    );
+    this.staged.set(normalized, null);
+    return this.baseline.get(normalized) !== null;
+  }
+  async records() {
+    const stateContent = this.staged.get(STATE_PATH);
+    if (this.input.operation === "workflow.submit" && stateContent) {
+      const previous = stateMetadata(this.baseline.get(STATE_PATH) ?? null);
+      if (previous.actionId) {
+        const claimInput = {
+          runId: this.input.runId,
+          expectedRevision: previous.revision,
+          expectedActionId: previous.actionId,
+          intendedRevision: stateMetadata(stateContent).revision,
+          execution: this.input.execution
+        };
+        const claimPath = revisionClaimPath(claimInput);
+        const claim = await this.read(
+          claimPath,
+          this.input.profile.bounds.claimBytes,
+          "Workflow revision claim"
+        );
+        if (claim !== null) {
+          this.staged.set(claimPath, committedRevisionClaimText(claim));
+        }
+      }
+    }
+    const records = [];
+    for (const [recordPath, intendedContent] of this.staged) {
+      const previousContent = this.baseline.get(recordPath) ?? null;
+      records.push({
+        path: recordPath,
+        kind: recordKind(recordPath),
+        previous: materialOf(previousContent),
+        intended: materialOf(intendedContent)
+      });
+    }
+    return stagedOrder(records);
+  }
+  async commit() {
+    if (this.committed) return;
+    if (this.committing)
+      throw new Error("Workflow transition commit is already running");
+    this.committing = true;
+    try {
+      const records = await this.records();
+      if (records.length === 0) {
+        this.committed = true;
+        return;
+      }
+      const state = stateRecord(records);
+      if (!state || state.intended.content === null) {
+        throw new Error("Workflow transition must declare intended Run state");
+      }
+      const journal = createJournal(
+        this.input,
+        state.previous.content,
+        state.intended.content,
+        records,
+        this.journalId
+      );
+      validateJournalRecordBounds(journal, this.input.profile);
+      validateJournalStateIdentity(journal);
+      validateJournalRevisionIdentity(journal);
+      validateJournalPendingIdentity(journal);
+      const existing = await readJournal(
+        this.input.runRoot,
+        this.input.profile
+      );
+      if (existing) throw new WorkflowTransitionJournalPendingError(existing);
+      await verifyJournalPrevious(
+        this.input.runRoot,
+        this.input.profile,
+        journal
+      );
+      try {
+        await writeJournal(this.input.runRoot, this.input.profile, journal, {
+          exclusive: true
+        });
+      } catch (error) {
+        if (error.code === "EEXIST") {
+          const pending = await readJournal(
+            this.input.runRoot,
+            this.input.profile
+          );
+          if (pending) throw new WorkflowTransitionJournalPendingError(pending);
+        }
+        throw error;
+      }
+      let active = await markBoundary(
+        this.input.runRoot,
+        this.input.profile,
+        journal,
+        { phase: "journal-prepared" }
+      );
+      const verified = await readJournal(
+        this.input.runRoot,
+        this.input.profile
+      );
+      if (!verified || verified.journalId !== active.journalId) {
+        throw new Error(
+          "Workflow transition journal changed after preparation"
+        );
+      }
+      active = await markBoundary(
+        this.input.runRoot,
+        this.input.profile,
+        active,
+        { phase: "journal-verified" }
+      );
+      await applyJournalRecords(
+        this.input.runRoot,
+        this.input.profile,
+        active,
+        false
+      );
+      active = await markBoundary(
+        this.input.runRoot,
+        this.input.profile,
+        active,
+        { phase: "commit-evidence" }
+      );
+      const committedAt = (/* @__PURE__ */ new Date()).toISOString();
+      active = {
+        ...active,
+        status: "committed",
+        committedAt,
+        commitEvidence: {
+          kind: "workflow-transition-commit",
+          journalId: active.journalId,
+          operation: active.operation,
+          runId: active.runId,
+          previousRevision: active.previous.revision,
+          intendedRevision: active.intended.revision,
+          recovered: false,
+          committedAt
+        }
+      };
+      await writeJournal(this.input.runRoot, this.input.profile, active);
+      await finalizeCommittedJournal(
+        this.input.runRoot,
+        this.input.profile,
+        active
+      );
+      this.committed = true;
+    } finally {
+      this.committing = false;
+    }
+  }
+};
+function createWorkflowTransition(input) {
+  return new WorkflowTransitionImpl({
+    ...input,
+    execution: structuredClone(input.execution),
+    profile: parseWorkflowDurabilityProfile(input.profile)
+  });
+}
+async function recoverPreparedJournal(runRoot, profile, initial) {
+  let journal = initial;
+  const crashBoundary = journal.recovery?.crashBoundary ?? journal.lastBoundary ?? "unknown";
+  const classifications = await classifyRecords(runRoot, profile, journal);
+  const unknown = [...classifications.entries()].filter(([, classification]) => classification === "unknown").map(([recordPath]) => recordPath);
+  if (unknown.length > 0) {
+    const blocked = {
+      status: "blocked",
+      journal,
+      unknownPaths: unknown
+    };
+    return blocked;
+  }
+  const repaired = await applyJournalRecords(runRoot, profile, journal, true);
+  journal = await readJournal(runRoot, profile) ?? journal;
+  const record = trajectoryRecord(journal.records);
+  if (!record || record.intended.content === null) {
+    throw new Error("Workflow transition journal has no intended trajectory");
+  }
+  const currentTrajectory = await readRecordMaterial(
+    runRoot,
+    record,
+    profile.bounds.trajectoryBytes
+  );
+  const alreadyRecorded = journal.recovery !== void 0 && sameMaterialIdentity(
+    currentTrajectory,
+    journal.recovery.intendedTrajectory
+  );
+  if (!alreadyRecorded && !sameMaterial(currentTrajectory, record.intended)) {
+    throw new WorkflowTransitionRecordConflictError(record.path);
+  }
+  if (!journal.recovery) {
+    const event = recoveryEvent(
+      journal,
+      record.intended.content,
+      repaired,
+      crashBoundary
+    );
+    const nextTrajectory = appendEventText(record.intended.content, event);
+    journal = recoveryJournal(
+      journal,
+      record.path,
+      event,
+      materialIdentityOf(nextTrajectory),
+      crashBoundary
+    );
+    journal = await markBoundary(runRoot, profile, journal, {
+      phase: "recovery-evidence-prepared"
+    });
+  }
+  const recovery = journal.recovery;
+  if (!recovery)
+    throw new Error("Workflow transition recovery evidence is missing");
+  const current = await readRecordMaterial(
+    runRoot,
+    { path: recovery.trajectoryPath, kind: "trajectory" },
+    profile.bounds.trajectoryBytes
+  );
+  if (!sameMaterialIdentity(current, recovery.intendedTrajectory)) {
+    if (!sameMaterial(current, record.intended)) {
+      const blocked = {
+        status: "blocked",
+        journal,
+        unknownPaths: [recovery.trajectoryPath]
+      };
+      return blocked;
+    }
+    journal = await markBoundary(runRoot, profile, journal, {
+      phase: "recovery-evidence",
+      path: recovery.trajectoryPath
+    });
+    const nextTrajectory = appendEventText(
+      record.intended.content,
+      recovery.event
+    );
+    await writeEngineRunText(
+      runRoot,
+      recovery.trajectoryPath,
+      nextTrajectory,
+      profile.bounds.trajectoryBytes,
+      `Workflow transition record ${recovery.trajectoryPath}`
+    );
+    const verified = await readRecordMaterial(
+      runRoot,
+      { path: recovery.trajectoryPath, kind: "trajectory" },
+      profile.bounds.trajectoryBytes
+    );
+    if (!sameMaterialIdentity(verified, recovery.intendedTrajectory)) {
+      throw new WorkflowTransitionRecordConflictError(recovery.trajectoryPath);
+    }
+    journal = await markBoundary(runRoot, profile, journal, {
+      phase: "recovery-evidence-recorded",
+      path: recovery.trajectoryPath
+    });
+  }
+  if (recovery.status !== "recorded") {
+    journal = {
+      ...journal,
+      recovery: { ...recovery, status: "recorded" }
+    };
+    await writeJournal(runRoot, profile, journal);
+  }
+  const finalTrajectory = await readRecordMaterial(
+    runRoot,
+    { path: recovery.trajectoryPath, kind: "trajectory" },
+    profile.bounds.trajectoryBytes
+  );
+  const finalRecords = journal.records.map(
+    (candidate) => candidate.path === recovery.trajectoryPath ? { ...candidate, intended: { ...finalTrajectory } } : candidate
+  );
+  journal = {
+    ...journal,
+    records: finalRecords
+  };
+  journal = await markBoundary(runRoot, profile, journal, {
+    phase: "commit-evidence"
+  });
+  const committedAt = journal.committedAt ?? (/* @__PURE__ */ new Date()).toISOString();
+  journal = {
+    ...journal,
+    status: "committed",
+    committedAt,
+    commitEvidence: {
+      kind: "workflow-transition-commit",
+      journalId: journal.journalId,
+      operation: journal.operation,
+      runId: journal.runId,
+      previousRevision: journal.previous.revision,
+      intendedRevision: journal.intended.revision,
+      recovered: true,
+      committedAt
+    }
+  };
+  await writeJournal(runRoot, profile, journal);
+  await finalizeCommittedJournal(runRoot, profile, journal);
+  return journal;
+}
+async function recoverWorkflowTransition(runRoot, profile) {
+  const normalizedProfile = parseWorkflowDurabilityProfile(profile);
+  const journal = await readJournal(runRoot, normalizedProfile);
+  if (!journal) return { status: "none" };
+  if (journal.status === "committed") {
+    const classifications = await classifyRecords(
+      runRoot,
+      normalizedProfile,
+      journal
+    );
+    const unknown = [...classifications.entries()].filter(([, classification]) => classification === "unknown").map(([recordPath]) => recordPath);
+    if (unknown.length > 0)
+      return { status: "blocked", journal, unknownPaths: unknown };
+    const needsRepair = [...classifications.values()].some(
+      (classification) => classification === "previous"
+    );
+    if (needsRepair) {
+      const {
+        committedAt: _committedAt,
+        commitEvidence: _commitEvidence,
+        ...withoutCommitEvidence
+      } = journal;
+      const prepared = {
+        ...withoutCommitEvidence,
+        status: "prepared"
+      };
+      const result2 = await recoverPreparedJournal(
+        runRoot,
+        normalizedProfile,
+        prepared
+      );
+      if (isBlockedRecoveryResult(result2)) return result2;
+      return { status: "recovered", journal: result2 };
+    }
+    await finalizeCommittedJournal(runRoot, normalizedProfile, journal);
+    return { status: "recovered", journal };
+  }
+  const result = await recoverPreparedJournal(
+    runRoot,
+    normalizedProfile,
+    journal
+  );
+  if (isBlockedRecoveryResult(result)) return result;
+  return { status: "recovered", journal: result };
+}
 
 // src/workflow-runtime/location.ts
-import { randomUUID as randomUUID5 } from "node:crypto";
+import { randomUUID as randomUUID6 } from "node:crypto";
 
 // src/engine/manual-run.ts
-import { randomUUID as randomUUID4 } from "crypto";
+import { randomUUID as randomUUID5 } from "crypto";
 
 // src/engine/evals.ts
 function evaluateRuntime(definitions, scope, state, artifacts) {
@@ -6761,1006 +9059,6 @@ function recordOutcomeWithResolver(pkg, state, outcome, resolver, context) {
   };
 }
 
-// src/engine/state.ts
-import path10 from "path";
-function assertSafeRunReference(value, key) {
-  const normalized = value.replaceAll("\\", "/");
-  if (path10.posix.isAbsolute(normalized) || path10.win32.isAbsolute(value) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(value) || /[*?]/u.test(value) || normalized.split("/").some(
-    (segment) => segment.length === 0 || segment === "." || segment === ".."
-  )) {
-    throw new Error(
-      `Invalid Run state: ${key} must stay inside the change directory`
-    );
-  }
-}
-var RUN_STATE_FILE = ".comet/run-state.json";
-var RUN_STATE_MAX_BYTES = 256 * 1024;
-var RUN_STATE_READ_MAX_BYTES = Math.max(
-  RUN_STATE_MAX_BYTES,
-  WORKFLOW_DURABILITY_MAX_RECORD_BYTES
-);
-var RUN_STATE_JSON_KEYS = /* @__PURE__ */ new Set([
-  "runId",
-  "skill",
-  "skillVersion",
-  "skillHash",
-  "orchestration",
-  "currentStep",
-  "iteration",
-  "pending",
-  "pendingRef",
-  "trajectoryRef",
-  "contextRef",
-  "artifactsRef",
-  "checkpointRef",
-  "status",
-  "retries",
-  "runtimeIdentity",
-  "workflowRuntime"
-]);
-function requiredJsonString(value, key) {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`Invalid Run state: ${key} must be a non-empty string`);
-  }
-  return value;
-}
-function nullableJsonString(value, key) {
-  if (value === null) return null;
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(
-      `Invalid Run state: ${key} must be a non-empty string or null`
-    );
-  }
-  return value;
-}
-function parseStringRecord(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  for (const [key, entry] of Object.entries(value)) {
-    if (!key || typeof entry !== "string" || entry.length === 0) {
-      throw new Error(`Invalid Run state: ${label} must contain strings`);
-    }
-  }
-  return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [key, entry])
-  );
-}
-function parseJsonRecord(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  try {
-    JSON.stringify(value);
-  } catch (error) {
-    throw new Error(`Invalid Run state: ${label} must be JSON-serializable`, {
-      cause: error
-    });
-  }
-  return structuredClone(value);
-}
-function parseDecisionScalarRecord(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const result = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (!key || entry === null) {
-      throw new Error(`Invalid Run state: ${label} must contain scalar values`);
-    }
-    if (typeof entry !== "string" && typeof entry !== "number" && typeof entry !== "boolean") {
-      throw new Error(`Invalid Run state: ${label} must contain scalar values`);
-    }
-    if (typeof entry === "number" && !Number.isFinite(entry)) {
-      throw new Error(
-        `Invalid Run state: ${label} must contain finite numbers`
-      );
-    }
-    result[key] = entry;
-  }
-  return result;
-}
-function parseReviewerAttestation(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const reviewer = value;
-  const unknown = Object.keys(reviewer).find(
-    (key) => key !== "subject" && key !== "authorities"
-  );
-  if (unknown)
-    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
-  const subject = reviewer.subject;
-  if (typeof subject !== "string" || subject.length === 0) {
-    throw new Error(`Invalid Run state: ${label}.subject must be non-empty`);
-  }
-  if (!Array.isArray(reviewer.authorities) || reviewer.authorities.length === 0 || reviewer.authorities.some(
-    (authority) => typeof authority !== "string" || authority.length === 0
-  )) {
-    throw new Error(`Invalid Run state: ${label}.authorities must be strings`);
-  }
-  if (new Set(reviewer.authorities).size !== reviewer.authorities.length) {
-    throw new Error(
-      `Invalid Run state: ${label}.authorities must not contain duplicates`
-    );
-  }
-  return {
-    subject,
-    authorities: [...reviewer.authorities]
-  };
-}
-function parseDecisionScopeReference(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const reference = value;
-  const keys = /* @__PURE__ */ new Set([
-    "id",
-    "required",
-    "versionId",
-    "contentHash",
-    "producer"
-  ]);
-  const unknown = Object.keys(reference).find((key) => !keys.has(key));
-  if (unknown) {
-    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
-  }
-  const contentHash2 = requiredJsonString(
-    reference.contentHash,
-    `${label}.contentHash`
-  );
-  if (!/^[a-f0-9]{64}$/u.test(contentHash2)) {
-    throw new Error(
-      `Invalid Run state: ${label}.contentHash must be a SHA-256 hash`
-    );
-  }
-  if (typeof reference.required !== "boolean") {
-    throw new Error(`Invalid Run state: ${label}.required must be a boolean`);
-  }
-  if (!reference.producer || typeof reference.producer !== "object" || Array.isArray(reference.producer)) {
-    throw new Error(`Invalid Run state: ${label}.producer must be an object`);
-  }
-  const producer = reference.producer;
-  const producerKeys = /* @__PURE__ */ new Set([
-    "runId",
-    "nodeId",
-    "cycleId",
-    "attemptId",
-    "actionId",
-    "revision"
-  ]);
-  const unknownProducer = Object.keys(producer).find(
-    (key) => !producerKeys.has(key)
-  );
-  if (unknownProducer) {
-    throw new Error(
-      `Invalid Run state: ${label}.producer has unknown field ${unknownProducer}`
-    );
-  }
-  return {
-    id: requiredJsonString(reference.id, `${label}.id`),
-    required: reference.required,
-    versionId: requiredJsonString(reference.versionId, `${label}.versionId`),
-    contentHash: contentHash2,
-    producer: parseWorkflowArtifactCoordinate(producer, `${label}.producer`)
-  };
-}
-function parseDecisionScope2(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const scope = value;
-  const unknown = Object.keys(scope).find(
-    (key) => key !== "artifacts" && key !== "evidence"
-  );
-  if (unknown) {
-    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
-  }
-  const parseEntries = (kind) => {
-    if (!Array.isArray(scope[kind])) {
-      throw new Error(`Invalid Run state: ${label}.${kind} must be an array`);
-    }
-    if (scope[kind].length > 64) {
-      throw new Error(
-        `Invalid Run state: ${label}.${kind} has too many entries`
-      );
-    }
-    return scope[kind].map(
-      (entry, index) => parseDecisionScopeReference(entry, `${label}.${kind}[${index}]`)
-    );
-  };
-  return {
-    artifacts: parseEntries("artifacts"),
-    evidence: parseEntries("evidence")
-  };
-}
-function parseDecisionReceipt(value, index) {
-  const label = `workflowRuntime.decisionReceipts[${index}]`;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const receipt = value;
-  const keys = /* @__PURE__ */ new Set([
-    "runId",
-    "revision",
-    "resultingRevision",
-    "actionId",
-    "decisionId",
-    "nodeId",
-    "cycleId",
-    "attemptId",
-    "choiceId",
-    "reviewer",
-    "inputs",
-    "rationale",
-    "evidenceReferences",
-    "scope",
-    "timestamp",
-    "protocolHash",
-    "packageHash",
-    "snapshotHash"
-  ]);
-  const unknown = Object.keys(receipt).find((key) => !keys.has(key));
-  if (unknown)
-    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
-  const integer = (key) => {
-    const entry = receipt[key];
-    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 0) {
-      throw new Error(
-        `Invalid Run state: ${label}.${key} must be a non-negative integer`
-      );
-    }
-    return entry;
-  };
-  const revision = integer("revision");
-  const resultingRevision = integer("resultingRevision");
-  if (resultingRevision !== revision + 1) {
-    throw new Error(
-      `Invalid Run state: ${label} revisions are not consecutive`
-    );
-  }
-  const cycleId = receipt.cycleId;
-  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
-    throw new Error(
-      `Invalid Run state: ${label}.cycleId must be a string or null`
-    );
-  }
-  const protocolHash = requiredJsonString(receipt.protocolHash, "protocolHash");
-  const packageHash = requiredJsonString(receipt.packageHash, "packageHash");
-  const snapshotHash = requiredJsonString(receipt.snapshotHash, "snapshotHash");
-  for (const [key, hash2] of [
-    ["protocolHash", protocolHash],
-    ["packageHash", packageHash],
-    ["snapshotHash", snapshotHash]
-  ]) {
-    if (!/^[a-f0-9]{64}$/u.test(hash2)) {
-      throw new Error(
-        `Invalid Run state: ${label}.${key} must be a SHA-256 hash`
-      );
-    }
-  }
-  if (receipt.rationale !== void 0 && typeof receipt.rationale !== "string") {
-    throw new Error(`Invalid Run state: ${label}.rationale must be a string`);
-  }
-  let evidenceReferences;
-  if (receipt.evidenceReferences !== void 0) {
-    if (!Array.isArray(receipt.evidenceReferences) || receipt.evidenceReferences.some(
-      (reference) => typeof reference !== "string" || reference.length === 0
-    )) {
-      throw new Error(
-        `Invalid Run state: ${label}.evidenceReferences must be strings`
-      );
-    }
-    evidenceReferences = [...receipt.evidenceReferences];
-  }
-  const scope = receipt.scope === void 0 ? void 0 : parseDecisionScope2(receipt.scope, `${label}.scope`);
-  return {
-    runId: requiredJsonString(receipt.runId, "runId"),
-    revision,
-    resultingRevision,
-    actionId: requiredJsonString(receipt.actionId, "actionId"),
-    decisionId: requiredJsonString(receipt.decisionId, "decisionId"),
-    nodeId: requiredJsonString(receipt.nodeId, "nodeId"),
-    cycleId,
-    attemptId: requiredJsonString(receipt.attemptId, "attemptId"),
-    choiceId: requiredJsonString(receipt.choiceId, "choiceId"),
-    reviewer: parseReviewerAttestation(receipt.reviewer, `${label}.reviewer`),
-    inputs: parseDecisionScalarRecord(receipt.inputs, `${label}.inputs`),
-    ...receipt.rationale !== void 0 ? { rationale: receipt.rationale } : {},
-    ...evidenceReferences ? { evidenceReferences } : {},
-    ...scope ? { scope } : {},
-    timestamp: requiredJsonString(receipt.timestamp, "timestamp"),
-    protocolHash,
-    packageHash,
-    snapshotHash
-  };
-}
-function parseWorkflowCycle(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const cycle = value;
-  const keys = /* @__PURE__ */ new Set(["id", "key", "instanceOrdinal"]);
-  const unknown = Object.keys(cycle).find((key) => !keys.has(key));
-  if (unknown)
-    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
-  const instanceOrdinal = cycle.instanceOrdinal;
-  if (typeof instanceOrdinal !== "number" || !Number.isSafeInteger(instanceOrdinal) || instanceOrdinal < 1) {
-    throw new Error(
-      `Invalid Run state: ${label}.instanceOrdinal must be a positive integer`
-    );
-  }
-  return {
-    id: requiredJsonString(cycle.id, `${label}.id`),
-    key: requiredJsonString(cycle.key, `${label}.key`),
-    instanceOrdinal
-  };
-}
-function parseWorkflowAttempt(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const attempt = value;
-  const keys = /* @__PURE__ */ new Set([
-    "id",
-    "stepId",
-    "cycleId",
-    "visitOrdinal",
-    "retryOrdinal"
-  ]);
-  const unknown = Object.keys(attempt).find((key) => !keys.has(key));
-  if (unknown)
-    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
-  const id = requiredJsonString(
-    attempt.id,
-    `${label}.id`
-  );
-  const stepId2 = requiredJsonString(
-    attempt.stepId,
-    `${label}.stepId`
-  );
-  const cycleId = attempt.cycleId === void 0 ? null : attempt.cycleId;
-  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
-    throw new Error(
-      `Invalid Run state: ${label}.cycleId must be a string or null`
-    );
-  }
-  const visitOrdinal = attempt.visitOrdinal;
-  const retryOrdinal = attempt.retryOrdinal;
-  if (typeof visitOrdinal !== "number" || !Number.isSafeInteger(visitOrdinal) || visitOrdinal < 1) {
-    throw new Error(
-      `Invalid Run state: ${label}.visitOrdinal must be a positive integer`
-    );
-  }
-  if (typeof retryOrdinal !== "number" || !Number.isSafeInteger(retryOrdinal) || retryOrdinal < 0) {
-    throw new Error(
-      `Invalid Run state: ${label}.retryOrdinal must be a non-negative integer`
-    );
-  }
-  return {
-    id,
-    stepId: stepId2,
-    cycleId,
-    visitOrdinal,
-    retryOrdinal
-  };
-}
-function parseWorkflowOutcome(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const outcome = value;
-  const keys = /* @__PURE__ */ new Set([
-    "actionId",
-    "status",
-    "summary",
-    "retryOrdinal",
-    "routing",
-    "evidence",
-    "artifactVersions"
-  ]);
-  const unknown = Object.keys(outcome).find((key) => !keys.has(key));
-  if (unknown)
-    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
-  const actionId2 = requiredJsonString(
-    outcome.actionId,
-    `${label}.actionId`
-  );
-  const summary = requiredJsonString(
-    outcome.summary,
-    `${label}.summary`
-  );
-  if (outcome.status !== "succeeded" && outcome.status !== "failed") {
-    throw new Error(`Invalid Run state: ${label}.status is invalid`);
-  }
-  const retryOrdinal = outcome.retryOrdinal;
-  if (typeof retryOrdinal !== "number" || !Number.isSafeInteger(retryOrdinal) || retryOrdinal < 0) {
-    throw new Error(
-      `Invalid Run state: ${label}.retryOrdinal must be a non-negative integer`
-    );
-  }
-  return {
-    actionId: actionId2,
-    status: outcome.status,
-    summary,
-    retryOrdinal,
-    ...outcome.routing !== void 0 ? { routing: parseStringRecord(outcome.routing, `${label}.routing`) } : {},
-    ...outcome.evidence !== void 0 ? { evidence: parseJsonRecord(outcome.evidence, `${label}.evidence`) } : {},
-    ...outcome.artifactVersions !== void 0 ? {
-      artifactVersions: parseStringRecord(
-        outcome.artifactVersions,
-        `${label}.artifactVersions`
-      )
-    } : {}
-  };
-}
-function parseWorkflowVisit(value, index) {
-  const label = `workflowRuntime.visits[${index}]`;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const visit = value;
-  const keys = /* @__PURE__ */ new Set([
-    "attemptId",
-    "stepId",
-    "cycleId",
-    "visitOrdinal",
-    "outcomes"
-  ]);
-  const unknown = Object.keys(visit).find((key) => !keys.has(key));
-  if (unknown)
-    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
-  const attemptId2 = requiredJsonString(
-    visit.attemptId,
-    `${label}.attemptId`
-  );
-  const stepId2 = requiredJsonString(
-    visit.stepId,
-    `${label}.stepId`
-  );
-  const cycleId = visit.cycleId === void 0 ? null : visit.cycleId;
-  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
-    throw new Error(
-      `Invalid Run state: ${label}.cycleId must be a string or null`
-    );
-  }
-  const visitOrdinal = visit.visitOrdinal;
-  if (typeof visitOrdinal !== "number" || !Number.isSafeInteger(visitOrdinal) || visitOrdinal < 1) {
-    throw new Error(
-      `Invalid Run state: ${label}.visitOrdinal must be a positive integer`
-    );
-  }
-  if (!Array.isArray(visit.outcomes)) {
-    throw new Error(`Invalid Run state: ${label}.outcomes must be an array`);
-  }
-  return {
-    attemptId: attemptId2,
-    stepId: stepId2,
-    cycleId,
-    visitOrdinal,
-    outcomes: visit.outcomes.map(
-      (outcome, outcomeIndex) => parseWorkflowOutcome(outcome, `${label}.outcomes[${outcomeIndex}]`)
-    )
-  };
-}
-function parseWorkflowArtifactLifetime(value, label) {
-  if (value !== "attempt" && value !== "cycle" && value !== "run") {
-    throw new Error(`Invalid Run state: ${label} must be a valid lifetime`);
-  }
-  return value;
-}
-function parseWorkflowArtifactProducer(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const producer = value;
-  const keys = /* @__PURE__ */ new Set([
-    "runId",
-    "nodeId",
-    "cycleId",
-    "attemptId",
-    "actionId",
-    "revision"
-  ]);
-  const unknown = Object.keys(producer).find((key) => !keys.has(key));
-  if (unknown) {
-    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
-  }
-  return parseWorkflowArtifactCoordinate(producer, label);
-}
-function parseWorkflowArtifactCoordinate(coordinate, label) {
-  const cycleId = coordinate.cycleId;
-  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
-    throw new Error(
-      `Invalid Run state: ${label}.cycleId must be a string or null`
-    );
-  }
-  const revision = coordinate.revision;
-  if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0) {
-    throw new Error(
-      `Invalid Run state: ${label}.revision must be a non-negative integer`
-    );
-  }
-  return {
-    runId: requiredJsonString(coordinate.runId, `${label}.runId`),
-    nodeId: requiredJsonString(coordinate.nodeId, `${label}.nodeId`),
-    cycleId,
-    attemptId: requiredJsonString(coordinate.attemptId, `${label}.attemptId`),
-    actionId: requiredJsonString(coordinate.actionId, `${label}.actionId`),
-    revision
-  };
-}
-function parseWorkflowArtifactVersion(value, index) {
-  const label = `workflowRuntime.artifactVersions[${index}]`;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const version = value;
-  const keys = /* @__PURE__ */ new Set([
-    "id",
-    "artifactId",
-    "schemaId",
-    "lifetime",
-    "scopeId",
-    "contentHash",
-    "path",
-    "producer",
-    "timestamp"
-  ]);
-  const unknown = Object.keys(version).find((key) => !keys.has(key));
-  if (unknown) {
-    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
-  }
-  const contentHash2 = requiredJsonString(
-    version.contentHash,
-    `${label}.contentHash`
-  );
-  if (!/^[a-f0-9]{64}$/u.test(contentHash2)) {
-    throw new Error(
-      `Invalid Run state: ${label}.contentHash must be a SHA-256 hash`
-    );
-  }
-  const artifactPath = requiredJsonString(version.path, `${label}.path`);
-  assertSafeRunReference(artifactPath, `${label}.path`);
-  return {
-    id: requiredJsonString(version.id, `${label}.id`),
-    artifactId: requiredJsonString(version.artifactId, `${label}.artifactId`),
-    schemaId: requiredJsonString(version.schemaId, `${label}.schemaId`),
-    lifetime: parseWorkflowArtifactLifetime(
-      version.lifetime,
-      `${label}.lifetime`
-    ),
-    scopeId: requiredJsonString(version.scopeId, `${label}.scopeId`),
-    contentHash: contentHash2,
-    path: artifactPath,
-    producer: parseWorkflowArtifactProducer(
-      version.producer,
-      `${label}.producer`
-    ),
-    timestamp: requiredJsonString(version.timestamp, `${label}.timestamp`)
-  };
-}
-function parseWorkflowArtifactSelection(value, index) {
-  const label = `workflowRuntime.artifactSelections[${index}]`;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Run state: ${label} must be an object`);
-  }
-  const selection2 = value;
-  const keys = /* @__PURE__ */ new Set([
-    "artifactId",
-    "versionId",
-    "runId",
-    "nodeId",
-    "cycleId",
-    "attemptId",
-    "actionId",
-    "revision",
-    "timestamp"
-  ]);
-  const unknown = Object.keys(selection2).find((key) => !keys.has(key));
-  if (unknown) {
-    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
-  }
-  const coordinate = parseWorkflowArtifactCoordinate(selection2, label);
-  return {
-    artifactId: requiredJsonString(selection2.artifactId, `${label}.artifactId`),
-    versionId: requiredJsonString(selection2.versionId, `${label}.versionId`),
-    ...coordinate,
-    timestamp: requiredJsonString(selection2.timestamp, `${label}.timestamp`)
-  };
-}
-function parseWorkflowRuntime(value, runId) {
-  if (value === void 0) return void 0;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Invalid Run state: workflowRuntime must be an object");
-  }
-  const runtime = value;
-  const keys = /* @__PURE__ */ new Set([
-    "revision",
-    "nextVisitOrdinal",
-    "currentAttempt",
-    "currentCycle",
-    "cycles",
-    "visits",
-    "decisionReceipts",
-    "artifactVersions",
-    "artifactSelections"
-  ]);
-  const unknown = Object.keys(runtime).find((key) => !keys.has(key));
-  if (unknown) {
-    throw new Error(
-      `Invalid Run state: workflowRuntime has unknown field ${unknown}`
-    );
-  }
-  for (const key of ["revision", "nextVisitOrdinal"]) {
-    const entry = runtime[key];
-    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 0) {
-      throw new Error(
-        `Invalid Run state: workflowRuntime.${key} must be a non-negative integer`
-      );
-    }
-  }
-  const revision = runtime.revision;
-  const nextVisitOrdinal = runtime.nextVisitOrdinal;
-  if (!Array.isArray(runtime.visits)) {
-    throw new Error(
-      "Invalid Run state: workflowRuntime.visits must be an array"
-    );
-  }
-  const visits = runtime.visits.map(parseWorkflowVisit);
-  const cycles = runtime.cycles === void 0 ? [] : Array.isArray(runtime.cycles) ? runtime.cycles.map(
-    (cycle, index) => parseWorkflowCycle(cycle, `workflowRuntime.cycles[${index}]`)
-  ) : (() => {
-    throw new Error(
-      "Invalid Run state: workflowRuntime.cycles must be an array"
-    );
-  })();
-  const cycleIds = /* @__PURE__ */ new Set();
-  const cycleOrdinals = /* @__PURE__ */ new Map();
-  for (const cycle of cycles) {
-    if (cycleIds.has(cycle.id)) {
-      throw new Error(
-        `Invalid Run state: duplicate WorkflowRuntime Cycle ${cycle.id}`
-      );
-    }
-    cycleIds.add(cycle.id);
-    const expectedOrdinal = (cycleOrdinals.get(cycle.key) ?? 0) + 1;
-    if (cycle.instanceOrdinal !== expectedOrdinal) {
-      throw new Error(
-        `Invalid Run state: WorkflowRuntime Cycle ordinal is invalid for ${cycle.key}`
-      );
-    }
-    cycleOrdinals.set(cycle.key, cycle.instanceOrdinal);
-  }
-  const currentCycle = runtime.currentCycle === void 0 || runtime.currentCycle === null ? null : parseWorkflowCycle(
-    runtime.currentCycle,
-    "workflowRuntime.currentCycle"
-  );
-  if (currentCycle && !cycleIds.has(currentCycle.id)) {
-    throw new Error(
-      "Invalid Run state: current WorkflowRuntime Cycle is not in cycles"
-    );
-  }
-  const decisionReceipts = runtime.decisionReceipts === void 0 ? [] : Array.isArray(runtime.decisionReceipts) ? runtime.decisionReceipts.map(parseDecisionReceipt) : (() => {
-    throw new Error(
-      "Invalid Run state: WorkflowRuntime decisionReceipts must be an array"
-    );
-  })();
-  const artifactVersions = runtime.artifactVersions === void 0 ? [] : Array.isArray(runtime.artifactVersions) ? runtime.artifactVersions.map(parseWorkflowArtifactVersion) : (() => {
-    throw new Error(
-      "Invalid Run state: WorkflowRuntime artifactVersions must be an array"
-    );
-  })();
-  const artifactSelections = runtime.artifactSelections === void 0 ? [] : Array.isArray(runtime.artifactSelections) ? runtime.artifactSelections.map(parseWorkflowArtifactSelection) : (() => {
-    throw new Error(
-      "Invalid Run state: WorkflowRuntime artifactSelections must be an array"
-    );
-  })();
-  const artifactVersionIds = /* @__PURE__ */ new Set();
-  for (const version of artifactVersions) {
-    if (artifactVersionIds.has(version.id)) {
-      throw new Error(
-        `Invalid Run state: duplicate WorkflowRuntime artifact version ${version.id}`
-      );
-    }
-    artifactVersionIds.add(version.id);
-    if (version.producer.runId !== runId) {
-      throw new Error(
-        `Invalid Run state: artifact version ${version.id} belongs to another Run`
-      );
-    }
-    if (version.lifetime === "attempt" && version.scopeId !== version.producer.attemptId || version.lifetime === "cycle" && version.scopeId !== version.producer.cycleId || version.lifetime === "run" && version.scopeId !== runId) {
-      throw new Error(
-        `Invalid Run state: artifact version ${version.id} has an invalid scope`
-      );
-    }
-    if (version.producer.revision >= revision) {
-      throw new Error(
-        `Invalid Run state: artifact version ${version.id} has a future revision`
-      );
-    }
-  }
-  const artifactSelectionKeys = /* @__PURE__ */ new Set();
-  for (const selection2 of artifactSelections) {
-    const selectionKey = `${selection2.attemptId}\0${selection2.actionId}\0${selection2.artifactId}`;
-    if (artifactSelectionKeys.has(selectionKey)) {
-      throw new Error(
-        `Invalid Run state: duplicate WorkflowRuntime artifact selection ${selection2.artifactId}`
-      );
-    }
-    artifactSelectionKeys.add(selectionKey);
-    if (!artifactVersionIds.has(selection2.versionId)) {
-      throw new Error(
-        `Invalid Run state: WorkflowRuntime selection references unknown artifact version ${selection2.versionId}`
-      );
-    }
-    const version = artifactVersions.find(
-      (candidate) => candidate.id === selection2.versionId
-    );
-    if (version.artifactId !== selection2.artifactId) {
-      throw new Error(
-        "Invalid Run state: WorkflowRuntime artifact selection id does not match its version"
-      );
-    }
-    if (selection2.runId !== runId || selection2.revision >= revision) {
-      throw new Error(
-        `Invalid Run state: WorkflowRuntime artifact selection ${selection2.versionId} has an invalid Run or revision`
-      );
-    }
-  }
-  const attemptIds = /* @__PURE__ */ new Set();
-  const visitOrdinals = /* @__PURE__ */ new Set();
-  const receiptActionIds = /* @__PURE__ */ new Set();
-  for (const receipt of decisionReceipts) {
-    if (receiptActionIds.has(receipt.actionId)) {
-      throw new Error(
-        `Invalid Run state: duplicate WorkflowRuntime Decision Receipt ${receipt.actionId}`
-      );
-    }
-    receiptActionIds.add(receipt.actionId);
-  }
-  let outcomeCount = 0;
-  for (const visit of visits) {
-    if (attemptIds.has(visit.attemptId)) {
-      throw new Error(
-        `Invalid Run state: duplicate WorkflowRuntime Attempt ${visit.attemptId}`
-      );
-    }
-    attemptIds.add(visit.attemptId);
-    if (visitOrdinals.has(visit.visitOrdinal)) {
-      throw new Error(
-        `Invalid Run state: duplicate WorkflowRuntime visit ordinal ${visit.visitOrdinal}`
-      );
-    }
-    if (visit.cycleId !== null && !cycleIds.has(visit.cycleId)) {
-      throw new Error(
-        `Invalid Run state: WorkflowRuntime visit references unknown Cycle ${visit.cycleId}`
-      );
-    }
-    visitOrdinals.add(visit.visitOrdinal);
-    outcomeCount += visit.outcomes.length;
-    if (visit.visitOrdinal > nextVisitOrdinal) {
-      throw new Error(
-        "Invalid Run state: WorkflowRuntime visit ordinal exceeds its counter"
-      );
-    }
-  }
-  const currentAttempt = runtime.currentAttempt === null ? null : parseWorkflowAttempt(
-    runtime.currentAttempt,
-    "workflowRuntime.currentAttempt"
-  );
-  if (currentAttempt && !attemptIds.has(currentAttempt.id)) {
-    throw new Error(
-      "Invalid Run state: current WorkflowRuntime Attempt is not in visits"
-    );
-  }
-  if (currentAttempt && currentAttempt.cycleId !== (currentCycle?.id ?? null)) {
-    throw new Error(
-      "Invalid Run state: current WorkflowRuntime Attempt does not match current Cycle"
-    );
-  }
-  if (revision !== outcomeCount) {
-    throw new Error(
-      "Invalid Run state: WorkflowRuntime revision does not match visit outcomes"
-    );
-  }
-  if (currentAttempt) {
-    const currentVisit = visits.find(
-      (visit) => visit.attemptId === currentAttempt.id
-    );
-    if (currentVisit.stepId !== currentAttempt.stepId || currentVisit.cycleId !== currentAttempt.cycleId || currentVisit.visitOrdinal !== currentAttempt.visitOrdinal) {
-      throw new Error(
-        "Invalid Run state: current WorkflowRuntime Attempt does not match its visit"
-      );
-    }
-    const lastOutcome = currentVisit.outcomes.at(-1);
-    const expectedRetryOrdinal = lastOutcome ? lastOutcome.retryOrdinal + 1 : 0;
-    if (currentAttempt.retryOrdinal !== expectedRetryOrdinal) {
-      throw new Error(
-        "Invalid Run state: current WorkflowRuntime retry ordinal is invalid"
-      );
-    }
-  }
-  return {
-    revision,
-    nextVisitOrdinal,
-    currentAttempt,
-    currentCycle,
-    cycles,
-    visits,
-    decisionReceipts,
-    artifactVersions,
-    artifactSelections
-  };
-}
-function parseRunStateJson(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Invalid Run state: stored value must be an object");
-  }
-  const json = value;
-  const unknown = Object.keys(json).find(
-    (key) => !RUN_STATE_JSON_KEYS.has(key)
-  );
-  if (unknown) throw new Error(`Invalid Run state: unknown field ${unknown}`);
-  const runId = requiredJsonString(json.runId, "runId");
-  const skill = requiredJsonString(json.skill, "skill");
-  const skillVersion = requiredJsonString(json.skillVersion, "skillVersion");
-  const skillHash = requiredJsonString(json.skillHash, "skillHash");
-  if (json.orchestration !== "deterministic" && json.orchestration !== "adaptive") {
-    throw new Error(
-      "Invalid Run state: orchestration must be deterministic or adaptive"
-    );
-  }
-  const currentStep = nullableJsonString(json.currentStep, "currentStep");
-  const iteration = json.iteration;
-  if (typeof iteration !== "number" || !Number.isSafeInteger(iteration) || iteration < 0) {
-    throw new Error(
-      "Invalid Run state: iteration must be a non-negative integer"
-    );
-  }
-  const pending = nullableJsonString(json.pending, "pending");
-  const pendingRef = requiredJsonString(json.pendingRef, "pendingRef");
-  const trajectoryRef = requiredJsonString(json.trajectoryRef, "trajectoryRef");
-  const contextRef = requiredJsonString(json.contextRef, "contextRef");
-  const artifactsRef = requiredJsonString(json.artifactsRef, "artifactsRef");
-  const checkpointRef = requiredJsonString(json.checkpointRef, "checkpointRef");
-  assertSafeRunReference(pendingRef, "pending_ref");
-  assertSafeRunReference(trajectoryRef, "trajectory_ref");
-  assertSafeRunReference(contextRef, "context_ref");
-  assertSafeRunReference(artifactsRef, "artifacts_ref");
-  assertSafeRunReference(checkpointRef, "checkpoint_ref");
-  if (json.status !== "running" && json.status !== "waiting" && json.status !== "completed" && json.status !== "failed") {
-    throw new Error("Invalid Run state: run_status is invalid");
-  }
-  if (!json.retries || typeof json.retries !== "object" || Array.isArray(json.retries)) {
-    throw new Error("Invalid Run state: run_retries must be a JSON object");
-  }
-  for (const count of Object.values(json.retries)) {
-    if (!Number.isSafeInteger(count) || count < 0) {
-      throw new Error(
-        "Invalid Run state: retry counts must be non-negative integers"
-      );
-    }
-  }
-  let runtimeIdentity;
-  if (json.runtimeIdentity !== void 0) {
-    if (!json.runtimeIdentity || typeof json.runtimeIdentity !== "object" || Array.isArray(json.runtimeIdentity)) {
-      throw new Error("Invalid Run state: runtimeIdentity must be an object");
-    }
-    const identity = json.runtimeIdentity;
-    const identityKeys = /* @__PURE__ */ new Set([
-      "protocolHash",
-      "packageHash",
-      "snapshotHash",
-      "nodeToStep",
-      "capabilityVersion",
-      "resolverHash",
-      "findingCatalogVersion",
-      "durabilityProfile"
-    ]);
-    const unknownIdentityKey = Object.keys(identity).find(
-      (key) => !identityKeys.has(key)
-    );
-    if (unknownIdentityKey) {
-      throw new Error(
-        `Invalid Run state: runtimeIdentity unknown field ${unknownIdentityKey}`
-      );
-    }
-    if (typeof identity.protocolHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.protocolHash) || typeof identity.packageHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.packageHash) || typeof identity.snapshotHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.snapshotHash) || !identity.nodeToStep || typeof identity.nodeToStep !== "object" || Array.isArray(identity.nodeToStep) || identity.capabilityVersion !== void 0 && identity.capabilityVersion !== 3 || identity.resolverHash !== void 0 && (typeof identity.resolverHash !== "string" || !/^[a-f0-9]{64}$/u.test(identity.resolverHash)) || identity.findingCatalogVersion !== void 0 && identity.findingCatalogVersion !== 1) {
-      throw new Error("Invalid Run state: runtimeIdentity is invalid");
-    }
-    for (const [nodeId, stepId2] of Object.entries(identity.nodeToStep)) {
-      if (!nodeId || typeof stepId2 !== "string" || !stepId2) {
-        throw new Error(
-          "Invalid Run state: runtimeIdentity mapping is invalid"
-        );
-      }
-    }
-    const durabilityProfile = identity.durabilityProfile === void 0 ? void 0 : parseWorkflowDurabilityProfile(identity.durabilityProfile);
-    runtimeIdentity = {
-      protocolHash: identity.protocolHash,
-      packageHash: identity.packageHash,
-      snapshotHash: identity.snapshotHash,
-      nodeToStep: Object.fromEntries(
-        Object.entries(identity.nodeToStep).map(([nodeId, stepId2]) => [
-          nodeId,
-          stepId2
-        ])
-      ),
-      ...identity.capabilityVersion === 3 ? { capabilityVersion: 3 } : {},
-      ...typeof identity.resolverHash === "string" ? { resolverHash: identity.resolverHash } : {},
-      ...identity.findingCatalogVersion === 1 ? { findingCatalogVersion: 1 } : {},
-      ...durabilityProfile ? { durabilityProfile } : {}
-    };
-  }
-  const workflowRuntime = parseWorkflowRuntime(json.workflowRuntime, runId);
-  return {
-    runId,
-    skill,
-    skillVersion,
-    skillHash,
-    orchestration: json.orchestration,
-    currentStep,
-    iteration,
-    pending,
-    pendingRef,
-    trajectoryRef,
-    contextRef,
-    artifactsRef,
-    checkpointRef,
-    status: json.status,
-    retries: json.retries,
-    ...runtimeIdentity ? { runtimeIdentity } : {},
-    ...workflowRuntime ? { workflowRuntime } : {}
-  };
-}
-function parseRunStateValue(value) {
-  return parseRunStateJson(value);
-}
-function serializeRunState(state) {
-  return JSON.stringify(parseRunStateJson(state), null, 2);
-}
-async function readRunState(changeDir, options = {}) {
-  const raw = await readOptionalEngineRunText(
-    changeDir,
-    RUN_STATE_FILE,
-    RUN_STATE_READ_MAX_BYTES,
-    "Run state",
-    options
-  );
-  if (raw === null) return null;
-  let document;
-  try {
-    document = JSON.parse(raw);
-  } catch (error) {
-    if (Buffer.byteLength(raw, "utf8") > RUN_STATE_MAX_BYTES) {
-      throw new Error(`Run state exceeds ${RUN_STATE_MAX_BYTES} bytes`, {
-        cause: error
-      });
-    }
-    throw error;
-  }
-  const identity = document && typeof document === "object" && !Array.isArray(document) ? document.runtimeIdentity : void 0;
-  const profile = identity && typeof identity === "object" && !Array.isArray(identity) ? identity.durabilityProfile : void 0;
-  const maxBytes = profile === void 0 ? RUN_STATE_MAX_BYTES : parseWorkflowDurabilityProfile(profile).bounds.runStateBytes;
-  if (Buffer.byteLength(raw, "utf8") > maxBytes) {
-    throw new Error(`Run state exceeds ${maxBytes} bytes`);
-  }
-  return parseRunStateValue(document);
-}
-async function writeRunState(changeDir, state, options = {}) {
-  const serialized = serializeRunState(state);
-  const maxBytes = state.runtimeIdentity?.durabilityProfile?.bounds.runStateBytes ?? RUN_STATE_MAX_BYTES;
-  await writeEngineRunText(
-    changeDir,
-    RUN_STATE_FILE,
-    serialized,
-    maxBytes,
-    "Run state",
-    { ...options, maxBytes }
-  );
-}
-
 // src/engine/manual-run.ts
 function durabilityBound(state, key) {
   return state.runtimeIdentity?.durabilityProfile?.bounds[key];
@@ -7884,7 +9182,7 @@ async function appendEvent(changeDir, state, type, data, options = {}) {
     trajectoryOptions
   );
 }
-async function persistDecision(changeDir, state, pkg, confirmations, resolver = staticDeterministicResolver, prepareAction) {
+async function persistDecision(changeDir, state, pkg, confirmations, resolver = staticDeterministicResolver, prepareAction, mutationOverlay) {
   const decision = decideWithResolver(
     pkg,
     state,
@@ -7898,7 +9196,8 @@ async function persistDecision(changeDir, state, pkg, confirmations, resolver = 
       changeDir,
       pkg,
       decision.state,
-      action
+      action,
+      mutationOverlay
     );
     if (!prepared.action) {
       return {
@@ -7915,18 +9214,24 @@ async function persistDecision(changeDir, state, pkg, confirmations, resolver = 
       decision.state,
       "pendingActionBytes"
     );
-    await writePendingAction(
-      changeDir,
-      decision.state.pendingRef,
-      action,
-      pendingMaxBytes === void 0 ? {} : { maxBytes: pendingMaxBytes }
-    );
-  }
-  await writeRunState(changeDir, action ? decision.state : state);
-  if (action) {
-    await appendEvent(changeDir, decision.state, "action_proposed", {
-      action
+    await writePendingAction(changeDir, decision.state.pendingRef, action, {
+      ...pendingMaxBytes === void 0 ? {} : { maxBytes: pendingMaxBytes },
+      ...mutationOverlay ? { overlay: mutationOverlay } : {}
     });
+  }
+  await writeRunState(
+    changeDir,
+    action ? decision.state : state,
+    mutationOverlay ? { overlay: mutationOverlay } : {}
+  );
+  if (action) {
+    await appendEvent(
+      changeDir,
+      decision.state,
+      "action_proposed",
+      { action },
+      mutationOverlay ? { overlay: mutationOverlay } : {}
+    );
   }
   return {
     state: action ? decision.state : state,
@@ -7935,10 +9240,16 @@ async function persistDecision(changeDir, state, pkg, confirmations, resolver = 
     reason: decision.reason
   };
 }
-async function evaluateAndRecord(changeDir, pkg, state, scope, artifacts) {
+async function evaluateAndRecord(changeDir, pkg, state, scope, artifacts, mutationOverlay) {
   const results = evaluateRuntime(pkg.evals, scope, state, artifacts);
   if (results.length > 0) {
-    await appendEvent(changeDir, state, "eval_completed", { scope, results });
+    await appendEvent(
+      changeDir,
+      state,
+      "eval_completed",
+      { scope, results },
+      mutationOverlay ? { overlay: mutationOverlay } : {}
+    );
   }
   return results;
 }
@@ -7962,28 +9273,54 @@ async function startManualRun(pkg, changeDir, options = []) {
   }
   const state = startRun(
     pkg,
-    startOptions.runId ?? randomUUID4(),
+    startOptions.runId ?? randomUUID5(),
     snapshot.hash,
     startOptions.workflowRuntime
   );
   if (startOptions.runtimeIdentity) {
     state.runtimeIdentity = structuredClone(startOptions.runtimeIdentity);
   }
-  await writeRunState(changeDir, state);
-  await appendEvent(changeDir, state, "run_started", {
-    skill: state.skill,
-    skillVersion: state.skillVersion,
-    skillHash: state.skillHash,
-    ...state.runtimeIdentity ? { runtimeIdentity: structuredClone(state.runtimeIdentity) } : {}
-  });
-  return persistDecision(
+  const transition = startOptions.runtimeIdentity?.durabilityProfile ? createWorkflowTransition({
+    runRoot: changeDir,
+    runId: state.runId,
+    operation: "workflow.start",
+    execution: startOptions.runtimeIdentity,
+    profile: startOptions.runtimeIdentity.durabilityProfile
+  }) : void 0;
+  if (!transition) {
+    await writeRunState(changeDir, state);
+    await appendEvent(changeDir, state, "run_started", {
+      skill: state.skill,
+      skillVersion: state.skillVersion,
+      skillHash: state.skillHash,
+      ...state.runtimeIdentity ? { runtimeIdentity: structuredClone(state.runtimeIdentity) } : {}
+    });
+  } else {
+    await writeRunState(changeDir, state, { overlay: transition });
+    await appendEvent(
+      changeDir,
+      state,
+      "run_started",
+      {
+        skill: state.skill,
+        skillVersion: state.skillVersion,
+        skillHash: state.skillHash,
+        ...state.runtimeIdentity ? { runtimeIdentity: structuredClone(state.runtimeIdentity) } : {}
+      },
+      { overlay: transition }
+    );
+  }
+  const result = await persistDecision(
     changeDir,
     state,
     pkg,
     startOptions.confirmations ?? [],
     startOptions.resolver,
-    startOptions.prepareAction
+    startOptions.prepareAction,
+    transition
   );
+  await transition?.commit();
+  return result;
 }
 async function resumeManualRunInternal(changeDir, options = {}) {
   const state = await requiredRun(changeDir);
@@ -8012,14 +9349,24 @@ async function resumeManualRunInternal(changeDir, options = {}) {
         reason: `Run is ${state.status}`
       };
     }
-    return persistDecision(
+    const transition2 = state.runtimeIdentity?.durabilityProfile ? createWorkflowTransition({
+      runRoot: changeDir,
+      runId: state.runId,
+      operation: "workflow.resume",
+      execution: state.runtimeIdentity,
+      profile: state.runtimeIdentity.durabilityProfile
+    }) : void 0;
+    const result = await persistDecision(
       changeDir,
       state,
       pkg,
       options.confirmations ?? [],
       resolver,
-      options.prepareAction
+      options.prepareAction,
+      transition2
     );
+    await transition2?.commit();
+    return result;
   }
   if (!pending || !state.pending) {
     throw new Error("No pending action accepts an outcome");
@@ -8035,12 +9382,22 @@ async function resumeManualRunInternal(changeDir, options = {}) {
     );
   }
   const outcome = { ...options.outcome, actionId: pending.id };
+  const transition = state.runtimeIdentity?.durabilityProfile ? createWorkflowTransition({
+    runRoot: changeDir,
+    runId: state.runId,
+    operation: "workflow.submit",
+    execution: state.runtimeIdentity,
+    profile: state.runtimeIdentity.durabilityProfile
+  }) : void 0;
   const advanced = applyArtifactMutation(
     recordOutcomeWithResolver(pkg, state, outcome, resolver, void 0),
     options.artifactMutation
   );
   const artifactsMaxBytes = durabilityBound(state, "artifactsBytes");
-  const artifactReadOptions = artifactsMaxBytes === void 0 ? {} : { maxBytes: artifactsMaxBytes };
+  const artifactReadOptions = {
+    ...artifactsMaxBytes === void 0 ? {} : { maxBytes: artifactsMaxBytes },
+    ...transition ? { overlay: transition } : {}
+  };
   const artifacts = {
     ...await readArtifacts(
       changeDir,
@@ -8053,7 +9410,8 @@ async function resumeManualRunInternal(changeDir, options = {}) {
   await options.revisionFence?.();
   const artifactWriteOptions = {
     ...options.revisionFence ? { beforeCommit: options.revisionFence } : {},
-    ...artifactsMaxBytes === void 0 ? {} : { maxBytes: artifactsMaxBytes }
+    ...artifactsMaxBytes === void 0 ? {} : { maxBytes: artifactsMaxBytes },
+    ...transition ? { overlay: transition } : {}
   };
   await writeArtifacts(
     changeDir,
@@ -8064,7 +9422,8 @@ async function resumeManualRunInternal(changeDir, options = {}) {
   const trajectoryMaxBytes = durabilityBound(state, "trajectoryBytes");
   const trajectoryWriteOptions = {
     ...options.revisionFence ? { beforeCommit: options.revisionFence } : {},
-    ...trajectoryMaxBytes === void 0 ? {} : { maxBytes: trajectoryMaxBytes }
+    ...trajectoryMaxBytes === void 0 ? {} : { maxBytes: trajectoryMaxBytes },
+    ...transition ? { overlay: transition } : {}
   };
   const decisionReceipt2 = advanced.workflowRuntime?.decisionReceipts.find(
     (receipt) => receipt.actionId === pending.id
@@ -8080,23 +9439,22 @@ async function resumeManualRunInternal(changeDir, options = {}) {
     },
     trajectoryWriteOptions
   );
-  await clearPendingAction(
-    changeDir,
-    advanced.pendingRef,
-    options.revisionFence ? { beforeRemove: options.revisionFence } : {}
-  );
+  await clearPendingAction(changeDir, advanced.pendingRef, {
+    ...options.revisionFence ? { beforeRemove: options.revisionFence } : {},
+    ...transition ? { overlay: transition } : {}
+  });
   const stateFence = options.revisionStateFence ?? options.revisionFence;
-  await writeRunState(
-    changeDir,
-    advanced,
-    stateFence ? { beforeCommit: stateFence } : {}
-  );
+  await writeRunState(changeDir, advanced, {
+    ...stateFence ? { beforeCommit: stateFence } : {},
+    ...transition ? { overlay: transition } : {}
+  });
   const evals = await evaluateAndRecord(
     changeDir,
     pkg,
     advanced,
     "step",
-    artifacts
+    artifacts,
+    transition
   );
   if (advanced.status === "completed") {
     evals.push(
@@ -8105,12 +9463,15 @@ async function resumeManualRunInternal(changeDir, options = {}) {
         pkg,
         advanced,
         "completion",
-        artifacts
+        artifacts,
+        transition
       )
     );
+    await transition?.commit();
     return { state: advanced, action: null, evals };
   }
   if (advanced.status !== "running") {
+    await transition?.commit();
     return {
       state: advanced,
       action: null,
@@ -8124,8 +9485,10 @@ async function resumeManualRunInternal(changeDir, options = {}) {
     pkg,
     options.confirmations ?? [],
     resolver,
-    options.prepareAction
+    options.prepareAction,
+    transition
   );
+  await transition?.commit();
   return { ...next, evals };
 }
 async function resumeManualRun(changeDir, options = {}) {
@@ -8140,7 +9503,7 @@ async function resumeManualWorkflowRun(changeDir, options, artifactMutation) {
 
 // src/engine/standalone-run.ts
 import { promises as fs6 } from "node:fs";
-import path11 from "path";
+import path12 from "path";
 function validateRunId(runId) {
   if (typeof runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId)) {
     throw new Error(`Invalid standalone Run id: ${String(runId)}`);
@@ -8154,16 +9517,16 @@ function validateProjectRoot(projectRoot) {
 function standaloneRunDir(projectRoot, runId) {
   validateRunId(runId);
   validateProjectRoot(projectRoot);
-  return path11.resolve(projectRoot, ".comet", "runs", runId);
+  return path12.resolve(projectRoot, ".comet", "runs", runId);
 }
 function pathSegments(projectRoot) {
-  const lexicalRoot = path11.resolve(projectRoot);
-  const root = path11.parse(lexicalRoot).root;
-  const relative = path11.relative(root, lexicalRoot);
-  return relative.length === 0 ? [] : relative.split(path11.sep);
+  const lexicalRoot = path12.resolve(projectRoot);
+  const root = path12.parse(lexicalRoot).root;
+  const relative = path12.relative(root, lexicalRoot);
+  return relative.length === 0 ? [] : relative.split(path12.sep);
 }
 function runRootRelativePath(projectRoot, runRoot) {
-  return path11.relative(projectRoot, runRoot).replaceAll("\\", "/");
+  return path12.relative(projectRoot, runRoot).replaceAll("\\", "/");
 }
 function isMissing(error) {
   const code = error.code;
@@ -8171,10 +9534,10 @@ function isMissing(error) {
 }
 async function resolveStandaloneProjectRoot(projectRoot, createMissing) {
   validateProjectRoot(projectRoot);
-  const lexicalRoot = path11.resolve(projectRoot);
-  let cursor = path11.parse(lexicalRoot).root;
+  const lexicalRoot = path12.resolve(projectRoot);
+  let cursor = path12.parse(lexicalRoot).root;
   for (const segment of pathSegments(lexicalRoot)) {
-    cursor = path11.join(cursor, segment);
+    cursor = path12.join(cursor, segment);
     let stat;
     try {
       stat = await fs6.lstat(cursor);
@@ -8340,12 +9703,12 @@ function resolveWorkflowStartLocation(options) {
     }
     return {
       location,
-      runId: ("runId" in options ? options.runId : void 0) ?? randomUUID5()
+      runId: ("runId" in options ? options.runId : void 0) ?? randomUUID6()
     };
   }
   return {
     location: manualLocation(options.runRoot),
-    runId: options.runId ?? randomUUID5()
+    runId: options.runId ?? randomUUID6()
   };
 }
 
@@ -8488,7 +9851,7 @@ function terminalEvaluationResults(trajectory) {
       continue;
     }
     for (const result of event.data.results) {
-      if (!isRecord8(result)) continue;
+      if (!isRecord9(result)) continue;
       if (typeof result.evalId !== "string" || typeof result.passed !== "boolean" || typeof result.evidence !== "string") {
         continue;
       }
@@ -8782,7 +10145,7 @@ function continuation(result, identity) {
   };
 }
 var LEGACY_STATE_MAX_BYTES = 256 * 1024;
-function isRecord8(value) {
+function isRecord9(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function projectionStatus(state, pending, maxRetriesPerAction) {
@@ -8812,7 +10175,7 @@ async function projectWorkflowState(target) {
   );
   for (const event of trajectory) {
     if (event.type !== "action_completed") continue;
-    if (!isRecord8(event.data.action) || !isRecord8(event.data.outcome)) continue;
+    if (!isRecord9(event.data.action) || !isRecord9(event.data.outcome)) continue;
     const stepId2 = event.data.action.stepId;
     const node = typeof stepId2 === "string" ? nodeByStep.get(stepId2) : void 0;
     const outcomeStatus = event.data.outcome.status;
@@ -8828,7 +10191,7 @@ async function projectWorkflowState(target) {
     if (outcomeStatus !== "succeeded") continue;
     if (!completedNodes.includes(node)) completedNodes.push(node);
     const outcomeEvidence = event.data.outcome.evidence;
-    evidence[node] = isRecord8(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
+    evidence[node] = isRecord9(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
   }
   const protocol = verified.package.runtime.protocol;
   const runtimeState = state.workflowRuntime;
@@ -8931,7 +10294,7 @@ async function writeWorkflowStateProjection(target, projection) {
         continue;
       }
     }
-    const parent = path12.posix.dirname(relativePath);
+    const parent = path13.posix.dirname(relativePath);
     if (parent !== ".") {
       await ensureProtectedProjectDirectory(projectRoot, parent, { label });
       inspection = await inspectProtectedProjectPath(
@@ -9231,6 +10594,8 @@ async function continuationFromVerifiedRun(verified, runRoot) {
 async function inspectWorkflowRun(target) {
   return withStructuredRuntimeErrors(async () => {
     const location = resolveWorkflowRunLocation(target);
+    const journal = await readWorkflowTransitionJournal(location.runRoot);
+    if (journal) return recoveryRequiredContinuation(location, journal);
     try {
       if (!await location.readState()) return null;
     } catch (error) {
@@ -9540,8 +10905,75 @@ function conflictContinuation(verified, finding) {
     blockers: legacyBlockersFromFindings("blocked", projected.findings)
   };
 }
+async function recoveryRequiredContinuation(location, journal) {
+  const stateRecord2 = journal.records.find(
+    (candidate) => candidate.kind === "state"
+  );
+  if (!stateRecord2) {
+    throw new Error("Workflow transition journal has no state record");
+  }
+  const declaredStates = [
+    stateRecord2.previous.content === null ? void 0 : {
+      label: "previous",
+      state: parseRunStateValue(
+        JSON.parse(stateRecord2.previous.content)
+      )
+    },
+    stateRecord2.intended.content === null ? void 0 : {
+      label: "intended",
+      state: parseRunStateValue(
+        JSON.parse(stateRecord2.intended.content)
+      )
+    }
+  ].filter(
+    (candidate) => Boolean(candidate)
+  );
+  let current = null;
+  try {
+    current = await location.readState();
+  } catch {
+    current = null;
+  }
+  const selected = declaredStates.find(
+    (candidate) => current !== null && JSON.stringify(stableValue(candidate.state)) === JSON.stringify(stableValue(current))
+  ) ?? declaredStates.find((candidate) => candidate.label === "previous") ?? declaredStates.find((candidate) => candidate.label === "intended");
+  if (!selected) {
+    throw new Error("Workflow transition journal has no usable Run state");
+  }
+  const state = selected.state;
+  let action = null;
+  if (state.pending) {
+    const record = journal.records.find(
+      (candidate) => candidate.path === state.pendingRef && candidate[selected.label].content !== null
+    );
+    const content = record?.[selected.label].content;
+    if (content !== void 0 && content !== null) {
+      action = parsePendingActionValue(JSON.parse(content));
+    }
+  }
+  const base = continuation({ state, action, evals: [] }, journal.execution);
+  const projected = boundWorkflowFindings([
+    recoveryRequiredFinding(
+      state.workflowRuntime?.revision ?? journal.previous.revision,
+      state.pending
+    )
+  ]);
+  return {
+    ...base,
+    disposition: "blocked",
+    findings: projected.findings,
+    findingSummary: projected.summary,
+    requiresUserDecision: projected.findings.some(
+      (finding) => finding.requiresUserDecision
+    ),
+    blockers: legacyBlockersFromFindings("blocked", projected.findings)
+  };
+}
 async function validateWorkflowSubmission(target, submission) {
   return withStructuredRuntimeErrors(async () => {
+    const location = resolveWorkflowRunLocation(target);
+    const journal = await readWorkflowTransitionJournal(location.runRoot);
+    if (journal) return recoveryRequiredContinuation(location, journal);
     validateSubmission(submission);
     let prepared;
     try {
@@ -9712,9 +11144,9 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
           durabilityReadOptions(state, "trajectoryBytes")
         );
         const proposal = trajectory.slice().reverse().find(
-          (event) => event.type === "action_proposed" && isRecord8(event.data.action) && event.data.action.id === action.id
+          (event) => event.type === "action_proposed" && isRecord9(event.data.action) && event.data.action.id === action.id
         );
-        if (!proposal || !isRecord8(proposal.data.action)) {
+        if (!proposal || !isRecord9(proposal.data.action)) {
           throw new Error(
             "WorkflowRuntime scoped decision has no durable action proposal"
           );
@@ -9787,11 +11219,16 @@ function createWorkflowRuntime() {
     async resume(target, options = {}) {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
+        const journal = await readWorkflowTransitionJournal(location.runRoot);
+        if (journal) return recoveryRequiredContinuation(location, journal);
         return resumeStoredRun(location, options);
       });
     },
     async submit(target, submission) {
       return withStructuredRuntimeErrors(async () => {
+        const location = resolveWorkflowRunLocation(target);
+        const journal = await readWorkflowTransitionJournal(location.runRoot);
+        if (journal) return recoveryRequiredContinuation(location, journal);
         validateSubmission(submission);
         let prepared;
         try {
@@ -9868,6 +11305,22 @@ function createWorkflowRuntime() {
           if (error instanceof WorkflowRevisionConflictError) {
             return conflictContinuation(error.verified, error.finding);
           }
+          if (error instanceof WorkflowTransitionJournalPendingError || error instanceof WorkflowTransitionRecordConflictError) {
+            const journal2 = await readWorkflowTransitionJournal(
+              prepared.location.runRoot
+            );
+            if (journal2) {
+              return recoveryRequiredContinuation(prepared.location, journal2);
+            }
+            const current = await verifyStoredRun(prepared.location);
+            return conflictContinuation(
+              current,
+              revisionConflictFinding(
+                current.state.workflowRuntime?.revision ?? 0,
+                current.pending?.id ?? current.state.pending ?? null
+              )
+            );
+          }
           throw error;
         }
       });
@@ -9875,6 +11328,24 @@ function createWorkflowRuntime() {
     async recover(target, options = {}) {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
+        const journal = await readWorkflowTransitionJournal(location.runRoot);
+        if (journal) {
+          if (!journal.execution.durabilityProfile) {
+            throw new Error(
+              "Workflow transition journal has no durability profile"
+            );
+          }
+          const recovery = await recoverWorkflowTransition(
+            location.runRoot,
+            journal.execution.durabilityProfile
+          );
+          if (recovery.status === "blocked") {
+            return recoveryRequiredContinuation(
+              location,
+              recovery.journal ?? journal
+            );
+          }
+        }
         return resumeStoredRun(location, options);
       });
     }

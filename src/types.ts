@@ -257,7 +257,8 @@ export type WorkflowProtocolCapability =
   | "bounded-cycles"
   | "versioned-artifacts";
 
-export type WorkflowDurabilityCapability = "revision-fences";
+export type WorkflowDurabilityCapability =
+  "revision-fences" | "transition-journal";
 
 export interface WorkflowDurabilityBounds {
   runStateBytes: number;
@@ -265,6 +266,7 @@ export interface WorkflowDurabilityBounds {
   trajectoryBytes: number;
   artifactsBytes: number;
   claimBytes: number;
+  transitionJournalBytes?: number;
 }
 
 export interface WorkflowDurabilitySchemaVersions {
@@ -273,6 +275,7 @@ export interface WorkflowDurabilitySchemaVersions {
   trajectory: 1;
   artifacts: 1;
   revisionClaim: 1;
+  transitionJournal?: 1;
 }
 
 export interface WorkflowDurabilityProfile {

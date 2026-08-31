@@ -129,6 +129,14 @@ protected transition-addressed revision claim, so replaying the same transition
 cannot advance the Run twice. Output Schema evidence is supplied
 under `evidence`, while required Skill-call, augmentation, and guardrail proof
 may use the corresponding check identifiers in `evidence.completedChecks`.
+Phase 4 mutations are first staged behind a protected write-ahead journal at
+`.comet/transition-journal.json`. The journal records the operation, execution
+identity, revision/action boundary, and exact previous and intended material for
+each affected Run record. `resume` and `submit` return a `recovery-required`
+finding while that journal is pending; only explicit `recover` classifies each
+record as previous, intended, or unknown, rolls forward known mixtures, and
+appends one bounded `recovery_reconciled` event. Unknown material remains
+untouched and blocks recovery.
 The returned continuation reports the current Workflow Node, pending Engine
 action, current Cycle and Attempt, full Cycle and visit ledgers, stable
 Node-to-step mapping, artifact version and selection ledgers, current valid

@@ -63,6 +63,20 @@ second protected compare-and-swap check. A competing, stale, replayed, or
 cross-Run envelope returns a blocked continuation with the current revision,
 current action identity, and a stable `revision-conflict` finding.
 
+Every Phase 4 start, resume-time action materialization, and accepted submission
+is staged through one protected write-ahead transition journal at
+`.comet/transition-journal.json`. The bounded journal contains canonical
+previous and intended material plus content identities for every affected state,
+pending-action, artifacts, and trajectory record. Records are applied in a
+fixed order and re-read before commit evidence is written. A pending journal
+blocks ordinary `resume` and `submit` with `recovery-required`; explicit
+`recover` classifies records as exact previous, exact intended, or unknown.
+Known mixtures roll forward without replaying the external action, while unknown
+identity preserves the journal and all existing evidence. Successful recovery
+appends one bounded `recovery_reconciled` event naming the crash boundary and
+repaired identities, then clears the journal only after commit evidence is
+durable.
+
 The Creator evaluation report additionally records the generated package tree
 hash. Review readiness rejects missing, stale, mismatched, or incomplete
 identity evidence.

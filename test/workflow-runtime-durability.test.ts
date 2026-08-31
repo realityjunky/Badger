@@ -10,6 +10,11 @@ import { createWorkflowRuntime } from "../src/workflow-runtime/public.js";
 import { generatePackage } from "../src/factory/generate.js";
 import type { WorkflowInput, WorkflowProtocol } from "../src/types.js";
 import { promisify } from "node:util";
+import {
+  clearWorkflowTransitionFaultForTests,
+  readWorkflowTransitionJournal,
+  setWorkflowTransitionFaultForTests,
+} from "../src/workflow-runtime/transition-journal.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -33,9 +38,28 @@ const durabilityProfile = {
   findingCatalogVersion: 1,
 } as const;
 
+const transitionJournalProfile = {
+  ...durabilityProfile,
+  capabilities: ["revision-fences", "transition-journal"],
+  bounds: {
+    ...durabilityProfile.bounds,
+    transitionJournalBytes: 1024 * 1024,
+  },
+  schemaVersions: {
+    ...durabilityProfile.schemaVersions,
+    transitionJournal: 1,
+  },
+} as const;
+
 type Phase4Protocol = WorkflowProtocol & {
   capabilities: NonNullable<WorkflowProtocol["capabilities"]> & {
     durability: typeof durabilityProfile;
+  };
+};
+
+type Phase4JournalProtocol = WorkflowProtocol & {
+  capabilities: NonNullable<WorkflowProtocol["capabilities"]> & {
+    durability: typeof transitionJournalProfile;
   };
 };
 
@@ -68,6 +92,15 @@ function phase4Protocol(): Phase4Protocol {
       durability: structuredClone(durabilityProfile),
     },
   }).protocol as Phase4Protocol;
+}
+
+function phase4JournalProtocol(): Phase4JournalProtocol {
+  const protocol = phase4Protocol();
+  protocol.capabilities = {
+    ...protocol.capabilities!,
+    durability: structuredClone(transitionJournalProfile),
+  } as Phase4JournalProtocol["capabilities"];
+  return protocol as Phase4JournalProtocol;
 }
 
 function phase4DecisionProtocol(): Phase4Protocol {
@@ -131,6 +164,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
   });
 
   afterEach(async () => {
+    clearWorkflowTransitionFaultForTests();
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -145,6 +179,19 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
     expect((await readRunState(runRoot))?.runtimeIdentity).toMatchObject({
       durabilityProfile,
     });
+    await expect(readWorkflowTransitionJournal(runRoot)).resolves.toBeNull();
+  });
+
+  it("captures an explicit transition-journal capability and bound", async () => {
+    const started = await createWorkflowRuntime().start({
+      protocol: phase4JournalProtocol(),
+      runRoot,
+      runId: "explicit-journal-profile-run",
+    });
+
+    expect(started.execution.durabilityProfile).toEqual(
+      transitionJournalProfile,
+    );
   });
 
   it.each([
@@ -245,6 +292,306 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
     expect(
       trajectory.filter((event) => event.type === "action_proposed"),
     ).toHaveLength(2);
+  });
+
+  it("requires explicit recovery and rolls forward a crashed transition", async () => {
+    const runtime = createWorkflowRuntime();
+    const started = await runtime.start({
+      protocol: phase4Protocol(),
+      runRoot,
+      runId: "journal-run",
+    });
+    const submission = {
+      actionId: started.pendingAction!.id,
+      runId: started.runId,
+      nodeId: started.currentNode!,
+      revision: started.revision,
+      execution: started.execution,
+      status: "succeeded" as const,
+      summary: "Prepared the workflow input.",
+    };
+
+    setWorkflowTransitionFaultForTests({
+      phase: "record-write",
+      path: ".comet/artifacts.json",
+    });
+    await expect(runtime.submit(runRoot, submission)).rejects.toThrow(
+      "deterministic workflow transition fault",
+    );
+    const journal = await readWorkflowTransitionJournal(runRoot);
+    expect(journal).toMatchObject({
+      operation: "workflow.submit",
+      runId: started.runId,
+      previous: { revision: 0, actionId: started.pendingAction!.id },
+      intended: { revision: 1, actionId: expect.any(String) },
+    });
+    expect(journal?.records.slice(0, 4).map((record) => record.path)).toEqual([
+      ".comet/run-state.json",
+      ".comet/pending-action.json",
+      ".comet/artifacts.json",
+      ".comet/trajectory.jsonl",
+    ]);
+    expect(journal?.records.at(-1)).toMatchObject({
+      kind: "revision-claim",
+      path: expect.stringMatching(/^\.comet\/revision-claims\//u),
+    });
+    clearWorkflowTransitionFaultForTests();
+
+    const blocked = await runtime.resume(runRoot);
+    expect(blocked).toMatchObject({
+      disposition: "blocked",
+      revision: 1,
+      findings: [expect.objectContaining({ code: "recovery-required" })],
+    });
+
+    const recovered = await runtime.recover(runRoot);
+    expect(recovered).toMatchObject({
+      disposition: "continue",
+      revision: 1,
+      currentNode: "finish",
+    });
+    const state = await readRunState(runRoot);
+    const trajectory = await readTrajectory(runRoot, state!.trajectoryRef);
+    expect(
+      trajectory.filter((event) => event.type === "recovery_reconciled"),
+    ).toHaveLength(1);
+    expect(
+      trajectory.find((event) => event.type === "recovery_reconciled")?.data,
+    ).toMatchObject({
+      crashBoundary: "record-write:.comet/artifacts.json",
+    });
+    expect(await runtime.recover(runRoot)).toEqual(recovered);
+    const completed = await runtime.submit(runRoot, {
+      actionId: recovered.pendingAction!.id,
+      runId: recovered.runId,
+      nodeId: recovered.currentNode!,
+      revision: recovered.revision,
+      execution: recovered.execution,
+      status: "succeeded",
+      summary: "Finished the workflow.",
+    });
+    expect(completed).toMatchObject({
+      disposition: "done",
+      revision: 2,
+      pendingAction: null,
+    });
+  });
+
+  it.each([
+    ["journal-prepared", undefined],
+    ["journal-verified", undefined],
+    ["record-write", ".comet/run-state.json"],
+    ["record-verification", ".comet/run-state.json"],
+    ["commit-evidence", undefined],
+    ["commit-evidence-written", undefined],
+    ["journal-clearance", undefined],
+  ] as const)("recovers a start interrupted at %s", async (phase, path) => {
+    const runtime = createWorkflowRuntime();
+    setWorkflowTransitionFaultForTests({ phase, ...(path ? { path } : {}) });
+
+    await expect(
+      runtime.start({
+        protocol: phase4Protocol(),
+        runRoot,
+        runId: `fault-${phase}`,
+      }),
+    ).rejects.toThrow("deterministic workflow transition fault");
+    clearWorkflowTransitionFaultForTests();
+
+    const blocked = await runtime.resume(runRoot);
+    expect(blocked).toMatchObject({
+      disposition: "blocked",
+      findings: [expect.objectContaining({ code: "recovery-required" })],
+    });
+
+    const recovered = await runtime.recover(runRoot);
+    expect(recovered.pendingAction).not.toBeNull();
+    expect(await runtime.recover(runRoot)).toEqual(recovered);
+  });
+
+  it("blocks recovery on an unknown record identity without guessing", async () => {
+    const runtime = createWorkflowRuntime();
+    const started = await runtime.start({
+      protocol: phase4Protocol(),
+      runRoot,
+      runId: "unknown-record-run",
+    });
+    const submission = {
+      actionId: started.pendingAction!.id,
+      runId: started.runId,
+      nodeId: started.currentNode!,
+      revision: started.revision,
+      execution: started.execution,
+      status: "succeeded" as const,
+      summary: "Prepared the workflow input.",
+    };
+
+    setWorkflowTransitionFaultForTests({
+      phase: "record-write",
+      path: ".comet/run-state.json",
+    });
+    await expect(runtime.submit(runRoot, submission)).rejects.toThrow(
+      "deterministic workflow transition fault",
+    );
+    clearWorkflowTransitionFaultForTests();
+    await fs.writeFile(
+      path.join(runRoot, ".comet", "artifacts.json"),
+      '{"tampered":true}\n',
+    );
+
+    const blocked = await runtime.recover(runRoot);
+    expect(blocked).toMatchObject({
+      disposition: "blocked",
+      findings: [expect.objectContaining({ code: "recovery-required" })],
+    });
+    expect(
+      await fs.readFile(path.join(runRoot, ".comet", "artifacts.json"), "utf8"),
+    ).toBe('{"tampered":true}\n');
+    expect(
+      (
+        await readTrajectory(
+          runRoot,
+          (await readRunState(runRoot))!.trajectoryRef,
+        )
+      ).filter((event) => event.type === "recovery_reconciled"),
+    ).toHaveLength(0);
+  });
+
+  it("recovers decision receipts and terminal writes exactly once", async () => {
+    const runtime = createWorkflowRuntime();
+    const started = await runtime.start({
+      protocol: phase4DecisionProtocol(),
+      runRoot,
+      runId: "journal-decision-run",
+    });
+    const response = {
+      kind: "decision" as const,
+      actionId: started.pendingAction!.id,
+      runId: started.runId,
+      revision: started.revision,
+      nodeId: started.currentNode!,
+      cycleId: started.cycleId,
+      attemptId: started.attemptId!,
+      choiceId: "approve",
+      reviewer: { subject: "reviewer", authorities: ["approve"] },
+      execution: started.execution,
+    };
+
+    setWorkflowTransitionFaultForTests({
+      phase: "record-verification",
+      path: ".comet/run-state.json",
+    });
+    await expect(runtime.submit(runRoot, response)).rejects.toThrow(
+      "deterministic workflow transition fault",
+    );
+    clearWorkflowTransitionFaultForTests();
+
+    const afterDecision = await runtime.recover(runRoot);
+    expect(afterDecision).toMatchObject({
+      disposition: "continue",
+      revision: 1,
+      currentNode: "finish",
+      decisionReceipts: [
+        expect.objectContaining({ actionId: response.actionId }),
+      ],
+    });
+    expect(
+      (await readRunState(runRoot))?.workflowRuntime?.decisionReceipts,
+    ).toHaveLength(1);
+
+    const terminalSubmission = {
+      actionId: afterDecision.pendingAction!.id,
+      runId: afterDecision.runId,
+      revision: afterDecision.revision,
+      nodeId: afterDecision.currentNode!,
+      execution: afterDecision.execution,
+      status: "succeeded" as const,
+      summary: "Finished the workflow.",
+    };
+    setWorkflowTransitionFaultForTests({
+      phase: "record-write",
+      path: ".comet/pending-action.json",
+    });
+    await expect(runtime.submit(runRoot, terminalSubmission)).rejects.toThrow(
+      "deterministic workflow transition fault",
+    );
+    clearWorkflowTransitionFaultForTests();
+
+    const completed = await runtime.recover(runRoot);
+    expect(completed).toMatchObject({
+      disposition: "done",
+      revision: 2,
+      pendingAction: null,
+      decisionReceipts: [
+        expect.objectContaining({ actionId: response.actionId }),
+      ],
+    });
+    const state = await readRunState(runRoot);
+    const trajectory = await readTrajectory(runRoot, state!.trajectoryRef);
+    expect(
+      trajectory.filter((event) => event.type === "action_completed"),
+    ).toHaveLength(2);
+    expect(
+      trajectory.filter((event) => event.type === "recovery_reconciled"),
+    ).toHaveLength(2);
+    expect(await runtime.recover(runRoot)).toEqual(completed);
+  });
+
+  it.each([
+    "recovery-record-write",
+    "recovery-record-verification",
+    "recovery-evidence-prepared",
+    "recovery-evidence",
+    "recovery-evidence-recorded",
+    "commit-evidence",
+    "commit-evidence-written",
+    "journal-clearance",
+  ] as const)("recovers after a fault during %s", async (phase) => {
+    const runtime = createWorkflowRuntime();
+    const started = await runtime.start({
+      protocol: phase4Protocol(),
+      runRoot,
+      runId: `recovery-fault-${phase}`,
+    });
+    const submission = {
+      actionId: started.pendingAction!.id,
+      runId: started.runId,
+      nodeId: started.currentNode!,
+      revision: started.revision,
+      execution: started.execution,
+      status: "succeeded" as const,
+      summary: "Prepared the workflow input.",
+    };
+    setWorkflowTransitionFaultForTests({
+      phase: "record-write",
+      path: ".comet/run-state.json",
+    });
+    await expect(runtime.submit(runRoot, submission)).rejects.toThrow(
+      "deterministic workflow transition fault",
+    );
+    clearWorkflowTransitionFaultForTests();
+
+    setWorkflowTransitionFaultForTests({ phase });
+    await expect(runtime.recover(runRoot)).rejects.toThrow(
+      "deterministic workflow transition fault",
+    );
+    clearWorkflowTransitionFaultForTests();
+
+    const recovered = await runtime.recover(runRoot);
+    expect(recovered).toMatchObject({
+      disposition: "continue",
+      revision: 1,
+      currentNode: "finish",
+    });
+    expect(
+      (
+        await readTrajectory(
+          runRoot,
+          (await readRunState(runRoot))!.trajectoryRef,
+        )
+      ).filter((event) => event.type === "recovery_reconciled"),
+    ).toHaveLength(1);
+    expect(await runtime.recover(runRoot)).toEqual(recovered);
   });
 
   it("returns the authoritative continuation for stale and cross-Run submissions", async () => {
@@ -428,6 +775,207 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
       (await readRunState(generatedRunRoot))?.workflowRuntime?.revision,
     ).toBe(1);
   });
+
+  it("recovers a generated child-process interruption through the public runtime", async () => {
+    const projectRoot = path.join(root, "generated-journal-project");
+    const protocol = phase4Protocol();
+    const generated = await generatePackage({
+      proposal: {
+        schemaVersion: 1,
+        name: protocol.name,
+        goal: protocol.goal,
+        intent: "new-skill",
+        planHash: "plan-hash",
+        workflow: protocol,
+        candidates: [],
+        blockers: [],
+        warnings: [],
+        canInitialize: true,
+      },
+      plan: {
+        schemaVersion: 1,
+        goal: protocol.goal,
+        skillCreatorIntent: "new-skill",
+        preferredSkills: [],
+        workflow: protocol as unknown as WorkflowInput,
+        defaultLocale: "en",
+      },
+      destination: path.join(projectRoot, "generated"),
+    });
+    const stateScript = path.join(
+      generated.packageRoot,
+      "scripts",
+      "workflow-state.mjs",
+    );
+    const generatedRunRoot = path.join(projectRoot, "run");
+    const run = (args: string[], env = process.env) =>
+      execFileAsync(process.execPath, [stateScript, ...args], {
+        cwd: projectRoot,
+        env,
+      });
+    await run([
+      "init",
+      "--run-root",
+      generatedRunRoot,
+      "--run-id",
+      "generated-journal-run",
+    ]);
+
+    await expect(
+      run(
+        [
+          "record",
+          "prepare",
+          '{"summary":"Prepared through a child process."}',
+          "--run-root",
+          generatedRunRoot,
+          "--json",
+        ],
+        {
+          ...process.env,
+          COMET_WORKFLOW_TEST_FAULT_BOUNDARY:
+            "record-write:.comet/run-state.json",
+        },
+      ),
+    ).rejects.toThrow();
+
+    const runtime = createWorkflowRuntime();
+    const blocked = await runtime.resume(generatedRunRoot);
+    expect(blocked.findings).toEqual([
+      expect.objectContaining({ code: "recovery-required" }),
+    ]);
+    const recovered = await runtime.recover(generatedRunRoot);
+    expect(recovered).toMatchObject({
+      disposition: "continue",
+      revision: 1,
+      currentNode: "finish",
+    });
+  });
+
+  it("covers commit and recovery evidence boundaries in fresh processes", async () => {
+    const projectRoot = path.join(root, "generated-boundary-project");
+    const protocol = phase4Protocol();
+    const generated = await generatePackage({
+      proposal: {
+        schemaVersion: 1,
+        name: protocol.name,
+        goal: protocol.goal,
+        intent: "new-skill",
+        planHash: "plan-hash",
+        workflow: protocol,
+        candidates: [],
+        blockers: [],
+        warnings: [],
+        canInitialize: true,
+      },
+      plan: {
+        schemaVersion: 1,
+        goal: protocol.goal,
+        skillCreatorIntent: "new-skill",
+        preferredSkills: [],
+        workflow: protocol as unknown as WorkflowInput,
+        defaultLocale: "en",
+      },
+      destination: path.join(projectRoot, "generated"),
+    });
+    const stateScript = path.join(
+      generated.packageRoot,
+      "scripts",
+      "workflow-state.mjs",
+    );
+    const runtimeScript = path.join(
+      generated.packageRoot,
+      "scripts",
+      "workflow-runtime.mjs",
+    );
+    const run = (args: string[], env = process.env) =>
+      execFileAsync(process.execPath, [stateScript, ...args], {
+        cwd: projectRoot,
+        env,
+      });
+    const recover = (runRoot: string, env: NodeJS.ProcessEnv) =>
+      execFileAsync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          `const runtimeModule = await import(${JSON.stringify(runtimeScript)}); await runtimeModule.createWorkflowRuntime().recover(${JSON.stringify(runRoot)});`,
+        ],
+        { cwd: projectRoot, env },
+      );
+    const init = (runRoot: string, runId: string) =>
+      run(["init", "--run-root", runRoot, "--run-id", runId]);
+    const faultEnv = (boundary: string): NodeJS.ProcessEnv => ({
+      ...process.env,
+      COMET_WORKFLOW_TEST_FAULT_BOUNDARY: boundary,
+    });
+    const startBoundaries = [
+      "journal-prepared",
+      "journal-verified",
+      "record-write:.comet/run-state.json",
+      "record-verification:.comet/run-state.json",
+      "record-write:.comet/pending-action.json",
+      "record-verification:.comet/pending-action.json",
+      "record-write:.comet/trajectory.jsonl",
+      "record-verification:.comet/trajectory.jsonl",
+      "commit-evidence",
+      "commit-evidence-written",
+      "journal-clearance",
+    ];
+
+    for (const [index, boundary] of startBoundaries.entries()) {
+      const runRoot = path.join(projectRoot, `start-${index}`);
+      await expect(
+        run(
+          [
+            "init",
+            "--run-root",
+            runRoot,
+            "--run-id",
+            `start-boundary-${index}`,
+          ],
+          faultEnv(boundary),
+        ),
+      ).rejects.toThrow();
+      const recovered = await createWorkflowRuntime().recover(runRoot);
+      expect(recovered.pendingAction).not.toBeNull();
+    }
+
+    const recoveryBoundaries = [
+      "recovery-record-write",
+      "recovery-record-verification",
+      "recovery-evidence-prepared",
+      "recovery-evidence",
+      "recovery-evidence-recorded",
+      "commit-evidence",
+      "commit-evidence-written",
+      "journal-clearance",
+    ];
+    for (const [index, boundary] of recoveryBoundaries.entries()) {
+      const runRoot = path.join(projectRoot, `recovery-${index}`);
+      await init(runRoot, `recovery-boundary-${index}`);
+      await expect(
+        run(
+          [
+            "record",
+            "prepare",
+            '{"summary":"Prepared through a child process."}',
+            "--run-root",
+            runRoot,
+            "--json",
+          ],
+          faultEnv("record-write:.comet/run-state.json"),
+        ),
+      ).rejects.toThrow();
+      await expect(recover(runRoot, faultEnv(boundary))).rejects.toThrow();
+      const recovered = await createWorkflowRuntime().recover(runRoot);
+      expect(recovered).toMatchObject({
+        disposition: "continue",
+        revision: 1,
+        currentNode: "finish",
+      });
+    }
+  }, 60000);
 
   it("binds generated decision adapters to the Phase 4 Run identity", async () => {
     const projectRoot = path.join(root, "generated-decision-project");

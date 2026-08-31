@@ -366,6 +366,10 @@ function parseAction(value: unknown): EngineAction {
   return action;
 }
 
+export function parsePendingActionValue(value: unknown): EngineAction {
+  return parseAction(value);
+}
+
 function parseDecisionScalarType(
   value: unknown,
   label: string,

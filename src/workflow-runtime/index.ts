@@ -11,7 +11,12 @@ import {
   readSkillSnapshot,
 } from "../skill-runtime/snapshot.js";
 import { type ManualRunResult } from "../engine/manual-run.js";
-import { readPendingAction, readTrajectory } from "../engine/run-store.js";
+import {
+  parsePendingActionValue,
+  readPendingAction,
+  readTrajectory,
+} from "../engine/run-store.js";
+import { parseRunStateValue } from "../engine/state.js";
 import { RaceSafeReadError } from "../engine/race-safe-read.js";
 import type {
   EvalResult,
@@ -69,6 +74,7 @@ import {
   parseWorkflowFinding,
   parseWorkflowFindingSummary,
   revisionConflictFinding,
+  recoveryRequiredFinding,
   type WorkflowFinding,
   type WorkflowFindingSummary,
 } from "./findings.js";
@@ -77,6 +83,13 @@ import {
   type RevisionClaimInput,
 } from "./revision-claim.js";
 import { sameDurabilityProfile } from "./durability.js";
+import {
+  readWorkflowTransitionJournal,
+  recoverWorkflowTransition,
+  WorkflowTransitionJournalPendingError,
+  WorkflowTransitionRecordConflictError,
+  type WorkflowTransitionJournal,
+} from "./transition-journal.js";
 
 async function withStructuredRuntimeErrors<T>(
   operation: () => Promise<T>,
@@ -1371,6 +1384,8 @@ export async function inspectWorkflowRun(
 ): Promise<WorkflowContinuation | null> {
   return withStructuredRuntimeErrors(async () => {
     const location = resolveWorkflowRunLocation(target);
+    const journal = await readWorkflowTransitionJournal(location.runRoot);
+    if (journal) return recoveryRequiredContinuation(location, journal);
     try {
       if (!(await location.readState())) return null;
     } catch (error) {
@@ -1771,11 +1786,104 @@ function conflictContinuation(
   };
 }
 
+function journalIntendedState(journal: WorkflowTransitionJournal): RunState {
+  const record = journal.records.find(
+    (candidate) => candidate.kind === "state",
+  );
+  if (!record || record.intended.content === null) {
+    throw new Error("Workflow transition journal has no intended Run state");
+  }
+  return parseRunStateValue(JSON.parse(record.intended.content) as unknown);
+}
+
+async function recoveryRequiredContinuation(
+  location: ResolvedWorkflowRunLocation,
+  journal: WorkflowTransitionJournal,
+): Promise<WorkflowContinuation> {
+  const stateRecord = journal.records.find(
+    (candidate) => candidate.kind === "state",
+  );
+  if (!stateRecord) {
+    throw new Error("Workflow transition journal has no state record");
+  }
+  const declaredStates = [
+    stateRecord.previous.content === null
+      ? undefined
+      : {
+          label: "previous" as const,
+          state: parseRunStateValue(
+            JSON.parse(stateRecord.previous.content) as unknown,
+          ),
+        },
+    stateRecord.intended.content === null
+      ? undefined
+      : {
+          label: "intended" as const,
+          state: parseRunStateValue(
+            JSON.parse(stateRecord.intended.content) as unknown,
+          ),
+        },
+  ].filter((candidate): candidate is NonNullable<typeof candidate> =>
+    Boolean(candidate),
+  );
+  let current: RunState | null = null;
+  try {
+    current = await location.readState();
+  } catch {
+    current = null;
+  }
+  const selected =
+    declaredStates.find(
+      (candidate) =>
+        current !== null &&
+        JSON.stringify(stableValue(candidate.state)) ===
+          JSON.stringify(stableValue(current)),
+    ) ??
+    declaredStates.find((candidate) => candidate.label === "previous") ??
+    declaredStates.find((candidate) => candidate.label === "intended");
+  if (!selected) {
+    throw new Error("Workflow transition journal has no usable Run state");
+  }
+  const state = selected.state;
+  let action: EngineAction | null = null;
+  if (state.pending) {
+    const record = journal.records.find(
+      (candidate) =>
+        candidate.path === state.pendingRef &&
+        candidate[selected.label].content !== null,
+    );
+    const content = record?.[selected.label].content;
+    if (content !== undefined && content !== null) {
+      action = parsePendingActionValue(JSON.parse(content) as unknown);
+    }
+  }
+  const base = continuation({ state, action, evals: [] }, journal.execution);
+  const projected = boundWorkflowFindings([
+    recoveryRequiredFinding(
+      state.workflowRuntime?.revision ?? journal.previous.revision,
+      state.pending,
+    ),
+  ]);
+  return {
+    ...base,
+    disposition: "blocked",
+    findings: projected.findings,
+    findingSummary: projected.summary,
+    requiresUserDecision: projected.findings.some(
+      (finding) => finding.requiresUserDecision,
+    ),
+    blockers: legacyBlockersFromFindings("blocked", projected.findings),
+  };
+}
+
 export async function validateWorkflowSubmission(
   target: WorkflowRunTarget,
   submission: WorkflowSubmission,
 ): Promise<WorkflowContinuation> {
   return withStructuredRuntimeErrors(async () => {
+    const location = resolveWorkflowRunLocation(target);
+    const journal = await readWorkflowTransitionJournal(location.runRoot);
+    if (journal) return recoveryRequiredContinuation(location, journal);
     validateSubmission(submission);
     let prepared: PreparedWorkflowSubmission;
     try {
@@ -2098,6 +2206,8 @@ export function createWorkflowRuntime(): WorkflowRuntime {
     ): Promise<WorkflowContinuation> {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
+        const journal = await readWorkflowTransitionJournal(location.runRoot);
+        if (journal) return recoveryRequiredContinuation(location, journal);
         return resumeStoredRun(location, options);
       });
     },
@@ -2107,6 +2217,9 @@ export function createWorkflowRuntime(): WorkflowRuntime {
       submission: WorkflowSubmission,
     ): Promise<WorkflowContinuation> {
       return withStructuredRuntimeErrors(async () => {
+        const location = resolveWorkflowRunLocation(target);
+        const journal = await readWorkflowTransitionJournal(location.runRoot);
+        if (journal) return recoveryRequiredContinuation(location, journal);
         validateSubmission(submission);
         let prepared: PreparedWorkflowSubmission;
         try {
@@ -2186,6 +2299,25 @@ export function createWorkflowRuntime(): WorkflowRuntime {
           if (error instanceof WorkflowRevisionConflictError) {
             return conflictContinuation(error.verified, error.finding);
           }
+          if (
+            error instanceof WorkflowTransitionJournalPendingError ||
+            error instanceof WorkflowTransitionRecordConflictError
+          ) {
+            const journal = await readWorkflowTransitionJournal(
+              prepared.location.runRoot,
+            );
+            if (journal) {
+              return recoveryRequiredContinuation(prepared.location, journal);
+            }
+            const current = await verifyStoredRun(prepared.location);
+            return conflictContinuation(
+              current,
+              revisionConflictFinding(
+                current.state.workflowRuntime?.revision ?? 0,
+                current.pending?.id ?? current.state.pending ?? null,
+              ),
+            );
+          }
           throw error;
         }
       });
@@ -2197,6 +2329,24 @@ export function createWorkflowRuntime(): WorkflowRuntime {
     ): Promise<WorkflowContinuation> {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
+        const journal = await readWorkflowTransitionJournal(location.runRoot);
+        if (journal) {
+          if (!journal.execution.durabilityProfile) {
+            throw new Error(
+              "Workflow transition journal has no durability profile",
+            );
+          }
+          const recovery = await recoverWorkflowTransition(
+            location.runRoot,
+            journal.execution.durabilityProfile,
+          );
+          if (recovery.status === "blocked") {
+            return recoveryRequiredContinuation(
+              location,
+              recovery.journal ?? journal,
+            );
+          }
+        }
         return resumeStoredRun(location, options);
       });
     },
