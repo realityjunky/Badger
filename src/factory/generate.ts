@@ -72,7 +72,17 @@ description: ${JSON.stringify(`Run the ${proposal.name} workflow: ${descriptionG
 
 ## Decision Core
 
-Read the WorkflowRuntime continuation before entering a Node. The runtime owns route selection, pending actions, evidence submission, and state transitions. Load only the Node named by the persisted pending action and stop when the runtime reports a blocker.
+Read the WorkflowRuntime continuation before entering a Node. The runtime owns route selection, pending actions, evidence submission, and state transitions. Load only the Node named by the persisted pending action and follow the structured finding required action when one is present.
+
+Continuations include a versioned, bounded finding catalog. A finding has a
+stable code, severity, redacted message, optional safe relative path, required
+action, and an optional registered operation with an argument array. Treat
+\`requiresUserDecision\` as authoritative: automatic repair and retry findings
+are not user decisions. \`continue\` means executable machine work is available,
+\`await-user\` means a persisted decision is pending, \`blocked\` means an
+unresolved stop or repair condition prevents advancement, and \`done\` means the
+Run is terminal. The \`blockers\` strings are a legacy projection for older
+callers; do not parse them or use them for routing.
 
 ## Declared Routes
 
@@ -116,6 +126,7 @@ ${nodes}
 - Start a run only when status is \`not-started\`: \`node scripts/workflow-state.mjs init\`.
 - Resume a persisted Run: \`node scripts/workflow-state.mjs resume\`.
 - Read the persisted action and Node: \`node scripts/workflow-state.mjs next\`.
+- Inspect machine-readable findings with \`--json\`; use each finding's registered operation and argument array rather than constructing a shell command.
 - Submit characterized Node evidence: \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
 - Supply physical updates under \`artifacts\` and explicit accepted version ids under \`artifactVersions\` in the record JSON.
 - Submit a declared human decision: \`node scripts/workflow-state.mjs decide <node> '<json response>'\`.

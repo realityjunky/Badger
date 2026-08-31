@@ -20,6 +20,7 @@ export interface RuntimeIdentity {
   nodeToStep: Record<string, string>;
   capabilityVersion?: 3;
   resolverHash?: string;
+  findingCatalogVersion?: 1;
 }
 
 export interface WorkflowCycleState {

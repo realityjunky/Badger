@@ -399,6 +399,7 @@ export interface WorkflowRuntimeIdentityEvidence {
   packageHash: string;
   snapshotHash: string;
   nodeToStep: Record<string, string>;
+  findingCatalogVersion?: 1;
 }
 
 export interface WorkflowRuntimeCertificationEvidence {

@@ -13,8 +13,10 @@ import {
 import { type ManualRunResult } from "../engine/manual-run.js";
 import { readPendingAction, readTrajectory } from "../engine/run-store.js";
 import type {
+  EvalResult,
   EngineAction,
   RunState,
+  TrajectoryEvent,
   WorkflowVisitState,
 } from "../engine/types.js";
 import type { WorkflowArtifactMutation } from "../engine/runtime-types.js";
@@ -28,7 +30,6 @@ import { stableValue } from "../util.js";
 import { compileWorkflow } from "./compiler.js";
 import {
   createCompletionPlan,
-  boundBlockers,
   validateSuccessfulSubmission,
 } from "./completion.js";
 import {
@@ -53,6 +54,31 @@ import {
   WorkflowDecisionScopeError,
 } from "./decision-scope.js";
 import { resolverForPackage } from "./resolver.js";
+import {
+  MAX_WORKFLOW_FINDINGS,
+  WORKFLOW_FINDING_CATALOG_VERSION,
+  actionAvailableFinding,
+  attachWorkflowFinding,
+  boundWorkflowFindings,
+  decisionRequiredFinding,
+  evaluationWarningFinding,
+  findingFromBlocker,
+  legacyBlockersFromFindings,
+  parseWorkflowFinding,
+  parseWorkflowFindingSummary,
+  type WorkflowFinding,
+  type WorkflowFindingSummary,
+} from "./findings.js";
+
+async function withStructuredRuntimeErrors<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw attachWorkflowFinding(error);
+  }
+}
 import {
   resolveWorkflowRunLocation,
   resolveWorkflowStartLocation,
@@ -118,6 +144,10 @@ function identityFromState(state: RunState): WorkflowExecutionIdentity {
     ...(state.runtimeIdentity.resolverHash
       ? { resolverHash: state.runtimeIdentity.resolverHash }
       : {}),
+    ...(state.runtimeIdentity.findingCatalogVersion ===
+    WORKFLOW_FINDING_CATALOG_VERSION
+      ? { findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION }
+      : {}),
   };
 }
 
@@ -158,7 +188,10 @@ function sameExecutionIdentity(
     left.snapshotHash === right.snapshotHash &&
     sameStringRecord(left.nodeToStep, right.nodeToStep) &&
     left.capabilityVersion === right.capabilityVersion &&
-    left.resolverHash === right.resolverHash
+    left.resolverHash === right.resolverHash &&
+    (left.findingCatalogVersion === undefined ||
+      right.findingCatalogVersion === undefined ||
+      left.findingCatalogVersion === right.findingCatalogVersion)
   );
 }
 
@@ -210,6 +243,49 @@ function boundProjectedLedger<T>(values: readonly T[]): T[] {
 function boundedContinuation(
   value: WorkflowContinuation,
 ): WorkflowContinuation {
+  const parsedFindings = (value.findings ?? []).map(parseWorkflowFinding);
+  const parsedSummary = value.findingSummary
+    ? parseWorkflowFindingSummary(value.findingSummary)
+    : undefined;
+  if (
+    parsedSummary &&
+    (parsedFindings.length > MAX_WORKFLOW_FINDINGS ||
+      parsedSummary.returned !== parsedFindings.length ||
+      parsedSummary.omitted !== parsedSummary.total - parsedFindings.length)
+  ) {
+    throw new Error("Workflow finding summary does not match findings");
+  }
+  if (parsedSummary) {
+    const normalizedFindings = boundWorkflowFindings(parsedFindings).findings;
+    if (
+      JSON.stringify(stableValue(normalizedFindings)) !==
+        JSON.stringify(stableValue(parsedFindings)) ||
+      new TextEncoder().encode(JSON.stringify(parsedFindings)).byteLength !==
+        parsedSummary.encodedBytes
+    ) {
+      throw new Error("Workflow findings are not canonically ordered");
+    }
+  }
+  const projected = parsedSummary
+    ? {
+        findings: structuredClone(parsedFindings),
+        summary: structuredClone(parsedSummary),
+      }
+    : boundWorkflowFindings(
+        value.blockers.length > 0
+          ? value.blockers.map((blocker) => findingFromBlocker(blocker))
+          : value.pendingAction
+            ? [
+                value.pendingAction.type === "ask_user"
+                  ? decisionRequiredFinding(value.pendingAction.id)
+                  : actionAvailableFinding(
+                      value.pendingAction.id,
+                      (value.pendingAction.retryOrdinal ?? 0) > 0,
+                    ),
+              ]
+            : [],
+      );
+  const disposition = value.disposition;
   return {
     ...structuredClone(value),
     decisionReceipts: boundProjectedLedger(value.decisionReceipts),
@@ -217,7 +293,80 @@ function boundedContinuation(
     visits: boundProjectedLedger(value.visits),
     artifactVersions: boundProjectedLedger(value.artifactVersions),
     artifactSelections: boundProjectedLedger(value.artifactSelections),
+    findings: projected.findings,
+    findingSummary: projected.summary,
+    requiresUserDecision: projected.findings.some(
+      (finding) => finding.requiresUserDecision,
+    ),
+    blockers: legacyBlockersFromFindings(disposition, projected.findings),
   };
+}
+
+function emptyFindingSummary(): WorkflowFindingSummary {
+  return boundWorkflowFindings([]).summary;
+}
+
+function terminalEvaluationResults(
+  trajectory: readonly TrajectoryEvent[],
+): EvalResult[] {
+  const latest = new Map<string, EvalResult>();
+  for (const event of trajectory) {
+    if (event.type !== "eval_completed" || !Array.isArray(event.data.results)) {
+      continue;
+    }
+    for (const result of event.data.results) {
+      if (!isRecord(result)) continue;
+      if (
+        typeof result.evalId !== "string" ||
+        typeof result.passed !== "boolean" ||
+        typeof result.evidence !== "string"
+      ) {
+        continue;
+      }
+      latest.set(result.evalId, {
+        evalId: result.evalId,
+        passed: result.passed,
+        evidence: result.evidence,
+      });
+    }
+  }
+  return [...latest.values()];
+}
+
+function findingsForContinuation(
+  disposition: WorkflowContinuation["disposition"],
+  reason: string | undefined,
+  action: EngineAction | null,
+  evals: readonly { evalId: string; passed: boolean; evidence: string }[] = [],
+  retry = false,
+): { findings: WorkflowFinding[]; summary: WorkflowFindingSummary } {
+  const raw = [
+    ...(reason && disposition !== "done"
+      ? [
+          findingFromBlocker(reason, {
+            actionId: action?.id,
+            nodeId: action?.stepId,
+          }),
+        ]
+      : action
+        ? [
+            action.type === "ask_user"
+              ? decisionRequiredFinding(action.id)
+              : actionAvailableFinding(
+                  action.id,
+                  retry || (action.retryOrdinal ?? 0) > 0,
+                ),
+          ]
+        : []),
+    ...(disposition === "done"
+      ? evals
+          .filter((evaluation) => !evaluation.passed)
+          .map((evaluation) =>
+            evaluationWarningFinding(evaluation.evalId, evaluation.evidence),
+          )
+      : []),
+  ];
+  return boundWorkflowFindings(raw);
 }
 
 function validateScalarRecord(
@@ -509,6 +658,17 @@ function continuation(
     : result.state.status === "completed"
       ? "done"
       : "blocked";
+  const projected = findingsForContinuation(
+    disposition,
+    result.reason,
+    result.action,
+    result.evals,
+    result.action
+      ? (result.action.retryOrdinal ??
+          result.state.retries[result.action.attemptId ?? result.action.id] ??
+          0) > 0
+      : false,
+  );
   return {
     disposition,
     runId: result.state.runId,
@@ -535,7 +695,12 @@ function continuation(
       runtimeState?.artifactSelections ?? [],
     ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
-    blockers: disposition === "blocked" && result.reason ? [result.reason] : [],
+    findings: projected.findings,
+    findingSummary: projected.summary,
+    requiresUserDecision: projected.findings.some(
+      (finding) => finding.requiresUserDecision,
+    ),
+    blockers: legacyBlockersFromFindings(disposition, projected.findings),
   };
 }
 
@@ -618,6 +783,34 @@ export async function projectWorkflowState(
   const exhaustedAction = Object.entries(state.retries).find(
     ([, count]) => count > verified.package.guardrails.maxRetriesPerAction,
   )?.[0];
+  const projectedFindings =
+    status === "blocked"
+      ? boundWorkflowFindings([
+          findingFromBlocker(
+            exhaustedAction
+              ? `Retry budget exhausted for action: ${exhaustedAction}`
+              : `Run is ${state.status}`,
+            { actionId: exhaustedAction },
+          ),
+        ])
+      : verified.pending
+        ? findingsForContinuation(
+            verified.pending.type === "ask_user" ? "await-user" : "continue",
+            undefined,
+            verified.pending,
+            [],
+            (verified.pending.retryOrdinal ??
+              state.retries[
+                verified.pending.attemptId ?? verified.pending.id
+              ] ??
+              0) > 0,
+          )
+        : findingsForContinuation(
+            status === "completed" ? "done" : "blocked",
+            status === "running" ? "Run has no pending action" : undefined,
+            null,
+            status === "completed" ? terminalEvaluationResults(trajectory) : [],
+          );
   return {
     schemaVersion: 1,
     workflow: protocol.name,
@@ -650,14 +843,21 @@ export async function projectWorkflowState(
       runtimeState?.artifactSelections ?? [],
     ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
-    blockers:
-      status === "blocked"
-        ? [
-            exhaustedAction
-              ? `Retry budget exhausted for action: ${exhaustedAction}`
-              : `Run is ${state.status}`,
-          ]
-        : [],
+    findings: projectedFindings.findings,
+    findingSummary: projectedFindings.summary,
+    requiresUserDecision: projectedFindings.findings.some(
+      (finding) => finding.requiresUserDecision,
+    ),
+    blockers: legacyBlockersFromFindings(
+      status === "completed"
+        ? "done"
+        : verified.pending?.type === "ask_user"
+          ? "await-user"
+          : verified.pending
+            ? "continue"
+            : "blocked",
+      projectedFindings.findings,
+    ),
   };
 }
 
@@ -739,6 +939,14 @@ async function verifyStoredPackage(
   if (pkg.runtime.resolverHash !== identity.resolverHash) {
     throw new Error(
       "WorkflowRuntime resolver identity does not match Skill snapshot",
+    );
+  }
+  if (
+    identity.findingCatalogVersion !== undefined &&
+    pkg.runtime.findingCatalogVersion !== identity.findingCatalogVersion
+  ) {
+    throw new Error(
+      "WorkflowRuntime finding catalog identity does not match Skill snapshot",
     );
   }
   const packageHash = await hashSkillPackage(pkg);
@@ -917,21 +1125,31 @@ async function verifyStoredRun(location: ResolvedWorkflowRunLocation): Promise<{
 
 type VerifiedWorkflowRun = Awaited<ReturnType<typeof verifyStoredRun>>;
 
-function continuationFromVerifiedRun(
+async function continuationFromVerifiedRun(
   verified: VerifiedWorkflowRun,
-): WorkflowContinuation {
+  runRoot: string,
+): Promise<WorkflowContinuation> {
+  const trajectory = await readTrajectory(
+    runRoot,
+    verified.state.trajectoryRef,
+  );
   return continuation(
     {
       state: verified.state,
       action: verified.pending,
-      evals: [],
+      evals:
+        verified.state.status === "completed"
+          ? terminalEvaluationResults(trajectory)
+          : [],
       ...(verified.pending
         ? {}
         : {
             reason:
               verified.state.status === "running"
                 ? "Run has no pending action"
-                : `Run is ${verified.state.status}`,
+                : verified.state.status === "failed"
+                  ? `Run is ${verified.state.status}`
+                  : undefined,
           }),
     },
     verified.identity,
@@ -941,15 +1159,20 @@ function continuationFromVerifiedRun(
 export async function inspectWorkflowRun(
   target: WorkflowRunTarget,
 ): Promise<WorkflowContinuation | null> {
-  const location = resolveWorkflowRunLocation(target);
-  try {
-    if (!(await location.readState())) return null;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return null;
-    throw error;
-  }
-  return continuationFromVerifiedRun(await verifyStoredRun(location));
+  return withStructuredRuntimeErrors(async () => {
+    const location = resolveWorkflowRunLocation(target);
+    try {
+      if (!(await location.readState())) return null;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") return null;
+      throw error;
+    }
+    return continuationFromVerifiedRun(
+      await verifyStoredRun(location),
+      location.runRoot,
+    );
+  });
 }
 
 interface PreparedWorkflowSubmission {
@@ -1248,7 +1471,7 @@ async function artifactMutationForSubmission(
     };
   } catch (error) {
     if (error instanceof WorkflowArtifactValidationError) {
-      return { blockers: boundBlockers(error.blockers) };
+      return { blockers: [...error.blockers] };
     }
     throw error;
   }
@@ -1258,6 +1481,14 @@ function blockedContinuation(
   prepared: PreparedWorkflowSubmission,
   blockers: readonly string[],
 ): WorkflowContinuation {
+  const projected = boundWorkflowFindings(
+    blockers.map((blocker) =>
+      findingFromBlocker(blocker, {
+        actionId: prepared.pending.id,
+        nodeId: prepared.node,
+      }),
+    ),
+  );
   return {
     disposition: "blocked",
     runId: prepared.verified.state.runId,
@@ -1295,7 +1526,12 @@ function blockedContinuation(
     currentArtifactVersions: currentWorkflowArtifactVersions(
       prepared.verified.state.workflowRuntime,
     ),
-    blockers: [...blockers],
+    findings: projected.findings,
+    findingSummary: projected.summary,
+    requiresUserDecision: projected.findings.some(
+      (finding) => finding.requiresUserDecision,
+    ),
+    blockers: legacyBlockersFromFindings("blocked", projected.findings),
   };
 }
 
@@ -1303,21 +1539,26 @@ export async function validateWorkflowSubmission(
   target: WorkflowRunTarget,
   submission: WorkflowSubmission,
 ): Promise<WorkflowContinuation> {
-  validateSubmission(submission);
-  const prepared = await prepareWorkflowSubmission(target, submission);
-  const blockers = await completionBlockers(prepared, submission);
-  if (blockers.length > 0) {
-    return blockedContinuation(prepared, blockers);
-  }
-  const routeFindings = routeBlockers(prepared, submission);
-  if (routeFindings.length > 0) {
-    return blockedContinuation(prepared, routeFindings);
-  }
-  const artifact = await artifactMutationForSubmission(prepared, submission);
-  if (artifact.blockers.length > 0) {
-    return blockedContinuation(prepared, artifact.blockers);
-  }
-  return continuationFromVerifiedRun(prepared.verified);
+  return withStructuredRuntimeErrors(async () => {
+    validateSubmission(submission);
+    const prepared = await prepareWorkflowSubmission(target, submission);
+    const blockers = await completionBlockers(prepared, submission);
+    if (blockers.length > 0) {
+      return blockedContinuation(prepared, blockers);
+    }
+    const routeFindings = routeBlockers(prepared, submission);
+    if (routeFindings.length > 0) {
+      return blockedContinuation(prepared, routeFindings);
+    }
+    const artifact = await artifactMutationForSubmission(prepared, submission);
+    if (artifact.blockers.length > 0) {
+      return blockedContinuation(prepared, artifact.blockers);
+    }
+    return continuationFromVerifiedRun(
+      prepared.verified,
+      prepared.location.runRoot,
+    );
+  });
 }
 
 export async function verifyWorkflowProtocol(
@@ -1335,7 +1576,11 @@ export async function projectWorkflowHandoff(
   current: WorkflowContinuation | null,
 ): Promise<WorkflowHandoff> {
   const execution = await verifyWorkflowProtocol(protocol);
-  if (current && !sameExecutionIdentity(current.execution, execution)) {
+  const projectedCurrent = current ? boundedContinuation(current) : null;
+  if (
+    projectedCurrent &&
+    !sameExecutionIdentity(projectedCurrent.execution, execution)
+  ) {
     throw new Error(
       "WorkflowRuntime handoff identity does not match generated protocol",
     );
@@ -1350,18 +1595,29 @@ export async function projectWorkflowHandoff(
     execution,
     nodes: structuredClone(protocol.nodes),
     outputSchemas: structuredClone(protocol.outputSchemas),
-    decisionReceipts: boundProjectedLedger(current?.decisionReceipts ?? []),
-    cycles: boundProjectedLedger(current?.cycles ?? []),
-    visits:
-      current?.disposition === "await-user"
-        ? boundProjectedLedger(redactVisitEvidence(current.visits))
-        : boundProjectedLedger(current?.visits ?? []),
-    artifactVersions: boundProjectedLedger(current?.artifactVersions ?? []),
-    artifactSelections: boundProjectedLedger(current?.artifactSelections ?? []),
-    currentArtifactVersions: structuredClone(
-      current?.currentArtifactVersions ?? {},
+    decisionReceipts: boundProjectedLedger(
+      projectedCurrent?.decisionReceipts ?? [],
     ),
-    continuation: current ? boundedContinuation(current) : null,
+    cycles: boundProjectedLedger(projectedCurrent?.cycles ?? []),
+    visits:
+      projectedCurrent?.disposition === "await-user"
+        ? boundProjectedLedger(redactVisitEvidence(projectedCurrent.visits))
+        : boundProjectedLedger(projectedCurrent?.visits ?? []),
+    artifactVersions: boundProjectedLedger(
+      projectedCurrent?.artifactVersions ?? [],
+    ),
+    artifactSelections: boundProjectedLedger(
+      projectedCurrent?.artifactSelections ?? [],
+    ),
+    currentArtifactVersions: structuredClone(
+      projectedCurrent?.currentArtifactVersions ?? {},
+    ),
+    findings: structuredClone(projectedCurrent?.findings ?? []),
+    findingSummary: structuredClone(
+      projectedCurrent?.findingSummary ?? emptyFindingSummary(),
+    ),
+    requiresUserDecision: projectedCurrent?.requiresUserDecision ?? false,
+    continuation: projectedCurrent,
   };
 }
 
@@ -1375,7 +1631,17 @@ async function resumeStoredRun(
     resolver: resolverForPackage(),
     prepareAction: prepareWorkflowAction,
   });
-  return continuation(result, verified.identity);
+  if (result.state.status !== "completed") {
+    return continuation(result, verified.identity);
+  }
+  const trajectory = await readTrajectory(
+    location.runRoot,
+    result.state.trajectoryRef,
+  );
+  return continuation(
+    { ...result, evals: terminalEvaluationResults(trajectory) },
+    verified.identity,
+  );
 }
 
 async function prepareWorkflowAction(
@@ -1532,40 +1798,44 @@ export function createWorkflowRuntime(): WorkflowRuntime {
     async start(
       options: StartWorkflowRunOptions,
     ): Promise<WorkflowContinuation> {
-      const resolved = resolveWorkflowStartLocation(options);
-      const compiled = await compileWorkflow(options.protocol);
-      const revisioned = compiled.package.runtime?.capabilityVersion === 3;
-      const result = await resolved.location.start(compiled.package, {
-        runId: resolved.runId,
-        confirmations: options.confirmations ?? [],
-        resolver: resolverForPackage(),
-        runtimeIdentity: {
+      return withStructuredRuntimeErrors(async () => {
+        const resolved = resolveWorkflowStartLocation(options);
+        const compiled = await compileWorkflow(options.protocol);
+        const revisioned = compiled.package.runtime?.capabilityVersion === 3;
+        const result = await resolved.location.start(compiled.package, {
+          runId: resolved.runId,
+          confirmations: options.confirmations ?? [],
+          resolver: resolverForPackage(),
+          runtimeIdentity: {
+            ...compiled.identity,
+            snapshotHash: compiled.identity.packageHash,
+          },
+          ...(revisioned
+            ? {
+                workflowRuntime: {
+                  revision: 0,
+                  nextVisitOrdinal: 0,
+                  currentAttempt: null,
+                  currentCycle: null,
+                  cycles: [],
+                  visits: [],
+                  decisionReceipts: [],
+                  artifactVersions: [],
+                  artifactSelections: [],
+                },
+              }
+            : {}),
+          prepareAction: prepareWorkflowAction,
+        });
+        if (result.state.skillHash !== compiled.identity.packageHash) {
+          throw new Error(
+            "WorkflowRuntime snapshot identity was not persisted",
+          );
+        }
+        return continuation(result, {
           ...compiled.identity,
-          snapshotHash: compiled.identity.packageHash,
-        },
-        ...(revisioned
-          ? {
-              workflowRuntime: {
-                revision: 0,
-                nextVisitOrdinal: 0,
-                currentAttempt: null,
-                currentCycle: null,
-                cycles: [],
-                visits: [],
-                decisionReceipts: [],
-                artifactVersions: [],
-                artifactSelections: [],
-              },
-            }
-          : {}),
-        prepareAction: prepareWorkflowAction,
-      });
-      if (result.state.skillHash !== compiled.identity.packageHash) {
-        throw new Error("WorkflowRuntime snapshot identity was not persisted");
-      }
-      return continuation(result, {
-        ...compiled.identity,
-        snapshotHash: result.state.skillHash,
+          snapshotHash: result.state.skillHash,
+        });
       });
     },
 
@@ -1573,48 +1843,54 @@ export function createWorkflowRuntime(): WorkflowRuntime {
       target: WorkflowRunTarget,
       options: ResumeWorkflowRunOptions = {},
     ): Promise<WorkflowContinuation> {
-      const location = resolveWorkflowRunLocation(target);
-      return resumeStoredRun(location, options);
+      return withStructuredRuntimeErrors(async () => {
+        const location = resolveWorkflowRunLocation(target);
+        return resumeStoredRun(location, options);
+      });
     },
 
     async submit(
       target: WorkflowRunTarget,
       submission: WorkflowSubmission,
     ): Promise<WorkflowContinuation> {
-      validateSubmission(submission);
-      const prepared = await prepareWorkflowSubmission(target, submission);
-      const blockers = await completionBlockers(prepared, submission);
-      if (blockers.length > 0) {
-        return blockedContinuation(prepared, blockers);
-      }
-      const routeFindings = routeBlockers(prepared, submission);
-      if (routeFindings.length > 0) {
-        return blockedContinuation(prepared, routeFindings);
-      }
-      const artifact = await artifactMutationForSubmission(
-        prepared,
-        submission,
-      );
-      if (artifact.blockers.length > 0) {
-        return blockedContinuation(prepared, artifact.blockers);
-      }
-      const result = await prepared.location.resume(
-        {
-          resolver: resolverForPackage(),
-          outcome: engineOutcome(prepared, submission, artifact.mutation),
-          prepareAction: prepareWorkflowAction,
-        },
-        artifact.mutation,
-      );
-      return continuation(result, prepared.verified.identity);
+      return withStructuredRuntimeErrors(async () => {
+        validateSubmission(submission);
+        const prepared = await prepareWorkflowSubmission(target, submission);
+        const blockers = await completionBlockers(prepared, submission);
+        if (blockers.length > 0) {
+          return blockedContinuation(prepared, blockers);
+        }
+        const routeFindings = routeBlockers(prepared, submission);
+        if (routeFindings.length > 0) {
+          return blockedContinuation(prepared, routeFindings);
+        }
+        const artifact = await artifactMutationForSubmission(
+          prepared,
+          submission,
+        );
+        if (artifact.blockers.length > 0) {
+          return blockedContinuation(prepared, artifact.blockers);
+        }
+        const result = await prepared.location.resume(
+          {
+            resolver: resolverForPackage(),
+            outcome: engineOutcome(prepared, submission, artifact.mutation),
+            prepareAction: prepareWorkflowAction,
+          },
+          artifact.mutation,
+        );
+        return continuation(result, prepared.verified.identity);
+      });
     },
 
     async recover(
       target: WorkflowRunTarget,
       options: RecoverWorkflowRunOptions = {},
     ): Promise<WorkflowContinuation> {
-      const location = resolveWorkflowRunLocation(target);
-      return resumeStoredRun(location, options);
+      return withStructuredRuntimeErrors(async () => {
+        const location = resolveWorkflowRunLocation(target);
+        return resumeStoredRun(location, options);
+      });
     },
   };
 }

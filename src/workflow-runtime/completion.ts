@@ -14,8 +14,6 @@ import {
 import type { WorkflowSubmission } from "./types.js";
 
 const ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
-const MAX_BLOCKERS = 32;
-const MAX_BLOCKER_LENGTH = 512;
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values)];
@@ -161,18 +159,6 @@ function missingGuardrailEvidence(
     .map((key) => key);
 }
 
-export function boundBlockers(blockers: readonly string[]): string[] {
-  return unique(
-    blockers
-      .slice(0, MAX_BLOCKERS)
-      .map((blocker) =>
-        blocker.length > MAX_BLOCKER_LENGTH
-          ? `${blocker.slice(0, MAX_BLOCKER_LENGTH - 1)}…`
-          : blocker,
-      ),
-  );
-}
-
 export async function validateSuccessfulSubmission(
   runRoot: string,
   protocol: WorkflowProtocol,
@@ -225,5 +211,5 @@ export async function validateSuccessfulSubmission(
     blockers.push(`Missing guardrail evidence: ${key}`);
   }
 
-  return boundBlockers(blockers);
+  return blockers;
 }

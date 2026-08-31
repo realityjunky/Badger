@@ -19,6 +19,7 @@ import type {
   WorkflowProtocol,
   WorkflowReviewerAttestation,
 } from "../types.js";
+import type { WorkflowFinding, WorkflowFindingSummary } from "./findings.js";
 
 export type WorkflowExecutionIdentity = RuntimeIdentity;
 
@@ -86,6 +87,9 @@ export interface WorkflowContinuation {
     WorkflowArtifactVersionId
   >;
   blockers: string[];
+  findings: WorkflowFinding[];
+  findingSummary: WorkflowFindingSummary;
+  requiresUserDecision: boolean;
 }
 
 export interface WorkflowHandoff {
@@ -107,6 +111,9 @@ export interface WorkflowHandoff {
     WorkflowArtifactId,
     WorkflowArtifactVersionId
   >;
+  findings: WorkflowFinding[];
+  findingSummary: WorkflowFindingSummary;
+  requiresUserDecision: boolean;
   continuation: WorkflowContinuation | null;
 }
 
@@ -145,6 +152,9 @@ export interface WorkflowStateProjection {
     WorkflowArtifactVersionId
   >;
   blockers: string[];
+  findings: WorkflowFinding[];
+  findingSummary: WorkflowFindingSummary;
+  requiresUserDecision: boolean;
 }
 
 export type StartWorkflowRunOptions =

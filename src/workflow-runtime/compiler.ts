@@ -26,6 +26,7 @@ import {
 } from "./routing.js";
 import { validateDecisionDefinition } from "../workflow/contract.js";
 import { validateWorkflowDecisionScopeDefinition } from "./decision-scope.js";
+import { WORKFLOW_FINDING_CATALOG_VERSION } from "./findings.js";
 
 interface CompiledWorkflow {
   package: SkillPackage;
@@ -656,6 +657,7 @@ export async function compileWorkflow(
     ...(revisioned
       ? { capabilityVersion: 3 as const, resolverHash: resolverHash(protocol) }
       : {}),
+    findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
     completionPlans: compileCompletionPlans(nodes),
   };
   const pkg: SkillPackage = {
@@ -686,6 +688,7 @@ export async function compileWorkflow(
             resolverHash: resolverHash(protocol),
           }
         : {}),
+      findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
     },
   };
 }

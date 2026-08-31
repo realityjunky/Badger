@@ -80,6 +80,12 @@ function printSummary(handoff) {
   console.log(
     `CONTINUATION: ${handoff.continuation?.disposition ?? "not-started"}`,
   );
+  for (const finding of handoff.findings ?? []) {
+    console.log(`FINDING: ${JSON.stringify(finding)}`);
+  }
+  if (handoff.findingSummary?.truncated) {
+    console.log(`FINDING_SUMMARY: ${JSON.stringify(handoff.findingSummary)}`);
+  }
   for (const node of handoff.nodes) {
     console.log(`NODE: ${node.id} (${node.kind})`);
   }
@@ -100,6 +106,9 @@ async function main() {
 }
 
 main().catch((error) => {
+  if (error && typeof error === "object" && error.finding) {
+    console.error(`FINDING: ${JSON.stringify(error.finding)}`);
+  }
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

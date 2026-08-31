@@ -19,6 +19,7 @@ The package includes:
 - bounded declared Cycle execution with stable identities and append-only repeated-visit evidence;
 - immutable Attempt-, Cycle-, and Run-lifetime artifact versions with protected content hashes and explicit carry-forward;
 - bounded Decision Receipt scope references tied to accepted artifact and evidence versions;
+- versioned structured findings with bounded redaction, deterministic ordering, continuation dispositions, and derived legacy blockers;
 - official/private differential observations for the pinned Engine behavior.
 
 It intentionally excludes Comet Classic policy, Comet Native policy and hardening, Comet Entry, host platform installers, ambient resume routing, and external platform adapters.
@@ -109,6 +110,13 @@ reference-only and does not add attachment storage or generalized snapshots.
 snapshot, Run state, and pending action. It does not use conversation context
 or generated source files, and rejects Run-id, protocol, package, snapshot, or
 pending-action drift before returning a continuation.
+
+Each continuation also carries the versioned `findings` catalog and its
+`findingSummary`. Findings are bounded, deterministically ordered, redacted,
+and expose registered runtime operations as argument arrays. `blockers` remains
+only a compatibility projection for blocked continuations; callers should use
+finding codes, required actions, and `requiresUserDecision` instead of parsing
+messages.
 
 Submissions are bound to the pending action with `actionId` and may identify
 the expected Workflow Node with `nodeId`. Output Schema evidence is supplied

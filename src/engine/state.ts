@@ -1252,6 +1252,7 @@ function parseRunStateJson(value: unknown): RunStateJson {
       "nodeToStep",
       "capabilityVersion",
       "resolverHash",
+      "findingCatalogVersion",
     ]);
     const unknownIdentityKey = Object.keys(identity).find(
       (key) => !identityKeys.has(key),
@@ -1275,7 +1276,9 @@ function parseRunStateJson(value: unknown): RunStateJson {
         identity.capabilityVersion !== 3) ||
       (identity.resolverHash !== undefined &&
         (typeof identity.resolverHash !== "string" ||
-          !/^[a-f0-9]{64}$/u.test(identity.resolverHash)))
+          !/^[a-f0-9]{64}$/u.test(identity.resolverHash))) ||
+      (identity.findingCatalogVersion !== undefined &&
+        identity.findingCatalogVersion !== 1)
     ) {
       throw new Error("Invalid Run state: runtimeIdentity is invalid");
     }
@@ -1301,6 +1304,9 @@ function parseRunStateJson(value: unknown): RunStateJson {
         : {}),
       ...(typeof identity.resolverHash === "string"
         ? { resolverHash: identity.resolverHash }
+        : {}),
+      ...(identity.findingCatalogVersion === 1
+        ? { findingCatalogVersion: 1 as const }
         : {}),
     };
   }

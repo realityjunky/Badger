@@ -170,6 +170,12 @@ function printPendingAction(value) {
 }
 
 function printNext(value) {
+  for (const finding of value.findings ?? []) {
+    console.log(`FINDING: ${JSON.stringify(finding)}`);
+  }
+  if (value.findingSummary?.truncated) {
+    console.log(`FINDING_SUMMARY: ${JSON.stringify(value.findingSummary)}`);
+  }
   if (value.disposition === "done" || value.status === "completed") {
     console.log("NEXT: done");
     return;
@@ -394,6 +400,9 @@ async function main() {
 }
 
 main().catch((error) => {
+  if (error && typeof error === "object" && error.finding) {
+    console.error(`FINDING: ${JSON.stringify(error.finding)}`);
+  }
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

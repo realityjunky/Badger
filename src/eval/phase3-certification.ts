@@ -404,7 +404,12 @@ function projectionMatches(
     JSON.stringify(stableValue(value.artifactSelections)) ===
       JSON.stringify(stableValue(continuation.artifactSelections)) &&
     JSON.stringify(stableValue(value.currentArtifactVersions)) ===
-      JSON.stringify(stableValue(continuation.currentArtifactVersions))
+      JSON.stringify(stableValue(continuation.currentArtifactVersions)) &&
+    JSON.stringify(stableValue(value.findings)) ===
+      JSON.stringify(stableValue(continuation.findings)) &&
+    JSON.stringify(stableValue(value.findingSummary)) ===
+      JSON.stringify(stableValue(continuation.findingSummary)) &&
+    value.requiresUserDecision === continuation.requiresUserDecision
   );
 }
 

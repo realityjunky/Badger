@@ -81,3 +81,18 @@ writes. Generated state and handoff output projects the bounded decision
 scope, receipt references, artifact versions, and current selections, while
 allocation, hashing, carry-forward, scope validation, and authoritative
 storage remain inside WorkflowRuntime.
+
+## Findings and continuations
+
+Every WorkflowRuntime continuation includes a versioned `findings` array and a
+`findingSummary`. Findings have stable catalog codes, severity, bounded
+redacted messages, optional safe relative paths, required actions, and
+registered runtime operations represented by argument arrays. A finding also
+declares whether it requires a real user decision.
+
+The dispositions have one meaning: `continue` exposes executable machine work,
+`await-user` exposes a persisted first-class decision, `blocked` exposes an
+unresolved repair or stop condition, and `done` exposes terminal state. The
+legacy `blockers` array is derived from blocked finding messages and is not a
+runtime authority. Use JSON output for machine consumers so truncation summary,
+omitted-code counts, and registered operations remain visible.

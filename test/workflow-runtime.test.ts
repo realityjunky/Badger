@@ -293,6 +293,13 @@ describe("WorkflowRuntime", () => {
       currentNode: "prepare",
       pendingAction: started.pendingAction,
       blockers: [],
+      findings: [
+        expect.objectContaining({
+          code: "action-available",
+          requiredAction: "retry",
+          operation: expect.objectContaining({ id: "workflow.resume" }),
+        }),
+      ],
     });
     expect((await readRunState(runRoot))?.retries).toEqual({
       [started.pendingAction!.id]: 1,

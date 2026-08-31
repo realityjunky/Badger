@@ -218,6 +218,7 @@ describe("generated WorkflowRuntime guard and handoff adapters", () => {
       packageHash: string;
       snapshotHash: string;
       nodeToStep: Record<string, string>;
+      findingCatalogVersion: number;
     };
     expect(verification).toMatchObject({
       protocolHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
@@ -227,6 +228,7 @@ describe("generated WorkflowRuntime guard and handoff adapters", () => {
         prepare: "node-1-prepare",
         finish: "node-2-finish",
       },
+      findingCatalogVersion: 1,
     });
 
     const beforeRun = JSON.parse(
@@ -255,6 +257,7 @@ describe("generated WorkflowRuntime guard and handoff adapters", () => {
         disposition: string;
         currentNode: string;
         pendingAction: { id: string };
+        findings: Array<{ code: string; requiredAction: string }>;
       };
     };
     expect(currentHandoff).toMatchObject({
@@ -267,6 +270,12 @@ describe("generated WorkflowRuntime guard and handoff adapters", () => {
       continuation: {
         disposition: "continue",
         currentNode: "prepare",
+        findings: [
+          expect.objectContaining({
+            code: "action-available",
+            requiredAction: "execute",
+          }),
+        ],
       },
     });
     expect(currentHandoff.nodes.find((node) => node.id === "prepare")).toEqual(
@@ -296,6 +305,15 @@ describe("generated WorkflowRuntime guard and handoff adapters", () => {
       stderr: expect.stringContaining(
         "BLOCKED: Missing Output Schema artifacts: prepare.v1.result",
       ),
+    });
+    await expect(
+      runScript(guard, projectRoot, [
+        "exit",
+        "prepare",
+        '{"summary":"Not ready."}',
+      ]),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("FINDING: {"),
     });
     expect(await fs.readFile(runStatePath, "utf8")).toBe(runStateBefore);
     expect(await fs.readFile(trajectoryPath, "utf8")).toBe(trajectoryBefore);

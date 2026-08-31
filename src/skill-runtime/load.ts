@@ -430,6 +430,16 @@ function narrowRuntimeMetadata(
       );
     }
   }
+  if (
+    value.findingCatalogVersion !== undefined &&
+    value.findingCatalogVersion !== 1
+  ) {
+    throw invalidDocument(
+      filePath,
+      "runtime.findingCatalogVersion",
+      "must be 1 when present",
+    );
+  }
   let completionPlans: Record<string, RuntimeCompletionPlan> | undefined;
   if (value.completionPlans !== undefined) {
     assertObject(value.completionPlans, filePath, "runtime.completionPlans");
@@ -475,6 +485,9 @@ function narrowRuntimeMetadata(
     ...(value.capabilityVersion === 3 ? { capabilityVersion: 3 as const } : {}),
     ...(typeof value.resolverHash === "string"
       ? { resolverHash: value.resolverHash }
+      : {}),
+    ...(value.findingCatalogVersion === 1
+      ? { findingCatalogVersion: 1 as const }
       : {}),
     ...(completionPlans ? { completionPlans } : {}),
   };

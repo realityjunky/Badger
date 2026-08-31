@@ -23,6 +23,29 @@ export type {
   WorkflowSubmission,
 } from "./types.js";
 
+export {
+  MAX_WORKFLOW_FINDING_MESSAGE_LENGTH,
+  MAX_WORKFLOW_FINDING_OPERATION_ARG_LENGTH,
+  MAX_WORKFLOW_FINDING_OPERATION_ARGS,
+  MAX_WORKFLOW_FINDING_PATH_LENGTH,
+  MAX_WORKFLOW_FINDINGS,
+  MAX_WORKFLOW_FINDINGS_ENCODED_BYTES,
+  WORKFLOW_FINDING_CATALOG_VERSION,
+} from "./findings.js";
+
+export type {
+  WorkflowFinding,
+  WorkflowFindingCatalogVersion,
+  WorkflowFindingCode,
+  WorkflowFindingInput,
+  WorkflowFindingOperation,
+  WorkflowFindingOperationId,
+  WorkflowFindingRequiredAction,
+  WorkflowFindingSeverity,
+  WorkflowFindingSummary,
+  WorkflowRuntimeError,
+} from "./findings.js";
+
 export type {
   WorkflowDecisionScope,
   WorkflowDecisionScopeEntry,

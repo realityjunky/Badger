@@ -6,6 +6,7 @@ import type {
   WorkflowRationalePolicy,
   WorkflowReviewerPolicy,
 } from "../types.js";
+import type { WorkflowFindingCatalogVersion } from "../workflow-runtime/findings.js";
 
 export type OrchestrationMode = "deterministic" | "adaptive";
 export type ActionType =
@@ -116,6 +117,7 @@ export interface RuntimePackageMetadata {
   nodeToStep: Record<string, string>;
   capabilityVersion?: 3;
   resolverHash?: string;
+  findingCatalogVersion?: WorkflowFindingCatalogVersion;
   completionPlans?: Record<string, RuntimeCompletionPlan>;
 }
 

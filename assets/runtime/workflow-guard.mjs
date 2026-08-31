@@ -118,7 +118,9 @@ function assertCurrentContract(continuation, verification) {
     execution.protocolHash !== verification.protocolHash ||
     execution.packageHash !== verification.packageHash ||
     execution.snapshotHash !== verification.snapshotHash ||
-    !sameRecord(execution.nodeToStep, verification.nodeToStep)
+    !sameRecord(execution.nodeToStep, verification.nodeToStep) ||
+    (execution.findingCatalogVersion !== undefined &&
+      execution.findingCatalogVersion !== verification.findingCatalogVersion)
   ) {
     throw new Error(
       "WorkflowRuntime generated protocol does not match persisted Run identity",
@@ -179,8 +181,17 @@ function submissionField(evidence, field) {
     : undefined;
 }
 
-function blockedError(blockers) {
-  return new Error(blockers.map((blocker) => `BLOCKED: ${blocker}`).join("\n"));
+function blockedError(value) {
+  const findings = (value.findings ?? []).map(
+    (finding) => `FINDING: ${JSON.stringify(finding)}`,
+  );
+  const summary = value.findingSummary
+    ? [`FINDING_SUMMARY: ${JSON.stringify(value.findingSummary)}`]
+    : [];
+  const blockers = (value.blockers ?? []).map(
+    (blocker) => `BLOCKED: ${blocker}`,
+  );
+  return new Error([...findings, ...summary, ...blockers].join("\n"));
 }
 
 function printJson(value) {
@@ -188,6 +199,12 @@ function printJson(value) {
 }
 
 function printContinuation(value) {
+  for (const finding of value.findings ?? []) {
+    console.log(`FINDING: ${JSON.stringify(finding)}`);
+  }
+  if (value.findingSummary?.truncated) {
+    console.log(`FINDING_SUMMARY: ${JSON.stringify(value.findingSummary)}`);
+  }
   if (value.disposition === "done") {
     console.log("NEXT: done");
     return;
@@ -309,7 +326,7 @@ async function main() {
     };
     const validation = await validateWorkflowSubmission(target, submission);
     if (validation.disposition === "blocked") {
-      throw blockedError(validation.blockers);
+      throw blockedError(validation);
     }
     if (!options.apply) {
       if (options.json) printJson(validation);
@@ -321,7 +338,7 @@ async function main() {
     }
     const applied = await createWorkflowRuntime().submit(target, submission);
     if (applied.disposition === "blocked") {
-      throw blockedError(applied.blockers);
+      throw blockedError(applied);
     }
     if (options.json) printJson(applied);
     else {
@@ -352,7 +369,7 @@ async function main() {
   };
   const validation = await validateWorkflowSubmission(target, submission);
   if (validation.disposition === "blocked") {
-    throw blockedError(validation.blockers);
+    throw blockedError(validation);
   }
   if (!options.apply) {
     if (options.json) printJson(validation);
@@ -365,7 +382,7 @@ async function main() {
 
   const applied = await createWorkflowRuntime().submit(target, submission);
   if (applied.disposition === "blocked") {
-    throw blockedError(applied.blockers);
+    throw blockedError(applied);
   }
   if (options.json) printJson(applied);
   else {
@@ -375,6 +392,9 @@ async function main() {
 }
 
 main().catch((error) => {
+  if (error && typeof error === "object" && error.finding) {
+    console.error(`FINDING: ${JSON.stringify(error.finding)}`);
+  }
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

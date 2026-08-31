@@ -46,7 +46,12 @@ function sameContinuation(
       JSON.stringify(stableValue(right.pendingAction)) &&
     JSON.stringify(stableValue(left.execution)) ===
       JSON.stringify(stableValue(right.execution)) &&
-    sameStrings(left.blockers, right.blockers)
+    sameStrings(left.blockers, right.blockers) &&
+    JSON.stringify(stableValue(left.findings)) ===
+      JSON.stringify(stableValue(right.findings)) &&
+    JSON.stringify(stableValue(left.findingSummary)) ===
+      JSON.stringify(stableValue(right.findingSummary)) &&
+    left.requiresUserDecision === right.requiresUserDecision
   );
 }
 

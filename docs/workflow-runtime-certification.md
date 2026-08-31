@@ -37,7 +37,8 @@ Every Run carries one execution identity containing:
 - the normalized Workflow Protocol hash;
 - the compiled Engine package hash;
 - the immutable Engine Skill snapshot hash;
-- the deterministic Workflow Node-to-Engine-step mapping.
+- the deterministic Workflow Node-to-Engine-step mapping;
+- the versioned structured-finding catalog.
 
 Revisioned branch packages additionally carry capability version and resolver
 plan identities. The Run state retains the logical revision, current Cycle,
@@ -103,3 +104,7 @@ bounded pending decision scope references. Awaiting decisions redact prior
 evidence payloads from continuation and state projections. Compiler, Run-location,
 projection, storage, and protected filesystem modules remain private
 implementation details.
+
+Continuations and generated projections also carry deterministic structured
+findings, truncation summaries, and the catalog version. Legacy blocker strings
+are derived from blocked findings and are retained only for compatibility.

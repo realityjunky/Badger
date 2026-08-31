@@ -135,6 +135,7 @@ describe("generated WorkflowRuntime state adapter", () => {
     const initialized = await run(["init", "--run-id", "manual-run"]);
     expect(initialized.stdout).toContain("NEXT: auto");
     expect(initialized.stdout).toContain("NODE: prepare");
+    expect(initialized.stdout).toContain('"code":"action-available"');
     expect((await run(["resume", "--json"])).stdout).toContain(
       '"currentNode": "prepare"',
     );
@@ -149,11 +150,26 @@ describe("generated WorkflowRuntime state adapter", () => {
       status: string;
       currentNode: string;
       pendingAction: { id: string };
+      findings: Array<{ code: string; requiredAction: string }>;
     };
     expect(firstStatus).toMatchObject({
       status: "waiting",
       currentNode: "prepare",
     });
+    expect(firstStatus.findings).toEqual([
+      {
+        catalogVersion: 1,
+        code: "action-available",
+        severity: "info",
+        message: "Executable workflow action is available.",
+        requiredAction: "execute",
+        operation: {
+          id: "workflow.resume",
+          args: [firstStatus.pendingAction.id],
+        },
+        requiresUserDecision: false,
+      },
+    ]);
     expect((await run(["next"])).stdout).toContain(
       `ACTION: ${firstStatus.pendingAction.id}`,
     );
@@ -204,11 +220,13 @@ describe("generated WorkflowRuntime state adapter", () => {
       status: string;
       completedNodes: string[];
       evidence: Record<string, { summary: string }>;
+      findings: unknown[];
     };
     expect(completed).toMatchObject({
       status: "completed",
       completedNodes: ["prepare"],
       evidence: { prepare: { summary: "Prepared." } },
+      findings: [],
     });
     const legacyProjection = JSON.parse(
       await fs.readFile(legacyPath, "utf8"),
@@ -536,11 +554,19 @@ describe("generated WorkflowRuntime state adapter", () => {
       status: string;
       currentNode: string;
       blockers: string[];
+      findings: Array<{ code: string; requiredAction: string }>;
     };
     expect(status).toMatchObject({
       status: "blocked",
       currentNode: "prepare",
     });
     expect(status.blockers[0]).toContain("Retry budget exhausted for action:");
+    expect(status.findings).toEqual([
+      expect.objectContaining({
+        code: "retry-budget-exhausted",
+        requiredAction: "stop",
+        requiresUserDecision: false,
+      }),
+    ]);
   });
 });
