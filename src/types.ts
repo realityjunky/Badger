@@ -257,9 +257,36 @@ export type WorkflowProtocolCapability =
   | "bounded-cycles"
   | "versioned-artifacts";
 
+export type WorkflowDurabilityCapability = "revision-fences";
+
+export interface WorkflowDurabilityBounds {
+  runStateBytes: number;
+  pendingActionBytes: number;
+  trajectoryBytes: number;
+  artifactsBytes: number;
+  claimBytes: number;
+}
+
+export interface WorkflowDurabilitySchemaVersions {
+  runState: 1;
+  pendingAction: 1;
+  trajectory: 1;
+  artifacts: 1;
+  revisionClaim: 1;
+}
+
+export interface WorkflowDurabilityProfile {
+  version: 1;
+  capabilities: WorkflowDurabilityCapability[];
+  bounds: WorkflowDurabilityBounds;
+  schemaVersions: WorkflowDurabilitySchemaVersions;
+  findingCatalogVersion: 1;
+}
+
 export interface WorkflowProtocolCapabilities {
   version: 3;
   features: WorkflowProtocolCapability[];
+  durability?: WorkflowDurabilityProfile;
 }
 
 export interface NodeProtocol extends Omit<
@@ -400,6 +427,7 @@ export interface WorkflowRuntimeIdentityEvidence {
   snapshotHash: string;
   nodeToStep: Record<string, string>;
   findingCatalogVersion?: 1;
+  durabilityProfile?: WorkflowDurabilityProfile;
 }
 
 export interface WorkflowRuntimeCertificationEvidence {

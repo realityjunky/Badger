@@ -2,6 +2,7 @@ import type {
   WorkflowDecisionChoiceSummary,
   WorkflowDecisionInputSchema,
   WorkflowDecisionScopeSnapshot,
+  WorkflowDurabilityProfile,
   WorkflowProtocol,
   WorkflowRationalePolicy,
   WorkflowReviewerPolicy,
@@ -118,6 +119,7 @@ export interface RuntimePackageMetadata {
   capabilityVersion?: 3;
   resolverHash?: string;
   findingCatalogVersion?: WorkflowFindingCatalogVersion;
+  durabilityProfile?: WorkflowDurabilityProfile;
   completionPlans?: Record<string, RuntimeCompletionPlan>;
 }
 

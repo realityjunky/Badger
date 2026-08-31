@@ -56,6 +56,19 @@ export type {
 } from "../types.js";
 
 export type {
+  WorkflowDurabilityBounds,
+  WorkflowDurabilityCapability,
+  WorkflowDurabilityProfile,
+  WorkflowDurabilitySchemaVersions,
+} from "../types.js";
+
+export {
+  WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
+  WORKFLOW_DURABILITY_PROFILE_VERSION,
+  WORKFLOW_DURABILITY_SCHEMA_VERSION,
+} from "./durability.js";
+
+export type {
   WorkflowArtifactId,
   WorkflowArtifactLifetime,
   WorkflowArtifactPath,

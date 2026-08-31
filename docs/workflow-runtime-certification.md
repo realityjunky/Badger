@@ -45,9 +45,23 @@ plan identities. The Run state retains the logical revision, current Cycle,
 current Attempt, Cycle ledger, visit ledger, retry context, immutable artifact
 version ledger, and append-only selection ledger.
 
+Phase 4 packages additionally carry a versioned durability profile containing
+enabled capabilities, record bounds, record schema versions, and the finding
+catalog version. That profile is included in the protocol hash, compiled
+package metadata, resolver-plan hash, and execution identity. Phase 4 machine
+and decision submissions must include the observed Run id, logical revision,
+pending action id, and complete execution identity.
+
 The logical revision starts at `0` and advances exactly once for each accepted
 machine outcome or decision response. Rejected, stale, or route-blocked
 submissions leave the revision and pending Attempt unchanged.
+
+For Phase 4 submissions, an exclusive protected revision claim is created for
+the expected revision/action and intended next revision. The claim is checked
+again immediately before durable mutation and the Run state write performs a
+second protected compare-and-swap check. A competing, stale, replayed, or
+cross-Run envelope returns a blocked continuation with the current revision,
+current action identity, and a stable `revision-conflict` finding.
 
 The Creator evaluation report additionally records the generated package tree
 hash. Review readiness rejects missing, stale, mismatched, or incomplete

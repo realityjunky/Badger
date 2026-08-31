@@ -18,6 +18,7 @@ import {
   writeArtifacts,
   writePendingAction,
 } from "./run-store.js";
+import type { EngineRunWriteOptions } from "./protected-run-file.js";
 import { readRunState, writeRunState } from "./state.js";
 import type {
   ActionOutcome,
@@ -28,6 +29,7 @@ import type {
   TrajectoryEvent,
   WorkflowRuntimeState,
 } from "./types.js";
+import type { WorkflowDurabilityProfile } from "../types.js";
 import type { WorkflowArtifactMutation } from "./runtime-types.js";
 import {
   createSkillSnapshot,
@@ -60,6 +62,8 @@ export interface ResumeManualRunOptions {
   confirmations?: Iterable<string>;
   resolver?: DeterministicResolver<undefined>;
   prepareAction?: PreparePendingAction;
+  revisionFence?: () => void | Promise<void>;
+  revisionStateFence?: () => void | Promise<void>;
 }
 
 export interface PendingActionPreparation {
@@ -76,6 +80,13 @@ export type PreparePendingAction = (
 
 interface ResumeManualWorkflowRunOptions extends ResumeManualRunOptions {
   artifactMutation?: WorkflowArtifactMutation;
+}
+
+function durabilityBound(
+  state: RunState,
+  key: keyof WorkflowDurabilityProfile["bounds"],
+): number | undefined {
+  return state.runtimeIdentity?.durabilityProfile?.bounds[key];
 }
 
 export interface ManualRunEvaluation {
@@ -207,15 +218,32 @@ async function appendEvent(
   state: RunState,
   type: TrajectoryEvent["type"],
   data: Record<string, unknown>,
+  options: EngineRunWriteOptions = {},
 ): Promise<void> {
-  const trajectory = await readTrajectory(changeDir, state.trajectoryRef);
-  await appendTrajectory(changeDir, state.trajectoryRef, {
-    sequence: trajectory.length + 1,
-    timestamp: new Date().toISOString(),
-    type,
-    runId: state.runId,
-    data,
-  });
+  const trajectoryMaxBytes = durabilityBound(state, "trajectoryBytes");
+  const trajectoryOptions = {
+    ...options,
+    ...(options.maxBytes === undefined && trajectoryMaxBytes !== undefined
+      ? { maxBytes: trajectoryMaxBytes }
+      : {}),
+  };
+  const trajectory = await readTrajectory(
+    changeDir,
+    state.trajectoryRef,
+    trajectoryOptions,
+  );
+  await appendTrajectory(
+    changeDir,
+    state.trajectoryRef,
+    {
+      sequence: trajectory.length + 1,
+      timestamp: new Date().toISOString(),
+      type,
+      runId: state.runId,
+      data,
+    },
+    trajectoryOptions,
+  );
 }
 
 async function persistDecision(
@@ -252,7 +280,16 @@ async function persistDecision(
     action = prepared.action;
   }
   if (action) {
-    await writePendingAction(changeDir, decision.state.pendingRef, action);
+    const pendingMaxBytes = durabilityBound(
+      decision.state,
+      "pendingActionBytes",
+    );
+    await writePendingAction(
+      changeDir,
+      decision.state.pendingRef,
+      action,
+      pendingMaxBytes === undefined ? {} : { maxBytes: pendingMaxBytes },
+    );
   }
   await writeRunState(changeDir, action ? decision.state : state);
   if (action) {
@@ -361,7 +398,12 @@ async function resumeManualRunInternal(
   }
   const resolver = options.resolver ?? staticDeterministicResolver;
 
-  const pending = await readPendingAction(changeDir, state.pendingRef);
+  const pendingMaxBytes = durabilityBound(state, "pendingActionBytes");
+  const pending = await readPendingAction(
+    changeDir,
+    state.pendingRef,
+    pendingMaxBytes === undefined ? {} : { maxBytes: pendingMaxBytes },
+  );
   if (!options.outcome) {
     validatePendingState(state, pending);
     if (pending) {
@@ -407,23 +449,62 @@ async function resumeManualRunInternal(
     recordOutcomeWithResolver(pkg, state, outcome, resolver, undefined),
     options.artifactMutation,
   );
+  const artifactsMaxBytes = durabilityBound(state, "artifactsBytes");
+  const artifactReadOptions =
+    artifactsMaxBytes === undefined ? {} : { maxBytes: artifactsMaxBytes };
   const artifacts = {
-    ...(await readArtifacts(changeDir, state.artifactsRef)),
+    ...(await readArtifacts(
+      changeDir,
+      state.artifactsRef,
+      artifactReadOptions,
+    )),
     ...(outcome.artifacts ?? {}),
     ...(options.artifactMutation?.artifactPaths ?? {}),
   };
-  await writeArtifacts(changeDir, state.artifactsRef, artifacts);
+  await options.revisionFence?.();
+  const artifactWriteOptions = {
+    ...(options.revisionFence ? { beforeCommit: options.revisionFence } : {}),
+    ...(artifactsMaxBytes === undefined ? {} : { maxBytes: artifactsMaxBytes }),
+  };
+  await writeArtifacts(
+    changeDir,
+    state.artifactsRef,
+    artifacts,
+    artifactWriteOptions,
+  );
+  const trajectoryMaxBytes = durabilityBound(state, "trajectoryBytes");
+  const trajectoryWriteOptions = {
+    ...(options.revisionFence ? { beforeCommit: options.revisionFence } : {}),
+    ...(trajectoryMaxBytes === undefined
+      ? {}
+      : { maxBytes: trajectoryMaxBytes }),
+  };
   const decisionReceipt = advanced.workflowRuntime?.decisionReceipts.find(
     (receipt) => receipt.actionId === pending.id,
   );
-  await appendEvent(changeDir, state, "action_completed", {
-    action: pending,
-    outcome,
-    ...(decisionReceipt ? { decisionReceipt } : {}),
-  });
+  await appendEvent(
+    changeDir,
+    state,
+    "action_completed",
+    {
+      action: pending,
+      outcome,
+      ...(decisionReceipt ? { decisionReceipt } : {}),
+    },
+    trajectoryWriteOptions,
+  );
 
-  await clearPendingAction(changeDir, advanced.pendingRef);
-  await writeRunState(changeDir, advanced);
+  await clearPendingAction(
+    changeDir,
+    advanced.pendingRef,
+    options.revisionFence ? { beforeRemove: options.revisionFence } : {},
+  );
+  const stateFence = options.revisionStateFence ?? options.revisionFence;
+  await writeRunState(
+    changeDir,
+    advanced,
+    stateFence ? { beforeCommit: stateFence } : {},
+  );
 
   const evals = await evaluateAndRecord(
     changeDir,
@@ -489,7 +570,12 @@ export async function evaluateManualRun(
   const state = await requiredRun(changeDir);
   const pkg = await readSkillSnapshot(changeDir, state.skillHash);
   validateSnapshotState(pkg, state);
-  const artifacts = await readArtifacts(changeDir, state.artifactsRef);
+  const artifactsMaxBytes = durabilityBound(state, "artifactsBytes");
+  const artifacts = await readArtifacts(
+    changeDir,
+    state.artifactsRef,
+    artifactsMaxBytes === undefined ? {} : { maxBytes: artifactsMaxBytes },
+  );
   return {
     state,
     scope,

@@ -835,6 +835,7 @@ function phase3Enabled(input: WorkflowInput): boolean {
     input.routing?.routingFields !== undefined ||
     input.customNodes.some((node) => node.kind === "decision") ||
     input.cycles !== undefined ||
+    input.capabilities?.durability !== undefined ||
     input.outputSchemas?.some((schema) =>
       schema.artifacts.some((artifact) => artifact.lifetime !== undefined),
     ),
@@ -883,6 +884,9 @@ function protocolCapabilities(
   return {
     version: 3,
     features: [...features],
+    ...(input.capabilities?.durability
+      ? { durability: structuredClone(input.capabilities.durability) }
+      : {}),
   };
 }
 

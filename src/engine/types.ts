@@ -8,6 +8,7 @@ import type {
   WorkflowArtifactVersion,
   WorkflowDecisionReceipt,
   WorkflowDecisionScopeSnapshot,
+  WorkflowDurabilityProfile,
   WorkflowReviewerAttestation,
 } from "../types.js";
 
@@ -21,6 +22,7 @@ export interface RuntimeIdentity {
   capabilityVersion?: 3;
   resolverHash?: string;
   findingCatalogVersion?: 1;
+  durabilityProfile?: WorkflowDurabilityProfile;
 }
 
 export interface WorkflowCycleState {

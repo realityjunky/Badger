@@ -119,6 +119,8 @@ function assertCurrentContract(continuation, verification) {
     execution.packageHash !== verification.packageHash ||
     execution.snapshotHash !== verification.snapshotHash ||
     !sameRecord(execution.nodeToStep, verification.nodeToStep) ||
+    JSON.stringify(execution.durabilityProfile) !==
+      JSON.stringify(verification.durabilityProfile) ||
     (execution.findingCatalogVersion !== undefined &&
       execution.findingCatalogVersion !== verification.findingCatalogVersion)
   ) {
@@ -318,6 +320,7 @@ async function main() {
       ...response,
       kind: "decision",
       actionId: continuation.pendingAction.id,
+      runId: continuation.runId,
       revision: continuation.revision,
       nodeId: continuation.currentNode,
       cycleId: continuation.cycleId,
@@ -365,6 +368,9 @@ async function main() {
       : {}),
     ...(artifacts !== undefined ? { artifacts } : {}),
     ...(artifactVersions !== undefined ? { artifactVersions } : {}),
+    runId: continuation.runId,
+    revision: continuation.revision,
+    execution: continuation.execution,
     nodeId: continuation.currentNode,
   };
   const validation = await validateWorkflowSubmission(target, submission);

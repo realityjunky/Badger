@@ -667,6 +667,7 @@ export async function appendTrajectory(
       normalized,
       RUN_FILE_LIMITS.trajectory,
       "Run trajectory",
+      options,
     );
     const events = parseTrajectory(raw);
     const parsed = parseTrajectoryEvent(event);
@@ -683,6 +684,7 @@ export async function appendTrajectory(
       RUN_FILE_LIMITS.trajectory,
       "Run trajectory",
       {
+        ...options,
         beforeCommit: async () => {
           await options.beforeCommit?.();
           const latest = parseTrajectory(
@@ -691,6 +693,7 @@ export async function appendTrajectory(
               normalized,
               RUN_FILE_LIMITS.trajectory,
               "Run trajectory",
+              options,
             ),
           );
           assertNextTrajectoryEvent(latest, parsed);

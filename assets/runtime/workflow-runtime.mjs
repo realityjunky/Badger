@@ -572,10 +572,1104 @@ async function readProtectedProjectFile(projectRoot, relativePath, maxBytes, opt
 // src/skill-runtime/snapshot.ts
 import { createHash as createHash2, randomUUID as randomUUID2 } from "crypto";
 import { promises as fs4 } from "fs";
-import path6 from "path";
+import path7 from "path";
 
 // src/skill-runtime/load.ts
-import path4 from "path";
+import path5 from "path";
+
+// src/util.ts
+import { createHash } from "node:crypto";
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, stableValue(item)])
+    );
+  }
+  return value;
+}
+function slug(value) {
+  return value.toLowerCase().replace(/[^a-z0-9._-]+/gu, "-").replace(/^-+|-+$/gu, "");
+}
+
+// src/workflow-runtime/findings.ts
+import path4 from "node:path";
+var WORKFLOW_FINDING_CATALOG_VERSION = 1;
+var MAX_WORKFLOW_FINDINGS = 32;
+var MAX_WORKFLOW_FINDING_MESSAGE_LENGTH = 512;
+var MAX_WORKFLOW_FINDING_PATH_LENGTH = 256;
+var MAX_WORKFLOW_FINDING_OPERATION_ARGS = 16;
+var MAX_WORKFLOW_FINDING_OPERATION_ARG_LENGTH = 256;
+var MAX_WORKFLOW_FINDINGS_ENCODED_BYTES = 16 * 1024;
+var WORKFLOW_FINDING_SEVERITIES = ["info", "warning", "error"];
+var WORKFLOW_FINDING_REQUIRED_ACTIONS = [
+  "none",
+  "execute",
+  "decide",
+  "repair",
+  "retry",
+  "stop"
+];
+var WORKFLOW_FINDING_OPERATION_IDS = [
+  "workflow.start",
+  "workflow.resume",
+  "workflow.submit",
+  "workflow.recover"
+];
+var WORKFLOW_FINDING_CODES = [
+  "action-available",
+  "action-already-pending",
+  "adaptive-requires-agent",
+  "agent-not-allowed",
+  "artifact-capability-required",
+  "artifact-content-drift",
+  "artifact-failed-submission",
+  "artifact-invalid",
+  "artifact-oversized",
+  "artifact-stale-attempt",
+  "artifact-unknown-version",
+  "completion-invalid-artifact",
+  "completion-missing-artifact",
+  "completion-missing-augmentation",
+  "completion-missing-evidence",
+  "completion-missing-guardrail",
+  "completion-missing-required-skill",
+  "confirmation-required",
+  "catalog-version-unsupported",
+  "cycle-budget-exhausted",
+  "cycle-invalid",
+  "decision-required",
+  "evaluation-warning",
+  "identity-invalid",
+  "iteration-budget-exhausted",
+  "no-pending-action",
+  "pending-action-invalid",
+  "revision-conflict",
+  "retry-budget-exhausted",
+  "route-ambiguous",
+  "route-invalid-value",
+  "route-no-match",
+  "route-unknown-field",
+  "run-not-found",
+  "run-status",
+  "scope-invalid",
+  "scope-unavailable",
+  "skill-not-allowed",
+  "state-invalid",
+  "tool-not-allowed",
+  "unknown-current-step",
+  "unknown-next-step"
+];
+var severityRank = {
+  error: 0,
+  warning: 1,
+  info: 2
+};
+var registeredOperations = new Set(
+  WORKFLOW_FINDING_OPERATION_IDS
+);
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function truncate(value, maxLength) {
+  if (new TextEncoder().encode(value).byteLength <= maxLength) return value;
+  let result = "";
+  for (const character of value) {
+    const next = `${result}${character}\u2026`;
+    if (new TextEncoder().encode(next).byteLength > maxLength) break;
+    result += character;
+  }
+  return `${result}\u2026`;
+}
+function redactMessage(value) {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  const redactedUrls = normalized.replace(
+    /\b(?:https?|file):\/\/[^\s,;)]+/giu,
+    "[URL]"
+  );
+  const redactedCredentials = redactedUrls.replace(
+    /\b(password|passwd|secret|token|api[-_]?key|authorization|cookie|credential)["']?\s*[:=]\s*["']?[^\s,;"'}]+/giu,
+    "$1=[REDACTED]"
+  ).replace(/\bBearer\s+[^\s,;)]+/giu, "Bearer [REDACTED]").replace(/\b([A-Z][A-Z0-9_]{2,})\s*=\s*[^\s,;]+/gu, "$1=[REDACTED]");
+  const redactedAbsolutePaths = redactedCredentials.replace(
+    /(?:[A-Za-z]:[\\/]|\/)[^,;)]*/gu,
+    "[PATH]"
+  );
+  return truncate(redactedAbsolutePaths, MAX_WORKFLOW_FINDING_MESSAGE_LENGTH);
+}
+function normalizeWorkflowFindingPath(value) {
+  if (value === void 0 || value.length === 0 || new TextEncoder().encode(value).byteLength > MAX_WORKFLOW_FINDING_PATH_LENGTH) {
+    return void 0;
+  }
+  const normalizedSeparators = value.replaceAll("\\", "/");
+  if (normalizedSeparators.startsWith("/") || /^[A-Za-z]:/u.test(normalizedSeparators) || /[*?\u0000-\u001f\u007f]/u.test(normalizedSeparators)) {
+    return void 0;
+  }
+  const segments = normalizedSeparators.split("/");
+  if (segments.some(
+    (segment) => segment.length === 0 || segment === "." || segment === ".."
+  )) {
+    return void 0;
+  }
+  const normalized = path4.posix.normalize(normalizedSeparators);
+  if (normalized === "." || normalized.startsWith("../") || normalized.includes("/../") || path4.posix.isAbsolute(normalized)) {
+    return void 0;
+  }
+  return normalized;
+}
+function operation(value) {
+  if (value === void 0) return void 0;
+  if (!isRecord(value)) {
+    throw new Error("Workflow finding operation must be an object");
+  }
+  const unknown = Object.keys(value).find(
+    (key) => key !== "id" && key !== "args"
+  );
+  if (unknown) {
+    throw new Error(`Workflow finding operation has unknown field: ${unknown}`);
+  }
+  if (typeof value.id !== "string" || !registeredOperations.has(value.id)) {
+    throw new Error(`Unknown Workflow finding operation: ${String(value.id)}`);
+  }
+  if (!Array.isArray(value.args) || value.args.some((arg) => typeof arg !== "string") || value.args.length > MAX_WORKFLOW_FINDING_OPERATION_ARGS || value.args.some(
+    (arg) => arg.length === 0 || new TextEncoder().encode(arg).byteLength > MAX_WORKFLOW_FINDING_OPERATION_ARG_LENGTH || /[\u0000\r\n]/u.test(arg)
+  )) {
+    throw new Error("Workflow finding operation args are invalid");
+  }
+  const args = value.args.map(
+    (arg) => truncate(redactMessage(arg), MAX_WORKFLOW_FINDING_OPERATION_ARG_LENGTH)
+  );
+  return {
+    id: value.id,
+    args
+  };
+}
+function findingKey(value) {
+  return JSON.stringify([
+    value.code,
+    value.severity,
+    value.message,
+    value.path ?? "",
+    value.requiredAction,
+    value.operation?.id ?? "",
+    value.operation?.args ?? [],
+    value.requiresUserDecision,
+    value.currentRevision ?? null,
+    value.currentActionId ?? null
+  ]);
+}
+function compareFindings(left, right) {
+  const severity = severityRank[left.severity] - severityRank[right.severity];
+  if (severity !== 0) return severity;
+  if (left.requiresUserDecision !== right.requiresUserDecision) {
+    return left.requiresUserDecision ? -1 : 1;
+  }
+  const code = left.code.localeCompare(right.code);
+  if (code !== 0) return code;
+  const pathComparison = (left.path ?? "").localeCompare(right.path ?? "");
+  if (pathComparison !== 0) return pathComparison;
+  const message = left.message.localeCompare(right.message);
+  if (message !== 0) return message;
+  const revision = (left.currentRevision ?? -1) - (right.currentRevision ?? -1);
+  if (revision !== 0) return revision;
+  return (left.currentActionId ?? "").localeCompare(
+    right.currentActionId ?? ""
+  );
+}
+function findingBytes(value) {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+var findingCodes = new Set(WORKFLOW_FINDING_CODES);
+var findingSeverities = new Set(
+  WORKFLOW_FINDING_SEVERITIES
+);
+var findingActions = new Set(
+  WORKFLOW_FINDING_REQUIRED_ACTIONS
+);
+function createWorkflowFinding(input) {
+  if (!findingCodes.has(input.code)) {
+    throw new Error(`Unknown Workflow finding code: ${input.code}`);
+  }
+  if (!findingSeverities.has(input.severity)) {
+    throw new Error(`Unknown Workflow finding severity: ${input.severity}`);
+  }
+  if (!findingActions.has(input.requiredAction)) {
+    throw new Error(
+      `Unknown Workflow finding required action: ${input.requiredAction}`
+    );
+  }
+  if (typeof input.message !== "string" || input.message.trim().length === 0) {
+    throw new Error("Workflow finding message must be non-empty");
+  }
+  if (input.currentRevision !== void 0 && (!Number.isSafeInteger(input.currentRevision) || input.currentRevision < 0)) {
+    throw new Error("Workflow finding current revision must be non-negative");
+  }
+  if (input.currentActionId !== void 0 && input.currentActionId !== null && (typeof input.currentActionId !== "string" || input.currentActionId.length === 0 || input.currentActionId.length > MAX_WORKFLOW_FINDING_OPERATION_ARG_LENGTH || /[\u0000\r\n]/u.test(input.currentActionId))) {
+    throw new Error("Workflow finding current action id is invalid");
+  }
+  const safePath = normalizeWorkflowFindingPath(input.path);
+  const safeOperation = operation(input.operation);
+  const allowedOperations = {
+    execute: ["workflow.start", "workflow.resume"],
+    decide: ["workflow.submit"],
+    repair: ["workflow.submit"],
+    retry: ["workflow.resume"]
+  };
+  const expectedOperations = allowedOperations[input.requiredAction];
+  if (expectedOperations && (!safeOperation || !expectedOperations.includes(safeOperation.id))) {
+    throw new Error(
+      `Workflow finding ${input.code} has an invalid operation for ${input.requiredAction}`
+    );
+  }
+  return {
+    catalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
+    code: input.code,
+    severity: input.severity,
+    message: redactMessage(input.message),
+    ...safePath ? { path: safePath } : {},
+    requiredAction: input.requiredAction,
+    ...safeOperation ? { operation: safeOperation } : {},
+    requiresUserDecision: input.requiresUserDecision ?? false,
+    ...input.currentRevision !== void 0 ? { currentRevision: input.currentRevision } : {},
+    ...input.currentActionId !== void 0 ? { currentActionId: input.currentActionId } : {}
+  };
+}
+function parseWorkflowFinding(value) {
+  if (!isRecord(value)) {
+    throw new Error("Workflow finding must be an object");
+  }
+  if (value.catalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
+    throw new Error(
+      `Unknown Workflow finding catalog version: ${String(value.catalogVersion)}`
+    );
+  }
+  const keys = /* @__PURE__ */ new Set([
+    "catalogVersion",
+    "code",
+    "severity",
+    "message",
+    "path",
+    "requiredAction",
+    "operation",
+    "requiresUserDecision",
+    "currentRevision",
+    "currentActionId"
+  ]);
+  const unknown = Object.keys(value).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Workflow finding has unknown field: ${unknown}`);
+  }
+  if (typeof value.code !== "string" || typeof value.severity !== "string" || typeof value.message !== "string" || typeof value.requiredAction !== "string" || typeof value.requiresUserDecision !== "boolean") {
+    throw new Error("Workflow finding fields are invalid");
+  }
+  if (value.path !== void 0 && typeof value.path !== "string") {
+    throw new Error("Workflow finding path must be a string");
+  }
+  if (value.currentRevision !== void 0 && (typeof value.currentRevision !== "number" || !Number.isSafeInteger(value.currentRevision) || value.currentRevision < 0)) {
+    throw new Error("Workflow finding current revision is invalid");
+  }
+  if (value.currentActionId !== void 0 && value.currentActionId !== null && typeof value.currentActionId !== "string") {
+    throw new Error("Workflow finding current action id is invalid");
+  }
+  const finding = createWorkflowFinding({
+    code: value.code,
+    severity: value.severity,
+    message: value.message,
+    ...value.path !== void 0 ? { path: value.path } : {},
+    requiredAction: value.requiredAction,
+    ...value.operation !== void 0 ? { operation: value.operation } : {},
+    requiresUserDecision: value.requiresUserDecision,
+    ...value.currentRevision !== void 0 ? { currentRevision: value.currentRevision } : {},
+    ...value.currentActionId !== void 0 ? { currentActionId: value.currentActionId } : {}
+  });
+  if (JSON.stringify(stableValue(finding)) !== JSON.stringify(stableValue(value))) {
+    throw new Error("Workflow finding is not canonical");
+  }
+  return finding;
+}
+function boundWorkflowFindings(values) {
+  const unique2 = /* @__PURE__ */ new Map();
+  for (const value of values) {
+    const finding = parseWorkflowFinding(value);
+    unique2.set(findingKey(finding), finding);
+  }
+  const candidates = [...unique2.values()].sort(compareFindings);
+  const findings = [];
+  let encodedBytes = findingBytes(findings);
+  for (const candidate of candidates) {
+    if (findings.length >= MAX_WORKFLOW_FINDINGS) break;
+    const next = [...findings, candidate];
+    const nextBytes = findingBytes(next);
+    if (nextBytes > MAX_WORKFLOW_FINDINGS_ENCODED_BYTES) continue;
+    findings.push(candidate);
+    encodedBytes = nextBytes;
+  }
+  const omittedValues = candidates.filter(
+    (candidate) => !findings.some((value) => findingKey(value) === findingKey(candidate))
+  );
+  const omittedBySeverity = {
+    info: 0,
+    warning: 0,
+    error: 0
+  };
+  const omittedByCode = {};
+  for (const omitted of omittedValues) {
+    omittedBySeverity[omitted.severity] += 1;
+    omittedByCode[omitted.code] = (omittedByCode[omitted.code] ?? 0) + 1;
+  }
+  const summary = {
+    catalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
+    total: candidates.length,
+    returned: findings.length,
+    omitted: omittedValues.length,
+    omittedBySeverity,
+    omittedByCode,
+    omittedRequiresUserDecision: omittedValues.filter(
+      (finding) => finding.requiresUserDecision
+    ).length,
+    truncated: omittedValues.length > 0,
+    encodedBytes,
+    maxEncodedBytes: MAX_WORKFLOW_FINDINGS_ENCODED_BYTES
+  };
+  return { findings: structuredClone(findings), summary };
+}
+function parseWorkflowFindingSummary(value) {
+  if (!isRecord(value)) {
+    throw new Error("Workflow finding summary must be an object");
+  }
+  const keys = /* @__PURE__ */ new Set([
+    "catalogVersion",
+    "total",
+    "returned",
+    "omitted",
+    "omittedBySeverity",
+    "omittedByCode",
+    "omittedRequiresUserDecision",
+    "truncated",
+    "encodedBytes",
+    "maxEncodedBytes"
+  ]);
+  const unknown = Object.keys(value).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Workflow finding summary has unknown field: ${unknown}`);
+  }
+  if (value.catalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
+    throw new Error(
+      `Unknown Workflow finding catalog version: ${String(value.catalogVersion)}`
+    );
+  }
+  const integerFields = [
+    "total",
+    "returned",
+    "omitted",
+    "omittedRequiresUserDecision",
+    "encodedBytes",
+    "maxEncodedBytes"
+  ];
+  for (const field of integerFields) {
+    const entry = value[field];
+    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 0) {
+      throw new Error(`Workflow finding summary field is invalid: ${field}`);
+    }
+  }
+  if (typeof value.truncated !== "boolean") {
+    throw new Error("Workflow finding summary truncated field is invalid");
+  }
+  if (!isRecord(value.omittedBySeverity)) {
+    throw new Error("Workflow finding summary severities are invalid");
+  }
+  const omittedBySeverity = {
+    info: 0,
+    warning: 0,
+    error: 0
+  };
+  const unknownSeverity = Object.keys(value.omittedBySeverity).find(
+    (severity) => !(severity in omittedBySeverity)
+  );
+  if (unknownSeverity) {
+    throw new Error(
+      `Workflow finding summary has unknown severity: ${unknownSeverity}`
+    );
+  }
+  for (const severity of Object.keys(
+    omittedBySeverity
+  )) {
+    const entry = value.omittedBySeverity[severity];
+    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 0) {
+      throw new Error(
+        `Workflow finding summary severity count is invalid: ${severity}`
+      );
+    }
+    omittedBySeverity[severity] = entry;
+  }
+  if (!isRecord(value.omittedByCode)) {
+    throw new Error("Workflow finding summary codes are invalid");
+  }
+  const omittedByCode = {};
+  for (const [code, entry] of Object.entries(value.omittedByCode)) {
+    if (!findingCodes.has(code)) {
+      throw new Error(`Unknown Workflow finding code: ${code}`);
+    }
+    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry <= 0) {
+      throw new Error(
+        `Workflow finding summary code count is invalid: ${code}`
+      );
+    }
+    omittedByCode[code] = entry;
+  }
+  const total = value.total;
+  const returned = value.returned;
+  const omitted = value.omitted;
+  if (returned > total || returned > MAX_WORKFLOW_FINDINGS || omitted !== total - returned || value.truncated !== omitted > 0 || Object.values(omittedBySeverity).reduce((sum, count) => sum + count, 0) !== omitted || Object.values(omittedByCode).reduce(
+    (sum, count) => sum + (count ?? 0),
+    0
+  ) !== omitted || value.omittedRequiresUserDecision > omitted || value.maxEncodedBytes !== MAX_WORKFLOW_FINDINGS_ENCODED_BYTES || value.encodedBytes > value.maxEncodedBytes) {
+    throw new Error("Workflow finding summary counts are inconsistent");
+  }
+  return {
+    catalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
+    total,
+    returned,
+    omitted,
+    omittedBySeverity,
+    omittedByCode,
+    omittedRequiresUserDecision: value.omittedRequiresUserDecision,
+    truncated: value.truncated,
+    encodedBytes: value.encodedBytes,
+    maxEncodedBytes: value.maxEncodedBytes
+  };
+}
+var blockerCatalog = [
+  {
+    match: /^No Comet Run found:/u,
+    entry: {
+      code: "run-not-found",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Unknown Workflow finding catalog version:/u,
+    entry: {
+      code: "catalog-version-unsupported",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Decision is pending/u,
+    entry: {
+      code: "decision-required",
+      severity: "info",
+      requiredAction: "decide",
+      requiresUserDecision: true,
+      operationId: "workflow.submit"
+    }
+  },
+  {
+    match: /^Missing Output Schema artifacts:/u,
+    entry: {
+      code: "completion-missing-artifact",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Missing Output Schema evidence:/u,
+    entry: {
+      code: "completion-missing-evidence",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /exceeds \d+ bytes/iu,
+    entry: {
+      code: "artifact-oversized",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Invalid Output Schema artifact/u,
+    entry: {
+      code: "completion-invalid-artifact",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Missing required Skill evidence:/u,
+    entry: {
+      code: "completion-missing-required-skill",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Missing augmentation evidence:/u,
+    entry: {
+      code: "completion-missing-augmentation",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Missing guardrail evidence:/u,
+    entry: {
+      code: "completion-missing-guardrail",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Route blocker: unknown routing field:/u,
+    entry: {
+      code: "route-unknown-field",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Route blocker: invalid routing value/u,
+    entry: {
+      code: "route-invalid-value",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Route blocker: ambiguous/u,
+    entry: {
+      code: "route-ambiguous",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Route blocker: no matching/u,
+    entry: {
+      code: "route-no-match",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Cycle budget exhausted:/u,
+    entry: {
+      code: "cycle-budget-exhausted",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Cycle /u,
+    entry: {
+      code: "cycle-invalid",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /Workflow Protocol Cycle|WorkflowRuntime .*Cycle/iu,
+    entry: {
+      code: "cycle-invalid",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Workflow artifact selections require versioned-artifacts capability$/u,
+    entry: {
+      code: "artifact-capability-required",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Failed submissions cannot update versioned artifacts$/u,
+    entry: {
+      code: "artifact-failed-submission",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /artifact content drift detected/iu,
+    entry: {
+      code: "artifact-content-drift",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /artifact version is unknown/iu,
+    entry: {
+      code: "artifact-unknown-version",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /stale for this Attempt/iu,
+    entry: {
+      code: "artifact-stale-attempt",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /scope is unavailable/iu,
+    entry: {
+      code: "scope-unavailable",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /scope/iu,
+    entry: {
+      code: "scope-invalid",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /WorkflowRuntime .*identity|execution identity|Skill snapshot is invalid or missing/iu,
+    entry: {
+      code: "identity-invalid",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /Decision response revision|Decision response execution identity|Decision response .* identity/iu,
+    entry: {
+      code: "identity-invalid",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /Outcome does not match pending action|Submission Node does not match pending Node|Decision response required|Decision response cannot satisfy|Decision choice|pending decision identity/iu,
+    entry: {
+      code: "pending-action-invalid",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /WorkflowRuntime pending action|pending action file|current Node does not match pending action/iu,
+    entry: {
+      code: "pending-action-invalid",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /WorkflowRuntime current (?:Cycle|Attempt)|Cycle identity|Cycle position is invalid/iu,
+    entry: {
+      code: "cycle-invalid",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /WorkflowRuntime current Node is not in the compiled route/iu,
+    entry: {
+      code: "pending-action-invalid",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Run has no pending action$/u,
+    entry: {
+      code: "no-pending-action",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Workflow artifact/u,
+    entry: {
+      code: "artifact-invalid",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Required Workflow artifact needs an explicit update or version:/u,
+    entry: {
+      code: "artifact-invalid",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Cycle-persistent artifact update requires a current Cycle$/u,
+    entry: {
+      code: "artifact-invalid",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Attempt artifact path must include the current Attempt id:/u,
+    entry: {
+      code: "artifact-invalid",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Versioned artifact submission requires revisioned Run state$/u,
+    entry: {
+      code: "artifact-invalid",
+      severity: "error",
+      requiredAction: "repair"
+    }
+  },
+  {
+    match: /^Retry budget exhausted for action:/u,
+    entry: {
+      code: "retry-budget-exhausted",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Iteration budget exhausted:/u,
+    entry: {
+      code: "iteration-budget-exhausted",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Skill is not allowed:/u,
+    entry: {
+      code: "skill-not-allowed",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Tool is not allowed:/u,
+    entry: {
+      code: "tool-not-allowed",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Agent is not allowed:/u,
+    entry: {
+      code: "agent-not-allowed",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^User confirmation required for:/u,
+    entry: {
+      code: "confirmation-required",
+      severity: "warning",
+      requiredAction: "execute",
+      requiresUserDecision: true
+    }
+  },
+  {
+    match: /^Action already pending:/u,
+    entry: {
+      code: "action-already-pending",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^No pending action accepts an outcome$/u,
+    entry: {
+      code: "no-pending-action",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Adaptive orchestration requires an Agent candidate$/u,
+    entry: {
+      code: "adaptive-requires-agent",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Unknown current step:/u,
+    entry: {
+      code: "unknown-current-step",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Resolver returned unknown next step:/u,
+    entry: {
+      code: "unknown-next-step",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Run is /u,
+    entry: {
+      code: "run-status",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  }
+];
+function operationFor(requiredAction, context, operationId) {
+  const args = context.actionId ? [context.actionId] : [];
+  if (operationId) return { id: operationId, args };
+  if (requiredAction === "repair") {
+    return { id: "workflow.submit", args };
+  }
+  if (requiredAction === "retry") {
+    return { id: "workflow.resume", args };
+  }
+  if (requiredAction === "decide") {
+    return { id: "workflow.submit", args };
+  }
+  if (requiredAction === "execute") {
+    return { id: "workflow.resume", args };
+  }
+  return void 0;
+}
+function findingFromBlocker(message, context = {}) {
+  const catalog = blockerCatalog.find((entry2) => entry2.match.test(message));
+  const entry = catalog?.entry ?? {
+    code: "state-invalid",
+    severity: "error",
+    requiredAction: "stop"
+  };
+  return createWorkflowFinding({
+    ...entry,
+    message,
+    path: context.path,
+    operation: operationFor(entry.requiredAction, context, entry.operationId)
+  });
+}
+function attachWorkflowFinding(error) {
+  if (error instanceof Error && "finding" in error) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  const finding = findingFromBlocker(message);
+  if (error instanceof Error) {
+    Object.defineProperty(error, "finding", {
+      configurable: true,
+      enumerable: true,
+      value: finding,
+      writable: false
+    });
+    return error;
+  }
+  const wrapped = new Error(message, { cause: error });
+  Object.defineProperty(wrapped, "finding", {
+    configurable: true,
+    enumerable: true,
+    value: finding,
+    writable: false
+  });
+  return wrapped;
+}
+function actionAvailableFinding(actionId2, retry = false) {
+  return createWorkflowFinding({
+    code: "action-available",
+    severity: "info",
+    message: "Executable workflow action is available.",
+    requiredAction: retry ? "retry" : "execute",
+    operation: { id: "workflow.resume", args: [actionId2] }
+  });
+}
+function decisionRequiredFinding(actionId2) {
+  return createWorkflowFinding({
+    code: "decision-required",
+    severity: "info",
+    message: "A persisted workflow decision requires user input.",
+    requiredAction: "decide",
+    operation: { id: "workflow.submit", args: [actionId2] },
+    requiresUserDecision: true
+  });
+}
+function revisionConflictFinding(currentRevision, currentActionId) {
+  return createWorkflowFinding({
+    code: "revision-conflict",
+    severity: "error",
+    message: `Workflow submission conflicts with the current Run revision ${currentRevision} and action ${currentActionId ?? "(none)"}. Refresh the authoritative continuation before retrying.`,
+    requiredAction: "retry",
+    operation: {
+      id: "workflow.resume",
+      args: currentActionId ? [currentActionId] : []
+    },
+    currentRevision,
+    currentActionId
+  });
+}
+function evaluationWarningFinding(evalId, evidence) {
+  return createWorkflowFinding({
+    code: "evaluation-warning",
+    severity: "warning",
+    message: `Terminal evaluation ${evalId} did not pass: ${evidence}`,
+    requiredAction: "none"
+  });
+}
+function legacyBlockersFromFindings(disposition, findings) {
+  return disposition === "blocked" ? findings.map((finding) => finding.message) : [];
+}
+
+// src/workflow-runtime/durability.ts
+var WORKFLOW_DURABILITY_PROFILE_VERSION = 1;
+var WORKFLOW_DURABILITY_SCHEMA_VERSION = 1;
+var WORKFLOW_DURABILITY_MAX_RECORD_BYTES = 16 * 1024 * 1024;
+var PROFILE_KEYS = /* @__PURE__ */ new Set([
+  "version",
+  "capabilities",
+  "bounds",
+  "schemaVersions",
+  "findingCatalogVersion"
+]);
+var CAPABILITIES = /* @__PURE__ */ new Set(["revision-fences"]);
+var BOUND_KEY_NAMES = [
+  "runStateBytes",
+  "pendingActionBytes",
+  "trajectoryBytes",
+  "artifactsBytes",
+  "claimBytes"
+];
+var BOUND_KEYS = new Set(BOUND_KEY_NAMES);
+var SCHEMA_KEY_NAMES = [
+  "runState",
+  "pendingAction",
+  "trajectory",
+  "artifacts",
+  "revisionClaim"
+];
+var SCHEMA_KEYS = new Set(SCHEMA_KEY_NAMES);
+var MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
+function isRecord2(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function assertKnownFields(value, keys, label) {
+  const unknown = Object.keys(value).find((key) => !keys.has(key));
+  if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
+}
+function requiredBound(value, key) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > MAX_PROFILE_BOUND) {
+    throw new Error(
+      `Invalid Workflow durability profile: bounds.${key} must be a positive bounded integer`
+    );
+  }
+  return value;
+}
+function parseWorkflowDurabilityProfile(value) {
+  if (!isRecord2(value)) {
+    throw new Error("Invalid Workflow durability profile: must be an object");
+  }
+  assertKnownFields(value, PROFILE_KEYS, "Workflow durability profile");
+  if (value.version !== WORKFLOW_DURABILITY_PROFILE_VERSION) {
+    throw new Error(
+      `Unsupported Workflow durability profile version: ${String(value.version)}`
+    );
+  }
+  if (!Array.isArray(value.capabilities) || value.capabilities.length === 0) {
+    throw new Error(
+      "Invalid Workflow durability profile: capabilities must be a non-empty array"
+    );
+  }
+  const capabilities = value.capabilities.map((capability) => {
+    if (typeof capability !== "string" || !CAPABILITIES.has(capability) || capability !== "revision-fences") {
+      throw new Error(
+        `Invalid Workflow durability profile: unsupported capability ${String(capability)}`
+      );
+    }
+    return capability;
+  });
+  if (new Set(capabilities).size !== capabilities.length) {
+    throw new Error(
+      "Invalid Workflow durability profile: capabilities must not contain duplicates"
+    );
+  }
+  if (!isRecord2(value.bounds)) {
+    throw new Error(
+      "Invalid Workflow durability profile: bounds must be an object"
+    );
+  }
+  const boundsValue = value.bounds;
+  assertKnownFields(
+    boundsValue,
+    BOUND_KEYS,
+    "Workflow durability profile bounds"
+  );
+  const bounds = Object.fromEntries(
+    BOUND_KEY_NAMES.map((key) => [key, requiredBound(boundsValue[key], key)])
+  );
+  if (!isRecord2(value.schemaVersions)) {
+    throw new Error(
+      "Invalid Workflow durability profile: schemaVersions must be an object"
+    );
+  }
+  assertKnownFields(
+    value.schemaVersions,
+    SCHEMA_KEYS,
+    "Workflow durability profile schemaVersions"
+  );
+  const schemaVersions = value.schemaVersions;
+  for (const key of SCHEMA_KEY_NAMES) {
+    if (schemaVersions[key] !== WORKFLOW_DURABILITY_SCHEMA_VERSION) {
+      throw new Error(`Unsupported Workflow durability schema version: ${key}`);
+    }
+  }
+  if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
+    throw new Error(
+      `Unsupported Workflow durability finding catalog version: ${String(value.findingCatalogVersion)}`
+    );
+  }
+  return {
+    version: WORKFLOW_DURABILITY_PROFILE_VERSION,
+    capabilities: [...capabilities].sort(),
+    bounds,
+    schemaVersions: {
+      runState: WORKFLOW_DURABILITY_SCHEMA_VERSION,
+      pendingAction: WORKFLOW_DURABILITY_SCHEMA_VERSION,
+      trajectory: WORKFLOW_DURABILITY_SCHEMA_VERSION,
+      artifacts: WORKFLOW_DURABILITY_SCHEMA_VERSION,
+      revisionClaim: WORKFLOW_DURABILITY_SCHEMA_VERSION
+    },
+    findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION
+  };
+}
+function normalizeWorkflowDurabilityProtocol(protocol) {
+  const durability = protocol.capabilities?.durability;
+  if (durability === void 0) return protocol;
+  return {
+    ...structuredClone(protocol),
+    capabilities: {
+      ...structuredClone(protocol.capabilities),
+      durability: parseWorkflowDurabilityProfile(durability)
+    }
+  };
+}
+function durabilityProfileForProtocol(protocol) {
+  const durability = protocol.capabilities?.durability;
+  return durability === void 0 ? void 0 : parseWorkflowDurabilityProfile(durability);
+}
+function sameDurabilityProfile(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+}
+
+// src/skill-runtime/load.ts
 var ACTION_TYPES = [
   "invoke_skill",
   "call_tool",
@@ -890,6 +1984,7 @@ function narrowRuntimeMetadata(value, filePath) {
       "must be 1 when present"
     );
   }
+  const durabilityProfile = value.durabilityProfile === void 0 ? void 0 : parseWorkflowDurabilityProfile(value.durabilityProfile);
   let completionPlans;
   if (value.completionPlans !== void 0) {
     assertObject(value.completionPlans, filePath, "runtime.completionPlans");
@@ -935,6 +2030,7 @@ function narrowRuntimeMetadata(value, filePath) {
     ...value.capabilityVersion === 3 ? { capabilityVersion: 3 } : {},
     ...typeof value.resolverHash === "string" ? { resolverHash: value.resolverHash } : {},
     ...value.findingCatalogVersion === 1 ? { findingCatalogVersion: 1 } : {},
+    ...durabilityProfile ? { durabilityProfile } : {},
     ...completionPlans ? { completionPlans } : {}
   };
 }
@@ -952,7 +2048,7 @@ function narrowRuntimeEvals(value, filePath, fieldPath) {
   });
   return value;
 }
-function loadSkillPackageDocument(document, root, filePath = path4.join(root, "package.json")) {
+function loadSkillPackageDocument(document, root, filePath = path5.join(root, "package.json")) {
   assertObject(document, filePath);
   const packageKind = document.packageKind === "runtime" ? "runtime" : void 0;
   const runtime = narrowRuntimeMetadata(document.runtime, filePath);
@@ -968,7 +2064,7 @@ function loadSkillPackageDocument(document, root, filePath = path4.join(root, "p
     confirmationRequiredFor: definition.tools.filter((tool) => tool.requiresConfirmation).map((tool) => tool.id)
   };
   return {
-    root: path4.resolve(root),
+    root: path5.resolve(root),
     packageKind,
     runtime,
     definition,
@@ -981,7 +2077,7 @@ function loadSkillPackageDocument(document, root, filePath = path4.join(root, "p
 }
 
 // src/skill-runtime/validate.ts
-import path5 from "path";
+import path6 from "path";
 function validatesAction(action, pkg, errors, stepId2) {
   if (action.type === "invoke_skill" && !pkg.definition.skills.some((item) => item.id === action.ref)) {
     errors.push(
@@ -1063,8 +2159,8 @@ function validateSkillPackage(pkg) {
   }
   for (const tool of definition.tools) {
     if (tool.kind !== "script") continue;
-    const normalized = path5.posix.normalize(tool.source.replaceAll("\\", "/"));
-    if (path5.isAbsolute(tool.source) || normalized === ".." || normalized.startsWith("../")) {
+    const normalized = path6.posix.normalize(tool.source.replaceAll("\\", "/"));
+    if (path6.isAbsolute(tool.source) || normalized === ".." || normalized.startsWith("../")) {
       errors.push(
         `script tool ${tool.id} must reference a relative path inside the Skill package`
       );
@@ -1085,24 +2181,6 @@ function validateSkillPackage(pkg) {
   return errors;
 }
 
-// src/util.ts
-import { createHash } from "node:crypto";
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, stableValue(item)])
-    );
-  }
-  return value;
-}
-function slug(value) {
-  return value.toLowerCase().replace(/[^a-z0-9._-]+/gu, "-").replace(/^-+|-+$/gu, "");
-}
-
 // src/skill-runtime/snapshot.ts
 function packageDocument(pkg) {
   return stableValue({
@@ -1114,21 +2192,21 @@ function packageDocument(pkg) {
   });
 }
 function normalizedRelativePath(source) {
-  return path6.posix.normalize(source.replaceAll("\\", "/"));
+  return path7.posix.normalize(source.replaceAll("\\", "/"));
 }
 function assertInside(parent, target, label) {
-  const relative = path6.relative(parent, target);
-  if (relative === "" || !path6.isAbsolute(relative) && !relative.startsWith(`..${path6.sep}`)) {
+  const relative = path7.relative(parent, target);
+  if (relative === "" || !path7.isAbsolute(relative) && !relative.startsWith(`..${path7.sep}`)) {
     return;
   }
   throw new Error(`${label} resolves outside the Skill package`);
 }
 async function readPackageFile(root, relativePath, label) {
   const normalized = normalizedRelativePath(relativePath);
-  if (path6.posix.isAbsolute(normalized) || normalized === ".." || normalized.startsWith("../")) {
+  if (path7.posix.isAbsolute(normalized) || normalized === ".." || normalized.startsWith("../")) {
     throw new Error(`${label} resolves outside the Skill package`);
   }
-  const target = path6.resolve(root, ...normalized.split("/"));
+  const target = path7.resolve(root, ...normalized.split("/"));
   assertInside(root, target, label);
   let realTarget;
   try {
@@ -1189,17 +2267,17 @@ async function pathExists(target) {
 }
 async function verifyPublishedSnapshot(snapshotDir, material) {
   try {
-    const storedHash = (await fs4.readFile(path6.join(snapshotDir, "sha256"), "utf8")).trim();
+    const storedHash = (await fs4.readFile(path7.join(snapshotDir, "sha256"), "utf8")).trim();
     if (storedHash !== material.hash) throw new Error("hash mismatch");
     const storedPackage = await fs4.readFile(
-      path6.join(snapshotDir, "package.json"),
+      path7.join(snapshotDir, "package.json"),
       "utf8"
     );
     if (storedPackage !== packageJson(material.document))
       throw new Error("package mismatch");
     for (const file of material.files) {
       const stored = await fs4.readFile(
-        path6.join(snapshotDir, ...file.path.split("/"))
+        path7.join(snapshotDir, ...file.path.split("/"))
       );
       if (!stored.equals(file.content))
         throw new Error(`file mismatch: ${file.path}`);
@@ -1212,29 +2290,29 @@ async function verifyPublishedSnapshot(snapshotDir, material) {
 }
 async function createSkillSnapshot(pkg, changeDir) {
   const material = await snapshotMaterial(pkg);
-  const snapshotsRoot = path6.resolve(changeDir, ".comet", "skill-snapshots");
-  const snapshotDir = path6.join(snapshotsRoot, material.hash);
+  const snapshotsRoot = path7.resolve(changeDir, ".comet", "skill-snapshots");
+  const snapshotDir = path7.join(snapshotsRoot, material.hash);
   await fs4.mkdir(snapshotsRoot, { recursive: true });
   if (await pathExists(snapshotDir)) {
     await verifyPublishedSnapshot(snapshotDir, material);
     return { hash: material.hash, snapshotDir };
   }
-  const temporaryDir = path6.join(snapshotsRoot, `.tmp-${randomUUID2()}`);
+  const temporaryDir = path7.join(snapshotsRoot, `.tmp-${randomUUID2()}`);
   assertInside(snapshotsRoot, temporaryDir, "Temporary snapshot");
   assertInside(snapshotsRoot, snapshotDir, "Published snapshot");
   try {
     await fs4.mkdir(temporaryDir);
     for (const file of material.files) {
-      const destination = path6.join(temporaryDir, ...file.path.split("/"));
+      const destination = path7.join(temporaryDir, ...file.path.split("/"));
       assertInside(temporaryDir, destination, `Snapshot file ${file.path}`);
-      await fs4.mkdir(path6.dirname(destination), { recursive: true });
+      await fs4.mkdir(path7.dirname(destination), { recursive: true });
       await fs4.writeFile(destination, file.content);
     }
     await fs4.writeFile(
-      path6.join(temporaryDir, "package.json"),
+      path7.join(temporaryDir, "package.json"),
       packageJson(material.document)
     );
-    await fs4.writeFile(path6.join(temporaryDir, "sha256"), material.hash + "\n");
+    await fs4.writeFile(path7.join(temporaryDir, "sha256"), material.hash + "\n");
     await fs4.rename(temporaryDir, snapshotDir);
   } catch (error) {
     if (await pathExists(snapshotDir)) {
@@ -1250,19 +2328,19 @@ async function createSkillSnapshot(pkg, changeDir) {
   }
   return { hash: material.hash, snapshotDir };
 }
-async function readSkillSnapshot(changeDir, hash) {
-  if (!/^[a-f0-9]{64}$/u.test(hash)) {
-    throw new Error(`Invalid Skill snapshot hash: ${hash}`);
+async function readSkillSnapshot(changeDir, hash2) {
+  if (!/^[a-f0-9]{64}$/u.test(hash2)) {
+    throw new Error(`Invalid Skill snapshot hash: ${hash2}`);
   }
-  const snapshotsRoot = path6.resolve(changeDir, ".comet", "skill-snapshots");
-  const snapshotDir = path6.join(snapshotsRoot, hash);
+  const snapshotsRoot = path7.resolve(changeDir, ".comet", "skill-snapshots");
+  const snapshotDir = path7.join(snapshotsRoot, hash2);
   assertInside(snapshotsRoot, snapshotDir, "Skill snapshot");
   try {
-    const storedHash = (await fs4.readFile(path6.join(snapshotDir, "sha256"), "utf8")).trim();
-    if (storedHash !== hash) {
+    const storedHash = (await fs4.readFile(path7.join(snapshotDir, "sha256"), "utf8")).trim();
+    if (storedHash !== hash2) {
       throw new Error(`stored hash is ${storedHash || "(empty)"}`);
     }
-    const packagePath = path6.join(snapshotDir, "package.json");
+    const packagePath = path7.join(snapshotDir, "package.json");
     const document = JSON.parse(
       await fs4.readFile(packagePath, "utf8")
     );
@@ -1272,22 +2350,30 @@ async function readSkillSnapshot(changeDir, hash) {
       throw new Error(errors.map((error) => `  - ${error}`).join("\n"));
     }
     const calculated = await hashSkillPackage(pkg);
-    if (calculated !== hash) {
+    if (calculated !== hash2) {
       throw new Error(`calculated hash is ${calculated}`);
     }
     return pkg;
   } catch (error) {
-    throw new Error(`Skill snapshot is invalid or missing: ${hash}`, {
+    throw new Error(`Skill snapshot is invalid or missing: ${hash2}`, {
       cause: error
     });
   }
 }
 
 // src/engine/run-store.ts
-import path7 from "path";
+import path8 from "path";
 
 // src/engine/protected-run-file.ts
 import { TextDecoder } from "util";
+var MAX_ENGINE_RUN_FILE_BYTES = 16 * 1024 * 1024;
+function boundedMaxBytes(requested, fallback, label) {
+  const value = requested ?? fallback;
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_ENGINE_RUN_FILE_BYTES) {
+    throw new Error(`${label} size bound is invalid`);
+  }
+  return value;
+}
 function identityOf2(stat) {
   return { dev: stat.dev, ino: stat.ino, birthtime: stat.birthtimeMs };
 }
@@ -1299,11 +2385,12 @@ function decodeRunText(result, label) {
   }
 }
 async function readSnapshot(changeDir, relativePath, maxBytes, label, options = {}) {
+  const effectiveMaxBytes = boundedMaxBytes(options.maxBytes, maxBytes, label);
   try {
     const result = await readProtectedProjectFile(
       changeDir,
       relativePath,
-      maxBytes,
+      effectiveMaxBytes,
       {
         label,
         hooks: options.hooks
@@ -1320,10 +2407,17 @@ async function readOptionalEngineRunText(changeDir, relativePath, maxBytes, labe
   return (await readSnapshot(changeDir, relativePath, maxBytes, label, options))?.text ?? null;
 }
 async function writeEngineRunText(changeDir, relativePath, content, maxBytes, label, options = {}) {
-  if (Buffer.byteLength(content, "utf8") > maxBytes) {
-    throw new Error(`${label} exceeds ${maxBytes} bytes`);
+  const effectiveMaxBytes = boundedMaxBytes(options.maxBytes, maxBytes, label);
+  if (Buffer.byteLength(content, "utf8") > effectiveMaxBytes) {
+    throw new Error(`${label} exceeds ${effectiveMaxBytes} bytes`);
   }
-  const expected = await readSnapshot(changeDir, relativePath, maxBytes, label);
+  const expected = await readSnapshot(
+    changeDir,
+    relativePath,
+    effectiveMaxBytes,
+    label,
+    options
+  );
   const inspection = await inspectProtectedProjectPath(
     changeDir,
     relativePath,
@@ -1334,17 +2428,22 @@ async function writeEngineRunText(changeDir, relativePath, content, maxBytes, la
   );
   await atomicWriteContainedText(inspection.target, content, {
     containedRoot: inspection.projectRoot,
+    exclusive: options.exclusive,
     beforeCommit: async () => {
       await options.beforeCommit?.();
       const current = await readSnapshot(
         changeDir,
         relativePath,
-        maxBytes,
+        effectiveMaxBytes,
         label
       );
       if (!expected && !current) return;
       if (!expected || !current) {
-        throw new Error(`${label} changed before commit`);
+        const error = new Error(
+          `${label} changed before commit`
+        );
+        if (options.exclusive && !expected && current) error.code = "EEXIST";
+        throw error;
       }
       if (expected.result.realPath !== current.result.realPath || !sameFileObject(
         identityOf2(expected.result.stat),
@@ -1419,19 +2518,19 @@ var ACTION_KEYS = /* @__PURE__ */ new Set([
 var appendLocks = /* @__PURE__ */ new Map();
 function assertRunPath(changeDir, relativePath) {
   const normalized = typeof relativePath === "string" ? relativePath.replaceAll("\\", "/") : "";
-  if (typeof relativePath !== "string" || normalized.length === 0 || path7.posix.isAbsolute(normalized) || path7.win32.isAbsolute(relativePath) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(relativePath) || normalized.split("/").some(
+  if (typeof relativePath !== "string" || normalized.length === 0 || path8.posix.isAbsolute(normalized) || path8.win32.isAbsolute(relativePath) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(relativePath) || normalized.split("/").some(
     (segment) => segment.length === 0 || segment === "." || segment === ".."
   )) {
     throw new Error("Run path must stay inside the change directory");
   }
-  const root = path7.resolve(changeDir);
-  const target = path7.resolve(root, ...normalized.split("/"));
-  if (target !== root && !target.startsWith(root + path7.sep)) {
+  const root = path8.resolve(changeDir);
+  const target = path8.resolve(root, ...normalized.split("/"));
+  if (target !== root && !target.startsWith(root + path8.sep)) {
     throw new Error("Run path must stay inside the change directory");
   }
   return normalized;
 }
-function isRecord(value) {
+function isRecord3(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function requiredText(value, key, label) {
@@ -1444,7 +2543,7 @@ function nullableText(value, key, label) {
   if (value === null) return null;
   return requiredText(value, key, label);
 }
-function assertKnownFields(value, keys, label) {
+function assertKnownFields2(value, keys, label) {
   const unknown = Object.keys(value).find((key) => !keys.has(key));
   if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
 }
@@ -1469,8 +2568,8 @@ function parseJson(raw, label) {
   }
 }
 function parseScopeProducer(value, label) {
-  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields(
+  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields2(
     value,
     /* @__PURE__ */ new Set([
       "runId",
@@ -1496,8 +2595,8 @@ function parseScopeProducer(value, label) {
   };
 }
 function parseScopeReference(value, label) {
-  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields(
+  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields2(
     value,
     /* @__PURE__ */ new Set(["id", "required", "versionId", "contentHash", "producer"]),
     label
@@ -1518,8 +2617,8 @@ function parseScopeReference(value, label) {
   };
 }
 function parseDecisionScope(value, label) {
-  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields(value, /* @__PURE__ */ new Set(["artifacts", "evidence"]), label);
+  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields2(value, /* @__PURE__ */ new Set(["artifacts", "evidence"]), label);
   const parseEntries = (kind) => {
     const entries = value[kind];
     if (!Array.isArray(entries)) {
@@ -1538,12 +2637,12 @@ function parseDecisionScope(value, label) {
   };
 }
 function parseAction(value) {
-  if (!isRecord(value)) {
+  if (!isRecord3(value)) {
     throw new Error(
       "Invalid Run pending action: stored value must be an object"
     );
   }
-  assertKnownFields(value, ACTION_KEYS, "Run pending action");
+  assertKnownFields2(value, ACTION_KEYS, "Run pending action");
   requiredFields(
     value,
     /* @__PURE__ */ new Set(["id", "stepId", "type"]),
@@ -1651,10 +2750,10 @@ function parseDecisionScalarType(value, label) {
   return value;
 }
 function parseDecisionInputSchema(value, label) {
-  if (!isRecord(value)) {
+  if (!isRecord3(value)) {
     throw new Error(`Invalid ${label}: must be an object`);
   }
-  assertKnownFields(value, /* @__PURE__ */ new Set(["type", "fields"]), label);
+  assertKnownFields2(value, /* @__PURE__ */ new Set(["type", "fields"]), label);
   if (value.type !== "object") {
     throw new Error(`Invalid ${label}: type must be object`);
   }
@@ -1664,10 +2763,10 @@ function parseDecisionInputSchema(value, label) {
   const ids = /* @__PURE__ */ new Set();
   const fields = value.fields.map((entry, index) => {
     const fieldLabel = `${label}.fields[${index}]`;
-    if (!isRecord(entry)) {
+    if (!isRecord3(entry)) {
       throw new Error(`Invalid ${fieldLabel}: must be an object`);
     }
-    assertKnownFields(
+    assertKnownFields2(
       entry,
       /* @__PURE__ */ new Set(["id", "type", "required", "values", "enum"]),
       fieldLabel
@@ -1709,8 +2808,8 @@ function parseDecisionInputSchema(value, label) {
   return { type: "object", fields };
 }
 function parseDecisionChoiceSummary(value, label) {
-  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields(value, /* @__PURE__ */ new Set(["id", "label", "requiredInputs"]), label);
+  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields2(value, /* @__PURE__ */ new Set(["id", "label", "requiredInputs"]), label);
   const result = {
     id: requiredText(value.id, "id", label),
     label: requiredText(value.label, "label", label)
@@ -1724,16 +2823,16 @@ function parseDecisionChoiceSummary(value, label) {
   return result;
 }
 function parseRationalePolicy(value, label) {
-  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields(value, /* @__PURE__ */ new Set(["required"]), label);
+  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields2(value, /* @__PURE__ */ new Set(["required"]), label);
   if (value.required !== void 0 && typeof value.required !== "boolean") {
     throw new Error(`Invalid ${label}: required must be a boolean`);
   }
   return { required: value.required === true };
 }
 function parseReviewerPolicy(value, label) {
-  if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields(value, /* @__PURE__ */ new Set(["subjects", "authorities"]), label);
+  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields2(value, /* @__PURE__ */ new Set(["subjects", "authorities"]), label);
   const result = {};
   for (const key of ["subjects", "authorities"]) {
     if (value[key] === void 0) continue;
@@ -1747,7 +2846,7 @@ function parseReviewerPolicy(value, label) {
   return result;
 }
 function parseArtifacts(value) {
-  if (!isRecord(value)) {
+  if (!isRecord3(value)) {
     throw new Error("Invalid Run artifacts: stored value must be an object");
   }
   for (const artifact of Object.values(value)) {
@@ -1760,11 +2859,11 @@ function parseArtifacts(value) {
   );
 }
 function parseTrajectoryEvent(value) {
-  if (!isRecord(value)) {
+  if (!isRecord3(value)) {
     throw new Error("Invalid Run trajectory: stored value must be an object");
   }
   const keys = /* @__PURE__ */ new Set(["sequence", "timestamp", "type", "runId", "data"]);
-  assertKnownFields(value, keys, "Run trajectory");
+  assertKnownFields2(value, keys, "Run trajectory");
   requiredFields(value, keys, "Run trajectory");
   if (typeof value.sequence !== "number" || !Number.isSafeInteger(value.sequence) || value.sequence < 1) {
     throw new Error(
@@ -1774,7 +2873,7 @@ function parseTrajectoryEvent(value) {
   if (!TRAJECTORY_EVENT_TYPES.has(value.type)) {
     throw new Error("Invalid Run trajectory: type is invalid");
   }
-  if (!isRecord(value.data)) {
+  if (!isRecord3(value.data)) {
     throw new Error("Invalid Run trajectory: data must be an object");
   }
   return {
@@ -1853,13 +2952,14 @@ async function withAppendLock(key, operation2) {
 }
 async function appendTrajectory(changeDir, relativePath, event, options = {}) {
   const normalized = assertRunPath(changeDir, relativePath);
-  const key = `${path7.resolve(changeDir)}\0${normalized}`;
+  const key = `${path8.resolve(changeDir)}\0${normalized}`;
   await withAppendLock(key, async () => {
     const raw = await readOptionalEngineRunText(
       changeDir,
       normalized,
       RUN_FILE_LIMITS.trajectory,
-      "Run trajectory"
+      "Run trajectory",
+      options
     );
     const events = parseTrajectory(raw);
     const parsed = parseTrajectoryEvent(event);
@@ -1875,6 +2975,7 @@ async function appendTrajectory(changeDir, relativePath, event, options = {}) {
       RUN_FILE_LIMITS.trajectory,
       "Run trajectory",
       {
+        ...options,
         beforeCommit: async () => {
           await options.beforeCommit?.();
           const latest = parseTrajectory(
@@ -1882,7 +2983,8 @@ async function appendTrajectory(changeDir, relativePath, event, options = {}) {
               changeDir,
               normalized,
               RUN_FILE_LIMITS.trajectory,
-              "Run trajectory"
+              "Run trajectory",
+              options
             )
           );
           assertNextTrajectoryEvent(latest, parsed);
@@ -1960,7 +3062,7 @@ async function clearPendingAction(changeDir, relativePath, options = {}) {
 
 // src/workflow-runtime/artifacts.ts
 import { promises as fs5 } from "node:fs";
-import path8 from "node:path";
+import path9 from "node:path";
 var ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
 var ARTIFACT_MAX_ENTRIES = 256;
 var WorkflowArtifactValidationError = class extends Error {
@@ -2007,7 +3109,7 @@ function declarationFor(key, candidates) {
 }
 function artifactPatternSegments(value, label) {
   const normalized = value.trim().replaceAll("\\", "/");
-  if (normalized.length === 0 || path8.posix.isAbsolute(normalized) || path8.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
+  if (normalized.length === 0 || path9.posix.isAbsolute(normalized) || path9.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
     throw new Error(`${label} must be relative to the Run root`);
   }
   const segments = normalized.split("/");
@@ -2051,7 +3153,7 @@ async function realRunRoot(runRoot, label) {
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error(`${label} Run root must be a real directory`);
   }
-  return path8.resolve(runRoot);
+  return path9.resolve(runRoot);
 }
 async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, label, options = { maxMatches: ARTIFACT_MAX_ENTRIES }) {
   const segments = artifactPatternSegments(artifactPath, label);
@@ -2064,7 +3166,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
       });
       return inspection.exists ? [inspection.relative] : [];
     }
-    const current = relative.length === 0 ? root : path8.join(root, relative);
+    const current = relative.length === 0 ? root : path9.join(root, relative);
     if (relative.length > 0) {
       const inspection = await inspectProtectedProjectPath(runRoot, relative, {
         label,
@@ -2075,7 +3177,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
     const segment = segments[index];
     if (!segment.includes("*")) {
       return walk(
-        relative.length === 0 ? segment : path8.posix.join(relative, segment),
+        relative.length === 0 ? segment : path9.posix.join(relative, segment),
         index + 1
       );
     }
@@ -2094,7 +3196,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
     )) {
       if (entry.isSymbolicLink()) {
         throw new Error(
-          `${label} crosses a symbolic link or junction at ${path8.join(current, entry.name)}`
+          `${label} crosses a symbolic link or junction at ${path9.join(current, entry.name)}`
         );
       }
       if (!matcher.test(entry.name)) continue;
@@ -2103,7 +3205,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
       if (final && (expected === "file" && !entry.isFile() || expected === "directory" && !entry.isDirectory())) {
         continue;
       }
-      const next = relative.length === 0 ? entry.name : path8.posix.join(relative, entry.name);
+      const next = relative.length === 0 ? entry.name : path9.posix.join(relative, entry.name);
       matches.push(...await walk(next, index + 1));
       if (options.maxMatches !== void 0 && matches.length > options.maxMatches) {
         throw new Error(
@@ -2141,7 +3243,7 @@ async function hashDirectoryArtifact(runRoot, relativePath, label) {
     if (!inspection.exists) throw new Error(`${label} does not exist`);
     const entries = (await fs5.readdir(inspection.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
-      const relative = path8.posix.join(directory, entry.name);
+      const relative = path9.posix.join(directory, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error(
           `${label} crosses a symbolic link or junction at ${relative}`
@@ -2223,7 +3325,7 @@ function artifactScopeId(lifetime, state) {
   }
   return state.runId;
 }
-function selection(artifactId, versionId, state, nodeId, actionId2, timestamp) {
+function selection(artifactId, versionId, state, nodeId, actionId2, timestamp2) {
   const runtime = state.workflowRuntime;
   const attempt = runtime?.currentAttempt;
   if (!runtime || !attempt) {
@@ -2238,7 +3340,7 @@ function selection(artifactId, versionId, state, nodeId, actionId2, timestamp) {
     attemptId: attempt.id,
     actionId: actionId2,
     revision: runtime.revision,
-    timestamp
+    timestamp: timestamp2
   };
 }
 function artifactVersionId(artifactId, contentHash2, pathValue, producer, scopeId) {
@@ -2331,7 +3433,7 @@ async function prepareWorkflowArtifactMutation(options) {
     }
   }
   const mutation = structuredClone(empty);
-  const timestamp = (/* @__PURE__ */ new Date()).toISOString();
+  const timestamp2 = (/* @__PURE__ */ new Date()).toISOString();
   for (const { declaration, value: requested } of requestedUpdates.values()) {
     const artifactPath = await resolveArtifactPath(
       options.runRoot,
@@ -2382,7 +3484,7 @@ async function prepareWorkflowArtifactMutation(options) {
       contentHash: contentHash2,
       path: artifactPath,
       producer,
-      timestamp
+      timestamp: timestamp2
     };
     mutation.versions.push(version);
     mutation.selections.push(
@@ -2392,7 +3494,7 @@ async function prepareWorkflowArtifactMutation(options) {
         options.state,
         options.nodeId,
         options.actionId,
-        timestamp
+        timestamp2
       )
     );
     mutation.artifactPaths[declaration.artifactId] = artifactPath;
@@ -2432,7 +3534,7 @@ async function prepareWorkflowArtifactMutation(options) {
         options.state,
         options.nodeId,
         options.actionId,
-        timestamp
+        timestamp2
       )
     );
     mutation.artifactPaths[declaration.artifactId] = version.path;
@@ -2563,7 +3665,7 @@ function createCompletionPlan(node) {
     )
   };
 }
-function isRecord2(value) {
+function isRecord4(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function hasOwn(value, key) {
@@ -2575,7 +3677,7 @@ function includesEvidence(value, keys) {
       (item) => typeof item === "string" && keys.includes(item)
     );
   }
-  if (!isRecord2(value)) return false;
+  if (!isRecord4(value)) return false;
   return keys.some((key) => hasOwn(value, key));
 }
 function hasEvidence(evidence, keys, containers = []) {
@@ -3476,7 +4578,7 @@ function resolverHash(protocol) {
 }
 
 // src/workflow/contract.ts
-function isRecord3(value) {
+function isRecord5(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function decisionChoiceTarget2(choice) {
@@ -3493,7 +4595,7 @@ function scalarMatchesType(value, type) {
 }
 function decisionInputErrors(schema, label) {
   const errors = [];
-  if (!isRecord3(schema)) return [`${label} must be an object`];
+  if (!isRecord5(schema)) return [`${label} must be an object`];
   const schemaKeys = /* @__PURE__ */ new Set(["type", "fields"]);
   const unknownSchemaKey = Object.keys(schema).find(
     (key) => !schemaKeys.has(key)
@@ -3511,7 +4613,7 @@ function decisionInputErrors(schema, label) {
   const ids = /* @__PURE__ */ new Set();
   for (const [index, field] of schema.fields.entries()) {
     const fieldLabel = `${label}.fields[${index}]`;
-    if (!isRecord3(field)) {
+    if (!isRecord5(field)) {
       errors.push(`${fieldLabel} must be an object`);
       continue;
     }
@@ -3564,7 +4666,7 @@ function decisionInputErrors(schema, label) {
 }
 function decisionScopeErrors(scope, label) {
   const errors = [];
-  if (!isRecord3(scope)) return [`${label} must be an object`];
+  if (!isRecord5(scope)) return [`${label} must be an object`];
   const scopeKeys = /* @__PURE__ */ new Set(["artifacts", "evidence"]);
   const unknown = Object.keys(scope).find((key) => !scopeKeys.has(key));
   if (unknown) errors.push(`${label} has unsupported field: ${unknown}`);
@@ -3579,7 +4681,7 @@ function decisionScopeErrors(scope, label) {
     const ids = /* @__PURE__ */ new Set();
     for (const [index, entry] of entries.entries()) {
       const entryLabel = `${label}.${kind}[${index}]`;
-      if (!isRecord3(entry)) {
+      if (!isRecord5(entry)) {
         errors.push(`${entryLabel} must be an object`);
         continue;
       }
@@ -3610,7 +4712,7 @@ function decisionScopeErrors(scope, label) {
 function decisionErrors(decision, nodeId) {
   const label = `Decision Node ${nodeId}`;
   const errors = [];
-  if (!isRecord3(decision)) return [`${label} requires a decision definition`];
+  if (!isRecord5(decision)) return [`${label} requires a decision definition`];
   const keys = /* @__PURE__ */ new Set([
     "id",
     "question",
@@ -3635,7 +4737,7 @@ function decisionErrors(decision, nodeId) {
     const targets = /* @__PURE__ */ new Set();
     for (const [index, choice] of decision.choices.entries()) {
       const choiceLabel = `${label}.choices[${index}]`;
-      if (!isRecord3(choice)) {
+      if (!isRecord5(choice)) {
         errors.push(`${choiceLabel} must be an object`);
         continue;
       }
@@ -3688,7 +4790,7 @@ function decisionErrors(decision, nodeId) {
         );
       }
       if (choice.routing !== void 0) {
-        if (!isRecord3(choice.routing)) {
+        if (!isRecord5(choice.routing)) {
           errors.push(`${choiceLabel}.routing must be an object`);
         } else if (Object.entries(choice.routing).some(
           ([field, value]) => field.length === 0 || typeof value !== "string" || value.length === 0
@@ -3702,14 +4804,14 @@ function decisionErrors(decision, nodeId) {
     errors.push(...decisionInputErrors(decision.inputs, `${label}.inputs`));
   }
   if (decision.rationale !== void 0) {
-    if (!isRecord3(decision.rationale)) {
+    if (!isRecord5(decision.rationale)) {
       errors.push(`${label}.rationale must be an object`);
     } else if (Object.keys(decision.rationale).some((key) => key !== "required") || decision.rationale.required !== void 0 && typeof decision.rationale.required !== "boolean") {
       errors.push(`${label}.rationale.required must be a boolean`);
     }
   }
   if (decision.reviewer !== void 0) {
-    if (!isRecord3(decision.reviewer)) {
+    if (!isRecord5(decision.reviewer)) {
       errors.push(`${label}.reviewer must be an object`);
     } else {
       const reviewerKeys = /* @__PURE__ */ new Set(["subjects", "authorities"]);
@@ -3758,7 +4860,7 @@ var WorkflowDecisionScopeError = class extends Error {
 function fail2(message) {
   throw new WorkflowDecisionScopeError(message);
 }
-function isRecord4(value) {
+function isRecord6(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function protocolNodeForAction(pkg, action) {
@@ -3817,12 +4919,12 @@ function evidenceValue(evidence, declaration) {
     }
   }
   const scoped = evidence.schemaEvidence;
-  if (!isRecord4(scoped)) return { found: false };
+  if (!isRecord6(scoped)) return { found: false };
   if (Object.prototype.hasOwnProperty.call(scoped, logicalId)) {
     return { found: true, value: scoped[logicalId] };
   }
   const schemaEvidence = scoped[declaration.schemaId];
-  if (isRecord4(schemaEvidence)) {
+  if (isRecord6(schemaEvidence)) {
     if (Object.prototype.hasOwnProperty.call(
       schemaEvidence,
       declaration.evidenceId
@@ -3860,19 +4962,19 @@ function evidenceProducer(state, visit, outcome) {
     revision: outcomeRevision(state.workflowRuntime, visit, outcome)
   };
 }
-function evidenceVersionId(evidenceId, hash, producer) {
+function evidenceVersionId(evidenceId, hash2, producer) {
   return `evidence-version-${sha256(
-    JSON.stringify(stableValue({ evidenceId, hash, producer }))
+    JSON.stringify(stableValue({ evidenceId, hash: hash2, producer }))
   ).slice(0, 24)}`;
 }
 function evidenceReference(state, declaration, visit, outcome, value, required) {
   const producer = evidenceProducer(state, visit, outcome);
-  const hash = contentHash(value);
+  const hash2 = contentHash(value);
   return {
     id: declaration.id,
     required,
-    versionId: evidenceVersionId(declaration.id, hash, producer),
-    contentHash: hash,
+    versionId: evidenceVersionId(declaration.id, hash2, producer),
+    contentHash: hash2,
     producer
   };
 }
@@ -4062,14 +5164,14 @@ function pendingReference(references, id) {
 function validateScopeList(references, pending, label) {
   const keys = /* @__PURE__ */ new Set();
   for (const reference of references) {
-    if (!isRecord4(reference)) fail2(`${label} entries must be objects`);
+    if (!isRecord6(reference)) fail2(`${label} entries must be objects`);
     const unknown = Object.keys(reference).find(
       (key2) => !["id", "required", "versionId", "contentHash", "producer"].includes(
         key2
       )
     );
     if (unknown) fail2(`${label} has unsupported field: ${unknown}`);
-    if (typeof reference.id !== "string" || typeof reference.versionId !== "string" || typeof reference.contentHash !== "string" || !/^[a-f0-9]{64}$/u.test(reference.contentHash) || reference.required !== void 0 && typeof reference.required !== "boolean" || reference.producer !== void 0 && !isRecord4(reference.producer)) {
+    if (typeof reference.id !== "string" || typeof reference.versionId !== "string" || typeof reference.contentHash !== "string" || !/^[a-f0-9]{64}$/u.test(reference.contentHash) || reference.required !== void 0 && typeof reference.required !== "boolean" || reference.producer !== void 0 && !isRecord6(reference.producer)) {
       fail2(`${label} contains an invalid reference`);
     }
     const key = referenceKey(reference);
@@ -4098,7 +5200,7 @@ function validateWorkflowDecisionScopeResponse(pending, submitted, evidenceRefer
   let submittedScope;
   if (submitted) {
     const submittedValue = submitted;
-    if (!isRecord4(submittedValue)) {
+    if (!isRecord6(submittedValue)) {
       fail2("Decision response scope must be an object");
     }
     const unknown = Object.keys(submittedValue).find(
@@ -4279,899 +5381,6 @@ function validateWorkflowDecisionScopeDefinition(protocol) {
   }
 }
 
-// src/workflow-runtime/findings.ts
-import path9 from "node:path";
-var WORKFLOW_FINDING_CATALOG_VERSION = 1;
-var MAX_WORKFLOW_FINDINGS = 32;
-var MAX_WORKFLOW_FINDING_MESSAGE_LENGTH = 512;
-var MAX_WORKFLOW_FINDING_PATH_LENGTH = 256;
-var MAX_WORKFLOW_FINDING_OPERATION_ARGS = 16;
-var MAX_WORKFLOW_FINDING_OPERATION_ARG_LENGTH = 256;
-var MAX_WORKFLOW_FINDINGS_ENCODED_BYTES = 16 * 1024;
-var WORKFLOW_FINDING_SEVERITIES = ["info", "warning", "error"];
-var WORKFLOW_FINDING_REQUIRED_ACTIONS = [
-  "none",
-  "execute",
-  "decide",
-  "repair",
-  "retry",
-  "stop"
-];
-var WORKFLOW_FINDING_OPERATION_IDS = [
-  "workflow.start",
-  "workflow.resume",
-  "workflow.submit",
-  "workflow.recover"
-];
-var WORKFLOW_FINDING_CODES = [
-  "action-available",
-  "action-already-pending",
-  "adaptive-requires-agent",
-  "agent-not-allowed",
-  "artifact-capability-required",
-  "artifact-content-drift",
-  "artifact-failed-submission",
-  "artifact-invalid",
-  "artifact-oversized",
-  "artifact-stale-attempt",
-  "artifact-unknown-version",
-  "completion-invalid-artifact",
-  "completion-missing-artifact",
-  "completion-missing-augmentation",
-  "completion-missing-evidence",
-  "completion-missing-guardrail",
-  "completion-missing-required-skill",
-  "confirmation-required",
-  "catalog-version-unsupported",
-  "cycle-budget-exhausted",
-  "cycle-invalid",
-  "decision-required",
-  "evaluation-warning",
-  "identity-invalid",
-  "iteration-budget-exhausted",
-  "no-pending-action",
-  "pending-action-invalid",
-  "retry-budget-exhausted",
-  "route-ambiguous",
-  "route-invalid-value",
-  "route-no-match",
-  "route-unknown-field",
-  "run-not-found",
-  "run-status",
-  "scope-invalid",
-  "scope-unavailable",
-  "skill-not-allowed",
-  "state-invalid",
-  "tool-not-allowed",
-  "unknown-current-step",
-  "unknown-next-step"
-];
-var severityRank = {
-  error: 0,
-  warning: 1,
-  info: 2
-};
-var registeredOperations = new Set(
-  WORKFLOW_FINDING_OPERATION_IDS
-);
-function isRecord5(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function truncate(value, maxLength) {
-  if (new TextEncoder().encode(value).byteLength <= maxLength) return value;
-  let result = "";
-  for (const character of value) {
-    const next = `${result}${character}\u2026`;
-    if (new TextEncoder().encode(next).byteLength > maxLength) break;
-    result += character;
-  }
-  return `${result}\u2026`;
-}
-function redactMessage(value) {
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  const redactedUrls = normalized.replace(
-    /\b(?:https?|file):\/\/[^\s,;)]+/giu,
-    "[URL]"
-  );
-  const redactedCredentials = redactedUrls.replace(
-    /\b(password|passwd|secret|token|api[-_]?key|authorization|cookie|credential)["']?\s*[:=]\s*["']?[^\s,;"'}]+/giu,
-    "$1=[REDACTED]"
-  ).replace(/\bBearer\s+[^\s,;)]+/giu, "Bearer [REDACTED]").replace(/\b([A-Z][A-Z0-9_]{2,})\s*=\s*[^\s,;]+/gu, "$1=[REDACTED]");
-  const redactedAbsolutePaths = redactedCredentials.replace(
-    /(?:[A-Za-z]:[\\/]|\/)[^,;)]*/gu,
-    "[PATH]"
-  );
-  return truncate(redactedAbsolutePaths, MAX_WORKFLOW_FINDING_MESSAGE_LENGTH);
-}
-function normalizeWorkflowFindingPath(value) {
-  if (value === void 0 || value.length === 0 || new TextEncoder().encode(value).byteLength > MAX_WORKFLOW_FINDING_PATH_LENGTH) {
-    return void 0;
-  }
-  const normalizedSeparators = value.replaceAll("\\", "/");
-  if (normalizedSeparators.startsWith("/") || /^[A-Za-z]:/u.test(normalizedSeparators) || /[*?\u0000-\u001f\u007f]/u.test(normalizedSeparators)) {
-    return void 0;
-  }
-  const segments = normalizedSeparators.split("/");
-  if (segments.some(
-    (segment) => segment.length === 0 || segment === "." || segment === ".."
-  )) {
-    return void 0;
-  }
-  const normalized = path9.posix.normalize(normalizedSeparators);
-  if (normalized === "." || normalized.startsWith("../") || normalized.includes("/../") || path9.posix.isAbsolute(normalized)) {
-    return void 0;
-  }
-  return normalized;
-}
-function operation(value) {
-  if (value === void 0) return void 0;
-  if (!isRecord5(value)) {
-    throw new Error("Workflow finding operation must be an object");
-  }
-  const unknown = Object.keys(value).find(
-    (key) => key !== "id" && key !== "args"
-  );
-  if (unknown) {
-    throw new Error(`Workflow finding operation has unknown field: ${unknown}`);
-  }
-  if (typeof value.id !== "string" || !registeredOperations.has(value.id)) {
-    throw new Error(`Unknown Workflow finding operation: ${String(value.id)}`);
-  }
-  if (!Array.isArray(value.args) || value.args.some((arg) => typeof arg !== "string") || value.args.length > MAX_WORKFLOW_FINDING_OPERATION_ARGS || value.args.some(
-    (arg) => arg.length === 0 || new TextEncoder().encode(arg).byteLength > MAX_WORKFLOW_FINDING_OPERATION_ARG_LENGTH || /[\u0000\r\n]/u.test(arg)
-  )) {
-    throw new Error("Workflow finding operation args are invalid");
-  }
-  const args = value.args.map(
-    (arg) => truncate(redactMessage(arg), MAX_WORKFLOW_FINDING_OPERATION_ARG_LENGTH)
-  );
-  return {
-    id: value.id,
-    args
-  };
-}
-function findingKey(value) {
-  return JSON.stringify([
-    value.code,
-    value.severity,
-    value.message,
-    value.path ?? "",
-    value.requiredAction,
-    value.operation?.id ?? "",
-    value.operation?.args ?? [],
-    value.requiresUserDecision
-  ]);
-}
-function compareFindings(left, right) {
-  const severity = severityRank[left.severity] - severityRank[right.severity];
-  if (severity !== 0) return severity;
-  if (left.requiresUserDecision !== right.requiresUserDecision) {
-    return left.requiresUserDecision ? -1 : 1;
-  }
-  const code = left.code.localeCompare(right.code);
-  if (code !== 0) return code;
-  const pathComparison = (left.path ?? "").localeCompare(right.path ?? "");
-  if (pathComparison !== 0) return pathComparison;
-  return left.message.localeCompare(right.message);
-}
-function findingBytes(value) {
-  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
-}
-var findingCodes = new Set(WORKFLOW_FINDING_CODES);
-var findingSeverities = new Set(
-  WORKFLOW_FINDING_SEVERITIES
-);
-var findingActions = new Set(
-  WORKFLOW_FINDING_REQUIRED_ACTIONS
-);
-function createWorkflowFinding(input) {
-  if (!findingCodes.has(input.code)) {
-    throw new Error(`Unknown Workflow finding code: ${input.code}`);
-  }
-  if (!findingSeverities.has(input.severity)) {
-    throw new Error(`Unknown Workflow finding severity: ${input.severity}`);
-  }
-  if (!findingActions.has(input.requiredAction)) {
-    throw new Error(
-      `Unknown Workflow finding required action: ${input.requiredAction}`
-    );
-  }
-  if (typeof input.message !== "string" || input.message.trim().length === 0) {
-    throw new Error("Workflow finding message must be non-empty");
-  }
-  const safePath = normalizeWorkflowFindingPath(input.path);
-  const safeOperation = operation(input.operation);
-  const allowedOperations = {
-    execute: ["workflow.start", "workflow.resume"],
-    decide: ["workflow.submit"],
-    repair: ["workflow.submit"],
-    retry: ["workflow.resume"]
-  };
-  const expectedOperations = allowedOperations[input.requiredAction];
-  if (expectedOperations && (!safeOperation || !expectedOperations.includes(safeOperation.id))) {
-    throw new Error(
-      `Workflow finding ${input.code} has an invalid operation for ${input.requiredAction}`
-    );
-  }
-  return {
-    catalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
-    code: input.code,
-    severity: input.severity,
-    message: redactMessage(input.message),
-    ...safePath ? { path: safePath } : {},
-    requiredAction: input.requiredAction,
-    ...safeOperation ? { operation: safeOperation } : {},
-    requiresUserDecision: input.requiresUserDecision ?? false
-  };
-}
-function parseWorkflowFinding(value) {
-  if (!isRecord5(value)) {
-    throw new Error("Workflow finding must be an object");
-  }
-  if (value.catalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
-    throw new Error(
-      `Unknown Workflow finding catalog version: ${String(value.catalogVersion)}`
-    );
-  }
-  const keys = /* @__PURE__ */ new Set([
-    "catalogVersion",
-    "code",
-    "severity",
-    "message",
-    "path",
-    "requiredAction",
-    "operation",
-    "requiresUserDecision"
-  ]);
-  const unknown = Object.keys(value).find((key) => !keys.has(key));
-  if (unknown) {
-    throw new Error(`Workflow finding has unknown field: ${unknown}`);
-  }
-  if (typeof value.code !== "string" || typeof value.severity !== "string" || typeof value.message !== "string" || typeof value.requiredAction !== "string" || typeof value.requiresUserDecision !== "boolean") {
-    throw new Error("Workflow finding fields are invalid");
-  }
-  if (value.path !== void 0 && typeof value.path !== "string") {
-    throw new Error("Workflow finding path must be a string");
-  }
-  const finding = createWorkflowFinding({
-    code: value.code,
-    severity: value.severity,
-    message: value.message,
-    ...value.path !== void 0 ? { path: value.path } : {},
-    requiredAction: value.requiredAction,
-    ...value.operation !== void 0 ? { operation: value.operation } : {},
-    requiresUserDecision: value.requiresUserDecision
-  });
-  if (JSON.stringify(stableValue(finding)) !== JSON.stringify(stableValue(value))) {
-    throw new Error("Workflow finding is not canonical");
-  }
-  return finding;
-}
-function boundWorkflowFindings(values) {
-  const unique2 = /* @__PURE__ */ new Map();
-  for (const value of values) {
-    const finding = parseWorkflowFinding(value);
-    unique2.set(findingKey(finding), finding);
-  }
-  const candidates = [...unique2.values()].sort(compareFindings);
-  const findings = [];
-  let encodedBytes = findingBytes(findings);
-  for (const candidate of candidates) {
-    if (findings.length >= MAX_WORKFLOW_FINDINGS) break;
-    const next = [...findings, candidate];
-    const nextBytes = findingBytes(next);
-    if (nextBytes > MAX_WORKFLOW_FINDINGS_ENCODED_BYTES) continue;
-    findings.push(candidate);
-    encodedBytes = nextBytes;
-  }
-  const omittedValues = candidates.filter(
-    (candidate) => !findings.some((value) => findingKey(value) === findingKey(candidate))
-  );
-  const omittedBySeverity = {
-    info: 0,
-    warning: 0,
-    error: 0
-  };
-  const omittedByCode = {};
-  for (const omitted of omittedValues) {
-    omittedBySeverity[omitted.severity] += 1;
-    omittedByCode[omitted.code] = (omittedByCode[omitted.code] ?? 0) + 1;
-  }
-  const summary = {
-    catalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
-    total: candidates.length,
-    returned: findings.length,
-    omitted: omittedValues.length,
-    omittedBySeverity,
-    omittedByCode,
-    omittedRequiresUserDecision: omittedValues.filter(
-      (finding) => finding.requiresUserDecision
-    ).length,
-    truncated: omittedValues.length > 0,
-    encodedBytes,
-    maxEncodedBytes: MAX_WORKFLOW_FINDINGS_ENCODED_BYTES
-  };
-  return { findings: structuredClone(findings), summary };
-}
-function parseWorkflowFindingSummary(value) {
-  if (!isRecord5(value)) {
-    throw new Error("Workflow finding summary must be an object");
-  }
-  const keys = /* @__PURE__ */ new Set([
-    "catalogVersion",
-    "total",
-    "returned",
-    "omitted",
-    "omittedBySeverity",
-    "omittedByCode",
-    "omittedRequiresUserDecision",
-    "truncated",
-    "encodedBytes",
-    "maxEncodedBytes"
-  ]);
-  const unknown = Object.keys(value).find((key) => !keys.has(key));
-  if (unknown) {
-    throw new Error(`Workflow finding summary has unknown field: ${unknown}`);
-  }
-  if (value.catalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
-    throw new Error(
-      `Unknown Workflow finding catalog version: ${String(value.catalogVersion)}`
-    );
-  }
-  const integerFields = [
-    "total",
-    "returned",
-    "omitted",
-    "omittedRequiresUserDecision",
-    "encodedBytes",
-    "maxEncodedBytes"
-  ];
-  for (const field of integerFields) {
-    const entry = value[field];
-    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 0) {
-      throw new Error(`Workflow finding summary field is invalid: ${field}`);
-    }
-  }
-  if (typeof value.truncated !== "boolean") {
-    throw new Error("Workflow finding summary truncated field is invalid");
-  }
-  if (!isRecord5(value.omittedBySeverity)) {
-    throw new Error("Workflow finding summary severities are invalid");
-  }
-  const omittedBySeverity = {
-    info: 0,
-    warning: 0,
-    error: 0
-  };
-  const unknownSeverity = Object.keys(value.omittedBySeverity).find(
-    (severity) => !(severity in omittedBySeverity)
-  );
-  if (unknownSeverity) {
-    throw new Error(
-      `Workflow finding summary has unknown severity: ${unknownSeverity}`
-    );
-  }
-  for (const severity of Object.keys(
-    omittedBySeverity
-  )) {
-    const entry = value.omittedBySeverity[severity];
-    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 0) {
-      throw new Error(
-        `Workflow finding summary severity count is invalid: ${severity}`
-      );
-    }
-    omittedBySeverity[severity] = entry;
-  }
-  if (!isRecord5(value.omittedByCode)) {
-    throw new Error("Workflow finding summary codes are invalid");
-  }
-  const omittedByCode = {};
-  for (const [code, entry] of Object.entries(value.omittedByCode)) {
-    if (!findingCodes.has(code)) {
-      throw new Error(`Unknown Workflow finding code: ${code}`);
-    }
-    if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry <= 0) {
-      throw new Error(
-        `Workflow finding summary code count is invalid: ${code}`
-      );
-    }
-    omittedByCode[code] = entry;
-  }
-  const total = value.total;
-  const returned = value.returned;
-  const omitted = value.omitted;
-  if (returned > total || returned > MAX_WORKFLOW_FINDINGS || omitted !== total - returned || value.truncated !== omitted > 0 || Object.values(omittedBySeverity).reduce((sum, count) => sum + count, 0) !== omitted || Object.values(omittedByCode).reduce(
-    (sum, count) => sum + (count ?? 0),
-    0
-  ) !== omitted || value.omittedRequiresUserDecision > omitted || value.maxEncodedBytes !== MAX_WORKFLOW_FINDINGS_ENCODED_BYTES || value.encodedBytes > value.maxEncodedBytes) {
-    throw new Error("Workflow finding summary counts are inconsistent");
-  }
-  return {
-    catalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
-    total,
-    returned,
-    omitted,
-    omittedBySeverity,
-    omittedByCode,
-    omittedRequiresUserDecision: value.omittedRequiresUserDecision,
-    truncated: value.truncated,
-    encodedBytes: value.encodedBytes,
-    maxEncodedBytes: value.maxEncodedBytes
-  };
-}
-var blockerCatalog = [
-  {
-    match: /^No Comet Run found:/u,
-    entry: {
-      code: "run-not-found",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Unknown Workflow finding catalog version:/u,
-    entry: {
-      code: "catalog-version-unsupported",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Decision is pending/u,
-    entry: {
-      code: "decision-required",
-      severity: "info",
-      requiredAction: "decide",
-      requiresUserDecision: true,
-      operationId: "workflow.submit"
-    }
-  },
-  {
-    match: /^Missing Output Schema artifacts:/u,
-    entry: {
-      code: "completion-missing-artifact",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Missing Output Schema evidence:/u,
-    entry: {
-      code: "completion-missing-evidence",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /exceeds \d+ bytes/iu,
-    entry: {
-      code: "artifact-oversized",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Invalid Output Schema artifact/u,
-    entry: {
-      code: "completion-invalid-artifact",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Missing required Skill evidence:/u,
-    entry: {
-      code: "completion-missing-required-skill",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Missing augmentation evidence:/u,
-    entry: {
-      code: "completion-missing-augmentation",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Missing guardrail evidence:/u,
-    entry: {
-      code: "completion-missing-guardrail",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Route blocker: unknown routing field:/u,
-    entry: {
-      code: "route-unknown-field",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Route blocker: invalid routing value/u,
-    entry: {
-      code: "route-invalid-value",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Route blocker: ambiguous/u,
-    entry: {
-      code: "route-ambiguous",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Route blocker: no matching/u,
-    entry: {
-      code: "route-no-match",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Cycle budget exhausted:/u,
-    entry: {
-      code: "cycle-budget-exhausted",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Cycle /u,
-    entry: {
-      code: "cycle-invalid",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /Workflow Protocol Cycle|WorkflowRuntime .*Cycle/iu,
-    entry: {
-      code: "cycle-invalid",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Workflow artifact selections require versioned-artifacts capability$/u,
-    entry: {
-      code: "artifact-capability-required",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Failed submissions cannot update versioned artifacts$/u,
-    entry: {
-      code: "artifact-failed-submission",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /artifact content drift detected/iu,
-    entry: {
-      code: "artifact-content-drift",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /artifact version is unknown/iu,
-    entry: {
-      code: "artifact-unknown-version",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /stale for this Attempt/iu,
-    entry: {
-      code: "artifact-stale-attempt",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /scope is unavailable/iu,
-    entry: {
-      code: "scope-unavailable",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /scope/iu,
-    entry: {
-      code: "scope-invalid",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /WorkflowRuntime .*identity|execution identity|Skill snapshot is invalid or missing/iu,
-    entry: {
-      code: "identity-invalid",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /Decision response revision|Decision response execution identity|Decision response .* identity/iu,
-    entry: {
-      code: "identity-invalid",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /Outcome does not match pending action|Submission Node does not match pending Node|Decision response required|Decision response cannot satisfy|Decision choice|pending decision identity/iu,
-    entry: {
-      code: "pending-action-invalid",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /WorkflowRuntime pending action|pending action file|current Node does not match pending action/iu,
-    entry: {
-      code: "pending-action-invalid",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /WorkflowRuntime current (?:Cycle|Attempt)|Cycle identity|Cycle position is invalid/iu,
-    entry: {
-      code: "cycle-invalid",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /WorkflowRuntime current Node is not in the compiled route/iu,
-    entry: {
-      code: "pending-action-invalid",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Run has no pending action$/u,
-    entry: {
-      code: "no-pending-action",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Workflow artifact/u,
-    entry: {
-      code: "artifact-invalid",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Required Workflow artifact needs an explicit update or version:/u,
-    entry: {
-      code: "artifact-invalid",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Cycle-persistent artifact update requires a current Cycle$/u,
-    entry: {
-      code: "artifact-invalid",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Attempt artifact path must include the current Attempt id:/u,
-    entry: {
-      code: "artifact-invalid",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Versioned artifact submission requires revisioned Run state$/u,
-    entry: {
-      code: "artifact-invalid",
-      severity: "error",
-      requiredAction: "repair"
-    }
-  },
-  {
-    match: /^Retry budget exhausted for action:/u,
-    entry: {
-      code: "retry-budget-exhausted",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Iteration budget exhausted:/u,
-    entry: {
-      code: "iteration-budget-exhausted",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Skill is not allowed:/u,
-    entry: {
-      code: "skill-not-allowed",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Tool is not allowed:/u,
-    entry: {
-      code: "tool-not-allowed",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Agent is not allowed:/u,
-    entry: {
-      code: "agent-not-allowed",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^User confirmation required for:/u,
-    entry: {
-      code: "confirmation-required",
-      severity: "warning",
-      requiredAction: "execute",
-      requiresUserDecision: true
-    }
-  },
-  {
-    match: /^Action already pending:/u,
-    entry: {
-      code: "action-already-pending",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^No pending action accepts an outcome$/u,
-    entry: {
-      code: "no-pending-action",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Adaptive orchestration requires an Agent candidate$/u,
-    entry: {
-      code: "adaptive-requires-agent",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Unknown current step:/u,
-    entry: {
-      code: "unknown-current-step",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Resolver returned unknown next step:/u,
-    entry: {
-      code: "unknown-next-step",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  },
-  {
-    match: /^Run is /u,
-    entry: {
-      code: "run-status",
-      severity: "error",
-      requiredAction: "stop"
-    }
-  }
-];
-function operationFor(requiredAction, context, operationId) {
-  const args = context.actionId ? [context.actionId] : [];
-  if (operationId) return { id: operationId, args };
-  if (requiredAction === "repair") {
-    return { id: "workflow.submit", args };
-  }
-  if (requiredAction === "retry") {
-    return { id: "workflow.resume", args };
-  }
-  if (requiredAction === "decide") {
-    return { id: "workflow.submit", args };
-  }
-  if (requiredAction === "execute") {
-    return { id: "workflow.resume", args };
-  }
-  return void 0;
-}
-function findingFromBlocker(message, context = {}) {
-  const catalog = blockerCatalog.find((entry2) => entry2.match.test(message));
-  const entry = catalog?.entry ?? {
-    code: "state-invalid",
-    severity: "error",
-    requiredAction: "stop"
-  };
-  return createWorkflowFinding({
-    ...entry,
-    message,
-    path: context.path,
-    operation: operationFor(entry.requiredAction, context, entry.operationId)
-  });
-}
-function attachWorkflowFinding(error) {
-  if (error instanceof Error && "finding" in error) return error;
-  const message = error instanceof Error ? error.message : String(error);
-  const finding = findingFromBlocker(message);
-  if (error instanceof Error) {
-    Object.defineProperty(error, "finding", {
-      configurable: true,
-      enumerable: true,
-      value: finding,
-      writable: false
-    });
-    return error;
-  }
-  const wrapped = new Error(message, { cause: error });
-  Object.defineProperty(wrapped, "finding", {
-    configurable: true,
-    enumerable: true,
-    value: finding,
-    writable: false
-  });
-  return wrapped;
-}
-function actionAvailableFinding(actionId2, retry = false) {
-  return createWorkflowFinding({
-    code: "action-available",
-    severity: "info",
-    message: "Executable workflow action is available.",
-    requiredAction: retry ? "retry" : "execute",
-    operation: { id: "workflow.resume", args: [actionId2] }
-  });
-}
-function decisionRequiredFinding(actionId2) {
-  return createWorkflowFinding({
-    code: "decision-required",
-    severity: "info",
-    message: "A persisted workflow decision requires user input.",
-    requiredAction: "decide",
-    operation: { id: "workflow.submit", args: [actionId2] },
-    requiresUserDecision: true
-  });
-}
-function evaluationWarningFinding(evalId, evidence) {
-  return createWorkflowFinding({
-    code: "evaluation-warning",
-    severity: "warning",
-    message: `Terminal evaluation ${evalId} did not pass: ${evidence}`,
-    requiredAction: "none"
-  });
-}
-function legacyBlockersFromFindings(disposition, findings) {
-  return disposition === "blocked" ? findings.map((finding) => finding.message) : [];
-}
-
 // src/workflow-runtime/compiler.ts
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) {
@@ -5249,6 +5458,9 @@ function validateProtocolShape(protocol) {
       throw new Error(
         "Workflow Protocol cycle declarations require bounded-cycles capability"
       );
+    }
+    if (protocol.capabilities.durability !== void 0) {
+      durabilityProfileForProtocol(protocol);
     }
   } else if (protocol.cycles !== void 0) {
     throw new Error(
@@ -5655,27 +5867,34 @@ function compileCompletionPlans(nodes) {
   );
 }
 async function compileWorkflow(protocol) {
-  validateProtocolShape(protocol);
-  validateWorkflowDecisionScopeDefinition(protocol);
-  const revisioned = isRevisionedWorkflowProtocol(protocol);
-  if (revisioned && protocol.capabilities?.version !== 3) {
+  const executableProtocol = normalizeWorkflowDurabilityProtocol(protocol);
+  validateProtocolShape(executableProtocol);
+  validateWorkflowDecisionScopeDefinition(executableProtocol);
+  const revisioned = isRevisionedWorkflowProtocol(executableProtocol);
+  if (revisioned && executableProtocol.capabilities?.version !== 3) {
     throw new Error(
       "Workflow Protocol revisioned capabilities are required for branch routing"
     );
   }
-  if (revisioned) validateRevisionedWorkflow(protocol);
-  const nodes = revisioned ? activeNodes2(protocol) : validateLinearRoute(protocol);
-  const definition = compileDefinition(protocol, nodes, !revisioned);
+  if (revisioned) validateRevisionedWorkflow(executableProtocol);
+  const nodes = revisioned ? activeNodes2(executableProtocol) : validateLinearRoute(executableProtocol);
+  const definition = compileDefinition(executableProtocol, nodes, !revisioned);
   const nodeToStep = Object.fromEntries(
     nodes.map((node, index) => [node.id, stepId(index, node.id)])
   );
-  const protocolHash = hashProtocol(protocol);
+  const protocolHash = hashProtocol(executableProtocol);
   const runtime = {
     protocolHash,
-    protocol: structuredClone(protocol),
+    protocol: structuredClone(executableProtocol),
     nodeToStep: { ...nodeToStep },
-    ...revisioned ? { capabilityVersion: 3, resolverHash: resolverHash(protocol) } : {},
+    ...revisioned ? {
+      capabilityVersion: 3,
+      resolverHash: resolverHash(executableProtocol)
+    } : {},
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
+    ...executableProtocol.capabilities?.durability ? {
+      durabilityProfile: durabilityProfileForProtocol(executableProtocol)
+    } : {},
     completionPlans: compileCompletionPlans(nodes)
   };
   const pkg = {
@@ -5683,7 +5902,7 @@ async function compileWorkflow(protocol) {
     packageKind: "runtime",
     runtime,
     definition,
-    guardrails: compileGuardrails(protocol, nodes),
+    guardrails: compileGuardrails(executableProtocol, nodes),
     evals: []
   };
   const packageErrors = validateSkillPackage(pkg);
@@ -5703,9 +5922,12 @@ ${packageErrors.map((error) => `  - ${error}`).join("\n")}`
       nodeToStep,
       ...revisioned ? {
         capabilityVersion: 3,
-        resolverHash: resolverHash(protocol)
+        resolverHash: resolverHash(executableProtocol)
       } : {},
-      findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION
+      findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
+      ...executableProtocol.capabilities?.durability ? {
+        durabilityProfile: durabilityProfileForProtocol(executableProtocol)
+      } : {}
     }
   };
 }
@@ -5797,11 +6019,306 @@ function resolverForPackage() {
   return workflowDeterministicResolver;
 }
 
+// src/workflow-runtime/revision-claim.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
+var CLAIM_DIRECTORY = ".comet/revision-claims";
+var CLAIM_MAX_IDENTIFIER_LENGTH = 256;
+var CLAIM_WAIT_TIMEOUT_MS = 5e3;
+var CLAIM_POLL_INTERVAL_MS = 10;
+function isRecord7(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function assertKnownFields3(value, keys, label) {
+  const unknown = Object.keys(value).find((key) => !keys.has(key));
+  if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
+}
+function requiredText2(value, key, label) {
+  if (typeof value !== "string" || value.length === 0 || value.length > CLAIM_MAX_IDENTIFIER_LENGTH || /[\u0000\r\n]/u.test(value)) {
+    throw new Error(`Invalid ${label}: ${key} must be a bounded string`);
+  }
+  return value;
+}
+function timestamp(value, key, label) {
+  const result = requiredText2(value, key, label);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(result)) {
+    throw new Error(`Invalid ${label}: ${key} must be an ISO timestamp`);
+  }
+  return result;
+}
+function nonNegativeInteger2(value, key, label) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
+  }
+  return value;
+}
+function hash(value, key, label) {
+  const result = requiredText2(value, key, label);
+  if (!/^[a-f0-9]{64}$/u.test(result)) {
+    throw new Error(`Invalid ${label}: ${key} must be a SHA-256 hash`);
+  }
+  return result;
+}
+function parseExecutionIdentity(value) {
+  const label = "Workflow revision claim execution";
+  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields3(
+    value,
+    /* @__PURE__ */ new Set([
+      "protocolHash",
+      "packageHash",
+      "snapshotHash",
+      "nodeToStep",
+      "capabilityVersion",
+      "resolverHash",
+      "findingCatalogVersion",
+      "durabilityProfile"
+    ]),
+    label
+  );
+  if (!isRecord7(value.nodeToStep)) {
+    throw new Error(`Invalid ${label}: nodeToStep must be an object`);
+  }
+  const nodeToStep = {};
+  for (const [nodeId, stepId2] of Object.entries(value.nodeToStep)) {
+    nodeToStep[requiredText2(nodeId, "nodeId", label)] = requiredText2(
+      stepId2,
+      `nodeToStep.${nodeId}`,
+      label
+    );
+  }
+  if (value.capabilityVersion !== 3) {
+    throw new Error(`Invalid ${label}: capabilityVersion is required`);
+  }
+  if (typeof value.resolverHash !== "string" || !/^[a-f0-9]{64}$/u.test(value.resolverHash)) {
+    throw new Error(`Invalid ${label}: resolverHash is required`);
+  }
+  if (value.findingCatalogVersion !== 1) {
+    throw new Error(`Invalid ${label}: findingCatalogVersion is required`);
+  }
+  if (value.durabilityProfile === void 0) {
+    throw new Error(`Invalid ${label}: durabilityProfile is required`);
+  }
+  const durabilityProfile = parseWorkflowDurabilityProfile(
+    value.durabilityProfile
+  );
+  return {
+    protocolHash: hash(value.protocolHash, "protocolHash", label),
+    packageHash: hash(value.packageHash, "packageHash", label),
+    snapshotHash: hash(value.snapshotHash, "snapshotHash", label),
+    nodeToStep,
+    ...value.capabilityVersion === 3 ? { capabilityVersion: 3 } : {},
+    resolverHash: hash(value.resolverHash, "resolverHash", label),
+    findingCatalogVersion: 1,
+    durabilityProfile
+  };
+}
+function parseClaim(value) {
+  const label = "Workflow revision claim";
+  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields3(
+    value,
+    /* @__PURE__ */ new Set([
+      "schemaVersion",
+      "kind",
+      "status",
+      "operation",
+      "runId",
+      "expectedRevision",
+      "expectedActionId",
+      "intendedRevision",
+      "execution",
+      "ownerToken",
+      "createdAt",
+      "committedAt"
+    ]),
+    label
+  );
+  if (value.schemaVersion !== 1 || value.kind !== "workflow-revision-claim") {
+    throw new Error(`Invalid ${label}: schema identity is invalid`);
+  }
+  if (value.status !== "prepared" && value.status !== "committed") {
+    throw new Error(`Invalid ${label}: status is invalid`);
+  }
+  if (value.operation !== "workflow.submit") {
+    throw new Error(`Invalid ${label}: operation is invalid`);
+  }
+  const expectedRevision = nonNegativeInteger2(
+    value.expectedRevision,
+    "expectedRevision",
+    label
+  );
+  const intendedRevision = nonNegativeInteger2(
+    value.intendedRevision,
+    "intendedRevision",
+    label
+  );
+  if (intendedRevision !== expectedRevision + 1) {
+    throw new Error(`Invalid ${label}: revisions are not consecutive`);
+  }
+  const committedAt = value.committedAt === void 0 ? void 0 : requiredText2(value.committedAt, "committedAt", label);
+  if (value.status === "committed" !== (committedAt !== void 0)) {
+    throw new Error(`Invalid ${label}: committedAt does not match status`);
+  }
+  const ownerToken = requiredText2(value.ownerToken, "ownerToken", label);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+    ownerToken
+  )) {
+    throw new Error(`Invalid ${label}: ownerToken is invalid`);
+  }
+  return {
+    schemaVersion: 1,
+    kind: "workflow-revision-claim",
+    status: value.status,
+    operation: "workflow.submit",
+    runId: requiredText2(value.runId, "runId", label),
+    expectedRevision,
+    expectedActionId: requiredText2(
+      value.expectedActionId,
+      "expectedActionId",
+      label
+    ),
+    intendedRevision,
+    execution: parseExecutionIdentity(value.execution),
+    ownerToken,
+    createdAt: timestamp(value.createdAt, "createdAt", label),
+    ...committedAt ? { committedAt: timestamp(committedAt, "committedAt", label) } : {}
+  };
+}
+function claimPath(input) {
+  return `${CLAIM_DIRECTORY}/revision-${input.expectedRevision}-${sha256(input.expectedActionId).slice(0, 24)}-${input.intendedRevision}.json`;
+}
+function profileForExecution(execution) {
+  if (!execution.durabilityProfile) {
+    throw new Error("Workflow revision claim requires a durability profile");
+  }
+  return parseWorkflowDurabilityProfile(execution.durabilityProfile);
+}
+function claimMatches(claim, input) {
+  return claim.runId === input.runId && claim.expectedRevision === input.expectedRevision && claim.expectedActionId === input.expectedActionId && claim.intendedRevision === input.intendedRevision && JSON.stringify(stableValue(claim.execution)) === JSON.stringify(stableValue(input.execution));
+}
+async function readClaim(runRoot, input) {
+  const raw = await readOptionalEngineRunText(
+    runRoot,
+    claimPath(input),
+    profileForExecution(input.execution).bounds.claimBytes,
+    "Workflow revision claim"
+  );
+  if (raw === null) return null;
+  try {
+    return parseClaim(JSON.parse(raw));
+  } catch (error) {
+    throw new Error("Workflow revision claim is malformed", { cause: error });
+  }
+}
+function createClaim(input) {
+  if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0 || input.intendedRevision !== input.expectedRevision + 1) {
+    throw new Error("Workflow revision claim revisions are invalid");
+  }
+  return {
+    schemaVersion: 1,
+    kind: "workflow-revision-claim",
+    status: "prepared",
+    operation: "workflow.submit",
+    runId: input.runId,
+    expectedRevision: input.expectedRevision,
+    expectedActionId: input.expectedActionId,
+    intendedRevision: input.intendedRevision,
+    execution: structuredClone(input.execution),
+    ownerToken: randomUUID3(),
+    createdAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function serializeClaim(claim) {
+  return `${JSON.stringify(stableValue(claim), null, 2)}
+`;
+}
+async function waitForExistingClaim(runRoot, input, existing) {
+  const deadline = Date.now() + CLAIM_WAIT_TIMEOUT_MS;
+  let current = existing;
+  while (current.status === "prepared" && Date.now() < deadline) {
+    await new Promise((resolve) => {
+      setTimeout(resolve, CLAIM_POLL_INTERVAL_MS);
+    });
+    let next;
+    try {
+      next = await readClaim(runRoot, input);
+    } catch (error) {
+      if (error instanceof RaceSafeReadError && error.reason === "changed") {
+        continue;
+      }
+      throw error;
+    }
+    if (!next) return current;
+    if (!claimMatches(next, input)) {
+      throw new Error("Workflow revision claim identity changed");
+    }
+    current = next;
+  }
+  return current;
+}
+async function acquireRevisionClaim(runRoot, input) {
+  const candidate = createClaim(input);
+  const relativePath = claimPath(input);
+  const maxBytes = profileForExecution(input.execution).bounds.claimBytes;
+  for (; ; ) {
+    const existing = await readClaim(runRoot, input);
+    if (existing) {
+      if (!claimMatches(existing, input)) {
+        throw new Error("Workflow revision claim identity changed");
+      }
+      return {
+        acquired: false,
+        claim: await waitForExistingClaim(runRoot, input, existing)
+      };
+    }
+    try {
+      await writeEngineRunText(
+        runRoot,
+        relativePath,
+        serializeClaim(candidate),
+        maxBytes,
+        "Workflow revision claim",
+        { exclusive: true }
+      );
+      return {
+        acquired: true,
+        claim: candidate,
+        async commit() {
+          const committed = {
+            ...candidate,
+            status: "committed",
+            committedAt: (/* @__PURE__ */ new Date()).toISOString()
+          };
+          await writeEngineRunText(
+            runRoot,
+            relativePath,
+            serializeClaim(committed),
+            maxBytes,
+            "Workflow revision claim",
+            {
+              beforeCommit: async () => {
+                const current = await readClaim(runRoot, input);
+                if (!current || current.status !== "prepared" || current.ownerToken !== candidate.ownerToken) {
+                  throw new Error(
+                    "Workflow revision claim changed before commit"
+                  );
+                }
+              }
+            }
+          );
+        }
+      };
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+  }
+}
+
 // src/workflow-runtime/location.ts
-import { randomUUID as randomUUID4 } from "node:crypto";
+import { randomUUID as randomUUID5 } from "node:crypto";
 
 // src/engine/manual-run.ts
-import { randomUUID as randomUUID3 } from "crypto";
+import { randomUUID as randomUUID4 } from "crypto";
 
 // src/engine/evals.ts
 function evaluateRuntime(definitions, scope, state, artifacts) {
@@ -6258,6 +6775,10 @@ function assertSafeRunReference(value, key) {
 }
 var RUN_STATE_FILE = ".comet/run-state.json";
 var RUN_STATE_MAX_BYTES = 256 * 1024;
+var RUN_STATE_READ_MAX_BYTES = Math.max(
+  RUN_STATE_MAX_BYTES,
+  WORKFLOW_DURABILITY_MAX_RECORD_BYTES
+);
 var RUN_STATE_JSON_KEYS = /* @__PURE__ */ new Set([
   "runId",
   "skill",
@@ -6507,12 +7028,12 @@ function parseDecisionReceipt(value, index) {
   const protocolHash = requiredJsonString(receipt.protocolHash, "protocolHash");
   const packageHash = requiredJsonString(receipt.packageHash, "packageHash");
   const snapshotHash = requiredJsonString(receipt.snapshotHash, "snapshotHash");
-  for (const [key, hash] of [
+  for (const [key, hash2] of [
     ["protocolHash", protocolHash],
     ["packageHash", packageHash],
     ["snapshotHash", snapshotHash]
   ]) {
-    if (!/^[a-f0-9]{64}$/u.test(hash)) {
+    if (!/^[a-f0-9]{64}$/u.test(hash2)) {
       throw new Error(
         `Invalid Run state: ${label}.${key} must be a SHA-256 hash`
       );
@@ -7134,7 +7655,8 @@ function parseRunStateJson(value) {
       "nodeToStep",
       "capabilityVersion",
       "resolverHash",
-      "findingCatalogVersion"
+      "findingCatalogVersion",
+      "durabilityProfile"
     ]);
     const unknownIdentityKey = Object.keys(identity).find(
       (key) => !identityKeys.has(key)
@@ -7154,6 +7676,7 @@ function parseRunStateJson(value) {
         );
       }
     }
+    const durabilityProfile = identity.durabilityProfile === void 0 ? void 0 : parseWorkflowDurabilityProfile(identity.durabilityProfile);
     runtimeIdentity = {
       protocolHash: identity.protocolHash,
       packageHash: identity.packageHash,
@@ -7166,7 +7689,8 @@ function parseRunStateJson(value) {
       ),
       ...identity.capabilityVersion === 3 ? { capabilityVersion: 3 } : {},
       ...typeof identity.resolverHash === "string" ? { resolverHash: identity.resolverHash } : {},
-      ...identity.findingCatalogVersion === 1 ? { findingCatalogVersion: 1 } : {}
+      ...identity.findingCatalogVersion === 1 ? { findingCatalogVersion: 1 } : {},
+      ...durabilityProfile ? { durabilityProfile } : {}
     };
   }
   const workflowRuntime = parseWorkflowRuntime(json.workflowRuntime, runId);
@@ -7200,26 +7724,47 @@ async function readRunState(changeDir, options = {}) {
   const raw = await readOptionalEngineRunText(
     changeDir,
     RUN_STATE_FILE,
-    RUN_STATE_MAX_BYTES,
+    RUN_STATE_READ_MAX_BYTES,
     "Run state",
     options
   );
   if (raw === null) return null;
-  return parseRunStateValue(JSON.parse(raw));
+  let document;
+  try {
+    document = JSON.parse(raw);
+  } catch (error) {
+    if (Buffer.byteLength(raw, "utf8") > RUN_STATE_MAX_BYTES) {
+      throw new Error(`Run state exceeds ${RUN_STATE_MAX_BYTES} bytes`, {
+        cause: error
+      });
+    }
+    throw error;
+  }
+  const identity = document && typeof document === "object" && !Array.isArray(document) ? document.runtimeIdentity : void 0;
+  const profile = identity && typeof identity === "object" && !Array.isArray(identity) ? identity.durabilityProfile : void 0;
+  const maxBytes = profile === void 0 ? RUN_STATE_MAX_BYTES : parseWorkflowDurabilityProfile(profile).bounds.runStateBytes;
+  if (Buffer.byteLength(raw, "utf8") > maxBytes) {
+    throw new Error(`Run state exceeds ${maxBytes} bytes`);
+  }
+  return parseRunStateValue(document);
 }
 async function writeRunState(changeDir, state, options = {}) {
   const serialized = serializeRunState(state);
+  const maxBytes = state.runtimeIdentity?.durabilityProfile?.bounds.runStateBytes ?? RUN_STATE_MAX_BYTES;
   await writeEngineRunText(
     changeDir,
     RUN_STATE_FILE,
     serialized,
-    RUN_STATE_MAX_BYTES,
+    maxBytes,
     "Run state",
-    options
+    { ...options, maxBytes }
   );
 }
 
 // src/engine/manual-run.ts
+function durabilityBound(state, key) {
+  return state.runtimeIdentity?.durabilityProfile?.bounds[key];
+}
 async function existingRun(changeDir) {
   try {
     return await readRunState(changeDir);
@@ -7315,15 +7860,29 @@ function validateSnapshotState(pkg, state) {
     throw new Error("Run state does not match Skill snapshot");
   }
 }
-async function appendEvent(changeDir, state, type, data) {
-  const trajectory = await readTrajectory(changeDir, state.trajectoryRef);
-  await appendTrajectory(changeDir, state.trajectoryRef, {
-    sequence: trajectory.length + 1,
-    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-    type,
-    runId: state.runId,
-    data
-  });
+async function appendEvent(changeDir, state, type, data, options = {}) {
+  const trajectoryMaxBytes = durabilityBound(state, "trajectoryBytes");
+  const trajectoryOptions = {
+    ...options,
+    ...options.maxBytes === void 0 && trajectoryMaxBytes !== void 0 ? { maxBytes: trajectoryMaxBytes } : {}
+  };
+  const trajectory = await readTrajectory(
+    changeDir,
+    state.trajectoryRef,
+    trajectoryOptions
+  );
+  await appendTrajectory(
+    changeDir,
+    state.trajectoryRef,
+    {
+      sequence: trajectory.length + 1,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      type,
+      runId: state.runId,
+      data
+    },
+    trajectoryOptions
+  );
 }
 async function persistDecision(changeDir, state, pkg, confirmations, resolver = staticDeterministicResolver, prepareAction) {
   const decision = decideWithResolver(
@@ -7352,7 +7911,16 @@ async function persistDecision(changeDir, state, pkg, confirmations, resolver = 
     action = prepared.action;
   }
   if (action) {
-    await writePendingAction(changeDir, decision.state.pendingRef, action);
+    const pendingMaxBytes = durabilityBound(
+      decision.state,
+      "pendingActionBytes"
+    );
+    await writePendingAction(
+      changeDir,
+      decision.state.pendingRef,
+      action,
+      pendingMaxBytes === void 0 ? {} : { maxBytes: pendingMaxBytes }
+    );
   }
   await writeRunState(changeDir, action ? decision.state : state);
   if (action) {
@@ -7394,7 +7962,7 @@ async function startManualRun(pkg, changeDir, options = []) {
   }
   const state = startRun(
     pkg,
-    startOptions.runId ?? randomUUID3(),
+    startOptions.runId ?? randomUUID4(),
     snapshot.hash,
     startOptions.workflowRuntime
   );
@@ -7425,7 +7993,12 @@ async function resumeManualRunInternal(changeDir, options = {}) {
     throw new Error("Adaptive orchestration requires an Agent candidate");
   }
   const resolver = options.resolver ?? staticDeterministicResolver;
-  const pending = await readPendingAction(changeDir, state.pendingRef);
+  const pendingMaxBytes = durabilityBound(state, "pendingActionBytes");
+  const pending = await readPendingAction(
+    changeDir,
+    state.pendingRef,
+    pendingMaxBytes === void 0 ? {} : { maxBytes: pendingMaxBytes }
+  );
   if (!options.outcome) {
     validatePendingState(state, pending);
     if (pending) {
@@ -7466,22 +8039,58 @@ async function resumeManualRunInternal(changeDir, options = {}) {
     recordOutcomeWithResolver(pkg, state, outcome, resolver, void 0),
     options.artifactMutation
   );
+  const artifactsMaxBytes = durabilityBound(state, "artifactsBytes");
+  const artifactReadOptions = artifactsMaxBytes === void 0 ? {} : { maxBytes: artifactsMaxBytes };
   const artifacts = {
-    ...await readArtifacts(changeDir, state.artifactsRef),
+    ...await readArtifacts(
+      changeDir,
+      state.artifactsRef,
+      artifactReadOptions
+    ),
     ...outcome.artifacts ?? {},
     ...options.artifactMutation?.artifactPaths ?? {}
   };
-  await writeArtifacts(changeDir, state.artifactsRef, artifacts);
+  await options.revisionFence?.();
+  const artifactWriteOptions = {
+    ...options.revisionFence ? { beforeCommit: options.revisionFence } : {},
+    ...artifactsMaxBytes === void 0 ? {} : { maxBytes: artifactsMaxBytes }
+  };
+  await writeArtifacts(
+    changeDir,
+    state.artifactsRef,
+    artifacts,
+    artifactWriteOptions
+  );
+  const trajectoryMaxBytes = durabilityBound(state, "trajectoryBytes");
+  const trajectoryWriteOptions = {
+    ...options.revisionFence ? { beforeCommit: options.revisionFence } : {},
+    ...trajectoryMaxBytes === void 0 ? {} : { maxBytes: trajectoryMaxBytes }
+  };
   const decisionReceipt2 = advanced.workflowRuntime?.decisionReceipts.find(
     (receipt) => receipt.actionId === pending.id
   );
-  await appendEvent(changeDir, state, "action_completed", {
-    action: pending,
-    outcome,
-    ...decisionReceipt2 ? { decisionReceipt: decisionReceipt2 } : {}
-  });
-  await clearPendingAction(changeDir, advanced.pendingRef);
-  await writeRunState(changeDir, advanced);
+  await appendEvent(
+    changeDir,
+    state,
+    "action_completed",
+    {
+      action: pending,
+      outcome,
+      ...decisionReceipt2 ? { decisionReceipt: decisionReceipt2 } : {}
+    },
+    trajectoryWriteOptions
+  );
+  await clearPendingAction(
+    changeDir,
+    advanced.pendingRef,
+    options.revisionFence ? { beforeRemove: options.revisionFence } : {}
+  );
+  const stateFence = options.revisionStateFence ?? options.revisionFence;
+  await writeRunState(
+    changeDir,
+    advanced,
+    stateFence ? { beforeCommit: stateFence } : {}
+  );
   const evals = await evaluateAndRecord(
     changeDir,
     pkg,
@@ -7731,12 +8340,12 @@ function resolveWorkflowStartLocation(options) {
     }
     return {
       location,
-      runId: ("runId" in options ? options.runId : void 0) ?? randomUUID4()
+      runId: ("runId" in options ? options.runId : void 0) ?? randomUUID5()
     };
   }
   return {
     location: manualLocation(options.runRoot),
-    runId: options.runId ?? randomUUID4()
+    runId: options.runId ?? randomUUID5()
   };
 }
 
@@ -7759,7 +8368,12 @@ function identityFromState(state) {
     nodeToStep: { ...state.runtimeIdentity.nodeToStep },
     ...state.runtimeIdentity.capabilityVersion === 3 ? { capabilityVersion: 3 } : {},
     ...state.runtimeIdentity.resolverHash ? { resolverHash: state.runtimeIdentity.resolverHash } : {},
-    ...state.runtimeIdentity.findingCatalogVersion === WORKFLOW_FINDING_CATALOG_VERSION ? { findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION } : {}
+    ...state.runtimeIdentity.findingCatalogVersion === WORKFLOW_FINDING_CATALOG_VERSION ? { findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION } : {},
+    ...state.runtimeIdentity.durabilityProfile ? {
+      durabilityProfile: structuredClone(
+        state.runtimeIdentity.durabilityProfile
+      )
+    } : {}
   };
 }
 function currentNode(state, identity, action) {
@@ -7779,7 +8393,14 @@ function sameStringRecord(left, right) {
   return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
 }
 function sameExecutionIdentity(left, right) {
-  return left.protocolHash === right.protocolHash && left.packageHash === right.packageHash && left.snapshotHash === right.snapshotHash && sameStringRecord(left.nodeToStep, right.nodeToStep) && left.capabilityVersion === right.capabilityVersion && left.resolverHash === right.resolverHash && (left.findingCatalogVersion === void 0 || right.findingCatalogVersion === void 0 || left.findingCatalogVersion === right.findingCatalogVersion);
+  return left.protocolHash === right.protocolHash && left.packageHash === right.packageHash && left.snapshotHash === right.snapshotHash && sameStringRecord(left.nodeToStep, right.nodeToStep) && left.capabilityVersion === right.capabilityVersion && left.resolverHash === right.resolverHash && (left.findingCatalogVersion === void 0 || right.findingCatalogVersion === void 0 || left.findingCatalogVersion === right.findingCatalogVersion) && sameDurabilityProfile(left.durabilityProfile, right.durabilityProfile);
+}
+function samePhase4ExecutionIdentity(left, right) {
+  return sameExecutionIdentity(left, right) && left.capabilityVersion === 3 && right.capabilityVersion === 3 && left.resolverHash !== void 0 && right.resolverHash !== void 0 && left.resolverHash === right.resolverHash && left.findingCatalogVersion === WORKFLOW_FINDING_CATALOG_VERSION && right.findingCatalogVersion === WORKFLOW_FINDING_CATALOG_VERSION && left.durabilityProfile !== void 0 && right.durabilityProfile !== void 0;
+}
+function durabilityReadOptions(state, key) {
+  const maxBytes = state.runtimeIdentity?.durabilityProfile?.bounds[key];
+  return maxBytes === void 0 ? {} : { maxBytes };
 }
 function isDecisionSubmission(submission) {
   return submission.kind === "decision";
@@ -7787,6 +8408,7 @@ function isDecisionSubmission(submission) {
 var DECISION_SUBMISSION_KEYS = /* @__PURE__ */ new Set([
   "kind",
   "actionId",
+  "runId",
   "revision",
   "nodeId",
   "cycleId",
@@ -7866,7 +8488,7 @@ function terminalEvaluationResults(trajectory) {
       continue;
     }
     for (const result of event.data.results) {
-      if (!isRecord6(result)) continue;
+      if (!isRecord8(result)) continue;
       if (typeof result.evalId !== "string" || typeof result.passed !== "boolean" || typeof result.evidence !== "string") {
         continue;
       }
@@ -7991,6 +8613,9 @@ function validateSubmission(submission) {
     if (unknown) {
       throw new Error(`Decision submission has unknown field: ${unknown}`);
     }
+    if (submission.runId !== void 0 && (typeof submission.runId !== "string" || !submission.runId)) {
+      throw new Error("Decision runId must be a non-empty string");
+    }
     if (!Number.isSafeInteger(submission.revision) || submission.revision < 0) {
       throw new Error("Decision revision must be a non-negative integer");
     }
@@ -8023,6 +8648,12 @@ function validateSubmission(submission) {
       }
     }
     return;
+  }
+  if (submission.runId !== void 0 && (typeof submission.runId !== "string" || !submission.runId)) {
+    throw new Error("Submission runId must be a non-empty string");
+  }
+  if (submission.revision !== void 0 && (!Number.isSafeInteger(submission.revision) || submission.revision < 0)) {
+    throw new Error("Submission revision must be a non-negative integer");
   }
   if (submission.nodeId !== void 0 && submission.nodeId !== null && (typeof submission.nodeId !== "string" || !submission.nodeId)) {
     throw new Error("Submission nodeId must be a non-empty string or null");
@@ -8151,7 +8782,7 @@ function continuation(result, identity) {
   };
 }
 var LEGACY_STATE_MAX_BYTES = 256 * 1024;
-function isRecord6(value) {
+function isRecord8(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function projectionStatus(state, pending, maxRetriesPerAction) {
@@ -8176,11 +8807,12 @@ async function projectWorkflowState(target) {
   const history = [];
   const trajectory = await readTrajectory(
     location.runRoot,
-    state.trajectoryRef
+    state.trajectoryRef,
+    durabilityReadOptions(state, "trajectoryBytes")
   );
   for (const event of trajectory) {
     if (event.type !== "action_completed") continue;
-    if (!isRecord6(event.data.action) || !isRecord6(event.data.outcome)) continue;
+    if (!isRecord8(event.data.action) || !isRecord8(event.data.outcome)) continue;
     const stepId2 = event.data.action.stepId;
     const node = typeof stepId2 === "string" ? nodeByStep.get(stepId2) : void 0;
     const outcomeStatus = event.data.outcome.status;
@@ -8196,7 +8828,7 @@ async function projectWorkflowState(target) {
     if (outcomeStatus !== "succeeded") continue;
     if (!completedNodes.includes(node)) completedNodes.push(node);
     const outcomeEvidence = event.data.outcome.evidence;
-    evidence[node] = isRecord6(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
+    evidence[node] = isRecord8(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
   }
   const protocol = verified.package.runtime.protocol;
   const runtimeState = state.workflowRuntime;
@@ -8277,31 +8909,45 @@ async function writeWorkflowStateProjection(target, projection) {
   if (Buffer.byteLength(content, "utf8") > LEGACY_STATE_MAX_BYTES) {
     throw new Error(`${label} exceeds ${LEGACY_STATE_MAX_BYTES} bytes`);
   }
-  let inspection = await inspectProtectedProjectPath(
-    projectRoot,
-    relativePath,
-    { label, expected: "file" }
-  );
-  if (inspection.exists) {
-    const existing = await readProtectedProjectFile(
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let inspection = await inspectProtectedProjectPath(
       projectRoot,
       relativePath,
-      LEGACY_STATE_MAX_BYTES,
-      { label }
+      { label, expected: "file" }
     );
-    if (Buffer.from(existing.bytes).equals(Buffer.from(content))) return;
-  }
-  const parent = path12.posix.dirname(relativePath);
-  if (parent !== ".") {
-    await ensureProtectedProjectDirectory(projectRoot, parent, { label });
-    inspection = await inspectProtectedProjectPath(projectRoot, relativePath, {
-      label,
-      expected: "file"
+    if (inspection.exists) {
+      try {
+        const existing = await readProtectedProjectFile(
+          projectRoot,
+          relativePath,
+          LEGACY_STATE_MAX_BYTES,
+          { label }
+        );
+        if (Buffer.from(existing.bytes).equals(Buffer.from(content))) return;
+      } catch (error) {
+        if (!(error instanceof RaceSafeReadError) || error.reason !== "changed" || attempt === 2) {
+          throw error;
+        }
+        continue;
+      }
+    }
+    const parent = path12.posix.dirname(relativePath);
+    if (parent !== ".") {
+      await ensureProtectedProjectDirectory(projectRoot, parent, { label });
+      inspection = await inspectProtectedProjectPath(
+        projectRoot,
+        relativePath,
+        {
+          label,
+          expected: "file"
+        }
+      );
+    }
+    await atomicWriteContainedText(inspection.target, content, {
+      containedRoot: inspection.projectRoot
     });
+    return;
   }
-  await atomicWriteContainedText(inspection.target, content, {
-    containedRoot: inspection.projectRoot
-  });
 }
 async function verifyStoredPackage(runRoot, state) {
   const identity = identityFromState(state);
@@ -8337,6 +8983,22 @@ async function verifyStoredPackage(runRoot, state) {
   if (identity.findingCatalogVersion !== void 0 && pkg.runtime.findingCatalogVersion !== identity.findingCatalogVersion) {
     throw new Error(
       "WorkflowRuntime finding catalog identity does not match Skill snapshot"
+    );
+  }
+  if (identity.durabilityProfile !== void 0 && (identity.capabilityVersion !== 3 || identity.resolverHash === void 0 || identity.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION || pkg.runtime.capabilityVersion !== 3 || pkg.runtime.resolverHash === void 0 || pkg.runtime.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION)) {
+    throw new Error(
+      "WorkflowRuntime durability profile requires complete execution identity"
+    );
+  }
+  if (!sameDurabilityProfile(
+    identity.durabilityProfile,
+    pkg.runtime.durabilityProfile
+  ) || !sameDurabilityProfile(
+    identity.durabilityProfile,
+    pkg.runtime.protocol.capabilities?.durability
+  )) {
+    throw new Error(
+      "WorkflowRuntime durability profile identity does not match Skill snapshot"
     );
   }
   const packageHash = await hashSkillPackage(pkg);
@@ -8479,10 +9141,80 @@ async function verifyStoredRun(location) {
   );
   return { state, ...verified, pending };
 }
+var WorkflowRevisionConflictError = class extends Error {
+  constructor(verified, finding) {
+    super(finding.message);
+    this.verified = verified;
+    this.finding = finding;
+    this.name = "WorkflowRevisionConflictError";
+  }
+  verified;
+  finding;
+};
+function phase4SubmissionConflict(verified, submission) {
+  if (verified.identity.durabilityProfile === void 0) return void 0;
+  const runtimeState = verified.state.workflowRuntime;
+  if (!runtimeState) {
+    throw new Error("Phase 4 WorkflowRuntime state is missing");
+  }
+  if (!submission.runId) {
+    throw new Error("Phase 4 submission runId is required");
+  }
+  if (submission.revision === void 0) {
+    throw new Error("Phase 4 submission revision is required");
+  }
+  if (!submission.execution) {
+    throw new Error("Phase 4 submission execution identity is required");
+  }
+  let identityMatches = samePhase4ExecutionIdentity(
+    submission.execution,
+    verified.identity
+  );
+  if (isDecisionSubmission(submission)) {
+    const flatIdentity = [
+      submission.protocolHash,
+      submission.packageHash,
+      submission.snapshotHash
+    ];
+    if (flatIdentity.some((value) => value !== void 0)) {
+      identityMatches = identityMatches && submission.protocolHash === verified.identity.protocolHash && submission.packageHash === verified.identity.packageHash && submission.snapshotHash === verified.identity.snapshotHash;
+    }
+  }
+  const currentActionId = verified.pending?.id ?? verified.state.pending ?? null;
+  if (submission.runId !== verified.state.runId || submission.revision !== runtimeState.revision || submission.actionId !== currentActionId || !identityMatches) {
+    return revisionConflictFinding(runtimeState.revision, currentActionId);
+  }
+  return void 0;
+}
+function throwOnPhase4SubmissionConflict(verified, submission) {
+  const finding = phase4SubmissionConflict(verified, submission);
+  if (finding) throw new WorkflowRevisionConflictError(verified, finding);
+}
+async function assertRevisionFence(location, input, checkPendingAction = true) {
+  const state = await location.readState();
+  if (!state) {
+    throw new Error("WorkflowRuntime Run disappeared during submission");
+  }
+  const currentRevision = state.workflowRuntime?.revision ?? 0;
+  const currentActionId = state.pending;
+  const pending = checkPendingAction ? await readPendingAction(
+    location.runRoot,
+    state.pendingRef,
+    durabilityReadOptions(state, "pendingActionBytes")
+  ) : null;
+  if (state.runId !== input.runId || currentRevision !== input.expectedRevision || currentActionId !== input.expectedActionId || checkPendingAction && (!pending || pending.id !== input.expectedActionId) || !state.runtimeIdentity || !samePhase4ExecutionIdentity(identityFromState(state), input.execution)) {
+    const current = await verifyStoredRun(location);
+    throw new WorkflowRevisionConflictError(
+      current,
+      revisionConflictFinding(currentRevision, currentActionId)
+    );
+  }
+}
 async function continuationFromVerifiedRun(verified, runRoot) {
   const trajectory = await readTrajectory(
     runRoot,
-    verified.state.trajectoryRef
+    verified.state.trajectoryRef,
+    durabilityReadOptions(verified.state, "trajectoryBytes")
   );
   return continuation(
     {
@@ -8515,6 +9247,7 @@ async function inspectWorkflowRun(target) {
 async function prepareWorkflowSubmission(target, submission) {
   const location = resolveWorkflowRunLocation(target);
   const verified = await verifyStoredRun(location);
+  throwOnPhase4SubmissionConflict(verified, submission);
   const pending = verified.pending;
   if (!pending || !verified.state.pending || verified.state.status !== "waiting") {
     throw new Error(`Run is ${verified.state.status}`);
@@ -8786,10 +9519,39 @@ function blockedContinuation(prepared, blockers) {
     blockers: legacyBlockersFromFindings("blocked", projected.findings)
   };
 }
+function conflictContinuation(verified, finding) {
+  const base = continuation(
+    {
+      state: verified.state,
+      action: verified.pending,
+      evals: []
+    },
+    verified.identity
+  );
+  const projected = boundWorkflowFindings([finding]);
+  return {
+    ...base,
+    disposition: "blocked",
+    findings: projected.findings,
+    findingSummary: projected.summary,
+    requiresUserDecision: projected.findings.some(
+      (candidate) => candidate.requiresUserDecision
+    ),
+    blockers: legacyBlockersFromFindings("blocked", projected.findings)
+  };
+}
 async function validateWorkflowSubmission(target, submission) {
   return withStructuredRuntimeErrors(async () => {
     validateSubmission(submission);
-    const prepared = await prepareWorkflowSubmission(target, submission);
+    let prepared;
+    try {
+      prepared = await prepareWorkflowSubmission(target, submission);
+    } catch (error) {
+      if (error instanceof WorkflowRevisionConflictError) {
+        return conflictContinuation(error.verified, error.finding);
+      }
+      throw error;
+    }
     const blockers = await completionBlockers(prepared, submission);
     if (blockers.length > 0) {
       return blockedContinuation(prepared, blockers);
@@ -8867,7 +9629,8 @@ async function resumeStoredRun(location, options) {
   }
   const trajectory = await readTrajectory(
     location.runRoot,
-    result.state.trajectoryRef
+    result.state.trajectoryRef,
+    durabilityReadOptions(result.state, "trajectoryBytes")
   );
   return continuation(
     { ...result, evals: terminalEvaluationResults(trajectory) },
@@ -8887,7 +9650,11 @@ async function prepareWorkflowAction(runRoot, pkg, state, action) {
   }
 }
 async function verifyStoredAction(runRoot, state, identity, pkg) {
-  const action = await readPendingAction(runRoot, state.pendingRef);
+  const action = await readPendingAction(
+    runRoot,
+    state.pendingRef,
+    durabilityReadOptions(state, "pendingActionBytes")
+  );
   if (state.status === "waiting") {
     if (!state.pending || !action || action.id !== state.pending) {
       throw new Error(
@@ -8939,11 +9706,15 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
       );
       if (node?.decision?.scope) {
         await validateWorkflowDecisionScope(runRoot, pkg, state, action);
-        const trajectory = await readTrajectory(runRoot, state.trajectoryRef);
-        const proposal = trajectory.slice().reverse().find(
-          (event) => event.type === "action_proposed" && isRecord6(event.data.action) && event.data.action.id === action.id
+        const trajectory = await readTrajectory(
+          runRoot,
+          state.trajectoryRef,
+          durabilityReadOptions(state, "trajectoryBytes")
         );
-        if (!proposal || !isRecord6(proposal.data.action)) {
+        const proposal = trajectory.slice().reverse().find(
+          (event) => event.type === "action_proposed" && isRecord8(event.data.action) && event.data.action.id === action.id
+        );
+        if (!proposal || !isRecord8(proposal.data.action)) {
           throw new Error(
             "WorkflowRuntime scoped decision has no durable action proposal"
           );
@@ -9022,7 +9793,15 @@ function createWorkflowRuntime() {
     async submit(target, submission) {
       return withStructuredRuntimeErrors(async () => {
         validateSubmission(submission);
-        const prepared = await prepareWorkflowSubmission(target, submission);
+        let prepared;
+        try {
+          prepared = await prepareWorkflowSubmission(target, submission);
+        } catch (error) {
+          if (error instanceof WorkflowRevisionConflictError) {
+            return conflictContinuation(error.verified, error.finding);
+          }
+          throw error;
+        }
         const blockers = await completionBlockers(prepared, submission);
         if (blockers.length > 0) {
           return blockedContinuation(prepared, blockers);
@@ -9038,15 +9817,59 @@ function createWorkflowRuntime() {
         if (artifact.blockers.length > 0) {
           return blockedContinuation(prepared, artifact.blockers);
         }
-        const result = await prepared.location.resume(
-          {
-            resolver: resolverForPackage(),
-            outcome: engineOutcome(prepared, submission, artifact.mutation),
-            prepareAction: prepareWorkflowAction
-          },
-          artifact.mutation
+        const outcome = engineOutcome(prepared, submission, artifact.mutation);
+        if (prepared.verified.identity.durabilityProfile === void 0) {
+          const result = await prepared.location.resume(
+            {
+              resolver: resolverForPackage(),
+              outcome,
+              prepareAction: prepareWorkflowAction
+            },
+            artifact.mutation
+          );
+          return continuation(result, prepared.verified.identity);
+        }
+        const claimInput = {
+          runId: submission.runId,
+          expectedRevision: submission.revision,
+          expectedActionId: submission.actionId,
+          intendedRevision: submission.revision + 1,
+          execution: structuredClone(submission.execution)
+        };
+        const claim = await acquireRevisionClaim(
+          prepared.location.runRoot,
+          claimInput
         );
-        return continuation(result, prepared.verified.identity);
+        if (!claim.acquired) {
+          const current = await verifyStoredRun(prepared.location);
+          return conflictContinuation(
+            current,
+            revisionConflictFinding(
+              current.state.workflowRuntime?.revision ?? 0,
+              current.pending?.id ?? current.state.pending ?? null
+            )
+          );
+        }
+        try {
+          await assertRevisionFence(prepared.location, claimInput);
+          const result = await prepared.location.resume(
+            {
+              resolver: resolverForPackage(),
+              outcome,
+              prepareAction: prepareWorkflowAction,
+              revisionFence: () => assertRevisionFence(prepared.location, claimInput),
+              revisionStateFence: () => assertRevisionFence(prepared.location, claimInput, false)
+            },
+            artifact.mutation
+          );
+          await claim.commit();
+          return continuation(result, prepared.verified.identity);
+        } catch (error) {
+          if (error instanceof WorkflowRevisionConflictError) {
+            return conflictContinuation(error.verified, error.finding);
+          }
+          throw error;
+        }
       });
     },
     async recover(target, options = {}) {

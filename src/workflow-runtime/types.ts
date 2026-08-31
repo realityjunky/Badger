@@ -28,11 +28,14 @@ export type WorkflowPendingAction = EngineAction;
 export interface WorkflowMachineSubmission extends ActionOutcome {
   kind?: "machine";
   nodeId?: string | null;
+  runId?: string;
+  execution?: WorkflowExecutionIdentity;
 }
 
 export interface WorkflowDecisionSubmission {
   kind: "decision";
   actionId: string;
+  runId?: string;
   revision: number;
   nodeId: string;
   cycleId: string | null;

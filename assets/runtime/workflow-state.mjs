@@ -352,6 +352,9 @@ async function main() {
         : {}),
       ...(artifacts !== undefined ? { artifacts } : {}),
       ...(artifactVersions !== undefined ? { artifactVersions } : {}),
+      runId: projection.runId,
+      revision: projection.revision,
+      execution: projection.execution,
       ...(nodeId ? { nodeId } : {}),
     };
     const continuation = await createWorkflowRuntime().submit(
@@ -384,6 +387,7 @@ async function main() {
       ...response,
       kind: "decision",
       actionId: projection.pendingAction.id,
+      runId: projection.runId,
       revision: projection.revision,
       nodeId,
       cycleId: projection.cycleId,

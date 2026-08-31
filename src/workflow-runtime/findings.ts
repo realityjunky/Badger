@@ -69,6 +69,7 @@ const WORKFLOW_FINDING_CODES = [
   "iteration-budget-exhausted",
   "no-pending-action",
   "pending-action-invalid",
+  "revision-conflict",
   "retry-budget-exhausted",
   "route-ambiguous",
   "route-invalid-value",
@@ -95,6 +96,8 @@ export interface WorkflowFinding {
   requiredAction: WorkflowFindingRequiredAction;
   operation?: WorkflowFindingOperation;
   requiresUserDecision: boolean;
+  currentRevision?: number;
+  currentActionId?: string | null;
 }
 
 export interface WorkflowRuntimeError extends Error {
@@ -128,6 +131,8 @@ export interface WorkflowFindingInput {
   requiredAction: WorkflowFindingRequiredAction;
   operation?: WorkflowFindingOperation;
   requiresUserDecision?: boolean;
+  currentRevision?: number;
+  currentActionId?: string | null;
 }
 
 const severityRank: Record<WorkflowFindingSeverity, number> = {
@@ -264,6 +269,8 @@ function findingKey(value: WorkflowFinding): string {
     value.operation?.id ?? "",
     value.operation?.args ?? [],
     value.requiresUserDecision,
+    value.currentRevision ?? null,
+    value.currentActionId ?? null,
   ]);
 }
 
@@ -280,7 +287,13 @@ function compareFindings(
   if (code !== 0) return code;
   const pathComparison = (left.path ?? "").localeCompare(right.path ?? "");
   if (pathComparison !== 0) return pathComparison;
-  return left.message.localeCompare(right.message);
+  const message = left.message.localeCompare(right.message);
+  if (message !== 0) return message;
+  const revision = (left.currentRevision ?? -1) - (right.currentRevision ?? -1);
+  if (revision !== 0) return revision;
+  return (left.currentActionId ?? "").localeCompare(
+    right.currentActionId ?? "",
+  );
 }
 
 function findingBytes(value: readonly WorkflowFinding[]): number {
@@ -314,6 +327,23 @@ export function createWorkflowFinding(
   if (typeof input.message !== "string" || input.message.trim().length === 0) {
     throw new Error("Workflow finding message must be non-empty");
   }
+  if (
+    input.currentRevision !== undefined &&
+    (!Number.isSafeInteger(input.currentRevision) || input.currentRevision < 0)
+  ) {
+    throw new Error("Workflow finding current revision must be non-negative");
+  }
+  if (
+    input.currentActionId !== undefined &&
+    input.currentActionId !== null &&
+    (typeof input.currentActionId !== "string" ||
+      input.currentActionId.length === 0 ||
+      input.currentActionId.length >
+        MAX_WORKFLOW_FINDING_OPERATION_ARG_LENGTH ||
+      /[\u0000\r\n]/u.test(input.currentActionId))
+  ) {
+    throw new Error("Workflow finding current action id is invalid");
+  }
   const safePath = normalizeWorkflowFindingPath(input.path);
   const safeOperation = operation(input.operation);
   const allowedOperations: Partial<
@@ -342,6 +372,12 @@ export function createWorkflowFinding(
     requiredAction: input.requiredAction,
     ...(safeOperation ? { operation: safeOperation } : {}),
     requiresUserDecision: input.requiresUserDecision ?? false,
+    ...(input.currentRevision !== undefined
+      ? { currentRevision: input.currentRevision }
+      : {}),
+    ...(input.currentActionId !== undefined
+      ? { currentActionId: input.currentActionId }
+      : {}),
   };
 }
 
@@ -363,6 +399,8 @@ export function parseWorkflowFinding(value: unknown): WorkflowFinding {
     "requiredAction",
     "operation",
     "requiresUserDecision",
+    "currentRevision",
+    "currentActionId",
   ]);
   const unknown = Object.keys(value).find((key) => !keys.has(key));
   if (unknown) {
@@ -380,6 +418,21 @@ export function parseWorkflowFinding(value: unknown): WorkflowFinding {
   if (value.path !== undefined && typeof value.path !== "string") {
     throw new Error("Workflow finding path must be a string");
   }
+  if (
+    value.currentRevision !== undefined &&
+    (typeof value.currentRevision !== "number" ||
+      !Number.isSafeInteger(value.currentRevision) ||
+      value.currentRevision < 0)
+  ) {
+    throw new Error("Workflow finding current revision is invalid");
+  }
+  if (
+    value.currentActionId !== undefined &&
+    value.currentActionId !== null &&
+    typeof value.currentActionId !== "string"
+  ) {
+    throw new Error("Workflow finding current action id is invalid");
+  }
   const finding = createWorkflowFinding({
     code: value.code as WorkflowFindingCode,
     severity: value.severity as WorkflowFindingSeverity,
@@ -390,6 +443,12 @@ export function parseWorkflowFinding(value: unknown): WorkflowFinding {
       ? { operation: value.operation as WorkflowFindingOperation }
       : {}),
     requiresUserDecision: value.requiresUserDecision,
+    ...(value.currentRevision !== undefined
+      ? { currentRevision: value.currentRevision as number }
+      : {}),
+    ...(value.currentActionId !== undefined
+      ? { currentActionId: value.currentActionId as string | null }
+      : {}),
   });
   if (
     JSON.stringify(stableValue(finding)) !== JSON.stringify(stableValue(value))
@@ -1075,6 +1134,24 @@ export function decisionRequiredFinding(actionId: string): WorkflowFinding {
     requiredAction: "decide",
     operation: { id: "workflow.submit", args: [actionId] },
     requiresUserDecision: true,
+  });
+}
+
+export function revisionConflictFinding(
+  currentRevision: number,
+  currentActionId: string | null,
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "revision-conflict",
+    severity: "error",
+    message: `Workflow submission conflicts with the current Run revision ${currentRevision} and action ${currentActionId ?? "(none)"}. Refresh the authoritative continuation before retrying.`,
+    requiredAction: "retry",
+    operation: {
+      id: "workflow.resume",
+      args: currentActionId ? [currentActionId] : [],
+    },
+    currentRevision,
+    currentActionId,
   });
 }
 

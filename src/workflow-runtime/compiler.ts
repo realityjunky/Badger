@@ -27,6 +27,10 @@ import {
 import { validateDecisionDefinition } from "../workflow/contract.js";
 import { validateWorkflowDecisionScopeDefinition } from "./decision-scope.js";
 import { WORKFLOW_FINDING_CATALOG_VERSION } from "./findings.js";
+import {
+  durabilityProfileForProtocol,
+  normalizeWorkflowDurabilityProtocol,
+} from "./durability.js";
 
 interface CompiledWorkflow {
   package: SkillPackage;
@@ -135,6 +139,9 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
       throw new Error(
         "Workflow Protocol cycle declarations require bounded-cycles capability",
       );
+    }
+    if (protocol.capabilities.durability !== undefined) {
+      durabilityProfileForProtocol(protocol);
     }
   } else if (protocol.cycles !== undefined) {
     throw new Error(
@@ -633,31 +640,40 @@ function compileCompletionPlans(
 export async function compileWorkflow(
   protocol: WorkflowProtocol,
 ): Promise<CompiledWorkflow> {
-  validateProtocolShape(protocol);
-  validateWorkflowDecisionScopeDefinition(protocol);
-  const revisioned = isRevisionedWorkflowProtocol(protocol);
-  if (revisioned && protocol.capabilities?.version !== 3) {
+  const executableProtocol = normalizeWorkflowDurabilityProtocol(protocol);
+  validateProtocolShape(executableProtocol);
+  validateWorkflowDecisionScopeDefinition(executableProtocol);
+  const revisioned = isRevisionedWorkflowProtocol(executableProtocol);
+  if (revisioned && executableProtocol.capabilities?.version !== 3) {
     throw new Error(
       "Workflow Protocol revisioned capabilities are required for branch routing",
     );
   }
-  if (revisioned) validateRevisionedWorkflow(protocol);
+  if (revisioned) validateRevisionedWorkflow(executableProtocol);
   const nodes = revisioned
-    ? activeNodes(protocol)
-    : validateLinearRoute(protocol);
-  const definition = compileDefinition(protocol, nodes, !revisioned);
+    ? activeNodes(executableProtocol)
+    : validateLinearRoute(executableProtocol);
+  const definition = compileDefinition(executableProtocol, nodes, !revisioned);
   const nodeToStep = Object.fromEntries(
     nodes.map((node, index) => [node.id, stepId(index, node.id)]),
   );
-  const protocolHash = hashProtocol(protocol);
+  const protocolHash = hashProtocol(executableProtocol);
   const runtime: RuntimePackageMetadata = {
     protocolHash,
-    protocol: structuredClone(protocol),
+    protocol: structuredClone(executableProtocol),
     nodeToStep: { ...nodeToStep },
     ...(revisioned
-      ? { capabilityVersion: 3 as const, resolverHash: resolverHash(protocol) }
+      ? {
+          capabilityVersion: 3 as const,
+          resolverHash: resolverHash(executableProtocol),
+        }
       : {}),
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
+    ...(executableProtocol.capabilities?.durability
+      ? {
+          durabilityProfile: durabilityProfileForProtocol(executableProtocol),
+        }
+      : {}),
     completionPlans: compileCompletionPlans(nodes),
   };
   const pkg: SkillPackage = {
@@ -665,7 +681,7 @@ export async function compileWorkflow(
     packageKind: "runtime",
     runtime,
     definition,
-    guardrails: compileGuardrails(protocol, nodes),
+    guardrails: compileGuardrails(executableProtocol, nodes),
     evals: [],
   };
   const packageErrors = validateSkillPackage(pkg);
@@ -685,10 +701,15 @@ export async function compileWorkflow(
       ...(revisioned
         ? {
             capabilityVersion: 3 as const,
-            resolverHash: resolverHash(protocol),
+            resolverHash: resolverHash(executableProtocol),
           }
         : {}),
       findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
+      ...(executableProtocol.capabilities?.durability
+        ? {
+            durabilityProfile: durabilityProfileForProtocol(executableProtocol),
+          }
+        : {}),
     },
   };
 }

@@ -14,10 +14,13 @@ import type {
 
 export interface EngineRunReadOptions {
   hooks?: RaceSafeReadOptions["hooks"];
+  maxBytes?: number;
 }
 
 export interface EngineRunWriteOptions {
   beforeCommit?: () => void | Promise<void>;
+  exclusive?: boolean;
+  maxBytes?: number;
 }
 
 export interface EngineRunRemoveOptions {
@@ -27,6 +30,24 @@ export interface EngineRunRemoveOptions {
 interface RunFileSnapshot {
   text: string;
   result: RaceSafeReadResult;
+}
+
+const MAX_ENGINE_RUN_FILE_BYTES = 16 * 1024 * 1024;
+
+function boundedMaxBytes(
+  requested: number | undefined,
+  fallback: number,
+  label: string,
+): number {
+  const value = requested ?? fallback;
+  if (
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > MAX_ENGINE_RUN_FILE_BYTES
+  ) {
+    throw new Error(`${label} size bound is invalid`);
+  }
+  return value;
 }
 
 function identityOf(stat: RaceSafeReadResult["stat"]): FileObjectIdentity {
@@ -48,11 +69,12 @@ async function readSnapshot(
   label: string,
   options: EngineRunReadOptions = {},
 ): Promise<RunFileSnapshot | null> {
+  const effectiveMaxBytes = boundedMaxBytes(options.maxBytes, maxBytes, label);
   try {
     const result = await readProtectedProjectFile(
       changeDir,
       relativePath,
-      maxBytes,
+      effectiveMaxBytes,
       {
         label,
         hooks: options.hooks,
@@ -87,10 +109,17 @@ export async function writeEngineRunText(
   label: string,
   options: EngineRunWriteOptions = {},
 ): Promise<void> {
-  if (Buffer.byteLength(content, "utf8") > maxBytes) {
-    throw new Error(`${label} exceeds ${maxBytes} bytes`);
+  const effectiveMaxBytes = boundedMaxBytes(options.maxBytes, maxBytes, label);
+  if (Buffer.byteLength(content, "utf8") > effectiveMaxBytes) {
+    throw new Error(`${label} exceeds ${effectiveMaxBytes} bytes`);
   }
-  const expected = await readSnapshot(changeDir, relativePath, maxBytes, label);
+  const expected = await readSnapshot(
+    changeDir,
+    relativePath,
+    effectiveMaxBytes,
+    label,
+    options,
+  );
   const inspection = await inspectProtectedProjectPath(
     changeDir,
     relativePath,
@@ -101,17 +130,22 @@ export async function writeEngineRunText(
   );
   await atomicWriteContainedText(inspection.target, content, {
     containedRoot: inspection.projectRoot,
+    exclusive: options.exclusive,
     beforeCommit: async () => {
       await options.beforeCommit?.();
       const current = await readSnapshot(
         changeDir,
         relativePath,
-        maxBytes,
+        effectiveMaxBytes,
         label,
       );
       if (!expected && !current) return;
       if (!expected || !current) {
-        throw new Error(`${label} changed before commit`);
+        const error = new Error(
+          `${label} changed before commit`,
+        ) as NodeJS.ErrnoException;
+        if (options.exclusive && !expected && current) error.code = "EEXIST";
+        throw error;
       }
       if (
         expected.result.realPath !== current.result.realPath ||
@@ -140,6 +174,7 @@ export async function appendEngineRunText(
     relativePath,
     maxBytes,
     label,
+    options,
   );
   await writeEngineRunText(
     changeDir,

@@ -12,6 +12,7 @@ import {
 } from "../skill-runtime/snapshot.js";
 import { type ManualRunResult } from "../engine/manual-run.js";
 import { readPendingAction, readTrajectory } from "../engine/run-store.js";
+import { RaceSafeReadError } from "../engine/race-safe-read.js";
 import type {
   EvalResult,
   EngineAction,
@@ -23,6 +24,7 @@ import type { WorkflowArtifactMutation } from "../engine/runtime-types.js";
 import type {
   DecisionScalar,
   WorkflowDecisionInputSchema,
+  WorkflowDurabilityProfile,
   WorkflowProtocol,
   WorkflowReviewerPolicy,
 } from "../types.js";
@@ -66,9 +68,15 @@ import {
   legacyBlockersFromFindings,
   parseWorkflowFinding,
   parseWorkflowFindingSummary,
+  revisionConflictFinding,
   type WorkflowFinding,
   type WorkflowFindingSummary,
 } from "./findings.js";
+import {
+  acquireRevisionClaim,
+  type RevisionClaimInput,
+} from "./revision-claim.js";
+import { sameDurabilityProfile } from "./durability.js";
 
 async function withStructuredRuntimeErrors<T>(
   operation: () => Promise<T>,
@@ -148,6 +156,13 @@ function identityFromState(state: RunState): WorkflowExecutionIdentity {
     WORKFLOW_FINDING_CATALOG_VERSION
       ? { findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION }
       : {}),
+    ...(state.runtimeIdentity.durabilityProfile
+      ? {
+          durabilityProfile: structuredClone(
+            state.runtimeIdentity.durabilityProfile,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -191,8 +206,35 @@ function sameExecutionIdentity(
     left.resolverHash === right.resolverHash &&
     (left.findingCatalogVersion === undefined ||
       right.findingCatalogVersion === undefined ||
-      left.findingCatalogVersion === right.findingCatalogVersion)
+      left.findingCatalogVersion === right.findingCatalogVersion) &&
+    sameDurabilityProfile(left.durabilityProfile, right.durabilityProfile)
   );
+}
+
+function samePhase4ExecutionIdentity(
+  left: WorkflowExecutionIdentity,
+  right: WorkflowExecutionIdentity,
+): boolean {
+  return (
+    sameExecutionIdentity(left, right) &&
+    left.capabilityVersion === 3 &&
+    right.capabilityVersion === 3 &&
+    left.resolverHash !== undefined &&
+    right.resolverHash !== undefined &&
+    left.resolverHash === right.resolverHash &&
+    left.findingCatalogVersion === WORKFLOW_FINDING_CATALOG_VERSION &&
+    right.findingCatalogVersion === WORKFLOW_FINDING_CATALOG_VERSION &&
+    left.durabilityProfile !== undefined &&
+    right.durabilityProfile !== undefined
+  );
+}
+
+function durabilityReadOptions(
+  state: RunState,
+  key: keyof WorkflowDurabilityProfile["bounds"],
+): { maxBytes?: number } {
+  const maxBytes = state.runtimeIdentity?.durabilityProfile?.bounds[key];
+  return maxBytes === undefined ? {} : { maxBytes };
 }
 
 function isDecisionSubmission(
@@ -204,6 +246,7 @@ function isDecisionSubmission(
 const DECISION_SUBMISSION_KEYS = new Set([
   "kind",
   "actionId",
+  "runId",
   "revision",
   "nodeId",
   "cycleId",
@@ -492,6 +535,12 @@ function validateSubmission(submission: WorkflowSubmission): void {
     if (unknown) {
       throw new Error(`Decision submission has unknown field: ${unknown}`);
     }
+    if (
+      submission.runId !== undefined &&
+      (typeof submission.runId !== "string" || !submission.runId)
+    ) {
+      throw new Error("Decision runId must be a non-empty string");
+    }
     if (!Number.isSafeInteger(submission.revision) || submission.revision < 0) {
       throw new Error("Decision revision must be a non-negative integer");
     }
@@ -533,6 +582,18 @@ function validateSubmission(submission: WorkflowSubmission): void {
       }
     }
     return;
+  }
+  if (
+    submission.runId !== undefined &&
+    (typeof submission.runId !== "string" || !submission.runId)
+  ) {
+    throw new Error("Submission runId must be a non-empty string");
+  }
+  if (
+    submission.revision !== undefined &&
+    (!Number.isSafeInteger(submission.revision) || submission.revision < 0)
+  ) {
+    throw new Error("Submission revision must be a non-negative integer");
   }
   if (
     submission.nodeId !== undefined &&
@@ -743,6 +804,7 @@ export async function projectWorkflowState(
   const trajectory = await readTrajectory(
     location.runRoot,
     state.trajectoryRef,
+    durabilityReadOptions(state, "trajectoryBytes"),
   );
 
   for (const event of trajectory) {
@@ -876,32 +938,50 @@ export async function writeWorkflowStateProjection(
     throw new Error(`${label} exceeds ${LEGACY_STATE_MAX_BYTES} bytes`);
   }
 
-  let inspection = await inspectProtectedProjectPath(
-    projectRoot,
-    relativePath,
-    { label, expected: "file" },
-  );
-  if (inspection.exists) {
-    const existing = await readProtectedProjectFile(
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let inspection = await inspectProtectedProjectPath(
       projectRoot,
       relativePath,
-      LEGACY_STATE_MAX_BYTES,
-      { label },
+      { label, expected: "file" },
     );
-    if (Buffer.from(existing.bytes).equals(Buffer.from(content))) return;
-  }
+    if (inspection.exists) {
+      try {
+        const existing = await readProtectedProjectFile(
+          projectRoot,
+          relativePath,
+          LEGACY_STATE_MAX_BYTES,
+          { label },
+        );
+        if (Buffer.from(existing.bytes).equals(Buffer.from(content))) return;
+      } catch (error) {
+        if (
+          !(error instanceof RaceSafeReadError) ||
+          error.reason !== "changed" ||
+          attempt === 2
+        ) {
+          throw error;
+        }
+        continue;
+      }
+    }
 
-  const parent = path.posix.dirname(relativePath);
-  if (parent !== ".") {
-    await ensureProtectedProjectDirectory(projectRoot, parent, { label });
-    inspection = await inspectProtectedProjectPath(projectRoot, relativePath, {
-      label,
-      expected: "file",
+    const parent = path.posix.dirname(relativePath);
+    if (parent !== ".") {
+      await ensureProtectedProjectDirectory(projectRoot, parent, { label });
+      inspection = await inspectProtectedProjectPath(
+        projectRoot,
+        relativePath,
+        {
+          label,
+          expected: "file",
+        },
+      );
+    }
+    await atomicWriteContainedText(inspection.target, content, {
+      containedRoot: inspection.projectRoot,
     });
+    return;
   }
-  await atomicWriteContainedText(inspection.target, content, {
-    containedRoot: inspection.projectRoot,
-  });
 }
 
 async function verifyStoredPackage(
@@ -947,6 +1027,33 @@ async function verifyStoredPackage(
   ) {
     throw new Error(
       "WorkflowRuntime finding catalog identity does not match Skill snapshot",
+    );
+  }
+  if (
+    identity.durabilityProfile !== undefined &&
+    (identity.capabilityVersion !== 3 ||
+      identity.resolverHash === undefined ||
+      identity.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION ||
+      pkg.runtime.capabilityVersion !== 3 ||
+      pkg.runtime.resolverHash === undefined ||
+      pkg.runtime.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION)
+  ) {
+    throw new Error(
+      "WorkflowRuntime durability profile requires complete execution identity",
+    );
+  }
+  if (
+    !sameDurabilityProfile(
+      identity.durabilityProfile,
+      pkg.runtime.durabilityProfile,
+    ) ||
+    !sameDurabilityProfile(
+      identity.durabilityProfile,
+      pkg.runtime.protocol.capabilities?.durability,
+    )
+  ) {
+    throw new Error(
+      "WorkflowRuntime durability profile identity does not match Skill snapshot",
     );
   }
   const packageHash = await hashSkillPackage(pkg);
@@ -1125,6 +1232,108 @@ async function verifyStoredRun(location: ResolvedWorkflowRunLocation): Promise<{
 
 type VerifiedWorkflowRun = Awaited<ReturnType<typeof verifyStoredRun>>;
 
+class WorkflowRevisionConflictError extends Error {
+  constructor(
+    readonly verified: VerifiedWorkflowRun,
+    readonly finding: WorkflowFinding,
+  ) {
+    super(finding.message);
+    this.name = "WorkflowRevisionConflictError";
+  }
+}
+
+function phase4SubmissionConflict(
+  verified: VerifiedWorkflowRun,
+  submission: WorkflowSubmission,
+): WorkflowFinding | undefined {
+  if (verified.identity.durabilityProfile === undefined) return undefined;
+  const runtimeState = verified.state.workflowRuntime;
+  if (!runtimeState) {
+    throw new Error("Phase 4 WorkflowRuntime state is missing");
+  }
+  if (!submission.runId) {
+    throw new Error("Phase 4 submission runId is required");
+  }
+  if (submission.revision === undefined) {
+    throw new Error("Phase 4 submission revision is required");
+  }
+  if (!submission.execution) {
+    throw new Error("Phase 4 submission execution identity is required");
+  }
+  let identityMatches = samePhase4ExecutionIdentity(
+    submission.execution,
+    verified.identity,
+  );
+  if (isDecisionSubmission(submission)) {
+    const flatIdentity = [
+      submission.protocolHash,
+      submission.packageHash,
+      submission.snapshotHash,
+    ];
+    if (flatIdentity.some((value) => value !== undefined)) {
+      identityMatches =
+        identityMatches &&
+        submission.protocolHash === verified.identity.protocolHash &&
+        submission.packageHash === verified.identity.packageHash &&
+        submission.snapshotHash === verified.identity.snapshotHash;
+    }
+  }
+  const currentActionId =
+    verified.pending?.id ?? verified.state.pending ?? null;
+  if (
+    submission.runId !== verified.state.runId ||
+    submission.revision !== runtimeState.revision ||
+    submission.actionId !== currentActionId ||
+    !identityMatches
+  ) {
+    return revisionConflictFinding(runtimeState.revision, currentActionId);
+  }
+  return undefined;
+}
+
+function throwOnPhase4SubmissionConflict(
+  verified: VerifiedWorkflowRun,
+  submission: WorkflowSubmission,
+): void {
+  const finding = phase4SubmissionConflict(verified, submission);
+  if (finding) throw new WorkflowRevisionConflictError(verified, finding);
+}
+
+async function assertRevisionFence(
+  location: ResolvedWorkflowRunLocation,
+  input: RevisionClaimInput,
+  checkPendingAction = true,
+): Promise<void> {
+  const state = await location.readState();
+  if (!state) {
+    throw new Error("WorkflowRuntime Run disappeared during submission");
+  }
+  const currentRevision = state.workflowRuntime?.revision ?? 0;
+  const currentActionId = state.pending;
+  const pending = checkPendingAction
+    ? await readPendingAction(
+        location.runRoot,
+        state.pendingRef,
+        durabilityReadOptions(state, "pendingActionBytes"),
+      )
+    : null;
+  if (
+    state.runId !== input.runId ||
+    currentRevision !== input.expectedRevision ||
+    currentActionId !== input.expectedActionId ||
+    (checkPendingAction &&
+      (!pending || pending.id !== input.expectedActionId)) ||
+    !state.runtimeIdentity ||
+    !samePhase4ExecutionIdentity(identityFromState(state), input.execution)
+  ) {
+    const current = await verifyStoredRun(location);
+    throw new WorkflowRevisionConflictError(
+      current,
+      revisionConflictFinding(currentRevision, currentActionId),
+    );
+  }
+}
+
 async function continuationFromVerifiedRun(
   verified: VerifiedWorkflowRun,
   runRoot: string,
@@ -1132,6 +1341,7 @@ async function continuationFromVerifiedRun(
   const trajectory = await readTrajectory(
     runRoot,
     verified.state.trajectoryRef,
+    durabilityReadOptions(verified.state, "trajectoryBytes"),
   );
   return continuation(
     {
@@ -1188,6 +1398,7 @@ async function prepareWorkflowSubmission(
 ): Promise<PreparedWorkflowSubmission> {
   const location = resolveWorkflowRunLocation(target);
   const verified = await verifyStoredRun(location);
+  throwOnPhase4SubmissionConflict(verified, submission);
   const pending = verified.pending;
   if (
     !pending ||
@@ -1535,13 +1746,46 @@ function blockedContinuation(
   };
 }
 
+function conflictContinuation(
+  verified: VerifiedWorkflowRun,
+  finding: WorkflowFinding,
+): WorkflowContinuation {
+  const base = continuation(
+    {
+      state: verified.state,
+      action: verified.pending,
+      evals: [],
+    },
+    verified.identity,
+  );
+  const projected = boundWorkflowFindings([finding]);
+  return {
+    ...base,
+    disposition: "blocked",
+    findings: projected.findings,
+    findingSummary: projected.summary,
+    requiresUserDecision: projected.findings.some(
+      (candidate) => candidate.requiresUserDecision,
+    ),
+    blockers: legacyBlockersFromFindings("blocked", projected.findings),
+  };
+}
+
 export async function validateWorkflowSubmission(
   target: WorkflowRunTarget,
   submission: WorkflowSubmission,
 ): Promise<WorkflowContinuation> {
   return withStructuredRuntimeErrors(async () => {
     validateSubmission(submission);
-    const prepared = await prepareWorkflowSubmission(target, submission);
+    let prepared: PreparedWorkflowSubmission;
+    try {
+      prepared = await prepareWorkflowSubmission(target, submission);
+    } catch (error) {
+      if (error instanceof WorkflowRevisionConflictError) {
+        return conflictContinuation(error.verified, error.finding);
+      }
+      throw error;
+    }
     const blockers = await completionBlockers(prepared, submission);
     if (blockers.length > 0) {
       return blockedContinuation(prepared, blockers);
@@ -1637,6 +1881,7 @@ async function resumeStoredRun(
   const trajectory = await readTrajectory(
     location.runRoot,
     result.state.trajectoryRef,
+    durabilityReadOptions(result.state, "trajectoryBytes"),
   );
   return continuation(
     { ...result, evals: terminalEvaluationResults(trajectory) },
@@ -1668,7 +1913,11 @@ async function verifyStoredAction(
   identity: WorkflowExecutionIdentity,
   pkg: Awaited<ReturnType<typeof readSkillSnapshot>>,
 ): Promise<EngineAction | null> {
-  const action = await readPendingAction(runRoot, state.pendingRef);
+  const action = await readPendingAction(
+    runRoot,
+    state.pendingRef,
+    durabilityReadOptions(state, "pendingActionBytes"),
+  );
   if (state.status === "waiting") {
     if (!state.pending || !action || action.id !== state.pending) {
       throw new Error(
@@ -1746,7 +1995,11 @@ async function verifyStoredAction(
       );
       if (node?.decision?.scope) {
         await validateWorkflowDecisionScope(runRoot, pkg, state, action);
-        const trajectory = await readTrajectory(runRoot, state.trajectoryRef);
+        const trajectory = await readTrajectory(
+          runRoot,
+          state.trajectoryRef,
+          durabilityReadOptions(state, "trajectoryBytes"),
+        );
         const proposal = trajectory
           .slice()
           .reverse()
@@ -1855,7 +2108,15 @@ export function createWorkflowRuntime(): WorkflowRuntime {
     ): Promise<WorkflowContinuation> {
       return withStructuredRuntimeErrors(async () => {
         validateSubmission(submission);
-        const prepared = await prepareWorkflowSubmission(target, submission);
+        let prepared: PreparedWorkflowSubmission;
+        try {
+          prepared = await prepareWorkflowSubmission(target, submission);
+        } catch (error) {
+          if (error instanceof WorkflowRevisionConflictError) {
+            return conflictContinuation(error.verified, error.finding);
+          }
+          throw error;
+        }
         const blockers = await completionBlockers(prepared, submission);
         if (blockers.length > 0) {
           return blockedContinuation(prepared, blockers);
@@ -1871,15 +2132,62 @@ export function createWorkflowRuntime(): WorkflowRuntime {
         if (artifact.blockers.length > 0) {
           return blockedContinuation(prepared, artifact.blockers);
         }
-        const result = await prepared.location.resume(
-          {
-            resolver: resolverForPackage(),
-            outcome: engineOutcome(prepared, submission, artifact.mutation),
-            prepareAction: prepareWorkflowAction,
-          },
-          artifact.mutation,
+        const outcome = engineOutcome(prepared, submission, artifact.mutation);
+        if (prepared.verified.identity.durabilityProfile === undefined) {
+          const result = await prepared.location.resume(
+            {
+              resolver: resolverForPackage(),
+              outcome,
+              prepareAction: prepareWorkflowAction,
+            },
+            artifact.mutation,
+          );
+          return continuation(result, prepared.verified.identity);
+        }
+
+        const claimInput: RevisionClaimInput = {
+          runId: submission.runId!,
+          expectedRevision: submission.revision!,
+          expectedActionId: submission.actionId,
+          intendedRevision: submission.revision! + 1,
+          execution: structuredClone(submission.execution!),
+        };
+        const claim = await acquireRevisionClaim(
+          prepared.location.runRoot,
+          claimInput,
         );
-        return continuation(result, prepared.verified.identity);
+        if (!claim.acquired) {
+          const current = await verifyStoredRun(prepared.location);
+          return conflictContinuation(
+            current,
+            revisionConflictFinding(
+              current.state.workflowRuntime?.revision ?? 0,
+              current.pending?.id ?? current.state.pending ?? null,
+            ),
+          );
+        }
+        try {
+          await assertRevisionFence(prepared.location, claimInput);
+          const result = await prepared.location.resume(
+            {
+              resolver: resolverForPackage(),
+              outcome,
+              prepareAction: prepareWorkflowAction,
+              revisionFence: () =>
+                assertRevisionFence(prepared.location, claimInput),
+              revisionStateFence: () =>
+                assertRevisionFence(prepared.location, claimInput, false),
+            },
+            artifact.mutation,
+          );
+          await claim.commit();
+          return continuation(result, prepared.verified.identity);
+        } catch (error) {
+          if (error instanceof WorkflowRevisionConflictError) {
+            return conflictContinuation(error.verified, error.finding);
+          }
+          throw error;
+        }
       });
     },
 

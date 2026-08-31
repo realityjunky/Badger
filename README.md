@@ -119,7 +119,14 @@ finding codes, required actions, and `requiresUserDecision` instead of parsing
 messages.
 
 Submissions are bound to the pending action with `actionId` and may identify
-the expected Workflow Node with `nodeId`. Output Schema evidence is supplied
+the expected Workflow Node with `nodeId`. Phase 4 submissions additionally
+carry the observed `runId`, logical `revision`, and complete `execution`
+identity. The runtime checks those values before validation and again at the
+protected compare-and-swap boundary; a conflicting submission returns the
+current continuation with a structured `revision-conflict` finding and does
+not change committed Run records. Each accepted Phase 4 transition leaves a
+protected transition-addressed revision claim, so replaying the same transition
+cannot advance the Run twice. Output Schema evidence is supplied
 under `evidence`, while required Skill-call, augmentation, and guardrail proof
 may use the corresponding check identifiers in `evidence.completedChecks`.
 The returned continuation reports the current Workflow Node, pending Engine

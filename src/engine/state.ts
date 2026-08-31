@@ -26,6 +26,10 @@ import type {
   WorkflowDecisionScopeSnapshot,
   WorkflowReviewerAttestation,
 } from "../types.js";
+import {
+  parseWorkflowDurabilityProfile,
+  WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
+} from "../workflow-runtime/durability.js";
 
 export type StateDocument = Record<string, unknown>;
 
@@ -157,6 +161,10 @@ export function applyRunStateToDocument(
 
 export const RUN_STATE_FILE = ".comet/run-state.json";
 export const RUN_STATE_MAX_BYTES = 256 * 1024;
+const RUN_STATE_READ_MAX_BYTES = Math.max(
+  RUN_STATE_MAX_BYTES,
+  WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
+);
 
 interface RunStateJson {
   runId: string;
@@ -1253,6 +1261,7 @@ function parseRunStateJson(value: unknown): RunStateJson {
       "capabilityVersion",
       "resolverHash",
       "findingCatalogVersion",
+      "durabilityProfile",
     ]);
     const unknownIdentityKey = Object.keys(identity).find(
       (key) => !identityKeys.has(key),
@@ -1289,6 +1298,10 @@ function parseRunStateJson(value: unknown): RunStateJson {
         );
       }
     }
+    const durabilityProfile =
+      identity.durabilityProfile === undefined
+        ? undefined
+        : parseWorkflowDurabilityProfile(identity.durabilityProfile);
     runtimeIdentity = {
       protocolHash: identity.protocolHash,
       packageHash: identity.packageHash,
@@ -1308,6 +1321,7 @@ function parseRunStateJson(value: unknown): RunStateJson {
       ...(identity.findingCatalogVersion === 1
         ? { findingCatalogVersion: 1 as const }
         : {}),
+      ...(durabilityProfile ? { durabilityProfile } : {}),
     };
   }
 
@@ -1349,12 +1363,38 @@ export async function readRunState(
   const raw = await readOptionalEngineRunText(
     changeDir,
     RUN_STATE_FILE,
-    RUN_STATE_MAX_BYTES,
+    RUN_STATE_READ_MAX_BYTES,
     "Run state",
     options,
   );
   if (raw === null) return null;
-  return parseRunStateValue(JSON.parse(raw) as unknown);
+  let document: unknown;
+  try {
+    document = JSON.parse(raw) as unknown;
+  } catch (error) {
+    if (Buffer.byteLength(raw, "utf8") > RUN_STATE_MAX_BYTES) {
+      throw new Error(`Run state exceeds ${RUN_STATE_MAX_BYTES} bytes`, {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  const identity =
+    document && typeof document === "object" && !Array.isArray(document)
+      ? (document as { runtimeIdentity?: unknown }).runtimeIdentity
+      : undefined;
+  const profile =
+    identity && typeof identity === "object" && !Array.isArray(identity)
+      ? (identity as { durabilityProfile?: unknown }).durabilityProfile
+      : undefined;
+  const maxBytes =
+    profile === undefined
+      ? RUN_STATE_MAX_BYTES
+      : parseWorkflowDurabilityProfile(profile).bounds.runStateBytes;
+  if (Buffer.byteLength(raw, "utf8") > maxBytes) {
+    throw new Error(`Run state exceeds ${maxBytes} bytes`);
+  }
+  return parseRunStateValue(document);
 }
 
 export async function writeRunState(
@@ -1363,13 +1403,16 @@ export async function writeRunState(
   options: EngineRunWriteOptions = {},
 ): Promise<void> {
   const serialized = serializeRunState(state);
+  const maxBytes =
+    state.runtimeIdentity?.durabilityProfile?.bounds.runStateBytes ??
+    RUN_STATE_MAX_BYTES;
   await writeEngineRunText(
     changeDir,
     RUN_STATE_FILE,
     serialized,
-    RUN_STATE_MAX_BYTES,
+    maxBytes,
     "Run state",
-    options,
+    { ...options, maxBytes },
   );
 }
 

@@ -10,6 +10,7 @@ import type {
   SkillPackage,
 } from "./types.js";
 import type { WorkflowProtocol } from "../types.js";
+import { parseWorkflowDurabilityProfile } from "../workflow-runtime/durability.js";
 
 type YamlObject = Record<string, unknown>;
 
@@ -440,6 +441,10 @@ function narrowRuntimeMetadata(
       "must be 1 when present",
     );
   }
+  const durabilityProfile =
+    value.durabilityProfile === undefined
+      ? undefined
+      : parseWorkflowDurabilityProfile(value.durabilityProfile);
   let completionPlans: Record<string, RuntimeCompletionPlan> | undefined;
   if (value.completionPlans !== undefined) {
     assertObject(value.completionPlans, filePath, "runtime.completionPlans");
@@ -489,6 +494,7 @@ function narrowRuntimeMetadata(
     ...(value.findingCatalogVersion === 1
       ? { findingCatalogVersion: 1 as const }
       : {}),
+    ...(durabilityProfile ? { durabilityProfile } : {}),
     ...(completionPlans ? { completionPlans } : {}),
   };
 }
