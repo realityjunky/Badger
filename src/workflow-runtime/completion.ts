@@ -1,9 +1,4 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import {
-  inspectProtectedProjectPath,
-  readProtectedProjectFile,
-} from "../engine/protected-project-path.js";
+import { readProtectedProjectFile } from "../engine/protected-project-path.js";
 import { RaceSafeReadError } from "../engine/race-safe-read.js";
 import type {
   ArtifactSchema,
@@ -12,6 +7,10 @@ import type {
   WorkflowProtocol,
 } from "../types.js";
 import type { RuntimeCompletionPlan } from "../skill-runtime/types.js";
+import {
+  matchingWorkflowArtifactPaths,
+  workflowArtifactExpectedKind,
+} from "./artifacts.js";
 import type { WorkflowSubmission } from "./types.js";
 
 const ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
@@ -84,112 +83,6 @@ function schemaFor(protocol: WorkflowProtocol, schemaId: string): OutputSchema {
   return schema;
 }
 
-function expectedArtifactKind(artifact: ArtifactSchema): "file" | "directory" {
-  return artifact.kind === "directory" ? "directory" : "file";
-}
-
-function artifactPatternSegments(value: string, label: string): string[] {
-  const normalized = value.trim().replaceAll("\\", "/");
-  if (
-    normalized.length === 0 ||
-    path.posix.isAbsolute(normalized) ||
-    path.win32.isAbsolute(normalized) ||
-    /^(?:~|[\\/])/u.test(normalized)
-  ) {
-    throw new Error(`${label} must be relative to the Run root`);
-  }
-  const segments = normalized.split("/");
-  if (segments.some((segment) => segment === "..")) {
-    throw new Error(`${label} must stay inside the Run root`);
-  }
-  if (segments.some((segment) => segment.length === 0 || segment === ".")) {
-    throw new Error(`${label} must not contain empty or dot path segments`);
-  }
-  return segments;
-}
-
-function patternMatcher(pattern: string): RegExp {
-  return new RegExp(
-    `^${pattern
-      .split("*")
-      .map((part) => part.replace(/[|\\{}()[\]^$+?.]/gu, "\\$&"))
-      .join(".*")}$`,
-    "u",
-  );
-}
-
-async function rootForPattern(runRoot: string, label: string): Promise<string> {
-  const stat = await fs.lstat(runRoot);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new Error(`${label} Run root must be a real directory`);
-  }
-  return path.resolve(runRoot);
-}
-
-async function matchingArtifactPaths(
-  runRoot: string,
-  artifactPath: string,
-  expected: "file" | "directory",
-  label: string,
-): Promise<string[]> {
-  const segments = artifactPatternSegments(artifactPath, label);
-  const root = await rootForPattern(runRoot, label);
-
-  async function walk(relative: string, index: number): Promise<string[]> {
-    if (index >= segments.length) {
-      const inspection = await inspectProtectedProjectPath(runRoot, relative, {
-        label,
-        expected,
-      });
-      return inspection.exists ? [relative] : [];
-    }
-
-    const current = relative.length === 0 ? root : path.join(root, relative);
-    if (relative.length > 0) {
-      const inspection = await inspectProtectedProjectPath(runRoot, relative, {
-        label,
-        expected: "directory",
-      });
-      if (!inspection.exists) return [];
-    }
-
-    const segment = segments[index];
-    if (!segment.includes("*")) {
-      return walk(
-        relative.length === 0 ? segment : path.posix.join(relative, segment),
-        index + 1,
-      );
-    }
-
-    let entries;
-    try {
-      entries = await fs.readdir(current, { withFileTypes: true });
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "ENOTDIR") return [];
-      throw error;
-    }
-    const matcher = patternMatcher(segment);
-    const matches: string[] = [];
-    for (const entry of entries) {
-      if (entry.isSymbolicLink()) {
-        throw new Error(
-          `${label} crosses a symbolic link or junction at ${path.join(current, entry.name)}`,
-        );
-      }
-      if (!matcher.test(entry.name)) continue;
-      const next =
-        relative.length === 0
-          ? entry.name
-          : path.posix.join(relative, entry.name);
-      matches.push(...(await walk(next, index + 1)));
-    }
-    return matches;
-  }
-
-  return walk("", 0);
-}
-
 async function artifactExists(
   runRoot: string,
   schema: OutputSchema,
@@ -198,10 +91,10 @@ async function artifactExists(
   let found = false;
   for (const artifactPath of artifact.paths) {
     const label = `Output Schema artifact ${schema.id}.${artifact.id}`;
-    const matches = await matchingArtifactPaths(
+    const matches = await matchingWorkflowArtifactPaths(
       runRoot,
       artifactPath,
-      expectedArtifactKind(artifact),
+      workflowArtifactExpectedKind(artifact),
       label,
     );
     if (matches.length === 0) continue;

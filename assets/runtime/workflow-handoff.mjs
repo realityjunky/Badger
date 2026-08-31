@@ -77,9 +77,14 @@ async function readProtocol() {
 function printSummary(handoff) {
   console.log(`WORKFLOW: ${handoff.workflow.name}`);
   console.log(`PROTOCOL: ${handoff.workflow.protocolHash}`);
-  console.log(`CONTINUATION: ${handoff.continuation?.disposition ?? "not-started"}`);
+  console.log(
+    `CONTINUATION: ${handoff.continuation?.disposition ?? "not-started"}`,
+  );
   for (const node of handoff.nodes) {
     console.log(`NODE: ${node.id} (${node.kind})`);
+  }
+  for (const version of handoff.artifactVersions ?? []) {
+    console.log(`ARTIFACT: ${version.artifactId}@${version.id}`);
   }
 }
 

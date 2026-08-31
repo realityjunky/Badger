@@ -173,6 +173,12 @@ function submissionRouting(evidence) {
   return evidence.routing;
 }
 
+function submissionField(evidence, field) {
+  return Object.prototype.hasOwnProperty.call(evidence, field)
+    ? evidence[field]
+    : undefined;
+}
+
 function blockedError(blockers) {
   return new Error(blockers.map((blocker) => `BLOCKED: ${blocker}`).join("\n"));
 }
@@ -322,6 +328,8 @@ async function main() {
   }
 
   const evidence = parseEvidence(evidenceRaw);
+  const artifacts = submissionField(evidence, "artifacts");
+  const artifactVersions = submissionField(evidence, "artifactVersions");
   const submission = {
     actionId: options.actionid ?? continuation.pendingAction.id,
     status: "succeeded",
@@ -334,6 +342,8 @@ async function main() {
     ...(submissionRouting(evidence)
       ? { routing: submissionRouting(evidence) }
       : {}),
+    ...(artifacts !== undefined ? { artifacts } : {}),
+    ...(artifactVersions !== undefined ? { artifactVersions } : {}),
     nodeId: continuation.currentNode,
   };
   const validation = await validateWorkflowSubmission(target, submission);

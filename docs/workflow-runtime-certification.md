@@ -19,8 +19,11 @@ deterministic Attempt and visit ordinal; Engine retries retain the Attempt and
 increment its retry ordinal. Declared Cycles require an entry Node, explicit
 repeat transitions, and a finite `maxInstances` budget. Cycle identities are
 stable per Run, key, and instance ordinal; an exhausted repeat returns a
-non-mutating blocker. Artifact versions and Native-derived durability remain
-separate capabilities.
+non-mutating blocker. Versioned artifact declarations use Attempt lifetime by
+default and may opt into Cycle or Run lifetime. Accepted updates append
+content-bound versions, and later work selects exact accepted ids; incompatible
+scope, stale references, and content drift block before mutation. Decision
+evidence scope and Native-derived durability remain separate capabilities.
 
 ## Identity
 
@@ -33,7 +36,8 @@ Every Run carries one execution identity containing:
 
 Revisioned branch packages additionally carry capability version and resolver
 plan identities. The Run state retains the logical revision, current Cycle,
-current Attempt, Cycle ledger, visit ledger, and retry context.
+current Attempt, Cycle ledger, visit ledger, retry context, immutable artifact
+version ledger, and append-only selection ledger.
 
 The logical revision starts at `0` and advances exactly once for each accepted
 machine outcome or decision response. Rejected, stale, or route-blocked
@@ -58,6 +62,12 @@ snapshot hashes match, generated guard and handoff identities match, every
 recovery reproduces the prior continuation, both entry directions complete,
 and the primary Run reaches a recovered `done` continuation.
 
+Issue #27 adds focused synthetic public-runtime, both-location, fresh-process,
+and generated-adapter tests for artifact provenance. The existing Creator
+certification fixture remains linear until the combined Phase 3 lifecycle gate
+owned by #29; this document does not treat focused artifact coverage alone as
+complete Phase 3 certification.
+
 ## Compatibility
 
 Generated `workflow-state.mjs`, `workflow-guard.mjs`, and
@@ -71,6 +81,8 @@ The public `@rpamis/comet-any-private/workflow-runtime` package seam exposes
 only runtime construction and the four operations `start`, `resume`, `submit`,
 and `recover`. Revisioned continuations add `revision`, `attemptId`,
 `visitOrdinal`, `retryOrdinal`, `cycleId`, Cycle and visit ledgers, and
-decision receipt projections. Compiler, Run-location,
+decision receipt projections. Versioned continuations also project immutable
+artifact versions, selection evidence, and current scope-valid selections.
+Compiler, Run-location,
 projection, storage, and protected filesystem modules remain private
 implementation details.

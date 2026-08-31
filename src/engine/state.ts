@@ -17,6 +17,10 @@ import type {
   WorkflowVisitState,
 } from "./types.js";
 import type {
+  WorkflowArtifactLifetime,
+  WorkflowArtifactProducer,
+  WorkflowArtifactSelection,
+  WorkflowArtifactVersion,
   WorkflowDecisionReceipt,
   WorkflowReviewerAttestation,
 } from "../types.js";
@@ -534,6 +538,7 @@ function parseWorkflowOutcome(
     "retryOrdinal",
     "routing",
     "evidence",
+    "artifactVersions",
   ]);
   const unknown = Object.keys(outcome).find((key) => !keys.has(key));
   if (unknown)
@@ -569,6 +574,14 @@ function parseWorkflowOutcome(
       : {}),
     ...(outcome.evidence !== undefined
       ? { evidence: parseJsonRecord(outcome.evidence, `${label}.evidence`) }
+      : {}),
+    ...(outcome.artifactVersions !== undefined
+      ? {
+          artifactVersions: parseStringRecord(
+            outcome.artifactVersions,
+            `${label}.artifactVersions`,
+          ),
+        }
       : {}),
   };
 }
@@ -630,8 +643,162 @@ function parseWorkflowVisit(value: unknown, index: number): WorkflowVisitState {
   };
 }
 
+function parseWorkflowArtifactLifetime(
+  value: unknown,
+  label: string,
+): WorkflowArtifactLifetime {
+  if (value !== "attempt" && value !== "cycle" && value !== "run") {
+    throw new Error(`Invalid Run state: ${label} must be a valid lifetime`);
+  }
+  return value;
+}
+
+function parseWorkflowArtifactProducer(
+  value: unknown,
+  label: string,
+): WorkflowArtifactProducer {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const producer = value as Record<string, unknown>;
+  const keys = new Set([
+    "runId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "actionId",
+    "revision",
+  ]);
+  const unknown = Object.keys(producer).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  return parseWorkflowArtifactCoordinate(producer, label);
+}
+
+function parseWorkflowArtifactCoordinate(
+  coordinate: Record<string, unknown>,
+  label: string,
+): WorkflowArtifactProducer {
+  const cycleId = coordinate.cycleId;
+  if (
+    cycleId !== null &&
+    (typeof cycleId !== "string" || cycleId.length === 0)
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`,
+    );
+  }
+  const revision = coordinate.revision;
+  if (
+    typeof revision !== "number" ||
+    !Number.isSafeInteger(revision) ||
+    revision < 0
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label}.revision must be a non-negative integer`,
+    );
+  }
+  return {
+    runId: requiredJsonString(coordinate.runId, `${label}.runId`),
+    nodeId: requiredJsonString(coordinate.nodeId, `${label}.nodeId`),
+    cycleId: cycleId as string | null,
+    attemptId: requiredJsonString(coordinate.attemptId, `${label}.attemptId`),
+    actionId: requiredJsonString(coordinate.actionId, `${label}.actionId`),
+    revision,
+  };
+}
+
+function parseWorkflowArtifactVersion(
+  value: unknown,
+  index: number,
+): WorkflowArtifactVersion {
+  const label = `workflowRuntime.artifactVersions[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const version = value as Record<string, unknown>;
+  const keys = new Set([
+    "id",
+    "artifactId",
+    "schemaId",
+    "lifetime",
+    "scopeId",
+    "contentHash",
+    "path",
+    "producer",
+    "timestamp",
+  ]);
+  const unknown = Object.keys(version).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const contentHash = requiredJsonString(
+    version.contentHash,
+    `${label}.contentHash`,
+  );
+  if (!/^[a-f0-9]{64}$/u.test(contentHash)) {
+    throw new Error(
+      `Invalid Run state: ${label}.contentHash must be a SHA-256 hash`,
+    );
+  }
+  const artifactPath = requiredJsonString(version.path, `${label}.path`);
+  assertSafeRunReference(artifactPath, `${label}.path`);
+  return {
+    id: requiredJsonString(version.id, `${label}.id`),
+    artifactId: requiredJsonString(version.artifactId, `${label}.artifactId`),
+    schemaId: requiredJsonString(version.schemaId, `${label}.schemaId`),
+    lifetime: parseWorkflowArtifactLifetime(
+      version.lifetime,
+      `${label}.lifetime`,
+    ),
+    scopeId: requiredJsonString(version.scopeId, `${label}.scopeId`),
+    contentHash,
+    path: artifactPath,
+    producer: parseWorkflowArtifactProducer(
+      version.producer,
+      `${label}.producer`,
+    ),
+    timestamp: requiredJsonString(version.timestamp, `${label}.timestamp`),
+  };
+}
+
+function parseWorkflowArtifactSelection(
+  value: unknown,
+  index: number,
+): WorkflowArtifactSelection {
+  const label = `workflowRuntime.artifactSelections[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const selection = value as Record<string, unknown>;
+  const keys = new Set([
+    "artifactId",
+    "versionId",
+    "runId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "actionId",
+    "revision",
+    "timestamp",
+  ]);
+  const unknown = Object.keys(selection).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const coordinate = parseWorkflowArtifactCoordinate(selection, label);
+  return {
+    artifactId: requiredJsonString(selection.artifactId, `${label}.artifactId`),
+    versionId: requiredJsonString(selection.versionId, `${label}.versionId`),
+    ...coordinate,
+    timestamp: requiredJsonString(selection.timestamp, `${label}.timestamp`),
+  };
+}
+
 function parseWorkflowRuntime(
   value: unknown,
+  runId: string,
 ): WorkflowRuntimeState | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -646,6 +813,8 @@ function parseWorkflowRuntime(
     "cycles",
     "visits",
     "decisionReceipts",
+    "artifactVersions",
+    "artifactSelections",
   ]);
   const unknown = Object.keys(runtime).find((key) => !keys.has(key));
   if (unknown) {
@@ -724,6 +893,84 @@ function parseWorkflowRuntime(
               "Invalid Run state: WorkflowRuntime decisionReceipts must be an array",
             );
           })();
+  const artifactVersions =
+    runtime.artifactVersions === undefined
+      ? []
+      : Array.isArray(runtime.artifactVersions)
+        ? runtime.artifactVersions.map(parseWorkflowArtifactVersion)
+        : (() => {
+            throw new Error(
+              "Invalid Run state: WorkflowRuntime artifactVersions must be an array",
+            );
+          })();
+  const artifactSelections =
+    runtime.artifactSelections === undefined
+      ? []
+      : Array.isArray(runtime.artifactSelections)
+        ? runtime.artifactSelections.map(parseWorkflowArtifactSelection)
+        : (() => {
+            throw new Error(
+              "Invalid Run state: WorkflowRuntime artifactSelections must be an array",
+            );
+          })();
+  const artifactVersionIds = new Set<string>();
+  for (const version of artifactVersions) {
+    if (artifactVersionIds.has(version.id)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime artifact version ${version.id}`,
+      );
+    }
+    artifactVersionIds.add(version.id);
+    if (version.producer.runId !== runId) {
+      throw new Error(
+        `Invalid Run state: artifact version ${version.id} belongs to another Run`,
+      );
+    }
+    if (
+      (version.lifetime === "attempt" &&
+        version.scopeId !== version.producer.attemptId) ||
+      (version.lifetime === "cycle" &&
+        version.scopeId !== version.producer.cycleId) ||
+      (version.lifetime === "run" && version.scopeId !== runId)
+    ) {
+      throw new Error(
+        `Invalid Run state: artifact version ${version.id} has an invalid scope`,
+      );
+    }
+    if (version.producer.revision >= revision) {
+      throw new Error(
+        `Invalid Run state: artifact version ${version.id} has a future revision`,
+      );
+    }
+  }
+  const artifactSelectionKeys = new Set<string>();
+  for (const selection of artifactSelections) {
+    const selectionKey = `${selection.attemptId}\u0000${selection.actionId}\u0000${selection.artifactId}`;
+    if (artifactSelectionKeys.has(selectionKey)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime artifact selection ${selection.artifactId}`,
+      );
+    }
+    artifactSelectionKeys.add(selectionKey);
+    if (!artifactVersionIds.has(selection.versionId)) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime selection references unknown artifact version ${selection.versionId}`,
+      );
+    }
+    const version = artifactVersions.find(
+      (candidate) => candidate.id === selection.versionId,
+    )!;
+    if (version.artifactId !== selection.artifactId) {
+      throw new Error(
+        "Invalid Run state: WorkflowRuntime artifact selection id does not match its version",
+      );
+    }
+    if (selection.runId !== runId || selection.revision >= revision) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime artifact selection ${selection.versionId} has an invalid Run or revision`,
+      );
+    }
+  }
   const attemptIds = new Set<string>();
   const visitOrdinals = new Set<number>();
   const receiptActionIds = new Set<string>();
@@ -812,6 +1059,8 @@ function parseWorkflowRuntime(
     cycles,
     visits,
     decisionReceipts,
+    artifactVersions,
+    artifactSelections,
   };
 }
 
@@ -951,7 +1200,7 @@ function parseRunStateJson(value: unknown): RunStateJson {
     };
   }
 
-  const workflowRuntime = parseWorkflowRuntime(json.workflowRuntime);
+  const workflowRuntime = parseWorkflowRuntime(json.workflowRuntime, runId);
 
   return {
     runId,

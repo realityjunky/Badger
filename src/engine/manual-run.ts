@@ -28,6 +28,7 @@ import type {
   TrajectoryEvent,
   WorkflowRuntimeState,
 } from "./types.js";
+import type { WorkflowArtifactMutation } from "./runtime-types.js";
 import {
   createSkillSnapshot,
   readSkillSnapshot,
@@ -57,6 +58,10 @@ export interface ResumeManualRunOptions {
   outcome?: Omit<ActionOutcome, "actionId"> & { actionId?: string };
   confirmations?: Iterable<string>;
   resolver?: DeterministicResolver<undefined>;
+}
+
+interface ResumeManualWorkflowRunOptions extends ResumeManualRunOptions {
+  artifactMutation?: WorkflowArtifactMutation;
 }
 
 export interface ManualRunEvaluation {
@@ -125,7 +130,32 @@ function validateOutcome(outcome: ResumeManualRunOptions["outcome"]): void {
   validateStringRecord(outcome.artifacts, "Outcome artifacts");
   validateStringRecord(outcome.state, "Outcome state");
   validateStringRecord(outcome.routing, "Outcome routing");
+  validateStringRecord(outcome.artifactVersions, "Outcome artifact versions");
   validateEvidenceRecord(outcome.evidence, "Outcome evidence");
+}
+
+function applyArtifactMutation(
+  state: RunState,
+  mutation: WorkflowArtifactMutation | undefined,
+): RunState {
+  if (!mutation) return state;
+  if (!state.workflowRuntime) {
+    throw new Error("Artifact mutation requires WorkflowRuntime state");
+  }
+  return {
+    ...state,
+    workflowRuntime: {
+      ...state.workflowRuntime,
+      artifactVersions: [
+        ...(state.workflowRuntime.artifactVersions ?? []),
+        ...structuredClone(mutation.versions),
+      ],
+      artifactSelections: [
+        ...(state.workflowRuntime.artifactSelections ?? []),
+        ...structuredClone(mutation.selections),
+      ],
+    },
+  };
 }
 
 function validatePendingState(
@@ -288,9 +318,9 @@ export async function startManualRun(
   );
 }
 
-export async function resumeManualRun(
+async function resumeManualRunInternal(
   changeDir: string,
-  options: ResumeManualRunOptions = {},
+  options: ResumeManualWorkflowRunOptions = {},
 ): Promise<ManualRunResult> {
   const state = await requiredRun(changeDir);
   const pkg = await readSkillSnapshot(changeDir, state.skillHash);
@@ -341,16 +371,14 @@ export async function resumeManualRun(
     );
   }
   const outcome: ActionOutcome = { ...options.outcome, actionId: pending.id };
-  const advanced = recordOutcomeWithResolver(
-    pkg,
-    state,
-    outcome,
-    resolver,
-    undefined,
+  const advanced = applyArtifactMutation(
+    recordOutcomeWithResolver(pkg, state, outcome, resolver, undefined),
+    options.artifactMutation,
   );
   const artifacts = {
     ...(await readArtifacts(changeDir, state.artifactsRef)),
     ...(outcome.artifacts ?? {}),
+    ...(options.artifactMutation?.artifactPaths ?? {}),
   };
   await writeArtifacts(changeDir, state.artifactsRef, artifacts);
   const decisionReceipt = advanced.workflowRuntime?.decisionReceipts.find(
@@ -401,6 +429,24 @@ export async function resumeManualRun(
     resolver,
   );
   return { ...next, evals };
+}
+
+export async function resumeManualRun(
+  changeDir: string,
+  options: ResumeManualRunOptions = {},
+): Promise<ManualRunResult> {
+  return resumeManualRunInternal(changeDir, options);
+}
+
+export async function resumeManualWorkflowRun(
+  changeDir: string,
+  options: ResumeManualRunOptions,
+  artifactMutation: WorkflowArtifactMutation,
+): Promise<ManualRunResult> {
+  return resumeManualRunInternal(changeDir, {
+    ...options,
+    artifactMutation,
+  });
 }
 
 export async function evaluateManualRun(

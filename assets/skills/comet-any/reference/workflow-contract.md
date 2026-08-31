@@ -49,6 +49,21 @@ requirement, and reviewer subjects or authorities. Executable validators,
 remote references, and arbitrary nested values are rejected before Run
 creation.
 
+A versioned workflow may add `versioned-artifacts`. Each Output Schema artifact
+keeps its stable schema-qualified logical id and may declare `lifetime` as
+`attempt`, `cycle`, or `run`; omitted lifetime defaults to `attempt`. Physical
+paths remain declarations, not identities. A successful producer update creates
+one immutable content-bound version with its producer Run, Node, Cycle, Attempt,
+action, accepted revision, and runtime timestamp. Later actions consume only an
+explicit accepted version supplied under `artifactVersions`; the runtime never
+resolves an implicit latest value. `artifacts` may select one physical path that
+matches the declaration. Every required versioned output must provide one of
+those two explicit forms. Attempt-lifetime update paths contain the current
+Attempt id as a path segment to isolate repeated visits. Undeclared updates,
+incompatible lifetime scopes,
+unknown versions, link traversal, oversized reads, and content drift fail before
+Run mutation.
+
 Decision Nodes compile to Engine `ask_user` actions. The continuation reports
 `await-user` and exposes the pending question, choices, required inputs,
 rationale policy, reviewer requirement summary, revision, and Attempt identity.
@@ -58,4 +73,6 @@ and rationale. WorkflowRuntime validates the response, selects the declared
 choice transition, and writes one identity-bound Decision Receipt with a
 runtime timestamp. Generated adapters render and forward this contract but do
 not perform policy validation, Cycle allocation, route selection, or receipt
-writes. Artifact versions remain a separate follow-up capability.
+writes. Generated state and handoff output projects artifact versions and
+current selections, while allocation, hashing, carry-forward, and authoritative
+storage remain inside WorkflowRuntime.

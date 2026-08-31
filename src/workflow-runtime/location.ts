@@ -7,6 +7,7 @@ import type {
 import type { DeterministicResolver } from "../engine/resolver.js";
 import {
   resumeManualRun,
+  resumeManualWorkflowRun,
   startManualRun,
   type ManualRunResult,
   type ResumeManualRunOptions,
@@ -15,10 +16,12 @@ import { readRunState } from "../engine/state.js";
 import {
   readStandaloneRunState,
   resumeStandaloneRun,
+  resumeStandaloneWorkflowRun,
   startStandaloneRun,
   standaloneRunDir,
 } from "../engine/standalone-run.js";
 import type { SkillPackage } from "../skill-runtime/types.js";
+import type { WorkflowArtifactMutation } from "../engine/runtime-types.js";
 import type {
   StartWorkflowRunOptions,
   WorkflowRunLocation,
@@ -39,7 +42,10 @@ export interface ResolvedWorkflowRunLocation {
       resolver?: DeterministicResolver<undefined>;
     },
   ): Promise<ManualRunResult>;
-  resume(options?: ResumeManualRunOptions): Promise<ManualRunResult>;
+  resume(
+    options?: ResumeManualRunOptions,
+    artifactMutation?: WorkflowArtifactMutation,
+  ): Promise<ManualRunResult>;
   readState(): Promise<RunState | null>;
 }
 
@@ -58,8 +64,10 @@ function manualLocation(runRoot: string): ResolvedWorkflowRunLocation {
     async start(pkg, options) {
       return startManualRun(pkg, validatedRoot, options);
     },
-    async resume(options = {}) {
-      return resumeManualRun(validatedRoot, options);
+    async resume(options = {}, artifactMutation) {
+      return artifactMutation
+        ? resumeManualWorkflowRun(validatedRoot, options, artifactMutation)
+        : resumeManualRun(validatedRoot, options);
     },
     async readState() {
       return readRunState(validatedRoot);
@@ -94,8 +102,15 @@ function standaloneLocation(
         resolver: options.resolver,
       });
     },
-    async resume(options = {}) {
-      return resumeStandaloneRun(validatedProjectRoot, validatedRunId, options);
+    async resume(options = {}, artifactMutation) {
+      return artifactMutation
+        ? resumeStandaloneWorkflowRun(
+            validatedProjectRoot,
+            validatedRunId,
+            options,
+            artifactMutation,
+          )
+        : resumeStandaloneRun(validatedProjectRoot, validatedRunId, options);
     },
     async readState() {
       return readStandaloneRunState(validatedProjectRoot, validatedRunId);

@@ -22,3 +22,13 @@ export type {
   WorkflowRuntime,
   WorkflowSubmission,
 } from "./types.js";
+
+export type {
+  WorkflowArtifactId,
+  WorkflowArtifactLifetime,
+  WorkflowArtifactPath,
+  WorkflowArtifactProducer,
+  WorkflowArtifactSelection,
+  WorkflowArtifactVersionId,
+  WorkflowArtifactVersion,
+} from "../types.js";

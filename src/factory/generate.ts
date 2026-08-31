@@ -48,6 +48,18 @@ function entryMarkdown(proposal: FactoryProposal): string {
           .join(", ")}`,
     )
     .join("\n");
+  const artifacts = proposal.workflow.capabilities?.features.includes(
+    "versioned-artifacts",
+  )
+    ? proposal.workflow.outputSchemas
+        .flatMap((schema) =>
+          schema.artifacts.map(
+            (artifact) =>
+              `- **${schema.id}.${artifact.id}**: \`${artifact.lifetime ?? "attempt"}\` lifetime; declared path ${artifact.paths.map((artifactPath) => `\`${artifactPath}\``).join(", ")}`,
+          ),
+        )
+        .join("\n")
+    : "";
   const executableNodeOrder = executableNodeIds
     .map((nodeId) => `\`${nodeId}\``)
     .join(" → ");
@@ -74,6 +86,16 @@ Cycle and Attempt identities come from the authoritative WorkflowRuntime. A
 repeat transition allocates the next Cycle only when the declared finite budget
 allows it; an exhausted budget is a blocker and does not create new state.
 
+## Declared Artifacts
+
+${artifacts || "- None. The workflow does not opt into versioned artifacts."}
+
+WorkflowRuntime records immutable content-bound versions for declared outputs.
+Required outputs must name one explicit physical update or accepted version.
+Attempt-lifetime paths include the current Attempt id as a path segment. Later
+work must select an exact accepted version; generated scripts never infer or
+allocate a latest artifact version.
+
 ## Executable Node Order
 
 Executable Node Order: ${executableNodeOrder || "(empty)"}
@@ -89,6 +111,7 @@ ${nodes}
 - Resume a persisted Run: \`node scripts/workflow-state.mjs resume\`.
 - Read the persisted action and Node: \`node scripts/workflow-state.mjs next\`.
 - Submit characterized Node evidence: \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
+- Supply physical updates under \`artifacts\` and explicit accepted version ids under \`artifactVersions\` in the record JSON.
 - Submit a declared human decision: \`node scripts/workflow-state.mjs decide <node> '<json response>'\`.
 - For branched workflows, include declared route values in the submission's top-level \`routing\` object; summaries and evidence do not select edges.
 - Verify the generated protocol and runtime: \`node scripts/workflow-guard.mjs verify\`.

@@ -13,12 +13,18 @@ export type ValidationKind =
   | "semantic"
   | "state-transition";
 
+export type WorkflowArtifactLifetime = "attempt" | "cycle" | "run";
+export type WorkflowArtifactId = string;
+export type WorkflowArtifactPath = string;
+export type WorkflowArtifactVersionId = string;
+
 export interface ArtifactSchema {
   id: string;
   kind: "file" | "directory" | "state" | "report";
   required: boolean;
   paths: string[];
   validations: ValidationKind[];
+  lifetime?: WorkflowArtifactLifetime;
 }
 
 export interface EvidenceSchema {
@@ -211,7 +217,8 @@ export type WorkflowProtocolCapability =
   | "conditional-routing"
   | "revisioned-attempts"
   | "decision-nodes"
-  | "bounded-cycles";
+  | "bounded-cycles"
+  | "versioned-artifacts";
 
 export interface WorkflowProtocolCapabilities {
   version: 3;
@@ -397,4 +404,37 @@ export interface WorkflowDecisionReceipt {
   protocolHash: string;
   packageHash: string;
   snapshotHash: string;
+}
+
+export interface WorkflowArtifactProducer {
+  runId: string;
+  nodeId: string;
+  cycleId: string | null;
+  attemptId: string;
+  actionId: string;
+  revision: number;
+}
+
+export interface WorkflowArtifactVersion {
+  id: WorkflowArtifactVersionId;
+  artifactId: WorkflowArtifactId;
+  schemaId: string;
+  lifetime: WorkflowArtifactLifetime;
+  scopeId: string;
+  contentHash: string;
+  path: WorkflowArtifactPath;
+  producer: WorkflowArtifactProducer;
+  timestamp: string;
+}
+
+export interface WorkflowArtifactSelection {
+  artifactId: WorkflowArtifactId;
+  versionId: WorkflowArtifactVersionId;
+  runId: string;
+  nodeId: string;
+  cycleId: string | null;
+  attemptId: string;
+  actionId: string;
+  revision: number;
+  timestamp: string;
 }

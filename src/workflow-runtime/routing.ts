@@ -800,7 +800,8 @@ export function isRevisionedWorkflowProtocol(
     protocol.routing?.fields !== undefined ||
     protocol.routing?.routingFields !== undefined ||
     protocol.nodes.some((node) => node.kind === "decision") ||
-    protocol.cycles !== undefined,
+    protocol.cycles !== undefined ||
+    protocol.capabilities?.features.includes("versioned-artifacts"),
   );
 }
 

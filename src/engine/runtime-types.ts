@@ -1,4 +1,18 @@
 import type { ActionOutcome, EngineAction, RunState } from "./types.js";
+import type {
+  WorkflowArtifactId,
+  WorkflowArtifactPath,
+  WorkflowArtifactSelection,
+  WorkflowArtifactVersionId,
+  WorkflowArtifactVersion,
+} from "../types.js";
+
+export interface WorkflowArtifactMutation {
+  versions: WorkflowArtifactVersion[];
+  selections: WorkflowArtifactSelection[];
+  artifactPaths: Record<WorkflowArtifactId, WorkflowArtifactPath>;
+  selectedVersionIds: Record<WorkflowArtifactId, WorkflowArtifactVersionId>;
+}
 
 export interface RuntimeContext {
   changeDir: string;

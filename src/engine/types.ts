@@ -1,6 +1,11 @@
 import type { OrchestrationMode, StepAction } from "../skill-runtime/types.js";
 import type {
   DecisionScalar,
+  WorkflowArtifactId,
+  WorkflowArtifactPath,
+  WorkflowArtifactSelection,
+  WorkflowArtifactVersionId,
+  WorkflowArtifactVersion,
   WorkflowDecisionReceipt,
   WorkflowReviewerAttestation,
 } from "../types.js";
@@ -42,6 +47,7 @@ export interface WorkflowVisitOutcome {
   retryOrdinal: number;
   routing?: Record<string, string>;
   evidence?: Record<string, unknown>;
+  artifactVersions?: Record<string, string>;
 }
 
 export interface WorkflowVisitState {
@@ -60,6 +66,8 @@ export interface WorkflowRuntimeState {
   cycles: WorkflowCycleState[];
   visits: WorkflowVisitState[];
   decisionReceipts: WorkflowDecisionReceipt[];
+  artifactVersions: WorkflowArtifactVersion[];
+  artifactSelections: WorkflowArtifactSelection[];
 }
 
 export interface RunState {
@@ -95,7 +103,7 @@ export interface ActionOutcome {
   actionId: string;
   status: "succeeded" | "failed";
   summary: string;
-  artifacts?: Record<string, string>;
+  artifacts?: Record<WorkflowArtifactId, WorkflowArtifactPath>;
   state?: Record<string, string>;
   evidence?: Record<string, unknown>;
   routing?: Record<string, string>;
@@ -110,6 +118,7 @@ export interface ActionOutcome {
   inputs?: Record<string, DecisionScalar>;
   rationale?: string;
   evidenceReferences?: string[];
+  artifactVersions?: Record<WorkflowArtifactId, WorkflowArtifactVersionId>;
 }
 
 export interface TrajectoryEvent {

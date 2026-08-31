@@ -108,8 +108,11 @@ mismatches. The deterministic linear WorkflowRuntime is delivered under Phase
 2, and issue #24 extends it with versioned conditional routing and revisioned
 Attempts. Issue #25 adds first-class decision Nodes with identity-bound
 receipts, and issue #26 adds bounded declared Cycles with stable identities and
-append-only repeated-visit evidence. Artifact versions, Native hardening, and
-Primer Designer migration remain separately scoped.
+append-only repeated-visit evidence. Issue #27 adds immutable Attempt-, Cycle-,
+and Run-lifetime artifact versions, protected content hashing, explicit
+carry-forward selections, and generated projections through the same runtime
+authority. Decision evidence scope, complete Phase 3 certification, Native
+hardening, and Primer Designer migration remain separately scoped.
 
 `runEngineDifferential` runs official and private observations against one
 synthetic fixture matrix. `createPrivateEngineCommandRunner` is an injected

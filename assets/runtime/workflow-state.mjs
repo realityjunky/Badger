@@ -149,7 +149,9 @@ function printPendingAction(value) {
     console.log(`DECISION: ${value.pendingAction.decisionId}`);
     console.log(`ACTION: ${value.pendingAction.id}`);
     console.log(`QUESTION: ${value.pendingAction.question}`);
-    console.log(`CHOICES: ${JSON.stringify(value.pendingAction.choices ?? [])}`);
+    console.log(
+      `CHOICES: ${JSON.stringify(value.pendingAction.choices ?? [])}`,
+    );
     console.log(
       `REQUIRED_INPUTS: ${JSON.stringify(value.pendingAction.requiredInputs ?? { type: "object", fields: [] })}`,
     );
@@ -230,6 +232,12 @@ function submissionRouting(evidence) {
     return undefined;
   }
   return evidence.routing;
+}
+
+function submissionField(evidence, field) {
+  return Object.prototype.hasOwnProperty.call(evidence, field)
+    ? evidence[field]
+    : undefined;
 }
 
 function ensureCurrentNode(nodeArgument, projection) {
@@ -323,6 +331,8 @@ async function main() {
     }
     const nodeId = ensureCurrentNode(nodeArgument, projection);
     const evidence = parseEvidence(evidenceRaw);
+    const artifacts = submissionField(evidence, "artifacts");
+    const artifactVersions = submissionField(evidence, "artifactVersions");
     const submission = {
       actionId: projection.pendingAction.id,
       status: "succeeded",
@@ -331,6 +341,8 @@ async function main() {
       ...(submissionRouting(evidence)
         ? { routing: submissionRouting(evidence) }
         : {}),
+      ...(artifacts !== undefined ? { artifacts } : {}),
+      ...(artifactVersions !== undefined ? { artifactVersions } : {}),
       ...(nodeId ? { nodeId } : {}),
     };
     const continuation = await createWorkflowRuntime().submit(

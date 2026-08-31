@@ -84,6 +84,8 @@ function enterAttempt(state: RunState, stepId: string): RunState {
     state.workflowRuntime,
   );
   workflowRuntime.decisionReceipts ??= [];
+  workflowRuntime.artifactVersions ??= [];
+  workflowRuntime.artifactSelections ??= [];
   workflowRuntime.currentCycle ??= null;
   workflowRuntime.cycles ??= [];
   const visitOrdinal = workflowRuntime.nextVisitOrdinal + 1;
@@ -121,6 +123,8 @@ function recordWorkflowOutcome(
     state.workflowRuntime,
   );
   workflowRuntime.decisionReceipts ??= [];
+  workflowRuntime.artifactVersions ??= [];
+  workflowRuntime.artifactSelections ??= [];
   workflowRuntime.currentCycle ??= null;
   workflowRuntime.cycles ??= [];
   const attempt = workflowRuntime.currentAttempt;
@@ -144,6 +148,9 @@ function recordWorkflowOutcome(
     ...(outcome.routing ? { routing: { ...outcome.routing } } : {}),
     ...(outcome.evidence
       ? { evidence: structuredClone(outcome.evidence) }
+      : {}),
+    ...(outcome.artifactVersions
+      ? { artifactVersions: { ...outcome.artifactVersions } }
       : {}),
   };
   visit.outcomes.push(visitOutcome);

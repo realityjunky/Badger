@@ -17,6 +17,7 @@ The package includes:
 - protected Run state, pending-action, trajectory, artifact, context, and checkpoint storage;
 - a public WorkflowRuntime for deterministic workflow start, resume, revisioned outcome submission, and recovery;
 - bounded declared Cycle execution with stable identities and append-only repeated-visit evidence;
+- immutable Attempt-, Cycle-, and Run-lifetime artifact versions with protected content hashes and explicit carry-forward;
 - official/private differential observations for the pinned Engine behavior.
 
 It intentionally excludes Comet Classic policy, Comet Native policy and hardening, Comet Entry, host platform installers, ambient resume routing, and external platform adapters.
@@ -108,7 +109,8 @@ under `evidence`, while required Skill-call, augmentation, and guardrail proof
 may use the corresponding check identifiers in `evidence.completedChecks`.
 The returned continuation reports the current Workflow Node, pending Engine
 action, current Cycle and Attempt, full Cycle and visit ledgers, stable
-Node-to-step mapping, and protocol/package/snapshot identity.
+Node-to-step mapping, artifact version and selection ledgers, current valid
+artifact selections, and protocol/package/snapshot identity.
 Opted-in branch protocols declare routing fields and allowed scalar values. The
 runtime supports exact equality, conjunction, one fallback edge, revisioned
 outcomes, deterministic visit ordinals, and append-only Attempt evidence.
@@ -119,6 +121,20 @@ First entry and accepted repeat transitions allocate stable Cycle identities
 before the target Node is entered; exhausting the budget returns a non-mutating
 blocker. Re-entered Nodes receive new Attempts, while Engine retries remain
 within the existing Attempt.
+
+Workflows opt into artifact provenance with the `versioned-artifacts`
+capability. Output artifacts use Attempt lifetime by default and may declare
+`cycle` or `run` lifetime. A successful producer action hashes one declared,
+protected, bounded physical path and appends an immutable version containing
+the logical artifact id, lifetime scope, producer Run/Node/Cycle/Attempt/action,
+accepted revision, and runtime timestamp. Every required versioned output must
+identify either one physical update under `artifacts` or one exact accepted
+version under `artifactVersions`; ambient files are never captured implicitly.
+Attempt-lifetime update paths include the current Attempt id as a path segment,
+so repeated visits use physically isolated coordinates. The runtime never
+selects an implicit latest version;
+undeclared updates, incompatible scopes, unknown versions, and physical content
+drift block before committed Run state changes.
 
 Revisioned Runs start at logical revision `0`. Each accepted machine outcome or
 decision response advances it once; route blockers, invalid submissions, and
@@ -143,8 +159,10 @@ report binds the generated-package hash to the normalized protocol hash,
 compiled package hash, Engine snapshot hash, declared and observed Node order,
 recovery evidence, and terminal completion. Review readiness requires this
 evidence to remain current. Phase 3 branch/Attempt, decision/receipt, and
-declared-Cycle behavior is covered by focused synthetic runtime tests; artifact
-versions, Native-derived durability, and Primer Designer migration remain
-separate follow-up tickets.
+declared-Cycle behavior is covered by focused synthetic runtime tests. Artifact
+versioning has focused public-runtime and generated-adapter coverage; scoped
+Decision Receipt evidence, complete Phase 3 lifecycle certification,
+Native-derived durability, and Primer Designer migration remain separate
+follow-up tickets.
 
 See `docs/workflow-runtime-certification.md` for the certification contract.

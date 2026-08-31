@@ -3,6 +3,7 @@ import path from "path";
 import {
   evaluateManualRun,
   resumeManualRun,
+  resumeManualWorkflowRun,
   startManualRun,
   upgradeManualRun,
   type ManualRunEvaluation,
@@ -18,6 +19,7 @@ import { readRunState } from "./state.js";
 import type { RuntimeEvalDefinition } from "../skill-runtime/types.js";
 import type { SkillPackage } from "../skill-runtime/types.js";
 import type { RunState, RuntimeIdentity } from "./types.js";
+import type { WorkflowArtifactMutation } from "./runtime-types.js";
 import type { WorkflowRuntimeState } from "./types.js";
 import type { DeterministicResolver } from "./resolver.js";
 
@@ -173,6 +175,19 @@ export async function resumeStandaloneRun(
   return resumeManualRun(
     await checkedStandaloneRunDir(projectRoot, runId),
     options,
+  );
+}
+
+export async function resumeStandaloneWorkflowRun(
+  projectRoot: string,
+  runId: string,
+  options: ResumeManualRunOptions,
+  artifactMutation: WorkflowArtifactMutation,
+): Promise<ManualRunResult> {
+  return resumeManualWorkflowRun(
+    await checkedStandaloneRunDir(projectRoot, runId),
+    options,
+    artifactMutation,
   );
 }
 

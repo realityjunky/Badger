@@ -9,6 +9,10 @@ import type {
   DecisionScalar,
   NodeProtocol,
   OutputSchema,
+  WorkflowArtifactId,
+  WorkflowArtifactSelection,
+  WorkflowArtifactVersionId,
+  WorkflowArtifactVersion,
   WorkflowDecisionReceipt,
   WorkflowProtocol,
   WorkflowReviewerAttestation,
@@ -68,6 +72,12 @@ export interface WorkflowContinuation {
   decisionReceipts: WorkflowDecisionReceipt[];
   cycles: WorkflowCycleState[];
   visits: WorkflowVisitState[];
+  artifactVersions: WorkflowArtifactVersion[];
+  artifactSelections: WorkflowArtifactSelection[];
+  currentArtifactVersions: Record<
+    WorkflowArtifactId,
+    WorkflowArtifactVersionId
+  >;
   blockers: string[];
 }
 
@@ -84,6 +94,12 @@ export interface WorkflowHandoff {
   decisionReceipts: WorkflowDecisionReceipt[];
   cycles: WorkflowCycleState[];
   visits: WorkflowVisitState[];
+  artifactVersions: WorkflowArtifactVersion[];
+  artifactSelections: WorkflowArtifactSelection[];
+  currentArtifactVersions: Record<
+    WorkflowArtifactId,
+    WorkflowArtifactVersionId
+  >;
   continuation: WorkflowContinuation | null;
 }
 
@@ -115,6 +131,12 @@ export interface WorkflowStateProjection {
   visits: WorkflowVisitState[];
   cycles: WorkflowCycleState[];
   decisionReceipts: WorkflowDecisionReceipt[];
+  artifactVersions: WorkflowArtifactVersion[];
+  artifactSelections: WorkflowArtifactSelection[];
+  currentArtifactVersions: Record<
+    WorkflowArtifactId,
+    WorkflowArtifactVersionId
+  >;
   blockers: string[];
 }
 

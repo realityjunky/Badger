@@ -118,7 +118,8 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
           feature !== "conditional-routing" &&
           feature !== "revisioned-attempts" &&
           feature !== "decision-nodes" &&
-          feature !== "bounded-cycles",
+          feature !== "bounded-cycles" &&
+          feature !== "versioned-artifacts",
       ) ||
       !protocol.capabilities.features.includes("conditional-routing") ||
       !protocol.capabilities.features.includes("revisioned-attempts")
@@ -139,6 +140,7 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
     );
   }
   const schemaIds = new Set<string>();
+  const logicalArtifactIds = new Set<string>();
   for (const schema of protocol.outputSchemas) {
     if (
       !schema ||
@@ -160,6 +162,7 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
       );
     }
     schemaIds.add(schema.id);
+    const artifactIds = new Set<string>();
     for (const artifact of schema.artifacts) {
       if (
         !artifact ||
@@ -171,10 +174,35 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
         artifact.paths.some(
           (artifactPath) => typeof artifactPath !== "string",
         ) ||
-        !Array.isArray(artifact.validations)
+        !Array.isArray(artifact.validations) ||
+        (artifact.lifetime !== undefined &&
+          artifact.lifetime !== "attempt" &&
+          artifact.lifetime !== "cycle" &&
+          artifact.lifetime !== "run")
       ) {
         throw new Error(
           `Workflow Protocol Output Schema ${schema.id} has an invalid artifact`,
+        );
+      }
+      if (artifactIds.has(artifact.id)) {
+        throw new Error(
+          `Workflow Protocol Output Schema ${schema.id} has duplicate artifact: ${artifact.id}`,
+        );
+      }
+      artifactIds.add(artifact.id);
+      const logicalArtifactId = `${schema.id}.${artifact.id}`;
+      if (logicalArtifactIds.has(logicalArtifactId)) {
+        throw new Error(
+          `Workflow Protocol has duplicate logical artifact: ${logicalArtifactId}`,
+        );
+      }
+      logicalArtifactIds.add(logicalArtifactId);
+      if (
+        artifact.lifetime !== undefined &&
+        !protocol.capabilities?.features.includes("versioned-artifacts")
+      ) {
+        throw new Error(
+          `Workflow Protocol artifact ${schema.id}.${artifact.id} requires versioned-artifacts capability`,
         );
       }
     }

@@ -13,6 +13,7 @@ import {
 import { type ManualRunResult } from "../engine/manual-run.js";
 import { readPendingAction, readTrajectory } from "../engine/run-store.js";
 import type { EngineAction, RunState } from "../engine/types.js";
+import type { WorkflowArtifactMutation } from "../engine/runtime-types.js";
 import type {
   DecisionScalar,
   WorkflowDecisionInputSchema,
@@ -23,8 +24,15 @@ import { stableValue } from "../util.js";
 import { compileWorkflow } from "./compiler.js";
 import {
   createCompletionPlan,
+  boundBlockers,
   validateSuccessfulSubmission,
 } from "./completion.js";
+import {
+  currentWorkflowArtifactVersions,
+  prepareWorkflowArtifactMutation,
+  validateWorkflowArtifactState,
+  WorkflowArtifactValidationError,
+} from "./artifacts.js";
 import {
   WorkflowRouteResolutionError,
   isRevisionedWorkflowProtocol,
@@ -317,6 +325,7 @@ function validateSubmission(submission: WorkflowSubmission): void {
   for (const [label, value] of [
     ["Submission artifacts", submission.artifacts],
     ["Submission state", submission.state],
+    ["Submission artifact versions", submission.artifactVersions],
   ] as const) {
     if (value === undefined) continue;
     if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -358,6 +367,12 @@ function validateSubmission(submission: WorkflowSubmission): void {
       throw new Error("Submission routing must contain non-empty strings");
     }
   }
+  if (
+    submission.status !== "succeeded" &&
+    submission.artifactVersions !== undefined
+  ) {
+    throw new Error("Failed submissions cannot select artifact versions");
+  }
 }
 
 function continuation(
@@ -387,6 +402,9 @@ function continuation(
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     cycles: structuredClone(runtimeState?.cycles ?? []),
     visits: structuredClone(runtimeState?.visits ?? []),
+    artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
+    artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
+    currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
     blockers: disposition === "blocked" && result.reason ? [result.reason] : [],
   };
 }
@@ -490,6 +508,9 @@ export async function projectWorkflowState(
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     visits: structuredClone(runtimeState?.visits ?? []),
     cycles: structuredClone(runtimeState?.cycles ?? []),
+    artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
+    artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
+    currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
     blockers:
       status === "blocked"
         ? [
@@ -661,6 +682,12 @@ async function verifyStoredPackage(
     } else if (state.workflowRuntime.currentCycle) {
       throw new Error("WorkflowRuntime current Cycle position is invalid");
     }
+    validateWorkflowArtifactState(
+      pkg.runtime.protocol,
+      state.runId,
+      identity.nodeToStep,
+      state.workflowRuntime,
+    );
   }
   for (const receipt of state.workflowRuntime?.decisionReceipts ?? []) {
     if (
@@ -896,16 +923,26 @@ function validateDecisionResponse(
 function engineOutcome(
   prepared: PreparedWorkflowSubmission,
   submission: WorkflowSubmission,
+  artifactMutation?: WorkflowArtifactMutation,
 ): import("../engine/types.js").ActionOutcome {
   if (!isDecisionSubmission(submission)) {
+    const artifacts = artifactMutation
+      ? artifactMutation.artifactPaths
+      : submission.artifacts;
     return {
       actionId: prepared.pending.id,
       status: submission.status,
       summary: submission.summary,
-      ...(submission.artifacts ? { artifacts: submission.artifacts } : {}),
+      ...(artifacts && Object.keys(artifacts).length > 0 ? { artifacts } : {}),
       ...(submission.state ? { state: submission.state } : {}),
       ...(submission.evidence ? { evidence: submission.evidence } : {}),
       ...(submission.routing ? { routing: submission.routing } : {}),
+      ...(artifactMutation &&
+      Object.keys(artifactMutation.selectedVersionIds).length > 0
+        ? { artifactVersions: artifactMutation.selectedVersionIds }
+        : submission.artifactVersions
+          ? { artifactVersions: submission.artifactVersions }
+          : {}),
     };
   }
   const node = prepared.verified.package.runtime!.protocol.nodes.find(
@@ -1002,6 +1039,59 @@ function routeBlockers(
   }
 }
 
+async function artifactMutationForSubmission(
+  prepared: PreparedWorkflowSubmission,
+  submission: WorkflowSubmission,
+): Promise<{
+  mutation?: WorkflowArtifactMutation;
+  blockers: string[];
+}> {
+  if (isDecisionSubmission(submission) || !prepared.node) {
+    return { blockers: [] };
+  }
+  const versioned =
+    prepared.verified.package.runtime!.protocol.capabilities?.features.includes(
+      "versioned-artifacts",
+    ) === true;
+  if (!versioned) {
+    return Object.keys(submission.artifactVersions ?? {}).length > 0
+      ? {
+          blockers: [
+            "Workflow artifact selections require versioned-artifacts capability",
+          ],
+        }
+      : { blockers: [] };
+  }
+  if (submission.status !== "succeeded") {
+    return Object.keys(submission.artifacts ?? {}).length > 0
+      ? {
+          blockers: ["Failed submissions cannot update versioned artifacts"],
+        }
+      : { blockers: [] };
+  }
+  try {
+    return {
+      mutation: await prepareWorkflowArtifactMutation({
+        runRoot: prepared.location.runRoot,
+        protocol: prepared.verified.package.runtime!.protocol,
+        state: prepared.verified.state,
+        nodeId: prepared.node,
+        actionId: prepared.pending.id,
+        ...(submission.artifacts ? { artifacts: submission.artifacts } : {}),
+        ...(submission.artifactVersions
+          ? { artifactVersions: submission.artifactVersions }
+          : {}),
+      }),
+      blockers: [],
+    };
+  } catch (error) {
+    if (error instanceof WorkflowArtifactValidationError) {
+      return { blockers: boundBlockers(error.blockers) };
+    }
+    throw error;
+  }
+}
+
 function blockedContinuation(
   prepared: PreparedWorkflowSubmission,
   blockers: readonly string[],
@@ -1034,6 +1124,15 @@ function blockedContinuation(
     visits: structuredClone(
       prepared.verified.state.workflowRuntime?.visits ?? [],
     ),
+    artifactVersions: structuredClone(
+      prepared.verified.state.workflowRuntime?.artifactVersions ?? [],
+    ),
+    artifactSelections: structuredClone(
+      prepared.verified.state.workflowRuntime?.artifactSelections ?? [],
+    ),
+    currentArtifactVersions: currentWorkflowArtifactVersions(
+      prepared.verified.state.workflowRuntime,
+    ),
     blockers: [...blockers],
   };
 }
@@ -1051,6 +1150,10 @@ export async function validateWorkflowSubmission(
   const routeFindings = routeBlockers(prepared, submission);
   if (routeFindings.length > 0) {
     return blockedContinuation(prepared, routeFindings);
+  }
+  const artifact = await artifactMutationForSubmission(prepared, submission);
+  if (artifact.blockers.length > 0) {
+    return blockedContinuation(prepared, artifact.blockers);
   }
   return continuationFromVerifiedRun(prepared.verified);
 }
@@ -1088,6 +1191,11 @@ export async function projectWorkflowHandoff(
     decisionReceipts: structuredClone(current?.decisionReceipts ?? []),
     cycles: structuredClone(current?.cycles ?? []),
     visits: structuredClone(current?.visits ?? []),
+    artifactVersions: structuredClone(current?.artifactVersions ?? []),
+    artifactSelections: structuredClone(current?.artifactSelections ?? []),
+    currentArtifactVersions: structuredClone(
+      current?.currentArtifactVersions ?? {},
+    ),
     continuation: current ? structuredClone(current) : null,
   };
 }
@@ -1225,6 +1333,8 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 cycles: [],
                 visits: [],
                 decisionReceipts: [],
+                artifactVersions: [],
+                artifactSelections: [],
               },
             }
           : {}),
@@ -1260,10 +1370,20 @@ export function createWorkflowRuntime(): WorkflowRuntime {
       if (routeFindings.length > 0) {
         return blockedContinuation(prepared, routeFindings);
       }
-      const result = await prepared.location.resume({
-        resolver: resolverForPackage(),
-        outcome: engineOutcome(prepared, submission),
-      });
+      const artifact = await artifactMutationForSubmission(
+        prepared,
+        submission,
+      );
+      if (artifact.blockers.length > 0) {
+        return blockedContinuation(prepared, artifact.blockers);
+      }
+      const result = await prepared.location.resume(
+        {
+          resolver: resolverForPackage(),
+          outcome: engineOutcome(prepared, submission, artifact.mutation),
+        },
+        artifact.mutation,
+      );
       return continuation(result, prepared.verified.identity);
     },
 

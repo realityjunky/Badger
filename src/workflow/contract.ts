@@ -598,18 +598,46 @@ export function validateWorkflow(input: WorkflowInput): ValidationFinding[] {
     if (byId.has(nodeId))
       for (const schema of patch.outputSchemas ?? []) attached.add(schema);
   }
+  const logicalArtifactIds = new Set<string>();
   for (const schema of input.outputSchemas ?? []) {
     if (!schema.id || !schema.description || !attached.has(schema.id))
       findings.push({
         code: "orphan-output-schema",
         message: `Output Schema ${schema.id || "(missing id)"} is not attached to a Node`,
       });
+    const artifactIds = new Set<string>();
     for (const artifact of schema.artifacts) {
       if (!artifact.id || artifact.paths.length === 0)
         findings.push({
           code: "invalid-schema",
           message: `Output Schema ${schema.id} has an invalid artifact`,
         });
+      if (artifactIds.has(artifact.id)) {
+        findings.push({
+          code: "invalid-schema",
+          message: `Output Schema ${schema.id} has duplicate artifact: ${artifact.id}`,
+        });
+      }
+      artifactIds.add(artifact.id);
+      const logicalArtifactId = `${schema.id}.${artifact.id}`;
+      if (logicalArtifactIds.has(logicalArtifactId)) {
+        findings.push({
+          code: "invalid-schema",
+          message: `Workflow has duplicate logical artifact: ${logicalArtifactId}`,
+        });
+      }
+      logicalArtifactIds.add(logicalArtifactId);
+      if (
+        artifact.lifetime !== undefined &&
+        artifact.lifetime !== "attempt" &&
+        artifact.lifetime !== "cycle" &&
+        artifact.lifetime !== "run"
+      ) {
+        findings.push({
+          code: "invalid-schema",
+          message: `Output Schema ${schema.id}.${artifact.id} has an invalid lifetime`,
+        });
+      }
     }
   }
   validateRouting(input, nodes, findings);
@@ -682,7 +710,19 @@ function phase3Enabled(input: WorkflowInput): boolean {
     input.routing?.fields !== undefined ||
     input.routing?.routingFields !== undefined ||
     input.customNodes.some((node) => node.kind === "decision") ||
-    input.cycles !== undefined,
+    input.cycles !== undefined ||
+    input.outputSchemas?.some((schema) =>
+      schema.artifacts.some((artifact) => artifact.lifetime !== undefined),
+    ),
+  );
+}
+
+function versionedArtifactsEnabled(input: WorkflowInput): boolean {
+  return Boolean(
+    input.capabilities?.features.includes("versioned-artifacts") ||
+    input.outputSchemas?.some((schema) =>
+      schema.artifacts.some((artifact) => artifact.lifetime !== undefined),
+    ),
   );
 }
 
@@ -715,6 +755,7 @@ function protocolCapabilities(
     features.add("decision-nodes");
   }
   if (input.cycles !== undefined) features.add("bounded-cycles");
+  if (versionedArtifactsEnabled(input)) features.add("versioned-artifacts");
   return {
     version: 3,
     features: [...features],

@@ -172,4 +172,52 @@ describe("workflow-kernel contract", () => {
       "pool.v1",
     ]);
   });
+
+  it("normalizes artifact lifetimes and rejects invalid declarations", () => {
+    const versionedSchema = structuredClone(schema);
+    versionedSchema.artifacts[0] = {
+      ...versionedSchema.artifacts[0],
+      lifetime: "run",
+    } as (typeof versionedSchema.artifacts)[number];
+    const input: WorkflowInput = {
+      kind: "workflow-kernel",
+      name: "artifact-contract-workflow",
+      goal: "Version a declared artifact.",
+      customNodes: [node()],
+      outputSchemas: [versionedSchema],
+    };
+
+    const protocol = normalizeWorkflow(input).protocol;
+    expect(protocol.capabilities).toEqual({
+      version: 3,
+      features: [
+        "conditional-routing",
+        "revisioned-attempts",
+        "versioned-artifacts",
+      ],
+    });
+    expect(protocol.outputSchemas[0].artifacts[0]).toMatchObject({
+      id: "manifest",
+      lifetime: "run",
+    });
+
+    const invalid = structuredClone(input) as unknown as WorkflowInput;
+    invalid.outputSchemas![0].artifacts.push({
+      ...invalid.outputSchemas![0].artifacts[0],
+      lifetime: "forever",
+    } as never);
+    const findings = validateWorkflow(invalid);
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "invalid-schema",
+          message: expect.stringContaining("invalid lifetime"),
+        }),
+        expect.objectContaining({
+          code: "invalid-schema",
+          message: expect.stringContaining("duplicate artifact"),
+        }),
+      ]),
+    );
+  });
 });

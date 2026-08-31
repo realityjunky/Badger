@@ -1868,10 +1868,552 @@ async function clearPendingAction(changeDir, relativePath, options = {}) {
   );
 }
 
-// src/workflow-runtime/completion.ts
+// src/workflow-runtime/artifacts.ts
 import { promises as fs5 } from "node:fs";
 import path8 from "node:path";
 var ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
+var ARTIFACT_MAX_ENTRIES = 256;
+var WorkflowArtifactValidationError = class extends Error {
+  blockers;
+  constructor(blockers) {
+    super(blockers.join("\n"));
+    this.name = "WorkflowArtifactValidationError";
+    this.blockers = [...blockers];
+  }
+};
+function fail(message) {
+  throw new WorkflowArtifactValidationError([message]);
+}
+function versioningEnabled(protocol) {
+  return Boolean(
+    protocol.capabilities?.features.includes("versioned-artifacts")
+  );
+}
+function declarations(protocol) {
+  return protocol.outputSchemas.flatMap(
+    (schema) => schema.artifacts.map((artifact) => ({
+      artifactId: `${schema.id}.${artifact.id}`,
+      schemaId: schema.id,
+      artifact
+    }))
+  );
+}
+function declarationsForNode(protocol, nodeId) {
+  const node = protocol.nodes.find((candidate) => candidate.id === nodeId);
+  if (!node) fail(`Workflow artifact producer Node is unknown: ${nodeId}`);
+  const schemaIds = new Set(node.outputSchemas);
+  return declarations(protocol).filter((item) => schemaIds.has(item.schemaId));
+}
+function declarationFor(key, candidates) {
+  const exact = candidates.filter((candidate) => candidate.artifactId === key);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) fail(`Workflow artifact id is ambiguous: ${key}`);
+  const short = candidates.filter((candidate) => candidate.artifact.id === key);
+  if (short.length === 1) return short[0];
+  if (short.length > 1) {
+    fail(`Workflow artifact id requires a schema-qualified name: ${key}`);
+  }
+  fail(`Workflow artifact id is not declared: ${key}`);
+}
+function artifactPatternSegments(value, label) {
+  const normalized = value.trim().replaceAll("\\", "/");
+  if (normalized.length === 0 || path8.posix.isAbsolute(normalized) || path8.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
+    throw new Error(`${label} must be relative to the Run root`);
+  }
+  const segments = normalized.split("/");
+  if (segments.some((segment) => segment === "..")) {
+    throw new Error(`${label} must stay inside the Run root`);
+  }
+  if (segments.some((segment) => segment.length === 0 || segment === ".")) {
+    throw new Error(`${label} must not contain empty or dot path segments`);
+  }
+  if (segments.some((segment) => segment.includes("?"))) {
+    throw new Error(`${label} supports only * wildcards`);
+  }
+  return segments;
+}
+function patternMatcher(pattern) {
+  return new RegExp(
+    `^${pattern.split("*").map((part) => part.replace(/[|\\{}()[\]^$+?.]/gu, "\\$&")).join(".*")}$`,
+    "u"
+  );
+}
+function artifactPathMatches(artifactPath, patterns) {
+  const candidateSegments = artifactPatternSegments(
+    artifactPath,
+    "Workflow artifact path"
+  );
+  return patterns.some((pattern) => {
+    const patternSegments = artifactPatternSegments(
+      pattern,
+      "Workflow artifact declaration"
+    );
+    return candidateSegments.length === patternSegments.length && candidateSegments.every(
+      (segment, index) => patternMatcher(patternSegments[index]).test(segment)
+    );
+  });
+}
+function workflowArtifactExpectedKind(artifact) {
+  return artifact.kind === "directory" ? "directory" : "file";
+}
+async function realRunRoot(runRoot, label) {
+  const stat = await fs5.lstat(runRoot);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error(`${label} Run root must be a real directory`);
+  }
+  return path8.resolve(runRoot);
+}
+async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, label, options = { maxMatches: ARTIFACT_MAX_ENTRIES }) {
+  const segments = artifactPatternSegments(artifactPath, label);
+  const root = await realRunRoot(runRoot, label);
+  async function walk(relative, index) {
+    if (index >= segments.length) {
+      const inspection = await inspectProtectedProjectPath(runRoot, relative, {
+        label,
+        expected
+      });
+      return inspection.exists ? [inspection.relative] : [];
+    }
+    const current = relative.length === 0 ? root : path8.join(root, relative);
+    if (relative.length > 0) {
+      const inspection = await inspectProtectedProjectPath(runRoot, relative, {
+        label,
+        expected: "directory"
+      });
+      if (!inspection.exists) return [];
+    }
+    const segment = segments[index];
+    if (!segment.includes("*")) {
+      return walk(
+        relative.length === 0 ? segment : path8.posix.join(relative, segment),
+        index + 1
+      );
+    }
+    let entries;
+    try {
+      entries = await fs5.readdir(current, { withFileTypes: true });
+    } catch (error) {
+      const code = error.code;
+      if (code === "ENOENT" || code === "ENOTDIR") return [];
+      throw error;
+    }
+    const matcher = patternMatcher(segment);
+    const matches = [];
+    for (const entry of entries.sort(
+      (left, right) => left.name.localeCompare(right.name)
+    )) {
+      if (entry.isSymbolicLink()) {
+        throw new Error(
+          `${label} crosses a symbolic link or junction at ${path8.join(current, entry.name)}`
+        );
+      }
+      if (!matcher.test(entry.name)) continue;
+      const final = index === segments.length - 1;
+      if (!final && !entry.isDirectory()) continue;
+      if (final && (expected === "file" && !entry.isFile() || expected === "directory" && !entry.isDirectory())) {
+        continue;
+      }
+      const next = relative.length === 0 ? entry.name : path8.posix.join(relative, entry.name);
+      matches.push(...await walk(next, index + 1));
+      if (options.maxMatches !== void 0 && matches.length > options.maxMatches) {
+        throw new Error(
+          `${label} exceeds ${options.maxMatches} matching paths`
+        );
+      }
+    }
+    return matches;
+  }
+  return walk("", 0);
+}
+async function resolveArtifactPath(runRoot, declaration, requestedPath) {
+  const label = `Workflow artifact ${declaration.artifactId}`;
+  if (!artifactPathMatches(requestedPath, declaration.artifact.paths)) {
+    fail(`${label} path is outside its declaration: ${requestedPath}`);
+  }
+  const normalized = artifactPatternSegments(requestedPath, label).join("/");
+  if (normalized.includes("*")) {
+    fail(`${label} update path must identify one physical artifact`);
+  }
+  const inspection = await inspectProtectedProjectPath(runRoot, normalized, {
+    label,
+    expected: workflowArtifactExpectedKind(declaration.artifact)
+  });
+  return inspection.exists ? inspection.relative : null;
+}
+async function hashDirectoryArtifact(runRoot, relativePath, label) {
+  const manifest = [];
+  let totalBytes = 0;
+  async function walk(directory) {
+    const inspection = await inspectProtectedProjectPath(runRoot, directory, {
+      label,
+      expected: "directory"
+    });
+    if (!inspection.exists) throw new Error(`${label} does not exist`);
+    const entries = (await fs5.readdir(inspection.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const relative = path8.posix.join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new Error(
+          `${label} crosses a symbolic link or junction at ${relative}`
+        );
+      }
+      if (entry.isDirectory()) {
+        await walk(relative);
+        continue;
+      }
+      if (!entry.isFile()) {
+        throw new Error(
+          `${label} contains an unsupported object at ${relative}`
+        );
+      }
+      const result = await readProtectedProjectFile(
+        runRoot,
+        relative,
+        ARTIFACT_MAX_BYTES,
+        { label }
+      );
+      totalBytes += result.bytes.length;
+      if (totalBytes > ARTIFACT_MAX_BYTES) {
+        throw new Error(`${label} exceeds ${ARTIFACT_MAX_BYTES} bytes`);
+      }
+      manifest.push({ path: relative, contentHash: sha256(result.bytes) });
+      if (manifest.length > ARTIFACT_MAX_ENTRIES) {
+        throw new Error(`${label} exceeds ${ARTIFACT_MAX_ENTRIES} entries`);
+      }
+    }
+  }
+  await walk(relativePath);
+  return sha256(JSON.stringify(stableValue({ kind: "directory", manifest })));
+}
+async function hashArtifactPath(runRoot, declaration, relativePath) {
+  const label = `Workflow artifact ${declaration.artifactId}`;
+  if (!artifactPathMatches(relativePath, declaration.artifact.paths)) {
+    fail(`${label} path is outside its declaration: ${relativePath}`);
+  }
+  if (declaration.artifact.kind === "directory") {
+    return hashDirectoryArtifact(runRoot, relativePath, label);
+  }
+  const result = await readProtectedProjectFile(
+    runRoot,
+    relativePath,
+    ARTIFACT_MAX_BYTES,
+    { label }
+  );
+  return sha256(result.bytes);
+}
+function artifactLifetime(declaration) {
+  return declaration.artifact.lifetime ?? "attempt";
+}
+function artifactScopeId(lifetime, state) {
+  const attempt = state.workflowRuntime?.currentAttempt;
+  if (!attempt) fail("Workflow artifact update requires a current Attempt");
+  if (lifetime === "attempt") return attempt.id;
+  if (lifetime === "cycle") {
+    if (!attempt.cycleId) {
+      fail("Cycle-persistent artifact update requires a current Cycle");
+    }
+    return attempt.cycleId;
+  }
+  return state.runId;
+}
+function selection(artifactId, versionId, state, nodeId, actionId2, timestamp) {
+  const runtime = state.workflowRuntime;
+  const attempt = runtime?.currentAttempt;
+  if (!runtime || !attempt) {
+    fail("Workflow artifact selection requires a current Attempt");
+  }
+  return {
+    artifactId,
+    versionId,
+    runId: state.runId,
+    nodeId,
+    cycleId: attempt.cycleId,
+    attemptId: attempt.id,
+    actionId: actionId2,
+    revision: runtime.revision,
+    timestamp
+  };
+}
+function assertSelectionScope(version, state) {
+  const attempt = state.workflowRuntime?.currentAttempt;
+  if (!attempt) fail("Workflow artifact selection requires a current Attempt");
+  if (version.producer.runId !== state.runId) {
+    fail(`Workflow artifact version belongs to another Run: ${version.id}`);
+  }
+  if (version.lifetime === "attempt" && version.scopeId !== attempt.id) {
+    fail(`Attempt artifact version is stale for this Attempt: ${version.id}`);
+  }
+  if (version.lifetime === "cycle" && version.scopeId !== attempt.cycleId) {
+    fail(`Cycle artifact version is stale for this Cycle: ${version.id}`);
+  }
+  if (version.lifetime === "run" && version.scopeId !== state.runId) {
+    fail(`Run artifact version has an invalid scope: ${version.id}`);
+  }
+}
+function requestedDeclarations(values, candidates, label) {
+  const result = /* @__PURE__ */ new Map();
+  for (const [key, value] of Object.entries(values)) {
+    const declaration = declarationFor(key, candidates);
+    if (result.has(declaration.artifactId)) {
+      fail(`${label} repeats artifact ${declaration.artifactId}`);
+    }
+    result.set(declaration.artifactId, { declaration, value });
+  }
+  return result;
+}
+async function prepareWorkflowArtifactMutation(options) {
+  const empty = {
+    versions: [],
+    selections: [],
+    artifactPaths: {},
+    selectedVersionIds: {}
+  };
+  if (!versioningEnabled(options.protocol)) {
+    if (Object.keys(options.artifactVersions ?? {}).length > 0) {
+      fail(
+        "Workflow artifact selections require versioned-artifacts capability"
+      );
+    }
+    return empty;
+  }
+  const runtime = options.state.workflowRuntime;
+  const attempt = runtime?.currentAttempt;
+  if (!runtime || !attempt) {
+    fail("Versioned artifact submission requires revisioned Run state");
+  }
+  const allDeclarations = declarations(options.protocol);
+  const outputDeclarations = declarationsForNode(
+    options.protocol,
+    options.nodeId
+  );
+  const requestedUpdates = requestedDeclarations(
+    options.artifacts ?? {},
+    outputDeclarations,
+    "Workflow artifact updates"
+  );
+  const requestedSelections = requestedDeclarations(
+    options.artifactVersions ?? {},
+    allDeclarations,
+    "Workflow artifact selections"
+  );
+  for (const artifactId of requestedSelections.keys()) {
+    if (requestedUpdates.has(artifactId)) {
+      fail(
+        `Workflow artifact cannot be updated and carried forward: ${artifactId}`
+      );
+    }
+  }
+  for (const declaration of outputDeclarations) {
+    if (declaration.artifact.required && !requestedUpdates.has(declaration.artifactId) && !requestedSelections.has(declaration.artifactId)) {
+      fail(
+        `Required Workflow artifact needs an explicit update or version: ${declaration.artifactId}`
+      );
+    }
+  }
+  const mutation = structuredClone(empty);
+  const timestamp = (/* @__PURE__ */ new Date()).toISOString();
+  for (const { declaration, value: requested } of requestedUpdates.values()) {
+    const artifactPath = await resolveArtifactPath(
+      options.runRoot,
+      declaration,
+      requested
+    );
+    if (!artifactPath) {
+      fail(
+        `Workflow artifact update does not exist: ${declaration.artifactId}`
+      );
+    }
+    const lifetime = artifactLifetime(declaration);
+    if (lifetime === "attempt" && !artifactPath.split("/").includes(attempt.id)) {
+      fail(
+        `Attempt artifact path must include the current Attempt id: ${declaration.artifactId}`
+      );
+    }
+    const contentHash = await hashArtifactPath(
+      options.runRoot,
+      declaration,
+      artifactPath
+    );
+    const scopeId = artifactScopeId(lifetime, options.state);
+    const producer = {
+      runId: options.state.runId,
+      nodeId: options.nodeId,
+      cycleId: attempt.cycleId,
+      attemptId: attempt.id,
+      actionId: options.actionId,
+      revision: runtime.revision
+    };
+    const id = `artifact-version-${sha256(
+      JSON.stringify(
+        stableValue({
+          artifactId: declaration.artifactId,
+          contentHash,
+          path: artifactPath,
+          producer,
+          scopeId
+        })
+      )
+    ).slice(0, 24)}`;
+    if (runtime.artifactVersions.some((version2) => version2.id === id)) {
+      fail(`Workflow artifact version already exists: ${id}`);
+    }
+    const version = {
+      id,
+      artifactId: declaration.artifactId,
+      schemaId: declaration.schemaId,
+      lifetime,
+      scopeId,
+      contentHash,
+      path: artifactPath,
+      producer,
+      timestamp
+    };
+    mutation.versions.push(version);
+    mutation.selections.push(
+      selection(
+        declaration.artifactId,
+        id,
+        options.state,
+        options.nodeId,
+        options.actionId,
+        timestamp
+      )
+    );
+    mutation.artifactPaths[declaration.artifactId] = artifactPath;
+    mutation.selectedVersionIds[declaration.artifactId] = id;
+  }
+  for (const {
+    declaration,
+    value: versionId
+  } of requestedSelections.values()) {
+    const version = runtime.artifactVersions.find(
+      (candidate) => candidate.id === versionId
+    );
+    if (!version) fail(`Workflow artifact version is unknown: ${versionId}`);
+    if (version.artifactId !== declaration.artifactId) {
+      fail(
+        `Workflow artifact version ${versionId} does not belong to ${declaration.artifactId}`
+      );
+    }
+    if (version.lifetime !== artifactLifetime(declaration)) {
+      fail(
+        `Workflow artifact lifetime is incompatible: ${declaration.artifactId}`
+      );
+    }
+    assertSelectionScope(version, options.state);
+    const contentHash = await hashArtifactPath(
+      options.runRoot,
+      declaration,
+      version.path
+    );
+    if (contentHash !== version.contentHash) {
+      fail(`Workflow artifact content drift detected: ${version.id}`);
+    }
+    mutation.selections.push(
+      selection(
+        declaration.artifactId,
+        version.id,
+        options.state,
+        options.nodeId,
+        options.actionId,
+        timestamp
+      )
+    );
+    mutation.artifactPaths[declaration.artifactId] = version.path;
+    mutation.selectedVersionIds[declaration.artifactId] = version.id;
+  }
+  return mutation;
+}
+function currentWorkflowArtifactVersions(runtime) {
+  const current = {};
+  for (const selection2 of runtime?.artifactSelections ?? []) {
+    const version = runtime?.artifactVersions?.find(
+      (candidate) => candidate.id === selection2.versionId
+    );
+    if (!version) continue;
+    if (version.lifetime === "attempt" && version.scopeId !== runtime?.currentAttempt?.id || version.lifetime === "cycle" && version.scopeId !== runtime?.currentCycle?.id) {
+      continue;
+    }
+    current[selection2.artifactId] = selection2.versionId;
+  }
+  return current;
+}
+function validateWorkflowArtifactState(protocol, runId, nodeToStep, runtime) {
+  const versions = runtime.artifactVersions ?? [];
+  const selections = runtime.artifactSelections ?? [];
+  if (!versioningEnabled(protocol)) {
+    if (versions.length > 0 || selections.length > 0) {
+      throw new Error(
+        "WorkflowRuntime artifact state requires versioned-artifacts capability"
+      );
+    }
+    return;
+  }
+  const declared = declarations(protocol);
+  const versionsById = new Map(
+    versions.map((version) => [version.id, version])
+  );
+  for (const version of versions) {
+    const declaration = declarationFor(version.artifactId, declared);
+    if (version.schemaId !== declaration.schemaId || version.lifetime !== artifactLifetime(declaration) || !artifactPathMatches(version.path, declaration.artifact.paths) || version.producer.runId !== runId || version.producer.revision >= runtime.revision) {
+      throw new Error(
+        `WorkflowRuntime artifact version identity is invalid: ${version.id}`
+      );
+    }
+    const stepId2 = nodeToStep[version.producer.nodeId];
+    const visit = runtime.visits.find(
+      (candidate) => candidate.attemptId === version.producer.attemptId
+    );
+    const outcome = visit?.outcomes.find(
+      (candidate) => candidate.actionId === version.producer.actionId
+    );
+    if (!stepId2 || !visit || visit.stepId !== stepId2 || visit.cycleId !== version.producer.cycleId || !outcome || outcome.status !== "succeeded" || outcome.artifactVersions?.[version.artifactId] !== version.id) {
+      throw new Error(
+        `WorkflowRuntime artifact producer is invalid: ${version.id}`
+      );
+    }
+    if (!selections.some(
+      (item) => item.artifactId === version.artifactId && item.versionId === version.id && item.attemptId === version.producer.attemptId && item.actionId === version.producer.actionId
+    )) {
+      throw new Error(
+        `WorkflowRuntime artifact version has no accepted selection: ${version.id}`
+      );
+    }
+  }
+  for (const item of selections) {
+    const version = versionsById.get(item.versionId);
+    const stepId2 = nodeToStep[item.nodeId];
+    const visit = runtime.visits.find(
+      (candidate) => candidate.attemptId === item.attemptId
+    );
+    const outcome = visit?.outcomes.find(
+      (candidate) => candidate.actionId === item.actionId
+    );
+    if (!version || version.artifactId !== item.artifactId || item.runId !== runId || item.revision >= runtime.revision || !stepId2 || !visit || visit.stepId !== stepId2 || visit.cycleId !== item.cycleId || !outcome || outcome.status !== "succeeded" || outcome.artifactVersions?.[item.artifactId] !== item.versionId || version.lifetime === "attempt" && version.scopeId !== item.attemptId || version.lifetime === "cycle" && version.scopeId !== item.cycleId || version.lifetime === "run" && version.scopeId !== runId) {
+      throw new Error(
+        `WorkflowRuntime artifact selection is invalid: ${item.versionId}`
+      );
+    }
+  }
+  for (const visit of runtime.visits) {
+    for (const outcome of visit.outcomes) {
+      for (const [artifactId, versionId] of Object.entries(
+        outcome.artifactVersions ?? {}
+      )) {
+        if (!selections.some(
+          (item) => item.artifactId === artifactId && item.versionId === versionId && item.attemptId === visit.attemptId && item.actionId === outcome.actionId
+        )) {
+          throw new Error(
+            `WorkflowRuntime outcome has an unknown artifact selection: ${versionId}`
+          );
+        }
+      }
+    }
+  }
+}
+
+// src/workflow-runtime/completion.ts
+var ARTIFACT_MAX_BYTES2 = 2 * 1024 * 1024;
 var MAX_BLOCKERS = 32;
 var MAX_BLOCKER_LENGTH = 512;
 function unique(values) {
@@ -1925,94 +2467,14 @@ function schemaFor(protocol, schemaId) {
   }
   return schema;
 }
-function expectedArtifactKind(artifact) {
-  return artifact.kind === "directory" ? "directory" : "file";
-}
-function artifactPatternSegments(value, label) {
-  const normalized = value.trim().replaceAll("\\", "/");
-  if (normalized.length === 0 || path8.posix.isAbsolute(normalized) || path8.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
-    throw new Error(`${label} must be relative to the Run root`);
-  }
-  const segments = normalized.split("/");
-  if (segments.some((segment) => segment === "..")) {
-    throw new Error(`${label} must stay inside the Run root`);
-  }
-  if (segments.some((segment) => segment.length === 0 || segment === ".")) {
-    throw new Error(`${label} must not contain empty or dot path segments`);
-  }
-  return segments;
-}
-function patternMatcher(pattern) {
-  return new RegExp(
-    `^${pattern.split("*").map((part) => part.replace(/[|\\{}()[\]^$+?.]/gu, "\\$&")).join(".*")}$`,
-    "u"
-  );
-}
-async function rootForPattern(runRoot, label) {
-  const stat = await fs5.lstat(runRoot);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new Error(`${label} Run root must be a real directory`);
-  }
-  return path8.resolve(runRoot);
-}
-async function matchingArtifactPaths(runRoot, artifactPath, expected, label) {
-  const segments = artifactPatternSegments(artifactPath, label);
-  const root = await rootForPattern(runRoot, label);
-  async function walk(relative, index) {
-    if (index >= segments.length) {
-      const inspection = await inspectProtectedProjectPath(runRoot, relative, {
-        label,
-        expected
-      });
-      return inspection.exists ? [relative] : [];
-    }
-    const current = relative.length === 0 ? root : path8.join(root, relative);
-    if (relative.length > 0) {
-      const inspection = await inspectProtectedProjectPath(runRoot, relative, {
-        label,
-        expected: "directory"
-      });
-      if (!inspection.exists) return [];
-    }
-    const segment = segments[index];
-    if (!segment.includes("*")) {
-      return walk(
-        relative.length === 0 ? segment : path8.posix.join(relative, segment),
-        index + 1
-      );
-    }
-    let entries;
-    try {
-      entries = await fs5.readdir(current, { withFileTypes: true });
-    } catch (error) {
-      const code = error.code;
-      if (code === "ENOENT" || code === "ENOTDIR") return [];
-      throw error;
-    }
-    const matcher = patternMatcher(segment);
-    const matches = [];
-    for (const entry of entries) {
-      if (entry.isSymbolicLink()) {
-        throw new Error(
-          `${label} crosses a symbolic link or junction at ${path8.join(current, entry.name)}`
-        );
-      }
-      if (!matcher.test(entry.name)) continue;
-      const next = relative.length === 0 ? entry.name : path8.posix.join(relative, entry.name);
-      matches.push(...await walk(next, index + 1));
-    }
-    return matches;
-  }
-  return walk("", 0);
-}
 async function artifactExists(runRoot, schema, artifact) {
   let found = false;
   for (const artifactPath of artifact.paths) {
     const label = `Output Schema artifact ${schema.id}.${artifact.id}`;
-    const matches = await matchingArtifactPaths(
+    const matches = await matchingWorkflowArtifactPaths(
       runRoot,
       artifactPath,
-      expectedArtifactKind(artifact),
+      workflowArtifactExpectedKind(artifact),
       label
     );
     if (matches.length === 0) continue;
@@ -2020,7 +2482,7 @@ async function artifactExists(runRoot, schema, artifact) {
     if (artifact.kind !== "directory") {
       for (const match of matches) {
         try {
-          await readProtectedProjectFile(runRoot, match, ARTIFACT_MAX_BYTES, {
+          await readProtectedProjectFile(runRoot, match, ARTIFACT_MAX_BYTES2, {
             label
           });
         } catch (error) {
@@ -2443,9 +2905,9 @@ function cycleAnalysis(protocol) {
       );
     }
     const componentId = componentKey(component);
-    const declarations = componentDefinitions.get(componentId) ?? [];
-    declarations.push(definition);
-    componentDefinitions.set(componentId, declarations);
+    const declarations2 = componentDefinitions.get(componentId) ?? [];
+    declarations2.push(definition);
+    componentDefinitions.set(componentId, declarations2);
     const members = new Set(component);
     const repeats = /* @__PURE__ */ new Set();
     for (const repeat of definition.repeatTransitions) {
@@ -2714,7 +3176,7 @@ function maxWorkflowIterations(protocol) {
 }
 function isRevisionedWorkflowProtocol(protocol) {
   return Boolean(
-    protocol.capabilities?.version === 3 || protocol.routing?.fields !== void 0 || protocol.routing?.routingFields !== void 0 || protocol.nodes.some((node) => node.kind === "decision") || protocol.cycles !== void 0
+    protocol.capabilities?.version === 3 || protocol.routing?.fields !== void 0 || protocol.routing?.routingFields !== void 0 || protocol.nodes.some((node) => node.kind === "decision") || protocol.cycles !== void 0 || protocol.capabilities?.features.includes("versioned-artifacts")
   );
 }
 function validateRevisionedWorkflow(protocol) {
@@ -3186,7 +3648,7 @@ function validateProtocolShape(protocol) {
   }
   if (protocol.capabilities !== void 0) {
     if (!protocol.capabilities || protocol.capabilities.version !== 3 || !Array.isArray(protocol.capabilities.features) || protocol.capabilities.features.some(
-      (feature) => feature !== "conditional-routing" && feature !== "revisioned-attempts" && feature !== "decision-nodes" && feature !== "bounded-cycles"
+      (feature) => feature !== "conditional-routing" && feature !== "revisioned-attempts" && feature !== "decision-nodes" && feature !== "bounded-cycles" && feature !== "versioned-artifacts"
     ) || !protocol.capabilities.features.includes("conditional-routing") || !protocol.capabilities.features.includes("revisioned-attempts")) {
       throw new Error("Workflow Protocol capabilities are invalid");
     }
@@ -3201,6 +3663,7 @@ function validateProtocolShape(protocol) {
     );
   }
   const schemaIds = /* @__PURE__ */ new Set();
+  const logicalArtifactIds = /* @__PURE__ */ new Set();
   for (const schema of protocol.outputSchemas) {
     if (!schema || typeof schema !== "object" || typeof schema.id !== "string" || schema.id.length === 0 || typeof schema.description !== "string" || schema.description.length === 0 || !Array.isArray(schema.artifacts) || !Array.isArray(schema.evidence)) {
       throw new Error(
@@ -3213,12 +3676,31 @@ function validateProtocolShape(protocol) {
       );
     }
     schemaIds.add(schema.id);
+    const artifactIds = /* @__PURE__ */ new Set();
     for (const artifact of schema.artifacts) {
       if (!artifact || typeof artifact !== "object" || typeof artifact.id !== "string" || artifact.id.length === 0 || typeof artifact.required !== "boolean" || !Array.isArray(artifact.paths) || artifact.paths.some(
         (artifactPath) => typeof artifactPath !== "string"
-      ) || !Array.isArray(artifact.validations)) {
+      ) || !Array.isArray(artifact.validations) || artifact.lifetime !== void 0 && artifact.lifetime !== "attempt" && artifact.lifetime !== "cycle" && artifact.lifetime !== "run") {
         throw new Error(
           `Workflow Protocol Output Schema ${schema.id} has an invalid artifact`
+        );
+      }
+      if (artifactIds.has(artifact.id)) {
+        throw new Error(
+          `Workflow Protocol Output Schema ${schema.id} has duplicate artifact: ${artifact.id}`
+        );
+      }
+      artifactIds.add(artifact.id);
+      const logicalArtifactId = `${schema.id}.${artifact.id}`;
+      if (logicalArtifactIds.has(logicalArtifactId)) {
+        throw new Error(
+          `Workflow Protocol has duplicate logical artifact: ${logicalArtifactId}`
+        );
+      }
+      logicalArtifactIds.add(logicalArtifactId);
+      if (artifact.lifetime !== void 0 && !protocol.capabilities?.features.includes("versioned-artifacts")) {
+        throw new Error(
+          `Workflow Protocol artifact ${schema.id}.${artifact.id} requires versioned-artifacts capability`
         );
       }
     }
@@ -3878,6 +4360,8 @@ function enterAttempt(state, stepId2) {
     state.workflowRuntime
   );
   workflowRuntime.decisionReceipts ??= [];
+  workflowRuntime.artifactVersions ??= [];
+  workflowRuntime.artifactSelections ??= [];
   workflowRuntime.currentCycle ??= null;
   workflowRuntime.cycles ??= [];
   const visitOrdinal = workflowRuntime.nextVisitOrdinal + 1;
@@ -3910,6 +4394,8 @@ function recordWorkflowOutcome(pkg, state, outcome) {
     state.workflowRuntime
   );
   workflowRuntime.decisionReceipts ??= [];
+  workflowRuntime.artifactVersions ??= [];
+  workflowRuntime.artifactSelections ??= [];
   workflowRuntime.currentCycle ??= null;
   workflowRuntime.cycles ??= [];
   const attempt = workflowRuntime.currentAttempt;
@@ -3931,7 +4417,8 @@ function recordWorkflowOutcome(pkg, state, outcome) {
     summary: outcome.summary,
     retryOrdinal: attempt.retryOrdinal,
     ...outcome.routing ? { routing: { ...outcome.routing } } : {},
-    ...outcome.evidence ? { evidence: structuredClone(outcome.evidence) } : {}
+    ...outcome.evidence ? { evidence: structuredClone(outcome.evidence) } : {},
+    ...outcome.artifactVersions ? { artifactVersions: { ...outcome.artifactVersions } } : {}
   };
   visit.outcomes.push(visitOutcome);
   workflowRuntime.revision += 1;
@@ -4463,7 +4950,8 @@ function parseWorkflowOutcome(value, label) {
     "summary",
     "retryOrdinal",
     "routing",
-    "evidence"
+    "evidence",
+    "artifactVersions"
   ]);
   const unknown = Object.keys(outcome).find((key) => !keys.has(key));
   if (unknown)
@@ -4491,7 +4979,13 @@ function parseWorkflowOutcome(value, label) {
     summary,
     retryOrdinal,
     ...outcome.routing !== void 0 ? { routing: parseStringRecord(outcome.routing, `${label}.routing`) } : {},
-    ...outcome.evidence !== void 0 ? { evidence: parseJsonRecord(outcome.evidence, `${label}.evidence`) } : {}
+    ...outcome.evidence !== void 0 ? { evidence: parseJsonRecord(outcome.evidence, `${label}.evidence`) } : {},
+    ...outcome.artifactVersions !== void 0 ? {
+      artifactVersions: parseStringRecord(
+        outcome.artifactVersions,
+        `${label}.artifactVersions`
+      )
+    } : {}
   };
 }
 function parseWorkflowVisit(value, index) {
@@ -4543,7 +5037,133 @@ function parseWorkflowVisit(value, index) {
     )
   };
 }
-function parseWorkflowRuntime(value) {
+function parseWorkflowArtifactLifetime(value, label) {
+  if (value !== "attempt" && value !== "cycle" && value !== "run") {
+    throw new Error(`Invalid Run state: ${label} must be a valid lifetime`);
+  }
+  return value;
+}
+function parseWorkflowArtifactProducer(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const producer = value;
+  const keys = /* @__PURE__ */ new Set([
+    "runId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "actionId",
+    "revision"
+  ]);
+  const unknown = Object.keys(producer).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  return parseWorkflowArtifactCoordinate(producer, label);
+}
+function parseWorkflowArtifactCoordinate(coordinate, label) {
+  const cycleId = coordinate.cycleId;
+  if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
+    throw new Error(
+      `Invalid Run state: ${label}.cycleId must be a string or null`
+    );
+  }
+  const revision = coordinate.revision;
+  if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0) {
+    throw new Error(
+      `Invalid Run state: ${label}.revision must be a non-negative integer`
+    );
+  }
+  return {
+    runId: requiredJsonString(coordinate.runId, `${label}.runId`),
+    nodeId: requiredJsonString(coordinate.nodeId, `${label}.nodeId`),
+    cycleId,
+    attemptId: requiredJsonString(coordinate.attemptId, `${label}.attemptId`),
+    actionId: requiredJsonString(coordinate.actionId, `${label}.actionId`),
+    revision
+  };
+}
+function parseWorkflowArtifactVersion(value, index) {
+  const label = `workflowRuntime.artifactVersions[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const version = value;
+  const keys = /* @__PURE__ */ new Set([
+    "id",
+    "artifactId",
+    "schemaId",
+    "lifetime",
+    "scopeId",
+    "contentHash",
+    "path",
+    "producer",
+    "timestamp"
+  ]);
+  const unknown = Object.keys(version).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const contentHash = requiredJsonString(
+    version.contentHash,
+    `${label}.contentHash`
+  );
+  if (!/^[a-f0-9]{64}$/u.test(contentHash)) {
+    throw new Error(
+      `Invalid Run state: ${label}.contentHash must be a SHA-256 hash`
+    );
+  }
+  const artifactPath = requiredJsonString(version.path, `${label}.path`);
+  assertSafeRunReference(artifactPath, `${label}.path`);
+  return {
+    id: requiredJsonString(version.id, `${label}.id`),
+    artifactId: requiredJsonString(version.artifactId, `${label}.artifactId`),
+    schemaId: requiredJsonString(version.schemaId, `${label}.schemaId`),
+    lifetime: parseWorkflowArtifactLifetime(
+      version.lifetime,
+      `${label}.lifetime`
+    ),
+    scopeId: requiredJsonString(version.scopeId, `${label}.scopeId`),
+    contentHash,
+    path: artifactPath,
+    producer: parseWorkflowArtifactProducer(
+      version.producer,
+      `${label}.producer`
+    ),
+    timestamp: requiredJsonString(version.timestamp, `${label}.timestamp`)
+  };
+}
+function parseWorkflowArtifactSelection(value, index) {
+  const label = `workflowRuntime.artifactSelections[${index}]`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const selection2 = value;
+  const keys = /* @__PURE__ */ new Set([
+    "artifactId",
+    "versionId",
+    "runId",
+    "nodeId",
+    "cycleId",
+    "attemptId",
+    "actionId",
+    "revision",
+    "timestamp"
+  ]);
+  const unknown = Object.keys(selection2).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(`Invalid Run state: ${label} has unknown field ${unknown}`);
+  }
+  const coordinate = parseWorkflowArtifactCoordinate(selection2, label);
+  return {
+    artifactId: requiredJsonString(selection2.artifactId, `${label}.artifactId`),
+    versionId: requiredJsonString(selection2.versionId, `${label}.versionId`),
+    ...coordinate,
+    timestamp: requiredJsonString(selection2.timestamp, `${label}.timestamp`)
+  };
+}
+function parseWorkflowRuntime(value, runId) {
   if (value === void 0) return void 0;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Invalid Run state: workflowRuntime must be an object");
@@ -4556,7 +5176,9 @@ function parseWorkflowRuntime(value) {
     "currentCycle",
     "cycles",
     "visits",
-    "decisionReceipts"
+    "decisionReceipts",
+    "artifactVersions",
+    "artifactSelections"
   ]);
   const unknown = Object.keys(runtime).find((key) => !keys.has(key));
   if (unknown) {
@@ -4618,6 +5240,68 @@ function parseWorkflowRuntime(value) {
       "Invalid Run state: WorkflowRuntime decisionReceipts must be an array"
     );
   })();
+  const artifactVersions = runtime.artifactVersions === void 0 ? [] : Array.isArray(runtime.artifactVersions) ? runtime.artifactVersions.map(parseWorkflowArtifactVersion) : (() => {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime artifactVersions must be an array"
+    );
+  })();
+  const artifactSelections = runtime.artifactSelections === void 0 ? [] : Array.isArray(runtime.artifactSelections) ? runtime.artifactSelections.map(parseWorkflowArtifactSelection) : (() => {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime artifactSelections must be an array"
+    );
+  })();
+  const artifactVersionIds = /* @__PURE__ */ new Set();
+  for (const version of artifactVersions) {
+    if (artifactVersionIds.has(version.id)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime artifact version ${version.id}`
+      );
+    }
+    artifactVersionIds.add(version.id);
+    if (version.producer.runId !== runId) {
+      throw new Error(
+        `Invalid Run state: artifact version ${version.id} belongs to another Run`
+      );
+    }
+    if (version.lifetime === "attempt" && version.scopeId !== version.producer.attemptId || version.lifetime === "cycle" && version.scopeId !== version.producer.cycleId || version.lifetime === "run" && version.scopeId !== runId) {
+      throw new Error(
+        `Invalid Run state: artifact version ${version.id} has an invalid scope`
+      );
+    }
+    if (version.producer.revision >= revision) {
+      throw new Error(
+        `Invalid Run state: artifact version ${version.id} has a future revision`
+      );
+    }
+  }
+  const artifactSelectionKeys = /* @__PURE__ */ new Set();
+  for (const selection2 of artifactSelections) {
+    const selectionKey = `${selection2.attemptId}\0${selection2.actionId}\0${selection2.artifactId}`;
+    if (artifactSelectionKeys.has(selectionKey)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime artifact selection ${selection2.artifactId}`
+      );
+    }
+    artifactSelectionKeys.add(selectionKey);
+    if (!artifactVersionIds.has(selection2.versionId)) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime selection references unknown artifact version ${selection2.versionId}`
+      );
+    }
+    const version = artifactVersions.find(
+      (candidate) => candidate.id === selection2.versionId
+    );
+    if (version.artifactId !== selection2.artifactId) {
+      throw new Error(
+        "Invalid Run state: WorkflowRuntime artifact selection id does not match its version"
+      );
+    }
+    if (selection2.runId !== runId || selection2.revision >= revision) {
+      throw new Error(
+        `Invalid Run state: WorkflowRuntime artifact selection ${selection2.versionId} has an invalid Run or revision`
+      );
+    }
+  }
   const attemptIds = /* @__PURE__ */ new Set();
   const visitOrdinals = /* @__PURE__ */ new Set();
   const receiptActionIds = /* @__PURE__ */ new Set();
@@ -4698,7 +5382,9 @@ function parseWorkflowRuntime(value) {
     currentCycle,
     cycles,
     visits,
-    decisionReceipts
+    decisionReceipts,
+    artifactVersions,
+    artifactSelections
   };
 }
 function parseRunStateJson(value) {
@@ -4796,7 +5482,7 @@ function parseRunStateJson(value) {
       ...typeof identity.resolverHash === "string" ? { resolverHash: identity.resolverHash } : {}
     };
   }
-  const workflowRuntime = parseWorkflowRuntime(json.workflowRuntime);
+  const workflowRuntime = parseWorkflowRuntime(json.workflowRuntime, runId);
   return {
     runId,
     skill,
@@ -4898,7 +5584,28 @@ function validateOutcome(outcome) {
   validateStringRecord(outcome.artifacts, "Outcome artifacts");
   validateStringRecord(outcome.state, "Outcome state");
   validateStringRecord(outcome.routing, "Outcome routing");
+  validateStringRecord(outcome.artifactVersions, "Outcome artifact versions");
   validateEvidenceRecord(outcome.evidence, "Outcome evidence");
+}
+function applyArtifactMutation(state, mutation) {
+  if (!mutation) return state;
+  if (!state.workflowRuntime) {
+    throw new Error("Artifact mutation requires WorkflowRuntime state");
+  }
+  return {
+    ...state,
+    workflowRuntime: {
+      ...state.workflowRuntime,
+      artifactVersions: [
+        ...state.workflowRuntime.artifactVersions ?? [],
+        ...structuredClone(mutation.versions)
+      ],
+      artifactSelections: [
+        ...state.workflowRuntime.artifactSelections ?? [],
+        ...structuredClone(mutation.selections)
+      ]
+    }
+  };
 }
 function validatePendingState(state, pending) {
   if (pending) {
@@ -5008,7 +5715,7 @@ async function startManualRun(pkg, changeDir, options = []) {
     startOptions.resolver
   );
 }
-async function resumeManualRun(changeDir, options = {}) {
+async function resumeManualRunInternal(changeDir, options = {}) {
   const state = await requiredRun(changeDir);
   const pkg = await readSkillSnapshot(changeDir, state.skillHash);
   validateSnapshotState(pkg, state);
@@ -5052,16 +5759,14 @@ async function resumeManualRun(changeDir, options = {}) {
     );
   }
   const outcome = { ...options.outcome, actionId: pending.id };
-  const advanced = recordOutcomeWithResolver(
-    pkg,
-    state,
-    outcome,
-    resolver,
-    void 0
+  const advanced = applyArtifactMutation(
+    recordOutcomeWithResolver(pkg, state, outcome, resolver, void 0),
+    options.artifactMutation
   );
   const artifacts = {
     ...await readArtifacts(changeDir, state.artifactsRef),
-    ...outcome.artifacts ?? {}
+    ...outcome.artifacts ?? {},
+    ...options.artifactMutation?.artifactPaths ?? {}
   };
   await writeArtifacts(changeDir, state.artifactsRef, artifacts);
   const decisionReceipt2 = advanced.workflowRuntime?.decisionReceipts.find(
@@ -5109,6 +5814,15 @@ async function resumeManualRun(changeDir, options = {}) {
     resolver
   );
   return { ...next, evals };
+}
+async function resumeManualRun(changeDir, options = {}) {
+  return resumeManualRunInternal(changeDir, options);
+}
+async function resumeManualWorkflowRun(changeDir, options, artifactMutation) {
+  return resumeManualRunInternal(changeDir, {
+    ...options,
+    artifactMutation
+  });
 }
 
 // src/engine/standalone-run.ts
@@ -5224,6 +5938,13 @@ async function resumeStandaloneRun(projectRoot, runId, options = {}) {
     options
   );
 }
+async function resumeStandaloneWorkflowRun(projectRoot, runId, options, artifactMutation) {
+  return resumeManualWorkflowRun(
+    await checkedStandaloneRunDir(projectRoot, runId),
+    options,
+    artifactMutation
+  );
+}
 
 // src/workflow-runtime/location.ts
 function requiredString(value, label) {
@@ -5240,8 +5961,8 @@ function manualLocation(runRoot) {
     async start(pkg, options) {
       return startManualRun(pkg, validatedRoot, options);
     },
-    async resume(options = {}) {
-      return resumeManualRun(validatedRoot, options);
+    async resume(options = {}, artifactMutation) {
+      return artifactMutation ? resumeManualWorkflowRun(validatedRoot, options, artifactMutation) : resumeManualRun(validatedRoot, options);
     },
     async readState() {
       return readRunState(validatedRoot);
@@ -5272,8 +5993,13 @@ function standaloneLocation(projectRoot, runId) {
         resolver: options.resolver
       });
     },
-    async resume(options = {}) {
-      return resumeStandaloneRun(validatedProjectRoot, validatedRunId, options);
+    async resume(options = {}, artifactMutation) {
+      return artifactMutation ? resumeStandaloneWorkflowRun(
+        validatedProjectRoot,
+        validatedRunId,
+        options,
+        artifactMutation
+      ) : resumeStandaloneRun(validatedProjectRoot, validatedRunId, options);
     },
     async readState() {
       return readStandaloneRunState(validatedProjectRoot, validatedRunId);
@@ -5478,7 +6204,8 @@ function validateSubmission(submission) {
   }
   for (const [label, value] of [
     ["Submission artifacts", submission.artifacts],
-    ["Submission state", submission.state]
+    ["Submission state", submission.state],
+    ["Submission artifact versions", submission.artifactVersions]
   ]) {
     if (value === void 0) continue;
     if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -5510,6 +6237,9 @@ function validateSubmission(submission) {
       throw new Error("Submission routing must contain non-empty strings");
     }
   }
+  if (submission.status !== "succeeded" && submission.artifactVersions !== void 0) {
+    throw new Error("Failed submissions cannot select artifact versions");
+  }
 }
 function continuation(result, identity) {
   const runtimeState = result.state.workflowRuntime;
@@ -5529,6 +6259,9 @@ function continuation(result, identity) {
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     cycles: structuredClone(runtimeState?.cycles ?? []),
     visits: structuredClone(runtimeState?.visits ?? []),
+    artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
+    artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
+    currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
     blockers: disposition === "blocked" && result.reason ? [result.reason] : []
   };
 }
@@ -5611,6 +6344,9 @@ async function projectWorkflowState(target) {
     decisionReceipts: structuredClone(runtimeState?.decisionReceipts ?? []),
     visits: structuredClone(runtimeState?.visits ?? []),
     cycles: structuredClone(runtimeState?.cycles ?? []),
+    artifactVersions: structuredClone(runtimeState?.artifactVersions ?? []),
+    artifactSelections: structuredClone(runtimeState?.artifactSelections ?? []),
+    currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
     blockers: status === "blocked" ? [
       exhaustedAction ? `Retry budget exhausted for action: ${exhaustedAction}` : `Run is ${state.status}`
     ] : []
@@ -5757,6 +6493,12 @@ async function verifyStoredPackage(runRoot, state) {
     } else if (state.workflowRuntime.currentCycle) {
       throw new Error("WorkflowRuntime current Cycle position is invalid");
     }
+    validateWorkflowArtifactState(
+      pkg.runtime.protocol,
+      state.runId,
+      identity.nodeToStep,
+      state.workflowRuntime
+    );
   }
   for (const receipt of state.workflowRuntime?.decisionReceipts ?? []) {
     if (receipt.runId !== state.runId || receipt.protocolHash !== identity.protocolHash || receipt.packageHash !== identity.packageHash || receipt.snapshotHash !== identity.snapshotHash || receipt.resultingRevision !== receipt.revision + 1 || receipt.resultingRevision > (state.workflowRuntime?.revision ?? 0)) {
@@ -5924,16 +6666,18 @@ function validateDecisionResponse(verified, pending, node, submission) {
     throw new Error("Decision rationale is required");
   }
 }
-function engineOutcome(prepared, submission) {
+function engineOutcome(prepared, submission, artifactMutation) {
   if (!isDecisionSubmission(submission)) {
+    const artifacts = artifactMutation ? artifactMutation.artifactPaths : submission.artifacts;
     return {
       actionId: prepared.pending.id,
       status: submission.status,
       summary: submission.summary,
-      ...submission.artifacts ? { artifacts: submission.artifacts } : {},
+      ...artifacts && Object.keys(artifacts).length > 0 ? { artifacts } : {},
       ...submission.state ? { state: submission.state } : {},
       ...submission.evidence ? { evidence: submission.evidence } : {},
-      ...submission.routing ? { routing: submission.routing } : {}
+      ...submission.routing ? { routing: submission.routing } : {},
+      ...artifactMutation && Object.keys(artifactMutation.selectedVersionIds).length > 0 ? { artifactVersions: artifactMutation.selectedVersionIds } : submission.artifactVersions ? { artifactVersions: submission.artifactVersions } : {}
     };
   }
   const node = prepared.verified.package.runtime.protocol.nodes.find(
@@ -6008,6 +6752,45 @@ function routeBlockers(prepared, submission) {
     throw error;
   }
 }
+async function artifactMutationForSubmission(prepared, submission) {
+  if (isDecisionSubmission(submission) || !prepared.node) {
+    return { blockers: [] };
+  }
+  const versioned = prepared.verified.package.runtime.protocol.capabilities?.features.includes(
+    "versioned-artifacts"
+  ) === true;
+  if (!versioned) {
+    return Object.keys(submission.artifactVersions ?? {}).length > 0 ? {
+      blockers: [
+        "Workflow artifact selections require versioned-artifacts capability"
+      ]
+    } : { blockers: [] };
+  }
+  if (submission.status !== "succeeded") {
+    return Object.keys(submission.artifacts ?? {}).length > 0 ? {
+      blockers: ["Failed submissions cannot update versioned artifacts"]
+    } : { blockers: [] };
+  }
+  try {
+    return {
+      mutation: await prepareWorkflowArtifactMutation({
+        runRoot: prepared.location.runRoot,
+        protocol: prepared.verified.package.runtime.protocol,
+        state: prepared.verified.state,
+        nodeId: prepared.node,
+        actionId: prepared.pending.id,
+        ...submission.artifacts ? { artifacts: submission.artifacts } : {},
+        ...submission.artifactVersions ? { artifactVersions: submission.artifactVersions } : {}
+      }),
+      blockers: []
+    };
+  } catch (error) {
+    if (error instanceof WorkflowArtifactValidationError) {
+      return { blockers: boundBlockers(error.blockers) };
+    }
+    throw error;
+  }
+}
 function blockedContinuation(prepared, blockers) {
   return {
     disposition: "blocked",
@@ -6029,6 +6812,15 @@ function blockedContinuation(prepared, blockers) {
     visits: structuredClone(
       prepared.verified.state.workflowRuntime?.visits ?? []
     ),
+    artifactVersions: structuredClone(
+      prepared.verified.state.workflowRuntime?.artifactVersions ?? []
+    ),
+    artifactSelections: structuredClone(
+      prepared.verified.state.workflowRuntime?.artifactSelections ?? []
+    ),
+    currentArtifactVersions: currentWorkflowArtifactVersions(
+      prepared.verified.state.workflowRuntime
+    ),
     blockers: [...blockers]
   };
 }
@@ -6042,6 +6834,10 @@ async function validateWorkflowSubmission(target, submission) {
   const routeFindings = routeBlockers(prepared, submission);
   if (routeFindings.length > 0) {
     return blockedContinuation(prepared, routeFindings);
+  }
+  const artifact = await artifactMutationForSubmission(prepared, submission);
+  if (artifact.blockers.length > 0) {
+    return blockedContinuation(prepared, artifact.blockers);
   }
   return continuationFromVerifiedRun(prepared.verified);
 }
@@ -6072,6 +6868,11 @@ async function projectWorkflowHandoff(protocol, current) {
     decisionReceipts: structuredClone(current?.decisionReceipts ?? []),
     cycles: structuredClone(current?.cycles ?? []),
     visits: structuredClone(current?.visits ?? []),
+    artifactVersions: structuredClone(current?.artifactVersions ?? []),
+    artifactSelections: structuredClone(current?.artifactSelections ?? []),
+    currentArtifactVersions: structuredClone(
+      current?.currentArtifactVersions ?? {}
+    ),
     continuation: current ? structuredClone(current) : null
   };
 }
@@ -6164,7 +6965,9 @@ function createWorkflowRuntime() {
             currentCycle: null,
             cycles: [],
             visits: [],
-            decisionReceipts: []
+            decisionReceipts: [],
+            artifactVersions: [],
+            artifactSelections: []
           }
         } : {}
       });
@@ -6191,10 +6994,20 @@ function createWorkflowRuntime() {
       if (routeFindings.length > 0) {
         return blockedContinuation(prepared, routeFindings);
       }
-      const result = await prepared.location.resume({
-        resolver: resolverForPackage(),
-        outcome: engineOutcome(prepared, submission)
-      });
+      const artifact = await artifactMutationForSubmission(
+        prepared,
+        submission
+      );
+      if (artifact.blockers.length > 0) {
+        return blockedContinuation(prepared, artifact.blockers);
+      }
+      const result = await prepared.location.resume(
+        {
+          resolver: resolverForPackage(),
+          outcome: engineOutcome(prepared, submission, artifact.mutation)
+        },
+        artifact.mutation
+      );
       return continuation(result, prepared.verified.identity);
     },
     async recover(target, options = {}) {
