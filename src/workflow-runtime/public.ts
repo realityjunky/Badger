@@ -62,6 +62,22 @@ export type {
   WorkflowDurabilitySchemaVersions,
 } from "../types.js";
 
+export type {
+  WorkflowContentSnapshotCapture,
+  WorkflowContentSnapshotEntry,
+  WorkflowContentSnapshotLimits,
+  WorkflowContentSnapshotManifest,
+  WorkflowContentSnapshotOmission,
+  WorkflowContentSnapshotOmissionReason,
+  WorkflowContentSnapshotOmissionOverflow,
+  WorkflowContentSnapshotOrigin,
+  WorkflowContentSnapshotPolicy,
+  WorkflowContentSnapshotReference,
+  WorkflowContentSnapshotProvider,
+  WorkflowPhysicalSnapshotSelection,
+  WorkflowPhysicalSnapshotSelectionStream,
+} from "../types.js";
+
 export {
   WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
   WORKFLOW_DURABILITY_PROFILE_VERSION,

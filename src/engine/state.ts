@@ -30,6 +30,7 @@ import {
   parseWorkflowDurabilityProfile,
   WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
 } from "../workflow-runtime/durability.js";
+import { parseWorkflowContentSnapshotReference } from "../workflow-runtime/snapshots.js";
 
 export type StateDocument = Record<string, unknown>;
 
@@ -928,6 +929,7 @@ function parseWorkflowRuntime(
     "decisionReceipts",
     "artifactVersions",
     "artifactSelections",
+    "contentSnapshots",
   ]);
   const unknown = Object.keys(runtime).find((key) => !keys.has(key));
   if (unknown) {
@@ -1026,6 +1028,38 @@ function parseWorkflowRuntime(
               "Invalid Run state: WorkflowRuntime artifactSelections must be an array",
             );
           })();
+  const contentSnapshots =
+    runtime.contentSnapshots === undefined
+      ? undefined
+      : Array.isArray(runtime.contentSnapshots)
+        ? runtime.contentSnapshots.length > 64
+          ? (() => {
+              throw new Error(
+                "Invalid Run state: WorkflowRuntime contentSnapshots exceeds its bound",
+              );
+            })()
+          : runtime.contentSnapshots.map((snapshot, index) =>
+              parseWorkflowContentSnapshotReference(
+                snapshot,
+                `workflowRuntime.contentSnapshots[${index}]`,
+              ),
+            )
+        : (() => {
+            throw new Error(
+              "Invalid Run state: WorkflowRuntime contentSnapshots must be an array",
+            );
+          })();
+  if (contentSnapshots) {
+    const snapshotHashes = new Set<string>();
+    for (const snapshot of contentSnapshots) {
+      if (snapshotHashes.has(snapshot.hash)) {
+        throw new Error(
+          `Invalid Run state: duplicate WorkflowRuntime content snapshot ${snapshot.hash}`,
+        );
+      }
+      snapshotHashes.add(snapshot.hash);
+    }
+  }
   const artifactVersionIds = new Set<string>();
   for (const version of artifactVersions) {
     if (artifactVersionIds.has(version.id)) {
@@ -1174,6 +1208,7 @@ function parseWorkflowRuntime(
     decisionReceipts,
     artifactVersions,
     artifactSelections,
+    ...(contentSnapshots ? { contentSnapshots } : {}),
   };
 }
 

@@ -13,6 +13,7 @@ import type {
   WorkflowArtifactSelection,
   WorkflowArtifactVersionId,
   WorkflowArtifactVersion,
+  WorkflowContentSnapshotReference,
   WorkflowDecisionReceipt,
   WorkflowDecisionScopeSelection,
   WorkflowDecisionScopeSnapshot,
@@ -85,6 +86,7 @@ export interface WorkflowContinuation {
   visits: WorkflowVisitState[];
   artifactVersions: WorkflowArtifactVersion[];
   artifactSelections: WorkflowArtifactSelection[];
+  contentSnapshots: WorkflowContentSnapshotReference[];
   currentArtifactVersions: Record<
     WorkflowArtifactId,
     WorkflowArtifactVersionId
@@ -110,6 +112,7 @@ export interface WorkflowHandoff {
   visits: WorkflowVisitState[];
   artifactVersions: WorkflowArtifactVersion[];
   artifactSelections: WorkflowArtifactSelection[];
+  contentSnapshots: WorkflowContentSnapshotReference[];
   currentArtifactVersions: Record<
     WorkflowArtifactId,
     WorkflowArtifactVersionId
@@ -154,6 +157,7 @@ export interface WorkflowStateProjection {
     WorkflowArtifactId,
     WorkflowArtifactVersionId
   >;
+  contentSnapshots: WorkflowContentSnapshotReference[];
   blockers: string[];
   findings: WorkflowFinding[];
   findingSummary: WorkflowFindingSummary;
@@ -166,21 +170,25 @@ export type StartWorkflowRunOptions =
       location: ManualWorkflowRunLocation;
       runId?: string;
       confirmations?: Iterable<string>;
+      protectedSnapshotRoots?: readonly string[];
     }
   | {
       protocol: WorkflowProtocol;
       location: StandaloneWorkflowRunLocation;
       confirmations?: Iterable<string>;
+      protectedSnapshotRoots?: readonly string[];
     }
   | {
       protocol: WorkflowProtocol;
       runRoot: string;
       runId?: string;
       confirmations?: Iterable<string>;
+      protectedSnapshotRoots?: readonly string[];
     };
 
 export interface ResumeWorkflowRunOptions {
   confirmations?: Iterable<string>;
+  protectedSnapshotRoots?: readonly string[];
 }
 
 export type RecoverWorkflowRunOptions = ResumeWorkflowRunOptions;

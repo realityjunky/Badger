@@ -1,5 +1,5 @@
 // src/workflow-runtime/index.ts
-import path15 from "node:path";
+import path16 from "node:path";
 
 // src/engine/contained-atomic-write.ts
 import { randomUUID } from "crypto";
@@ -464,8 +464,8 @@ async function inspectExistingChain(lexicalRoot, realRoot, segments, options) {
   }
   return { exists: true, kind: "directory" };
 }
-async function inspectProtectedProjectPath(projectRoot, relativePath, options) {
-  const relative = normalizeWorkflowRelativePath(relativePath, options.label);
+async function inspectProtectedProjectPath(projectRoot, relativePath2, options) {
+  const relative = normalizeWorkflowRelativePath(relativePath2, options.label);
   const lexicalRoot = path3.resolve(projectRoot);
   const realRoot = await assertRealProjectRoot(lexicalRoot, options.label);
   const segments = relative.split("/");
@@ -487,8 +487,8 @@ async function inspectProtectedProjectPath(projectRoot, relativePath, options) {
     kind: result.kind
   };
 }
-async function ensureProtectedProjectDirectory(projectRoot, relativePath, options) {
-  const relative = normalizeWorkflowRelativePath(relativePath, options.label);
+async function ensureProtectedProjectDirectory(projectRoot, relativePath2, options) {
+  const relative = normalizeWorkflowRelativePath(relativePath2, options.label);
   const lexicalRoot = path3.resolve(projectRoot);
   const realRoot = await assertRealProjectRoot(lexicalRoot, options.label);
   const segments = relative.split("/");
@@ -530,10 +530,10 @@ async function ensureProtectedProjectDirectory(projectRoot, relativePath, option
   });
   return cursor;
 }
-async function readProtectedProjectFile(projectRoot, relativePath, maxBytes, options) {
+async function readProtectedProjectFile(projectRoot, relativePath2, maxBytes, options) {
   const inspection = await inspectProtectedProjectPath(
     projectRoot,
-    relativePath,
+    relativePath2,
     {
       label: options.label,
       expected: "file"
@@ -570,12 +570,12 @@ async function readProtectedProjectFile(projectRoot, relativePath, maxBytes, opt
 }
 
 // src/skill-runtime/snapshot.ts
-import { createHash as createHash2, randomUUID as randomUUID2 } from "crypto";
-import { promises as fs4 } from "fs";
-import path7 from "path";
+import { createHash as createHash3, randomUUID as randomUUID2 } from "crypto";
+import { promises as fs5 } from "fs";
+import path8 from "path";
 
 // src/skill-runtime/load.ts
-import path5 from "path";
+import path6 from "path";
 
 // src/util.ts
 import { createHash } from "node:crypto";
@@ -665,6 +665,10 @@ var WORKFLOW_FINDING_CODES = [
   "scope-invalid",
   "scope-unavailable",
   "skill-not-allowed",
+  "snapshot-incomplete",
+  "snapshot-storage-failed",
+  "snapshot-unsafe-scope",
+  "snapshot-unstable",
   "state-invalid",
   "tool-not-allowed",
   "unknown-current-step",
@@ -848,6 +852,42 @@ function createWorkflowFinding(input) {
     ...input.currentRevision !== void 0 ? { currentRevision: input.currentRevision } : {},
     ...input.currentActionId !== void 0 ? { currentActionId: input.currentActionId } : {}
   };
+}
+function snapshotIncompleteFinding(message, path17) {
+  return createWorkflowFinding({
+    code: "snapshot-incomplete",
+    severity: "error",
+    message,
+    ...path17 ? { path: path17 } : {},
+    requiredAction: "stop"
+  });
+}
+function snapshotStorageFailedFinding(message, path17) {
+  return createWorkflowFinding({
+    code: "snapshot-storage-failed",
+    severity: "error",
+    message,
+    ...path17 ? { path: path17 } : {},
+    requiredAction: "stop"
+  });
+}
+function snapshotUnsafeScopeFinding(message, path17) {
+  return createWorkflowFinding({
+    code: "snapshot-unsafe-scope",
+    severity: "error",
+    message,
+    ...path17 ? { path: path17 } : {},
+    requiredAction: "stop"
+  });
+}
+function snapshotUnstableFinding(message, path17) {
+  return createWorkflowFinding({
+    code: "snapshot-unstable",
+    severity: "error",
+    message,
+    ...path17 ? { path: path17 } : {},
+    requiredAction: "stop"
+  });
 }
 function parseWorkflowFinding(value) {
   if (!isRecord(value)) {
@@ -1599,21 +1639,21 @@ function recoveryRequiredFinding(currentRevision, currentActionId, recoveryPath 
     ...currentActionId === void 0 ? {} : { currentActionId }
   });
 }
-function checkpointInvalidFinding(message, path16, severity = "error") {
+function checkpointInvalidFinding(message, path17, severity = "error") {
   return createWorkflowFinding({
     code: "checkpoint-invalid",
     severity,
     message,
-    path: path16,
+    path: path17,
     requiredAction: severity === "warning" ? "none" : "stop"
   });
 }
-function checkpointHistoryAmbiguousFinding(message, path16) {
+function checkpointHistoryAmbiguousFinding(message, path17) {
   return createWorkflowFinding({
     code: "checkpoint-history-ambiguous",
     severity: "error",
     message,
-    path: path16,
+    path: path17,
     requiredAction: "stop"
   });
 }
@@ -1629,6 +1669,1800 @@ function legacyBlockersFromFindings(disposition, findings) {
   return disposition === "blocked" ? findings.map((finding) => finding.message) : [];
 }
 
+// src/workflow-runtime/snapshots.ts
+import { constants as fsConstants3, promises as fs4 } from "node:fs";
+import { createHash as createHash2 } from "node:crypto";
+import path5 from "node:path";
+
+// src/engine/protected-run-file.ts
+import { TextDecoder as TextDecoder2 } from "util";
+var MAX_ENGINE_RUN_FILE_BYTES = 16 * 1024 * 1024;
+function boundedMaxBytes(requested, fallback, label) {
+  const value = requested ?? fallback;
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_ENGINE_RUN_FILE_BYTES) {
+    throw new Error(`${label} size bound is invalid`);
+  }
+  return value;
+}
+function identityOf2(stat) {
+  return { dev: stat.dev, ino: stat.ino, birthtime: stat.birthtimeMs };
+}
+function decodeRunText(result, label) {
+  try {
+    return new TextDecoder2("utf-8", { fatal: true }).decode(result.bytes);
+  } catch (error) {
+    throw new Error(`${label} is not valid UTF-8`, { cause: error });
+  }
+}
+async function readSnapshot(changeDir, relativePath2, maxBytes, label, options = {}) {
+  const effectiveMaxBytes = boundedMaxBytes(options.maxBytes, maxBytes, label);
+  try {
+    const result = await readProtectedProjectFile(
+      changeDir,
+      relativePath2,
+      effectiveMaxBytes,
+      {
+        label,
+        hooks: options.hooks
+      }
+    );
+    return { result, text: decodeRunText(result, label) };
+  } catch (error) {
+    const code = error.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw error;
+  }
+}
+async function readOptionalEngineRunText(changeDir, relativePath2, maxBytes, label, options = {}) {
+  if (options.overlay) {
+    return options.overlay.read(
+      relativePath2,
+      options.maxBytes ?? maxBytes,
+      label
+    );
+  }
+  return (await readSnapshot(changeDir, relativePath2, maxBytes, label, options))?.text ?? null;
+}
+async function writeEngineRunText(changeDir, relativePath2, content, maxBytes, label, options = {}) {
+  const effectiveMaxBytes = boundedMaxBytes(options.maxBytes, maxBytes, label);
+  if (Buffer.byteLength(content, "utf8") > effectiveMaxBytes) {
+    throw new Error(`${label} exceeds ${effectiveMaxBytes} bytes`);
+  }
+  if (options.overlay) {
+    await options.overlay.write(
+      relativePath2,
+      content,
+      effectiveMaxBytes,
+      label
+    );
+    return;
+  }
+  const expected = await readSnapshot(
+    changeDir,
+    relativePath2,
+    effectiveMaxBytes,
+    label,
+    options
+  );
+  const inspection = await inspectProtectedProjectPath(
+    changeDir,
+    relativePath2,
+    {
+      label,
+      expected: "file"
+    }
+  );
+  await atomicWriteContainedText(inspection.target, content, {
+    containedRoot: inspection.projectRoot,
+    exclusive: options.exclusive,
+    beforeCommit: async () => {
+      await options.beforeCommit?.();
+      const current = await readSnapshot(
+        changeDir,
+        relativePath2,
+        effectiveMaxBytes,
+        label
+      );
+      if (!expected && !current) return;
+      if (!expected || !current) {
+        const error = new Error(
+          `${label} changed before commit`
+        );
+        if (options.exclusive && !expected && current) error.code = "EEXIST";
+        throw error;
+      }
+      if (expected.result.realPath !== current.result.realPath || !sameFileObject(
+        identityOf2(expected.result.stat),
+        identityOf2(current.result.stat)
+      ) || expected.text !== current.text) {
+        throw new Error(`${label} changed before commit`);
+      }
+    }
+  });
+}
+async function appendEngineRunText(changeDir, relativePath2, addition, maxBytes, label, options = {}) {
+  const existing = await readOptionalEngineRunText(
+    changeDir,
+    relativePath2,
+    maxBytes,
+    label,
+    options
+  );
+  await writeEngineRunText(
+    changeDir,
+    relativePath2,
+    `${existing ?? ""}${addition}`,
+    maxBytes,
+    label,
+    options
+  );
+}
+async function removeEngineRunFile(changeDir, relativePath2, label, options = {}) {
+  if (options.overlay) {
+    return options.overlay.remove(relativePath2, label);
+  }
+  const inspection = await inspectProtectedProjectPath(
+    changeDir,
+    relativePath2,
+    {
+      label,
+      expected: "file"
+    }
+  );
+  if (!inspection.exists) return false;
+  return removeContainedFile(inspection.target, {
+    containedRoot: inspection.projectRoot,
+    beforeRemove: options.beforeRemove
+  });
+}
+
+// src/workflow-runtime/snapshots.ts
+var WORKFLOW_CONTENT_SNAPSHOT_DIRECTORY = ".comet/content-snapshots";
+var WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION = 1;
+var WORKFLOW_CONTENT_SNAPSHOT_POLICY_SCHEMA_VERSION = 1;
+var WORKFLOW_CONTENT_SNAPSHOT_SELECTION_SCHEMA_VERSION = 1;
+var WORKFLOW_CONTENT_SNAPSHOT_DEFAULT_LIMITS = {
+  maxFiles: 1e4,
+  maxFileBytes: 5 * 1024 * 1024,
+  maxTotalBytes: 64 * 1024 * 1024,
+  maxManifestBytes: 1024 * 1024,
+  maxVisitedNodes: 2e4,
+  maxDurationMs: 6e4,
+  maxOmissionEntries: 1e3
+};
+var WORKFLOW_CONTENT_SNAPSHOT_HASH_TAG = "workflow-content-snapshot.v1";
+var WORKFLOW_CONTENT_SNAPSHOT_POLICY_HASH_TAG = "workflow-content-snapshot-policy.v1";
+var MAX_SNAPSHOT_PATH_BYTES = 64 * 1024;
+var MAX_SELECTION_BYTES = 8 * 1024 * 1024;
+var MAX_SNAPSHOT_FILE_BYTES = 256 * 1024 * 1024;
+var MAX_SNAPSHOT_TOTAL_BYTES = 1024 * 1024 * 1024;
+var MAX_SNAPSHOT_MANIFEST_BYTES = 16 * 1024 * 1024;
+var MAX_SNAPSHOT_VISITED_NODES = 1e6;
+var MAX_SNAPSHOT_DURATION_MS = 24 * 60 * 60 * 1e3;
+var MAX_SNAPSHOT_OMISSION_ENTRIES = 1e4;
+var MIN_SNAPSHOT_OMISSION_ENTRIES = 2;
+var HASH_PATTERN = /^[a-f0-9]{64}$/u;
+var ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+var SNAPSHOT_POLICY_KEYS = /* @__PURE__ */ new Set([
+  "schemaVersion",
+  "provider",
+  "include",
+  "exclude",
+  "limits",
+  "hash"
+]);
+var SNAPSHOT_LIMIT_KEYS = /* @__PURE__ */ new Set([
+  "maxFiles",
+  "maxFileBytes",
+  "maxTotalBytes",
+  "maxManifestBytes",
+  "maxVisitedNodes",
+  "maxDurationMs",
+  "maxOmissionEntries"
+]);
+var SNAPSHOT_MANIFEST_KEYS = /* @__PURE__ */ new Set([
+  "schemaVersion",
+  "kind",
+  "origin",
+  "capture",
+  "createdAt",
+  "complete",
+  "policy",
+  "limits",
+  "entries",
+  "omitted",
+  "omittedCount",
+  "omissionOverflow"
+]);
+var SNAPSHOT_CAPTURE_KEYS = /* @__PURE__ */ new Set(["provider", "physicalSelection"]);
+var SNAPSHOT_SELECTION_KEYS = /* @__PURE__ */ new Set([
+  "schemaVersion",
+  "status",
+  "before",
+  "after"
+]);
+var SNAPSHOT_SELECTION_STREAM_KEYS = /* @__PURE__ */ new Set([
+  "hash",
+  "visitedNodeCount",
+  "recordCount",
+  "storedRecordCount",
+  "encodedBytes",
+  "overflow",
+  "unstable"
+]);
+var SNAPSHOT_ENTRY_KEYS = /* @__PURE__ */ new Set(["path", "hash", "size", "type"]);
+var SNAPSHOT_OMISSION_KEYS = /* @__PURE__ */ new Set(["path", "size", "type", "reason"]);
+var SNAPSHOT_OVERFLOW_KEYS = /* @__PURE__ */ new Set(["ref", "hash", "count"]);
+var PROVIDER = "physical-tree";
+var DEFAULT_PROTECTED_SNAPSHOT_ROOTS = [".comet"];
+var INTEGRITY_OMISSION_REASONS = /* @__PURE__ */ new Set([
+  "physical-enumeration-limit",
+  "physical-selection-changed"
+]);
+var WorkflowContentSnapshotError = class extends Error {
+  finding;
+  constructor(finding, options) {
+    super(finding.message, options);
+    this.name = "WorkflowContentSnapshotError";
+    this.finding = finding;
+  }
+};
+function isRecord2(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function assertKnownFields(value, keys, label) {
+  const unknown = Object.keys(value).find((key) => !keys.has(key));
+  if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
+}
+function positiveBound(value, key) {
+  const hardMax = key === "maxFiles" ? MAX_SNAPSHOT_VISITED_NODES : key === "maxFileBytes" ? MAX_SNAPSHOT_FILE_BYTES : key === "maxTotalBytes" ? MAX_SNAPSHOT_TOTAL_BYTES : key === "maxManifestBytes" ? MAX_SNAPSHOT_MANIFEST_BYTES : key === "maxVisitedNodes" ? MAX_SNAPSHOT_VISITED_NODES : key === "maxDurationMs" ? MAX_SNAPSHOT_DURATION_MS : MAX_SNAPSHOT_OMISSION_ENTRIES;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > hardMax) {
+    throw new Error(
+      `Invalid Workflow content snapshot limits: ${key} must be a positive bounded integer`
+    );
+  }
+  if (key === "maxOmissionEntries" && value < MIN_SNAPSHOT_OMISSION_ENTRIES) {
+    throw new Error(
+      "Invalid Workflow content snapshot limits: maxOmissionEntries must reserve two integrity entries"
+    );
+  }
+  return value;
+}
+function normalizeSnapshotPattern(value, label) {
+  if (typeof value !== "string" || value.length === 0 || Buffer.byteLength(value, "utf8") > 512 || value.includes("\\") || value.includes("\0") || path5.posix.isAbsolute(value) || path5.win32.isAbsolute(value) || value.startsWith("~")) {
+    throw new Error(`${label} must be a bounded relative pattern`);
+  }
+  const segments = value.split("/");
+  if (segments.some(
+    (segment) => segment.length === 0 || segment === "." || segment === ".."
+  )) {
+    throw new Error(`${label} must not contain empty or traversal segments`);
+  }
+  if ([...value].filter((character) => character === "*" || character === "?").length > 64) {
+    throw new Error(`${label} contains too many wildcards`);
+  }
+  return value;
+}
+function epsilonClosure(tokens, positions, checkpoint) {
+  const closure = new Set(positions);
+  const pending = [...positions];
+  while (pending.length > 0) {
+    if (checkpoint && !checkpoint()) return null;
+    const position = pending.pop();
+    const token = tokens[position];
+    if (token && (token.kind === "star" || token.kind === "globstar" || token.kind === "globstar-slash") && !closure.has(position + 1)) {
+      closure.add(position + 1);
+      pending.push(position + 1);
+    }
+  }
+  return closure;
+}
+function cooperativePatternCheckpoint(hasBudget) {
+  let operationsUntilCheck = 0;
+  return () => {
+    if (operationsUntilCheck > 0) {
+      operationsUntilCheck -= 1;
+      return true;
+    }
+    if (!hasBudget()) return false;
+    operationsUntilCheck = 63;
+    return true;
+  };
+}
+function patternTokens(normalized) {
+  const tokens = [];
+  for (let index = 0; index < normalized.length; index += 1) {
+    const character = normalized[index];
+    if (character === "*" && normalized[index + 1] === "*") {
+      index += 1;
+      if (normalized[index + 1] === "/") {
+        index += 1;
+        tokens.push({ kind: "globstar-slash" });
+      } else {
+        tokens.push({ kind: "globstar" });
+      }
+    } else if (character === "*") {
+      tokens.push({ kind: "star" });
+    } else if (character === "?") {
+      tokens.push({ kind: "question" });
+    } else {
+      tokens.push({ kind: "literal", value: character });
+    }
+  }
+  return tokens;
+}
+function advancePattern(tokens, positions, character) {
+  const next = /* @__PURE__ */ new Set();
+  for (const position of positions) {
+    const token = tokens[position];
+    if (!token) continue;
+    if (token.kind === "literal" && token.value === character) {
+      next.add(position + 1);
+    } else if (token.kind === "question" && character !== "/") {
+      next.add(position + 1);
+    } else if (token.kind === "star" && character !== "/") {
+      next.add(position);
+    } else if (token.kind === "globstar") {
+      next.add(position);
+    } else if (token.kind === "globstar-slash") {
+      next.add(position);
+      if (character === "/") next.add(position + 1);
+    }
+  }
+  return epsilonClosure(tokens, next);
+}
+function compileWorkflowContentSnapshotPattern(pattern) {
+  const normalized = normalizeSnapshotPattern(
+    pattern,
+    "Workflow content snapshot pattern"
+  );
+  const tokens = patternTokens(normalized);
+  return (relative, hasBudget) => {
+    const checkpoint = hasBudget ? cooperativePatternCheckpoint(hasBudget) : void 0;
+    if (checkpoint && !checkpoint()) return false;
+    let positions = epsilonClosure(tokens, /* @__PURE__ */ new Set([0]), checkpoint);
+    if (positions === null) return false;
+    for (const character of relative) {
+      if (checkpoint && !checkpoint()) return false;
+      positions = advancePattern(tokens, positions, character);
+      if (positions === null || positions.size === 0) return false;
+    }
+    return epsilonClosure(tokens, positions, checkpoint)?.has(tokens.length) ?? false;
+  };
+}
+function canonicalJson(value) {
+  return `${JSON.stringify(stableValue(value), null, 2)}
+`;
+}
+function canonicalHash(value, tag) {
+  return sha256(`${tag}
+${JSON.stringify(stableValue(value))}`);
+}
+function policyHashValue(policy) {
+  return canonicalHash(policy, WORKFLOW_CONTENT_SNAPSHOT_POLICY_HASH_TAG);
+}
+function normalizedLimits(limits) {
+  if (limits !== void 0) {
+    if (!isRecord2(limits)) {
+      throw new Error("Workflow content snapshot limits must be an object");
+    }
+    assertKnownFields(
+      limits,
+      SNAPSHOT_LIMIT_KEYS,
+      "Workflow content snapshot limits"
+    );
+  }
+  const value = {
+    ...WORKFLOW_CONTENT_SNAPSHOT_DEFAULT_LIMITS,
+    ...limits ?? {}
+  };
+  return {
+    maxFiles: positiveBound(value.maxFiles, "maxFiles"),
+    maxFileBytes: positiveBound(value.maxFileBytes, "maxFileBytes"),
+    maxTotalBytes: positiveBound(value.maxTotalBytes, "maxTotalBytes"),
+    maxManifestBytes: positiveBound(value.maxManifestBytes, "maxManifestBytes"),
+    maxVisitedNodes: positiveBound(value.maxVisitedNodes, "maxVisitedNodes"),
+    maxDurationMs: positiveBound(value.maxDurationMs, "maxDurationMs"),
+    maxOmissionEntries: positiveBound(
+      value.maxOmissionEntries,
+      "maxOmissionEntries"
+    )
+  };
+}
+function normalizedPatterns(values, label) {
+  return [
+    ...new Set(values.map((value) => normalizeSnapshotPattern(value, label)))
+  ].sort((left, right) => left.localeCompare(right, "en"));
+}
+function createWorkflowContentSnapshotPolicy(input) {
+  if (!isRecord2(input)) {
+    throw new Error("Workflow content snapshot policy must be an object");
+  }
+  assertKnownFields(
+    input,
+    /* @__PURE__ */ new Set(["provider", "include", "exclude", "limits", "hash"]),
+    "Workflow content snapshot policy"
+  );
+  const provider = input.provider ?? PROVIDER;
+  if (provider !== PROVIDER) {
+    throw new Error(
+      `Unsupported Workflow content snapshot provider: ${provider}`
+    );
+  }
+  const include = normalizedPatterns(
+    input.include,
+    "Workflow snapshot include"
+  );
+  if (include.length === 0) {
+    throw new Error("Workflow snapshot include must not be empty");
+  }
+  const exclude = normalizedPatterns(
+    input.exclude ?? [],
+    "Workflow snapshot exclude"
+  );
+  const policyWithoutHash = {
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_POLICY_SCHEMA_VERSION,
+    provider,
+    include,
+    exclude,
+    limits: normalizedLimits(input.limits)
+  };
+  const hash4 = policyHashValue(policyWithoutHash);
+  if (input.hash !== void 0 && input.hash !== hash4) {
+    throw new Error("Workflow content snapshot policy hash is invalid");
+  }
+  return { ...policyWithoutHash, hash: hash4 };
+}
+function parseWorkflowContentSnapshotPolicy(value) {
+  if (!isRecord2(value)) {
+    throw new Error(
+      "Invalid Workflow content snapshot policy: must be an object"
+    );
+  }
+  assertKnownFields(
+    value,
+    SNAPSHOT_POLICY_KEYS,
+    "Workflow content snapshot policy"
+  );
+  if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_POLICY_SCHEMA_VERSION) {
+    throw new Error("Unsupported Workflow content snapshot policy schema");
+  }
+  if (value.provider !== PROVIDER) {
+    throw new Error("Unsupported Workflow content snapshot provider");
+  }
+  if (!Array.isArray(value.include) || !Array.isArray(value.exclude)) {
+    throw new Error("Workflow content snapshot policy patterns must be arrays");
+  }
+  if (!isRecord2(value.limits)) {
+    throw new Error(
+      "Workflow content snapshot policy limits must be an object"
+    );
+  }
+  assertKnownFields(
+    value.limits,
+    SNAPSHOT_LIMIT_KEYS,
+    "Workflow content snapshot limits"
+  );
+  const policy = createWorkflowContentSnapshotPolicy({
+    provider: PROVIDER,
+    include: value.include,
+    exclude: value.exclude,
+    limits: value.limits,
+    hash: typeof value.hash === "string" ? value.hash : void 0
+  });
+  if (typeof value.hash !== "string" || !HASH_PATTERN.test(value.hash)) {
+    throw new Error("Workflow content snapshot policy hash is invalid");
+  }
+  return policy;
+}
+function resolveSnapshotPolicy(value) {
+  const policy = "hash" in value && value.hash !== void 0 ? parseWorkflowContentSnapshotPolicy(value) : createWorkflowContentSnapshotPolicy(value);
+  return {
+    policy,
+    includeMatchers: policy.include.map(compileWorkflowContentSnapshotPattern),
+    excludeMatchers: policy.exclude.map(compileWorkflowContentSnapshotPattern),
+    excludedDirectoryPrefixes: policy.exclude.flatMap((pattern) => {
+      if (!pattern.endsWith("/**")) return [];
+      const prefix = pattern.slice(0, -3);
+      return /[*?]/u.test(prefix) ? [] : [prefix];
+    }).sort((left, right) => left.localeCompare(right, "en"))
+  };
+}
+function isIncluded(policy, relative, execution) {
+  const hasBudget = execution ? () => hasExecutionBudget(execution) : void 0;
+  if (!policy.includeMatchers.some((matcher) => matcher(relative, hasBudget))) {
+    return false;
+  }
+  return !policy.excludeMatchers.some(
+    (matcher) => matcher(relative, hasBudget)
+  );
+}
+function excludesDirectory(policy, relative) {
+  return policy.excludedDirectoryPrefixes.includes(relative) || policy.excludeMatchers.some((matcher) => matcher(relative));
+}
+function isInside3(root, target) {
+  const relative = path5.relative(path5.resolve(root), path5.resolve(target));
+  return relative === "" || !path5.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path5.sep}`);
+}
+function portableRelative(root, target) {
+  return path5.relative(root, target).split(path5.sep).join("/");
+}
+function relativePath(value, label, allowRoot = false) {
+  if (typeof value !== "string" || value.length === 0 || Buffer.byteLength(value, "utf8") > MAX_SNAPSHOT_PATH_BYTES || value.includes("\\") || value.includes("\0") || path5.posix.isAbsolute(value) || path5.win32.isAbsolute(value) || value.startsWith("~")) {
+    throw new Error(`${label} must be a safe relative path`);
+  }
+  if (allowRoot && value === ".") return value;
+  const segments = value.split("/");
+  if (segments.some(
+    (segment) => segment.length === 0 || segment === "." || segment === ".."
+  )) {
+    throw new Error(`${label} must be a normalized relative path`);
+  }
+  return value;
+}
+function hashValue(value, label) {
+  if (typeof value !== "string" || !HASH_PATTERN.test(value)) {
+    throw new Error(`${label} must be a SHA-256 hash`);
+  }
+  return value;
+}
+function nonNegativeInteger(value, label) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return value;
+}
+function parseSelectionStream(value, label) {
+  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(value, SNAPSHOT_SELECTION_STREAM_KEYS, label);
+  const recordCount = nonNegativeInteger(
+    value.recordCount,
+    `${label}.recordCount`
+  );
+  const storedRecordCount = nonNegativeInteger(
+    value.storedRecordCount,
+    `${label}.storedRecordCount`
+  );
+  const stream = {
+    hash: hashValue(value.hash, `${label}.hash`),
+    visitedNodeCount: nonNegativeInteger(
+      value.visitedNodeCount,
+      `${label}.visitedNodeCount`
+    ),
+    recordCount,
+    storedRecordCount,
+    encodedBytes: nonNegativeInteger(
+      value.encodedBytes,
+      `${label}.encodedBytes`
+    ),
+    overflow: value.overflow,
+    unstable: value.unstable
+  };
+  if (typeof stream.overflow !== "boolean" || typeof stream.unstable !== "boolean") {
+    throw new Error(`${label} flags are invalid`);
+  }
+  if (storedRecordCount > recordCount || !stream.overflow && storedRecordCount !== recordCount) {
+    throw new Error(`${label} record counts are inconsistent`);
+  }
+  return {
+    ...stream,
+    overflow: stream.overflow,
+    unstable: stream.unstable
+  };
+}
+function sameSelectionStream(left, right) {
+  return left.hash === right.hash && left.visitedNodeCount === right.visitedNodeCount && left.recordCount === right.recordCount && left.storedRecordCount === right.storedRecordCount && left.encodedBytes === right.encodedBytes && left.overflow === right.overflow && left.unstable === right.unstable;
+}
+function parsePhysicalSelection(value) {
+  if (!isRecord2(value)) {
+    throw new Error("Workflow physical snapshot selection must be an object");
+  }
+  assertKnownFields(
+    value,
+    SNAPSHOT_SELECTION_KEYS,
+    "Workflow physical snapshot selection"
+  );
+  if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_SELECTION_SCHEMA_VERSION) {
+    throw new Error("Unsupported Workflow physical snapshot selection schema");
+  }
+  if (value.status !== "overflow" && value.status !== "changed" && value.status !== "overflow-and-changed") {
+    throw new Error("Workflow physical snapshot selection status is invalid");
+  }
+  const before = parseSelectionStream(
+    value.before,
+    "Workflow physical snapshot selection before"
+  );
+  const after = parseSelectionStream(
+    value.after,
+    "Workflow physical snapshot selection after"
+  );
+  const hasOverflow = before.overflow || after.overflow;
+  const changed = before.unstable || after.unstable || !sameSelectionStream(before, after);
+  const expectedStatus = hasOverflow && changed ? "overflow-and-changed" : hasOverflow ? "overflow" : "changed";
+  if (value.status !== expectedStatus) {
+    throw new Error(
+      "Workflow physical snapshot selection status is inconsistent"
+    );
+  }
+  return {
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SELECTION_SCHEMA_VERSION,
+    status: expectedStatus,
+    before,
+    after
+  };
+}
+function parseEntry(value, index) {
+  const label = `Workflow content snapshot entry ${index}`;
+  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(value, SNAPSHOT_ENTRY_KEYS, label);
+  const entryPath = relativePath(value.path, `${label}.path`);
+  if (value.type !== "file") throw new Error(`${label}.type is invalid`);
+  return {
+    path: entryPath,
+    hash: hashValue(value.hash, `${label}.hash`),
+    size: nonNegativeInteger(value.size, `${label}.size`),
+    type: "file"
+  };
+}
+var OMISSION_REASONS = /* @__PURE__ */ new Set([
+  "file-size",
+  "file-count",
+  "total-size",
+  "manifest-size",
+  "changed-during-read",
+  "unreadable",
+  "non-regular",
+  "duration",
+  "physical-enumeration-limit",
+  "physical-selection-changed"
+]);
+function parseOmission(value, index) {
+  const label = `Workflow content snapshot omission ${index}`;
+  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(value, SNAPSHOT_OMISSION_KEYS, label);
+  if (value.type !== "file" && value.type !== "directory" && value.type !== "other" || typeof value.reason !== "string" || !OMISSION_REASONS.has(
+    value.reason
+  )) {
+    throw new Error(`${label} fields are invalid`);
+  }
+  return {
+    path: relativePath(value.path, `${label}.path`, true),
+    size: value.size === null ? null : nonNegativeInteger(value.size, `${label}.size`),
+    type: value.type,
+    reason: value.reason
+  };
+}
+function parseOverflow(value) {
+  const label = "Workflow content snapshot omission overflow";
+  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(value, SNAPSHOT_OVERFLOW_KEYS, label);
+  const hash4 = hashValue(value.hash, `${label}.hash`);
+  if (value.ref !== `workflow-snapshot://omitted-overflow/${hash4}`) {
+    throw new Error(`${label}.ref is invalid`);
+  }
+  const count = nonNegativeInteger(value.count, `${label}.count`);
+  if (count < 1) throw new Error(`${label}.count must be positive`);
+  return {
+    ref: value.ref,
+    hash: hash4,
+    count
+  };
+}
+function sameLimits(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+}
+function parseWorkflowContentSnapshotManifest(value) {
+  const label = "Workflow content snapshot manifest";
+  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(value, SNAPSHOT_MANIFEST_KEYS, label);
+  if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION || value.kind !== "workflow-content-snapshot" || value.origin !== "explicit") {
+    throw new Error(`${label} schema identity is invalid`);
+  }
+  if (!isRecord2(value.capture))
+    throw new Error(`${label}.capture must be an object`);
+  assertKnownFields(value.capture, SNAPSHOT_CAPTURE_KEYS, `${label}.capture`);
+  if (value.capture.provider !== PROVIDER) {
+    throw new Error(`${label}.capture.provider is invalid`);
+  }
+  const physicalSelection = value.capture.physicalSelection === void 0 ? void 0 : parsePhysicalSelection(value.capture.physicalSelection);
+  if (typeof value.createdAt !== "string" || !ISO_TIMESTAMP_PATTERN.test(value.createdAt) || Number.isNaN(Date.parse(value.createdAt))) {
+    throw new Error(`${label}.createdAt is invalid`);
+  }
+  if (typeof value.complete !== "boolean") {
+    throw new Error(`${label}.complete is invalid`);
+  }
+  const policy = parseWorkflowContentSnapshotPolicy(value.policy);
+  if (!isRecord2(value.limits))
+    throw new Error(`${label}.limits must be an object`);
+  assertKnownFields(value.limits, SNAPSHOT_LIMIT_KEYS, `${label}.limits`);
+  const limits = normalizedLimits(
+    value.limits
+  );
+  if (!sameLimits(limits, policy.limits)) {
+    throw new Error(`${label}.limits does not match policy`);
+  }
+  if (!Array.isArray(value.entries) || !Array.isArray(value.omitted)) {
+    throw new Error(`${label}.entries and omissions must be arrays`);
+  }
+  const entries = value.entries.map(parseEntry);
+  const omitted = value.omitted.map(parseOmission);
+  const omissionKeys = /* @__PURE__ */ new Set();
+  for (const omission of omitted) {
+    const key = snapshotIdentityOmissionKey(omission);
+    if (omissionKeys.has(key)) {
+      throw new Error(`${label}.omitted contains duplicate entries`);
+    }
+    omissionKeys.add(key);
+  }
+  if (entries.some(
+    (entry, index) => index > 0 && entries[index - 1].path.localeCompare(entry.path, "en") >= 0
+  ) || new Set(entries.map((entry) => entry.path)).size !== entries.length) {
+    throw new Error(`${label}.entries are not canonical`);
+  }
+  if (omitted.some(
+    (omission, index) => index > 0 && `${omitted[index - 1].path}\0${omitted[index - 1].reason}`.localeCompare(
+      `${omission.path}\0${omission.reason}`,
+      "en"
+    ) > 0
+  )) {
+    throw new Error(`${label}.omitted is not canonical`);
+  }
+  const omittedCount = nonNegativeInteger(
+    value.omittedCount,
+    `${label}.omittedCount`
+  );
+  const omissionOverflow = value.omissionOverflow === void 0 ? void 0 : parseOverflow(value.omissionOverflow);
+  const overflowCount = omittedCount - omitted.length;
+  if (omitted.length > limits.maxOmissionEntries || overflowCount < 0 || overflowCount === 0 && omissionOverflow !== void 0 || overflowCount > 0 && omissionOverflow?.count !== overflowCount) {
+    throw new Error(`${label}.omissionOverflow is inconsistent`);
+  }
+  if (entries.length > limits.maxFiles) {
+    throw new Error(`${label} exceeds its file-count limit`);
+  }
+  if (entries.some((entry) => entry.size > limits.maxFileBytes) || entries.reduce((total, entry) => total + entry.size, 0) > limits.maxTotalBytes) {
+    throw new Error(`${label} exceeds its byte limits`);
+  }
+  if (value.complete !== (omittedCount === 0)) {
+    throw new Error(`${label}.complete is inconsistent`);
+  }
+  const physicalEnumerationOmission = omitted.filter(
+    (omission) => omission.reason === "physical-enumeration-limit"
+  );
+  const physicalChangedOmission = omitted.filter(
+    (omission) => omission.reason === "physical-selection-changed"
+  );
+  for (const omission of [
+    ...physicalEnumerationOmission,
+    ...physicalChangedOmission
+  ]) {
+    if (omission.path !== "." || omission.type !== "directory" || omission.size !== null) {
+      throw new Error(`${label} physical selection omissions are invalid`);
+    }
+  }
+  if (physicalEnumerationOmission.length > 1 || physicalChangedOmission.length > 1) {
+    throw new Error(`${label} physical selection omissions are duplicated`);
+  }
+  if (physicalSelection === void 0 && (physicalEnumerationOmission.length > 0 || physicalChangedOmission.length > 0)) {
+    throw new Error(`${label} physical selection evidence is missing`);
+  }
+  if (physicalSelection !== void 0) {
+    const hasOverflow = physicalSelection.status === "overflow" || physicalSelection.status === "overflow-and-changed";
+    const hasChanged = physicalSelection.status === "changed" || physicalSelection.status === "overflow-and-changed";
+    if (hasOverflow !== (physicalEnumerationOmission.length === 1) || hasChanged !== (physicalChangedOmission.length === 1)) {
+      throw new Error(`${label} physical selection evidence is inconsistent`);
+    }
+  }
+  if (Buffer.byteLength(
+    canonicalJson({
+      schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION,
+      kind: "workflow-content-snapshot",
+      origin: "explicit",
+      capture: {
+        provider: PROVIDER,
+        ...physicalSelection ? { physicalSelection } : {}
+      },
+      createdAt: value.createdAt,
+      complete: value.complete,
+      policy,
+      limits,
+      entries,
+      omitted,
+      omittedCount,
+      ...omissionOverflow ? { omissionOverflow } : {}
+    }),
+    "utf8"
+  ) > limits.maxManifestBytes) {
+    throw new Error(`${label} exceeds its manifest byte limit`);
+  }
+  return {
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION,
+    kind: "workflow-content-snapshot",
+    origin: "explicit",
+    capture: {
+      provider: PROVIDER,
+      ...physicalSelection ? { physicalSelection } : {}
+    },
+    createdAt: value.createdAt,
+    complete: value.complete,
+    policy,
+    limits,
+    entries,
+    omitted,
+    omittedCount,
+    ...omissionOverflow ? { omissionOverflow } : {}
+  };
+}
+function snapshotIdentityProjection(manifest) {
+  return {
+    schemaVersion: manifest.schemaVersion,
+    kind: manifest.kind,
+    origin: manifest.origin,
+    capture: manifest.capture,
+    complete: manifest.complete,
+    policy: manifest.policy,
+    limits: manifest.limits,
+    entries: manifest.entries,
+    omitted: manifest.omitted,
+    omittedCount: manifest.omittedCount,
+    ...manifest.omissionOverflow ? { omissionOverflow: manifest.omissionOverflow } : {}
+  };
+}
+function hashWorkflowContentSnapshot(value) {
+  const manifest = parseWorkflowContentSnapshotManifest(value);
+  return canonicalHash(
+    snapshotIdentityProjection(manifest),
+    WORKFLOW_CONTENT_SNAPSHOT_HASH_TAG
+  );
+}
+function snapshotPathForHash(hash4) {
+  return `${WORKFLOW_CONTENT_SNAPSHOT_DIRECTORY}/${hash4}.json`;
+}
+function parseWorkflowContentSnapshotReference(value, label = "Workflow content snapshot reference") {
+  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(
+    value,
+    /* @__PURE__ */ new Set(["schemaVersion", "kind", "hash", "path", "provider", "complete"]),
+    label
+  );
+  const hash4 = hashValue(value.hash, `${label}.hash`);
+  if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION || value.kind !== "workflow-content-snapshot-reference" || value.path !== snapshotPathForHash(hash4) || value.provider !== PROVIDER || typeof value.complete !== "boolean") {
+    throw new Error(`${label} identity is invalid`);
+  }
+  return {
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION,
+    kind: "workflow-content-snapshot-reference",
+    hash: hash4,
+    path: snapshotPathForHash(hash4),
+    provider: PROVIDER,
+    complete: value.complete
+  };
+}
+function referenceFor(manifest) {
+  const hash4 = hashWorkflowContentSnapshot(manifest);
+  return {
+    schemaVersion: 1,
+    kind: "workflow-content-snapshot-reference",
+    hash: hash4,
+    path: snapshotPathForHash(hash4),
+    provider: manifest.capture.provider,
+    complete: manifest.complete
+  };
+}
+function createExecution(limits) {
+  return { deadlineAt: Date.now() + limits.maxDurationMs, expired: false };
+}
+function hasExecutionBudget(execution) {
+  if (execution.expired) return false;
+  if (Date.now() < execution.deadlineAt) return true;
+  execution.expired = true;
+  return false;
+}
+function fileIdentity(stat) {
+  return { dev: stat.dev, ino: stat.ino, birthtime: stat.birthtimeMs };
+}
+function sameStat(left, right) {
+  const leftIdentity = fileIdentity(left);
+  const rightIdentity = fileIdentity(right);
+  const sameObject = hasComparableFileObject(leftIdentity, rightIdentity) ? sameFileObject(leftIdentity, rightIdentity) : sameFileObject(leftIdentity, rightIdentity) && left.birthtimeMs === right.birthtimeMs && left.ctimeMs === right.ctimeMs && left.size === right.size;
+  return sameObject && left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
+}
+function isUnreadable(error) {
+  return ["EACCES", "EPERM"].includes(
+    error?.code ?? ""
+  );
+}
+function isMissing(error) {
+  return ["ENOENT", "ENOTDIR"].includes(
+    error?.code ?? ""
+  );
+}
+function isScopePath(protectedRoot, target) {
+  return isInside3(protectedRoot.lexicalPath, target) || protectedRoot.realPath !== null && isInside3(protectedRoot.realPath, target);
+}
+async function resolveRoot(root) {
+  if (typeof root !== "string" || root.length === 0) {
+    throw new WorkflowContentSnapshotError(
+      snapshotUnsafeScopeFinding("Workflow content snapshot root is invalid")
+    );
+  }
+  const lexical = path5.resolve(root);
+  let stat;
+  try {
+    stat = await fs4.lstat(lexical);
+  } catch (error) {
+    throw new WorkflowContentSnapshotError(
+      snapshotUnsafeScopeFinding(
+        "Workflow content snapshot root is unavailable"
+      ),
+      { cause: error }
+    );
+  }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new WorkflowContentSnapshotError(
+      snapshotUnsafeScopeFinding(
+        "Workflow content snapshot root must be a real directory"
+      )
+    );
+  }
+  let real;
+  try {
+    real = await fs4.realpath(lexical);
+  } catch (error) {
+    throw new WorkflowContentSnapshotError(
+      snapshotUnsafeScopeFinding(
+        "Workflow content snapshot root cannot be resolved"
+      ),
+      { cause: error }
+    );
+  }
+  return { lexical, real };
+}
+async function resolveProtectedRoots(root, values) {
+  const result = [];
+  for (const value of values) {
+    if (typeof value !== "string" || value.length === 0) {
+      throw new WorkflowContentSnapshotError(
+        snapshotUnsafeScopeFinding(
+          "Workflow content snapshot exclusion is invalid"
+        )
+      );
+    }
+    const lexicalPath = path5.isAbsolute(value) ? path5.resolve(value) : path5.resolve(root.lexical, value);
+    if (lexicalPath === root.lexical) {
+      throw new WorkflowContentSnapshotError(
+        snapshotUnsafeScopeFinding(
+          "Workflow content snapshot exclusion cannot be the declared root"
+        )
+      );
+    }
+    if (!isInside3(root.lexical, lexicalPath)) {
+      if (!path5.isAbsolute(value)) {
+        throw new WorkflowContentSnapshotError(
+          snapshotUnsafeScopeFinding(
+            "Workflow content snapshot exclusion must stay inside the root"
+          )
+        );
+      }
+      continue;
+    }
+    let realPath = null;
+    let exists = false;
+    try {
+      const stat = await fs4.lstat(lexicalPath);
+      exists = true;
+      if (stat.isSymbolicLink()) {
+        throw new WorkflowContentSnapshotError(
+          snapshotUnsafeScopeFinding(
+            "Workflow content snapshot exclusion cannot be a symbolic link"
+          )
+        );
+      }
+      realPath = await fs4.realpath(lexicalPath);
+      if (!isInside3(root.real, realPath)) {
+        throw new WorkflowContentSnapshotError(
+          snapshotUnsafeScopeFinding(
+            "Workflow content snapshot exclusion resolves outside the root"
+          )
+        );
+      }
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+    result.push({ lexicalPath, realPath, exists });
+  }
+  return result;
+}
+function scopeOverlapsProtectedRoot(root, protectedRoot, policy) {
+  const relative = portableRelative(root, protectedRoot.lexicalPath);
+  if (!protectedRoot.exists || !relative || relative.startsWith(".."))
+    return false;
+  const canMatch = (pattern) => {
+    const tokens = patternTokens(pattern);
+    const consume = (value) => {
+      let positions = epsilonClosure(tokens, /* @__PURE__ */ new Set([0]));
+      if (positions === null) return null;
+      for (const character of value) {
+        positions = advancePattern(tokens, positions, character);
+        if (positions === null || positions.size === 0) return null;
+      }
+      return positions;
+    };
+    if (consume(relative)?.has(tokens.length)) return true;
+    const initial = consume(`${relative}/`);
+    if (initial === null) return false;
+    const literalCharacters = tokens.filter(
+      (token) => token.kind === "literal" && token.value !== "/"
+    ).map((token) => token.value);
+    const characters = [.../* @__PURE__ */ new Set(["/", "x", ...literalCharacters])];
+    const queue = [initial];
+    const seen = /* @__PURE__ */ new Set();
+    while (queue.length > 0) {
+      const positions = queue.shift();
+      const key = [...positions].sort((left, right) => left - right).join(",");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (positions.has(tokens.length)) return true;
+      for (const character of characters) {
+        const next = advancePattern(tokens, positions, character);
+        if (next && next.size > 0) queue.push(next);
+      }
+    }
+    return false;
+  };
+  return policy.policy.include.some(canMatch);
+}
+function selectionHash(records) {
+  const canonical2 = records.map((record) => `${record.type}\0${record.path}`).sort((left, right) => left.localeCompare(right, "en")).join("\n");
+  return sha256(`workflow-physical-selection.v1
+${canonical2}`);
+}
+function selectionEvidence(records, visitedNodeCount, encodedBytes, overflow, unstable, limits) {
+  return {
+    hash: overflow ? sha256(
+      `workflow-physical-selection-incomplete.v1
+${JSON.stringify({
+        maxVisitedNodes: limits.maxVisitedNodes,
+        maxSelectionBytes: MAX_SELECTION_BYTES
+      })}`
+    ) : selectionHash(records),
+    visitedNodeCount,
+    recordCount: records.length,
+    storedRecordCount: overflow ? 0 : records.length,
+    encodedBytes,
+    overflow,
+    unstable
+  };
+}
+async function enumeratePhysicalTree(options) {
+  const records = [];
+  const omissions = [];
+  let visitedNodeCount = 0;
+  let encodedBytes = 0;
+  let overflow = false;
+  let unstable = false;
+  let stopped = false;
+  const addRecord = (record) => {
+    const encoded = Buffer.byteLength(
+      `${record.type}\0${record.path}`,
+      "utf8"
+    );
+    if (Buffer.byteLength(record.path, "utf8") > MAX_SNAPSHOT_PATH_BYTES || encodedBytes + encoded > MAX_SELECTION_BYTES) {
+      overflow = true;
+      stopped = true;
+      return;
+    }
+    records.push(record);
+    encodedBytes += encoded;
+  };
+  const visit = async (directory, relativeDirectory, expected) => {
+    if (stopped || !hasExecutionBudget(options.execution)) return;
+    if (expected) {
+      let current;
+      let currentRealPath;
+      try {
+        current = await fs4.lstat(directory);
+        currentRealPath = await fs4.realpath(directory);
+      } catch (error) {
+        if (!hasExecutionBudget(options.execution)) return;
+        if (!isUnreadable(error) && !isMissing(error)) throw error;
+        unstable ||= isMissing(error);
+        omissions.push({
+          path: relativeDirectory || ".",
+          size: null,
+          type: "directory",
+          reason: isUnreadable(error) ? "unreadable" : "changed-during-read"
+        });
+        return;
+      }
+      if (!isInside3(options.root.real, currentRealPath)) {
+        throw new WorkflowContentSnapshotError(
+          snapshotUnsafeScopeFinding(
+            "Workflow content snapshot directory escapes its declared root"
+          )
+        );
+      }
+      if (current.isSymbolicLink() || !current.isDirectory() || currentRealPath !== expected.realPath || !sameStat(expected.stat, current)) {
+        unstable = true;
+        omissions.push({
+          path: relativeDirectory || ".",
+          size: null,
+          type: "directory",
+          reason: "changed-during-read"
+        });
+        return;
+      }
+    }
+    let handle;
+    try {
+      handle = await fs4.opendir(directory);
+    } catch (error) {
+      if (!hasExecutionBudget(options.execution)) return;
+      if (!isUnreadable(error) && !isMissing(error)) throw error;
+      unstable ||= isMissing(error);
+      omissions.push({
+        path: relativeDirectory || ".",
+        size: null,
+        type: "directory",
+        reason: isUnreadable(error) ? "unreadable" : "changed-during-read"
+      });
+      return;
+    }
+    const children = [];
+    try {
+      while (!stopped && hasExecutionBudget(options.execution)) {
+        let child;
+        try {
+          child = await handle.read();
+        } catch (error) {
+          if (!hasExecutionBudget(options.execution)) break;
+          if (!isUnreadable(error) && !isMissing(error)) throw error;
+          unstable ||= isMissing(error);
+          omissions.push({
+            path: relativeDirectory || ".",
+            size: null,
+            type: "directory",
+            reason: isUnreadable(error) ? "unreadable" : "changed-during-read"
+          });
+          break;
+        }
+        if (!hasExecutionBudget(options.execution) || child === null) break;
+        visitedNodeCount += 1;
+        if (visitedNodeCount > options.policy.policy.limits.maxVisitedNodes) {
+          overflow = true;
+          stopped = true;
+          break;
+        }
+        const target = path5.join(directory, child.name);
+        const relative = portableRelative(options.root.lexical, target);
+        if (!relative || relative.startsWith("..") || relative.includes("/../")) {
+          throw new WorkflowContentSnapshotError(
+            snapshotUnsafeScopeFinding(
+              "Workflow content snapshot discovered an unsafe path"
+            )
+          );
+        }
+        if (options.protectedRoots.some(
+          (protectedRoot) => isScopePath(protectedRoot, target)
+        )) {
+          continue;
+        }
+        if (child.isDirectory() && excludesDirectory(options.policy, relative)) {
+          continue;
+        }
+        let stat;
+        try {
+          stat = await fs4.lstat(target);
+        } catch (error) {
+          if (!hasExecutionBudget(options.execution)) break;
+          if (!isUnreadable(error) && !isMissing(error)) throw error;
+          unstable ||= isMissing(error);
+          if (isIncluded(options.policy, relative, options.execution)) {
+            addRecord({ path: relative, type: "other" });
+            omissions.push({
+              path: relative,
+              size: null,
+              type: "other",
+              reason: isUnreadable(error) ? "unreadable" : "changed-during-read"
+            });
+          }
+          await options.hooks?.afterNode?.(relative);
+          continue;
+        }
+        const type = stat.isDirectory() ? "directory" : stat.isSymbolicLink() ? "symlink" : stat.isFile() ? "file" : "other";
+        let realDirectory = "";
+        if (type === "directory") {
+          try {
+            realDirectory = await fs4.realpath(target);
+          } catch (error) {
+            if (!hasExecutionBudget(options.execution)) break;
+            if (!isUnreadable(error) && !isMissing(error)) throw error;
+            unstable ||= isMissing(error);
+            addRecord({ path: relative, type });
+            omissions.push({
+              path: relative,
+              size: null,
+              type: "directory",
+              reason: isUnreadable(error) ? "unreadable" : "changed-during-read"
+            });
+            await options.hooks?.afterNode?.(relative);
+            continue;
+          }
+          if (!isInside3(options.root.real, realDirectory) || options.protectedRoots.some(
+            (protectedRoot) => protectedRoot.realPath !== null && isInside3(protectedRoot.realPath, realDirectory)
+          )) {
+            throw new WorkflowContentSnapshotError(
+              snapshotUnsafeScopeFinding(
+                "Workflow content snapshot directory escapes its declared root"
+              )
+            );
+          }
+          addRecord({ path: relative, type });
+        } else if (isIncluded(options.policy, relative, options.execution)) {
+          addRecord({ path: relative, type });
+        }
+        if (!stopped) {
+          children.push({
+            target,
+            relative,
+            stat,
+            type,
+            realPath: realDirectory
+          });
+          await options.hooks?.afterNode?.(relative);
+        }
+      }
+    } finally {
+      await handle.close().catch((error) => {
+        if (error.code !== "ERR_DIR_CLOSED")
+          throw error;
+      });
+    }
+    if (stopped || !hasExecutionBudget(options.execution)) return;
+    children.sort(
+      (left, right) => left.relative.localeCompare(right.relative, "en")
+    );
+    for (const child of children) {
+      if (stopped || !hasExecutionBudget(options.execution)) return;
+      if (child.type !== "directory") continue;
+      if (excludesDirectory(options.policy, child.relative)) continue;
+      await visit(child.target, child.relative, {
+        stat: child.stat,
+        realPath: child.realPath
+      });
+    }
+  };
+  await visit(options.root.lexical, "");
+  if (options.execution.expired) overflow = true;
+  const evidence = selectionEvidence(
+    records,
+    visitedNodeCount,
+    encodedBytes,
+    overflow,
+    unstable,
+    options.policy.policy.limits
+  );
+  return { records, evidence, omissions };
+}
+async function hashFileBounded(target, before, limits, execution) {
+  if (!hasExecutionBudget(execution)) return { status: "duration" };
+  const flags = process.platform === "win32" ? fsConstants3.O_RDONLY : fsConstants3.O_RDONLY | fsConstants3.O_NOFOLLOW | fsConstants3.O_NONBLOCK;
+  let handle;
+  try {
+    handle = await fs4.open(target, flags);
+  } catch (error) {
+    if (!hasExecutionBudget(execution)) return { status: "duration" };
+    if (error.code === "ELOOP")
+      return { status: "changed" };
+    if (isUnreadable(error)) return { status: "unreadable" };
+    if (isMissing(error)) return { status: "changed" };
+    throw error;
+  }
+  try {
+    const opened = await handle.stat();
+    if (!hasExecutionBudget(execution)) return { status: "duration" };
+    const openedRealPath = await fs4.realpath(target);
+    if (!hasExecutionBudget(execution)) return { status: "duration" };
+    if (!opened.isFile() || !sameStat(before, opened))
+      return { status: "changed" };
+    const digest = createHash2("sha256");
+    const buffer = Buffer.allocUnsafe(
+      Math.min(64 * 1024, limits.maxFileBytes + 1)
+    );
+    let bytes = 0;
+    while (true) {
+      if (!hasExecutionBudget(execution)) return { status: "duration" };
+      const remaining = limits.maxFileBytes + 1 - bytes;
+      if (remaining < 1) return { status: "changed" };
+      const result = await handle.read(
+        buffer,
+        0,
+        Math.min(buffer.length, remaining),
+        null
+      );
+      if (!hasExecutionBudget(execution)) return { status: "duration" };
+      if (result.bytesRead === 0) break;
+      bytes += result.bytesRead;
+      if (bytes > limits.maxFileBytes) return { status: "changed" };
+      digest.update(buffer.subarray(0, result.bytesRead));
+    }
+    const finalHandle = await handle.stat();
+    const finalPath = await fs4.lstat(target);
+    const finalRealPath = await fs4.realpath(target);
+    if (!hasExecutionBudget(execution)) return { status: "duration" };
+    if (!finalHandle.isFile() || !finalPath.isFile() || !sameStat(opened, finalHandle) || !sameStat(before, finalPath) || finalRealPath !== openedRealPath || bytes !== before.size) {
+      return { status: "changed" };
+    }
+    return {
+      status: "complete",
+      hash: digest.digest("hex"),
+      stat: finalPath,
+      realPath: finalRealPath
+    };
+  } catch (error) {
+    if (!hasExecutionBudget(execution)) return { status: "duration" };
+    if (isUnreadable(error)) return { status: "unreadable" };
+    if (isMissing(error)) return { status: "changed" };
+    throw error;
+  } finally {
+    await handle.close();
+  }
+}
+function snapshotIdentityOmissionKey(value) {
+  return `${value.path}\0${value.type}\0${value.reason}\0${value.size ?? ""}`;
+}
+function physicalSelectionEvidence(before, after) {
+  const hasOverflow = before.overflow || after.overflow;
+  const changed = before.unstable || after.unstable || !sameSelectionStream(before, after);
+  if (!hasOverflow && !changed) return null;
+  return {
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SELECTION_SCHEMA_VERSION,
+    status: hasOverflow && changed ? "overflow-and-changed" : hasOverflow ? "overflow" : "changed",
+    before,
+    after
+  };
+}
+function snapshotIdentityPath(value) {
+  if (!HASH_PATTERN.test(value))
+    throw new Error("Workflow snapshot hash is invalid");
+  return snapshotPathForHash(value);
+}
+function workflowContentSnapshotFindings(value) {
+  const manifest = parseWorkflowContentSnapshotManifest(value);
+  const unstable = manifest.omitted.some(
+    (omission) => ["changed-during-read", "duration", "physical-selection-changed"].includes(
+      omission.reason
+    )
+  );
+  const findings = [];
+  if (unstable) {
+    findings.push(
+      snapshotUnstableFinding(
+        "Workflow content snapshot selection or content changed during capture."
+      )
+    );
+  }
+  if (!manifest.complete) {
+    findings.push(
+      snapshotIncompleteFinding(
+        "Workflow content snapshot is incomplete and cannot satisfy a complete-scope requirement."
+      )
+    );
+  }
+  return findings;
+}
+async function captureWorkflowContentSnapshotInternal(options) {
+  const policy = resolveSnapshotPolicy(options.policy);
+  const root = await resolveRoot(options.root);
+  const protectedRoots = await resolveProtectedRoots(
+    root,
+    options.protectedRoots ?? []
+  );
+  for (const protectedRoot of protectedRoots) {
+    if (scopeOverlapsProtectedRoot(root.lexical, protectedRoot, policy)) {
+      throw new WorkflowContentSnapshotError(
+        snapshotUnsafeScopeFinding(
+          "Workflow content snapshot scope overlaps a protected repository exclusion."
+        )
+      );
+    }
+  }
+  const execution = createExecution(policy.policy.limits);
+  const before = await enumeratePhysicalTree({
+    root,
+    policy,
+    protectedRoots,
+    execution,
+    hooks: options.hooks
+  });
+  await options.hooks?.afterInitialSelection?.();
+  const entries = [];
+  const captured = [];
+  const omitted = [];
+  const omissionKeys = /* @__PURE__ */ new Set();
+  let omittedCount = 0;
+  let overflowCount = 0;
+  let overflowHash = sha256("workflow-content-snapshot-omission-overflow.v1");
+  let totalBytes = 0;
+  const foldOverflow = (value) => {
+    overflowCount += 1;
+    overflowHash = sha256(
+      `${overflowHash}
+${JSON.stringify(stableValue(value))}`
+    );
+  };
+  const omit = (value) => {
+    const key = snapshotIdentityOmissionKey(value);
+    if (omissionKeys.has(key)) return;
+    omissionKeys.add(key);
+    omittedCount += 1;
+    if (omitted.length < policy.policy.limits.maxOmissionEntries) {
+      omitted.push(value);
+      return;
+    }
+    if (INTEGRITY_OMISSION_REASONS.has(value.reason)) {
+      const displacedIndex = omitted.findIndex(
+        (candidate) => !INTEGRITY_OMISSION_REASONS.has(candidate.reason)
+      );
+      if (displacedIndex >= 0) {
+        const [displaced] = omitted.splice(displacedIndex, 1);
+        if (displaced) foldOverflow(displaced);
+        omitted.push(value);
+        return;
+      }
+    }
+    foldOverflow(value);
+  };
+  for (const omission of before.omissions) omit(omission);
+  const records = [...before.records].sort(
+    (left, right) => left.path.localeCompare(right.path, "en")
+  );
+  for (const record of records) {
+    if (!hasExecutionBudget(execution)) break;
+    if (record.type !== "file") {
+      if (record.type === "symlink" || record.type === "other") {
+        omit({
+          path: record.path,
+          size: null,
+          type: "other",
+          reason: "non-regular"
+        });
+      }
+      continue;
+    }
+    const target = path5.resolve(root.lexical, ...record.path.split("/"));
+    let beforeStat;
+    try {
+      beforeStat = await fs4.lstat(target);
+    } catch (error) {
+      if (!hasExecutionBudget(execution)) break;
+      if (!isUnreadable(error) && !isMissing(error)) throw error;
+      omit({
+        path: record.path,
+        size: null,
+        type: "file",
+        reason: isUnreadable(error) ? "unreadable" : "changed-during-read"
+      });
+      continue;
+    }
+    if (!beforeStat.isFile() || beforeStat.isSymbolicLink()) {
+      omit({
+        path: record.path,
+        size: null,
+        type: "other",
+        reason: "non-regular"
+      });
+      continue;
+    }
+    if (entries.length >= policy.policy.limits.maxFiles) {
+      omit({
+        path: record.path,
+        size: beforeStat.size,
+        type: "file",
+        reason: "file-count"
+      });
+      continue;
+    }
+    if (beforeStat.size > policy.policy.limits.maxFileBytes) {
+      omit({
+        path: record.path,
+        size: beforeStat.size,
+        type: "file",
+        reason: "file-size"
+      });
+      continue;
+    }
+    if (totalBytes + beforeStat.size > policy.policy.limits.maxTotalBytes) {
+      omit({
+        path: record.path,
+        size: beforeStat.size,
+        type: "file",
+        reason: "total-size"
+      });
+      continue;
+    }
+    let realPath;
+    try {
+      realPath = await fs4.realpath(target);
+    } catch (error) {
+      if (!hasExecutionBudget(execution)) break;
+      if (!isUnreadable(error) && !isMissing(error)) throw error;
+      omit({
+        path: record.path,
+        size: beforeStat.size,
+        type: "file",
+        reason: isUnreadable(error) ? "unreadable" : "changed-during-read"
+      });
+      continue;
+    }
+    if (!isInside3(root.real, realPath) || protectedRoots.some(
+      (protectedRoot) => protectedRoot.realPath !== null && isInside3(protectedRoot.realPath, realPath)
+    )) {
+      throw new WorkflowContentSnapshotError(
+        snapshotUnsafeScopeFinding(
+          "Workflow content snapshot file escapes its declared root"
+        )
+      );
+    }
+    await options.hooks?.beforeFileRead?.(record.path);
+    const hashed = await hashFileBounded(
+      target,
+      beforeStat,
+      policy.policy.limits,
+      execution
+    );
+    await options.hooks?.afterFileRead?.(record.path);
+    if (hashed.status !== "complete") {
+      omit({
+        path: record.path,
+        size: hashed.status === "duration" ? beforeStat.size : null,
+        type: "file",
+        reason: hashed.status === "duration" ? "duration" : hashed.status === "unreadable" ? "unreadable" : "changed-during-read"
+      });
+      if (hashed.status === "duration") break;
+      continue;
+    }
+    entries.push({
+      path: record.path,
+      hash: hashed.hash,
+      size: hashed.stat.size,
+      type: "file"
+    });
+    totalBytes += hashed.stat.size;
+    captured.push({
+      path: record.path,
+      target,
+      realPath,
+      stat: hashed.stat
+    });
+  }
+  for (const capturedFile of captured) {
+    if (!hasExecutionBudget(execution)) break;
+    let current;
+    let currentRealPath;
+    try {
+      current = await fs4.lstat(capturedFile.target);
+      currentRealPath = await fs4.realpath(capturedFile.target);
+    } catch (error) {
+      if (!hasExecutionBudget(execution)) break;
+      if (!isUnreadable(error) && !isMissing(error)) throw error;
+      const entry = entries.find(
+        (candidate) => candidate.path === capturedFile.path
+      );
+      if (entry) {
+        entries.splice(entries.indexOf(entry), 1);
+        totalBytes -= entry.size;
+      }
+      omit({
+        path: capturedFile.path,
+        size: null,
+        type: "file",
+        reason: isUnreadable(error) ? "unreadable" : "changed-during-read"
+      });
+      continue;
+    }
+    if (!current.isFile() || currentRealPath !== capturedFile.realPath || !sameStat(capturedFile.stat, current)) {
+      const entry = entries.find(
+        (candidate) => candidate.path === capturedFile.path
+      );
+      if (entry) {
+        entries.splice(entries.indexOf(entry), 1);
+        totalBytes -= entry.size;
+      }
+      omit({
+        path: capturedFile.path,
+        size: current.isFile() ? current.size : null,
+        type: current.isFile() ? "file" : "other",
+        reason: "changed-during-read"
+      });
+    }
+  }
+  let after;
+  if (hasExecutionBudget(execution)) {
+    after = await enumeratePhysicalTree({
+      root,
+      policy,
+      protectedRoots,
+      execution
+    });
+    for (const omission of after.omissions) omit(omission);
+  } else {
+    after = {
+      records: [],
+      evidence: selectionEvidence([], 0, 0, true, true, policy.policy.limits),
+      omissions: []
+    };
+  }
+  const selection2 = physicalSelectionEvidence(before.evidence, after.evidence);
+  if (before.evidence.overflow || after.evidence.overflow || execution.expired) {
+    omit({
+      path: ".",
+      size: null,
+      type: "directory",
+      reason: "physical-enumeration-limit"
+    });
+  }
+  if (selection2 && (selection2.status === "changed" || selection2.status === "overflow-and-changed")) {
+    omit({
+      path: ".",
+      size: null,
+      type: "directory",
+      reason: "physical-selection-changed"
+    });
+  }
+  if (execution.expired) {
+    omit({ path: ".", size: null, type: "directory", reason: "duration" });
+  }
+  entries.sort((left, right) => left.path.localeCompare(right.path, "en"));
+  omitted.sort((left, right) => {
+    const pathOrder = left.path.localeCompare(right.path, "en");
+    return pathOrder !== 0 ? pathOrder : `${left.reason}\0${left.type}`.localeCompare(
+      `${right.reason}\0${right.type}`,
+      "en"
+    );
+  });
+  const buildManifest = () => ({
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION,
+    kind: "workflow-content-snapshot",
+    origin: "explicit",
+    capture: {
+      provider: PROVIDER,
+      ...selection2 ? { physicalSelection: selection2 } : {}
+    },
+    createdAt: (options.now ?? /* @__PURE__ */ new Date()).toISOString(),
+    complete: omittedCount === 0,
+    policy: policy.policy,
+    limits: policy.policy.limits,
+    entries,
+    omitted,
+    omittedCount,
+    ...overflowCount > 0 ? {
+      omissionOverflow: {
+        ref: `workflow-snapshot://omitted-overflow/${overflowHash}`,
+        hash: overflowHash,
+        count: overflowCount
+      }
+    } : {}
+  });
+  let manifest = buildManifest();
+  while (Buffer.byteLength(canonicalJson(manifest), "utf8") > policy.policy.limits.maxManifestBytes) {
+    const compactable = omitted.findIndex(
+      (omission) => !INTEGRITY_OMISSION_REASONS.has(omission.reason)
+    );
+    if (compactable >= 0) {
+      const [removed] = omitted.splice(compactable, 1);
+      if (removed) foldOverflow(removed);
+    } else if (entries.length > 0) {
+      const removed = entries.pop();
+      omittedCount += 1;
+      foldOverflow({
+        path: removed.path,
+        size: removed.size,
+        type: "file",
+        reason: "manifest-size"
+      });
+    } else {
+      throw new WorkflowContentSnapshotError(
+        snapshotStorageFailedFinding(
+          "Workflow content snapshot manifest metadata exceeds its configured bound."
+        )
+      );
+    }
+    manifest = buildManifest();
+  }
+  return parseWorkflowContentSnapshotManifest(manifest);
+}
+async function captureWorkflowContentSnapshot(options) {
+  try {
+    return await captureWorkflowContentSnapshotInternal({
+      ...options,
+      protectedRoots: [
+        ...DEFAULT_PROTECTED_SNAPSHOT_ROOTS,
+        ...options.protectedRoots ?? []
+      ]
+    });
+  } catch (error) {
+    if (error instanceof WorkflowContentSnapshotError) throw error;
+    throw new WorkflowContentSnapshotError(
+      snapshotStorageFailedFinding(
+        "Workflow content snapshot capture failed without a safe diagnostic."
+      ),
+      { cause: error }
+    );
+  }
+}
+async function stageWorkflowContentSnapshot(options) {
+  const manifest = parseWorkflowContentSnapshotManifest(options.manifest);
+  const reference = referenceFor(manifest);
+  const content = canonicalJson(manifest);
+  try {
+    const existing = await options.transition.read(
+      reference.path,
+      manifest.limits.maxManifestBytes,
+      "Workflow content snapshot"
+    );
+    if (existing !== null) {
+      const parsed = parseWorkflowContentSnapshotManifest(
+        JSON.parse(existing)
+      );
+      if (hashWorkflowContentSnapshot(parsed) !== reference.hash) {
+        throw new Error("Workflow content snapshot identity changed");
+      }
+      return reference;
+    }
+    await options.transition.write(
+      reference.path,
+      content,
+      manifest.limits.maxManifestBytes,
+      "Workflow content snapshot"
+    );
+    return reference;
+  } catch (error) {
+    if (error instanceof WorkflowContentSnapshotError) throw error;
+    throw new WorkflowContentSnapshotError(
+      snapshotStorageFailedFinding(
+        "Workflow content snapshot evidence could not be persisted.",
+        WORKFLOW_CONTENT_SNAPSHOT_DIRECTORY
+      ),
+      { cause: error }
+    );
+  }
+}
+async function readWorkflowContentSnapshot(runRoot, hash4, maxBytes = WORKFLOW_CONTENT_SNAPSHOT_DEFAULT_LIMITS.maxManifestBytes) {
+  const relative = snapshotIdentityPath(hash4);
+  try {
+    const inspection = await inspectProtectedProjectPath(runRoot, relative, {
+      label: "Workflow content snapshot",
+      expected: "file"
+    });
+    if (!inspection.exists) return null;
+    const content = await readOptionalEngineRunText(
+      runRoot,
+      relative,
+      maxBytes,
+      "Workflow content snapshot"
+    );
+    if (content === null) return null;
+    const manifest = parseWorkflowContentSnapshotManifest(
+      JSON.parse(content)
+    );
+    if (hashWorkflowContentSnapshot(manifest) !== hash4) {
+      throw new Error(
+        "Workflow content snapshot identity does not match its path"
+      );
+    }
+    return manifest;
+  } catch (error) {
+    if (error instanceof WorkflowContentSnapshotError) throw error;
+    throw new WorkflowContentSnapshotError(
+      snapshotStorageFailedFinding(
+        "Workflow content snapshot evidence could not be read.",
+        WORKFLOW_CONTENT_SNAPSHOT_DIRECTORY
+      ),
+      { cause: error }
+    );
+  }
+}
+
 // src/workflow-runtime/durability.ts
 var WORKFLOW_DURABILITY_PROFILE_VERSION = 1;
 var WORKFLOW_DURABILITY_SCHEMA_VERSION = 1;
@@ -1638,13 +3472,15 @@ var PROFILE_KEYS = /* @__PURE__ */ new Set([
   "capabilities",
   "bounds",
   "schemaVersions",
-  "findingCatalogVersion"
+  "findingCatalogVersion",
+  "snapshotPolicy"
 ]);
 var CAPABILITIES = /* @__PURE__ */ new Set([
   "mutation-locks",
   "revision-fences",
   "transition-journal",
-  "verified-checkpoints"
+  "verified-checkpoints",
+  "content-snapshots"
 ]);
 var BOUND_KEY_NAMES = [
   "runStateBytes",
@@ -1673,14 +3509,15 @@ var SCHEMA_KEYS = /* @__PURE__ */ new Set([
   "runLock",
   "transitionJournal",
   "checkpointManifest",
-  "checkpointRecord"
+  "checkpointRecord",
+  "contentSnapshot"
 ]);
 var MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
 var MAX_CHECKPOINT_COUNT = 256;
-function isRecord2(value) {
+function isRecord3(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-function assertKnownFields(value, keys, label) {
+function assertKnownFields2(value, keys, label) {
   const unknown = Object.keys(value).find((key) => !keys.has(key));
   if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
 }
@@ -1701,10 +3538,10 @@ function requiredCheckpointCount(value) {
   return value;
 }
 function parseWorkflowDurabilityProfile(value) {
-  if (!isRecord2(value)) {
+  if (!isRecord3(value)) {
     throw new Error("Invalid Workflow durability profile: must be an object");
   }
-  assertKnownFields(value, PROFILE_KEYS, "Workflow durability profile");
+  assertKnownFields2(value, PROFILE_KEYS, "Workflow durability profile");
   if (value.version !== WORKFLOW_DURABILITY_PROFILE_VERSION) {
     throw new Error(
       `Unsupported Workflow durability profile version: ${String(value.version)}`
@@ -1730,13 +3567,13 @@ function parseWorkflowDurabilityProfile(value) {
       "Invalid Workflow durability profile: capabilities must not contain duplicates"
     );
   }
-  if (!isRecord2(value.bounds)) {
+  if (!isRecord3(value.bounds)) {
     throw new Error(
       "Invalid Workflow durability profile: bounds must be an object"
     );
   }
   const boundsValue = value.bounds;
-  assertKnownFields(
+  assertKnownFields2(
     boundsValue,
     BOUND_KEYS,
     "Workflow durability profile bounds"
@@ -1773,12 +3610,12 @@ function parseWorkflowDurabilityProfile(value) {
       boundsValue.checkpointCount
     );
   }
-  if (!isRecord2(value.schemaVersions)) {
+  if (!isRecord3(value.schemaVersions)) {
     throw new Error(
       "Invalid Workflow durability profile: schemaVersions must be an object"
     );
   }
-  assertKnownFields(
+  assertKnownFields2(
     value.schemaVersions,
     SCHEMA_KEYS,
     "Workflow durability profile schemaVersions"
@@ -1811,6 +3648,12 @@ function parseWorkflowDurabilityProfile(value) {
       "Unsupported Workflow durability schema version: checkpointRecord"
     );
   }
+  const contentSnapshot = value.schemaVersions.contentSnapshot;
+  if (contentSnapshot !== void 0 && contentSnapshot !== WORKFLOW_DURABILITY_SCHEMA_VERSION) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: contentSnapshot"
+    );
+  }
   if (capabilities.includes("transition-journal") && (bounds.transitionJournalBytes === void 0 || transitionJournal !== WORKFLOW_DURABILITY_SCHEMA_VERSION)) {
     throw new Error(
       "Invalid Workflow durability profile: transition-journal requires its bound and schema version"
@@ -1824,6 +3667,17 @@ function parseWorkflowDurabilityProfile(value) {
   if (capabilities.includes("verified-checkpoints") && (!capabilities.includes("mutation-locks") || !capabilities.includes("revision-fences") || !capabilities.includes("transition-journal") || bounds.checkpointManifestBytes === void 0 || bounds.checkpointRecordBytes === void 0 || bounds.checkpointCount === void 0 || checkpointManifest !== WORKFLOW_DURABILITY_SCHEMA_VERSION || checkpointRecord !== WORKFLOW_DURABILITY_SCHEMA_VERSION)) {
     throw new Error(
       "Invalid Workflow durability profile: verified-checkpoints requires mutation locks, transition journal, checkpoint bounds, and schema versions"
+    );
+  }
+  const snapshotPolicy = value.snapshotPolicy === void 0 ? void 0 : parseWorkflowContentSnapshotPolicy(value.snapshotPolicy);
+  if (snapshotPolicy !== void 0 && !capabilities.includes("content-snapshots")) {
+    throw new Error(
+      "Invalid Workflow durability profile: snapshotPolicy requires content-snapshots"
+    );
+  }
+  if (capabilities.includes("content-snapshots") && (!capabilities.includes("mutation-locks") || !capabilities.includes("revision-fences") || !capabilities.includes("transition-journal") || snapshotPolicy === void 0 || contentSnapshot !== WORKFLOW_DURABILITY_SCHEMA_VERSION)) {
+    throw new Error(
+      "Invalid Workflow durability profile: content-snapshots requires mutation locks, revision fences, transition journal, snapshot policy, and schema version"
     );
   }
   if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
@@ -1844,9 +3698,11 @@ function parseWorkflowDurabilityProfile(value) {
       ...runLock === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { runLock: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
       ...transitionJournal === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { transitionJournal: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
       ...checkpointManifest === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { checkpointManifest: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
-      ...checkpointRecord === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { checkpointRecord: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {}
+      ...checkpointRecord === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { checkpointRecord: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
+      ...contentSnapshot === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { contentSnapshot: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {}
     },
-    findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION
+    findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
+    ...snapshotPolicy ? { snapshotPolicy } : {}
   };
 }
 function normalizeWorkflowDurabilityProtocol(protocol) {
@@ -2247,7 +4103,7 @@ function narrowRuntimeEvals(value, filePath, fieldPath) {
   });
   return value;
 }
-function loadSkillPackageDocument(document, root, filePath = path5.join(root, "package.json")) {
+function loadSkillPackageDocument(document, root, filePath = path6.join(root, "package.json")) {
   assertObject(document, filePath);
   const packageKind = document.packageKind === "runtime" ? "runtime" : void 0;
   const runtime = narrowRuntimeMetadata(document.runtime, filePath);
@@ -2263,7 +4119,7 @@ function loadSkillPackageDocument(document, root, filePath = path5.join(root, "p
     confirmationRequiredFor: definition.tools.filter((tool) => tool.requiresConfirmation).map((tool) => tool.id)
   };
   return {
-    root: path5.resolve(root),
+    root: path6.resolve(root),
     packageKind,
     runtime,
     definition,
@@ -2276,7 +4132,7 @@ function loadSkillPackageDocument(document, root, filePath = path5.join(root, "p
 }
 
 // src/skill-runtime/validate.ts
-import path6 from "path";
+import path7 from "path";
 function validatesAction(action, pkg, errors, stepId2) {
   if (action.type === "invoke_skill" && !pkg.definition.skills.some((item) => item.id === action.ref)) {
     errors.push(
@@ -2358,8 +4214,8 @@ function validateSkillPackage(pkg) {
   }
   for (const tool of definition.tools) {
     if (tool.kind !== "script") continue;
-    const normalized = path6.posix.normalize(tool.source.replaceAll("\\", "/"));
-    if (path6.isAbsolute(tool.source) || normalized === ".." || normalized.startsWith("../")) {
+    const normalized = path7.posix.normalize(tool.source.replaceAll("\\", "/"));
+    if (path7.isAbsolute(tool.source) || normalized === ".." || normalized.startsWith("../")) {
       errors.push(
         `script tool ${tool.id} must reference a relative path inside the Skill package`
       );
@@ -2391,41 +4247,41 @@ function packageDocument(pkg) {
   });
 }
 function normalizedRelativePath(source) {
-  return path7.posix.normalize(source.replaceAll("\\", "/"));
+  return path8.posix.normalize(source.replaceAll("\\", "/"));
 }
 function assertInside(parent, target, label) {
-  const relative = path7.relative(parent, target);
-  if (relative === "" || !path7.isAbsolute(relative) && !relative.startsWith(`..${path7.sep}`)) {
+  const relative = path8.relative(parent, target);
+  if (relative === "" || !path8.isAbsolute(relative) && !relative.startsWith(`..${path8.sep}`)) {
     return;
   }
   throw new Error(`${label} resolves outside the Skill package`);
 }
-async function readPackageFile(root, relativePath, label) {
-  const normalized = normalizedRelativePath(relativePath);
-  if (path7.posix.isAbsolute(normalized) || normalized === ".." || normalized.startsWith("../")) {
+async function readPackageFile(root, relativePath2, label) {
+  const normalized = normalizedRelativePath(relativePath2);
+  if (path8.posix.isAbsolute(normalized) || normalized === ".." || normalized.startsWith("../")) {
     throw new Error(`${label} resolves outside the Skill package`);
   }
-  const target = path7.resolve(root, ...normalized.split("/"));
+  const target = path8.resolve(root, ...normalized.split("/"));
   assertInside(root, target, label);
   let realTarget;
   try {
-    realTarget = await fs4.realpath(target);
+    realTarget = await fs5.realpath(target);
   } catch (error) {
     if (error.code === "ENOENT") {
-      throw new Error(`${label} does not exist: ${relativePath}`, {
+      throw new Error(`${label} does not exist: ${relativePath2}`, {
         cause: error
       });
     }
     throw error;
   }
   assertInside(root, realTarget, label);
-  if (!(await fs4.stat(realTarget)).isFile()) {
-    throw new Error(`${label} is not a file: ${relativePath}`);
+  if (!(await fs5.stat(realTarget)).isFile()) {
+    throw new Error(`${label} is not a file: ${relativePath2}`);
   }
-  return { path: normalized, content: await fs4.readFile(realTarget) };
+  return { path: normalized, content: await fs5.readFile(realTarget) };
 }
 async function snapshotFiles(pkg) {
-  const root = await fs4.realpath(pkg.root);
+  const root = await fs5.realpath(pkg.root);
   const files = pkg.packageKind === "runtime" ? [] : [await readPackageFile(root, "SKILL.md", "SKILL.md")];
   for (const tool of pkg.definition.tools) {
     if (tool.kind !== "script") continue;
@@ -2438,9 +4294,9 @@ async function snapshotFiles(pkg) {
 function hashSnapshot(document, files) {
   const fileDigests = files.map((file) => ({
     path: file.path,
-    sha256: createHash2("sha256").update(file.content).digest("hex")
+    sha256: createHash3("sha256").update(file.content).digest("hex")
   }));
-  return createHash2("sha256").update(
+  return createHash3("sha256").update(
     JSON.stringify(stableValue({ package: document, files: fileDigests }))
   ).digest("hex");
 }
@@ -2457,7 +4313,7 @@ async function hashSkillPackage(pkg) {
 }
 async function pathExists(target) {
   try {
-    await fs4.access(target);
+    await fs5.access(target);
     return true;
   } catch (error) {
     if (error.code === "ENOENT") return false;
@@ -2466,17 +4322,17 @@ async function pathExists(target) {
 }
 async function verifyPublishedSnapshot(snapshotDir, material) {
   try {
-    const storedHash = (await fs4.readFile(path7.join(snapshotDir, "sha256"), "utf8")).trim();
+    const storedHash = (await fs5.readFile(path8.join(snapshotDir, "sha256"), "utf8")).trim();
     if (storedHash !== material.hash) throw new Error("hash mismatch");
-    const storedPackage = await fs4.readFile(
-      path7.join(snapshotDir, "package.json"),
+    const storedPackage = await fs5.readFile(
+      path8.join(snapshotDir, "package.json"),
       "utf8"
     );
     if (storedPackage !== packageJson(material.document))
       throw new Error("package mismatch");
     for (const file of material.files) {
-      const stored = await fs4.readFile(
-        path7.join(snapshotDir, ...file.path.split("/"))
+      const stored = await fs5.readFile(
+        path8.join(snapshotDir, ...file.path.split("/"))
       );
       if (!stored.equals(file.content))
         throw new Error(`file mismatch: ${file.path}`);
@@ -2489,40 +4345,40 @@ async function verifyPublishedSnapshot(snapshotDir, material) {
 }
 async function createSkillSnapshot(pkg, changeDir) {
   const material = await snapshotMaterial(pkg);
-  const snapshotsRoot = path7.resolve(changeDir, ".comet", "skill-snapshots");
-  const snapshotDir = path7.join(snapshotsRoot, material.hash);
-  await fs4.mkdir(snapshotsRoot, { recursive: true });
+  const snapshotsRoot = path8.resolve(changeDir, ".comet", "skill-snapshots");
+  const snapshotDir = path8.join(snapshotsRoot, material.hash);
+  await fs5.mkdir(snapshotsRoot, { recursive: true });
   if (await pathExists(snapshotDir)) {
     await verifyPublishedSnapshot(snapshotDir, material);
     return { hash: material.hash, snapshotDir };
   }
-  const temporaryDir = path7.join(snapshotsRoot, `.tmp-${randomUUID2()}`);
+  const temporaryDir = path8.join(snapshotsRoot, `.tmp-${randomUUID2()}`);
   assertInside(snapshotsRoot, temporaryDir, "Temporary snapshot");
   assertInside(snapshotsRoot, snapshotDir, "Published snapshot");
   try {
-    await fs4.mkdir(temporaryDir);
+    await fs5.mkdir(temporaryDir);
     for (const file of material.files) {
-      const destination = path7.join(temporaryDir, ...file.path.split("/"));
+      const destination = path8.join(temporaryDir, ...file.path.split("/"));
       assertInside(temporaryDir, destination, `Snapshot file ${file.path}`);
-      await fs4.mkdir(path7.dirname(destination), { recursive: true });
-      await fs4.writeFile(destination, file.content);
+      await fs5.mkdir(path8.dirname(destination), { recursive: true });
+      await fs5.writeFile(destination, file.content);
     }
-    await fs4.writeFile(
-      path7.join(temporaryDir, "package.json"),
+    await fs5.writeFile(
+      path8.join(temporaryDir, "package.json"),
       packageJson(material.document)
     );
-    await fs4.writeFile(path7.join(temporaryDir, "sha256"), material.hash + "\n");
-    await fs4.rename(temporaryDir, snapshotDir);
+    await fs5.writeFile(path8.join(temporaryDir, "sha256"), material.hash + "\n");
+    await fs5.rename(temporaryDir, snapshotDir);
   } catch (error) {
     if (await pathExists(snapshotDir)) {
       try {
         await verifyPublishedSnapshot(snapshotDir, material);
       } finally {
-        await fs4.rm(temporaryDir, { recursive: true, force: true });
+        await fs5.rm(temporaryDir, { recursive: true, force: true });
       }
       return { hash: material.hash, snapshotDir };
     }
-    await fs4.rm(temporaryDir, { recursive: true, force: true });
+    await fs5.rm(temporaryDir, { recursive: true, force: true });
     throw error;
   }
   return { hash: material.hash, snapshotDir };
@@ -2531,17 +4387,17 @@ async function readSkillSnapshot(changeDir, hash4) {
   if (!/^[a-f0-9]{64}$/u.test(hash4)) {
     throw new Error(`Invalid Skill snapshot hash: ${hash4}`);
   }
-  const snapshotsRoot = path7.resolve(changeDir, ".comet", "skill-snapshots");
-  const snapshotDir = path7.join(snapshotsRoot, hash4);
+  const snapshotsRoot = path8.resolve(changeDir, ".comet", "skill-snapshots");
+  const snapshotDir = path8.join(snapshotsRoot, hash4);
   assertInside(snapshotsRoot, snapshotDir, "Skill snapshot");
   try {
-    const storedHash = (await fs4.readFile(path7.join(snapshotDir, "sha256"), "utf8")).trim();
+    const storedHash = (await fs5.readFile(path8.join(snapshotDir, "sha256"), "utf8")).trim();
     if (storedHash !== hash4) {
       throw new Error(`stored hash is ${storedHash || "(empty)"}`);
     }
-    const packagePath = path7.join(snapshotDir, "package.json");
+    const packagePath = path8.join(snapshotDir, "package.json");
     const document = JSON.parse(
-      await fs4.readFile(packagePath, "utf8")
+      await fs5.readFile(packagePath, "utf8")
     );
     const pkg = loadSkillPackageDocument(document, snapshotDir, packagePath);
     const errors = validateSkillPackage(pkg);
@@ -2561,151 +4417,7 @@ async function readSkillSnapshot(changeDir, hash4) {
 }
 
 // src/engine/run-store.ts
-import path8 from "path";
-
-// src/engine/protected-run-file.ts
-import { TextDecoder as TextDecoder2 } from "util";
-var MAX_ENGINE_RUN_FILE_BYTES = 16 * 1024 * 1024;
-function boundedMaxBytes(requested, fallback, label) {
-  const value = requested ?? fallback;
-  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_ENGINE_RUN_FILE_BYTES) {
-    throw new Error(`${label} size bound is invalid`);
-  }
-  return value;
-}
-function identityOf2(stat) {
-  return { dev: stat.dev, ino: stat.ino, birthtime: stat.birthtimeMs };
-}
-function decodeRunText(result, label) {
-  try {
-    return new TextDecoder2("utf-8", { fatal: true }).decode(result.bytes);
-  } catch (error) {
-    throw new Error(`${label} is not valid UTF-8`, { cause: error });
-  }
-}
-async function readSnapshot(changeDir, relativePath, maxBytes, label, options = {}) {
-  const effectiveMaxBytes = boundedMaxBytes(options.maxBytes, maxBytes, label);
-  try {
-    const result = await readProtectedProjectFile(
-      changeDir,
-      relativePath,
-      effectiveMaxBytes,
-      {
-        label,
-        hooks: options.hooks
-      }
-    );
-    return { result, text: decodeRunText(result, label) };
-  } catch (error) {
-    const code = error.code;
-    if (code === "ENOENT" || code === "ENOTDIR") return null;
-    throw error;
-  }
-}
-async function readOptionalEngineRunText(changeDir, relativePath, maxBytes, label, options = {}) {
-  if (options.overlay) {
-    return options.overlay.read(
-      relativePath,
-      options.maxBytes ?? maxBytes,
-      label
-    );
-  }
-  return (await readSnapshot(changeDir, relativePath, maxBytes, label, options))?.text ?? null;
-}
-async function writeEngineRunText(changeDir, relativePath, content, maxBytes, label, options = {}) {
-  const effectiveMaxBytes = boundedMaxBytes(options.maxBytes, maxBytes, label);
-  if (Buffer.byteLength(content, "utf8") > effectiveMaxBytes) {
-    throw new Error(`${label} exceeds ${effectiveMaxBytes} bytes`);
-  }
-  if (options.overlay) {
-    await options.overlay.write(
-      relativePath,
-      content,
-      effectiveMaxBytes,
-      label
-    );
-    return;
-  }
-  const expected = await readSnapshot(
-    changeDir,
-    relativePath,
-    effectiveMaxBytes,
-    label,
-    options
-  );
-  const inspection = await inspectProtectedProjectPath(
-    changeDir,
-    relativePath,
-    {
-      label,
-      expected: "file"
-    }
-  );
-  await atomicWriteContainedText(inspection.target, content, {
-    containedRoot: inspection.projectRoot,
-    exclusive: options.exclusive,
-    beforeCommit: async () => {
-      await options.beforeCommit?.();
-      const current = await readSnapshot(
-        changeDir,
-        relativePath,
-        effectiveMaxBytes,
-        label
-      );
-      if (!expected && !current) return;
-      if (!expected || !current) {
-        const error = new Error(
-          `${label} changed before commit`
-        );
-        if (options.exclusive && !expected && current) error.code = "EEXIST";
-        throw error;
-      }
-      if (expected.result.realPath !== current.result.realPath || !sameFileObject(
-        identityOf2(expected.result.stat),
-        identityOf2(current.result.stat)
-      ) || expected.text !== current.text) {
-        throw new Error(`${label} changed before commit`);
-      }
-    }
-  });
-}
-async function appendEngineRunText(changeDir, relativePath, addition, maxBytes, label, options = {}) {
-  const existing = await readOptionalEngineRunText(
-    changeDir,
-    relativePath,
-    maxBytes,
-    label,
-    options
-  );
-  await writeEngineRunText(
-    changeDir,
-    relativePath,
-    `${existing ?? ""}${addition}`,
-    maxBytes,
-    label,
-    options
-  );
-}
-async function removeEngineRunFile(changeDir, relativePath, label, options = {}) {
-  if (options.overlay) {
-    return options.overlay.remove(relativePath, label);
-  }
-  const inspection = await inspectProtectedProjectPath(
-    changeDir,
-    relativePath,
-    {
-      label,
-      expected: "file"
-    }
-  );
-  if (!inspection.exists) return false;
-  return removeContainedFile(inspection.target, {
-    containedRoot: inspection.projectRoot,
-    beforeRemove: options.beforeRemove
-  });
-}
-
-// src/engine/run-store.ts
+import path9 from "path";
 var RUN_FILE_LIMITS = {
   trajectory: 8 * 1024 * 1024,
   artifacts: 1024 * 1024,
@@ -2751,21 +4463,21 @@ var ACTION_KEYS = /* @__PURE__ */ new Set([
   "retryOrdinal"
 ]);
 var appendLocks = /* @__PURE__ */ new Map();
-function assertRunPath(changeDir, relativePath) {
-  const normalized = typeof relativePath === "string" ? relativePath.replaceAll("\\", "/") : "";
-  if (typeof relativePath !== "string" || normalized.length === 0 || path8.posix.isAbsolute(normalized) || path8.win32.isAbsolute(relativePath) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(relativePath) || normalized.split("/").some(
+function assertRunPath(changeDir, relativePath2) {
+  const normalized = typeof relativePath2 === "string" ? relativePath2.replaceAll("\\", "/") : "";
+  if (typeof relativePath2 !== "string" || normalized.length === 0 || path9.posix.isAbsolute(normalized) || path9.win32.isAbsolute(relativePath2) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(relativePath2) || normalized.split("/").some(
     (segment) => segment.length === 0 || segment === "." || segment === ".."
   )) {
     throw new Error("Run path must stay inside the change directory");
   }
-  const root = path8.resolve(changeDir);
-  const target = path8.resolve(root, ...normalized.split("/"));
-  if (target !== root && !target.startsWith(root + path8.sep)) {
+  const root = path9.resolve(changeDir);
+  const target = path9.resolve(root, ...normalized.split("/"));
+  if (target !== root && !target.startsWith(root + path9.sep)) {
     throw new Error("Run path must stay inside the change directory");
   }
   return normalized;
 }
-function isRecord3(value) {
+function isRecord4(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function requiredText(value, key, label) {
@@ -2778,7 +4490,7 @@ function nullableText(value, key, label) {
   if (value === null) return null;
   return requiredText(value, key, label);
 }
-function assertKnownFields2(value, keys, label) {
+function assertKnownFields3(value, keys, label) {
   const unknown = Object.keys(value).find((key) => !keys.has(key));
   if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
 }
@@ -2789,7 +4501,7 @@ function requiredFields(value, keys, label) {
     }
   }
 }
-function nonNegativeInteger(value, key, label) {
+function nonNegativeInteger2(value, key, label) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
   }
@@ -2803,8 +4515,8 @@ function parseJson(raw, label) {
   }
 }
 function parseScopeProducer(value, label) {
-  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields2(
+  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields3(
     value,
     /* @__PURE__ */ new Set([
       "runId",
@@ -2826,12 +4538,12 @@ function parseScopeProducer(value, label) {
     cycleId,
     attemptId: requiredText(value.attemptId, "attemptId", label),
     actionId: requiredText(value.actionId, "actionId", label),
-    revision: nonNegativeInteger(value.revision, "revision", label)
+    revision: nonNegativeInteger2(value.revision, "revision", label)
   };
 }
 function parseScopeReference(value, label) {
-  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields2(
+  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields3(
     value,
     /* @__PURE__ */ new Set(["id", "required", "versionId", "contentHash", "producer"]),
     label
@@ -2852,8 +4564,8 @@ function parseScopeReference(value, label) {
   };
 }
 function parseDecisionScope(value, label) {
-  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields2(value, /* @__PURE__ */ new Set(["artifacts", "evidence"]), label);
+  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields3(value, /* @__PURE__ */ new Set(["artifacts", "evidence"]), label);
   const parseEntries = (kind) => {
     const entries = value[kind];
     if (!Array.isArray(entries)) {
@@ -2872,12 +4584,12 @@ function parseDecisionScope(value, label) {
   };
 }
 function parseAction(value) {
-  if (!isRecord3(value)) {
+  if (!isRecord4(value)) {
     throw new Error(
       "Invalid Run pending action: stored value must be an object"
     );
   }
-  assertKnownFields2(value, ACTION_KEYS, "Run pending action");
+  assertKnownFields3(value, ACTION_KEYS, "Run pending action");
   requiredFields(
     value,
     /* @__PURE__ */ new Set(["id", "stepId", "type"]),
@@ -2988,10 +4700,10 @@ function parseDecisionScalarType(value, label) {
   return value;
 }
 function parseDecisionInputSchema(value, label) {
-  if (!isRecord3(value)) {
+  if (!isRecord4(value)) {
     throw new Error(`Invalid ${label}: must be an object`);
   }
-  assertKnownFields2(value, /* @__PURE__ */ new Set(["type", "fields"]), label);
+  assertKnownFields3(value, /* @__PURE__ */ new Set(["type", "fields"]), label);
   if (value.type !== "object") {
     throw new Error(`Invalid ${label}: type must be object`);
   }
@@ -3001,10 +4713,10 @@ function parseDecisionInputSchema(value, label) {
   const ids = /* @__PURE__ */ new Set();
   const fields = value.fields.map((entry, index) => {
     const fieldLabel = `${label}.fields[${index}]`;
-    if (!isRecord3(entry)) {
+    if (!isRecord4(entry)) {
       throw new Error(`Invalid ${fieldLabel}: must be an object`);
     }
-    assertKnownFields2(
+    assertKnownFields3(
       entry,
       /* @__PURE__ */ new Set(["id", "type", "required", "values", "enum"]),
       fieldLabel
@@ -3046,8 +4758,8 @@ function parseDecisionInputSchema(value, label) {
   return { type: "object", fields };
 }
 function parseDecisionChoiceSummary(value, label) {
-  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields2(value, /* @__PURE__ */ new Set(["id", "label", "requiredInputs"]), label);
+  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields3(value, /* @__PURE__ */ new Set(["id", "label", "requiredInputs"]), label);
   const result = {
     id: requiredText(value.id, "id", label),
     label: requiredText(value.label, "label", label)
@@ -3061,16 +4773,16 @@ function parseDecisionChoiceSummary(value, label) {
   return result;
 }
 function parseRationalePolicy(value, label) {
-  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields2(value, /* @__PURE__ */ new Set(["required"]), label);
+  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields3(value, /* @__PURE__ */ new Set(["required"]), label);
   if (value.required !== void 0 && typeof value.required !== "boolean") {
     throw new Error(`Invalid ${label}: required must be a boolean`);
   }
   return { required: value.required === true };
 }
 function parseReviewerPolicy(value, label) {
-  if (!isRecord3(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields2(value, /* @__PURE__ */ new Set(["subjects", "authorities"]), label);
+  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields3(value, /* @__PURE__ */ new Set(["subjects", "authorities"]), label);
   const result = {};
   for (const key of ["subjects", "authorities"]) {
     if (value[key] === void 0) continue;
@@ -3084,7 +4796,7 @@ function parseReviewerPolicy(value, label) {
   return result;
 }
 function parseArtifacts(value) {
-  if (!isRecord3(value)) {
+  if (!isRecord4(value)) {
     throw new Error("Invalid Run artifacts: stored value must be an object");
   }
   for (const artifact of Object.values(value)) {
@@ -3097,11 +4809,11 @@ function parseArtifacts(value) {
   );
 }
 function parseTrajectoryEvent(value) {
-  if (!isRecord3(value)) {
+  if (!isRecord4(value)) {
     throw new Error("Invalid Run trajectory: stored value must be an object");
   }
   const keys = /* @__PURE__ */ new Set(["sequence", "timestamp", "type", "runId", "data"]);
-  assertKnownFields2(value, keys, "Run trajectory");
+  assertKnownFields3(value, keys, "Run trajectory");
   requiredFields(value, keys, "Run trajectory");
   if (typeof value.sequence !== "number" || !Number.isSafeInteger(value.sequence) || value.sequence < 1) {
     throw new Error(
@@ -3111,7 +4823,7 @@ function parseTrajectoryEvent(value) {
   if (!TRAJECTORY_EVENT_TYPES.has(value.type)) {
     throw new Error("Invalid Run trajectory: type is invalid");
   }
-  if (!isRecord3(value.data)) {
+  if (!isRecord4(value.data)) {
     throw new Error("Invalid Run trajectory: data must be an object");
   }
   return {
@@ -3188,9 +4900,9 @@ async function withAppendLock(key, operation2) {
     if (appendLocks.get(key) === current) appendLocks.delete(key);
   }
 }
-async function appendTrajectory(changeDir, relativePath, event, options = {}) {
-  const normalized = assertRunPath(changeDir, relativePath);
-  const key = `${path8.resolve(changeDir)}\0${normalized}`;
+async function appendTrajectory(changeDir, relativePath2, event, options = {}) {
+  const normalized = assertRunPath(changeDir, relativePath2);
+  const key = `${path9.resolve(changeDir)}\0${normalized}`;
   await withAppendLock(key, async () => {
     const raw = await readOptionalEngineRunText(
       changeDir,
@@ -3231,8 +4943,8 @@ async function appendTrajectory(changeDir, relativePath, event, options = {}) {
     );
   });
 }
-async function readTrajectory(changeDir, relativePath, options = {}) {
-  const normalized = assertRunPath(changeDir, relativePath);
+async function readTrajectory(changeDir, relativePath2, options = {}) {
+  const normalized = assertRunPath(changeDir, relativePath2);
   const raw = await readOptionalEngineRunText(
     changeDir,
     normalized,
@@ -3242,8 +4954,8 @@ async function readTrajectory(changeDir, relativePath, options = {}) {
   );
   return parseTrajectory(raw);
 }
-async function readArtifacts(changeDir, relativePath, options = {}) {
-  const normalized = assertRunPath(changeDir, relativePath);
+async function readArtifacts(changeDir, relativePath2, options = {}) {
+  const normalized = assertRunPath(changeDir, relativePath2);
   const raw = await readOptionalEngineRunText(
     changeDir,
     normalized,
@@ -3253,8 +4965,8 @@ async function readArtifacts(changeDir, relativePath, options = {}) {
   );
   return raw === null ? {} : parseArtifacts(parseJson(raw, "Run artifacts"));
 }
-async function writeArtifacts(changeDir, relativePath, artifacts, options = {}) {
-  const normalized = assertRunPath(changeDir, relativePath);
+async function writeArtifacts(changeDir, relativePath2, artifacts, options = {}) {
+  const normalized = assertRunPath(changeDir, relativePath2);
   const parsed = parseArtifacts(artifacts);
   await writeEngineRunText(
     changeDir,
@@ -3265,8 +4977,8 @@ async function writeArtifacts(changeDir, relativePath, artifacts, options = {}) 
     options
   );
 }
-async function writePendingAction(changeDir, relativePath, action, options = {}) {
-  const normalized = assertRunPath(changeDir, relativePath);
+async function writePendingAction(changeDir, relativePath2, action, options = {}) {
+  const normalized = assertRunPath(changeDir, relativePath2);
   const parsed = parseAction(action);
   await writeEngineRunText(
     changeDir,
@@ -3277,8 +4989,8 @@ async function writePendingAction(changeDir, relativePath, action, options = {})
     options
   );
 }
-async function readPendingAction(changeDir, relativePath, options = {}) {
-  const normalized = assertRunPath(changeDir, relativePath);
+async function readPendingAction(changeDir, relativePath2, options = {}) {
+  const normalized = assertRunPath(changeDir, relativePath2);
   const raw = await readOptionalEngineRunText(
     changeDir,
     normalized,
@@ -3288,8 +5000,8 @@ async function readPendingAction(changeDir, relativePath, options = {}) {
   );
   return raw === null ? null : parseAction(parseJson(raw, "Run pending action"));
 }
-async function clearPendingAction(changeDir, relativePath, options = {}) {
-  const normalized = assertRunPath(changeDir, relativePath);
+async function clearPendingAction(changeDir, relativePath2, options = {}) {
+  const normalized = assertRunPath(changeDir, relativePath2);
   await removeEngineRunFile(
     changeDir,
     normalized,
@@ -3299,10 +5011,10 @@ async function clearPendingAction(changeDir, relativePath, options = {}) {
 }
 
 // src/engine/state.ts
-import path9 from "path";
+import path10 from "path";
 function assertSafeRunReference(value, key) {
   const normalized = value.replaceAll("\\", "/");
-  if (path9.posix.isAbsolute(normalized) || path9.win32.isAbsolute(value) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(value) || /[*?]/u.test(value) || normalized.split("/").some(
+  if (path10.posix.isAbsolute(normalized) || path10.win32.isAbsolute(value) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(value) || /[*?]/u.test(value) || normalized.split("/").some(
     (segment) => segment.length === 0 || segment === "." || segment === ".."
   )) {
     throw new Error(
@@ -3921,7 +5633,8 @@ function parseWorkflowRuntime(value, runId) {
     "visits",
     "decisionReceipts",
     "artifactVersions",
-    "artifactSelections"
+    "artifactSelections",
+    "contentSnapshots"
   ]);
   const unknown = Object.keys(runtime).find((key) => !keys.has(key));
   if (unknown) {
@@ -3993,6 +5706,31 @@ function parseWorkflowRuntime(value, runId) {
       "Invalid Run state: WorkflowRuntime artifactSelections must be an array"
     );
   })();
+  const contentSnapshots = runtime.contentSnapshots === void 0 ? void 0 : Array.isArray(runtime.contentSnapshots) ? runtime.contentSnapshots.length > 64 ? (() => {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime contentSnapshots exceeds its bound"
+    );
+  })() : runtime.contentSnapshots.map(
+    (snapshot, index) => parseWorkflowContentSnapshotReference(
+      snapshot,
+      `workflowRuntime.contentSnapshots[${index}]`
+    )
+  ) : (() => {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime contentSnapshots must be an array"
+    );
+  })();
+  if (contentSnapshots) {
+    const snapshotHashes = /* @__PURE__ */ new Set();
+    for (const snapshot of contentSnapshots) {
+      if (snapshotHashes.has(snapshot.hash)) {
+        throw new Error(
+          `Invalid Run state: duplicate WorkflowRuntime content snapshot ${snapshot.hash}`
+        );
+      }
+      snapshotHashes.add(snapshot.hash);
+    }
+  }
   const artifactVersionIds = /* @__PURE__ */ new Set();
   for (const version of artifactVersions) {
     if (artifactVersionIds.has(version.id)) {
@@ -4127,7 +5865,8 @@ function parseWorkflowRuntime(value, runId) {
     visits,
     decisionReceipts,
     artifactVersions,
-    artifactSelections
+    artifactSelections,
+    ...contentSnapshots ? { contentSnapshots } : {}
   };
 }
 function parseRunStateJson(value) {
@@ -4299,8 +6038,8 @@ async function writeRunState(changeDir, state, options = {}) {
 }
 
 // src/workflow-runtime/artifacts.ts
-import { promises as fs5 } from "node:fs";
-import path10 from "node:path";
+import { promises as fs6 } from "node:fs";
+import path11 from "node:path";
 var ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
 var ARTIFACT_MAX_ENTRIES = 256;
 var WorkflowArtifactValidationError = class extends Error {
@@ -4347,7 +6086,7 @@ function declarationFor(key, candidates) {
 }
 function artifactPatternSegments(value, label) {
   const normalized = value.trim().replaceAll("\\", "/");
-  if (normalized.length === 0 || path10.posix.isAbsolute(normalized) || path10.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
+  if (normalized.length === 0 || path11.posix.isAbsolute(normalized) || path11.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
     throw new Error(`${label} must be relative to the Run root`);
   }
   const segments = normalized.split("/");
@@ -4387,11 +6126,11 @@ function workflowArtifactExpectedKind(artifact) {
   return artifact.kind === "directory" ? "directory" : "file";
 }
 async function realRunRoot(runRoot, label) {
-  const stat = await fs5.lstat(runRoot);
+  const stat = await fs6.lstat(runRoot);
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error(`${label} Run root must be a real directory`);
   }
-  return path10.resolve(runRoot);
+  return path11.resolve(runRoot);
 }
 async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, label, options = { maxMatches: ARTIFACT_MAX_ENTRIES }) {
   const segments = artifactPatternSegments(artifactPath, label);
@@ -4404,7 +6143,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
       });
       return inspection.exists ? [inspection.relative] : [];
     }
-    const current = relative.length === 0 ? root : path10.join(root, relative);
+    const current = relative.length === 0 ? root : path11.join(root, relative);
     if (relative.length > 0) {
       const inspection = await inspectProtectedProjectPath(runRoot, relative, {
         label,
@@ -4415,13 +6154,13 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
     const segment = segments[index];
     if (!segment.includes("*")) {
       return walk(
-        relative.length === 0 ? segment : path10.posix.join(relative, segment),
+        relative.length === 0 ? segment : path11.posix.join(relative, segment),
         index + 1
       );
     }
     let entries;
     try {
-      entries = await fs5.readdir(current, { withFileTypes: true });
+      entries = await fs6.readdir(current, { withFileTypes: true });
     } catch (error) {
       const code = error.code;
       if (code === "ENOENT" || code === "ENOTDIR") return [];
@@ -4434,7 +6173,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
     )) {
       if (entry.isSymbolicLink()) {
         throw new Error(
-          `${label} crosses a symbolic link or junction at ${path10.join(current, entry.name)}`
+          `${label} crosses a symbolic link or junction at ${path11.join(current, entry.name)}`
         );
       }
       if (!matcher.test(entry.name)) continue;
@@ -4443,7 +6182,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
       if (final && (expected === "file" && !entry.isFile() || expected === "directory" && !entry.isDirectory())) {
         continue;
       }
-      const next = relative.length === 0 ? entry.name : path10.posix.join(relative, entry.name);
+      const next = relative.length === 0 ? entry.name : path11.posix.join(relative, entry.name);
       matches.push(...await walk(next, index + 1));
       if (options.maxMatches !== void 0 && matches.length > options.maxMatches) {
         throw new Error(
@@ -4470,7 +6209,7 @@ async function resolveArtifactPath(runRoot, declaration, requestedPath) {
   });
   return inspection.exists ? inspection.relative : null;
 }
-async function hashDirectoryArtifact(runRoot, relativePath, label) {
+async function hashDirectoryArtifact(runRoot, relativePath2, label) {
   const manifest = [];
   let totalBytes = 0;
   async function walk(directory) {
@@ -4479,9 +6218,9 @@ async function hashDirectoryArtifact(runRoot, relativePath, label) {
       expected: "directory"
     });
     if (!inspection.exists) throw new Error(`${label} does not exist`);
-    const entries = (await fs5.readdir(inspection.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
+    const entries = (await fs6.readdir(inspection.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
-      const relative = path10.posix.join(directory, entry.name);
+      const relative = path11.posix.join(directory, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error(
           `${label} crosses a symbolic link or junction at ${relative}`
@@ -4512,20 +6251,20 @@ async function hashDirectoryArtifact(runRoot, relativePath, label) {
       }
     }
   }
-  await walk(relativePath);
+  await walk(relativePath2);
   return sha256(JSON.stringify(stableValue({ kind: "directory", manifest })));
 }
-async function hashArtifactPath(runRoot, declaration, relativePath) {
+async function hashArtifactPath(runRoot, declaration, relativePath2) {
   const label = `Workflow artifact ${declaration.artifactId}`;
-  if (!artifactPathMatches(relativePath, declaration.artifact.paths)) {
-    fail(`${label} path is outside its declaration: ${relativePath}`);
+  if (!artifactPathMatches(relativePath2, declaration.artifact.paths)) {
+    fail(`${label} path is outside its declaration: ${relativePath2}`);
   }
   if (declaration.artifact.kind === "directory") {
-    return hashDirectoryArtifact(runRoot, relativePath, label);
+    return hashDirectoryArtifact(runRoot, relativePath2, label);
   }
   const result = await readProtectedProjectFile(
     runRoot,
-    relativePath,
+    relativePath2,
     ARTIFACT_MAX_BYTES,
     { label }
   );
@@ -4903,7 +6642,7 @@ function createCompletionPlan(node) {
     )
   };
 }
-function isRecord4(value) {
+function isRecord5(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function hasOwn(value, key) {
@@ -4915,7 +6654,7 @@ function includesEvidence(value, keys) {
       (item) => typeof item === "string" && keys.includes(item)
     );
   }
-  if (!isRecord4(value)) return false;
+  if (!isRecord5(value)) return false;
   return keys.some((key) => hasOwn(value, key));
 }
 function hasEvidence(evidence, keys, containers = []) {
@@ -5816,7 +7555,7 @@ function resolverHash(protocol) {
 }
 
 // src/workflow/contract.ts
-function isRecord5(value) {
+function isRecord6(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function decisionChoiceTarget2(choice) {
@@ -5833,7 +7572,7 @@ function scalarMatchesType(value, type) {
 }
 function decisionInputErrors(schema, label) {
   const errors = [];
-  if (!isRecord5(schema)) return [`${label} must be an object`];
+  if (!isRecord6(schema)) return [`${label} must be an object`];
   const schemaKeys = /* @__PURE__ */ new Set(["type", "fields"]);
   const unknownSchemaKey = Object.keys(schema).find(
     (key) => !schemaKeys.has(key)
@@ -5851,7 +7590,7 @@ function decisionInputErrors(schema, label) {
   const ids = /* @__PURE__ */ new Set();
   for (const [index, field] of schema.fields.entries()) {
     const fieldLabel = `${label}.fields[${index}]`;
-    if (!isRecord5(field)) {
+    if (!isRecord6(field)) {
       errors.push(`${fieldLabel} must be an object`);
       continue;
     }
@@ -5904,7 +7643,7 @@ function decisionInputErrors(schema, label) {
 }
 function decisionScopeErrors(scope, label) {
   const errors = [];
-  if (!isRecord5(scope)) return [`${label} must be an object`];
+  if (!isRecord6(scope)) return [`${label} must be an object`];
   const scopeKeys = /* @__PURE__ */ new Set(["artifacts", "evidence"]);
   const unknown = Object.keys(scope).find((key) => !scopeKeys.has(key));
   if (unknown) errors.push(`${label} has unsupported field: ${unknown}`);
@@ -5919,7 +7658,7 @@ function decisionScopeErrors(scope, label) {
     const ids = /* @__PURE__ */ new Set();
     for (const [index, entry] of entries.entries()) {
       const entryLabel = `${label}.${kind}[${index}]`;
-      if (!isRecord5(entry)) {
+      if (!isRecord6(entry)) {
         errors.push(`${entryLabel} must be an object`);
         continue;
       }
@@ -5950,7 +7689,7 @@ function decisionScopeErrors(scope, label) {
 function decisionErrors(decision, nodeId) {
   const label = `Decision Node ${nodeId}`;
   const errors = [];
-  if (!isRecord5(decision)) return [`${label} requires a decision definition`];
+  if (!isRecord6(decision)) return [`${label} requires a decision definition`];
   const keys = /* @__PURE__ */ new Set([
     "id",
     "question",
@@ -5975,7 +7714,7 @@ function decisionErrors(decision, nodeId) {
     const targets = /* @__PURE__ */ new Set();
     for (const [index, choice] of decision.choices.entries()) {
       const choiceLabel = `${label}.choices[${index}]`;
-      if (!isRecord5(choice)) {
+      if (!isRecord6(choice)) {
         errors.push(`${choiceLabel} must be an object`);
         continue;
       }
@@ -6028,7 +7767,7 @@ function decisionErrors(decision, nodeId) {
         );
       }
       if (choice.routing !== void 0) {
-        if (!isRecord5(choice.routing)) {
+        if (!isRecord6(choice.routing)) {
           errors.push(`${choiceLabel}.routing must be an object`);
         } else if (Object.entries(choice.routing).some(
           ([field, value]) => field.length === 0 || typeof value !== "string" || value.length === 0
@@ -6042,14 +7781,14 @@ function decisionErrors(decision, nodeId) {
     errors.push(...decisionInputErrors(decision.inputs, `${label}.inputs`));
   }
   if (decision.rationale !== void 0) {
-    if (!isRecord5(decision.rationale)) {
+    if (!isRecord6(decision.rationale)) {
       errors.push(`${label}.rationale must be an object`);
     } else if (Object.keys(decision.rationale).some((key) => key !== "required") || decision.rationale.required !== void 0 && typeof decision.rationale.required !== "boolean") {
       errors.push(`${label}.rationale.required must be a boolean`);
     }
   }
   if (decision.reviewer !== void 0) {
-    if (!isRecord5(decision.reviewer)) {
+    if (!isRecord6(decision.reviewer)) {
       errors.push(`${label}.reviewer must be an object`);
     } else {
       const reviewerKeys = /* @__PURE__ */ new Set(["subjects", "authorities"]);
@@ -6098,7 +7837,7 @@ var WorkflowDecisionScopeError = class extends Error {
 function fail2(message) {
   throw new WorkflowDecisionScopeError(message);
 }
-function isRecord6(value) {
+function isRecord7(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function protocolNodeForAction(pkg, action) {
@@ -6157,12 +7896,12 @@ function evidenceValue(evidence, declaration) {
     }
   }
   const scoped = evidence.schemaEvidence;
-  if (!isRecord6(scoped)) return { found: false };
+  if (!isRecord7(scoped)) return { found: false };
   if (Object.prototype.hasOwnProperty.call(scoped, logicalId)) {
     return { found: true, value: scoped[logicalId] };
   }
   const schemaEvidence = scoped[declaration.schemaId];
-  if (isRecord6(schemaEvidence)) {
+  if (isRecord7(schemaEvidence)) {
     if (Object.prototype.hasOwnProperty.call(
       schemaEvidence,
       declaration.evidenceId
@@ -6402,14 +8141,14 @@ function pendingReference(references, id) {
 function validateScopeList(references, pending, label) {
   const keys = /* @__PURE__ */ new Set();
   for (const reference of references) {
-    if (!isRecord6(reference)) fail2(`${label} entries must be objects`);
+    if (!isRecord7(reference)) fail2(`${label} entries must be objects`);
     const unknown = Object.keys(reference).find(
       (key2) => !["id", "required", "versionId", "contentHash", "producer"].includes(
         key2
       )
     );
     if (unknown) fail2(`${label} has unsupported field: ${unknown}`);
-    if (typeof reference.id !== "string" || typeof reference.versionId !== "string" || typeof reference.contentHash !== "string" || !/^[a-f0-9]{64}$/u.test(reference.contentHash) || reference.required !== void 0 && typeof reference.required !== "boolean" || reference.producer !== void 0 && !isRecord6(reference.producer)) {
+    if (typeof reference.id !== "string" || typeof reference.versionId !== "string" || typeof reference.contentHash !== "string" || !/^[a-f0-9]{64}$/u.test(reference.contentHash) || reference.required !== void 0 && typeof reference.required !== "boolean" || reference.producer !== void 0 && !isRecord7(reference.producer)) {
       fail2(`${label} contains an invalid reference`);
     }
     const key = referenceKey(reference);
@@ -6438,7 +8177,7 @@ function validateWorkflowDecisionScopeResponse(pending, submitted, evidenceRefer
   let submittedScope;
   if (submitted) {
     const submittedValue = submitted;
-    if (!isRecord6(submittedValue)) {
+    if (!isRecord7(submittedValue)) {
       fail2("Decision response scope must be an object");
     }
     const unknown = Object.keys(submittedValue).find(
@@ -7270,10 +9009,10 @@ var CLAIM_DIRECTORY = ".comet/revision-claims";
 var CLAIM_MAX_IDENTIFIER_LENGTH = 256;
 var CLAIM_WAIT_TIMEOUT_MS = 5e3;
 var CLAIM_POLL_INTERVAL_MS = 10;
-function isRecord7(value) {
+function isRecord8(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-function assertKnownFields3(value, keys, label) {
+function assertKnownFields4(value, keys, label) {
   const unknown = Object.keys(value).find((key) => !keys.has(key));
   if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
 }
@@ -7290,7 +9029,7 @@ function timestamp(value, key, label) {
   }
   return result;
 }
-function nonNegativeInteger2(value, key, label) {
+function nonNegativeInteger3(value, key, label) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
   }
@@ -7305,8 +9044,8 @@ function hash(value, key, label) {
 }
 function parseExecutionIdentity(value) {
   const label = "Workflow revision claim execution";
-  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields3(
+  if (!isRecord8(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields4(
     value,
     /* @__PURE__ */ new Set([
       "protocolHash",
@@ -7320,7 +9059,7 @@ function parseExecutionIdentity(value) {
     ]),
     label
   );
-  if (!isRecord7(value.nodeToStep)) {
+  if (!isRecord8(value.nodeToStep)) {
     throw new Error(`Invalid ${label}: nodeToStep must be an object`);
   }
   const nodeToStep = {};
@@ -7359,8 +9098,8 @@ function parseExecutionIdentity(value) {
 }
 function parseClaim(value) {
   const label = "Workflow revision claim";
-  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields3(
+  if (!isRecord8(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields4(
     value,
     /* @__PURE__ */ new Set([
       "schemaVersion",
@@ -7387,12 +9126,12 @@ function parseClaim(value) {
   if (value.operation !== "workflow.submit") {
     throw new Error(`Invalid ${label}: operation is invalid`);
   }
-  const expectedRevision = nonNegativeInteger2(
+  const expectedRevision = nonNegativeInteger3(
     value.expectedRevision,
     "expectedRevision",
     label
   );
-  const intendedRevision = nonNegativeInteger2(
+  const intendedRevision = nonNegativeInteger3(
     value.intendedRevision,
     "intendedRevision",
     label
@@ -7503,7 +9242,7 @@ async function waitForExistingClaim(runRoot, input, existing) {
 }
 async function acquireRevisionClaim(runRoot, input) {
   const candidate = createClaim(input);
-  const relativePath = revisionClaimPath(input);
+  const relativePath2 = revisionClaimPath(input);
   const maxBytes = profileForExecution(input.execution).bounds.claimBytes;
   for (; ; ) {
     const existing = await readClaim(runRoot, input);
@@ -7519,7 +9258,7 @@ async function acquireRevisionClaim(runRoot, input) {
     try {
       await writeEngineRunText(
         runRoot,
-        relativePath,
+        relativePath2,
         serializeClaim(candidate),
         maxBytes,
         "Workflow revision claim",
@@ -7548,7 +9287,7 @@ async function acquireRevisionClaim(runRoot, input) {
           };
           await writeEngineRunText(
             runRoot,
-            relativePath,
+            relativePath2,
             serializeClaim(committed),
             maxBytes,
             "Workflow revision claim",
@@ -7613,7 +9352,7 @@ function committedRevisionClaimText(raw) {
 
 // src/workflow-runtime/transition-journal.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-import path11 from "node:path";
+import path12 from "node:path";
 var WORKFLOW_TRANSITION_JOURNAL_PATH = ".comet/transition-journal.json";
 var WORKFLOW_TRANSITION_JOURNAL_SCHEMA_VERSION = 1;
 var WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS = 16;
@@ -7641,9 +9380,9 @@ var WorkflowTransitionJournalPendingError = class extends Error {
   journal;
 };
 var WorkflowTransitionRecordConflictError = class extends Error {
-  constructor(path16) {
-    super(`Workflow transition record changed before journaling: ${path16}`);
-    this.path = path16;
+  constructor(path17) {
+    super(`Workflow transition record changed before journaling: ${path17}`);
+    this.path = path17;
     this.name = "WorkflowTransitionRecordConflictError";
   }
   path;
@@ -7652,10 +9391,10 @@ function isBlockedRecoveryResult(value) {
   return value.status === "blocked";
 }
 var configuredFault;
-function isRecord8(value) {
+function isRecord9(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-function assertKnownFields4(value, keys, label) {
+function assertKnownFields5(value, keys, label) {
   const unknown = Object.keys(value).find((key) => !keys.has(key));
   if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
 }
@@ -7672,7 +9411,7 @@ function timestamp2(value, key, label) {
   }
   return result;
 }
-function nonNegativeInteger3(value, key, label) {
+function nonNegativeInteger4(value, key, label) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
   }
@@ -7698,9 +9437,9 @@ function nullableActionId(value, key, label) {
   return value === null ? null : requiredText3(value, key, label);
 }
 function parseMaterialIdentity(value, key, label) {
-  if (!isRecord8(value))
+  if (!isRecord9(value))
     throw new Error(`Invalid ${label}: ${key} must be an object`);
-  assertKnownFields4(
+  assertKnownFields5(
     value,
     /* @__PURE__ */ new Set(["exists", "bytes", "sha256"]),
     `${label}.${key}`
@@ -7708,7 +9447,7 @@ function parseMaterialIdentity(value, key, label) {
   if (typeof value.exists !== "boolean") {
     throw new Error(`Invalid ${label}: ${key}.exists must be a boolean`);
   }
-  const bytes = nonNegativeInteger3(value.bytes, `${key}.bytes`, label);
+  const bytes = nonNegativeInteger4(value.bytes, `${key}.bytes`, label);
   const digest = value.sha256 === null ? null : hash2(value.sha256, `${key}.sha256`, label);
   if (!value.exists && (bytes !== 0 || digest !== null) || value.exists && (bytes < 1 || digest === null)) {
     throw new Error(`Invalid ${label}: ${key} identity is inconsistent`);
@@ -7716,9 +9455,9 @@ function parseMaterialIdentity(value, key, label) {
   return { exists: value.exists, bytes, sha256: digest };
 }
 function parseMaterial(value, key, label, maxBytes) {
-  if (!isRecord8(value))
+  if (!isRecord9(value))
     throw new Error(`Invalid ${label}: ${key} must be an object`);
-  assertKnownFields4(
+  assertKnownFields5(
     value,
     /* @__PURE__ */ new Set(["content", "exists", "bytes", "sha256"]),
     `${label}.${key}`
@@ -7747,12 +9486,12 @@ function parseMaterial(value, key, label, maxBytes) {
   }
   return { ...identity, content };
 }
-function recordKind(relativePath) {
-  if (relativePath === STATE_PATH) return "state";
-  if (relativePath.endsWith("/pending-action.json")) return "pending";
-  if (relativePath.endsWith("/artifacts.json")) return "artifacts";
-  if (relativePath.endsWith("/trajectory.jsonl")) return "trajectory";
-  if (relativePath.startsWith(".comet/revision-claims/")) {
+function recordKind(relativePath2) {
+  if (relativePath2 === STATE_PATH) return "state";
+  if (relativePath2.endsWith("/pending-action.json")) return "pending";
+  if (relativePath2.endsWith("/artifacts.json")) return "artifacts";
+  if (relativePath2.endsWith("/trajectory.jsonl")) return "trajectory";
+  if (relativePath2.startsWith(".comet/revision-claims/")) {
     return "revision-claim";
   }
   return "other";
@@ -7763,7 +9502,7 @@ function orderOf(record) {
 }
 function assertSafeRecordPath(value, label) {
   const normalized = typeof value === "string" ? value.replaceAll("\\", "/") : "";
-  if (normalized.length === 0 || normalized.length > MAX_IDENTIFIER_LENGTH || path11.posix.isAbsolute(normalized) || path11.win32.isAbsolute(String(value)) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(String(value)) || normalized.split("/").some(
+  if (normalized.length === 0 || normalized.length > MAX_IDENTIFIER_LENGTH || path12.posix.isAbsolute(normalized) || path12.win32.isAbsolute(String(value)) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(String(value)) || normalized.split("/").some(
     (segment) => segment.length === 0 || segment === "." || segment === ".."
   )) {
     throw new Error(`Invalid ${label}: path must stay inside the Run root`);
@@ -7774,22 +9513,22 @@ function assertSafeRecordPath(value, label) {
   return normalized;
 }
 function parseRevisionIdentity(value, key, label) {
-  if (!isRecord8(value))
+  if (!isRecord9(value))
     throw new Error(`Invalid ${label}: ${key} must be an object`);
-  assertKnownFields4(
+  assertKnownFields5(
     value,
     /* @__PURE__ */ new Set(["revision", "actionId"]),
     `${label}.${key}`
   );
   return {
-    revision: nonNegativeInteger3(value.revision, `${key}.revision`, label),
+    revision: nonNegativeInteger4(value.revision, `${key}.revision`, label),
     actionId: nullableActionId(value.actionId, `${key}.actionId`, label)
   };
 }
 function parseRecoveryEvent(value) {
   const label = "Workflow transition journal recovery event";
-  if (!isRecord8(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields4(
+  if (!isRecord9(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields5(
     value,
     /* @__PURE__ */ new Set(["sequence", "timestamp", "type", "runId", "data"]),
     label
@@ -7797,9 +9536,9 @@ function parseRecoveryEvent(value) {
   if (value.type !== "recovery_reconciled") {
     throw new Error(`Invalid ${label}: type is invalid`);
   }
-  if (!isRecord8(value.data))
+  if (!isRecord9(value.data))
     throw new Error(`Invalid ${label}: data must be an object`);
-  const sequence = nonNegativeInteger3(value.sequence, "sequence", label);
+  const sequence = nonNegativeInteger4(value.sequence, "sequence", label);
   if (sequence < 1) throw new Error(`Invalid ${label}: sequence is invalid`);
   return {
     sequence,
@@ -7811,8 +9550,8 @@ function parseRecoveryEvent(value) {
 }
 function parseCommitEvidence(value) {
   const label = "Workflow transition commit evidence";
-  if (!isRecord8(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields4(
+  if (!isRecord9(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields5(
     value,
     /* @__PURE__ */ new Set([
       "kind",
@@ -7842,12 +9581,12 @@ function parseCommitEvidence(value) {
     journalId: uuid(value.journalId, "journalId", label),
     operation: value.operation,
     runId: requiredText3(value.runId, "runId", label),
-    previousRevision: nonNegativeInteger3(
+    previousRevision: nonNegativeInteger4(
       value.previousRevision,
       "previousRevision",
       label
     ),
-    intendedRevision: nonNegativeInteger3(
+    intendedRevision: nonNegativeInteger4(
       value.intendedRevision,
       "intendedRevision",
       label
@@ -7858,8 +9597,8 @@ function parseCommitEvidence(value) {
 }
 function parseRecovery(value, maxBytes) {
   const label = "Workflow transition journal recovery";
-  if (!isRecord8(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields4(
+  if (!isRecord9(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields5(
     value,
     /* @__PURE__ */ new Set([
       "status",
@@ -7890,8 +9629,8 @@ function parseRecovery(value, maxBytes) {
 }
 function parseWorkflowTransitionJournal(value, maxBytes = WORKFLOW_DURABILITY_MAX_RECORD_BYTES) {
   const label = "Workflow transition journal";
-  if (!isRecord8(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields4(
+  if (!isRecord9(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields5(
     value,
     /* @__PURE__ */ new Set([
       "schemaVersion",
@@ -7929,9 +9668,9 @@ function parseWorkflowTransitionJournal(value, maxBytes = WORKFLOW_DURABILITY_MA
   const records = [];
   const paths = /* @__PURE__ */ new Set();
   for (const [index, entry] of value.records.entries()) {
-    if (!isRecord8(entry))
+    if (!isRecord9(entry))
       throw new Error(`Invalid ${label}: records[${index}] must be an object`);
-    assertKnownFields4(
+    assertKnownFields5(
       entry,
       /* @__PURE__ */ new Set(["path", "kind", "previous", "intended"]),
       `${label} record`
@@ -8420,8 +10159,8 @@ var WorkflowTransitionImpl = class {
   baseline = /* @__PURE__ */ new Map();
   committing = false;
   committed = false;
-  async read(relativePath, maxBytes, label) {
-    const normalized = assertSafeRecordPath(relativePath, label);
+  async read(relativePath2, maxBytes, label) {
+    const normalized = assertSafeRecordPath(relativePath2, label);
     if (this.staged.has(normalized)) return this.staged.get(normalized) ?? null;
     if (!this.baseline.has(normalized)) {
       this.baseline.set(
@@ -8436,16 +10175,16 @@ var WorkflowTransitionImpl = class {
     }
     return this.baseline.get(normalized) ?? null;
   }
-  async write(relativePath, content, maxBytes, label) {
-    const normalized = assertSafeRecordPath(relativePath, label);
+  async write(relativePath2, content, maxBytes, label) {
+    const normalized = assertSafeRecordPath(relativePath2, label);
     if (Buffer.byteLength(content, "utf8") > maxBytes) {
       throw new Error(`${label} exceeds ${maxBytes} bytes`);
     }
     await this.read(normalized, maxBytes, label);
     this.staged.set(normalized, content);
   }
-  async remove(relativePath, label) {
-    const normalized = assertSafeRecordPath(relativePath, label);
+  async remove(relativePath2, label) {
+    const normalized = assertSafeRecordPath(relativePath2, label);
     await this.read(
       normalized,
       recordMaxBytes(this.input.profile, recordKind(normalized)),
@@ -8792,9 +10531,9 @@ async function recoverWorkflowTransition(runRoot, profile) {
 
 // src/workflow-runtime/run-lock.ts
 import { randomUUID as randomUUID5 } from "node:crypto";
-import { promises as fs6 } from "node:fs";
+import { promises as fs7 } from "node:fs";
 import os from "node:os";
-import path12 from "node:path";
+import path13 from "node:path";
 var WORKFLOW_RUN_LOCK_PATH = ".comet/run-lock.json";
 var WORKFLOW_RUN_LOCK_RECOVERY_PATH = ".comet/run-lock-recovery.jsonl";
 var WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY = ".comet/run-lock-quarantine";
@@ -8824,10 +10563,10 @@ var configuredFault2;
 async function invokeConfiguredFault2(boundary) {
   await configuredFault2?.(boundary);
 }
-function isRecord9(value) {
+function isRecord10(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-function assertKnownFields5(value, keys, label) {
+function assertKnownFields6(value, keys, label) {
   const unknown = Object.keys(value).find((key) => !keys.has(key));
   if (unknown) throw new Error(`${label} has unknown field: ${unknown}`);
 }
@@ -8846,8 +10585,8 @@ function timestamp3(value, key, label) {
 }
 function parseWorkflowRunLockRecord(value) {
   const label = "Workflow Run lock";
-  if (!isRecord9(value)) throw new Error(`${label} must be an object`);
-  assertKnownFields5(
+  if (!isRecord10(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields6(
     value,
     /* @__PURE__ */ new Set([
       "schemaVersion",
@@ -8886,8 +10625,8 @@ function parseWorkflowRunLockRecord(value) {
 }
 function parseWorkflowRunLockTakeoverEvidence(value) {
   const label = "Workflow Run lock takeover evidence";
-  if (!isRecord9(value)) throw new Error(`${label} must be an object`);
-  assertKnownFields5(
+  if (!isRecord10(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields6(
     value,
     /* @__PURE__ */ new Set([
       "schemaVersion",
@@ -8989,9 +10728,9 @@ function validateMaxBytes(value) {
   }
   return value;
 }
-async function readSnapshot2(runRoot, relativePath = WORKFLOW_RUN_LOCK_PATH, maxBytes = WORKFLOW_RUN_LOCK_MAX_BYTES) {
-  const label = relativePath === WORKFLOW_RUN_LOCK_PATH ? "Workflow Run lock" : "Workflow Run lock quarantine";
-  const inspection = await inspectProtectedProjectPath(runRoot, relativePath, {
+async function readSnapshot2(runRoot, relativePath2 = WORKFLOW_RUN_LOCK_PATH, maxBytes = WORKFLOW_RUN_LOCK_MAX_BYTES) {
+  const label = relativePath2 === WORKFLOW_RUN_LOCK_PATH ? "Workflow Run lock" : "Workflow Run lock quarantine";
+  const inspection = await inspectProtectedProjectPath(runRoot, relativePath2, {
     label,
     expected: "file"
   });
@@ -8999,7 +10738,7 @@ async function readSnapshot2(runRoot, relativePath = WORKFLOW_RUN_LOCK_PATH, max
   try {
     const result = await readProtectedProjectFile(
       runRoot,
-      relativePath,
+      relativePath2,
       validateMaxBytes(maxBytes),
       { label }
     );
@@ -9211,7 +10950,7 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
     return { status: "changed", diagnosis: verifiedDiagnosis };
   }
   try {
-    await fs6.rename(verified.file, quarantine.target);
+    await fs7.rename(verified.file, quarantine.target);
   } catch (error) {
     if (error.code === "ENOENT") {
       return { status: "missing" };
@@ -9237,7 +10976,7 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
         { label: "Workflow Run lock quarantine", expected: "file" }
       );
       if (!source.exists && quarantined.exists) {
-        await fs6.rename(quarantined.target, source.target);
+        await fs7.rename(quarantined.target, source.target);
       }
     } catch {
       return {
@@ -9298,7 +11037,7 @@ async function releaseLock(runRoot, handle) {
   }
   try {
     await removeContainedFile(current.file, {
-      containedRoot: path12.resolve(runRoot),
+      containedRoot: path13.resolve(runRoot),
       beforeRemove: async () => {
         const latest = await readSnapshot2(runRoot, WORKFLOW_RUN_LOCK_PATH);
         if (!latest || latest.owner.ownerToken !== handle.owner.ownerToken || !sameLockVersion(latest.identity, handle.identity)) {
@@ -9481,8 +11220,8 @@ async function recordWorkflowRunLockTakeover(runRoot, evidence, maxBytes = WORKF
 
 // src/workflow-runtime/checkpoints.ts
 import { randomUUID as randomUUID6 } from "node:crypto";
-import { promises as fs7 } from "node:fs";
-import path13 from "node:path";
+import { promises as fs8 } from "node:fs";
+import path14 from "node:path";
 var WORKFLOW_CHECKPOINT_DIRECTORY = ".comet/checkpoints";
 var WORKFLOW_CHECKPOINT_INDEX_PATH = ".comet/checkpoints/index.json";
 var WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY = ".comet/checkpoints/manifests";
@@ -9497,7 +11236,7 @@ var ARTIFACTS_PATH = ".comet/artifacts.json";
 var CONTEXT_PATH = ".comet/context.md";
 var TRAJECTORY_PATH = ".comet/trajectory.jsonl";
 var TRANSITION_JOURNAL_PATH = ".comet/transition-journal.json";
-var HASH_PATTERN = /^[a-f0-9]{64}$/u;
+var HASH_PATTERN2 = /^[a-f0-9]{64}$/u;
 var MAX_IDENTIFIER_LENGTH2 = 256;
 var MAX_CHECKPOINT_ENTRIES = 256;
 var MAX_RECOVERY_RECORDS = 8;
@@ -9513,10 +11252,10 @@ var TRAJECTORY_EVENT_TYPES2 = /* @__PURE__ */ new Set([
   "recovery_reconciled"
 ]);
 var configuredFault3;
-function isRecord10(value) {
+function isRecord11(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-function assertKnownFields6(value, keys, label) {
+function assertKnownFields7(value, keys, label) {
   const unknown = Object.keys(value).find((key) => !keys.has(key));
   if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
 }
@@ -9533,20 +11272,20 @@ function timestamp4(value, key, label) {
   }
   return result;
 }
-function nonNegativeInteger4(value, key, label) {
+function nonNegativeInteger5(value, key, label) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
   }
   return value;
 }
 function positiveInteger(value, key, label) {
-  const result = nonNegativeInteger4(value, key, label);
+  const result = nonNegativeInteger5(value, key, label);
   if (result < 1) throw new Error(`Invalid ${label}: ${key} must be positive`);
   return result;
 }
 function hash3(value, key, label) {
   const result = boundedText2(value, key, label);
-  if (!HASH_PATTERN.test(result)) {
+  if (!HASH_PATTERN2.test(result)) {
     throw new Error(`Invalid ${label}: ${key} must be a SHA-256 hash`);
   }
   return result;
@@ -9562,19 +11301,19 @@ function canonical(value) {
   return `${JSON.stringify(stableValue(value), null, 2)}
 `;
 }
-function canonicalHash(value) {
+function canonicalHash2(value) {
   return sha256(JSON.stringify(stableValue(value)));
 }
 function contentAddressHash(value) {
-  if (isRecord10(value) && value.kind === "workflow-checkpoint-manifest") {
+  if (isRecord11(value) && value.kind === "workflow-checkpoint-manifest") {
     const { manifestHash: _manifestHash, ...withoutHash } = value;
-    return canonicalHash(withoutHash);
+    return canonicalHash2(withoutHash);
   }
-  if (isRecord10(value) && value.kind === "workflow-checkpoint-record") {
+  if (isRecord11(value) && value.kind === "workflow-checkpoint-record") {
     const { recordHash: _recordHash, ...withoutHash } = value;
-    return canonicalHash(withoutHash);
+    return canonicalHash2(withoutHash);
   }
-  return canonicalHash(value);
+  return canonicalHash2(value);
 }
 function contentIdentity(content) {
   if (content === null) return { exists: false, bytes: 0, sha256: null };
@@ -9598,14 +11337,14 @@ function sameStableValue(left, right) {
 function sameActionDefinition(action, step) {
   return action.type === step.action.type && action.ref === step.action.ref && action.prompt === step.action.prompt && action.question === step.action.question && sameStableValue(action.options, step.action.options) && action.decisionId === step.action.decisionId && sameStableValue(action.choices, step.action.choices) && sameStableValue(action.requiredInputs, step.action.requiredInputs) && sameStableValue(action.rationale, step.action.rationale) && sameStableValue(action.reviewer, step.action.reviewer);
 }
-function contentPathFor(hashValue) {
-  return `${WORKFLOW_CHECKPOINT_CONTENT_DIRECTORY}/${hashValue}.txt`;
+function contentPathFor(hashValue2) {
+  return `${WORKFLOW_CHECKPOINT_CONTENT_DIRECTORY}/${hashValue2}.txt`;
 }
-function manifestPathFor(hashValue) {
-  return `${WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY}/${hashValue}.json`;
+function manifestPathFor(hashValue2) {
+  return `${WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY}/${hashValue2}.json`;
 }
-function recordPathFor(hashValue) {
-  return `${WORKFLOW_CHECKPOINT_RECORD_DIRECTORY}/${hashValue}.json`;
+function recordPathFor(hashValue2) {
+  return `${WORKFLOW_CHECKPOINT_RECORD_DIRECTORY}/${hashValue2}.json`;
 }
 function checkpointBounds(profile) {
   const parsed = parseWorkflowDurabilityProfile(profile);
@@ -9622,16 +11361,16 @@ function checkpointBounds(profile) {
   }
   return { manifestBytes, recordBytes, count };
 }
-function maxBytesForPath(profile, relativePath) {
-  if (relativePath === STATE_PATH2) return profile.bounds.runStateBytes;
-  if (relativePath === PENDING_PATH) return profile.bounds.pendingActionBytes;
-  if (relativePath === TRAJECTORY_PATH) return profile.bounds.trajectoryBytes;
-  if (relativePath === ARTIFACTS_PATH) return profile.bounds.artifactsBytes;
+function maxBytesForPath(profile, relativePath2) {
+  if (relativePath2 === STATE_PATH2) return profile.bounds.runStateBytes;
+  if (relativePath2 === PENDING_PATH) return profile.bounds.pendingActionBytes;
+  if (relativePath2 === TRAJECTORY_PATH) return profile.bounds.trajectoryBytes;
+  if (relativePath2 === ARTIFACTS_PATH) return profile.bounds.artifactsBytes;
   return Math.max(profile.bounds.runStateBytes, profile.bounds.artifactsBytes);
 }
 function parseExecutionIdentity2(value, label) {
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields6(
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields7(
     value,
     /* @__PURE__ */ new Set([
       "protocolHash",
@@ -9678,8 +11417,8 @@ function parseExecutionIdentity2(value, label) {
   return identity;
 }
 function parseMaterialIdentity2(value, label) {
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields6(
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields7(
     value,
     /* @__PURE__ */ new Set(["path", "exists", "bytes", "sha256"]),
     label
@@ -9688,7 +11427,7 @@ function parseMaterialIdentity2(value, label) {
   if (typeof value.exists !== "boolean") {
     throw new Error(`Invalid ${label}: exists must be a boolean`);
   }
-  const bytes = nonNegativeInteger4(value.bytes, "bytes", label);
+  const bytes = nonNegativeInteger5(value.bytes, "bytes", label);
   const digest = nullableHash(value.sha256, "sha256", label);
   if (!value.exists && (bytes !== 0 || digest !== null) || value.exists && (bytes < 1 || digest === null)) {
     throw new Error(`Invalid ${label}: identity is inconsistent`);
@@ -9696,8 +11435,8 @@ function parseMaterialIdentity2(value, label) {
   return { path: pathValue, exists: value.exists, bytes, sha256: digest };
 }
 function parseMaterialReference(value, label) {
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields6(
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields7(
     value,
     /* @__PURE__ */ new Set(["path", "contentPath", "exists", "bytes", "sha256"]),
     label
@@ -9714,8 +11453,8 @@ function parseMaterialReference(value, label) {
   return { ...identity, contentPath };
 }
 function parsePendingActionIdentity(value, label) {
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields6(
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields7(
     value,
     /* @__PURE__ */ new Set(["id", "path", "exists", "bytes", "sha256"]),
     label
@@ -9727,8 +11466,8 @@ function parsePendingActionIdentity(value, label) {
   };
 }
 function parseTrajectoryIdentity(value, label) {
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields6(
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields7(
     value,
     /* @__PURE__ */ new Set(["path", "exists", "bytes", "sha256", "offset", "prefixSha256"]),
     label
@@ -9739,7 +11478,7 @@ function parseTrajectoryIdentity(value, label) {
     ...material
   } = value;
   const identity = parseMaterialIdentity2(material, label);
-  const offset = nonNegativeInteger4(rawOffset, "offset", label);
+  const offset = nonNegativeInteger5(rawOffset, "offset", label);
   const prefixSha256 = hash3(rawPrefixSha256, "prefixSha256", label);
   if (!identity.exists || offset > identity.bytes) {
     throw new Error(`Invalid ${label}: offset is inconsistent`);
@@ -9747,8 +11486,8 @@ function parseTrajectoryIdentity(value, label) {
   return { ...identity, offset, prefixSha256 };
 }
 function parseArtifactVersionReference(value, label) {
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields6(
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields7(
     value,
     /* @__PURE__ */ new Set(["artifactId", "versionId", "path", "contentHash", "bytes"]),
     label
@@ -9763,8 +11502,8 @@ function parseArtifactVersionReference(value, label) {
 }
 function parseCheckpointManifest(value, bounds) {
   const label = "Workflow checkpoint manifest";
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields6(
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields7(
     value,
     /* @__PURE__ */ new Set([
       "schemaVersion",
@@ -9798,7 +11537,7 @@ function parseCheckpointManifest(value, bounds) {
     kind: "workflow-checkpoint-manifest",
     manifestHash: hash3(value.manifestHash, "manifestHash", label),
     runId: boundedText2(value.runId, "runId", label),
-    revision: nonNegativeInteger4(value.revision, "revision", label),
+    revision: nonNegativeInteger5(value.revision, "revision", label),
     execution: parseExecutionIdentity2(value.execution, `${label}.execution`),
     pendingAction: value.pendingAction === null ? null : parsePendingActionIdentity(
       value.pendingAction,
@@ -9829,8 +11568,8 @@ function parseCheckpointManifest(value, bounds) {
 }
 function parseCheckpointRecord(value, bounds) {
   const label = "Workflow checkpoint record";
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields6(
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields7(
     value,
     /* @__PURE__ */ new Set([
       "schemaVersion",
@@ -9855,7 +11594,7 @@ function parseCheckpointRecord(value, bounds) {
     kind: "workflow-checkpoint-record",
     recordHash: hash3(value.recordHash, "recordHash", label),
     runId: boundedText2(value.runId, "runId", label),
-    revision: nonNegativeInteger4(value.revision, "revision", label),
+    revision: nonNegativeInteger5(value.revision, "revision", label),
     manifestHash: hash3(value.manifestHash, "manifestHash", label),
     state: parseMaterialReference(value.state, `${label}.state`),
     pendingAction: parseMaterialReference(
@@ -9873,8 +11612,8 @@ function parseCheckpointRecord(value, bounds) {
 }
 function parseCheckpointIndex(value, bounds) {
   const label = "Workflow checkpoint index";
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields6(
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields7(
     value,
     /* @__PURE__ */ new Set(["schemaVersion", "kind", "runId", "records"]),
     label
@@ -9886,10 +11625,10 @@ function parseCheckpointIndex(value, bounds) {
     throw new Error(`Invalid ${label}: records are outside the bound`);
   }
   const records = value.records.map((entry, index) => {
-    if (!isRecord10(entry)) {
+    if (!isRecord11(entry)) {
       throw new Error(`Invalid ${label}: records[${index}] must be an object`);
     }
-    assertKnownFields6(
+    assertKnownFields7(
       entry,
       /* @__PURE__ */ new Set(["recordHash", "manifestHash", "revision"]),
       label
@@ -9897,7 +11636,7 @@ function parseCheckpointIndex(value, bounds) {
     return {
       recordHash: hash3(entry.recordHash, "recordHash", label),
       manifestHash: hash3(entry.manifestHash, "manifestHash", label),
-      revision: nonNegativeInteger4(entry.revision, "revision", label)
+      revision: nonNegativeInteger5(entry.revision, "revision", label)
     };
   });
   const recordKeys = /* @__PURE__ */ new Set();
@@ -9921,8 +11660,8 @@ function parseCheckpointIndex(value, bounds) {
 }
 function parseRecoveryJournal(value, bounds) {
   const label = "Workflow checkpoint recovery journal";
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
-  assertKnownFields6(
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields7(
     value,
     /* @__PURE__ */ new Set([
       "schemaVersion",
@@ -9947,12 +11686,12 @@ function parseRecoveryJournal(value, bounds) {
   }
   const records = value.records.map(
     (entry, index) => {
-      if (!isRecord10(entry)) {
+      if (!isRecord11(entry)) {
         throw new Error(
           `Invalid ${label}: records[${index}] must be an object`
         );
       }
-      assertKnownFields6(
+      assertKnownFields7(
         entry,
         /* @__PURE__ */ new Set(["path", "previous", "intended", "contentPath"]),
         label
@@ -10021,9 +11760,9 @@ function parseRecoveryJournal(value, bounds) {
   return parsed;
 }
 function parseTrajectoryEvent2(value, label) {
-  if (!isRecord10(value))
+  if (!isRecord11(value))
     throw new Error(`Invalid ${label}: event must be an object`);
-  assertKnownFields6(
+  assertKnownFields7(
     value,
     /* @__PURE__ */ new Set(["sequence", "timestamp", "type", "runId", "data"]),
     label
@@ -10033,7 +11772,7 @@ function parseTrajectoryEvent2(value, label) {
   if (typeof type !== "string" || !TRAJECTORY_EVENT_TYPES2.has(type)) {
     throw new Error(`Invalid ${label}: event type is invalid`);
   }
-  if (!isRecord10(value.data))
+  if (!isRecord11(value.data))
     throw new Error(`Invalid ${label}: event data is invalid`);
   return {
     sequence,
@@ -10085,7 +11824,7 @@ function validateArtifactContent(raw) {
       cause: error
     });
   }
-  if (!isRecord10(value)) {
+  if (!isRecord11(value)) {
     throw new Error("Workflow checkpoint artifacts are not an object");
   }
   for (const [key, artifact] of Object.entries(value)) {
@@ -10099,7 +11838,7 @@ function validateTrajectorySemantics(events, state, pending) {
   const completed = /* @__PURE__ */ new Set();
   for (const event of events) {
     if (event.type === "action_proposed") {
-      if (!isRecord10(event.data.action)) {
+      if (!isRecord11(event.data.action)) {
         throw new Error("Workflow checkpoint action proposal is invalid");
       }
       const action2 = parsePendingActionValue(event.data.action);
@@ -10110,7 +11849,7 @@ function validateTrajectorySemantics(events, state, pending) {
       continue;
     }
     if (event.type !== "action_completed") continue;
-    if (!isRecord10(event.data.action) || !isRecord10(event.data.outcome)) {
+    if (!isRecord11(event.data.action) || !isRecord11(event.data.outcome)) {
       throw new Error("Workflow checkpoint action completion is invalid");
     }
     const action = parsePendingActionValue(event.data.action);
@@ -10139,14 +11878,14 @@ function validateTrajectorySemantics(events, state, pending) {
     throw new Error("Workflow checkpoint pending action has no proposal");
   }
 }
-async function readRaw(runRoot, relativePath, maxBytes, label) {
-  return readOptionalEngineRunText(runRoot, relativePath, maxBytes, label);
+async function readRaw(runRoot, relativePath2, maxBytes, label) {
+  return readOptionalEngineRunText(runRoot, relativePath2, maxBytes, label);
 }
-async function readMaterial(runRoot, relativePath, maxBytes, label) {
-  const content = await readRaw(runRoot, relativePath, maxBytes, label);
+async function readMaterial(runRoot, relativePath2, maxBytes, label) {
+  const content = await readRaw(runRoot, relativePath2, maxBytes, label);
   return {
     content,
-    identity: { path: relativePath, ...contentIdentity(content) }
+    identity: { path: relativePath2, ...contentIdentity(content) }
   };
 }
 async function readReferencedContent(runRoot, reference, maxBytes, label) {
@@ -10205,14 +11944,14 @@ async function publishContent(runRoot, reference, content, maxBytes) {
     if (raced !== content) throw error;
   }
 }
-async function publishJson(runRoot, relativePath, value, maxBytes, label) {
+async function publishJson(runRoot, relativePath2, value, maxBytes, label) {
   const content = canonical(value);
-  const existing = await readRaw(runRoot, relativePath, maxBytes, label);
+  const existing = await readRaw(runRoot, relativePath2, maxBytes, label);
   if (existing !== null) {
-    if (relativePath === WORKFLOW_CHECKPOINT_INDEX_PATH) {
+    if (relativePath2 === WORKFLOW_CHECKPOINT_INDEX_PATH) {
       await writeEngineRunText(
         runRoot,
-        relativePath,
+        relativePath2,
         content,
         maxBytes,
         label,
@@ -10227,18 +11966,18 @@ async function publishJson(runRoot, relativePath, value, maxBytes, label) {
     return;
   }
   try {
-    await writeEngineRunText(runRoot, relativePath, content, maxBytes, label, {
+    await writeEngineRunText(runRoot, relativePath2, content, maxBytes, label, {
       exclusive: true,
       maxBytes
     });
   } catch (error) {
     if (error.code !== "EEXIST") throw error;
-    const raced = await readRaw(runRoot, relativePath, maxBytes, label);
+    const raced = await readRaw(runRoot, relativePath2, maxBytes, label);
     if (raced !== content) throw error;
   }
 }
-async function captureMaterial(runRoot, relativePath, maxBytes, label) {
-  const material = await readMaterial(runRoot, relativePath, maxBytes, label);
+async function captureMaterial(runRoot, relativePath2, maxBytes, label) {
+  const material = await readMaterial(runRoot, relativePath2, maxBytes, label);
   if (material.content === null) {
     return {
       content: null,
@@ -10267,13 +12006,13 @@ async function physicalArtifactBytes(runRoot, protocol, version, maxBytes) {
     })).bytes.length;
   }
   let total = 0;
-  async function walk(relativePath) {
-    const current = await inspectProtectedProjectPath(runRoot, relativePath, {
+  async function walk(relativePath2) {
+    const current = await inspectProtectedProjectPath(runRoot, relativePath2, {
       label: `Workflow checkpoint artifact ${version.id}`,
       expected: "directory"
     });
-    for (const entry of (await fs7.readdir(current.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
-      const child = path13.posix.join(relativePath, entry.name);
+    for (const entry of (await fs8.readdir(current.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
+      const child = path14.posix.join(relativePath2, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error(
           `Workflow checkpoint artifact crosses a symbolic link: ${child}`
@@ -10427,7 +12166,7 @@ async function buildCheckpoint(options) {
   };
   const manifest = {
     ...manifestWithoutHash,
-    manifestHash: canonicalHash(manifestWithoutHash)
+    manifestHash: canonicalHash2(manifestWithoutHash)
   };
   parseCheckpointManifest(manifest, bounds);
   const recordWithoutHash = {
@@ -10444,7 +12183,7 @@ async function buildCheckpoint(options) {
   };
   const record = {
     ...recordWithoutHash,
-    recordHash: canonicalHash(recordWithoutHash)
+    recordHash: canonicalHash2(recordWithoutHash)
   };
   parseCheckpointRecord(record, bounds);
   return {
@@ -10477,8 +12216,8 @@ async function readIndexWithBounds(runRoot, profile) {
   }
   return parseCheckpointIndex(JSON.parse(raw), bounds);
 }
-async function readAddressedJson(runRoot, relativePath, expectedHash, maxBytes, label) {
-  const raw = await readRaw(runRoot, relativePath, maxBytes, label);
+async function readAddressedJson(runRoot, relativePath2, expectedHash, maxBytes, label) {
+  const raw = await readRaw(runRoot, relativePath2, maxBytes, label);
   if (raw === null) throw new Error(`${label} is missing`);
   const value = JSON.parse(raw);
   if (contentAddressHash(value) !== expectedHash)
@@ -10987,7 +12726,7 @@ async function readWorkflowCheckpointRecoveryJournal(runRoot, profile) {
   );
   if (raw === null) return null;
   const value = JSON.parse(raw);
-  const execution = isRecord10(value) ? parseExecutionIdentity2(
+  const execution = isRecord11(value) ? parseExecutionIdentity2(
     value.execution,
     "Workflow checkpoint recovery execution"
   ) : void 0;
@@ -11237,7 +12976,7 @@ function evaluateRuntime(definitions, scope, state, artifacts) {
 }
 
 // src/engine/loop.ts
-import { createHash as createHash3 } from "crypto";
+import { createHash as createHash4 } from "crypto";
 
 // src/engine/guardrails.ts
 function checkAction(action, state, guardrails, confirmations) {
@@ -11334,10 +13073,10 @@ var staticDeterministicResolver = {
 // src/engine/loop.ts
 function actionId(runId, iteration, stepId2, attempt) {
   const context = attempt ? `${runId}:${iteration}:${stepId2 ?? "adaptive"}:${attempt.id}:retry:${attempt.retryOrdinal}` : `${runId}:${iteration}:${stepId2 ?? "adaptive"}`;
-  return createHash3("sha256").update(context).digest("hex").slice(0, 16);
+  return createHash4("sha256").update(context).digest("hex").slice(0, 16);
 }
 function attemptId(runId, stepId2, visitOrdinal, cycleId) {
-  return `attempt-${createHash3("sha256").update(`${runId}:${stepId2}:${visitOrdinal}:cycle:${cycleId ?? "none"}`).digest("hex").slice(0, 24)}`;
+  return `attempt-${createHash4("sha256").update(`${runId}:${stepId2}:${visitOrdinal}:cycle:${cycleId ?? "none"}`).digest("hex").slice(0, 24)}`;
 }
 function applyPreparedWorkflowState(state, prepared) {
   if (!state.workflowRuntime) return state;
@@ -11781,7 +13520,7 @@ async function appendEvent(changeDir, state, type, data, options = {}) {
   );
 }
 async function persistDecision(changeDir, state, pkg, confirmations, resolver = staticDeterministicResolver, prepareAction, mutationOverlay) {
-  const decision = decideWithResolver(
+  let decision = decideWithResolver(
     pkg,
     state,
     new Set(confirmations),
@@ -11797,14 +13536,23 @@ async function persistDecision(changeDir, state, pkg, confirmations, resolver = 
       action,
       mutationOverlay
     );
+    const preparedState = prepared.workflowRuntime ? { ...decision.state, workflowRuntime: prepared.workflowRuntime } : decision.state;
     if (!prepared.action) {
+      if (prepared.workflowRuntime) {
+        await writeRunState(
+          changeDir,
+          { ...state, workflowRuntime: prepared.workflowRuntime },
+          mutationOverlay ? { overlay: mutationOverlay } : {}
+        );
+      }
       return {
-        state,
+        state: prepared.workflowRuntime ? { ...state, workflowRuntime: prepared.workflowRuntime } : state,
         action: null,
         evals: [],
         reason: prepared.reason ?? "Pending action preparation was blocked"
       };
     }
+    decision = { ...decision, state: preparedState };
     action = prepared.action;
   }
   if (action) {
@@ -12100,8 +13848,8 @@ async function resumeManualWorkflowRun(changeDir, options, artifactMutation) {
 }
 
 // src/engine/standalone-run.ts
-import { promises as fs8 } from "node:fs";
-import path14 from "path";
+import { promises as fs9 } from "node:fs";
+import path15 from "path";
 function validateRunId(runId) {
   if (typeof runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId)) {
     throw new Error(`Invalid standalone Run id: ${String(runId)}`);
@@ -12115,41 +13863,41 @@ function validateProjectRoot(projectRoot) {
 function standaloneRunDir(projectRoot, runId) {
   validateRunId(runId);
   validateProjectRoot(projectRoot);
-  return path14.resolve(projectRoot, ".comet", "runs", runId);
+  return path15.resolve(projectRoot, ".comet", "runs", runId);
 }
 function pathSegments(projectRoot) {
-  const lexicalRoot = path14.resolve(projectRoot);
-  const root = path14.parse(lexicalRoot).root;
-  const relative = path14.relative(root, lexicalRoot);
-  return relative.length === 0 ? [] : relative.split(path14.sep);
+  const lexicalRoot = path15.resolve(projectRoot);
+  const root = path15.parse(lexicalRoot).root;
+  const relative = path15.relative(root, lexicalRoot);
+  return relative.length === 0 ? [] : relative.split(path15.sep);
 }
 function runRootRelativePath(projectRoot, runRoot) {
-  return path14.relative(projectRoot, runRoot).replaceAll("\\", "/");
+  return path15.relative(projectRoot, runRoot).replaceAll("\\", "/");
 }
-function isMissing(error) {
+function isMissing2(error) {
   const code = error.code;
   return code === "ENOENT" || code === "ENOTDIR";
 }
 async function resolveStandaloneProjectRoot(projectRoot, createMissing) {
   validateProjectRoot(projectRoot);
-  const lexicalRoot = path14.resolve(projectRoot);
-  let cursor = path14.parse(lexicalRoot).root;
+  const lexicalRoot = path15.resolve(projectRoot);
+  let cursor = path15.parse(lexicalRoot).root;
   for (const segment of pathSegments(lexicalRoot)) {
-    cursor = path14.join(cursor, segment);
+    cursor = path15.join(cursor, segment);
     let stat;
     try {
-      stat = await fs8.lstat(cursor);
+      stat = await fs9.lstat(cursor);
     } catch (error) {
-      if (!isMissing(error)) throw error;
+      if (!isMissing2(error)) throw error;
       if (!createMissing) return lexicalRoot;
       try {
-        await fs8.mkdir(cursor);
+        await fs9.mkdir(cursor);
       } catch (mkdirError) {
         if (mkdirError.code !== "EEXIST") {
           throw mkdirError;
         }
       }
-      stat = await fs8.lstat(cursor);
+      stat = await fs9.lstat(cursor);
     }
     if (stat.isSymbolicLink()) {
       throw new Error("Standalone project root cannot cross a symbolic link");
@@ -12245,6 +13993,7 @@ function manualLocation(runRoot) {
   return {
     kind: "manual",
     runRoot: validatedRoot,
+    contentSnapshotRoot: validatedRoot,
     async start(pkg, options) {
       return startManualRun(pkg, validatedRoot, options);
     },
@@ -12271,6 +14020,7 @@ function standaloneLocation(projectRoot, runId) {
   return {
     kind: "standalone",
     runRoot,
+    contentSnapshotRoot: validatedProjectRoot,
     runId: validatedRunId,
     async start(pkg, options) {
       return startStandaloneRun(pkg, {
@@ -12344,6 +14094,9 @@ function usesWorkflowRunLock(profile) {
 }
 function usesWorkflowCheckpoints(profile) {
   return profile?.capabilities.includes("verified-checkpoints") ?? false;
+}
+function usesWorkflowContentSnapshots(profile) {
+  return profile?.capabilities.includes("content-snapshots") ?? false;
 }
 async function durabilityProfileForLocation(location, options = {}) {
   try {
@@ -12541,7 +14294,7 @@ function terminalEvaluationResults(trajectory) {
       continue;
     }
     for (const result of event.data.results) {
-      if (!isRecord11(result)) continue;
+      if (!isRecord12(result)) continue;
       if (typeof result.evalId !== "string" || typeof result.passed !== "boolean" || typeof result.evidence !== "string") {
         continue;
       }
@@ -12572,6 +14325,16 @@ function findingsForContinuation(disposition, reason, action, evals = [], retry 
     ) : []
   ];
   return boundWorkflowFindings(raw);
+}
+function contentSnapshotFindings(state) {
+  const incomplete = (state.workflowRuntime?.contentSnapshots ?? []).some(
+    (snapshot) => !snapshot.complete
+  );
+  return incomplete ? [
+    snapshotIncompleteFinding(
+      "Workflow content snapshot is incomplete and cannot satisfy a complete-scope requirement."
+    )
+  ] : [];
 }
 function validateScalarRecord(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -12803,6 +14566,10 @@ function continuation(result, identity) {
     result.evals,
     result.action ? (result.action.retryOrdinal ?? result.state.retries[result.action.attemptId ?? result.action.id] ?? 0) > 0 : false
   );
+  const withSnapshots = boundWorkflowFindings([
+    ...projected.findings,
+    ...contentSnapshotFindings(result.state)
+  ]);
   return {
     disposition,
     runId: result.state.runId,
@@ -12825,13 +14592,16 @@ function continuation(result, identity) {
     artifactSelections: boundProjectedLedger(
       runtimeState?.artifactSelections ?? []
     ),
+    contentSnapshots: boundProjectedLedger(
+      runtimeState?.contentSnapshots ?? []
+    ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
-    findings: projected.findings,
-    findingSummary: projected.summary,
-    requiresUserDecision: projected.findings.some(
+    findings: withSnapshots.findings,
+    findingSummary: withSnapshots.summary,
+    requiresUserDecision: withSnapshots.findings.some(
       (finding) => finding.requiresUserDecision
     ),
-    blockers: legacyBlockersFromFindings(disposition, projected.findings)
+    blockers: legacyBlockersFromFindings(disposition, withSnapshots.findings)
   };
 }
 function withAdditionalFindings(value, additional, disposition = value.disposition) {
@@ -12912,7 +14682,7 @@ async function persistWorkflowCheckpoint(location, state, pending, pkg) {
   });
 }
 var LEGACY_STATE_MAX_BYTES = 256 * 1024;
-function isRecord11(value) {
+function isRecord12(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function projectionStatus(state, pending, maxRetriesPerAction) {
@@ -12942,7 +14712,7 @@ async function projectWorkflowState(target) {
   );
   for (const event of trajectory) {
     if (event.type !== "action_completed") continue;
-    if (!isRecord11(event.data.action) || !isRecord11(event.data.outcome)) continue;
+    if (!isRecord12(event.data.action) || !isRecord12(event.data.outcome)) continue;
     const stepId2 = event.data.action.stepId;
     const node = typeof stepId2 === "string" ? nodeByStep.get(stepId2) : void 0;
     const outcomeStatus = event.data.outcome.status;
@@ -12958,7 +14728,7 @@ async function projectWorkflowState(target) {
     if (outcomeStatus !== "succeeded") continue;
     if (!completedNodes.includes(node)) completedNodes.push(node);
     const outcomeEvidence = event.data.outcome.evidence;
-    evidence[node] = isRecord11(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
+    evidence[node] = isRecord12(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
   }
   const protocol = verified.package.runtime.protocol;
   const runtimeState = state.workflowRuntime;
@@ -12971,7 +14741,7 @@ async function projectWorkflowState(target) {
   const exhaustedAction = Object.entries(state.retries).find(
     ([, count]) => count > verified.package.guardrails.maxRetriesPerAction
   )?.[0];
-  const projectedFindings = status === "blocked" ? boundWorkflowFindings([
+  const projectedBaseFindings = status === "blocked" ? boundWorkflowFindings([
     findingFromBlocker(
       exhaustedAction ? `Retry budget exhausted for action: ${exhaustedAction}` : `Run is ${state.status}`,
       { actionId: exhaustedAction }
@@ -12988,6 +14758,24 @@ async function projectWorkflowState(target) {
     null,
     status === "completed" ? terminalEvaluationResults(trajectory) : []
   );
+  const snapshotFindings = [];
+  const snapshotPolicy = verified.identity.durabilityProfile?.snapshotPolicy;
+  if (usesWorkflowContentSnapshots(verified.identity.durabilityProfile) && snapshotPolicy) {
+    for (const reference of runtimeState?.contentSnapshots ?? []) {
+      const snapshot = await readWorkflowContentSnapshot(
+        location.runRoot,
+        reference.hash,
+        snapshotPolicy.limits.maxManifestBytes
+      );
+      if (snapshot) {
+        snapshotFindings.push(...workflowContentSnapshotFindings(snapshot));
+      }
+    }
+  }
+  const projectedFindings = boundWorkflowFindings([
+    ...projectedBaseFindings.findings,
+    ...snapshotFindings
+  ]);
   return {
     schemaVersion: 1,
     workflow: protocol.name,
@@ -13016,6 +14804,9 @@ async function projectWorkflowState(target) {
     artifactSelections: boundProjectedLedger(
       runtimeState?.artifactSelections ?? []
     ),
+    contentSnapshots: boundProjectedLedger(
+      runtimeState?.contentSnapshots ?? []
+    ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
     findings: projectedFindings.findings,
     findingSummary: projectedFindings.summary,
@@ -13031,7 +14822,7 @@ async function projectWorkflowState(target) {
 async function writeWorkflowStateProjection(target, projection) {
   const projectRoot = resolveWorkflowRunLocation(target).runRoot;
   const label = "Workflow state projection";
-  const relativePath = normalizeWorkflowRelativePath(
+  const relativePath2 = normalizeWorkflowRelativePath(
     projection.statePath,
     `${label} path`
   );
@@ -13042,14 +14833,14 @@ async function writeWorkflowStateProjection(target, projection) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     let inspection = await inspectProtectedProjectPath(
       projectRoot,
-      relativePath,
+      relativePath2,
       { label, expected: "file" }
     );
     if (inspection.exists) {
       try {
         const existing = await readProtectedProjectFile(
           projectRoot,
-          relativePath,
+          relativePath2,
           LEGACY_STATE_MAX_BYTES,
           { label }
         );
@@ -13061,12 +14852,12 @@ async function writeWorkflowStateProjection(target, projection) {
         continue;
       }
     }
-    const parent = path15.posix.dirname(relativePath);
+    const parent = path16.posix.dirname(relativePath2);
     if (parent !== ".") {
       await ensureProtectedProjectDirectory(projectRoot, parent, { label });
       inspection = await inspectProtectedProjectPath(
         projectRoot,
-        relativePath,
+        relativePath2,
         {
           label,
           expected: "file"
@@ -13130,6 +14921,32 @@ async function verifyStoredPackage(runRoot, state) {
     throw new Error(
       "WorkflowRuntime durability profile identity does not match Skill snapshot"
     );
+  }
+  if (usesWorkflowContentSnapshots(identity.durabilityProfile)) {
+    const snapshotPolicy = identity.durabilityProfile?.snapshotPolicy;
+    const references = state.workflowRuntime?.contentSnapshots ?? [];
+    if (!snapshotPolicy || references.length === 0) {
+      throw new Error(
+        "WorkflowRuntime content snapshot references are missing"
+      );
+    }
+    for (const reference of references) {
+      const snapshot = await readWorkflowContentSnapshot(
+        runRoot,
+        reference.hash,
+        snapshotPolicy.limits.maxManifestBytes
+      );
+      if (!snapshot) {
+        throw new Error(
+          `WorkflowRuntime content snapshot is missing: ${reference.hash}`
+        );
+      }
+      if (snapshot.complete !== reference.complete || !sameStableValue2(snapshot.policy, snapshotPolicy)) {
+        throw new Error(
+          `WorkflowRuntime content snapshot identity is invalid: ${reference.hash}`
+        );
+      }
+    }
   }
   const packageHash = await hashSkillPackage(pkg);
   if (packageHash !== identity.packageHash) {
@@ -13346,7 +15163,7 @@ async function continuationFromVerifiedRun(verified, runRoot) {
     verified.state.trajectoryRef,
     durabilityReadOptions(verified.state, "trajectoryBytes")
   );
-  return continuation(
+  const base = continuation(
     {
       state: verified.state,
       action: verified.pending,
@@ -13357,6 +15174,20 @@ async function continuationFromVerifiedRun(verified, runRoot) {
     },
     verified.identity
   );
+  const snapshotFindings = [];
+  const snapshotPolicy = verified.identity.durabilityProfile?.snapshotPolicy;
+  if (usesWorkflowContentSnapshots(verified.identity.durabilityProfile) && snapshotPolicy) {
+    for (const reference of verified.state.workflowRuntime?.contentSnapshots ?? []) {
+      const snapshot = await readWorkflowContentSnapshot(
+        runRoot,
+        reference.hash,
+        snapshotPolicy.limits.maxManifestBytes
+      );
+      if (snapshot)
+        snapshotFindings.push(...workflowContentSnapshotFindings(snapshot));
+    }
+  }
+  return withAdditionalFindings(base, snapshotFindings);
 }
 async function inspectWorkflowRun(target) {
   return withStructuredRuntimeErrors(async () => {
@@ -13649,6 +15480,9 @@ function blockedContinuation(prepared, blockers) {
     artifactSelections: structuredClone(
       prepared.verified.state.workflowRuntime?.artifactSelections ?? []
     ),
+    contentSnapshots: structuredClone(
+      prepared.verified.state.workflowRuntime?.contentSnapshots ?? []
+    ),
     currentArtifactVersions: currentWorkflowArtifactVersions(
       prepared.verified.state.workflowRuntime
     ),
@@ -13823,6 +15657,9 @@ async function projectWorkflowHandoff(protocol, current) {
     artifactSelections: boundProjectedLedger(
       projectedCurrent?.artifactSelections ?? []
     ),
+    contentSnapshots: boundProjectedLedger(
+      projectedCurrent?.contentSnapshots ?? []
+    ),
     currentArtifactVersions: structuredClone(
       projectedCurrent?.currentArtifactVersions ?? {}
     ),
@@ -13839,7 +15676,10 @@ async function resumeStoredRun(location, options, forceCheckpoint = false, persi
   const result = await location.resume({
     confirmations: options.confirmations ?? [],
     resolver: resolverForPackage(),
-    prepareAction: prepareWorkflowAction
+    prepareAction: prepareWorkflowActionForLocation(
+      location,
+      options.protectedSnapshotRoots
+    )
   });
   const changed = !sameStableValue2(verified.state, result.state) || !sameStableValue2(verified.pending, result.action);
   if ((changed || forceCheckpoint) && persistCheckpoint) {
@@ -13863,17 +15703,67 @@ async function resumeStoredRun(location, options, forceCheckpoint = false, persi
     verified.identity
   );
 }
-async function prepareWorkflowAction(runRoot, pkg, state, action) {
+async function prepareWorkflowAction(runRoot, pkg, state, action, mutationOverlay, snapshotRoot = runRoot, protectedSnapshotRoots = []) {
+  const profile = state.runtimeIdentity?.durabilityProfile;
+  let snapshotRuntimeState;
   try {
+    if (usesWorkflowContentSnapshots(profile) && state.workflowRuntime && (state.workflowRuntime.contentSnapshots?.length ?? 0) === 0) {
+      if (!mutationOverlay) {
+        throw new Error(
+          "Workflow content snapshot persistence requires a transition"
+        );
+      }
+      const snapshotPolicy = profile?.snapshotPolicy;
+      if (!snapshotPolicy) {
+        throw new Error(
+          "Workflow content snapshot capability has no snapshot policy"
+        );
+      }
+      const manifest = await captureWorkflowContentSnapshot({
+        root: snapshotRoot,
+        policy: snapshotPolicy,
+        protectedRoots: protectedSnapshotRoots
+      });
+      const reference = await stageWorkflowContentSnapshot({
+        runRoot,
+        manifest,
+        transition: mutationOverlay
+      });
+      state.workflowRuntime.contentSnapshots ??= [];
+      state.workflowRuntime.contentSnapshots.push(reference);
+      snapshotRuntimeState = structuredClone(state.workflowRuntime);
+    }
+    const preparedAction = await captureWorkflowDecisionScope(
+      runRoot,
+      pkg,
+      state,
+      action
+    );
     return {
-      action: await captureWorkflowDecisionScope(runRoot, pkg, state, action)
+      action: preparedAction,
+      ...snapshotRuntimeState ? { workflowRuntime: snapshotRuntimeState } : {}
     };
   } catch (error) {
     if (error instanceof WorkflowDecisionScopeError) {
-      return { action: null, reason: error.message };
+      return {
+        action: null,
+        reason: error.message,
+        ...snapshotRuntimeState ? { workflowRuntime: snapshotRuntimeState } : {}
+      };
     }
     throw error;
   }
+}
+function prepareWorkflowActionForLocation(location, protectedSnapshotRoots = []) {
+  return (runRoot, pkg, state, action, mutationOverlay) => prepareWorkflowAction(
+    runRoot,
+    pkg,
+    state,
+    action,
+    mutationOverlay,
+    location.contentSnapshotRoot,
+    protectedSnapshotRoots
+  );
 }
 async function verifyStoredAction(runRoot, state, identity, pkg) {
   const action = await readPendingAction(
@@ -13938,9 +15828,9 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
           durabilityReadOptions(state, "trajectoryBytes")
         );
         const proposal = trajectory.slice().reverse().find(
-          (event) => event.type === "action_proposed" && isRecord11(event.data.action) && event.data.action.id === action.id
+          (event) => event.type === "action_proposed" && isRecord12(event.data.action) && event.data.action.id === action.id
         );
-        if (!proposal || !isRecord11(proposal.data.action)) {
+        if (!proposal || !isRecord12(proposal.data.action)) {
           throw new Error(
             "WorkflowRuntime scoped decision has no durable action proposal"
           );
@@ -14229,10 +16119,16 @@ function createWorkflowRuntime() {
                   visits: [],
                   decisionReceipts: [],
                   artifactVersions: [],
-                  artifactSelections: []
+                  artifactSelections: [],
+                  ...usesWorkflowContentSnapshots(
+                    compiled.identity.durabilityProfile
+                  ) ? { contentSnapshots: [] } : {}
                 }
               } : {},
-              prepareAction: prepareWorkflowAction
+              prepareAction: prepareWorkflowActionForLocation(
+                resolved.location,
+                options.protectedSnapshotRoots
+              )
             });
             if (result.state.skillHash !== compiled.identity.packageHash) {
               throw new Error(
@@ -14337,7 +16233,7 @@ function createWorkflowRuntime() {
                 {
                   resolver: resolverForPackage(),
                   outcome,
-                  prepareAction: prepareWorkflowAction
+                  prepareAction: prepareWorkflowActionForLocation(location)
                 },
                 artifact.mutation
               );
@@ -14370,7 +16266,7 @@ function createWorkflowRuntime() {
                 {
                   resolver: resolverForPackage(),
                   outcome,
-                  prepareAction: prepareWorkflowAction,
+                  prepareAction: prepareWorkflowActionForLocation(location),
                   revisionFence: () => assertRevisionFence(prepared.location, claimInput),
                   revisionStateFence: () => assertRevisionFence(prepared.location, claimInput, false)
                 },

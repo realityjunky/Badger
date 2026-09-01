@@ -107,6 +107,18 @@ rewinding. Restoration is protected by a checkpoint recovery journal and
 appends one bounded `recovery_reconciled` event before clearing that journal.
 Retention never removes an active recovery anchor.
 
+The `content-snapshots` capability requires the same revision fences, mutation
+lock, and transition journal, plus a hash-bound physical-tree policy. The
+policy bounds selected files, file sizes, total bytes, manifest bytes, visited
+nodes, duration, and recorded omission details. A snapshot records only
+normalized relative paths, regular-file hashes and sizes, provider evidence,
+and bounded omissions. Symlinks and non-regular nodes are never captured as
+file evidence; changed selection, changed content, unreadable files, and any
+overflow make the snapshot incomplete. Incomplete snapshots remain
+content-addressed diagnostic evidence and are not valid complete-scope proof.
+Snapshot references are written inside the same locked transition as the Run
+state and recover identically for manual and standalone locations.
+
 The Creator evaluation report additionally records the generated package tree
 hash. Review readiness rejects missing, stale, mismatched, or incomplete
 identity evidence.

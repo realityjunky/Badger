@@ -87,6 +87,10 @@ const WORKFLOW_FINDING_CODES = [
   "scope-invalid",
   "scope-unavailable",
   "skill-not-allowed",
+  "snapshot-incomplete",
+  "snapshot-storage-failed",
+  "snapshot-unsafe-scope",
+  "snapshot-unstable",
   "state-invalid",
   "tool-not-allowed",
   "unknown-current-step",
@@ -391,6 +395,58 @@ export function createWorkflowFinding(
       ? { currentActionId: input.currentActionId }
       : {}),
   };
+}
+
+export function snapshotIncompleteFinding(
+  message: string,
+  path?: string,
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "snapshot-incomplete",
+    severity: "error",
+    message,
+    ...(path ? { path } : {}),
+    requiredAction: "stop",
+  });
+}
+
+export function snapshotStorageFailedFinding(
+  message: string,
+  path?: string,
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "snapshot-storage-failed",
+    severity: "error",
+    message,
+    ...(path ? { path } : {}),
+    requiredAction: "stop",
+  });
+}
+
+export function snapshotUnsafeScopeFinding(
+  message: string,
+  path?: string,
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "snapshot-unsafe-scope",
+    severity: "error",
+    message,
+    ...(path ? { path } : {}),
+    requiredAction: "stop",
+  });
+}
+
+export function snapshotUnstableFinding(
+  message: string,
+  path?: string,
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "snapshot-unstable",
+    severity: "error",
+    message,
+    ...(path ? { path } : {}),
+    requiredAction: "stop",
+  });
 }
 
 export function parseWorkflowFinding(value: unknown): WorkflowFinding {

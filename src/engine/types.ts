@@ -8,6 +8,7 @@ import type {
   WorkflowArtifactVersion,
   WorkflowDecisionReceipt,
   WorkflowDecisionScopeSnapshot,
+  WorkflowContentSnapshotReference,
   WorkflowDurabilityProfile,
   WorkflowReviewerAttestation,
 } from "../types.js";
@@ -72,6 +73,7 @@ export interface WorkflowRuntimeState {
   decisionReceipts: WorkflowDecisionReceipt[];
   artifactVersions: WorkflowArtifactVersion[];
   artifactSelections: WorkflowArtifactSelection[];
+  contentSnapshots?: WorkflowContentSnapshotReference[];
 }
 
 export interface RunState {

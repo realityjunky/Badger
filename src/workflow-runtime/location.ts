@@ -33,6 +33,7 @@ import type {
 export interface ResolvedWorkflowRunLocation {
   readonly kind: WorkflowRunLocation["kind"];
   readonly runRoot: string;
+  readonly contentSnapshotRoot: string;
   readonly runId?: string;
   start(
     pkg: SkillPackage,
@@ -67,6 +68,7 @@ function manualLocation(runRoot: string): ResolvedWorkflowRunLocation {
   return {
     kind: "manual",
     runRoot: validatedRoot,
+    contentSnapshotRoot: validatedRoot,
     async start(pkg, options) {
       return startManualRun(pkg, validatedRoot, options);
     },
@@ -98,6 +100,7 @@ function standaloneLocation(
   return {
     kind: "standalone",
     runRoot,
+    contentSnapshotRoot: validatedProjectRoot,
     runId: validatedRunId,
     async start(pkg, options) {
       return startStandaloneRun(pkg, {

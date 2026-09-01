@@ -261,7 +261,108 @@ export type WorkflowDurabilityCapability =
   | "mutation-locks"
   | "revision-fences"
   | "transition-journal"
-  | "verified-checkpoints";
+  | "verified-checkpoints"
+  | "content-snapshots";
+
+export type WorkflowContentSnapshotProvider = "physical-tree";
+export type WorkflowContentSnapshotOrigin = "explicit";
+
+export type WorkflowContentSnapshotOmissionReason =
+  | "file-size"
+  | "file-count"
+  | "total-size"
+  | "manifest-size"
+  | "changed-during-read"
+  | "unreadable"
+  | "non-regular"
+  | "duration"
+  | "physical-enumeration-limit"
+  | "physical-selection-changed";
+
+export interface WorkflowContentSnapshotLimits {
+  maxFiles: number;
+  maxFileBytes: number;
+  maxTotalBytes: number;
+  maxManifestBytes: number;
+  maxVisitedNodes: number;
+  maxDurationMs: number;
+  maxOmissionEntries: number;
+}
+
+export interface WorkflowContentSnapshotPolicy {
+  schemaVersion: 1;
+  provider: WorkflowContentSnapshotProvider;
+  include: string[];
+  exclude: string[];
+  limits: WorkflowContentSnapshotLimits;
+  hash: string;
+}
+
+export interface WorkflowPhysicalSnapshotSelectionStream {
+  hash: string;
+  visitedNodeCount: number;
+  recordCount: number;
+  storedRecordCount: number;
+  encodedBytes: number;
+  overflow: boolean;
+  unstable: boolean;
+}
+
+export interface WorkflowPhysicalSnapshotSelection {
+  schemaVersion: 1;
+  status: "overflow" | "changed" | "overflow-and-changed";
+  before: WorkflowPhysicalSnapshotSelectionStream;
+  after: WorkflowPhysicalSnapshotSelectionStream;
+}
+
+export interface WorkflowContentSnapshotCapture {
+  provider: WorkflowContentSnapshotProvider;
+  physicalSelection?: WorkflowPhysicalSnapshotSelection;
+}
+
+export interface WorkflowContentSnapshotEntry {
+  path: string;
+  hash: string;
+  size: number;
+  type: "file";
+}
+
+export interface WorkflowContentSnapshotOmission {
+  path: string;
+  size: number | null;
+  type: "file" | "directory" | "other";
+  reason: WorkflowContentSnapshotOmissionReason;
+}
+
+export interface WorkflowContentSnapshotOmissionOverflow {
+  ref: string;
+  hash: string;
+  count: number;
+}
+
+export interface WorkflowContentSnapshotManifest {
+  schemaVersion: 1;
+  kind: "workflow-content-snapshot";
+  origin: WorkflowContentSnapshotOrigin;
+  capture: WorkflowContentSnapshotCapture;
+  createdAt: string;
+  complete: boolean;
+  policy: WorkflowContentSnapshotPolicy;
+  limits: WorkflowContentSnapshotLimits;
+  entries: WorkflowContentSnapshotEntry[];
+  omitted: WorkflowContentSnapshotOmission[];
+  omittedCount: number;
+  omissionOverflow?: WorkflowContentSnapshotOmissionOverflow;
+}
+
+export interface WorkflowContentSnapshotReference {
+  schemaVersion: 1;
+  kind: "workflow-content-snapshot-reference";
+  hash: string;
+  path: string;
+  provider: WorkflowContentSnapshotProvider;
+  complete: boolean;
+}
 
 export interface WorkflowDurabilityBounds {
   runStateBytes: number;
@@ -286,6 +387,7 @@ export interface WorkflowDurabilitySchemaVersions {
   runLock?: 1;
   checkpointManifest?: 1;
   checkpointRecord?: 1;
+  contentSnapshot?: 1;
 }
 
 export interface WorkflowDurabilityProfile {
@@ -294,6 +396,7 @@ export interface WorkflowDurabilityProfile {
   bounds: WorkflowDurabilityBounds;
   schemaVersions: WorkflowDurabilitySchemaVersions;
   findingCatalogVersion: 1;
+  snapshotPolicy?: WorkflowContentSnapshotPolicy;
 }
 
 export interface WorkflowProtocolCapabilities {

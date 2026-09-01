@@ -1,6 +1,7 @@
 import { stableValue } from "../util.js";
 import type { WorkflowDurabilityProfile, WorkflowProtocol } from "../types.js";
 import { WORKFLOW_FINDING_CATALOG_VERSION } from "./findings.js";
+import { parseWorkflowContentSnapshotPolicy } from "./snapshots.js";
 
 export const WORKFLOW_DURABILITY_PROFILE_VERSION = 1 as const;
 export const WORKFLOW_DURABILITY_SCHEMA_VERSION = 1 as const;
@@ -12,12 +13,14 @@ const PROFILE_KEYS = new Set([
   "bounds",
   "schemaVersions",
   "findingCatalogVersion",
+  "snapshotPolicy",
 ]);
 const CAPABILITIES = new Set([
   "mutation-locks",
   "revision-fences",
   "transition-journal",
   "verified-checkpoints",
+  "content-snapshots",
 ]);
 const BOUND_KEY_NAMES = [
   "runStateBytes",
@@ -47,6 +50,7 @@ const SCHEMA_KEYS = new Set<string>([
   "transitionJournal",
   "checkpointManifest",
   "checkpointRecord",
+  "contentSnapshot",
 ]);
 const MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
 const MAX_CHECKPOINT_COUNT = 256;
@@ -214,6 +218,15 @@ export function parseWorkflowDurabilityProfile(
       "Unsupported Workflow durability schema version: checkpointRecord",
     );
   }
+  const contentSnapshot = value.schemaVersions.contentSnapshot;
+  if (
+    contentSnapshot !== undefined &&
+    contentSnapshot !== WORKFLOW_DURABILITY_SCHEMA_VERSION
+  ) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: contentSnapshot",
+    );
+  }
   if (
     capabilities.includes("transition-journal") &&
     (bounds.transitionJournalBytes === undefined ||
@@ -247,6 +260,30 @@ export function parseWorkflowDurabilityProfile(
       "Invalid Workflow durability profile: verified-checkpoints requires mutation locks, transition journal, checkpoint bounds, and schema versions",
     );
   }
+  const snapshotPolicy =
+    value.snapshotPolicy === undefined
+      ? undefined
+      : parseWorkflowContentSnapshotPolicy(value.snapshotPolicy);
+  if (
+    snapshotPolicy !== undefined &&
+    !capabilities.includes("content-snapshots")
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: snapshotPolicy requires content-snapshots",
+    );
+  }
+  if (
+    capabilities.includes("content-snapshots") &&
+    (!capabilities.includes("mutation-locks") ||
+      !capabilities.includes("revision-fences") ||
+      !capabilities.includes("transition-journal") ||
+      snapshotPolicy === undefined ||
+      contentSnapshot !== WORKFLOW_DURABILITY_SCHEMA_VERSION)
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: content-snapshots requires mutation locks, revision fences, transition journal, snapshot policy, and schema version",
+    );
+  }
   if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
     throw new Error(
       `Unsupported Workflow durability finding catalog version: ${String(value.findingCatalogVersion)}`,
@@ -274,8 +311,12 @@ export function parseWorkflowDurabilityProfile(
       ...(checkpointRecord === WORKFLOW_DURABILITY_SCHEMA_VERSION
         ? { checkpointRecord: WORKFLOW_DURABILITY_SCHEMA_VERSION }
         : {}),
+      ...(contentSnapshot === WORKFLOW_DURABILITY_SCHEMA_VERSION
+        ? { contentSnapshot: WORKFLOW_DURABILITY_SCHEMA_VERSION }
+        : {}),
     },
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
+    ...(snapshotPolicy ? { snapshotPolicy } : {}),
   };
 }
 

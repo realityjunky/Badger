@@ -10,13 +10,19 @@ import {
   hashSkillPackage,
   readSkillSnapshot,
 } from "../skill-runtime/snapshot.js";
-import { type ManualRunResult } from "../engine/manual-run.js";
+import {
+  type ManualRunResult,
+  type PreparePendingAction,
+} from "../engine/manual-run.js";
 import {
   parsePendingActionValue,
   readPendingAction,
   readTrajectory,
 } from "../engine/run-store.js";
-import { readOptionalEngineRunText } from "../engine/protected-run-file.js";
+import {
+  readOptionalEngineRunText,
+  type EngineRunMutationOverlay,
+} from "../engine/protected-run-file.js";
 import { parseRunStateValue } from "../engine/state.js";
 import { RaceSafeReadError } from "../engine/race-safe-read.js";
 import type {
@@ -78,6 +84,7 @@ import {
   parseWorkflowFindingSummary,
   revisionConflictFinding,
   recoveryRequiredFinding,
+  snapshotIncompleteFinding,
   type WorkflowFinding,
   type WorkflowFindingSummary,
 } from "./findings.js";
@@ -115,6 +122,12 @@ import {
   type WorkflowCheckpointRecoveryJournal,
   type WorkflowCheckpointVerification,
 } from "./checkpoints.js";
+import {
+  captureWorkflowContentSnapshot,
+  stageWorkflowContentSnapshot,
+  readWorkflowContentSnapshot,
+  workflowContentSnapshotFindings,
+} from "./snapshots.js";
 
 async function withStructuredRuntimeErrors<T>(
   operation: () => Promise<T>,
@@ -136,6 +149,12 @@ function usesWorkflowCheckpoints(
   profile: WorkflowDurabilityProfile | undefined,
 ): boolean {
   return profile?.capabilities.includes("verified-checkpoints") ?? false;
+}
+
+function usesWorkflowContentSnapshots(
+  profile: WorkflowDurabilityProfile | undefined,
+): boolean {
+  return profile?.capabilities.includes("content-snapshots") ?? false;
 }
 
 async function durabilityProfileForLocation(
@@ -548,6 +567,19 @@ function findingsForContinuation(
   return boundWorkflowFindings(raw);
 }
 
+function contentSnapshotFindings(state: RunState): WorkflowFinding[] {
+  const incomplete = (state.workflowRuntime?.contentSnapshots ?? []).some(
+    (snapshot) => !snapshot.complete,
+  );
+  return incomplete
+    ? [
+        snapshotIncompleteFinding(
+          "Workflow content snapshot is incomplete and cannot satisfy a complete-scope requirement.",
+        ),
+      ]
+    : [];
+}
+
 function validateScalarRecord(
   value: unknown,
   label: string,
@@ -866,6 +898,10 @@ function continuation(
           0) > 0
       : false,
   );
+  const withSnapshots = boundWorkflowFindings([
+    ...projected.findings,
+    ...contentSnapshotFindings(result.state),
+  ]);
   return {
     disposition,
     runId: result.state.runId,
@@ -891,13 +927,16 @@ function continuation(
     artifactSelections: boundProjectedLedger(
       runtimeState?.artifactSelections ?? [],
     ),
+    contentSnapshots: boundProjectedLedger(
+      runtimeState?.contentSnapshots ?? [],
+    ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
-    findings: projected.findings,
-    findingSummary: projected.summary,
-    requiresUserDecision: projected.findings.some(
+    findings: withSnapshots.findings,
+    findingSummary: withSnapshots.summary,
+    requiresUserDecision: withSnapshots.findings.some(
       (finding) => finding.requiresUserDecision,
     ),
-    blockers: legacyBlockersFromFindings(disposition, projected.findings),
+    blockers: legacyBlockersFromFindings(disposition, withSnapshots.findings),
   };
 }
 
@@ -1085,7 +1124,7 @@ export async function projectWorkflowState(
   const exhaustedAction = Object.entries(state.retries).find(
     ([, count]) => count > verified.package.guardrails.maxRetriesPerAction,
   )?.[0];
-  const projectedFindings =
+  const projectedBaseFindings =
     status === "blocked"
       ? boundWorkflowFindings([
           findingFromBlocker(
@@ -1113,6 +1152,27 @@ export async function projectWorkflowState(
             null,
             status === "completed" ? terminalEvaluationResults(trajectory) : [],
           );
+  const snapshotFindings: WorkflowFinding[] = [];
+  const snapshotPolicy = verified.identity.durabilityProfile?.snapshotPolicy;
+  if (
+    usesWorkflowContentSnapshots(verified.identity.durabilityProfile) &&
+    snapshotPolicy
+  ) {
+    for (const reference of runtimeState?.contentSnapshots ?? []) {
+      const snapshot = await readWorkflowContentSnapshot(
+        location.runRoot,
+        reference.hash,
+        snapshotPolicy.limits.maxManifestBytes,
+      );
+      if (snapshot) {
+        snapshotFindings.push(...workflowContentSnapshotFindings(snapshot));
+      }
+    }
+  }
+  const projectedFindings = boundWorkflowFindings([
+    ...projectedBaseFindings.findings,
+    ...snapshotFindings,
+  ]);
   return {
     schemaVersion: 1,
     workflow: protocol.name,
@@ -1143,6 +1203,9 @@ export async function projectWorkflowState(
     ),
     artifactSelections: boundProjectedLedger(
       runtimeState?.artifactSelections ?? [],
+    ),
+    contentSnapshots: boundProjectedLedger(
+      runtimeState?.contentSnapshots ?? [],
     ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
     findings: projectedFindings.findings,
@@ -1295,6 +1358,35 @@ async function verifyStoredPackage(
     throw new Error(
       "WorkflowRuntime durability profile identity does not match Skill snapshot",
     );
+  }
+  if (usesWorkflowContentSnapshots(identity.durabilityProfile)) {
+    const snapshotPolicy = identity.durabilityProfile?.snapshotPolicy;
+    const references = state.workflowRuntime?.contentSnapshots ?? [];
+    if (!snapshotPolicy || references.length === 0) {
+      throw new Error(
+        "WorkflowRuntime content snapshot references are missing",
+      );
+    }
+    for (const reference of references) {
+      const snapshot = await readWorkflowContentSnapshot(
+        runRoot,
+        reference.hash,
+        snapshotPolicy.limits.maxManifestBytes,
+      );
+      if (!snapshot) {
+        throw new Error(
+          `WorkflowRuntime content snapshot is missing: ${reference.hash}`,
+        );
+      }
+      if (
+        snapshot.complete !== reference.complete ||
+        !sameStableValue(snapshot.policy, snapshotPolicy)
+      ) {
+        throw new Error(
+          `WorkflowRuntime content snapshot identity is invalid: ${reference.hash}`,
+        );
+      }
+    }
   }
   const packageHash = await hashSkillPackage(pkg);
   if (packageHash !== identity.packageHash) {
@@ -1583,7 +1675,7 @@ async function continuationFromVerifiedRun(
     verified.state.trajectoryRef,
     durabilityReadOptions(verified.state, "trajectoryBytes"),
   );
-  return continuation(
+  const base = continuation(
     {
       state: verified.state,
       action: verified.pending,
@@ -1604,6 +1696,24 @@ async function continuationFromVerifiedRun(
     },
     verified.identity,
   );
+  const snapshotFindings: WorkflowFinding[] = [];
+  const snapshotPolicy = verified.identity.durabilityProfile?.snapshotPolicy;
+  if (
+    usesWorkflowContentSnapshots(verified.identity.durabilityProfile) &&
+    snapshotPolicy
+  ) {
+    for (const reference of verified.state.workflowRuntime?.contentSnapshots ??
+      []) {
+      const snapshot = await readWorkflowContentSnapshot(
+        runRoot,
+        reference.hash,
+        snapshotPolicy.limits.maxManifestBytes,
+      );
+      if (snapshot)
+        snapshotFindings.push(...workflowContentSnapshotFindings(snapshot));
+    }
+  }
+  return withAdditionalFindings(base, snapshotFindings);
 }
 
 export async function inspectWorkflowRun(
@@ -1985,6 +2095,9 @@ function blockedContinuation(
     artifactSelections: structuredClone(
       prepared.verified.state.workflowRuntime?.artifactSelections ?? [],
     ),
+    contentSnapshots: structuredClone(
+      prepared.verified.state.workflowRuntime?.contentSnapshots ?? [],
+    ),
     currentArtifactVersions: currentWorkflowArtifactVersions(
       prepared.verified.state.workflowRuntime,
     ),
@@ -2206,6 +2319,9 @@ export async function projectWorkflowHandoff(
     artifactSelections: boundProjectedLedger(
       projectedCurrent?.artifactSelections ?? [],
     ),
+    contentSnapshots: boundProjectedLedger(
+      projectedCurrent?.contentSnapshots ?? [],
+    ),
     currentArtifactVersions: structuredClone(
       projectedCurrent?.currentArtifactVersions ?? {},
     ),
@@ -2228,7 +2344,10 @@ async function resumeStoredRun(
   const result = await location.resume({
     confirmations: options.confirmations ?? [],
     resolver: resolverForPackage(),
-    prepareAction: prepareWorkflowAction,
+    prepareAction: prepareWorkflowActionForLocation(
+      location,
+      options.protectedSnapshotRoots,
+    ),
   });
   const changed =
     !sameStableValue(verified.state, result.state) ||
@@ -2260,17 +2379,83 @@ async function prepareWorkflowAction(
   pkg: Awaited<ReturnType<typeof readSkillSnapshot>>,
   state: RunState,
   action: EngineAction,
-): Promise<{ action: EngineAction | null; reason?: string }> {
+  mutationOverlay?: EngineRunMutationOverlay,
+  snapshotRoot = runRoot,
+  protectedSnapshotRoots: readonly string[] = [],
+): Promise<Awaited<ReturnType<PreparePendingAction>>> {
+  const profile = state.runtimeIdentity?.durabilityProfile;
+  let snapshotRuntimeState: RunState["workflowRuntime"];
   try {
+    if (
+      usesWorkflowContentSnapshots(profile) &&
+      state.workflowRuntime &&
+      (state.workflowRuntime.contentSnapshots?.length ?? 0) === 0
+    ) {
+      if (!mutationOverlay) {
+        throw new Error(
+          "Workflow content snapshot persistence requires a transition",
+        );
+      }
+      const snapshotPolicy = profile?.snapshotPolicy;
+      if (!snapshotPolicy) {
+        throw new Error(
+          "Workflow content snapshot capability has no snapshot policy",
+        );
+      }
+      const manifest = await captureWorkflowContentSnapshot({
+        root: snapshotRoot,
+        policy: snapshotPolicy,
+        protectedRoots: protectedSnapshotRoots,
+      });
+      const reference = await stageWorkflowContentSnapshot({
+        runRoot,
+        manifest,
+        transition: mutationOverlay,
+      });
+      state.workflowRuntime.contentSnapshots ??= [];
+      state.workflowRuntime.contentSnapshots.push(reference);
+      snapshotRuntimeState = structuredClone(state.workflowRuntime);
+    }
+    const preparedAction = await captureWorkflowDecisionScope(
+      runRoot,
+      pkg,
+      state,
+      action,
+    );
     return {
-      action: await captureWorkflowDecisionScope(runRoot, pkg, state, action),
+      action: preparedAction,
+      ...(snapshotRuntimeState
+        ? { workflowRuntime: snapshotRuntimeState }
+        : {}),
     };
   } catch (error) {
     if (error instanceof WorkflowDecisionScopeError) {
-      return { action: null, reason: error.message };
+      return {
+        action: null,
+        reason: error.message,
+        ...(snapshotRuntimeState
+          ? { workflowRuntime: snapshotRuntimeState }
+          : {}),
+      };
     }
     throw error;
   }
+}
+
+function prepareWorkflowActionForLocation(
+  location: ResolvedWorkflowRunLocation,
+  protectedSnapshotRoots: readonly string[] = [],
+): PreparePendingAction {
+  return (runRoot, pkg, state, action, mutationOverlay) =>
+    prepareWorkflowAction(
+      runRoot,
+      pkg,
+      state,
+      action,
+      mutationOverlay,
+      location.contentSnapshotRoot,
+      protectedSnapshotRoots,
+    );
 }
 
 async function verifyStoredAction(
@@ -2730,10 +2915,18 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                       decisionReceipts: [],
                       artifactVersions: [],
                       artifactSelections: [],
+                      ...(usesWorkflowContentSnapshots(
+                        compiled.identity.durabilityProfile,
+                      )
+                        ? { contentSnapshots: [] }
+                        : {}),
                     },
                   }
                 : {}),
-              prepareAction: prepareWorkflowAction,
+              prepareAction: prepareWorkflowActionForLocation(
+                resolved.location,
+                options.protectedSnapshotRoots,
+              ),
             });
             if (result.state.skillHash !== compiled.identity.packageHash) {
               throw new Error(
@@ -2848,7 +3041,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 {
                   resolver: resolverForPackage(),
                   outcome,
-                  prepareAction: prepareWorkflowAction,
+                  prepareAction: prepareWorkflowActionForLocation(location),
                 },
                 artifact.mutation,
               );
@@ -2882,7 +3075,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 {
                   resolver: resolverForPackage(),
                   outcome,
-                  prepareAction: prepareWorkflowAction,
+                  prepareAction: prepareWorkflowActionForLocation(location),
                   revisionFence: () =>
                     assertRevisionFence(prepared.location, claimInput),
                   revisionStateFence: () =>

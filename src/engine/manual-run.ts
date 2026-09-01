@@ -76,6 +76,7 @@ export interface ResumeManualRunOptions {
 export interface PendingActionPreparation {
   action: EngineAction | null;
   reason?: string;
+  workflowRuntime?: WorkflowRuntimeState;
 }
 
 export type PreparePendingAction = (
@@ -263,7 +264,7 @@ async function persistDecision(
   prepareAction?: PreparePendingAction,
   mutationOverlay?: EngineRunMutationOverlay,
 ): Promise<ManualRunResult> {
-  const decision = decideWithResolver(
+  let decision = decideWithResolver(
     pkg,
     state,
     new Set(confirmations),
@@ -279,14 +280,27 @@ async function persistDecision(
       action,
       mutationOverlay,
     );
+    const preparedState = prepared.workflowRuntime
+      ? { ...decision.state, workflowRuntime: prepared.workflowRuntime }
+      : decision.state;
     if (!prepared.action) {
+      if (prepared.workflowRuntime) {
+        await writeRunState(
+          changeDir,
+          { ...state, workflowRuntime: prepared.workflowRuntime },
+          mutationOverlay ? { overlay: mutationOverlay } : {},
+        );
+      }
       return {
-        state,
+        state: prepared.workflowRuntime
+          ? { ...state, workflowRuntime: prepared.workflowRuntime }
+          : state,
         action: null,
         evals: [],
         reason: prepared.reason ?? "Pending action preparation was blocked",
       };
     }
+    decision = { ...decision, state: preparedState };
     action = prepared.action;
   }
   if (action) {
