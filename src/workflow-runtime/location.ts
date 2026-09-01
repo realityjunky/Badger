@@ -49,7 +49,9 @@ export interface ResolvedWorkflowRunLocation {
     options?: ResumeManualRunOptions,
     artifactMutation?: WorkflowArtifactMutation,
   ): Promise<ManualRunResult>;
-  readState(): Promise<RunState | null>;
+  readState(options?: {
+    allowMalformedState?: boolean;
+  }): Promise<RunState | null>;
   prepareStart(): Promise<void>;
 }
 
@@ -118,8 +120,12 @@ function standaloneLocation(
           )
         : resumeStandaloneRun(validatedProjectRoot, validatedRunId, options);
     },
-    async readState() {
-      return readStandaloneRunState(validatedProjectRoot, validatedRunId);
+    async readState(options) {
+      return readStandaloneRunState(
+        validatedProjectRoot,
+        validatedRunId,
+        options,
+      );
     },
     async prepareStart() {
       await ensureStandaloneRunDir(validatedProjectRoot, validatedRunId);

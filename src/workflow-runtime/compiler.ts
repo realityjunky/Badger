@@ -644,6 +644,16 @@ export async function compileWorkflow(
   validateProtocolShape(executableProtocol);
   validateWorkflowDecisionScopeDefinition(executableProtocol);
   const revisioned = isRevisionedWorkflowProtocol(executableProtocol);
+  if (
+    executableProtocol.capabilities?.durability?.capabilities.includes(
+      "verified-checkpoints",
+    ) &&
+    !revisioned
+  ) {
+    throw new Error(
+      "Workflow Protocol verified checkpoints require revisioned capabilities",
+    );
+  }
   if (revisioned && executableProtocol.capabilities?.version !== 3) {
     throw new Error(
       "Workflow Protocol revisioned capabilities are required for branch routing",

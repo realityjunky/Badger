@@ -60,6 +60,8 @@ const WORKFLOW_FINDING_CODES = [
   "completion-missing-guardrail",
   "completion-missing-required-skill",
   "confirmation-required",
+  "checkpoint-history-ambiguous",
+  "checkpoint-invalid",
   "catalog-version-unsupported",
   "cycle-budget-exhausted",
   "cycle-invalid",
@@ -705,6 +707,22 @@ const blockerCatalog: Array<{
     },
   },
   {
+    match: /^Workflow checkpoint history is ambiguous/u,
+    entry: {
+      code: "checkpoint-history-ambiguous",
+      severity: "error",
+      requiredAction: "stop",
+    },
+  },
+  {
+    match: /^Workflow checkpoint/u,
+    entry: {
+      code: "checkpoint-invalid",
+      severity: "error",
+      requiredAction: "stop",
+    },
+  },
+  {
     match: /^WorkflowRuntime recovery is required/u,
     entry: {
       code: "recovery-required",
@@ -1210,17 +1228,47 @@ export function revisionConflictFinding(
 export function recoveryRequiredFinding(
   currentRevision?: number,
   currentActionId?: string | null,
+  recoveryPath = ".comet/transition-journal.json",
 ): WorkflowFinding {
   return createWorkflowFinding({
     code: "recovery-required",
     severity: "error",
     message:
-      "WorkflowRuntime has an unfinished transition journal. Run explicit recovery before resuming or submitting.",
+      recoveryPath === ".comet/transition-journal.json"
+        ? "WorkflowRuntime has an unfinished transition journal. Run explicit recovery before resuming or submitting."
+        : "WorkflowRuntime has unfinished checkpoint recovery evidence. Run explicit recovery before resuming or submitting.",
     requiredAction: "repair",
     operation: { id: "workflow.recover", args: [] },
-    path: ".comet/transition-journal.json",
+    path: recoveryPath,
     ...(currentRevision === undefined ? {} : { currentRevision }),
     ...(currentActionId === undefined ? {} : { currentActionId }),
+  });
+}
+
+export function checkpointInvalidFinding(
+  message: string,
+  path?: string,
+  severity: "warning" | "error" = "error",
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "checkpoint-invalid",
+    severity,
+    message,
+    path,
+    requiredAction: severity === "warning" ? "none" : "stop",
+  });
+}
+
+export function checkpointHistoryAmbiguousFinding(
+  message: string,
+  path?: string,
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "checkpoint-history-ambiguous",
+    severity: "error",
+    message,
+    path,
+    requiredAction: "stop",
   });
 }
 

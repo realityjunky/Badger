@@ -17,6 +17,7 @@ const CAPABILITIES = new Set([
   "mutation-locks",
   "revision-fences",
   "transition-journal",
+  "verified-checkpoints",
 ]);
 const BOUND_KEY_NAMES = [
   "runStateBytes",
@@ -29,6 +30,9 @@ const BOUND_KEYS = new Set<string>([
   ...BOUND_KEY_NAMES,
   "transitionJournalBytes",
   "runLockBytes",
+  "checkpointManifestBytes",
+  "checkpointRecordBytes",
+  "checkpointCount",
 ]);
 const SCHEMA_KEY_NAMES = [
   "runState",
@@ -41,8 +45,11 @@ const SCHEMA_KEYS = new Set<string>([
   ...SCHEMA_KEY_NAMES,
   "runLock",
   "transitionJournal",
+  "checkpointManifest",
+  "checkpointRecord",
 ]);
 const MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
+const MAX_CHECKPOINT_COUNT = 256;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -66,6 +73,20 @@ function requiredBound(value: unknown, key: string): number {
   ) {
     throw new Error(
       `Invalid Workflow durability profile: bounds.${key} must be a positive bounded integer`,
+    );
+  }
+  return value;
+}
+
+function requiredCheckpointCount(value: unknown): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > MAX_CHECKPOINT_COUNT
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: bounds.checkpointCount must be a positive bounded integer",
     );
   }
   return value;
@@ -129,6 +150,23 @@ export function parseWorkflowDurabilityProfile(
       "runLockBytes",
     );
   }
+  if (boundsValue.checkpointManifestBytes !== undefined) {
+    bounds.checkpointManifestBytes = requiredBound(
+      boundsValue.checkpointManifestBytes,
+      "checkpointManifestBytes",
+    );
+  }
+  if (boundsValue.checkpointRecordBytes !== undefined) {
+    bounds.checkpointRecordBytes = requiredBound(
+      boundsValue.checkpointRecordBytes,
+      "checkpointRecordBytes",
+    );
+  }
+  if (boundsValue.checkpointCount !== undefined) {
+    bounds.checkpointCount = requiredCheckpointCount(
+      boundsValue.checkpointCount,
+    );
+  }
   if (!isRecord(value.schemaVersions)) {
     throw new Error(
       "Invalid Workflow durability profile: schemaVersions must be an object",
@@ -158,6 +196,24 @@ export function parseWorkflowDurabilityProfile(
   if (runLock !== undefined && runLock !== WORKFLOW_DURABILITY_SCHEMA_VERSION) {
     throw new Error("Unsupported Workflow durability schema version: runLock");
   }
+  const checkpointManifest = value.schemaVersions.checkpointManifest;
+  if (
+    checkpointManifest !== undefined &&
+    checkpointManifest !== WORKFLOW_DURABILITY_SCHEMA_VERSION
+  ) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: checkpointManifest",
+    );
+  }
+  const checkpointRecord = value.schemaVersions.checkpointRecord;
+  if (
+    checkpointRecord !== undefined &&
+    checkpointRecord !== WORKFLOW_DURABILITY_SCHEMA_VERSION
+  ) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: checkpointRecord",
+    );
+  }
   if (
     capabilities.includes("transition-journal") &&
     (bounds.transitionJournalBytes === undefined ||
@@ -174,6 +230,21 @@ export function parseWorkflowDurabilityProfile(
   ) {
     throw new Error(
       "Invalid Workflow durability profile: mutation-locks requires its bound and schema version",
+    );
+  }
+  if (
+    capabilities.includes("verified-checkpoints") &&
+    (!capabilities.includes("mutation-locks") ||
+      !capabilities.includes("revision-fences") ||
+      !capabilities.includes("transition-journal") ||
+      bounds.checkpointManifestBytes === undefined ||
+      bounds.checkpointRecordBytes === undefined ||
+      bounds.checkpointCount === undefined ||
+      checkpointManifest !== WORKFLOW_DURABILITY_SCHEMA_VERSION ||
+      checkpointRecord !== WORKFLOW_DURABILITY_SCHEMA_VERSION)
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: verified-checkpoints requires mutation locks, transition journal, checkpoint bounds, and schema versions",
     );
   }
   if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
@@ -196,6 +267,12 @@ export function parseWorkflowDurabilityProfile(
         : {}),
       ...(transitionJournal === WORKFLOW_DURABILITY_SCHEMA_VERSION
         ? { transitionJournal: WORKFLOW_DURABILITY_SCHEMA_VERSION }
+        : {}),
+      ...(checkpointManifest === WORKFLOW_DURABILITY_SCHEMA_VERSION
+        ? { checkpointManifest: WORKFLOW_DURABILITY_SCHEMA_VERSION }
+        : {}),
+      ...(checkpointRecord === WORKFLOW_DURABILITY_SCHEMA_VERSION
+        ? { checkpointRecord: WORKFLOW_DURABILITY_SCHEMA_VERSION }
         : {}),
     },
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,

@@ -126,6 +126,7 @@ export async function ensureStandaloneRunDir(
 async function checkedStandaloneRunDir(
   projectRoot: string,
   runId: string,
+  options: { allowMalformedState?: boolean } = {},
 ): Promise<string> {
   validateRunId(runId);
   validateProjectRoot(projectRoot);
@@ -136,7 +137,13 @@ async function checkedStandaloneRunDir(
     runRootRelativePath(validatedRoot, runDir),
     { label: "Standalone Run root", expected: "directory" },
   );
-  const state = await readRunState(runDir);
+  let state: RunState | null;
+  try {
+    state = await readRunState(runDir);
+  } catch (error) {
+    if (!options.allowMalformedState) throw error;
+    state = null;
+  }
   if (state && state.runId !== runId) {
     throw new Error(
       `Standalone Run state does not match requested Run id: ${runId}`,
@@ -148,8 +155,15 @@ async function checkedStandaloneRunDir(
 export async function readStandaloneRunState(
   projectRoot: string,
   runId: string,
+  options: { allowMalformedState?: boolean } = {},
 ): Promise<RunState | null> {
-  return readRunState(await checkedStandaloneRunDir(projectRoot, runId));
+  const runDir = await checkedStandaloneRunDir(projectRoot, runId, options);
+  try {
+    return await readRunState(runDir);
+  } catch (error) {
+    if (!options.allowMalformedState) throw error;
+    return null;
+  }
 }
 
 export async function startStandaloneRun(

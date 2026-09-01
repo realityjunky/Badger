@@ -258,7 +258,10 @@ export type WorkflowProtocolCapability =
   | "versioned-artifacts";
 
 export type WorkflowDurabilityCapability =
-  "mutation-locks" | "revision-fences" | "transition-journal";
+  | "mutation-locks"
+  | "revision-fences"
+  | "transition-journal"
+  | "verified-checkpoints";
 
 export interface WorkflowDurabilityBounds {
   runStateBytes: number;
@@ -268,6 +271,9 @@ export interface WorkflowDurabilityBounds {
   claimBytes: number;
   transitionJournalBytes?: number;
   runLockBytes?: number;
+  checkpointManifestBytes?: number;
+  checkpointRecordBytes?: number;
+  checkpointCount?: number;
 }
 
 export interface WorkflowDurabilitySchemaVersions {
@@ -278,6 +284,8 @@ export interface WorkflowDurabilitySchemaVersions {
   revisionClaim: 1;
   transitionJournal?: 1;
   runLock?: 1;
+  checkpointManifest?: 1;
+  checkpointRecord?: 1;
 }
 
 export interface WorkflowDurabilityProfile {

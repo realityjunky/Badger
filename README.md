@@ -146,6 +146,23 @@ locks return structured findings and are never stolen; only `recover` may
 quarantine a lock whose local owner process is proven absent. Release checks
 the owner token and file identity, and takeover evidence is appended to
 `.comet/run-lock-recovery.jsonl` before journal recovery continues.
+
+Profiles that enable `verified-checkpoints` additionally publish a bounded
+content-addressed manifest and checkpoint record after each committed logical
+mutation. The manifest binds the Run revision, execution identity, pending
+action, Node, Cycle, Attempt, state identity, trajectory offset and prefix
+hash, and referenced artifact version hashes and sizes. Recovery prefers a
+fully verified authoritative Run head; it selects or restores an older
+checkpoint only when the transition journal is settled and the live trajectory
+proves that no later transition committed. Invalid checkpoint candidates and
+ambiguous history remain structured findings. Checkpoint restoration uses a
+protected recovery journal, appends one `recovery_reconciled` event, and keeps
+retention bounded without evicting an active recovery anchor.
+
+Checkpoint manifests and records contain identities and references, not copied
+artifact contents. Generated adapters continue to delegate checkpoint
+selection and restoration to the bundled WorkflowRuntime.
+
 The returned continuation reports the current Workflow Node, pending Engine
 action, current Cycle and Attempt, full Cycle and visit ledgers, stable
 Node-to-step mapping, artifact version and selection ledgers, current valid

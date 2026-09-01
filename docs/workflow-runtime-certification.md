@@ -93,6 +93,20 @@ performs the same owner and file-identity check and preserves a changed lock.
 The lock wraps manual and standalone locations identically, while generated
 adapters remain projections over the four public operations.
 
+The `verified-checkpoints` capability requires revision fences, mutation locks,
+and transition journals plus explicit manifest, record, and retention bounds. A committed
+checkpoint publishes a content-addressed manifest and record containing only
+durable record identities and references. It binds the Run revision, execution,
+pending action, Node, Cycle, Attempt, state, trajectory offset and prefix hash,
+and every referenced artifact version's content hash and size. Candidate order
+uses committed revision, never timestamp. Recovery first verifies the current
+authoritative head; it reports invalid newer candidates, and it restores an
+older candidate only when the settled journal and exact trajectory prefix prove
+that no later transition committed. Ambiguous later history blocks without
+rewinding. Restoration is protected by a checkpoint recovery journal and
+appends one bounded `recovery_reconciled` event before clearing that journal.
+Retention never removes an active recovery anchor.
+
 The Creator evaluation report additionally records the generated package tree
 hash. Review readiness rejects missing, stale, mismatched, or incomplete
 identity evidence.

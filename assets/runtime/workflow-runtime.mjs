@@ -1,5 +1,5 @@
 // src/workflow-runtime/index.ts
-import path14 from "node:path";
+import path15 from "node:path";
 
 // src/engine/contained-atomic-write.ts
 import { randomUUID } from "crypto";
@@ -638,6 +638,8 @@ var WORKFLOW_FINDING_CODES = [
   "completion-missing-guardrail",
   "completion-missing-required-skill",
   "confirmation-required",
+  "checkpoint-history-ambiguous",
+  "checkpoint-invalid",
   "catalog-version-unsupported",
   "cycle-budget-exhausted",
   "cycle-invalid",
@@ -815,7 +817,7 @@ function createWorkflowFinding(input) {
   if (input.currentActionId !== void 0 && input.currentActionId !== null && (typeof input.currentActionId !== "string" || input.currentActionId.length === 0 || input.currentActionId.length > MAX_WORKFLOW_FINDING_OPERATION_ARG_LENGTH || /[\u0000\r\n]/u.test(input.currentActionId))) {
     throw new Error("Workflow finding current action id is invalid");
   }
-  const safePath = normalizeWorkflowFindingPath(input.path);
+  const safePath2 = normalizeWorkflowFindingPath(input.path);
   const safeOperation = operation(input.operation);
   const allowedOperations = {
     execute: ["workflow.start", "workflow.resume"],
@@ -839,7 +841,7 @@ function createWorkflowFinding(input) {
     code: input.code,
     severity: input.severity,
     message: redactMessage(input.message),
-    ...safePath ? { path: safePath } : {},
+    ...safePath2 ? { path: safePath2 } : {},
     requiredAction: input.requiredAction,
     ...safeOperation ? { operation: safeOperation } : {},
     requiresUserDecision: input.requiresUserDecision ?? false,
@@ -1090,6 +1092,22 @@ var blockerCatalog = [
     match: /^Workflow Run lock/u,
     entry: {
       code: "run-lock-unknown",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Workflow checkpoint history is ambiguous/u,
+    entry: {
+      code: "checkpoint-history-ambiguous",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Workflow checkpoint/u,
+    entry: {
+      code: "checkpoint-invalid",
       severity: "error",
       requiredAction: "stop"
     }
@@ -1569,16 +1587,34 @@ function revisionConflictFinding(currentRevision, currentActionId) {
     currentActionId
   });
 }
-function recoveryRequiredFinding(currentRevision, currentActionId) {
+function recoveryRequiredFinding(currentRevision, currentActionId, recoveryPath = ".comet/transition-journal.json") {
   return createWorkflowFinding({
     code: "recovery-required",
     severity: "error",
-    message: "WorkflowRuntime has an unfinished transition journal. Run explicit recovery before resuming or submitting.",
+    message: recoveryPath === ".comet/transition-journal.json" ? "WorkflowRuntime has an unfinished transition journal. Run explicit recovery before resuming or submitting." : "WorkflowRuntime has unfinished checkpoint recovery evidence. Run explicit recovery before resuming or submitting.",
     requiredAction: "repair",
     operation: { id: "workflow.recover", args: [] },
-    path: ".comet/transition-journal.json",
+    path: recoveryPath,
     ...currentRevision === void 0 ? {} : { currentRevision },
     ...currentActionId === void 0 ? {} : { currentActionId }
+  });
+}
+function checkpointInvalidFinding(message, path16, severity = "error") {
+  return createWorkflowFinding({
+    code: "checkpoint-invalid",
+    severity,
+    message,
+    path: path16,
+    requiredAction: severity === "warning" ? "none" : "stop"
+  });
+}
+function checkpointHistoryAmbiguousFinding(message, path16) {
+  return createWorkflowFinding({
+    code: "checkpoint-history-ambiguous",
+    severity: "error",
+    message,
+    path: path16,
+    requiredAction: "stop"
   });
 }
 function evaluationWarningFinding(evalId, evidence) {
@@ -1607,7 +1643,8 @@ var PROFILE_KEYS = /* @__PURE__ */ new Set([
 var CAPABILITIES = /* @__PURE__ */ new Set([
   "mutation-locks",
   "revision-fences",
-  "transition-journal"
+  "transition-journal",
+  "verified-checkpoints"
 ]);
 var BOUND_KEY_NAMES = [
   "runStateBytes",
@@ -1619,7 +1656,10 @@ var BOUND_KEY_NAMES = [
 var BOUND_KEYS = /* @__PURE__ */ new Set([
   ...BOUND_KEY_NAMES,
   "transitionJournalBytes",
-  "runLockBytes"
+  "runLockBytes",
+  "checkpointManifestBytes",
+  "checkpointRecordBytes",
+  "checkpointCount"
 ]);
 var SCHEMA_KEY_NAMES = [
   "runState",
@@ -1631,9 +1671,12 @@ var SCHEMA_KEY_NAMES = [
 var SCHEMA_KEYS = /* @__PURE__ */ new Set([
   ...SCHEMA_KEY_NAMES,
   "runLock",
-  "transitionJournal"
+  "transitionJournal",
+  "checkpointManifest",
+  "checkpointRecord"
 ]);
 var MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
+var MAX_CHECKPOINT_COUNT = 256;
 function isRecord2(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -1645,6 +1688,14 @@ function requiredBound(value, key) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > MAX_PROFILE_BOUND) {
     throw new Error(
       `Invalid Workflow durability profile: bounds.${key} must be a positive bounded integer`
+    );
+  }
+  return value;
+}
+function requiredCheckpointCount(value) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > MAX_CHECKPOINT_COUNT) {
+    throw new Error(
+      "Invalid Workflow durability profile: bounds.checkpointCount must be a positive bounded integer"
     );
   }
   return value;
@@ -1705,6 +1756,23 @@ function parseWorkflowDurabilityProfile(value) {
       "runLockBytes"
     );
   }
+  if (boundsValue.checkpointManifestBytes !== void 0) {
+    bounds.checkpointManifestBytes = requiredBound(
+      boundsValue.checkpointManifestBytes,
+      "checkpointManifestBytes"
+    );
+  }
+  if (boundsValue.checkpointRecordBytes !== void 0) {
+    bounds.checkpointRecordBytes = requiredBound(
+      boundsValue.checkpointRecordBytes,
+      "checkpointRecordBytes"
+    );
+  }
+  if (boundsValue.checkpointCount !== void 0) {
+    bounds.checkpointCount = requiredCheckpointCount(
+      boundsValue.checkpointCount
+    );
+  }
   if (!isRecord2(value.schemaVersions)) {
     throw new Error(
       "Invalid Workflow durability profile: schemaVersions must be an object"
@@ -1731,6 +1799,18 @@ function parseWorkflowDurabilityProfile(value) {
   if (runLock !== void 0 && runLock !== WORKFLOW_DURABILITY_SCHEMA_VERSION) {
     throw new Error("Unsupported Workflow durability schema version: runLock");
   }
+  const checkpointManifest = value.schemaVersions.checkpointManifest;
+  if (checkpointManifest !== void 0 && checkpointManifest !== WORKFLOW_DURABILITY_SCHEMA_VERSION) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: checkpointManifest"
+    );
+  }
+  const checkpointRecord = value.schemaVersions.checkpointRecord;
+  if (checkpointRecord !== void 0 && checkpointRecord !== WORKFLOW_DURABILITY_SCHEMA_VERSION) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: checkpointRecord"
+    );
+  }
   if (capabilities.includes("transition-journal") && (bounds.transitionJournalBytes === void 0 || transitionJournal !== WORKFLOW_DURABILITY_SCHEMA_VERSION)) {
     throw new Error(
       "Invalid Workflow durability profile: transition-journal requires its bound and schema version"
@@ -1739,6 +1819,11 @@ function parseWorkflowDurabilityProfile(value) {
   if (capabilities.includes("mutation-locks") && (bounds.runLockBytes === void 0 || runLock !== WORKFLOW_DURABILITY_SCHEMA_VERSION)) {
     throw new Error(
       "Invalid Workflow durability profile: mutation-locks requires its bound and schema version"
+    );
+  }
+  if (capabilities.includes("verified-checkpoints") && (!capabilities.includes("mutation-locks") || !capabilities.includes("revision-fences") || !capabilities.includes("transition-journal") || bounds.checkpointManifestBytes === void 0 || bounds.checkpointRecordBytes === void 0 || bounds.checkpointCount === void 0 || checkpointManifest !== WORKFLOW_DURABILITY_SCHEMA_VERSION || checkpointRecord !== WORKFLOW_DURABILITY_SCHEMA_VERSION)) {
+    throw new Error(
+      "Invalid Workflow durability profile: verified-checkpoints requires mutation locks, transition journal, checkpoint bounds, and schema versions"
     );
   }
   if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
@@ -1757,7 +1842,9 @@ function parseWorkflowDurabilityProfile(value) {
       artifacts: WORKFLOW_DURABILITY_SCHEMA_VERSION,
       revisionClaim: WORKFLOW_DURABILITY_SCHEMA_VERSION,
       ...runLock === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { runLock: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
-      ...transitionJournal === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { transitionJournal: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {}
+      ...transitionJournal === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { transitionJournal: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
+      ...checkpointManifest === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { checkpointManifest: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
+      ...checkpointRecord === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { checkpointRecord: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {}
     },
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION
   };
@@ -2440,16 +2527,16 @@ async function createSkillSnapshot(pkg, changeDir) {
   }
   return { hash: material.hash, snapshotDir };
 }
-async function readSkillSnapshot(changeDir, hash3) {
-  if (!/^[a-f0-9]{64}$/u.test(hash3)) {
-    throw new Error(`Invalid Skill snapshot hash: ${hash3}`);
+async function readSkillSnapshot(changeDir, hash4) {
+  if (!/^[a-f0-9]{64}$/u.test(hash4)) {
+    throw new Error(`Invalid Skill snapshot hash: ${hash4}`);
   }
   const snapshotsRoot = path7.resolve(changeDir, ".comet", "skill-snapshots");
-  const snapshotDir = path7.join(snapshotsRoot, hash3);
+  const snapshotDir = path7.join(snapshotsRoot, hash4);
   assertInside(snapshotsRoot, snapshotDir, "Skill snapshot");
   try {
     const storedHash = (await fs4.readFile(path7.join(snapshotDir, "sha256"), "utf8")).trim();
-    if (storedHash !== hash3) {
+    if (storedHash !== hash4) {
       throw new Error(`stored hash is ${storedHash || "(empty)"}`);
     }
     const packagePath = path7.join(snapshotDir, "package.json");
@@ -2462,12 +2549,12 @@ async function readSkillSnapshot(changeDir, hash3) {
       throw new Error(errors.map((error) => `  - ${error}`).join("\n"));
     }
     const calculated = await hashSkillPackage(pkg);
-    if (calculated !== hash3) {
+    if (calculated !== hash4) {
       throw new Error(`calculated hash is ${calculated}`);
     }
     return pkg;
   } catch (error) {
-    throw new Error(`Skill snapshot is invalid or missing: ${hash3}`, {
+    throw new Error(`Skill snapshot is invalid or missing: ${hash4}`, {
       cause: error
     });
   }
@@ -3478,12 +3565,12 @@ function parseDecisionReceipt(value, index) {
   const protocolHash = requiredJsonString(receipt.protocolHash, "protocolHash");
   const packageHash = requiredJsonString(receipt.packageHash, "packageHash");
   const snapshotHash = requiredJsonString(receipt.snapshotHash, "snapshotHash");
-  for (const [key, hash3] of [
+  for (const [key, hash4] of [
     ["protocolHash", protocolHash],
     ["packageHash", packageHash],
     ["snapshotHash", snapshotHash]
   ]) {
-    if (!/^[a-f0-9]{64}$/u.test(hash3)) {
+    if (!/^[a-f0-9]{64}$/u.test(hash4)) {
       throw new Error(
         `Invalid Run state: ${label}.${key} must be a SHA-256 hash`
       );
@@ -4476,7 +4563,7 @@ function artifactScopeId(lifetime, state) {
   }
   return state.runId;
 }
-function selection(artifactId, versionId, state, nodeId, actionId2, timestamp4) {
+function selection(artifactId, versionId, state, nodeId, actionId2, timestamp5) {
   const runtime = state.workflowRuntime;
   const attempt = runtime?.currentAttempt;
   if (!runtime || !attempt) {
@@ -4491,7 +4578,7 @@ function selection(artifactId, versionId, state, nodeId, actionId2, timestamp4) 
     attemptId: attempt.id,
     actionId: actionId2,
     revision: runtime.revision,
-    timestamp: timestamp4
+    timestamp: timestamp5
   };
 }
 function artifactVersionId(artifactId, contentHash2, pathValue, producer, scopeId) {
@@ -4584,7 +4671,7 @@ async function prepareWorkflowArtifactMutation(options) {
     }
   }
   const mutation = structuredClone(empty);
-  const timestamp4 = (/* @__PURE__ */ new Date()).toISOString();
+  const timestamp5 = (/* @__PURE__ */ new Date()).toISOString();
   for (const { declaration, value: requested } of requestedUpdates.values()) {
     const artifactPath = await resolveArtifactPath(
       options.runRoot,
@@ -4635,7 +4722,7 @@ async function prepareWorkflowArtifactMutation(options) {
       contentHash: contentHash2,
       path: artifactPath,
       producer,
-      timestamp: timestamp4
+      timestamp: timestamp5
     };
     mutation.versions.push(version);
     mutation.selections.push(
@@ -4645,7 +4732,7 @@ async function prepareWorkflowArtifactMutation(options) {
         options.state,
         options.nodeId,
         options.actionId,
-        timestamp4
+        timestamp5
       )
     );
     mutation.artifactPaths[declaration.artifactId] = artifactPath;
@@ -4685,7 +4772,7 @@ async function prepareWorkflowArtifactMutation(options) {
         options.state,
         options.nodeId,
         options.actionId,
-        timestamp4
+        timestamp5
       )
     );
     mutation.artifactPaths[declaration.artifactId] = version.path;
@@ -6113,19 +6200,19 @@ function evidenceProducer(state, visit, outcome) {
     revision: outcomeRevision(state.workflowRuntime, visit, outcome)
   };
 }
-function evidenceVersionId(evidenceId, hash3, producer) {
+function evidenceVersionId(evidenceId, hash4, producer) {
   return `evidence-version-${sha256(
-    JSON.stringify(stableValue({ evidenceId, hash: hash3, producer }))
+    JSON.stringify(stableValue({ evidenceId, hash: hash4, producer }))
   ).slice(0, 24)}`;
 }
 function evidenceReference(state, declaration, visit, outcome, value, required) {
   const producer = evidenceProducer(state, visit, outcome);
-  const hash3 = contentHash(value);
+  const hash4 = contentHash(value);
   return {
     id: declaration.id,
     required,
-    versionId: evidenceVersionId(declaration.id, hash3, producer),
-    contentHash: hash3,
+    versionId: evidenceVersionId(declaration.id, hash4, producer),
+    contentHash: hash4,
     producer
   };
 }
@@ -7022,6 +7109,13 @@ async function compileWorkflow(protocol) {
   validateProtocolShape(executableProtocol);
   validateWorkflowDecisionScopeDefinition(executableProtocol);
   const revisioned = isRevisionedWorkflowProtocol(executableProtocol);
+  if (executableProtocol.capabilities?.durability?.capabilities.includes(
+    "verified-checkpoints"
+  ) && !revisioned) {
+    throw new Error(
+      "Workflow Protocol verified checkpoints require revisioned capabilities"
+    );
+  }
   if (revisioned && executableProtocol.capabilities?.version !== 3) {
     throw new Error(
       "Workflow Protocol revisioned capabilities are required for branch routing"
@@ -7547,9 +7641,9 @@ var WorkflowTransitionJournalPendingError = class extends Error {
   journal;
 };
 var WorkflowTransitionRecordConflictError = class extends Error {
-  constructor(path15) {
-    super(`Workflow transition record changed before journaling: ${path15}`);
-    this.path = path15;
+  constructor(path16) {
+    super(`Workflow transition record changed before journaling: ${path16}`);
+    this.path = path16;
     this.name = "WorkflowTransitionRecordConflictError";
   }
   path;
@@ -9385,11 +9479,1742 @@ async function recordWorkflowRunLockTakeover(runRoot, evidence, maxBytes = WORKF
   );
 }
 
+// src/workflow-runtime/checkpoints.ts
+import { randomUUID as randomUUID6 } from "node:crypto";
+import { promises as fs7 } from "node:fs";
+import path13 from "node:path";
+var WORKFLOW_CHECKPOINT_DIRECTORY = ".comet/checkpoints";
+var WORKFLOW_CHECKPOINT_INDEX_PATH = ".comet/checkpoints/index.json";
+var WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY = ".comet/checkpoints/manifests";
+var WORKFLOW_CHECKPOINT_RECORD_DIRECTORY = ".comet/checkpoints/records";
+var WORKFLOW_CHECKPOINT_CONTENT_DIRECTORY = ".comet/checkpoints/content";
+var WORKFLOW_CHECKPOINT_RECOVERY_JOURNAL_PATH = ".comet/checkpoint-recovery-journal.json";
+var WORKFLOW_CHECKPOINT_SCHEMA_VERSION = 1;
+var WORKFLOW_CHECKPOINT_RECOVERY_SCHEMA_VERSION = 1;
+var STATE_PATH2 = ".comet/run-state.json";
+var PENDING_PATH = ".comet/pending-action.json";
+var ARTIFACTS_PATH = ".comet/artifacts.json";
+var CONTEXT_PATH = ".comet/context.md";
+var TRAJECTORY_PATH = ".comet/trajectory.jsonl";
+var TRANSITION_JOURNAL_PATH = ".comet/transition-journal.json";
+var HASH_PATTERN = /^[a-f0-9]{64}$/u;
+var MAX_IDENTIFIER_LENGTH2 = 256;
+var MAX_CHECKPOINT_ENTRIES = 256;
+var MAX_RECOVERY_RECORDS = 8;
+var TRAJECTORY_EVENT_TYPES2 = /* @__PURE__ */ new Set([
+  "run_started",
+  "action_proposed",
+  "action_completed",
+  "eval_completed",
+  "checkpoint",
+  "state_migrated",
+  "state_transitioned",
+  "command_check_recorded",
+  "recovery_reconciled"
+]);
+var configuredFault3;
+function isRecord10(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function assertKnownFields6(value, keys, label) {
+  const unknown = Object.keys(value).find((key) => !keys.has(key));
+  if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
+}
+function boundedText2(value, key, label) {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_IDENTIFIER_LENGTH2 || /[\u0000\r\n]/u.test(value)) {
+    throw new Error(`Invalid ${label}: ${key} must be a bounded string`);
+  }
+  return value;
+}
+function timestamp4(value, key, label) {
+  const result = boundedText2(value, key, label);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(result)) {
+    throw new Error(`Invalid ${label}: ${key} must be an ISO timestamp`);
+  }
+  return result;
+}
+function nonNegativeInteger4(value, key, label) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
+  }
+  return value;
+}
+function positiveInteger(value, key, label) {
+  const result = nonNegativeInteger4(value, key, label);
+  if (result < 1) throw new Error(`Invalid ${label}: ${key} must be positive`);
+  return result;
+}
+function hash3(value, key, label) {
+  const result = boundedText2(value, key, label);
+  if (!HASH_PATTERN.test(result)) {
+    throw new Error(`Invalid ${label}: ${key} must be a SHA-256 hash`);
+  }
+  return result;
+}
+function nullableHash(value, key, label) {
+  return value === null ? null : hash3(value, key, label);
+}
+function safePath(value, key, label) {
+  const result = boundedText2(value, key, label);
+  return normalizeWorkflowRelativePath(result, `${label}: ${key}`);
+}
+function canonical(value) {
+  return `${JSON.stringify(stableValue(value), null, 2)}
+`;
+}
+function canonicalHash(value) {
+  return sha256(JSON.stringify(stableValue(value)));
+}
+function contentAddressHash(value) {
+  if (isRecord10(value) && value.kind === "workflow-checkpoint-manifest") {
+    const { manifestHash: _manifestHash, ...withoutHash } = value;
+    return canonicalHash(withoutHash);
+  }
+  if (isRecord10(value) && value.kind === "workflow-checkpoint-record") {
+    const { recordHash: _recordHash, ...withoutHash } = value;
+    return canonicalHash(withoutHash);
+  }
+  return canonicalHash(value);
+}
+function contentIdentity(content) {
+  if (content === null) return { exists: false, bytes: 0, sha256: null };
+  const bytes = Buffer.byteLength(content, "utf8");
+  return { exists: true, bytes, sha256: sha256(Buffer.from(content, "utf8")) };
+}
+function identityOf4(value) {
+  return {
+    path: value.path,
+    exists: value.exists,
+    bytes: value.bytes,
+    sha256: value.sha256
+  };
+}
+function sameIdentity(left, right) {
+  return left.path === right.path && left.exists === right.exists && left.bytes === right.bytes && left.sha256 === right.sha256;
+}
+function sameStableValue(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+}
+function sameActionDefinition(action, step) {
+  return action.type === step.action.type && action.ref === step.action.ref && action.prompt === step.action.prompt && action.question === step.action.question && sameStableValue(action.options, step.action.options) && action.decisionId === step.action.decisionId && sameStableValue(action.choices, step.action.choices) && sameStableValue(action.requiredInputs, step.action.requiredInputs) && sameStableValue(action.rationale, step.action.rationale) && sameStableValue(action.reviewer, step.action.reviewer);
+}
+function contentPathFor(hashValue) {
+  return `${WORKFLOW_CHECKPOINT_CONTENT_DIRECTORY}/${hashValue}.txt`;
+}
+function manifestPathFor(hashValue) {
+  return `${WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY}/${hashValue}.json`;
+}
+function recordPathFor(hashValue) {
+  return `${WORKFLOW_CHECKPOINT_RECORD_DIRECTORY}/${hashValue}.json`;
+}
+function checkpointBounds(profile) {
+  const parsed = parseWorkflowDurabilityProfile(profile);
+  if (!parsed.capabilities.includes("verified-checkpoints")) {
+    throw new Error(
+      "Workflow durability profile has no verified checkpoint capability"
+    );
+  }
+  const manifestBytes = parsed.bounds.checkpointManifestBytes;
+  const recordBytes = parsed.bounds.checkpointRecordBytes;
+  const count = parsed.bounds.checkpointCount;
+  if (manifestBytes === void 0 || recordBytes === void 0 || count === void 0) {
+    throw new Error("Workflow checkpoint bounds are missing");
+  }
+  return { manifestBytes, recordBytes, count };
+}
+function maxBytesForPath(profile, relativePath) {
+  if (relativePath === STATE_PATH2) return profile.bounds.runStateBytes;
+  if (relativePath === PENDING_PATH) return profile.bounds.pendingActionBytes;
+  if (relativePath === TRAJECTORY_PATH) return profile.bounds.trajectoryBytes;
+  if (relativePath === ARTIFACTS_PATH) return profile.bounds.artifactsBytes;
+  return Math.max(profile.bounds.runStateBytes, profile.bounds.artifactsBytes);
+}
+function parseExecutionIdentity2(value, label) {
+  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields6(
+    value,
+    /* @__PURE__ */ new Set([
+      "protocolHash",
+      "packageHash",
+      "snapshotHash",
+      "nodeToStep",
+      "capabilityVersion",
+      "resolverHash",
+      "findingCatalogVersion",
+      "durabilityProfile"
+    ]),
+    label
+  );
+  if (!value.nodeToStep || typeof value.nodeToStep !== "object" || Array.isArray(value.nodeToStep)) {
+    throw new Error(`Invalid ${label}: nodeToStep is invalid`);
+  }
+  const nodeToStep = {};
+  for (const [nodeId, stepId2] of Object.entries(value.nodeToStep)) {
+    if (!nodeId || typeof stepId2 !== "string" || stepId2.length === 0) {
+      throw new Error(`Invalid ${label}: nodeToStep is invalid`);
+    }
+    nodeToStep[nodeId] = stepId2;
+  }
+  if (value.capabilityVersion !== void 0 && value.capabilityVersion !== 3) {
+    throw new Error(`Invalid ${label}: capabilityVersion is invalid`);
+  }
+  if (value.findingCatalogVersion !== void 0 && value.findingCatalogVersion !== 1) {
+    throw new Error(`Invalid ${label}: findingCatalogVersion is invalid`);
+  }
+  const identity = {
+    protocolHash: hash3(value.protocolHash, "protocolHash", label),
+    packageHash: hash3(value.packageHash, "packageHash", label),
+    snapshotHash: hash3(value.snapshotHash, "snapshotHash", label),
+    nodeToStep,
+    ...value.capabilityVersion === 3 ? { capabilityVersion: 3 } : {},
+    ...value.resolverHash !== void 0 ? { resolverHash: hash3(value.resolverHash, "resolverHash", label) } : {},
+    ...value.findingCatalogVersion === 1 ? { findingCatalogVersion: 1 } : {}
+  };
+  if (value.durabilityProfile !== void 0) {
+    identity.durabilityProfile = parseWorkflowDurabilityProfile(
+      value.durabilityProfile
+    );
+  }
+  return identity;
+}
+function parseMaterialIdentity2(value, label) {
+  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields6(
+    value,
+    /* @__PURE__ */ new Set(["path", "exists", "bytes", "sha256"]),
+    label
+  );
+  const pathValue = safePath(value.path, "path", label);
+  if (typeof value.exists !== "boolean") {
+    throw new Error(`Invalid ${label}: exists must be a boolean`);
+  }
+  const bytes = nonNegativeInteger4(value.bytes, "bytes", label);
+  const digest = nullableHash(value.sha256, "sha256", label);
+  if (!value.exists && (bytes !== 0 || digest !== null) || value.exists && (bytes < 1 || digest === null)) {
+    throw new Error(`Invalid ${label}: identity is inconsistent`);
+  }
+  return { path: pathValue, exists: value.exists, bytes, sha256: digest };
+}
+function parseMaterialReference(value, label) {
+  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields6(
+    value,
+    /* @__PURE__ */ new Set(["path", "contentPath", "exists", "bytes", "sha256"]),
+    label
+  );
+  const { contentPath: rawContentPath, ...material } = value;
+  const identity = parseMaterialIdentity2(material, label);
+  const contentPath = rawContentPath === null ? null : safePath(rawContentPath, "contentPath", label);
+  if (!identity.exists && contentPath !== null) {
+    throw new Error(`Invalid ${label}: missing material cannot have content`);
+  }
+  if (identity.exists && (contentPath === null || contentPath !== contentPathFor(identity.sha256))) {
+    throw new Error(`Invalid ${label}: contentPath is not content-addressed`);
+  }
+  return { ...identity, contentPath };
+}
+function parsePendingActionIdentity(value, label) {
+  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields6(
+    value,
+    /* @__PURE__ */ new Set(["id", "path", "exists", "bytes", "sha256"]),
+    label
+  );
+  const { id, ...material } = value;
+  return {
+    id: boundedText2(id, "id", label),
+    ...parseMaterialIdentity2(material, label)
+  };
+}
+function parseTrajectoryIdentity(value, label) {
+  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields6(
+    value,
+    /* @__PURE__ */ new Set(["path", "exists", "bytes", "sha256", "offset", "prefixSha256"]),
+    label
+  );
+  const {
+    offset: rawOffset,
+    prefixSha256: rawPrefixSha256,
+    ...material
+  } = value;
+  const identity = parseMaterialIdentity2(material, label);
+  const offset = nonNegativeInteger4(rawOffset, "offset", label);
+  const prefixSha256 = hash3(rawPrefixSha256, "prefixSha256", label);
+  if (!identity.exists || offset > identity.bytes) {
+    throw new Error(`Invalid ${label}: offset is inconsistent`);
+  }
+  return { ...identity, offset, prefixSha256 };
+}
+function parseArtifactVersionReference(value, label) {
+  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields6(
+    value,
+    /* @__PURE__ */ new Set(["artifactId", "versionId", "path", "contentHash", "bytes"]),
+    label
+  );
+  return {
+    artifactId: boundedText2(value.artifactId, "artifactId", label),
+    versionId: boundedText2(value.versionId, "versionId", label),
+    path: safePath(value.path, "path", label),
+    contentHash: hash3(value.contentHash, "contentHash", label),
+    bytes: positiveInteger(value.bytes, "bytes", label)
+  };
+}
+function parseCheckpointManifest(value, bounds) {
+  const label = "Workflow checkpoint manifest";
+  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields6(
+    value,
+    /* @__PURE__ */ new Set([
+      "schemaVersion",
+      "kind",
+      "manifestHash",
+      "runId",
+      "revision",
+      "execution",
+      "pendingAction",
+      "nodeId",
+      "cycleId",
+      "attemptId",
+      "state",
+      "context",
+      "artifacts",
+      "trajectory",
+      "artifactVersions",
+      "createdAt"
+    ]),
+    label
+  );
+  if (value.schemaVersion !== WORKFLOW_CHECKPOINT_SCHEMA_VERSION || value.kind !== "workflow-checkpoint-manifest") {
+    throw new Error(`Invalid ${label}: schema identity is invalid`);
+  }
+  const artifactVersions = value.artifactVersions;
+  if (!Array.isArray(artifactVersions) || artifactVersions.length > MAX_CHECKPOINT_ENTRIES) {
+    throw new Error(`Invalid ${label}: artifactVersions are outside the bound`);
+  }
+  const parsed = {
+    schemaVersion: WORKFLOW_CHECKPOINT_SCHEMA_VERSION,
+    kind: "workflow-checkpoint-manifest",
+    manifestHash: hash3(value.manifestHash, "manifestHash", label),
+    runId: boundedText2(value.runId, "runId", label),
+    revision: nonNegativeInteger4(value.revision, "revision", label),
+    execution: parseExecutionIdentity2(value.execution, `${label}.execution`),
+    pendingAction: value.pendingAction === null ? null : parsePendingActionIdentity(
+      value.pendingAction,
+      `${label}.pendingAction`
+    ),
+    nodeId: value.nodeId === null ? null : boundedText2(value.nodeId, "nodeId", label),
+    cycleId: value.cycleId === null ? null : boundedText2(value.cycleId, "cycleId", label),
+    attemptId: value.attemptId === null ? null : boundedText2(value.attemptId, "attemptId", label),
+    state: parseMaterialIdentity2(value.state, `${label}.state`),
+    context: parseMaterialIdentity2(value.context, `${label}.context`),
+    artifacts: parseMaterialIdentity2(value.artifacts, `${label}.artifacts`),
+    trajectory: parseTrajectoryIdentity(
+      value.trajectory,
+      `${label}.trajectory`
+    ),
+    artifactVersions: artifactVersions.map(
+      (entry, index) => parseArtifactVersionReference(
+        entry,
+        `${label}.artifactVersions[${index}]`
+      )
+    ),
+    createdAt: timestamp4(value.createdAt, "createdAt", label)
+  };
+  if (Buffer.byteLength(canonical(parsed), "utf8") > bounds.manifestBytes) {
+    throw new Error(`Invalid ${label}: exceeds ${bounds.manifestBytes} bytes`);
+  }
+  return parsed;
+}
+function parseCheckpointRecord(value, bounds) {
+  const label = "Workflow checkpoint record";
+  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields6(
+    value,
+    /* @__PURE__ */ new Set([
+      "schemaVersion",
+      "kind",
+      "recordHash",
+      "runId",
+      "revision",
+      "manifestHash",
+      "state",
+      "pendingAction",
+      "context",
+      "artifacts",
+      "trajectory"
+    ]),
+    label
+  );
+  if (value.schemaVersion !== WORKFLOW_CHECKPOINT_SCHEMA_VERSION || value.kind !== "workflow-checkpoint-record") {
+    throw new Error(`Invalid ${label}: schema identity is invalid`);
+  }
+  const parsed = {
+    schemaVersion: WORKFLOW_CHECKPOINT_SCHEMA_VERSION,
+    kind: "workflow-checkpoint-record",
+    recordHash: hash3(value.recordHash, "recordHash", label),
+    runId: boundedText2(value.runId, "runId", label),
+    revision: nonNegativeInteger4(value.revision, "revision", label),
+    manifestHash: hash3(value.manifestHash, "manifestHash", label),
+    state: parseMaterialReference(value.state, `${label}.state`),
+    pendingAction: parseMaterialReference(
+      value.pendingAction,
+      `${label}.pendingAction`
+    ),
+    context: parseMaterialReference(value.context, `${label}.context`),
+    artifacts: parseMaterialReference(value.artifacts, `${label}.artifacts`),
+    trajectory: parseMaterialReference(value.trajectory, `${label}.trajectory`)
+  };
+  if (Buffer.byteLength(canonical(parsed), "utf8") > bounds.recordBytes) {
+    throw new Error(`Invalid ${label}: exceeds ${bounds.recordBytes} bytes`);
+  }
+  return parsed;
+}
+function parseCheckpointIndex(value, bounds) {
+  const label = "Workflow checkpoint index";
+  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields6(
+    value,
+    /* @__PURE__ */ new Set(["schemaVersion", "kind", "runId", "records"]),
+    label
+  );
+  if (value.schemaVersion !== WORKFLOW_CHECKPOINT_SCHEMA_VERSION || value.kind !== "workflow-checkpoint-index") {
+    throw new Error(`Invalid ${label}: schema identity is invalid`);
+  }
+  if (!Array.isArray(value.records) || value.records.length > (bounds?.count ?? MAX_CHECKPOINT_ENTRIES)) {
+    throw new Error(`Invalid ${label}: records are outside the bound`);
+  }
+  const records = value.records.map((entry, index) => {
+    if (!isRecord10(entry)) {
+      throw new Error(`Invalid ${label}: records[${index}] must be an object`);
+    }
+    assertKnownFields6(
+      entry,
+      /* @__PURE__ */ new Set(["recordHash", "manifestHash", "revision"]),
+      label
+    );
+    return {
+      recordHash: hash3(entry.recordHash, "recordHash", label),
+      manifestHash: hash3(entry.manifestHash, "manifestHash", label),
+      revision: nonNegativeInteger4(entry.revision, "revision", label)
+    };
+  });
+  const recordKeys = /* @__PURE__ */ new Set();
+  const manifestHashes = /* @__PURE__ */ new Set();
+  for (const record of records) {
+    if (recordKeys.has(record.recordHash) || manifestHashes.has(record.manifestHash)) {
+      throw new Error(`Invalid ${label}: duplicate record identity`);
+    }
+    recordKeys.add(record.recordHash);
+    manifestHashes.add(record.manifestHash);
+  }
+  records.sort(
+    (left, right) => right.revision - left.revision || left.recordHash.localeCompare(right.recordHash)
+  );
+  return {
+    schemaVersion: WORKFLOW_CHECKPOINT_SCHEMA_VERSION,
+    kind: "workflow-checkpoint-index",
+    runId: boundedText2(value.runId, "runId", label),
+    records
+  };
+}
+function parseRecoveryJournal(value, bounds) {
+  const label = "Workflow checkpoint recovery journal";
+  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  assertKnownFields6(
+    value,
+    /* @__PURE__ */ new Set([
+      "schemaVersion",
+      "kind",
+      "status",
+      "journalId",
+      "runId",
+      "execution",
+      "checkpointRecordHash",
+      "records",
+      "recoveryEvent",
+      "createdAt",
+      "committedAt"
+    ]),
+    label
+  );
+  if (value.schemaVersion !== WORKFLOW_CHECKPOINT_RECOVERY_SCHEMA_VERSION || value.kind !== "workflow-checkpoint-recovery-journal" || value.status !== "prepared" && value.status !== "committed") {
+    throw new Error(`Invalid ${label}: schema identity is invalid`);
+  }
+  if (!Array.isArray(value.records) || value.records.length === 0 || value.records.length > MAX_RECOVERY_RECORDS) {
+    throw new Error(`Invalid ${label}: records are outside the bound`);
+  }
+  const records = value.records.map(
+    (entry, index) => {
+      if (!isRecord10(entry)) {
+        throw new Error(
+          `Invalid ${label}: records[${index}] must be an object`
+        );
+      }
+      assertKnownFields6(
+        entry,
+        /* @__PURE__ */ new Set(["path", "previous", "intended", "contentPath"]),
+        label
+      );
+      const intended = parseMaterialIdentity2(
+        entry.intended,
+        `${label}.intended`
+      );
+      const contentPath = entry.contentPath === null ? null : safePath(entry.contentPath, "contentPath", label);
+      if (intended.exists && contentPath !== contentPathFor(intended.sha256)) {
+        throw new Error(`Invalid ${label}: intended content is not addressed`);
+      }
+      if (!intended.exists && contentPath !== null) {
+        throw new Error(
+          `Invalid ${label}: missing intended content is addressed`
+        );
+      }
+      const pathValue = safePath(entry.path, "path", label);
+      const previous = parseMaterialIdentity2(
+        entry.previous,
+        `${label}.previous`
+      );
+      if (previous.path !== pathValue || intended.path !== pathValue) {
+        throw new Error(`Invalid ${label}: record path identity is invalid`);
+      }
+      return { path: pathValue, previous, intended, contentPath };
+    }
+  );
+  records.sort((left, right) => left.path.localeCompare(right.path));
+  const recoveryPaths = /* @__PURE__ */ new Set([
+    STATE_PATH2,
+    PENDING_PATH,
+    CONTEXT_PATH,
+    ARTIFACTS_PATH,
+    TRAJECTORY_PATH
+  ]);
+  if (records.some((record) => !recoveryPaths.has(record.path)) || new Set(records.map((record) => record.path)).size !== records.length || records.length !== recoveryPaths.size || [...recoveryPaths].some(
+    (pathValue) => !records.some((record) => record.path === pathValue)
+  )) {
+    throw new Error(`Invalid ${label}: recovery path is not a Run record`);
+  }
+  const recoveryEvent2 = parseTrajectoryEvent2(value.recoveryEvent, label);
+  if (recoveryEvent2.type !== "recovery_reconciled") {
+    throw new Error(`Invalid ${label}: recoveryEvent type is invalid`);
+  }
+  const parsed = {
+    schemaVersion: WORKFLOW_CHECKPOINT_RECOVERY_SCHEMA_VERSION,
+    kind: "workflow-checkpoint-recovery-journal",
+    status: value.status,
+    journalId: boundedText2(value.journalId, "journalId", label),
+    runId: boundedText2(value.runId, "runId", label),
+    execution: parseExecutionIdentity2(value.execution, `${label}.execution`),
+    checkpointRecordHash: hash3(
+      value.checkpointRecordHash,
+      "checkpointRecordHash",
+      label
+    ),
+    records,
+    recoveryEvent: recoveryEvent2,
+    createdAt: timestamp4(value.createdAt, "createdAt", label),
+    ...value.committedAt === void 0 ? {} : { committedAt: timestamp4(value.committedAt, "committedAt", label) }
+  };
+  if (parsed.status === "committed" !== (parsed.committedAt !== void 0) || parsed.recoveryEvent.runId !== parsed.runId || Buffer.byteLength(canonical(parsed), "utf8") > bounds.recordBytes) {
+    throw new Error(`Invalid ${label}: evidence is inconsistent or oversized`);
+  }
+  return parsed;
+}
+function parseTrajectoryEvent2(value, label) {
+  if (!isRecord10(value))
+    throw new Error(`Invalid ${label}: event must be an object`);
+  assertKnownFields6(
+    value,
+    /* @__PURE__ */ new Set(["sequence", "timestamp", "type", "runId", "data"]),
+    label
+  );
+  const sequence = positiveInteger(value.sequence, "sequence", label);
+  const type = value.type;
+  if (typeof type !== "string" || !TRAJECTORY_EVENT_TYPES2.has(type)) {
+    throw new Error(`Invalid ${label}: event type is invalid`);
+  }
+  if (!isRecord10(value.data))
+    throw new Error(`Invalid ${label}: event data is invalid`);
+  return {
+    sequence,
+    timestamp: timestamp4(value.timestamp, "timestamp", label),
+    type,
+    runId: boundedText2(value.runId, "runId", label),
+    data: value.data
+  };
+}
+function parseTrajectory2(raw, runId) {
+  const events = [];
+  let expectedSequence = 1;
+  for (const [index, line] of raw.split(/\r?\n/u).entries()) {
+    if (line.length === 0) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch (error) {
+      throw new Error(
+        `Invalid checkpoint trajectory event at line ${index + 1}`,
+        {
+          cause: error
+        }
+      );
+    }
+    const event = parseTrajectoryEvent2(
+      parsed,
+      `checkpoint trajectory line ${index + 1}`
+    );
+    if (event.sequence !== expectedSequence || event.runId !== runId) {
+      throw new Error(
+        `Invalid checkpoint trajectory sequence at line ${index + 1}`
+      );
+    }
+    events.push(event);
+    expectedSequence += 1;
+  }
+  if (events.length === 0)
+    throw new Error("Invalid checkpoint trajectory: no events");
+  return events;
+}
+function validateArtifactContent(raw) {
+  if (raw === null) return;
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch (error) {
+    throw new Error("Workflow checkpoint artifacts are not valid JSON", {
+      cause: error
+    });
+  }
+  if (!isRecord10(value)) {
+    throw new Error("Workflow checkpoint artifacts are not an object");
+  }
+  for (const [key, artifact] of Object.entries(value)) {
+    if (!key || typeof artifact !== "string") {
+      throw new Error("Workflow checkpoint artifacts contain an invalid entry");
+    }
+  }
+}
+function validateTrajectorySemantics(events, state, pending) {
+  const proposals = /* @__PURE__ */ new Map();
+  const completed = /* @__PURE__ */ new Set();
+  for (const event of events) {
+    if (event.type === "action_proposed") {
+      if (!isRecord10(event.data.action)) {
+        throw new Error("Workflow checkpoint action proposal is invalid");
+      }
+      const action2 = parsePendingActionValue(event.data.action);
+      if (proposals.has(action2.id)) {
+        throw new Error("Workflow checkpoint action proposal is duplicated");
+      }
+      proposals.set(action2.id, action2);
+      continue;
+    }
+    if (event.type !== "action_completed") continue;
+    if (!isRecord10(event.data.action) || !isRecord10(event.data.outcome)) {
+      throw new Error("Workflow checkpoint action completion is invalid");
+    }
+    const action = parsePendingActionValue(event.data.action);
+    const outcome = event.data.outcome;
+    if (typeof outcome.actionId !== "string" || outcome.actionId !== action.id || outcome.status !== "succeeded" && outcome.status !== "failed" || typeof outcome.summary !== "string" || outcome.summary.length === 0) {
+      throw new Error("Workflow checkpoint action outcome is invalid");
+    }
+    if (!proposals.has(action.id) || completed.has(action.id)) {
+      throw new Error(
+        "Workflow checkpoint action completion is not attributable"
+      );
+    }
+    completed.add(action.id);
+  }
+  if (completed.size !== (state.workflowRuntime?.revision ?? 0)) {
+    throw new Error("Workflow checkpoint trajectory revision is invalid");
+  }
+  for (const actionId2 of proposals.keys()) {
+    if (!completed.has(actionId2) && actionId2 !== pending?.id) {
+      throw new Error(
+        "Workflow checkpoint trajectory has an uncommitted action"
+      );
+    }
+  }
+  if (pending && !proposals.has(pending.id)) {
+    throw new Error("Workflow checkpoint pending action has no proposal");
+  }
+}
+async function readRaw(runRoot, relativePath, maxBytes, label) {
+  return readOptionalEngineRunText(runRoot, relativePath, maxBytes, label);
+}
+async function readMaterial(runRoot, relativePath, maxBytes, label) {
+  const content = await readRaw(runRoot, relativePath, maxBytes, label);
+  return {
+    content,
+    identity: { path: relativePath, ...contentIdentity(content) }
+  };
+}
+async function readReferencedContent(runRoot, reference, maxBytes, label) {
+  if (!reference.exists || reference.contentPath === null) return null;
+  const content = await readRaw(
+    runRoot,
+    reference.contentPath,
+    maxBytes,
+    label
+  );
+  if (content === null) throw new Error(`${label} content is missing`);
+  const identity = contentIdentity(content);
+  if (!identity.exists || identity.bytes !== reference.bytes || identity.sha256 !== reference.sha256) {
+    throw new Error(`${label} content identity is invalid`);
+  }
+  return content;
+}
+async function publishContent(runRoot, reference, content, maxBytes) {
+  if (!reference.contentPath)
+    throw new Error("Cannot publish missing checkpoint content");
+  await ensureProtectedProjectDirectory(
+    runRoot,
+    WORKFLOW_CHECKPOINT_CONTENT_DIRECTORY,
+    {
+      label: "Workflow checkpoint content"
+    }
+  );
+  const existing = await readRaw(
+    runRoot,
+    reference.contentPath,
+    maxBytes,
+    "Workflow checkpoint content"
+  );
+  if (existing !== null) {
+    if (existing !== content)
+      throw new Error("Workflow checkpoint content identity changed");
+    return;
+  }
+  try {
+    await writeEngineRunText(
+      runRoot,
+      reference.contentPath,
+      content,
+      maxBytes,
+      "Workflow checkpoint content",
+      { exclusive: true, maxBytes }
+    );
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    const raced = await readRaw(
+      runRoot,
+      reference.contentPath,
+      maxBytes,
+      "Workflow checkpoint content"
+    );
+    if (raced !== content) throw error;
+  }
+}
+async function publishJson(runRoot, relativePath, value, maxBytes, label) {
+  const content = canonical(value);
+  const existing = await readRaw(runRoot, relativePath, maxBytes, label);
+  if (existing !== null) {
+    if (relativePath === WORKFLOW_CHECKPOINT_INDEX_PATH) {
+      await writeEngineRunText(
+        runRoot,
+        relativePath,
+        content,
+        maxBytes,
+        label,
+        {
+          maxBytes
+        }
+      );
+      return;
+    }
+    if (existing !== content)
+      throw new Error(`${label} content identity changed`);
+    return;
+  }
+  try {
+    await writeEngineRunText(runRoot, relativePath, content, maxBytes, label, {
+      exclusive: true,
+      maxBytes
+    });
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    const raced = await readRaw(runRoot, relativePath, maxBytes, label);
+    if (raced !== content) throw error;
+  }
+}
+async function captureMaterial(runRoot, relativePath, maxBytes, label) {
+  const material = await readMaterial(runRoot, relativePath, maxBytes, label);
+  if (material.content === null) {
+    return {
+      content: null,
+      reference: { ...material.identity, contentPath: null }
+    };
+  }
+  return {
+    content: material.content,
+    reference: {
+      ...material.identity,
+      contentPath: contentPathFor(material.identity.sha256)
+    }
+  };
+}
+async function physicalArtifactBytes(runRoot, protocol, version, maxBytes) {
+  await validateWorkflowArtifactVersion(runRoot, protocol, version);
+  const inspection = await inspectProtectedProjectPath(runRoot, version.path, {
+    label: `Workflow checkpoint artifact ${version.id}`,
+    expected: "any"
+  });
+  if (!inspection.exists)
+    throw new Error(`Workflow checkpoint artifact is missing: ${version.id}`);
+  if (inspection.kind === "file") {
+    return (await readProtectedProjectFile(runRoot, version.path, maxBytes, {
+      label: `Workflow checkpoint artifact ${version.id}`
+    })).bytes.length;
+  }
+  let total = 0;
+  async function walk(relativePath) {
+    const current = await inspectProtectedProjectPath(runRoot, relativePath, {
+      label: `Workflow checkpoint artifact ${version.id}`,
+      expected: "directory"
+    });
+    for (const entry of (await fs7.readdir(current.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
+      const child = path13.posix.join(relativePath, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new Error(
+          `Workflow checkpoint artifact crosses a symbolic link: ${child}`
+        );
+      }
+      if (entry.isDirectory()) {
+        await walk(child);
+        continue;
+      }
+      if (!entry.isFile())
+        throw new Error(
+          `Workflow checkpoint artifact has an invalid entry: ${child}`
+        );
+      total += (await readProtectedProjectFile(runRoot, child, maxBytes, {
+        label: `Workflow checkpoint artifact ${version.id}`
+      })).bytes.length;
+      if (total > maxBytes)
+        throw new Error(
+          `Workflow checkpoint artifact exceeds ${maxBytes} bytes`
+        );
+    }
+  }
+  await walk(version.path);
+  return total;
+}
+async function artifactVersionReferences(runRoot, pkg, state, profile) {
+  const versions = state.workflowRuntime?.artifactVersions ?? [];
+  if (!pkg.runtime)
+    throw new Error("Workflow checkpoint package has no runtime");
+  validateWorkflowArtifactState(
+    pkg.runtime.protocol,
+    state.runId,
+    state.runtimeIdentity?.nodeToStep ?? {},
+    state.workflowRuntime
+  );
+  const references = [];
+  for (const version of versions) {
+    const bytes = await physicalArtifactBytes(
+      runRoot,
+      pkg.runtime.protocol,
+      version,
+      profile.bounds.artifactsBytes
+    );
+    references.push({
+      artifactId: version.artifactId,
+      versionId: version.id,
+      path: version.path,
+      contentHash: version.contentHash,
+      bytes
+    });
+  }
+  return references.sort(
+    (left, right) => left.artifactId.localeCompare(right.artifactId) || left.versionId.localeCompare(right.versionId)
+  );
+}
+function currentNodeIdentity(state, identity, pending) {
+  const step = pending?.stepId ?? state.currentStep;
+  if (!step) return null;
+  return Object.entries(identity.nodeToStep).find(
+    ([, stepId2]) => stepId2 === step
+  )?.[0] ?? null;
+}
+async function buildCheckpoint(options) {
+  const bounds = checkpointBounds(options.profile);
+  const stateMaterial = await captureMaterial(
+    options.runRoot,
+    STATE_PATH2,
+    options.profile.bounds.runStateBytes,
+    "Workflow checkpoint state"
+  );
+  if (!stateMaterial.content)
+    throw new Error("Workflow checkpoint state is missing");
+  const parsedState = parseRunStateValue(
+    JSON.parse(stateMaterial.content)
+  );
+  if (!sameStableValue(parsedState, options.state))
+    throw new Error("Workflow checkpoint state changed during capture");
+  const pendingMaterial = await captureMaterial(
+    options.runRoot,
+    PENDING_PATH,
+    options.profile.bounds.pendingActionBytes,
+    "Workflow checkpoint pending action"
+  );
+  const contextMaterial = await captureMaterial(
+    options.runRoot,
+    CONTEXT_PATH,
+    Math.max(
+      options.profile.bounds.runStateBytes,
+      options.profile.bounds.artifactsBytes
+    ),
+    "Workflow checkpoint context"
+  );
+  const artifactsMaterial = await captureMaterial(
+    options.runRoot,
+    ARTIFACTS_PATH,
+    options.profile.bounds.artifactsBytes,
+    "Workflow checkpoint artifacts"
+  );
+  const trajectoryMaterial = await captureMaterial(
+    options.runRoot,
+    TRAJECTORY_PATH,
+    options.profile.bounds.trajectoryBytes,
+    "Workflow checkpoint trajectory"
+  );
+  if (!trajectoryMaterial.content)
+    throw new Error("Workflow checkpoint trajectory is missing");
+  parseTrajectory2(trajectoryMaterial.content, options.state.runId);
+  const trajectoryBytes = Buffer.byteLength(trajectoryMaterial.content, "utf8");
+  if (trajectoryBytes !== trajectoryMaterial.reference.bytes)
+    throw new Error("Workflow checkpoint trajectory size changed");
+  const pending = pendingMaterial.content ? parsePendingActionValue(JSON.parse(pendingMaterial.content)) : null;
+  if (Boolean(pending) !== Boolean(options.pending))
+    throw new Error(
+      "Workflow checkpoint pending action changed during capture"
+    );
+  if (pending && options.pending && !sameStableValue(pending, options.pending)) {
+    throw new Error(
+      "Workflow checkpoint pending action changed during capture"
+    );
+  }
+  if (options.state.pending !== (pending?.id ?? null)) {
+    throw new Error("Workflow checkpoint pending action does not match state");
+  }
+  const artifactVersions = await artifactVersionReferences(
+    options.runRoot,
+    options.package,
+    options.state,
+    options.profile
+  );
+  const runtimeState = options.state.workflowRuntime;
+  const manifestWithoutHash = {
+    schemaVersion: WORKFLOW_CHECKPOINT_SCHEMA_VERSION,
+    kind: "workflow-checkpoint-manifest",
+    runId: options.state.runId,
+    revision: runtimeState?.revision ?? 0,
+    execution: structuredClone(options.identity),
+    pendingAction: pending ? { id: pending.id, ...identityOf4(pendingMaterial.reference) } : null,
+    nodeId: currentNodeIdentity(options.state, options.identity, pending),
+    cycleId: runtimeState?.currentCycle?.id ?? runtimeState?.currentAttempt?.cycleId ?? null,
+    attemptId: runtimeState?.currentAttempt?.id ?? null,
+    state: identityOf4(stateMaterial.reference),
+    context: identityOf4(contextMaterial.reference),
+    artifacts: identityOf4(artifactsMaterial.reference),
+    trajectory: {
+      ...identityOf4(trajectoryMaterial.reference),
+      offset: trajectoryBytes,
+      prefixSha256: sha256(Buffer.from(trajectoryMaterial.content, "utf8"))
+    },
+    artifactVersions,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const manifest = {
+    ...manifestWithoutHash,
+    manifestHash: canonicalHash(manifestWithoutHash)
+  };
+  parseCheckpointManifest(manifest, bounds);
+  const recordWithoutHash = {
+    schemaVersion: WORKFLOW_CHECKPOINT_SCHEMA_VERSION,
+    kind: "workflow-checkpoint-record",
+    runId: options.state.runId,
+    revision: manifest.revision,
+    manifestHash: manifest.manifestHash,
+    state: stateMaterial.reference,
+    pendingAction: pendingMaterial.reference,
+    context: contextMaterial.reference,
+    artifacts: artifactsMaterial.reference,
+    trajectory: trajectoryMaterial.reference
+  };
+  const record = {
+    ...recordWithoutHash,
+    recordHash: canonicalHash(recordWithoutHash)
+  };
+  parseCheckpointRecord(record, bounds);
+  return {
+    manifest,
+    record,
+    contents: new Map(
+      [
+        stateMaterial,
+        pendingMaterial,
+        contextMaterial,
+        artifactsMaterial,
+        trajectoryMaterial
+      ].filter(
+        (material) => material.content !== null
+      ).map((material) => [material.reference.contentPath, material.content])
+    )
+  };
+}
+async function readIndexWithBounds(runRoot, profile) {
+  const bounds = profile ? checkpointBounds(profile) : void 0;
+  const raw = await readRaw(
+    runRoot,
+    WORKFLOW_CHECKPOINT_INDEX_PATH,
+    bounds?.recordBytes ?? 16 * 1024 * 1024,
+    "Workflow checkpoint index"
+  );
+  if (raw === null) return null;
+  if (Buffer.byteLength(raw, "utf8") > (bounds?.recordBytes ?? 16 * 1024 * 1024)) {
+    throw new Error("Workflow checkpoint index is oversized");
+  }
+  return parseCheckpointIndex(JSON.parse(raw), bounds);
+}
+async function readAddressedJson(runRoot, relativePath, expectedHash, maxBytes, label) {
+  const raw = await readRaw(runRoot, relativePath, maxBytes, label);
+  if (raw === null) throw new Error(`${label} is missing`);
+  const value = JSON.parse(raw);
+  if (contentAddressHash(value) !== expectedHash)
+    throw new Error(`${label} content address is invalid`);
+  return value;
+}
+async function readRecordAndManifest(runRoot, profile, entry) {
+  const bounds = checkpointBounds(profile);
+  const recordValue = await readAddressedJson(
+    runRoot,
+    recordPathFor(entry.recordHash),
+    entry.recordHash,
+    bounds.recordBytes,
+    "Workflow checkpoint record"
+  );
+  const record = parseCheckpointRecord(recordValue, bounds);
+  if (record.manifestHash !== entry.manifestHash || record.revision !== entry.revision) {
+    throw new Error("Workflow checkpoint record index identity is invalid");
+  }
+  const manifestValue = await readAddressedJson(
+    runRoot,
+    manifestPathFor(entry.manifestHash),
+    entry.manifestHash,
+    bounds.manifestBytes,
+    "Workflow checkpoint manifest"
+  );
+  const manifest = parseCheckpointManifest(manifestValue, bounds);
+  if (manifest.runId !== record.runId || manifest.revision !== record.revision) {
+    throw new Error("Workflow checkpoint manifest identity is invalid");
+  }
+  if (manifest.manifestHash !== entry.manifestHash || record.recordHash !== entry.recordHash) {
+    throw new Error("Workflow checkpoint content address is invalid");
+  }
+  if (record.state.path !== STATE_PATH2 || record.pendingAction.path !== PENDING_PATH || record.context.path !== CONTEXT_PATH || record.artifacts.path !== ARTIFACTS_PATH || record.trajectory.path !== TRAJECTORY_PATH || manifest.state.path !== STATE_PATH2 || manifest.context.path !== CONTEXT_PATH || manifest.artifacts.path !== ARTIFACTS_PATH || manifest.trajectory.path !== TRAJECTORY_PATH || manifest.pendingAction !== null && manifest.pendingAction.path !== PENDING_PATH) {
+    throw new Error("Workflow checkpoint record paths are invalid");
+  }
+  return { record, manifest };
+}
+function materialMatchesManifest(reference, identity) {
+  return sameIdentity(identityOf4(reference), identity);
+}
+async function verifyPackageIdentity(runRoot, state, manifest) {
+  if (!state.runtimeIdentity)
+    throw new Error("Workflow checkpoint state has no execution identity");
+  const identity = state.runtimeIdentity;
+  if (!sameStableValue(identity, manifest.execution)) {
+    throw new Error(
+      "Workflow checkpoint execution identity does not match state"
+    );
+  }
+  if (state.skillHash !== identity.snapshotHash)
+    throw new Error("Workflow checkpoint snapshot identity is invalid");
+  const pkg = await readSkillSnapshot(runRoot, state.skillHash);
+  if (!pkg.runtime)
+    throw new Error("Workflow checkpoint Skill snapshot has no runtime");
+  if (pkg.runtime.protocolHash !== identity.protocolHash || !sameStableValue(pkg.runtime.nodeToStep, identity.nodeToStep) || pkg.runtime.capabilityVersion !== identity.capabilityVersion || pkg.runtime.resolverHash !== identity.resolverHash || pkg.runtime.findingCatalogVersion !== identity.findingCatalogVersion || !sameStableValue(
+    pkg.runtime.durabilityProfile,
+    identity.durabilityProfile
+  ) || await hashSkillPackage(pkg) !== identity.packageHash) {
+    throw new Error("Workflow checkpoint package identity is invalid");
+  }
+  return { identity, package: pkg };
+}
+async function invokeFault(boundary) {
+  const configured = process.env.COMET_WORKFLOW_TEST_CHECKPOINT_FAULT_BOUNDARY;
+  const value = boundary.path ? `${boundary.phase}:${boundary.path}` : boundary.phase;
+  if (configured === boundary.phase || configured === value) {
+    throw new Error("deterministic workflow checkpoint fault");
+  }
+  await configuredFault3?.(boundary);
+}
+async function readWorkflowCheckpointIndex(runRoot, profile) {
+  return readIndexWithBounds(runRoot, parseWorkflowDurabilityProfile(profile));
+}
+async function readWorkflowCheckpointRecord(runRoot, profile, entry) {
+  return (await readRecordAndManifest(runRoot, profile, entry)).record;
+}
+async function readWorkflowCheckpointProfile(runRoot) {
+  const index = await readIndexWithBounds(runRoot);
+  if (!index || index.records.length === 0) return void 0;
+  for (const entry of index.records) {
+    try {
+      const raw = await readRaw(
+        runRoot,
+        manifestPathFor(entry.manifestHash),
+        16 * 1024 * 1024,
+        "Workflow checkpoint manifest"
+      );
+      if (raw === null) continue;
+      const value = JSON.parse(raw);
+      const execution = parseExecutionIdentity2(
+        value.execution,
+        "Workflow checkpoint manifest execution"
+      );
+      if (execution.durabilityProfile) return execution.durabilityProfile;
+    } catch {
+      continue;
+    }
+  }
+  return void 0;
+}
+async function verifyWorkflowCheckpointCandidate(runRoot, profile, entry, options = {}) {
+  const normalizedProfile = parseWorkflowDurabilityProfile(profile);
+  const bounds = checkpointBounds(normalizedProfile);
+  const { record, manifest } = await readRecordAndManifest(
+    runRoot,
+    normalizedProfile,
+    entry
+  );
+  if (options.expectedRunId && manifest.runId !== options.expectedRunId) {
+    throw new Error("Workflow checkpoint Run identity is invalid");
+  }
+  if (options.expectedExecution && !sameStableValue(options.expectedExecution, manifest.execution)) {
+    throw new Error("Workflow checkpoint execution identity is invalid");
+  }
+  for (const [reference, manifestIdentity] of [
+    [record.state, manifest.state],
+    [record.context, manifest.context],
+    [record.artifacts, manifest.artifacts],
+    [record.trajectory, manifest.trajectory]
+  ]) {
+    if (!materialMatchesManifest(reference, manifestIdentity)) {
+      throw new Error("Workflow checkpoint material identity is invalid");
+    }
+  }
+  const stateContent = await readReferencedContent(
+    runRoot,
+    record.state,
+    normalizedProfile.bounds.runStateBytes,
+    "Workflow checkpoint state content"
+  );
+  if (stateContent === null)
+    throw new Error("Workflow checkpoint state content is missing");
+  const pendingContent = await readReferencedContent(
+    runRoot,
+    record.pendingAction,
+    normalizedProfile.bounds.pendingActionBytes,
+    "Workflow checkpoint pending action content"
+  );
+  const contextContent = await readReferencedContent(
+    runRoot,
+    record.context,
+    Math.max(
+      normalizedProfile.bounds.runStateBytes,
+      normalizedProfile.bounds.artifactsBytes
+    ),
+    "Workflow checkpoint context content"
+  );
+  const artifactsContent = await readReferencedContent(
+    runRoot,
+    record.artifacts,
+    normalizedProfile.bounds.artifactsBytes,
+    "Workflow checkpoint artifacts content"
+  );
+  const trajectoryContent = await readReferencedContent(
+    runRoot,
+    record.trajectory,
+    normalizedProfile.bounds.trajectoryBytes,
+    "Workflow checkpoint trajectory content"
+  );
+  if (trajectoryContent === null)
+    throw new Error("Workflow checkpoint trajectory content is missing");
+  validateArtifactContent(artifactsContent);
+  const state = parseRunStateValue(JSON.parse(stateContent));
+  if (state.runId !== manifest.runId || state.workflowRuntime?.revision !== manifest.revision) {
+    throw new Error("Workflow checkpoint state revision is invalid");
+  }
+  if (state.pendingRef !== PENDING_PATH || state.trajectoryRef !== TRAJECTORY_PATH || state.contextRef !== CONTEXT_PATH || state.artifactsRef !== ARTIFACTS_PATH) {
+    throw new Error("Workflow checkpoint state references are invalid");
+  }
+  const verifiedPackage = await verifyPackageIdentity(runRoot, state, manifest);
+  if (!verifiedPackage.package.runtime)
+    throw new Error("Workflow checkpoint package has no runtime");
+  if (!sameStableValue(
+    state.runtimeIdentity?.durabilityProfile,
+    normalizedProfile
+  )) {
+    throw new Error("Workflow checkpoint durability profile is invalid");
+  }
+  const pending = pendingContent ? parsePendingActionValue(JSON.parse(pendingContent)) : null;
+  if (Boolean(pending) !== Boolean(state.pending))
+    throw new Error("Workflow checkpoint pending state is invalid");
+  if (pending && pending.id !== state.pending)
+    throw new Error("Workflow checkpoint pending action id is invalid");
+  if (pending && state.status !== "waiting" || !pending && state.status === "waiting" || state.status === "completed" && state.currentStep !== null || state.status === "running" && (state.currentStep === null || !Object.values(verifiedPackage.identity.nodeToStep).includes(
+    state.currentStep
+  ))) {
+    throw new Error("Workflow checkpoint Run status is invalid");
+  }
+  if (pending) {
+    const step = verifiedPackage.package.definition.orchestration.steps?.find(
+      (candidate) => candidate.id === pending.stepId
+    );
+    if (!step || !sameActionDefinition(pending, step)) {
+      throw new Error(
+        "Workflow checkpoint pending action definition is invalid"
+      );
+    }
+  }
+  if (manifest.pendingAction === null) {
+    if (pending !== null || record.pendingAction.exists)
+      throw new Error("Workflow checkpoint pending identity is invalid");
+  } else if (!pending || manifest.pendingAction.id !== pending.id || !sameIdentity(manifest.pendingAction, identityOf4(record.pendingAction))) {
+    throw new Error("Workflow checkpoint pending action identity is invalid");
+  }
+  const events = parseTrajectory2(trajectoryContent, state.runId);
+  validateTrajectorySemantics(events, state, pending);
+  const trajectoryBytes = Buffer.byteLength(trajectoryContent, "utf8");
+  if (manifest.trajectory.offset !== trajectoryBytes || manifest.trajectory.prefixSha256 !== sha256(Buffer.from(trajectoryContent, "utf8"))) {
+    throw new Error("Workflow checkpoint trajectory boundary is invalid");
+  }
+  const identity = verifiedPackage.identity;
+  const nodeId = currentNodeIdentity(state, identity, pending);
+  const runtimeState = state.workflowRuntime;
+  if (manifest.nodeId !== nodeId || manifest.cycleId !== (runtimeState?.currentCycle?.id ?? runtimeState?.currentAttempt?.cycleId ?? null) || manifest.attemptId !== (runtimeState?.currentAttempt?.id ?? null)) {
+    throw new Error("Workflow checkpoint Node or Attempt identity is invalid");
+  }
+  if (verifiedPackage.package.runtime.capabilityVersion !== 3 || !runtimeState) {
+    throw new Error("Workflow checkpoint requires revisioned runtime state");
+  }
+  validateWorkflowArtifactState(
+    verifiedPackage.package.runtime.protocol,
+    state.runId,
+    identity.nodeToStep,
+    runtimeState
+  );
+  const artifactVersions = await artifactVersionReferences(
+    runRoot,
+    verifiedPackage.package,
+    state,
+    normalizedProfile
+  );
+  if (!sameStableValue(artifactVersions, manifest.artifactVersions)) {
+    throw new Error("Workflow checkpoint artifact identity is invalid");
+  }
+  return {
+    entry,
+    manifest,
+    record,
+    state,
+    pending,
+    identity,
+    package: verifiedPackage.package,
+    contents: {
+      state: stateContent,
+      pendingAction: pendingContent,
+      context: contextContent,
+      artifacts: artifactsContent,
+      trajectory: trajectoryContent
+    }
+  };
+}
+async function inspectWorkflowCheckpointCandidates(runRoot, profile, options = {}) {
+  const index = await readWorkflowCheckpointIndex(runRoot, profile);
+  if (!index) return [];
+  const expectedRunId = options.expectedRunId ?? index.runId;
+  if (index.runId !== expectedRunId) {
+    throw new Error("Workflow checkpoint index Run identity is invalid");
+  }
+  return Promise.all(
+    index.records.map(async (entry) => {
+      try {
+        return {
+          entry,
+          verification: await verifyWorkflowCheckpointCandidate(
+            runRoot,
+            profile,
+            entry,
+            { ...options, expectedRunId }
+          )
+        };
+      } catch (error) {
+        return {
+          entry,
+          error: error instanceof Error ? error.message : String(error)
+        };
+      }
+    })
+  );
+}
+async function activeRecoveryRecordHash(runRoot, profile) {
+  return (await readWorkflowCheckpointRecoveryJournal(runRoot, profile))?.checkpointRecordHash;
+}
+async function cleanupRetainedCheckpoints(runRoot, removed, retained, profile) {
+  const retainedContent = /* @__PURE__ */ new Set();
+  for (const entry of retained) {
+    try {
+      const record = await readWorkflowCheckpointRecord(
+        runRoot,
+        profile,
+        entry
+      );
+      for (const reference of [
+        record.state,
+        record.pendingAction,
+        record.context,
+        record.artifacts,
+        record.trajectory
+      ]) {
+        if (reference.contentPath) retainedContent.add(reference.contentPath);
+      }
+    } catch {
+      return;
+    }
+  }
+  for (const entry of removed) {
+    let record;
+    try {
+      record = await readWorkflowCheckpointRecord(runRoot, profile, entry);
+    } catch {
+      continue;
+    }
+    await removeEngineRunFile(
+      runRoot,
+      recordPathFor(entry.recordHash),
+      "Workflow checkpoint record"
+    );
+    await removeEngineRunFile(
+      runRoot,
+      manifestPathFor(entry.manifestHash),
+      "Workflow checkpoint manifest"
+    );
+    for (const reference of [
+      record.state,
+      record.pendingAction,
+      record.context,
+      record.artifacts,
+      record.trajectory
+    ]) {
+      if (reference.contentPath && !retainedContent.has(reference.contentPath)) {
+        await removeEngineRunFile(
+          runRoot,
+          reference.contentPath,
+          "Workflow checkpoint content"
+        );
+      }
+    }
+  }
+}
+async function createWorkflowCheckpoint(options) {
+  const profile = parseWorkflowDurabilityProfile(options.profile);
+  const bounds = checkpointBounds(profile);
+  const built = await buildCheckpoint({ ...options, profile });
+  for (const [contentPath, content] of built.contents) {
+    const originalPath = contentPath === built.record.state.contentPath ? built.record.state.path : contentPath === built.record.pendingAction.contentPath ? built.record.pendingAction.path : contentPath === built.record.context.contentPath ? built.record.context.path : contentPath === built.record.artifacts.contentPath ? built.record.artifacts.path : built.record.trajectory.path;
+    await publishContent(
+      options.runRoot,
+      {
+        path: originalPath,
+        contentPath,
+        ...contentIdentity(content)
+      },
+      content,
+      maxBytesForPath(profile, originalPath)
+    );
+  }
+  await ensureProtectedProjectDirectory(
+    options.runRoot,
+    WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY,
+    {
+      label: "Workflow checkpoint manifest"
+    }
+  );
+  await ensureProtectedProjectDirectory(
+    options.runRoot,
+    WORKFLOW_CHECKPOINT_RECORD_DIRECTORY,
+    {
+      label: "Workflow checkpoint record"
+    }
+  );
+  const manifestHash = built.manifest.manifestHash;
+  const recordHash = built.record.recordHash;
+  await publishJson(
+    options.runRoot,
+    manifestPathFor(manifestHash),
+    built.manifest,
+    bounds.manifestBytes,
+    "Workflow checkpoint manifest"
+  );
+  await publishJson(
+    options.runRoot,
+    recordPathFor(recordHash),
+    built.record,
+    bounds.recordBytes,
+    "Workflow checkpoint record"
+  );
+  const existing = await readWorkflowCheckpointIndex(options.runRoot, profile);
+  if (existing && existing.runId !== options.state.runId) {
+    throw new Error("Workflow checkpoint index Run identity is invalid");
+  }
+  const entry = {
+    recordHash,
+    manifestHash,
+    revision: built.manifest.revision
+  };
+  const all = [
+    ...(existing?.records ?? []).filter(
+      (candidate) => candidate.recordHash !== recordHash
+    ),
+    entry
+  ];
+  all.sort(
+    (left, right) => right.revision - left.revision || left.recordHash.localeCompare(right.recordHash)
+  );
+  const active = await activeRecoveryRecordHash(options.runRoot, profile);
+  if (active && !all.some((candidate) => candidate.recordHash === active)) {
+    throw new Error(
+      "Workflow checkpoint retention cannot preserve the active recovery anchor"
+    );
+  }
+  if (active) {
+    const activeEntry = all.find(
+      (candidate) => candidate.recordHash === active
+    );
+    try {
+      await readWorkflowCheckpointRecord(options.runRoot, profile, activeEntry);
+    } catch (error) {
+      throw new Error(
+        "Workflow checkpoint retention cannot verify the active recovery anchor",
+        { cause: error }
+      );
+    }
+  }
+  const top = all.slice(0, bounds.count);
+  if (active && bounds.count === 1 && !top.some((candidate) => candidate.recordHash === active)) {
+    throw new Error(
+      "Workflow checkpoint retention cannot preserve the active recovery anchor"
+    );
+  }
+  let retained = top;
+  if (active && all.some((candidate) => candidate.recordHash === active) && !retained.some((candidate) => candidate.recordHash === active)) {
+    retained = [
+      ...retained.slice(0, Math.max(0, bounds.count - 1)),
+      all.find((candidate) => candidate.recordHash === active)
+    ];
+    retained.sort(
+      (left, right) => right.revision - left.revision || left.recordHash.localeCompare(right.recordHash)
+    );
+  }
+  const removed = all.filter(
+    (candidate) => !retained.some((kept) => kept.recordHash === candidate.recordHash)
+  );
+  const index = {
+    schemaVersion: WORKFLOW_CHECKPOINT_SCHEMA_VERSION,
+    kind: "workflow-checkpoint-index",
+    runId: options.state.runId,
+    records: retained
+  };
+  await ensureProtectedProjectDirectory(
+    options.runRoot,
+    WORKFLOW_CHECKPOINT_DIRECTORY,
+    {
+      label: "Workflow checkpoint index"
+    }
+  );
+  await publishJson(
+    options.runRoot,
+    WORKFLOW_CHECKPOINT_INDEX_PATH,
+    index,
+    bounds.recordBytes,
+    "Workflow checkpoint index"
+  );
+  await cleanupRetainedCheckpoints(options.runRoot, removed, retained, profile);
+  return built.manifest;
+}
+async function verifyWorkflowCheckpointHead(options) {
+  await buildCheckpoint({
+    ...options,
+    profile: parseWorkflowDurabilityProfile(options.profile)
+  });
+}
+function recoveryJournalFor(runId, identity, checkpointRecordHash, records, recoveryEvent2) {
+  return {
+    schemaVersion: WORKFLOW_CHECKPOINT_RECOVERY_SCHEMA_VERSION,
+    kind: "workflow-checkpoint-recovery-journal",
+    status: "prepared",
+    journalId: randomUUID6(),
+    runId,
+    execution: structuredClone(identity),
+    checkpointRecordHash,
+    records: [...records].sort(
+      (left, right) => left.path.localeCompare(right.path)
+    ),
+    recoveryEvent: recoveryEvent2,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+async function writeRecoveryJournal(runRoot, profile, journal, exclusive = false) {
+  const bounds = checkpointBounds(profile);
+  parseRecoveryJournal(journal, bounds);
+  await writeEngineRunText(
+    runRoot,
+    WORKFLOW_CHECKPOINT_RECOVERY_JOURNAL_PATH,
+    canonical(journal),
+    bounds.recordBytes,
+    "Workflow checkpoint recovery journal",
+    { exclusive, maxBytes: bounds.recordBytes }
+  );
+}
+async function readWorkflowCheckpointRecoveryJournal(runRoot, profile) {
+  const raw = await readRaw(
+    runRoot,
+    WORKFLOW_CHECKPOINT_RECOVERY_JOURNAL_PATH,
+    profile ? checkpointBounds(profile).recordBytes : 16 * 1024 * 1024,
+    "Workflow checkpoint recovery journal"
+  );
+  if (raw === null) return null;
+  const value = JSON.parse(raw);
+  const execution = isRecord10(value) ? parseExecutionIdentity2(
+    value.execution,
+    "Workflow checkpoint recovery execution"
+  ) : void 0;
+  const effectiveProfile = profile ?? execution?.durabilityProfile;
+  if (!effectiveProfile)
+    throw new Error("Workflow checkpoint recovery has no durability profile");
+  const bounds = checkpointBounds(effectiveProfile);
+  if (Buffer.byteLength(raw, "utf8") > bounds.recordBytes)
+    throw new Error("Workflow checkpoint recovery journal is oversized");
+  return parseRecoveryJournal(value, bounds);
+}
+async function clearRecoveryJournal(runRoot, profile, journal) {
+  const current = await readWorkflowCheckpointRecoveryJournal(runRoot, profile);
+  if (!current || current.journalId !== journal.journalId || current.status !== "committed") {
+    throw new Error(
+      "Workflow checkpoint recovery journal changed before clearance"
+    );
+  }
+  await invokeFault({ phase: "checkpoint-recovery-journal-clearance" });
+  await removeEngineRunFile(
+    runRoot,
+    WORKFLOW_CHECKPOINT_RECOVERY_JOURNAL_PATH,
+    "Workflow checkpoint recovery journal"
+  );
+}
+async function settleRecoveryJournal(runRoot, profile, journal) {
+  const index = await readWorkflowCheckpointIndex(runRoot, profile);
+  const indexed = index?.records.find(
+    (entry) => entry.recordHash === journal.checkpointRecordHash
+  );
+  if (!indexed)
+    throw new Error("Workflow checkpoint recovery record is not retained");
+  const candidate = await verifyWorkflowCheckpointCandidate(
+    runRoot,
+    profile,
+    indexed
+  );
+  if (journal.runId !== candidate.state.runId || !sameStableValue(journal.execution, candidate.identity)) {
+    throw new Error("Workflow checkpoint recovery identity is invalid");
+  }
+  const unknownPaths = [];
+  const currentMaterials = /* @__PURE__ */ new Map();
+  for (const record of journal.records) {
+    const current = await readMaterial(
+      runRoot,
+      record.path,
+      maxBytesForPath(profile, record.path),
+      `Workflow checkpoint recovery record ${record.path}`
+    );
+    if (!sameIdentity(current.identity, record.previous) && !sameIdentity(current.identity, record.intended)) {
+      unknownPaths.push(record.path);
+    }
+    currentMaterials.set(record.path, current.content);
+  }
+  if (unknownPaths.length > 0)
+    return { status: "blocked", journal, unknownPaths };
+  for (const record of journal.records) {
+    const current = currentMaterials.get(record.path);
+    if (sameIdentity(
+      { path: record.path, ...contentIdentity(current ?? null) },
+      record.intended
+    ))
+      continue;
+    const contentPath = record.contentPath;
+    if (!record.intended.exists || !contentPath) {
+      await removeEngineRunFile(
+        runRoot,
+        record.path,
+        `Workflow checkpoint recovery record ${record.path}`
+      );
+    } else {
+      const content = record.path === TRAJECTORY_PATH ? await readReferencedContent(
+        runRoot,
+        { ...record.intended, contentPath },
+        profile.bounds.trajectoryBytes,
+        "Workflow checkpoint recovery trajectory"
+      ) : await readRaw(
+        runRoot,
+        contentPath,
+        maxBytesForPath(profile, record.path),
+        `Workflow checkpoint recovery content ${record.path}`
+      );
+      if (content === null)
+        throw new Error(
+          `Workflow checkpoint recovery content is missing: ${record.path}`
+        );
+      const contentIdentityValue = contentIdentity(content);
+      if (!record.intended.exists || contentIdentityValue.bytes !== record.intended.bytes || contentIdentityValue.sha256 !== record.intended.sha256) {
+        throw new Error(
+          `Workflow checkpoint recovery content identity is invalid: ${record.path}`
+        );
+      }
+      await writeEngineRunText(
+        runRoot,
+        record.path,
+        content,
+        maxBytesForPath(profile, record.path),
+        `Workflow checkpoint recovery record ${record.path}`
+      );
+    }
+    await invokeFault({
+      phase: "checkpoint-recovery-record-write",
+      path: record.path
+    });
+    const verified = await readMaterial(
+      runRoot,
+      record.path,
+      maxBytesForPath(profile, record.path),
+      `Workflow checkpoint recovery record ${record.path}`
+    );
+    if (!sameIdentity(verified.identity, record.intended)) {
+      throw new Error(
+        `Workflow checkpoint recovery record changed: ${record.path}`
+      );
+    }
+    await invokeFault({
+      phase: "checkpoint-recovery-record-verification",
+      path: record.path
+    });
+  }
+  const committedAt = journal.committedAt ?? (/* @__PURE__ */ new Date()).toISOString();
+  const committed = {
+    ...journal,
+    status: "committed",
+    committedAt
+  };
+  await invokeFault({ phase: "checkpoint-recovery-commit-evidence" });
+  await writeRecoveryJournal(runRoot, profile, committed);
+  await clearRecoveryJournal(runRoot, profile, committed);
+  return { status: "recovered", journal: committed };
+}
+async function recoverWorkflowCheckpoint(runRoot, profile) {
+  const journal = await readWorkflowCheckpointRecoveryJournal(runRoot, profile);
+  if (!journal) return { status: "none" };
+  return settleRecoveryJournal(runRoot, profile, journal);
+}
+async function proveNoLaterTrajectory(runRoot, profile, candidate) {
+  const transitionJournal = await readRaw(
+    runRoot,
+    TRANSITION_JOURNAL_PATH,
+    profile.bounds.transitionJournalBytes ?? profile.bounds.runStateBytes,
+    "Workflow transition journal"
+  );
+  if (transitionJournal !== null) {
+    throw new Error("Workflow checkpoint history is ambiguous");
+  }
+  const current = await readRaw(
+    runRoot,
+    candidate.record.trajectory.path,
+    profile.bounds.trajectoryBytes,
+    "Workflow checkpoint current trajectory"
+  );
+  if (current === null || current !== candidate.contents.trajectory || Buffer.byteLength(current, "utf8") !== candidate.manifest.trajectory.offset) {
+    throw new Error("Workflow checkpoint history is ambiguous");
+  }
+}
+async function restoreWorkflowCheckpoint(runRoot, profile, candidate) {
+  const existing = await readWorkflowCheckpointRecoveryJournal(
+    runRoot,
+    profile
+  );
+  if (existing) return settleRecoveryJournal(runRoot, profile, existing);
+  await proveNoLaterTrajectory(runRoot, profile, candidate);
+  const paths = [
+    candidate.record.state,
+    candidate.record.pendingAction,
+    candidate.record.context,
+    candidate.record.artifacts
+  ];
+  const trajectoryEvent = {
+    sequence: parseTrajectory2(candidate.contents.trajectory, candidate.state.runId).length + 1,
+    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+    type: "recovery_reconciled",
+    runId: candidate.state.runId,
+    data: {
+      kind: "workflow-checkpoint-restored",
+      checkpointRecordHash: candidate.entry.recordHash,
+      revision: candidate.manifest.revision,
+      paths: [...paths.map((reference) => reference.path), TRAJECTORY_PATH]
+    }
+  };
+  const nextTrajectory = `${candidate.contents.trajectory}${JSON.stringify(trajectoryEvent)}
+`;
+  const trajectoryReference = {
+    path: candidate.record.trajectory.path,
+    contentPath: contentPathFor(sha256(Buffer.from(nextTrajectory, "utf8"))),
+    ...contentIdentity(nextTrajectory)
+  };
+  await publishContent(
+    runRoot,
+    trajectoryReference,
+    nextTrajectory,
+    profile.bounds.trajectoryBytes
+  );
+  const records = [];
+  for (const reference of [...paths, candidate.record.trajectory]) {
+    const current = await readMaterial(
+      runRoot,
+      reference.path,
+      maxBytesForPath(profile, reference.path),
+      `Workflow checkpoint current record ${reference.path}`
+    );
+    const intended = reference.path === TRAJECTORY_PATH ? trajectoryReference : reference;
+    records.push({
+      path: reference.path,
+      previous: current.identity,
+      intended: identityOf4(intended),
+      contentPath: intended.contentPath
+    });
+  }
+  const journal = recoveryJournalFor(
+    candidate.state.runId,
+    candidate.identity,
+    candidate.entry.recordHash,
+    records,
+    trajectoryEvent
+  );
+  await writeRecoveryJournal(runRoot, profile, journal, true);
+  await invokeFault({ phase: "checkpoint-recovery-journal-prepared" });
+  return settleRecoveryJournal(runRoot, profile, journal);
+}
+
 // src/workflow-runtime/location.ts
-import { randomUUID as randomUUID7 } from "node:crypto";
+import { randomUUID as randomUUID8 } from "node:crypto";
 
 // src/engine/manual-run.ts
-import { randomUUID as randomUUID6 } from "crypto";
+import { randomUUID as randomUUID7 } from "crypto";
 
 // src/engine/evals.ts
 function evaluateRuntime(definitions, scope, state, artifacts) {
@@ -10046,7 +11871,7 @@ async function startManualRun(pkg, changeDir, options = []) {
   }
   const state = startRun(
     pkg,
-    startOptions.runId ?? randomUUID6(),
+    startOptions.runId ?? randomUUID7(),
     snapshot.hash,
     startOptions.workflowRuntime
   );
@@ -10275,8 +12100,8 @@ async function resumeManualWorkflowRun(changeDir, options, artifactMutation) {
 }
 
 // src/engine/standalone-run.ts
-import { promises as fs7 } from "node:fs";
-import path13 from "path";
+import { promises as fs8 } from "node:fs";
+import path14 from "path";
 function validateRunId(runId) {
   if (typeof runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId)) {
     throw new Error(`Invalid standalone Run id: ${String(runId)}`);
@@ -10290,16 +12115,16 @@ function validateProjectRoot(projectRoot) {
 function standaloneRunDir(projectRoot, runId) {
   validateRunId(runId);
   validateProjectRoot(projectRoot);
-  return path13.resolve(projectRoot, ".comet", "runs", runId);
+  return path14.resolve(projectRoot, ".comet", "runs", runId);
 }
 function pathSegments(projectRoot) {
-  const lexicalRoot = path13.resolve(projectRoot);
-  const root = path13.parse(lexicalRoot).root;
-  const relative = path13.relative(root, lexicalRoot);
-  return relative.length === 0 ? [] : relative.split(path13.sep);
+  const lexicalRoot = path14.resolve(projectRoot);
+  const root = path14.parse(lexicalRoot).root;
+  const relative = path14.relative(root, lexicalRoot);
+  return relative.length === 0 ? [] : relative.split(path14.sep);
 }
 function runRootRelativePath(projectRoot, runRoot) {
-  return path13.relative(projectRoot, runRoot).replaceAll("\\", "/");
+  return path14.relative(projectRoot, runRoot).replaceAll("\\", "/");
 }
 function isMissing(error) {
   const code = error.code;
@@ -10307,24 +12132,24 @@ function isMissing(error) {
 }
 async function resolveStandaloneProjectRoot(projectRoot, createMissing) {
   validateProjectRoot(projectRoot);
-  const lexicalRoot = path13.resolve(projectRoot);
-  let cursor = path13.parse(lexicalRoot).root;
+  const lexicalRoot = path14.resolve(projectRoot);
+  let cursor = path14.parse(lexicalRoot).root;
   for (const segment of pathSegments(lexicalRoot)) {
-    cursor = path13.join(cursor, segment);
+    cursor = path14.join(cursor, segment);
     let stat;
     try {
-      stat = await fs7.lstat(cursor);
+      stat = await fs8.lstat(cursor);
     } catch (error) {
       if (!isMissing(error)) throw error;
       if (!createMissing) return lexicalRoot;
       try {
-        await fs7.mkdir(cursor);
+        await fs8.mkdir(cursor);
       } catch (mkdirError) {
         if (mkdirError.code !== "EEXIST") {
           throw mkdirError;
         }
       }
-      stat = await fs7.lstat(cursor);
+      stat = await fs8.lstat(cursor);
     }
     if (stat.isSymbolicLink()) {
       throw new Error("Standalone project root cannot cross a symbolic link");
@@ -10347,7 +12172,7 @@ async function ensureStandaloneRunDir(projectRoot, runId) {
   );
   return runDir;
 }
-async function checkedStandaloneRunDir(projectRoot, runId) {
+async function checkedStandaloneRunDir(projectRoot, runId, options = {}) {
   validateRunId(runId);
   validateProjectRoot(projectRoot);
   const validatedRoot = await resolveStandaloneProjectRoot(projectRoot, false);
@@ -10357,7 +12182,13 @@ async function checkedStandaloneRunDir(projectRoot, runId) {
     runRootRelativePath(validatedRoot, runDir),
     { label: "Standalone Run root", expected: "directory" }
   );
-  const state = await readRunState(runDir);
+  let state;
+  try {
+    state = await readRunState(runDir);
+  } catch (error) {
+    if (!options.allowMalformedState) throw error;
+    state = null;
+  }
   if (state && state.runId !== runId) {
     throw new Error(
       `Standalone Run state does not match requested Run id: ${runId}`
@@ -10365,8 +12196,14 @@ async function checkedStandaloneRunDir(projectRoot, runId) {
   }
   return runDir;
 }
-async function readStandaloneRunState(projectRoot, runId) {
-  return readRunState(await checkedStandaloneRunDir(projectRoot, runId));
+async function readStandaloneRunState(projectRoot, runId, options = {}) {
+  const runDir = await checkedStandaloneRunDir(projectRoot, runId, options);
+  try {
+    return await readRunState(runDir);
+  } catch (error) {
+    if (!options.allowMalformedState) throw error;
+    return null;
+  }
 }
 async function startStandaloneRun(pkg, options) {
   const runDir = await ensureStandaloneRunDir(
@@ -10454,8 +12291,12 @@ function standaloneLocation(projectRoot, runId) {
         artifactMutation
       ) : resumeStandaloneRun(validatedProjectRoot, validatedRunId, options);
     },
-    async readState() {
-      return readStandaloneRunState(validatedProjectRoot, validatedRunId);
+    async readState(options) {
+      return readStandaloneRunState(
+        validatedProjectRoot,
+        validatedRunId,
+        options
+      );
     },
     async prepareStart() {
       await ensureStandaloneRunDir(validatedProjectRoot, validatedRunId);
@@ -10481,12 +12322,12 @@ function resolveWorkflowStartLocation(options) {
     }
     return {
       location,
-      runId: ("runId" in options ? options.runId : void 0) ?? randomUUID7()
+      runId: ("runId" in options ? options.runId : void 0) ?? randomUUID8()
     };
   }
   return {
     location: manualLocation(options.runRoot),
-    runId: options.runId ?? randomUUID7()
+    runId: options.runId ?? randomUUID8()
   };
 }
 
@@ -10501,12 +12342,31 @@ async function withStructuredRuntimeErrors(operation2) {
 function usesWorkflowRunLock(profile) {
   return profile?.capabilities.includes("mutation-locks") ?? false;
 }
-async function durabilityProfileForLocation(location) {
-  const state = await location.readState();
-  if (state?.runtimeIdentity?.durabilityProfile) {
-    return state.runtimeIdentity.durabilityProfile;
+function usesWorkflowCheckpoints(profile) {
+  return profile?.capabilities.includes("verified-checkpoints") ?? false;
+}
+async function durabilityProfileForLocation(location, options = {}) {
+  try {
+    const state = await location.readState(options);
+    if (state) {
+      if (state.runtimeIdentity?.durabilityProfile) {
+        return state.runtimeIdentity.durabilityProfile;
+      }
+      const journal2 = await readWorkflowTransitionJournal(location.runRoot);
+      return journal2?.execution.durabilityProfile;
+    }
+  } catch (error) {
+    const checkpointProfile = await readWorkflowCheckpointProfile(
+      location.runRoot
+    );
+    if (checkpointProfile) return checkpointProfile;
+    throw error;
   }
-  return (await readWorkflowTransitionJournal(location.runRoot))?.execution.durabilityProfile;
+  const journal = await readWorkflowTransitionJournal(location.runRoot);
+  if (journal?.execution.durabilityProfile) {
+    return journal.execution.durabilityProfile;
+  }
+  return readWorkflowCheckpointProfile(location.runRoot);
 }
 async function withWorkflowRunLock(location, operation2, profile, work, options = {}) {
   if (!usesWorkflowRunLock(profile)) return work();
@@ -10581,6 +12441,9 @@ function sameStringRecord(left, right) {
     ([a], [b]) => a.localeCompare(b)
   );
   return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
+}
+function sameStableValue2(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
 }
 function sameExecutionIdentity(left, right) {
   return left.protocolHash === right.protocolHash && left.packageHash === right.packageHash && left.snapshotHash === right.snapshotHash && sameStringRecord(left.nodeToStep, right.nodeToStep) && left.capabilityVersion === right.capabilityVersion && left.resolverHash === right.resolverHash && (left.findingCatalogVersion === void 0 || right.findingCatalogVersion === void 0 || left.findingCatalogVersion === right.findingCatalogVersion) && sameDurabilityProfile(left.durabilityProfile, right.durabilityProfile);
@@ -10678,7 +12541,7 @@ function terminalEvaluationResults(trajectory) {
       continue;
     }
     for (const result of event.data.results) {
-      if (!isRecord10(result)) continue;
+      if (!isRecord11(result)) continue;
       if (typeof result.evalId !== "string" || typeof result.passed !== "boolean" || typeof result.evidence !== "string") {
         continue;
       }
@@ -10971,8 +12834,85 @@ function continuation(result, identity) {
     blockers: legacyBlockersFromFindings(disposition, projected.findings)
   };
 }
+function withAdditionalFindings(value, additional, disposition = value.disposition) {
+  const projected = boundWorkflowFindings([...value.findings, ...additional]);
+  return {
+    ...value,
+    disposition,
+    findings: projected.findings,
+    findingSummary: projected.summary,
+    requiresUserDecision: projected.findings.some(
+      (finding) => finding.requiresUserDecision
+    ),
+    blockers: legacyBlockersFromFindings(disposition, projected.findings)
+  };
+}
+function checkpointFindings(inspections, severity) {
+  return inspections.filter((inspection) => inspection.error !== void 0).map(
+    (inspection) => checkpointInvalidFinding(
+      `Workflow checkpoint revision ${inspection.entry.revision} is invalid: ${inspection.error}`,
+      `.comet/checkpoints/manifests/${inspection.entry.manifestHash}.json`,
+      severity
+    )
+  );
+}
+function checkpointIndexFinding(error, severity) {
+  return checkpointInvalidFinding(
+    `Workflow checkpoint index is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    ".comet/checkpoints/index.json",
+    severity
+  );
+}
+async function checkpointRecoveryRequiredContinuation(location, journal) {
+  let base;
+  let verified;
+  try {
+    verified = await verifyStoredRun(location);
+    base = await continuationFromVerifiedRun(verified, location.runRoot);
+  } catch (error) {
+    const profile = journal.execution.durabilityProfile;
+    if (!profile) throw error;
+    const index = await readWorkflowCheckpointIndex(location.runRoot, profile);
+    const entry = index?.records.find(
+      (candidate2) => candidate2.recordHash === journal.checkpointRecordHash
+    );
+    if (!entry) throw error;
+    const candidate = await verifyWorkflowCheckpointCandidate(
+      location.runRoot,
+      profile,
+      entry
+    );
+    base = continuation(
+      { state: candidate.state, action: candidate.pending, evals: [] },
+      candidate.identity
+    );
+  }
+  return withAdditionalFindings(
+    base,
+    [
+      recoveryRequiredFinding(
+        base.revision,
+        base.pendingAction?.id ?? null,
+        ".comet/checkpoint-recovery-journal.json"
+      )
+    ],
+    "blocked"
+  );
+}
+async function persistWorkflowCheckpoint(location, state, pending, pkg) {
+  const profile = state.runtimeIdentity?.durabilityProfile;
+  if (!usesWorkflowCheckpoints(profile)) return;
+  await createWorkflowCheckpoint({
+    runRoot: location.runRoot,
+    state,
+    pending,
+    identity: identityFromState(state),
+    package: pkg,
+    profile
+  });
+}
 var LEGACY_STATE_MAX_BYTES = 256 * 1024;
-function isRecord10(value) {
+function isRecord11(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function projectionStatus(state, pending, maxRetriesPerAction) {
@@ -11002,7 +12942,7 @@ async function projectWorkflowState(target) {
   );
   for (const event of trajectory) {
     if (event.type !== "action_completed") continue;
-    if (!isRecord10(event.data.action) || !isRecord10(event.data.outcome)) continue;
+    if (!isRecord11(event.data.action) || !isRecord11(event.data.outcome)) continue;
     const stepId2 = event.data.action.stepId;
     const node = typeof stepId2 === "string" ? nodeByStep.get(stepId2) : void 0;
     const outcomeStatus = event.data.outcome.status;
@@ -11018,7 +12958,7 @@ async function projectWorkflowState(target) {
     if (outcomeStatus !== "succeeded") continue;
     if (!completedNodes.includes(node)) completedNodes.push(node);
     const outcomeEvidence = event.data.outcome.evidence;
-    evidence[node] = isRecord10(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
+    evidence[node] = isRecord11(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
   }
   const protocol = verified.package.runtime.protocol;
   const runtimeState = state.workflowRuntime;
@@ -11121,7 +13061,7 @@ async function writeWorkflowStateProjection(target, projection) {
         continue;
       }
     }
-    const parent = path14.posix.dirname(relativePath);
+    const parent = path15.posix.dirname(relativePath);
     if (parent !== ".") {
       await ensureProtectedProjectDirectory(projectRoot, parent, { label });
       inspection = await inspectProtectedProjectPath(
@@ -11423,6 +13363,15 @@ async function inspectWorkflowRun(target) {
     const location = resolveWorkflowRunLocation(target);
     const journal = await readWorkflowTransitionJournal(location.runRoot);
     if (journal) return recoveryRequiredContinuation(location, journal);
+    const checkpointRecovery = await readWorkflowCheckpointRecoveryJournal(
+      location.runRoot
+    );
+    if (checkpointRecovery) {
+      return checkpointRecoveryRequiredContinuation(
+        location,
+        checkpointRecovery
+      );
+    }
     try {
       if (!await location.readState()) return null;
     } catch (error) {
@@ -11801,6 +13750,15 @@ async function validateWorkflowSubmission(target, submission) {
     const location = resolveWorkflowRunLocation(target);
     const journal = await readWorkflowTransitionJournal(location.runRoot);
     if (journal) return recoveryRequiredContinuation(location, journal);
+    const checkpointRecovery = await readWorkflowCheckpointRecoveryJournal(
+      location.runRoot
+    );
+    if (checkpointRecovery) {
+      return checkpointRecoveryRequiredContinuation(
+        location,
+        checkpointRecovery
+      );
+    }
     validateSubmission(submission);
     let prepared;
     try {
@@ -11876,13 +13834,22 @@ async function projectWorkflowHandoff(protocol, current) {
     continuation: projectedCurrent
   };
 }
-async function resumeStoredRun(location, options) {
+async function resumeStoredRun(location, options, forceCheckpoint = false, persistCheckpoint = true) {
   const verified = await verifyStoredRun(location);
   const result = await location.resume({
     confirmations: options.confirmations ?? [],
     resolver: resolverForPackage(),
     prepareAction: prepareWorkflowAction
   });
+  const changed = !sameStableValue2(verified.state, result.state) || !sameStableValue2(verified.pending, result.action);
+  if ((changed || forceCheckpoint) && persistCheckpoint) {
+    await persistWorkflowCheckpoint(
+      location,
+      result.state,
+      result.action,
+      verified.package
+    );
+  }
   if (result.state.status !== "completed") {
     return continuation(result, verified.identity);
   }
@@ -11971,9 +13938,9 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
           durabilityReadOptions(state, "trajectoryBytes")
         );
         const proposal = trajectory.slice().reverse().find(
-          (event) => event.type === "action_proposed" && isRecord10(event.data.action) && event.data.action.id === action.id
+          (event) => event.type === "action_proposed" && isRecord11(event.data.action) && event.data.action.id === action.id
         );
-        if (!proposal || !isRecord10(proposal.data.action)) {
+        if (!proposal || !isRecord11(proposal.data.action)) {
           throw new Error(
             "WorkflowRuntime scoped decision has no durable action proposal"
           );
@@ -12002,6 +13969,220 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
   }
   return null;
 }
+var WorkflowCheckpointRecoveryBlockedError = class extends Error {
+  findings;
+  finding;
+  constructor(findings) {
+    const projected = boundWorkflowFindings(findings).findings;
+    const finding = projected[0];
+    super(finding?.message ?? "Workflow checkpoint recovery is blocked");
+    this.name = "WorkflowCheckpointRecoveryBlockedError";
+    this.findings = projected;
+    this.finding = finding ?? checkpointInvalidFinding(
+      "Workflow checkpoint recovery is blocked.",
+      WORKFLOW_CHECKPOINT_INDEX_PATH
+    );
+  }
+};
+var WorkflowCheckpointRecoveryPendingError = class extends Error {
+  finding;
+  constructor() {
+    const finding = recoveryRequiredFinding(
+      void 0,
+      void 0,
+      ".comet/checkpoint-recovery-journal.json"
+    );
+    super(finding.message);
+    this.name = "WorkflowCheckpointRecoveryPendingError";
+    this.finding = finding;
+  }
+};
+async function checkpointBlockedContinuation(location, findings, fallback) {
+  try {
+    const verified = await verifyStoredRun(location);
+    return withAdditionalFindings(
+      await continuationFromVerifiedRun(verified, location.runRoot),
+      findings,
+      "blocked"
+    );
+  } catch (error) {
+    if (!fallback) throw error;
+    return withAdditionalFindings(
+      continuation(
+        { state: fallback.state, action: fallback.pending, evals: [] },
+        fallback.identity
+      ),
+      findings,
+      "blocked"
+    );
+  }
+}
+function throwCheckpointRecoveryBlocked(findings) {
+  throw new WorkflowCheckpointRecoveryBlockedError(findings);
+}
+async function recoverCheckpointAwareRun(location, options, forceCheckpoint) {
+  const profile = await durabilityProfileForLocation(location);
+  if (!profile || !usesWorkflowCheckpoints(profile)) {
+    return resumeStoredRun(location, options, forceCheckpoint);
+  }
+  const checkpointRecovery = await recoverWorkflowCheckpoint(
+    location.runRoot,
+    profile
+  );
+  if (checkpointRecovery.status === "blocked") {
+    return checkpointBlockedContinuation(location, [
+      checkpointHistoryAmbiguousFinding(
+        `Workflow checkpoint restoration has ambiguous records: ${checkpointRecovery.unknownPaths?.join(", ") ?? "unknown"}.`,
+        checkpointRecovery.unknownPaths?.[0]
+      )
+    ]);
+  }
+  const checkpointChanged = forceCheckpoint || checkpointRecovery.status === "recovered";
+  let persistedState = null;
+  let persistedExecution;
+  try {
+    persistedState = await location.readState();
+    if (persistedState?.runtimeIdentity) {
+      persistedExecution = identityFromState(persistedState);
+    }
+  } catch {
+    persistedState = null;
+  }
+  let verified;
+  let headError;
+  let headVerified = false;
+  try {
+    verified = await verifyStoredRun(location);
+  } catch (error) {
+    headError = error;
+  }
+  if (verified) {
+    try {
+      await verifyWorkflowCheckpointHead({
+        runRoot: location.runRoot,
+        state: verified.state,
+        pending: verified.pending,
+        identity: verified.identity,
+        package: verified.package,
+        profile
+      });
+      headVerified = true;
+    } catch (error) {
+      headError = error;
+    }
+  }
+  let inspections = [];
+  let auditFindings = [];
+  let checkpointIndexReadable = true;
+  try {
+    inspections = await inspectWorkflowCheckpointCandidates(
+      location.runRoot,
+      profile,
+      verified ? {
+        expectedRunId: verified.state.runId,
+        expectedExecution: verified.identity
+      } : persistedState ? {
+        expectedRunId: persistedState.runId,
+        ...persistedExecution ? { expectedExecution: persistedExecution } : {}
+      } : location.runId ? { expectedRunId: location.runId } : {}
+    );
+    auditFindings = checkpointFindings(inspections, "warning");
+  } catch (error) {
+    checkpointIndexReadable = false;
+    auditFindings = [checkpointIndexFinding(error, "warning")];
+  }
+  const verifiedCandidates = inspections.filter(
+    (inspection) => inspection.verification !== void 0
+  ).sort(
+    (left, right) => right.verification.manifest.revision - left.verification.manifest.revision || left.entry.recordHash.localeCompare(right.entry.recordHash)
+  );
+  if (verified) {
+    if (headError && headVerified === false) {
+      return checkpointBlockedContinuation(location, [
+        checkpointInvalidFinding(
+          `Workflow checkpoint authoritative-head verification failed: ${headError instanceof Error ? headError.message : String(headError)}`,
+          ".comet/checkpoints/index.json"
+        ),
+        ...auditFindings
+      ]);
+    }
+    const currentRevision = verified.state.workflowRuntime?.revision ?? 0;
+    const newerCheckpoint = verifiedCandidates.find(
+      (inspection) => inspection.verification.manifest.revision > currentRevision
+    );
+    if (newerCheckpoint) {
+      return checkpointBlockedContinuation(location, [
+        checkpointHistoryAmbiguousFinding(
+          `Workflow checkpoint revision ${newerCheckpoint.verification.manifest.revision} is newer than the authoritative Run head revision ${currentRevision}; recovery will not rewind or discard accepted history.`,
+          ".comet/checkpoints/index.json"
+        ),
+        ...auditFindings
+      ]);
+    }
+    const currentTrajectory = await readOptionalEngineRunText(
+      location.runRoot,
+      verified.state.trajectoryRef,
+      profile.bounds.trajectoryBytes,
+      "Workflow checkpoint current trajectory"
+    );
+    const headCheckpoint = inspections.some(
+      (inspection) => inspection.verification !== void 0 && inspection.verification.manifest.revision === (verified.state.workflowRuntime?.revision ?? 0) && sameStableValue2(inspection.verification.state, verified.state) && sameStableValue2(inspection.verification.pending, verified.pending) && currentTrajectory === inspection.verification.contents.trajectory
+    );
+    const result = await resumeStoredRun(
+      location,
+      options,
+      checkpointChanged || headVerified && checkpointIndexReadable && !headCheckpoint,
+      headVerified
+    );
+    return withAdditionalFindings(result, auditFindings);
+  }
+  const candidates = verifiedCandidates;
+  if (candidates.length === 0) {
+    throwCheckpointRecoveryBlocked([
+      ...auditFindings,
+      checkpointInvalidFinding(
+        `No completely verified checkpoint can restore the Run: ${headError instanceof Error ? headError.message : String(headError)}`,
+        ".comet/run-state.json"
+      )
+    ]);
+  }
+  const selected = candidates[0].verification;
+  try {
+    const restored = await restoreWorkflowCheckpoint(
+      location.runRoot,
+      profile,
+      selected
+    );
+    if (restored.status === "blocked") {
+      throw new Error(
+        `Workflow checkpoint history is ambiguous: ${restored.unknownPaths?.join(", ") ?? "unknown"}`
+      );
+    }
+  } catch (error) {
+    return checkpointBlockedContinuation(
+      location,
+      [
+        ...auditFindings,
+        checkpointHistoryAmbiguousFinding(
+          error instanceof Error ? error.message : String(error),
+          ".comet/trajectory.jsonl"
+        )
+      ],
+      selected
+    );
+  }
+  const recovered = await verifyStoredRun(location);
+  await persistWorkflowCheckpoint(
+    location,
+    recovered.state,
+    recovered.pending,
+    recovered.package
+  );
+  return withAdditionalFindings(
+    await continuationFromVerifiedRun(recovered, location.runRoot),
+    auditFindings
+  );
+}
 function createWorkflowRuntime() {
   return {
     async start(options) {
@@ -12021,6 +14202,14 @@ function createWorkflowRuntime() {
               );
               if (journal)
                 throw new WorkflowTransitionJournalPendingError(journal);
+            }
+            if (usesWorkflowCheckpoints(compiled.identity.durabilityProfile)) {
+              const checkpointRecovery = await readWorkflowCheckpointRecoveryJournal(
+                resolved.location.runRoot
+              );
+              if (checkpointRecovery) {
+                throw new WorkflowCheckpointRecoveryPendingError();
+              }
             }
             const result = await resolved.location.start(compiled.package, {
               runId: resolved.runId,
@@ -12050,10 +14239,17 @@ function createWorkflowRuntime() {
                 "WorkflowRuntime snapshot identity was not persisted"
               );
             }
-            return continuation(result, {
+            const next = continuation(result, {
               ...compiled.identity,
               snapshotHash: result.state.skillHash
             });
+            await persistWorkflowCheckpoint(
+              resolved.location,
+              result.state,
+              result.action,
+              compiled.package
+            );
+            return next;
           }
         );
       });
@@ -12071,6 +14267,13 @@ function createWorkflowRuntime() {
               location.runRoot
             );
             if (journal) return recoveryRequiredContinuation(location, journal);
+            const checkpointRecovery = await readWorkflowCheckpointRecoveryJournal(location.runRoot);
+            if (checkpointRecovery) {
+              return checkpointRecoveryRequiredContinuation(
+                location,
+                checkpointRecovery
+              );
+            }
             return resumeStoredRun(location, options);
           },
           {
@@ -12092,6 +14295,13 @@ function createWorkflowRuntime() {
               location.runRoot
             );
             if (journal) return recoveryRequiredContinuation(location, journal);
+            const checkpointRecovery = await readWorkflowCheckpointRecoveryJournal(location.runRoot);
+            if (checkpointRecovery) {
+              return checkpointRecoveryRequiredContinuation(
+                location,
+                checkpointRecovery
+              );
+            }
             validateSubmission(submission);
             let prepared;
             try {
@@ -12167,6 +14377,12 @@ function createWorkflowRuntime() {
                 artifact.mutation
               );
               await claim.commit();
+              await persistWorkflowCheckpoint(
+                prepared.location,
+                result.state,
+                result.action,
+                prepared.verified.package
+              );
               return continuation(result, prepared.verified.identity);
             } catch (error) {
               if (error instanceof WorkflowRevisionConflictError) {
@@ -12203,7 +14419,9 @@ function createWorkflowRuntime() {
     async recover(target, options = {}) {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
-        const profile = await durabilityProfileForLocation(location);
+        const profile = await durabilityProfileForLocation(location, {
+          allowMalformedState: true
+        });
         return withWorkflowRunLock(
           location,
           "workflow.recover",
@@ -12219,6 +14437,7 @@ function createWorkflowRuntime() {
             const journal = await readWorkflowTransitionJournal(
               location.runRoot
             );
+            let transitionRecovered = false;
             if (journal) {
               if (!journal.execution.durabilityProfile) {
                 throw new Error(
@@ -12235,8 +14454,16 @@ function createWorkflowRuntime() {
                   recovery.journal ?? journal
                 );
               }
+              transitionRecovered = recovery.status === "recovered";
             }
-            return resumeStoredRun(location, options);
+            if (usesWorkflowCheckpoints(profile)) {
+              return recoverCheckpointAwareRun(
+                location,
+                options,
+                transitionRecovered
+              );
+            }
+            return resumeStoredRun(location, options, transitionRecovered);
           },
           {
             allowStale: true,

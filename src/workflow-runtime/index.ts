@@ -16,6 +16,7 @@ import {
   readPendingAction,
   readTrajectory,
 } from "../engine/run-store.js";
+import { readOptionalEngineRunText } from "../engine/protected-run-file.js";
 import { parseRunStateValue } from "../engine/state.js";
 import { RaceSafeReadError } from "../engine/race-safe-read.js";
 import type {
@@ -67,6 +68,8 @@ import {
   actionAvailableFinding,
   attachWorkflowFinding,
   boundWorkflowFindings,
+  checkpointHistoryAmbiguousFinding,
+  checkpointInvalidFinding,
   decisionRequiredFinding,
   evaluationWarningFinding,
   findingFromBlocker,
@@ -97,6 +100,21 @@ import {
   type WorkflowRunLockHandle,
   type WorkflowRunLockOperation,
 } from "./run-lock.js";
+import {
+  createWorkflowCheckpoint,
+  inspectWorkflowCheckpointCandidates,
+  WORKFLOW_CHECKPOINT_INDEX_PATH,
+  readWorkflowCheckpointIndex,
+  readWorkflowCheckpointProfile,
+  readWorkflowCheckpointRecoveryJournal,
+  recoverWorkflowCheckpoint,
+  restoreWorkflowCheckpoint,
+  verifyWorkflowCheckpointCandidate,
+  verifyWorkflowCheckpointHead,
+  type WorkflowCheckpointInspection,
+  type WorkflowCheckpointRecoveryJournal,
+  type WorkflowCheckpointVerification,
+} from "./checkpoints.js";
 
 async function withStructuredRuntimeErrors<T>(
   operation: () => Promise<T>,
@@ -114,15 +132,37 @@ function usesWorkflowRunLock(
   return profile?.capabilities.includes("mutation-locks") ?? false;
 }
 
+function usesWorkflowCheckpoints(
+  profile: WorkflowDurabilityProfile | undefined,
+): boolean {
+  return profile?.capabilities.includes("verified-checkpoints") ?? false;
+}
+
 async function durabilityProfileForLocation(
   location: ResolvedWorkflowRunLocation,
+  options: { allowMalformedState?: boolean } = {},
 ): Promise<WorkflowDurabilityProfile | undefined> {
-  const state = await location.readState();
-  if (state?.runtimeIdentity?.durabilityProfile) {
-    return state.runtimeIdentity.durabilityProfile;
+  try {
+    const state = await location.readState(options);
+    if (state) {
+      if (state.runtimeIdentity?.durabilityProfile) {
+        return state.runtimeIdentity.durabilityProfile;
+      }
+      const journal = await readWorkflowTransitionJournal(location.runRoot);
+      return journal?.execution.durabilityProfile;
+    }
+  } catch (error) {
+    const checkpointProfile = await readWorkflowCheckpointProfile(
+      location.runRoot,
+    );
+    if (checkpointProfile) return checkpointProfile;
+    throw error;
   }
-  return (await readWorkflowTransitionJournal(location.runRoot))?.execution
-    .durabilityProfile;
+  const journal = await readWorkflowTransitionJournal(location.runRoot);
+  if (journal?.execution.durabilityProfile) {
+    return journal.execution.durabilityProfile;
+  }
+  return readWorkflowCheckpointProfile(location.runRoot);
 }
 
 async function withWorkflowRunLock<T>(
@@ -281,6 +321,12 @@ function sameStringRecord(
     a.localeCompare(b),
   );
   return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
+}
+
+function sameStableValue(left: unknown, right: unknown): boolean {
+  return (
+    JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right))
+  );
 }
 
 function sameExecutionIdentity(
@@ -853,6 +899,110 @@ function continuation(
     ),
     blockers: legacyBlockersFromFindings(disposition, projected.findings),
   };
+}
+
+function withAdditionalFindings(
+  value: WorkflowContinuation,
+  additional: readonly WorkflowFinding[],
+  disposition = value.disposition,
+): WorkflowContinuation {
+  const projected = boundWorkflowFindings([...value.findings, ...additional]);
+  return {
+    ...value,
+    disposition,
+    findings: projected.findings,
+    findingSummary: projected.summary,
+    requiresUserDecision: projected.findings.some(
+      (finding) => finding.requiresUserDecision,
+    ),
+    blockers: legacyBlockersFromFindings(disposition, projected.findings),
+  };
+}
+
+function checkpointFindings(
+  inspections: readonly WorkflowCheckpointInspection[],
+  severity: "warning" | "error",
+): WorkflowFinding[] {
+  return inspections
+    .filter((inspection) => inspection.error !== undefined)
+    .map((inspection) =>
+      checkpointInvalidFinding(
+        `Workflow checkpoint revision ${inspection.entry.revision} is invalid: ${inspection.error}`,
+        `.comet/checkpoints/manifests/${inspection.entry.manifestHash}.json`,
+        severity,
+      ),
+    );
+}
+
+function checkpointIndexFinding(
+  error: unknown,
+  severity: "warning" | "error",
+): WorkflowFinding {
+  return checkpointInvalidFinding(
+    `Workflow checkpoint index is invalid: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+    ".comet/checkpoints/index.json",
+    severity,
+  );
+}
+
+async function checkpointRecoveryRequiredContinuation(
+  location: ResolvedWorkflowRunLocation,
+  journal: WorkflowCheckpointRecoveryJournal,
+): Promise<WorkflowContinuation> {
+  let base: WorkflowContinuation;
+  let verified: VerifiedWorkflowRun | undefined;
+  try {
+    verified = await verifyStoredRun(location);
+    base = await continuationFromVerifiedRun(verified, location.runRoot);
+  } catch (error) {
+    const profile = journal.execution.durabilityProfile;
+    if (!profile) throw error;
+    const index = await readWorkflowCheckpointIndex(location.runRoot, profile);
+    const entry = index?.records.find(
+      (candidate) => candidate.recordHash === journal.checkpointRecordHash,
+    );
+    if (!entry) throw error;
+    const candidate = await verifyWorkflowCheckpointCandidate(
+      location.runRoot,
+      profile,
+      entry,
+    );
+    base = continuation(
+      { state: candidate.state, action: candidate.pending, evals: [] },
+      candidate.identity,
+    );
+  }
+  return withAdditionalFindings(
+    base,
+    [
+      recoveryRequiredFinding(
+        base.revision,
+        base.pendingAction?.id ?? null,
+        ".comet/checkpoint-recovery-journal.json",
+      ),
+    ],
+    "blocked",
+  );
+}
+
+async function persistWorkflowCheckpoint(
+  location: ResolvedWorkflowRunLocation,
+  state: RunState,
+  pending: EngineAction | null,
+  pkg: Awaited<ReturnType<typeof readSkillSnapshot>>,
+): Promise<void> {
+  const profile = state.runtimeIdentity?.durabilityProfile;
+  if (!usesWorkflowCheckpoints(profile)) return;
+  await createWorkflowCheckpoint({
+    runRoot: location.runRoot,
+    state,
+    pending,
+    identity: identityFromState(state),
+    package: pkg,
+    profile: profile!,
+  });
 }
 
 const LEGACY_STATE_MAX_BYTES = 256 * 1024;
@@ -1463,6 +1613,15 @@ export async function inspectWorkflowRun(
     const location = resolveWorkflowRunLocation(target);
     const journal = await readWorkflowTransitionJournal(location.runRoot);
     if (journal) return recoveryRequiredContinuation(location, journal);
+    const checkpointRecovery = await readWorkflowCheckpointRecoveryJournal(
+      location.runRoot,
+    );
+    if (checkpointRecovery) {
+      return checkpointRecoveryRequiredContinuation(
+        location,
+        checkpointRecovery,
+      );
+    }
     try {
       if (!(await location.readState())) return null;
     } catch (error) {
@@ -1961,6 +2120,15 @@ export async function validateWorkflowSubmission(
     const location = resolveWorkflowRunLocation(target);
     const journal = await readWorkflowTransitionJournal(location.runRoot);
     if (journal) return recoveryRequiredContinuation(location, journal);
+    const checkpointRecovery = await readWorkflowCheckpointRecoveryJournal(
+      location.runRoot,
+    );
+    if (checkpointRecovery) {
+      return checkpointRecoveryRequiredContinuation(
+        location,
+        checkpointRecovery,
+      );
+    }
     validateSubmission(submission);
     let prepared: PreparedWorkflowSubmission;
     try {
@@ -2053,6 +2221,8 @@ export async function projectWorkflowHandoff(
 async function resumeStoredRun(
   location: ResolvedWorkflowRunLocation,
   options: ResumeWorkflowRunOptions,
+  forceCheckpoint = false,
+  persistCheckpoint = true,
 ): Promise<WorkflowContinuation> {
   const verified = await verifyStoredRun(location);
   const result = await location.resume({
@@ -2060,6 +2230,17 @@ async function resumeStoredRun(
     resolver: resolverForPackage(),
     prepareAction: prepareWorkflowAction,
   });
+  const changed =
+    !sameStableValue(verified.state, result.state) ||
+    !sameStableValue(verified.pending, result.action);
+  if ((changed || forceCheckpoint) && persistCheckpoint) {
+    await persistWorkflowCheckpoint(
+      location,
+      result.state,
+      result.action,
+      verified.package,
+    );
+  }
   if (result.state.status !== "completed") {
     return continuation(result, verified.identity);
   }
@@ -2231,6 +2412,273 @@ async function verifyStoredAction(
   return null;
 }
 
+class WorkflowCheckpointRecoveryBlockedError extends Error {
+  readonly findings: WorkflowFinding[];
+  readonly finding: WorkflowFinding;
+
+  constructor(findings: readonly WorkflowFinding[]) {
+    const projected = boundWorkflowFindings(findings).findings;
+    const finding = projected[0];
+    super(finding?.message ?? "Workflow checkpoint recovery is blocked");
+    this.name = "WorkflowCheckpointRecoveryBlockedError";
+    this.findings = projected;
+    this.finding =
+      finding ??
+      checkpointInvalidFinding(
+        "Workflow checkpoint recovery is blocked.",
+        WORKFLOW_CHECKPOINT_INDEX_PATH,
+      );
+  }
+}
+
+class WorkflowCheckpointRecoveryPendingError extends Error {
+  readonly finding: WorkflowFinding;
+
+  constructor() {
+    const finding = recoveryRequiredFinding(
+      undefined,
+      undefined,
+      ".comet/checkpoint-recovery-journal.json",
+    );
+    super(finding.message);
+    this.name = "WorkflowCheckpointRecoveryPendingError";
+    this.finding = finding;
+  }
+}
+
+async function checkpointBlockedContinuation(
+  location: ResolvedWorkflowRunLocation,
+  findings: readonly WorkflowFinding[],
+  fallback?: WorkflowCheckpointVerification,
+): Promise<WorkflowContinuation> {
+  try {
+    const verified = await verifyStoredRun(location);
+    return withAdditionalFindings(
+      await continuationFromVerifiedRun(verified, location.runRoot),
+      findings,
+      "blocked",
+    );
+  } catch (error) {
+    if (!fallback) throw error;
+    return withAdditionalFindings(
+      continuation(
+        { state: fallback.state, action: fallback.pending, evals: [] },
+        fallback.identity,
+      ),
+      findings,
+      "blocked",
+    );
+  }
+}
+
+function throwCheckpointRecoveryBlocked(
+  findings: readonly WorkflowFinding[],
+): never {
+  throw new WorkflowCheckpointRecoveryBlockedError(findings);
+}
+
+async function recoverCheckpointAwareRun(
+  location: ResolvedWorkflowRunLocation,
+  options: ResumeWorkflowRunOptions,
+  forceCheckpoint: boolean,
+): Promise<WorkflowContinuation> {
+  const profile = await durabilityProfileForLocation(location);
+  if (!profile || !usesWorkflowCheckpoints(profile)) {
+    return resumeStoredRun(location, options, forceCheckpoint);
+  }
+  const checkpointRecovery = await recoverWorkflowCheckpoint(
+    location.runRoot,
+    profile,
+  );
+  if (checkpointRecovery.status === "blocked") {
+    return checkpointBlockedContinuation(location, [
+      checkpointHistoryAmbiguousFinding(
+        `Workflow checkpoint restoration has ambiguous records: ${checkpointRecovery.unknownPaths?.join(", ") ?? "unknown"}.`,
+        checkpointRecovery.unknownPaths?.[0],
+      ),
+    ]);
+  }
+  const checkpointChanged =
+    forceCheckpoint || checkpointRecovery.status === "recovered";
+  let persistedState: RunState | null = null;
+  let persistedExecution: WorkflowExecutionIdentity | undefined;
+  try {
+    persistedState = await location.readState();
+    if (persistedState?.runtimeIdentity) {
+      persistedExecution = identityFromState(persistedState);
+    }
+  } catch {
+    persistedState = null;
+  }
+  let verified: VerifiedWorkflowRun | undefined;
+  let headError: unknown;
+  let headVerified = false;
+  try {
+    verified = await verifyStoredRun(location);
+  } catch (error) {
+    headError = error;
+  }
+  if (verified) {
+    try {
+      await verifyWorkflowCheckpointHead({
+        runRoot: location.runRoot,
+        state: verified.state,
+        pending: verified.pending,
+        identity: verified.identity,
+        package: verified.package,
+        profile,
+      });
+      headVerified = true;
+    } catch (error) {
+      headError = error;
+    }
+  }
+
+  let inspections: WorkflowCheckpointInspection[] = [];
+  let auditFindings: WorkflowFinding[] = [];
+  let checkpointIndexReadable = true;
+  try {
+    inspections = await inspectWorkflowCheckpointCandidates(
+      location.runRoot,
+      profile,
+      verified
+        ? {
+            expectedRunId: verified.state.runId,
+            expectedExecution: verified.identity,
+          }
+        : persistedState
+          ? {
+              expectedRunId: persistedState.runId,
+              ...(persistedExecution
+                ? { expectedExecution: persistedExecution }
+                : {}),
+            }
+          : location.runId
+            ? { expectedRunId: location.runId }
+            : {},
+    );
+    auditFindings = checkpointFindings(inspections, "warning");
+  } catch (error) {
+    checkpointIndexReadable = false;
+    auditFindings = [checkpointIndexFinding(error, "warning")];
+  }
+
+  const verifiedCandidates = inspections
+    .filter(
+      (
+        inspection,
+      ): inspection is WorkflowCheckpointInspection & {
+        verification: WorkflowCheckpointVerification;
+      } => inspection.verification !== undefined,
+    )
+    .sort(
+      (left, right) =>
+        right.verification.manifest.revision -
+          left.verification.manifest.revision ||
+        left.entry.recordHash.localeCompare(right.entry.recordHash),
+    );
+
+  if (verified) {
+    if (headError && headVerified === false) {
+      return checkpointBlockedContinuation(location, [
+        checkpointInvalidFinding(
+          `Workflow checkpoint authoritative-head verification failed: ${
+            headError instanceof Error ? headError.message : String(headError)
+          }`,
+          ".comet/checkpoints/index.json",
+        ),
+        ...auditFindings,
+      ]);
+    }
+    const currentRevision = verified.state.workflowRuntime?.revision ?? 0;
+    const newerCheckpoint = verifiedCandidates.find(
+      (inspection) =>
+        inspection.verification.manifest.revision > currentRevision,
+    );
+    if (newerCheckpoint) {
+      return checkpointBlockedContinuation(location, [
+        checkpointHistoryAmbiguousFinding(
+          `Workflow checkpoint revision ${newerCheckpoint.verification.manifest.revision} is newer than the authoritative Run head revision ${currentRevision}; recovery will not rewind or discard accepted history.`,
+          ".comet/checkpoints/index.json",
+        ),
+        ...auditFindings,
+      ]);
+    }
+    const currentTrajectory = await readOptionalEngineRunText(
+      location.runRoot,
+      verified.state.trajectoryRef,
+      profile.bounds.trajectoryBytes,
+      "Workflow checkpoint current trajectory",
+    );
+    const headCheckpoint = inspections.some(
+      (inspection) =>
+        inspection.verification !== undefined &&
+        inspection.verification.manifest.revision ===
+          (verified.state.workflowRuntime?.revision ?? 0) &&
+        sameStableValue(inspection.verification.state, verified.state) &&
+        sameStableValue(inspection.verification.pending, verified.pending) &&
+        currentTrajectory === inspection.verification.contents.trajectory,
+    );
+    const result = await resumeStoredRun(
+      location,
+      options,
+      checkpointChanged ||
+        (headVerified && checkpointIndexReadable && !headCheckpoint),
+      headVerified,
+    );
+    return withAdditionalFindings(result, auditFindings);
+  }
+
+  const candidates = verifiedCandidates;
+  if (candidates.length === 0) {
+    throwCheckpointRecoveryBlocked([
+      ...auditFindings,
+      checkpointInvalidFinding(
+        `No completely verified checkpoint can restore the Run: ${
+          headError instanceof Error ? headError.message : String(headError)
+        }`,
+        ".comet/run-state.json",
+      ),
+    ]);
+  }
+  const selected = candidates[0].verification;
+  try {
+    const restored = await restoreWorkflowCheckpoint(
+      location.runRoot,
+      profile,
+      selected,
+    );
+    if (restored.status === "blocked") {
+      throw new Error(
+        `Workflow checkpoint history is ambiguous: ${restored.unknownPaths?.join(", ") ?? "unknown"}`,
+      );
+    }
+  } catch (error) {
+    return checkpointBlockedContinuation(
+      location,
+      [
+        ...auditFindings,
+        checkpointHistoryAmbiguousFinding(
+          error instanceof Error ? error.message : String(error),
+          ".comet/trajectory.jsonl",
+        ),
+      ],
+      selected,
+    );
+  }
+  const recovered = await verifyStoredRun(location);
+  await persistWorkflowCheckpoint(
+    location,
+    recovered.state,
+    recovered.pending,
+    recovered.package,
+  );
+  return withAdditionalFindings(
+    await continuationFromVerifiedRun(recovered, location.runRoot),
+    auditFindings,
+  );
+}
+
 export function createWorkflowRuntime(): WorkflowRuntime {
   return {
     async start(
@@ -2252,6 +2700,15 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               );
               if (journal)
                 throw new WorkflowTransitionJournalPendingError(journal);
+            }
+            if (usesWorkflowCheckpoints(compiled.identity.durabilityProfile)) {
+              const checkpointRecovery =
+                await readWorkflowCheckpointRecoveryJournal(
+                  resolved.location.runRoot,
+                );
+              if (checkpointRecovery) {
+                throw new WorkflowCheckpointRecoveryPendingError();
+              }
             }
             const result = await resolved.location.start(compiled.package, {
               runId: resolved.runId,
@@ -2283,10 +2740,17 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 "WorkflowRuntime snapshot identity was not persisted",
               );
             }
-            return continuation(result, {
+            const next = continuation(result, {
               ...compiled.identity,
               snapshotHash: result.state.skillHash,
             });
+            await persistWorkflowCheckpoint(
+              resolved.location,
+              result.state,
+              result.action,
+              compiled.package,
+            );
+            return next;
           },
         );
       });
@@ -2308,6 +2772,14 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               location.runRoot,
             );
             if (journal) return recoveryRequiredContinuation(location, journal);
+            const checkpointRecovery =
+              await readWorkflowCheckpointRecoveryJournal(location.runRoot);
+            if (checkpointRecovery) {
+              return checkpointRecoveryRequiredContinuation(
+                location,
+                checkpointRecovery,
+              );
+            }
             return resumeStoredRun(location, options);
           },
           {
@@ -2333,6 +2805,14 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               location.runRoot,
             );
             if (journal) return recoveryRequiredContinuation(location, journal);
+            const checkpointRecovery =
+              await readWorkflowCheckpointRecoveryJournal(location.runRoot);
+            if (checkpointRecovery) {
+              return checkpointRecoveryRequiredContinuation(
+                location,
+                checkpointRecovery,
+              );
+            }
             validateSubmission(submission);
             let prepared: PreparedWorkflowSubmission;
             try {
@@ -2411,6 +2891,12 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 artifact.mutation,
               );
               await claim.commit();
+              await persistWorkflowCheckpoint(
+                prepared.location,
+                result.state,
+                result.action,
+                prepared.verified.package,
+              );
               return continuation(result, prepared.verified.identity);
             } catch (error) {
               if (error instanceof WorkflowRevisionConflictError) {
@@ -2454,7 +2940,9 @@ export function createWorkflowRuntime(): WorkflowRuntime {
     ): Promise<WorkflowContinuation> {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
-        const profile = await durabilityProfileForLocation(location);
+        const profile = await durabilityProfileForLocation(location, {
+          allowMalformedState: true,
+        });
         return withWorkflowRunLock(
           location,
           "workflow.recover",
@@ -2470,6 +2958,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
             const journal = await readWorkflowTransitionJournal(
               location.runRoot,
             );
+            let transitionRecovered = false;
             if (journal) {
               if (!journal.execution.durabilityProfile) {
                 throw new Error(
@@ -2486,8 +2975,16 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                   recovery.journal ?? journal,
                 );
               }
+              transitionRecovered = recovery.status === "recovered";
             }
-            return resumeStoredRun(location, options);
+            if (usesWorkflowCheckpoints(profile)) {
+              return recoverCheckpointAwareRun(
+                location,
+                options,
+                transitionRecovered,
+              );
+            }
+            return resumeStoredRun(location, options, transitionRecovered);
           },
           {
             allowStale: true,
