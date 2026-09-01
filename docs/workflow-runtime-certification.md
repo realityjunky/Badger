@@ -140,6 +140,27 @@ scope, snapshot, and candidate artifact drift makes a receipt stale without
 deleting its audit record. Decision Receipts remain a separate evidence family
 and may name exact Verification Receipt ids without substituting for them.
 
+The `repair-policy` capability requires the same revision fences, mutation locks,
+and transition journals plus bounded repair history and a hash-bound repair
+policy. Failed outcomes produce canonical signatures over protocol and execution
+identity, stable Attempt/action context, finding and failed-receipt coverage,
+scope, snapshot, and artifact identities. Cosmetic summaries, timestamps, and
+retry action ids are excluded. Strictly reduced failure coverage or newly
+verified scope resets consecutive stagnation; equivalent failures remain
+consecutive across process restarts. The policy returns `continue`, `warning`,
+`manual-stop`, or `hard-stop`. A manual stop publishes a stable persisted
+`ask_user` repair action from the declared choices. Decisions bind revision,
+action, Attempt, signature, reviewer, rationale, and replay state. At most one
+bounded override may reopen a signature when policy allows it; the hard maximum
+cannot be overridden. Contract-change stops the captured Run and never rewrites
+its protocol identity. Repair history is checked against the append-only
+trajectory before a continuation is returned, and generated adapters only
+project or submit the declared runtime action.
+The normalized policy includes a registered idempotent `workflow.resume`
+automatic operation with a finite execution bound. Retry action materialization
+dispatches through that operation while the originating mutation still owns the
+Run lock and transition journal.
+
 The Creator evaluation report additionally records the generated package tree
 hash. Review readiness rejects missing, stale, mismatched, or incomplete
 identity evidence.

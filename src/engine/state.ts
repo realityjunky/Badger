@@ -32,6 +32,10 @@ import {
 } from "../workflow-runtime/durability.js";
 import { parseWorkflowContentSnapshotReference } from "../workflow-runtime/snapshots.js";
 import { parseWorkflowVerificationReceiptReference } from "../workflow-runtime/verification-receipts.js";
+import {
+  normalizeWorkflowRepairPolicy,
+  parseWorkflowRepairEpisode,
+} from "../workflow-runtime/repair.js";
 
 export type StateDocument = Record<string, unknown>;
 
@@ -680,6 +684,7 @@ function parseWorkflowOutcome(
     "evidence",
     "artifactVersions",
     "verificationReceiptIds",
+    "repairDecision",
   ]);
   const unknown = Object.keys(outcome).find((key) => !keys.has(key));
   if (unknown)
@@ -750,6 +755,64 @@ function parseWorkflowOutcome(
             verificationReceiptIds: [
               ...(outcome.verificationReceiptIds as string[]),
             ],
+          };
+        })()
+      : {}),
+    ...(outcome.repairDecision !== undefined
+      ? (() => {
+          const repair = outcome.repairDecision;
+          if (!repair || typeof repair !== "object" || Array.isArray(repair)) {
+            throw new Error(
+              `Invalid Run state: ${label}.repairDecision must be an object`,
+            );
+          }
+          const repairValue = repair as Record<string, unknown>;
+          const repairKeys = new Set([
+            "decisionId",
+            "signatureHash",
+            "choiceId",
+            "outcome",
+          ]);
+          const unknownRepair = Object.keys(repairValue).find(
+            (key) => !repairKeys.has(key),
+          );
+          if (unknownRepair) {
+            throw new Error(
+              `Invalid Run state: ${label}.repairDecision has unknown field ${unknownRepair}`,
+            );
+          }
+          const repairOutcome = repairValue.outcome;
+          if (
+            repairOutcome !== "retry" &&
+            repairOutcome !== "stop" &&
+            repairOutcome !== "contract-change"
+          ) {
+            throw new Error(
+              `Invalid Run state: ${label}.repairDecision.outcome is invalid`,
+            );
+          }
+          const signatureHash = requiredJsonString(
+            repairValue.signatureHash,
+            `${label}.repairDecision.signatureHash`,
+          );
+          if (!/^[a-f0-9]{64}$/u.test(signatureHash)) {
+            throw new Error(
+              `Invalid Run state: ${label}.repairDecision.signatureHash is invalid`,
+            );
+          }
+          return {
+            repairDecision: {
+              decisionId: requiredJsonString(
+                repairValue.decisionId,
+                `${label}.repairDecision.decisionId`,
+              ),
+              signatureHash,
+              choiceId: requiredJsonString(
+                repairValue.choiceId,
+                `${label}.repairDecision.choiceId`,
+              ),
+              outcome: repairOutcome,
+            },
           };
         })()
       : {}),
@@ -988,6 +1051,7 @@ function parseWorkflowRuntime(
     "artifactVersions",
     "artifactSelections",
     "contentSnapshots",
+    "repairEpisode",
   ]);
   const unknown = Object.keys(runtime).find((key) => !keys.has(key));
   if (unknown) {
@@ -1149,6 +1213,61 @@ function parseWorkflowRuntime(
       }
       snapshotHashes.add(snapshot.hash);
     }
+  }
+  const repairEpisode =
+    runtime.repairEpisode === undefined
+      ? undefined
+      : (() => {
+          if (!durabilityProfile?.capabilities.includes("repair-policy")) {
+            throw new Error(
+              "Invalid Run state: repair episodes require repair-policy capability",
+            );
+          }
+          const maxCount = durabilityProfile.bounds.repairHistoryCount;
+          const parsed = parseWorkflowRepairEpisode(
+            runtime.repairEpisode,
+            maxCount,
+          );
+          const repairPolicy = durabilityProfile.repairPolicy;
+          if (!repairPolicy) {
+            throw new Error(
+              "Invalid Run state: repair-policy capability has no repair policy",
+            );
+          }
+          const normalizedPolicy = normalizeWorkflowRepairPolicy(repairPolicy);
+          if (
+            parsed.totalFailures > normalizedPolicy.maxFailures ||
+            parsed.remainingFailures !==
+              normalizedPolicy.maxFailures - parsed.totalFailures ||
+            parsed.consecutiveFailures > parsed.totalFailures
+          ) {
+            throw new Error(
+              "Invalid Run state: WorkflowRuntime repair counters are outside policy",
+            );
+          }
+          const maxBytes = durabilityProfile.bounds.repairHistoryBytes;
+          if (
+            maxBytes !== undefined &&
+            Buffer.byteLength(JSON.stringify(parsed), "utf8") > maxBytes
+          ) {
+            throw new Error(
+              "Invalid Run state: WorkflowRuntime repair episode exceeds its bound",
+            );
+          }
+          if (parsed.history.some((record) => record.revision > revision)) {
+            throw new Error(
+              "Invalid Run state: WorkflowRuntime repair history has a future revision",
+            );
+          }
+          return parsed;
+        })();
+  if (
+    durabilityProfile?.capabilities.includes("repair-policy") &&
+    repairEpisode === undefined
+  ) {
+    throw new Error(
+      "Invalid Run state: repair-policy capability requires a repair episode",
+    );
   }
   const artifactVersionIds = new Set<string>();
   for (const version of artifactVersions) {
@@ -1319,6 +1438,7 @@ function parseWorkflowRuntime(
     artifactVersions,
     artifactSelections,
     ...(contentSnapshots ? { contentSnapshots } : {}),
+    ...(repairEpisode ? { repairEpisode } : {}),
   };
 }
 

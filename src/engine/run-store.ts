@@ -20,6 +20,7 @@ import type {
   WorkflowRationalePolicy,
   WorkflowReviewerPolicy,
 } from "../types.js";
+import { parseWorkflowRepairPendingDecision } from "../workflow-runtime/repair.js";
 
 const RUN_FILE_LIMITS = {
   trajectory: 8 * 1024 * 1024,
@@ -67,6 +68,7 @@ const ACTION_KEYS = new Set([
   "cycleId",
   "visitOrdinal",
   "retryOrdinal",
+  "repair",
 ]);
 
 const CHECKPOINT_KEYS = new Set([
@@ -362,6 +364,26 @@ function parseAction(value: unknown): EngineAction {
       );
     }
     action[key] = ordinal;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "repair")) {
+    if (action.type !== "ask_user") {
+      throw new Error("Invalid Run pending action: repair requires ask_user");
+    }
+    const repair = parseWorkflowRepairPendingDecision(value.repair);
+    if (
+      repair.actionId !== action.id ||
+      repair.stepId !== action.stepId ||
+      repair.attemptId !== action.attemptId ||
+      repair.cycleId !== (action.cycleId ?? null) ||
+      repair.visitOrdinal !== action.visitOrdinal ||
+      repair.retryOrdinal !== action.retryOrdinal ||
+      repair.decisionId !== action.decisionId
+    ) {
+      throw new Error(
+        "Invalid Run pending action: repair identity does not match action",
+      );
+    }
+    action.repair = repair;
   }
   return action;
 }

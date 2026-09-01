@@ -100,6 +100,11 @@ const WORKFLOW_FINDING_CODES = [
   "verification-receipt-stale",
   "verification-receipt-failed",
   "verification-receipt-storage-failed",
+  "repair-stagnation-warning",
+  "repair-stagnation-stop",
+  "repair-iteration-limit",
+  "repair-override-exhausted",
+  "repair-decision-invalid",
 ] as const;
 export type WorkflowFindingCode = (typeof WORKFLOW_FINDING_CODES)[number];
 
@@ -1009,6 +1014,30 @@ const blockerCatalog: Array<{
     },
   },
   {
+    match: /^Workflow repair hard stop/u,
+    entry: {
+      code: "repair-iteration-limit",
+      severity: "error",
+      requiredAction: "stop",
+    },
+  },
+  {
+    match: /^Workflow repair override has already been used/u,
+    entry: {
+      code: "repair-override-exhausted",
+      severity: "error",
+      requiredAction: "stop",
+    },
+  },
+  {
+    match: /^Workflow repair (?:override|decision)/u,
+    entry: {
+      code: "repair-decision-invalid",
+      severity: "error",
+      requiredAction: "stop",
+    },
+  },
+  {
     match: /verification receipt|verificationReceipts/iu,
     entry: {
       code: "verification-receipt-invalid",
@@ -1395,6 +1424,71 @@ export function evaluationWarningFinding(
     severity: "warning",
     message: `Terminal evaluation ${evalId} did not pass: ${evidence}`,
     requiredAction: "none",
+  });
+}
+
+export function repairStagnationWarningFinding(
+  signatureHash: string,
+  consecutiveFailures: number,
+  remainingFailures: number,
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "repair-stagnation-warning",
+    severity: "warning",
+    message: `Equivalent repair failure has occurred ${consecutiveFailures} times; change the repair approach before the manual stop threshold. ${remainingFailures} repair attempt(s) remain.`,
+    requiredAction: "retry",
+    operation: { id: "workflow.resume", args: [signatureHash] },
+  });
+}
+
+export function repairStagnationStopFinding(
+  signatureHash: string,
+  consecutiveFailures: number,
+  remainingFailures: number,
+  requiresUserDecision = true,
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "repair-stagnation-stop",
+    severity: "error",
+    message: `Equivalent repair failure reached the manual stop threshold after ${consecutiveFailures} consecutive failure(s); an explicit repair decision is required. ${remainingFailures} repair attempt(s) remain.`,
+    requiredAction: requiresUserDecision ? "decide" : "stop",
+    ...(requiresUserDecision
+      ? { operation: { id: "workflow.submit", args: [signatureHash] } }
+      : {}),
+    requiresUserDecision,
+  });
+}
+
+export function repairIterationLimitFinding(
+  signatureHash: string,
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "repair-iteration-limit",
+    severity: "error",
+    message: `The finite repair episode budget is exhausted for failure signature ${signatureHash}; no override can continue it.`,
+    requiredAction: "stop",
+  });
+}
+
+export function repairOverrideExhaustedFinding(
+  signatureHash: string,
+): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "repair-override-exhausted",
+    severity: "error",
+    message: `The one-time repair override has already been used for failure signature ${signatureHash}.`,
+    requiredAction: "decide",
+    operation: { id: "workflow.submit", args: [signatureHash] },
+    requiresUserDecision: true,
+  });
+}
+
+export function repairDecisionInvalidFinding(message: string): WorkflowFinding {
+  return createWorkflowFinding({
+    code: "repair-decision-invalid",
+    severity: "error",
+    message,
+    requiredAction: "stop",
   });
 }
 

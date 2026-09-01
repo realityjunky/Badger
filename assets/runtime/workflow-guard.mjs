@@ -358,9 +358,10 @@ async function main() {
   const verificationReceipts = submissionField(evidence, "verificationReceipts");
   const verificationReceiptIds = submissionField(evidence, "verificationReceiptIds");
   const receiptIds = submissionField(evidence, "receiptIds");
+  const status = evidence.status === "failed" ? "failed" : "succeeded";
   const submission = {
     actionId: options.actionid ?? continuation.pendingAction.id,
-    status: "succeeded",
+    status,
     summary: submissionSummary(
       evidence,
       evidenceRaw,

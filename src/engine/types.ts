@@ -10,6 +10,11 @@ import type {
   WorkflowDecisionScopeSnapshot,
   WorkflowContentSnapshotReference,
   WorkflowDurabilityProfile,
+  WorkflowRepairDecisionOutcome,
+  WorkflowRepairAutomaticOperation,
+  WorkflowRepairEpisodeState,
+  WorkflowRepairFailureSignature,
+  WorkflowRepairPendingDecision,
   WorkflowReviewerAttestation,
   WorkflowVerificationReceiptReference,
 } from "../types.js";
@@ -55,6 +60,12 @@ export interface WorkflowVisitOutcome {
   evidence?: Record<string, unknown>;
   artifactVersions?: Record<string, string>;
   verificationReceiptIds?: string[];
+  repairDecision?: {
+    decisionId: string;
+    signatureHash: string;
+    choiceId: string;
+    outcome: "retry" | "stop" | "contract-change";
+  };
 }
 
 export interface WorkflowVisitState {
@@ -77,6 +88,7 @@ export interface WorkflowRuntimeState {
   artifactVersions: WorkflowArtifactVersion[];
   artifactSelections: WorkflowArtifactSelection[];
   contentSnapshots?: WorkflowContentSnapshotReference[];
+  repairEpisode?: WorkflowRepairEpisodeState;
 }
 
 export interface RunState {
@@ -106,6 +118,7 @@ export interface EngineAction extends StepAction {
   cycleId?: string | null;
   visitOrdinal?: number;
   retryOrdinal?: number;
+  repair?: WorkflowRepairPendingDecision;
 }
 
 export interface ActionOutcome {
@@ -130,6 +143,18 @@ export interface ActionOutcome {
   scope?: WorkflowDecisionScopeSnapshot;
   artifactVersions?: Record<WorkflowArtifactId, WorkflowArtifactVersionId>;
   verificationReceiptIds?: string[];
+  repairDecision?: WorkflowRepairDecisionOutcome;
+  repairFailure?: {
+    signature: WorkflowRepairFailureSignature;
+    disposition: "continue" | "warning" | "manual-stop" | "hard-stop";
+    reasonCode: string;
+    consecutiveFailures: number;
+    totalFailures: number;
+    remainingFailures: number;
+    overrideAccepted: boolean;
+    automaticRepair?: WorkflowRepairAutomaticOperation;
+    pendingDecision?: WorkflowRepairPendingDecision;
+  };
 }
 
 export interface TrajectoryEvent {

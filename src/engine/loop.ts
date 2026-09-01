@@ -18,6 +18,14 @@ import {
 } from "./resolver.js";
 import type { SkillPackage, SkillStep } from "../skill-runtime/types.js";
 import type { WorkflowDecisionReceipt } from "../types.js";
+import {
+  normalizeWorkflowRepairPolicy,
+  repairEpisodeForDecision,
+  repairEpisodeForFailure,
+  workflowRepairAction,
+  workflowRepairDecisionRecord,
+  workflowRepairFailureRecord,
+} from "../workflow-runtime/repair.js";
 
 export interface Decision {
   state: RunState;
@@ -156,13 +164,97 @@ function recordWorkflowOutcome(
     ...(outcome.verificationReceiptIds
       ? { verificationReceiptIds: [...outcome.verificationReceiptIds] }
       : {}),
+    ...(outcome.repairDecision
+      ? {
+          repairDecision: {
+            decisionId: outcome.repairDecision.decisionId,
+            signatureHash: outcome.repairDecision.signatureHash,
+            choiceId: outcome.repairDecision.choiceId,
+            outcome: outcome.repairDecision.outcome,
+          },
+        }
+      : {}),
   };
   visit.outcomes.push(visitOutcome);
   workflowRuntime.revision += 1;
   if (receipt) workflowRuntime.decisionReceipts.push(receipt);
+  if (outcome.repairFailure) {
+    const failure = workflowRepairFailureRecord(
+      workflowRuntime.revision,
+      outcome.repairFailure.signature,
+    );
+    workflowRuntime.repairEpisode = repairEpisodeForFailure({
+      previous: workflowRuntime.repairEpisode,
+      decision: {
+        disposition: outcome.repairFailure.disposition,
+        reasonCode: outcome.repairFailure.reasonCode as
+          | "new-failure-signature"
+          | "repeated-failure-warning"
+          | "repeated-failure-stop"
+          | "repair-iteration-limit"
+          | "override-accepted"
+          | "override-already-used",
+        signature: outcome.repairFailure.signature,
+        consecutiveFailures: outcome.repairFailure.consecutiveFailures,
+        totalFailures: outcome.repairFailure.totalFailures,
+        remainingFailures: outcome.repairFailure.remainingFailures,
+        totalRepairFailures: outcome.repairFailure.totalFailures,
+        remainingIterations: outcome.repairFailure.remainingFailures,
+        overrideAccepted: outcome.repairFailure.overrideAccepted,
+        automaticRepair: outcome.repairFailure.automaticRepair ?? null,
+      },
+      failure,
+      ...(outcome.repairFailure.pendingDecision
+        ? { pendingDecision: outcome.repairFailure.pendingDecision }
+        : {}),
+    });
+  }
+  if (outcome.repairDecision) {
+    const episode = workflowRuntime.repairEpisode;
+    const policy = state.runtimeIdentity?.durabilityProfile?.repairPolicy;
+    if (!episode || !policy) {
+      throw new Error(
+        "Workflow repair decision requires a repair episode policy",
+      );
+    }
+    const pendingDecision = episode.pendingDecision;
+    if (
+      !pendingDecision ||
+      pendingDecision.actionId !== outcome.actionId ||
+      pendingDecision.signatureHash !== outcome.repairDecision.signatureHash ||
+      !pendingDecision.choices.some(
+        (choice) => choice.id === outcome.repairDecision!.choiceId,
+      )
+    ) {
+      throw new Error(
+        "Workflow repair decision does not match pending policy decision",
+      );
+    }
+    const normalizedPolicy = normalizeWorkflowRepairPolicy(policy);
+    const record = workflowRepairDecisionRecord({
+      revision: workflowRuntime.revision,
+      actionId: outcome.actionId,
+      attemptId: pendingDecision.attemptId,
+      signatureHash: outcome.repairDecision.signatureHash,
+      decision: outcome.repairDecision,
+      maxRationaleBytes: normalizedPolicy.maxOverrideRationaleBytes,
+    });
+    workflowRuntime.repairEpisode = repairEpisodeForDecision({
+      previous: episode,
+      record,
+      disposition:
+        outcome.repairDecision.outcome === "retry" ? "continue" : "manual-stop",
+      reasonCode:
+        outcome.repairDecision.hypothesis !== undefined
+          ? "override-accepted"
+          : "repair-decision-accepted",
+    });
+  }
   if (outcome.status === "failed") {
     attempt.retryOrdinal += 1;
-  } else {
+  } else if (outcome.repairDecision) {
+    attempt.retryOrdinal += 1;
+  } else if (!outcome.repairDecision) {
     workflowRuntime.currentAttempt = null;
   }
   return workflowRuntime;
@@ -420,6 +512,22 @@ export function recordOutcomeWithResolver<TContext>(
   if (state.status === "completed" || state.status === "failed") {
     throw new Error(`Run is ${state.status}`);
   }
+  const repairDecision = outcome.repairDecision;
+  if (repairDecision) {
+    const pendingDecision =
+      state.workflowRuntime?.repairEpisode?.pendingDecision;
+    if (
+      !pendingDecision ||
+      pendingDecision.actionId !== outcome.actionId ||
+      pendingDecision.signatureHash !== repairDecision.signatureHash ||
+      pendingDecision.decisionId !== repairDecision.decisionId
+    ) {
+      throw new Error("Workflow repair decision does not match pending action");
+    }
+    if (outcome.status !== "succeeded") {
+      throw new Error("Workflow repair decisions must succeed");
+    }
+  }
   const resolvedStep =
     state.orchestration === "deterministic"
       ? resolveDeterministicStep(resolver, pkg, state, context)
@@ -435,10 +543,18 @@ export function recordOutcomeWithResolver<TContext>(
       `Resolver returned unknown current step: ${resolvedStep!.id}`,
     );
   }
-  if (step?.action.type === "ask_user" && outcome.kind !== "decision") {
+  if (
+    !repairDecision &&
+    step?.action.type === "ask_user" &&
+    outcome.kind !== "decision"
+  ) {
     throw new Error("Decision response required for pending ask_user action");
   }
-  if (step?.action.type !== "ask_user" && outcome.kind === "decision") {
+  if (
+    !repairDecision &&
+    step?.action.type !== "ask_user" &&
+    outcome.kind === "decision"
+  ) {
     throw new Error(
       `Decision response cannot satisfy ${step?.action.type ?? "unknown"} action`,
     );
@@ -451,11 +567,30 @@ export function recordOutcomeWithResolver<TContext>(
       [retryKey]: (state.retries[retryKey] ?? 0) + 1,
     };
     const workflowRuntime = recordWorkflowOutcome(pkg, state, outcome);
+    const pendingRepair = workflowRuntime?.repairEpisode?.pendingDecision;
+    const repairAction = pendingRepair
+      ? workflowRepairAction(pendingRepair)
+      : null;
     return {
       ...state,
-      pending: null,
-      status: "running",
+      pending: repairAction?.id ?? null,
+      status:
+        repairAction !== null
+          ? "waiting"
+          : outcome.repairFailure?.disposition === "hard-stop"
+            ? "failed"
+            : "running",
       retries,
+      ...(workflowRuntime ? { workflowRuntime } : {}),
+    };
+  }
+  if (repairDecision) {
+    const workflowRuntime = recordWorkflowOutcome(pkg, state, outcome);
+    return {
+      ...state,
+      iteration: state.iteration + 1,
+      pending: null,
+      status: repairDecision.outcome === "retry" ? "running" : "failed",
       ...(workflowRuntime ? { workflowRuntime } : {}),
     };
   }

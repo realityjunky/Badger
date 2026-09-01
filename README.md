@@ -22,6 +22,7 @@ The package includes:
 - bounded Decision Receipt scope references tied to accepted artifact and evidence versions;
 - bounded, content-addressed physical-tree and Git-aware snapshots for explicitly declared project scopes;
 - immutable, content-addressed Verification Receipts for automated checks, static inspections, and manual evidence, with bounded redacted summaries and freshness enforcement;
+- evidence-bound repair episodes with finite budgets, stagnation decisions, bounded overrides, and restart-safe history;
 - versioned structured findings with bounded redaction, deterministic ordering, continuation dispositions, and derived legacy blockers;
 - official/private differential observations for the pinned Engine behavior.
 
@@ -133,6 +134,21 @@ locations. Repository-owned protected roots must be supplied by the host and
 are rejected before provider enumeration if the declared scope would select
 them.
 
+Profiles that enable `repair-policy` declare a finite failure budget, warning and
+manual-stop thresholds, allowed retry/stop/contract-change choices, and an
+optional one-time override bound. Failed machine outcomes are reduced to a
+canonical signature containing protocol and execution identity, Attempt context,
+finding and receipt coverage, scope, snapshot, and artifact identities; prose,
+timestamps, and retry action ids do not reset an episode. The second equivalent
+failure warns, the manual-stop threshold creates a persisted repair `ask_user`
+action, and the hard maximum blocks without an override. Repair history is
+bounded and checked against the append-only trajectory during recovery. An
+accepted retry decision continues the same Attempt, while contract change stops
+the captured Run without rewriting its protocol identity.
+The normalized policy registers the bounded idempotent `workflow.resume`
+operation; automatic retry action materialization dispatches through that
+operation inside the same locked transition journal.
+
 Each continuation also carries the versioned `findings` catalog and its
 `findingSummary`. Findings are bounded, deterministically ordered, redacted,
 and expose registered runtime operations as argument arrays. `blockers` remains
@@ -231,6 +247,9 @@ Use `COMET_RUN_ROOT` or `--run-root` for manual Runs; use
 `--project <dir> --run-id <id>` for standalone Runs.
 Lock coordination remains private to the bundled runtime; generated adapters
 cannot acquire, release, diagnose, or recover locks independently.
+Generated state and guard adapters may forward `status: "failed"` outcomes and
+repair decision payloads; they do not evaluate budgets, signatures, overrides,
+or stop conditions.
 
 `eval` runs the Phase 2 certification over the generated package and a separate
 synthetic Phase 3 lifecycle certification. The report binds the generated

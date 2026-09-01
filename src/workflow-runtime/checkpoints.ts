@@ -347,6 +347,16 @@ function sameActionDefinition(
   action: EngineAction,
   step: { action: SkillStep["action"] },
 ): boolean {
+  if (action.repair) {
+    return (
+      action.type === "ask_user" &&
+      action.stepId !== null &&
+      action.repair.stepId === action.stepId &&
+      action.repair.actionId === action.id &&
+      action.repair.decisionId === action.decisionId &&
+      action.repair.signatureHash.length === 64
+    );
+  }
   return (
     action.type === step.action.type &&
     action.ref === step.action.ref &&

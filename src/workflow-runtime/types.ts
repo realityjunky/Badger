@@ -18,6 +18,7 @@ import type {
   WorkflowDecisionScopeSelection,
   WorkflowDecisionScopeSnapshot,
   WorkflowProtocol,
+  WorkflowRepairEpisodeState,
   WorkflowReviewerAttestation,
   WorkflowVerificationReceiptProposal,
   WorkflowVerificationReceiptReference,
@@ -75,6 +76,13 @@ export interface WorkflowDecisionSubmission {
     | WorkflowVerificationReceiptProposal[];
   verificationReceiptIds?: string[];
   receiptIds?: string[];
+  repair?: {
+    expectedSignatureHash?: string;
+    signatureHash?: string;
+    rationale?: string;
+    hypothesis?: string;
+    summary?: string;
+  };
 }
 
 export interface ManualWorkflowRunLocation {
@@ -119,6 +127,7 @@ export interface WorkflowContinuation {
   findings: WorkflowFinding[];
   findingSummary: WorkflowFindingSummary;
   requiresUserDecision: boolean;
+  repair?: WorkflowRepairEpisodeState;
 }
 
 export interface WorkflowHandoff {
@@ -145,6 +154,7 @@ export interface WorkflowHandoff {
   findings: WorkflowFinding[];
   findingSummary: WorkflowFindingSummary;
   requiresUserDecision: boolean;
+  repair?: WorkflowRepairEpisodeState;
   continuation: WorkflowContinuation | null;
 }
 
@@ -188,6 +198,7 @@ export interface WorkflowStateProjection {
   findings: WorkflowFinding[];
   findingSummary: WorkflowFindingSummary;
   requiresUserDecision: boolean;
+  repair?: WorkflowRepairEpisodeState;
 }
 
 export type StartWorkflowRunOptions =

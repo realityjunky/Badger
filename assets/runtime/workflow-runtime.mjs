@@ -677,7 +677,12 @@ var WORKFLOW_FINDING_CODES = [
   "verification-receipt-invalid",
   "verification-receipt-stale",
   "verification-receipt-failed",
-  "verification-receipt-storage-failed"
+  "verification-receipt-storage-failed",
+  "repair-stagnation-warning",
+  "repair-stagnation-stop",
+  "repair-iteration-limit",
+  "repair-override-exhausted",
+  "repair-decision-invalid"
 ];
 var severityRank = {
   error: 0,
@@ -1380,6 +1385,30 @@ var blockerCatalog = [
     }
   },
   {
+    match: /^Workflow repair hard stop/u,
+    entry: {
+      code: "repair-iteration-limit",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Workflow repair override has already been used/u,
+    entry: {
+      code: "repair-override-exhausted",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Workflow repair (?:override|decision)/u,
+    entry: {
+      code: "repair-decision-invalid",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
     match: /verification receipt|verificationReceipts/iu,
     entry: {
       code: "verification-receipt-invalid",
@@ -1721,8 +1750,1435 @@ function evaluationWarningFinding(evalId, evidence) {
     requiredAction: "none"
   });
 }
+function repairStagnationWarningFinding(signatureHash, consecutiveFailures, remainingFailures) {
+  return createWorkflowFinding({
+    code: "repair-stagnation-warning",
+    severity: "warning",
+    message: `Equivalent repair failure has occurred ${consecutiveFailures} times; change the repair approach before the manual stop threshold. ${remainingFailures} repair attempt(s) remain.`,
+    requiredAction: "retry",
+    operation: { id: "workflow.resume", args: [signatureHash] }
+  });
+}
+function repairStagnationStopFinding(signatureHash, consecutiveFailures, remainingFailures, requiresUserDecision = true) {
+  return createWorkflowFinding({
+    code: "repair-stagnation-stop",
+    severity: "error",
+    message: `Equivalent repair failure reached the manual stop threshold after ${consecutiveFailures} consecutive failure(s); an explicit repair decision is required. ${remainingFailures} repair attempt(s) remain.`,
+    requiredAction: requiresUserDecision ? "decide" : "stop",
+    ...requiresUserDecision ? { operation: { id: "workflow.submit", args: [signatureHash] } } : {},
+    requiresUserDecision
+  });
+}
+function repairIterationLimitFinding(signatureHash) {
+  return createWorkflowFinding({
+    code: "repair-iteration-limit",
+    severity: "error",
+    message: `The finite repair episode budget is exhausted for failure signature ${signatureHash}; no override can continue it.`,
+    requiredAction: "stop"
+  });
+}
+function repairOverrideExhaustedFinding(signatureHash) {
+  return createWorkflowFinding({
+    code: "repair-override-exhausted",
+    severity: "error",
+    message: `The one-time repair override has already been used for failure signature ${signatureHash}.`,
+    requiredAction: "decide",
+    operation: { id: "workflow.submit", args: [signatureHash] },
+    requiresUserDecision: true
+  });
+}
 function legacyBlockersFromFindings(disposition, findings) {
   return disposition === "blocked" ? findings.map((finding) => finding.message) : [];
+}
+
+// src/workflow-runtime/repair.ts
+var WORKFLOW_REPAIR_SCHEMA_VERSION = 1;
+var WORKFLOW_REPAIR_MAX_HISTORY_RECORDS = 256;
+var WORKFLOW_REPAIR_MAX_COVERAGE_ENTRIES = 1024;
+var WORKFLOW_REPAIR_MAX_TEXT_BYTES = 64 * 1024;
+var WORKFLOW_REPAIR_DEFAULT_RATIONALE_BYTES = 4 * 1024;
+var HASH_PATTERN = /^[a-f0-9]{64}$/u;
+var TOKEN_PATTERN = /^[^\u0000\r\n]{1,512}$/u;
+var SAFE_IDENTITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,511}$/u;
+var REPAIR_REASON_CODES = [
+  "new-failure-signature",
+  "repeated-failure-warning",
+  "repeated-failure-stop",
+  "repair-iteration-limit",
+  "override-accepted",
+  "override-already-used",
+  "repair-decision-accepted"
+];
+var WORKFLOW_REPAIR_OPERATION_REGISTRY = {
+  "workflow.resume": {
+    idempotent: true,
+    execute: async (operation2, executionCount, work) => {
+      if (operation2.operation !== "workflow.resume" || executionCount < 1 || executionCount > operation2.maxExecutions) {
+        throw new Error(
+          "Workflow repair automatic operation exceeded its bound"
+        );
+      }
+      return work();
+    }
+  }
+};
+function isRecord2(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function sameStableValue(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+}
+function boundedText(value, label) {
+  if (typeof value !== "string" || !TOKEN_PATTERN.test(value)) {
+    throw new Error(`${label} must be a bounded non-empty string`);
+  }
+  return value;
+}
+function boundedHash(value, label) {
+  const result = boundedText(value, label);
+  if (!HASH_PATTERN.test(result))
+    throw new Error(`${label} must be a SHA-256 hash`);
+  return result;
+}
+function nullableText(value, label) {
+  if (value === void 0 || value === null) return null;
+  return boundedText(value, label);
+}
+function nonNegativeInteger(value, label) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return value;
+}
+function positiveInteger(value, label) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return value;
+}
+function hashText(value, label) {
+  if (Buffer.byteLength(value, "utf8") > WORKFLOW_REPAIR_MAX_TEXT_BYTES) {
+    throw new Error(`${label} exceeds its byte bound`);
+  }
+  return sha256(normalizeWorkflowRepairText(value, label));
+}
+function normalizeWorkflowRepairText(value, label = "Workflow repair text", maxBytes = WORKFLOW_REPAIR_MAX_TEXT_BYTES) {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (normalized.length === 0 || Buffer.byteLength(normalized, "utf8") > maxBytes) {
+    throw new Error(`${label} is outside its bound`);
+  }
+  return normalized;
+}
+function hashWorkflowRepairText(value, label = "Workflow repair text", maxBytes = WORKFLOW_REPAIR_MAX_TEXT_BYTES) {
+  return sha256(normalizeWorkflowRepairText(value, label, maxBytes));
+}
+function hashValue(value) {
+  return sha256(JSON.stringify(stableValue(value)));
+}
+function normalizedValues(values, label) {
+  if (values === void 0) return [];
+  if (!Array.isArray(values) || values.length > WORKFLOW_REPAIR_MAX_COVERAGE_ENTRIES) {
+    throw new Error(`${label} exceeds its count boundary`);
+  }
+  const normalized = values.map((value) => {
+    if (typeof value === "string") {
+      const bounded = boundedText(value, label);
+      return SAFE_IDENTITY_PATTERN.test(bounded) ? bounded : hashValue(bounded);
+    }
+    if (!isRecord2(value) && !Array.isArray(value)) {
+      throw new Error(`${label} contains an invalid identity`);
+    }
+    return hashValue(value);
+  });
+  return [...new Set(normalized)].sort(
+    (left, right) => left.localeCompare(right)
+  );
+}
+function combinedValues(values, label) {
+  return normalizedValues(
+    values.flatMap((value) => value ?? []),
+    label
+  );
+}
+function identityHash(execution, explicit) {
+  if (explicit !== void 0) return boundedText(explicit, "executionHash");
+  if (typeof execution === "string") return boundedText(execution, "execution");
+  if (execution !== void 0) return hashValue(execution);
+  return hashValue({ execution: null });
+}
+function buildWorkflowRepairSignature(facts) {
+  const attempt = typeof facts.attempt === "object" && facts.attempt !== null ? facts.attempt : void 0;
+  const attemptId2 = nullableText(
+    facts.attemptId ?? (typeof facts.attempt === "string" ? facts.attempt : attempt?.id),
+    "attemptId"
+  );
+  const action = typeof facts.action === "object" && facts.action !== null ? facts.action : void 0;
+  const actionId2 = facts.actionId ?? (typeof facts.action === "string" ? facts.action : action?.id);
+  const protocolHash = boundedText(
+    facts.protocolHash ?? facts.contractHash,
+    "protocolHash"
+  );
+  const content = {
+    schemaVersion: WORKFLOW_REPAIR_SCHEMA_VERSION,
+    protocolHash,
+    executionHash: identityHash(
+      facts.execution ?? facts.executionIdentity,
+      facts.executionHash
+    ),
+    actionId: attemptId2 === null ? nullableText(actionId2, "actionId") : null,
+    attemptId: attemptId2,
+    nodeId: nullableText(facts.nodeId ?? attempt?.nodeId, "nodeId"),
+    cycleId: nullableText(facts.cycleId ?? attempt?.cycleId, "cycleId"),
+    visitOrdinal: (facts.visitOrdinal ?? attempt?.visitOrdinal) === void 0 || (facts.visitOrdinal ?? attempt?.visitOrdinal) === null ? null : nonNegativeInteger(
+      facts.visitOrdinal ?? attempt?.visitOrdinal,
+      "visitOrdinal"
+    ),
+    findingCodes: combinedValues(
+      [facts.findingCodes, facts.failedFindingCodes, facts.failedCheckIds],
+      "findingCodes"
+    ),
+    failedReceiptCoverage: combinedValues(
+      [
+        facts.failedReceiptCoverage,
+        facts.failedReceiptIds,
+        facts.receiptCoverage
+      ],
+      "failedReceiptCoverage"
+    ),
+    failedAcceptanceCoverage: combinedValues(
+      [
+        facts.failedAcceptanceCoverage,
+        facts.failedAcceptanceIds,
+        facts.acceptanceCoverage
+      ],
+      "failedAcceptanceCoverage"
+    ),
+    scopeIdentities: combinedValues(
+      [
+        facts.scopeIdentities,
+        facts.scopeHashes,
+        facts.implementationScopeHash === void 0 || facts.implementationScopeHash === null ? void 0 : [facts.implementationScopeHash],
+        facts.scopeHash === void 0 || facts.scopeHash === null ? void 0 : [facts.scopeHash]
+      ],
+      "scopeIdentities"
+    ),
+    snapshotIdentities: combinedValues(
+      [
+        facts.snapshotIdentities,
+        facts.snapshotHashes,
+        facts.artifactSnapshotHash === void 0 || facts.artifactSnapshotHash === null ? void 0 : [facts.artifactSnapshotHash],
+        facts.snapshotHash === void 0 || facts.snapshotHash === null ? void 0 : [facts.snapshotHash]
+      ],
+      "snapshotIdentities"
+    ),
+    artifactIdentities: combinedValues(
+      [
+        facts.artifactIdentities,
+        facts.artifactHashes,
+        facts.artifactHash === void 0 || facts.artifactHash === null ? void 0 : [facts.artifactHash]
+      ],
+      "artifactIdentities"
+    )
+  };
+  return {
+    ...content,
+    signatureHash: hashValue(content)
+  };
+}
+function choiceOutcome(value) {
+  return {
+    retry: "retry",
+    "retry-with-new-approach": "retry",
+    stop: "stop",
+    "contract-change": "contract-change",
+    "replace-run": "contract-change"
+  }[value];
+}
+function choiceLabel(id) {
+  return {
+    retry: "Retry with a new approach",
+    "retry-with-new-approach": "Retry with a new approach",
+    stop: "Stop",
+    "contract-change": "Change the contract",
+    "replace-run": "Change the contract"
+  }[id] ?? id;
+}
+function normalizeChoice(value, index) {
+  if (typeof value === "string") {
+    const id2 = boundedText(value, `repair policy choice ${index}`);
+    const outcome2 = choiceOutcome(id2);
+    if (!outcome2) {
+      throw new Error(`Repair policy choice has no declared outcome: ${id2}`);
+    }
+    return { id: id2, label: choiceLabel(id2), outcome: outcome2 };
+  }
+  if (!isRecord2(value)) {
+    throw new Error(
+      `Repair policy choice ${index} must be an object or string`
+    );
+  }
+  const unknown = Object.keys(value).find(
+    (key) => ![
+      "id",
+      "choiceId",
+      "label",
+      "description",
+      "outcome",
+      "effect",
+      "kind"
+    ].includes(key)
+  );
+  if (unknown)
+    throw new Error(`Repair policy choice has unknown field: ${unknown}`);
+  const id = boundedText(
+    value.id ?? value.choiceId ?? value.kind,
+    `repair policy choice ${index}.id`
+  );
+  const rawOutcome = value.outcome ?? value.effect ?? choiceOutcome(id);
+  if (typeof rawOutcome !== "string") {
+    throw new Error(`Repair policy choice ${id} requires an outcome`);
+  }
+  const outcome = choiceOutcome(rawOutcome) ?? rawOutcome;
+  if (outcome !== "retry" && outcome !== "stop" && outcome !== "contract-change") {
+    throw new Error(`Repair policy choice ${id} has an invalid outcome`);
+  }
+  const label = value.label ?? value.description ?? choiceLabel(id);
+  return {
+    id,
+    label: boundedText(label, `repair policy choice ${index}.label`),
+    outcome
+  };
+}
+function policyNumber(policy, names, label) {
+  const values = names.map((name) => policy[name]).filter((value2) => value2 !== void 0);
+  if (values.length === 0)
+    throw new Error(`Repair policy ${label} is required`);
+  const value = positiveInteger(values[0], `Repair policy ${label}`);
+  if (values.some((candidate) => candidate !== value)) {
+    throw new Error(`Repair policy ${label} aliases disagree`);
+  }
+  return value;
+}
+function normalizeReviewer(value) {
+  if (value === void 0) return {};
+  if (!isRecord2(value))
+    throw new Error("Repair policy reviewer must be an object");
+  const unknown = Object.keys(value).find(
+    (key) => key !== "subjects" && key !== "authorities"
+  );
+  if (unknown)
+    throw new Error(`Repair policy reviewer has unknown field: ${unknown}`);
+  const result = {};
+  for (const key of ["subjects", "authorities"]) {
+    if (value[key] === void 0) continue;
+    if (!Array.isArray(value[key]) || value[key].some(
+      (entry) => typeof entry !== "string" || entry.length === 0
+    )) {
+      throw new Error(`Repair policy reviewer ${key} must be a string array`);
+    }
+    const entries = [...value[key]];
+    if (new Set(entries).size !== entries.length) {
+      throw new Error(
+        `Repair policy reviewer ${key} must not contain duplicates`
+      );
+    }
+    result[key] = entries.sort((left, right) => left.localeCompare(right));
+  }
+  return result;
+}
+function normalizeRationale(value) {
+  if (value === void 0) return { required: false };
+  if (!isRecord2(value))
+    throw new Error("Repair policy rationale must be an object");
+  const unknown = Object.keys(value).find((key) => key !== "required");
+  if (unknown)
+    throw new Error(`Repair policy rationale has unknown field: ${unknown}`);
+  if (value.required !== void 0 && typeof value.required !== "boolean") {
+    throw new Error("Repair policy rationale required must be a boolean");
+  }
+  return { required: value.required === true };
+}
+function overrideSetting(policy) {
+  const raw = policy.overridePolicy ?? policy.override ?? policy.oneTimeOverride;
+  if (Object.prototype.hasOwnProperty.call(policy, "override") && policy.override === null || Object.prototype.hasOwnProperty.call(policy, "oneTimeOverride") && policy.oneTimeOverride === null || Object.prototype.hasOwnProperty.call(policy, "overridePolicy") && policy.overridePolicy === null) {
+    throw new Error("Repair policy override must not be null");
+  }
+  let enabled = policy.allowOneTimeOverride ?? policy.allowOverride;
+  let maxRationaleBytes = policy.maxOverrideRationaleBytes ?? policy.maxRationaleBytes ?? policy.maxOverrideBytes;
+  if (typeof raw === "boolean") enabled ??= raw;
+  if (raw !== void 0 && raw !== null && typeof raw !== "boolean" && !isRecord2(raw)) {
+    throw new Error("Repair policy override must be a boolean or object");
+  }
+  if (isRecord2(raw)) {
+    if (raw.enabled !== void 0) enabled ??= raw.enabled;
+    maxRationaleBytes ??= raw.maxRationaleBytes ?? raw.maxOverrideRationaleBytes ?? raw.maxBytes;
+    const unknown = Object.keys(raw).find(
+      (key) => ![
+        "enabled",
+        "maxRationaleBytes",
+        "maxOverrideRationaleBytes",
+        "maxBytes"
+      ].includes(key)
+    );
+    if (unknown)
+      throw new Error(`Repair policy override has unknown field: ${unknown}`);
+  }
+  if (enabled !== void 0 && typeof enabled !== "boolean") {
+    throw new Error("Repair policy allowOneTimeOverride must be a boolean");
+  }
+  if (policy.allowOneTimeOverride !== void 0 && policy.allowOverride !== void 0 && policy.allowOneTimeOverride !== policy.allowOverride) {
+    throw new Error("Repair policy override aliases disagree");
+  }
+  const normalizedEnabled = enabled === true;
+  const normalizedBytes = maxRationaleBytes === void 0 ? WORKFLOW_REPAIR_DEFAULT_RATIONALE_BYTES : positiveInteger(
+    maxRationaleBytes,
+    "Repair policy maxOverrideRationaleBytes"
+  );
+  if (normalizedBytes > WORKFLOW_REPAIR_MAX_TEXT_BYTES) {
+    throw new Error(
+      "Repair policy maxOverrideRationaleBytes exceeds its bound"
+    );
+  }
+  return { enabled: normalizedEnabled, maxRationaleBytes: normalizedBytes };
+}
+function normalizeAutomaticRepair(value, index, maxFailures) {
+  if (!isRecord2(value)) {
+    throw new Error(`Repair automatic operation ${index} must be an object`);
+  }
+  const unknown = Object.keys(value).find(
+    (key) => !["id", "operation", "idempotent", "maxExecutions"].includes(key)
+  );
+  if (unknown) {
+    throw new Error(
+      `Repair automatic operation ${index} has unknown field: ${unknown}`
+    );
+  }
+  const id = boundedText(value.id, `Repair automatic operation ${index}.id`);
+  if (value.operation !== "workflow.resume") {
+    throw new Error(
+      `Repair automatic operation ${id} must use workflow.resume`
+    );
+  }
+  if (!Object.hasOwn(WORKFLOW_REPAIR_OPERATION_REGISTRY, value.operation)) {
+    throw new Error(`Repair automatic operation ${id} is not registered`);
+  }
+  if (value.idempotent !== true) {
+    throw new Error(`Repair automatic operation ${id} must be idempotent`);
+  }
+  const maxExecutions = value.maxExecutions === void 0 ? maxFailures : positiveInteger(
+    value.maxExecutions,
+    `Repair automatic operation ${id}.maxExecutions`
+  );
+  if (maxExecutions > maxFailures) {
+    throw new Error(
+      `Repair automatic operation ${id} cannot exceed the repair failure budget`
+    );
+  }
+  return { id, operation: "workflow.resume", idempotent: true, maxExecutions };
+}
+function parseWorkflowRepairAutomaticOperation(value) {
+  const maxExecutions = isRecord2(value) && typeof value.maxExecutions === "number" ? value.maxExecutions : WORKFLOW_REPAIR_MAX_HISTORY_RECORDS;
+  return normalizeAutomaticRepair(value, 0, maxExecutions);
+}
+function normalizeAutomaticRepairs(policy, maxFailures) {
+  const single = policy.automaticRepair;
+  const plural = policy.automaticRepairs;
+  if (single !== void 0 && plural !== void 0) {
+    throw new Error(
+      "Repair automatic operation aliases cannot both be declared"
+    );
+  }
+  const values = plural ?? (single === void 0 ? [
+    {
+      id: "retry",
+      operation: "workflow.resume",
+      idempotent: true,
+      maxExecutions: maxFailures
+    }
+  ] : [single]);
+  if (!Array.isArray(values) || values.length === 0 || values.length > 16) {
+    throw new Error(
+      "Repair automatic operations must be a bounded non-empty array"
+    );
+  }
+  const normalized = values.map(
+    (value, index) => normalizeAutomaticRepair(value, index, maxFailures)
+  );
+  if (new Set(normalized.map((operation2) => operation2.id)).size !== normalized.length) {
+    throw new Error("Repair automatic operation ids must not be duplicated");
+  }
+  return normalized;
+}
+function normalizeWorkflowRepairPolicy(value) {
+  if (!isRecord2(value))
+    throw new Error("Workflow repair policy must be an object");
+  const allowedKeys = /* @__PURE__ */ new Set([
+    "maxFailures",
+    "maxRepairFailures",
+    "maxVerifyFailures",
+    "maxRepairIterations",
+    "warningThreshold",
+    "warningAtConsecutiveFailures",
+    "warningAfter",
+    "warnAfter",
+    "manualStopThreshold",
+    "manualStopAtConsecutiveFailures",
+    "stopAfter",
+    "manualStopAfter",
+    "allowedChoices",
+    "choices",
+    "allowOneTimeOverride",
+    "allowOverride",
+    "oneTimeOverride",
+    "override",
+    "overridePolicy",
+    "automaticRepair",
+    "automaticRepairs",
+    "maxOverrideRationaleBytes",
+    "maxRationaleBytes",
+    "maxOverrideBytes",
+    "reviewer",
+    "rationale"
+  ]);
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unknown) throw new Error(`Repair policy has unknown field: ${unknown}`);
+  const maxFailures = policyNumber(
+    value,
+    [
+      "maxFailures",
+      "maxRepairFailures",
+      "maxVerifyFailures",
+      "maxRepairIterations"
+    ],
+    "maxFailures"
+  );
+  const warningThreshold = policyNumber(
+    value,
+    [
+      "warningThreshold",
+      "warningAtConsecutiveFailures",
+      "warningAfter",
+      "warnAfter"
+    ],
+    "warningThreshold"
+  );
+  const manualStopThreshold = policyNumber(
+    value,
+    [
+      "manualStopThreshold",
+      "manualStopAtConsecutiveFailures",
+      "stopAfter",
+      "manualStopAfter"
+    ],
+    "manualStopThreshold"
+  );
+  if (warningThreshold > manualStopThreshold || manualStopThreshold > maxFailures) {
+    throw new Error(
+      "Repair policy thresholds must be warning <= manual-stop <= maxFailures"
+    );
+  }
+  const rawChoices = value.allowedChoices ?? value.choices;
+  if (value.allowedChoices !== void 0 && value.choices !== void 0 && JSON.stringify(stableValue(value.allowedChoices)) !== JSON.stringify(stableValue(value.choices))) {
+    throw new Error("Repair policy choice aliases disagree");
+  }
+  if (!Array.isArray(rawChoices) || rawChoices.length === 0) {
+    throw new Error("Repair policy allowedChoices must be a non-empty array");
+  }
+  const allowedChoices = rawChoices.map(normalizeChoice);
+  if (new Set(allowedChoices.map((choice) => choice.id)).size !== allowedChoices.length) {
+    throw new Error("Repair policy allowedChoices must not contain duplicates");
+  }
+  if (!allowedChoices.some(
+    (choice) => choice.outcome === "stop" || choice.outcome === "contract-change"
+  )) {
+    throw new Error(
+      "Repair policy allowedChoices must declare a stop or contract-change choice"
+    );
+  }
+  const override = overrideSetting(value);
+  const automaticRepairs = normalizeAutomaticRepairs(value, maxFailures);
+  return {
+    maxFailures,
+    warningThreshold,
+    manualStopThreshold,
+    allowedChoices,
+    allowOneTimeOverride: override.enabled,
+    maxOverrideRationaleBytes: override.maxRationaleBytes,
+    reviewer: normalizeReviewer(value.reviewer),
+    rationale: normalizeRationale(value.rationale),
+    automaticRepairs
+  };
+}
+async function executeWorkflowRepairOperation(operation2, executionCount, work) {
+  const registered = WORKFLOW_REPAIR_OPERATION_REGISTRY[operation2.operation];
+  if (!registered || operation2.idempotent !== registered.idempotent || !Number.isSafeInteger(operation2.maxExecutions) || operation2.maxExecutions < 1) {
+    throw new Error("Workflow repair automatic operation is not registered");
+  }
+  return registered.execute(operation2, executionCount, work);
+}
+function historyArray(value, maxRecords = WORKFLOW_REPAIR_MAX_HISTORY_RECORDS) {
+  if (!Array.isArray(value) || value.length > maxRecords) {
+    throw new Error("Workflow repair history exceeds its record boundary");
+  }
+  let previousRevision = -1;
+  return value.map((record, index) => {
+    if (!isRecord2(record) || typeof record.kind !== "string") {
+      throw new Error(`Workflow repair history record ${index} is invalid`);
+    }
+    const allowedKeys = record.kind === "failure" ? /* @__PURE__ */ new Set([
+      "kind",
+      "revision",
+      "actionId",
+      "attemptId",
+      "signatureHash",
+      "findingCodes",
+      "failedReceiptCoverage",
+      "failedAcceptanceCoverage",
+      "scopeIdentities",
+      "snapshotIdentities",
+      "artifactIdentities",
+      "automaticRepair",
+      "disposition",
+      "reasonCode",
+      "consecutiveFailures",
+      "totalFailures",
+      "remainingFailures",
+      "overrideAccepted"
+    ]) : record.kind === "decision" ? /* @__PURE__ */ new Set([
+      "kind",
+      "revision",
+      "actionId",
+      "attemptId",
+      "signatureHash",
+      "decisionId",
+      "choiceId",
+      "outcome",
+      "reviewer",
+      "rationaleHash",
+      "hypothesisHash"
+    ]) : record.kind === "override" ? /* @__PURE__ */ new Set([
+      "kind",
+      "revision",
+      "actionId",
+      "attemptId",
+      "signatureHash",
+      "decisionId",
+      "choiceId",
+      "outcome",
+      "reviewer",
+      "rationaleHash",
+      "hypothesisHash"
+    ]) : /* @__PURE__ */ new Set();
+    const unknown = Object.keys(record).find((key) => !allowedKeys.has(key));
+    if (unknown) {
+      throw new Error(
+        `Workflow repair history record ${index} has unknown field: ${unknown}`
+      );
+    }
+    const revision = nonNegativeInteger(
+      record.revision,
+      `Workflow repair history ${index}.revision`
+    );
+    if (revision <= previousRevision) {
+      throw new Error("Workflow repair history must be ordered by revision");
+    }
+    previousRevision = revision;
+    const actionId2 = nullableText(
+      record.actionId,
+      `Workflow repair history ${index}.actionId`
+    );
+    const attemptId2 = nullableText(
+      record.attemptId,
+      `Workflow repair history ${index}.attemptId`
+    );
+    const signatureHash = boundedHash(
+      record.signatureHash,
+      `Workflow repair history ${index}.signatureHash`
+    );
+    if (!HASH_PATTERN.test(signatureHash)) {
+      throw new Error(
+        `Workflow repair history ${index} signature hash is invalid`
+      );
+    }
+    if (record.kind === "failure") {
+      const metadata = [
+        record.disposition,
+        record.reasonCode,
+        record.consecutiveFailures,
+        record.totalFailures,
+        record.remainingFailures,
+        record.overrideAccepted
+      ];
+      const hasMetadata = metadata.some((value2) => value2 !== void 0);
+      if (hasMetadata && metadata.some((value2) => value2 === void 0)) {
+        throw new Error(
+          `Workflow repair history ${index} failure metadata is incomplete`
+        );
+      }
+      if (record.disposition !== void 0 && !["continue", "warning", "manual-stop", "hard-stop"].includes(
+        record.disposition
+      )) {
+        throw new Error(
+          `Workflow repair history ${index} failure disposition is invalid`
+        );
+      }
+      if (record.reasonCode !== void 0 && !REPAIR_REASON_CODES.includes(
+        record.reasonCode
+      )) {
+        throw new Error(
+          `Workflow repair history ${index} failure reasonCode is invalid`
+        );
+      }
+      if (record.overrideAccepted !== void 0 && typeof record.overrideAccepted !== "boolean") {
+        throw new Error(
+          `Workflow repair history ${index} overrideAccepted is invalid`
+        );
+      }
+      const automaticRepair = record.automaticRepair === void 0 ? void 0 : parseWorkflowRepairAutomaticOperation(record.automaticRepair);
+      return {
+        kind: "failure",
+        revision,
+        actionId: actionId2,
+        attemptId: attemptId2,
+        signatureHash,
+        findingCodes: normalizedValues(
+          record.findingCodes,
+          `Workflow repair history ${index}.findingCodes`
+        ),
+        failedReceiptCoverage: normalizedValues(
+          record.failedReceiptCoverage,
+          `Workflow repair history ${index}.failedReceiptCoverage`
+        ),
+        failedAcceptanceCoverage: normalizedValues(
+          record.failedAcceptanceCoverage,
+          `Workflow repair history ${index}.failedAcceptanceCoverage`
+        ),
+        scopeIdentities: normalizedValues(
+          record.scopeIdentities,
+          `Workflow repair history ${index}.scopeIdentities`
+        ),
+        snapshotIdentities: normalizedValues(
+          record.snapshotIdentities,
+          `Workflow repair history ${index}.snapshotIdentities`
+        ),
+        artifactIdentities: normalizedValues(
+          record.artifactIdentities,
+          `Workflow repair history ${index}.artifactIdentities`
+        ),
+        ...hasMetadata ? {
+          disposition: record.disposition,
+          reasonCode: boundedText(
+            record.reasonCode,
+            `Workflow repair history ${index}.reasonCode`
+          ),
+          consecutiveFailures: nonNegativeInteger(
+            record.consecutiveFailures,
+            `Workflow repair history ${index}.consecutiveFailures`
+          ),
+          totalFailures: nonNegativeInteger(
+            record.totalFailures,
+            `Workflow repair history ${index}.totalFailures`
+          ),
+          remainingFailures: nonNegativeInteger(
+            record.remainingFailures,
+            `Workflow repair history ${index}.remainingFailures`
+          ),
+          overrideAccepted: record.overrideAccepted
+        } : {},
+        ...automaticRepair ? { automaticRepair } : {}
+      };
+    }
+    if (record.kind === "decision") {
+      const outcome = choiceOutcome(String(record.outcome));
+      if (!outcome)
+        throw new Error(
+          `Workflow repair history ${index} decision outcome is invalid`
+        );
+      if (typeof record.reviewer !== "object" || !record.reviewer) {
+        throw new Error(`Workflow repair history ${index} reviewer is invalid`);
+      }
+      const reviewer = record.reviewer;
+      const unknownReviewer = Object.keys(reviewer).find(
+        (key) => key !== "subject" && key !== "authorities"
+      );
+      if (unknownReviewer || typeof reviewer.subject !== "string" || !Array.isArray(reviewer.authorities)) {
+        throw new Error(`Workflow repair history ${index} reviewer is invalid`);
+      }
+      return {
+        kind: "decision",
+        revision,
+        actionId: boundedText(
+          record.actionId,
+          `Workflow repair history ${index}.actionId`
+        ),
+        attemptId: attemptId2,
+        signatureHash,
+        decisionId: boundedText(
+          record.decisionId,
+          `Workflow repair history ${index}.decisionId`
+        ),
+        choiceId: boundedText(
+          record.choiceId,
+          `Workflow repair history ${index}.choiceId`
+        ),
+        outcome,
+        reviewer: {
+          subject: boundedText(
+            reviewer.subject,
+            `Workflow repair history ${index}.reviewer.subject`
+          ),
+          authorities: normalizedValues(
+            reviewer.authorities,
+            `Workflow repair history ${index}.reviewer.authorities`
+          )
+        },
+        rationaleHash: record.rationaleHash === null || record.rationaleHash === void 0 ? null : boundedHash(
+          record.rationaleHash,
+          `Workflow repair history ${index}.rationaleHash`
+        ),
+        hypothesisHash: record.hypothesisHash === null || record.hypothesisHash === void 0 ? null : boundedHash(
+          record.hypothesisHash,
+          `Workflow repair history ${index}.hypothesisHash`
+        )
+      };
+    }
+    if (record.kind === "override") {
+      const overrideOutcome = choiceOutcome(String(record.outcome));
+      if (!overrideOutcome) {
+        throw new Error(
+          `Workflow repair history ${index} override outcome is invalid`
+        );
+      }
+      if (!isRecord2(record.reviewer)) {
+        throw new Error(`Workflow repair history ${index} reviewer is invalid`);
+      }
+      const reviewerValue = record.reviewer;
+      const unknownReviewer = Object.keys(reviewerValue).find(
+        (key) => key !== "subject" && key !== "authorities"
+      );
+      if (unknownReviewer || typeof reviewerValue.subject !== "string" || !Array.isArray(reviewerValue.authorities)) {
+        throw new Error(`Workflow repair history ${index} reviewer is invalid`);
+      }
+      const reviewer = {
+        subject: boundedText(
+          reviewerValue.subject,
+          `Workflow repair history ${index}.reviewer.subject`
+        ),
+        authorities: normalizedValues(
+          reviewerValue.authorities,
+          `Workflow repair history ${index}.reviewer.authorities`
+        )
+      };
+      return {
+        kind: "override",
+        revision,
+        actionId: boundedText(
+          record.actionId,
+          `Workflow repair history ${index}.actionId`
+        ),
+        attemptId: attemptId2,
+        signatureHash,
+        decisionId: boundedText(
+          record.decisionId,
+          `Workflow repair history ${index}.decisionId`
+        ),
+        choiceId: boundedText(
+          record.choiceId,
+          `Workflow repair history ${index}.choiceId`
+        ),
+        outcome: overrideOutcome,
+        reviewer,
+        rationaleHash: boundedHash(
+          record.rationaleHash,
+          `Workflow repair history ${index}.rationaleHash`
+        ),
+        hypothesisHash: boundedHash(
+          record.hypothesisHash,
+          `Workflow repair history ${index}.hypothesisHash`
+        )
+      };
+    }
+    throw new Error(`Workflow repair history record ${index} kind is invalid`);
+  });
+}
+function parseSignature(value) {
+  if (!isRecord2(value)) {
+    throw new Error("Workflow repair episode signature must be an object");
+  }
+  const allowedKeys = /* @__PURE__ */ new Set([
+    "schemaVersion",
+    "protocolHash",
+    "executionHash",
+    "actionId",
+    "attemptId",
+    "nodeId",
+    "cycleId",
+    "visitOrdinal",
+    "findingCodes",
+    "failedReceiptCoverage",
+    "failedAcceptanceCoverage",
+    "scopeIdentities",
+    "snapshotIdentities",
+    "artifactIdentities",
+    "signatureHash"
+  ]);
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unknown) {
+    throw new Error(
+      `Workflow repair episode signature has unknown field: ${unknown}`
+    );
+  }
+  if (value.schemaVersion !== WORKFLOW_REPAIR_SCHEMA_VERSION) {
+    throw new Error(
+      "Workflow repair episode signature schema version is unsupported"
+    );
+  }
+  const signature = {
+    schemaVersion: WORKFLOW_REPAIR_SCHEMA_VERSION,
+    protocolHash: boundedText(
+      value.protocolHash,
+      "Workflow repair signature protocolHash"
+    ),
+    executionHash: boundedText(
+      value.executionHash,
+      "Workflow repair signature executionHash"
+    ),
+    actionId: nullableText(
+      value.actionId,
+      "Workflow repair signature actionId"
+    ),
+    attemptId: nullableText(
+      value.attemptId,
+      "Workflow repair signature attemptId"
+    ),
+    nodeId: nullableText(value.nodeId, "Workflow repair signature nodeId"),
+    cycleId: nullableText(value.cycleId, "Workflow repair signature cycleId"),
+    visitOrdinal: value.visitOrdinal === null ? null : nonNegativeInteger(
+      value.visitOrdinal,
+      "Workflow repair signature visitOrdinal"
+    ),
+    findingCodes: normalizedValues(
+      value.findingCodes,
+      "Workflow repair signature findingCodes"
+    ),
+    failedReceiptCoverage: normalizedValues(
+      value.failedReceiptCoverage,
+      "Workflow repair signature failedReceiptCoverage"
+    ),
+    failedAcceptanceCoverage: normalizedValues(
+      value.failedAcceptanceCoverage,
+      "Workflow repair signature failedAcceptanceCoverage"
+    ),
+    scopeIdentities: normalizedValues(
+      value.scopeIdentities,
+      "Workflow repair signature scopeIdentities"
+    ),
+    snapshotIdentities: normalizedValues(
+      value.snapshotIdentities,
+      "Workflow repair signature snapshotIdentities"
+    ),
+    artifactIdentities: normalizedValues(
+      value.artifactIdentities,
+      "Workflow repair signature artifactIdentities"
+    ),
+    signatureHash: boundedText(
+      value.signatureHash,
+      "Workflow repair signature signatureHash"
+    )
+  };
+  if (!HASH_PATTERN.test(signature.signatureHash)) {
+    throw new Error("Workflow repair episode signature hash is invalid");
+  }
+  const expected = buildWorkflowRepairSignature({
+    protocolHash: signature.protocolHash,
+    executionHash: signature.executionHash,
+    actionId: signature.actionId,
+    attemptId: signature.attemptId,
+    nodeId: signature.nodeId,
+    cycleId: signature.cycleId,
+    visitOrdinal: signature.visitOrdinal,
+    findingCodes: signature.findingCodes,
+    failedReceiptCoverage: signature.failedReceiptCoverage,
+    failedAcceptanceCoverage: signature.failedAcceptanceCoverage,
+    scopeIdentities: signature.scopeIdentities,
+    snapshotIdentities: signature.snapshotIdentities,
+    artifactIdentities: signature.artifactIdentities
+  });
+  if (!sameStableValue(expected, signature)) {
+    throw new Error("Workflow repair episode signature is not canonical");
+  }
+  return signature;
+}
+function parseWorkflowRepairPendingDecision(value) {
+  if (!isRecord2(value)) {
+    throw new Error("Workflow repair pending decision must be an object");
+  }
+  const allowedKeys = /* @__PURE__ */ new Set([
+    "schemaVersion",
+    "decisionId",
+    "actionId",
+    "signatureHash",
+    "failureRevision",
+    "attemptId",
+    "stepId",
+    "nodeId",
+    "cycleId",
+    "visitOrdinal",
+    "retryOrdinal",
+    "choices",
+    "rationale",
+    "reviewer"
+  ]);
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unknown) {
+    throw new Error(
+      `Workflow repair pending decision has unknown field: ${unknown}`
+    );
+  }
+  if (value.schemaVersion !== WORKFLOW_REPAIR_SCHEMA_VERSION) {
+    throw new Error(
+      "Workflow repair pending decision schema version is unsupported"
+    );
+  }
+  if (!Array.isArray(value.choices) || value.choices.length === 0) {
+    throw new Error("Workflow repair pending decision choices are invalid");
+  }
+  const choices = value.choices.map((entry, index) => {
+    const choice = normalizeChoice(entry, index);
+    return choice;
+  });
+  if (new Set(choices.map((choice) => choice.id)).size !== choices.length) {
+    throw new Error("Workflow repair pending decision choices are duplicated");
+  }
+  if (!isRecord2(value.rationale) || typeof value.rationale.required !== "boolean") {
+    throw new Error("Workflow repair pending decision rationale is invalid");
+  }
+  if (!isRecord2(value.reviewer)) {
+    throw new Error("Workflow repair pending decision reviewer is invalid");
+  }
+  const reviewer = normalizeReviewer(value.reviewer);
+  const signatureHash = boundedText(
+    value.signatureHash,
+    "Workflow repair pending decision signatureHash"
+  );
+  if (!HASH_PATTERN.test(signatureHash)) {
+    throw new Error(
+      "Workflow repair pending decision signature hash is invalid"
+    );
+  }
+  return {
+    schemaVersion: WORKFLOW_REPAIR_SCHEMA_VERSION,
+    decisionId: boundedText(
+      value.decisionId,
+      "Workflow repair pending decision decisionId"
+    ),
+    actionId: boundedText(
+      value.actionId,
+      "Workflow repair pending decision actionId"
+    ),
+    signatureHash,
+    failureRevision: nonNegativeInteger(
+      value.failureRevision,
+      "Workflow repair pending decision failureRevision"
+    ),
+    attemptId: boundedText(
+      value.attemptId,
+      "Workflow repair pending decision attemptId"
+    ),
+    stepId: boundedText(
+      value.stepId,
+      "Workflow repair pending decision stepId"
+    ),
+    nodeId: boundedText(
+      value.nodeId,
+      "Workflow repair pending decision nodeId"
+    ),
+    cycleId: nullableText(
+      value.cycleId,
+      "Workflow repair pending decision cycleId"
+    ),
+    visitOrdinal: positiveInteger(
+      value.visitOrdinal,
+      "Workflow repair pending decision visitOrdinal"
+    ),
+    retryOrdinal: nonNegativeInteger(
+      value.retryOrdinal,
+      "Workflow repair pending decision retryOrdinal"
+    ),
+    choices,
+    rationale: { required: value.rationale.required },
+    reviewer
+  };
+}
+function parseWorkflowRepairEpisode(value, maxRecords = WORKFLOW_REPAIR_MAX_HISTORY_RECORDS) {
+  if (!isRecord2(value)) {
+    throw new Error("Workflow repair episode must be an object");
+  }
+  const allowedKeys = /* @__PURE__ */ new Set([
+    "schemaVersion",
+    "history",
+    "signature",
+    "disposition",
+    "reasonCode",
+    "consecutiveFailures",
+    "totalFailures",
+    "remainingFailures",
+    "pendingDecision"
+  ]);
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unknown)
+    throw new Error(`Workflow repair episode has unknown field: ${unknown}`);
+  if (value.schemaVersion !== WORKFLOW_REPAIR_SCHEMA_VERSION) {
+    throw new Error("Workflow repair episode schema version is unsupported");
+  }
+  if (!Array.isArray(value.history)) {
+    throw new Error("Workflow repair episode history must be an array");
+  }
+  const history = historyArray(
+    value.history,
+    maxRecords
+  );
+  const signature = value.signature === null ? null : parseSignature(value.signature);
+  const dispositions = /* @__PURE__ */ new Set([
+    "continue",
+    "warning",
+    "manual-stop",
+    "hard-stop"
+  ]);
+  if (value.disposition !== null && !dispositions.has(value.disposition)) {
+    throw new Error("Workflow repair episode disposition is invalid");
+  }
+  const reasonCode = nullableText(
+    value.reasonCode,
+    "Workflow repair episode reasonCode"
+  );
+  if (reasonCode !== null && !REPAIR_REASON_CODES.includes(
+    reasonCode
+  )) {
+    throw new Error("Workflow repair episode reasonCode is invalid");
+  }
+  const consecutiveFailures = nonNegativeInteger(
+    value.consecutiveFailures,
+    "Workflow repair episode consecutiveFailures"
+  );
+  const totalFailures = nonNegativeInteger(
+    value.totalFailures,
+    "Workflow repair episode totalFailures"
+  );
+  const remainingFailures = nonNegativeInteger(
+    value.remainingFailures,
+    "Workflow repair episode remainingFailures"
+  );
+  const failureCount = history.filter(
+    (record) => record.kind === "failure"
+  ).length;
+  const automaticExecutionCounts = /* @__PURE__ */ new Map();
+  for (const record of history) {
+    if (record.kind !== "failure" || !record.automaticRepair) continue;
+    const count = (automaticExecutionCounts.get(record.automaticRepair.id) ?? 0) + 1;
+    if (count > record.automaticRepair.maxExecutions) {
+      throw new Error(
+        "Workflow repair automatic operation history exceeds its bound"
+      );
+    }
+    automaticExecutionCounts.set(record.automaticRepair.id, count);
+  }
+  if (failureCount !== totalFailures || totalFailures === 0 && signature !== null) {
+    throw new Error(
+      "Workflow repair episode failure counters are inconsistent"
+    );
+  }
+  const latestFailure = [...history].reverse().find(
+    (record) => record.kind === "failure"
+  );
+  if (latestFailure === void 0 && signature !== null || latestFailure !== void 0 && signature?.signatureHash !== latestFailure.signatureHash) {
+    throw new Error(
+      "Workflow repair episode signature is inconsistent with history"
+    );
+  }
+  const pendingDecision = value.pendingDecision === void 0 ? void 0 : parseWorkflowRepairPendingDecision(value.pendingDecision);
+  if (pendingDecision && signature?.signatureHash !== pendingDecision.signatureHash) {
+    throw new Error(
+      "Workflow repair pending decision signature is inconsistent"
+    );
+  }
+  return {
+    schemaVersion: WORKFLOW_REPAIR_SCHEMA_VERSION,
+    history,
+    signature,
+    disposition: value.disposition ?? null,
+    reasonCode,
+    consecutiveFailures,
+    totalFailures,
+    remainingFailures,
+    ...pendingDecision ? { pendingDecision } : {}
+  };
+}
+function workflowRepairFailureRecord(revision, signature) {
+  return {
+    kind: "failure",
+    revision: nonNegativeInteger(revision, "Workflow repair failure revision"),
+    actionId: signature.actionId,
+    attemptId: signature.attemptId,
+    signatureHash: signature.signatureHash,
+    findingCodes: [...signature.findingCodes],
+    failedReceiptCoverage: [...signature.failedReceiptCoverage],
+    failedAcceptanceCoverage: [...signature.failedAcceptanceCoverage],
+    scopeIdentities: [...signature.scopeIdentities],
+    snapshotIdentities: [...signature.snapshotIdentities],
+    artifactIdentities: [...signature.artifactIdentities]
+  };
+}
+function isStrictSubset(current, previous) {
+  const previousSet = new Set(previous);
+  return current.length < previous.length && current.every((value) => previousSet.has(value));
+}
+function semanticProgress(current, previous) {
+  const failingSets = [
+    [current.findingCodes, previous.findingCodes],
+    [current.failedReceiptCoverage, previous.failedReceiptCoverage],
+    [current.failedAcceptanceCoverage, previous.failedAcceptanceCoverage]
+  ];
+  const reducedFailureSet = failingSets.every(
+    ([now, before]) => now.every((value) => before.includes(value))
+  ) && failingSets.some(([now, before]) => isStrictSubset(now, before));
+  const previousScope = /* @__PURE__ */ new Set([
+    ...previous.scopeIdentities,
+    ...previous.snapshotIdentities,
+    ...previous.artifactIdentities
+  ]);
+  const newlyVerifiedScope = [
+    ...current.scopeIdentities,
+    ...current.snapshotIdentities,
+    ...current.artifactIdentities
+  ].some((value) => !previousScope.has(value));
+  return reducedFailureSet || newlyVerifiedScope;
+}
+function workflowRepairConsecutiveFailures(current, history) {
+  const failures = history.filter(
+    (record) => record.kind === "failure"
+  );
+  let consecutive = 1;
+  let later = current;
+  for (let index = failures.length - 1; index >= 0; index -= 1) {
+    const previous = failures[index];
+    if (later.signatureHash !== previous.signatureHash || semanticProgress(later, previous)) {
+      break;
+    }
+    consecutive += 1;
+    later = previous;
+  }
+  return consecutive;
+}
+function validateOverride(request, signature, policy, history) {
+  if (!policy.allowOneTimeOverride) {
+    throw new Error("Workflow repair override is not allowed by policy");
+  }
+  if (request.expectedSignatureHash !== signature.signatureHash) {
+    throw new Error(
+      "Workflow repair override does not match the current failure signature"
+    );
+  }
+  const rationale = (request.rationale ?? request.summary ?? "").trim();
+  const hypothesis = (request.hypothesis ?? request.summary ?? "").trim();
+  if (rationale.length === 0 || hypothesis.length === 0 || Buffer.byteLength(rationale, "utf8") > policy.maxOverrideRationaleBytes || Buffer.byteLength(hypothesis, "utf8") > policy.maxOverrideRationaleBytes) {
+    throw new Error(
+      "Workflow repair override rationale and hypothesis are outside their bounds"
+    );
+  }
+  return {
+    alreadyUsed: history.some(
+      (record) => record.kind === "override" && record.signatureHash === signature.signatureHash
+    ),
+    rationale,
+    hypothesis
+  };
+}
+function decideWorkflowRepair(options) {
+  const signature = buildWorkflowRepairSignature(options.facts);
+  const policy = normalizeWorkflowRepairPolicy(options.policy);
+  const history = historyArray(options.history, options.maxHistoryRecords);
+  const current = workflowRepairFailureRecord(
+    (history.at(-1)?.revision ?? 0) + 1,
+    signature
+  );
+  const failures = history.filter(
+    (record) => record.kind === "failure"
+  );
+  const totalFailures = failures.length + 1;
+  const consecutiveFailures = workflowRepairConsecutiveFailures(
+    current,
+    history
+  );
+  const automaticLimit = Math.min(
+    ...policy.automaticRepairs.map((operation2) => operation2.maxExecutions)
+  );
+  const effectiveMaxFailures = Math.min(policy.maxFailures, automaticLimit);
+  const remainingFailures = Math.max(0, effectiveMaxFailures - totalFailures);
+  const automaticRepair = totalFailures < effectiveMaxFailures && consecutiveFailures < policy.manualStopThreshold ? policy.automaticRepairs[0] ?? null : null;
+  const base = {
+    signature,
+    consecutiveFailures,
+    totalFailures,
+    remainingFailures,
+    totalRepairFailures: totalFailures,
+    remainingIterations: remainingFailures,
+    automaticRepair
+  };
+  if (totalFailures >= effectiveMaxFailures) {
+    return {
+      disposition: "hard-stop",
+      reasonCode: "repair-iteration-limit",
+      ...base,
+      overrideAccepted: false
+    };
+  }
+  if (consecutiveFailures < policy.warningThreshold) {
+    return {
+      disposition: "continue",
+      reasonCode: "new-failure-signature",
+      ...base,
+      overrideAccepted: false
+    };
+  }
+  if (consecutiveFailures < policy.manualStopThreshold) {
+    return {
+      disposition: "warning",
+      reasonCode: "repeated-failure-warning",
+      ...base,
+      overrideAccepted: false
+    };
+  }
+  const alreadyUsed = history.some(
+    (record) => record.kind === "override" && record.signatureHash === signature.signatureHash
+  );
+  if (options.override) {
+    const validated = validateOverride(
+      options.override,
+      signature,
+      policy,
+      history
+    );
+    return {
+      disposition: validated.alreadyUsed ? "manual-stop" : "continue",
+      reasonCode: validated.alreadyUsed ? "override-already-used" : "override-accepted",
+      ...base,
+      overrideAccepted: !validated.alreadyUsed
+    };
+  }
+  return {
+    disposition: "manual-stop",
+    reasonCode: alreadyUsed ? "override-already-used" : "repeated-failure-stop",
+    ...base,
+    overrideAccepted: false
+  };
+}
+function workflowRepairDecisionRecord(options) {
+  const rationale = options.decision.rationale?.trim() ?? "";
+  const hypothesis = options.decision.hypothesis?.trim() ?? "";
+  if (rationale.length > 0 && Buffer.byteLength(rationale, "utf8") > options.maxRationaleBytes) {
+    throw new Error("Workflow repair decision rationale exceeds its bound");
+  }
+  if (hypothesis.length > 0 && Buffer.byteLength(hypothesis, "utf8") > options.maxRationaleBytes) {
+    throw new Error("Workflow repair decision hypothesis exceeds its bound");
+  }
+  const isOverride = hypothesis.length > 0;
+  if (isOverride) {
+    return {
+      kind: "override",
+      revision: options.revision,
+      actionId: options.actionId,
+      attemptId: options.attemptId,
+      signatureHash: options.signatureHash,
+      decisionId: options.decision.decisionId,
+      choiceId: options.decision.choiceId,
+      outcome: options.decision.outcome,
+      reviewer: {
+        subject: options.decision.reviewer.subject,
+        authorities: [...options.decision.reviewer.authorities].sort(
+          (left, right) => left.localeCompare(right)
+        )
+      },
+      rationaleHash: hashText(rationale, "Workflow repair rationale"),
+      hypothesisHash: hashText(hypothesis, "Workflow repair hypothesis")
+    };
+  }
+  return {
+    kind: "decision",
+    revision: options.revision,
+    actionId: options.actionId,
+    attemptId: options.attemptId,
+    signatureHash: options.signatureHash,
+    decisionId: options.decision.decisionId,
+    choiceId: options.decision.choiceId,
+    outcome: options.decision.outcome,
+    reviewer: {
+      subject: options.decision.reviewer.subject,
+      authorities: [...options.decision.reviewer.authorities].sort(
+        (left, right) => left.localeCompare(right)
+      )
+    },
+    rationaleHash: rationale.length > 0 ? hashText(rationale, "Workflow repair rationale") : null,
+    hypothesisHash: null
+  };
+}
+function workflowRepairAction(pending) {
+  return {
+    id: pending.actionId,
+    stepId: pending.stepId,
+    type: "ask_user",
+    decisionId: pending.decisionId,
+    question: "The repair episode requires an explicit continuation decision.",
+    choices: pending.choices.map(({ id, label }) => ({ id, label })),
+    requiredInputs: { type: "object", fields: [] },
+    rationale: structuredClone(pending.rationale),
+    reviewer: structuredClone(pending.reviewer),
+    attemptId: pending.attemptId,
+    cycleId: pending.cycleId,
+    visitOrdinal: pending.visitOrdinal,
+    retryOrdinal: pending.retryOrdinal,
+    repair: structuredClone(pending)
+  };
+}
+function isWorkflowRepairAction(action) {
+  return Boolean(action?.type === "ask_user" && action.repair);
+}
+function repairEpisodeForFailure(options) {
+  const previous = options.previous;
+  const history = [
+    ...previous?.history ?? [],
+    {
+      ...options.failure,
+      disposition: options.decision.disposition,
+      reasonCode: options.decision.reasonCode,
+      consecutiveFailures: options.decision.consecutiveFailures,
+      totalFailures: options.decision.totalFailures,
+      remainingFailures: options.decision.remainingFailures,
+      overrideAccepted: options.decision.overrideAccepted,
+      ...options.decision.automaticRepair ? { automaticRepair: structuredClone(options.decision.automaticRepair) } : {}
+    }
+  ];
+  return {
+    schemaVersion: WORKFLOW_REPAIR_SCHEMA_VERSION,
+    history,
+    signature: structuredClone(options.decision.signature),
+    disposition: options.decision.disposition,
+    reasonCode: options.decision.reasonCode,
+    consecutiveFailures: options.decision.consecutiveFailures,
+    totalFailures: options.decision.totalFailures,
+    remainingFailures: options.decision.remainingFailures,
+    ...options.pendingDecision ? { pendingDecision: structuredClone(options.pendingDecision) } : {}
+  };
+}
+function repairEpisodeForDecision(options) {
+  const episode = structuredClone(options.previous);
+  delete episode.pendingDecision;
+  return {
+    ...episode,
+    history: [...options.previous.history, structuredClone(options.record)],
+    disposition: options.disposition,
+    reasonCode: options.reasonCode
+  };
 }
 
 // src/workflow-runtime/snapshots.ts
@@ -1901,7 +3357,7 @@ var MIN_SNAPSHOT_OMISSION_ENTRIES = 2;
 var MAX_GIT_OUTPUT_BYTES = 8 * 1024 * 1024;
 var MAX_GIT_DIAGNOSTICS = 16;
 var MAX_GIT_DIAGNOSTIC_BYTES = 256;
-var HASH_PATTERN = /^[a-f0-9]{64}$/u;
+var HASH_PATTERN2 = /^[a-f0-9]{64}$/u;
 var GIT_OBJECT_HASH_PATTERN = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
 var ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 var SNAPSHOT_POLICY_KEYS = /* @__PURE__ */ new Set([
@@ -2003,7 +3459,7 @@ var WorkflowContentSnapshotError = class extends Error {
     this.finding = finding;
   }
 };
-function isRecord2(value) {
+function isRecord3(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function assertKnownFields(value, keys, label) {
@@ -2139,7 +3595,7 @@ function policyHashValue(policy) {
 }
 function normalizedLimits(limits) {
   if (limits !== void 0) {
-    if (!isRecord2(limits)) {
+    if (!isRecord3(limits)) {
       throw new Error("Workflow content snapshot limits must be an object");
     }
     assertKnownFields(
@@ -2171,7 +3627,7 @@ function normalizedPatterns(values, label) {
   ].sort((left, right) => left.localeCompare(right, "en"));
 }
 function createWorkflowContentSnapshotPolicy(input) {
-  if (!isRecord2(input)) {
+  if (!isRecord3(input)) {
     throw new Error("Workflow content snapshot policy must be an object");
   }
   assertKnownFields(
@@ -2219,7 +3675,7 @@ function createWorkflowContentSnapshotPolicy(input) {
   return { ...policyWithoutHash, hash: hash4 };
 }
 function parseWorkflowContentSnapshotPolicy(value) {
-  if (!isRecord2(value)) {
+  if (!isRecord3(value)) {
     throw new Error(
       "Invalid Workflow content snapshot policy: must be an object"
     );
@@ -2241,7 +3697,7 @@ function parseWorkflowContentSnapshotPolicy(value) {
   if (!Array.isArray(value.include) || !Array.isArray(value.exclude)) {
     throw new Error("Workflow content snapshot policy patterns must be arrays");
   }
-  if (!isRecord2(value.limits)) {
+  if (!isRecord3(value.limits)) {
     throw new Error(
       "Workflow content snapshot policy limits must be an object"
     );
@@ -2259,7 +3715,7 @@ function parseWorkflowContentSnapshotPolicy(value) {
     limits: value.limits,
     hash: typeof value.hash === "string" ? value.hash : void 0
   });
-  if (typeof value.hash !== "string" || !HASH_PATTERN.test(value.hash)) {
+  if (typeof value.hash !== "string" || !HASH_PATTERN2.test(value.hash)) {
     throw new Error("Workflow content snapshot policy hash is invalid");
   }
   return policy;
@@ -2309,34 +3765,34 @@ function relativePath(value, label, allowRoot = false) {
   }
   return value;
 }
-function hashValue(value, label) {
-  if (typeof value !== "string" || !HASH_PATTERN.test(value)) {
+function hashValue2(value, label) {
+  if (typeof value !== "string" || !HASH_PATTERN2.test(value)) {
     throw new Error(`${label} must be a SHA-256 hash`);
   }
   return value;
 }
-function nonNegativeInteger(value, label) {
+function nonNegativeInteger2(value, label) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`${label} must be a non-negative integer`);
   }
   return value;
 }
 function parseSelectionStream(value, label) {
-  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord3(value)) throw new Error(`${label} must be an object`);
   assertKnownFields(value, SNAPSHOT_SELECTION_STREAM_KEYS, label);
-  const recordCount = nonNegativeInteger(
+  const recordCount = nonNegativeInteger2(
     value.recordCount,
     `${label}.recordCount`
   );
-  const storedRecordCount = nonNegativeInteger(
+  const storedRecordCount = nonNegativeInteger2(
     value.storedRecordCount,
     `${label}.storedRecordCount`
   );
-  const visitedNodeCount = nonNegativeInteger(
+  const visitedNodeCount = nonNegativeInteger2(
     value.visitedNodeCount,
     `${label}.visitedNodeCount`
   );
-  const encodedBytes = nonNegativeInteger(
+  const encodedBytes = nonNegativeInteger2(
     value.encodedBytes,
     `${label}.encodedBytes`
   );
@@ -2344,7 +3800,7 @@ function parseSelectionStream(value, label) {
     throw new Error(`${label} exceeds its enumeration bounds`);
   }
   const stream = {
-    hash: hashValue(value.hash, `${label}.hash`),
+    hash: hashValue2(value.hash, `${label}.hash`),
     visitedNodeCount,
     recordCount,
     storedRecordCount,
@@ -2368,7 +3824,7 @@ function sameSelectionStream(left, right) {
   return left.hash === right.hash && left.visitedNodeCount === right.visitedNodeCount && left.recordCount === right.recordCount && left.storedRecordCount === right.storedRecordCount && left.encodedBytes === right.encodedBytes && left.overflow === right.overflow && left.unstable === right.unstable;
 }
 function parsePhysicalSelection(value) {
-  if (!isRecord2(value)) {
+  if (!isRecord3(value)) {
     throw new Error("Workflow physical snapshot selection must be an object");
   }
   assertKnownFields(
@@ -2406,7 +3862,7 @@ function parsePhysicalSelection(value) {
   };
 }
 function parseGitSelectionStream(value, label) {
-  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord3(value)) throw new Error(`${label} must be an object`);
   assertKnownFields(value, SNAPSHOT_GIT_SELECTION_STREAM_KEYS, label);
   const base = parseSelectionStream(
     Object.fromEntries(
@@ -2414,11 +3870,11 @@ function parseGitSelectionStream(value, label) {
     ),
     label
   );
-  const outputBytes = nonNegativeInteger(
+  const outputBytes = nonNegativeInteger2(
     value.outputBytes,
     `${label}.outputBytes`
   );
-  const durationMs = nonNegativeInteger(
+  const durationMs = nonNegativeInteger2(
     value.durationMs,
     `${label}.durationMs`
   );
@@ -2430,7 +3886,7 @@ function parseGitSelectionStream(value, label) {
   }
   for (const key of ["indexHash", "workingTreeHash"]) {
     const hash4 = value[key];
-    if (hash4 !== null && (typeof hash4 !== "string" || !HASH_PATTERN.test(hash4))) {
+    if (hash4 !== null && (typeof hash4 !== "string" || !HASH_PATTERN2.test(hash4))) {
       throw new Error(`${label}.${key} is invalid`);
     }
   }
@@ -2446,7 +3902,7 @@ function sameGitSelectionStream(left, right) {
   return sameSelectionStream(left, right) && left.indexHash === right.indexHash && left.workingTreeHash === right.workingTreeHash;
 }
 function parseGitSelection(value) {
-  if (!isRecord2(value)) {
+  if (!isRecord3(value)) {
     throw new Error("Workflow Git snapshot selection must be an object");
   }
   assertKnownFields(
@@ -2482,12 +3938,12 @@ function parseGitSelection(value) {
   };
 }
 function parseGitMetadata(value, label) {
-  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord3(value)) throw new Error(`${label} must be an object`);
   assertKnownFields(value, SNAPSHOT_GIT_METADATA_KEYS, label);
   for (const [key, pattern] of [
     ["head", GIT_OBJECT_HASH_PATTERN],
-    ["index", HASH_PATTERN],
-    ["workingTree", HASH_PATTERN]
+    ["index", HASH_PATTERN2],
+    ["workingTree", HASH_PATTERN2]
   ]) {
     const entry = value[key];
     if (entry !== null && (typeof entry !== "string" || !pattern.test(entry))) {
@@ -2502,7 +3958,7 @@ function parseGitMetadata(value, label) {
 }
 function parseGitEvidence(value) {
   const label = "Workflow Git snapshot evidence";
-  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord3(value)) throw new Error(`${label} must be an object`);
   assertKnownFields(value, SNAPSHOT_GIT_EVIDENCE_KEYS, label);
   if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION || value.status !== "available" && value.status !== "unavailable" && value.status !== "error" && value.status !== "nested-repository") {
     throw new Error(`${label} identity is invalid`);
@@ -2526,7 +3982,7 @@ function parseGitEvidence(value) {
 }
 function parseSnapshotFallback(value) {
   const label = "Workflow content snapshot fallback";
-  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord3(value)) throw new Error(`${label} must be an object`);
   assertKnownFields(value, SNAPSHOT_FALLBACK_KEYS, label);
   const reasons = /* @__PURE__ */ new Set([
     "git-metadata-unavailable",
@@ -2544,14 +4000,14 @@ function parseSnapshotFallback(value) {
 }
 function parseEntry(value, index) {
   const label = `Workflow content snapshot entry ${index}`;
-  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord3(value)) throw new Error(`${label} must be an object`);
   assertKnownFields(value, SNAPSHOT_ENTRY_KEYS, label);
   const entryPath = relativePath(value.path, `${label}.path`);
   if (value.type !== "file") throw new Error(`${label}.type is invalid`);
   return {
     path: entryPath,
-    hash: hashValue(value.hash, `${label}.hash`),
-    size: nonNegativeInteger(value.size, `${label}.size`),
+    hash: hashValue2(value.hash, `${label}.hash`),
+    size: nonNegativeInteger2(value.size, `${label}.size`),
     type: "file"
   };
 }
@@ -2575,7 +4031,7 @@ var OMISSION_REASONS = /* @__PURE__ */ new Set([
 ]);
 function parseOmission(value, index) {
   const label = `Workflow content snapshot omission ${index}`;
-  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord3(value)) throw new Error(`${label} must be an object`);
   assertKnownFields(value, SNAPSHOT_OMISSION_KEYS, label);
   if (value.type !== "file" && value.type !== "directory" && value.type !== "other" || typeof value.reason !== "string" || !OMISSION_REASONS.has(
     value.reason
@@ -2584,20 +4040,20 @@ function parseOmission(value, index) {
   }
   return {
     path: relativePath(value.path, `${label}.path`, true),
-    size: value.size === null ? null : nonNegativeInteger(value.size, `${label}.size`),
+    size: value.size === null ? null : nonNegativeInteger2(value.size, `${label}.size`),
     type: value.type,
     reason: value.reason
   };
 }
 function parseOverflow(value) {
   const label = "Workflow content snapshot omission overflow";
-  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord3(value)) throw new Error(`${label} must be an object`);
   assertKnownFields(value, SNAPSHOT_OVERFLOW_KEYS, label);
-  const hash4 = hashValue(value.hash, `${label}.hash`);
+  const hash4 = hashValue2(value.hash, `${label}.hash`);
   if (value.ref !== `workflow-snapshot://omitted-overflow/${hash4}`) {
     throw new Error(`${label}.ref is invalid`);
   }
-  const count = nonNegativeInteger(value.count, `${label}.count`);
+  const count = nonNegativeInteger2(value.count, `${label}.count`);
   if (count < 1) throw new Error(`${label}.count must be positive`);
   return {
     ref: value.ref,
@@ -2610,12 +4066,12 @@ function sameLimits(left, right) {
 }
 function parseWorkflowContentSnapshotManifest(value) {
   const label = "Workflow content snapshot manifest";
-  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord3(value)) throw new Error(`${label} must be an object`);
   assertKnownFields(value, SNAPSHOT_MANIFEST_KEYS, label);
   if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION || value.kind !== "workflow-content-snapshot" || value.origin !== "explicit") {
     throw new Error(`${label} schema identity is invalid`);
   }
-  if (!isRecord2(value.capture))
+  if (!isRecord3(value.capture))
     throw new Error(`${label}.capture must be an object`);
   assertKnownFields(value.capture, SNAPSHOT_CAPTURE_KEYS, `${label}.capture`);
   if (value.capture.provider !== PHYSICAL_PROVIDER && value.capture.provider !== GIT_PROVIDER) {
@@ -2670,7 +4126,7 @@ function parseWorkflowContentSnapshotManifest(value) {
   if (fallback === void 0 && value.capture.provider === PHYSICAL_PROVIDER && gitEvidence !== void 0) {
     throw new Error(`${label}.capture Git evidence is inconsistent`);
   }
-  if (!isRecord2(value.limits))
+  if (!isRecord3(value.limits))
     throw new Error(`${label}.limits must be an object`);
   assertKnownFields(value.limits, SNAPSHOT_LIMIT_KEYS, `${label}.limits`);
   const limits = normalizedLimits(
@@ -2716,7 +4172,7 @@ function parseWorkflowContentSnapshotManifest(value) {
   )) {
     throw new Error(`${label}.omitted is not canonical`);
   }
-  const omittedCount = nonNegativeInteger(
+  const omittedCount = nonNegativeInteger2(
     value.omittedCount,
     `${label}.omittedCount`
   );
@@ -2899,13 +4355,13 @@ function snapshotPathForHash(hash4) {
   return `${WORKFLOW_CONTENT_SNAPSHOT_DIRECTORY}/${hash4}.json`;
 }
 function parseWorkflowContentSnapshotReference(value, label = "Workflow content snapshot reference") {
-  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord3(value)) throw new Error(`${label} must be an object`);
   assertKnownFields(
     value,
     /* @__PURE__ */ new Set(["schemaVersion", "kind", "hash", "path", "provider", "complete"]),
     label
   );
-  const hash4 = hashValue(value.hash, `${label}.hash`);
+  const hash4 = hashValue2(value.hash, `${label}.hash`);
   if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION || value.kind !== "workflow-content-snapshot-reference" || value.path !== snapshotPathForHash(hash4) || value.provider !== PHYSICAL_PROVIDER && value.provider !== GIT_PROVIDER || typeof value.complete !== "boolean") {
     throw new Error(`${label} identity is invalid`);
   }
@@ -4122,7 +5578,7 @@ function gitEvidenceStatus(before, after) {
   return "error";
 }
 function snapshotIdentityPath(value) {
-  if (!HASH_PATTERN.test(value))
+  if (!HASH_PATTERN2.test(value))
     throw new Error("Workflow snapshot hash is invalid");
   return snapshotPathForHash(value);
 }
@@ -4719,7 +6175,9 @@ var PROFILE_KEYS = /* @__PURE__ */ new Set([
   "schemaVersions",
   "findingCatalogVersion",
   "snapshotPolicy",
-  "verificationPolicy"
+  "verificationPolicy",
+  "repairPolicy",
+  "repair"
 ]);
 var CAPABILITIES = /* @__PURE__ */ new Set([
   "mutation-locks",
@@ -4727,7 +6185,8 @@ var CAPABILITIES = /* @__PURE__ */ new Set([
   "transition-journal",
   "verified-checkpoints",
   "content-snapshots",
-  "verification-receipts"
+  "verification-receipts",
+  "repair-policy"
 ]);
 var BOUND_KEY_NAMES = [
   "runStateBytes",
@@ -4744,7 +6203,13 @@ var BOUND_KEYS = /* @__PURE__ */ new Set([
   "checkpointRecordBytes",
   "checkpointCount",
   "verificationReceiptBytes",
-  "verificationReceiptCount"
+  "verificationReceiptCount",
+  "repairHistoryBytes",
+  "repairHistoryCount",
+  "repairEpisodeBytes",
+  "repairEpisodeCount",
+  "repairHistoryRecords",
+  "repairEpisodeRecords"
 ]);
 var SCHEMA_KEY_NAMES = [
   "runState",
@@ -4760,16 +6225,19 @@ var SCHEMA_KEYS = /* @__PURE__ */ new Set([
   "checkpointManifest",
   "checkpointRecord",
   "contentSnapshot",
-  "verificationReceipt"
+  "verificationReceipt",
+  "repairEpisode",
+  "repairHistory"
 ]);
 var MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
 var MAX_CHECKPOINT_COUNT = 256;
 var MAX_VERIFICATION_RECEIPT_COUNT = 256;
+var MAX_REPAIR_HISTORY_COUNT = 1024;
 var VERIFICATION_POLICY_KEYS = /* @__PURE__ */ new Set([
   "maxSummaryBytes",
   "maxEvidenceBytes"
 ]);
-function isRecord3(value) {
+function isRecord4(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function assertKnownFields2(value, keys, label) {
@@ -4801,7 +6269,7 @@ function requiredVerificationReceiptCount(value) {
   return value;
 }
 function parseVerificationPolicy(value) {
-  if (!isRecord3(value)) {
+  if (!isRecord4(value)) {
     throw new Error("Invalid Workflow verification policy: must be an object");
   }
   assertKnownFields2(
@@ -4828,7 +6296,7 @@ function parseVerificationPolicy(value) {
   };
 }
 function parseWorkflowDurabilityProfile(value) {
-  if (!isRecord3(value)) {
+  if (!isRecord4(value)) {
     throw new Error("Invalid Workflow durability profile: must be an object");
   }
   assertKnownFields2(value, PROFILE_KEYS, "Workflow durability profile");
@@ -4857,7 +6325,7 @@ function parseWorkflowDurabilityProfile(value) {
       "Invalid Workflow durability profile: capabilities must not contain duplicates"
     );
   }
-  if (!isRecord3(value.bounds)) {
+  if (!isRecord4(value.bounds)) {
     throw new Error(
       "Invalid Workflow durability profile: bounds must be an object"
     );
@@ -4911,7 +6379,39 @@ function parseWorkflowDurabilityProfile(value) {
       boundsValue.verificationReceiptCount
     );
   }
-  if (!isRecord3(value.schemaVersions)) {
+  const repairHistoryBytes = boundsValue.repairHistoryBytes ?? boundsValue.repairEpisodeBytes;
+  if (boundsValue.repairHistoryBytes !== void 0 && boundsValue.repairEpisodeBytes !== void 0 && boundsValue.repairHistoryBytes !== boundsValue.repairEpisodeBytes) {
+    throw new Error(
+      "Invalid Workflow durability profile: repair history byte aliases disagree"
+    );
+  }
+  if (repairHistoryBytes !== void 0) {
+    bounds.repairHistoryBytes = requiredBound(
+      repairHistoryBytes,
+      "repairHistoryBytes"
+    );
+  }
+  const repairHistoryCount = boundsValue.repairHistoryCount ?? boundsValue.repairEpisodeCount ?? boundsValue.repairHistoryRecords ?? boundsValue.repairEpisodeRecords;
+  const repairCountAliases = [
+    boundsValue.repairHistoryCount,
+    boundsValue.repairEpisodeCount,
+    boundsValue.repairHistoryRecords,
+    boundsValue.repairEpisodeRecords
+  ].filter((value2) => value2 !== void 0);
+  if (repairCountAliases.some((value2) => value2 !== repairCountAliases[0])) {
+    throw new Error(
+      "Invalid Workflow durability profile: repair history count aliases disagree"
+    );
+  }
+  if (repairHistoryCount !== void 0) {
+    if (typeof repairHistoryCount !== "number" || !Number.isSafeInteger(repairHistoryCount) || repairHistoryCount < 1 || repairHistoryCount > MAX_REPAIR_HISTORY_COUNT) {
+      throw new Error(
+        "Invalid Workflow durability profile: bounds.repairHistoryCount must be a positive bounded integer"
+      );
+    }
+    bounds.repairHistoryCount = repairHistoryCount;
+  }
+  if (!isRecord4(value.schemaVersions)) {
     throw new Error(
       "Invalid Workflow durability profile: schemaVersions must be an object"
     );
@@ -4961,6 +6461,22 @@ function parseWorkflowDurabilityProfile(value) {
       "Unsupported Workflow durability schema version: verificationReceipt"
     );
   }
+  const repairEpisode = value.schemaVersions.repairEpisode ?? value.schemaVersions.repairHistory ?? value.schemaVersions.repair;
+  const repairSchemaAliases = [
+    value.schemaVersions.repairEpisode,
+    value.schemaVersions.repairHistory,
+    value.schemaVersions.repair
+  ].filter((value2) => value2 !== void 0);
+  if (repairSchemaAliases.some((value2) => value2 !== repairSchemaAliases[0])) {
+    throw new Error(
+      "Invalid Workflow durability profile: repair schema aliases disagree"
+    );
+  }
+  if (repairEpisode !== void 0 && repairEpisode !== WORKFLOW_DURABILITY_SCHEMA_VERSION) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: repairEpisode"
+    );
+  }
   if (capabilities.includes("transition-journal") && (bounds.transitionJournalBytes === void 0 || transitionJournal !== WORKFLOW_DURABILITY_SCHEMA_VERSION)) {
     throw new Error(
       "Invalid Workflow durability profile: transition-journal requires its bound and schema version"
@@ -5001,6 +6517,25 @@ function parseWorkflowDurabilityProfile(value) {
       "Invalid Workflow durability profile: verification-receipts requires mutation locks, revision fences, transition journal, receipt bounds, and schema version"
     );
   }
+  const repairPolicyValue = value.repairPolicy ?? value.repair;
+  if (value.repairPolicy !== void 0 && value.repair !== void 0 && JSON.stringify(stableValue(value.repairPolicy)) !== JSON.stringify(stableValue(value.repair))) {
+    throw new Error(
+      "Invalid Workflow durability profile: repair policy aliases disagree"
+    );
+  }
+  const repairPolicy = repairPolicyValue === void 0 ? void 0 : normalizeWorkflowRepairPolicy(
+    repairPolicyValue
+  );
+  if (repairPolicy !== void 0 && !capabilities.includes("repair-policy")) {
+    throw new Error(
+      "Invalid Workflow durability profile: repairPolicy requires repair-policy capability"
+    );
+  }
+  if (capabilities.includes("repair-policy") && (!capabilities.includes("mutation-locks") || !capabilities.includes("revision-fences") || !capabilities.includes("transition-journal") || repairPolicy === void 0 || bounds.repairHistoryBytes === void 0 || bounds.repairHistoryCount === void 0 || repairPolicy !== void 0 && repairPolicy.maxFailures > bounds.repairHistoryCount || repairEpisode !== WORKFLOW_DURABILITY_SCHEMA_VERSION)) {
+    throw new Error(
+      "Invalid Workflow durability profile: repair-policy requires mutation locks, revision fences, transition journal, repair policy, repair history bounds, and schema version"
+    );
+  }
   if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
     throw new Error(
       `Unsupported Workflow durability finding catalog version: ${String(value.findingCatalogVersion)}`
@@ -5021,11 +6556,13 @@ function parseWorkflowDurabilityProfile(value) {
       ...checkpointManifest === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { checkpointManifest: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
       ...checkpointRecord === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { checkpointRecord: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
       ...contentSnapshot === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { contentSnapshot: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
-      ...verificationReceipt === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { verificationReceipt: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {}
+      ...verificationReceipt === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { verificationReceipt: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
+      ...repairEpisode === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { repairEpisode: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {}
     },
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
     ...snapshotPolicy ? { snapshotPolicy } : {},
-    ...verificationPolicy ? { verificationPolicy } : {}
+    ...verificationPolicy ? { verificationPolicy } : {},
+    ...repairPolicy ? { repairPolicy } : {}
   };
 }
 function normalizeWorkflowDurabilityProtocol(protocol) {
@@ -5783,7 +7320,8 @@ var ACTION_KEYS = /* @__PURE__ */ new Set([
   "attemptId",
   "cycleId",
   "visitOrdinal",
-  "retryOrdinal"
+  "retryOrdinal",
+  "repair"
 ]);
 var appendLocks = /* @__PURE__ */ new Map();
 function assertRunPath(changeDir, relativePath2) {
@@ -5800,7 +7338,7 @@ function assertRunPath(changeDir, relativePath2) {
   }
   return normalized;
 }
-function isRecord4(value) {
+function isRecord5(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function requiredText(value, key, label) {
@@ -5809,7 +7347,7 @@ function requiredText(value, key, label) {
   }
   return value;
 }
-function nullableText(value, key, label) {
+function nullableText2(value, key, label) {
   if (value === null) return null;
   return requiredText(value, key, label);
 }
@@ -5824,7 +7362,7 @@ function requiredFields(value, keys, label) {
     }
   }
 }
-function nonNegativeInteger2(value, key, label) {
+function nonNegativeInteger3(value, key, label) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
   }
@@ -5838,7 +7376,7 @@ function parseJson(raw, label) {
   }
 }
 function parseScopeProducer(value, label) {
-  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord5(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields3(
     value,
     /* @__PURE__ */ new Set([
@@ -5861,11 +7399,11 @@ function parseScopeProducer(value, label) {
     cycleId,
     attemptId: requiredText(value.attemptId, "attemptId", label),
     actionId: requiredText(value.actionId, "actionId", label),
-    revision: nonNegativeInteger2(value.revision, "revision", label)
+    revision: nonNegativeInteger3(value.revision, "revision", label)
   };
 }
 function parseScopeReference(value, label) {
-  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord5(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields3(
     value,
     /* @__PURE__ */ new Set(["id", "required", "versionId", "contentHash", "producer"]),
@@ -5887,7 +7425,7 @@ function parseScopeReference(value, label) {
   };
 }
 function parseDecisionScope(value, label) {
-  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord5(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields3(value, /* @__PURE__ */ new Set(["artifacts", "evidence"]), label);
   const parseEntries = (kind) => {
     const entries = value[kind];
@@ -5907,7 +7445,7 @@ function parseDecisionScope(value, label) {
   };
 }
 function parseAction(value) {
-  if (!isRecord4(value)) {
+  if (!isRecord5(value)) {
     throw new Error(
       "Invalid Run pending action: stored value must be an object"
     );
@@ -5919,7 +7457,7 @@ function parseAction(value) {
     "Run pending action"
   );
   const id = requiredText(value.id, "id", "Run pending action");
-  const stepId2 = nullableText(value.stepId, "stepId", "Run pending action");
+  const stepId2 = nullableText2(value.stepId, "stepId", "Run pending action");
   if (!ACTION_TYPES2.has(value.type)) {
     throw new Error("Invalid Run pending action: type is invalid");
   }
@@ -5994,7 +7532,7 @@ function parseAction(value) {
     );
   }
   if (Object.prototype.hasOwnProperty.call(value, "cycleId")) {
-    action.cycleId = nullableText(
+    action.cycleId = nullableText2(
       value.cycleId,
       "cycleId",
       "Run pending action"
@@ -6011,6 +7549,18 @@ function parseAction(value) {
     }
     action[key] = ordinal;
   }
+  if (Object.prototype.hasOwnProperty.call(value, "repair")) {
+    if (action.type !== "ask_user") {
+      throw new Error("Invalid Run pending action: repair requires ask_user");
+    }
+    const repair = parseWorkflowRepairPendingDecision(value.repair);
+    if (repair.actionId !== action.id || repair.stepId !== action.stepId || repair.attemptId !== action.attemptId || repair.cycleId !== (action.cycleId ?? null) || repair.visitOrdinal !== action.visitOrdinal || repair.retryOrdinal !== action.retryOrdinal || repair.decisionId !== action.decisionId) {
+      throw new Error(
+        "Invalid Run pending action: repair identity does not match action"
+      );
+    }
+    action.repair = repair;
+  }
   return action;
 }
 function parsePendingActionValue(value) {
@@ -6023,7 +7573,7 @@ function parseDecisionScalarType(value, label) {
   return value;
 }
 function parseDecisionInputSchema(value, label) {
-  if (!isRecord4(value)) {
+  if (!isRecord5(value)) {
     throw new Error(`Invalid ${label}: must be an object`);
   }
   assertKnownFields3(value, /* @__PURE__ */ new Set(["type", "fields"]), label);
@@ -6036,7 +7586,7 @@ function parseDecisionInputSchema(value, label) {
   const ids = /* @__PURE__ */ new Set();
   const fields = value.fields.map((entry, index) => {
     const fieldLabel = `${label}.fields[${index}]`;
-    if (!isRecord4(entry)) {
+    if (!isRecord5(entry)) {
       throw new Error(`Invalid ${fieldLabel}: must be an object`);
     }
     assertKnownFields3(
@@ -6081,7 +7631,7 @@ function parseDecisionInputSchema(value, label) {
   return { type: "object", fields };
 }
 function parseDecisionChoiceSummary(value, label) {
-  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord5(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields3(value, /* @__PURE__ */ new Set(["id", "label", "requiredInputs"]), label);
   const result = {
     id: requiredText(value.id, "id", label),
@@ -6096,7 +7646,7 @@ function parseDecisionChoiceSummary(value, label) {
   return result;
 }
 function parseRationalePolicy(value, label) {
-  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord5(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields3(value, /* @__PURE__ */ new Set(["required"]), label);
   if (value.required !== void 0 && typeof value.required !== "boolean") {
     throw new Error(`Invalid ${label}: required must be a boolean`);
@@ -6104,7 +7654,7 @@ function parseRationalePolicy(value, label) {
   return { required: value.required === true };
 }
 function parseReviewerPolicy(value, label) {
-  if (!isRecord4(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord5(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields3(value, /* @__PURE__ */ new Set(["subjects", "authorities"]), label);
   const result = {};
   for (const key of ["subjects", "authorities"]) {
@@ -6119,7 +7669,7 @@ function parseReviewerPolicy(value, label) {
   return result;
 }
 function parseArtifacts(value) {
-  if (!isRecord4(value)) {
+  if (!isRecord5(value)) {
     throw new Error("Invalid Run artifacts: stored value must be an object");
   }
   for (const artifact of Object.values(value)) {
@@ -6132,7 +7682,7 @@ function parseArtifacts(value) {
   );
 }
 function parseTrajectoryEvent(value) {
-  if (!isRecord4(value)) {
+  if (!isRecord5(value)) {
     throw new Error("Invalid Run trajectory: stored value must be an object");
   }
   const keys = /* @__PURE__ */ new Set(["sequence", "timestamp", "type", "runId", "data"]);
@@ -6146,7 +7696,7 @@ function parseTrajectoryEvent(value) {
   if (!TRAJECTORY_EVENT_TYPES.has(value.type)) {
     throw new Error("Invalid Run trajectory: type is invalid");
   }
-  if (!isRecord4(value.data)) {
+  if (!isRecord5(value.data)) {
     throw new Error("Invalid Run trajectory: data must be an object");
   }
   return {
@@ -6342,7 +7892,7 @@ var CLAIM_DIRECTORY = ".comet/revision-claims";
 var CLAIM_MAX_IDENTIFIER_LENGTH = 256;
 var CLAIM_WAIT_TIMEOUT_MS = 5e3;
 var CLAIM_POLL_INTERVAL_MS = 10;
-function isRecord5(value) {
+function isRecord6(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function assertKnownFields4(value, keys, label) {
@@ -6362,7 +7912,7 @@ function timestamp(value, key, label) {
   }
   return result;
 }
-function nonNegativeInteger3(value, key, label) {
+function nonNegativeInteger4(value, key, label) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
   }
@@ -6377,7 +7927,7 @@ function hash(value, key, label) {
 }
 function parseExecutionIdentity(value) {
   const label = "Workflow revision claim execution";
-  if (!isRecord5(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord6(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields4(
     value,
     /* @__PURE__ */ new Set([
@@ -6392,7 +7942,7 @@ function parseExecutionIdentity(value) {
     ]),
     label
   );
-  if (!isRecord5(value.nodeToStep)) {
+  if (!isRecord6(value.nodeToStep)) {
     throw new Error(`Invalid ${label}: nodeToStep must be an object`);
   }
   const nodeToStep = {};
@@ -6431,7 +7981,7 @@ function parseExecutionIdentity(value) {
 }
 function parseClaim(value) {
   const label = "Workflow revision claim";
-  if (!isRecord5(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord6(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields4(
     value,
     /* @__PURE__ */ new Set([
@@ -6459,12 +8009,12 @@ function parseClaim(value) {
   if (value.operation !== "workflow.submit") {
     throw new Error(`Invalid ${label}: operation is invalid`);
   }
-  const expectedRevision = nonNegativeInteger3(
+  const expectedRevision = nonNegativeInteger4(
     value.expectedRevision,
     "expectedRevision",
     label
   );
-  const intendedRevision = nonNegativeInteger3(
+  const intendedRevision = nonNegativeInteger4(
     value.intendedRevision,
     "intendedRevision",
     label
@@ -6689,7 +8239,7 @@ var WORKFLOW_VERIFICATION_RECEIPT_SCHEMA_VERSION = 1;
 var WORKFLOW_VERIFICATION_RECEIPT_MAX_SCOPE_ENTRIES = 64;
 var WORKFLOW_VERIFICATION_RECEIPT_DEFAULT_SUMMARY_BYTES = 4 * 1024;
 var WORKFLOW_VERIFICATION_RECEIPT_DEFAULT_EVIDENCE_BYTES = 8 * 1024;
-var HASH_PATTERN2 = /^[a-f0-9]{64}$/u;
+var HASH_PATTERN3 = /^[a-f0-9]{64}$/u;
 var ISO_TIMESTAMP_PATTERN2 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 var MAX_IDENTIFIER_BYTES = 256;
 var MAX_RAW_SUMMARY_BYTES = 16 * 1024 * 1024;
@@ -6763,7 +8313,7 @@ function workflowVerificationKinds(requirement) {
   return values;
 }
 function validateWorkflowVerificationRequirement(value, label = "Workflow verification requirement") {
-  if (!isRecord6(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord7(value)) throw new Error(`${label} must be an object`);
   assertKnownFields5(
     value,
     /* @__PURE__ */ new Set(["id", "role", "kind", "scope", "requireContentSnapshot"]),
@@ -6782,7 +8332,7 @@ function validateWorkflowVerificationRequirement(value, label = "Workflow verifi
     throw new Error(`${label}.requireContentSnapshot must be a boolean`);
   }
   if (value.scope === void 0) return;
-  if (!isRecord6(value.scope))
+  if (!isRecord7(value.scope))
     throw new Error(`${label}.scope must be an object`);
   assertKnownFields5(
     value.scope,
@@ -6797,7 +8347,7 @@ function validateWorkflowVerificationRequirement(value, label = "Workflow verifi
     }
     const ids = /* @__PURE__ */ new Set();
     for (const [index, entry] of entries.entries()) {
-      if (!isRecord6(entry)) {
+      if (!isRecord7(entry)) {
         throw new Error(`${label}.scope.${key}[${index}] must be an object`);
       }
       assertKnownFields5(
@@ -6819,28 +8369,28 @@ function validateWorkflowVerificationRequirement(value, label = "Workflow verifi
     }
   }
 }
-function isRecord6(value) {
+function isRecord7(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function assertKnownFields5(value, keys, label) {
   const unknown = Object.keys(value).find((key) => !keys.has(key));
   if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
 }
-function boundedText(value, key, label) {
+function boundedText2(value, key, label) {
   if (typeof value !== "string" || value.length === 0 || Buffer.byteLength(value, "utf8") > MAX_IDENTIFIER_BYTES || /[\u0000\r\n]/u.test(value)) {
     throw new Error(`Invalid ${label}: ${key} must be a bounded string`);
   }
   return value;
 }
-function hashValue2(value, key, label) {
-  const result = boundedText(value, key, label);
-  if (!HASH_PATTERN2.test(result)) {
+function hashValue3(value, key, label) {
+  const result = boundedText2(value, key, label);
+  if (!HASH_PATTERN3.test(result)) {
     throw new Error(`Invalid ${label}: ${key} must be a SHA-256 hash`);
   }
   return result;
 }
 function identityText(value, key, label) {
-  const result = boundedText(value, key, label);
+  const result = boundedText2(value, key, label);
   if (/\b(?:password|passwd|secret|token|api[-_]?key|authorization|cookie|credential)\s*[:=]/iu.test(
     result
   ) || /\bBearer\s+/iu.test(result)) {
@@ -6849,16 +8399,16 @@ function identityText(value, key, label) {
   return result;
 }
 function nullableHash(value, key, label) {
-  return value === null ? null : hashValue2(value, key, label);
+  return value === null ? null : hashValue3(value, key, label);
 }
-function nonNegativeInteger4(value, key, label) {
+function nonNegativeInteger5(value, key, label) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
   }
   return value;
 }
 function timestamp2(value, key, label) {
-  const result = boundedText(value, key, label);
+  const result = boundedText2(value, key, label);
   if (!ISO_TIMESTAMP_PATTERN2.test(result)) {
     throw new Error(`Invalid ${label}: ${key} must be an ISO timestamp`);
   }
@@ -6884,23 +8434,23 @@ function verificationBounds(profile) {
   };
 }
 function parseProducer(value, label) {
-  if (!isRecord6(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields5(value, PRODUCER_KEYS, label);
   const cycleId = value.cycleId;
   if (cycleId !== null && (typeof cycleId !== "string" || cycleId.length === 0)) {
     throw new Error(`Invalid ${label}: cycleId must be a string or null`);
   }
   return {
-    runId: boundedText(value.runId, "runId", label),
-    nodeId: boundedText(value.nodeId, "nodeId", label),
+    runId: boundedText2(value.runId, "runId", label),
+    nodeId: boundedText2(value.nodeId, "nodeId", label),
     cycleId,
-    attemptId: boundedText(value.attemptId, "attemptId", label),
-    actionId: boundedText(value.actionId, "actionId", label),
-    revision: nonNegativeInteger4(value.revision, "revision", label)
+    attemptId: boundedText2(value.attemptId, "attemptId", label),
+    actionId: boundedText2(value.actionId, "actionId", label),
+    revision: nonNegativeInteger5(value.revision, "revision", label)
   };
 }
 function parseScopeReference2(value, label) {
-  if (!isRecord6(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields5(
     value,
     /* @__PURE__ */ new Set(["id", "required", "versionId", "contentHash", "producer"]),
@@ -6910,15 +8460,15 @@ function parseScopeReference2(value, label) {
     throw new Error(`Invalid ${label}: required must be a boolean`);
   }
   return {
-    id: boundedText(value.id, "id", label),
+    id: boundedText2(value.id, "id", label),
     required: value.required,
-    versionId: boundedText(value.versionId, "versionId", label),
-    contentHash: hashValue2(value.contentHash, "contentHash", label),
+    versionId: boundedText2(value.versionId, "versionId", label),
+    contentHash: hashValue3(value.contentHash, "contentHash", label),
     producer: parseProducer(value.producer, `${label}.producer`)
   };
 }
 function parseScope(value, label) {
-  if (!isRecord6(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields5(value, /* @__PURE__ */ new Set(["artifacts", "evidence"]), label);
   const parseEntries = (key) => {
     const entries = value[key];
@@ -6955,13 +8505,13 @@ function parseScope(value, label) {
   };
 }
 function parseEvidence(value, label, bounds, options = {}) {
-  if (!isRecord6(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields5(value, EVIDENCE_KEYS, label);
   if (typeof value.summary !== "string" || value.summary.length === 0 || Buffer.byteLength(value.summary, "utf8") > bounds.summaryBytes || /[\u0000\r\n]/u.test(value.summary)) {
     throw new Error(`Invalid ${label}: summary is outside its bound`);
   }
   const summary = value.summary;
-  const durationMs = nonNegativeInteger4(value.durationMs, "durationMs", label);
+  const durationMs = nonNegativeInteger5(value.durationMs, "durationMs", label);
   if (durationMs > MAX_DURATION_MS) {
     throw new Error(`Invalid ${label}: durationMs exceeds its bound`);
   }
@@ -6970,7 +8520,7 @@ function parseEvidence(value, label, bounds, options = {}) {
   }
   const evidence = {
     summary,
-    outputHash: hashValue2(value.outputHash, "outputHash", label),
+    outputHash: hashValue3(value.outputHash, "outputHash", label),
     durationMs,
     truncated: value.truncated
   };
@@ -6983,12 +8533,12 @@ function parseEvidence(value, label, bounds, options = {}) {
   return evidence;
 }
 function parseArtifactReference(value, label) {
-  if (!isRecord6(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields5(value, ARTIFACT_REFERENCE_KEYS, label);
   return {
-    artifactId: boundedText(value.artifactId, "artifactId", label),
-    versionId: boundedText(value.versionId, "versionId", label),
-    contentHash: hashValue2(value.contentHash, "contentHash", label),
+    artifactId: boundedText2(value.artifactId, "artifactId", label),
+    versionId: boundedText2(value.versionId, "versionId", label),
+    contentHash: hashValue3(value.contentHash, "contentHash", label),
     producer: parseProducer(value.producer, `${label}.producer`)
   };
 }
@@ -7090,7 +8640,7 @@ function validateReceiptFields(value, label, bounds) {
 function parseWorkflowVerificationReceipt(value, profile) {
   const bounds = verificationBounds(profile);
   const label = RECEIPT_LABEL;
-  if (!isRecord6(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
   validateReceiptFields(value, label, bounds);
   const scope = parseScope(value.scope, `${label}.scope`);
   const evidence = parseEvidence(value.evidence, `${label}.evidence`, bounds, {
@@ -7112,23 +8662,23 @@ function parseWorkflowVerificationReceipt(value, profile) {
   const receipt = {
     schemaVersion: WORKFLOW_VERIFICATION_RECEIPT_SCHEMA_VERSION,
     kind: "workflow-verification-receipt",
-    receiptId: boundedText(value.receiptId, "receiptId", label),
-    receiptHash: hashValue2(value.receiptHash, "receiptHash", label),
+    receiptId: boundedText2(value.receiptId, "receiptId", label),
+    receiptHash: hashValue3(value.receiptHash, "receiptHash", label),
     receiptKind: value.receiptKind,
     status: value.status,
-    requirementId: boundedText(value.requirementId, "requirementId", label),
-    role: boundedText(value.role, "role", label),
-    runId: boundedText(value.runId, "runId", label),
-    revision: nonNegativeInteger4(value.revision, "revision", label),
-    actionId: boundedText(value.actionId, "actionId", label),
-    nodeId: boundedText(value.nodeId, "nodeId", label),
-    cycleId: value.cycleId === null ? null : boundedText(value.cycleId, "cycleId", label),
-    attemptId: boundedText(value.attemptId, "attemptId", label),
+    requirementId: boundedText2(value.requirementId, "requirementId", label),
+    role: boundedText2(value.role, "role", label),
+    runId: boundedText2(value.runId, "runId", label),
+    revision: nonNegativeInteger5(value.revision, "revision", label),
+    actionId: boundedText2(value.actionId, "actionId", label),
+    nodeId: boundedText2(value.nodeId, "nodeId", label),
+    cycleId: value.cycleId === null ? null : boundedText2(value.cycleId, "cycleId", label),
+    attemptId: boundedText2(value.attemptId, "attemptId", label),
     execution: parseExecutionIdentity(value.execution),
-    protocolHash: hashValue2(value.protocolHash, "protocolHash", label),
-    packageHash: hashValue2(value.packageHash, "packageHash", label),
-    snapshotHash: hashValue2(value.snapshotHash, "snapshotHash", label),
-    scopeHash: hashValue2(value.scopeHash, "scopeHash", label),
+    protocolHash: hashValue3(value.protocolHash, "protocolHash", label),
+    packageHash: hashValue3(value.packageHash, "packageHash", label),
+    snapshotHash: hashValue3(value.snapshotHash, "snapshotHash", label),
+    scopeHash: hashValue3(value.scopeHash, "scopeHash", label),
     contentSnapshotHash: nullableHash(
       value.contentSnapshotHash,
       "contentSnapshotHash",
@@ -7142,7 +8692,7 @@ function parseWorkflowVerificationReceipt(value, profile) {
     ),
     provider: identityText(value.provider, "provider", label),
     issuedAt: timestamp2(value.issuedAt, "issuedAt", label),
-    evidenceHash: hashValue2(value.evidenceHash, "evidenceHash", label),
+    evidenceHash: hashValue3(value.evidenceHash, "evidenceHash", label),
     truncated: value.truncated,
     scope,
     evidence
@@ -7183,7 +8733,7 @@ function parseWorkflowVerificationReceipt(value, profile) {
 function parseWorkflowVerificationReceiptReference(value, profile) {
   const bounds = verificationBounds(profile);
   const label = "Workflow Verification Receipt reference";
-  if (!isRecord6(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields5(value, RECEIPT_REFERENCE_KEYS, label);
   if (value.schemaVersion !== WORKFLOW_VERIFICATION_RECEIPT_SCHEMA_VERSION || value.kind !== "workflow-verification-receipt-reference") {
     throw new Error(`Invalid ${label}: schema identity is invalid`);
@@ -7201,23 +8751,23 @@ function parseWorkflowVerificationReceiptReference(value, profile) {
   const reference = {
     schemaVersion: WORKFLOW_VERIFICATION_RECEIPT_SCHEMA_VERSION,
     kind: "workflow-verification-receipt-reference",
-    receiptId: boundedText(value.receiptId, "receiptId", label),
-    receiptHash: hashValue2(value.receiptHash, "receiptHash", label),
+    receiptId: boundedText2(value.receiptId, "receiptId", label),
+    receiptHash: hashValue3(value.receiptHash, "receiptHash", label),
     receiptKind: value.receiptKind,
     status: value.status,
-    requirementId: boundedText(value.requirementId, "requirementId", label),
-    role: boundedText(value.role, "role", label),
-    runId: boundedText(value.runId, "runId", label),
-    revision: nonNegativeInteger4(value.revision, "revision", label),
-    actionId: boundedText(value.actionId, "actionId", label),
-    nodeId: boundedText(value.nodeId, "nodeId", label),
-    cycleId: value.cycleId === null ? null : boundedText(value.cycleId, "cycleId", label),
-    attemptId: boundedText(value.attemptId, "attemptId", label),
+    requirementId: boundedText2(value.requirementId, "requirementId", label),
+    role: boundedText2(value.role, "role", label),
+    runId: boundedText2(value.runId, "runId", label),
+    revision: nonNegativeInteger5(value.revision, "revision", label),
+    actionId: boundedText2(value.actionId, "actionId", label),
+    nodeId: boundedText2(value.nodeId, "nodeId", label),
+    cycleId: value.cycleId === null ? null : boundedText2(value.cycleId, "cycleId", label),
+    attemptId: boundedText2(value.attemptId, "attemptId", label),
     execution: parseExecutionIdentity(value.execution),
-    protocolHash: hashValue2(value.protocolHash, "protocolHash", label),
-    packageHash: hashValue2(value.packageHash, "packageHash", label),
-    snapshotHash: hashValue2(value.snapshotHash, "snapshotHash", label),
-    scopeHash: hashValue2(value.scopeHash, "scopeHash", label),
+    protocolHash: hashValue3(value.protocolHash, "protocolHash", label),
+    packageHash: hashValue3(value.packageHash, "packageHash", label),
+    snapshotHash: hashValue3(value.snapshotHash, "snapshotHash", label),
+    scopeHash: hashValue3(value.scopeHash, "scopeHash", label),
     contentSnapshotHash: nullableHash(
       value.contentSnapshotHash,
       "contentSnapshotHash",
@@ -7231,7 +8781,7 @@ function parseWorkflowVerificationReceiptReference(value, profile) {
     ),
     provider: identityText(value.provider, "provider", label),
     issuedAt: timestamp2(value.issuedAt, "issuedAt", label),
-    evidenceHash: hashValue2(value.evidenceHash, "evidenceHash", label),
+    evidenceHash: hashValue3(value.evidenceHash, "evidenceHash", label),
     truncated: value.truncated
   };
   if (typeof reference.truncated !== "boolean") {
@@ -7276,7 +8826,7 @@ function redactedSummary(value, maxBytes) {
 function normalizeWorkflowVerificationProposal(value, profile) {
   const bounds = verificationBounds(profile);
   const label = "Workflow Verification Receipt proposal";
-  if (!isRecord6(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord7(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields5(
     value,
     /* @__PURE__ */ new Set([
@@ -7311,7 +8861,7 @@ function normalizeWorkflowVerificationProposal(value, profile) {
     durationMs: value.durationMs,
     truncated: value.truncated
   } : void 0);
-  if (!isRecord6(evidenceValue2)) {
+  if (!isRecord7(evidenceValue2)) {
     throw new Error(`Invalid ${label}: evidence is required`);
   }
   const evidence = parseEvidence(evidenceValue2, `${label}.evidence`, {
@@ -7330,7 +8880,7 @@ function normalizeWorkflowVerificationProposal(value, profile) {
   }
   let artifactVersions;
   if (value.artifactVersions !== void 0) {
-    if (!isRecord6(value.artifactVersions)) {
+    if (!isRecord7(value.artifactVersions)) {
       throw new Error(`Invalid ${label}: artifactVersions must be an object`);
     }
     const entries = Object.entries(value.artifactVersions);
@@ -7363,13 +8913,13 @@ function normalizeWorkflowVerificationProposal(value, profile) {
     kind: value.kind,
     status: value.status,
     ...value.requirementId !== void 0 ? {
-      requirementId: boundedText(
+      requirementId: boundedText2(
         value.requirementId,
         "requirementId",
         label
       )
     } : {},
-    ...value.role !== void 0 ? { role: boundedText(value.role, "role", label) } : {},
+    ...value.role !== void 0 ? { role: boundedText2(value.role, "role", label) } : {},
     ...value.scope !== void 0 ? { scope: value.scope } : {},
     ...artifactVersions ? { artifactVersions } : {},
     ...contentSnapshotHash !== void 0 ? { contentSnapshotHash } : {},
@@ -7441,7 +8991,7 @@ function serializedReceipt(receipt) {
 }
 async function readWorkflowVerificationReceipt(runRoot, receiptHash, profile, options = {}) {
   const bounds = verificationBounds(profile);
-  const hash4 = hashValue2(receiptHash, "receiptHash", RECEIPT_LABEL);
+  const hash4 = hashValue3(receiptHash, "receiptHash", RECEIPT_LABEL);
   const raw = await readOptionalEngineRunText(
     runRoot,
     receiptPath(hash4),
@@ -7919,7 +9469,8 @@ function parseWorkflowOutcome(value, label) {
     "routing",
     "evidence",
     "artifactVersions",
-    "verificationReceiptIds"
+    "verificationReceiptIds",
+    "repairDecision"
   ]);
   const unknown = Object.keys(outcome).find((key) => !keys.has(key));
   if (unknown)
@@ -7971,6 +9522,58 @@ function parseWorkflowOutcome(value, label) {
         verificationReceiptIds: [
           ...outcome.verificationReceiptIds
         ]
+      };
+    })() : {},
+    ...outcome.repairDecision !== void 0 ? (() => {
+      const repair = outcome.repairDecision;
+      if (!repair || typeof repair !== "object" || Array.isArray(repair)) {
+        throw new Error(
+          `Invalid Run state: ${label}.repairDecision must be an object`
+        );
+      }
+      const repairValue = repair;
+      const repairKeys = /* @__PURE__ */ new Set([
+        "decisionId",
+        "signatureHash",
+        "choiceId",
+        "outcome"
+      ]);
+      const unknownRepair = Object.keys(repairValue).find(
+        (key) => !repairKeys.has(key)
+      );
+      if (unknownRepair) {
+        throw new Error(
+          `Invalid Run state: ${label}.repairDecision has unknown field ${unknownRepair}`
+        );
+      }
+      const repairOutcome = repairValue.outcome;
+      if (repairOutcome !== "retry" && repairOutcome !== "stop" && repairOutcome !== "contract-change") {
+        throw new Error(
+          `Invalid Run state: ${label}.repairDecision.outcome is invalid`
+        );
+      }
+      const signatureHash = requiredJsonString(
+        repairValue.signatureHash,
+        `${label}.repairDecision.signatureHash`
+      );
+      if (!/^[a-f0-9]{64}$/u.test(signatureHash)) {
+        throw new Error(
+          `Invalid Run state: ${label}.repairDecision.signatureHash is invalid`
+        );
+      }
+      return {
+        repairDecision: {
+          decisionId: requiredJsonString(
+            repairValue.decisionId,
+            `${label}.repairDecision.decisionId`
+          ),
+          signatureHash,
+          choiceId: requiredJsonString(
+            repairValue.choiceId,
+            `${label}.repairDecision.choiceId`
+          ),
+          outcome: repairOutcome
+        }
       };
     })() : {}
   };
@@ -8167,7 +9770,8 @@ function parseWorkflowRuntime(value, runId, durabilityProfile) {
     "verificationReceipts",
     "artifactVersions",
     "artifactSelections",
-    "contentSnapshots"
+    "contentSnapshots",
+    "repairEpisode"
   ]);
   const unknown = Object.keys(runtime).find((key) => !keys.has(key));
   if (unknown) {
@@ -8287,6 +9891,47 @@ function parseWorkflowRuntime(value, runId, durabilityProfile) {
       }
       snapshotHashes.add(snapshot.hash);
     }
+  }
+  const repairEpisode = runtime.repairEpisode === void 0 ? void 0 : (() => {
+    if (!durabilityProfile?.capabilities.includes("repair-policy")) {
+      throw new Error(
+        "Invalid Run state: repair episodes require repair-policy capability"
+      );
+    }
+    const maxCount = durabilityProfile.bounds.repairHistoryCount;
+    const parsed = parseWorkflowRepairEpisode(
+      runtime.repairEpisode,
+      maxCount
+    );
+    const repairPolicy = durabilityProfile.repairPolicy;
+    if (!repairPolicy) {
+      throw new Error(
+        "Invalid Run state: repair-policy capability has no repair policy"
+      );
+    }
+    const normalizedPolicy = normalizeWorkflowRepairPolicy(repairPolicy);
+    if (parsed.totalFailures > normalizedPolicy.maxFailures || parsed.remainingFailures !== normalizedPolicy.maxFailures - parsed.totalFailures || parsed.consecutiveFailures > parsed.totalFailures) {
+      throw new Error(
+        "Invalid Run state: WorkflowRuntime repair counters are outside policy"
+      );
+    }
+    const maxBytes = durabilityProfile.bounds.repairHistoryBytes;
+    if (maxBytes !== void 0 && Buffer.byteLength(JSON.stringify(parsed), "utf8") > maxBytes) {
+      throw new Error(
+        "Invalid Run state: WorkflowRuntime repair episode exceeds its bound"
+      );
+    }
+    if (parsed.history.some((record) => record.revision > revision)) {
+      throw new Error(
+        "Invalid Run state: WorkflowRuntime repair history has a future revision"
+      );
+    }
+    return parsed;
+  })();
+  if (durabilityProfile?.capabilities.includes("repair-policy") && repairEpisode === void 0) {
+    throw new Error(
+      "Invalid Run state: repair-policy capability requires a repair episode"
+    );
   }
   const artifactVersionIds = /* @__PURE__ */ new Set();
   for (const version of artifactVersions) {
@@ -8443,7 +10088,8 @@ function parseWorkflowRuntime(value, runId, durabilityProfile) {
     verificationReceipts,
     artifactVersions,
     artifactSelections,
-    ...contentSnapshots ? { contentSnapshots } : {}
+    ...contentSnapshots ? { contentSnapshots } : {},
+    ...repairEpisode ? { repairEpisode } : {}
   };
 }
 function parseRunStateJson(value) {
@@ -9223,7 +10869,7 @@ function createCompletionPlan(node) {
     )
   };
 }
-function isRecord7(value) {
+function isRecord8(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function hasOwn(value, key) {
@@ -9235,7 +10881,7 @@ function includesEvidence(value, keys) {
       (item) => typeof item === "string" && keys.includes(item)
     );
   }
-  if (!isRecord7(value)) return false;
+  if (!isRecord8(value)) return false;
   return keys.some((key) => hasOwn(value, key));
 }
 function hasEvidence(evidence, keys, containers = []) {
@@ -10141,7 +11787,7 @@ function resolverHash(protocol) {
 }
 
 // src/workflow/contract.ts
-function isRecord8(value) {
+function isRecord9(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function decisionChoiceTarget2(choice) {
@@ -10158,7 +11804,7 @@ function scalarMatchesType(value, type) {
 }
 function decisionInputErrors(schema, label) {
   const errors = [];
-  if (!isRecord8(schema)) return [`${label} must be an object`];
+  if (!isRecord9(schema)) return [`${label} must be an object`];
   const schemaKeys = /* @__PURE__ */ new Set(["type", "fields"]);
   const unknownSchemaKey = Object.keys(schema).find(
     (key) => !schemaKeys.has(key)
@@ -10176,7 +11822,7 @@ function decisionInputErrors(schema, label) {
   const ids = /* @__PURE__ */ new Set();
   for (const [index, field] of schema.fields.entries()) {
     const fieldLabel = `${label}.fields[${index}]`;
-    if (!isRecord8(field)) {
+    if (!isRecord9(field)) {
       errors.push(`${fieldLabel} must be an object`);
       continue;
     }
@@ -10229,7 +11875,7 @@ function decisionInputErrors(schema, label) {
 }
 function decisionScopeErrors(scope, label) {
   const errors = [];
-  if (!isRecord8(scope)) return [`${label} must be an object`];
+  if (!isRecord9(scope)) return [`${label} must be an object`];
   const scopeKeys = /* @__PURE__ */ new Set(["artifacts", "evidence"]);
   const unknown = Object.keys(scope).find((key) => !scopeKeys.has(key));
   if (unknown) errors.push(`${label} has unsupported field: ${unknown}`);
@@ -10244,7 +11890,7 @@ function decisionScopeErrors(scope, label) {
     const ids = /* @__PURE__ */ new Set();
     for (const [index, entry] of entries.entries()) {
       const entryLabel = `${label}.${kind}[${index}]`;
-      if (!isRecord8(entry)) {
+      if (!isRecord9(entry)) {
         errors.push(`${entryLabel} must be an object`);
         continue;
       }
@@ -10275,7 +11921,7 @@ function decisionScopeErrors(scope, label) {
 function decisionErrors(decision, nodeId) {
   const label = `Decision Node ${nodeId}`;
   const errors = [];
-  if (!isRecord8(decision)) return [`${label} requires a decision definition`];
+  if (!isRecord9(decision)) return [`${label} requires a decision definition`];
   const keys = /* @__PURE__ */ new Set([
     "id",
     "question",
@@ -10299,9 +11945,9 @@ function decisionErrors(decision, nodeId) {
     const choiceIds = /* @__PURE__ */ new Set();
     const targets = /* @__PURE__ */ new Set();
     for (const [index, choice] of decision.choices.entries()) {
-      const choiceLabel = `${label}.choices[${index}]`;
-      if (!isRecord8(choice)) {
-        errors.push(`${choiceLabel} must be an object`);
+      const choiceLabel2 = `${label}.choices[${index}]`;
+      if (!isRecord9(choice)) {
+        errors.push(`${choiceLabel2} must be an object`);
         continue;
       }
       const choiceKeys = /* @__PURE__ */ new Set([
@@ -10317,31 +11963,31 @@ function decisionErrors(decision, nodeId) {
         (key) => !choiceKeys.has(key)
       );
       if (unknownChoice) {
-        errors.push(`${choiceLabel} has unsupported field: ${unknownChoice}`);
+        errors.push(`${choiceLabel2} has unsupported field: ${unknownChoice}`);
       }
       if (typeof choice.id !== "string" || choice.id.length === 0) {
-        errors.push(`${choiceLabel}.id must be a non-empty string`);
+        errors.push(`${choiceLabel2}.id must be a non-empty string`);
       } else if (choiceIds.has(choice.id)) {
         errors.push(`${label} has duplicate choice id: ${choice.id}`);
       } else {
         choiceIds.add(choice.id);
       }
       if (typeof choice.label !== "string" || choice.label.length === 0) {
-        errors.push(`${choiceLabel}.label must be a non-empty string`);
+        errors.push(`${choiceLabel2}.label must be a non-empty string`);
       }
       const targetProperties = ["to", "target", "transition"].filter(
         (key) => Object.prototype.hasOwnProperty.call(choice, key)
       );
       if (targetProperties.length !== 1) {
         errors.push(
-          `${choiceLabel} must declare exactly one transition target field`
+          `${choiceLabel2} must declare exactly one transition target field`
         );
       }
       const target = decisionChoiceTarget2(
         choice
       );
       if (target === void 0 || target === "") {
-        errors.push(`${choiceLabel} requires a transition target`);
+        errors.push(`${choiceLabel2} requires a transition target`);
       } else if (targets.has(target)) {
         errors.push(`${label} has duplicate choice mapping to: ${target}`);
       } else {
@@ -10349,16 +11995,16 @@ function decisionErrors(decision, nodeId) {
       }
       if (choice.inputs !== void 0) {
         errors.push(
-          ...decisionInputErrors(choice.inputs, `${choiceLabel}.inputs`)
+          ...decisionInputErrors(choice.inputs, `${choiceLabel2}.inputs`)
         );
       }
       if (choice.routing !== void 0) {
-        if (!isRecord8(choice.routing)) {
-          errors.push(`${choiceLabel}.routing must be an object`);
+        if (!isRecord9(choice.routing)) {
+          errors.push(`${choiceLabel2}.routing must be an object`);
         } else if (Object.entries(choice.routing).some(
           ([field, value]) => field.length === 0 || typeof value !== "string" || value.length === 0
         )) {
-          errors.push(`${choiceLabel}.routing must contain non-empty strings`);
+          errors.push(`${choiceLabel2}.routing must contain non-empty strings`);
         }
       }
     }
@@ -10367,14 +12013,14 @@ function decisionErrors(decision, nodeId) {
     errors.push(...decisionInputErrors(decision.inputs, `${label}.inputs`));
   }
   if (decision.rationale !== void 0) {
-    if (!isRecord8(decision.rationale)) {
+    if (!isRecord9(decision.rationale)) {
       errors.push(`${label}.rationale must be an object`);
     } else if (Object.keys(decision.rationale).some((key) => key !== "required") || decision.rationale.required !== void 0 && typeof decision.rationale.required !== "boolean") {
       errors.push(`${label}.rationale.required must be a boolean`);
     }
   }
   if (decision.reviewer !== void 0) {
-    if (!isRecord8(decision.reviewer)) {
+    if (!isRecord9(decision.reviewer)) {
       errors.push(`${label}.reviewer must be an object`);
     } else {
       const reviewerKeys = /* @__PURE__ */ new Set(["subjects", "authorities"]);
@@ -10423,7 +12069,7 @@ var WorkflowDecisionScopeError = class extends Error {
 function fail2(message) {
   throw new WorkflowDecisionScopeError(message);
 }
-function isRecord9(value) {
+function isRecord10(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function protocolNodeForAction(pkg, action) {
@@ -10482,12 +12128,12 @@ function evidenceValue(evidence, declaration) {
     }
   }
   const scoped = evidence.schemaEvidence;
-  if (!isRecord9(scoped)) return { found: false };
+  if (!isRecord10(scoped)) return { found: false };
   if (Object.prototype.hasOwnProperty.call(scoped, logicalId)) {
     return { found: true, value: scoped[logicalId] };
   }
   const schemaEvidence = scoped[declaration.schemaId];
-  if (isRecord9(schemaEvidence)) {
+  if (isRecord10(schemaEvidence)) {
     if (Object.prototype.hasOwnProperty.call(
       schemaEvidence,
       declaration.evidenceId
@@ -10727,14 +12373,14 @@ function pendingReference(references, id) {
 function validateScopeList(references, pending, label) {
   const keys = /* @__PURE__ */ new Set();
   for (const reference of references) {
-    if (!isRecord9(reference)) fail2(`${label} entries must be objects`);
+    if (!isRecord10(reference)) fail2(`${label} entries must be objects`);
     const unknown = Object.keys(reference).find(
       (key2) => !["id", "required", "versionId", "contentHash", "producer"].includes(
         key2
       )
     );
     if (unknown) fail2(`${label} has unsupported field: ${unknown}`);
-    if (typeof reference.id !== "string" || typeof reference.versionId !== "string" || typeof reference.contentHash !== "string" || !/^[a-f0-9]{64}$/u.test(reference.contentHash) || reference.required !== void 0 && typeof reference.required !== "boolean" || reference.producer !== void 0 && !isRecord9(reference.producer)) {
+    if (typeof reference.id !== "string" || typeof reference.versionId !== "string" || typeof reference.contentHash !== "string" || !/^[a-f0-9]{64}$/u.test(reference.contentHash) || reference.required !== void 0 && typeof reference.required !== "boolean" || reference.producer !== void 0 && !isRecord10(reference.producer)) {
       fail2(`${label} contains an invalid reference`);
     }
     const key = referenceKey(reference);
@@ -10763,7 +12409,7 @@ function validateWorkflowDecisionScopeResponse(pending, submitted, evidenceRefer
   let submittedScope;
   if (submitted) {
     const submittedValue = submitted;
-    if (!isRecord9(submittedValue)) {
+    if (!isRecord10(submittedValue)) {
       fail2("Decision response scope must be an object");
     }
     const unknown = Object.keys(submittedValue).find(
@@ -11436,12 +13082,15 @@ function compileDefinition(protocol, nodes, linear) {
   };
 }
 function compileGuardrails(protocol, nodes) {
+  const repairFailures = protocol.capabilities?.durability?.repairPolicy ? normalizeWorkflowRepairPolicy(
+    protocol.capabilities.durability.repairPolicy
+  ).maxFailures : 0;
   return {
     allowedSkills: compiledSkillIds(protocol, nodes),
     allowedAgents: [],
     allowedTools: [],
-    maxIterations: maxWorkflowIterations(protocol),
-    maxRetriesPerAction: 3,
+    maxIterations: maxWorkflowIterations(protocol) + repairFailures,
+    maxRetriesPerAction: repairFailures > 0 ? repairFailures : 3,
     confirmationRequiredFor: []
   };
 }
@@ -11467,6 +13116,13 @@ async function compileWorkflow(protocol) {
   ) && !revisioned) {
     throw new Error(
       "Workflow Protocol verification receipts require revisioned capabilities"
+    );
+  }
+  if (executableProtocol.capabilities?.durability?.capabilities.includes(
+    "repair-policy"
+  ) && !revisioned) {
+    throw new Error(
+      "Workflow Protocol repair policy requires revisioned capabilities"
     );
   }
   if (revisioned && executableProtocol.capabilities?.version !== 3) {
@@ -11659,7 +13315,7 @@ function isBlockedRecoveryResult(value) {
   return value.status === "blocked";
 }
 var configuredFault;
-function isRecord10(value) {
+function isRecord11(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function assertKnownFields6(value, keys, label) {
@@ -11679,7 +13335,7 @@ function timestamp3(value, key, label) {
   }
   return result;
 }
-function nonNegativeInteger5(value, key, label) {
+function nonNegativeInteger6(value, key, label) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
   }
@@ -11705,7 +13361,7 @@ function nullableActionId(value, key, label) {
   return value === null ? null : requiredText3(value, key, label);
 }
 function parseMaterialIdentity(value, key, label) {
-  if (!isRecord10(value))
+  if (!isRecord11(value))
     throw new Error(`Invalid ${label}: ${key} must be an object`);
   assertKnownFields6(
     value,
@@ -11715,7 +13371,7 @@ function parseMaterialIdentity(value, key, label) {
   if (typeof value.exists !== "boolean") {
     throw new Error(`Invalid ${label}: ${key}.exists must be a boolean`);
   }
-  const bytes = nonNegativeInteger5(value.bytes, `${key}.bytes`, label);
+  const bytes = nonNegativeInteger6(value.bytes, `${key}.bytes`, label);
   const digest = value.sha256 === null ? null : hash2(value.sha256, `${key}.sha256`, label);
   if (!value.exists && (bytes !== 0 || digest !== null) || value.exists && (bytes < 1 || digest === null)) {
     throw new Error(`Invalid ${label}: ${key} identity is inconsistent`);
@@ -11723,7 +13379,7 @@ function parseMaterialIdentity(value, key, label) {
   return { exists: value.exists, bytes, sha256: digest };
 }
 function parseMaterial(value, key, label, maxBytes) {
-  if (!isRecord10(value))
+  if (!isRecord11(value))
     throw new Error(`Invalid ${label}: ${key} must be an object`);
   assertKnownFields6(
     value,
@@ -11784,7 +13440,7 @@ function assertSafeRecordPath(value, label) {
   return normalized;
 }
 function parseRevisionIdentity(value, key, label) {
-  if (!isRecord10(value))
+  if (!isRecord11(value))
     throw new Error(`Invalid ${label}: ${key} must be an object`);
   assertKnownFields6(
     value,
@@ -11792,13 +13448,13 @@ function parseRevisionIdentity(value, key, label) {
     `${label}.${key}`
   );
   return {
-    revision: nonNegativeInteger5(value.revision, `${key}.revision`, label),
+    revision: nonNegativeInteger6(value.revision, `${key}.revision`, label),
     actionId: nullableActionId(value.actionId, `${key}.actionId`, label)
   };
 }
 function parseRecoveryEvent(value) {
   const label = "Workflow transition journal recovery event";
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields6(
     value,
     /* @__PURE__ */ new Set(["sequence", "timestamp", "type", "runId", "data"]),
@@ -11807,9 +13463,9 @@ function parseRecoveryEvent(value) {
   if (value.type !== "recovery_reconciled") {
     throw new Error(`Invalid ${label}: type is invalid`);
   }
-  if (!isRecord10(value.data))
+  if (!isRecord11(value.data))
     throw new Error(`Invalid ${label}: data must be an object`);
-  const sequence = nonNegativeInteger5(value.sequence, "sequence", label);
+  const sequence = nonNegativeInteger6(value.sequence, "sequence", label);
   if (sequence < 1) throw new Error(`Invalid ${label}: sequence is invalid`);
   return {
     sequence,
@@ -11821,7 +13477,7 @@ function parseRecoveryEvent(value) {
 }
 function parseCommitEvidence(value) {
   const label = "Workflow transition commit evidence";
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields6(
     value,
     /* @__PURE__ */ new Set([
@@ -11852,12 +13508,12 @@ function parseCommitEvidence(value) {
     journalId: uuid(value.journalId, "journalId", label),
     operation: value.operation,
     runId: requiredText3(value.runId, "runId", label),
-    previousRevision: nonNegativeInteger5(
+    previousRevision: nonNegativeInteger6(
       value.previousRevision,
       "previousRevision",
       label
     ),
-    intendedRevision: nonNegativeInteger5(
+    intendedRevision: nonNegativeInteger6(
       value.intendedRevision,
       "intendedRevision",
       label
@@ -11868,7 +13524,7 @@ function parseCommitEvidence(value) {
 }
 function parseRecovery(value, maxBytes) {
   const label = "Workflow transition journal recovery";
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields6(
     value,
     /* @__PURE__ */ new Set([
@@ -11900,7 +13556,7 @@ function parseRecovery(value, maxBytes) {
 }
 function parseWorkflowTransitionJournal(value, maxBytes = WORKFLOW_DURABILITY_MAX_RECORD_BYTES) {
   const label = "Workflow transition journal";
-  if (!isRecord10(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord11(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields6(
     value,
     /* @__PURE__ */ new Set([
@@ -11939,7 +13595,7 @@ function parseWorkflowTransitionJournal(value, maxBytes = WORKFLOW_DURABILITY_MA
   const records = [];
   const paths = /* @__PURE__ */ new Set();
   for (const [index, entry] of value.records.entries()) {
-    if (!isRecord10(entry))
+    if (!isRecord11(entry))
       throw new Error(`Invalid ${label}: records[${index}] must be an object`);
     assertKnownFields6(
       entry,
@@ -12840,21 +14496,21 @@ var configuredFault2;
 async function invokeConfiguredFault2(boundary) {
   await configuredFault2?.(boundary);
 }
-function isRecord11(value) {
+function isRecord12(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function assertKnownFields7(value, keys, label) {
   const unknown = Object.keys(value).find((key) => !keys.has(key));
   if (unknown) throw new Error(`${label} has unknown field: ${unknown}`);
 }
-function boundedText2(value, key, label) {
+function boundedText3(value, key, label) {
   if (typeof value !== "string" || value.length === 0 || value.length > MAX_LOCK_TEXT_LENGTH || /[\u0000\r\n]/u.test(value)) {
     throw new Error(`${label} ${key} must be a bounded string`);
   }
   return value;
 }
 function timestamp4(value, key, label) {
-  const result = boundedText2(value, key, label);
+  const result = boundedText3(value, key, label);
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(result)) {
     throw new Error(`${label} ${key} must be an ISO timestamp`);
   }
@@ -12862,7 +14518,7 @@ function timestamp4(value, key, label) {
 }
 function parseWorkflowRunLockRecord(value) {
   const label = "Workflow Run lock";
-  if (!isRecord11(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord12(value)) throw new Error(`${label} must be an object`);
   assertKnownFields7(
     value,
     /* @__PURE__ */ new Set([
@@ -12879,14 +14535,14 @@ function parseWorkflowRunLockRecord(value) {
   if (value.schemaVersion !== WORKFLOW_RUN_LOCK_SCHEMA_VERSION || value.kind !== "workflow-run-lock") {
     throw new Error(`${label} schema identity is invalid`);
   }
-  const ownerToken = boundedText2(value.ownerToken, "ownerToken", label);
+  const ownerToken = boundedText3(value.ownerToken, "ownerToken", label);
   if (!UUID_PATTERN.test(ownerToken)) {
     throw new Error(`${label} ownerToken is invalid`);
   }
   if (typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid < 1) {
     throw new Error(`${label} pid is invalid`);
   }
-  const operation2 = boundedText2(value.operation, "operation", label);
+  const operation2 = boundedText3(value.operation, "operation", label);
   if (!LOCK_OPERATIONS.includes(operation2)) {
     throw new Error(`${label} operation is invalid`);
   }
@@ -12895,14 +14551,14 @@ function parseWorkflowRunLockRecord(value) {
     kind: "workflow-run-lock",
     ownerToken,
     pid: value.pid,
-    hostname: boundedText2(value.hostname, "hostname", label),
+    hostname: boundedText3(value.hostname, "hostname", label),
     createdAt: timestamp4(value.createdAt, "createdAt", label),
     operation: operation2
   };
 }
 function parseWorkflowRunLockTakeoverEvidence(value) {
   const label = "Workflow Run lock takeover evidence";
-  if (!isRecord11(value)) throw new Error(`${label} must be an object`);
+  if (!isRecord12(value)) throw new Error(`${label} must be an object`);
   assertKnownFields7(
     value,
     /* @__PURE__ */ new Set([
@@ -12918,7 +14574,7 @@ function parseWorkflowRunLockTakeoverEvidence(value) {
     ]),
     label
   );
-  const ownerToken = boundedText2(value.ownerToken, "ownerToken", label);
+  const ownerToken = boundedText3(value.ownerToken, "ownerToken", label);
   if (!UUID_PATTERN.test(ownerToken)) {
     throw new Error(`${label} ownerToken is invalid`);
   }
@@ -12928,7 +14584,7 @@ function parseWorkflowRunLockTakeoverEvidence(value) {
   if (typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid < 1) {
     throw new Error(`${label} pid is invalid`);
   }
-  const ownerOperation = boundedText2(
+  const ownerOperation = boundedText3(
     value.ownerOperation,
     "ownerOperation",
     label
@@ -12936,7 +14592,7 @@ function parseWorkflowRunLockTakeoverEvidence(value) {
   if (!LOCK_OPERATIONS.includes(ownerOperation)) {
     throw new Error(`${label} ownerOperation is invalid`);
   }
-  const quarantinePath = boundedText2(
+  const quarantinePath = boundedText3(
     value.quarantinePath,
     "quarantinePath",
     label
@@ -12949,7 +14605,7 @@ function parseWorkflowRunLockTakeoverEvidence(value) {
     kind: LOCK_TAKEOVER_KIND,
     ownerToken,
     pid: value.pid,
-    hostname: boundedText2(value.hostname, "hostname", label),
+    hostname: boundedText3(value.hostname, "hostname", label),
     ownerOperation,
     operation: "workflow.recover",
     quarantinePath,
@@ -13513,7 +15169,7 @@ var ARTIFACTS_PATH = ".comet/artifacts.json";
 var CONTEXT_PATH = ".comet/context.md";
 var TRAJECTORY_PATH = ".comet/trajectory.jsonl";
 var TRANSITION_JOURNAL_PATH = ".comet/transition-journal.json";
-var HASH_PATTERN3 = /^[a-f0-9]{64}$/u;
+var HASH_PATTERN4 = /^[a-f0-9]{64}$/u;
 var MAX_IDENTIFIER_LENGTH2 = 256;
 var MAX_CHECKPOINT_ENTRIES = 256;
 var MAX_RECOVERY_RECORDS = 8;
@@ -13529,40 +15185,40 @@ var TRAJECTORY_EVENT_TYPES2 = /* @__PURE__ */ new Set([
   "recovery_reconciled"
 ]);
 var configuredFault3;
-function isRecord12(value) {
+function isRecord13(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function assertKnownFields8(value, keys, label) {
   const unknown = Object.keys(value).find((key) => !keys.has(key));
   if (unknown) throw new Error(`Invalid ${label}: unknown field ${unknown}`);
 }
-function boundedText3(value, key, label) {
+function boundedText4(value, key, label) {
   if (typeof value !== "string" || value.length === 0 || value.length > MAX_IDENTIFIER_LENGTH2 || /[\u0000\r\n]/u.test(value)) {
     throw new Error(`Invalid ${label}: ${key} must be a bounded string`);
   }
   return value;
 }
 function timestamp5(value, key, label) {
-  const result = boundedText3(value, key, label);
+  const result = boundedText4(value, key, label);
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(result)) {
     throw new Error(`Invalid ${label}: ${key} must be an ISO timestamp`);
   }
   return result;
 }
-function nonNegativeInteger6(value, key, label) {
+function nonNegativeInteger7(value, key, label) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`Invalid ${label}: ${key} must be a non-negative integer`);
   }
   return value;
 }
-function positiveInteger(value, key, label) {
-  const result = nonNegativeInteger6(value, key, label);
+function positiveInteger2(value, key, label) {
+  const result = nonNegativeInteger7(value, key, label);
   if (result < 1) throw new Error(`Invalid ${label}: ${key} must be positive`);
   return result;
 }
 function hash3(value, key, label) {
-  const result = boundedText3(value, key, label);
-  if (!HASH_PATTERN3.test(result)) {
+  const result = boundedText4(value, key, label);
+  if (!HASH_PATTERN4.test(result)) {
     throw new Error(`Invalid ${label}: ${key} must be a SHA-256 hash`);
   }
   return result;
@@ -13571,7 +15227,7 @@ function nullableHash2(value, key, label) {
   return value === null ? null : hash3(value, key, label);
 }
 function safePath(value, key, label) {
-  const result = boundedText3(value, key, label);
+  const result = boundedText4(value, key, label);
   return normalizeWorkflowRelativePath(result, `${label}: ${key}`);
 }
 function canonical(value) {
@@ -13582,11 +15238,11 @@ function canonicalHash2(value) {
   return sha256(JSON.stringify(stableValue(value)));
 }
 function contentAddressHash(value) {
-  if (isRecord12(value) && value.kind === "workflow-checkpoint-manifest") {
+  if (isRecord13(value) && value.kind === "workflow-checkpoint-manifest") {
     const { manifestHash: _manifestHash, ...withoutHash } = value;
     return canonicalHash2(withoutHash);
   }
-  if (isRecord12(value) && value.kind === "workflow-checkpoint-record") {
+  if (isRecord13(value) && value.kind === "workflow-checkpoint-record") {
     const { recordHash: _recordHash, ...withoutHash } = value;
     return canonicalHash2(withoutHash);
   }
@@ -13608,20 +15264,23 @@ function identityOf4(value) {
 function sameIdentity(left, right) {
   return left.path === right.path && left.exists === right.exists && left.bytes === right.bytes && left.sha256 === right.sha256;
 }
-function sameStableValue(left, right) {
+function sameStableValue2(left, right) {
   return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
 }
 function sameActionDefinition(action, step) {
-  return action.type === step.action.type && action.ref === step.action.ref && action.prompt === step.action.prompt && action.question === step.action.question && sameStableValue(action.options, step.action.options) && action.decisionId === step.action.decisionId && sameStableValue(action.choices, step.action.choices) && sameStableValue(action.requiredInputs, step.action.requiredInputs) && sameStableValue(action.rationale, step.action.rationale) && sameStableValue(action.reviewer, step.action.reviewer);
+  if (action.repair) {
+    return action.type === "ask_user" && action.stepId !== null && action.repair.stepId === action.stepId && action.repair.actionId === action.id && action.repair.decisionId === action.decisionId && action.repair.signatureHash.length === 64;
+  }
+  return action.type === step.action.type && action.ref === step.action.ref && action.prompt === step.action.prompt && action.question === step.action.question && sameStableValue2(action.options, step.action.options) && action.decisionId === step.action.decisionId && sameStableValue2(action.choices, step.action.choices) && sameStableValue2(action.requiredInputs, step.action.requiredInputs) && sameStableValue2(action.rationale, step.action.rationale) && sameStableValue2(action.reviewer, step.action.reviewer);
 }
-function contentPathFor(hashValue3) {
-  return `${WORKFLOW_CHECKPOINT_CONTENT_DIRECTORY}/${hashValue3}.txt`;
+function contentPathFor(hashValue4) {
+  return `${WORKFLOW_CHECKPOINT_CONTENT_DIRECTORY}/${hashValue4}.txt`;
 }
-function manifestPathFor(hashValue3) {
-  return `${WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY}/${hashValue3}.json`;
+function manifestPathFor(hashValue4) {
+  return `${WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY}/${hashValue4}.json`;
 }
-function recordPathFor(hashValue3) {
-  return `${WORKFLOW_CHECKPOINT_RECORD_DIRECTORY}/${hashValue3}.json`;
+function recordPathFor(hashValue4) {
+  return `${WORKFLOW_CHECKPOINT_RECORD_DIRECTORY}/${hashValue4}.json`;
 }
 function checkpointBounds(profile) {
   const parsed = parseWorkflowDurabilityProfile(profile);
@@ -13646,7 +15305,7 @@ function maxBytesForPath(profile, relativePath2) {
   return Math.max(profile.bounds.runStateBytes, profile.bounds.artifactsBytes);
 }
 function parseExecutionIdentity2(value, label) {
-  if (!isRecord12(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord13(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields8(
     value,
     /* @__PURE__ */ new Set([
@@ -13694,7 +15353,7 @@ function parseExecutionIdentity2(value, label) {
   return identity;
 }
 function parseMaterialIdentity2(value, label) {
-  if (!isRecord12(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord13(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields8(
     value,
     /* @__PURE__ */ new Set(["path", "exists", "bytes", "sha256"]),
@@ -13704,7 +15363,7 @@ function parseMaterialIdentity2(value, label) {
   if (typeof value.exists !== "boolean") {
     throw new Error(`Invalid ${label}: exists must be a boolean`);
   }
-  const bytes = nonNegativeInteger6(value.bytes, "bytes", label);
+  const bytes = nonNegativeInteger7(value.bytes, "bytes", label);
   const digest = nullableHash2(value.sha256, "sha256", label);
   if (!value.exists && (bytes !== 0 || digest !== null) || value.exists && (bytes < 1 || digest === null)) {
     throw new Error(`Invalid ${label}: identity is inconsistent`);
@@ -13712,7 +15371,7 @@ function parseMaterialIdentity2(value, label) {
   return { path: pathValue, exists: value.exists, bytes, sha256: digest };
 }
 function parseMaterialReference(value, label) {
-  if (!isRecord12(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord13(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields8(
     value,
     /* @__PURE__ */ new Set(["path", "contentPath", "exists", "bytes", "sha256"]),
@@ -13730,7 +15389,7 @@ function parseMaterialReference(value, label) {
   return { ...identity, contentPath };
 }
 function parsePendingActionIdentity(value, label) {
-  if (!isRecord12(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord13(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields8(
     value,
     /* @__PURE__ */ new Set(["id", "path", "exists", "bytes", "sha256"]),
@@ -13738,12 +15397,12 @@ function parsePendingActionIdentity(value, label) {
   );
   const { id, ...material } = value;
   return {
-    id: boundedText3(id, "id", label),
+    id: boundedText4(id, "id", label),
     ...parseMaterialIdentity2(material, label)
   };
 }
 function parseTrajectoryIdentity(value, label) {
-  if (!isRecord12(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord13(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields8(
     value,
     /* @__PURE__ */ new Set(["path", "exists", "bytes", "sha256", "offset", "prefixSha256"]),
@@ -13755,7 +15414,7 @@ function parseTrajectoryIdentity(value, label) {
     ...material
   } = value;
   const identity = parseMaterialIdentity2(material, label);
-  const offset = nonNegativeInteger6(rawOffset, "offset", label);
+  const offset = nonNegativeInteger7(rawOffset, "offset", label);
   const prefixSha256 = hash3(rawPrefixSha256, "prefixSha256", label);
   if (!identity.exists || offset > identity.bytes) {
     throw new Error(`Invalid ${label}: offset is inconsistent`);
@@ -13763,23 +15422,23 @@ function parseTrajectoryIdentity(value, label) {
   return { ...identity, offset, prefixSha256 };
 }
 function parseArtifactVersionReference(value, label) {
-  if (!isRecord12(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord13(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields8(
     value,
     /* @__PURE__ */ new Set(["artifactId", "versionId", "path", "contentHash", "bytes"]),
     label
   );
   return {
-    artifactId: boundedText3(value.artifactId, "artifactId", label),
-    versionId: boundedText3(value.versionId, "versionId", label),
+    artifactId: boundedText4(value.artifactId, "artifactId", label),
+    versionId: boundedText4(value.versionId, "versionId", label),
     path: safePath(value.path, "path", label),
     contentHash: hash3(value.contentHash, "contentHash", label),
-    bytes: positiveInteger(value.bytes, "bytes", label)
+    bytes: positiveInteger2(value.bytes, "bytes", label)
   };
 }
 function parseCheckpointManifest(value, bounds) {
   const label = "Workflow checkpoint manifest";
-  if (!isRecord12(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord13(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields8(
     value,
     /* @__PURE__ */ new Set([
@@ -13813,16 +15472,16 @@ function parseCheckpointManifest(value, bounds) {
     schemaVersion: WORKFLOW_CHECKPOINT_SCHEMA_VERSION,
     kind: "workflow-checkpoint-manifest",
     manifestHash: hash3(value.manifestHash, "manifestHash", label),
-    runId: boundedText3(value.runId, "runId", label),
-    revision: nonNegativeInteger6(value.revision, "revision", label),
+    runId: boundedText4(value.runId, "runId", label),
+    revision: nonNegativeInteger7(value.revision, "revision", label),
     execution: parseExecutionIdentity2(value.execution, `${label}.execution`),
     pendingAction: value.pendingAction === null ? null : parsePendingActionIdentity(
       value.pendingAction,
       `${label}.pendingAction`
     ),
-    nodeId: value.nodeId === null ? null : boundedText3(value.nodeId, "nodeId", label),
-    cycleId: value.cycleId === null ? null : boundedText3(value.cycleId, "cycleId", label),
-    attemptId: value.attemptId === null ? null : boundedText3(value.attemptId, "attemptId", label),
+    nodeId: value.nodeId === null ? null : boundedText4(value.nodeId, "nodeId", label),
+    cycleId: value.cycleId === null ? null : boundedText4(value.cycleId, "cycleId", label),
+    attemptId: value.attemptId === null ? null : boundedText4(value.attemptId, "attemptId", label),
     state: parseMaterialIdentity2(value.state, `${label}.state`),
     context: parseMaterialIdentity2(value.context, `${label}.context`),
     artifacts: parseMaterialIdentity2(value.artifacts, `${label}.artifacts`),
@@ -13845,7 +15504,7 @@ function parseCheckpointManifest(value, bounds) {
 }
 function parseCheckpointRecord(value, bounds) {
   const label = "Workflow checkpoint record";
-  if (!isRecord12(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord13(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields8(
     value,
     /* @__PURE__ */ new Set([
@@ -13870,8 +15529,8 @@ function parseCheckpointRecord(value, bounds) {
     schemaVersion: WORKFLOW_CHECKPOINT_SCHEMA_VERSION,
     kind: "workflow-checkpoint-record",
     recordHash: hash3(value.recordHash, "recordHash", label),
-    runId: boundedText3(value.runId, "runId", label),
-    revision: nonNegativeInteger6(value.revision, "revision", label),
+    runId: boundedText4(value.runId, "runId", label),
+    revision: nonNegativeInteger7(value.revision, "revision", label),
     manifestHash: hash3(value.manifestHash, "manifestHash", label),
     state: parseMaterialReference(value.state, `${label}.state`),
     pendingAction: parseMaterialReference(
@@ -13889,7 +15548,7 @@ function parseCheckpointRecord(value, bounds) {
 }
 function parseCheckpointIndex(value, bounds) {
   const label = "Workflow checkpoint index";
-  if (!isRecord12(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord13(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields8(
     value,
     /* @__PURE__ */ new Set(["schemaVersion", "kind", "runId", "records"]),
@@ -13902,7 +15561,7 @@ function parseCheckpointIndex(value, bounds) {
     throw new Error(`Invalid ${label}: records are outside the bound`);
   }
   const records = value.records.map((entry, index) => {
-    if (!isRecord12(entry)) {
+    if (!isRecord13(entry)) {
       throw new Error(`Invalid ${label}: records[${index}] must be an object`);
     }
     assertKnownFields8(
@@ -13913,7 +15572,7 @@ function parseCheckpointIndex(value, bounds) {
     return {
       recordHash: hash3(entry.recordHash, "recordHash", label),
       manifestHash: hash3(entry.manifestHash, "manifestHash", label),
-      revision: nonNegativeInteger6(entry.revision, "revision", label)
+      revision: nonNegativeInteger7(entry.revision, "revision", label)
     };
   });
   const recordKeys = /* @__PURE__ */ new Set();
@@ -13931,13 +15590,13 @@ function parseCheckpointIndex(value, bounds) {
   return {
     schemaVersion: WORKFLOW_CHECKPOINT_SCHEMA_VERSION,
     kind: "workflow-checkpoint-index",
-    runId: boundedText3(value.runId, "runId", label),
+    runId: boundedText4(value.runId, "runId", label),
     records
   };
 }
 function parseRecoveryJournal(value, bounds) {
   const label = "Workflow checkpoint recovery journal";
-  if (!isRecord12(value)) throw new Error(`Invalid ${label}: must be an object`);
+  if (!isRecord13(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields8(
     value,
     /* @__PURE__ */ new Set([
@@ -13963,7 +15622,7 @@ function parseRecoveryJournal(value, bounds) {
   }
   const records = value.records.map(
     (entry, index) => {
-      if (!isRecord12(entry)) {
+      if (!isRecord13(entry)) {
         throw new Error(
           `Invalid ${label}: records[${index}] must be an object`
         );
@@ -14018,8 +15677,8 @@ function parseRecoveryJournal(value, bounds) {
     schemaVersion: WORKFLOW_CHECKPOINT_RECOVERY_SCHEMA_VERSION,
     kind: "workflow-checkpoint-recovery-journal",
     status: value.status,
-    journalId: boundedText3(value.journalId, "journalId", label),
-    runId: boundedText3(value.runId, "runId", label),
+    journalId: boundedText4(value.journalId, "journalId", label),
+    runId: boundedText4(value.runId, "runId", label),
     execution: parseExecutionIdentity2(value.execution, `${label}.execution`),
     checkpointRecordHash: hash3(
       value.checkpointRecordHash,
@@ -14037,25 +15696,25 @@ function parseRecoveryJournal(value, bounds) {
   return parsed;
 }
 function parseTrajectoryEvent2(value, label) {
-  if (!isRecord12(value))
+  if (!isRecord13(value))
     throw new Error(`Invalid ${label}: event must be an object`);
   assertKnownFields8(
     value,
     /* @__PURE__ */ new Set(["sequence", "timestamp", "type", "runId", "data"]),
     label
   );
-  const sequence = positiveInteger(value.sequence, "sequence", label);
+  const sequence = positiveInteger2(value.sequence, "sequence", label);
   const type = value.type;
   if (typeof type !== "string" || !TRAJECTORY_EVENT_TYPES2.has(type)) {
     throw new Error(`Invalid ${label}: event type is invalid`);
   }
-  if (!isRecord12(value.data))
+  if (!isRecord13(value.data))
     throw new Error(`Invalid ${label}: event data is invalid`);
   return {
     sequence,
     timestamp: timestamp5(value.timestamp, "timestamp", label),
     type,
-    runId: boundedText3(value.runId, "runId", label),
+    runId: boundedText4(value.runId, "runId", label),
     data: value.data
   };
 }
@@ -14101,7 +15760,7 @@ function validateArtifactContent(raw) {
       cause: error
     });
   }
-  if (!isRecord12(value)) {
+  if (!isRecord13(value)) {
     throw new Error("Workflow checkpoint artifacts are not an object");
   }
   for (const [key, artifact] of Object.entries(value)) {
@@ -14115,7 +15774,7 @@ function validateTrajectorySemantics(events, state, pending) {
   const completed = /* @__PURE__ */ new Set();
   for (const event of events) {
     if (event.type === "action_proposed") {
-      if (!isRecord12(event.data.action)) {
+      if (!isRecord13(event.data.action)) {
         throw new Error("Workflow checkpoint action proposal is invalid");
       }
       const action2 = parsePendingActionValue(event.data.action);
@@ -14126,7 +15785,7 @@ function validateTrajectorySemantics(events, state, pending) {
       continue;
     }
     if (event.type !== "action_completed") continue;
-    if (!isRecord12(event.data.action) || !isRecord12(event.data.outcome)) {
+    if (!isRecord13(event.data.action) || !isRecord13(event.data.outcome)) {
       throw new Error("Workflow checkpoint action completion is invalid");
     }
     const action = parsePendingActionValue(event.data.action);
@@ -14365,7 +16024,7 @@ async function buildCheckpoint(options) {
   const parsedState = parseRunStateValue(
     JSON.parse(stateMaterial.content)
   );
-  if (!sameStableValue(parsedState, options.state))
+  if (!sameStableValue2(parsedState, options.state))
     throw new Error("Workflow checkpoint state changed during capture");
   const pendingMaterial = await captureMaterial(
     options.runRoot,
@@ -14405,7 +16064,7 @@ async function buildCheckpoint(options) {
     throw new Error(
       "Workflow checkpoint pending action changed during capture"
     );
-  if (pending && options.pending && !sameStableValue(pending, options.pending)) {
+  if (pending && options.pending && !sameStableValue2(pending, options.pending)) {
     throw new Error(
       "Workflow checkpoint pending action changed during capture"
     );
@@ -14540,7 +16199,7 @@ async function verifyPackageIdentity(runRoot, state, manifest) {
   if (!state.runtimeIdentity)
     throw new Error("Workflow checkpoint state has no execution identity");
   const identity = state.runtimeIdentity;
-  if (!sameStableValue(identity, manifest.execution)) {
+  if (!sameStableValue2(identity, manifest.execution)) {
     throw new Error(
       "Workflow checkpoint execution identity does not match state"
     );
@@ -14550,7 +16209,7 @@ async function verifyPackageIdentity(runRoot, state, manifest) {
   const pkg = await readSkillSnapshot(runRoot, state.skillHash);
   if (!pkg.runtime)
     throw new Error("Workflow checkpoint Skill snapshot has no runtime");
-  if (pkg.runtime.protocolHash !== identity.protocolHash || !sameStableValue(pkg.runtime.nodeToStep, identity.nodeToStep) || pkg.runtime.capabilityVersion !== identity.capabilityVersion || pkg.runtime.resolverHash !== identity.resolverHash || pkg.runtime.findingCatalogVersion !== identity.findingCatalogVersion || !sameStableValue(
+  if (pkg.runtime.protocolHash !== identity.protocolHash || !sameStableValue2(pkg.runtime.nodeToStep, identity.nodeToStep) || pkg.runtime.capabilityVersion !== identity.capabilityVersion || pkg.runtime.resolverHash !== identity.resolverHash || pkg.runtime.findingCatalogVersion !== identity.findingCatalogVersion || !sameStableValue2(
     pkg.runtime.durabilityProfile,
     identity.durabilityProfile
   ) || await hashSkillPackage(pkg) !== identity.packageHash) {
@@ -14607,7 +16266,7 @@ async function verifyWorkflowCheckpointCandidate(runRoot, profile, entry, option
   if (options.expectedRunId && manifest.runId !== options.expectedRunId) {
     throw new Error("Workflow checkpoint Run identity is invalid");
   }
-  if (options.expectedExecution && !sameStableValue(options.expectedExecution, manifest.execution)) {
+  if (options.expectedExecution && !sameStableValue2(options.expectedExecution, manifest.execution)) {
     throw new Error("Workflow checkpoint execution identity is invalid");
   }
   for (const [reference, manifestIdentity] of [
@@ -14668,7 +16327,7 @@ async function verifyWorkflowCheckpointCandidate(runRoot, profile, entry, option
   const verifiedPackage = await verifyPackageIdentity(runRoot, state, manifest);
   if (!verifiedPackage.package.runtime)
     throw new Error("Workflow checkpoint package has no runtime");
-  if (!sameStableValue(
+  if (!sameStableValue2(
     state.runtimeIdentity?.durabilityProfile,
     normalizedProfile
   )) {
@@ -14727,7 +16386,7 @@ async function verifyWorkflowCheckpointCandidate(runRoot, profile, entry, option
     state,
     normalizedProfile
   );
-  if (!sameStableValue(artifactVersions, manifest.artifactVersions)) {
+  if (!sameStableValue2(artifactVersions, manifest.artifactVersions)) {
     throw new Error("Workflow checkpoint artifact identity is invalid");
   }
   return {
@@ -15003,7 +16662,7 @@ async function readWorkflowCheckpointRecoveryJournal(runRoot, profile) {
   );
   if (raw === null) return null;
   const value = JSON.parse(raw);
-  const execution = isRecord12(value) ? parseExecutionIdentity2(
+  const execution = isRecord13(value) ? parseExecutionIdentity2(
     value.execution,
     "Workflow checkpoint recovery execution"
   ) : void 0;
@@ -15041,7 +16700,7 @@ async function settleRecoveryJournal(runRoot, profile, journal) {
     profile,
     indexed
   );
-  if (journal.runId !== candidate.state.runId || !sameStableValue(journal.execution, candidate.identity)) {
+  if (journal.runId !== candidate.state.runId || !sameStableValue2(journal.execution, candidate.identity)) {
     throw new Error("Workflow checkpoint recovery identity is invalid");
   }
   const unknownPaths = [];
@@ -15446,14 +17105,79 @@ function recordWorkflowOutcome(pkg, state, outcome) {
     ...outcome.routing ? { routing: { ...outcome.routing } } : {},
     ...outcome.evidence ? { evidence: structuredClone(outcome.evidence) } : {},
     ...outcome.artifactVersions ? { artifactVersions: { ...outcome.artifactVersions } } : {},
-    ...outcome.verificationReceiptIds ? { verificationReceiptIds: [...outcome.verificationReceiptIds] } : {}
+    ...outcome.verificationReceiptIds ? { verificationReceiptIds: [...outcome.verificationReceiptIds] } : {},
+    ...outcome.repairDecision ? {
+      repairDecision: {
+        decisionId: outcome.repairDecision.decisionId,
+        signatureHash: outcome.repairDecision.signatureHash,
+        choiceId: outcome.repairDecision.choiceId,
+        outcome: outcome.repairDecision.outcome
+      }
+    } : {}
   };
   visit.outcomes.push(visitOutcome);
   workflowRuntime.revision += 1;
   if (receipt) workflowRuntime.decisionReceipts.push(receipt);
+  if (outcome.repairFailure) {
+    const failure = workflowRepairFailureRecord(
+      workflowRuntime.revision,
+      outcome.repairFailure.signature
+    );
+    workflowRuntime.repairEpisode = repairEpisodeForFailure({
+      previous: workflowRuntime.repairEpisode,
+      decision: {
+        disposition: outcome.repairFailure.disposition,
+        reasonCode: outcome.repairFailure.reasonCode,
+        signature: outcome.repairFailure.signature,
+        consecutiveFailures: outcome.repairFailure.consecutiveFailures,
+        totalFailures: outcome.repairFailure.totalFailures,
+        remainingFailures: outcome.repairFailure.remainingFailures,
+        totalRepairFailures: outcome.repairFailure.totalFailures,
+        remainingIterations: outcome.repairFailure.remainingFailures,
+        overrideAccepted: outcome.repairFailure.overrideAccepted,
+        automaticRepair: outcome.repairFailure.automaticRepair ?? null
+      },
+      failure,
+      ...outcome.repairFailure.pendingDecision ? { pendingDecision: outcome.repairFailure.pendingDecision } : {}
+    });
+  }
+  if (outcome.repairDecision) {
+    const episode = workflowRuntime.repairEpisode;
+    const policy = state.runtimeIdentity?.durabilityProfile?.repairPolicy;
+    if (!episode || !policy) {
+      throw new Error(
+        "Workflow repair decision requires a repair episode policy"
+      );
+    }
+    const pendingDecision = episode.pendingDecision;
+    if (!pendingDecision || pendingDecision.actionId !== outcome.actionId || pendingDecision.signatureHash !== outcome.repairDecision.signatureHash || !pendingDecision.choices.some(
+      (choice) => choice.id === outcome.repairDecision.choiceId
+    )) {
+      throw new Error(
+        "Workflow repair decision does not match pending policy decision"
+      );
+    }
+    const normalizedPolicy = normalizeWorkflowRepairPolicy(policy);
+    const record = workflowRepairDecisionRecord({
+      revision: workflowRuntime.revision,
+      actionId: outcome.actionId,
+      attemptId: pendingDecision.attemptId,
+      signatureHash: outcome.repairDecision.signatureHash,
+      decision: outcome.repairDecision,
+      maxRationaleBytes: normalizedPolicy.maxOverrideRationaleBytes
+    });
+    workflowRuntime.repairEpisode = repairEpisodeForDecision({
+      previous: episode,
+      record,
+      disposition: outcome.repairDecision.outcome === "retry" ? "continue" : "manual-stop",
+      reasonCode: outcome.repairDecision.hypothesis !== void 0 ? "override-accepted" : "repair-decision-accepted"
+    });
+  }
   if (outcome.status === "failed") {
     attempt.retryOrdinal += 1;
-  } else {
+  } else if (outcome.repairDecision) {
+    attempt.retryOrdinal += 1;
+  } else if (!outcome.repairDecision) {
     workflowRuntime.currentAttempt = null;
   }
   return workflowRuntime;
@@ -15613,6 +17337,16 @@ function recordOutcomeWithResolver(pkg, state, outcome, resolver, context) {
   if (state.status === "completed" || state.status === "failed") {
     throw new Error(`Run is ${state.status}`);
   }
+  const repairDecision = outcome.repairDecision;
+  if (repairDecision) {
+    const pendingDecision = state.workflowRuntime?.repairEpisode?.pendingDecision;
+    if (!pendingDecision || pendingDecision.actionId !== outcome.actionId || pendingDecision.signatureHash !== repairDecision.signatureHash || pendingDecision.decisionId !== repairDecision.decisionId) {
+      throw new Error("Workflow repair decision does not match pending action");
+    }
+    if (outcome.status !== "succeeded") {
+      throw new Error("Workflow repair decisions must succeed");
+    }
+  }
   const resolvedStep = state.orchestration === "deterministic" ? resolveDeterministicStep(resolver, pkg, state, context) : void 0;
   const step = resolvedStep ? stepFor2(pkg, resolvedStep.id) : void 0;
   if (state.orchestration === "deterministic" && !resolvedStep) {
@@ -15625,10 +17359,10 @@ function recordOutcomeWithResolver(pkg, state, outcome, resolver, context) {
       `Resolver returned unknown current step: ${resolvedStep.id}`
     );
   }
-  if (step?.action.type === "ask_user" && outcome.kind !== "decision") {
+  if (!repairDecision && step?.action.type === "ask_user" && outcome.kind !== "decision") {
     throw new Error("Decision response required for pending ask_user action");
   }
-  if (step?.action.type !== "ask_user" && outcome.kind === "decision") {
+  if (!repairDecision && step?.action.type !== "ask_user" && outcome.kind === "decision") {
     throw new Error(
       `Decision response cannot satisfy ${step?.action.type ?? "unknown"} action`
     );
@@ -15640,11 +17374,23 @@ function recordOutcomeWithResolver(pkg, state, outcome, resolver, context) {
       [retryKey]: (state.retries[retryKey] ?? 0) + 1
     };
     const workflowRuntime2 = recordWorkflowOutcome(pkg, state, outcome);
+    const pendingRepair = workflowRuntime2?.repairEpisode?.pendingDecision;
+    const repairAction = pendingRepair ? workflowRepairAction(pendingRepair) : null;
     return {
       ...state,
-      pending: null,
-      status: "running",
+      pending: repairAction?.id ?? null,
+      status: repairAction !== null ? "waiting" : outcome.repairFailure?.disposition === "hard-stop" ? "failed" : "running",
       retries,
+      ...workflowRuntime2 ? { workflowRuntime: workflowRuntime2 } : {}
+    };
+  }
+  if (repairDecision) {
+    const workflowRuntime2 = recordWorkflowOutcome(pkg, state, outcome);
+    return {
+      ...state,
+      iteration: state.iteration + 1,
+      pending: null,
+      status: repairDecision.outcome === "retry" ? "running" : "failed",
       ...workflowRuntime2 ? { workflowRuntime: workflowRuntime2 } : {}
     };
   }
@@ -16092,6 +17838,21 @@ async function resumeManualRunInternal(changeDir, options = {}) {
     ...stateFence ? { beforeCommit: stateFence } : {},
     ...transition ? { overlay: transition } : {}
   });
+  const repairAction = advanced.workflowRuntime?.repairEpisode?.pendingDecision ? workflowRepairAction(
+    advanced.workflowRuntime.repairEpisode.pendingDecision
+  ) : null;
+  if (repairAction) {
+    await writePendingAction(changeDir, advanced.pendingRef, repairAction, {
+      ...transition ? { overlay: transition } : {}
+    });
+    await appendEvent(
+      changeDir,
+      advanced,
+      "action_proposed",
+      { action: repairAction },
+      transition ? { overlay: transition } : {}
+    );
+  }
   const evals = await evaluateAndRecord(
     changeDir,
     pkg,
@@ -16118,12 +17879,12 @@ async function resumeManualRunInternal(changeDir, options = {}) {
     await transition?.commit();
     return {
       state: advanced,
-      action: null,
+      action: repairAction,
       evals,
-      reason: `Run is ${advanced.status}`
+      ...repairAction ? {} : { reason: `Run is ${advanced.status}` }
     };
   }
-  const next = await persistDecision(
+  const materializeNextAction = () => persistDecision(
     changeDir,
     advanced,
     pkg,
@@ -16132,6 +17893,16 @@ async function resumeManualRunInternal(changeDir, options = {}) {
     options.prepareAction,
     transition
   );
+  const latestRepairRecord = advanced.workflowRuntime?.repairEpisode?.history.at(-1);
+  const automaticRepair = options.outcome?.status === "failed" && latestRepairRecord?.kind === "failure" ? latestRepairRecord.automaticRepair : void 0;
+  const automaticExecutionCount = automaticRepair ? advanced.workflowRuntime?.repairEpisode?.history.filter(
+    (record) => record.kind === "failure" && record.automaticRepair?.id === automaticRepair.id
+  ).length ?? 0 : 0;
+  const next = automaticRepair ? await executeWorkflowRepairOperation(
+    automaticRepair,
+    automaticExecutionCount,
+    materializeNextAction
+  ) : await materializeNextAction();
   await transition?.commit();
   return { ...next, evals };
 }
@@ -16500,7 +18271,7 @@ function sameStringRecord(left, right) {
   );
   return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
 }
-function sameStableValue2(left, right) {
+function sameStableValue3(left, right) {
   return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
 }
 function sameExecutionIdentity(left, right) {
@@ -16538,7 +18309,8 @@ var DECISION_SUBMISSION_KEYS = /* @__PURE__ */ new Set([
   "verification",
   "verificationReceipts",
   "verificationReceiptIds",
-  "receiptIds"
+  "receiptIds",
+  "repair"
 ]);
 var VERIFICATION_SUBMISSION_KEYS = /* @__PURE__ */ new Set([
   "proposals",
@@ -16588,11 +18360,11 @@ function normalizedVerificationSubmission(submission) {
       receiptIds.push(entry);
       return;
     }
-    if (isRecord13(entry) && typeof entry.receiptId === "string" && entry.receiptId.length > 0) {
+    if (isRecord14(entry) && typeof entry.receiptId === "string" && entry.receiptId.length > 0) {
       receiptIds.push(entry.receiptId);
       return;
     }
-    if (isRecord13(entry) && typeof entry.receiptHash === "string" && entry.receiptHash.length > 0) {
+    if (isRecord14(entry) && typeof entry.receiptHash === "string" && entry.receiptHash.length > 0) {
       receiptIds.push(entry.receiptHash);
       return;
     }
@@ -16602,13 +18374,13 @@ function normalizedVerificationSubmission(submission) {
     if (value === void 0) return;
     if (Array.isArray(value)) {
       for (const entry of value) {
-        if (typeof entry === "string" || isRecord13(entry) && (typeof entry.receiptId === "string" || typeof entry.receiptHash === "string") && (entry.kind === void 0 || entry.kind === "workflow-verification-receipt-reference")) {
+        if (typeof entry === "string" || isRecord14(entry) && (typeof entry.receiptId === "string" || typeof entry.receiptHash === "string") && (entry.kind === void 0 || entry.kind === "workflow-verification-receipt-reference")) {
           addReceiptEntry(entry, label);
         } else proposals.push(entry);
       }
       return;
     }
-    if (isRecord13(value)) {
+    if (isRecord14(value)) {
       const keys = Object.keys(value);
       if (value.kind === void 0 && (typeof value.receiptId === "string" || typeof value.receiptHash === "string")) {
         addReceiptEntry(value, label);
@@ -16639,7 +18411,7 @@ function normalizedVerificationSubmission(submission) {
             );
           }
           for (const entry of wrapperIds) {
-            if (typeof entry === "string" || isRecord13(entry) && (typeof entry.receiptId === "string" || typeof entry.receiptHash === "string") && (entry.kind === void 0 || entry.kind === "workflow-verification-receipt-reference")) {
+            if (typeof entry === "string" || isRecord14(entry) && (typeof entry.receiptId === "string" || typeof entry.receiptHash === "string") && (entry.kind === void 0 || entry.kind === "workflow-verification-receipt-reference")) {
               addReceiptEntry(entry, `${label}.receiptIds`);
             } else {
               proposals.push(entry);
@@ -16812,12 +18584,12 @@ function workflowEvidenceValue(evidence, declaration) {
     }
   }
   const schemaEvidence = evidence.schemaEvidence;
-  if (!isRecord13(schemaEvidence)) return { found: false };
+  if (!isRecord14(schemaEvidence)) return { found: false };
   if (Object.prototype.hasOwnProperty.call(schemaEvidence, declaration.id)) {
     return { found: true, value: schemaEvidence[declaration.id] };
   }
   const scoped = schemaEvidence[declaration.schemaId];
-  if (isRecord13(scoped) && Object.prototype.hasOwnProperty.call(scoped, declaration.shortId)) {
+  if (isRecord14(scoped) && Object.prototype.hasOwnProperty.call(scoped, declaration.shortId)) {
     return { found: true, value: scoped[declaration.shortId] };
   }
   return { found: false };
@@ -16984,7 +18756,7 @@ function workflowScopeHash(scope) {
 }
 function workflowScopeSelectionMatches(expected, submitted) {
   if (submitted === void 0) return;
-  if (!isRecord13(submitted)) {
+  if (!isRecord14(submitted)) {
     throw new Error(verificationFailure("proposal scope must be an object"));
   }
   const unknown = Object.keys(submitted).find(
@@ -17009,7 +18781,7 @@ function workflowScopeSelectionMatches(expected, submitted) {
     }
     const seen = /* @__PURE__ */ new Set();
     for (const value of values) {
-      if (!isRecord13(value))
+      if (!isRecord14(value))
         throw new Error(
           verificationFailure(
             `proposal ${kind} scope contains an invalid reference`
@@ -17038,14 +18810,14 @@ function workflowScopeSelectionMatches(expected, submitted) {
       const reference = expected[kind].find(
         (candidate) => candidate.id === value.id && candidate.versionId === value.versionId
       );
-      if (!reference || value.contentHash !== reference.contentHash || value.required !== void 0 && value.required !== reference.required || value.producer !== void 0 && !sameStableValue2(value.producer, reference.producer)) {
+      if (!reference || value.contentHash !== reference.contentHash || value.required !== void 0 && value.required !== reference.required || value.producer !== void 0 && !sameStableValue3(value.producer, reference.producer)) {
         throw new Error(
           verificationFailure(`${kind} scope does not match the current scope`)
         );
       }
     }
     for (const reference of expected[kind]) {
-      if (reference.required && !values.some((value) => isRecord13(value) && value.id === reference.id)) {
+      if (reference.required && !values.some((value) => isRecord14(value) && value.id === reference.id)) {
         throw new Error(
           verificationFailure(
             `required ${kind} scope is missing: ${reference.id}`
@@ -17088,6 +18860,13 @@ var MAX_PROJECTED_LEDGER_ENTRIES = 256;
 function boundProjectedLedger(values) {
   return structuredClone(values.slice(-MAX_PROJECTED_LEDGER_ENTRIES));
 }
+function boundedRepairEpisode(value) {
+  if (!value) return void 0;
+  return {
+    ...structuredClone(value),
+    history: boundProjectedLedger(value.history)
+  };
+}
 function boundedContinuation(value) {
   const parsedFindings = (value.findings ?? []).map(parseWorkflowFinding);
   const parsedSummary = value.findingSummary ? parseWorkflowFindingSummary(value.findingSummary) : void 0;
@@ -17124,7 +18903,8 @@ function boundedContinuation(value) {
     requiresUserDecision: projected.findings.some(
       (finding) => finding.requiresUserDecision
     ),
-    blockers: legacyBlockersFromFindings(disposition, projected.findings)
+    blockers: legacyBlockersFromFindings(disposition, projected.findings),
+    ...value.repair ? { repair: boundedRepairEpisode(value.repair) } : {}
   };
 }
 function emptyFindingSummary() {
@@ -17137,7 +18917,7 @@ function terminalEvaluationResults(trajectory) {
       continue;
     }
     for (const result of event.data.results) {
-      if (!isRecord13(result)) continue;
+      if (!isRecord14(result)) continue;
       if (typeof result.evalId !== "string" || typeof result.passed !== "boolean" || typeof result.evidence !== "string") {
         continue;
       }
@@ -17324,6 +19104,14 @@ function validateSubmission(submission) {
   if (submission.scope !== void 0) {
     throw new Error("Decision scope is only valid for decision submissions");
   }
+  if (Object.prototype.hasOwnProperty.call(submission, "repair")) {
+    throw new Error(
+      "Repair decision fields are only valid for decision submissions"
+    );
+  }
+  if (submission.repairDecision !== void 0 || submission.repairFailure !== void 0) {
+    throw new Error("Workflow repair outcomes are runtime-generated");
+  }
   if (submission.status !== "succeeded" && submission.status !== "failed") {
     throw new Error("Submission status must be succeeded or failed");
   }
@@ -17414,6 +19202,10 @@ function continuation(result, identity) {
     ...projected.findings,
     ...contentSnapshotFindings(result.state)
   ]);
+  const withRepair = boundWorkflowFindings([
+    ...withSnapshots.findings,
+    ...repairFindings(result.state)
+  ]);
   return {
     disposition,
     runId: result.state.runId,
@@ -17443,12 +19235,13 @@ function continuation(result, identity) {
       runtimeState?.contentSnapshots ?? []
     ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
-    findings: withSnapshots.findings,
-    findingSummary: withSnapshots.summary,
-    requiresUserDecision: withSnapshots.findings.some(
+    findings: withRepair.findings,
+    findingSummary: withRepair.summary,
+    requiresUserDecision: withRepair.findings.some(
       (finding) => finding.requiresUserDecision
     ),
-    blockers: legacyBlockersFromFindings(disposition, withSnapshots.findings)
+    blockers: legacyBlockersFromFindings(disposition, withRepair.findings),
+    ...runtimeState?.repairEpisode ? { repair: boundedRepairEpisode(runtimeState.repairEpisode) } : {}
   };
 }
 function withAdditionalFindings(value, additional, disposition = value.disposition) {
@@ -17529,7 +19322,7 @@ async function persistWorkflowCheckpoint(location, state, pending, pkg) {
   });
 }
 var LEGACY_STATE_MAX_BYTES = 256 * 1024;
-function isRecord13(value) {
+function isRecord14(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function projectionStatus(state, pending, maxRetriesPerAction) {
@@ -17559,7 +19352,7 @@ async function projectWorkflowState(target) {
   );
   for (const event of trajectory) {
     if (event.type !== "action_completed") continue;
-    if (!isRecord13(event.data.action) || !isRecord13(event.data.outcome)) continue;
+    if (!isRecord14(event.data.action) || !isRecord14(event.data.outcome)) continue;
     const stepId2 = event.data.action.stepId;
     const node = typeof stepId2 === "string" ? nodeByStep.get(stepId2) : void 0;
     const outcomeStatus = event.data.outcome.status;
@@ -17575,7 +19368,7 @@ async function projectWorkflowState(target) {
     if (outcomeStatus !== "succeeded") continue;
     if (!completedNodes.includes(node)) completedNodes.push(node);
     const outcomeEvidence = event.data.outcome.evidence;
-    evidence[node] = isRecord13(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
+    evidence[node] = isRecord14(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
   }
   const protocol = verified.package.runtime.protocol;
   const runtimeState = state.workflowRuntime;
@@ -17621,7 +19414,8 @@ async function projectWorkflowState(target) {
   }
   const projectedFindings = boundWorkflowFindings([
     ...projectedBaseFindings.findings,
-    ...snapshotFindings
+    ...snapshotFindings,
+    ...repairFindings(state)
   ]);
   return {
     schemaVersion: 1,
@@ -17666,7 +19460,8 @@ async function projectWorkflowState(target) {
     blockers: legacyBlockersFromFindings(
       status === "completed" ? "done" : verified.pending?.type === "ask_user" ? "await-user" : verified.pending ? "continue" : "blocked",
       projectedFindings.findings
-    )
+    ),
+    ...runtimeState?.repairEpisode ? { repair: boundedRepairEpisode(runtimeState.repairEpisode) } : {}
   };
 }
 async function writeWorkflowStateProjection(target, projection) {
@@ -17764,7 +19559,7 @@ async function verifyStoredVerificationReceipts(runRoot, state, identity, pkg) {
       const version = state.workflowRuntime?.artifactVersions.find(
         (entry) => entry.id === candidate.versionId
       );
-      if (!version || version.artifactId !== candidate.artifactId || version.contentHash !== candidate.contentHash || !sameStableValue2(version.producer, candidate.producer)) {
+      if (!version || version.artifactId !== candidate.artifactId || version.contentHash !== candidate.contentHash || !sameStableValue3(version.producer, candidate.producer)) {
         throw new Error(
           `WorkflowRuntime verification receipt candidate artifact identity is invalid: ${reference.receiptId}`
         );
@@ -17795,7 +19590,7 @@ async function verifyStoredVerificationReceipts(runRoot, state, identity, pkg) {
         value.value,
         candidate.required
       );
-      if (!sameStableValue2(expected, candidate)) {
+      if (!sameStableValue3(expected, candidate)) {
         throw new Error(
           `WorkflowRuntime verification receipt evidence identity is invalid: ${reference.receiptId}`
         );
@@ -17909,7 +19704,7 @@ async function verifyStoredPackage(runRoot, state) {
           `WorkflowRuntime content snapshot is missing: ${reference.hash}`
         );
       }
-      if (snapshot.complete !== reference.complete || !sameStableValue2(snapshot.policy, snapshotPolicy)) {
+      if (snapshot.complete !== reference.complete || !sameStableValue3(snapshot.policy, snapshotPolicy)) {
         throw new Error(
           `WorkflowRuntime content snapshot identity is invalid: ${reference.hash}`
         );
@@ -18068,6 +19863,158 @@ async function verifyStoredPackage(runRoot, state) {
   }
   return { identity, package: pkg };
 }
+async function verifyStoredRepairEpisode(runRoot, state, identity) {
+  const episode = state.workflowRuntime?.repairEpisode;
+  if (!episode) {
+    if (identity.durabilityProfile?.capabilities.includes("repair-policy")) {
+      throw new Error("WorkflowRuntime repair episode is missing");
+    }
+    return;
+  }
+  if (!identity.durabilityProfile?.capabilities.includes("repair-policy")) {
+    throw new Error(
+      "WorkflowRuntime repair episode has no repair-policy capability"
+    );
+  }
+  const expectedExecutionHash = sha256(JSON.stringify(stableValue(identity)));
+  if (episode.signature && (episode.signature.protocolHash !== identity.protocolHash || episode.signature.executionHash !== expectedExecutionHash)) {
+    throw new Error(
+      "WorkflowRuntime repair signature is not bound to Run identity"
+    );
+  }
+  const trajectory = await readTrajectory(
+    runRoot,
+    state.trajectoryRef,
+    durabilityReadOptions(state, "trajectoryBytes")
+  );
+  const proof = [];
+  for (const event of trajectory) {
+    if (event.type !== "action_completed" || !isRecord14(event.data.outcome)) {
+      continue;
+    }
+    const outcome = event.data.outcome;
+    if (isRecord14(outcome.repairFailure) && isRecord14(outcome.repairFailure.signature)) {
+      const rawSignature = outcome.repairFailure.signature;
+      const signature = buildWorkflowRepairSignature({
+        protocolHash: rawSignature.protocolHash,
+        executionHash: rawSignature.executionHash,
+        actionId: rawSignature.actionId,
+        attemptId: rawSignature.attemptId,
+        nodeId: rawSignature.nodeId,
+        cycleId: rawSignature.cycleId,
+        visitOrdinal: rawSignature.visitOrdinal,
+        findingCodes: rawSignature.findingCodes,
+        failedReceiptCoverage: rawSignature.failedReceiptCoverage,
+        failedAcceptanceCoverage: rawSignature.failedAcceptanceCoverage,
+        scopeIdentities: rawSignature.scopeIdentities,
+        snapshotIdentities: rawSignature.snapshotIdentities,
+        artifactIdentities: rawSignature.artifactIdentities
+      });
+      if (rawSignature.signatureHash !== signature.signatureHash) {
+        throw new Error(
+          "WorkflowRuntime repair failure signature is not canonical"
+        );
+      }
+      if (rawSignature.protocolHash !== identity.protocolHash || rawSignature.executionHash !== expectedExecutionHash) {
+        throw new Error(
+          "WorkflowRuntime repair failure identity is not bound to Run"
+        );
+      }
+      const automaticRepair = outcome.repairFailure.automaticRepair === null || outcome.repairFailure.automaticRepair === void 0 ? void 0 : parseWorkflowRepairAutomaticOperation(
+        outcome.repairFailure.automaticRepair
+      );
+      proof.push({
+        kind: "failure",
+        signatureHash: signature.signatureHash,
+        findingCodes: signature.findingCodes,
+        failedReceiptCoverage: signature.failedReceiptCoverage,
+        failedAcceptanceCoverage: signature.failedAcceptanceCoverage,
+        scopeIdentities: signature.scopeIdentities,
+        snapshotIdentities: signature.snapshotIdentities,
+        artifactIdentities: signature.artifactIdentities,
+        disposition: outcome.repairFailure.disposition,
+        reasonCode: outcome.repairFailure.reasonCode,
+        consecutiveFailures: outcome.repairFailure.consecutiveFailures,
+        totalFailures: outcome.repairFailure.totalFailures,
+        remainingFailures: outcome.repairFailure.remainingFailures,
+        overrideAccepted: outcome.repairFailure.overrideAccepted,
+        ...automaticRepair ? { automaticRepair } : {}
+      });
+    }
+    if (isRecord14(outcome.repairDecision)) {
+      const repairDecision = outcome.repairDecision;
+      if (typeof repairDecision.signatureHash !== "string" || !/^[a-f0-9]{64}$/u.test(repairDecision.signatureHash)) {
+        throw new Error("WorkflowRuntime repair decision signature is invalid");
+      }
+      if (typeof repairDecision.decisionId !== "string" || typeof repairDecision.choiceId !== "string" || repairDecision.outcome !== "retry" && repairDecision.outcome !== "stop" && repairDecision.outcome !== "contract-change" || !isRecord14(repairDecision.reviewer) || typeof repairDecision.reviewer.subject !== "string" || !Array.isArray(repairDecision.reviewer.authorities) || repairDecision.reviewer.authorities.some(
+        (authority) => typeof authority !== "string"
+      )) {
+        throw new Error("WorkflowRuntime repair decision evidence is invalid");
+      }
+      const hypothesis = typeof repairDecision.hypothesis === "string" ? repairDecision.hypothesis.trim() : "";
+      const rationale = typeof repairDecision.rationale === "string" ? repairDecision.rationale.trim() : "";
+      proof.push({
+        kind: hypothesis.length > 0 ? "override" : "decision",
+        signatureHash: repairDecision.signatureHash,
+        actionId: outcome.actionId,
+        decisionId: repairDecision.decisionId,
+        choiceId: repairDecision.choiceId,
+        outcome: repairDecision.outcome,
+        reviewer: {
+          subject: repairDecision.reviewer.subject,
+          authorities: [...repairDecision.reviewer.authorities].sort(
+            (left, right) => left.localeCompare(right)
+          )
+        },
+        ...hypothesis.length > 0 ? {
+          rationaleHash: hashWorkflowRepairText(rationale),
+          hypothesisHash: hashWorkflowRepairText(hypothesis)
+        } : {
+          rationaleHash: rationale.length > 0 ? hashWorkflowRepairText(rationale) : null
+        }
+      });
+    }
+  }
+  if (proof.length !== episode.history.length) {
+    throw new Error(
+      "WorkflowRuntime repair history is detached from trajectory"
+    );
+  }
+  for (const [index, record] of episode.history.entries()) {
+    const evidence = proof[index];
+    if (!evidence || record.kind !== evidence.kind) {
+      throw new Error("WorkflowRuntime repair history order is invalid");
+    }
+    if (record.signatureHash !== evidence.signatureHash) {
+      throw new Error("WorkflowRuntime repair history signature is invalid");
+    }
+    if (record.kind === "failure") {
+      if (!sameStableValue3(record.findingCodes, evidence.findingCodes) || !sameStableValue3(
+        record.failedReceiptCoverage,
+        evidence.failedReceiptCoverage
+      ) || !sameStableValue3(
+        record.failedAcceptanceCoverage,
+        evidence.failedAcceptanceCoverage
+      ) || !sameStableValue3(record.scopeIdentities, evidence.scopeIdentities) || !sameStableValue3(
+        record.snapshotIdentities,
+        evidence.snapshotIdentities
+      ) || !sameStableValue3(
+        record.artifactIdentities,
+        evidence.artifactIdentities
+      ) || record.disposition !== evidence.disposition || record.reasonCode !== evidence.reasonCode || record.consecutiveFailures !== evidence.consecutiveFailures || record.totalFailures !== evidence.totalFailures || record.remainingFailures !== evidence.remainingFailures || record.overrideAccepted !== evidence.overrideAccepted || !sameStableValue3(record.automaticRepair, evidence.automaticRepair)) {
+        throw new Error("WorkflowRuntime repair failure coverage is invalid");
+      }
+      continue;
+    }
+    if (record.kind === "decision") {
+      if (record.actionId !== evidence.actionId || record.decisionId !== evidence.decisionId || record.choiceId !== evidence.choiceId || record.outcome !== evidence.outcome || !sameStableValue3(record.reviewer, evidence.reviewer) || record.rationaleHash !== evidence.rationaleHash) {
+        throw new Error("WorkflowRuntime repair decision history is invalid");
+      }
+    } else if (record.actionId !== evidence.actionId || record.decisionId !== evidence.decisionId || record.choiceId !== evidence.choiceId || record.outcome !== evidence.outcome || !sameStableValue3(record.reviewer, evidence.reviewer) || record.rationaleHash !== evidence.rationaleHash || record.hypothesisHash !== evidence.hypothesisHash) {
+      throw new Error("WorkflowRuntime repair override history is invalid");
+    }
+  }
+}
 async function verifyStoredRun(location) {
   const state = await location.readState();
   if (!state) throw new Error(`No Comet Run found in: ${location.runRoot}`);
@@ -18078,6 +20025,7 @@ async function verifyStoredRun(location) {
     verified.identity,
     verified.package
   );
+  await verifyStoredRepairEpisode(location.runRoot, state, verified.identity);
   return { state, ...verified, pending };
 }
 var WorkflowRevisionConflictError = class extends Error {
@@ -18208,6 +20156,177 @@ async function inspectWorkflowRun(target) {
     );
   });
 }
+function stringValues(value) {
+  return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
+}
+function repairFactsForSubmission(prepared, submission, mutation) {
+  const runtime = prepared.verified.state.workflowRuntime;
+  const failedReceipts = [
+    ...runtime?.verificationReceipts ?? [],
+    ...mutation?.verificationReceipts ?? []
+  ].filter((receipt) => receipt.status !== "passed").filter(
+    (receipt, index, values) => values.findIndex(
+      (candidate) => candidate.requirementId === receipt.requirementId && candidate.status === receipt.status && candidate.scopeHash === receipt.scopeHash
+    ) === index
+  );
+  const failedReceiptCoverage = failedReceipts.map(
+    (receipt) => `${receipt.requirementId}:${receipt.status}:${receipt.scopeHash}`
+  );
+  const evidence = !isDecisionSubmission(submission) ? submission.evidence : void 0;
+  const failedAcceptanceCoverage = [
+    ...stringValues(evidence && evidence.failedAcceptanceIds),
+    ...stringValues(evidence && evidence.failedCheckIds),
+    ...stringValues(evidence && evidence.failedAcceptanceCoverage)
+  ];
+  const findingCodes2 = [
+    ...failedReceipts.map(() => "verification-receipt-failed"),
+    ...stringValues(evidence && evidence.findingCodes)
+  ];
+  if (findingCodes2.length === 0) findingCodes2.push("action-failed");
+  if (failedAcceptanceCoverage.length === 0 && failedReceipts.length === 0) {
+    failedAcceptanceCoverage.push(
+      `node:${prepared.node ?? prepared.pending.stepId}`
+    );
+  }
+  const scopeIdentities = [
+    ...failedReceipts.map((receipt) => receipt.scopeHash),
+    ...stringValues(evidence && evidence.scopeIdentities),
+    ...stringValues(evidence && evidence.scopeHashes),
+    ...typeof evidence?.scopeHash === "string" ? [evidence.scopeHash] : []
+  ];
+  const snapshotIdentities = [
+    ...(runtime?.contentSnapshots ?? []).map((snapshot) => snapshot.hash),
+    ...failedReceipts.map((receipt) => receipt.contentSnapshotHash).filter((hash4) => hash4 !== null),
+    ...stringValues(evidence && evidence.snapshotIdentities),
+    ...stringValues(evidence && evidence.snapshotHashes),
+    ...typeof evidence?.snapshotHash === "string" ? [evidence.snapshotHash] : []
+  ];
+  const artifactIdentities = [
+    ...(runtime?.artifactVersions ?? []).map(
+      (version) => `${version.artifactId}:${version.id}:${version.contentHash}`
+    ),
+    ...(mutation?.versions ?? []).map(
+      (version) => `${version.artifactId}:${version.id}:${version.contentHash}`
+    ),
+    ...stringValues(evidence && evidence.artifactIdentities),
+    ...stringValues(evidence && evidence.artifactHashes),
+    ...typeof evidence?.artifactHash === "string" ? [evidence.artifactHash] : []
+  ];
+  return {
+    protocolHash: prepared.verified.identity.protocolHash,
+    execution: prepared.verified.identity,
+    actionId: prepared.pending.id,
+    attemptId: runtime?.currentAttempt?.id ?? null,
+    nodeId: prepared.node,
+    cycleId: runtime?.currentAttempt?.cycleId ?? null,
+    visitOrdinal: runtime?.currentAttempt?.visitOrdinal ?? null,
+    findingCodes: findingCodes2,
+    failedReceiptCoverage,
+    failedAcceptanceCoverage,
+    scopeIdentities,
+    snapshotIdentities,
+    artifactIdentities
+  };
+}
+function repairFailureForSubmission(prepared, submission, mutation) {
+  if (isDecisionSubmission(submission) || submission.status !== "failed" || !prepared.node) {
+    return void 0;
+  }
+  const profile = prepared.verified.identity.durabilityProfile;
+  if (!profile?.capabilities.includes("repair-policy") || !profile.repairPolicy) {
+    return void 0;
+  }
+  const facts = repairFactsForSubmission(prepared, submission, mutation);
+  const decision = decideWorkflowRepair({
+    facts,
+    history: prepared.verified.state.workflowRuntime?.repairEpisode?.history ?? [],
+    policy: profile.repairPolicy,
+    maxHistoryRecords: profile.bounds.repairHistoryCount
+  });
+  let pendingDecision;
+  if (decision.disposition === "manual-stop") {
+    const attempt = prepared.verified.state.workflowRuntime?.currentAttempt;
+    if (!attempt) {
+      throw new Error("Workflow repair stop requires a current Attempt");
+    }
+    const policy = normalizeWorkflowRepairPolicy(profile.repairPolicy);
+    const failureRevision = (prepared.verified.state.workflowRuntime?.revision ?? 0) + 1;
+    const decisionId = `workflow-repair-${decision.signature.signatureHash.slice(0, 24)}`;
+    const actionId2 = `workflow-repair-decision-${sha256(
+      JSON.stringify(
+        stableValue({
+          runId: prepared.verified.state.runId,
+          attemptId: attempt.id,
+          signatureHash: decision.signature.signatureHash,
+          failureRevision
+        })
+      )
+    ).slice(0, 24)}`;
+    pendingDecision = {
+      schemaVersion: 1,
+      decisionId,
+      actionId: actionId2,
+      signatureHash: decision.signature.signatureHash,
+      failureRevision,
+      attemptId: attempt.id,
+      stepId: attempt.stepId,
+      nodeId: prepared.node,
+      cycleId: attempt.cycleId,
+      visitOrdinal: attempt.visitOrdinal,
+      retryOrdinal: attempt.retryOrdinal + 1,
+      choices: structuredClone(policy.allowedChoices),
+      rationale: structuredClone(policy.rationale),
+      reviewer: structuredClone(policy.reviewer)
+    };
+  }
+  return {
+    signature: decision.signature,
+    disposition: decision.disposition,
+    reasonCode: decision.reasonCode,
+    consecutiveFailures: decision.consecutiveFailures,
+    totalFailures: decision.totalFailures,
+    remainingFailures: decision.remainingFailures,
+    overrideAccepted: decision.overrideAccepted,
+    ...decision.automaticRepair ? { automaticRepair: decision.automaticRepair } : {},
+    ...pendingDecision ? { pendingDecision } : {}
+  };
+}
+function repairFindings(state) {
+  const episode = state.workflowRuntime?.repairEpisode;
+  if (!episode?.signature) return [];
+  if (episode.disposition === "warning") {
+    return [
+      repairStagnationWarningFinding(
+        episode.signature.signatureHash,
+        episode.consecutiveFailures,
+        episode.remainingFailures
+      )
+    ];
+  }
+  if (episode.disposition === "manual-stop") {
+    if (!episode.pendingDecision) {
+      return [
+        repairStagnationStopFinding(
+          episode.signature.signatureHash,
+          episode.consecutiveFailures,
+          episode.remainingFailures,
+          false
+        )
+      ];
+    }
+    return episode.reasonCode === "override-already-used" ? [repairOverrideExhaustedFinding(episode.signature.signatureHash)] : [
+      repairStagnationStopFinding(
+        episode.signature.signatureHash,
+        episode.consecutiveFailures,
+        episode.remainingFailures
+      )
+    ];
+  }
+  if (episode.disposition === "hard-stop") {
+    return [repairIterationLimitFinding(episode.signature.signatureHash)];
+  }
+  return [];
+}
 async function prepareWorkflowSubmission(target, submission) {
   const location = resolveWorkflowRunLocation(target);
   const verified = await verifyStoredRun(location);
@@ -18241,6 +20360,10 @@ async function prepareWorkflowSubmission(target, submission) {
 function validateDecisionResponse(verified, pending, node, submission) {
   if (pending.type !== "ask_user") {
     throw new Error(`Decision response cannot satisfy ${pending.type} action`);
+  }
+  if (isWorkflowRepairAction(pending)) {
+    validateRepairDecisionResponse(verified, pending, node, submission);
+    return;
   }
   const runtimeState = verified.state.workflowRuntime;
   if (!runtimeState) {
@@ -18310,8 +20433,177 @@ function validateDecisionResponse(verified, pending, node, submission) {
   if (pending.rationale?.required && !submission.rationale) {
     throw new Error("Decision rationale is required");
   }
+  if (submission.repair !== void 0) {
+    throw new Error(
+      "Repair decision fields are only valid for a repair action"
+    );
+  }
 }
-function engineOutcome(prepared, submission, artifactMutation) {
+function validateRepairDecisionResponse(verified, pending, node, submission) {
+  const repair = pending.repair;
+  const runtime = verified.state.workflowRuntime;
+  const episode = runtime?.repairEpisode;
+  if (!runtime || !episode || episode.pendingDecision === void 0) {
+    throw new Error("Workflow repair decision state is missing");
+  }
+  if (submission.revision !== runtime.revision || submission.nodeId !== repair.nodeId || submission.attemptId !== repair.attemptId || submission.cycleId !== repair.cycleId) {
+    throw new Error("Workflow repair decision context does not match the Run");
+  }
+  if (node !== repair.nodeId) {
+    throw new Error("Workflow repair decision Node does not match the Run");
+  }
+  validateDecisionExecution(submission, verified.identity);
+  if (submission.decisionId !== void 0 && submission.decisionId !== repair.decisionId) {
+    throw new Error(
+      "Workflow repair decision id does not match the pending action"
+    );
+  }
+  const choice = repair.choices.find(
+    (candidate) => candidate.id === submission.choiceId
+  );
+  if (!choice) {
+    throw new Error(
+      `Workflow repair choice is not declared: ${submission.choiceId}`
+    );
+  }
+  if (submission.inputs && Object.keys(submission.inputs).length > 0) {
+    throw new Error("Workflow repair decisions do not accept inputs");
+  }
+  if (submission.scope !== void 0 || submission.evidenceReferences !== void 0) {
+    throw new Error("Workflow repair decisions do not accept evidence scope");
+  }
+  validateReviewer(submission.reviewer, repair.reviewer);
+  const policy = verified.identity.durabilityProfile?.repairPolicy;
+  if (!policy) throw new Error("Workflow repair decision policy is missing");
+  const normalizedPolicy = normalizeWorkflowRepairPolicy(policy);
+  const repairInput = submission.repair;
+  if (repairInput !== void 0 && (!repairInput || typeof repairInput !== "object" || Array.isArray(repairInput))) {
+    throw new Error("Workflow repair input must be an object");
+  }
+  if (repairInput !== void 0) {
+    const unknown = Object.keys(repairInput).find(
+      (key) => ![
+        "expectedSignatureHash",
+        "signatureHash",
+        "rationale",
+        "hypothesis",
+        "summary"
+      ].includes(key)
+    );
+    if (unknown)
+      throw new Error(`Workflow repair input has unknown field: ${unknown}`);
+    if (repairInput.expectedSignatureHash !== void 0 && repairInput.signatureHash !== void 0 && repairInput.expectedSignatureHash !== repairInput.signatureHash) {
+      throw new Error("Workflow repair input signature aliases disagree");
+    }
+    for (const [label, value] of [
+      ["expectedSignatureHash", repairInput.expectedSignatureHash],
+      ["signatureHash", repairInput.signatureHash],
+      ["rationale", repairInput.rationale],
+      ["hypothesis", repairInput.hypothesis],
+      ["summary", repairInput.summary]
+    ]) {
+      if (value !== void 0 && typeof value !== "string") {
+        throw new Error(`Workflow repair input ${label} must be a string`);
+      }
+    }
+  }
+  const expectedSignature = repairInput?.expectedSignatureHash ?? repairInput?.signatureHash;
+  if (expectedSignature !== void 0 && expectedSignature !== repair.signatureHash) {
+    throw new Error(
+      "Workflow repair decision signature does not match the pending episode"
+    );
+  }
+  const rawRationale = repairInput?.rationale ?? submission.rationale;
+  const rawHypothesis = repairInput?.hypothesis ?? repairInput?.summary ?? (choice.id === "retry-with-new-approach" ? submission.rationale : void 0);
+  const rationale = rawRationale === void 0 ? void 0 : normalizeWorkflowRepairText(rawRationale, "Workflow repair rationale");
+  const hypothesis = rawHypothesis === void 0 ? void 0 : normalizeWorkflowRepairText(
+    rawHypothesis,
+    "Workflow repair hypothesis"
+  );
+  if (repair.rationale.required && !rationale) {
+    throw new Error("Workflow repair decision rationale is required");
+  }
+  const overrideRequested = expectedSignature !== void 0 || hypothesis !== void 0;
+  if (!overrideRequested) return;
+  if (choice.outcome !== "retry") {
+    throw new Error("Workflow repair override must choose a retry outcome");
+  }
+  if (!normalizedPolicy.allowOneTimeOverride) {
+    throw new Error("Workflow repair override is not allowed by policy");
+  }
+  if (episode.totalFailures >= normalizedPolicy.maxFailures) {
+    throw new Error("Workflow repair hard stop cannot be overridden");
+  }
+  if (expectedSignature !== repair.signatureHash) {
+    throw new Error(
+      "Workflow repair override requires the current failure signature"
+    );
+  }
+  if (!rationale || !hypothesis) {
+    throw new Error(
+      "Workflow repair override requires rationale and hypothesis"
+    );
+  }
+  if (Buffer.byteLength(rationale, "utf8") > normalizedPolicy.maxOverrideRationaleBytes || Buffer.byteLength(hypothesis, "utf8") > normalizedPolicy.maxOverrideRationaleBytes) {
+    throw new Error("Workflow repair override rationale exceeds its bound");
+  }
+  const overrideAlreadyUsed = episode.history.some(
+    (record) => record.kind === "override" && record.signatureHash === repair.signatureHash
+  );
+  if (overrideAlreadyUsed) {
+    throw new Error(
+      "Workflow repair override has already been used for this signature"
+    );
+  }
+  const hypothesisHash = hashWorkflowRepairText(
+    hypothesis,
+    "Workflow repair hypothesis",
+    normalizedPolicy.maxOverrideRationaleBytes
+  );
+  if (episode.history.some(
+    (record) => record.signatureHash === repair.signatureHash && (record.kind === "override" && record.hypothesisHash === hypothesisHash || record.kind === "decision" && record.hypothesisHash === hypothesisHash)
+  )) {
+    throw new Error(
+      "Workflow repair override hypothesis is not materially new"
+    );
+  }
+}
+function engineOutcome(prepared, submission, artifactMutation, repairFailure) {
+  if (isWorkflowRepairAction(prepared.pending)) {
+    if (!isDecisionSubmission(submission)) {
+      throw new Error(
+        "Workflow repair decision requires a decision submission"
+      );
+    }
+    const choice2 = prepared.pending.repair.choices.find(
+      (candidate) => candidate.id === submission.choiceId
+    );
+    if (!choice2) {
+      throw new Error(
+        `Workflow repair choice is not declared: ${submission.choiceId}`
+      );
+    }
+    return {
+      actionId: prepared.pending.id,
+      status: "succeeded",
+      summary: `Repair decision ${prepared.pending.repair.decisionId}: ${choice2.id}`,
+      revision: submission.revision,
+      nodeId: submission.nodeId,
+      cycleId: submission.cycleId,
+      attemptId: submission.attemptId,
+      repairDecision: {
+        decisionId: prepared.pending.repair.decisionId,
+        signatureHash: prepared.pending.repair.signatureHash,
+        choiceId: choice2.id,
+        outcome: choice2.outcome,
+        reviewer: structuredClone(submission.reviewer),
+        ...(submission.repair?.rationale ?? submission.rationale) !== void 0 ? { rationale: submission.repair?.rationale ?? submission.rationale } : {},
+        ...submission.repair?.hypothesis || submission.repair?.summary || choice2.id === "retry-with-new-approach" ? {
+          hypothesis: submission.repair?.hypothesis ?? submission.repair?.summary ?? submission.rationale
+        } : {}
+      }
+    };
+  }
   if (!isDecisionSubmission(submission)) {
     const artifacts = artifactMutation ? artifactMutation.artifactPaths : submission.artifacts;
     const evidence = submission.evidence ? structuredClone(submission.evidence) : void 0;
@@ -18333,7 +20625,8 @@ function engineOutcome(prepared, submission, artifactMutation) {
         verificationReceiptIds: artifactMutation.verificationReceipts.map(
           (reference) => reference.receiptId
         )
-      } : {}
+      } : {},
+      ...repairFailure ? { repairFailure } : {}
     };
   }
   const node = prepared.verified.package.runtime.protocol.nodes.find(
@@ -18403,6 +20696,7 @@ async function completionBlockers(prepared, submission, mutation) {
 }
 function routeBlockers(prepared, submission, artifactMutation) {
   const protocol = prepared.verified.package.runtime.protocol;
+  if (isWorkflowRepairAction(prepared.pending)) return [];
   if (!isDecisionSubmission(submission) && submission.status !== "succeeded" || !prepared.node || !isRevisionedWorkflowProtocol(protocol)) {
     return [];
   }
@@ -18532,7 +20826,7 @@ function prepareVerificationReceiptRecords(mutation, profile) {
   };
 }
 function receiptReferencesEqual(left, right) {
-  return sameStableValue2(left, right);
+  return sameStableValue3(left, right);
 }
 async function validateCurrentVerificationReceipt(prepared, requirement, receipt, reference, scope, contentSnapshotHash) {
   const identity = prepared.verified.identity;
@@ -18550,7 +20844,7 @@ async function validateCurrentVerificationReceipt(prepared, requirement, receipt
       )
     );
   }
-  if (receipt.runId !== state.runId || receipt.revision !== runtime?.revision || receipt.actionId !== prepared.pending.id || receipt.nodeId !== prepared.node || receipt.cycleId !== (attempt?.cycleId ?? null) || receipt.attemptId !== attempt?.id || receipt.protocolHash !== identity.protocolHash || receipt.packageHash !== identity.packageHash || receipt.snapshotHash !== identity.snapshotHash || !sameExecutionIdentity(receipt.execution, identity) || receipt.requirementId !== requirement.id || receipt.role !== requirement.role || !expectedKinds.includes(receipt.receiptKind) || receipt.scopeHash !== workflowScopeHash(scope) || !sameStableValue2(receipt.scope, scope) || receipt.contentSnapshotHash !== contentSnapshotHash || !sameStableValue2(
+  if (receipt.runId !== state.runId || receipt.revision !== runtime?.revision || receipt.actionId !== prepared.pending.id || receipt.nodeId !== prepared.node || receipt.cycleId !== (attempt?.cycleId ?? null) || receipt.attemptId !== attempt?.id || receipt.protocolHash !== identity.protocolHash || receipt.packageHash !== identity.packageHash || receipt.snapshotHash !== identity.snapshotHash || !sameExecutionIdentity(receipt.execution, identity) || receipt.requirementId !== requirement.id || receipt.role !== requirement.role || !expectedKinds.includes(receipt.receiptKind) || receipt.scopeHash !== workflowScopeHash(scope) || !sameStableValue3(receipt.scope, scope) || receipt.contentSnapshotHash !== contentSnapshotHash || !sameStableValue3(
     receipt.candidateArtifacts,
     scope.artifacts.map((entry) => ({
       artifactId: entry.id,
@@ -18593,6 +20887,7 @@ function receiptIdsForRequirement(refs, requirement, submittedIds) {
   );
 }
 async function verificationMutationForSubmission(prepared, submission, artifactMutation) {
+  if (isWorkflowRepairAction(prepared.pending)) return { blockers: [] };
   const input = normalizedVerificationSubmission(submission);
   const submissionSucceeded = isDecisionSubmission(submission) || submission.status === "succeeded";
   if (input.proposals.length === 0 && input.receiptIds.length === 0) {
@@ -18882,14 +21177,15 @@ async function verificationMutationForSubmission(prepared, submission, artifactM
   };
 }
 function blockedContinuation(prepared, blockers) {
-  const projected = boundWorkflowFindings(
-    blockers.map(
+  const projected = boundWorkflowFindings([
+    ...blockers.map(
       (blocker) => findingFromBlocker(blocker, {
         actionId: prepared.pending.id,
         nodeId: prepared.node
       })
-    )
-  );
+    ),
+    ...repairFindings(prepared.verified.state)
+  ]);
   return {
     disposition: "blocked",
     runId: prepared.verified.state.runId,
@@ -18930,7 +21226,12 @@ function blockedContinuation(prepared, blockers) {
     requiresUserDecision: projected.findings.some(
       (finding) => finding.requiresUserDecision
     ),
-    blockers: legacyBlockersFromFindings("blocked", projected.findings)
+    blockers: legacyBlockersFromFindings("blocked", projected.findings),
+    ...prepared.verified.state.workflowRuntime?.repairEpisode ? {
+      repair: boundedRepairEpisode(
+        prepared.verified.state.workflowRuntime.repairEpisode
+      )
+    } : {}
   };
 }
 function conflictContinuation(verified, finding) {
@@ -19122,6 +21423,7 @@ async function projectWorkflowHandoff(protocol, current) {
       projectedCurrent?.findingSummary ?? emptyFindingSummary()
     ),
     requiresUserDecision: projectedCurrent?.requiresUserDecision ?? false,
+    ...projectedCurrent?.repair ? { repair: boundedRepairEpisode(projectedCurrent.repair) } : {},
     continuation: projectedCurrent
   };
 }
@@ -19135,7 +21437,7 @@ async function resumeStoredRun(location, options, forceCheckpoint = false, persi
       options.protectedSnapshotRoots
     )
   });
-  const changed = !sameStableValue2(verified.state, result.state) || !sameStableValue2(verified.pending, result.action);
+  const changed = !sameStableValue3(verified.state, result.state) || !sameStableValue3(verified.pending, result.action);
   if ((changed || forceCheckpoint) && persistCheckpoint) {
     await persistWorkflowCheckpoint(
       location,
@@ -19231,6 +21533,22 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
         "WorkflowRuntime pending action does not match Run state"
       );
     }
+    if (isWorkflowRepairAction(action)) {
+      const pendingRepair = state.workflowRuntime?.repairEpisode?.pendingDecision;
+      const episode = state.workflowRuntime?.repairEpisode;
+      const latestFailure = [...episode?.history ?? []].reverse().find((record) => record.kind === "failure");
+      const policy = identity.durabilityProfile?.repairPolicy;
+      const normalizedPolicy = policy ? normalizeWorkflowRepairPolicy(policy) : void 0;
+      if (!pendingRepair || !episode || !sameStableValue3(action.repair, pendingRepair) || pendingRepair.stepId !== action.stepId || state.currentStep !== action.stepId || identity.nodeToStep[pendingRepair.nodeId] !== pendingRepair.stepId || pendingRepair.failureRevision !== state.workflowRuntime?.revision || latestFailure?.revision !== pendingRepair.failureRevision || pendingRepair.signatureHash !== episode.signature?.signatureHash || !normalizedPolicy || !sameStableValue3(
+        pendingRepair.choices,
+        normalizedPolicy.allowedChoices
+      ) || !sameStableValue3(pendingRepair.rationale, normalizedPolicy.rationale) || !sameStableValue3(pendingRepair.reviewer, normalizedPolicy.reviewer)) {
+        throw new Error(
+          "WorkflowRuntime pending repair decision identity is invalid"
+        );
+      }
+      return action;
+    }
     if (action.type === "invoke_skill" || action.type === "ask_user") {
       if (!action.stepId || !Object.values(identity.nodeToStep).includes(action.stepId)) {
         throw new Error(
@@ -19282,9 +21600,9 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
           durabilityReadOptions(state, "trajectoryBytes")
         );
         const proposal = trajectory.slice().reverse().find(
-          (event) => event.type === "action_proposed" && isRecord13(event.data.action) && event.data.action.id === action.id
+          (event) => event.type === "action_proposed" && isRecord14(event.data.action) && event.data.action.id === action.id
         );
-        if (!proposal || !isRecord13(proposal.data.action)) {
+        if (!proposal || !isRecord14(proposal.data.action)) {
           throw new Error(
             "WorkflowRuntime scoped decision has no durable action proposal"
           );
@@ -19470,7 +21788,7 @@ async function recoverCheckpointAwareRun(location, options, forceCheckpoint) {
       "Workflow checkpoint current trajectory"
     );
     const headCheckpoint = inspections.some(
-      (inspection) => inspection.verification !== void 0 && inspection.verification.manifest.revision === (verified.state.workflowRuntime?.revision ?? 0) && sameStableValue2(inspection.verification.state, verified.state) && sameStableValue2(inspection.verification.pending, verified.pending) && currentTrajectory === inspection.verification.contents.trajectory
+      (inspection) => inspection.verification !== void 0 && inspection.verification.manifest.revision === (verified.state.workflowRuntime?.revision ?? 0) && sameStableValue3(inspection.verification.state, verified.state) && sameStableValue3(inspection.verification.pending, verified.pending) && currentTrajectory === inspection.verification.contents.trajectory
     );
     const result = await resumeStoredRun(
       location,
@@ -19577,7 +21895,23 @@ function createWorkflowRuntime() {
                   artifactSelections: [],
                   ...usesWorkflowContentSnapshots(
                     compiled.identity.durabilityProfile
-                  ) ? { contentSnapshots: [] } : {}
+                  ) ? { contentSnapshots: [] } : {},
+                  ...compiled.identity.durabilityProfile?.capabilities.includes(
+                    "repair-policy"
+                  ) ? {
+                    repairEpisode: {
+                      schemaVersion: 1,
+                      history: [],
+                      signature: null,
+                      disposition: null,
+                      reasonCode: null,
+                      consecutiveFailures: 0,
+                      totalFailures: 0,
+                      remainingFailures: normalizeWorkflowRepairPolicy(
+                        compiled.identity.durabilityProfile.repairPolicy
+                      ).maxFailures
+                    }
+                  } : {}
                 }
               } : {},
               prepareAction: prepareWorkflowActionForLocation(
@@ -19694,7 +22028,17 @@ function createWorkflowRuntime() {
             if (routeFindings.length > 0) {
               return blockedContinuation(prepared, routeFindings);
             }
-            const outcome = engineOutcome(prepared, submission, mutation);
+            const repairFailure = repairFailureForSubmission(
+              prepared,
+              submission,
+              mutation
+            );
+            const outcome = engineOutcome(
+              prepared,
+              submission,
+              mutation,
+              repairFailure
+            );
             if (prepared.verified.identity.durabilityProfile === void 0) {
               const result = await prepared.location.resume(
                 {

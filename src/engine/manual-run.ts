@@ -47,6 +47,10 @@ import {
   createWorkflowTransition,
   type WorkflowTransition,
 } from "../workflow-runtime/transition-journal.js";
+import {
+  executeWorkflowRepairOperation,
+  workflowRepairAction,
+} from "../workflow-runtime/repair.js";
 
 export interface ManualRunResult {
   state: RunState;
@@ -622,6 +626,24 @@ async function resumeManualRunInternal(
     ...(transition ? { overlay: transition } : {}),
   });
 
+  const repairAction = advanced.workflowRuntime?.repairEpisode?.pendingDecision
+    ? workflowRepairAction(
+        advanced.workflowRuntime.repairEpisode.pendingDecision,
+      )
+    : null;
+  if (repairAction) {
+    await writePendingAction(changeDir, advanced.pendingRef, repairAction, {
+      ...(transition ? { overlay: transition } : {}),
+    });
+    await appendEvent(
+      changeDir,
+      advanced,
+      "action_proposed",
+      { action: repairAction },
+      transition ? { overlay: transition } : {},
+    );
+  }
+
   const evals = await evaluateAndRecord(
     changeDir,
     pkg,
@@ -648,21 +670,43 @@ async function resumeManualRunInternal(
     await transition?.commit();
     return {
       state: advanced,
-      action: null,
+      action: repairAction,
       evals,
-      reason: `Run is ${advanced.status}`,
+      ...(repairAction ? {} : { reason: `Run is ${advanced.status}` }),
     };
   }
 
-  const next = await persistDecision(
-    changeDir,
-    advanced,
-    pkg,
-    options.confirmations ?? [],
-    resolver,
-    options.prepareAction,
-    transition,
-  );
+  const materializeNextAction = () =>
+    persistDecision(
+      changeDir,
+      advanced,
+      pkg,
+      options.confirmations ?? [],
+      resolver,
+      options.prepareAction,
+      transition,
+    );
+  const latestRepairRecord =
+    advanced.workflowRuntime?.repairEpisode?.history.at(-1);
+  const automaticRepair =
+    options.outcome?.status === "failed" &&
+    latestRepairRecord?.kind === "failure"
+      ? latestRepairRecord.automaticRepair
+      : undefined;
+  const automaticExecutionCount = automaticRepair
+    ? (advanced.workflowRuntime?.repairEpisode?.history.filter(
+        (record) =>
+          record.kind === "failure" &&
+          record.automaticRepair?.id === automaticRepair.id,
+      ).length ?? 0)
+    : 0;
+  const next = automaticRepair
+    ? await executeWorkflowRepairOperation(
+        automaticRepair,
+        automaticExecutionCount,
+        materializeNextAction,
+      )
+    : await materializeNextAction();
   await transition?.commit();
   return { ...next, evals };
 }

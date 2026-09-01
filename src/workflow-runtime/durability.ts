@@ -1,6 +1,11 @@
 import { stableValue } from "../util.js";
-import type { WorkflowDurabilityProfile, WorkflowProtocol } from "../types.js";
+import type {
+  WorkflowDurabilityProfile,
+  WorkflowProtocol,
+  WorkflowRepairPolicy,
+} from "../types.js";
 import { WORKFLOW_FINDING_CATALOG_VERSION } from "./findings.js";
+import { normalizeWorkflowRepairPolicy } from "./repair.js";
 import { parseWorkflowContentSnapshotPolicy } from "./snapshots.js";
 
 export const WORKFLOW_DURABILITY_PROFILE_VERSION = 1 as const;
@@ -15,6 +20,8 @@ const PROFILE_KEYS = new Set([
   "findingCatalogVersion",
   "snapshotPolicy",
   "verificationPolicy",
+  "repairPolicy",
+  "repair",
 ]);
 const CAPABILITIES = new Set([
   "mutation-locks",
@@ -23,6 +30,7 @@ const CAPABILITIES = new Set([
   "verified-checkpoints",
   "content-snapshots",
   "verification-receipts",
+  "repair-policy",
 ]);
 const BOUND_KEY_NAMES = [
   "runStateBytes",
@@ -40,6 +48,12 @@ const BOUND_KEYS = new Set<string>([
   "checkpointCount",
   "verificationReceiptBytes",
   "verificationReceiptCount",
+  "repairHistoryBytes",
+  "repairHistoryCount",
+  "repairEpisodeBytes",
+  "repairEpisodeCount",
+  "repairHistoryRecords",
+  "repairEpisodeRecords",
 ]);
 const SCHEMA_KEY_NAMES = [
   "runState",
@@ -56,10 +70,13 @@ const SCHEMA_KEYS = new Set<string>([
   "checkpointRecord",
   "contentSnapshot",
   "verificationReceipt",
+  "repairEpisode",
+  "repairHistory",
 ]);
 const MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
 const MAX_CHECKPOINT_COUNT = 256;
 const MAX_VERIFICATION_RECEIPT_COUNT = 256;
+const MAX_REPAIR_HISTORY_COUNT = 1_024;
 const VERIFICATION_POLICY_KEYS = new Set([
   "maxSummaryBytes",
   "maxEvidenceBytes",
@@ -237,6 +254,52 @@ export function parseWorkflowDurabilityProfile(
       boundsValue.verificationReceiptCount,
     );
   }
+  const repairHistoryBytes =
+    boundsValue.repairHistoryBytes ?? boundsValue.repairEpisodeBytes;
+  if (
+    boundsValue.repairHistoryBytes !== undefined &&
+    boundsValue.repairEpisodeBytes !== undefined &&
+    boundsValue.repairHistoryBytes !== boundsValue.repairEpisodeBytes
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: repair history byte aliases disagree",
+    );
+  }
+  if (repairHistoryBytes !== undefined) {
+    bounds.repairHistoryBytes = requiredBound(
+      repairHistoryBytes,
+      "repairHistoryBytes",
+    );
+  }
+  const repairHistoryCount =
+    boundsValue.repairHistoryCount ??
+    boundsValue.repairEpisodeCount ??
+    boundsValue.repairHistoryRecords ??
+    boundsValue.repairEpisodeRecords;
+  const repairCountAliases = [
+    boundsValue.repairHistoryCount,
+    boundsValue.repairEpisodeCount,
+    boundsValue.repairHistoryRecords,
+    boundsValue.repairEpisodeRecords,
+  ].filter((value): value is number => value !== undefined);
+  if (repairCountAliases.some((value) => value !== repairCountAliases[0])) {
+    throw new Error(
+      "Invalid Workflow durability profile: repair history count aliases disagree",
+    );
+  }
+  if (repairHistoryCount !== undefined) {
+    if (
+      typeof repairHistoryCount !== "number" ||
+      !Number.isSafeInteger(repairHistoryCount) ||
+      repairHistoryCount < 1 ||
+      repairHistoryCount > MAX_REPAIR_HISTORY_COUNT
+    ) {
+      throw new Error(
+        "Invalid Workflow durability profile: bounds.repairHistoryCount must be a positive bounded integer",
+      );
+    }
+    bounds.repairHistoryCount = repairHistoryCount;
+  }
   if (!isRecord(value.schemaVersions)) {
     throw new Error(
       "Invalid Workflow durability profile: schemaVersions must be an object",
@@ -300,6 +363,28 @@ export function parseWorkflowDurabilityProfile(
   ) {
     throw new Error(
       "Unsupported Workflow durability schema version: verificationReceipt",
+    );
+  }
+  const repairEpisode =
+    value.schemaVersions.repairEpisode ??
+    value.schemaVersions.repairHistory ??
+    value.schemaVersions.repair;
+  const repairSchemaAliases = [
+    value.schemaVersions.repairEpisode,
+    value.schemaVersions.repairHistory,
+    value.schemaVersions.repair,
+  ].filter((value): value is number => value !== undefined);
+  if (repairSchemaAliases.some((value) => value !== repairSchemaAliases[0])) {
+    throw new Error(
+      "Invalid Workflow durability profile: repair schema aliases disagree",
+    );
+  }
+  if (
+    repairEpisode !== undefined &&
+    repairEpisode !== WORKFLOW_DURABILITY_SCHEMA_VERSION
+  ) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: repairEpisode",
     );
   }
   if (
@@ -382,6 +467,44 @@ export function parseWorkflowDurabilityProfile(
       "Invalid Workflow durability profile: verification-receipts requires mutation locks, revision fences, transition journal, receipt bounds, and schema version",
     );
   }
+  const repairPolicyValue = value.repairPolicy ?? value.repair;
+  if (
+    value.repairPolicy !== undefined &&
+    value.repair !== undefined &&
+    JSON.stringify(stableValue(value.repairPolicy)) !==
+      JSON.stringify(stableValue(value.repair))
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: repair policy aliases disagree",
+    );
+  }
+  const repairPolicy =
+    repairPolicyValue === undefined
+      ? undefined
+      : normalizeWorkflowRepairPolicy(
+          repairPolicyValue as WorkflowRepairPolicy,
+        );
+  if (repairPolicy !== undefined && !capabilities.includes("repair-policy")) {
+    throw new Error(
+      "Invalid Workflow durability profile: repairPolicy requires repair-policy capability",
+    );
+  }
+  if (
+    capabilities.includes("repair-policy") &&
+    (!capabilities.includes("mutation-locks") ||
+      !capabilities.includes("revision-fences") ||
+      !capabilities.includes("transition-journal") ||
+      repairPolicy === undefined ||
+      bounds.repairHistoryBytes === undefined ||
+      bounds.repairHistoryCount === undefined ||
+      (repairPolicy !== undefined &&
+        repairPolicy.maxFailures > bounds.repairHistoryCount) ||
+      repairEpisode !== WORKFLOW_DURABILITY_SCHEMA_VERSION)
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: repair-policy requires mutation locks, revision fences, transition journal, repair policy, repair history bounds, and schema version",
+    );
+  }
   if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
     throw new Error(
       `Unsupported Workflow durability finding catalog version: ${String(value.findingCatalogVersion)}`,
@@ -415,10 +538,14 @@ export function parseWorkflowDurabilityProfile(
       ...(verificationReceipt === WORKFLOW_DURABILITY_SCHEMA_VERSION
         ? { verificationReceipt: WORKFLOW_DURABILITY_SCHEMA_VERSION }
         : {}),
+      ...(repairEpisode === WORKFLOW_DURABILITY_SCHEMA_VERSION
+        ? { repairEpisode: WORKFLOW_DURABILITY_SCHEMA_VERSION }
+        : {}),
     },
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
     ...(snapshotPolicy ? { snapshotPolicy } : {}),
     ...(verificationPolicy ? { verificationPolicy } : {}),
+    ...(repairPolicy ? { repairPolicy } : {}),
   };
 }
 

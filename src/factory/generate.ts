@@ -9,6 +9,7 @@ import {
   slug,
   atomicWrite,
 } from "../util.js";
+import { normalizeWorkflowRepairPolicy } from "../workflow-runtime/repair.js";
 
 function nodeSkillName(workflow: string, node: string): string {
   return `${slug(workflow) || "workflow"}-${slug(node) || "node"}`;
@@ -75,6 +76,24 @@ function entryMarkdown(proposal: FactoryProposal): string {
         `- **${requirement.id ?? guardrail.id}** on Node \`${node.id}\`: \`${Array.isArray(requirement.kind) ? requirement.kind.join(", ") : requirement.kind}\` receipt for role \`${requirement.role}\``,
     )
     .join("\n");
+  const durability = proposal.workflow.capabilities?.durability;
+  const repairPolicyInput = durability?.repairPolicy ?? durability?.repair;
+  const repairPolicy = repairPolicyInput
+    ? normalizeWorkflowRepairPolicy(repairPolicyInput)
+    : undefined;
+  const repairChoices = repairPolicy?.allowedChoices ?? [];
+  const repairs = repairPolicy
+    ? [
+        `- Maximum failures: \`${repairPolicy.maxFailures}\``,
+        `- Warning threshold: \`${repairPolicy.warningThreshold}\`; manual stop threshold: \`${repairPolicy.manualStopThreshold}\``,
+        `- Allowed choices: ${repairChoices
+          .map((choice) =>
+            typeof choice === "string" ? `\`${choice}\`` : `\`${choice.id}\``,
+          )
+          .join(", ")}`,
+        `- One-time override: \`${repairPolicy.allowOneTimeOverride}\``,
+      ].join("\n")
+    : "- None. The workflow does not opt into evidence-bound repair policy.";
   const executableNodeOrder = executableNodeIds
     .map((nodeId) => `\`${nodeId}\``)
     .join(" → ");
@@ -129,6 +148,17 @@ WorkflowRuntime accepts only bounded receipt proposals or exact existing receipt
 references. It generates issue time, scope and artifact bindings, and the
 content-addressed receipt identity. Failed, skipped, blocked, stale, malformed,
 or drifted receipts remain evidence or findings and cannot satisfy a guard.
+
+## Repair Policy
+
+${repairs}
+
+Repeated failure is evaluated from stable evidence identities, not prose or
+timestamps. A warning remains automatic work; a manual stop is a persisted
+repair decision; and a hard stop cannot be overridden. Generated adapters only
+forward failed outcomes and declared decisions to WorkflowRuntime.
+Automatic retries use the declared idempotent \`workflow.resume\` operation inside
+the same locked transition journal.
 
 Decision Nodes may declare bounded artifact and evidence scope entries. The
 runtime captures only accepted version ids, hashes, and producer identities for

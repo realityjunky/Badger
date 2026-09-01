@@ -32,6 +32,7 @@ import {
   durabilityProfileForProtocol,
   normalizeWorkflowDurabilityProtocol,
 } from "./durability.js";
+import { normalizeWorkflowRepairPolicy } from "./repair.js";
 
 interface CompiledWorkflow {
   package: SkillPackage;
@@ -643,12 +644,17 @@ function compileGuardrails(
   protocol: WorkflowProtocol,
   nodes: readonly NodeProtocol[],
 ): GuardrailDefinition {
+  const repairFailures = protocol.capabilities?.durability?.repairPolicy
+    ? normalizeWorkflowRepairPolicy(
+        protocol.capabilities.durability.repairPolicy,
+      ).maxFailures
+    : 0;
   return {
     allowedSkills: compiledSkillIds(protocol, nodes),
     allowedAgents: [],
     allowedTools: [],
-    maxIterations: maxWorkflowIterations(protocol),
-    maxRetriesPerAction: 3,
+    maxIterations: maxWorkflowIterations(protocol) + repairFailures,
+    maxRetriesPerAction: repairFailures > 0 ? repairFailures : 3,
     confirmationRequiredFor: [],
   };
 }
@@ -686,6 +692,16 @@ export async function compileWorkflow(
   ) {
     throw new Error(
       "Workflow Protocol verification receipts require revisioned capabilities",
+    );
+  }
+  if (
+    executableProtocol.capabilities?.durability?.capabilities.includes(
+      "repair-policy",
+    ) &&
+    !revisioned
+  ) {
+    throw new Error(
+      "Workflow Protocol repair policy requires revisioned capabilities",
     );
   }
   if (revisioned && executableProtocol.capabilities?.version !== 3) {

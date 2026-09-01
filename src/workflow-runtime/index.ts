@@ -48,6 +48,7 @@ import type {
   WorkflowVerificationReceipt,
   WorkflowVerificationReceiptProposal,
   WorkflowVerificationReceiptReference,
+  WorkflowRepairPendingDecision,
 } from "../types.js";
 import { sha256, stableValue } from "../util.js";
 import { compileWorkflow } from "./compiler.js";
@@ -94,6 +95,10 @@ import {
   parseWorkflowFindingSummary,
   revisionConflictFinding,
   recoveryRequiredFinding,
+  repairIterationLimitFinding,
+  repairOverrideExhaustedFinding,
+  repairStagnationStopFinding,
+  repairStagnationWarningFinding,
   snapshotIncompleteFinding,
   type WorkflowFinding,
   type WorkflowFindingSummary,
@@ -148,6 +153,17 @@ import {
   workflowVerificationReceiptReference,
   workflowVerificationKinds,
 } from "./verification-receipts.js";
+import {
+  buildWorkflowRepairSignature,
+  decideWorkflowRepair,
+  hashWorkflowRepairText,
+  isWorkflowRepairAction,
+  normalizeWorkflowRepairPolicy,
+  normalizeWorkflowRepairText,
+  parseWorkflowRepairAutomaticOperation,
+  workflowRepairAction,
+  type WorkflowRepairFailureFacts,
+} from "./repair.js";
 
 async function withStructuredRuntimeErrors<T>(
   operation: () => Promise<T>,
@@ -441,6 +457,7 @@ const DECISION_SUBMISSION_KEYS = new Set([
   "verificationReceipts",
   "verificationReceiptIds",
   "receiptIds",
+  "repair",
 ]);
 
 const VERIFICATION_SUBMISSION_KEYS = new Set([
@@ -1118,6 +1135,16 @@ function boundProjectedLedger<T>(values: readonly T[]): T[] {
   return structuredClone(values.slice(-MAX_PROJECTED_LEDGER_ENTRIES)) as T[];
 }
 
+function boundedRepairEpisode(
+  value: WorkflowContinuation["repair"],
+): WorkflowContinuation["repair"] {
+  if (!value) return undefined;
+  return {
+    ...structuredClone(value),
+    history: boundProjectedLedger(value.history),
+  };
+}
+
 function boundedContinuation(
   value: WorkflowContinuation,
 ): WorkflowContinuation {
@@ -1177,6 +1204,7 @@ function boundedContinuation(
       (finding) => finding.requiresUserDecision,
     ),
     blockers: legacyBlockersFromFindings(disposition, projected.findings),
+    ...(value.repair ? { repair: boundedRepairEpisode(value.repair) } : {}),
   };
 }
 
@@ -1457,6 +1485,17 @@ function validateSubmission(submission: WorkflowSubmission): void {
   if (submission.scope !== undefined) {
     throw new Error("Decision scope is only valid for decision submissions");
   }
+  if (Object.prototype.hasOwnProperty.call(submission, "repair")) {
+    throw new Error(
+      "Repair decision fields are only valid for decision submissions",
+    );
+  }
+  if (
+    submission.repairDecision !== undefined ||
+    submission.repairFailure !== undefined
+  ) {
+    throw new Error("Workflow repair outcomes are runtime-generated");
+  }
   if (submission.status !== "succeeded" && submission.status !== "failed") {
     throw new Error("Submission status must be succeeded or failed");
   }
@@ -1583,6 +1622,10 @@ function continuation(
     ...projected.findings,
     ...contentSnapshotFindings(result.state),
   ]);
+  const withRepair = boundWorkflowFindings([
+    ...withSnapshots.findings,
+    ...repairFindings(result.state),
+  ]);
   return {
     disposition,
     runId: result.state.runId,
@@ -1615,12 +1658,15 @@ function continuation(
       runtimeState?.contentSnapshots ?? [],
     ),
     currentArtifactVersions: currentWorkflowArtifactVersions(runtimeState),
-    findings: withSnapshots.findings,
-    findingSummary: withSnapshots.summary,
-    requiresUserDecision: withSnapshots.findings.some(
+    findings: withRepair.findings,
+    findingSummary: withRepair.summary,
+    requiresUserDecision: withRepair.findings.some(
       (finding) => finding.requiresUserDecision,
     ),
-    blockers: legacyBlockersFromFindings(disposition, withSnapshots.findings),
+    blockers: legacyBlockersFromFindings(disposition, withRepair.findings),
+    ...(runtimeState?.repairEpisode
+      ? { repair: boundedRepairEpisode(runtimeState.repairEpisode) }
+      : {}),
   };
 }
 
@@ -1856,6 +1902,7 @@ export async function projectWorkflowState(
   const projectedFindings = boundWorkflowFindings([
     ...projectedBaseFindings.findings,
     ...snapshotFindings,
+    ...repairFindings(state),
   ]);
   return {
     schemaVersion: 1,
@@ -1910,6 +1957,9 @@ export async function projectWorkflowState(
             : "blocked",
       projectedFindings.findings,
     ),
+    ...(runtimeState?.repairEpisode
+      ? { repair: boundedRepairEpisode(runtimeState.repairEpisode) }
+      : {}),
   };
 }
 
@@ -2413,6 +2463,258 @@ async function verifyStoredPackage(
   return { identity, package: pkg };
 }
 
+async function verifyStoredRepairEpisode(
+  runRoot: string,
+  state: RunState,
+  identity: WorkflowExecutionIdentity,
+): Promise<void> {
+  const episode = state.workflowRuntime?.repairEpisode;
+  if (!episode) {
+    if (identity.durabilityProfile?.capabilities.includes("repair-policy")) {
+      throw new Error("WorkflowRuntime repair episode is missing");
+    }
+    return;
+  }
+  if (!identity.durabilityProfile?.capabilities.includes("repair-policy")) {
+    throw new Error(
+      "WorkflowRuntime repair episode has no repair-policy capability",
+    );
+  }
+  const expectedExecutionHash = sha256(JSON.stringify(stableValue(identity)));
+  if (
+    episode.signature &&
+    (episode.signature.protocolHash !== identity.protocolHash ||
+      episode.signature.executionHash !== expectedExecutionHash)
+  ) {
+    throw new Error(
+      "WorkflowRuntime repair signature is not bound to Run identity",
+    );
+  }
+  const trajectory = await readTrajectory(
+    runRoot,
+    state.trajectoryRef,
+    durabilityReadOptions(state, "trajectoryBytes"),
+  );
+  const proof: Array<{
+    kind: "failure" | "decision" | "override";
+    signatureHash: string;
+    actionId?: string;
+    decisionId?: string;
+    choiceId?: string;
+    outcome?: string;
+    reviewer?: { subject: string; authorities: string[] };
+    rationaleHash?: string | null;
+    hypothesisHash?: string | null;
+    findingCodes?: string[];
+    failedReceiptCoverage?: string[];
+    failedAcceptanceCoverage?: string[];
+    scopeIdentities?: string[];
+    snapshotIdentities?: string[];
+    artifactIdentities?: string[];
+    disposition?: string;
+    reasonCode?: string;
+    consecutiveFailures?: number;
+    totalFailures?: number;
+    remainingFailures?: number;
+    overrideAccepted?: boolean;
+    automaticRepair?: {
+      id: string;
+      operation: "workflow.resume";
+      idempotent: true;
+      maxExecutions: number;
+    };
+  }> = [];
+  for (const event of trajectory) {
+    if (event.type !== "action_completed" || !isRecord(event.data.outcome)) {
+      continue;
+    }
+    const outcome = event.data.outcome;
+    if (
+      isRecord(outcome.repairFailure) &&
+      isRecord(outcome.repairFailure.signature)
+    ) {
+      const rawSignature = outcome.repairFailure.signature;
+      const signature = buildWorkflowRepairSignature({
+        protocolHash: rawSignature.protocolHash as string,
+        executionHash: rawSignature.executionHash as string,
+        actionId: rawSignature.actionId as string | null,
+        attemptId: rawSignature.attemptId as string | null,
+        nodeId: rawSignature.nodeId as string | null,
+        cycleId: rawSignature.cycleId as string | null,
+        visitOrdinal: rawSignature.visitOrdinal as number | null,
+        findingCodes: rawSignature.findingCodes as string[],
+        failedReceiptCoverage: rawSignature.failedReceiptCoverage as string[],
+        failedAcceptanceCoverage:
+          rawSignature.failedAcceptanceCoverage as string[],
+        scopeIdentities: rawSignature.scopeIdentities as string[],
+        snapshotIdentities: rawSignature.snapshotIdentities as string[],
+        artifactIdentities: rawSignature.artifactIdentities as string[],
+      });
+      if (rawSignature.signatureHash !== signature.signatureHash) {
+        throw new Error(
+          "WorkflowRuntime repair failure signature is not canonical",
+        );
+      }
+      if (
+        rawSignature.protocolHash !== identity.protocolHash ||
+        rawSignature.executionHash !== expectedExecutionHash
+      ) {
+        throw new Error(
+          "WorkflowRuntime repair failure identity is not bound to Run",
+        );
+      }
+      const automaticRepair =
+        outcome.repairFailure.automaticRepair === null ||
+        outcome.repairFailure.automaticRepair === undefined
+          ? undefined
+          : parseWorkflowRepairAutomaticOperation(
+              outcome.repairFailure.automaticRepair,
+            );
+      proof.push({
+        kind: "failure",
+        signatureHash: signature.signatureHash,
+        findingCodes: signature.findingCodes,
+        failedReceiptCoverage: signature.failedReceiptCoverage,
+        failedAcceptanceCoverage: signature.failedAcceptanceCoverage,
+        scopeIdentities: signature.scopeIdentities,
+        snapshotIdentities: signature.snapshotIdentities,
+        artifactIdentities: signature.artifactIdentities,
+        disposition: outcome.repairFailure.disposition as string,
+        reasonCode: outcome.repairFailure.reasonCode as string,
+        consecutiveFailures: outcome.repairFailure
+          .consecutiveFailures as number,
+        totalFailures: outcome.repairFailure.totalFailures as number,
+        remainingFailures: outcome.repairFailure.remainingFailures as number,
+        overrideAccepted: outcome.repairFailure.overrideAccepted as boolean,
+        ...(automaticRepair ? { automaticRepair } : {}),
+      });
+    }
+    if (isRecord(outcome.repairDecision)) {
+      const repairDecision = outcome.repairDecision;
+      if (
+        typeof repairDecision.signatureHash !== "string" ||
+        !/^[a-f0-9]{64}$/u.test(repairDecision.signatureHash)
+      ) {
+        throw new Error("WorkflowRuntime repair decision signature is invalid");
+      }
+      if (
+        typeof repairDecision.decisionId !== "string" ||
+        typeof repairDecision.choiceId !== "string" ||
+        (repairDecision.outcome !== "retry" &&
+          repairDecision.outcome !== "stop" &&
+          repairDecision.outcome !== "contract-change") ||
+        !isRecord(repairDecision.reviewer) ||
+        typeof repairDecision.reviewer.subject !== "string" ||
+        !Array.isArray(repairDecision.reviewer.authorities) ||
+        repairDecision.reviewer.authorities.some(
+          (authority) => typeof authority !== "string",
+        )
+      ) {
+        throw new Error("WorkflowRuntime repair decision evidence is invalid");
+      }
+      const hypothesis =
+        typeof repairDecision.hypothesis === "string"
+          ? repairDecision.hypothesis.trim()
+          : "";
+      const rationale =
+        typeof repairDecision.rationale === "string"
+          ? repairDecision.rationale.trim()
+          : "";
+      proof.push({
+        kind: hypothesis.length > 0 ? "override" : "decision",
+        signatureHash: repairDecision.signatureHash as string,
+        actionId: outcome.actionId as string,
+        decisionId: repairDecision.decisionId as string,
+        choiceId: repairDecision.choiceId as string,
+        outcome: repairDecision.outcome as string,
+        reviewer: {
+          subject: repairDecision.reviewer.subject,
+          authorities: [...repairDecision.reviewer.authorities].sort(
+            (left, right) => left.localeCompare(right),
+          ),
+        },
+        ...(hypothesis.length > 0
+          ? {
+              rationaleHash: hashWorkflowRepairText(rationale),
+              hypothesisHash: hashWorkflowRepairText(hypothesis),
+            }
+          : {
+              rationaleHash:
+                rationale.length > 0 ? hashWorkflowRepairText(rationale) : null,
+            }),
+      });
+    }
+  }
+  if (proof.length !== episode.history.length) {
+    throw new Error(
+      "WorkflowRuntime repair history is detached from trajectory",
+    );
+  }
+  for (const [index, record] of episode.history.entries()) {
+    const evidence = proof[index];
+    if (!evidence || record.kind !== evidence.kind) {
+      throw new Error("WorkflowRuntime repair history order is invalid");
+    }
+    if (record.signatureHash !== evidence.signatureHash) {
+      throw new Error("WorkflowRuntime repair history signature is invalid");
+    }
+    if (record.kind === "failure") {
+      if (
+        !sameStableValue(record.findingCodes, evidence.findingCodes) ||
+        !sameStableValue(
+          record.failedReceiptCoverage,
+          evidence.failedReceiptCoverage,
+        ) ||
+        !sameStableValue(
+          record.failedAcceptanceCoverage,
+          evidence.failedAcceptanceCoverage,
+        ) ||
+        !sameStableValue(record.scopeIdentities, evidence.scopeIdentities) ||
+        !sameStableValue(
+          record.snapshotIdentities,
+          evidence.snapshotIdentities,
+        ) ||
+        !sameStableValue(
+          record.artifactIdentities,
+          evidence.artifactIdentities,
+        ) ||
+        record.disposition !== evidence.disposition ||
+        record.reasonCode !== evidence.reasonCode ||
+        record.consecutiveFailures !== evidence.consecutiveFailures ||
+        record.totalFailures !== evidence.totalFailures ||
+        record.remainingFailures !== evidence.remainingFailures ||
+        record.overrideAccepted !== evidence.overrideAccepted ||
+        !sameStableValue(record.automaticRepair, evidence.automaticRepair)
+      ) {
+        throw new Error("WorkflowRuntime repair failure coverage is invalid");
+      }
+      continue;
+    }
+    if (record.kind === "decision") {
+      if (
+        record.actionId !== evidence.actionId ||
+        record.decisionId !== evidence.decisionId ||
+        record.choiceId !== evidence.choiceId ||
+        record.outcome !== evidence.outcome ||
+        !sameStableValue(record.reviewer, evidence.reviewer) ||
+        record.rationaleHash !== evidence.rationaleHash
+      ) {
+        throw new Error("WorkflowRuntime repair decision history is invalid");
+      }
+    } else if (
+      record.actionId !== evidence.actionId ||
+      record.decisionId !== evidence.decisionId ||
+      record.choiceId !== evidence.choiceId ||
+      record.outcome !== evidence.outcome ||
+      !sameStableValue(record.reviewer, evidence.reviewer) ||
+      record.rationaleHash !== evidence.rationaleHash ||
+      record.hypothesisHash !== evidence.hypothesisHash
+    ) {
+      throw new Error("WorkflowRuntime repair override history is invalid");
+    }
+  }
+}
+
 async function verifyStoredRun(location: ResolvedWorkflowRunLocation): Promise<{
   state: RunState;
   identity: WorkflowExecutionIdentity;
@@ -2428,6 +2730,7 @@ async function verifyStoredRun(location: ResolvedWorkflowRunLocation): Promise<{
     verified.identity,
     verified.package,
   );
+  await verifyStoredRepairEpisode(location.runRoot, state, verified.identity);
   return { state, ...verified, pending };
 }
 
@@ -2622,6 +2925,233 @@ interface PreparedWorkflowSubmission {
   node: string | null;
 }
 
+function stringValues(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+function repairFactsForSubmission(
+  prepared: PreparedWorkflowSubmission,
+  submission: WorkflowSubmission,
+  mutation: WorkflowArtifactMutation | undefined,
+): WorkflowRepairFailureFacts {
+  const runtime = prepared.verified.state.workflowRuntime;
+  const failedReceipts = [
+    ...(runtime?.verificationReceipts ?? []),
+    ...(mutation?.verificationReceipts ?? []),
+  ]
+    .filter((receipt) => receipt.status !== "passed")
+    .filter(
+      (receipt, index, values) =>
+        values.findIndex(
+          (candidate) =>
+            candidate.requirementId === receipt.requirementId &&
+            candidate.status === receipt.status &&
+            candidate.scopeHash === receipt.scopeHash,
+        ) === index,
+    );
+  const failedReceiptCoverage = failedReceipts.map(
+    (receipt) =>
+      `${receipt.requirementId}:${receipt.status}:${receipt.scopeHash}`,
+  );
+  const evidence = !isDecisionSubmission(submission)
+    ? submission.evidence
+    : undefined;
+  const failedAcceptanceCoverage = [
+    ...stringValues(evidence && evidence.failedAcceptanceIds),
+    ...stringValues(evidence && evidence.failedCheckIds),
+    ...stringValues(evidence && evidence.failedAcceptanceCoverage),
+  ];
+  const findingCodes = [
+    ...failedReceipts.map(() => "verification-receipt-failed"),
+    ...stringValues(evidence && evidence.findingCodes),
+  ];
+  if (findingCodes.length === 0) findingCodes.push("action-failed");
+  if (failedAcceptanceCoverage.length === 0 && failedReceipts.length === 0) {
+    failedAcceptanceCoverage.push(
+      `node:${prepared.node ?? prepared.pending.stepId}`,
+    );
+  }
+  const scopeIdentities = [
+    ...failedReceipts.map((receipt) => receipt.scopeHash),
+    ...stringValues(evidence && evidence.scopeIdentities),
+    ...stringValues(evidence && evidence.scopeHashes),
+    ...(typeof evidence?.scopeHash === "string" ? [evidence.scopeHash] : []),
+  ];
+  const snapshotIdentities = [
+    ...(runtime?.contentSnapshots ?? []).map((snapshot) => snapshot.hash),
+    ...failedReceipts
+      .map((receipt) => receipt.contentSnapshotHash)
+      .filter((hash): hash is string => hash !== null),
+    ...stringValues(evidence && evidence.snapshotIdentities),
+    ...stringValues(evidence && evidence.snapshotHashes),
+    ...(typeof evidence?.snapshotHash === "string"
+      ? [evidence.snapshotHash]
+      : []),
+  ];
+  const artifactIdentities = [
+    ...(runtime?.artifactVersions ?? []).map(
+      (version) => `${version.artifactId}:${version.id}:${version.contentHash}`,
+    ),
+    ...(mutation?.versions ?? []).map(
+      (version) => `${version.artifactId}:${version.id}:${version.contentHash}`,
+    ),
+    ...stringValues(evidence && evidence.artifactIdentities),
+    ...stringValues(evidence && evidence.artifactHashes),
+    ...(typeof evidence?.artifactHash === "string"
+      ? [evidence.artifactHash]
+      : []),
+  ];
+  return {
+    protocolHash: prepared.verified.identity.protocolHash,
+    execution: prepared.verified.identity,
+    actionId: prepared.pending.id,
+    attemptId: runtime?.currentAttempt?.id ?? null,
+    nodeId: prepared.node,
+    cycleId: runtime?.currentAttempt?.cycleId ?? null,
+    visitOrdinal: runtime?.currentAttempt?.visitOrdinal ?? null,
+    findingCodes,
+    failedReceiptCoverage,
+    failedAcceptanceCoverage,
+    scopeIdentities,
+    snapshotIdentities,
+    artifactIdentities,
+  };
+}
+
+function repairFailureForSubmission(
+  prepared: PreparedWorkflowSubmission,
+  submission: WorkflowSubmission,
+  mutation: WorkflowArtifactMutation | undefined,
+):
+  | {
+      signature: ReturnType<typeof buildWorkflowRepairSignature>;
+      disposition: "continue" | "warning" | "manual-stop" | "hard-stop";
+      reasonCode: string;
+      consecutiveFailures: number;
+      totalFailures: number;
+      remainingFailures: number;
+      overrideAccepted: boolean;
+      automaticRepair?: NonNullable<
+        ReturnType<typeof decideWorkflowRepair>["automaticRepair"]
+      >;
+      pendingDecision?: WorkflowRepairPendingDecision;
+    }
+  | undefined {
+  if (
+    isDecisionSubmission(submission) ||
+    submission.status !== "failed" ||
+    !prepared.node
+  ) {
+    return undefined;
+  }
+  const profile = prepared.verified.identity.durabilityProfile;
+  if (
+    !profile?.capabilities.includes("repair-policy") ||
+    !profile.repairPolicy
+  ) {
+    return undefined;
+  }
+  const facts = repairFactsForSubmission(prepared, submission, mutation);
+  const decision = decideWorkflowRepair({
+    facts,
+    history:
+      prepared.verified.state.workflowRuntime?.repairEpisode?.history ?? [],
+    policy: profile.repairPolicy,
+    maxHistoryRecords: profile.bounds.repairHistoryCount,
+  });
+  let pendingDecision: WorkflowRepairPendingDecision | undefined;
+  if (decision.disposition === "manual-stop") {
+    const attempt = prepared.verified.state.workflowRuntime?.currentAttempt;
+    if (!attempt) {
+      throw new Error("Workflow repair stop requires a current Attempt");
+    }
+    const policy = normalizeWorkflowRepairPolicy(profile.repairPolicy);
+    const failureRevision =
+      (prepared.verified.state.workflowRuntime?.revision ?? 0) + 1;
+    const decisionId = `workflow-repair-${decision.signature.signatureHash.slice(0, 24)}`;
+    const actionId = `workflow-repair-decision-${sha256(
+      JSON.stringify(
+        stableValue({
+          runId: prepared.verified.state.runId,
+          attemptId: attempt.id,
+          signatureHash: decision.signature.signatureHash,
+          failureRevision,
+        }),
+      ),
+    ).slice(0, 24)}`;
+    pendingDecision = {
+      schemaVersion: 1,
+      decisionId,
+      actionId,
+      signatureHash: decision.signature.signatureHash,
+      failureRevision,
+      attemptId: attempt.id,
+      stepId: attempt.stepId,
+      nodeId: prepared.node,
+      cycleId: attempt.cycleId,
+      visitOrdinal: attempt.visitOrdinal,
+      retryOrdinal: attempt.retryOrdinal + 1,
+      choices: structuredClone(policy.allowedChoices),
+      rationale: structuredClone(policy.rationale),
+      reviewer: structuredClone(policy.reviewer),
+    };
+  }
+  return {
+    signature: decision.signature,
+    disposition: decision.disposition,
+    reasonCode: decision.reasonCode,
+    consecutiveFailures: decision.consecutiveFailures,
+    totalFailures: decision.totalFailures,
+    remainingFailures: decision.remainingFailures,
+    overrideAccepted: decision.overrideAccepted,
+    ...(decision.automaticRepair
+      ? { automaticRepair: decision.automaticRepair }
+      : {}),
+    ...(pendingDecision ? { pendingDecision } : {}),
+  };
+}
+
+function repairFindings(state: RunState): WorkflowFinding[] {
+  const episode = state.workflowRuntime?.repairEpisode;
+  if (!episode?.signature) return [];
+  if (episode.disposition === "warning") {
+    return [
+      repairStagnationWarningFinding(
+        episode.signature.signatureHash,
+        episode.consecutiveFailures,
+        episode.remainingFailures,
+      ),
+    ];
+  }
+  if (episode.disposition === "manual-stop") {
+    if (!episode.pendingDecision) {
+      return [
+        repairStagnationStopFinding(
+          episode.signature.signatureHash,
+          episode.consecutiveFailures,
+          episode.remainingFailures,
+          false,
+        ),
+      ];
+    }
+    return episode.reasonCode === "override-already-used"
+      ? [repairOverrideExhaustedFinding(episode.signature.signatureHash)]
+      : [
+          repairStagnationStopFinding(
+            episode.signature.signatureHash,
+            episode.consecutiveFailures,
+            episode.remainingFailures,
+          ),
+        ];
+  }
+  if (episode.disposition === "hard-stop") {
+    return [repairIterationLimitFinding(episode.signature.signatureHash)];
+  }
+  return [];
+}
+
 async function prepareWorkflowSubmission(
   target: WorkflowRunTarget,
   submission: WorkflowSubmission,
@@ -2668,6 +3198,10 @@ function validateDecisionResponse(
 ): void {
   if (pending.type !== "ask_user") {
     throw new Error(`Decision response cannot satisfy ${pending.type} action`);
+  }
+  if (isWorkflowRepairAction(pending)) {
+    validateRepairDecisionResponse(verified, pending, node, submission);
+    return;
   }
   const runtimeState = verified.state.workflowRuntime;
   if (!runtimeState) {
@@ -2741,13 +3275,251 @@ function validateDecisionResponse(
   if (pending.rationale?.required && !submission.rationale) {
     throw new Error("Decision rationale is required");
   }
+  if (submission.repair !== undefined) {
+    throw new Error(
+      "Repair decision fields are only valid for a repair action",
+    );
+  }
+}
+
+function validateRepairDecisionResponse(
+  verified: VerifiedWorkflowRun,
+  pending: EngineAction & {
+    repair: WorkflowRepairPendingDecision;
+  },
+  node: string | null,
+  submission: WorkflowDecisionSubmission,
+): void {
+  const repair = pending.repair;
+  const runtime = verified.state.workflowRuntime;
+  const episode = runtime?.repairEpisode;
+  if (!runtime || !episode || episode.pendingDecision === undefined) {
+    throw new Error("Workflow repair decision state is missing");
+  }
+  if (
+    submission.revision !== runtime.revision ||
+    submission.nodeId !== repair.nodeId ||
+    submission.attemptId !== repair.attemptId ||
+    submission.cycleId !== repair.cycleId
+  ) {
+    throw new Error("Workflow repair decision context does not match the Run");
+  }
+  if (node !== repair.nodeId) {
+    throw new Error("Workflow repair decision Node does not match the Run");
+  }
+  validateDecisionExecution(submission, verified.identity);
+  if (
+    submission.decisionId !== undefined &&
+    submission.decisionId !== repair.decisionId
+  ) {
+    throw new Error(
+      "Workflow repair decision id does not match the pending action",
+    );
+  }
+  const choice = repair.choices.find(
+    (candidate) => candidate.id === submission.choiceId,
+  );
+  if (!choice) {
+    throw new Error(
+      `Workflow repair choice is not declared: ${submission.choiceId}`,
+    );
+  }
+  if (submission.inputs && Object.keys(submission.inputs).length > 0) {
+    throw new Error("Workflow repair decisions do not accept inputs");
+  }
+  if (
+    submission.scope !== undefined ||
+    submission.evidenceReferences !== undefined
+  ) {
+    throw new Error("Workflow repair decisions do not accept evidence scope");
+  }
+  validateReviewer(submission.reviewer, repair.reviewer);
+  const policy = verified.identity.durabilityProfile?.repairPolicy;
+  if (!policy) throw new Error("Workflow repair decision policy is missing");
+  const normalizedPolicy = normalizeWorkflowRepairPolicy(policy);
+  const repairInput = submission.repair;
+  if (
+    repairInput !== undefined &&
+    (!repairInput ||
+      typeof repairInput !== "object" ||
+      Array.isArray(repairInput))
+  ) {
+    throw new Error("Workflow repair input must be an object");
+  }
+  if (repairInput !== undefined) {
+    const unknown = Object.keys(repairInput).find(
+      (key) =>
+        ![
+          "expectedSignatureHash",
+          "signatureHash",
+          "rationale",
+          "hypothesis",
+          "summary",
+        ].includes(key),
+    );
+    if (unknown)
+      throw new Error(`Workflow repair input has unknown field: ${unknown}`);
+    if (
+      repairInput.expectedSignatureHash !== undefined &&
+      repairInput.signatureHash !== undefined &&
+      repairInput.expectedSignatureHash !== repairInput.signatureHash
+    ) {
+      throw new Error("Workflow repair input signature aliases disagree");
+    }
+    for (const [label, value] of [
+      ["expectedSignatureHash", repairInput.expectedSignatureHash],
+      ["signatureHash", repairInput.signatureHash],
+      ["rationale", repairInput.rationale],
+      ["hypothesis", repairInput.hypothesis],
+      ["summary", repairInput.summary],
+    ] as const) {
+      if (value !== undefined && typeof value !== "string") {
+        throw new Error(`Workflow repair input ${label} must be a string`);
+      }
+    }
+  }
+  const expectedSignature =
+    repairInput?.expectedSignatureHash ?? repairInput?.signatureHash;
+  if (
+    expectedSignature !== undefined &&
+    expectedSignature !== repair.signatureHash
+  ) {
+    throw new Error(
+      "Workflow repair decision signature does not match the pending episode",
+    );
+  }
+  const rawRationale = repairInput?.rationale ?? submission.rationale;
+  const rawHypothesis =
+    repairInput?.hypothesis ??
+    repairInput?.summary ??
+    (choice.id === "retry-with-new-approach"
+      ? submission.rationale
+      : undefined);
+  const rationale =
+    rawRationale === undefined
+      ? undefined
+      : normalizeWorkflowRepairText(rawRationale, "Workflow repair rationale");
+  const hypothesis =
+    rawHypothesis === undefined
+      ? undefined
+      : normalizeWorkflowRepairText(
+          rawHypothesis,
+          "Workflow repair hypothesis",
+        );
+  if (repair.rationale.required && !rationale) {
+    throw new Error("Workflow repair decision rationale is required");
+  }
+  const overrideRequested =
+    expectedSignature !== undefined || hypothesis !== undefined;
+  if (!overrideRequested) return;
+  if (choice.outcome !== "retry") {
+    throw new Error("Workflow repair override must choose a retry outcome");
+  }
+  if (!normalizedPolicy.allowOneTimeOverride) {
+    throw new Error("Workflow repair override is not allowed by policy");
+  }
+  if (episode.totalFailures >= normalizedPolicy.maxFailures) {
+    throw new Error("Workflow repair hard stop cannot be overridden");
+  }
+  if (expectedSignature !== repair.signatureHash) {
+    throw new Error(
+      "Workflow repair override requires the current failure signature",
+    );
+  }
+  if (!rationale || !hypothesis) {
+    throw new Error(
+      "Workflow repair override requires rationale and hypothesis",
+    );
+  }
+  if (
+    Buffer.byteLength(rationale, "utf8") >
+      normalizedPolicy.maxOverrideRationaleBytes ||
+    Buffer.byteLength(hypothesis, "utf8") >
+      normalizedPolicy.maxOverrideRationaleBytes
+  ) {
+    throw new Error("Workflow repair override rationale exceeds its bound");
+  }
+  const overrideAlreadyUsed = episode.history.some(
+    (record) =>
+      record.kind === "override" &&
+      record.signatureHash === repair.signatureHash,
+  );
+  if (overrideAlreadyUsed) {
+    throw new Error(
+      "Workflow repair override has already been used for this signature",
+    );
+  }
+  const hypothesisHash = hashWorkflowRepairText(
+    hypothesis,
+    "Workflow repair hypothesis",
+    normalizedPolicy.maxOverrideRationaleBytes,
+  );
+  if (
+    episode.history.some(
+      (record) =>
+        record.signatureHash === repair.signatureHash &&
+        ((record.kind === "override" &&
+          record.hypothesisHash === hypothesisHash) ||
+          (record.kind === "decision" &&
+            record.hypothesisHash === hypothesisHash)),
+    )
+  ) {
+    throw new Error(
+      "Workflow repair override hypothesis is not materially new",
+    );
+  }
 }
 
 function engineOutcome(
   prepared: PreparedWorkflowSubmission,
   submission: WorkflowSubmission,
   artifactMutation?: WorkflowArtifactMutation,
+  repairFailure?: ReturnType<typeof repairFailureForSubmission>,
 ): import("../engine/types.js").ActionOutcome {
+  if (isWorkflowRepairAction(prepared.pending)) {
+    if (!isDecisionSubmission(submission)) {
+      throw new Error(
+        "Workflow repair decision requires a decision submission",
+      );
+    }
+    const choice = prepared.pending.repair.choices.find(
+      (candidate) => candidate.id === submission.choiceId,
+    );
+    if (!choice) {
+      throw new Error(
+        `Workflow repair choice is not declared: ${submission.choiceId}`,
+      );
+    }
+    return {
+      actionId: prepared.pending.id,
+      status: "succeeded",
+      summary: `Repair decision ${prepared.pending.repair.decisionId}: ${choice.id}`,
+      revision: submission.revision,
+      nodeId: submission.nodeId,
+      cycleId: submission.cycleId,
+      attemptId: submission.attemptId,
+      repairDecision: {
+        decisionId: prepared.pending.repair.decisionId,
+        signatureHash: prepared.pending.repair.signatureHash,
+        choiceId: choice.id,
+        outcome: choice.outcome,
+        reviewer: structuredClone(submission.reviewer),
+        ...((submission.repair?.rationale ?? submission.rationale) !== undefined
+          ? { rationale: submission.repair?.rationale ?? submission.rationale }
+          : {}),
+        ...(submission.repair?.hypothesis ||
+        submission.repair?.summary ||
+        choice.id === "retry-with-new-approach"
+          ? {
+              hypothesis:
+                submission.repair?.hypothesis ??
+                submission.repair?.summary ??
+                submission.rationale,
+            }
+          : {}),
+      },
+    };
+  }
   if (!isDecisionSubmission(submission)) {
     const artifacts = artifactMutation
       ? artifactMutation.artifactPaths
@@ -2782,6 +3554,7 @@ function engineOutcome(
             ),
           }
         : {}),
+      ...(repairFailure ? { repairFailure } : {}),
     };
   }
   const node = prepared.verified.package.runtime!.protocol.nodes.find(
@@ -2881,6 +3654,7 @@ function routeBlockers(
   artifactMutation?: WorkflowArtifactMutation,
 ): string[] {
   const protocol = prepared.verified.package.runtime!.protocol;
+  if (isWorkflowRepairAction(prepared.pending)) return [];
   if (
     (!isDecisionSubmission(submission) && submission.status !== "succeeded") ||
     !prepared.node ||
@@ -3147,6 +3921,7 @@ async function verificationMutationForSubmission(
   submission: WorkflowSubmission,
   artifactMutation: WorkflowArtifactMutation | undefined,
 ): Promise<{ mutation?: WorkflowArtifactMutation; blockers: string[] }> {
+  if (isWorkflowRepairAction(prepared.pending)) return { blockers: [] };
   const input = normalizedVerificationSubmission(submission);
   const submissionSucceeded =
     isDecisionSubmission(submission) || submission.status === "succeeded";
@@ -3476,14 +4251,15 @@ function blockedContinuation(
   prepared: PreparedWorkflowSubmission,
   blockers: readonly string[],
 ): WorkflowContinuation {
-  const projected = boundWorkflowFindings(
-    blockers.map((blocker) =>
+  const projected = boundWorkflowFindings([
+    ...blockers.map((blocker) =>
       findingFromBlocker(blocker, {
         actionId: prepared.pending.id,
         nodeId: prepared.node,
       }),
     ),
-  );
+    ...repairFindings(prepared.verified.state),
+  ]);
   return {
     disposition: "blocked",
     runId: prepared.verified.state.runId,
@@ -3533,6 +4309,13 @@ function blockedContinuation(
       (finding) => finding.requiresUserDecision,
     ),
     blockers: legacyBlockersFromFindings("blocked", projected.findings),
+    ...(prepared.verified.state.workflowRuntime?.repairEpisode
+      ? {
+          repair: boundedRepairEpisode(
+            prepared.verified.state.workflowRuntime.repairEpisode,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -3771,6 +4554,9 @@ export async function projectWorkflowHandoff(
       projectedCurrent?.findingSummary ?? emptyFindingSummary(),
     ),
     requiresUserDecision: projectedCurrent?.requiresUserDecision ?? false,
+    ...(projectedCurrent?.repair
+      ? { repair: boundedRepairEpisode(projectedCurrent.repair) }
+      : {}),
     continuation: projectedCurrent,
   };
 }
@@ -3915,6 +4701,41 @@ async function verifyStoredAction(
       throw new Error(
         "WorkflowRuntime pending action does not match Run state",
       );
+    }
+    if (isWorkflowRepairAction(action)) {
+      const pendingRepair =
+        state.workflowRuntime?.repairEpisode?.pendingDecision;
+      const episode = state.workflowRuntime?.repairEpisode;
+      const latestFailure = [...(episode?.history ?? [])]
+        .reverse()
+        .find((record) => record.kind === "failure");
+      const policy = identity.durabilityProfile?.repairPolicy;
+      const normalizedPolicy = policy
+        ? normalizeWorkflowRepairPolicy(policy)
+        : undefined;
+      if (
+        !pendingRepair ||
+        !episode ||
+        !sameStableValue(action.repair, pendingRepair) ||
+        pendingRepair.stepId !== action.stepId ||
+        state.currentStep !== action.stepId ||
+        identity.nodeToStep[pendingRepair.nodeId] !== pendingRepair.stepId ||
+        pendingRepair.failureRevision !== state.workflowRuntime?.revision ||
+        latestFailure?.revision !== pendingRepair.failureRevision ||
+        pendingRepair.signatureHash !== episode.signature?.signatureHash ||
+        !normalizedPolicy ||
+        !sameStableValue(
+          pendingRepair.choices,
+          normalizedPolicy.allowedChoices,
+        ) ||
+        !sameStableValue(pendingRepair.rationale, normalizedPolicy.rationale) ||
+        !sameStableValue(pendingRepair.reviewer, normalizedPolicy.reviewer)
+      ) {
+        throw new Error(
+          "WorkflowRuntime pending repair decision identity is invalid",
+        );
+      }
+      return action;
     }
     if (action.type === "invoke_skill" || action.type === "ask_user") {
       if (
@@ -4362,6 +5183,25 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                       )
                         ? { contentSnapshots: [] }
                         : {}),
+                      ...(compiled.identity.durabilityProfile?.capabilities.includes(
+                        "repair-policy",
+                      )
+                        ? {
+                            repairEpisode: {
+                              schemaVersion: 1 as const,
+                              history: [],
+                              signature: null,
+                              disposition: null,
+                              reasonCode: null,
+                              consecutiveFailures: 0,
+                              totalFailures: 0,
+                              remainingFailures: normalizeWorkflowRepairPolicy(
+                                compiled.identity.durabilityProfile
+                                  .repairPolicy!,
+                              ).maxFailures,
+                            },
+                          }
+                        : {}),
                     },
                   }
                 : {}),
@@ -4489,7 +5329,17 @@ export function createWorkflowRuntime(): WorkflowRuntime {
             if (routeFindings.length > 0) {
               return blockedContinuation(prepared, routeFindings);
             }
-            const outcome = engineOutcome(prepared, submission, mutation);
+            const repairFailure = repairFailureForSubmission(
+              prepared,
+              submission,
+              mutation,
+            );
+            const outcome = engineOutcome(
+              prepared,
+              submission,
+              mutation,
+              repairFailure,
+            );
             if (prepared.verified.identity.durabilityProfile === undefined) {
               const result = await prepared.location.resume(
                 {

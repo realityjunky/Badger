@@ -73,6 +73,21 @@ export type {
   WorkflowDurabilityCapability,
   WorkflowDurabilityProfile,
   WorkflowDurabilitySchemaVersions,
+  WorkflowRepairChoice,
+  WorkflowRepairChoiceInput,
+  WorkflowRepairAutomaticOperation,
+  WorkflowRepairDecisionOutcome,
+  WorkflowRepairDecisionRecord,
+  WorkflowRepairDisposition,
+  WorkflowRepairEpisodeState,
+  WorkflowRepairFailureRecord,
+  WorkflowRepairFailureSignature,
+  WorkflowRepairHistoryRecord,
+  WorkflowRepairOverridePolicy,
+  WorkflowRepairOverrideRecord,
+  WorkflowRepairOutcome,
+  WorkflowRepairPendingDecision,
+  WorkflowRepairPolicy,
 } from "../types.js";
 
 export type {

@@ -355,7 +355,8 @@ export type WorkflowDurabilityCapability =
   | "transition-journal"
   | "verified-checkpoints"
   | "content-snapshots"
-  | "verification-receipts";
+  | "verification-receipts"
+  | "repair-policy";
 
 export type WorkflowContentSnapshotProvider = "physical-tree" | "git";
 export type WorkflowContentSnapshotOrigin = "explicit";
@@ -525,6 +526,12 @@ export interface WorkflowDurabilityBounds {
   checkpointCount?: number;
   verificationReceiptBytes?: number;
   verificationReceiptCount?: number;
+  repairHistoryBytes?: number;
+  repairHistoryCount?: number;
+  repairEpisodeBytes?: number;
+  repairEpisodeCount?: number;
+  repairHistoryRecords?: number;
+  repairEpisodeRecords?: number;
 }
 
 export interface WorkflowDurabilitySchemaVersions {
@@ -539,11 +546,194 @@ export interface WorkflowDurabilitySchemaVersions {
   checkpointRecord?: 1;
   contentSnapshot?: 1;
   verificationReceipt?: 1;
+  repairEpisode?: 1;
+  repairHistory?: 1;
+  repair?: 1;
 }
 
 export interface WorkflowVerificationPolicy {
   maxSummaryBytes: number;
   maxEvidenceBytes: number;
+}
+
+export type WorkflowRepairDisposition =
+  "continue" | "warning" | "manual-stop" | "hard-stop";
+
+export type WorkflowRepairOutcome = "retry" | "stop" | "contract-change";
+
+export interface WorkflowRepairChoice {
+  id: string;
+  label: string;
+  outcome: WorkflowRepairOutcome;
+}
+
+export type WorkflowRepairChoiceInput =
+  | WorkflowRepairChoice
+  | {
+      id?: string;
+      choiceId?: string;
+      label?: string;
+      description?: string;
+      outcome?: string;
+      effect?: string;
+      kind?: string;
+    }
+  | WorkflowRepairOutcome
+  | "retry-with-new-approach"
+  | "replace-run";
+
+export interface WorkflowRepairOverridePolicy {
+  enabled?: boolean;
+  maxRationaleBytes?: number;
+  maxOverrideRationaleBytes?: number;
+  maxBytes?: number;
+}
+
+export interface WorkflowRepairAutomaticOperation {
+  id: string;
+  operation: "workflow.resume";
+  idempotent: true;
+  maxExecutions: number;
+}
+
+export interface WorkflowRepairPolicy {
+  maxFailures?: number;
+  maxRepairFailures?: number;
+  maxVerifyFailures?: number;
+  maxRepairIterations?: number;
+  warningThreshold?: number;
+  warningAtConsecutiveFailures?: number;
+  warningAfter?: number;
+  warnAfter?: number;
+  manualStopThreshold?: number;
+  manualStopAtConsecutiveFailures?: number;
+  stopAfter?: number;
+  manualStopAfter?: number;
+  allowedChoices?: WorkflowRepairChoiceInput[];
+  choices?: WorkflowRepairChoiceInput[];
+  allowOneTimeOverride?: boolean;
+  allowOverride?: boolean;
+  oneTimeOverride?: WorkflowRepairOverridePolicy | boolean;
+  override?: WorkflowRepairOverridePolicy | boolean;
+  overridePolicy?: WorkflowRepairOverridePolicy | boolean;
+  automaticRepair?: WorkflowRepairAutomaticOperation;
+  automaticRepairs?: WorkflowRepairAutomaticOperation[];
+  maxOverrideRationaleBytes?: number;
+  maxRationaleBytes?: number;
+  maxOverrideBytes?: number;
+  reviewer?: WorkflowReviewerPolicy;
+  rationale?: WorkflowRationalePolicy;
+}
+
+export interface WorkflowRepairFailureSignature {
+  schemaVersion: 1;
+  protocolHash: string;
+  executionHash: string;
+  actionId: string | null;
+  attemptId: string | null;
+  nodeId: string | null;
+  cycleId: string | null;
+  visitOrdinal: number | null;
+  findingCodes: string[];
+  failedReceiptCoverage: string[];
+  failedAcceptanceCoverage: string[];
+  scopeIdentities: string[];
+  snapshotIdentities: string[];
+  artifactIdentities: string[];
+  signatureHash: string;
+}
+
+export interface WorkflowRepairFailureRecord {
+  kind: "failure";
+  revision: number;
+  actionId: string | null;
+  attemptId: string | null;
+  signatureHash: string;
+  findingCodes: string[];
+  failedReceiptCoverage: string[];
+  failedAcceptanceCoverage: string[];
+  scopeIdentities: string[];
+  snapshotIdentities: string[];
+  artifactIdentities: string[];
+  automaticRepair?: WorkflowRepairAutomaticOperation;
+  disposition?: WorkflowRepairDisposition;
+  reasonCode?: string;
+  consecutiveFailures?: number;
+  totalFailures?: number;
+  remainingFailures?: number;
+  overrideAccepted?: boolean;
+}
+
+export interface WorkflowRepairDecisionRecord {
+  kind: "decision";
+  revision: number;
+  actionId: string;
+  attemptId: string | null;
+  signatureHash: string;
+  decisionId: string;
+  choiceId: string;
+  outcome: WorkflowRepairOutcome;
+  reviewer: WorkflowReviewerAttestation;
+  rationaleHash: string | null;
+  hypothesisHash: string | null;
+}
+
+export interface WorkflowRepairOverrideRecord {
+  kind: "override";
+  revision: number;
+  actionId: string;
+  attemptId: string | null;
+  signatureHash: string;
+  decisionId: string;
+  choiceId: string;
+  outcome: WorkflowRepairOutcome;
+  reviewer: WorkflowReviewerAttestation;
+  rationaleHash: string;
+  hypothesisHash: string;
+}
+
+export type WorkflowRepairHistoryRecord =
+  | WorkflowRepairFailureRecord
+  | WorkflowRepairDecisionRecord
+  | WorkflowRepairOverrideRecord;
+
+export interface WorkflowRepairPendingDecision {
+  schemaVersion: 1;
+  decisionId: string;
+  actionId: string;
+  signatureHash: string;
+  failureRevision: number;
+  attemptId: string;
+  stepId: string;
+  nodeId: string;
+  cycleId: string | null;
+  visitOrdinal: number;
+  retryOrdinal: number;
+  choices: WorkflowRepairChoice[];
+  rationale: WorkflowRationalePolicy;
+  reviewer: WorkflowReviewerPolicy;
+}
+
+export interface WorkflowRepairEpisodeState {
+  schemaVersion: 1;
+  history: WorkflowRepairHistoryRecord[];
+  signature: WorkflowRepairFailureSignature | null;
+  disposition: WorkflowRepairDisposition | null;
+  reasonCode: string | null;
+  consecutiveFailures: number;
+  totalFailures: number;
+  remainingFailures: number;
+  pendingDecision?: WorkflowRepairPendingDecision;
+}
+
+export interface WorkflowRepairDecisionOutcome {
+  decisionId: string;
+  signatureHash: string;
+  choiceId: string;
+  outcome: WorkflowRepairOutcome;
+  reviewer: WorkflowReviewerAttestation;
+  rationale?: string;
+  hypothesis?: string;
 }
 
 export interface WorkflowDurabilityProfile {
@@ -554,6 +744,8 @@ export interface WorkflowDurabilityProfile {
   findingCatalogVersion: 1;
   snapshotPolicy?: WorkflowContentSnapshotPolicy;
   verificationPolicy?: WorkflowVerificationPolicy;
+  repairPolicy?: WorkflowRepairPolicy;
+  repair?: WorkflowRepairPolicy;
 }
 
 export interface WorkflowProtocolCapabilities {
