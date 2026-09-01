@@ -107,7 +107,7 @@ async function resolveStandaloneProjectRoot(
   return lexicalRoot;
 }
 
-async function ensureStandaloneRunDir(
+export async function ensureStandaloneRunDir(
   projectRoot: string,
   runId: string,
 ): Promise<string> {

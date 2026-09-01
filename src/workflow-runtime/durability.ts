@@ -13,7 +13,11 @@ const PROFILE_KEYS = new Set([
   "schemaVersions",
   "findingCatalogVersion",
 ]);
-const CAPABILITIES = new Set(["revision-fences", "transition-journal"]);
+const CAPABILITIES = new Set([
+  "mutation-locks",
+  "revision-fences",
+  "transition-journal",
+]);
 const BOUND_KEY_NAMES = [
   "runStateBytes",
   "pendingActionBytes",
@@ -24,6 +28,7 @@ const BOUND_KEY_NAMES = [
 const BOUND_KEYS = new Set<string>([
   ...BOUND_KEY_NAMES,
   "transitionJournalBytes",
+  "runLockBytes",
 ]);
 const SCHEMA_KEY_NAMES = [
   "runState",
@@ -32,7 +37,11 @@ const SCHEMA_KEY_NAMES = [
   "artifacts",
   "revisionClaim",
 ] as const;
-const SCHEMA_KEYS = new Set<string>([...SCHEMA_KEY_NAMES, "transitionJournal"]);
+const SCHEMA_KEYS = new Set<string>([
+  ...SCHEMA_KEY_NAMES,
+  "runLock",
+  "transitionJournal",
+]);
 const MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -81,12 +90,7 @@ export function parseWorkflowDurabilityProfile(
   }
   const capabilities = value.capabilities.map(
     (capability): WorkflowDurabilityProfile["capabilities"][number] => {
-      if (
-        typeof capability !== "string" ||
-        !CAPABILITIES.has(capability) ||
-        (capability !== "revision-fences" &&
-          capability !== "transition-journal")
-      ) {
+      if (typeof capability !== "string" || !CAPABILITIES.has(capability)) {
         throw new Error(
           `Invalid Workflow durability profile: unsupported capability ${String(capability)}`,
         );
@@ -119,6 +123,12 @@ export function parseWorkflowDurabilityProfile(
       "transitionJournalBytes",
     );
   }
+  if (boundsValue.runLockBytes !== undefined) {
+    bounds.runLockBytes = requiredBound(
+      boundsValue.runLockBytes,
+      "runLockBytes",
+    );
+  }
   if (!isRecord(value.schemaVersions)) {
     throw new Error(
       "Invalid Workflow durability profile: schemaVersions must be an object",
@@ -144,6 +154,10 @@ export function parseWorkflowDurabilityProfile(
       "Unsupported Workflow durability schema version: transitionJournal",
     );
   }
+  const runLock = value.schemaVersions.runLock;
+  if (runLock !== undefined && runLock !== WORKFLOW_DURABILITY_SCHEMA_VERSION) {
+    throw new Error("Unsupported Workflow durability schema version: runLock");
+  }
   if (
     capabilities.includes("transition-journal") &&
     (bounds.transitionJournalBytes === undefined ||
@@ -151,6 +165,15 @@ export function parseWorkflowDurabilityProfile(
   ) {
     throw new Error(
       "Invalid Workflow durability profile: transition-journal requires its bound and schema version",
+    );
+  }
+  if (
+    capabilities.includes("mutation-locks") &&
+    (bounds.runLockBytes === undefined ||
+      runLock !== WORKFLOW_DURABILITY_SCHEMA_VERSION)
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: mutation-locks requires its bound and schema version",
     );
   }
   if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
@@ -168,6 +191,9 @@ export function parseWorkflowDurabilityProfile(
       trajectory: WORKFLOW_DURABILITY_SCHEMA_VERSION,
       artifacts: WORKFLOW_DURABILITY_SCHEMA_VERSION,
       revisionClaim: WORKFLOW_DURABILITY_SCHEMA_VERSION,
+      ...(runLock === WORKFLOW_DURABILITY_SCHEMA_VERSION
+        ? { runLock: WORKFLOW_DURABILITY_SCHEMA_VERSION }
+        : {}),
       ...(transitionJournal === WORKFLOW_DURABILITY_SCHEMA_VERSION
         ? { transitionJournal: WORKFLOW_DURABILITY_SCHEMA_VERSION }
         : {}),

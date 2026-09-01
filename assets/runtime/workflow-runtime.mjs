@@ -1,5 +1,5 @@
 // src/workflow-runtime/index.ts
-import path13 from "node:path";
+import path14 from "node:path";
 
 // src/engine/contained-atomic-write.ts
 import { randomUUID } from "crypto";
@@ -655,6 +655,10 @@ var WORKFLOW_FINDING_CODES = [
   "route-no-match",
   "route-unknown-field",
   "run-not-found",
+  "run-lock-active",
+  "run-lock-release-conflict",
+  "run-lock-stale",
+  "run-lock-unknown",
   "run-status",
   "scope-invalid",
   "scope-unavailable",
@@ -817,7 +821,12 @@ function createWorkflowFinding(input) {
     execute: ["workflow.start", "workflow.resume"],
     decide: ["workflow.submit"],
     repair: ["workflow.submit", "workflow.recover"],
-    retry: ["workflow.resume"]
+    retry: [
+      "workflow.start",
+      "workflow.resume",
+      "workflow.submit",
+      "workflow.recover"
+    ]
   };
   const expectedOperations = allowedOperations[input.requiredAction];
   if (expectedOperations && (!safeOperation || !expectedOperations.includes(safeOperation.id))) {
@@ -1048,6 +1057,39 @@ var blockerCatalog = [
     match: /^No Comet Run found:/u,
     entry: {
       code: "run-not-found",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Workflow Run lock is active/u,
+    entry: {
+      code: "run-lock-active",
+      severity: "error",
+      requiredAction: "retry"
+    }
+  },
+  {
+    match: /^Workflow Run lock owner is absent/u,
+    entry: {
+      code: "run-lock-stale",
+      severity: "error",
+      requiredAction: "repair",
+      operationId: "workflow.recover"
+    }
+  },
+  {
+    match: /^Workflow Run lock ownership or file identity changed/u,
+    entry: {
+      code: "run-lock-release-conflict",
+      severity: "error",
+      requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Workflow Run lock/u,
+    entry: {
+      code: "run-lock-unknown",
       severity: "error",
       requiredAction: "stop"
     }
@@ -1562,7 +1604,11 @@ var PROFILE_KEYS = /* @__PURE__ */ new Set([
   "schemaVersions",
   "findingCatalogVersion"
 ]);
-var CAPABILITIES = /* @__PURE__ */ new Set(["revision-fences", "transition-journal"]);
+var CAPABILITIES = /* @__PURE__ */ new Set([
+  "mutation-locks",
+  "revision-fences",
+  "transition-journal"
+]);
 var BOUND_KEY_NAMES = [
   "runStateBytes",
   "pendingActionBytes",
@@ -1572,7 +1618,8 @@ var BOUND_KEY_NAMES = [
 ];
 var BOUND_KEYS = /* @__PURE__ */ new Set([
   ...BOUND_KEY_NAMES,
-  "transitionJournalBytes"
+  "transitionJournalBytes",
+  "runLockBytes"
 ]);
 var SCHEMA_KEY_NAMES = [
   "runState",
@@ -1581,7 +1628,11 @@ var SCHEMA_KEY_NAMES = [
   "artifacts",
   "revisionClaim"
 ];
-var SCHEMA_KEYS = /* @__PURE__ */ new Set([...SCHEMA_KEY_NAMES, "transitionJournal"]);
+var SCHEMA_KEYS = /* @__PURE__ */ new Set([
+  ...SCHEMA_KEY_NAMES,
+  "runLock",
+  "transitionJournal"
+]);
 var MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
 function isRecord2(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -1615,7 +1666,7 @@ function parseWorkflowDurabilityProfile(value) {
   }
   const capabilities = value.capabilities.map(
     (capability) => {
-      if (typeof capability !== "string" || !CAPABILITIES.has(capability) || capability !== "revision-fences" && capability !== "transition-journal") {
+      if (typeof capability !== "string" || !CAPABILITIES.has(capability)) {
         throw new Error(
           `Invalid Workflow durability profile: unsupported capability ${String(capability)}`
         );
@@ -1648,6 +1699,12 @@ function parseWorkflowDurabilityProfile(value) {
       "transitionJournalBytes"
     );
   }
+  if (boundsValue.runLockBytes !== void 0) {
+    bounds.runLockBytes = requiredBound(
+      boundsValue.runLockBytes,
+      "runLockBytes"
+    );
+  }
   if (!isRecord2(value.schemaVersions)) {
     throw new Error(
       "Invalid Workflow durability profile: schemaVersions must be an object"
@@ -1670,9 +1727,18 @@ function parseWorkflowDurabilityProfile(value) {
       "Unsupported Workflow durability schema version: transitionJournal"
     );
   }
+  const runLock = value.schemaVersions.runLock;
+  if (runLock !== void 0 && runLock !== WORKFLOW_DURABILITY_SCHEMA_VERSION) {
+    throw new Error("Unsupported Workflow durability schema version: runLock");
+  }
   if (capabilities.includes("transition-journal") && (bounds.transitionJournalBytes === void 0 || transitionJournal !== WORKFLOW_DURABILITY_SCHEMA_VERSION)) {
     throw new Error(
       "Invalid Workflow durability profile: transition-journal requires its bound and schema version"
+    );
+  }
+  if (capabilities.includes("mutation-locks") && (bounds.runLockBytes === void 0 || runLock !== WORKFLOW_DURABILITY_SCHEMA_VERSION)) {
+    throw new Error(
+      "Invalid Workflow durability profile: mutation-locks requires its bound and schema version"
     );
   }
   if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
@@ -1690,6 +1756,7 @@ function parseWorkflowDurabilityProfile(value) {
       trajectory: WORKFLOW_DURABILITY_SCHEMA_VERSION,
       artifacts: WORKFLOW_DURABILITY_SCHEMA_VERSION,
       revisionClaim: WORKFLOW_DURABILITY_SCHEMA_VERSION,
+      ...runLock === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { runLock: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {},
       ...transitionJournal === WORKFLOW_DURABILITY_SCHEMA_VERSION ? { transitionJournal: WORKFLOW_DURABILITY_SCHEMA_VERSION } : {}
     },
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION
@@ -2410,7 +2477,7 @@ async function readSkillSnapshot(changeDir, hash3) {
 import path8 from "path";
 
 // src/engine/protected-run-file.ts
-import { TextDecoder } from "util";
+import { TextDecoder as TextDecoder2 } from "util";
 var MAX_ENGINE_RUN_FILE_BYTES = 16 * 1024 * 1024;
 function boundedMaxBytes(requested, fallback, label) {
   const value = requested ?? fallback;
@@ -2424,7 +2491,7 @@ function identityOf2(stat) {
 }
 function decodeRunText(result, label) {
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(result.bytes);
+    return new TextDecoder2("utf-8", { fatal: true }).decode(result.bytes);
   } catch (error) {
     throw new Error(`${label} is not valid UTF-8`, { cause: error });
   }
@@ -2514,6 +2581,23 @@ async function writeEngineRunText(changeDir, relativePath, content, maxBytes, la
       }
     }
   });
+}
+async function appendEngineRunText(changeDir, relativePath, addition, maxBytes, label, options = {}) {
+  const existing = await readOptionalEngineRunText(
+    changeDir,
+    relativePath,
+    maxBytes,
+    label,
+    options
+  );
+  await writeEngineRunText(
+    changeDir,
+    relativePath,
+    `${existing ?? ""}${addition}`,
+    maxBytes,
+    label,
+    options
+  );
 }
 async function removeEngineRunFile(changeDir, relativePath, label, options = {}) {
   if (options.overlay) {
@@ -4392,7 +4476,7 @@ function artifactScopeId(lifetime, state) {
   }
   return state.runId;
 }
-function selection(artifactId, versionId, state, nodeId, actionId2, timestamp3) {
+function selection(artifactId, versionId, state, nodeId, actionId2, timestamp4) {
   const runtime = state.workflowRuntime;
   const attempt = runtime?.currentAttempt;
   if (!runtime || !attempt) {
@@ -4407,7 +4491,7 @@ function selection(artifactId, versionId, state, nodeId, actionId2, timestamp3) 
     attemptId: attempt.id,
     actionId: actionId2,
     revision: runtime.revision,
-    timestamp: timestamp3
+    timestamp: timestamp4
   };
 }
 function artifactVersionId(artifactId, contentHash2, pathValue, producer, scopeId) {
@@ -4500,7 +4584,7 @@ async function prepareWorkflowArtifactMutation(options) {
     }
   }
   const mutation = structuredClone(empty);
-  const timestamp3 = (/* @__PURE__ */ new Date()).toISOString();
+  const timestamp4 = (/* @__PURE__ */ new Date()).toISOString();
   for (const { declaration, value: requested } of requestedUpdates.values()) {
     const artifactPath = await resolveArtifactPath(
       options.runRoot,
@@ -4551,7 +4635,7 @@ async function prepareWorkflowArtifactMutation(options) {
       contentHash: contentHash2,
       path: artifactPath,
       producer,
-      timestamp: timestamp3
+      timestamp: timestamp4
     };
     mutation.versions.push(version);
     mutation.selections.push(
@@ -4561,7 +4645,7 @@ async function prepareWorkflowArtifactMutation(options) {
         options.state,
         options.nodeId,
         options.actionId,
-        timestamp3
+        timestamp4
       )
     );
     mutation.artifactPaths[declaration.artifactId] = artifactPath;
@@ -4601,7 +4685,7 @@ async function prepareWorkflowArtifactMutation(options) {
         options.state,
         options.nodeId,
         options.actionId,
-        timestamp3
+        timestamp4
       )
     );
     mutation.artifactPaths[declaration.artifactId] = version.path;
@@ -7463,9 +7547,9 @@ var WorkflowTransitionJournalPendingError = class extends Error {
   journal;
 };
 var WorkflowTransitionRecordConflictError = class extends Error {
-  constructor(path14) {
-    super(`Workflow transition record changed before journaling: ${path14}`);
-    this.path = path14;
+  constructor(path15) {
+    super(`Workflow transition record changed before journaling: ${path15}`);
+    this.path = path15;
     this.name = "WorkflowTransitionRecordConflictError";
   }
   path;
@@ -8435,12 +8519,12 @@ async function recoverPreparedJournal(runRoot, profile, initial) {
   const classifications = await classifyRecords(runRoot, profile, journal);
   const unknown = [...classifications.entries()].filter(([, classification]) => classification === "unknown").map(([recordPath]) => recordPath);
   if (unknown.length > 0) {
-    const blocked = {
+    const blocked2 = {
       status: "blocked",
       journal,
       unknownPaths: unknown
     };
-    return blocked;
+    return blocked2;
   }
   const repaired = await applyJournalRecords(runRoot, profile, journal, true);
   journal = await readJournal(runRoot, profile) ?? journal;
@@ -8489,12 +8573,12 @@ async function recoverPreparedJournal(runRoot, profile, initial) {
   );
   if (!sameMaterialIdentity(current, recovery.intendedTrajectory)) {
     if (!sameMaterial(current, record.intended)) {
-      const blocked = {
+      const blocked2 = {
         status: "blocked",
         journal,
         unknownPaths: [recovery.trajectoryPath]
       };
-      return blocked;
+      return blocked2;
     }
     journal = await markBoundary(runRoot, profile, journal, {
       phase: "recovery-evidence",
@@ -8612,11 +8696,700 @@ async function recoverWorkflowTransition(runRoot, profile) {
   return { status: "recovered", journal: result };
 }
 
+// src/workflow-runtime/run-lock.ts
+import { randomUUID as randomUUID5 } from "node:crypto";
+import { promises as fs6 } from "node:fs";
+import os from "node:os";
+import path12 from "node:path";
+var WORKFLOW_RUN_LOCK_PATH = ".comet/run-lock.json";
+var WORKFLOW_RUN_LOCK_RECOVERY_PATH = ".comet/run-lock-recovery.jsonl";
+var WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY = ".comet/run-lock-quarantine";
+var WORKFLOW_RUN_LOCK_SCHEMA_VERSION = 1;
+var WORKFLOW_RUN_LOCK_MAX_BYTES = 16 * 1024;
+var MAX_LOCK_TEXT_LENGTH = 256;
+var MAX_LOCK_EVENTS = 256;
+var LOCK_OPERATIONS = [
+  "workflow.start",
+  "workflow.resume",
+  "workflow.submit",
+  "workflow.recover"
+];
+var UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+var LOCK_TAKEOVER_KIND = "workflow-run-lock-takeover";
+var WorkflowRunLockBlockedError = class extends Error {
+  finding;
+  diagnosis;
+  constructor(finding, diagnosis) {
+    super(finding.message);
+    this.name = "WorkflowRunLockBlockedError";
+    this.finding = finding;
+    this.diagnosis = diagnosis;
+  }
+};
+var configuredFault2;
+async function invokeConfiguredFault2(boundary) {
+  await configuredFault2?.(boundary);
+}
+function isRecord9(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function assertKnownFields5(value, keys, label) {
+  const unknown = Object.keys(value).find((key) => !keys.has(key));
+  if (unknown) throw new Error(`${label} has unknown field: ${unknown}`);
+}
+function boundedText(value, key, label) {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_LOCK_TEXT_LENGTH || /[\u0000\r\n]/u.test(value)) {
+    throw new Error(`${label} ${key} must be a bounded string`);
+  }
+  return value;
+}
+function timestamp3(value, key, label) {
+  const result = boundedText(value, key, label);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(result)) {
+    throw new Error(`${label} ${key} must be an ISO timestamp`);
+  }
+  return result;
+}
+function parseWorkflowRunLockRecord(value) {
+  const label = "Workflow Run lock";
+  if (!isRecord9(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields5(
+    value,
+    /* @__PURE__ */ new Set([
+      "schemaVersion",
+      "kind",
+      "ownerToken",
+      "pid",
+      "hostname",
+      "createdAt",
+      "operation"
+    ]),
+    label
+  );
+  if (value.schemaVersion !== WORKFLOW_RUN_LOCK_SCHEMA_VERSION || value.kind !== "workflow-run-lock") {
+    throw new Error(`${label} schema identity is invalid`);
+  }
+  const ownerToken = boundedText(value.ownerToken, "ownerToken", label);
+  if (!UUID_PATTERN.test(ownerToken)) {
+    throw new Error(`${label} ownerToken is invalid`);
+  }
+  if (typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid < 1) {
+    throw new Error(`${label} pid is invalid`);
+  }
+  const operation2 = boundedText(value.operation, "operation", label);
+  if (!LOCK_OPERATIONS.includes(operation2)) {
+    throw new Error(`${label} operation is invalid`);
+  }
+  return {
+    schemaVersion: WORKFLOW_RUN_LOCK_SCHEMA_VERSION,
+    kind: "workflow-run-lock",
+    ownerToken,
+    pid: value.pid,
+    hostname: boundedText(value.hostname, "hostname", label),
+    createdAt: timestamp3(value.createdAt, "createdAt", label),
+    operation: operation2
+  };
+}
+function parseWorkflowRunLockTakeoverEvidence(value) {
+  const label = "Workflow Run lock takeover evidence";
+  if (!isRecord9(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields5(
+    value,
+    /* @__PURE__ */ new Set([
+      "schemaVersion",
+      "kind",
+      "ownerToken",
+      "pid",
+      "hostname",
+      "ownerOperation",
+      "operation",
+      "quarantinePath",
+      "recordedAt"
+    ]),
+    label
+  );
+  const ownerToken = boundedText(value.ownerToken, "ownerToken", label);
+  if (!UUID_PATTERN.test(ownerToken)) {
+    throw new Error(`${label} ownerToken is invalid`);
+  }
+  if (value.schemaVersion !== WORKFLOW_RUN_LOCK_SCHEMA_VERSION || value.kind !== LOCK_TAKEOVER_KIND || value.operation !== "workflow.recover") {
+    throw new Error(`${label} schema identity is invalid`);
+  }
+  if (typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid < 1) {
+    throw new Error(`${label} pid is invalid`);
+  }
+  const ownerOperation = boundedText(
+    value.ownerOperation,
+    "ownerOperation",
+    label
+  );
+  if (!LOCK_OPERATIONS.includes(ownerOperation)) {
+    throw new Error(`${label} ownerOperation is invalid`);
+  }
+  const quarantinePath = boundedText(
+    value.quarantinePath,
+    "quarantinePath",
+    label
+  );
+  if (quarantinePath !== WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY && !quarantinePath.startsWith(`${WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY}/`)) {
+    throw new Error(`${label} quarantinePath is invalid`);
+  }
+  return {
+    schemaVersion: WORKFLOW_RUN_LOCK_SCHEMA_VERSION,
+    kind: LOCK_TAKEOVER_KIND,
+    ownerToken,
+    pid: value.pid,
+    hostname: boundedText(value.hostname, "hostname", label),
+    ownerOperation,
+    operation: "workflow.recover",
+    quarantinePath,
+    recordedAt: timestamp3(value.recordedAt, "recordedAt", label)
+  };
+}
+function identityOf3(stat) {
+  return {
+    device: stat.dev.toString(),
+    inode: stat.ino.toString(),
+    size: stat.size.toString(),
+    birthtime: stat.birthtimeMs.toString(),
+    ctime: stat.ctimeMs.toString(),
+    mtime: stat.mtimeMs.toString()
+  };
+}
+function objectIdentity(identity) {
+  return {
+    dev: identity.device,
+    ino: identity.inode,
+    birthtime: identity.birthtime
+  };
+}
+function sameLockObject(left, right) {
+  const leftObject = objectIdentity(left);
+  const rightObject = objectIdentity(right);
+  if (hasComparableFileObject(leftObject, rightObject)) {
+    return sameFileObject(leftObject, rightObject);
+  }
+  return sameFileObject(leftObject, rightObject) && left.size === right.size;
+}
+function sameLockVersion(left, right) {
+  return sameLockObject(left, right) && left.size === right.size && left.birthtime === right.birthtime && left.ctime === right.ctime && left.mtime === right.mtime;
+}
+function sameDiagnosis(left, right) {
+  if (left.status !== right.status) return false;
+  if (!left.owner || !left.identity || !right.owner || !right.identity) {
+    return left.owner === right.owner && left.identity === right.identity;
+  }
+  return left.owner.ownerToken === right.owner.ownerToken && sameLockVersion(left.identity, right.identity);
+}
+function decode(bytes) {
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+function safeErrorMessage(error) {
+  if (error instanceof RaceSafeReadError) return error.reason;
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+function validateMaxBytes(value) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 16 * 1024 * 1024) {
+    throw new Error("Workflow Run lock size bound is invalid");
+  }
+  return value;
+}
+async function readSnapshot2(runRoot, relativePath = WORKFLOW_RUN_LOCK_PATH, maxBytes = WORKFLOW_RUN_LOCK_MAX_BYTES) {
+  const label = relativePath === WORKFLOW_RUN_LOCK_PATH ? "Workflow Run lock" : "Workflow Run lock quarantine";
+  const inspection = await inspectProtectedProjectPath(runRoot, relativePath, {
+    label,
+    expected: "file"
+  });
+  if (!inspection.exists) return null;
+  try {
+    const result = await readProtectedProjectFile(
+      runRoot,
+      relativePath,
+      validateMaxBytes(maxBytes),
+      { label }
+    );
+    const owner = parseWorkflowRunLockRecord(JSON.parse(decode(result.bytes)));
+    return {
+      file: inspection.target,
+      relativePath: inspection.relative,
+      realPath: result.realPath,
+      owner,
+      identity: identityOf3(result.stat)
+    };
+  } catch (error) {
+    const code = error.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    if (error instanceof RaceSafeReadError && error.reason === "changed") {
+      throw new Error("Workflow Run lock changed while reading", {
+        cause: error
+      });
+    }
+    throw error;
+  }
+}
+function diagnosisFromSnapshot(snapshot) {
+  if (!snapshot) return { status: "missing", owner: null, identity: null };
+  if (snapshot.owner.hostname !== os.hostname()) {
+    return {
+      status: "unknown",
+      owner: snapshot.owner,
+      identity: snapshot.identity
+    };
+  }
+  const alive = isProcessAlive(snapshot.owner.pid);
+  return {
+    status: alive === true ? "active" : alive === false ? "stale" : "unknown",
+    owner: snapshot.owner,
+    identity: snapshot.identity
+  };
+}
+function lockFinding(operation2, diagnosis) {
+  if (diagnosis.status === "active") {
+    const owner = diagnosis.owner;
+    return createWorkflowFinding({
+      code: "run-lock-active",
+      severity: "error",
+      message: `Workflow Run lock is active for ${owner?.operation ?? "another operation"} (pid ${owner?.pid ?? "unknown"}, host ${owner?.hostname ?? "unknown"}).`,
+      path: WORKFLOW_RUN_LOCK_PATH,
+      requiredAction: "retry",
+      operation: { id: operation2, args: [] }
+    });
+  }
+  if (diagnosis.status === "stale") {
+    return createWorkflowFinding({
+      code: "run-lock-stale",
+      severity: "error",
+      message: "Workflow Run lock owner is absent; explicit recovery is required.",
+      path: WORKFLOW_RUN_LOCK_PATH,
+      requiredAction: "repair",
+      operation: { id: "workflow.recover", args: [] }
+    });
+  }
+  return createWorkflowFinding({
+    code: "run-lock-unknown",
+    severity: "error",
+    message: "Workflow Run lock owner or file identity cannot be verified safely.",
+    path: WORKFLOW_RUN_LOCK_PATH,
+    requiredAction: "stop"
+  });
+}
+function releaseFinding() {
+  return createWorkflowFinding({
+    code: "run-lock-release-conflict",
+    severity: "error",
+    message: "Workflow Run lock ownership or file identity changed before release.",
+    path: WORKFLOW_RUN_LOCK_PATH,
+    requiredAction: "stop"
+  });
+}
+function blocked(operation2, diagnosis) {
+  return new WorkflowRunLockBlockedError(
+    lockFinding(operation2, diagnosis),
+    diagnosis
+  );
+}
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = error.code;
+    if (code === "ESRCH") return false;
+    if (code === "EPERM") return true;
+    return null;
+  }
+}
+async function diagnoseWorkflowRunLock(runRoot, maxBytes = WORKFLOW_RUN_LOCK_MAX_BYTES) {
+  try {
+    return diagnosisFromSnapshot(
+      await readSnapshot2(runRoot, WORKFLOW_RUN_LOCK_PATH, maxBytes)
+    );
+  } catch (error) {
+    return {
+      status: "unknown",
+      owner: null,
+      identity: null,
+      reason: safeErrorMessage(error)
+    };
+  }
+}
+function newLockRecord(operation2) {
+  return {
+    schemaVersion: WORKFLOW_RUN_LOCK_SCHEMA_VERSION,
+    kind: "workflow-run-lock",
+    ownerToken: randomUUID5(),
+    pid: process.pid,
+    hostname: os.hostname(),
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    operation: operation2
+  };
+}
+function serializedLock(record) {
+  return `${JSON.stringify(stableValue(record), null, 2)}
+`;
+}
+async function ensureLockDirectory(runRoot, operation2) {
+  try {
+    await ensureProtectedProjectDirectory(runRoot, ".comet", {
+      label: "Workflow Run lock"
+    });
+  } catch (error) {
+    const diagnosis = {
+      status: "unknown",
+      owner: null,
+      identity: null,
+      reason: safeErrorMessage(error)
+    };
+    throw new WorkflowRunLockBlockedError(
+      lockFinding(operation2, diagnosis),
+      diagnosis
+    );
+  }
+}
+async function takeOverStaleLock(runRoot, expected, maxBytes) {
+  let currentSnapshot;
+  try {
+    currentSnapshot = await readSnapshot2(
+      runRoot,
+      WORKFLOW_RUN_LOCK_PATH,
+      maxBytes
+    );
+  } catch {
+    return {
+      status: "changed",
+      diagnosis: {
+        status: "unknown",
+        owner: null,
+        identity: null,
+        reason: "Workflow Run lock changed before quarantine"
+      }
+    };
+  }
+  const currentDiagnosis = diagnosisFromSnapshot(currentSnapshot);
+  if (currentDiagnosis.status === "missing") return { status: "missing" };
+  if (!sameDiagnosis(expected, currentDiagnosis) || !currentSnapshot) {
+    return { status: "changed", diagnosis: currentDiagnosis };
+  }
+  if (currentDiagnosis.status !== "stale") {
+    return { status: "changed", diagnosis: currentDiagnosis };
+  }
+  await ensureProtectedProjectDirectory(
+    runRoot,
+    WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY,
+    { label: "Workflow Run lock quarantine" }
+  );
+  const quarantinePath = `${WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY}/${currentSnapshot.owner.ownerToken}-${randomUUID5()}.json`;
+  const quarantine = await inspectProtectedProjectPath(
+    runRoot,
+    quarantinePath,
+    { label: "Workflow Run lock quarantine", expected: "file" }
+  );
+  if (quarantine.exists) {
+    return {
+      status: "changed",
+      diagnosis: {
+        status: "unknown",
+        owner: null,
+        identity: null,
+        reason: "Workflow Run lock quarantine target already exists"
+      }
+    };
+  }
+  const latest = await readSnapshot2(runRoot, WORKFLOW_RUN_LOCK_PATH, maxBytes);
+  if (!latest || latest.owner.ownerToken !== currentSnapshot.owner.ownerToken || !sameLockVersion(latest.identity, currentSnapshot.identity)) {
+    return {
+      status: "changed",
+      diagnosis: diagnosisFromSnapshot(latest)
+    };
+  }
+  await invokeConfiguredFault2({
+    phase: "before-quarantine",
+    path: WORKFLOW_RUN_LOCK_PATH
+  });
+  const verified = await readSnapshot2(
+    runRoot,
+    WORKFLOW_RUN_LOCK_PATH,
+    maxBytes
+  );
+  const verifiedDiagnosis = diagnosisFromSnapshot(verified);
+  if (!verified || !sameDiagnosis(expected, verifiedDiagnosis) || verifiedDiagnosis.status !== "stale") {
+    return { status: "changed", diagnosis: verifiedDiagnosis };
+  }
+  try {
+    await fs6.rename(verified.file, quarantine.target);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return { status: "missing" };
+    }
+    throw error;
+  }
+  let moved;
+  try {
+    moved = await readSnapshot2(runRoot, quarantinePath, maxBytes);
+  } catch {
+    moved = null;
+  }
+  if (!moved || moved.owner.ownerToken !== currentSnapshot.owner.ownerToken || !sameLockObject(moved.identity, currentSnapshot.identity)) {
+    try {
+      const source = await inspectProtectedProjectPath(
+        runRoot,
+        WORKFLOW_RUN_LOCK_PATH,
+        { label: "Workflow Run lock", expected: "file" }
+      );
+      const quarantined = await inspectProtectedProjectPath(
+        runRoot,
+        quarantinePath,
+        { label: "Workflow Run lock quarantine", expected: "file" }
+      );
+      if (!source.exists && quarantined.exists) {
+        await fs6.rename(quarantined.target, source.target);
+      }
+    } catch {
+      return {
+        status: "changed",
+        diagnosis: {
+          status: "unknown",
+          owner: null,
+          identity: null,
+          reason: "Workflow Run lock changed during quarantine"
+        }
+      };
+    }
+    return {
+      status: "changed",
+      diagnosis: {
+        status: "unknown",
+        owner: null,
+        identity: null,
+        reason: "Workflow Run lock changed during quarantine"
+      }
+    };
+  }
+  return {
+    status: "removed",
+    evidence: {
+      schemaVersion: WORKFLOW_RUN_LOCK_SCHEMA_VERSION,
+      kind: LOCK_TAKEOVER_KIND,
+      ownerToken: currentSnapshot.owner.ownerToken,
+      pid: currentSnapshot.owner.pid,
+      hostname: currentSnapshot.owner.hostname,
+      ownerOperation: currentSnapshot.owner.operation,
+      operation: "workflow.recover",
+      quarantinePath,
+      recordedAt: (/* @__PURE__ */ new Date()).toISOString()
+    }
+  };
+}
+async function releaseLock(runRoot, handle) {
+  let current;
+  try {
+    current = await readSnapshot2(runRoot, WORKFLOW_RUN_LOCK_PATH);
+  } catch (error) {
+    throw new WorkflowRunLockBlockedError(releaseFinding(), {
+      status: "unknown",
+      owner: null,
+      identity: null,
+      reason: safeErrorMessage(error)
+    });
+  }
+  if (!current) return;
+  if (current.owner.ownerToken !== handle.owner.ownerToken || !sameLockVersion(current.identity, handle.identity)) {
+    throw new WorkflowRunLockBlockedError(releaseFinding(), {
+      status: "unknown",
+      owner: current.owner,
+      identity: current.identity,
+      reason: "Workflow Run lock changed before release"
+    });
+  }
+  try {
+    await removeContainedFile(current.file, {
+      containedRoot: path12.resolve(runRoot),
+      beforeRemove: async () => {
+        const latest = await readSnapshot2(runRoot, WORKFLOW_RUN_LOCK_PATH);
+        if (!latest || latest.owner.ownerToken !== handle.owner.ownerToken || !sameLockVersion(latest.identity, handle.identity)) {
+          throw new WorkflowRunLockBlockedError(
+            releaseFinding(),
+            latest ? {
+              status: "unknown",
+              owner: latest.owner,
+              identity: latest.identity,
+              reason: "Workflow Run lock changed before release"
+            } : {
+              status: "unknown",
+              owner: null,
+              identity: null,
+              reason: "Workflow Run lock disappeared before release"
+            }
+          );
+        }
+      }
+    });
+  } catch (error) {
+    if (error instanceof WorkflowRunLockBlockedError) throw error;
+    throw new WorkflowRunLockBlockedError(releaseFinding(), {
+      status: "unknown",
+      owner: null,
+      identity: null,
+      reason: safeErrorMessage(error)
+    });
+  }
+}
+async function holdLockForTests() {
+  const value = process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS;
+  if (value === void 0) return;
+  const milliseconds = Number(value);
+  if (!Number.isSafeInteger(milliseconds) || milliseconds < 1 || milliseconds > 3e4) {
+    return;
+  }
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+async function acquireWorkflowRunLock(runRoot, operation2, options = {}) {
+  const maxBytes = validateMaxBytes(
+    options.maxBytes ?? WORKFLOW_RUN_LOCK_MAX_BYTES
+  );
+  let takeover;
+  await ensureLockDirectory(runRoot, operation2);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const diagnosis = await diagnoseWorkflowRunLock(runRoot, maxBytes);
+    if (diagnosis.status !== "missing") {
+      if (options.allowStale && diagnosis.status === "stale") {
+        const result = await takeOverStaleLock(runRoot, diagnosis, maxBytes);
+        if (result.status === "removed") {
+          takeover = result.evidence;
+          continue;
+        }
+        if (result.status === "missing") continue;
+        throw blocked(operation2, result.diagnosis);
+      }
+      throw blocked(operation2, diagnosis);
+    }
+    const owner = newLockRecord(operation2);
+    try {
+      await writeEngineRunText(
+        runRoot,
+        WORKFLOW_RUN_LOCK_PATH,
+        serializedLock(owner),
+        maxBytes,
+        "Workflow Run lock",
+        { exclusive: true, maxBytes }
+      );
+    } catch (error) {
+      if (error.code === "EEXIST") continue;
+      throw new WorkflowRunLockBlockedError(
+        createWorkflowFinding({
+          code: "run-lock-unknown",
+          severity: "error",
+          message: "Workflow Run lock could not be published safely.",
+          path: WORKFLOW_RUN_LOCK_PATH,
+          requiredAction: "stop"
+        }),
+        {
+          status: "unknown",
+          owner: null,
+          identity: null,
+          reason: safeErrorMessage(error)
+        }
+      );
+    }
+    let snapshot;
+    try {
+      snapshot = await readSnapshot2(runRoot, WORKFLOW_RUN_LOCK_PATH, maxBytes);
+    } catch (error) {
+      const diagnosis2 = {
+        status: "unknown",
+        owner: null,
+        identity: null,
+        reason: safeErrorMessage(error)
+      };
+      throw new WorkflowRunLockBlockedError(
+        lockFinding(operation2, diagnosis2),
+        diagnosis2
+      );
+    }
+    if (!snapshot || snapshot.owner.ownerToken !== owner.ownerToken || snapshot.owner.operation !== owner.operation) {
+      throw new WorkflowRunLockBlockedError(
+        createWorkflowFinding({
+          code: "run-lock-unknown",
+          severity: "error",
+          message: "Workflow Run lock changed while ownership was published.",
+          path: WORKFLOW_RUN_LOCK_PATH,
+          requiredAction: "stop"
+        }),
+        diagnosisFromSnapshot(snapshot)
+      );
+    }
+    const handle = {
+      file: snapshot.file,
+      owner,
+      identity: snapshot.identity,
+      ...takeover ? { takeover } : {},
+      async release() {
+        await releaseLock(runRoot, handle);
+      }
+    };
+    await holdLockForTests();
+    return handle;
+  }
+  throw blocked(operation2, {
+    status: "unknown",
+    owner: null,
+    identity: null,
+    reason: "Workflow Run lock publication raced repeatedly"
+  });
+}
+async function recordWorkflowRunLockTakeover(runRoot, evidence, maxBytes = WORKFLOW_RUN_LOCK_MAX_BYTES) {
+  const parsed = parseWorkflowRunLockTakeoverEvidence(evidence);
+  const raw = await readOptionalEngineRunText(
+    runRoot,
+    WORKFLOW_RUN_LOCK_RECOVERY_PATH,
+    validateMaxBytes(maxBytes),
+    "Workflow Run lock recovery evidence"
+  );
+  const lines = (raw ?? "").split(/\r?\n/u).filter((line) => line.length > 0);
+  if (lines.length >= MAX_LOCK_EVENTS) {
+    throw new WorkflowRunLockBlockedError(
+      createWorkflowFinding({
+        code: "run-lock-unknown",
+        severity: "error",
+        message: "Workflow Run lock recovery evidence is at its safe bound.",
+        path: WORKFLOW_RUN_LOCK_RECOVERY_PATH,
+        requiredAction: "stop"
+      }),
+      { status: "unknown", owner: null, identity: null }
+    );
+  }
+  try {
+    for (const line of lines) {
+      parseWorkflowRunLockTakeoverEvidence(JSON.parse(line));
+    }
+  } catch (error) {
+    const diagnosis = {
+      status: "unknown",
+      owner: null,
+      identity: null,
+      reason: safeErrorMessage(error)
+    };
+    throw new WorkflowRunLockBlockedError(
+      lockFinding("workflow.recover", diagnosis),
+      diagnosis
+    );
+  }
+  await appendEngineRunText(
+    runRoot,
+    WORKFLOW_RUN_LOCK_RECOVERY_PATH,
+    `${JSON.stringify(stableValue(parsed))}
+`,
+    validateMaxBytes(maxBytes),
+    "Workflow Run lock recovery evidence"
+  );
+}
+
 // src/workflow-runtime/location.ts
-import { randomUUID as randomUUID6 } from "node:crypto";
+import { randomUUID as randomUUID7 } from "node:crypto";
 
 // src/engine/manual-run.ts
-import { randomUUID as randomUUID5 } from "crypto";
+import { randomUUID as randomUUID6 } from "crypto";
 
 // src/engine/evals.ts
 function evaluateRuntime(definitions, scope, state, artifacts) {
@@ -9273,7 +10046,7 @@ async function startManualRun(pkg, changeDir, options = []) {
   }
   const state = startRun(
     pkg,
-    startOptions.runId ?? randomUUID5(),
+    startOptions.runId ?? randomUUID6(),
     snapshot.hash,
     startOptions.workflowRuntime
   );
@@ -9502,8 +10275,8 @@ async function resumeManualWorkflowRun(changeDir, options, artifactMutation) {
 }
 
 // src/engine/standalone-run.ts
-import { promises as fs6 } from "node:fs";
-import path12 from "path";
+import { promises as fs7 } from "node:fs";
+import path13 from "path";
 function validateRunId(runId) {
   if (typeof runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId)) {
     throw new Error(`Invalid standalone Run id: ${String(runId)}`);
@@ -9517,16 +10290,16 @@ function validateProjectRoot(projectRoot) {
 function standaloneRunDir(projectRoot, runId) {
   validateRunId(runId);
   validateProjectRoot(projectRoot);
-  return path12.resolve(projectRoot, ".comet", "runs", runId);
+  return path13.resolve(projectRoot, ".comet", "runs", runId);
 }
 function pathSegments(projectRoot) {
-  const lexicalRoot = path12.resolve(projectRoot);
-  const root = path12.parse(lexicalRoot).root;
-  const relative = path12.relative(root, lexicalRoot);
-  return relative.length === 0 ? [] : relative.split(path12.sep);
+  const lexicalRoot = path13.resolve(projectRoot);
+  const root = path13.parse(lexicalRoot).root;
+  const relative = path13.relative(root, lexicalRoot);
+  return relative.length === 0 ? [] : relative.split(path13.sep);
 }
 function runRootRelativePath(projectRoot, runRoot) {
-  return path12.relative(projectRoot, runRoot).replaceAll("\\", "/");
+  return path13.relative(projectRoot, runRoot).replaceAll("\\", "/");
 }
 function isMissing(error) {
   const code = error.code;
@@ -9534,24 +10307,24 @@ function isMissing(error) {
 }
 async function resolveStandaloneProjectRoot(projectRoot, createMissing) {
   validateProjectRoot(projectRoot);
-  const lexicalRoot = path12.resolve(projectRoot);
-  let cursor = path12.parse(lexicalRoot).root;
+  const lexicalRoot = path13.resolve(projectRoot);
+  let cursor = path13.parse(lexicalRoot).root;
   for (const segment of pathSegments(lexicalRoot)) {
-    cursor = path12.join(cursor, segment);
+    cursor = path13.join(cursor, segment);
     let stat;
     try {
-      stat = await fs6.lstat(cursor);
+      stat = await fs7.lstat(cursor);
     } catch (error) {
       if (!isMissing(error)) throw error;
       if (!createMissing) return lexicalRoot;
       try {
-        await fs6.mkdir(cursor);
+        await fs7.mkdir(cursor);
       } catch (mkdirError) {
         if (mkdirError.code !== "EEXIST") {
           throw mkdirError;
         }
       }
-      stat = await fs6.lstat(cursor);
+      stat = await fs7.lstat(cursor);
     }
     if (stat.isSymbolicLink()) {
       throw new Error("Standalone project root cannot cross a symbolic link");
@@ -9643,6 +10416,8 @@ function manualLocation(runRoot) {
     },
     async readState() {
       return readRunState(validatedRoot);
+    },
+    async prepareStart() {
     }
   };
 }
@@ -9681,6 +10456,9 @@ function standaloneLocation(projectRoot, runId) {
     },
     async readState() {
       return readStandaloneRunState(validatedProjectRoot, validatedRunId);
+    },
+    async prepareStart() {
+      await ensureStandaloneRunDir(validatedProjectRoot, validatedRunId);
     }
   };
 }
@@ -9703,12 +10481,12 @@ function resolveWorkflowStartLocation(options) {
     }
     return {
       location,
-      runId: ("runId" in options ? options.runId : void 0) ?? randomUUID6()
+      runId: ("runId" in options ? options.runId : void 0) ?? randomUUID7()
     };
   }
   return {
     location: manualLocation(options.runRoot),
-    runId: options.runId ?? randomUUID6()
+    runId: options.runId ?? randomUUID7()
   };
 }
 
@@ -9718,6 +10496,55 @@ async function withStructuredRuntimeErrors(operation2) {
     return await operation2();
   } catch (error) {
     throw attachWorkflowFinding(error);
+  }
+}
+function usesWorkflowRunLock(profile) {
+  return profile?.capabilities.includes("mutation-locks") ?? false;
+}
+async function durabilityProfileForLocation(location) {
+  const state = await location.readState();
+  if (state?.runtimeIdentity?.durabilityProfile) {
+    return state.runtimeIdentity.durabilityProfile;
+  }
+  return (await readWorkflowTransitionJournal(location.runRoot))?.execution.durabilityProfile;
+}
+async function withWorkflowRunLock(location, operation2, profile, work, options = {}) {
+  if (!usesWorkflowRunLock(profile)) return work();
+  let lock;
+  try {
+    lock = await acquireWorkflowRunLock(location.runRoot, operation2, {
+      maxBytes: profile?.bounds.runLockBytes,
+      allowStale: options.allowStale
+    });
+  } catch (error) {
+    if (error instanceof WorkflowRunLockBlockedError && options.onBlocked) {
+      return options.onBlocked(error);
+    }
+    throw error;
+  }
+  try {
+    return await work(lock);
+  } finally {
+    await lock.release();
+  }
+}
+async function lockBlockedContinuation(location, error) {
+  try {
+    const verified = await verifyStoredRun(location);
+    const base = await continuationFromVerifiedRun(verified, location.runRoot);
+    const projected = boundWorkflowFindings([error.finding]);
+    return {
+      ...base,
+      disposition: "blocked",
+      findings: projected.findings,
+      findingSummary: projected.summary,
+      requiresUserDecision: projected.findings.some(
+        (finding) => finding.requiresUserDecision
+      ),
+      blockers: legacyBlockersFromFindings("blocked", projected.findings)
+    };
+  } catch {
+    throw error;
   }
 }
 function identityFromState(state) {
@@ -9851,7 +10678,7 @@ function terminalEvaluationResults(trajectory) {
       continue;
     }
     for (const result of event.data.results) {
-      if (!isRecord9(result)) continue;
+      if (!isRecord10(result)) continue;
       if (typeof result.evalId !== "string" || typeof result.passed !== "boolean" || typeof result.evidence !== "string") {
         continue;
       }
@@ -10145,7 +10972,7 @@ function continuation(result, identity) {
   };
 }
 var LEGACY_STATE_MAX_BYTES = 256 * 1024;
-function isRecord9(value) {
+function isRecord10(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function projectionStatus(state, pending, maxRetriesPerAction) {
@@ -10175,7 +11002,7 @@ async function projectWorkflowState(target) {
   );
   for (const event of trajectory) {
     if (event.type !== "action_completed") continue;
-    if (!isRecord9(event.data.action) || !isRecord9(event.data.outcome)) continue;
+    if (!isRecord10(event.data.action) || !isRecord10(event.data.outcome)) continue;
     const stepId2 = event.data.action.stepId;
     const node = typeof stepId2 === "string" ? nodeByStep.get(stepId2) : void 0;
     const outcomeStatus = event.data.outcome.status;
@@ -10191,7 +11018,7 @@ async function projectWorkflowState(target) {
     if (outcomeStatus !== "succeeded") continue;
     if (!completedNodes.includes(node)) completedNodes.push(node);
     const outcomeEvidence = event.data.outcome.evidence;
-    evidence[node] = isRecord9(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
+    evidence[node] = isRecord10(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
   }
   const protocol = verified.package.runtime.protocol;
   const runtimeState = state.workflowRuntime;
@@ -10294,7 +11121,7 @@ async function writeWorkflowStateProjection(target, projection) {
         continue;
       }
     }
-    const parent = path13.posix.dirname(relativePath);
+    const parent = path14.posix.dirname(relativePath);
     if (parent !== ".") {
       await ensureProtectedProjectDirectory(projectRoot, parent, { label });
       inspection = await inspectProtectedProjectPath(
@@ -11144,9 +11971,9 @@ async function verifyStoredAction(runRoot, state, identity, pkg) {
           durabilityReadOptions(state, "trajectoryBytes")
         );
         const proposal = trajectory.slice().reverse().find(
-          (event) => event.type === "action_proposed" && isRecord9(event.data.action) && event.data.action.id === action.id
+          (event) => event.type === "action_proposed" && isRecord10(event.data.action) && event.data.action.id === action.id
         );
-        if (!proposal || !isRecord9(proposal.data.action)) {
+        if (!proposal || !isRecord10(proposal.data.action)) {
           throw new Error(
             "WorkflowRuntime scoped decision has no durable action proposal"
           );
@@ -11182,171 +12009,240 @@ function createWorkflowRuntime() {
         const resolved = resolveWorkflowStartLocation(options);
         const compiled = await compileWorkflow(options.protocol);
         const revisioned = compiled.package.runtime?.capabilityVersion === 3;
-        const result = await resolved.location.start(compiled.package, {
-          runId: resolved.runId,
-          confirmations: options.confirmations ?? [],
-          resolver: resolverForPackage(),
-          runtimeIdentity: {
-            ...compiled.identity,
-            snapshotHash: compiled.identity.packageHash
-          },
-          ...revisioned ? {
-            workflowRuntime: {
-              revision: 0,
-              nextVisitOrdinal: 0,
-              currentAttempt: null,
-              currentCycle: null,
-              cycles: [],
-              visits: [],
-              decisionReceipts: [],
-              artifactVersions: [],
-              artifactSelections: []
+        await resolved.location.prepareStart();
+        return withWorkflowRunLock(
+          resolved.location,
+          "workflow.start",
+          compiled.identity.durabilityProfile,
+          async () => {
+            if (usesWorkflowRunLock(compiled.identity.durabilityProfile)) {
+              const journal = await readWorkflowTransitionJournal(
+                resolved.location.runRoot
+              );
+              if (journal)
+                throw new WorkflowTransitionJournalPendingError(journal);
             }
-          } : {},
-          prepareAction: prepareWorkflowAction
-        });
-        if (result.state.skillHash !== compiled.identity.packageHash) {
-          throw new Error(
-            "WorkflowRuntime snapshot identity was not persisted"
-          );
-        }
-        return continuation(result, {
-          ...compiled.identity,
-          snapshotHash: result.state.skillHash
-        });
+            const result = await resolved.location.start(compiled.package, {
+              runId: resolved.runId,
+              confirmations: options.confirmations ?? [],
+              resolver: resolverForPackage(),
+              runtimeIdentity: {
+                ...compiled.identity,
+                snapshotHash: compiled.identity.packageHash
+              },
+              ...revisioned ? {
+                workflowRuntime: {
+                  revision: 0,
+                  nextVisitOrdinal: 0,
+                  currentAttempt: null,
+                  currentCycle: null,
+                  cycles: [],
+                  visits: [],
+                  decisionReceipts: [],
+                  artifactVersions: [],
+                  artifactSelections: []
+                }
+              } : {},
+              prepareAction: prepareWorkflowAction
+            });
+            if (result.state.skillHash !== compiled.identity.packageHash) {
+              throw new Error(
+                "WorkflowRuntime snapshot identity was not persisted"
+              );
+            }
+            return continuation(result, {
+              ...compiled.identity,
+              snapshotHash: result.state.skillHash
+            });
+          }
+        );
       });
     },
     async resume(target, options = {}) {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
-        const journal = await readWorkflowTransitionJournal(location.runRoot);
-        if (journal) return recoveryRequiredContinuation(location, journal);
-        return resumeStoredRun(location, options);
+        const profile = await durabilityProfileForLocation(location);
+        return withWorkflowRunLock(
+          location,
+          "workflow.resume",
+          profile,
+          async () => {
+            const journal = await readWorkflowTransitionJournal(
+              location.runRoot
+            );
+            if (journal) return recoveryRequiredContinuation(location, journal);
+            return resumeStoredRun(location, options);
+          },
+          {
+            onBlocked: (error) => lockBlockedContinuation(location, error)
+          }
+        );
       });
     },
     async submit(target, submission) {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
-        const journal = await readWorkflowTransitionJournal(location.runRoot);
-        if (journal) return recoveryRequiredContinuation(location, journal);
-        validateSubmission(submission);
-        let prepared;
-        try {
-          prepared = await prepareWorkflowSubmission(target, submission);
-        } catch (error) {
-          if (error instanceof WorkflowRevisionConflictError) {
-            return conflictContinuation(error.verified, error.finding);
-          }
-          throw error;
-        }
-        const blockers = await completionBlockers(prepared, submission);
-        if (blockers.length > 0) {
-          return blockedContinuation(prepared, blockers);
-        }
-        const routeFindings = routeBlockers(prepared, submission);
-        if (routeFindings.length > 0) {
-          return blockedContinuation(prepared, routeFindings);
-        }
-        const artifact = await artifactMutationForSubmission(
-          prepared,
-          submission
-        );
-        if (artifact.blockers.length > 0) {
-          return blockedContinuation(prepared, artifact.blockers);
-        }
-        const outcome = engineOutcome(prepared, submission, artifact.mutation);
-        if (prepared.verified.identity.durabilityProfile === void 0) {
-          const result = await prepared.location.resume(
-            {
-              resolver: resolverForPackage(),
-              outcome,
-              prepareAction: prepareWorkflowAction
-            },
-            artifact.mutation
-          );
-          return continuation(result, prepared.verified.identity);
-        }
-        const claimInput = {
-          runId: submission.runId,
-          expectedRevision: submission.revision,
-          expectedActionId: submission.actionId,
-          intendedRevision: submission.revision + 1,
-          execution: structuredClone(submission.execution)
-        };
-        const claim = await acquireRevisionClaim(
-          prepared.location.runRoot,
-          claimInput
-        );
-        if (!claim.acquired) {
-          const current = await verifyStoredRun(prepared.location);
-          return conflictContinuation(
-            current,
-            revisionConflictFinding(
-              current.state.workflowRuntime?.revision ?? 0,
-              current.pending?.id ?? current.state.pending ?? null
-            )
-          );
-        }
-        try {
-          await assertRevisionFence(prepared.location, claimInput);
-          const result = await prepared.location.resume(
-            {
-              resolver: resolverForPackage(),
-              outcome,
-              prepareAction: prepareWorkflowAction,
-              revisionFence: () => assertRevisionFence(prepared.location, claimInput),
-              revisionStateFence: () => assertRevisionFence(prepared.location, claimInput, false)
-            },
-            artifact.mutation
-          );
-          await claim.commit();
-          return continuation(result, prepared.verified.identity);
-        } catch (error) {
-          if (error instanceof WorkflowRevisionConflictError) {
-            return conflictContinuation(error.verified, error.finding);
-          }
-          if (error instanceof WorkflowTransitionJournalPendingError || error instanceof WorkflowTransitionRecordConflictError) {
-            const journal2 = await readWorkflowTransitionJournal(
-              prepared.location.runRoot
+        const profile = await durabilityProfileForLocation(location);
+        return withWorkflowRunLock(
+          location,
+          "workflow.submit",
+          profile,
+          async () => {
+            const journal = await readWorkflowTransitionJournal(
+              location.runRoot
             );
-            if (journal2) {
-              return recoveryRequiredContinuation(prepared.location, journal2);
+            if (journal) return recoveryRequiredContinuation(location, journal);
+            validateSubmission(submission);
+            let prepared;
+            try {
+              prepared = await prepareWorkflowSubmission(target, submission);
+            } catch (error) {
+              if (error instanceof WorkflowRevisionConflictError) {
+                return conflictContinuation(error.verified, error.finding);
+              }
+              throw error;
             }
-            const current = await verifyStoredRun(prepared.location);
-            return conflictContinuation(
-              current,
-              revisionConflictFinding(
-                current.state.workflowRuntime?.revision ?? 0,
-                current.pending?.id ?? current.state.pending ?? null
-              )
+            const blockers = await completionBlockers(prepared, submission);
+            if (blockers.length > 0) {
+              return blockedContinuation(prepared, blockers);
+            }
+            const routeFindings = routeBlockers(prepared, submission);
+            if (routeFindings.length > 0) {
+              return blockedContinuation(prepared, routeFindings);
+            }
+            const artifact = await artifactMutationForSubmission(
+              prepared,
+              submission
             );
+            if (artifact.blockers.length > 0) {
+              return blockedContinuation(prepared, artifact.blockers);
+            }
+            const outcome = engineOutcome(
+              prepared,
+              submission,
+              artifact.mutation
+            );
+            if (prepared.verified.identity.durabilityProfile === void 0) {
+              const result = await prepared.location.resume(
+                {
+                  resolver: resolverForPackage(),
+                  outcome,
+                  prepareAction: prepareWorkflowAction
+                },
+                artifact.mutation
+              );
+              return continuation(result, prepared.verified.identity);
+            }
+            const claimInput = {
+              runId: submission.runId,
+              expectedRevision: submission.revision,
+              expectedActionId: submission.actionId,
+              intendedRevision: submission.revision + 1,
+              execution: structuredClone(submission.execution)
+            };
+            const claim = await acquireRevisionClaim(
+              prepared.location.runRoot,
+              claimInput
+            );
+            if (!claim.acquired) {
+              const current = await verifyStoredRun(prepared.location);
+              return conflictContinuation(
+                current,
+                revisionConflictFinding(
+                  current.state.workflowRuntime?.revision ?? 0,
+                  current.pending?.id ?? current.state.pending ?? null
+                )
+              );
+            }
+            try {
+              await assertRevisionFence(prepared.location, claimInput);
+              const result = await prepared.location.resume(
+                {
+                  resolver: resolverForPackage(),
+                  outcome,
+                  prepareAction: prepareWorkflowAction,
+                  revisionFence: () => assertRevisionFence(prepared.location, claimInput),
+                  revisionStateFence: () => assertRevisionFence(prepared.location, claimInput, false)
+                },
+                artifact.mutation
+              );
+              await claim.commit();
+              return continuation(result, prepared.verified.identity);
+            } catch (error) {
+              if (error instanceof WorkflowRevisionConflictError) {
+                return conflictContinuation(error.verified, error.finding);
+              }
+              if (error instanceof WorkflowTransitionJournalPendingError || error instanceof WorkflowTransitionRecordConflictError) {
+                const journal2 = await readWorkflowTransitionJournal(
+                  prepared.location.runRoot
+                );
+                if (journal2) {
+                  return recoveryRequiredContinuation(
+                    prepared.location,
+                    journal2
+                  );
+                }
+                const current = await verifyStoredRun(prepared.location);
+                return conflictContinuation(
+                  current,
+                  revisionConflictFinding(
+                    current.state.workflowRuntime?.revision ?? 0,
+                    current.pending?.id ?? current.state.pending ?? null
+                  )
+                );
+              }
+              throw error;
+            }
+          },
+          {
+            onBlocked: (error) => lockBlockedContinuation(location, error)
           }
-          throw error;
-        }
+        );
       });
     },
     async recover(target, options = {}) {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
-        const journal = await readWorkflowTransitionJournal(location.runRoot);
-        if (journal) {
-          if (!journal.execution.durabilityProfile) {
-            throw new Error(
-              "Workflow transition journal has no durability profile"
+        const profile = await durabilityProfileForLocation(location);
+        return withWorkflowRunLock(
+          location,
+          "workflow.recover",
+          profile,
+          async (lock) => {
+            if (lock?.takeover && profile?.bounds.runLockBytes) {
+              await recordWorkflowRunLockTakeover(
+                location.runRoot,
+                lock.takeover,
+                profile.bounds.runLockBytes
+              );
+            }
+            const journal = await readWorkflowTransitionJournal(
+              location.runRoot
             );
+            if (journal) {
+              if (!journal.execution.durabilityProfile) {
+                throw new Error(
+                  "Workflow transition journal has no durability profile"
+                );
+              }
+              const recovery = await recoverWorkflowTransition(
+                location.runRoot,
+                journal.execution.durabilityProfile
+              );
+              if (recovery.status === "blocked") {
+                return recoveryRequiredContinuation(
+                  location,
+                  recovery.journal ?? journal
+                );
+              }
+            }
+            return resumeStoredRun(location, options);
+          },
+          {
+            allowStale: true,
+            onBlocked: (error) => lockBlockedContinuation(location, error)
           }
-          const recovery = await recoverWorkflowTransition(
-            location.runRoot,
-            journal.execution.durabilityProfile
-          );
-          if (recovery.status === "blocked") {
-            return recoveryRequiredContinuation(
-              location,
-              recovery.journal ?? journal
-            );
-          }
-        }
-        return resumeStoredRun(location, options);
+        );
       });
     }
   };

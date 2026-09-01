@@ -51,6 +51,9 @@ catalog version. That profile is included in the protocol hash, compiled
 package metadata, resolver-plan hash, and execution identity. Phase 4 machine
 and decision submissions must include the observed Run id, logical revision,
 pending action id, and complete execution identity.
+The optional `mutation-locks` capability binds `runLockBytes` and the `runLock`
+schema version in the same profile; it enables the protected per-Run lock
+record without changing the public runtime seam.
 
 The logical revision starts at `0` and advances exactly once for each accepted
 machine outcome or decision response. Rejected, stale, or route-blocked
@@ -76,6 +79,19 @@ identity preserves the journal and all existing evidence. Successful recovery
 appends one bounded `recovery_reconciled` event naming the crash boundary and
 repaired identities, then clears the journal only after commit evidence is
 durable.
+
+When `mutation-locks` is enabled, each mutating public operation first
+publishes an exclusive `.comet/run-lock.json` record with a unique owner token,
+operation, process id, host, and creation time. A local lock is stale only when
+the owner process is proven absent; age never establishes staleness, and a
+foreign-host or unverifiable owner remains unknown. Ordinary operations never
+remove stale, malformed, oversized, symlinked, or replaced locks. Explicit
+`recover` revalidates the owner token and file identity, moves a proven-stale
+record into a bounded-path quarantine, and appends takeover evidence to
+`.comet/run-lock-recovery.jsonl` before settling a pending journal. Release
+performs the same owner and file-identity check and preserves a changed lock.
+The lock wraps manual and standalone locations identically, while generated
+adapters remain projections over the four public operations.
 
 The Creator evaluation report additionally records the generated package tree
 hash. Review readiness rejects missing, stale, mismatched, or incomplete

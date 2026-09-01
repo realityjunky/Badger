@@ -77,6 +77,10 @@ const WORKFLOW_FINDING_CODES = [
   "route-no-match",
   "route-unknown-field",
   "run-not-found",
+  "run-lock-active",
+  "run-lock-release-conflict",
+  "run-lock-stale",
+  "run-lock-unknown",
   "run-status",
   "scope-invalid",
   "scope-unavailable",
@@ -353,7 +357,12 @@ export function createWorkflowFinding(
     execute: ["workflow.start", "workflow.resume"],
     decide: ["workflow.submit"],
     repair: ["workflow.submit", "workflow.recover"],
-    retry: ["workflow.resume"],
+    retry: [
+      "workflow.start",
+      "workflow.resume",
+      "workflow.submit",
+      "workflow.recover",
+    ],
   };
   const expectedOperations = allowedOperations[input.requiredAction];
   if (
@@ -658,6 +667,39 @@ const blockerCatalog: Array<{
     match: /^No Comet Run found:/u,
     entry: {
       code: "run-not-found",
+      severity: "error",
+      requiredAction: "stop",
+    },
+  },
+  {
+    match: /^Workflow Run lock is active/u,
+    entry: {
+      code: "run-lock-active",
+      severity: "error",
+      requiredAction: "retry",
+    },
+  },
+  {
+    match: /^Workflow Run lock owner is absent/u,
+    entry: {
+      code: "run-lock-stale",
+      severity: "error",
+      requiredAction: "repair",
+      operationId: "workflow.recover",
+    },
+  },
+  {
+    match: /^Workflow Run lock ownership or file identity changed/u,
+    entry: {
+      code: "run-lock-release-conflict",
+      severity: "error",
+      requiredAction: "stop",
+    },
+  },
+  {
+    match: /^Workflow Run lock/u,
+    entry: {
+      code: "run-lock-unknown",
       severity: "error",
       requiredAction: "stop",
     },

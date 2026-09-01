@@ -15,6 +15,7 @@ The package includes:
 - private Skill runtime loading, validation, content identity, and immutable snapshots;
 - deterministic and adaptive Engine loop behavior with manual and standalone Run façades;
 - protected Run state, pending-action, trajectory, artifact, context, and checkpoint storage;
+- exclusive, diagnosable per-Run mutation locks with explicit stale-owner recovery;
 - a public WorkflowRuntime for deterministic workflow start, resume, revisioned outcome submission, and recovery;
 - bounded declared Cycle execution with stable identities and append-only repeated-visit evidence;
 - immutable Attempt-, Cycle-, and Run-lifetime artifact versions with protected content hashes and explicit carry-forward;
@@ -137,6 +138,14 @@ finding while that journal is pending; only explicit `recover` classifies each
 record as previous, intended, or unknown, rolls forward known mixtures, and
 appends one bounded `recovery_reconciled` event. Unknown material remains
 untouched and blocks recovery.
+Profiles that enable `mutation-locks` additionally serialize every mutating
+`start`, `resume`, `submit`, and `recover` operation through
+`.comet/run-lock.json`. Lock owners carry bounded operation, process, host, and
+creation-time metadata. Active, foreign, malformed, oversized, or replaced
+locks return structured findings and are never stolen; only `recover` may
+quarantine a lock whose local owner process is proven absent. Release checks
+the owner token and file identity, and takeover evidence is appended to
+`.comet/run-lock-recovery.jsonl` before journal recovery continues.
 The returned continuation reports the current Workflow Node, pending Engine
 action, current Cycle and Attempt, full Cycle and visit ledgers, stable
 Node-to-step mapping, artifact version and selection ledgers, current valid
@@ -182,6 +191,8 @@ handoff only reads protocol metadata and the current continuation. `status`,
 deleted or stale projection with `status --rebuild --confirm legacy-state`.
 Use `COMET_RUN_ROOT` or `--run-root` for manual Runs; use
 `--project <dir> --run-id <id>` for standalone Runs.
+Lock coordination remains private to the bundled runtime; generated adapters
+cannot acquire, release, diagnose, or recover locks independently.
 
 `eval` runs the Phase 2 certification over the generated package and a separate
 synthetic Phase 3 lifecycle certification. The report binds the generated

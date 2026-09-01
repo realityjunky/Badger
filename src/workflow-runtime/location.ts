@@ -20,6 +20,7 @@ import {
   resumeStandaloneWorkflowRun,
   startStandaloneRun,
   standaloneRunDir,
+  ensureStandaloneRunDir,
 } from "../engine/standalone-run.js";
 import type { SkillPackage } from "../skill-runtime/types.js";
 import type { WorkflowArtifactMutation } from "../engine/runtime-types.js";
@@ -49,6 +50,7 @@ export interface ResolvedWorkflowRunLocation {
     artifactMutation?: WorkflowArtifactMutation,
   ): Promise<ManualRunResult>;
   readState(): Promise<RunState | null>;
+  prepareStart(): Promise<void>;
 }
 
 function requiredString(value: unknown, label: string): string {
@@ -74,6 +76,7 @@ function manualLocation(runRoot: string): ResolvedWorkflowRunLocation {
     async readState() {
       return readRunState(validatedRoot);
     },
+    async prepareStart() {},
   };
 }
 
@@ -117,6 +120,9 @@ function standaloneLocation(
     },
     async readState() {
       return readStandaloneRunState(validatedProjectRoot, validatedRunId);
+    },
+    async prepareStart() {
+      await ensureStandaloneRunDir(validatedProjectRoot, validatedRunId);
     },
   };
 }

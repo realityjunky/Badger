@@ -90,6 +90,13 @@ import {
   WorkflowTransitionRecordConflictError,
   type WorkflowTransitionJournal,
 } from "./transition-journal.js";
+import {
+  acquireWorkflowRunLock,
+  recordWorkflowRunLockTakeover,
+  WorkflowRunLockBlockedError,
+  type WorkflowRunLockHandle,
+  type WorkflowRunLockOperation,
+} from "./run-lock.js";
 
 async function withStructuredRuntimeErrors<T>(
   operation: () => Promise<T>,
@@ -98,6 +105,76 @@ async function withStructuredRuntimeErrors<T>(
     return await operation();
   } catch (error) {
     throw attachWorkflowFinding(error);
+  }
+}
+
+function usesWorkflowRunLock(
+  profile: WorkflowDurabilityProfile | undefined,
+): boolean {
+  return profile?.capabilities.includes("mutation-locks") ?? false;
+}
+
+async function durabilityProfileForLocation(
+  location: ResolvedWorkflowRunLocation,
+): Promise<WorkflowDurabilityProfile | undefined> {
+  const state = await location.readState();
+  if (state?.runtimeIdentity?.durabilityProfile) {
+    return state.runtimeIdentity.durabilityProfile;
+  }
+  return (await readWorkflowTransitionJournal(location.runRoot))?.execution
+    .durabilityProfile;
+}
+
+async function withWorkflowRunLock<T>(
+  location: ResolvedWorkflowRunLocation,
+  operation: WorkflowRunLockOperation,
+  profile: WorkflowDurabilityProfile | undefined,
+  work: (lock?: WorkflowRunLockHandle) => Promise<T>,
+  options: {
+    allowStale?: boolean;
+    onBlocked?: (error: WorkflowRunLockBlockedError) => Promise<T>;
+  } = {},
+): Promise<T> {
+  if (!usesWorkflowRunLock(profile)) return work();
+  let lock: WorkflowRunLockHandle;
+  try {
+    lock = await acquireWorkflowRunLock(location.runRoot, operation, {
+      maxBytes: profile?.bounds.runLockBytes,
+      allowStale: options.allowStale,
+    });
+  } catch (error) {
+    if (error instanceof WorkflowRunLockBlockedError && options.onBlocked) {
+      return options.onBlocked(error);
+    }
+    throw error;
+  }
+  try {
+    return await work(lock);
+  } finally {
+    await lock.release();
+  }
+}
+
+async function lockBlockedContinuation(
+  location: ResolvedWorkflowRunLocation,
+  error: WorkflowRunLockBlockedError,
+): Promise<WorkflowContinuation> {
+  try {
+    const verified = await verifyStoredRun(location);
+    const base = await continuationFromVerifiedRun(verified, location.runRoot);
+    const projected = boundWorkflowFindings([error.finding]);
+    return {
+      ...base,
+      disposition: "blocked",
+      findings: projected.findings,
+      findingSummary: projected.summary,
+      requiresUserDecision: projected.findings.some(
+        (finding) => finding.requiresUserDecision,
+      ),
+      blockers: legacyBlockersFromFindings("blocked", projected.findings),
+    };
+  } catch {
+    throw error;
   }
 }
 import {
@@ -2163,40 +2240,55 @@ export function createWorkflowRuntime(): WorkflowRuntime {
         const resolved = resolveWorkflowStartLocation(options);
         const compiled = await compileWorkflow(options.protocol);
         const revisioned = compiled.package.runtime?.capabilityVersion === 3;
-        const result = await resolved.location.start(compiled.package, {
-          runId: resolved.runId,
-          confirmations: options.confirmations ?? [],
-          resolver: resolverForPackage(),
-          runtimeIdentity: {
-            ...compiled.identity,
-            snapshotHash: compiled.identity.packageHash,
+        await resolved.location.prepareStart();
+        return withWorkflowRunLock(
+          resolved.location,
+          "workflow.start",
+          compiled.identity.durabilityProfile,
+          async () => {
+            if (usesWorkflowRunLock(compiled.identity.durabilityProfile)) {
+              const journal = await readWorkflowTransitionJournal(
+                resolved.location.runRoot,
+              );
+              if (journal)
+                throw new WorkflowTransitionJournalPendingError(journal);
+            }
+            const result = await resolved.location.start(compiled.package, {
+              runId: resolved.runId,
+              confirmations: options.confirmations ?? [],
+              resolver: resolverForPackage(),
+              runtimeIdentity: {
+                ...compiled.identity,
+                snapshotHash: compiled.identity.packageHash,
+              },
+              ...(revisioned
+                ? {
+                    workflowRuntime: {
+                      revision: 0,
+                      nextVisitOrdinal: 0,
+                      currentAttempt: null,
+                      currentCycle: null,
+                      cycles: [],
+                      visits: [],
+                      decisionReceipts: [],
+                      artifactVersions: [],
+                      artifactSelections: [],
+                    },
+                  }
+                : {}),
+              prepareAction: prepareWorkflowAction,
+            });
+            if (result.state.skillHash !== compiled.identity.packageHash) {
+              throw new Error(
+                "WorkflowRuntime snapshot identity was not persisted",
+              );
+            }
+            return continuation(result, {
+              ...compiled.identity,
+              snapshotHash: result.state.skillHash,
+            });
           },
-          ...(revisioned
-            ? {
-                workflowRuntime: {
-                  revision: 0,
-                  nextVisitOrdinal: 0,
-                  currentAttempt: null,
-                  currentCycle: null,
-                  cycles: [],
-                  visits: [],
-                  decisionReceipts: [],
-                  artifactVersions: [],
-                  artifactSelections: [],
-                },
-              }
-            : {}),
-          prepareAction: prepareWorkflowAction,
-        });
-        if (result.state.skillHash !== compiled.identity.packageHash) {
-          throw new Error(
-            "WorkflowRuntime snapshot identity was not persisted",
-          );
-        }
-        return continuation(result, {
-          ...compiled.identity,
-          snapshotHash: result.state.skillHash,
-        });
+        );
       });
     },
 
@@ -2206,9 +2298,22 @@ export function createWorkflowRuntime(): WorkflowRuntime {
     ): Promise<WorkflowContinuation> {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
-        const journal = await readWorkflowTransitionJournal(location.runRoot);
-        if (journal) return recoveryRequiredContinuation(location, journal);
-        return resumeStoredRun(location, options);
+        const profile = await durabilityProfileForLocation(location);
+        return withWorkflowRunLock(
+          location,
+          "workflow.resume",
+          profile,
+          async () => {
+            const journal = await readWorkflowTransitionJournal(
+              location.runRoot,
+            );
+            if (journal) return recoveryRequiredContinuation(location, journal);
+            return resumeStoredRun(location, options);
+          },
+          {
+            onBlocked: (error) => lockBlockedContinuation(location, error),
+          },
+        );
       });
     },
 
@@ -2218,108 +2323,128 @@ export function createWorkflowRuntime(): WorkflowRuntime {
     ): Promise<WorkflowContinuation> {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
-        const journal = await readWorkflowTransitionJournal(location.runRoot);
-        if (journal) return recoveryRequiredContinuation(location, journal);
-        validateSubmission(submission);
-        let prepared: PreparedWorkflowSubmission;
-        try {
-          prepared = await prepareWorkflowSubmission(target, submission);
-        } catch (error) {
-          if (error instanceof WorkflowRevisionConflictError) {
-            return conflictContinuation(error.verified, error.finding);
-          }
-          throw error;
-        }
-        const blockers = await completionBlockers(prepared, submission);
-        if (blockers.length > 0) {
-          return blockedContinuation(prepared, blockers);
-        }
-        const routeFindings = routeBlockers(prepared, submission);
-        if (routeFindings.length > 0) {
-          return blockedContinuation(prepared, routeFindings);
-        }
-        const artifact = await artifactMutationForSubmission(
-          prepared,
-          submission,
-        );
-        if (artifact.blockers.length > 0) {
-          return blockedContinuation(prepared, artifact.blockers);
-        }
-        const outcome = engineOutcome(prepared, submission, artifact.mutation);
-        if (prepared.verified.identity.durabilityProfile === undefined) {
-          const result = await prepared.location.resume(
-            {
-              resolver: resolverForPackage(),
-              outcome,
-              prepareAction: prepareWorkflowAction,
-            },
-            artifact.mutation,
-          );
-          return continuation(result, prepared.verified.identity);
-        }
-
-        const claimInput: RevisionClaimInput = {
-          runId: submission.runId!,
-          expectedRevision: submission.revision!,
-          expectedActionId: submission.actionId,
-          intendedRevision: submission.revision! + 1,
-          execution: structuredClone(submission.execution!),
-        };
-        const claim = await acquireRevisionClaim(
-          prepared.location.runRoot,
-          claimInput,
-        );
-        if (!claim.acquired) {
-          const current = await verifyStoredRun(prepared.location);
-          return conflictContinuation(
-            current,
-            revisionConflictFinding(
-              current.state.workflowRuntime?.revision ?? 0,
-              current.pending?.id ?? current.state.pending ?? null,
-            ),
-          );
-        }
-        try {
-          await assertRevisionFence(prepared.location, claimInput);
-          const result = await prepared.location.resume(
-            {
-              resolver: resolverForPackage(),
-              outcome,
-              prepareAction: prepareWorkflowAction,
-              revisionFence: () =>
-                assertRevisionFence(prepared.location, claimInput),
-              revisionStateFence: () =>
-                assertRevisionFence(prepared.location, claimInput, false),
-            },
-            artifact.mutation,
-          );
-          await claim.commit();
-          return continuation(result, prepared.verified.identity);
-        } catch (error) {
-          if (error instanceof WorkflowRevisionConflictError) {
-            return conflictContinuation(error.verified, error.finding);
-          }
-          if (
-            error instanceof WorkflowTransitionJournalPendingError ||
-            error instanceof WorkflowTransitionRecordConflictError
-          ) {
+        const profile = await durabilityProfileForLocation(location);
+        return withWorkflowRunLock(
+          location,
+          "workflow.submit",
+          profile,
+          async () => {
             const journal = await readWorkflowTransitionJournal(
-              prepared.location.runRoot,
+              location.runRoot,
             );
-            if (journal) {
-              return recoveryRequiredContinuation(prepared.location, journal);
+            if (journal) return recoveryRequiredContinuation(location, journal);
+            validateSubmission(submission);
+            let prepared: PreparedWorkflowSubmission;
+            try {
+              prepared = await prepareWorkflowSubmission(target, submission);
+            } catch (error) {
+              if (error instanceof WorkflowRevisionConflictError) {
+                return conflictContinuation(error.verified, error.finding);
+              }
+              throw error;
             }
-            const current = await verifyStoredRun(prepared.location);
-            return conflictContinuation(
-              current,
-              revisionConflictFinding(
-                current.state.workflowRuntime?.revision ?? 0,
-                current.pending?.id ?? current.state.pending ?? null,
-              ),
+            const blockers = await completionBlockers(prepared, submission);
+            if (blockers.length > 0) {
+              return blockedContinuation(prepared, blockers);
+            }
+            const routeFindings = routeBlockers(prepared, submission);
+            if (routeFindings.length > 0) {
+              return blockedContinuation(prepared, routeFindings);
+            }
+            const artifact = await artifactMutationForSubmission(
+              prepared,
+              submission,
             );
-          }
-          throw error;
-        }
+            if (artifact.blockers.length > 0) {
+              return blockedContinuation(prepared, artifact.blockers);
+            }
+            const outcome = engineOutcome(
+              prepared,
+              submission,
+              artifact.mutation,
+            );
+            if (prepared.verified.identity.durabilityProfile === undefined) {
+              const result = await prepared.location.resume(
+                {
+                  resolver: resolverForPackage(),
+                  outcome,
+                  prepareAction: prepareWorkflowAction,
+                },
+                artifact.mutation,
+              );
+              return continuation(result, prepared.verified.identity);
+            }
+
+            const claimInput: RevisionClaimInput = {
+              runId: submission.runId!,
+              expectedRevision: submission.revision!,
+              expectedActionId: submission.actionId,
+              intendedRevision: submission.revision! + 1,
+              execution: structuredClone(submission.execution!),
+            };
+            const claim = await acquireRevisionClaim(
+              prepared.location.runRoot,
+              claimInput,
+            );
+            if (!claim.acquired) {
+              const current = await verifyStoredRun(prepared.location);
+              return conflictContinuation(
+                current,
+                revisionConflictFinding(
+                  current.state.workflowRuntime?.revision ?? 0,
+                  current.pending?.id ?? current.state.pending ?? null,
+                ),
+              );
+            }
+            try {
+              await assertRevisionFence(prepared.location, claimInput);
+              const result = await prepared.location.resume(
+                {
+                  resolver: resolverForPackage(),
+                  outcome,
+                  prepareAction: prepareWorkflowAction,
+                  revisionFence: () =>
+                    assertRevisionFence(prepared.location, claimInput),
+                  revisionStateFence: () =>
+                    assertRevisionFence(prepared.location, claimInput, false),
+                },
+                artifact.mutation,
+              );
+              await claim.commit();
+              return continuation(result, prepared.verified.identity);
+            } catch (error) {
+              if (error instanceof WorkflowRevisionConflictError) {
+                return conflictContinuation(error.verified, error.finding);
+              }
+              if (
+                error instanceof WorkflowTransitionJournalPendingError ||
+                error instanceof WorkflowTransitionRecordConflictError
+              ) {
+                const journal = await readWorkflowTransitionJournal(
+                  prepared.location.runRoot,
+                );
+                if (journal) {
+                  return recoveryRequiredContinuation(
+                    prepared.location,
+                    journal,
+                  );
+                }
+                const current = await verifyStoredRun(prepared.location);
+                return conflictContinuation(
+                  current,
+                  revisionConflictFinding(
+                    current.state.workflowRuntime?.revision ?? 0,
+                    current.pending?.id ?? current.state.pending ?? null,
+                  ),
+                );
+              }
+              throw error;
+            }
+          },
+          {
+            onBlocked: (error) => lockBlockedContinuation(location, error),
+          },
+        );
       });
     },
 
@@ -2329,25 +2454,46 @@ export function createWorkflowRuntime(): WorkflowRuntime {
     ): Promise<WorkflowContinuation> {
       return withStructuredRuntimeErrors(async () => {
         const location = resolveWorkflowRunLocation(target);
-        const journal = await readWorkflowTransitionJournal(location.runRoot);
-        if (journal) {
-          if (!journal.execution.durabilityProfile) {
-            throw new Error(
-              "Workflow transition journal has no durability profile",
+        const profile = await durabilityProfileForLocation(location);
+        return withWorkflowRunLock(
+          location,
+          "workflow.recover",
+          profile,
+          async (lock) => {
+            if (lock?.takeover && profile?.bounds.runLockBytes) {
+              await recordWorkflowRunLockTakeover(
+                location.runRoot,
+                lock.takeover,
+                profile.bounds.runLockBytes,
+              );
+            }
+            const journal = await readWorkflowTransitionJournal(
+              location.runRoot,
             );
-          }
-          const recovery = await recoverWorkflowTransition(
-            location.runRoot,
-            journal.execution.durabilityProfile,
-          );
-          if (recovery.status === "blocked") {
-            return recoveryRequiredContinuation(
-              location,
-              recovery.journal ?? journal,
-            );
-          }
-        }
-        return resumeStoredRun(location, options);
+            if (journal) {
+              if (!journal.execution.durabilityProfile) {
+                throw new Error(
+                  "Workflow transition journal has no durability profile",
+                );
+              }
+              const recovery = await recoverWorkflowTransition(
+                location.runRoot,
+                journal.execution.durabilityProfile,
+              );
+              if (recovery.status === "blocked") {
+                return recoveryRequiredContinuation(
+                  location,
+                  recovery.journal ?? journal,
+                );
+              }
+            }
+            return resumeStoredRun(location, options);
+          },
+          {
+            allowStale: true,
+            onBlocked: (error) => lockBlockedContinuation(location, error),
+          },
+        );
       });
     },
   };
