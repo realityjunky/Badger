@@ -20,7 +20,7 @@ The package includes:
 - bounded declared Cycle execution with stable identities and append-only repeated-visit evidence;
 - immutable Attempt-, Cycle-, and Run-lifetime artifact versions with protected content hashes and explicit carry-forward;
 - bounded Decision Receipt scope references tied to accepted artifact and evidence versions;
-- bounded, content-addressed physical-tree snapshots for explicitly declared project scopes;
+- bounded, content-addressed physical-tree and Git-aware snapshots for explicitly declared project scopes;
 - versioned structured findings with bounded redaction, deterministic ordering, continuation dispositions, and derived legacy blockers;
 - official/private differential observations for the pinned Engine behavior.
 
@@ -114,18 +114,23 @@ or generated source files, and rejects Run-id, protocol, package, snapshot, or
 pending-action drift before returning a continuation.
 
 Workflows may opt into the `content-snapshots` durability capability with a
-hash-bound physical-tree snapshot policy. The policy declares include and
-exclude patterns plus file-count, file-size, total-size, manifest-size,
-traversal, duration, and omission-detail limits. Captured entries contain only
-safe relative paths, sizes, and SHA-256 content hashes; raw file contents are
-never placed in a manifest. Symlinks and non-regular files are not captured,
-changes during enumeration or hashing produce incomplete evidence, and
-incomplete snapshots remain diagnostic references that cannot satisfy a
-complete-scope requirement. Snapshot references are stored through the same
-protected lock and transition journal as the Run mutation and recover
-identically in manual and standalone locations. Repository-owned protected
-roots must be supplied by the host and are rejected if the declared scope
-would select them.
+hash-bound physical-tree or Git snapshot policy. The policy declares a
+provider, optional physical-tree fallback, include and exclude patterns, plus
+file-count, file-size, total-size, manifest-size, traversal, duration, and
+omission-detail limits. Git capture enumerates tracked, dirty, staged,
+deleted, and selected untracked paths, then hashes the current working-tree
+bytes; commit, index, and status identities are supplemental evidence only.
+Captured entries contain only safe relative paths, sizes, and SHA-256 content
+hashes; raw file contents are never placed in a manifest. Symlinks,
+non-regular files, nested repository boundaries, selection races, provider
+errors, and overflow produce bounded incomplete evidence. Git and physical-tree
+captures of the same complete bytes have the same provider-independent content
+identity, while an actual fallback is explicit in that identity. Snapshot
+references are stored through the same protected lock and transition journal
+as the Run mutation and recover identically in manual and standalone
+locations. Repository-owned protected roots must be supplied by the host and
+are rejected before provider enumeration if the declared scope would select
+them.
 
 Each continuation also carries the versioned `findings` catalog and its
 `findingSummary`. Findings are bounded, deterministically ordered, redacted,

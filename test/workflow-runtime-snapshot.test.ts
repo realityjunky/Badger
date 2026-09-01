@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
+import { execFile as execFileCallback } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import {
   captureWorkflowContentSnapshot,
   createWorkflowContentSnapshotPolicy,
@@ -17,6 +19,29 @@ import {
   clearWorkflowTransitionFaultForTests,
   setWorkflowTransitionFaultForTests,
 } from "../src/workflow-runtime/transition-journal.js";
+
+const execFile = promisify(execFileCallback);
+
+async function git(root: string, ...args: string[]): Promise<string> {
+  const result = await execFile("git", ["-C", root, ...args], {
+    encoding: "utf8",
+  });
+  return result.stdout;
+}
+
+async function initializeGitRepository(root: string): Promise<void> {
+  await git(root, "init", "--quiet");
+  await git(root, "config", "user.email", "snapshot-tests@example.invalid");
+  await git(root, "config", "user.name", "Snapshot Tests");
+}
+
+async function commitGitRepository(
+  root: string,
+  message: string,
+): Promise<void> {
+  await git(root, "add", "--all");
+  await git(root, "commit", "--quiet", "-m", message);
+}
 
 const contentSnapshotProfile = {
   version: 1,
@@ -721,5 +746,597 @@ describe("WorkflowRuntime physical content snapshots", () => {
     ).rejects.toMatchObject({
       finding: expect.objectContaining({ code: "snapshot-unsafe-scope" }),
     });
+  });
+
+  it("captures a Git worktree with provider-independent content identity", async () => {
+    await initializeGitRepository(root);
+    await commitGitRepository(root, "initial snapshot");
+
+    const gitPolicy = createWorkflowContentSnapshotPolicy({
+      provider: "git",
+      include: ["nested/**", "z.txt"],
+      limits: { maxManifestBytes: 32 * 1024 },
+    });
+    const physicalPolicy = createWorkflowContentSnapshotPolicy({
+      provider: "physical-tree",
+      include: ["nested/**", "z.txt"],
+      limits: { maxManifestBytes: 32 * 1024 },
+    });
+    const [gitManifest, physicalManifest] = await Promise.all([
+      captureWorkflowContentSnapshot({ root, policy: gitPolicy }),
+      captureWorkflowContentSnapshot({ root, policy: physicalPolicy }),
+    ]);
+
+    expect(gitManifest.capture.provider).toBe("git");
+    expect(gitManifest.capture.gitSelection).toMatchObject({
+      status: expect.any(String),
+      before: { recordCount: 2 },
+      after: { recordCount: 2 },
+    });
+    expect(gitManifest.capture.gitEvidence).toMatchObject({
+      status: "available",
+      diagnostics: [],
+    });
+    expect(gitManifest.complete).toBe(true);
+    expect(gitManifest.entries).toEqual(physicalManifest.entries);
+    expect(hashWorkflowContentSnapshot(gitManifest)).toBe(
+      hashWorkflowContentSnapshot(physicalManifest),
+    );
+  });
+
+  it("keeps broad Git and physical scopes aligned without capturing Git metadata", async () => {
+    await initializeGitRepository(root);
+    await commitGitRepository(root, "broad parity baseline");
+    const gitManifest = await captureWorkflowContentSnapshot({
+      root,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "git",
+        include: ["**/*"],
+        limits: { maxManifestBytes: 64 * 1024 },
+      }),
+    });
+    const physicalManifest = await captureWorkflowContentSnapshot({
+      root,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "physical-tree",
+        include: ["**/*"],
+        limits: { maxManifestBytes: 64 * 1024 },
+      }),
+    });
+
+    expect(gitManifest.complete).toBe(true);
+    expect(physicalManifest.complete).toBe(true);
+    expect(gitManifest.entries).toEqual(physicalManifest.entries);
+    expect(hashWorkflowContentSnapshot(gitManifest)).toBe(
+      hashWorkflowContentSnapshot(physicalManifest),
+    );
+    expect(gitManifest.entries.map((entry) => entry.path)).not.toContain(
+      ".git/config",
+    );
+  });
+
+  it("uses current Git working-tree bytes for dirty tracked and untracked files", async () => {
+    await initializeGitRepository(root);
+    await Promise.all([
+      fs.writeFile(path.join(root, "modified.txt"), "before\n"),
+      fs.writeFile(path.join(root, "staged.txt"), "before\n"),
+      fs.writeFile(path.join(root, "deleted.txt"), "delete me\n"),
+      fs.writeFile(
+        path.join(root, "unstaged-deleted.txt"),
+        "delete me without staging\n",
+      ),
+    ]);
+    await commitGitRepository(root, "dirty snapshot baseline");
+    await fs.writeFile(path.join(root, "modified.txt"), "working tree\n");
+    await fs.writeFile(path.join(root, "staged.txt"), "index bytes\n");
+    await git(root, "add", "staged.txt");
+    await fs.rm(path.join(root, "deleted.txt"));
+    await git(root, "add", "-u", "--", "deleted.txt");
+    await fs.rm(path.join(root, "unstaged-deleted.txt"));
+    await fs.writeFile(path.join(root, "selected-untracked.txt"), "new\n");
+
+    const manifest = await captureWorkflowContentSnapshot({
+      root,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "git",
+        include: [
+          "modified.txt",
+          "staged.txt",
+          "deleted.txt",
+          "unstaged-deleted.txt",
+          "selected-untracked.txt",
+        ],
+        limits: { maxManifestBytes: 32 * 1024 },
+      }),
+    });
+
+    expect(manifest.complete).toBe(false);
+    expect(manifest.entries.map((entry) => entry.path)).toEqual([
+      "modified.txt",
+      "selected-untracked.txt",
+      "staged.txt",
+    ]);
+    expect(manifest.omitted).toContainEqual({
+      path: "deleted.txt",
+      size: null,
+      type: "file",
+      reason: "deleted",
+    });
+    expect(manifest.omitted).toContainEqual({
+      path: "unstaged-deleted.txt",
+      size: null,
+      type: "file",
+      reason: "deleted",
+    });
+    expect(JSON.stringify(manifest)).not.toContain("working tree");
+    expect(JSON.stringify(manifest)).not.toContain("index bytes");
+  });
+
+  it("captures an explicitly selected ignored untracked file", async () => {
+    await initializeGitRepository(root);
+    await fs.writeFile(path.join(root, ".gitignore"), "ignored.txt\n");
+    await commitGitRepository(root, "ignored-file baseline");
+    await fs.writeFile(path.join(root, "ignored.txt"), "current bytes\n");
+
+    const manifest = await captureWorkflowContentSnapshot({
+      root,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "git",
+        include: ["ignored.txt"],
+        limits: { maxManifestBytes: 32 * 1024 },
+      }),
+    });
+
+    expect(manifest.complete).toBe(true);
+    expect(manifest.entries).toHaveLength(1);
+    expect(manifest.entries[0]?.path).toBe("ignored.txt");
+  });
+
+  it("keeps content identity stable across Git metadata-only drift", async () => {
+    await initializeGitRepository(root);
+    await commitGitRepository(root, "metadata baseline");
+    const policy = createWorkflowContentSnapshotPolicy({
+      provider: "git",
+      include: ["z.txt"],
+      limits: { maxManifestBytes: 32 * 1024 },
+    });
+    const first = await captureWorkflowContentSnapshot({ root, policy });
+    await git(
+      root,
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "metadata drift",
+    );
+    const second = await captureWorkflowContentSnapshot({ root, policy });
+
+    expect(second.capture.gitEvidence?.before.head).not.toBe(
+      first.capture.gitEvidence?.before.head,
+    );
+    expect(hashWorkflowContentSnapshot(second)).toBe(
+      hashWorkflowContentSnapshot(first),
+    );
+
+    const evidenceOnlyChange = structuredClone(first);
+    evidenceOnlyChange.capture.gitEvidence!.diagnostics = [
+      "provider-private diagnostic",
+    ];
+    evidenceOnlyChange.capture.gitSelection!.before.outputBytes += 1;
+    expect(hashWorkflowContentSnapshot(evidenceOnlyChange)).toBe(
+      hashWorkflowContentSnapshot(first),
+    );
+    const withFallback = await captureWorkflowContentSnapshot({
+      root,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "git",
+        fallback: "physical-tree",
+        include: ["z.txt"],
+        limits: { maxManifestBytes: 32 * 1024 },
+      }),
+    });
+    expect(hashWorkflowContentSnapshot(withFallback)).not.toBe(
+      hashWorkflowContentSnapshot(first),
+    );
+    const oversizedEvidence = structuredClone(first);
+    oversizedEvidence.capture.gitSelection!.before.outputBytes =
+      8 * 1024 * 1024 + 1;
+    expect(() => hashWorkflowContentSnapshot(oversizedEvidence)).toThrow(
+      /outputBytes exceeds/,
+    );
+  });
+
+  it("records explicit physical fallback in the snapshot identity", async () => {
+    const fallbackRoot = path.join(root, "fallback");
+    await fs.mkdir(fallbackRoot);
+    await fs.writeFile(path.join(fallbackRoot, "input.txt"), "fallback\n");
+    const gitPolicy = createWorkflowContentSnapshotPolicy({
+      provider: "git",
+      fallback: "physical-tree",
+      include: ["input.txt"],
+      limits: { maxManifestBytes: 32 * 1024 },
+    });
+    const physicalPolicy = createWorkflowContentSnapshotPolicy({
+      provider: "physical-tree",
+      include: ["input.txt"],
+      limits: { maxManifestBytes: 32 * 1024 },
+    });
+
+    const [fallback, physical] = await Promise.all([
+      captureWorkflowContentSnapshot({ root: fallbackRoot, policy: gitPolicy }),
+      captureWorkflowContentSnapshot({
+        root: fallbackRoot,
+        policy: physicalPolicy,
+      }),
+    ]);
+
+    expect(fallback.capture).toMatchObject({
+      provider: "physical-tree",
+      requestedProvider: "git",
+      fallback: {
+        from: "git",
+        to: "physical-tree",
+        reason: "git-metadata-unavailable",
+      },
+    });
+    expect(fallback.complete).toBe(true);
+    expect(hashWorkflowContentSnapshot(fallback)).not.toBe(
+      hashWorkflowContentSnapshot(physical),
+    );
+  });
+
+  it("preserves explicit Git fallback when metadata disappears during capture", async () => {
+    if (process.platform === "win32") return;
+    const fallbackRoot = path.join(root, "fallback-during-capture");
+    await fs.mkdir(fallbackRoot);
+    await fs.writeFile(path.join(fallbackRoot, "input.txt"), "fallback\n");
+    await initializeGitRepository(fallbackRoot);
+    await commitGitRepository(fallbackRoot, "fallback baseline");
+    const manifest = await captureWorkflowContentSnapshot({
+      root: fallbackRoot,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "git",
+        fallback: "physical-tree",
+        include: ["input.txt"],
+        limits: { maxManifestBytes: 32 * 1024 },
+      }),
+      hooks: {
+        afterInitialSelection: async () => {
+          await fs.rm(path.join(fallbackRoot, ".git"), {
+            recursive: true,
+            force: true,
+          });
+        },
+      },
+    });
+
+    expect(manifest.capture).toMatchObject({
+      provider: "physical-tree",
+      requestedProvider: "git",
+      fallback: { from: "git", to: "physical-tree" },
+    });
+    expect(manifest.complete).toBe(true);
+  });
+
+  it("detects a Git selection race during capture", async () => {
+    await initializeGitRepository(root);
+    await commitGitRepository(root, "race baseline");
+    const manifest = await captureWorkflowContentSnapshot({
+      root,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "git",
+        include: ["**/*"],
+        limits: { maxManifestBytes: 32 * 1024 },
+      }),
+      hooks: {
+        afterInitialSelection: async () => {
+          await fs.writeFile(
+            path.join(root, "created-during-selection.txt"),
+            "race\n",
+          );
+        },
+      },
+    });
+
+    expect(manifest.complete).toBe(false);
+    expect(manifest.capture.gitSelection?.status).toBe("changed");
+    expect(manifest.omitted).toContainEqual({
+      path: ".",
+      size: null,
+      type: "directory",
+      reason: "git-selection-changed",
+    });
+    expect(manifest.entries.map((entry) => entry.path)).not.toContain(
+      "created-during-selection.txt",
+    );
+  });
+
+  it("detects index drift during Git content reads", async () => {
+    await initializeGitRepository(root);
+    await commitGitRepository(root, "index race baseline");
+    const manifest = await captureWorkflowContentSnapshot({
+      root,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "git",
+        include: ["z.txt"],
+        limits: { maxManifestBytes: 32 * 1024 },
+      }),
+      hooks: {
+        afterInitialSelection: async () => {
+          await fs.writeFile(path.join(root, "z.txt"), "staged race\n");
+          await git(root, "add", "--", "z.txt");
+        },
+      },
+    });
+
+    expect(manifest.complete).toBe(false);
+    expect(manifest.capture.gitSelection?.status).toBe("changed");
+    expect(manifest.capture.gitSelection?.before.indexHash).not.toBe(
+      manifest.capture.gitSelection?.after.indexHash,
+    );
+  });
+
+  it("omits a Git file changed during bounded content hashing", async () => {
+    await initializeGitRepository(root);
+    await commitGitRepository(root, "Git content race baseline");
+    const manifest = await captureWorkflowContentSnapshot({
+      root,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "git",
+        include: ["z.txt"],
+        limits: { maxManifestBytes: 32 * 1024 },
+      }),
+      hooks: {
+        beforeFileRead: async (relative) => {
+          if (relative === "z.txt") {
+            await fs.writeFile(
+              path.join(root, relative),
+              "changed while hashing\n",
+            );
+          }
+        },
+      },
+    });
+
+    expect(manifest.complete).toBe(false);
+    expect(manifest.entries).toEqual([]);
+    expect(manifest.omitted).toContainEqual({
+      path: "z.txt",
+      size: null,
+      type: "file",
+      reason: "changed-during-read",
+    });
+  });
+
+  it("returns bounded incomplete evidence when Git metadata is unavailable", async () => {
+    const policy = createWorkflowContentSnapshotPolicy({
+      provider: "git",
+      include: ["z.txt"],
+      limits: { maxManifestBytes: 32 * 1024 },
+    });
+    const manifest = await captureWorkflowContentSnapshot({ root, policy });
+
+    expect(manifest.complete).toBe(false);
+    expect(manifest.capture).toMatchObject({
+      provider: "git",
+      gitEvidence: {
+        status: "unavailable",
+        diagnostics: [expect.any(String)],
+      },
+    });
+    expect(manifest.omitted).toContainEqual({
+      path: ".",
+      size: null,
+      type: "directory",
+      reason: "git-metadata-unavailable",
+    });
+  });
+
+  it("records a Git provider error as bounded incomplete evidence", async () => {
+    await initializeGitRepository(root);
+    await commitGitRepository(root, "provider error baseline");
+    await fs.writeFile(path.join(root, ".git", "index"), "corrupt index\n");
+
+    const manifest = await captureWorkflowContentSnapshot({
+      root,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "git",
+        include: ["z.txt"],
+        limits: { maxManifestBytes: 32 * 1024 },
+      }),
+    });
+
+    expect(manifest.complete).toBe(false);
+    expect(manifest.capture.gitEvidence).toMatchObject({
+      status: "error",
+      diagnostics: [expect.any(String)],
+    });
+    expect(manifest.omitted).toContainEqual({
+      path: ".",
+      size: null,
+      type: "directory",
+      reason: "git-provider-error",
+    });
+  });
+
+  it("rejects a protected Git scope before provider enumeration", async () => {
+    await initializeGitRepository(root);
+    await commitGitRepository(root, "protected scope baseline");
+    await fs.mkdir(path.join(root, "protected"));
+
+    await expect(
+      captureWorkflowContentSnapshot({
+        root,
+        protectedRoots: ["protected"],
+        policy: createWorkflowContentSnapshotPolicy({
+          provider: "git",
+          include: ["**/*"],
+          limits: { maxManifestBytes: 32 * 1024 },
+        }),
+      }),
+    ).rejects.toMatchObject({
+      finding: expect.objectContaining({ code: "snapshot-unsafe-scope" }),
+    });
+  });
+
+  it("records Git enumeration overflow without reading an incomplete selection", async () => {
+    await initializeGitRepository(root);
+    await commitGitRepository(root, "enumeration overflow baseline");
+    const manifest = await captureWorkflowContentSnapshot({
+      root,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "git",
+        include: ["**/*"],
+        limits: {
+          maxVisitedNodes: 1,
+          maxManifestBytes: 32 * 1024,
+        },
+      }),
+    });
+
+    expect(manifest.complete).toBe(false);
+    expect(manifest.capture.gitSelection?.status).toBe("overflow");
+    expect(
+      manifest.capture.gitSelection?.before.outputBytes,
+    ).toBeLessThanOrEqual(8 * 1024 * 1024);
+    expect(manifest.omitted).toContainEqual({
+      path: ".",
+      size: null,
+      type: "directory",
+      reason: "git-enumeration-limit",
+    });
+  });
+
+  it("does not cross a nested Git repository boundary", async () => {
+    if (process.platform === "win32") return;
+    await initializeGitRepository(root);
+    await commitGitRepository(root, "outer baseline");
+    const nested = path.join(root, "nested-repository");
+    await fs.mkdir(nested);
+    await initializeGitRepository(nested);
+    await fs.writeFile(path.join(nested, "child.txt"), "child\n");
+    await commitGitRepository(nested, "nested baseline");
+    await expect(
+      captureWorkflowContentSnapshot({
+        root,
+        policy: createWorkflowContentSnapshotPolicy({
+          provider: "git",
+          include: ["nested-repository/child.txt"],
+          limits: { maxManifestBytes: 32 * 1024 },
+        }),
+      }),
+    ).resolves.toMatchObject({
+      complete: false,
+      capture: { gitEvidence: { status: "nested-repository" } },
+      omitted: [
+        {
+          path: ".",
+          size: null,
+          type: "directory",
+          reason: "git-nested-repository",
+        },
+      ],
+    });
+  });
+
+  it("rejects a selected path inside an indexed Git submodule", async () => {
+    if (process.platform === "win32") return;
+    await initializeGitRepository(root);
+    await commitGitRepository(root, "outer baseline");
+    const nested = path.join(root, "indexed-submodule");
+    await fs.mkdir(nested);
+    await initializeGitRepository(nested);
+    await fs.writeFile(path.join(nested, "child.txt"), "child\n");
+    await commitGitRepository(nested, "submodule baseline");
+    const nestedCommit = (await git(nested, "rev-parse", "HEAD")).trim();
+    await git(
+      root,
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      `160000,${nestedCommit},indexed-submodule`,
+    );
+    await git(root, "commit", "--quiet", "-m", "index submodule");
+
+    const manifest = await captureWorkflowContentSnapshot({
+      root,
+      policy: createWorkflowContentSnapshotPolicy({
+        provider: "git",
+        include: ["indexed-submodule/child.txt"],
+        limits: { maxManifestBytes: 32 * 1024 },
+      }),
+    });
+
+    expect(manifest.complete).toBe(false);
+    expect(manifest.capture.gitEvidence?.status).toBe("nested-repository");
+    expect(manifest.omitted).toContainEqual({
+      path: ".",
+      size: null,
+      type: "directory",
+      reason: "git-nested-repository",
+    });
+  });
+
+  it("persists and recovers Git snapshot references for both Run locations", async () => {
+    const manualRoot = path.join(root, "manual-git-project");
+    const standaloneRoot = path.join(root, "standalone-git-project");
+    await Promise.all([
+      fs.mkdir(path.join(manualRoot, "src"), { recursive: true }),
+      fs.mkdir(path.join(standaloneRoot, "src"), { recursive: true }),
+    ]);
+    await Promise.all([
+      fs.writeFile(
+        path.join(manualRoot, "src", "input.txt"),
+        "same Git bytes\n",
+      ),
+      fs.writeFile(
+        path.join(standaloneRoot, "src", "input.txt"),
+        "same Git bytes\n",
+      ),
+    ]);
+    await Promise.all([
+      initializeGitRepository(manualRoot),
+      initializeGitRepository(standaloneRoot),
+    ]);
+    await Promise.all([
+      commitGitRepository(manualRoot, "manual Git baseline"),
+      commitGitRepository(standaloneRoot, "standalone Git baseline"),
+    ]);
+    const policy = createWorkflowContentSnapshotPolicy({
+      provider: "git",
+      include: ["src/**"],
+      limits: { maxManifestBytes: 32 * 1024 },
+    });
+    const protocol = snapshotRuntimeProtocol(policy);
+    const runtime = createWorkflowRuntime();
+    const manual = await runtime.start({
+      protocol,
+      location: { kind: "manual", runRoot: manualRoot },
+      runId: "manual-git-run",
+    });
+    const standalone = await runtime.start({
+      protocol,
+      location: {
+        kind: "standalone",
+        projectRoot: standaloneRoot,
+        runId: "standalone-git-run",
+      },
+    });
+
+    expect(manual.contentSnapshots).toEqual(standalone.contentSnapshots);
+    expect(manual.contentSnapshots[0]?.provider).toBe("git");
+    expect(
+      (await runtime.recover({ kind: "manual", runRoot: manualRoot }))
+        .contentSnapshots,
+    ).toEqual(manual.contentSnapshots);
+    expect(
+      (
+        await runtime.recover({
+          kind: "standalone",
+          projectRoot: standaloneRoot,
+          runId: "standalone-git-run",
+        })
+      ).contentSnapshots,
+    ).toEqual(standalone.contentSnapshots);
   });
 });

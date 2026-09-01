@@ -108,13 +108,19 @@ appends one bounded `recovery_reconciled` event before clearing that journal.
 Retention never removes an active recovery anchor.
 
 The `content-snapshots` capability requires the same revision fences, mutation
-lock, and transition journal, plus a hash-bound physical-tree policy. The
-policy bounds selected files, file sizes, total bytes, manifest bytes, visited
-nodes, duration, and recorded omission details. A snapshot records only
-normalized relative paths, regular-file hashes and sizes, provider evidence,
-and bounded omissions. Symlinks and non-regular nodes are never captured as
-file evidence; changed selection, changed content, unreadable files, and any
-overflow make the snapshot incomplete. Incomplete snapshots remain
+lock, and transition journal, plus a hash-bound physical-tree or Git policy.
+The policy bounds selected files, file sizes, total bytes, manifest bytes,
+visited nodes, provider output, duration, and recorded omission details. Git
+capture uses current working-tree bytes for tracked, modified, staged,
+deleted, and selected untracked paths; commit, index, and status identities
+remain supplemental evidence. A snapshot records only normalized relative
+paths, regular-file hashes and sizes, provider evidence, and bounded
+omissions. Symlinks and non-regular nodes are never captured as file
+evidence; changed selection, nested repository boundaries, changed content,
+unreadable files, provider errors, and any overflow make the snapshot
+incomplete. Complete Git and physical-tree captures of the same bytes share a
+provider-independent content identity. An actual physical fallback is
+explicitly recorded and participates in identity. Incomplete snapshots remain
 content-addressed diagnostic evidence and are not valid complete-scope proof.
 Snapshot references are written inside the same locked transition as the Run
 state and recover identically for manual and standalone locations.

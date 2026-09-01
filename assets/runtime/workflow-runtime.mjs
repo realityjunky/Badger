@@ -1672,6 +1672,7 @@ function legacyBlockersFromFindings(disposition, findings) {
 // src/workflow-runtime/snapshots.ts
 import { constants as fsConstants3, promises as fs4 } from "node:fs";
 import { createHash as createHash2 } from "node:crypto";
+import { spawn } from "node:child_process";
 import path5 from "node:path";
 
 // src/engine/protected-run-file.ts
@@ -1841,11 +1842,16 @@ var MAX_SNAPSHOT_VISITED_NODES = 1e6;
 var MAX_SNAPSHOT_DURATION_MS = 24 * 60 * 60 * 1e3;
 var MAX_SNAPSHOT_OMISSION_ENTRIES = 1e4;
 var MIN_SNAPSHOT_OMISSION_ENTRIES = 2;
+var MAX_GIT_OUTPUT_BYTES = 8 * 1024 * 1024;
+var MAX_GIT_DIAGNOSTICS = 16;
+var MAX_GIT_DIAGNOSTIC_BYTES = 256;
 var HASH_PATTERN = /^[a-f0-9]{64}$/u;
+var GIT_OBJECT_HASH_PATTERN = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
 var ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 var SNAPSHOT_POLICY_KEYS = /* @__PURE__ */ new Set([
   "schemaVersion",
   "provider",
+  "fallback",
   "include",
   "exclude",
   "limits",
@@ -1874,7 +1880,14 @@ var SNAPSHOT_MANIFEST_KEYS = /* @__PURE__ */ new Set([
   "omittedCount",
   "omissionOverflow"
 ]);
-var SNAPSHOT_CAPTURE_KEYS = /* @__PURE__ */ new Set(["provider", "physicalSelection"]);
+var SNAPSHOT_CAPTURE_KEYS = /* @__PURE__ */ new Set([
+  "provider",
+  "requestedProvider",
+  "fallback",
+  "physicalSelection",
+  "gitSelection",
+  "gitEvidence"
+]);
 var SNAPSHOT_SELECTION_KEYS = /* @__PURE__ */ new Set([
   "schemaVersion",
   "status",
@@ -1890,15 +1903,42 @@ var SNAPSHOT_SELECTION_STREAM_KEYS = /* @__PURE__ */ new Set([
   "overflow",
   "unstable"
 ]);
+var SNAPSHOT_GIT_SELECTION_STREAM_KEYS = /* @__PURE__ */ new Set([
+  ...SNAPSHOT_SELECTION_STREAM_KEYS,
+  "indexHash",
+  "workingTreeHash",
+  "outputBytes",
+  "durationMs"
+]);
+var SNAPSHOT_GIT_EVIDENCE_KEYS = /* @__PURE__ */ new Set([
+  "schemaVersion",
+  "status",
+  "before",
+  "after",
+  "diagnostics"
+]);
+var SNAPSHOT_GIT_METADATA_KEYS = /* @__PURE__ */ new Set(["head", "index", "workingTree"]);
+var SNAPSHOT_FALLBACK_KEYS = /* @__PURE__ */ new Set(["from", "to", "reason"]);
 var SNAPSHOT_ENTRY_KEYS = /* @__PURE__ */ new Set(["path", "hash", "size", "type"]);
 var SNAPSHOT_OMISSION_KEYS = /* @__PURE__ */ new Set(["path", "size", "type", "reason"]);
 var SNAPSHOT_OVERFLOW_KEYS = /* @__PURE__ */ new Set(["ref", "hash", "count"]);
-var PROVIDER = "physical-tree";
+var PHYSICAL_PROVIDER = "physical-tree";
+var GIT_PROVIDER = "git";
 var DEFAULT_PROTECTED_SNAPSHOT_ROOTS = [".comet"];
 var INTEGRITY_OMISSION_REASONS = /* @__PURE__ */ new Set([
   "physical-enumeration-limit",
-  "physical-selection-changed"
+  "physical-selection-changed",
+  "git-enumeration-limit",
+  "git-selection-changed"
 ]);
+var GitProviderFailure = class extends Error {
+  status;
+  constructor(status, message) {
+    super(message);
+    this.name = "GitProviderFailure";
+    this.status = status;
+  }
+};
 var WorkflowContentSnapshotError = class extends Error {
   finding;
   constructor(finding, options) {
@@ -2080,13 +2120,21 @@ function createWorkflowContentSnapshotPolicy(input) {
   }
   assertKnownFields(
     input,
-    /* @__PURE__ */ new Set(["provider", "include", "exclude", "limits", "hash"]),
+    /* @__PURE__ */ new Set(["provider", "fallback", "include", "exclude", "limits", "hash"]),
     "Workflow content snapshot policy"
   );
-  const provider = input.provider ?? PROVIDER;
-  if (provider !== PROVIDER) {
+  const provider = input.provider ?? PHYSICAL_PROVIDER;
+  if (provider !== PHYSICAL_PROVIDER && provider !== GIT_PROVIDER) {
     throw new Error(
       `Unsupported Workflow content snapshot provider: ${provider}`
+    );
+  }
+  if (input.fallback !== void 0 && input.fallback !== PHYSICAL_PROVIDER) {
+    throw new Error("Unsupported Workflow content snapshot fallback");
+  }
+  if (input.fallback !== void 0 && provider !== GIT_PROVIDER) {
+    throw new Error(
+      "Workflow content snapshot fallback requires the Git provider"
     );
   }
   const include = normalizedPatterns(
@@ -2103,6 +2151,7 @@ function createWorkflowContentSnapshotPolicy(input) {
   const policyWithoutHash = {
     schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_POLICY_SCHEMA_VERSION,
     provider,
+    ...input.fallback ? { fallback: input.fallback } : {},
     include,
     exclude,
     limits: normalizedLimits(input.limits)
@@ -2127,8 +2176,11 @@ function parseWorkflowContentSnapshotPolicy(value) {
   if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_POLICY_SCHEMA_VERSION) {
     throw new Error("Unsupported Workflow content snapshot policy schema");
   }
-  if (value.provider !== PROVIDER) {
+  if (value.provider !== PHYSICAL_PROVIDER && value.provider !== GIT_PROVIDER) {
     throw new Error("Unsupported Workflow content snapshot provider");
+  }
+  if (value.fallback !== void 0 && value.fallback !== PHYSICAL_PROVIDER) {
+    throw new Error("Unsupported Workflow content snapshot fallback");
   }
   if (!Array.isArray(value.include) || !Array.isArray(value.exclude)) {
     throw new Error("Workflow content snapshot policy patterns must be arrays");
@@ -2144,7 +2196,8 @@ function parseWorkflowContentSnapshotPolicy(value) {
     "Workflow content snapshot limits"
   );
   const policy = createWorkflowContentSnapshotPolicy({
-    provider: PROVIDER,
+    provider: value.provider,
+    ...value.fallback !== void 0 ? { fallback: value.fallback } : {},
     include: value.include,
     exclude: value.exclude,
     limits: value.limits,
@@ -2223,18 +2276,23 @@ function parseSelectionStream(value, label) {
     value.storedRecordCount,
     `${label}.storedRecordCount`
   );
+  const visitedNodeCount = nonNegativeInteger(
+    value.visitedNodeCount,
+    `${label}.visitedNodeCount`
+  );
+  const encodedBytes = nonNegativeInteger(
+    value.encodedBytes,
+    `${label}.encodedBytes`
+  );
+  if (visitedNodeCount > MAX_SNAPSHOT_VISITED_NODES || recordCount > MAX_SNAPSHOT_VISITED_NODES || encodedBytes > MAX_SELECTION_BYTES) {
+    throw new Error(`${label} exceeds its enumeration bounds`);
+  }
   const stream = {
     hash: hashValue(value.hash, `${label}.hash`),
-    visitedNodeCount: nonNegativeInteger(
-      value.visitedNodeCount,
-      `${label}.visitedNodeCount`
-    ),
+    visitedNodeCount,
     recordCount,
     storedRecordCount,
-    encodedBytes: nonNegativeInteger(
-      value.encodedBytes,
-      `${label}.encodedBytes`
-    ),
+    encodedBytes,
     overflow: value.overflow,
     unstable: value.unstable
   };
@@ -2291,6 +2349,143 @@ function parsePhysicalSelection(value) {
     after
   };
 }
+function parseGitSelectionStream(value, label) {
+  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(value, SNAPSHOT_GIT_SELECTION_STREAM_KEYS, label);
+  const base = parseSelectionStream(
+    Object.fromEntries(
+      [...SNAPSHOT_SELECTION_STREAM_KEYS].map((key) => [key, value[key]])
+    ),
+    label
+  );
+  const outputBytes = nonNegativeInteger(
+    value.outputBytes,
+    `${label}.outputBytes`
+  );
+  const durationMs = nonNegativeInteger(
+    value.durationMs,
+    `${label}.durationMs`
+  );
+  if (outputBytes > MAX_GIT_OUTPUT_BYTES) {
+    throw new Error(`${label}.outputBytes exceeds its bound`);
+  }
+  if (durationMs > MAX_SNAPSHOT_DURATION_MS) {
+    throw new Error(`${label}.durationMs exceeds its bound`);
+  }
+  for (const key of ["indexHash", "workingTreeHash"]) {
+    const hash4 = value[key];
+    if (hash4 !== null && (typeof hash4 !== "string" || !HASH_PATTERN.test(hash4))) {
+      throw new Error(`${label}.${key} is invalid`);
+    }
+  }
+  return {
+    ...base,
+    indexHash: value.indexHash,
+    workingTreeHash: value.workingTreeHash,
+    outputBytes,
+    durationMs
+  };
+}
+function sameGitSelectionStream(left, right) {
+  return sameSelectionStream(left, right) && left.indexHash === right.indexHash && left.workingTreeHash === right.workingTreeHash;
+}
+function parseGitSelection(value) {
+  if (!isRecord2(value)) {
+    throw new Error("Workflow Git snapshot selection must be an object");
+  }
+  assertKnownFields(
+    value,
+    SNAPSHOT_SELECTION_KEYS,
+    "Workflow Git snapshot selection"
+  );
+  if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_SELECTION_SCHEMA_VERSION) {
+    throw new Error("Unsupported Workflow Git snapshot selection schema");
+  }
+  if (value.status !== "stable" && value.status !== "overflow" && value.status !== "changed" && value.status !== "overflow-and-changed") {
+    throw new Error("Workflow Git snapshot selection status is invalid");
+  }
+  const before = parseGitSelectionStream(
+    value.before,
+    "Workflow Git snapshot selection before"
+  );
+  const after = parseGitSelectionStream(
+    value.after,
+    "Workflow Git snapshot selection after"
+  );
+  const hasOverflow = before.overflow || after.overflow;
+  const changed = before.unstable || after.unstable || !sameGitSelectionStream(before, after);
+  const expectedStatus = hasOverflow && changed ? "overflow-and-changed" : hasOverflow ? "overflow" : changed ? "changed" : "stable";
+  if (value.status !== expectedStatus) {
+    throw new Error("Workflow Git snapshot selection status is inconsistent");
+  }
+  return {
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SELECTION_SCHEMA_VERSION,
+    status: expectedStatus,
+    before,
+    after
+  };
+}
+function parseGitMetadata(value, label) {
+  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(value, SNAPSHOT_GIT_METADATA_KEYS, label);
+  for (const [key, pattern] of [
+    ["head", GIT_OBJECT_HASH_PATTERN],
+    ["index", HASH_PATTERN],
+    ["workingTree", HASH_PATTERN]
+  ]) {
+    const entry = value[key];
+    if (entry !== null && (typeof entry !== "string" || !pattern.test(entry))) {
+      throw new Error(`${label}.${key} is invalid`);
+    }
+  }
+  return {
+    head: value.head,
+    index: value.index,
+    workingTree: value.workingTree
+  };
+}
+function parseGitEvidence(value) {
+  const label = "Workflow Git snapshot evidence";
+  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(value, SNAPSHOT_GIT_EVIDENCE_KEYS, label);
+  if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION || value.status !== "available" && value.status !== "unavailable" && value.status !== "error" && value.status !== "nested-repository") {
+    throw new Error(`${label} identity is invalid`);
+  }
+  if (!Array.isArray(value.diagnostics) || value.diagnostics.length > MAX_GIT_DIAGNOSTICS) {
+    throw new Error(`${label}.diagnostics is invalid`);
+  }
+  const diagnostics = value.diagnostics.map((diagnostic, index) => {
+    if (typeof diagnostic !== "string" || diagnostic.length === 0 || diagnostic.includes("\0") || Buffer.byteLength(diagnostic, "utf8") > MAX_GIT_DIAGNOSTIC_BYTES) {
+      throw new Error(`${label}.diagnostics[${index}] is invalid`);
+    }
+    return diagnostic;
+  });
+  return {
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION,
+    status: value.status,
+    before: parseGitMetadata(value.before, `${label}.before`),
+    after: parseGitMetadata(value.after, `${label}.after`),
+    diagnostics
+  };
+}
+function parseSnapshotFallback(value) {
+  const label = "Workflow content snapshot fallback";
+  if (!isRecord2(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(value, SNAPSHOT_FALLBACK_KEYS, label);
+  const reasons = /* @__PURE__ */ new Set([
+    "git-metadata-unavailable",
+    "git-provider-error",
+    "git-nested-repository"
+  ]);
+  if (value.from !== GIT_PROVIDER || value.to !== PHYSICAL_PROVIDER || typeof value.reason !== "string" || !reasons.has(value.reason)) {
+    throw new Error(`${label} identity is invalid`);
+  }
+  return {
+    from: GIT_PROVIDER,
+    to: PHYSICAL_PROVIDER,
+    reason: value.reason
+  };
+}
 function parseEntry(value, index) {
   const label = `Workflow content snapshot entry ${index}`;
   if (!isRecord2(value)) throw new Error(`${label} must be an object`);
@@ -2314,7 +2509,13 @@ var OMISSION_REASONS = /* @__PURE__ */ new Set([
   "non-regular",
   "duration",
   "physical-enumeration-limit",
-  "physical-selection-changed"
+  "physical-selection-changed",
+  "deleted",
+  "git-enumeration-limit",
+  "git-selection-changed",
+  "git-metadata-unavailable",
+  "git-provider-error",
+  "git-nested-repository"
 ]);
 function parseOmission(value, index) {
   const label = `Workflow content snapshot omission ${index}`;
@@ -2361,10 +2562,17 @@ function parseWorkflowContentSnapshotManifest(value) {
   if (!isRecord2(value.capture))
     throw new Error(`${label}.capture must be an object`);
   assertKnownFields(value.capture, SNAPSHOT_CAPTURE_KEYS, `${label}.capture`);
-  if (value.capture.provider !== PROVIDER) {
+  if (value.capture.provider !== PHYSICAL_PROVIDER && value.capture.provider !== GIT_PROVIDER) {
     throw new Error(`${label}.capture.provider is invalid`);
   }
+  const requestedProvider = value.capture.requestedProvider === void 0 ? void 0 : value.capture.requestedProvider;
+  if (requestedProvider !== void 0 && requestedProvider !== PHYSICAL_PROVIDER && requestedProvider !== GIT_PROVIDER) {
+    throw new Error(`${label}.capture.requestedProvider is invalid`);
+  }
+  const fallback = value.capture.fallback === void 0 ? void 0 : parseSnapshotFallback(value.capture.fallback);
   const physicalSelection = value.capture.physicalSelection === void 0 ? void 0 : parsePhysicalSelection(value.capture.physicalSelection);
+  const gitSelection = value.capture.gitSelection === void 0 ? void 0 : parseGitSelection(value.capture.gitSelection);
+  const gitEvidence = value.capture.gitEvidence === void 0 ? void 0 : parseGitEvidence(value.capture.gitEvidence);
   if (typeof value.createdAt !== "string" || !ISO_TIMESTAMP_PATTERN.test(value.createdAt) || Number.isNaN(Date.parse(value.createdAt))) {
     throw new Error(`${label}.createdAt is invalid`);
   }
@@ -2372,6 +2580,40 @@ function parseWorkflowContentSnapshotManifest(value) {
     throw new Error(`${label}.complete is invalid`);
   }
   const policy = parseWorkflowContentSnapshotPolicy(value.policy);
+  if (fallback === void 0) {
+    if (value.capture.provider !== policy.provider) {
+      throw new Error(`${label}.capture provider does not match policy`);
+    }
+    if (requestedProvider !== void 0 && requestedProvider !== policy.provider) {
+      throw new Error(`${label}.capture requested provider is inconsistent`);
+    }
+  } else if (policy.provider !== GIT_PROVIDER || value.capture.provider !== PHYSICAL_PROVIDER || requestedProvider !== GIT_PROVIDER) {
+    throw new Error(`${label}.capture fallback is inconsistent`);
+  }
+  if (fallback !== void 0 && gitEvidence === void 0) {
+    throw new Error(`${label}.capture fallback evidence is missing`);
+  }
+  if (fallback !== void 0) {
+    const expectedStatus = fallback.reason === "git-metadata-unavailable" ? "unavailable" : fallback.reason === "git-nested-repository" ? "nested-repository" : "error";
+    if (gitEvidence?.status !== expectedStatus) {
+      throw new Error(`${label}.capture fallback evidence is inconsistent`);
+    }
+  }
+  if (value.capture.provider === GIT_PROVIDER && (gitEvidence === void 0 || gitSelection === void 0)) {
+    throw new Error(`${label}.capture Git evidence is missing`);
+  }
+  if (value.capture.provider === GIT_PROVIDER && gitEvidence !== void 0 && gitEvidence.status !== "available" && value.complete) {
+    throw new Error(`${label}.complete is inconsistent with Git evidence`);
+  }
+  if (value.capture.provider !== GIT_PROVIDER && gitSelection !== void 0) {
+    throw new Error(`${label}.capture Git selection is inconsistent`);
+  }
+  if (value.capture.provider === GIT_PROVIDER && physicalSelection !== void 0) {
+    throw new Error(`${label}.capture physical selection is inconsistent`);
+  }
+  if (fallback === void 0 && value.capture.provider === PHYSICAL_PROVIDER && gitEvidence !== void 0) {
+    throw new Error(`${label}.capture Git evidence is inconsistent`);
+  }
   if (!isRecord2(value.limits))
     throw new Error(`${label}.limits must be an object`);
   assertKnownFields(value.limits, SNAPSHOT_LIMIT_KEYS, `${label}.limits`);
@@ -2386,6 +2628,17 @@ function parseWorkflowContentSnapshotManifest(value) {
   }
   const entries = value.entries.map(parseEntry);
   const omitted = value.omitted.map(parseOmission);
+  const gitOmissionReasons = /* @__PURE__ */ new Set([
+    "deleted",
+    "git-enumeration-limit",
+    "git-selection-changed",
+    "git-metadata-unavailable",
+    "git-provider-error",
+    "git-nested-repository"
+  ]);
+  if (omitted.some((omission) => gitOmissionReasons.has(omission.reason)) && value.capture.provider !== GIT_PROVIDER) {
+    throw new Error(`${label} Git omissions require the Git provider`);
+  }
   const omissionKeys = /* @__PURE__ */ new Set();
   for (const omission of omitted) {
     const key = snapshotIdentityOmissionKey(omission);
@@ -2400,8 +2653,8 @@ function parseWorkflowContentSnapshotManifest(value) {
     throw new Error(`${label}.entries are not canonical`);
   }
   if (omitted.some(
-    (omission, index) => index > 0 && `${omitted[index - 1].path}\0${omitted[index - 1].reason}`.localeCompare(
-      `${omission.path}\0${omission.reason}`,
+    (omission, index) => index > 0 && snapshotOmissionSortKey(omitted[index - 1]).localeCompare(
+      snapshotOmissionSortKey(omission),
       "en"
     ) > 0
   )) {
@@ -2431,6 +2684,12 @@ function parseWorkflowContentSnapshotManifest(value) {
   const physicalChangedOmission = omitted.filter(
     (omission) => omission.reason === "physical-selection-changed"
   );
+  const gitEnumerationOmission = omitted.filter(
+    (omission) => omission.reason === "git-enumeration-limit"
+  );
+  const gitChangedOmission = omitted.filter(
+    (omission) => omission.reason === "git-selection-changed"
+  );
   for (const omission of [
     ...physicalEnumerationOmission,
     ...physicalChangedOmission
@@ -2451,6 +2710,39 @@ function parseWorkflowContentSnapshotManifest(value) {
     if (hasOverflow !== (physicalEnumerationOmission.length === 1) || hasChanged !== (physicalChangedOmission.length === 1)) {
       throw new Error(`${label} physical selection evidence is inconsistent`);
     }
+    for (const stream of [physicalSelection.before, physicalSelection.after]) {
+      if (stream.visitedNodeCount > limits.maxVisitedNodes) {
+        throw new Error(`${label} physical selection exceeds its bounds`);
+      }
+    }
+  }
+  for (const omission of [...gitEnumerationOmission, ...gitChangedOmission]) {
+    if (omission.path !== "." || omission.type !== "directory" || omission.size !== null) {
+      throw new Error(`${label} Git selection omissions are invalid`);
+    }
+  }
+  if (gitEnumerationOmission.length > 1 || gitChangedOmission.length > 1) {
+    throw new Error(`${label} Git selection omissions are duplicated`);
+  }
+  if (gitSelection === void 0 && (gitEnumerationOmission.length > 0 || gitChangedOmission.length > 0)) {
+    throw new Error(`${label} Git selection evidence is missing`);
+  }
+  if (gitSelection !== void 0) {
+    const hasOverflow = gitSelection.status === "overflow" || gitSelection.status === "overflow-and-changed";
+    const hasChanged = gitSelection.status === "changed" || gitSelection.status === "overflow-and-changed";
+    if (hasOverflow !== (gitEnumerationOmission.length === 1) || hasChanged !== (gitChangedOmission.length === 1)) {
+      throw new Error(`${label} Git selection evidence is inconsistent`);
+    }
+    for (const stream of [gitSelection.before, gitSelection.after]) {
+      if (stream.visitedNodeCount > limits.maxVisitedNodes || stream.durationMs > limits.maxDurationMs) {
+        throw new Error(`${label} Git selection exceeds its bounds`);
+      }
+    }
+    if (gitEvidence !== void 0) {
+      if (gitSelection.before.indexHash !== gitEvidence.before.index || gitSelection.before.workingTreeHash !== gitEvidence.before.workingTree || gitSelection.after.indexHash !== gitEvidence.after.index || gitSelection.after.workingTreeHash !== gitEvidence.after.workingTree) {
+        throw new Error(`${label} Git selection metadata is inconsistent`);
+      }
+    }
   }
   if (Buffer.byteLength(
     canonicalJson({
@@ -2458,8 +2750,12 @@ function parseWorkflowContentSnapshotManifest(value) {
       kind: "workflow-content-snapshot",
       origin: "explicit",
       capture: {
-        provider: PROVIDER,
-        ...physicalSelection ? { physicalSelection } : {}
+        provider: value.capture.provider,
+        ...requestedProvider ? { requestedProvider } : {},
+        ...fallback ? { fallback } : {},
+        ...physicalSelection ? { physicalSelection } : {},
+        ...gitSelection ? { gitSelection } : {},
+        ...gitEvidence ? { gitEvidence } : {}
       },
       createdAt: value.createdAt,
       complete: value.complete,
@@ -2479,8 +2775,12 @@ function parseWorkflowContentSnapshotManifest(value) {
     kind: "workflow-content-snapshot",
     origin: "explicit",
     capture: {
-      provider: PROVIDER,
-      ...physicalSelection ? { physicalSelection } : {}
+      provider: value.capture.provider,
+      ...requestedProvider ? { requestedProvider } : {},
+      ...fallback ? { fallback } : {},
+      ...physicalSelection ? { physicalSelection } : {},
+      ...gitSelection ? { gitSelection } : {},
+      ...gitEvidence ? { gitEvidence } : {}
     },
     createdAt: value.createdAt,
     complete: value.complete,
@@ -2493,13 +2793,20 @@ function parseWorkflowContentSnapshotManifest(value) {
   };
 }
 function snapshotIdentityProjection(manifest) {
+  const policy = {
+    schemaVersion: manifest.policy.schemaVersion,
+    ...manifest.policy.fallback ? { fallback: manifest.policy.fallback } : {},
+    include: manifest.policy.include,
+    exclude: manifest.policy.exclude,
+    limits: manifest.policy.limits
+  };
   return {
     schemaVersion: manifest.schemaVersion,
     kind: manifest.kind,
     origin: manifest.origin,
-    capture: manifest.capture,
+    ...manifest.capture.fallback ? { fallback: manifest.capture.fallback } : {},
     complete: manifest.complete,
-    policy: manifest.policy,
+    policy,
     limits: manifest.limits,
     entries: manifest.entries,
     omitted: manifest.omitted,
@@ -2514,6 +2821,24 @@ function hashWorkflowContentSnapshot(value) {
     WORKFLOW_CONTENT_SNAPSHOT_HASH_TAG
   );
 }
+function hashLegacyPhysicalWorkflowContentSnapshot(value) {
+  return canonicalHash(
+    {
+      schemaVersion: value.schemaVersion,
+      kind: value.kind,
+      origin: value.origin,
+      capture: value.capture,
+      complete: value.complete,
+      policy: value.policy,
+      limits: value.limits,
+      entries: value.entries,
+      omitted: value.omitted,
+      omittedCount: value.omittedCount,
+      ...value.omissionOverflow ? { omissionOverflow: value.omissionOverflow } : {}
+    },
+    WORKFLOW_CONTENT_SNAPSHOT_HASH_TAG
+  );
+}
 function snapshotPathForHash(hash4) {
   return `${WORKFLOW_CONTENT_SNAPSHOT_DIRECTORY}/${hash4}.json`;
 }
@@ -2525,7 +2850,7 @@ function parseWorkflowContentSnapshotReference(value, label = "Workflow content 
     label
   );
   const hash4 = hashValue(value.hash, `${label}.hash`);
-  if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION || value.kind !== "workflow-content-snapshot-reference" || value.path !== snapshotPathForHash(hash4) || value.provider !== PROVIDER || typeof value.complete !== "boolean") {
+  if (value.schemaVersion !== WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION || value.kind !== "workflow-content-snapshot-reference" || value.path !== snapshotPathForHash(hash4) || value.provider !== PHYSICAL_PROVIDER && value.provider !== GIT_PROVIDER || typeof value.complete !== "boolean") {
     throw new Error(`${label} identity is invalid`);
   }
   return {
@@ -2533,7 +2858,7 @@ function parseWorkflowContentSnapshotReference(value, label = "Workflow content 
     kind: "workflow-content-snapshot-reference",
     hash: hash4,
     path: snapshotPathForHash(hash4),
-    provider: PROVIDER,
+    provider: value.provider,
     complete: value.complete
   };
 }
@@ -2555,6 +2880,285 @@ function hasExecutionBudget(execution) {
   if (execution.expired) return false;
   if (Date.now() < execution.deadlineAt) return true;
   execution.expired = true;
+  return false;
+}
+function boundedGitDiagnostic(command, result) {
+  if (result.status === "duration")
+    return `${command} exceeded its duration bound`;
+  if (result.status === "overflow")
+    return `${command} exceeded its output bound`;
+  if (result.errorCode === "ENOENT") return "git executable is unavailable";
+  if (result.code === null) return `${command} did not finish`;
+  return `${command} failed with exit code ${result.code}`;
+}
+function gitFailureStatus(result, command) {
+  if (result.errorCode === "ENOENT") return "unavailable";
+  if (command === "repository" && result.code === 128) {
+    return "unavailable";
+  }
+  if (result.status === "duration" || result.status === "overflow") {
+    return "error";
+  }
+  return command === "repository" ? "unavailable" : "error";
+}
+async function runGitCommand(root, args, execution, maxOutputBytes = MAX_GIT_OUTPUT_BYTES) {
+  if (!hasExecutionBudget(execution)) {
+    return {
+      status: "duration",
+      stdout: Buffer.alloc(0),
+      stderr: Buffer.alloc(0),
+      outputBytes: 0,
+      durationMs: 0,
+      code: null,
+      errorCode: "ETIMEDOUT"
+    };
+  }
+  const startedAt = Date.now();
+  return new Promise((resolve) => {
+    const child = spawn("git", ["-C", root, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true
+    });
+    const stdout = [];
+    const stderr = [];
+    let outputBytes = 0;
+    let overflow = false;
+    let duration = false;
+    let errorCode = null;
+    let settled = false;
+    const remaining = Math.max(1, execution.deadlineAt - startedAt);
+    const timer = setTimeout(() => {
+      duration = true;
+      child.kill();
+    }, remaining);
+    const append = (chunks, chunk) => {
+      if (settled) return;
+      const nextBytes = Math.min(maxOutputBytes, outputBytes + chunk.length);
+      const remainingBytes = Math.max(0, maxOutputBytes - outputBytes);
+      if (remainingBytes > 0) {
+        chunks.push(chunk.subarray(0, remainingBytes));
+      }
+      outputBytes = nextBytes;
+      if (chunk.length > remainingBytes) {
+        overflow = true;
+        child.kill();
+      }
+    };
+    child.stdout.on("data", (chunk) => append(stdout, chunk));
+    child.stderr.on("data", (chunk) => append(stderr, chunk));
+    child.once("error", (error) => {
+      errorCode = error.code ?? "UNKNOWN";
+    });
+    child.once("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const budgetExpired = !hasExecutionBudget(execution);
+      const status = duration ? "duration" : budgetExpired ? "duration" : overflow ? "overflow" : code === 0 ? "ok" : "error";
+      if (status === "duration") execution.expired = true;
+      resolve({
+        status,
+        stdout: Buffer.concat(stdout),
+        stderr: Buffer.concat(stderr),
+        outputBytes,
+        durationMs: Math.max(0, Date.now() - startedAt),
+        code,
+        errorCode
+      });
+    });
+  });
+}
+function decodeGitPaths(output) {
+  if (output.length === 0) return [];
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const paths = [];
+  let start = 0;
+  for (let index = 0; index < output.length; index += 1) {
+    if (output[index] !== 0) continue;
+    const raw = decoder.decode(output.subarray(start, index));
+    if (raw.length === 0) throw new Error("Git returned an empty path");
+    paths.push(raw);
+    start = index + 1;
+  }
+  if (start !== output.length)
+    throw new Error("Git returned an unterminated path");
+  return paths;
+}
+function gitSelectionHash(records) {
+  const canonical2 = records.map((record) => `${record.type}\0${record.path}`).sort((left, right) => left.localeCompare(right, "en")).join("\n");
+  return sha256(`workflow-git-selection.v1
+${canonical2}`);
+}
+function gitSelectionStream(records, metadata, limits, visitedNodeCount, encodedBytes, outputBytes, durationMs, overflow, unstable) {
+  return {
+    hash: overflow ? sha256(
+      `workflow-git-selection-incomplete.v1
+${JSON.stringify({
+        maxVisitedNodes: limits.maxVisitedNodes,
+        maxSelectionBytes: MAX_SELECTION_BYTES,
+        maxOutputBytes: MAX_GIT_OUTPUT_BYTES
+      })}`
+    ) : gitSelectionHash(records),
+    indexHash: metadata.index,
+    workingTreeHash: metadata.workingTree,
+    visitedNodeCount: Math.min(
+      visitedNodeCount,
+      limits.maxVisitedNodes,
+      MAX_SNAPSHOT_VISITED_NODES
+    ),
+    recordCount: records.length,
+    storedRecordCount: overflow ? 0 : records.length,
+    encodedBytes,
+    outputBytes,
+    durationMs: Math.min(durationMs, limits.maxDurationMs),
+    overflow,
+    unstable
+  };
+}
+function gitMetadataHash(output) {
+  return sha256(`workflow-git-metadata.v1
+${output.toString("base64")}`);
+}
+function emptyGitMetadata() {
+  return { head: null, index: null, workingTree: null };
+}
+async function gitMetadata(root, repositoryRelative, execution) {
+  const head = await runGitCommand(
+    root.lexical,
+    ["rev-parse", "--verify", "HEAD"],
+    execution
+  );
+  const metadata = emptyGitMetadata();
+  if (head.status === "ok") {
+    const value = head.stdout.toString("utf8").trim();
+    if (!GIT_OBJECT_HASH_PATTERN.test(value)) {
+      throw new GitProviderFailure(
+        "error",
+        "Git returned an invalid HEAD identity"
+      );
+    }
+    metadata.head = value;
+  } else if (head.code !== 128) {
+    throw new GitProviderFailure(
+      gitFailureStatus(head, "head"),
+      boundedGitDiagnostic("Git HEAD lookup", head)
+    );
+  }
+  const index = await runGitCommand(
+    root.lexical,
+    ["ls-files", "--stage", "-z", "--", repositoryRelative],
+    execution
+  );
+  if (index.status !== "ok") {
+    throw new GitProviderFailure(
+      gitFailureStatus(index, "index"),
+      boundedGitDiagnostic("Git index lookup", index)
+    );
+  }
+  metadata.index = gitMetadataHash(index.stdout);
+  const nestedRepositoryPaths = [];
+  try {
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let start = 0;
+    for (let position = 0; position < index.stdout.length; position += 1) {
+      if (index.stdout[position] !== 0) continue;
+      const record = decoder.decode(index.stdout.subarray(start, position));
+      const separator = record.indexOf("	");
+      if (separator > 0 && record.startsWith("160000 ")) {
+        const nestedPath = record.slice(separator + 1);
+        if (nestedPath.length > 0) nestedRepositoryPaths.push(nestedPath);
+      }
+      start = position + 1;
+    }
+    if (start !== index.stdout.length) {
+      throw new Error("Git index output is unterminated");
+    }
+  } catch (error) {
+    throw new GitProviderFailure("error", "Git index output is invalid");
+  }
+  const workingTree = await runGitCommand(
+    root.lexical,
+    [
+      "status",
+      "--porcelain=v2",
+      "--untracked-files=all",
+      "-z",
+      "--",
+      repositoryRelative
+    ],
+    execution
+  );
+  if (workingTree.status !== "ok") {
+    throw new GitProviderFailure(
+      gitFailureStatus(workingTree, "working-tree"),
+      boundedGitDiagnostic("Git working-tree lookup", workingTree)
+    );
+  }
+  metadata.workingTree = gitMetadataHash(workingTree.stdout);
+  return { metadata, nestedRepositoryPaths };
+}
+async function repositoryRelativeRoot(root, execution) {
+  const result = await runGitCommand(
+    root.lexical,
+    ["rev-parse", "--is-inside-work-tree"],
+    execution
+  );
+  if (result.status !== "ok" || result.stdout.toString("utf8").trim() !== "true") {
+    throw new GitProviderFailure(
+      gitFailureStatus(result, "repository"),
+      boundedGitDiagnostic("Git repository lookup", result)
+    );
+  }
+  const topLevel = await runGitCommand(
+    root.lexical,
+    ["rev-parse", "--show-toplevel"],
+    execution
+  );
+  if (topLevel.status !== "ok") {
+    throw new GitProviderFailure(
+      gitFailureStatus(topLevel, "repository"),
+      boundedGitDiagnostic("Git root lookup", topLevel)
+    );
+  }
+  const repositoryRoot = topLevel.stdout.toString("utf8").trim();
+  let repositoryRealPath;
+  try {
+    repositoryRealPath = await fs4.realpath(repositoryRoot);
+  } catch (error) {
+    throw new GitProviderFailure(
+      "unavailable",
+      "Git repository root is unavailable"
+    );
+  }
+  if (!isInside3(repositoryRealPath, root.real)) {
+    throw new GitProviderFailure(
+      "error",
+      "Git repository root does not contain the snapshot root"
+    );
+  }
+  const relative = portableRelative(repositoryRealPath, root.real);
+  return relative || ".";
+}
+async function hasNestedGitBoundary(root, relative) {
+  const segments = relative === "." ? [] : relative.split("/");
+  let cursor = root;
+  for (let index = 0; index < segments.length; index += 1) {
+    cursor = path5.join(cursor, segments[index]);
+    let stat;
+    try {
+      stat = await fs4.lstat(cursor);
+    } catch (error) {
+      if (isMissing(error)) return false;
+      throw error;
+    }
+    if (!stat.isDirectory()) continue;
+    try {
+      await fs4.lstat(path5.join(cursor, ".git"));
+      return true;
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+  }
   return false;
 }
 function fileIdentity(stat) {
@@ -2676,40 +3280,62 @@ function scopeOverlapsProtectedRoot(root, protectedRoot, policy) {
   const relative = portableRelative(root, protectedRoot.lexicalPath);
   if (!protectedRoot.exists || !relative || relative.startsWith(".."))
     return false;
-  const canMatch = (pattern) => {
-    const tokens = patternTokens(pattern);
-    const consume = (value) => {
-      let positions = epsilonClosure(tokens, /* @__PURE__ */ new Set([0]));
-      if (positions === null) return null;
-      for (const character of value) {
-        positions = advancePattern(tokens, positions, character);
-        if (positions === null || positions.size === 0) return null;
-      }
-      return positions;
-    };
-    if (consume(relative)?.has(tokens.length)) return true;
-    const initial = consume(`${relative}/`);
-    if (initial === null) return false;
-    const literalCharacters = tokens.filter(
-      (token) => token.kind === "literal" && token.value !== "/"
-    ).map((token) => token.value);
-    const characters = [.../* @__PURE__ */ new Set(["/", "x", ...literalCharacters])];
-    const queue = [initial];
-    const seen = /* @__PURE__ */ new Set();
-    while (queue.length > 0) {
-      const positions = queue.shift();
-      const key = [...positions].sort((left, right) => left - right).join(",");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (positions.has(tokens.length)) return true;
-      for (const character of characters) {
-        const next = advancePattern(tokens, positions, character);
-        if (next && next.size > 0) queue.push(next);
-      }
+  return policy.policy.include.some(
+    (pattern) => patternMatchesPathOrDescendant(pattern, relative)
+  );
+}
+function patternMatchesPathOrDescendant(pattern, relative) {
+  const tokens = patternTokens(pattern);
+  const consume = (value) => {
+    let positions = epsilonClosure(tokens, /* @__PURE__ */ new Set([0]));
+    if (positions === null) return null;
+    for (const character of value) {
+      positions = advancePattern(tokens, positions, character);
+      if (positions === null || positions.size === 0) return null;
     }
-    return false;
+    return positions;
   };
-  return policy.policy.include.some(canMatch);
+  if (consume(relative)?.has(tokens.length)) return true;
+  const initial = consume(`${relative}/`);
+  if (initial === null) return false;
+  const literalCharacters = tokens.filter(
+    (token) => token.kind === "literal" && token.value !== "/"
+  ).map((token) => token.value);
+  const characters = [.../* @__PURE__ */ new Set(["/", "x", ...literalCharacters])];
+  const queue = [initial];
+  const seen = /* @__PURE__ */ new Set();
+  while (queue.length > 0) {
+    if (seen.size >= 4096) return true;
+    const positions = queue.shift();
+    const key = [...positions].sort((left, right) => left - right).join(",");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (positions.has(tokens.length)) return true;
+    for (const character of characters) {
+      const next = advancePattern(tokens, positions, character);
+      if (next && next.size > 0) queue.push(next);
+    }
+  }
+  return false;
+}
+function relativeGitPath(repositoryRelative, repositoryPath) {
+  return repositoryRelative === "." ? repositoryPath : repositoryPath === repositoryRelative ? "." : repositoryPath.startsWith(`${repositoryRelative}/`) ? repositoryPath.slice(repositoryRelative.length + 1) : null;
+}
+function gitPathMayBeSelected(policy, relative) {
+  if (isIncluded(policy, relative)) return true;
+  return policy.policy.include.some(
+    (pattern) => patternMatchesPathOrDescendant(pattern, relative)
+  ) && !policy.policy.exclude.some(
+    (pattern) => patternMatchesPathOrDescendant(pattern, relative)
+  );
+}
+function isGitMetadataPath(relative) {
+  return relative.split("/").includes(".git");
+}
+function literalSnapshotIncludePaths(policy, repositoryRelative) {
+  return policy.policy.include.filter((pattern) => !/[*?]/u.test(pattern)).map(
+    (pattern) => repositoryRelative === "." ? pattern : `${repositoryRelative}/${pattern}`
+  ).filter((repositoryPath) => !isGitMetadataPath(repositoryPath));
 }
 function selectionHash(records) {
   const canonical2 = records.map((record) => `${record.type}\0${record.path}`).sort((left, right) => left.localeCompare(right, "en")).join("\n");
@@ -2725,7 +3351,7 @@ ${JSON.stringify({
         maxSelectionBytes: MAX_SELECTION_BYTES
       })}`
     ) : selectionHash(records),
-    visitedNodeCount,
+    visitedNodeCount: Math.min(visitedNodeCount, limits.maxVisitedNodes),
     recordCount: records.length,
     storedRecordCount: overflow ? 0 : records.length,
     encodedBytes,
@@ -2846,6 +3472,7 @@ async function enumeratePhysicalTree(options) {
         )) {
           continue;
         }
+        if (child.name === ".git") continue;
         if (child.isDirectory() && excludesDirectory(options.policy, relative)) {
           continue;
         }
@@ -2943,6 +3570,323 @@ async function enumeratePhysicalTree(options) {
   );
   return { records, evidence, omissions };
 }
+async function enumerateGitTree(options) {
+  const repositoryRelative = await repositoryRelativeRoot(
+    options.root,
+    options.execution
+  );
+  const metadataResult = await gitMetadata(
+    options.root,
+    repositoryRelative,
+    options.execution
+  );
+  const metadata = metadataResult.metadata;
+  for (const nestedRepositoryPath of metadataResult.nestedRepositoryPaths) {
+    const relative = relativeGitPath(repositoryRelative, nestedRepositoryPath);
+    if (relative === null || relative === ".") continue;
+    try {
+      relativePath(relative, "Git nested repository path");
+    } catch (error) {
+      throw new GitProviderFailure(
+        "error",
+        "Git returned an unsafe nested repository path"
+      );
+    }
+    const target = path5.resolve(options.root.lexical, ...relative.split("/"));
+    if (options.protectedRoots.some(
+      (protectedRoot) => isScopePath(protectedRoot, target)
+    )) {
+      continue;
+    }
+    if (gitPathMayBeSelected(options.policy, relative)) {
+      throw new GitProviderFailure(
+        "nested-repository",
+        "Git snapshot scope reaches a nested repository boundary"
+      );
+    }
+  }
+  const result = await runGitCommand(
+    options.root.lexical,
+    [
+      "ls-files",
+      "--cached",
+      "--others",
+      "--exclude-standard",
+      "--full-name",
+      "--deduplicate",
+      "-z",
+      "--",
+      repositoryRelative === "." ? "." : `${repositoryRelative}/`
+    ],
+    options.execution
+  );
+  const diagnostics = [];
+  if (result.status !== "ok") {
+    if (result.status === "error") {
+      throw new GitProviderFailure(
+        gitFailureStatus(result, "selection"),
+        boundedGitDiagnostic("Git selection", result)
+      );
+    }
+    diagnostics.push(boundedGitDiagnostic("Git selection", result));
+    const stream2 = gitSelectionStream(
+      [],
+      metadata,
+      options.policy.policy.limits,
+      0,
+      0,
+      result.outputBytes,
+      result.durationMs,
+      true,
+      result.status === "duration"
+    );
+    return {
+      records: [],
+      evidence: selectionEvidence(
+        [],
+        0,
+        0,
+        true,
+        result.status === "duration",
+        options.policy.policy.limits
+      ),
+      omissions: [],
+      gitStream: stream2,
+      gitMetadata: metadata,
+      gitStatus: "error",
+      gitDiagnostics: diagnostics
+    };
+  }
+  const stagedDeleted = await runGitCommand(
+    options.root.lexical,
+    [
+      "diff",
+      "--cached",
+      "--name-only",
+      "--diff-filter=D",
+      "-z",
+      "--",
+      repositoryRelative === "." ? "." : `${repositoryRelative}/`
+    ],
+    options.execution
+  );
+  if (stagedDeleted.status !== "ok") {
+    if (stagedDeleted.status === "error") {
+      throw new GitProviderFailure(
+        gitFailureStatus(stagedDeleted, "staged-deletion"),
+        boundedGitDiagnostic("Git staged deletion selection", stagedDeleted)
+      );
+    }
+    diagnostics.push(
+      boundedGitDiagnostic("Git staged deletion selection", stagedDeleted)
+    );
+    const stream2 = gitSelectionStream(
+      [],
+      metadata,
+      options.policy.policy.limits,
+      0,
+      0,
+      Math.min(
+        MAX_GIT_OUTPUT_BYTES,
+        result.outputBytes + stagedDeleted.outputBytes
+      ),
+      stagedDeleted.durationMs,
+      true,
+      stagedDeleted.status === "duration"
+    );
+    return {
+      records: [],
+      evidence: selectionEvidence(
+        [],
+        0,
+        0,
+        true,
+        stagedDeleted.status === "duration",
+        options.policy.policy.limits
+      ),
+      omissions: [],
+      gitStream: stream2,
+      gitMetadata: metadata,
+      gitStatus: "error",
+      gitDiagnostics: diagnostics
+    };
+  }
+  const deleted = await runGitCommand(
+    options.root.lexical,
+    [
+      "ls-files",
+      "--deleted",
+      "--full-name",
+      "--deduplicate",
+      "-z",
+      "--",
+      repositoryRelative === "." ? "." : `${repositoryRelative}/`
+    ],
+    options.execution
+  );
+  if (deleted.status !== "ok") {
+    if (deleted.status === "error") {
+      throw new GitProviderFailure(
+        gitFailureStatus(deleted, "deleted"),
+        boundedGitDiagnostic("Git deleted-path selection", deleted)
+      );
+    }
+    diagnostics.push(
+      boundedGitDiagnostic("Git deleted-path selection", deleted)
+    );
+    const stream2 = gitSelectionStream(
+      [],
+      metadata,
+      options.policy.policy.limits,
+      0,
+      0,
+      Math.min(
+        MAX_GIT_OUTPUT_BYTES,
+        result.outputBytes + stagedDeleted.outputBytes + deleted.outputBytes
+      ),
+      result.durationMs + stagedDeleted.durationMs + deleted.durationMs,
+      true,
+      deleted.status === "duration"
+    );
+    return {
+      records: [],
+      evidence: selectionEvidence(
+        [],
+        0,
+        0,
+        true,
+        deleted.status === "duration",
+        options.policy.policy.limits
+      ),
+      omissions: [],
+      gitStream: stream2,
+      gitMetadata: metadata,
+      gitStatus: "error",
+      gitDiagnostics: diagnostics
+    };
+  }
+  const outputBytes = Math.min(
+    MAX_GIT_OUTPUT_BYTES,
+    result.outputBytes + stagedDeleted.outputBytes + deleted.outputBytes
+  );
+  const outputOverflow = result.outputBytes + stagedDeleted.outputBytes + deleted.outputBytes > MAX_GIT_OUTPUT_BYTES;
+  const selectionOutput = outputOverflow ? Buffer.alloc(0) : Buffer.concat([result.stdout, stagedDeleted.stdout, deleted.stdout]);
+  let paths;
+  try {
+    paths = outputOverflow ? [] : decodeGitPaths(selectionOutput);
+  } catch (error) {
+    throw new GitProviderFailure("error", "Git returned invalid path data");
+  }
+  const records = [];
+  const omissions = [];
+  let visitedNodeCount = 0;
+  let encodedBytes = 0;
+  let overflow = false;
+  let unstable = false;
+  const outputDurationMs = result.durationMs + stagedDeleted.durationMs + deleted.durationMs;
+  const seen = /* @__PURE__ */ new Set();
+  const literalIncludePaths = literalSnapshotIncludePaths(
+    options.policy,
+    repositoryRelative
+  );
+  for (const rawPath of [
+    ...paths,
+    ...literalIncludePaths.filter((candidate) => !paths.includes(candidate))
+  ]) {
+    if (!hasExecutionBudget(options.execution)) {
+      overflow = true;
+      break;
+    }
+    visitedNodeCount += 1;
+    if (visitedNodeCount > options.policy.policy.limits.maxVisitedNodes) {
+      overflow = true;
+      break;
+    }
+    const directoryRecord = rawPath.endsWith("/");
+    const repositoryPath = directoryRecord ? rawPath.slice(0, -1) : rawPath;
+    const relative = relativeGitPath(repositoryRelative, repositoryPath);
+    if (relative === null || relative.length === 0) continue;
+    if (isGitMetadataPath(relative)) continue;
+    try {
+      relativePath(relative, "Git snapshot path");
+    } catch (error) {
+      throw new GitProviderFailure("error", "Git returned an unsafe path");
+    }
+    const target = path5.resolve(options.root.lexical, ...relative.split("/"));
+    if (options.protectedRoots.some(
+      (protectedRoot) => isScopePath(protectedRoot, target)
+    )) {
+      continue;
+    }
+    const included = isIncluded(options.policy, relative, options.execution);
+    const directoryMayContainIncludedPath = directoryRecord && !excludesDirectory(options.policy, relative) && gitPathMayBeSelected(options.policy, relative);
+    if (!included && !directoryMayContainIncludedPath) continue;
+    if (seen.has(relative)) continue;
+    seen.add(relative);
+    if (metadataResult.nestedRepositoryPaths.includes(repositoryPath) || await hasNestedGitBoundary(options.root.lexical, relative)) {
+      throw new GitProviderFailure(
+        "nested-repository",
+        "Git snapshot scope reaches a nested repository boundary"
+      );
+    }
+    let stat = null;
+    try {
+      stat = await fs4.lstat(target);
+    } catch (error) {
+      if (!isMissing(error) && !isUnreadable(error)) throw error;
+      if (isUnreadable(error)) {
+        omissions.push({
+          path: relative,
+          size: null,
+          type: "file",
+          reason: "unreadable"
+        });
+        unstable = true;
+      }
+    }
+    const type = directoryRecord ? "directory" : stat === null ? "file" : stat.isDirectory() ? "directory" : stat.isSymbolicLink() ? "symlink" : stat.isFile() ? "file" : "other";
+    const encoded = Buffer.byteLength(`${type}\0${relative}`, "utf8");
+    if (Buffer.byteLength(relative, "utf8") > MAX_SNAPSHOT_PATH_BYTES || encodedBytes + encoded > MAX_SELECTION_BYTES) {
+      overflow = true;
+      break;
+    }
+    records.push({
+      path: relative,
+      type,
+      ...stat === null && !directoryRecord ? { missing: true } : {}
+    });
+    encodedBytes += encoded;
+    await options.hooks?.afterNode?.(relative);
+  }
+  if (options.execution.expired) overflow = true;
+  const stream = gitSelectionStream(
+    records,
+    metadata,
+    options.policy.policy.limits,
+    visitedNodeCount,
+    encodedBytes,
+    outputBytes,
+    outputDurationMs,
+    overflow || outputOverflow,
+    unstable
+  );
+  return {
+    records,
+    evidence: selectionEvidence(
+      records,
+      visitedNodeCount,
+      encodedBytes,
+      overflow,
+      unstable,
+      options.policy.policy.limits
+    ),
+    omissions,
+    gitStream: stream,
+    gitMetadata: metadata,
+    gitStatus: "available",
+    gitDiagnostics: diagnostics
+  };
+}
 async function hashFileBounded(target, before, limits, execution) {
   if (!hasExecutionBudget(execution)) return { status: "duration" };
   const flags = process.platform === "win32" ? fsConstants3.O_RDONLY : fsConstants3.O_RDONLY | fsConstants3.O_NOFOLLOW | fsConstants3.O_NONBLOCK;
@@ -3010,6 +3954,9 @@ async function hashFileBounded(target, before, limits, execution) {
 function snapshotIdentityOmissionKey(value) {
   return `${value.path}\0${value.type}\0${value.reason}\0${value.size ?? ""}`;
 }
+function snapshotOmissionSortKey(value) {
+  return `${value.path}\0${value.reason}\0${value.type}\0${value.size ?? ""}`;
+}
 function physicalSelectionEvidence(before, after) {
   const hasOverflow = before.overflow || after.overflow;
   const changed = before.unstable || after.unstable || !sameSelectionStream(before, after);
@@ -3021,6 +3968,103 @@ function physicalSelectionEvidence(before, after) {
     after
   };
 }
+function gitSelectionEvidence(before, after) {
+  const hasOverflow = before.overflow || after.overflow;
+  const changed = before.unstable || after.unstable || !sameGitSelectionStream(before, after);
+  return {
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SELECTION_SCHEMA_VERSION,
+    status: hasOverflow && changed ? "overflow-and-changed" : hasOverflow ? "overflow" : changed ? "changed" : "stable",
+    before,
+    after
+  };
+}
+function emptyGitSelectionStream(limits = WORKFLOW_CONTENT_SNAPSHOT_DEFAULT_LIMITS) {
+  return gitSelectionStream(
+    [],
+    emptyGitMetadata(),
+    limits,
+    0,
+    0,
+    0,
+    0,
+    false,
+    false
+  );
+}
+function gitFailureEvidence(status, diagnostic) {
+  const normalizedDiagnostic = diagnostic.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim() || "Git provider failed";
+  const diagnostics = [
+    normalizedDiagnostic.slice(0, MAX_GIT_DIAGNOSTIC_BYTES)
+  ].slice(0, MAX_GIT_DIAGNOSTICS);
+  const metadata = emptyGitMetadata();
+  return {
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION,
+    status,
+    before: metadata,
+    after: metadata,
+    diagnostics
+  };
+}
+function gitFailureOmissionReason(status) {
+  return status === "unavailable" ? "git-metadata-unavailable" : status === "nested-repository" ? "git-nested-repository" : "git-provider-error";
+}
+function gitFailureSelectionResult(status, diagnostic, limits) {
+  const stream = emptyGitSelectionStream(limits);
+  const evidence = gitFailureEvidence(status, diagnostic);
+  return {
+    records: [],
+    evidence: selectionEvidence([], 0, 0, false, false, limits),
+    omissions: [],
+    gitStream: stream,
+    gitMetadata: emptyGitMetadata(),
+    gitStatus: status,
+    gitDiagnostics: evidence.diagnostics
+  };
+}
+function captureForGitFailure(policy, status, diagnostic, now) {
+  const stream = emptyGitSelectionStream(policy.limits);
+  const evidence = gitFailureEvidence(status, diagnostic);
+  const manifest = {
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION,
+    kind: "workflow-content-snapshot",
+    origin: "explicit",
+    capture: {
+      provider: GIT_PROVIDER,
+      gitSelection: {
+        schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SELECTION_SCHEMA_VERSION,
+        status: "stable",
+        before: stream,
+        after: stream
+      },
+      gitEvidence: evidence
+    },
+    createdAt: (now ?? /* @__PURE__ */ new Date()).toISOString(),
+    complete: false,
+    policy,
+    limits: policy.limits,
+    entries: [],
+    omitted: [
+      {
+        path: ".",
+        size: null,
+        type: "directory",
+        reason: gitFailureOmissionReason(status)
+      }
+    ],
+    omittedCount: 1
+  };
+  return parseWorkflowContentSnapshotManifest(manifest);
+}
+function gitEvidenceStatus(before, after) {
+  if (before === "available" && after === "available") return "available";
+  if (before === "nested-repository" || after === "nested-repository") {
+    return "nested-repository";
+  }
+  if (before === "unavailable" || after === "unavailable") {
+    return "unavailable";
+  }
+  return "error";
+}
 function snapshotIdentityPath(value) {
   if (!HASH_PATTERN.test(value))
     throw new Error("Workflow snapshot hash is invalid");
@@ -3029,9 +4073,12 @@ function snapshotIdentityPath(value) {
 function workflowContentSnapshotFindings(value) {
   const manifest = parseWorkflowContentSnapshotManifest(value);
   const unstable = manifest.omitted.some(
-    (omission) => ["changed-during-read", "duration", "physical-selection-changed"].includes(
-      omission.reason
-    )
+    (omission) => [
+      "changed-during-read",
+      "duration",
+      "physical-selection-changed",
+      "git-selection-changed"
+    ].includes(omission.reason)
   );
   const findings = [];
   if (unstable) {
@@ -3067,13 +4114,55 @@ async function captureWorkflowContentSnapshotInternal(options) {
     }
   }
   const execution = createExecution(policy.policy.limits);
-  const before = await enumeratePhysicalTree({
-    root,
-    policy,
-    protectedRoots,
-    execution,
-    hooks: options.hooks
-  });
+  const requestedProvider = policy.policy.provider;
+  let selectedProvider = requestedProvider;
+  let fallback;
+  let gitFailure;
+  let before;
+  if (requestedProvider === GIT_PROVIDER) {
+    try {
+      before = await enumerateGitTree({
+        root,
+        policy,
+        protectedRoots,
+        execution,
+        hooks: options.hooks
+      });
+    } catch (error) {
+      const failure = error instanceof GitProviderFailure ? error : new GitProviderFailure("error", "Git snapshot provider failed");
+      if (policy.policy.fallback === PHYSICAL_PROVIDER && failure.status !== "nested-repository") {
+        selectedProvider = PHYSICAL_PROVIDER;
+        fallback = {
+          from: GIT_PROVIDER,
+          to: PHYSICAL_PROVIDER,
+          reason: failure.status === "unavailable" ? "git-metadata-unavailable" : "git-provider-error"
+        };
+        gitFailure = gitFailureEvidence(failure.status, failure.message);
+        before = await enumeratePhysicalTree({
+          root,
+          policy,
+          protectedRoots,
+          execution,
+          hooks: options.hooks
+        });
+      } else {
+        return captureForGitFailure(
+          policy.policy,
+          failure.status,
+          failure.message,
+          options.now
+        );
+      }
+    }
+  } else {
+    before = await enumeratePhysicalTree({
+      root,
+      policy,
+      protectedRoots,
+      execution,
+      hooks: options.hooks
+    });
+  }
   await options.hooks?.afterInitialSelection?.();
   const entries = [];
   const captured = [];
@@ -3140,7 +4229,7 @@ ${JSON.stringify(stableValue(value))}`
         path: record.path,
         size: null,
         type: "file",
-        reason: isUnreadable(error) ? "unreadable" : "changed-during-read"
+        reason: isUnreadable(error) ? "unreadable" : selectedProvider === GIT_PROVIDER && record.missing ? "deleted" : "changed-during-read"
       });
       continue;
     }
@@ -3278,22 +4367,114 @@ ${JSON.stringify(stableValue(value))}`
   }
   let after;
   if (hasExecutionBudget(execution)) {
-    after = await enumeratePhysicalTree({
-      root,
-      policy,
-      protectedRoots,
-      execution
-    });
+    try {
+      after = selectedProvider === GIT_PROVIDER ? await enumerateGitTree({
+        root,
+        policy,
+        protectedRoots,
+        execution
+      }) : await enumeratePhysicalTree({
+        root,
+        policy,
+        protectedRoots,
+        execution
+      });
+    } catch (error) {
+      if (selectedProvider !== GIT_PROVIDER) throw error;
+      const failure = error instanceof GitProviderFailure ? error : new GitProviderFailure("error", "Git snapshot provider failed");
+      if (policy.policy.fallback === PHYSICAL_PROVIDER && failure.status !== "nested-repository") {
+        selectedProvider = PHYSICAL_PROVIDER;
+        fallback ??= {
+          from: GIT_PROVIDER,
+          to: PHYSICAL_PROVIDER,
+          reason: failure.status === "unavailable" ? "git-metadata-unavailable" : "git-provider-error"
+        };
+        gitFailure ??= gitFailureEvidence(failure.status, failure.message);
+        before = await enumeratePhysicalTree({
+          root,
+          policy,
+          protectedRoots,
+          execution
+        });
+        after = await enumeratePhysicalTree({
+          root,
+          policy,
+          protectedRoots,
+          execution
+        });
+      } else {
+        after = gitFailureSelectionResult(
+          failure.status,
+          failure.message,
+          policy.policy.limits
+        );
+      }
+    }
     for (const omission of after.omissions) omit(omission);
   } else {
     after = {
       records: [],
       evidence: selectionEvidence([], 0, 0, true, true, policy.policy.limits),
-      omissions: []
+      omissions: [],
+      ...selectedProvider === GIT_PROVIDER ? {
+        gitStream: gitSelectionStream(
+          [],
+          emptyGitMetadata(),
+          policy.policy.limits,
+          0,
+          0,
+          0,
+          0,
+          true,
+          true
+        ),
+        gitMetadata: emptyGitMetadata(),
+        gitStatus: "error",
+        gitDiagnostics: ["Git selection exceeded its duration bound"]
+      } : {}
     };
   }
-  const selection2 = physicalSelectionEvidence(before.evidence, after.evidence);
-  if (before.evidence.overflow || after.evidence.overflow || execution.expired) {
+  const selection2 = selectedProvider === PHYSICAL_PROVIDER ? physicalSelectionEvidence(before.evidence, after.evidence) : null;
+  const gitSelection = selectedProvider === GIT_PROVIDER && before.gitStream && after.gitStream ? gitSelectionEvidence(before.gitStream, after.gitStream) : null;
+  const gitEvidence = selectedProvider === GIT_PROVIDER ? {
+    schemaVersion: WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION,
+    status: gitEvidenceStatus(before.gitStatus, after.gitStatus),
+    before: before.gitMetadata ?? emptyGitMetadata(),
+    after: after.gitMetadata ?? emptyGitMetadata(),
+    diagnostics: [
+      .../* @__PURE__ */ new Set([
+        ...before.gitDiagnostics ?? [],
+        ...after.gitDiagnostics ?? []
+      ])
+    ].slice(0, MAX_GIT_DIAGNOSTICS)
+  } : gitFailure;
+  if (selectedProvider === GIT_PROVIDER) {
+    const gitEnumerationOverflow = before.gitStream?.overflow || after.gitStream?.overflow || execution.expired;
+    if (gitEnumerationOverflow) {
+      omit({
+        path: ".",
+        size: null,
+        type: "directory",
+        reason: "git-enumeration-limit"
+      });
+    }
+    if (gitSelection && (gitSelection.status === "changed" || gitSelection.status === "overflow-and-changed")) {
+      omit({
+        path: ".",
+        size: null,
+        type: "directory",
+        reason: "git-selection-changed"
+      });
+    }
+    if (after.gitStatus && after.gitStatus !== "available" && !after.gitStream?.overflow && !execution.expired) {
+      omit({
+        path: ".",
+        size: null,
+        type: "directory",
+        reason: gitFailureOmissionReason(after.gitStatus)
+      });
+    }
+  } else if (before.evidence.overflow || after.evidence.overflow || execution.expired) {
     omit({
       path: ".",
       size: null,
@@ -3315,8 +4496,8 @@ ${JSON.stringify(stableValue(value))}`
   entries.sort((left, right) => left.path.localeCompare(right.path, "en"));
   omitted.sort((left, right) => {
     const pathOrder = left.path.localeCompare(right.path, "en");
-    return pathOrder !== 0 ? pathOrder : `${left.reason}\0${left.type}`.localeCompare(
-      `${right.reason}\0${right.type}`,
+    return pathOrder !== 0 ? pathOrder : snapshotOmissionSortKey(left).localeCompare(
+      snapshotOmissionSortKey(right),
       "en"
     );
   });
@@ -3325,8 +4506,14 @@ ${JSON.stringify(stableValue(value))}`
     kind: "workflow-content-snapshot",
     origin: "explicit",
     capture: {
-      provider: PROVIDER,
-      ...selection2 ? { physicalSelection: selection2 } : {}
+      provider: selectedProvider,
+      ...selectedProvider !== requestedProvider ? {
+        requestedProvider,
+        fallback
+      } : {},
+      ...selection2 ? { physicalSelection: selection2 } : {},
+      ...gitSelection ? { gitSelection } : {},
+      ...gitEvidence ? { gitEvidence } : {}
     },
     createdAt: (options.now ?? /* @__PURE__ */ new Date()).toISOString(),
     complete: omittedCount === 0,
@@ -3445,7 +4632,9 @@ async function readWorkflowContentSnapshot(runRoot, hash4, maxBytes = WORKFLOW_C
     const manifest = parseWorkflowContentSnapshotManifest(
       JSON.parse(content)
     );
-    if (hashWorkflowContentSnapshot(manifest) !== hash4) {
+    const currentHash = hashWorkflowContentSnapshot(manifest);
+    const legacyPhysicalHash = manifest.capture.provider === PHYSICAL_PROVIDER ? hashLegacyPhysicalWorkflowContentSnapshot(manifest) : null;
+    if (currentHash !== hash4 && legacyPhysicalHash !== hash4) {
       throw new Error(
         "Workflow content snapshot identity does not match its path"
       );

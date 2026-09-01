@@ -65,6 +65,8 @@ export type {
 export type {
   WorkflowContentSnapshotCapture,
   WorkflowContentSnapshotEntry,
+  WorkflowContentSnapshotFallback,
+  WorkflowContentSnapshotFallbackReason,
   WorkflowContentSnapshotLimits,
   WorkflowContentSnapshotManifest,
   WorkflowContentSnapshotOmission,
@@ -74,6 +76,10 @@ export type {
   WorkflowContentSnapshotPolicy,
   WorkflowContentSnapshotReference,
   WorkflowContentSnapshotProvider,
+  WorkflowGitSnapshotEvidence,
+  WorkflowGitSnapshotMetadata,
+  WorkflowGitSnapshotSelection,
+  WorkflowGitSnapshotSelectionStream,
   WorkflowPhysicalSnapshotSelection,
   WorkflowPhysicalSnapshotSelectionStream,
 } from "../types.js";

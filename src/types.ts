@@ -264,8 +264,11 @@ export type WorkflowDurabilityCapability =
   | "verified-checkpoints"
   | "content-snapshots";
 
-export type WorkflowContentSnapshotProvider = "physical-tree";
+export type WorkflowContentSnapshotProvider = "physical-tree" | "git";
 export type WorkflowContentSnapshotOrigin = "explicit";
+
+export type WorkflowContentSnapshotFallbackReason =
+  "git-metadata-unavailable" | "git-provider-error" | "git-nested-repository";
 
 export type WorkflowContentSnapshotOmissionReason =
   | "file-size"
@@ -277,7 +280,13 @@ export type WorkflowContentSnapshotOmissionReason =
   | "non-regular"
   | "duration"
   | "physical-enumeration-limit"
-  | "physical-selection-changed";
+  | "physical-selection-changed"
+  | "deleted"
+  | "git-enumeration-limit"
+  | "git-selection-changed"
+  | "git-metadata-unavailable"
+  | "git-provider-error"
+  | "git-nested-repository";
 
 export interface WorkflowContentSnapshotLimits {
   maxFiles: number;
@@ -292,6 +301,7 @@ export interface WorkflowContentSnapshotLimits {
 export interface WorkflowContentSnapshotPolicy {
   schemaVersion: 1;
   provider: WorkflowContentSnapshotProvider;
+  fallback?: "physical-tree";
   include: string[];
   exclude: string[];
   limits: WorkflowContentSnapshotLimits;
@@ -315,9 +325,54 @@ export interface WorkflowPhysicalSnapshotSelection {
   after: WorkflowPhysicalSnapshotSelectionStream;
 }
 
+export interface WorkflowGitSnapshotSelectionStream {
+  hash: string;
+  indexHash: string | null;
+  workingTreeHash: string | null;
+  visitedNodeCount: number;
+  recordCount: number;
+  storedRecordCount: number;
+  encodedBytes: number;
+  outputBytes: number;
+  durationMs: number;
+  overflow: boolean;
+  unstable: boolean;
+}
+
+export interface WorkflowGitSnapshotSelection {
+  schemaVersion: 1;
+  status: "stable" | "overflow" | "changed" | "overflow-and-changed";
+  before: WorkflowGitSnapshotSelectionStream;
+  after: WorkflowGitSnapshotSelectionStream;
+}
+
+export interface WorkflowGitSnapshotMetadata {
+  head: string | null;
+  index: string | null;
+  workingTree: string | null;
+}
+
+export interface WorkflowGitSnapshotEvidence {
+  schemaVersion: 1;
+  status: "available" | "unavailable" | "error" | "nested-repository";
+  before: WorkflowGitSnapshotMetadata;
+  after: WorkflowGitSnapshotMetadata;
+  diagnostics: string[];
+}
+
+export interface WorkflowContentSnapshotFallback {
+  from: "git";
+  to: "physical-tree";
+  reason: WorkflowContentSnapshotFallbackReason;
+}
+
 export interface WorkflowContentSnapshotCapture {
   provider: WorkflowContentSnapshotProvider;
+  requestedProvider?: WorkflowContentSnapshotProvider;
+  fallback?: WorkflowContentSnapshotFallback;
   physicalSelection?: WorkflowPhysicalSnapshotSelection;
+  gitSelection?: WorkflowGitSnapshotSelection;
+  gitEvidence?: WorkflowGitSnapshotEvidence;
 }
 
 export interface WorkflowContentSnapshotEntry {
