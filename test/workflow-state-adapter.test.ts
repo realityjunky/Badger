@@ -103,6 +103,10 @@ describe("generated WorkflowRuntime state adapter", () => {
     });
     expect(stateAdapter).toContain("./workflow-runtime.mjs");
     expect(stateAdapter).toContain("createWorkflowRuntime");
+    expect(stateAdapter).toContain('submissionField(evidence, "verification")');
+    expect(stateAdapter).toContain(
+      'submissionField(evidence, "verificationReceiptIds")',
+    );
     expect(stateAdapter).not.toContain("completedNodes");
     expect(stateAdapter).not.toContain("nextNode");
     expect(entrySkill).toContain("node scripts/workflow-state.mjs status");

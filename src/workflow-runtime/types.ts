@@ -19,6 +19,9 @@ import type {
   WorkflowDecisionScopeSnapshot,
   WorkflowProtocol,
   WorkflowReviewerAttestation,
+  WorkflowVerificationReceiptProposal,
+  WorkflowVerificationReceiptReference,
+  WorkflowVerificationSubmission,
 } from "../types.js";
 import type { WorkflowFinding, WorkflowFindingSummary } from "./findings.js";
 
@@ -31,6 +34,16 @@ export interface WorkflowMachineSubmission extends ActionOutcome {
   nodeId?: string | null;
   runId?: string;
   execution?: WorkflowExecutionIdentity;
+  verification?:
+    | WorkflowVerificationSubmission
+    | WorkflowVerificationReceiptProposal
+    | WorkflowVerificationReceiptProposal[];
+  verificationReceipts?:
+    | WorkflowVerificationSubmission
+    | string[]
+    | WorkflowVerificationReceiptProposal[];
+  verificationReceiptIds?: string[];
+  receiptIds?: string[];
 }
 
 export interface WorkflowDecisionSubmission {
@@ -52,6 +65,16 @@ export interface WorkflowDecisionSubmission {
   protocolHash?: string;
   packageHash?: string;
   snapshotHash?: string;
+  verification?:
+    | WorkflowVerificationSubmission
+    | WorkflowVerificationReceiptProposal
+    | WorkflowVerificationReceiptProposal[];
+  verificationReceipts?:
+    | WorkflowVerificationSubmission
+    | string[]
+    | WorkflowVerificationReceiptProposal[];
+  verificationReceiptIds?: string[];
+  receiptIds?: string[];
 }
 
 export interface ManualWorkflowRunLocation {
@@ -82,6 +105,7 @@ export interface WorkflowContinuation {
   pendingAction: WorkflowPendingAction | null;
   execution: WorkflowExecutionIdentity;
   decisionReceipts: WorkflowDecisionReceipt[];
+  verificationReceipts: WorkflowVerificationReceiptReference[];
   cycles: WorkflowCycleState[];
   visits: WorkflowVisitState[];
   artifactVersions: WorkflowArtifactVersion[];
@@ -108,6 +132,7 @@ export interface WorkflowHandoff {
   nodes: NodeProtocol[];
   outputSchemas: OutputSchema[];
   decisionReceipts: WorkflowDecisionReceipt[];
+  verificationReceipts: WorkflowVerificationReceiptReference[];
   cycles: WorkflowCycleState[];
   visits: WorkflowVisitState[];
   artifactVersions: WorkflowArtifactVersion[];
@@ -151,6 +176,7 @@ export interface WorkflowStateProjection {
   visits: WorkflowVisitState[];
   cycles: WorkflowCycleState[];
   decisionReceipts: WorkflowDecisionReceipt[];
+  verificationReceipts: WorkflowVerificationReceiptReference[];
   artifactVersions: WorkflowArtifactVersion[];
   artifactSelections: WorkflowArtifactSelection[];
   currentArtifactVersions: Record<

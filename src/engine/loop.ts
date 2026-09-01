@@ -84,6 +84,7 @@ function enterAttempt(state: RunState, stepId: string): RunState {
     state.workflowRuntime,
   );
   workflowRuntime.decisionReceipts ??= [];
+  workflowRuntime.verificationReceipts ??= [];
   workflowRuntime.artifactVersions ??= [];
   workflowRuntime.artifactSelections ??= [];
   workflowRuntime.currentCycle ??= null;
@@ -152,6 +153,9 @@ function recordWorkflowOutcome(
     ...(outcome.artifactVersions
       ? { artifactVersions: { ...outcome.artifactVersions } }
       : {}),
+    ...(outcome.verificationReceiptIds
+      ? { verificationReceiptIds: [...outcome.verificationReceiptIds] }
+      : {}),
   };
   visit.outcomes.push(visitOutcome);
   workflowRuntime.revision += 1;
@@ -216,6 +220,9 @@ function decisionReceipt(
       ? { evidenceReferences: [...outcome.evidenceReferences] }
       : {}),
     ...(outcome.scope ? { scope: structuredClone(outcome.scope) } : {}),
+    ...(outcome.verificationReceiptIds
+      ? { verificationReceiptIds: [...outcome.verificationReceiptIds] }
+      : {}),
     timestamp: new Date().toISOString(),
     protocolHash: identity.protocolHash,
     packageHash: identity.packageHash,

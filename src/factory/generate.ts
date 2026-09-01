@@ -60,6 +60,21 @@ function entryMarkdown(proposal: FactoryProposal): string {
         )
         .join("\n")
     : "";
+  const verifications = proposal.workflow.nodes
+    .flatMap((node) =>
+      node.guardrails
+        .filter((guardrail) => guardrail.verification)
+        .map((guardrail) => ({
+          node,
+          guardrail,
+          requirement: guardrail.verification!,
+        })),
+    )
+    .map(
+      ({ node, guardrail, requirement }) =>
+        `- **${requirement.id ?? guardrail.id}** on Node \`${node.id}\`: \`${Array.isArray(requirement.kind) ? requirement.kind.join(", ") : requirement.kind}\` receipt for role \`${requirement.role}\``,
+    )
+    .join("\n");
   const executableNodeOrder = executableNodeIds
     .map((nodeId) => `\`${nodeId}\``)
     .join(" → ");
@@ -106,6 +121,15 @@ Attempt-lifetime paths include the current Attempt id as a path segment. Later
 work must select an exact accepted version; generated scripts never infer or
 allocate a latest artifact version.
 
+## Verification Receipts
+
+${verifications || "- None. The workflow has no declared verification receipt guard."}
+
+WorkflowRuntime accepts only bounded receipt proposals or exact existing receipt
+references. It generates issue time, scope and artifact bindings, and the
+content-addressed receipt identity. Failed, skipped, blocked, stale, malformed,
+or drifted receipts remain evidence or findings and cannot satisfy a guard.
+
 Decision Nodes may declare bounded artifact and evidence scope entries. The
 runtime captures only accepted version ids, hashes, and producer identities for
 those entries when it creates the pending question. Generated scripts render
@@ -129,6 +153,7 @@ ${nodes}
 - Inspect machine-readable findings with \`--json\`; use each finding's registered operation and argument array rather than constructing a shell command.
 - Submit characterized Node evidence: \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
 - Supply physical updates under \`artifacts\` and explicit accepted version ids under \`artifactVersions\` in the record JSON.
+- Supply a bounded verification proposal under \`verification\`, or exact receipt ids under \`verificationReceiptIds\`; the runtime owns receipt identity and issue time.
 - Submit a declared human decision: \`node scripts/workflow-state.mjs decide <node> '<json response>'\`.
 - For branched workflows, include declared route values in the submission's top-level \`routing\` object; summaries and evidence do not select edges.
 - Verify the generated protocol and runtime: \`node scripts/workflow-guard.mjs verify\`.
@@ -170,6 +195,16 @@ function nodeMarkdown(workflow: string, node: NodeProtocol): string {
     node.outputSchemas
       .map((item) => `- Output Schema: \`${item}\``)
       .join("\n") || "- Output Schemas: none";
+  const verifications = node.guardrails
+    .filter((guardrail) => guardrail.verification)
+    .map((guardrail) => {
+      const requirement = guardrail.verification!;
+      const kinds = Array.isArray(requirement.kind)
+        ? requirement.kind.join(", ")
+        : requirement.kind;
+      return `- Verification Receipt: \`${requirement.id ?? guardrail.id}\` (${kinds}; role \`${requirement.role}\`)`;
+    })
+    .join("\n");
   const decisionScope = node.decision
     ? [
         ...(node.decision.scope?.artifacts ?? []).map(
@@ -189,7 +224,7 @@ function nodeMarkdown(workflow: string, node: NodeProtocol): string {
           "\n",
         )}\n\n${decisionScope}\n\nSubmit the typed response through \`scripts/workflow-state.mjs decide\`; WorkflowRuntime validates the choice, inputs, rationale, reviewer attestation, and immutable scope references.\n`
     : "";
-  return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}\n${decision}\nRecord completion evidence before advancing to the next Node.\n`;
+  return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}\n${verifications ? `\n## Verification\n\n${verifications}\n\nSubmit bounded receipt evidence or exact receipt references through WorkflowRuntime; receipt contents and issue time are runtime-owned.\n` : ""}\n${decision}\nRecord completion evidence before advancing to the next Node.\n`;
 }
 
 async function runtimeAsset(name: string): Promise<string> {

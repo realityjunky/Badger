@@ -71,7 +71,15 @@ export interface ResumeManualRunOptions {
   prepareAction?: PreparePendingAction;
   revisionFence?: () => void | Promise<void>;
   revisionStateFence?: () => void | Promise<void>;
+  prepareOutcome?: PrepareOutcomeMutation;
 }
+
+export type PrepareOutcomeMutation = (
+  changeDir: string,
+  state: RunState,
+  outcome: ActionOutcome,
+  mutationOverlay?: EngineRunMutationOverlay,
+) => Promise<void>;
 
 export interface PendingActionPreparation {
   action: EngineAction | null;
@@ -176,6 +184,18 @@ function applyArtifactMutation(
   if (!state.workflowRuntime) {
     throw new Error("Artifact mutation requires WorkflowRuntime state");
   }
+  const existingReceiptIds = new Set(
+    state.workflowRuntime.verificationReceipts?.map(
+      (receipt) => receipt.receiptId,
+    ) ?? [],
+  );
+  const verificationReceipts = (mutation.verificationReceipts ?? []).filter(
+    (receipt) => {
+      if (existingReceiptIds.has(receipt.receiptId)) return false;
+      existingReceiptIds.add(receipt.receiptId);
+      return true;
+    },
+  );
   return {
     ...state,
     workflowRuntime: {
@@ -187,6 +207,10 @@ function applyArtifactMutation(
       artifactSelections: [
         ...(state.workflowRuntime.artifactSelections ?? []),
         ...structuredClone(mutation.selections),
+      ],
+      verificationReceipts: [
+        ...(state.workflowRuntime.verificationReceipts ?? []),
+        ...structuredClone(verificationReceipts),
       ],
     },
   };
@@ -534,6 +558,7 @@ async function resumeManualRunInternal(
         profile: state.runtimeIdentity.durabilityProfile,
       })
     : undefined;
+  await options.prepareOutcome?.(changeDir, state, outcome, transition);
   const advanced = applyArtifactMutation(
     recordOutcomeWithResolver(pkg, state, outcome, resolver, undefined),
     options.artifactMutation,

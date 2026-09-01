@@ -342,6 +342,10 @@ async function main() {
     const evidence = parseEvidence(evidenceRaw);
     const artifacts = submissionField(evidence, "artifacts");
     const artifactVersions = submissionField(evidence, "artifactVersions");
+    const verification = submissionField(evidence, "verification");
+    const verificationReceipts = submissionField(evidence, "verificationReceipts");
+    const verificationReceiptIds = submissionField(evidence, "verificationReceiptIds");
+    const receiptIds = submissionField(evidence, "receiptIds");
     const submission = {
       actionId: projection.pendingAction.id,
       status: "succeeded",
@@ -352,6 +356,10 @@ async function main() {
         : {}),
       ...(artifacts !== undefined ? { artifacts } : {}),
       ...(artifactVersions !== undefined ? { artifactVersions } : {}),
+      ...(verification !== undefined ? { verification } : {}),
+      ...(verificationReceipts !== undefined ? { verificationReceipts } : {}),
+      ...(verificationReceiptIds !== undefined ? { verificationReceiptIds } : {}),
+      ...(receiptIds !== undefined ? { receiptIds } : {}),
       runId: projection.runId,
       revision: projection.revision,
       execution: projection.execution,

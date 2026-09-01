@@ -5,6 +5,8 @@ import type {
   WorkflowArtifactSelection,
   WorkflowArtifactVersionId,
   WorkflowArtifactVersion,
+  WorkflowVerificationReceiptReference,
+  WorkflowVerificationReceipt,
 } from "../types.js";
 
 export interface WorkflowArtifactMutation {
@@ -12,6 +14,8 @@ export interface WorkflowArtifactMutation {
   selections: WorkflowArtifactSelection[];
   artifactPaths: Record<WorkflowArtifactId, WorkflowArtifactPath>;
   selectedVersionIds: Record<WorkflowArtifactId, WorkflowArtifactVersionId>;
+  verificationReceipts?: WorkflowVerificationReceiptReference[];
+  verificationReceiptRecords?: WorkflowVerificationReceipt[];
 }
 
 export interface RuntimeContext {

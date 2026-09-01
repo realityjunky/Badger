@@ -187,6 +187,8 @@ describe("generated WorkflowRuntime guard and handoff adapters", () => {
     ).resolves.toMatchObject({ isFile: expect.any(Function) });
     expect(guard).toContain("./workflow-runtime.mjs");
     expect(guard).toContain("validateWorkflowSubmission");
+    expect(guard).toContain('submissionField(evidence, "verification")');
+    expect(handoff).toContain("VERIFICATION:");
     expect(guard).not.toContain("completedNodes");
     expect(guard).not.toContain("nextNode");
     expect(guard).not.toContain("writeRunState");

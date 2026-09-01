@@ -92,6 +92,11 @@ function printSummary(handoff) {
   for (const version of handoff.artifactVersions ?? []) {
     console.log(`ARTIFACT: ${version.artifactId}@${version.id}`);
   }
+  for (const receipt of handoff.verificationReceipts ?? []) {
+    console.log(
+      `VERIFICATION: ${receipt.receiptId} (${receipt.receiptKind}/${receipt.status})`,
+    );
+  }
 }
 
 async function main() {

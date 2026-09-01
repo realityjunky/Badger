@@ -125,6 +125,21 @@ content-addressed diagnostic evidence and are not valid complete-scope proof.
 Snapshot references are written inside the same locked transition as the Run
 state and recover identically for manual and standalone locations.
 
+The `verification-receipts` capability requires revision fences, mutation locks,
+and transition journals plus bounded receipt bytes and count. A guardrail may
+declare one or more accepted receipt kinds and a role, along with artifact or
+evidence scope. The runtime accepts only bounded proposals or exact existing
+receipt references, generates issue time and content identity, and stores the
+full receipt at a content-addressed protected path while Run state retains only
+the bounded reference. Automated checks, static inspections, and manual
+evidence use explicit passed, failed, skipped, or blocked statuses; only a
+currently scope-valid passed receipt satisfies a guard. Provider summaries are
+redacted and bounded, and raw output, attachments, credentials, and command
+execution are outside the runtime contract. Protocol, execution, Run revision,
+scope, snapshot, and candidate artifact drift makes a receipt stale without
+deleting its audit record. Decision Receipts remain a separate evidence family
+and may name exact Verification Receipt ids without substituting for them.
+
 The Creator evaluation report additionally records the generated package tree
 hash. Review readiness rejects missing, stale, mismatched, or incomplete
 identity evidence.
@@ -180,6 +195,10 @@ bounded pending decision scope references. Awaiting decisions redact prior
 evidence payloads from continuation and state projections. Compiler, Run-location,
 projection, storage, and protected filesystem modules remain private
 implementation details.
+
+Continuations, state projections, and handoffs project bounded Verification
+Receipt references and summaries only; provider evidence remains in the
+protected content-addressed receipt record.
 
 Continuations and generated projections also carry deterministic structured
 findings, truncation summaries, and the catalog version. Legacy blocker strings

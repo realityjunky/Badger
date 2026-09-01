@@ -140,6 +140,7 @@ function missingGuardrailEvidence(
   node: NodeProtocol,
   plan: RuntimeCompletionPlan,
   evidence: Record<string, unknown>,
+  satisfiedGuardrails: ReadonlySet<string> = new Set(),
 ): string[] {
   const guardrailByKey = new Map(
     node.guardrails.map((guardrail) => [
@@ -150,6 +151,7 @@ function missingGuardrailEvidence(
   return plan.guardrails
     .filter(
       (key) =>
+        !satisfiedGuardrails.has(key) &&
         !hasEvidence(
           evidence,
           [key, guardrailByKey.get(key)?.id ?? key],
@@ -165,6 +167,7 @@ export async function validateSuccessfulSubmission(
   node: NodeProtocol,
   plan: RuntimeCompletionPlan,
   submission: WorkflowSubmission,
+  satisfiedGuardrails: ReadonlySet<string> = new Set(),
 ): Promise<string[]> {
   if (submission.kind === "decision") return [];
   const evidence = submission.evidence ?? {};
@@ -207,7 +210,12 @@ export async function validateSuccessfulSubmission(
       blockers.push(`Missing augmentation evidence: ${key}`);
     }
   }
-  for (const key of missingGuardrailEvidence(node, plan, evidence)) {
+  for (const key of missingGuardrailEvidence(
+    node,
+    plan,
+    evidence,
+    satisfiedGuardrails,
+  )) {
     blockers.push(`Missing guardrail evidence: ${key}`);
   }
 

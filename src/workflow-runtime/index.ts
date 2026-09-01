@@ -13,6 +13,7 @@ import {
 import {
   type ManualRunResult,
   type PreparePendingAction,
+  type PrepareOutcomeMutation,
 } from "../engine/manual-run.js";
 import {
   parsePendingActionValue,
@@ -35,12 +36,20 @@ import type {
 import type { WorkflowArtifactMutation } from "../engine/runtime-types.js";
 import type {
   DecisionScalar,
+  WorkflowArtifactProducer,
+  WorkflowDecisionScopeReference,
+  WorkflowDecisionScopeSnapshot,
   WorkflowDecisionInputSchema,
   WorkflowDurabilityProfile,
+  NodeProtocol,
   WorkflowProtocol,
   WorkflowReviewerPolicy,
+  WorkflowVerificationKind,
+  WorkflowVerificationReceipt,
+  WorkflowVerificationReceiptProposal,
+  WorkflowVerificationReceiptReference,
 } from "../types.js";
-import { stableValue } from "../util.js";
+import { sha256, stableValue } from "../util.js";
 import { compileWorkflow } from "./compiler.js";
 import {
   createCompletionPlan,
@@ -49,6 +58,7 @@ import {
 import {
   currentWorkflowArtifactVersions,
   prepareWorkflowArtifactMutation,
+  validateWorkflowArtifactVersion,
   validateWorkflowArtifactState,
   WorkflowArtifactValidationError,
 } from "./artifacts.js";
@@ -124,10 +134,20 @@ import {
 } from "./checkpoints.js";
 import {
   captureWorkflowContentSnapshot,
+  hashWorkflowContentSnapshot,
   stageWorkflowContentSnapshot,
   readWorkflowContentSnapshot,
   workflowContentSnapshotFindings,
 } from "./snapshots.js";
+import {
+  createWorkflowVerificationReceipt,
+  normalizeWorkflowVerificationProposal,
+  readWorkflowVerificationReceipt,
+  stageWorkflowVerificationReceipt,
+  validateWorkflowVerificationRequirement,
+  workflowVerificationReceiptReference,
+  workflowVerificationKinds,
+} from "./verification-receipts.js";
 
 async function withStructuredRuntimeErrors<T>(
   operation: () => Promise<T>,
@@ -417,7 +437,667 @@ const DECISION_SUBMISSION_KEYS = new Set([
   "protocolHash",
   "packageHash",
   "snapshotHash",
+  "verification",
+  "verificationReceipts",
+  "verificationReceiptIds",
+  "receiptIds",
 ]);
+
+const VERIFICATION_SUBMISSION_KEYS = new Set([
+  "proposals",
+  "receiptIds",
+  "receipts",
+]);
+
+interface ResolvedWorkflowVerificationRequirement {
+  id: string;
+  role: string;
+  kinds: WorkflowVerificationKind[];
+  scope: {
+    artifacts: Array<{ id: string; required: boolean }>;
+    evidence: Array<{ id: string; required: boolean }>;
+  };
+  requireContentSnapshot: boolean;
+}
+
+interface NormalizedVerificationSubmission {
+  proposals: unknown[];
+  receiptIds: string[];
+}
+
+function verificationRequirements(
+  node: NodeProtocol | undefined,
+): ResolvedWorkflowVerificationRequirement[] {
+  if (!node) return [];
+  const result: ResolvedWorkflowVerificationRequirement[] = [];
+  const ids = new Set<string>();
+  for (const guardrail of node.guardrails) {
+    if (!guardrail.verification) continue;
+    validateWorkflowVerificationRequirement(
+      guardrail.verification,
+      `Workflow verification requirement for ${node.id}.${guardrail.id}`,
+    );
+    const requirement = guardrail.verification;
+    const id = requirement.id ?? guardrail.id;
+    if (ids.has(id)) {
+      throw new Error(`Workflow verification requirement is duplicated: ${id}`);
+    }
+    ids.add(id);
+    result.push({
+      id,
+      role: requirement.role,
+      kinds: workflowVerificationKinds(requirement),
+      scope: {
+        artifacts: (requirement.scope?.artifacts ?? []).map((entry) => ({
+          id: entry.id,
+          required: entry.required === true,
+        })),
+        evidence: (requirement.scope?.evidence ?? []).map((entry) => ({
+          id: entry.id,
+          required: entry.required === true,
+        })),
+      },
+      requireContentSnapshot: requirement.requireContentSnapshot === true,
+    });
+  }
+  return result;
+}
+
+function normalizedVerificationSubmission(
+  submission: WorkflowSubmission,
+): NormalizedVerificationSubmission {
+  const proposals: unknown[] = [];
+  const receiptIds: string[] = [];
+  const addReceiptEntry = (entry: unknown, label: string): void => {
+    if (typeof entry === "string" && entry.length > 0) {
+      receiptIds.push(entry);
+      return;
+    }
+    if (
+      isRecord(entry) &&
+      typeof entry.receiptId === "string" &&
+      entry.receiptId.length > 0
+    ) {
+      receiptIds.push(entry.receiptId);
+      return;
+    }
+    if (
+      isRecord(entry) &&
+      typeof entry.receiptHash === "string" &&
+      entry.receiptHash.length > 0
+    ) {
+      receiptIds.push(entry.receiptHash);
+      return;
+    }
+    throw new Error(verificationFailure(`${label} must contain receipt ids`));
+  };
+  const addValue = (value: unknown, label: string): void => {
+    if (value === undefined) return;
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (
+          typeof entry === "string" ||
+          (isRecord(entry) &&
+            (typeof entry.receiptId === "string" ||
+              typeof entry.receiptHash === "string") &&
+            (entry.kind === undefined ||
+              entry.kind === "workflow-verification-receipt-reference"))
+        ) {
+          addReceiptEntry(entry, label);
+        } else proposals.push(entry);
+      }
+      return;
+    }
+    if (isRecord(value)) {
+      const keys = Object.keys(value);
+      if (
+        value.kind === undefined &&
+        (typeof value.receiptId === "string" ||
+          typeof value.receiptHash === "string")
+      ) {
+        addReceiptEntry(value, label);
+        return;
+      }
+      if (keys.some((key) => VERIFICATION_SUBMISSION_KEYS.has(key))) {
+        const unknown = keys.find(
+          (key) => !VERIFICATION_SUBMISSION_KEYS.has(key),
+        );
+        if (unknown) {
+          throw new Error(
+            verificationFailure(`${label} has unknown field: ${unknown}`),
+          );
+        }
+        if (value.proposals !== undefined) {
+          if (!Array.isArray(value.proposals)) {
+            throw new Error(
+              verificationFailure(`${label}.proposals must be an array`),
+            );
+          }
+          proposals.push(...value.proposals);
+        }
+        const wrapperIds = value.receiptIds ?? value.receipts;
+        if (wrapperIds !== undefined) {
+          if (!Array.isArray(wrapperIds)) {
+            throw new Error(
+              verificationFailure(`${label}.receiptIds must be an array`),
+            );
+          }
+          for (const entry of wrapperIds) {
+            if (
+              typeof entry === "string" ||
+              (isRecord(entry) &&
+                (typeof entry.receiptId === "string" ||
+                  typeof entry.receiptHash === "string") &&
+                (entry.kind === undefined ||
+                  entry.kind === "workflow-verification-receipt-reference"))
+            ) {
+              addReceiptEntry(entry, `${label}.receiptIds`);
+            } else {
+              proposals.push(entry);
+            }
+          }
+        }
+        return;
+      }
+      proposals.push(value);
+      return;
+    }
+    throw new Error(
+      verificationFailure(`${label} must be a proposal, wrapper, or array`),
+    );
+  };
+  addValue(submission.verification, "Verification submission");
+  addValue(submission.verificationReceipts, "verificationReceipts");
+  if (submission.verificationReceiptIds !== undefined) {
+    if (!Array.isArray(submission.verificationReceiptIds)) {
+      throw new Error(
+        verificationFailure("verificationReceiptIds must be an array"),
+      );
+    }
+    for (const entry of submission.verificationReceiptIds) {
+      if (typeof entry !== "string" || entry.length === 0) {
+        throw new Error(
+          verificationFailure(
+            "verificationReceiptIds must contain non-empty strings",
+          ),
+        );
+      }
+      receiptIds.push(entry);
+    }
+  }
+  if (submission.receiptIds !== undefined) {
+    if (!Array.isArray(submission.receiptIds)) {
+      throw new Error(verificationFailure("receiptIds must be an array"));
+    }
+    for (const entry of submission.receiptIds) {
+      if (typeof entry !== "string" || entry.length === 0) {
+        throw new Error(
+          verificationFailure("receiptIds must contain non-empty strings"),
+        );
+      }
+      receiptIds.push(entry);
+    }
+  }
+  if (receiptIds.length > 64 || proposals.length > 64) {
+    throw new Error(verificationFailure("submission exceeds its bound"));
+  }
+  if (new Set(receiptIds).size !== receiptIds.length) {
+    throw new Error(
+      verificationFailure("submission contains duplicate receipt ids"),
+    );
+  }
+  return { proposals, receiptIds };
+}
+
+function verificationFailure(message: string): string {
+  return `Workflow Verification Receipt ${message}`;
+}
+
+function workflowContentSnapshotBinding(state: RunState): string | null {
+  const snapshots = state.workflowRuntime?.contentSnapshots ?? [];
+  if (snapshots.length === 0) return null;
+  const ordered = [...snapshots]
+    .map((snapshot) => ({
+      hash: snapshot.hash,
+      path: snapshot.path,
+      provider: snapshot.provider,
+      complete: snapshot.complete,
+    }))
+    .sort((left, right) => left.hash.localeCompare(right.hash));
+  if (ordered.length === 1) return ordered[0].hash;
+  return sha256(JSON.stringify(stableValue(ordered)));
+}
+
+async function currentWorkflowContentSnapshotBinding(
+  prepared: PreparedWorkflowSubmission,
+  state: RunState,
+): Promise<string | null> {
+  const profile = prepared.verified.identity.durabilityProfile;
+  const policy = profile?.snapshotPolicy;
+  if (!usesWorkflowContentSnapshots(profile) || !policy) {
+    return workflowContentSnapshotBinding(state);
+  }
+  const references = state.workflowRuntime?.contentSnapshots ?? [];
+  if (references.length !== 1) {
+    throw new Error(
+      verificationFailure(
+        "content snapshot binding is unavailable or ambiguous",
+      ),
+    );
+  }
+  let current;
+  try {
+    current = await captureWorkflowContentSnapshot({
+      root: prepared.location.contentSnapshotRoot,
+      policy,
+    });
+  } catch (error) {
+    throw new Error(
+      verificationFailure(
+        `content snapshot could not be recaptured: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
+  }
+  const currentHash = hashWorkflowContentSnapshot(current);
+  if (currentHash !== references[0].hash) {
+    throw new Error(
+      verificationFailure(`content snapshot is stale: ${references[0].hash}`),
+    );
+  }
+  if (!current.complete) {
+    throw new Error(verificationFailure("content snapshot is incomplete"));
+  }
+  return currentHash;
+}
+
+function workflowArtifactDeclaration(
+  protocol: WorkflowProtocol,
+  requested: string,
+): { id: string; schemaId: string } {
+  const declarations = protocol.outputSchemas.flatMap((schema) =>
+    schema.artifacts.map((artifact) => ({
+      id: `${schema.id}.${artifact.id}`,
+      shortId: artifact.id,
+      schemaId: schema.id,
+    })),
+  );
+  const exact = declarations.find(
+    (declaration) => declaration.id === requested,
+  );
+  if (exact) return exact;
+  const matches = declarations.filter(
+    (declaration) => declaration.shortId === requested,
+  );
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    throw new Error(
+      verificationFailure(
+        `artifact scope requires a schema-qualified id: ${requested}`,
+      ),
+    );
+  }
+  throw new Error(
+    verificationFailure(`artifact scope is not declared: ${requested}`),
+  );
+}
+
+function workflowEvidenceDeclaration(
+  protocol: WorkflowProtocol,
+  requested: string,
+): { id: string; schemaId: string; shortId: string } {
+  const declarations = protocol.outputSchemas.flatMap((schema) =>
+    schema.evidence.map((evidence) => ({
+      id: `${schema.id}.${evidence.id}`,
+      shortId: evidence.id,
+      schemaId: schema.id,
+    })),
+  );
+  const exact = declarations.find(
+    (declaration) => declaration.id === requested,
+  );
+  if (exact) return exact;
+  const matches = declarations.filter(
+    (declaration) => declaration.shortId === requested,
+  );
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    throw new Error(
+      verificationFailure(
+        `evidence scope requires a schema-qualified id: ${requested}`,
+      ),
+    );
+  }
+  throw new Error(
+    verificationFailure(`evidence scope is not declared: ${requested}`),
+  );
+}
+
+function workflowEvidenceValue(
+  evidence: Record<string, unknown> | undefined,
+  declaration: { id: string; schemaId: string; shortId: string },
+): { found: boolean; value?: unknown } {
+  if (!evidence) return { found: false };
+  for (const key of [declaration.id, declaration.shortId]) {
+    if (Object.prototype.hasOwnProperty.call(evidence, key)) {
+      return { found: true, value: evidence[key] };
+    }
+  }
+  const schemaEvidence = evidence.schemaEvidence;
+  if (!isRecord(schemaEvidence)) return { found: false };
+  if (Object.prototype.hasOwnProperty.call(schemaEvidence, declaration.id)) {
+    return { found: true, value: schemaEvidence[declaration.id] };
+  }
+  const scoped = schemaEvidence[declaration.schemaId];
+  if (
+    isRecord(scoped) &&
+    Object.prototype.hasOwnProperty.call(scoped, declaration.shortId)
+  ) {
+    return { found: true, value: scoped[declaration.shortId] };
+  }
+  return { found: false };
+}
+
+function workflowOutcomeRevision(
+  state: RunState,
+  attemptId: string,
+  actionId: string,
+): number {
+  let revision = 0;
+  for (const visit of state.workflowRuntime?.visits ?? []) {
+    for (const outcome of visit.outcomes) {
+      if (visit.attemptId === attemptId && outcome.actionId === actionId) {
+        return revision;
+      }
+      revision += 1;
+    }
+  }
+  throw new Error(
+    verificationFailure(`evidence producer is not accepted: ${actionId}`),
+  );
+}
+
+function workflowEvidenceReference(
+  state: RunState,
+  declaration: { id: string; schemaId: string; shortId: string },
+  visit: WorkflowVisitState,
+  actionId: string,
+  value: unknown,
+  required: boolean,
+): WorkflowDecisionScopeReference {
+  const nodeId = Object.entries(state.runtimeIdentity?.nodeToStep ?? []).find(
+    ([, stepId]) => stepId === visit.stepId,
+  )?.[0];
+  if (!nodeId) {
+    throw new Error(
+      verificationFailure(`evidence producer Node is unknown: ${visit.stepId}`),
+    );
+  }
+  const producer: WorkflowArtifactProducer = {
+    runId: state.runId,
+    nodeId,
+    cycleId: visit.cycleId,
+    attemptId: visit.attemptId,
+    actionId,
+    revision: workflowOutcomeRevision(state, visit.attemptId, actionId),
+  };
+  const hash = sha256(JSON.stringify(stableValue(value)) ?? "undefined");
+  return {
+    id: declaration.id,
+    required,
+    versionId: `evidence-version-${sha256(
+      JSON.stringify(
+        stableValue({ evidenceId: declaration.id, hash, producer }),
+      ),
+    ).slice(0, 24)}`,
+    contentHash: hash,
+    producer,
+  };
+}
+
+function currentWorkflowEvidenceReference(
+  protocol: WorkflowProtocol,
+  state: RunState,
+  requested: string,
+  required: boolean,
+): WorkflowDecisionScopeReference | undefined {
+  const declaration = workflowEvidenceDeclaration(protocol, requested);
+  const nodeByStep = new Map(
+    Object.entries(state.runtimeIdentity?.nodeToStep ?? {}).map(
+      ([nodeId, stepId]) => [stepId, nodeId],
+    ),
+  );
+  for (const visit of [...(state.workflowRuntime?.visits ?? [])].reverse()) {
+    const nodeId = nodeByStep.get(visit.stepId);
+    if (!nodeId) continue;
+    const node = protocol.nodes.find((candidate) => candidate.id === nodeId);
+    if (
+      !node?.outputSchemas.some((schemaId) => schemaId === declaration.schemaId)
+    ) {
+      continue;
+    }
+    for (const outcome of [...visit.outcomes].reverse()) {
+      if (outcome.status !== "succeeded") continue;
+      const value = workflowEvidenceValue(outcome.evidence, declaration);
+      if (!value.found) continue;
+      return workflowEvidenceReference(
+        state,
+        declaration,
+        visit,
+        outcome.actionId,
+        value.value,
+        required,
+      );
+    }
+  }
+  return undefined;
+}
+
+function sortWorkflowScope(
+  scope: WorkflowDecisionScopeSnapshot,
+): WorkflowDecisionScopeSnapshot {
+  return {
+    artifacts: [...scope.artifacts].sort((left, right) =>
+      `${left.id}\u0000${left.versionId}`.localeCompare(
+        `${right.id}\u0000${right.versionId}`,
+      ),
+    ),
+    evidence: [...scope.evidence].sort((left, right) =>
+      `${left.id}\u0000${left.versionId}`.localeCompare(
+        `${right.id}\u0000${right.versionId}`,
+      ),
+    ),
+  };
+}
+
+async function captureWorkflowVerificationScope(
+  prepared: PreparedWorkflowSubmission,
+  requirement: ResolvedWorkflowVerificationRequirement,
+  state: RunState,
+): Promise<WorkflowDecisionScopeSnapshot> {
+  const protocol = prepared.verified.package.runtime!.protocol;
+  const runtime = state.workflowRuntime;
+  if (!runtime) {
+    throw new Error(verificationFailure("scope requires revisioned Run state"));
+  }
+  const artifactVersions = new Map(
+    runtime.artifactVersions.map((version) => [version.id, version]),
+  );
+  const currentArtifacts = currentWorkflowArtifactVersions(runtime);
+  const artifacts: WorkflowDecisionScopeReference[] = [];
+  for (const entry of requirement.scope.artifacts) {
+    const declaration = workflowArtifactDeclaration(protocol, entry.id);
+    const versionId = currentArtifacts[declaration.id];
+    const version = versionId ? artifactVersions.get(versionId) : undefined;
+    if (!version) {
+      if (entry.required) {
+        throw new Error(
+          verificationFailure(
+            `required artifact scope is unavailable: ${declaration.id}`,
+          ),
+        );
+      }
+      continue;
+    }
+    try {
+      await validateWorkflowArtifactVersion(
+        prepared.location.runRoot,
+        protocol,
+        version,
+      );
+    } catch (error) {
+      throw new Error(
+        verificationFailure(
+          `artifact scope is stale: ${declaration.id} (${error instanceof Error ? error.message : String(error)})`,
+        ),
+      );
+    }
+    artifacts.push({
+      id: declaration.id,
+      required: entry.required,
+      versionId: version.id,
+      contentHash: version.contentHash,
+      producer: structuredClone(version.producer),
+    });
+  }
+  const evidence: WorkflowDecisionScopeReference[] = [];
+  for (const entry of requirement.scope.evidence) {
+    const declaration = workflowEvidenceDeclaration(protocol, entry.id);
+    const reference = currentWorkflowEvidenceReference(
+      protocol,
+      state,
+      declaration.id,
+      entry.required,
+    );
+    if (!reference) {
+      if (entry.required) {
+        throw new Error(
+          verificationFailure(
+            `required evidence scope is unavailable: ${declaration.id}`,
+          ),
+        );
+      }
+      continue;
+    }
+    evidence.push(reference);
+  }
+  return sortWorkflowScope({ artifacts, evidence });
+}
+
+function workflowScopeHash(scope: WorkflowDecisionScopeSnapshot): string {
+  return sha256(JSON.stringify(stableValue(sortWorkflowScope(scope))));
+}
+
+function workflowScopeSelectionMatches(
+  expected: WorkflowDecisionScopeSnapshot,
+  submitted: WorkflowVerificationReceiptProposal["scope"],
+): void {
+  if (submitted === undefined) return;
+  if (!isRecord(submitted)) {
+    throw new Error(verificationFailure("proposal scope must be an object"));
+  }
+  const unknown = Object.keys(submitted).find(
+    (key) => key !== "artifacts" && key !== "evidence",
+  );
+  if (unknown)
+    throw new Error(
+      verificationFailure(`proposal scope has unknown field: ${unknown}`),
+    );
+  const validate = (kind: "artifacts" | "evidence"): void => {
+    const rawValues = submitted[kind];
+    if (rawValues !== undefined && !Array.isArray(rawValues)) {
+      throw new Error(
+        verificationFailure(`proposal ${kind} scope must be an array`),
+      );
+    }
+    const values = rawValues ?? [];
+    if (values.length > 64) {
+      throw new Error(
+        verificationFailure(`proposal ${kind} scope is outside its bound`),
+      );
+    }
+    const seen = new Set<string>();
+    for (const value of values) {
+      if (!isRecord(value))
+        throw new Error(
+          verificationFailure(
+            `proposal ${kind} scope contains an invalid reference`,
+          ),
+        );
+      const unknownReference = Object.keys(value).find(
+        (key) =>
+          !["id", "required", "versionId", "contentHash", "producer"].includes(
+            key,
+          ),
+      );
+      if (unknownReference) {
+        throw new Error(
+          verificationFailure(
+            `proposal ${kind} scope has unknown field: ${unknownReference}`,
+          ),
+        );
+      }
+      const key = `${value.id}\u0000${value.versionId}`;
+      if (seen.has(key))
+        throw new Error(
+          verificationFailure(
+            `proposal ${kind} scope contains a duplicate reference`,
+          ),
+        );
+      seen.add(key);
+      const reference = expected[kind].find(
+        (candidate) =>
+          candidate.id === value.id && candidate.versionId === value.versionId,
+      );
+      if (
+        !reference ||
+        value.contentHash !== reference.contentHash ||
+        (value.required !== undefined &&
+          value.required !== reference.required) ||
+        (value.producer !== undefined &&
+          !sameStableValue(value.producer, reference.producer))
+      ) {
+        throw new Error(
+          verificationFailure(`${kind} scope does not match the current scope`),
+        );
+      }
+    }
+    for (const reference of expected[kind]) {
+      if (
+        reference.required &&
+        !values.some((value) => isRecord(value) && value.id === reference.id)
+      ) {
+        throw new Error(
+          verificationFailure(
+            `required ${kind} scope is missing: ${reference.id}`,
+          ),
+        );
+      }
+    }
+  };
+  validate("artifacts");
+  validate("evidence");
+}
+
+function workflowStateWithArtifactMutation(
+  state: RunState,
+  mutation: WorkflowArtifactMutation | undefined,
+): RunState {
+  if (!mutation || !state.workflowRuntime) return state;
+  return {
+    ...state,
+    workflowRuntime: {
+      ...state.workflowRuntime,
+      artifactVersions: [
+        ...state.workflowRuntime.artifactVersions,
+        ...structuredClone(mutation.versions),
+      ],
+      artifactSelections: [
+        ...state.workflowRuntime.artifactSelections,
+        ...structuredClone(mutation.selections),
+      ],
+    },
+  };
+}
 
 function redactVisitEvidence(
   visits: readonly WorkflowVisitState[],
@@ -693,6 +1373,7 @@ function validateSubmission(submission: WorkflowSubmission): void {
   if (!submission || typeof submission !== "object") {
     throw new Error("Submission must be an object");
   }
+  normalizedVerificationSubmission(submission);
   if (typeof submission.actionId !== "string" || !submission.actionId) {
     throw new Error("Submission actionId must be a non-empty string");
   }
@@ -915,6 +1596,9 @@ function continuation(
     execution: structuredClone(identity),
     decisionReceipts: boundProjectedLedger(
       runtimeState?.decisionReceipts ?? [],
+    ),
+    verificationReceipts: boundProjectedLedger(
+      runtimeState?.verificationReceipts ?? [],
     ),
     cycles: boundProjectedLedger(runtimeState?.cycles ?? []),
     visits:
@@ -1193,6 +1877,9 @@ export async function projectWorkflowState(
     decisionReceipts: boundProjectedLedger(
       runtimeState?.decisionReceipts ?? [],
     ),
+    verificationReceipts: boundProjectedLedger(
+      runtimeState?.verificationReceipts ?? [],
+    ),
     visits:
       verified.pending?.type === "ask_user"
         ? boundProjectedLedger(redactVisitEvidence(runtimeState?.visits ?? []))
@@ -1284,6 +1971,164 @@ export async function writeWorkflowStateProjection(
       containedRoot: inspection.projectRoot,
     });
     return;
+  }
+}
+
+async function verifyStoredVerificationReceipts(
+  runRoot: string,
+  state: RunState,
+  identity: WorkflowExecutionIdentity,
+  pkg: Awaited<ReturnType<typeof readSkillSnapshot>>,
+): Promise<void> {
+  const profile = identity.durabilityProfile;
+  const references = state.workflowRuntime?.verificationReceipts ?? [];
+  if (references.length === 0) return;
+  if (!profile?.capabilities.includes("verification-receipts")) {
+    throw new Error(
+      "WorkflowRuntime verification receipt state requires verification-receipts capability",
+    );
+  }
+  if (
+    profile.bounds.verificationReceiptCount !== undefined &&
+    references.length > profile.bounds.verificationReceiptCount
+  ) {
+    throw new Error(
+      "WorkflowRuntime verification receipt count exceeds its bound",
+    );
+  }
+  const ids = new Set<string>();
+  for (const reference of references) {
+    if (ids.has(reference.receiptId)) {
+      throw new Error(
+        `WorkflowRuntime verification receipt is duplicated: ${reference.receiptId}`,
+      );
+    }
+    ids.add(reference.receiptId);
+    const receipt = await readWorkflowVerificationReceipt(
+      runRoot,
+      reference.receiptHash,
+      profile,
+    );
+    if (!receipt) {
+      throw new Error(
+        `WorkflowRuntime verification receipt is missing: ${reference.receiptId}`,
+      );
+    }
+    if (
+      !receiptReferencesEqual(
+        workflowVerificationReceiptReference(receipt),
+        reference,
+      ) ||
+      receipt.runId !== state.runId ||
+      receipt.protocolHash !== identity.protocolHash ||
+      receipt.packageHash !== identity.packageHash ||
+      receipt.snapshotHash !== identity.snapshotHash ||
+      !sameExecutionIdentity(receipt.execution, identity)
+    ) {
+      throw new Error(
+        `WorkflowRuntime verification receipt identity is invalid: ${reference.receiptId}`,
+      );
+    }
+    for (const candidate of receipt.candidateArtifacts) {
+      const version = state.workflowRuntime?.artifactVersions.find(
+        (entry) => entry.id === candidate.versionId,
+      );
+      if (
+        !version ||
+        version.artifactId !== candidate.artifactId ||
+        version.contentHash !== candidate.contentHash ||
+        !sameStableValue(version.producer, candidate.producer)
+      ) {
+        throw new Error(
+          `WorkflowRuntime verification receipt candidate artifact identity is invalid: ${reference.receiptId}`,
+        );
+      }
+    }
+    for (const candidate of receipt.scope.evidence) {
+      const declaration = workflowEvidenceDeclaration(
+        pkg.runtime!.protocol,
+        candidate.id,
+      );
+      const visit = state.workflowRuntime?.visits.find(
+        (entry) => entry.attemptId === candidate.producer.attemptId,
+      );
+      const outcome = visit?.outcomes.find(
+        (entry) => entry.actionId === candidate.producer.actionId,
+      );
+      const value = workflowEvidenceValue(outcome?.evidence, declaration);
+      if (
+        !visit ||
+        !outcome ||
+        outcome.status !== "succeeded" ||
+        !value.found
+      ) {
+        throw new Error(
+          `WorkflowRuntime verification receipt evidence identity is invalid: ${reference.receiptId}`,
+        );
+      }
+      const expected = workflowEvidenceReference(
+        state,
+        declaration,
+        visit,
+        outcome.actionId,
+        value.value,
+        candidate.required,
+      );
+      if (!sameStableValue(expected, candidate)) {
+        throw new Error(
+          `WorkflowRuntime verification receipt evidence identity is invalid: ${reference.receiptId}`,
+        );
+      }
+    }
+    const outcomeLocation = state.workflowRuntime?.visits
+      .map((visit) => ({
+        visit,
+        outcome: visit.outcomes.find((outcome) =>
+          outcome.verificationReceiptIds?.includes(reference.receiptId),
+        ),
+      }))
+      .find((candidate) => candidate.outcome !== undefined);
+    if (!outcomeLocation) {
+      throw new Error(
+        `WorkflowRuntime verification receipt is detached from an outcome: ${reference.receiptId}`,
+      );
+    }
+    const outcome = outcomeLocation.outcome;
+    if (!outcome) {
+      throw new Error(
+        `WorkflowRuntime verification receipt is detached from an outcome: ${reference.receiptId}`,
+      );
+    }
+    const nodeId = Object.entries(identity.nodeToStep).find(
+      ([, stepId]) => stepId === outcomeLocation.visit.stepId,
+    )?.[0];
+    const node = pkg.runtime?.protocol.nodes.find(
+      (candidate) => candidate.id === nodeId,
+    );
+    const requirement = verificationRequirements(node).find(
+      (candidate) => candidate.id === receipt.requirementId,
+    );
+    if (
+      !nodeId ||
+      !node ||
+      !requirement ||
+      receipt.role !== requirement.role ||
+      !requirement.kinds.includes(receipt.receiptKind) ||
+      receipt.nodeId !== nodeId ||
+      receipt.attemptId !== outcomeLocation.visit.attemptId ||
+      receipt.cycleId !== outcomeLocation.visit.cycleId ||
+      receipt.actionId !== outcome.actionId ||
+      receipt.revision !==
+        workflowOutcomeRevision(
+          state,
+          outcomeLocation.visit.attemptId,
+          outcome.actionId,
+        )
+    ) {
+      throw new Error(
+        `WorkflowRuntime verification receipt context is invalid: ${reference.receiptId}`,
+      );
+    }
   }
 }
 
@@ -1475,7 +2320,31 @@ async function verifyStoredPackage(
       state.workflowRuntime,
     );
   }
+  await verifyStoredVerificationReceipts(runRoot, state, identity, pkg);
+  const verificationReceiptIds = new Set(
+    state.workflowRuntime?.verificationReceipts.map(
+      (reference) => reference.receiptId,
+    ) ?? [],
+  );
+  for (const visit of state.workflowRuntime?.visits ?? []) {
+    for (const outcome of visit.outcomes) {
+      for (const receiptId of outcome.verificationReceiptIds ?? []) {
+        if (!verificationReceiptIds.has(receiptId)) {
+          throw new Error(
+            `WorkflowRuntime verification receipt reference is unknown: ${receiptId}`,
+          );
+        }
+      }
+    }
+  }
   for (const receipt of state.workflowRuntime?.decisionReceipts ?? []) {
+    for (const verificationReceiptId of receipt.verificationReceiptIds ?? []) {
+      if (!verificationReceiptIds.has(verificationReceiptId)) {
+        throw new Error(
+          `WorkflowRuntime Decision Receipt references an unknown Verification Receipt: ${verificationReceiptId}`,
+        );
+      }
+    }
     if (
       receipt.runId !== state.runId ||
       receipt.protocolHash !== identity.protocolHash ||
@@ -1883,13 +2752,21 @@ function engineOutcome(
     const artifacts = artifactMutation
       ? artifactMutation.artifactPaths
       : submission.artifacts;
+    const evidence = submission.evidence
+      ? structuredClone(submission.evidence)
+      : undefined;
+    if (evidence) {
+      delete evidence.verification;
+      delete evidence.verificationReceipts;
+      delete evidence.verificationReceiptIds;
+    }
     return {
       actionId: prepared.pending.id,
       status: submission.status,
       summary: submission.summary,
       ...(artifacts && Object.keys(artifacts).length > 0 ? { artifacts } : {}),
       ...(submission.state ? { state: submission.state } : {}),
-      ...(submission.evidence ? { evidence: submission.evidence } : {}),
+      ...(evidence && Object.keys(evidence).length > 0 ? { evidence } : {}),
       ...(submission.routing ? { routing: submission.routing } : {}),
       ...(artifactMutation &&
       Object.keys(artifactMutation.selectedVersionIds).length > 0
@@ -1897,6 +2774,14 @@ function engineOutcome(
         : submission.artifactVersions
           ? { artifactVersions: submission.artifactVersions }
           : {}),
+      ...(artifactMutation &&
+      (artifactMutation.verificationReceipts?.length ?? 0) > 0
+        ? {
+            verificationReceiptIds: artifactMutation.verificationReceipts!.map(
+              (reference) => reference.receiptId,
+            ),
+          }
+        : {}),
     };
   }
   const node = prepared.verified.package.runtime!.protocol.nodes.find(
@@ -1928,6 +2813,14 @@ function engineOutcome(
     ...(prepared.pending.scope
       ? { scope: structuredClone(prepared.pending.scope) }
       : {}),
+    ...(artifactMutation &&
+    (artifactMutation.verificationReceipts?.length ?? 0) > 0
+      ? {
+          verificationReceiptIds: artifactMutation.verificationReceipts!.map(
+            (reference) => reference.receiptId,
+          ),
+        }
+      : {}),
     routing: {
       [decision.id]: choice.id,
       ...(choice.routing ?? {}),
@@ -1938,6 +2831,7 @@ function engineOutcome(
 async function completionBlockers(
   prepared: PreparedWorkflowSubmission,
   submission: WorkflowSubmission,
+  mutation?: WorkflowArtifactMutation,
 ): Promise<string[]> {
   if (isDecisionSubmission(submission)) return [];
   if (submission.status !== "succeeded" || !prepared.node) return [];
@@ -1958,18 +2852,33 @@ async function completionBlockers(
       `WorkflowRuntime completion plan does not match Node: ${prepared.node}`,
     );
   }
+  const satisfiedGuardrails = new Set(
+    workflowNode.guardrails
+      .filter((guardrail) => guardrail.verification !== undefined)
+      .filter((guardrail) =>
+        (mutation?.verificationReceipts ?? []).some(
+          (receipt) =>
+            receipt.status === "passed" &&
+            receipt.requirementId ===
+              (guardrail.verification?.id ?? guardrail.id),
+        ),
+      )
+      .map((guardrail) => `guardrail:${workflowNode.id}.${guardrail.id}`),
+  );
   return validateSuccessfulSubmission(
     prepared.location.runRoot,
     prepared.verified.package.runtime!.protocol,
     workflowNode,
     plan,
     submission,
+    satisfiedGuardrails,
   );
 }
 
 function routeBlockers(
   prepared: PreparedWorkflowSubmission,
   submission: WorkflowSubmission,
+  artifactMutation?: WorkflowArtifactMutation,
 ): string[] {
   const protocol = prepared.verified.package.runtime!.protocol;
   if (
@@ -1983,7 +2892,7 @@ function routeBlockers(
     resolveWorkflowTransition(
       protocol,
       prepared.node,
-      engineOutcome(prepared, submission),
+      engineOutcome(prepared, submission, artifactMutation),
       prepared.verified.state.workflowRuntime,
       prepared.verified.state.runId,
     );
@@ -2045,8 +2954,522 @@ async function artifactMutationForSubmission(
     if (error instanceof WorkflowArtifactValidationError) {
       return { blockers: [...error.blockers] };
     }
+    if (error instanceof RaceSafeReadError) {
+      return { blockers: [error.message] };
+    }
     throw error;
   }
+}
+
+function mergeWorkflowMutations(
+  artifact: WorkflowArtifactMutation | undefined,
+  verification: WorkflowArtifactMutation | undefined,
+): WorkflowArtifactMutation | undefined {
+  if (!artifact && !verification) return undefined;
+  return {
+    versions: [
+      ...(artifact?.versions ?? []),
+      ...(verification?.versions ?? []),
+    ],
+    selections: [
+      ...(artifact?.selections ?? []),
+      ...(verification?.selections ?? []),
+    ],
+    artifactPaths: {
+      ...(artifact?.artifactPaths ?? {}),
+      ...(verification?.artifactPaths ?? {}),
+    },
+    selectedVersionIds: {
+      ...(artifact?.selectedVersionIds ?? {}),
+      ...(verification?.selectedVersionIds ?? {}),
+    },
+    ...(verification?.verificationReceipts ||
+    verification?.verificationReceiptRecords
+      ? {
+          verificationReceipts: [
+            ...(artifact?.verificationReceipts ?? []),
+            ...(verification.verificationReceipts ?? []),
+          ],
+          verificationReceiptRecords: [
+            ...(artifact?.verificationReceiptRecords ?? []),
+            ...(verification.verificationReceiptRecords ?? []),
+          ],
+        }
+      : artifact?.verificationReceipts || artifact?.verificationReceiptRecords
+        ? {
+            verificationReceipts: [...(artifact.verificationReceipts ?? [])],
+            verificationReceiptRecords: [
+              ...(artifact.verificationReceiptRecords ?? []),
+            ],
+          }
+        : {}),
+  };
+}
+
+function prepareVerificationReceiptRecords(
+  mutation: WorkflowArtifactMutation | undefined,
+  profile: WorkflowDurabilityProfile | undefined,
+): PrepareOutcomeMutation | undefined {
+  const records = mutation?.verificationReceiptRecords ?? [];
+  if (records.length === 0) return undefined;
+  if (!profile) {
+    throw new Error(
+      verificationFailure("persistence requires a durability profile"),
+    );
+  }
+  return async (_runRoot, _state, _outcome, overlay) => {
+    if (!overlay) {
+      throw new Error(verificationFailure("persistence requires a transition"));
+    }
+    const seen = new Set<string>();
+    for (const receipt of records) {
+      if (seen.has(receipt.receiptHash)) continue;
+      seen.add(receipt.receiptHash);
+      const reference = await stageWorkflowVerificationReceipt({
+        runRoot: _runRoot,
+        receipt,
+        transition: overlay,
+        profile,
+      });
+      const referenceIndex = mutation?.verificationReceipts?.findIndex(
+        (candidate) => candidate.receiptHash === receipt.receiptHash,
+      );
+      if (referenceIndex !== undefined && referenceIndex >= 0) {
+        mutation!.verificationReceipts![referenceIndex] = reference;
+      }
+    }
+  };
+}
+
+function receiptReferencesEqual(
+  left: WorkflowVerificationReceiptReference,
+  right: WorkflowVerificationReceiptReference,
+): boolean {
+  return sameStableValue(left, right);
+}
+
+async function validateCurrentVerificationReceipt(
+  prepared: PreparedWorkflowSubmission,
+  requirement: ResolvedWorkflowVerificationRequirement,
+  receipt: WorkflowVerificationReceipt,
+  reference: WorkflowVerificationReceiptReference,
+  scope: WorkflowDecisionScopeSnapshot,
+  contentSnapshotHash: string | null,
+): Promise<void> {
+  const identity = prepared.verified.identity;
+  const state = prepared.verified.state;
+  const runtime = state.workflowRuntime;
+  const attempt = runtime?.currentAttempt;
+  const expectedKinds = requirement.kinds;
+  if (
+    !receiptReferencesEqual(
+      workflowVerificationReceiptReference(receipt),
+      reference,
+    )
+  ) {
+    throw new Error(
+      verificationFailure(
+        `reference does not match stored receipt: ${receipt.receiptId}`,
+      ),
+    );
+  }
+  if (
+    receipt.runId !== state.runId ||
+    receipt.revision !== runtime?.revision ||
+    receipt.actionId !== prepared.pending.id ||
+    receipt.nodeId !== prepared.node ||
+    receipt.cycleId !== (attempt?.cycleId ?? null) ||
+    receipt.attemptId !== attempt?.id ||
+    receipt.protocolHash !== identity.protocolHash ||
+    receipt.packageHash !== identity.packageHash ||
+    receipt.snapshotHash !== identity.snapshotHash ||
+    !sameExecutionIdentity(receipt.execution, identity) ||
+    receipt.requirementId !== requirement.id ||
+    receipt.role !== requirement.role ||
+    !expectedKinds.includes(receipt.receiptKind) ||
+    receipt.scopeHash !== workflowScopeHash(scope) ||
+    !sameStableValue(receipt.scope, scope) ||
+    receipt.contentSnapshotHash !== contentSnapshotHash ||
+    !sameStableValue(
+      receipt.candidateArtifacts,
+      scope.artifacts.map((entry) => ({
+        artifactId: entry.id,
+        versionId: entry.versionId,
+        contentHash: entry.contentHash,
+        producer: entry.producer,
+      })),
+    )
+  ) {
+    throw new Error(verificationFailure(`is stale: ${receipt.receiptId}`));
+  }
+  for (const artifact of scope.artifacts) {
+    const version = runtime?.artifactVersions.find(
+      (candidate) => candidate.id === artifact.versionId,
+    );
+    if (!version) {
+      throw new Error(
+        verificationFailure(
+          `candidate artifact is missing: ${artifact.versionId}`,
+        ),
+      );
+    }
+    try {
+      await validateWorkflowArtifactVersion(
+        prepared.location.runRoot,
+        prepared.verified.package.runtime!.protocol,
+        version,
+      );
+    } catch (error) {
+      throw new Error(
+        verificationFailure(
+          `candidate artifact is stale: ${artifact.versionId} (${error instanceof Error ? error.message : String(error)})`,
+        ),
+      );
+    }
+  }
+}
+
+function receiptIdsForRequirement(
+  refs: readonly WorkflowVerificationReceiptReference[],
+  requirement: ResolvedWorkflowVerificationRequirement,
+  submittedIds: readonly string[],
+): WorkflowVerificationReceiptReference[] {
+  return refs.filter(
+    (reference) =>
+      reference.requirementId === requirement.id &&
+      (submittedIds.includes(reference.receiptId) ||
+        submittedIds.includes(reference.receiptHash)),
+  );
+}
+
+async function verificationMutationForSubmission(
+  prepared: PreparedWorkflowSubmission,
+  submission: WorkflowSubmission,
+  artifactMutation: WorkflowArtifactMutation | undefined,
+): Promise<{ mutation?: WorkflowArtifactMutation; blockers: string[] }> {
+  const input = normalizedVerificationSubmission(submission);
+  const submissionSucceeded =
+    isDecisionSubmission(submission) || submission.status === "succeeded";
+  if (input.proposals.length === 0 && input.receiptIds.length === 0) {
+    const node = prepared.verified.package.runtime!.protocol.nodes.find(
+      (candidate) => candidate.id === prepared.node,
+    );
+    const requirements = verificationRequirements(node);
+    return {
+      blockers: submissionSucceeded
+        ? requirements.map((requirement) =>
+            verificationFailure(`is required: ${requirement.id}`),
+          )
+        : [],
+    };
+  }
+  const profile = prepared.verified.identity.durabilityProfile;
+  if (!profile || !profile.capabilities.includes("verification-receipts")) {
+    return {
+      blockers: [
+        verificationFailure(
+          "submissions require the verification-receipts capability",
+        ),
+      ],
+    };
+  }
+  const node = prepared.verified.package.runtime!.protocol.nodes.find(
+    (candidate) => candidate.id === prepared.node,
+  );
+  const requirements = verificationRequirements(node);
+  if (requirements.length === 0) {
+    return {
+      blockers: [
+        verificationFailure("has no declared requirement for this Node"),
+      ],
+    };
+  }
+  const normalizedProposals: WorkflowVerificationReceiptProposal[] = [];
+  const blockers: string[] = [];
+  for (const proposal of input.proposals) {
+    try {
+      normalizedProposals.push(
+        normalizeWorkflowVerificationProposal(proposal, profile),
+      );
+    } catch (error) {
+      blockers.push(
+        error instanceof Error
+          ? error.message
+          : verificationFailure(String(error)),
+      );
+    }
+  }
+  if (blockers.length > 0) return { blockers };
+  const projectedState = workflowStateWithArtifactMutation(
+    prepared.verified.state,
+    artifactMutation,
+  );
+  const mutation: WorkflowArtifactMutation = {
+    versions: [],
+    selections: [],
+    artifactPaths: {},
+    selectedVersionIds: {},
+    verificationReceipts: [],
+    verificationReceiptRecords: [],
+  };
+  const usedProposalIndexes = new Set<number>();
+  const usedReceiptIds = new Set<string>();
+  for (const requirement of requirements) {
+    const matchingProposals = normalizedProposals
+      .map((proposal, index) => ({ proposal, index }))
+      .filter(
+        ({ proposal }) =>
+          (proposal.requirementId === undefined ||
+            proposal.requirementId === requirement.id) &&
+          (proposal.role === undefined || proposal.role === requirement.role) &&
+          requirement.kinds.includes(proposal.kind),
+      );
+    if (matchingProposals.length > 1) {
+      blockers.push(
+        verificationFailure(
+          `has duplicate proposals for requirement: ${requirement.id}`,
+        ),
+      );
+      continue;
+    }
+    const submittedRefs = receiptIdsForRequirement(
+      prepared.verified.state.workflowRuntime?.verificationReceipts ?? [],
+      requirement,
+      input.receiptIds,
+    );
+    if (matchingProposals.length > 0 && submittedRefs.length > 0) {
+      blockers.push(
+        verificationFailure(
+          `cannot submit a proposal and existing receipt together: ${requirement.id}`,
+        ),
+      );
+      continue;
+    }
+    if (matchingProposals.length === 0 && submittedRefs.length > 1) {
+      blockers.push(
+        verificationFailure(
+          `has multiple existing receipts for requirement: ${requirement.id}`,
+        ),
+      );
+      continue;
+    }
+    if (matchingProposals.length === 0 && submittedRefs.length === 0) {
+      if (submissionSucceeded) {
+        blockers.push(verificationFailure(`is required: ${requirement.id}`));
+      }
+      continue;
+    }
+    let expectedScope: WorkflowDecisionScopeSnapshot;
+    let expectedSnapshotHash: string | null;
+    try {
+      expectedScope = await captureWorkflowVerificationScope(
+        prepared,
+        requirement,
+        projectedState,
+      );
+      expectedSnapshotHash = await currentWorkflowContentSnapshotBinding(
+        prepared,
+        projectedState,
+      );
+    } catch (error) {
+      blockers.push(
+        error instanceof Error
+          ? error.message
+          : verificationFailure(String(error)),
+      );
+      continue;
+    }
+    if (requirement.requireContentSnapshot && expectedSnapshotHash === null) {
+      blockers.push(
+        verificationFailure(`requires a content snapshot: ${requirement.id}`),
+      );
+      continue;
+    }
+    if (matchingProposals.length > 0) {
+      const { proposal, index } = matchingProposals[0];
+      usedProposalIndexes.add(index);
+      if (
+        proposal.requirementId !== undefined &&
+        proposal.requirementId !== requirement.id
+      ) {
+        blockers.push(
+          verificationFailure(
+            `proposal requirement does not match: ${requirement.id}`,
+          ),
+        );
+        continue;
+      }
+      if (proposal.role !== undefined && proposal.role !== requirement.role) {
+        blockers.push(
+          verificationFailure(
+            `proposal role does not match: ${requirement.id}`,
+          ),
+        );
+        continue;
+      }
+      try {
+        workflowScopeSelectionMatches(expectedScope, proposal.scope);
+        if (proposal.artifactVersions !== undefined) {
+          for (const [requestedId, versionId] of Object.entries(
+            proposal.artifactVersions,
+          )) {
+            const declaration = workflowArtifactDeclaration(
+              prepared.verified.package.runtime!.protocol,
+              requestedId,
+            );
+            const expected = expectedScope.artifacts.find(
+              (reference) => reference.id === declaration.id,
+            );
+            if (!expected || expected.versionId !== versionId) {
+              throw new Error(
+                verificationFailure(
+                  `candidate artifact version is stale: ${requestedId}`,
+                ),
+              );
+            }
+          }
+        }
+        if (
+          proposal.contentSnapshotHash !== undefined &&
+          proposal.contentSnapshotHash !== expectedSnapshotHash
+        ) {
+          throw new Error(
+            verificationFailure(`content snapshot is stale: ${requirement.id}`),
+          );
+        }
+        const receipt = createWorkflowVerificationReceipt(
+          {
+            proposal,
+            requirementId: requirement.id,
+            role: requirement.role,
+            runId: prepared.verified.state.runId,
+            revision: prepared.verified.state.workflowRuntime?.revision ?? 0,
+            actionId: prepared.pending.id,
+            nodeId: prepared.node!,
+            cycleId:
+              prepared.verified.state.workflowRuntime?.currentAttempt
+                ?.cycleId ?? null,
+            attemptId:
+              prepared.verified.state.workflowRuntime?.currentAttempt?.id ?? "",
+            execution: structuredClone(prepared.verified.identity),
+            protocolHash: prepared.verified.identity.protocolHash,
+            packageHash: prepared.verified.identity.packageHash,
+            snapshotHash: prepared.verified.identity.snapshotHash,
+            scope: expectedScope,
+            contentSnapshotHash: expectedSnapshotHash,
+          },
+          profile,
+        );
+        const reference = workflowVerificationReceiptReference(receipt);
+        mutation.verificationReceipts!.push(reference);
+        mutation.verificationReceiptRecords!.push(receipt);
+        if (submissionSucceeded && receipt.status !== "passed") {
+          blockers.push(
+            verificationFailure(
+              `does not pass requirement ${requirement.id}: ${receipt.status}`,
+            ),
+          );
+        }
+      } catch (error) {
+        blockers.push(
+          error instanceof Error
+            ? error.message
+            : verificationFailure(String(error)),
+        );
+      }
+      continue;
+    }
+    const reference = submittedRefs[0];
+    for (const submittedId of input.receiptIds) {
+      if (
+        submittedId === reference.receiptId ||
+        submittedId === reference.receiptHash
+      ) {
+        usedReceiptIds.add(submittedId);
+      }
+    }
+    if (!profile.capabilities.includes("verification-receipts")) {
+      blockers.push(
+        verificationFailure(
+          "reuse requires the verification-receipts capability",
+        ),
+      );
+      continue;
+    }
+    let receipt: WorkflowVerificationReceipt | null;
+    try {
+      receipt = await readWorkflowVerificationReceipt(
+        prepared.location.runRoot,
+        reference.receiptHash,
+        profile,
+      );
+      if (!receipt)
+        throw new Error(
+          verificationFailure(`is missing: ${reference.receiptId}`),
+        );
+      await validateCurrentVerificationReceipt(
+        prepared,
+        requirement,
+        receipt,
+        reference,
+        expectedScope,
+        expectedSnapshotHash,
+      );
+      mutation.verificationReceipts!.push(reference);
+      if (submissionSucceeded && receipt.status !== "passed") {
+        blockers.push(
+          verificationFailure(
+            `does not pass requirement ${requirement.id}: ${receipt.status}`,
+          ),
+        );
+      }
+    } catch (error) {
+      blockers.push(
+        error instanceof Error
+          ? error.message
+          : verificationFailure(String(error)),
+      );
+    }
+  }
+  for (const [index, proposal] of normalizedProposals.entries()) {
+    if (!usedProposalIndexes.has(index)) {
+      blockers.push(
+        verificationFailure(
+          `proposal does not match a declared requirement: ${proposal.requirementId ?? proposal.role ?? proposal.kind}`,
+        ),
+      );
+    }
+  }
+  for (const receiptId of input.receiptIds) {
+    if (!usedReceiptIds.has(receiptId)) {
+      blockers.push(
+        verificationFailure(
+          `receipt reference does not match a declared requirement: ${receiptId}`,
+        ),
+      );
+    }
+  }
+  const existingCount =
+    prepared.verified.state.workflowRuntime?.verificationReceipts.length ?? 0;
+  const newIds = new Set(
+    mutation.verificationReceipts!.map((reference) => reference.receiptId),
+  );
+  const newCount = [...newIds].filter(
+    (id) =>
+      !(
+        prepared.verified.state.workflowRuntime?.verificationReceipts ?? []
+      ).some((reference) => reference.receiptId === id),
+  ).length;
+  if (
+    profile.bounds.verificationReceiptCount !== undefined &&
+    existingCount + newCount > profile.bounds.verificationReceiptCount
+  ) {
+    blockers.push(verificationFailure("count exceeds its configured bound"));
+  }
+  return {
+    mutation: blockers.length === 0 ? mutation : mutation,
+    blockers,
+  };
 }
 
 function blockedContinuation(
@@ -2082,6 +3505,9 @@ function blockedContinuation(
     execution: structuredClone(prepared.verified.identity),
     decisionReceipts: structuredClone(
       prepared.verified.state.workflowRuntime?.decisionReceipts ?? [],
+    ),
+    verificationReceipts: structuredClone(
+      prepared.verified.state.workflowRuntime?.verificationReceipts ?? [],
     ),
     cycles: structuredClone(
       prepared.verified.state.workflowRuntime?.cycles ?? [],
@@ -2252,17 +3678,29 @@ export async function validateWorkflowSubmission(
       }
       throw error;
     }
-    const blockers = await completionBlockers(prepared, submission);
-    if (blockers.length > 0) {
-      return blockedContinuation(prepared, blockers);
-    }
-    const routeFindings = routeBlockers(prepared, submission);
-    if (routeFindings.length > 0) {
-      return blockedContinuation(prepared, routeFindings);
-    }
     const artifact = await artifactMutationForSubmission(prepared, submission);
     if (artifact.blockers.length > 0) {
       return blockedContinuation(prepared, artifact.blockers);
+    }
+    const verification = await verificationMutationForSubmission(
+      prepared,
+      submission,
+      artifact.mutation,
+    );
+    if (verification.blockers.length > 0) {
+      return blockedContinuation(prepared, verification.blockers);
+    }
+    const mutation = mergeWorkflowMutations(
+      artifact.mutation,
+      verification.mutation,
+    );
+    const blockers = await completionBlockers(prepared, submission, mutation);
+    if (blockers.length > 0) {
+      return blockedContinuation(prepared, blockers);
+    }
+    const routeFindings = routeBlockers(prepared, submission, mutation);
+    if (routeFindings.length > 0) {
+      return blockedContinuation(prepared, routeFindings);
     }
     return continuationFromVerifiedRun(
       prepared.verified,
@@ -2307,6 +3745,9 @@ export async function projectWorkflowHandoff(
     outputSchemas: structuredClone(protocol.outputSchemas),
     decisionReceipts: boundProjectedLedger(
       projectedCurrent?.decisionReceipts ?? [],
+    ),
+    verificationReceipts: boundProjectedLedger(
+      projectedCurrent?.verificationReceipts ?? [],
     ),
     cycles: boundProjectedLedger(projectedCurrent?.cycles ?? []),
     visits:
@@ -2913,6 +4354,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                       cycles: [],
                       visits: [],
                       decisionReceipts: [],
+                      verificationReceipts: [],
                       artifactVersions: [],
                       artifactSelections: [],
                       ...(usesWorkflowContentSnapshots(
@@ -3016,14 +4458,6 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               }
               throw error;
             }
-            const blockers = await completionBlockers(prepared, submission);
-            if (blockers.length > 0) {
-              return blockedContinuation(prepared, blockers);
-            }
-            const routeFindings = routeBlockers(prepared, submission);
-            if (routeFindings.length > 0) {
-              return blockedContinuation(prepared, routeFindings);
-            }
             const artifact = await artifactMutationForSubmission(
               prepared,
               submission,
@@ -3031,19 +4465,43 @@ export function createWorkflowRuntime(): WorkflowRuntime {
             if (artifact.blockers.length > 0) {
               return blockedContinuation(prepared, artifact.blockers);
             }
-            const outcome = engineOutcome(
+            const verification = await verificationMutationForSubmission(
               prepared,
               submission,
               artifact.mutation,
             );
+            if (verification.blockers.length > 0) {
+              return blockedContinuation(prepared, verification.blockers);
+            }
+            const mutation = mergeWorkflowMutations(
+              artifact.mutation,
+              verification.mutation,
+            );
+            const blockers = await completionBlockers(
+              prepared,
+              submission,
+              mutation,
+            );
+            if (blockers.length > 0) {
+              return blockedContinuation(prepared, blockers);
+            }
+            const routeFindings = routeBlockers(prepared, submission, mutation);
+            if (routeFindings.length > 0) {
+              return blockedContinuation(prepared, routeFindings);
+            }
+            const outcome = engineOutcome(prepared, submission, mutation);
             if (prepared.verified.identity.durabilityProfile === undefined) {
               const result = await prepared.location.resume(
                 {
                   resolver: resolverForPackage(),
                   outcome,
                   prepareAction: prepareWorkflowActionForLocation(location),
+                  prepareOutcome: prepareVerificationReceiptRecords(
+                    mutation,
+                    prepared.verified.identity.durabilityProfile,
+                  ),
                 },
-                artifact.mutation,
+                mutation,
               );
               return continuation(result, prepared.verified.identity);
             }
@@ -3076,12 +4534,16 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                   resolver: resolverForPackage(),
                   outcome,
                   prepareAction: prepareWorkflowActionForLocation(location),
+                  prepareOutcome: prepareVerificationReceiptRecords(
+                    mutation,
+                    prepared.verified.identity.durabilityProfile,
+                  ),
                   revisionFence: () =>
                     assertRevisionFence(prepared.location, claimInput),
                   revisionStateFence: () =>
                     assertRevisionFence(prepared.location, claimInput, false),
                 },
-                artifact.mutation,
+                mutation,
               );
               await claim.commit();
               await persistWorkflowCheckpoint(

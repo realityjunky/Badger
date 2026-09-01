@@ -21,6 +21,7 @@ The package includes:
 - immutable Attempt-, Cycle-, and Run-lifetime artifact versions with protected content hashes and explicit carry-forward;
 - bounded Decision Receipt scope references tied to accepted artifact and evidence versions;
 - bounded, content-addressed physical-tree and Git-aware snapshots for explicitly declared project scopes;
+- immutable, content-addressed Verification Receipts for automated checks, static inspections, and manual evidence, with bounded redacted summaries and freshness enforcement;
 - versioned structured findings with bounded redaction, deterministic ordering, continuation dispositions, and derived legacy blockers;
 - official/private differential observations for the pinned Engine behavior.
 

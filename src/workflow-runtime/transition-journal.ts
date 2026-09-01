@@ -40,6 +40,7 @@ const RECORD_ORDER = [
   "state",
   "pending",
   "artifacts",
+  "verification-receipt",
   "trajectory",
   "revision-claim",
 ] as const;
@@ -374,6 +375,9 @@ function recordKind(relativePath: string): WorkflowTransitionRecordKind {
   if (relativePath === STATE_PATH) return "state";
   if (relativePath.endsWith("/pending-action.json")) return "pending";
   if (relativePath.endsWith("/artifacts.json")) return "artifacts";
+  if (relativePath.startsWith(".comet/verification-receipts/")) {
+    return "verification-receipt";
+  }
   if (relativePath.endsWith("/trajectory.jsonl")) return "trajectory";
   if (relativePath.startsWith(".comet/revision-claims/")) {
     return "revision-claim";
@@ -614,6 +618,7 @@ export function parseWorkflowTransitionJournal(
       kind !== "state" &&
       kind !== "pending" &&
       kind !== "artifacts" &&
+      kind !== "verification-receipt" &&
       kind !== "trajectory" &&
       kind !== "revision-claim" &&
       kind !== "other"
@@ -731,6 +736,12 @@ function recordMaxBytes(
   if (kind === "state") return profile.bounds.runStateBytes;
   if (kind === "pending") return profile.bounds.pendingActionBytes;
   if (kind === "artifacts") return profile.bounds.artifactsBytes;
+  if (kind === "verification-receipt") {
+    if (profile.bounds.verificationReceiptBytes === undefined) {
+      throw new Error("Workflow verification receipt bound is missing");
+    }
+    return profile.bounds.verificationReceiptBytes;
+  }
   if (kind === "trajectory") return profile.bounds.trajectoryBytes;
   if (kind === "revision-claim") return profile.bounds.claimBytes;
   return journalMaxBytes(profile);

@@ -56,6 +56,19 @@ export type {
 } from "../types.js";
 
 export type {
+  WorkflowVerificationArtifactReference,
+  WorkflowVerificationEvidence,
+  WorkflowVerificationKind,
+  WorkflowVerificationReceipt,
+  WorkflowVerificationReceiptProposal,
+  WorkflowVerificationReceiptReference,
+  WorkflowVerificationStatus,
+  WorkflowVerificationRequirement,
+  WorkflowVerificationSubmission,
+  WorkflowVerificationPolicy,
+} from "../types.js";
+
+export type {
   WorkflowDurabilityBounds,
   WorkflowDurabilityCapability,
   WorkflowDurabilityProfile,

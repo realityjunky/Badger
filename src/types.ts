@@ -1,3 +1,5 @@
+import type { RuntimeIdentity } from "./engine/types.js";
+
 export type CreatorIntent = "new-skill" | "upgrade-existing";
 
 export type NodeKind =
@@ -59,6 +61,7 @@ export interface Guardrail {
   id: string;
   label: string;
   validation: ValidationKind;
+  verification?: WorkflowVerificationRequirement;
 }
 
 export type DecisionScalarType = "string" | "number" | "boolean";
@@ -151,6 +154,95 @@ export interface WorkflowDecisionScopeSelectionReference {
 export interface WorkflowDecisionScopeSelection {
   artifacts?: WorkflowDecisionScopeSelectionReference[];
   evidence?: WorkflowDecisionScopeSelectionReference[];
+}
+
+export type WorkflowVerificationKind =
+  "automated-check" | "static-inspection" | "manual-evidence";
+export type WorkflowVerificationStatus =
+  "passed" | "failed" | "skipped" | "blocked";
+
+export interface WorkflowVerificationEvidence {
+  summary: string;
+  outputHash: string;
+  durationMs: number;
+  truncated: boolean;
+}
+
+export interface WorkflowVerificationRequirement {
+  id?: string;
+  role: string;
+  kind: WorkflowVerificationKind | WorkflowVerificationKind[];
+  scope?: WorkflowDecisionScope;
+  requireContentSnapshot?: boolean;
+}
+
+export interface WorkflowVerificationArtifactReference {
+  artifactId: WorkflowArtifactId;
+  versionId: WorkflowArtifactVersionId;
+  contentHash: string;
+  producer: WorkflowArtifactProducer;
+}
+
+interface WorkflowVerificationReceiptFields {
+  schemaVersion: 1;
+  receiptId: string;
+  receiptHash: string;
+  receiptKind: WorkflowVerificationKind;
+  status: WorkflowVerificationStatus;
+  requirementId: string;
+  role: string;
+  runId: string;
+  revision: number;
+  actionId: string;
+  nodeId: string;
+  cycleId: string | null;
+  attemptId: string;
+  execution: RuntimeIdentity;
+  protocolHash: string;
+  packageHash: string;
+  snapshotHash: string;
+  scopeHash: string;
+  contentSnapshotHash: string | null;
+  candidateArtifacts: WorkflowVerificationArtifactReference[];
+  verifierSubject: string;
+  provider: string;
+  issuedAt: string;
+  evidenceHash: string;
+  truncated: boolean;
+}
+
+export interface WorkflowVerificationReceiptReference extends WorkflowVerificationReceiptFields {
+  kind: "workflow-verification-receipt-reference";
+}
+
+export interface WorkflowVerificationReceipt extends WorkflowVerificationReceiptFields {
+  kind: "workflow-verification-receipt";
+  scope: WorkflowDecisionScopeSnapshot;
+  evidence: WorkflowVerificationEvidence;
+}
+
+export interface WorkflowVerificationReceiptProposal {
+  kind: WorkflowVerificationKind;
+  status: WorkflowVerificationStatus;
+  requirementId?: string;
+  role?: string;
+  scope?: WorkflowDecisionScopeSelection;
+  artifactVersions?: Record<WorkflowArtifactId, WorkflowArtifactVersionId>;
+  contentSnapshotHash?: string | null;
+  verifierSubject?: string;
+  verifier?: string;
+  provider?: string;
+  providerId?: string;
+  evidence?: WorkflowVerificationEvidence;
+  summary?: string;
+  outputHash?: string;
+  durationMs?: number;
+  truncated?: boolean;
+}
+
+export interface WorkflowVerificationSubmission {
+  proposals?: WorkflowVerificationReceiptProposal[];
+  receiptIds?: string[];
 }
 
 export interface NodeTemplate {
@@ -262,7 +354,8 @@ export type WorkflowDurabilityCapability =
   | "revision-fences"
   | "transition-journal"
   | "verified-checkpoints"
-  | "content-snapshots";
+  | "content-snapshots"
+  | "verification-receipts";
 
 export type WorkflowContentSnapshotProvider = "physical-tree" | "git";
 export type WorkflowContentSnapshotOrigin = "explicit";
@@ -430,6 +523,8 @@ export interface WorkflowDurabilityBounds {
   checkpointManifestBytes?: number;
   checkpointRecordBytes?: number;
   checkpointCount?: number;
+  verificationReceiptBytes?: number;
+  verificationReceiptCount?: number;
 }
 
 export interface WorkflowDurabilitySchemaVersions {
@@ -443,6 +538,12 @@ export interface WorkflowDurabilitySchemaVersions {
   checkpointManifest?: 1;
   checkpointRecord?: 1;
   contentSnapshot?: 1;
+  verificationReceipt?: 1;
+}
+
+export interface WorkflowVerificationPolicy {
+  maxSummaryBytes: number;
+  maxEvidenceBytes: number;
 }
 
 export interface WorkflowDurabilityProfile {
@@ -452,6 +553,7 @@ export interface WorkflowDurabilityProfile {
   schemaVersions: WorkflowDurabilitySchemaVersions;
   findingCatalogVersion: 1;
   snapshotPolicy?: WorkflowContentSnapshotPolicy;
+  verificationPolicy?: WorkflowVerificationPolicy;
 }
 
 export interface WorkflowProtocolCapabilities {
@@ -744,6 +846,7 @@ export interface WorkflowDecisionReceipt {
   protocolHash: string;
   packageHash: string;
   snapshotHash: string;
+  verificationReceiptIds?: string[];
 }
 
 export interface WorkflowArtifactProducer {

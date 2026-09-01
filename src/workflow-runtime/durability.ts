@@ -14,6 +14,7 @@ const PROFILE_KEYS = new Set([
   "schemaVersions",
   "findingCatalogVersion",
   "snapshotPolicy",
+  "verificationPolicy",
 ]);
 const CAPABILITIES = new Set([
   "mutation-locks",
@@ -21,6 +22,7 @@ const CAPABILITIES = new Set([
   "transition-journal",
   "verified-checkpoints",
   "content-snapshots",
+  "verification-receipts",
 ]);
 const BOUND_KEY_NAMES = [
   "runStateBytes",
@@ -36,6 +38,8 @@ const BOUND_KEYS = new Set<string>([
   "checkpointManifestBytes",
   "checkpointRecordBytes",
   "checkpointCount",
+  "verificationReceiptBytes",
+  "verificationReceiptCount",
 ]);
 const SCHEMA_KEY_NAMES = [
   "runState",
@@ -51,9 +55,15 @@ const SCHEMA_KEYS = new Set<string>([
   "checkpointManifest",
   "checkpointRecord",
   "contentSnapshot",
+  "verificationReceipt",
 ]);
 const MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
 const MAX_CHECKPOINT_COUNT = 256;
+const MAX_VERIFICATION_RECEIPT_COUNT = 256;
+const VERIFICATION_POLICY_KEYS = new Set([
+  "maxSummaryBytes",
+  "maxEvidenceBytes",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -94,6 +104,51 @@ function requiredCheckpointCount(value: unknown): number {
     );
   }
   return value;
+}
+
+function requiredVerificationReceiptCount(value: unknown): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > MAX_VERIFICATION_RECEIPT_COUNT
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: bounds.verificationReceiptCount must be a positive bounded integer",
+    );
+  }
+  return value;
+}
+
+function parseVerificationPolicy(value: unknown): {
+  maxSummaryBytes: number;
+  maxEvidenceBytes: number;
+} {
+  if (!isRecord(value)) {
+    throw new Error("Invalid Workflow verification policy: must be an object");
+  }
+  assertKnownFields(
+    value,
+    VERIFICATION_POLICY_KEYS,
+    "Workflow verification policy",
+  );
+  const maxSummaryBytes = requiredBound(
+    value.maxSummaryBytes,
+    "verificationPolicy.maxSummaryBytes",
+  );
+  const maxEvidenceBytes = requiredBound(
+    value.maxEvidenceBytes,
+    "verificationPolicy.maxEvidenceBytes",
+  );
+  if (maxSummaryBytes > maxEvidenceBytes) {
+    throw new Error(
+      "Invalid Workflow verification policy: maxSummaryBytes cannot exceed maxEvidenceBytes",
+    );
+  }
+  return {
+    maxSummaryBytes,
+    maxEvidenceBytes,
+  };
 }
 
 export function parseWorkflowDurabilityProfile(
@@ -171,6 +226,17 @@ export function parseWorkflowDurabilityProfile(
       boundsValue.checkpointCount,
     );
   }
+  if (boundsValue.verificationReceiptBytes !== undefined) {
+    bounds.verificationReceiptBytes = requiredBound(
+      boundsValue.verificationReceiptBytes,
+      "verificationReceiptBytes",
+    );
+  }
+  if (boundsValue.verificationReceiptCount !== undefined) {
+    bounds.verificationReceiptCount = requiredVerificationReceiptCount(
+      boundsValue.verificationReceiptCount,
+    );
+  }
   if (!isRecord(value.schemaVersions)) {
     throw new Error(
       "Invalid Workflow durability profile: schemaVersions must be an object",
@@ -225,6 +291,15 @@ export function parseWorkflowDurabilityProfile(
   ) {
     throw new Error(
       "Unsupported Workflow durability schema version: contentSnapshot",
+    );
+  }
+  const verificationReceipt = value.schemaVersions.verificationReceipt;
+  if (
+    verificationReceipt !== undefined &&
+    verificationReceipt !== WORKFLOW_DURABILITY_SCHEMA_VERSION
+  ) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: verificationReceipt",
     );
   }
   if (
@@ -284,6 +359,29 @@ export function parseWorkflowDurabilityProfile(
       "Invalid Workflow durability profile: content-snapshots requires mutation locks, revision fences, transition journal, snapshot policy, and schema version",
     );
   }
+  let verificationPolicy:
+    WorkflowDurabilityProfile["verificationPolicy"] | undefined;
+  if (value.verificationPolicy !== undefined) {
+    verificationPolicy = parseVerificationPolicy(value.verificationPolicy);
+    if (!capabilities.includes("verification-receipts")) {
+      throw new Error(
+        "Invalid Workflow durability profile: verificationPolicy requires verification-receipts",
+      );
+    }
+  }
+  if (
+    capabilities.includes("verification-receipts") &&
+    (!capabilities.includes("mutation-locks") ||
+      !capabilities.includes("revision-fences") ||
+      !capabilities.includes("transition-journal") ||
+      bounds.verificationReceiptBytes === undefined ||
+      bounds.verificationReceiptCount === undefined ||
+      verificationReceipt !== WORKFLOW_DURABILITY_SCHEMA_VERSION)
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: verification-receipts requires mutation locks, revision fences, transition journal, receipt bounds, and schema version",
+    );
+  }
   if (value.findingCatalogVersion !== WORKFLOW_FINDING_CATALOG_VERSION) {
     throw new Error(
       `Unsupported Workflow durability finding catalog version: ${String(value.findingCatalogVersion)}`,
@@ -314,9 +412,13 @@ export function parseWorkflowDurabilityProfile(
       ...(contentSnapshot === WORKFLOW_DURABILITY_SCHEMA_VERSION
         ? { contentSnapshot: WORKFLOW_DURABILITY_SCHEMA_VERSION }
         : {}),
+      ...(verificationReceipt === WORKFLOW_DURABILITY_SCHEMA_VERSION
+        ? { verificationReceipt: WORKFLOW_DURABILITY_SCHEMA_VERSION }
+        : {}),
     },
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,
     ...(snapshotPolicy ? { snapshotPolicy } : {}),
+    ...(verificationPolicy ? { verificationPolicy } : {}),
   };
 }
 

@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type {
   RuntimeIdentity,
@@ -80,7 +81,15 @@ function manualLocation(runRoot: string): ResolvedWorkflowRunLocation {
     async readState() {
       return readRunState(validatedRoot);
     },
-    async prepareStart() {},
+    async prepareStart() {
+      await fs.mkdir(validatedRoot, { recursive: true });
+      const stat = await fs.lstat(validatedRoot);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        throw new Error(
+          "WorkflowRuntime manual Run root must be a real directory",
+        );
+      }
+    },
   };
 }
 

@@ -95,6 +95,11 @@ const WORKFLOW_FINDING_CODES = [
   "tool-not-allowed",
   "unknown-current-step",
   "unknown-next-step",
+  "verification-receipt-required",
+  "verification-receipt-invalid",
+  "verification-receipt-stale",
+  "verification-receipt-failed",
+  "verification-receipt-storage-failed",
 ] as const;
 export type WorkflowFindingCode = (typeof WORKFLOW_FINDING_CODES)[number];
 
@@ -956,6 +961,59 @@ const blockerCatalog: Array<{
       code: "artifact-stale-attempt",
       severity: "error",
       requiredAction: "repair",
+    },
+  },
+  {
+    match: /^Workflow Verification Receipt is required:/u,
+    entry: {
+      code: "verification-receipt-required",
+      severity: "error",
+      requiredAction: "repair",
+      operationId: "workflow.submit",
+    },
+  },
+  {
+    match:
+      /^Workflow Verification Receipt (?:is stale:|content snapshot is stale:|artifact scope is stale:|candidate artifact is stale:)/u,
+    entry: {
+      code: "verification-receipt-stale",
+      severity: "error",
+      requiredAction: "repair",
+      operationId: "workflow.submit",
+    },
+  },
+  {
+    match: /^Workflow Verification Receipt does not pass requirement:/u,
+    entry: {
+      code: "verification-receipt-failed",
+      severity: "error",
+      requiredAction: "repair",
+      operationId: "workflow.submit",
+    },
+  },
+  {
+    match:
+      /^Workflow Verification Receipt (?:is missing:|identity is invalid:|duplicate identity conflicts|is not valid JSON|record exceeds)/u,
+    entry: {
+      code: "verification-receipt-invalid",
+      severity: "error",
+      requiredAction: "stop",
+    },
+  },
+  {
+    match: /^Workflow Verification Receipt persistence/u,
+    entry: {
+      code: "verification-receipt-storage-failed",
+      severity: "error",
+      requiredAction: "stop",
+    },
+  },
+  {
+    match: /verification receipt|verificationReceipts/iu,
+    entry: {
+      code: "verification-receipt-invalid",
+      severity: "error",
+      requiredAction: "stop",
     },
   },
   {

@@ -31,6 +31,7 @@ import {
   WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
 } from "../workflow-runtime/durability.js";
 import { parseWorkflowContentSnapshotReference } from "../workflow-runtime/snapshots.js";
+import { parseWorkflowVerificationReceiptReference } from "../workflow-runtime/verification-receipts.js";
 
 export type StateDocument = Record<string, unknown>;
 
@@ -452,6 +453,7 @@ function parseDecisionReceipt(
     "protocolHash",
     "packageHash",
     "snapshotHash",
+    "verificationReceiptIds",
   ]);
   const unknown = Object.keys(receipt).find((key) => !keys.has(key));
   if (unknown)
@@ -519,6 +521,29 @@ function parseDecisionReceipt(
     }
     evidenceReferences = [...(receipt.evidenceReferences as string[])];
   }
+  let verificationReceiptIds: string[] | undefined;
+  if (receipt.verificationReceiptIds !== undefined) {
+    if (
+      !Array.isArray(receipt.verificationReceiptIds) ||
+      receipt.verificationReceiptIds.length > 64 ||
+      receipt.verificationReceiptIds.some(
+        (reference) => typeof reference !== "string" || reference.length === 0,
+      )
+    ) {
+      throw new Error(
+        `Invalid Run state: ${label}.verificationReceiptIds must be bounded strings`,
+      );
+    }
+    if (
+      new Set(receipt.verificationReceiptIds).size !==
+      receipt.verificationReceiptIds.length
+    ) {
+      throw new Error(
+        `Invalid Run state: ${label}.verificationReceiptIds must not contain duplicates`,
+      );
+    }
+    verificationReceiptIds = [...(receipt.verificationReceiptIds as string[])];
+  }
   const scope =
     receipt.scope === undefined
       ? undefined
@@ -540,6 +565,7 @@ function parseDecisionReceipt(
       : {}),
     ...(evidenceReferences ? { evidenceReferences } : {}),
     ...(scope ? { scope } : {}),
+    ...(verificationReceiptIds ? { verificationReceiptIds } : {}),
     timestamp: requiredJsonString(receipt.timestamp, "timestamp"),
     protocolHash,
     packageHash,
@@ -653,6 +679,7 @@ function parseWorkflowOutcome(
     "routing",
     "evidence",
     "artifactVersions",
+    "verificationReceiptIds",
   ]);
   const unknown = Object.keys(outcome).find((key) => !keys.has(key));
   if (unknown)
@@ -696,6 +723,35 @@ function parseWorkflowOutcome(
             `${label}.artifactVersions`,
           ),
         }
+      : {}),
+    ...(outcome.verificationReceiptIds !== undefined
+      ? (() => {
+          if (
+            !Array.isArray(outcome.verificationReceiptIds) ||
+            outcome.verificationReceiptIds.length > 64 ||
+            outcome.verificationReceiptIds.some(
+              (reference) =>
+                typeof reference !== "string" || reference.length === 0,
+            )
+          ) {
+            throw new Error(
+              `Invalid Run state: ${label}.verificationReceiptIds must be bounded strings`,
+            );
+          }
+          if (
+            new Set(outcome.verificationReceiptIds).size !==
+            outcome.verificationReceiptIds.length
+          ) {
+            throw new Error(
+              `Invalid Run state: ${label}.verificationReceiptIds must not contain duplicates`,
+            );
+          }
+          return {
+            verificationReceiptIds: [
+              ...(outcome.verificationReceiptIds as string[]),
+            ],
+          };
+        })()
       : {}),
   };
 }
@@ -913,6 +969,7 @@ function parseWorkflowArtifactSelection(
 function parseWorkflowRuntime(
   value: unknown,
   runId: string,
+  durabilityProfile?: import("../types.js").WorkflowDurabilityProfile,
 ): WorkflowRuntimeState | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -927,6 +984,7 @@ function parseWorkflowRuntime(
     "cycles",
     "visits",
     "decisionReceipts",
+    "verificationReceipts",
     "artifactVersions",
     "artifactSelections",
     "contentSnapshots",
@@ -1006,6 +1064,38 @@ function parseWorkflowRuntime(
         : (() => {
             throw new Error(
               "Invalid Run state: WorkflowRuntime decisionReceipts must be an array",
+            );
+          })();
+  const verificationReceipts =
+    runtime.verificationReceipts === undefined
+      ? []
+      : Array.isArray(runtime.verificationReceipts)
+        ? (() => {
+            if (!durabilityProfile && runtime.verificationReceipts.length > 0) {
+              throw new Error(
+                "Invalid Run state: verification receipts require a durability profile",
+              );
+            }
+            if (!durabilityProfile) return [];
+            const maxCount = durabilityProfile.bounds.verificationReceiptCount;
+            if (
+              maxCount !== undefined &&
+              runtime.verificationReceipts.length > maxCount
+            ) {
+              throw new Error(
+                "Invalid Run state: WorkflowRuntime verificationReceipts exceeds its bound",
+              );
+            }
+            return runtime.verificationReceipts.map((receipt, index) =>
+              parseWorkflowVerificationReceiptReference(
+                receipt,
+                durabilityProfile,
+              ),
+            );
+          })()
+        : (() => {
+            throw new Error(
+              "Invalid Run state: WorkflowRuntime verificationReceipts must be an array",
             );
           })();
   const artifactVersions =
@@ -1129,6 +1219,25 @@ function parseWorkflowRuntime(
     }
     receiptActionIds.add(receipt.actionId);
   }
+  const verificationReceiptIds = new Set<string>();
+  for (const receipt of verificationReceipts) {
+    if (verificationReceiptIds.has(receipt.receiptId)) {
+      throw new Error(
+        `Invalid Run state: duplicate WorkflowRuntime Verification Receipt ${receipt.receiptId}`,
+      );
+    }
+    verificationReceiptIds.add(receipt.receiptId);
+    if (receipt.runId !== runId) {
+      throw new Error(
+        `Invalid Run state: Verification Receipt ${receipt.receiptId} belongs to another Run`,
+      );
+    }
+    if (receipt.revision >= revision) {
+      throw new Error(
+        `Invalid Run state: Verification Receipt ${receipt.receiptId} has a future revision`,
+      );
+    }
+  }
   let outcomeCount = 0;
   for (const visit of visits) {
     if (attemptIds.has(visit.attemptId)) {
@@ -1206,6 +1315,7 @@ function parseWorkflowRuntime(
     cycles,
     visits,
     decisionReceipts,
+    verificationReceipts,
     artifactVersions,
     artifactSelections,
     ...(contentSnapshots ? { contentSnapshots } : {}),
@@ -1360,7 +1470,11 @@ function parseRunStateJson(value: unknown): RunStateJson {
     };
   }
 
-  const workflowRuntime = parseWorkflowRuntime(json.workflowRuntime, runId);
+  const workflowRuntime = parseWorkflowRuntime(
+    json.workflowRuntime,
+    runId,
+    runtimeIdentity?.durabilityProfile,
+  );
 
   return {
     runId,

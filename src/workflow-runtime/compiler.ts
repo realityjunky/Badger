@@ -18,6 +18,7 @@ import { validateSkillPackage } from "../skill-runtime/validate.js";
 import { sha256, slug, stableValue } from "../util.js";
 import type { WorkflowExecutionIdentity } from "./types.js";
 import { createCompletionPlan } from "./completion.js";
+import { validateWorkflowVerificationRequirement } from "./verification-receipts.js";
 import {
   isRevisionedWorkflowProtocol,
   maxWorkflowIterations,
@@ -231,6 +232,7 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
   }
   const nodeIds = new Set<string>();
   const decisionIds = new Set<string>();
+  const verificationRequirementIds = new Set<string>();
   for (const node of protocol.nodes) {
     if (!node || typeof node !== "object") {
       throw new Error("Workflow Protocol Nodes must be objects");
@@ -286,6 +288,28 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
         throw new Error(
           `Workflow Protocol Node ${node.id} guardrail must have an id and label`,
         );
+      }
+      if (guardrail.verification !== undefined) {
+        validateWorkflowVerificationRequirement(
+          guardrail.verification,
+          `Workflow Protocol Node ${node.id} guardrail ${guardrail.id} verification`,
+        );
+        if (
+          !protocol.capabilities?.durability?.capabilities.includes(
+            "verification-receipts",
+          )
+        ) {
+          throw new Error(
+            `Workflow Protocol Node ${node.id} verification guardrails require verification-receipts durability`,
+          );
+        }
+        const verificationId = guardrail.verification.id ?? guardrail.id;
+        if (verificationRequirementIds.has(verificationId)) {
+          throw new Error(
+            `Workflow Protocol has duplicate verification requirement: ${verificationId}`,
+          );
+        }
+        verificationRequirementIds.add(verificationId);
       }
     }
     for (const schemaId of node.outputSchemas) {
@@ -652,6 +676,16 @@ export async function compileWorkflow(
   ) {
     throw new Error(
       "Workflow Protocol verified checkpoints require revisioned capabilities",
+    );
+  }
+  if (
+    executableProtocol.capabilities?.durability?.capabilities.includes(
+      "verification-receipts",
+    ) &&
+    !revisioned
+  ) {
+    throw new Error(
+      "Workflow Protocol verification receipts require revisioned capabilities",
     );
   }
   if (revisioned && executableProtocol.capabilities?.version !== 3) {

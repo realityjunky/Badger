@@ -11,6 +11,7 @@ import type {
   WorkflowContentSnapshotReference,
   WorkflowDurabilityProfile,
   WorkflowReviewerAttestation,
+  WorkflowVerificationReceiptReference,
 } from "../types.js";
 
 export type RunStatus = "running" | "waiting" | "completed" | "failed";
@@ -53,6 +54,7 @@ export interface WorkflowVisitOutcome {
   routing?: Record<string, string>;
   evidence?: Record<string, unknown>;
   artifactVersions?: Record<string, string>;
+  verificationReceiptIds?: string[];
 }
 
 export interface WorkflowVisitState {
@@ -71,6 +73,7 @@ export interface WorkflowRuntimeState {
   cycles: WorkflowCycleState[];
   visits: WorkflowVisitState[];
   decisionReceipts: WorkflowDecisionReceipt[];
+  verificationReceipts: WorkflowVerificationReceiptReference[];
   artifactVersions: WorkflowArtifactVersion[];
   artifactSelections: WorkflowArtifactSelection[];
   contentSnapshots?: WorkflowContentSnapshotReference[];
@@ -126,6 +129,7 @@ export interface ActionOutcome {
   evidenceReferences?: string[];
   scope?: WorkflowDecisionScopeSnapshot;
   artifactVersions?: Record<WorkflowArtifactId, WorkflowArtifactVersionId>;
+  verificationReceiptIds?: string[];
 }
 
 export interface TrajectoryEvent {
