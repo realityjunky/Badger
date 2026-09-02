@@ -178,14 +178,22 @@ Apply prepares `.comet/finalization/transaction.json` before touching an
 approved file. The bounded journal records prepared, applying, committed,
 rolling-back, and rolled-back states plus append-only operation events. Each
 effect rechecks its precondition immediately before mutation, stages new
-content or backs up replaced content, and verifies its expected post-state.
-`recover` classifies every operation as exact previous, exact intended, or
-unknown; it resumes known partial work idempotently, rolls back from durable
-backup evidence when explicitly rolling back, and preserves the journal when
-identity is unknown. A content-addressed final receipt is published before the
-Run can become `done`; preview, confirmation, blocked, applying, and rollback
-states remain non-terminal. Generated adapters expose preview and forward the
-confirmation through the existing `submit` and `recover` operations.
+content, backs up replaced targets, or moves destructive sources into a
+transaction-scoped quarantine. A move publishes the quarantined source only
+after its target and backup identities are checked; a remove leaves its
+quarantine in place until the commit receipt is durable. Operation state
+distinguishes staged, source- or target-quarantined, target-published,
+verified, committed, and cleanup progress.
+`recover` classifies every operation and every staging, backup, and quarantine
+object as exact previous, exact intended, or unknown; it resumes known partial
+work idempotently, rolls back from identity-checked journal or quarantine
+evidence when explicitly rolling back, and preserves the journal when identity
+is unknown. A content-addressed commit receipt is published before cleanup,
+then a final receipt records each cleanup outcome before the transaction anchor
+is cleared. The Run can become `done` only from that final receipt; preview,
+confirmation, blocked, applying, and rollback states remain non-terminal.
+Generated adapters expose preview and forward the confirmation through the
+existing `submit` and `recover` operations.
 
 The Creator evaluation report additionally records the generated package tree
 hash. Review readiness rejects missing, stale, mismatched, or incomplete

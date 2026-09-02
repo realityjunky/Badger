@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   atomicWriteContainedText,
+  moveContainedFile,
   removeContainedFile,
 } from "../src/engine/workflow-contract.js";
 
@@ -128,5 +129,26 @@ describe("contained atomic write", () => {
         },
       }),
     ).rejects.toThrow(/removal target changed before removal/u);
+  });
+
+  it("moves an unchanged contained file without replacing its destination", async () => {
+    const source = path.join(root, "source.txt");
+    const destinationDirectory = path.join(root, "archive");
+    const destination = path.join(destinationDirectory, "source.txt");
+    await fs.mkdir(destinationDirectory);
+    await fs.writeFile(source, "content");
+
+    expect(
+      await moveContainedFile(source, destination, { containedRoot: root }),
+    ).toBe(true);
+    await expect(fs.readFile(destination, "utf8")).resolves.toBe("content");
+    await expect(fs.stat(source)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await fs.writeFile(source, "replacement");
+    await expect(
+      moveContainedFile(source, destination, { containedRoot: root }),
+    ).rejects.toThrow(/destination must be missing/u);
+    await expect(fs.readFile(source, "utf8")).resolves.toBe("replacement");
+    await expect(fs.readFile(destination, "utf8")).resolves.toBe("content");
   });
 });

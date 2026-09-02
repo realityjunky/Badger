@@ -3,9 +3,11 @@ import path from "node:path";
 
 import {
   atomicWriteContainedText,
+  moveContainedFile,
   removeContainedFile,
 } from "../engine/contained-atomic-write.js";
 import {
+  ensureProtectedProjectDirectory,
   inspectProtectedProjectPath,
   readProtectedProjectFile,
 } from "../engine/protected-project-path.js";
@@ -19,6 +21,8 @@ import type {
   WorkflowDurabilityProfile,
   WorkflowFinalizationConfirmationPolicy,
   WorkflowFinalizationDefinition,
+  WorkflowFinalizationCleanup,
+  WorkflowFinalizationCleanupEntry,
   WorkflowFinalizationMaterialIdentity,
   WorkflowFinalizationOperation,
   WorkflowFinalizationPlannedOperation,
@@ -55,11 +59,25 @@ export type WorkflowFinalizationBoundaryPhase =
   | "staged"
   | "before-operation"
   | "after-operation"
+  | "before-target-removal"
+  | "target-removed"
+  | "before-quarantine"
+  | "quarantined"
+  | "before-source-removal"
+  | "source-removed"
+  | "before-target-publication"
+  | "target-published"
   | "operation-verified"
   | "committing"
+  | "committed"
   | "before-receipt"
   | "receipt-written"
   | "rolling-back"
+  | "before-rollback-operation"
+  | "rollback-verified"
+  | "before-cleanup"
+  | "cleanup-item"
+  | "cleaned"
   | "rolled-back"
   | "cleared";
 
@@ -71,11 +89,25 @@ export const WORKFLOW_FINALIZATION_BOUNDARY_PHASES: readonly WorkflowFinalizatio
     "staged",
     "before-operation",
     "after-operation",
+    "before-target-removal",
+    "target-removed",
+    "before-quarantine",
+    "quarantined",
+    "before-source-removal",
+    "source-removed",
+    "before-target-publication",
+    "target-published",
     "operation-verified",
     "committing",
+    "committed",
     "before-receipt",
     "receipt-written",
     "rolling-back",
+    "before-rollback-operation",
+    "rollback-verified",
+    "before-cleanup",
+    "cleanup-item",
+    "cleaned",
     "rolled-back",
     "cleared",
   ];
@@ -1055,6 +1087,7 @@ function identityForOperation(
     target: targetPath,
     stagedPath: null,
     backupPath: target.identity.exists ? null : null,
+    quarantinePath: null,
     precondition: {
       source: source?.identity ?? null,
       target: target.identity,
@@ -1202,11 +1235,18 @@ export async function buildWorkflowFinalizationPreview(options: {
   const operations = baseOperations.map((operation) => {
     const rootPath = roots.get(operation.rootId)!;
     const prefix = `${joinRelative(rootPath, ".comet/finalization")}/${transactionId}`;
-    const backupPath = operation.precondition.target.exists
-      ? `${prefix}/${operation.id}.backup`
-      : null;
+    const backupPath =
+      operation.precondition.target.exists &&
+      (operation.kind === "write" || operation.kind === "move")
+        ? `${prefix}/${operation.id}.backup`
+        : null;
     const stagedPath =
-      operation.kind === "remove" ? null : `${prefix}/${operation.id}.stage`;
+      operation.kind === "write" ? `${prefix}/${operation.id}.stage` : null;
+    const quarantinePath =
+      (operation.kind === "remove" && operation.precondition.target.exists) ||
+      (operation.kind === "move" && operation.precondition.source?.exists)
+        ? `${prefix}/${operation.id}.quarantine`
+        : null;
     const declaration = definition.operations.find(
       (candidate) => candidate.id === operation.id,
     )!;
@@ -1214,6 +1254,7 @@ export async function buildWorkflowFinalizationPreview(options: {
       ...operation,
       stagedPath,
       backupPath,
+      quarantinePath,
       requiresConfirmation: operationRequiresConfirmation(
         declaration,
         confirmation,
@@ -1226,6 +1267,26 @@ export async function buildWorkflowFinalizationPreview(options: {
       confirmation,
     ),
   );
+  const cleanupEntryCount = operations.reduce(
+    (count, operation) =>
+      count +
+      [
+        operation.stagedPath,
+        operation.backupPath,
+        operation.quarantinePath,
+      ].filter((relative) => relative !== null).length,
+    0,
+  );
+  const estimatedEventCount =
+    16 + operations.length * 11 + cleanupEntryCount * 2;
+  if (
+    estimatedEventCount >
+    profileBound(options.profile, "finalizationEventCount")
+  ) {
+    throw new Error(
+      "Workflow finalization event count exceeds its configured bound",
+    );
+  }
   for (const operation of operations) {
     const approvedRoot = path.resolve(
       options.baseRoot,
@@ -1251,6 +1312,17 @@ export async function buildWorkflowFinalizationPreview(options: {
     ) {
       throw new Error(
         `Workflow finalization backup path escapes its approved root: ${operation.id}`,
+      );
+    }
+    if (
+      operation.quarantinePath &&
+      !isInside(
+        approvedRoot,
+        path.resolve(options.baseRoot, operation.quarantinePath),
+      )
+    ) {
+      throw new Error(
+        `Workflow finalization quarantine path escapes its approved root: ${operation.id}`,
       );
     }
   }
@@ -1300,7 +1372,15 @@ type WorkflowFinalizationTransactionStatus =
   "prepared" | "applying" | "committed" | "rolling-back" | "rolled-back";
 
 type WorkflowFinalizationOperationStatus =
-  "pending" | "staged" | "applying" | "committed" | "rolled-back";
+  | "pending"
+  | "staged"
+  | "target-quarantined"
+  | "source-quarantined"
+  | "target-published"
+  | "verified"
+  | "applying"
+  | "committed"
+  | "rolled-back";
 
 type WorkflowFinalizationEventType =
   | "prepared"
@@ -1308,12 +1388,18 @@ type WorkflowFinalizationEventType =
   | "operation-staged"
   | "operation-started"
   | "operation-completed"
+  | "operation-quarantined"
+  | "operation-published"
+  | "operation-verified"
   | "committing"
   | "receipt-written"
   | "committed"
   | "rolling-back"
   | "operation-rolled-back"
-  | "rolled-back";
+  | "rolled-back"
+  | "cleanup-started"
+  | "cleanup-item"
+  | "cleanup-completed";
 
 interface WorkflowFinalizationTransactionOperation extends WorkflowFinalizationPlannedOperation {
   content: string | null;
@@ -1344,6 +1430,7 @@ export interface WorkflowFinalizationTransaction {
   operations: WorkflowFinalizationTransactionOperation[];
   confirmation: WorkflowFinalizationConfirmationRecord;
   events: WorkflowFinalizationTransactionEvent[];
+  cleanup: WorkflowFinalizationCleanup;
   recovery: {
     status: "none" | "recovered" | "rolled-back";
     crashBoundaries: string[];
@@ -1447,6 +1534,7 @@ function parsePlannedOperation(
       "target",
       "stagedPath",
       "backupPath",
+      "quarantinePath",
       "precondition",
       "expectedPostState",
       "contentHash",
@@ -1471,6 +1559,9 @@ function parsePlannedOperation(
   if (value.backupPath !== null && value.backupPath !== undefined) {
     normalizePath(value.backupPath, `${label} backupPath`);
   }
+  if (value.quarantinePath !== null && value.quarantinePath !== undefined) {
+    normalizePath(value.quarantinePath, `${label} quarantinePath`);
+  }
   const contentHash =
     value.contentHash === null
       ? null
@@ -1482,7 +1573,7 @@ function parsePlannedOperation(
   if (typeof value.requiresConfirmation !== "boolean") {
     throw new Error(`${label} requiresConfirmation must be boolean`);
   }
-  return {
+  const planned: WorkflowFinalizationPlannedOperation = {
     id: safeId(value.id, `${label} id`),
     kind: value.kind,
     rootId: safeId(value.rootId, `${label} rootId`),
@@ -1499,6 +1590,10 @@ function parsePlannedOperation(
       value.backupPath === null || value.backupPath === undefined
         ? null
         : String(value.backupPath),
+    quarantinePath:
+      value.quarantinePath === null || value.quarantinePath === undefined
+        ? null
+        : String(value.quarantinePath),
     precondition: parseOperationState(
       value.precondition,
       `${label} precondition`,
@@ -1511,6 +1606,42 @@ function parsePlannedOperation(
     contentBytes,
     requiresConfirmation: value.requiresConfirmation,
   };
+  if (
+    planned.kind === "write" &&
+    (planned.source !== null ||
+      planned.contentHash === null ||
+      !planned.expectedPostState.target.exists ||
+      planned.expectedPostState.source !== null ||
+      planned.contentBytes !== planned.expectedPostState.target.bytes ||
+      planned.contentHash !== planned.expectedPostState.target.sha256)
+  ) {
+    throw new Error(`${label} write identity is invalid`);
+  }
+  if (
+    planned.kind === "remove" &&
+    (planned.source !== null ||
+      planned.contentHash !== null ||
+      planned.contentBytes !== 0 ||
+      planned.expectedPostState.source !== null ||
+      planned.expectedPostState.target.exists)
+  ) {
+    throw new Error(`${label} remove identity is invalid`);
+  }
+  if (
+    planned.kind === "move" &&
+    (planned.source === null ||
+      planned.precondition.source === null ||
+      planned.contentHash !== planned.precondition.source.sha256 ||
+      planned.contentBytes !== planned.precondition.source.bytes ||
+      planned.expectedPostState.source?.exists !== false ||
+      !sameIdentity(
+        planned.expectedPostState.target,
+        planned.precondition.source,
+      ))
+  ) {
+    throw new Error(`${label} move identity is invalid`);
+  }
+  return planned;
 }
 
 function parseTimestamp(value: unknown, label: string): string {
@@ -1556,6 +1687,7 @@ export function parseWorkflowFinalizationPreview(
   ) {
     throw new Error(`${label} schema identity is invalid`);
   }
+  const transactionId = safeId(value.transactionId, `${label} transactionId`);
   if (
     !Array.isArray(value.verificationReceiptIds) ||
     value.verificationReceiptIds.length > 256
@@ -1615,9 +1747,34 @@ export function parseWorkflowFinalizationPreview(
   for (const operation of operations) {
     const root = roots.find((candidate) => candidate.id === operation.rootId);
     if (!root) throw new Error(`${label} operation root is not declared`);
+    const operationPrefix = `${joinRelative(
+      root.path,
+      `.comet/finalization/${transactionId}`,
+    )}/${operation.id}`;
+    const expectedStagedPath =
+      operation.kind === "write" ? `${operationPrefix}.stage` : null;
+    const expectedBackupPath =
+      operation.precondition.target.exists &&
+      (operation.kind === "write" || operation.kind === "move")
+        ? `${operationPrefix}.backup`
+        : null;
+    const expectedQuarantinePath =
+      (operation.kind === "remove" && operation.precondition.target.exists) ||
+      (operation.kind === "move" && operation.precondition.source?.exists)
+        ? `${operationPrefix}.quarantine`
+        : null;
+    if (
+      operation.stagedPath !== expectedStagedPath ||
+      operation.backupPath !== expectedBackupPath ||
+      operation.quarantinePath !== expectedQuarantinePath ||
+      (operation.kind !== "move" && operation.source !== null) ||
+      (operation.kind === "move" && operation.source === null)
+    ) {
+      throw new Error(`${label} operation coordinates are invalid`);
+    }
     const internalPrefix = `${joinRelative(
       root.path,
-      `.comet/finalization/${value.transactionId}`,
+      `.comet/finalization/${transactionId}`,
     )}/`;
     if (
       (operation.stagedPath !== null &&
@@ -1634,6 +1791,7 @@ export function parseWorkflowFinalizationPreview(
       [operation.source, true],
       [operation.stagedPath, false],
       [operation.backupPath, false],
+      [operation.quarantinePath, false],
     ] as const) {
       if (
         candidate !== null &&
@@ -1653,7 +1811,7 @@ export function parseWorkflowFinalizationPreview(
     runId: boundedText(value.runId, `${label} runId`),
     revision: nonNegativeInteger(value.revision, `${label} revision`),
     actionId: parseActionId(value.actionId, `${label} actionId`),
-    transactionId: safeId(value.transactionId, `${label} transactionId`),
+    transactionId,
     roots,
     execution: parseExecutionIdentity(value.execution),
     contentSnapshotHash: nullableHash(
@@ -1760,6 +1918,9 @@ function parseOperationReceipt(
       "kind",
       "source",
       "target",
+      "stagedPath",
+      "backupPath",
+      "quarantinePath",
       "precondition",
       "expectedPostState",
       "observedPostState",
@@ -1785,6 +1946,18 @@ function parseOperationReceipt(
         ? null
         : normalizePath(value.source, `${label}.source`),
     target: normalizePath(value.target, `${label}.target`),
+    stagedPath:
+      value.stagedPath === null || value.stagedPath === undefined
+        ? null
+        : normalizePath(value.stagedPath, `${label}.stagedPath`),
+    backupPath:
+      value.backupPath === null || value.backupPath === undefined
+        ? null
+        : normalizePath(value.backupPath, `${label}.backupPath`),
+    quarantinePath:
+      value.quarantinePath === null || value.quarantinePath === undefined
+        ? null
+        : normalizePath(value.quarantinePath, `${label}.quarantinePath`),
     precondition: parseOperationState(
       value.precondition,
       `${label}.precondition`,
@@ -1799,6 +1972,146 @@ function parseOperationReceipt(
     ),
     status: value.status,
   };
+}
+
+function parseCleanupEntry(
+  value: unknown,
+  index: number,
+): WorkflowFinalizationCleanupEntry {
+  const label = `Workflow finalization cleanup entry ${index}`;
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(
+    value,
+    new Set(["operationId", "role", "path", "expected", "status"]),
+    label,
+  );
+  if (
+    value.role !== "staged" &&
+    value.role !== "backup" &&
+    value.role !== "quarantine"
+  ) {
+    throw new Error(`${label}.role is invalid`);
+  }
+  if (
+    value.status !== "pending" &&
+    value.status !== "cleaned" &&
+    value.status !== "missing"
+  ) {
+    throw new Error(`${label}.status is invalid`);
+  }
+  return {
+    operationId: safeId(value.operationId, `${label}.operationId`),
+    role: value.role,
+    path: normalizePath(value.path, `${label}.path`),
+    expected: parseMaterialIdentity(value.expected, `${label}.expected`),
+    status: value.status,
+  };
+}
+
+function parseCleanup(
+  value: unknown,
+  label: string,
+): WorkflowFinalizationCleanup {
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields(value, new Set(["status", "entries"]), label);
+  if (value.status !== "pending" && value.status !== "completed") {
+    throw new Error(`${label}.status is invalid`);
+  }
+  if (!Array.isArray(value.entries) || value.entries.length > 768) {
+    throw new Error(`${label}.entries are outside their bound`);
+  }
+  const entries = value.entries.map((entry, index) =>
+    parseCleanupEntry(entry, index),
+  );
+  const keys = entries.map(
+    (entry) => `${entry.operationId}:${entry.role}:${entry.path}`,
+  );
+  if (new Set(keys).size !== keys.length) {
+    throw new Error(`${label}.entries must be unique`);
+  }
+  if (
+    value.status === "completed" &&
+    entries.some((entry) => entry.status === "pending")
+  ) {
+    throw new Error(`${label}.completed state has pending entries`);
+  }
+  return { status: value.status, entries };
+}
+
+function cleanupEntryKey(
+  entry: Pick<WorkflowFinalizationCleanupEntry, "operationId" | "role">,
+): string {
+  return `${entry.operationId}:${entry.role}`;
+}
+
+function validateCleanupEntries(
+  expected: readonly WorkflowFinalizationCleanupEntry[],
+  actual: WorkflowFinalizationCleanup,
+  label: string,
+): void {
+  if (expected.length !== actual.entries.length) {
+    throw new Error(`${label}.entries do not match transaction operations`);
+  }
+  const expectedByKey = new Map(
+    expected.map((entry) => [cleanupEntryKey(entry), entry]),
+  );
+  const actualKeys = new Set<string>();
+  for (const entry of actual.entries) {
+    const key = cleanupEntryKey(entry);
+    const expectedEntry = expectedByKey.get(key);
+    if (
+      !expectedEntry ||
+      actualKeys.has(key) ||
+      entry.path !== expectedEntry.path ||
+      !sameIdentity(entry.expected, expectedEntry.expected)
+    ) {
+      throw new Error(`${label}.entry identity is invalid`);
+    }
+    actualKeys.add(key);
+  }
+}
+
+function receiptCleanupEntries(
+  operations: readonly WorkflowFinalizationOperationReceipt[],
+): WorkflowFinalizationCleanupEntry[] {
+  const entries: WorkflowFinalizationCleanupEntry[] = [];
+  for (const operation of operations) {
+    const values: Array<{
+      role: WorkflowFinalizationCleanupEntry["role"];
+      path: string | null;
+      expected: WorkflowFinalizationMaterialIdentity;
+    }> = [
+      {
+        role: "staged",
+        path: operation.stagedPath,
+        expected: operation.expectedPostState.target,
+      },
+      {
+        role: "backup",
+        path: operation.backupPath,
+        expected: operation.precondition.target,
+      },
+      {
+        role: "quarantine",
+        path: operation.quarantinePath,
+        expected:
+          operation.kind === "remove"
+            ? operation.precondition.target
+            : (operation.precondition.source ?? materialIdentity(null)),
+      },
+    ];
+    for (const value of values) {
+      if (!value.path || !value.expected.exists) continue;
+      entries.push({
+        operationId: operation.id,
+        role: value.role,
+        path: value.path,
+        expected: value.expected,
+        status: "pending",
+      });
+    }
+  }
+  return entries;
 }
 
 function parseFinalizationReceipt(value: unknown): WorkflowFinalizationReceipt {
@@ -1822,6 +2135,7 @@ function parseFinalizationReceipt(value: unknown): WorkflowFinalizationReceipt {
       "confirmation",
       "operations",
       "events",
+      "cleanup",
       "recovery",
       "committedAt",
     ]),
@@ -1897,6 +2211,13 @@ function parseFinalizationReceipt(value: unknown): WorkflowFinalizationReceipt {
   const crashBoundaries = value.recovery.crashBoundaries.map((entry) =>
     boundedText(entry, `${label}.recovery.crashBoundaries`),
   );
+  const cleanup =
+    value.cleanup === undefined
+      ? { status: "completed" as const, entries: [] }
+      : parseCleanup(value.cleanup, `${label}.cleanup`);
+  if (value.cleanup !== undefined) {
+    validateCleanupEntries(receiptCleanupEntries(operations), cleanup, label);
+  }
   const receipt: WorkflowFinalizationReceipt = {
     schemaVersion: WORKFLOW_FINALIZATION_SCHEMA_VERSION,
     kind: "workflow-finalization-receipt",
@@ -1926,6 +2247,7 @@ function parseFinalizationReceipt(value: unknown): WorkflowFinalizationReceipt {
         : parseConfirmationRecord(value.confirmation, `${label}.confirmation`),
     operations,
     events,
+    cleanup,
     recovery: { status: value.recovery.status, crashBoundaries },
     committedAt: parseTimestamp(value.committedAt, `${label}.committedAt`),
   };
@@ -1972,18 +2294,32 @@ function parseTransactionEvent(
     "operation-staged",
     "operation-started",
     "operation-completed",
+    "operation-quarantined",
+    "operation-published",
+    "operation-verified",
     "committing",
     "receipt-written",
     "committed",
     "rolling-back",
     "operation-rolled-back",
     "rolled-back",
+    "cleanup-started",
+    "cleanup-item",
+    "cleanup-completed",
   ]);
   if (
     typeof value.type !== "string" ||
     !eventTypes.has(value.type as WorkflowFinalizationEventType)
   ) {
     throw new Error(`${label}.type is invalid`);
+  }
+  const boundary = boundedText(value.boundary, `${label}.boundary`);
+  if (
+    !WORKFLOW_FINALIZATION_BOUNDARY_PHASES.some(
+      (phase) => boundary === phase || boundary.startsWith(`${phase}:`),
+    )
+  ) {
+    throw new Error(`${label}.boundary is invalid`);
   }
   return {
     sequence: nonNegativeInteger(value.sequence, `${label}.sequence`),
@@ -1992,7 +2328,7 @@ function parseTransactionEvent(
       value.operationId === null
         ? null
         : safeId(value.operationId, `${label}.operationId`),
-    boundary: boundedText(value.boundary, `${label}.boundary`),
+    boundary,
     timestamp: parseTimestamp(value.timestamp, `${label}.timestamp`),
   };
 }
@@ -2013,6 +2349,7 @@ function parseTransactionOperation(
       "target",
       "stagedPath",
       "backupPath",
+      "quarantinePath",
       "precondition",
       "expectedPostState",
       "contentHash",
@@ -2036,6 +2373,10 @@ function parseTransactionOperation(
   const statusValues = new Set<WorkflowFinalizationOperationStatus>([
     "pending",
     "staged",
+    "target-quarantined",
+    "source-quarantined",
+    "target-published",
+    "verified",
     "applying",
     "committed",
     "rolled-back",
@@ -2124,6 +2465,7 @@ export function parseWorkflowFinalizationTransaction(
       "operations",
       "confirmation",
       "events",
+      "cleanup",
       "recovery",
       "receipt",
       "createdAt",
@@ -2221,6 +2563,20 @@ export function parseWorkflowFinalizationTransaction(
     value.receipt === undefined
       ? undefined
       : parseFinalizationReceipt(value.receipt);
+  const legacyCleanupEntries = cleanupEntriesForOperations(operations);
+  const cleanup =
+    value.cleanup === undefined
+      ? legacyCleanupEntries.length > 0
+        ? { status: "pending" as const, entries: legacyCleanupEntries }
+        : { status: "completed" as const, entries: [] }
+      : parseCleanup(value.cleanup, `${label}.cleanup`);
+  if (value.cleanup !== undefined) {
+    validateCleanupEntries(
+      cleanupEntriesForOperations(operations),
+      cleanup,
+      label,
+    );
+  }
   if (value.status === "committed" && !receipt) {
     throw new Error(`${label} committed state is missing its receipt`);
   }
@@ -2258,6 +2614,7 @@ export function parseWorkflowFinalizationTransaction(
           })()
         : parseConfirmationRecord(value.confirmation, `${label}.confirmation`),
     events,
+    cleanup,
     recovery: {
       status: value.recovery.status,
       crashBoundaries: value.recovery.crashBoundaries.map((entry) =>
@@ -2271,6 +2628,28 @@ export function parseWorkflowFinalizationTransaction(
   const reviewerPolicy = normalizeConfirmation(plan.confirmation).reviewer;
   const reviewerSubjects = reviewerPolicy?.subjects ?? [];
   const reviewerAuthorities = reviewerPolicy?.authorities ?? [];
+  if (
+    transaction.status === "committed" &&
+    transaction.operations.some((operation) => operation.status !== "committed")
+  ) {
+    throw new Error(`${label} committed transaction has incomplete operations`);
+  }
+  if (
+    transaction.status === "rolled-back" &&
+    transaction.operations.some(
+      (operation) => operation.status !== "rolled-back",
+    )
+  ) {
+    throw new Error(
+      `${label} rolled-back transaction has incomplete operations`,
+    );
+  }
+  if (
+    transaction.cleanup.status === "completed" &&
+    transaction.cleanup.entries.some((entry) => entry.status === "pending")
+  ) {
+    throw new Error(`${label} completed cleanup has pending entries`);
+  }
   if (
     (reviewerSubjects.length > 0 &&
       !reviewerSubjects.includes(transaction.confirmation.reviewer.subject)) ||
@@ -2318,6 +2697,30 @@ export function parseWorkflowFinalizationTransaction(
         receipt.recovery.status !== "rolled-back"))
   ) {
     throw new Error(`${label} receipt identity is invalid`);
+  }
+  if (
+    receipt &&
+    transaction.cleanup.status === "completed" &&
+    !sameStableValue(receipt.cleanup, transaction.cleanup)
+  ) {
+    throw new Error(`${label} receipt cleanup does not match transaction`);
+  }
+  if (receipt && value.cleanup !== undefined) {
+    const expectedOperations = transaction.operations.map((operation) =>
+      receiptOperation(
+        operation,
+        receipt.recovery.status === "rolled-back" ? "rolled-back" : "committed",
+      ),
+    );
+    if (!sameStableValue(receipt.operations, expectedOperations)) {
+      throw new Error(`${label} receipt operations do not match transaction`);
+    }
+    if (
+      transaction.cleanup.status === "completed" &&
+      !sameStableValue(receipt.events, transaction.events)
+    ) {
+      throw new Error(`${label} receipt events do not match transaction`);
+    }
   }
   return transaction;
 }
@@ -2492,10 +2895,62 @@ async function removeBaseFile(
     { label: "Workflow finalization remove target", expected: "file" },
   );
   if (!inspection.exists) return false;
-  return removeContainedFile(inspection.target, {
-    containedRoot: inspection.projectRoot,
-    beforeRemove,
-  });
+  try {
+    return await removeContainedFile(inspection.target, {
+      containedRoot: inspection.projectRoot,
+      beforeRemove,
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      /Contained file removal target changed before removal/u.test(
+        error.message,
+      )
+    ) {
+      throw new WorkflowFinalizationConflictError([relative]);
+    }
+    throw error;
+  }
+}
+
+async function moveBaseFile(
+  root: string,
+  source: string,
+  destination: string,
+  beforeMove?: () => void | Promise<void>,
+): Promise<boolean> {
+  const destinationParent = path.posix.dirname(destination);
+  if (destinationParent !== ".") {
+    await ensureProtectedProjectDirectory(
+      path.resolve(root),
+      destinationParent,
+      {
+        label: "Workflow finalization move destination parent",
+      },
+    );
+  }
+  try {
+    return await moveContainedFile(
+      basePath(root, source, "Workflow finalization move source"),
+      basePath(root, destination, "Workflow finalization move destination"),
+      {
+        containedRoot: path.resolve(root),
+        beforeMove,
+      },
+    );
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (
+      code === "EEXIST" ||
+      (error instanceof Error &&
+        /Contained file move (?:source|destination) (?:changed|must be missing)/u.test(
+          error.message,
+        ))
+    ) {
+      throw new WorkflowFinalizationConflictError([source, destination]);
+    }
+    throw error;
+  }
 }
 
 interface OperationMaterial {
@@ -2507,6 +2962,18 @@ interface OperationMaterial {
     identity: WorkflowFinalizationMaterialIdentity;
     content: string | null;
   };
+  staged: {
+    identity: WorkflowFinalizationMaterialIdentity;
+    content: string | null;
+  } | null;
+  backup: {
+    identity: WorkflowFinalizationMaterialIdentity;
+    content: string | null;
+  } | null;
+  quarantine: {
+    identity: WorkflowFinalizationMaterialIdentity;
+    content: string | null;
+  } | null;
 }
 
 async function operationMaterial(
@@ -2519,7 +2986,19 @@ async function operationMaterial(
     operation.source === null
       ? null
       : await readMaterial(root, operation.source, maxBytes);
-  return { source, target };
+  const staged =
+    operation.stagedPath === null
+      ? null
+      : await readMaterial(root, operation.stagedPath, maxBytes);
+  const backup =
+    operation.backupPath === null
+      ? null
+      : await readMaterial(root, operation.backupPath, maxBytes);
+  const quarantine =
+    operation.quarantinePath === null
+      ? null
+      : await readMaterial(root, operation.quarantinePath, maxBytes);
+  return { source, target, staged, backup, quarantine };
 }
 
 function operationMatches(
@@ -2565,6 +3044,116 @@ function operationPostTargetExpected(
   operation: WorkflowFinalizationPlannedOperation,
 ): WorkflowFinalizationMaterialIdentity {
   return operation.expectedPostState.target;
+}
+
+function storageContentExpected(
+  operation: WorkflowFinalizationTransactionOperation,
+  role: "staged" | "backup" | "quarantine",
+): string | null {
+  if (role === "staged") {
+    return operation.kind === "write" ? operation.content : null;
+  }
+  if (role === "backup") return operation.previousTargetContent;
+  return operation.kind === "remove"
+    ? operation.previousTargetContent
+    : operation.kind === "move"
+      ? operation.previousSourceContent
+      : null;
+}
+
+function storageMaterial(
+  actual: OperationMaterial,
+  role: "staged" | "backup" | "quarantine",
+): OperationMaterial[typeof role] {
+  return actual[role];
+}
+
+function storagePath(
+  operation: WorkflowFinalizationTransactionOperation,
+  role: "staged" | "backup" | "quarantine",
+): string | null {
+  return role === "staged"
+    ? operation.stagedPath
+    : role === "backup"
+      ? operation.backupPath
+      : operation.quarantinePath;
+}
+
+function storageIsExpectedOrMissing(
+  actual: OperationMaterial,
+  operation: WorkflowFinalizationTransactionOperation,
+  role: "staged" | "backup" | "quarantine",
+): boolean {
+  const material = storageMaterial(actual, role);
+  const expected = storageContentExpected(operation, role);
+  if (material === null) return expected === null;
+  if (!material.identity.exists) return true;
+  return (
+    expected !== null &&
+    sameIdentity(material.identity, materialIdentity(expected))
+  );
+}
+
+function operationStorageUnknownPaths(
+  operation: WorkflowFinalizationTransactionOperation,
+  actual: OperationMaterial,
+): string[] {
+  return (["staged", "backup", "quarantine"] as const).flatMap((role) => {
+    const material = storageMaterial(actual, role);
+    if (!material || storageIsExpectedOrMissing(actual, operation, role)) {
+      return [];
+    }
+    return [storagePath(operation, role)!];
+  });
+}
+
+type OperationProgress =
+  "previous" | "staged" | "source-quarantined" | "target-published" | "post";
+
+function operationProgress(
+  operation: WorkflowFinalizationTransactionOperation,
+  actual: OperationMaterial,
+): OperationProgress | null {
+  const sourcePre =
+    operation.source === null ||
+    (actual.source !== null &&
+      sameIdentity(actual.source.identity, operationSourceExpected(operation)));
+  const sourcePost =
+    operation.source === null ||
+    (actual.source !== null &&
+      sameIdentity(
+        actual.source.identity,
+        operationPostSourceExpected(operation),
+      ));
+  const targetPre = sameIdentity(
+    actual.target.identity,
+    operationTargetExpected(operation),
+  );
+  const targetPost = sameIdentity(
+    actual.target.identity,
+    operationPostTargetExpected(operation),
+  );
+  if (operation.kind === "write") {
+    if (targetPost) return "post";
+    if (targetPre) {
+      return actual.staged?.identity.exists ? "staged" : "previous";
+    }
+    if (!actual.target.identity.exists && actual.staged?.identity.exists) {
+      return "staged";
+    }
+    return null;
+  }
+  if (operation.kind === "remove") {
+    if (targetPre) return "previous";
+    if (targetPost) return "post";
+    return null;
+  }
+  if (sourcePre && targetPre) return "previous";
+  if (sourcePost && targetPre) return "source-quarantined";
+  if (sourcePost && !actual.target.identity.exists) return "source-quarantined";
+  if (sourcePre && targetPost) return "source-quarantined";
+  if (sourcePost && targetPost) return "post";
+  return null;
 }
 
 function transactionOperationContent(
@@ -2690,6 +3279,23 @@ export function validateWorkflowFinalizationPlanDeclaration(
             operation.source,
           )
         : null;
+    const prefix = `${joinRelative(
+      normalized.roots.find((root) => root.id === operation.root)!.path,
+      `.comet/finalization/${plan.transactionId}`,
+    )}/${operation.id}`;
+    const stagedPath = operation.kind === "write" ? `${prefix}.stage` : null;
+    const backupPath =
+      plan.operations[index].precondition.target.exists &&
+      (operation.kind === "write" || operation.kind === "move")
+        ? `${prefix}.backup`
+        : null;
+    const quarantinePath =
+      (operation.kind === "remove" &&
+        plan.operations[index].precondition.target.exists) ||
+      (operation.kind === "move" &&
+        plan.operations[index].precondition.source?.exists)
+        ? `${prefix}.quarantine`
+        : null;
     if (
       !planned ||
       planned.id !== operation.id ||
@@ -2697,6 +3303,9 @@ export function validateWorkflowFinalizationPlanDeclaration(
       planned.rootId !== operation.root ||
       planned.target !== target ||
       planned.source !== source ||
+      planned.stagedPath !== stagedPath ||
+      planned.backupPath !== backupPath ||
+      planned.quarantinePath !== quarantinePath ||
       planned.requiresConfirmation !== true ||
       (operation.kind === "write" &&
         (planned.contentHash !== sha256(operation.content) ||
@@ -2706,6 +3315,27 @@ export function validateWorkflowFinalizationPlanDeclaration(
       throw new WorkflowFinalizationConflictError([operation.id]);
     }
   }
+}
+
+function cleanupEntriesForOperations(
+  operations: readonly WorkflowFinalizationTransactionOperation[],
+): WorkflowFinalizationCleanupEntry[] {
+  const entries: WorkflowFinalizationCleanupEntry[] = [];
+  for (const operation of operations) {
+    for (const role of ["staged", "backup", "quarantine"] as const) {
+      const relative = storagePath(operation, role);
+      const content = storageContentExpected(operation, role);
+      if (!relative || content === null) continue;
+      entries.push({
+        operationId: operation.id,
+        role,
+        path: relative,
+        expected: materialIdentity(content),
+        status: "pending",
+      });
+    }
+  }
+  return entries;
 }
 
 function newTransaction(
@@ -2727,6 +3357,10 @@ function newTransaction(
     operations,
     confirmation: structuredClone(request.confirmation),
     events: [],
+    cleanup: {
+      status: "pending",
+      entries: cleanupEntriesForOperations(operations),
+    },
     recovery: { status: "none", crashBoundaries: [] },
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -2772,6 +3406,9 @@ function receiptOperation(
     kind: operation.kind,
     source: operation.source,
     target: operation.target,
+    stagedPath: operation.stagedPath,
+    backupPath: operation.backupPath,
+    quarantinePath: operation.quarantinePath,
     precondition: structuredClone(precondition),
     expectedPostState: structuredClone(expectedPostState),
     observedPostState:
@@ -2802,6 +3439,7 @@ function buildFinalizationReceipt(
       receiptOperation(operation, status),
     ),
     events: structuredClone(transaction.events),
+    cleanup: structuredClone(transaction.cleanup),
     recovery: structuredClone(transaction.recovery),
     committedAt: transaction.createdAt,
   };
@@ -2864,6 +3502,168 @@ async function publishReceipt(
   }
 }
 
+async function completeFinalizationCleanup(
+  runRoot: string,
+  baseRoot: string,
+  profile: WorkflowDurabilityProfile,
+  transaction: WorkflowFinalizationTransaction,
+): Promise<WorkflowFinalizationReceipt> {
+  if (
+    transaction.cleanup.status === "completed" &&
+    transaction.receipt?.cleanup.status === "completed"
+  ) {
+    for (const entry of transaction.cleanup.entries) {
+      const current = await readMaterial(
+        baseRoot,
+        entry.path,
+        contentMaxBytes(profile),
+      );
+      if (current.identity.exists) {
+        throw new WorkflowFinalizationConflictError([entry.path]);
+      }
+    }
+    return transaction.receipt;
+  }
+  if (
+    !hasTransactionEvent(transaction, "cleanup-started", null, "before-cleanup")
+  ) {
+    await appendTransactionEvent(
+      runRoot,
+      profile,
+      transaction,
+      "cleanup-started",
+      { phase: "before-cleanup" },
+      null,
+    );
+  }
+  for (const entry of transaction.cleanup.entries) {
+    if (entry.status !== "pending") continue;
+    const operation = transaction.operations.find(
+      (candidate) => candidate.id === entry.operationId,
+    );
+    if (!operation) {
+      throw new WorkflowFinalizationConflictError([entry.path]);
+    }
+    const beforeCleanup = {
+      phase: "cleanup-item" as const,
+      operationId: entry.operationId,
+      path: entry.path,
+    };
+    if (
+      !hasTransactionPathEvent(
+        transaction,
+        "cleanup-item",
+        entry.operationId,
+        "cleanup-item",
+        entry.path,
+      )
+    ) {
+      await appendTransactionEvent(
+        runRoot,
+        profile,
+        transaction,
+        "cleanup-item",
+        beforeCleanup,
+        entry.operationId,
+      );
+    }
+    let current: {
+      identity: WorkflowFinalizationMaterialIdentity;
+      content: string | null;
+    };
+    try {
+      current = await readMaterial(
+        baseRoot,
+        entry.path,
+        contentMaxBytes(profile),
+      );
+    } catch (error) {
+      throw error;
+    }
+    if (!current.identity.exists) {
+      entry.status = "missing";
+    } else {
+      if (!sameIdentity(current.identity, entry.expected)) {
+        throw new WorkflowFinalizationConflictError([entry.path]);
+      }
+      await removeBaseFile(baseRoot, entry.path, async () => {
+        const latest = await readMaterial(
+          baseRoot,
+          entry.path,
+          contentMaxBytes(profile),
+        );
+        if (!sameIdentity(latest.identity, entry.expected)) {
+          throw new WorkflowFinalizationConflictError([entry.path]);
+        }
+      });
+      const verified = await readMaterial(
+        baseRoot,
+        entry.path,
+        contentMaxBytes(profile),
+      );
+      if (verified.identity.exists) {
+        throw new WorkflowFinalizationConflictError([entry.path]);
+      }
+      entry.status = "cleaned";
+    }
+    await appendTransactionEvent(
+      runRoot,
+      profile,
+      transaction,
+      "cleanup-item",
+      { phase: "cleaned", operationId: entry.operationId, path: entry.path },
+      entry.operationId,
+    );
+  }
+  for (const entry of transaction.cleanup.entries) {
+    let current: {
+      identity: WorkflowFinalizationMaterialIdentity;
+      content: string | null;
+    };
+    try {
+      current = await readMaterial(
+        baseRoot,
+        entry.path,
+        contentMaxBytes(profile),
+      );
+    } catch (error) {
+      throw error;
+    }
+    if (current.identity.exists) {
+      throw new WorkflowFinalizationConflictError([entry.path]);
+    }
+  }
+  if (!hasTransactionEvent(transaction, "cleanup-completed", null, "cleaned")) {
+    await appendTransactionEvent(
+      runRoot,
+      profile,
+      transaction,
+      "cleanup-completed",
+      { phase: "cleaned" },
+      null,
+    );
+  }
+  transaction.cleanup.status = "completed";
+  if (!hasTransactionEvent(transaction, "receipt-written", null, "cleaned")) {
+    await appendTransactionEvent(
+      runRoot,
+      profile,
+      transaction,
+      "receipt-written",
+      { phase: "cleaned" },
+      null,
+    );
+  }
+  const receipt = buildFinalizationReceipt(
+    transaction,
+    transaction.status === "rolled-back" ? "rolled-back" : "committed",
+  );
+  await publishReceipt(runRoot, profile, receipt);
+  transaction.receipt = receipt;
+  await writeTransaction(runRoot, profile, transaction);
+  return receipt;
+}
+
 export async function readWorkflowFinalizationReceipt(
   runRoot: string,
   receiptHash: string,
@@ -2919,6 +3719,9 @@ function transactionAffectedPaths(
     transaction.operations.flatMap((operation) => [
       operation.target,
       ...(operation.source ? [operation.source] : []),
+      ...(operation.stagedPath ? [operation.stagedPath] : []),
+      ...(operation.backupPath ? [operation.backupPath] : []),
+      ...(operation.quarantinePath ? [operation.quarantinePath] : []),
     ]),
   );
 }
@@ -3054,8 +3857,14 @@ async function commitTransaction(
       null,
     );
     transaction.status = "committed";
-    transaction.updatedAt = new Date().toISOString();
-    await writeTransaction(runRoot, profile, transaction);
+    await appendTransactionEvent(
+      runRoot,
+      profile,
+      transaction,
+      "committed",
+      { phase: "committed" },
+      null,
+    );
   }
   if (!transaction.receipt) {
     throw new Error(
@@ -3114,19 +3923,31 @@ export async function applyWorkflowFinalization(
     if (existing.status === "committed") {
       if (!existing.receipt)
         throw new Error("Workflow finalization receipt is missing");
+      const receipt = await completeFinalizationCleanup(
+        request.runRoot,
+        request.baseRoot,
+        request.profile,
+        existing,
+      );
       return {
         status: "committed",
         transaction: existing,
-        receipt: existing.receipt,
+        receipt,
       };
     }
     if (existing.status === "rolled-back") {
       if (!existing.receipt)
         throw new Error("Workflow finalization rollback receipt is missing");
+      const receipt = await completeFinalizationCleanup(
+        request.runRoot,
+        request.baseRoot,
+        request.profile,
+        existing,
+      );
       return {
         status: "rolled-back",
         transaction: existing,
-        receipt: existing.receipt,
+        receipt,
       };
     }
     throw new WorkflowFinalizationTransactionPendingError(existing);
@@ -3155,7 +3976,13 @@ export async function applyWorkflowFinalization(
     transaction,
     false,
   );
-  const receipt = await commitTransaction(
+  await commitTransaction(
+    request.runRoot,
+    request.baseRoot,
+    request.profile,
+    transaction,
+  );
+  const receipt = await completeFinalizationCleanup(
     request.runRoot,
     request.baseRoot,
     request.profile,
@@ -3225,22 +4052,45 @@ export async function recoverWorkflowFinalization(options: {
         unknownPaths: uniqueStrings(unknown),
       };
     }
-    await publishReceipt(options.runRoot, options.profile, transaction.receipt);
-    return {
-      status: "recovered",
-      transaction,
-      receipt: transaction.receipt,
-    };
+    try {
+      if (
+        transaction.cleanup.status !== "completed" ||
+        transaction.receipt.cleanup.status !== "completed"
+      ) {
+        transaction.recovery = {
+          status: "recovered",
+          crashBoundaries: uniqueStrings(
+            transaction.events.map((event) => event.boundary),
+          ),
+        };
+        await writeTransaction(options.runRoot, options.profile, transaction);
+      }
+      const receipt = await completeFinalizationCleanup(
+        options.runRoot,
+        options.baseRoot,
+        options.profile,
+        transaction,
+      );
+      return { status: "recovered", transaction, receipt };
+    } catch (error) {
+      return recoveryBlocked(transaction, error);
+    }
   }
   if (transaction.status === "rolling-back") {
     return rollbackWorkflowFinalization(options);
   }
   if (transaction.status === "rolled-back") {
-    return {
-      status: "rolled-back",
-      transaction,
-      receipt: transaction.receipt,
-    };
+    try {
+      const receipt = await completeFinalizationCleanup(
+        options.runRoot,
+        options.baseRoot,
+        options.profile,
+        transaction,
+      );
+      return { status: "rolled-back", transaction, receipt };
+    } catch (error) {
+      return recoveryBlocked(transaction, error);
+    }
   }
   transaction.recovery = {
     status: "recovered",
@@ -3256,7 +4106,13 @@ export async function recoverWorkflowFinalization(options: {
       transaction,
       true,
     );
-    const receipt = await commitTransaction(
+    await commitTransaction(
+      options.runRoot,
+      options.baseRoot,
+      options.profile,
+      transaction,
+    );
+    const receipt = await completeFinalizationCleanup(
       options.runRoot,
       options.baseRoot,
       options.profile,
@@ -3327,11 +4183,13 @@ export async function rollbackWorkflowFinalization(options: {
     throw new WorkflowFinalizationConflictError(["execution"]);
   }
   if (transaction.status === "rolled-back") {
-    return {
-      status: "rolled-back",
+    const receipt = await completeFinalizationCleanup(
+      options.runRoot,
+      options.baseRoot,
+      options.profile,
       transaction,
-      receipt: transaction.receipt,
-    };
+    );
+    return { status: "rolled-back", transaction, receipt };
   }
   if (transaction.status === "committed") {
     return {
@@ -3356,14 +4214,11 @@ export async function rollbackWorkflowFinalization(options: {
         operation,
         options.profile,
       );
-      if (!operationCanResume(operation, actual)) {
+      if (!operationCanResume(operation, actual, true)) {
         return {
           status: "blocked",
           transaction,
-          unknownPaths: [
-            operation.target,
-            ...(operation.source ? [operation.source] : []),
-          ],
+          unknownPaths: operationConflictPaths(operation, actual),
         };
       }
       if (
@@ -3371,6 +4226,27 @@ export async function rollbackWorkflowFinalization(options: {
         operationMatches(actual, operation.precondition)
       ) {
         continue;
+      }
+      if (
+        !hasTransactionEvent(
+          transaction,
+          "operation-rolled-back",
+          operation.id,
+          "before-rollback-operation",
+        )
+      ) {
+        await appendTransactionEvent(
+          options.runRoot,
+          options.profile,
+          transaction,
+          "operation-rolled-back",
+          {
+            phase: "before-rollback-operation",
+            operationId: operation.id,
+            path: operation.target,
+          },
+          operation.id,
+        );
       }
       if (operation.kind === "move" && operation.source) {
         await restoreContent(
@@ -3400,6 +4276,18 @@ export async function rollbackWorkflowFinalization(options: {
         ]);
       }
       operation.status = "rolled-back";
+      await appendTransactionEvent(
+        options.runRoot,
+        options.profile,
+        transaction,
+        "operation-rolled-back",
+        {
+          phase: "rollback-verified",
+          operationId: operation.id,
+          path: operation.target,
+        },
+        operation.id,
+      );
       await appendTransactionEvent(
         options.runRoot,
         options.profile,
@@ -3443,7 +4331,17 @@ export async function rollbackWorkflowFinalization(options: {
       { phase: "rolled-back" },
       null,
     );
-    return { status: "rolled-back", transaction, receipt };
+    const finalReceipt = await completeFinalizationCleanup(
+      options.runRoot,
+      options.baseRoot,
+      options.profile,
+      transaction,
+    );
+    return {
+      status: "rolled-back",
+      transaction,
+      receipt: finalReceipt,
+    };
   } catch (error) {
     return recoveryBlocked(transaction, error);
   }
@@ -3466,6 +4364,16 @@ export async function clearWorkflowFinalizationTransaction(
   ) {
     throw new WorkflowFinalizationTransactionPendingError(transaction);
   }
+  const receipt = transaction.receipt;
+  if (baseRoot) {
+    await completeFinalizationCleanup(runRoot, baseRoot, profile, transaction);
+  }
+  if (
+    transaction.cleanup.status !== "completed" ||
+    transaction.receipt.cleanup.status !== "completed"
+  ) {
+    throw new WorkflowFinalizationTransactionPendingError(transaction);
+  }
   const removed = await removeEngineRunFile(
     runRoot,
     WORKFLOW_FINALIZATION_TRANSACTION_PATH,
@@ -3479,7 +4387,9 @@ export async function clearWorkflowFinalizationTransaction(
         if (
           !current ||
           current.transactionId !== transaction.transactionId ||
-          current.status !== transaction.status
+          current.status !== transaction.status ||
+          !current.receipt ||
+          current.receipt.receiptHash !== receipt.receiptHash
         ) {
           throw new WorkflowFinalizationConflictError([
             WORKFLOW_FINALIZATION_TRANSACTION_PATH,
@@ -3488,42 +4398,6 @@ export async function clearWorkflowFinalizationTransaction(
       },
     },
   );
-  if (removed && baseRoot) {
-    for (const operation of transaction.operations) {
-      const cleanup = async (
-        relative: string | null,
-        expected: WorkflowFinalizationMaterialIdentity,
-      ) => {
-        if (!relative || !expected.exists) return;
-        const current = await readMaterial(
-          baseRoot,
-          relative,
-          contentMaxBytes(profile),
-        );
-        if (!sameIdentity(current.identity, expected)) return;
-        await removeBaseFile(baseRoot, relative, async () => {
-          const latest = await readMaterial(
-            baseRoot,
-            relative,
-            contentMaxBytes(profile),
-          );
-          if (!sameIdentity(latest.identity, expected)) {
-            throw new WorkflowFinalizationConflictError([relative]);
-          }
-        });
-      };
-      await cleanup(
-        operation.stagedPath,
-        operation.content === null
-          ? materialIdentity(null)
-          : materialIdentity(operation.content),
-      );
-      await cleanup(
-        operation.backupPath,
-        materialIdentity(operation.previousTargetContent),
-      );
-    }
-  }
   if (removed) await invokeFault({ phase: "cleared" });
   return removed;
 }
@@ -3558,27 +4432,132 @@ async function currentOperation(
 function operationCanResume(
   operation: WorkflowFinalizationTransactionOperation,
   actual: OperationMaterial,
+  allowDurableContent = false,
 ): boolean {
-  if (operationMatches(actual, operation.precondition)) return true;
-  if (operationMatches(actual, operation.expectedPostState)) return true;
-  if (operation.kind !== "move" || !actual.source) return false;
-  const sourcePre = sameIdentity(
-    actual.source.identity,
-    operationSourceExpected(operation),
+  return (
+    operationStorageUnknownPaths(operation, actual).length === 0 &&
+    operationProgress(operation, actual) !== null &&
+    operationStorageMissingRequiredPaths(operation, actual, allowDurableContent)
+      .length === 0
   );
-  const sourcePost = sameIdentity(
-    actual.source.identity,
-    operationPostSourceExpected(operation),
+}
+
+function operationStorageMissingRequiredPaths(
+  operation: WorkflowFinalizationTransactionOperation,
+  actual: OperationMaterial,
+  allowDurableContent = false,
+): string[] {
+  const missing: string[] = [];
+  const has = (role: "staged" | "backup" | "quarantine") =>
+    actual[role]?.identity.exists === true;
+  const progress = operationProgress(operation, actual);
+  if (
+    operation.kind === "write" &&
+    progress === "post" &&
+    operation.precondition.target.exists &&
+    !has("backup")
+  ) {
+    if (operation.backupPath) missing.push(operation.backupPath);
+  }
+  if (
+    operation.kind === "remove" &&
+    progress === "post" &&
+    operation.precondition.target.exists &&
+    !has("quarantine")
+  ) {
+    if (operation.quarantinePath) missing.push(operation.quarantinePath);
+  }
+  if (
+    operation.kind === "move" &&
+    progress === "source-quarantined" &&
+    !allowDurableContent &&
+    !has("quarantine")
+  ) {
+    if (operation.quarantinePath) missing.push(operation.quarantinePath);
+  }
+  if (
+    operation.kind === "move" &&
+    progress === "post" &&
+    operation.precondition.target.exists &&
+    !has("backup")
+  ) {
+    if (operation.backupPath) missing.push(operation.backupPath);
+  }
+  return missing;
+}
+
+function operationConflictPaths(
+  operation: WorkflowFinalizationTransactionOperation,
+  actual: OperationMaterial,
+): string[] {
+  return uniqueStrings([
+    ...operationStorageUnknownPaths(operation, actual),
+    ...operationStorageMissingRequiredPaths(operation, actual),
+    operation.target,
+    ...(operation.source ? [operation.source] : []),
+  ]);
+}
+
+function hasTransactionEvent(
+  transaction: WorkflowFinalizationTransaction,
+  type: WorkflowFinalizationEventType,
+  operationId: string | null,
+  boundary: WorkflowFinalizationBoundaryPhase,
+): boolean {
+  return transaction.events.some(
+    (event) =>
+      event.type === type &&
+      event.operationId === operationId &&
+      event.boundary.startsWith(boundary),
   );
-  const targetPre = sameIdentity(
-    actual.target.identity,
-    operationTargetExpected(operation),
+}
+
+function hasTransactionPathEvent(
+  transaction: WorkflowFinalizationTransaction,
+  type: WorkflowFinalizationEventType,
+  operationId: string,
+  phase: WorkflowFinalizationBoundaryPhase,
+  relativePath: string,
+): boolean {
+  return transaction.events.some(
+    (event) =>
+      event.type === type &&
+      event.operationId === operationId &&
+      event.boundary === `${phase}:${relativePath}`,
   );
-  const targetPost = sameIdentity(
-    actual.target.identity,
-    operationPostTargetExpected(operation),
+}
+
+async function readValidatedOperation(
+  baseRoot: string,
+  operation: WorkflowFinalizationTransactionOperation,
+  profile: WorkflowDurabilityProfile,
+): Promise<OperationMaterial> {
+  const actual = await currentOperation(baseRoot, operation, profile);
+  if (!operationCanResume(operation, actual)) {
+    throw new WorkflowFinalizationConflictError(
+      operationConflictPaths(operation, actual),
+    );
+  }
+  return actual;
+}
+
+async function appendOperationEvent(
+  runRoot: string,
+  profile: WorkflowDurabilityProfile,
+  transaction: WorkflowFinalizationTransaction,
+  operation: WorkflowFinalizationTransactionOperation,
+  type: WorkflowFinalizationEventType,
+  phase: WorkflowFinalizationBoundaryPhase,
+  path: string,
+): Promise<void> {
+  await appendTransactionEvent(
+    runRoot,
+    profile,
+    transaction,
+    type,
+    { phase, operationId: operation.id, path },
+    operation.id,
   );
-  return (sourcePre && targetPost) || (sourcePost && targetPre);
 }
 
 async function applyTransactionOperation(
@@ -3589,50 +4568,37 @@ async function applyTransactionOperation(
   operation: WorkflowFinalizationTransactionOperation,
   recovery: boolean,
 ): Promise<void> {
-  let actual = await currentOperation(baseRoot, operation, profile);
-  if (operationMatches(actual, operation.expectedPostState)) {
-    operation.status = "committed";
+  let actual = await readValidatedOperation(baseRoot, operation, profile);
+  let progress = operationProgress(operation, actual);
+  if (progress === null) {
+    throw new WorkflowFinalizationConflictError(
+      operationConflictPaths(operation, actual),
+    );
+  }
+  if (progress === "post") {
+    operation.status = "verified";
+  } else if (
+    operation.status === "pending" ||
+    operation.status === "applying"
+  ) {
     if (
-      !transaction.events.some(
-        (event) =>
-          event.type === "operation-completed" &&
-          event.operationId === operation.id,
+      !hasTransactionEvent(
+        transaction,
+        "operation-staged",
+        operation.id,
+        "before-staging",
       )
     ) {
-      await appendTransactionEvent(
+      await appendOperationEvent(
         runRoot,
         profile,
         transaction,
-        "operation-completed",
-        {
-          phase: "operation-verified",
-          operationId: operation.id,
-          path: operation.target,
-        },
-        operation.id,
+        operation,
+        "operation-staged",
+        "before-staging",
+        operation.target,
       );
     }
-    return;
-  }
-  if (!operationCanResume(operation, actual)) {
-    throw new WorkflowFinalizationConflictError([
-      operation.target,
-      ...(operation.source ? [operation.source] : []),
-    ]);
-  }
-  if (operation.status === "pending" || operation.status === "applying") {
-    await appendTransactionEvent(
-      runRoot,
-      profile,
-      transaction,
-      "operation-staged",
-      {
-        phase: "before-staging",
-        operationId: operation.id,
-        path: operation.target,
-      },
-      operation.id,
-    );
     if (operation.previousTargetContent !== null && operation.backupPath) {
       await ensureContentFile(
         baseRoot,
@@ -3650,165 +4616,521 @@ async function applyTransactionOperation(
       );
     }
     operation.status = "staged";
-    await appendTransactionEvent(
+    if (
+      !hasTransactionEvent(
+        transaction,
+        "operation-staged",
+        operation.id,
+        "staged",
+      )
+    ) {
+      await appendOperationEvent(
+        runRoot,
+        profile,
+        transaction,
+        operation,
+        "operation-staged",
+        "staged",
+        operation.target,
+      );
+    }
+    actual = await readValidatedOperation(baseRoot, operation, profile);
+    progress = operationProgress(operation, actual);
+  }
+  if (
+    !hasTransactionEvent(
+      transaction,
+      "operation-started",
+      operation.id,
+      "before-operation",
+    )
+  ) {
+    await appendOperationEvent(
       runRoot,
       profile,
       transaction,
-      "operation-staged",
-      { phase: "staged", operationId: operation.id, path: operation.target },
-      operation.id,
+      operation,
+      "operation-started",
+      "before-operation",
+      operation.target,
     );
   }
-  operation.status = "applying";
-  await appendTransactionEvent(
-    runRoot,
-    profile,
-    transaction,
-    "operation-started",
-    {
-      phase: "before-operation",
-      operationId: operation.id,
-      path: operation.target,
-    },
-    operation.id,
-  );
-  actual = await currentOperation(baseRoot, operation, profile);
-  if (operation.kind === "write") {
-    if (operation.content === null)
-      throw new Error("Workflow finalization write content is missing");
-    if (
-      !sameIdentity(
-        actual.target.identity,
-        operationPostTargetExpected(operation),
-      )
-    ) {
-      await writeBaseText(
-        baseRoot,
-        operation.target,
-        operation.content,
-        contentMaxBytes(profile),
-        async () => {
-          const current = await readMaterial(
-            baseRoot,
-            operation.target,
-            contentMaxBytes(profile),
-          );
-          if (
-            !sameIdentity(current.identity, operationTargetExpected(operation))
-          ) {
-            throw new WorkflowFinalizationConflictError([operation.target]);
-          }
-        },
-      );
+  actual = await readValidatedOperation(baseRoot, operation, profile);
+  progress = operationProgress(operation, actual);
+  if (progress === null) {
+    throw new WorkflowFinalizationConflictError(
+      operationConflictPaths(operation, actual),
+    );
+  }
+  if (operation.kind === "write" && progress !== "post") {
+    if (operation.content === null || !operation.stagedPath) {
+      throw new Error("Workflow finalization write staging is missing");
     }
-  } else if (operation.kind === "remove") {
     if (
       !sameIdentity(
         actual.target.identity,
         operationPostTargetExpected(operation),
       )
     ) {
-      await removeBaseFile(baseRoot, operation.target, async () => {
-        const current = await readMaterial(
-          baseRoot,
+      if (
+        !hasTransactionEvent(
+          transaction,
+          "operation-quarantined",
+          operation.id,
+          "before-target-removal",
+        )
+      ) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation,
+          "operation-quarantined",
+          "before-target-removal",
           operation.target,
-          contentMaxBytes(profile),
         );
+      }
+      await removeBaseFile(baseRoot, operation.target, async () => {
+        const current = await currentOperation(baseRoot, operation, profile);
         if (
-          !sameIdentity(current.identity, operationTargetExpected(operation))
+          !operationMatches(current, operation.precondition) ||
+          !current.staged?.identity.exists ||
+          (operation.backupPath &&
+            operation.precondition.target.exists &&
+            !current.backup?.identity.exists)
         ) {
-          throw new WorkflowFinalizationConflictError([operation.target]);
+          throw new WorkflowFinalizationConflictError(
+            operationConflictPaths(operation, current),
+          );
         }
       });
+      if (
+        !hasTransactionEvent(
+          transaction,
+          "operation-quarantined",
+          operation.id,
+          "target-removed",
+        )
+      ) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation,
+          "operation-quarantined",
+          "target-removed",
+          operation.target,
+        );
+      }
+      actual = await readValidatedOperation(baseRoot, operation, profile);
     }
-  } else {
-    if (operation.content === null)
-      throw new Error("Workflow finalization move content is missing");
-    const sourceBeforeTarget = actual.source?.identity;
-    if (
-      !sameIdentity(
-        actual.target.identity,
-        operationPostTargetExpected(operation),
-      )
-    ) {
-      await writeBaseText(
+    actual = await readValidatedOperation(baseRoot, operation, profile);
+    if (!actual.target.identity.exists && actual.staged?.identity.exists) {
+      if (
+        !hasTransactionEvent(
+          transaction,
+          "operation-published",
+          operation.id,
+          "before-target-publication",
+        )
+      ) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation,
+          "operation-published",
+          "before-target-publication",
+          operation.target,
+        );
+      }
+      const moved = await moveBaseFile(
         baseRoot,
+        operation.stagedPath,
         operation.target,
-        operation.content,
-        contentMaxBytes(profile),
         async () => {
           const current = await currentOperation(baseRoot, operation, profile);
           if (
+            current.target.identity.exists ||
+            !current.staged?.identity.exists ||
+            (operation.backupPath &&
+              operation.precondition.target.exists &&
+              !current.backup?.identity.exists)
+          ) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation, current),
+            );
+          }
+        },
+      );
+      if (!moved) {
+        throw new WorkflowFinalizationConflictError([
+          operation.stagedPath,
+          operation.target,
+        ]);
+      }
+      operation.status = "target-published";
+      await appendOperationEvent(
+        runRoot,
+        profile,
+        transaction,
+        operation,
+        "operation-published",
+        "target-published",
+        operation.target,
+      );
+    }
+  } else if (operation.kind === "remove" && progress !== "post") {
+    if (operation.precondition.target.exists) {
+      if (!operation.quarantinePath) {
+        throw new Error("Workflow finalization remove quarantine is missing");
+      }
+      actual = await currentOperation(baseRoot, operation, profile);
+      if (!actual.quarantine?.identity.exists) {
+        if (
+          !hasTransactionEvent(
+            transaction,
+            "operation-quarantined",
+            operation.id,
+            "before-quarantine",
+          )
+        ) {
+          await appendOperationEvent(
+            runRoot,
+            profile,
+            transaction,
+            operation,
+            "operation-quarantined",
+            "before-quarantine",
+            operation.target,
+          );
+        }
+        const moved = await moveBaseFile(
+          baseRoot,
+          operation.target,
+          operation.quarantinePath,
+          async () => {
+            const current = await currentOperation(
+              baseRoot,
+              operation,
+              profile,
+            );
+            if (
+              !operationMatches(current, operation.precondition) ||
+              current.quarantine?.identity.exists
+            ) {
+              throw new WorkflowFinalizationConflictError(
+                operationConflictPaths(operation, current),
+              );
+            }
+          },
+        );
+        if (!moved) {
+          throw new WorkflowFinalizationConflictError([
+            operation.target,
+            operation.quarantinePath,
+          ]);
+        }
+      } else {
+        await removeBaseFile(baseRoot, operation.target, async () => {
+          const current = await currentOperation(baseRoot, operation, profile);
+          if (
+            !operationMatches(current, operation.precondition) ||
+            !current.quarantine?.identity.exists
+          ) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation, current),
+            );
+          }
+        });
+      }
+      operation.status = "target-quarantined";
+      if (
+        !hasTransactionEvent(
+          transaction,
+          "operation-quarantined",
+          operation.id,
+          "quarantined",
+        )
+      ) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation,
+          "operation-quarantined",
+          "quarantined",
+          operation.target,
+        );
+      }
+    }
+  } else if (operation.kind === "move" && progress !== "post") {
+    if (
+      operation.content === null ||
+      !operation.source ||
+      !operation.quarantinePath
+    ) {
+      throw new Error("Workflow finalization move quarantine is missing");
+    }
+    actual = await currentOperation(baseRoot, operation, profile);
+    progress = operationProgress(operation, actual);
+    if (progress === "previous") {
+      if (actual.quarantine?.identity.exists) {
+        await removeBaseFile(baseRoot, operation.quarantinePath, async () => {
+          const current = await currentOperation(baseRoot, operation, profile);
+          if (
+            !current.quarantine?.identity.exists ||
+            !sameIdentity(
+              current.quarantine.identity,
+              materialIdentity(operation.previousSourceContent!),
+            )
+          ) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation, current),
+            );
+          }
+        });
+      }
+      if (
+        !hasTransactionEvent(
+          transaction,
+          "operation-quarantined",
+          operation.id,
+          "before-source-removal",
+        )
+      ) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation,
+          "operation-quarantined",
+          "before-source-removal",
+          operation.source,
+        );
+      }
+      const moved = await moveBaseFile(
+        baseRoot,
+        operation.source,
+        operation.quarantinePath,
+        async () => {
+          const current = await currentOperation(baseRoot, operation, profile);
+          if (
+            !operationMatches(current, operation.precondition) ||
+            current.quarantine?.identity.exists
+          ) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation, current),
+            );
+          }
+        },
+      );
+      if (!moved) {
+        throw new WorkflowFinalizationConflictError([
+          operation.source,
+          operation.quarantinePath,
+        ]);
+      }
+      operation.status = "source-quarantined";
+      await appendOperationEvent(
+        runRoot,
+        profile,
+        transaction,
+        operation,
+        "operation-quarantined",
+        "source-removed",
+        operation.source,
+      );
+    }
+    actual = await currentOperation(baseRoot, operation, profile);
+    progress = operationProgress(operation, actual);
+    if (progress === "source-quarantined") {
+      if (actual.target.identity.exists) {
+        if (
+          !hasTransactionEvent(
+            transaction,
+            "operation-quarantined",
+            operation.id,
+            "before-target-removal",
+          )
+        ) {
+          await appendOperationEvent(
+            runRoot,
+            profile,
+            transaction,
+            operation,
+            "operation-quarantined",
+            "before-target-removal",
+            operation.target,
+          );
+        }
+        await removeBaseFile(baseRoot, operation.target, async () => {
+          const current = await currentOperation(baseRoot, operation, profile);
+          if (
+            !current.source ||
+            !sameIdentity(
+              current.source.identity,
+              operationPostSourceExpected(operation),
+            ) ||
             !sameIdentity(
               current.target.identity,
               operationTargetExpected(operation),
             ) ||
-            !sourceBeforeTarget ||
-            !current.source ||
-            !sameIdentity(current.source.identity, sourceBeforeTarget)
+            !current.quarantine?.identity.exists ||
+            !operation.precondition.target.exists ||
+            !current.backup?.identity.exists
           ) {
-            throw new WorkflowFinalizationConflictError([
-              operation.target,
-              ...(operation.source ? [operation.source] : []),
-            ]);
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation, current),
+            );
+          }
+        });
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation,
+          "operation-quarantined",
+          "target-removed",
+          operation.target,
+        );
+        actual = await currentOperation(baseRoot, operation, profile);
+      }
+      if (
+        !hasTransactionEvent(
+          transaction,
+          "operation-published",
+          operation.id,
+          "before-target-publication",
+        )
+      ) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation,
+          "operation-published",
+          "before-target-publication",
+          operation.target,
+        );
+      }
+      const moved = await moveBaseFile(
+        baseRoot,
+        operation.quarantinePath,
+        operation.target,
+        async () => {
+          const current = await currentOperation(baseRoot, operation, profile);
+          if (
+            !current.source ||
+            !sameIdentity(
+              current.source.identity,
+              operationPostSourceExpected(operation),
+            ) ||
+            current.target.identity.exists ||
+            !current.quarantine?.identity.exists ||
+            (operation.precondition.target.exists &&
+              !current.backup?.identity.exists)
+          ) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation, current),
+            );
           }
         },
       );
-    }
-    actual = await currentOperation(baseRoot, operation, profile);
-    if (
-      actual.source &&
-      !sameIdentity(
-        actual.source.identity,
-        operationPostSourceExpected(operation),
-      )
-    ) {
-      await removeBaseFile(baseRoot, operation.source!, async () => {
-        const current = await readMaterial(
-          baseRoot,
-          operation.source!,
-          contentMaxBytes(profile),
-        );
-        if (
-          !sameIdentity(current.identity, operationSourceExpected(operation))
-        ) {
-          throw new WorkflowFinalizationConflictError([operation.source!]);
-        }
-      });
+      if (!moved) {
+        throw new WorkflowFinalizationConflictError([
+          operation.quarantinePath,
+          operation.target,
+        ]);
+      }
+      operation.status = "target-published";
+      await appendOperationEvent(
+        runRoot,
+        profile,
+        transaction,
+        operation,
+        "operation-published",
+        "target-published",
+        operation.target,
+      );
     }
   }
-  await appendTransactionEvent(
-    runRoot,
-    profile,
-    transaction,
-    "operation-started",
-    {
-      phase: "after-operation",
-      operationId: operation.id,
-      path: operation.target,
-    },
-    operation.id,
-  );
+  actual = await currentOperation(baseRoot, operation, profile);
+  progress = operationProgress(operation, actual);
+  if (progress !== "post" && operation.kind === "move") {
+    if (
+      progress === "source-quarantined" &&
+      actual.quarantine?.identity.exists &&
+      actual.target.identity.exists
+    ) {
+      throw new WorkflowFinalizationConflictError(
+        operationConflictPaths(operation, actual),
+      );
+    }
+  }
+  if (
+    !hasTransactionEvent(
+      transaction,
+      "operation-started",
+      operation.id,
+      "after-operation",
+    ) &&
+    progress === "post"
+  ) {
+    await appendOperationEvent(
+      runRoot,
+      profile,
+      transaction,
+      operation,
+      "operation-started",
+      "after-operation",
+      operation.target,
+    );
+  }
   const verified = await currentOperation(baseRoot, operation, profile);
   if (!operationMatches(verified, operation.expectedPostState)) {
-    throw new WorkflowFinalizationConflictError([
+    throw new WorkflowFinalizationConflictError(
+      operationConflictPaths(operation, verified),
+    );
+  }
+  operation.status = "verified";
+  if (
+    !hasTransactionEvent(
+      transaction,
+      "operation-verified",
+      operation.id,
+      "operation-verified",
+    )
+  ) {
+    await appendOperationEvent(
+      runRoot,
+      profile,
+      transaction,
+      operation,
+      "operation-verified",
+      "operation-verified",
       operation.target,
-      ...(operation.source ? [operation.source] : []),
-    ]);
+    );
   }
   operation.status = "committed";
-  await appendTransactionEvent(
-    runRoot,
-    profile,
-    transaction,
-    "operation-completed",
-    {
-      phase: "operation-verified",
-      operationId: operation.id,
-      path: operation.target,
-    },
-    operation.id,
-  );
+  if (
+    !hasTransactionEvent(
+      transaction,
+      "operation-completed",
+      operation.id,
+      "operation-verified",
+    )
+  ) {
+    await appendOperationEvent(
+      runRoot,
+      profile,
+      transaction,
+      operation,
+      "operation-completed",
+      "operation-verified",
+      operation.target,
+    );
+  }
   if (recovery)
     transaction.recovery.crashBoundaries = uniqueStrings([
       ...transaction.recovery.crashBoundaries,

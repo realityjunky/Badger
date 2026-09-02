@@ -12,6 +12,7 @@ import {
 import {
   clearWorkflowFinalizationFaultForTests,
   readWorkflowFinalizationReceipt,
+  readWorkflowFinalizationTransaction,
   rollbackWorkflowFinalization,
   setWorkflowFinalizationFaultForTests,
 } from "../src/workflow-runtime/finalization.js";
@@ -197,6 +198,59 @@ function evidenceProtocol(): WorkflowProtocol {
   };
 }
 
+async function preparedOperationsRun(root: string, runId: string) {
+  const runtime = createWorkflowRuntime();
+  let current = await runtime.start({
+    protocol: operationsProtocol(),
+    runRoot: root,
+    runId,
+  });
+  current = await runtime.submit(root, {
+    actionId: current.pendingAction!.id,
+    runId: current.runId,
+    revision: current.revision,
+    nodeId: current.currentNode,
+    execution: current.execution,
+    status: "succeeded",
+    summary: "Finish before destructive boundary recovery.",
+  });
+  return {
+    runtime,
+    current,
+    confirmation: current.pendingAction!.finalization!,
+  };
+}
+
+async function confirmOperationsRun(
+  root: string,
+  current: WorkflowContinuation,
+  confirmation: NonNullable<
+    WorkflowContinuation["pendingAction"]
+  >["finalization"],
+) {
+  return createWorkflowRuntime().submit(root, {
+    kind: "decision",
+    actionId: current.pendingAction!.id,
+    runId: current.runId,
+    revision: current.revision,
+    nodeId: null,
+    cycleId: null,
+    attemptId: null,
+    execution: current.execution,
+    decisionId: confirmation!.decisionId,
+    choiceId: "confirm",
+    reviewer: { subject: "operator", authorities: ["workflow-owner"] },
+    rationale: "Recover the reviewed destructive boundary.",
+    finalization: {
+      planHash: confirmation!.planHash,
+      decisionId: confirmation!.decisionId,
+      choiceId: "confirm",
+      contentSnapshotHash: confirmation!.contentSnapshotHash,
+      verificationReceiptIds: confirmation!.verificationReceiptIds,
+    },
+  });
+}
+
 describe("WorkflowRuntime finalization preview", () => {
   it.each([
     ["manual", (root: string) => root],
@@ -289,6 +343,165 @@ describe("WorkflowRuntime finalization preview", () => {
       }
     },
   );
+
+  it("blocks when a quarantined identity is replaced during recovery", async () => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "comet-finalization-quarantine-unknown-"),
+    );
+    try {
+      await fs.mkdir(path.join(root, "results"));
+      await fs.writeFile(path.join(root, "results", "source.txt"), "source\n");
+      await fs.writeFile(
+        path.join(root, "results", "obsolete.txt"),
+        "obsolete\n",
+      );
+      const { runtime, current, confirmation } = await preparedOperationsRun(
+        root,
+        "quarantine-unknown-run",
+      );
+      setWorkflowFinalizationFaultForTests({
+        phase: "source-removed",
+        operationId: "move-source",
+      });
+      await expect(
+        confirmOperationsRun(root, current, confirmation),
+      ).rejects.toThrow("deterministic workflow finalization fault");
+      clearWorkflowFinalizationFaultForTests();
+
+      const transaction = await readWorkflowFinalizationTransaction(
+        root,
+        finalizationProfile,
+      );
+      const quarantinePath = transaction!.operations.find(
+        (operation) => operation.id === "move-source",
+      )!.quarantinePath!;
+      await fs.writeFile(path.join(root, quarantinePath), "replaced\n");
+
+      const blocked = await runtime.recover(root);
+      expect(blocked.disposition).toBe("blocked");
+      expect(blocked.findings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "finalization-transaction-unknown" }),
+        ]),
+      );
+      await expect(
+        fs.stat(path.join(root, ".comet", "finalization", "transaction.json")),
+      ).resolves.toBeDefined();
+    } finally {
+      clearWorkflowFinalizationFaultForTests();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the transaction anchor until cleanup completes", async () => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "comet-finalization-cleanup-recovery-"),
+    );
+    try {
+      await fs.mkdir(path.join(root, "results"));
+      await fs.writeFile(path.join(root, "results", "source.txt"), "source\n");
+      await fs.writeFile(
+        path.join(root, "results", "obsolete.txt"),
+        "obsolete\n",
+      );
+      const { runtime, current, confirmation } = await preparedOperationsRun(
+        root,
+        "cleanup-recovery-run",
+      );
+      setWorkflowFinalizationFaultForTests({
+        phase: "cleaned",
+        operationId: "remove-obsolete",
+      });
+      await expect(
+        confirmOperationsRun(root, current, confirmation),
+      ).rejects.toThrow("deterministic workflow finalization fault");
+      clearWorkflowFinalizationFaultForTests();
+
+      await expect(
+        fs.stat(path.join(root, ".comet", "finalization", "transaction.json")),
+      ).resolves.toBeDefined();
+      const recovered = await runtime.recover(root);
+      expect(recovered.disposition).toBe("done");
+      expect(recovered.finalization?.receipt).toBeDefined();
+      await expect(
+        fs.stat(path.join(root, ".comet", "finalization", "transaction.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      const receipt = await readWorkflowFinalizationReceipt(
+        root,
+        recovered.finalization!.receipt!.receiptHash,
+        finalizationProfile,
+      );
+      expect(receipt?.cleanup.status).toBe("completed");
+      expect(receipt?.cleanup.entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            operationId: "remove-obsolete",
+            role: "quarantine",
+            status: "cleaned",
+          }),
+        ]),
+      );
+    } finally {
+      clearWorkflowFinalizationFaultForTests();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    "before-rollback-operation",
+    "rollback-verified",
+    "rolled-back",
+  ] as const)("recovers rollback after the %s boundary", async (phase) => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "comet-finalization-rollback-boundary-"),
+    );
+    try {
+      await fs.mkdir(path.join(root, "results"));
+      await fs.writeFile(path.join(root, "results", "source.txt"), "source\n");
+      await fs.writeFile(
+        path.join(root, "results", "obsolete.txt"),
+        "obsolete\n",
+      );
+      const { runtime, current, confirmation } = await preparedOperationsRun(
+        root,
+        `rollback-boundary-${phase}`,
+      );
+      setWorkflowFinalizationFaultForTests({
+        phase: "source-removed",
+        operationId: "move-source",
+      });
+      await expect(
+        confirmOperationsRun(root, current, confirmation),
+      ).rejects.toThrow("deterministic workflow finalization fault");
+      clearWorkflowFinalizationFaultForTests();
+      setWorkflowFinalizationFaultForTests({
+        phase,
+        operationId: "move-source",
+      });
+      await expect(
+        runtime.recover(root, { rollbackFinalization: true }),
+      ).rejects.toThrow("deterministic workflow finalization fault");
+      clearWorkflowFinalizationFaultForTests();
+
+      const rolledBack = await runtime.recover(root, {
+        rollbackFinalization: true,
+      });
+      expect(rolledBack.disposition).toBe("blocked");
+      expect(rolledBack.finalization?.status).toBe("rolled-back");
+      await expect(
+        fs.readFile(path.join(root, "results", "source.txt"), "utf8"),
+      ).resolves.toBe("source\n");
+      await expect(
+        fs.readFile(path.join(root, "results", "obsolete.txt"), "utf8"),
+      ).resolves.toBe("obsolete\n");
+      await expect(
+        fs.stat(path.join(root, "results", "moved.txt")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      clearWorkflowFinalizationFaultForTests();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
 
   it("requires the persisted confirmation action before applying effects", async () => {
     const root = await fs.mkdtemp(
@@ -496,12 +709,29 @@ describe("WorkflowRuntime finalization preview", () => {
         path.join(root, "results", "obsolete.txt"),
         "obsolete\n",
       );
+      await fs.writeFile(path.join(root, "results", "moved.txt"), "old\n");
       const runtime = createWorkflowRuntime();
       let current = await runtime.start({
         protocol: operationsProtocol(),
         runRoot: root,
         runId: "operations-run",
       });
+      const preview = await previewWorkflowFinalization(root);
+      expect(preview.operations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "move-source",
+            backupPath: expect.stringContaining("move-source.backup"),
+            quarantinePath: expect.stringContaining("move-source.quarantine"),
+          }),
+          expect.objectContaining({
+            id: "remove-obsolete",
+            quarantinePath: expect.stringContaining(
+              "remove-obsolete.quarantine",
+            ),
+          }),
+        ]),
+      );
       current = await runtime.submit(root, {
         actionId: current.pendingAction!.id,
         runId: current.runId,
@@ -558,6 +788,262 @@ describe("WorkflowRuntime finalization preview", () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
+
+  it("recovers quarantined move and remove effects with durable cleanup evidence", async () => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "comet-finalization-quarantine-recovery-"),
+    );
+    try {
+      await fs.mkdir(path.join(root, "results"));
+      await fs.writeFile(path.join(root, "results", "source.txt"), "source\n");
+      await fs.writeFile(
+        path.join(root, "results", "obsolete.txt"),
+        "obsolete\n",
+      );
+      await fs.writeFile(path.join(root, "results", "moved.txt"), "old\n");
+      const runtime = createWorkflowRuntime();
+      let current = await runtime.start({
+        protocol: operationsProtocol(),
+        runRoot: root,
+        runId: "quarantine-recovery-run",
+      });
+      current = await runtime.submit(root, {
+        actionId: current.pendingAction!.id,
+        runId: current.runId,
+        revision: current.revision,
+        nodeId: current.currentNode,
+        execution: current.execution,
+        status: "succeeded",
+        summary: "Finish before quarantine recovery.",
+      });
+      const confirmation = current.pendingAction!.finalization!;
+      setWorkflowFinalizationFaultForTests({
+        phase: "source-removed",
+        operationId: "move-source",
+      });
+      await expect(
+        runtime.submit(root, {
+          kind: "decision",
+          actionId: current.pendingAction!.id,
+          runId: current.runId,
+          revision: current.revision,
+          nodeId: null,
+          cycleId: null,
+          attemptId: null,
+          execution: current.execution,
+          decisionId: confirmation.decisionId,
+          choiceId: "confirm",
+          reviewer: { subject: "operator", authorities: ["workflow-owner"] },
+          rationale: "Recover the quarantined local operations.",
+          finalization: {
+            planHash: confirmation.planHash,
+            decisionId: confirmation.decisionId,
+            choiceId: "confirm",
+            contentSnapshotHash: confirmation.contentSnapshotHash,
+            verificationReceiptIds: confirmation.verificationReceiptIds,
+          },
+        }),
+      ).rejects.toThrow("deterministic workflow finalization fault");
+      clearWorkflowFinalizationFaultForTests();
+
+      expect((await runtime.resume(root)).disposition).toBe("blocked");
+      current = await runtime.recover(root);
+
+      expect(current.disposition).toBe("done");
+      await expect(
+        fs.readFile(path.join(root, "results", "moved.txt"), "utf8"),
+      ).resolves.toBe("source\n");
+      await expect(
+        fs.stat(path.join(root, "results", "source.txt")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        fs.stat(path.join(root, "results", "obsolete.txt")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      const receipt = await readWorkflowFinalizationReceipt(
+        root,
+        current.finalization!.receipt!.receiptHash,
+        finalizationProfile,
+      );
+      expect(receipt).toMatchObject({
+        cleanup: { status: "completed" },
+      });
+      expect(receipt?.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "operation-quarantined",
+            operationId: "move-source",
+          }),
+          expect.objectContaining({
+            type: "operation-published",
+            operationId: "move-source",
+          }),
+          expect.objectContaining({ type: "cleanup-completed" }),
+        ]),
+      );
+    } finally {
+      clearWorkflowFinalizationFaultForTests();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls back quarantined destructive effects without overwriting newer content", async () => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "comet-finalization-quarantine-rollback-"),
+    );
+    try {
+      await fs.mkdir(path.join(root, "results"));
+      await fs.writeFile(path.join(root, "results", "source.txt"), "source\n");
+      await fs.writeFile(
+        path.join(root, "results", "obsolete.txt"),
+        "obsolete\n",
+      );
+      await fs.writeFile(path.join(root, "results", "moved.txt"), "old\n");
+      const runtime = createWorkflowRuntime();
+      let current = await runtime.start({
+        protocol: operationsProtocol(),
+        runRoot: root,
+        runId: "quarantine-rollback-run",
+      });
+      current = await runtime.submit(root, {
+        actionId: current.pendingAction!.id,
+        runId: current.runId,
+        revision: current.revision,
+        nodeId: current.currentNode,
+        execution: current.execution,
+        status: "succeeded",
+        summary: "Finish before quarantine rollback.",
+      });
+      const confirmation = current.pendingAction!.finalization!;
+      setWorkflowFinalizationFaultForTests({
+        phase: "target-published",
+        operationId: "move-source",
+      });
+      await expect(
+        runtime.submit(root, {
+          kind: "decision",
+          actionId: current.pendingAction!.id,
+          runId: current.runId,
+          revision: current.revision,
+          nodeId: null,
+          cycleId: null,
+          attemptId: null,
+          execution: current.execution,
+          decisionId: confirmation.decisionId,
+          choiceId: "confirm",
+          reviewer: { subject: "operator", authorities: ["workflow-owner"] },
+          rationale: "Roll back the interrupted destructive operations.",
+          finalization: {
+            planHash: confirmation.planHash,
+            decisionId: confirmation.decisionId,
+            choiceId: "confirm",
+            contentSnapshotHash: confirmation.contentSnapshotHash,
+            verificationReceiptIds: confirmation.verificationReceiptIds,
+          },
+        }),
+      ).rejects.toThrow("deterministic workflow finalization fault");
+      clearWorkflowFinalizationFaultForTests();
+
+      await fs.writeFile(path.join(root, "results", "moved.txt"), "newer\n");
+      const blocked = await runtime.recover(root, {
+        rollbackFinalization: true,
+      });
+      expect(blocked.disposition).toBe("blocked");
+      await expect(
+        fs.readFile(path.join(root, "results", "moved.txt"), "utf8"),
+      ).resolves.toBe("newer\n");
+
+      await fs.rm(path.join(root, "results", "moved.txt"));
+      current = await runtime.recover(root, { rollbackFinalization: true });
+      expect(current.disposition).toBe("blocked");
+      expect(current.finalization?.status).toBe("rolled-back");
+      await expect(
+        fs.readFile(path.join(root, "results", "source.txt"), "utf8"),
+      ).resolves.toBe("source\n");
+      await expect(
+        fs.readFile(path.join(root, "results", "obsolete.txt"), "utf8"),
+      ).resolves.toBe("obsolete\n");
+      await expect(
+        fs.readFile(path.join(root, "results", "moved.txt"), "utf8"),
+      ).resolves.toBe("old\n");
+      await expect(
+        fs.stat(path.join(root, "results", "report.txt")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      const receipt = await readWorkflowFinalizationReceipt(
+        root,
+        current.finalization!.receipt!.receiptHash,
+        finalizationProfile,
+      );
+      expect(receipt).toMatchObject({
+        recovery: { status: "rolled-back" },
+        cleanup: { status: "completed" },
+      });
+    } finally {
+      clearWorkflowFinalizationFaultForTests();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["before-quarantine", "remove-obsolete"],
+    ["quarantined", "remove-obsolete"],
+    ["before-source-removal", "move-source"],
+    ["source-removed", "move-source"],
+    ["before-target-publication", "move-source"],
+    ["target-published", "move-source"],
+    ["operation-verified", "move-source"],
+    ["committed", undefined],
+    ["before-cleanup", undefined],
+    ["cleanup-item", "remove-obsolete"],
+    ["cleaned", "remove-obsolete"],
+  ] as const)(
+    "recovers destructive finalization after the %s boundary",
+    async (phase, operationId) => {
+      const root = await fs.mkdtemp(
+        path.join(os.tmpdir(), "comet-finalization-destructive-boundary-"),
+      );
+      try {
+        await fs.mkdir(path.join(root, "results"));
+        await fs.writeFile(
+          path.join(root, "results", "source.txt"),
+          "source\n",
+        );
+        await fs.writeFile(
+          path.join(root, "results", "obsolete.txt"),
+          "obsolete\n",
+        );
+        const { runtime, current, confirmation } = await preparedOperationsRun(
+          root,
+          `boundary-${phase}`,
+        );
+        setWorkflowFinalizationFaultForTests({ phase, operationId });
+        await expect(
+          confirmOperationsRun(root, current, confirmation),
+        ).rejects.toThrow("deterministic workflow finalization fault");
+        clearWorkflowFinalizationFaultForTests();
+
+        const recovered = await runtime.recover(root);
+        expect(recovered.disposition).toBe("done");
+        await expect(
+          fs.readFile(path.join(root, "results", "moved.txt"), "utf8"),
+        ).resolves.toBe("source\n");
+        await expect(
+          fs.stat(path.join(root, "results", "source.txt")),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(
+          fs.stat(path.join(root, "results", "obsolete.txt")),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+        const receipt = await readWorkflowFinalizationReceipt(
+          root,
+          recovered.finalization!.receipt!.receiptHash,
+          finalizationProfile,
+        );
+        expect(receipt?.cleanup.status).toBe("completed");
+      } finally {
+        clearWorkflowFinalizationFaultForTests();
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("forwards preview and finalization confirmation through generated adapters", async () => {
     const root = await fs.mkdtemp(

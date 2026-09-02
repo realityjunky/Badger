@@ -427,6 +427,7 @@ export interface WorkflowFinalizationPlannedOperation {
   target: string;
   stagedPath: string | null;
   backupPath: string | null;
+  quarantinePath: string | null;
   precondition: {
     source: WorkflowFinalizationMaterialIdentity | null;
     target: WorkflowFinalizationMaterialIdentity;
@@ -511,6 +512,9 @@ export interface WorkflowFinalizationOperationReceipt {
   kind: WorkflowFinalizationOperationKind;
   source: string | null;
   target: string;
+  stagedPath: string | null;
+  backupPath: string | null;
+  quarantinePath: string | null;
   precondition: {
     source: WorkflowFinalizationMaterialIdentity | null;
     target: WorkflowFinalizationMaterialIdentity;
@@ -526,6 +530,22 @@ export interface WorkflowFinalizationOperationReceipt {
   status: "committed" | "rolled-back";
 }
 
+export type WorkflowFinalizationCleanupStatus =
+  "pending" | "cleaned" | "missing";
+
+export interface WorkflowFinalizationCleanupEntry {
+  operationId: string;
+  role: "staged" | "backup" | "quarantine";
+  path: string;
+  expected: WorkflowFinalizationMaterialIdentity;
+  status: WorkflowFinalizationCleanupStatus;
+}
+
+export interface WorkflowFinalizationCleanup {
+  status: "pending" | "completed";
+  entries: WorkflowFinalizationCleanupEntry[];
+}
+
 export interface WorkflowFinalizationEvent {
   sequence: number;
   type:
@@ -534,12 +554,18 @@ export interface WorkflowFinalizationEvent {
     | "operation-staged"
     | "operation-started"
     | "operation-completed"
+    | "operation-quarantined"
+    | "operation-published"
+    | "operation-verified"
     | "committing"
     | "receipt-written"
     | "committed"
     | "rolling-back"
     | "operation-rolled-back"
-    | "rolled-back";
+    | "rolled-back"
+    | "cleanup-started"
+    | "cleanup-item"
+    | "cleanup-completed";
   operationId: string | null;
   boundary: string;
   timestamp: string;
@@ -561,6 +587,7 @@ export interface WorkflowFinalizationReceipt {
   confirmation: WorkflowFinalizationConfirmationRecord;
   operations: WorkflowFinalizationOperationReceipt[];
   events: WorkflowFinalizationEvent[];
+  cleanup: WorkflowFinalizationCleanup;
   recovery: {
     status: "none" | "recovered" | "rolled-back";
     crashBoundaries: string[];

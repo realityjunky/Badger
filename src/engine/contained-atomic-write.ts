@@ -16,6 +16,11 @@ export interface ContainedFileRemoveOptions {
   beforeRemove?: () => void | Promise<void>;
 }
 
+export interface ContainedFileMoveOptions {
+  containedRoot: string;
+  beforeMove?: () => void | Promise<void>;
+}
+
 interface DirectoryIdentity extends FileObjectIdentity {
   path: string;
   realPath: string;
@@ -382,5 +387,123 @@ export async function removeContainedFile(
   await fs.unlink(file);
   await verifyDirectoryChain(directoryChain);
   await syncDirectory(directory);
+  return true;
+}
+
+export async function moveContainedFile(
+  source: string,
+  destination: string,
+  options: ContainedFileMoveOptions,
+): Promise<boolean> {
+  const lexicalRoot = path.resolve(options.containedRoot);
+  const lexicalSource = path.resolve(source);
+  const lexicalDestination = path.resolve(destination);
+  if (!isInside(lexicalRoot, lexicalSource)) {
+    throw new Error("Contained file move source is outside its managed root");
+  }
+  if (!isInside(lexicalRoot, lexicalDestination)) {
+    throw new Error(
+      "Contained file move destination is outside its managed root",
+    );
+  }
+  const sourceDirectoryChain = await captureExistingContainedDirectoryChain(
+    lexicalRoot,
+    path.dirname(lexicalSource),
+  );
+  if (!sourceDirectoryChain) return false;
+  const destinationDirectoryChain =
+    await captureExistingContainedDirectoryChain(
+      lexicalRoot,
+      path.dirname(lexicalDestination),
+    );
+  if (!destinationDirectoryChain) {
+    throw new Error("Contained file move destination parent is missing");
+  }
+
+  let sourceIdentity: import("fs").Stats;
+  let sourceRealPath: string;
+  try {
+    sourceIdentity = await fs.lstat(lexicalSource);
+    sourceRealPath = await fs.realpath(lexicalSource);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  if (
+    !sourceIdentity.isFile() ||
+    sourceIdentity.isSymbolicLink() ||
+    !isInside(sourceDirectoryChain[0].realPath, sourceRealPath)
+  ) {
+    throw new Error(
+      "Contained file move source must be a regular file inside its managed root",
+    );
+  }
+  try {
+    await fs.lstat(lexicalDestination);
+    throw new Error("Contained file move destination must be missing");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  await options.beforeMove?.();
+  await verifyDirectoryChain(sourceDirectoryChain);
+  await verifyDirectoryChain(destinationDirectoryChain);
+  const [currentSource, currentSourceRealPath] = await Promise.all([
+    fs.lstat(lexicalSource),
+    fs.realpath(lexicalSource),
+  ]);
+  if (
+    !currentSource.isFile() ||
+    currentSource.isSymbolicLink() ||
+    !sameUnchangedFile(sourceIdentity, currentSource) ||
+    currentSourceRealPath !== sourceRealPath
+  ) {
+    throw new Error("Contained file move source changed before move");
+  }
+  try {
+    await fs.lstat(lexicalDestination);
+    throw new Error("Contained file move destination changed before move");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  let linked = false;
+  try {
+    await fs.link(lexicalSource, lexicalDestination);
+    linked = true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (!["ENOTSUP", "EOPNOTSUPP", "EPERM", "EXDEV"].includes(code ?? "")) {
+      throw error;
+    }
+    await fs.copyFile(
+      lexicalSource,
+      lexicalDestination,
+      fsConstants.COPYFILE_EXCL,
+    );
+  }
+  const [destinationStat, destinationRealPath, currentSourceAfterLink] =
+    await Promise.all([
+      fs.lstat(lexicalDestination),
+      fs.realpath(lexicalDestination),
+      fs.lstat(lexicalSource),
+    ]);
+  if (
+    !destinationStat.isFile() ||
+    destinationStat.isSymbolicLink() ||
+    !sameFileIdentity(sourceIdentity, currentSourceAfterLink) ||
+    (linked
+      ? !sameFileIdentity(sourceIdentity, destinationStat)
+      : !sameUnchangedFile(sourceIdentity, currentSourceAfterLink)) ||
+    !isInside(sourceDirectoryChain[0].realPath, destinationRealPath)
+  ) {
+    throw new Error("Contained file move destination changed after move");
+  }
+  await fs.unlink(lexicalSource);
+  await verifyDirectoryChain(sourceDirectoryChain);
+  await verifyDirectoryChain(destinationDirectoryChain);
+  await syncDirectory(path.dirname(lexicalSource));
+  if (path.dirname(lexicalSource) !== path.dirname(lexicalDestination)) {
+    await syncDirectory(path.dirname(lexicalDestination));
+  }
   return true;
 }

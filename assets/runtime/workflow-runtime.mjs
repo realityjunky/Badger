@@ -257,6 +257,98 @@ async function removeContainedFile(file, options) {
   await syncDirectory(directory);
   return true;
 }
+async function moveContainedFile(source, destination, options) {
+  const lexicalRoot = path.resolve(options.containedRoot);
+  const lexicalSource = path.resolve(source);
+  const lexicalDestination = path.resolve(destination);
+  if (!isInside(lexicalRoot, lexicalSource)) {
+    throw new Error("Contained file move source is outside its managed root");
+  }
+  if (!isInside(lexicalRoot, lexicalDestination)) {
+    throw new Error(
+      "Contained file move destination is outside its managed root"
+    );
+  }
+  const sourceDirectoryChain = await captureExistingContainedDirectoryChain(
+    lexicalRoot,
+    path.dirname(lexicalSource)
+  );
+  if (!sourceDirectoryChain) return false;
+  const destinationDirectoryChain = await captureExistingContainedDirectoryChain(
+    lexicalRoot,
+    path.dirname(lexicalDestination)
+  );
+  if (!destinationDirectoryChain) {
+    throw new Error("Contained file move destination parent is missing");
+  }
+  let sourceIdentity;
+  let sourceRealPath;
+  try {
+    sourceIdentity = await fs.lstat(lexicalSource);
+    sourceRealPath = await fs.realpath(lexicalSource);
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+  if (!sourceIdentity.isFile() || sourceIdentity.isSymbolicLink() || !isInside(sourceDirectoryChain[0].realPath, sourceRealPath)) {
+    throw new Error(
+      "Contained file move source must be a regular file inside its managed root"
+    );
+  }
+  try {
+    await fs.lstat(lexicalDestination);
+    throw new Error("Contained file move destination must be missing");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  await options.beforeMove?.();
+  await verifyDirectoryChain(sourceDirectoryChain);
+  await verifyDirectoryChain(destinationDirectoryChain);
+  const [currentSource, currentSourceRealPath] = await Promise.all([
+    fs.lstat(lexicalSource),
+    fs.realpath(lexicalSource)
+  ]);
+  if (!currentSource.isFile() || currentSource.isSymbolicLink() || !sameUnchangedFile(sourceIdentity, currentSource) || currentSourceRealPath !== sourceRealPath) {
+    throw new Error("Contained file move source changed before move");
+  }
+  try {
+    await fs.lstat(lexicalDestination);
+    throw new Error("Contained file move destination changed before move");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  let linked = false;
+  try {
+    await fs.link(lexicalSource, lexicalDestination);
+    linked = true;
+  } catch (error) {
+    const code = error.code;
+    if (!["ENOTSUP", "EOPNOTSUPP", "EPERM", "EXDEV"].includes(code ?? "")) {
+      throw error;
+    }
+    await fs.copyFile(
+      lexicalSource,
+      lexicalDestination,
+      fsConstants.COPYFILE_EXCL
+    );
+  }
+  const [destinationStat, destinationRealPath, currentSourceAfterLink] = await Promise.all([
+    fs.lstat(lexicalDestination),
+    fs.realpath(lexicalDestination),
+    fs.lstat(lexicalSource)
+  ]);
+  if (!destinationStat.isFile() || destinationStat.isSymbolicLink() || !sameFileIdentity(sourceIdentity, currentSourceAfterLink) || (linked ? !sameFileIdentity(sourceIdentity, destinationStat) : !sameUnchangedFile(sourceIdentity, currentSourceAfterLink)) || !isInside(sourceDirectoryChain[0].realPath, destinationRealPath)) {
+    throw new Error("Contained file move destination changed after move");
+  }
+  await fs.unlink(lexicalSource);
+  await verifyDirectoryChain(sourceDirectoryChain);
+  await verifyDirectoryChain(destinationDirectoryChain);
+  await syncDirectory(path.dirname(lexicalSource));
+  if (path.dirname(lexicalSource) !== path.dirname(lexicalDestination)) {
+    await syncDirectory(path.dirname(lexicalDestination));
+  }
+  return true;
+}
 
 // src/engine/protected-project-path.ts
 import { promises as fs3 } from "fs";
@@ -7779,6 +7871,35 @@ var HASH_PATTERN3 = /^[a-f0-9]{64}$/u;
 var SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 var MAX_IDENTIFIER_LENGTH = 256;
 var PROTECTED_RUNTIME_DIRECTORY = ".comet";
+var WORKFLOW_FINALIZATION_BOUNDARY_PHASES = [
+  "prepared",
+  "applying",
+  "before-staging",
+  "staged",
+  "before-operation",
+  "after-operation",
+  "before-target-removal",
+  "target-removed",
+  "before-quarantine",
+  "quarantined",
+  "before-source-removal",
+  "source-removed",
+  "before-target-publication",
+  "target-published",
+  "operation-verified",
+  "committing",
+  "committed",
+  "before-receipt",
+  "receipt-written",
+  "rolling-back",
+  "before-rollback-operation",
+  "rollback-verified",
+  "before-cleanup",
+  "cleanup-item",
+  "cleaned",
+  "rolled-back",
+  "cleared"
+];
 var configuredFault;
 var WorkflowFinalizationInjectedFaultError = class extends Error {
   constructor() {
@@ -8459,6 +8580,7 @@ function identityForOperation(operation2, rootPath, materialsByPath) {
     target: targetPath,
     stagedPath: null,
     backupPath: target.identity.exists ? null : null,
+    quarantinePath: null,
     precondition: {
       source: source?.identity ?? null,
       target: target.identity
@@ -8573,8 +8695,9 @@ async function buildWorkflowFinalizationPreview(options) {
   const operations = baseOperations.map((operation2) => {
     const rootPath = roots.get(operation2.rootId);
     const prefix = `${joinRelative(rootPath, ".comet/finalization")}/${transactionId}`;
-    const backupPath = operation2.precondition.target.exists ? `${prefix}/${operation2.id}.backup` : null;
-    const stagedPath = operation2.kind === "remove" ? null : `${prefix}/${operation2.id}.stage`;
+    const backupPath = operation2.precondition.target.exists && (operation2.kind === "write" || operation2.kind === "move") ? `${prefix}/${operation2.id}.backup` : null;
+    const stagedPath = operation2.kind === "write" ? `${prefix}/${operation2.id}.stage` : null;
+    const quarantinePath = operation2.kind === "remove" && operation2.precondition.target.exists || operation2.kind === "move" && operation2.precondition.source?.exists ? `${prefix}/${operation2.id}.quarantine` : null;
     const declaration = definition.operations.find(
       (candidate) => candidate.id === operation2.id
     );
@@ -8582,6 +8705,7 @@ async function buildWorkflowFinalizationPreview(options) {
       ...operation2,
       stagedPath,
       backupPath,
+      quarantinePath,
       requiresConfirmation: operationRequiresConfirmation(
         declaration,
         confirmation
@@ -8594,6 +8718,20 @@ async function buildWorkflowFinalizationPreview(options) {
       confirmation
     )
   );
+  const cleanupEntryCount = operations.reduce(
+    (count, operation2) => count + [
+      operation2.stagedPath,
+      operation2.backupPath,
+      operation2.quarantinePath
+    ].filter((relative) => relative !== null).length,
+    0
+  );
+  const estimatedEventCount = 16 + operations.length * 11 + cleanupEntryCount * 2;
+  if (estimatedEventCount > profileBound(options.profile, "finalizationEventCount")) {
+    throw new Error(
+      "Workflow finalization event count exceeds its configured bound"
+    );
+  }
   for (const operation2 of operations) {
     const approvedRoot = path9.resolve(
       options.baseRoot,
@@ -8613,6 +8751,14 @@ async function buildWorkflowFinalizationPreview(options) {
     )) {
       throw new Error(
         `Workflow finalization backup path escapes its approved root: ${operation2.id}`
+      );
+    }
+    if (operation2.quarantinePath && !isInside4(
+      approvedRoot,
+      path9.resolve(options.baseRoot, operation2.quarantinePath)
+    )) {
+      throw new Error(
+        `Workflow finalization quarantine path escapes its approved root: ${operation2.id}`
       );
     }
   }
@@ -8701,6 +8847,7 @@ function parsePlannedOperation(value, index) {
       "target",
       "stagedPath",
       "backupPath",
+      "quarantinePath",
       "precondition",
       "expectedPostState",
       "contentHash",
@@ -8721,6 +8868,9 @@ function parsePlannedOperation(value, index) {
   if (value.backupPath !== null && value.backupPath !== void 0) {
     normalizePath(value.backupPath, `${label} backupPath`);
   }
+  if (value.quarantinePath !== null && value.quarantinePath !== void 0) {
+    normalizePath(value.quarantinePath, `${label} quarantinePath`);
+  }
   const contentHash2 = value.contentHash === null ? null : boundedHash2(value.contentHash, `${label} contentHash`);
   const contentBytes = nonNegativeInteger4(
     value.contentBytes,
@@ -8729,7 +8879,7 @@ function parsePlannedOperation(value, index) {
   if (typeof value.requiresConfirmation !== "boolean") {
     throw new Error(`${label} requiresConfirmation must be boolean`);
   }
-  return {
+  const planned = {
     id: safeId(value.id, `${label} id`),
     kind: value.kind,
     rootId: safeId(value.rootId, `${label} rootId`),
@@ -8737,6 +8887,7 @@ function parsePlannedOperation(value, index) {
     target: normalizePath(value.target, `${label} target`),
     stagedPath: value.stagedPath === null || value.stagedPath === void 0 ? null : String(value.stagedPath),
     backupPath: value.backupPath === null || value.backupPath === void 0 ? null : String(value.backupPath),
+    quarantinePath: value.quarantinePath === null || value.quarantinePath === void 0 ? null : String(value.quarantinePath),
     precondition: parseOperationState(
       value.precondition,
       `${label} precondition`
@@ -8749,6 +8900,19 @@ function parsePlannedOperation(value, index) {
     contentBytes,
     requiresConfirmation: value.requiresConfirmation
   };
+  if (planned.kind === "write" && (planned.source !== null || planned.contentHash === null || !planned.expectedPostState.target.exists || planned.expectedPostState.source !== null || planned.contentBytes !== planned.expectedPostState.target.bytes || planned.contentHash !== planned.expectedPostState.target.sha256)) {
+    throw new Error(`${label} write identity is invalid`);
+  }
+  if (planned.kind === "remove" && (planned.source !== null || planned.contentHash !== null || planned.contentBytes !== 0 || planned.expectedPostState.source !== null || planned.expectedPostState.target.exists)) {
+    throw new Error(`${label} remove identity is invalid`);
+  }
+  if (planned.kind === "move" && (planned.source === null || planned.precondition.source === null || planned.contentHash !== planned.precondition.source.sha256 || planned.contentBytes !== planned.precondition.source.bytes || planned.expectedPostState.source?.exists !== false || !sameIdentity(
+    planned.expectedPostState.target,
+    planned.precondition.source
+  ))) {
+    throw new Error(`${label} move identity is invalid`);
+  }
+  return planned;
 }
 function parseTimestamp(value, label) {
   const result = boundedText2(value, label);
@@ -8786,6 +8950,7 @@ function parseWorkflowFinalizationPreview(value) {
   if (value.schemaVersion !== WORKFLOW_FINALIZATION_SCHEMA_VERSION || value.kind !== "workflow-finalization-preview") {
     throw new Error(`${label} schema identity is invalid`);
   }
+  const transactionId = safeId(value.transactionId, `${label} transactionId`);
   if (!Array.isArray(value.verificationReceiptIds) || value.verificationReceiptIds.length > 256) {
     throw new Error(`${label} verificationReceiptIds are invalid`);
   }
@@ -8825,9 +8990,19 @@ function parseWorkflowFinalizationPreview(value) {
   for (const operation2 of operations) {
     const root = roots.find((candidate) => candidate.id === operation2.rootId);
     if (!root) throw new Error(`${label} operation root is not declared`);
+    const operationPrefix = `${joinRelative(
+      root.path,
+      `.comet/finalization/${transactionId}`
+    )}/${operation2.id}`;
+    const expectedStagedPath = operation2.kind === "write" ? `${operationPrefix}.stage` : null;
+    const expectedBackupPath = operation2.precondition.target.exists && (operation2.kind === "write" || operation2.kind === "move") ? `${operationPrefix}.backup` : null;
+    const expectedQuarantinePath = operation2.kind === "remove" && operation2.precondition.target.exists || operation2.kind === "move" && operation2.precondition.source?.exists ? `${operationPrefix}.quarantine` : null;
+    if (operation2.stagedPath !== expectedStagedPath || operation2.backupPath !== expectedBackupPath || operation2.quarantinePath !== expectedQuarantinePath || operation2.kind !== "move" && operation2.source !== null || operation2.kind === "move" && operation2.source === null) {
+      throw new Error(`${label} operation coordinates are invalid`);
+    }
     const internalPrefix = `${joinRelative(
       root.path,
-      `.comet/finalization/${value.transactionId}`
+      `.comet/finalization/${transactionId}`
     )}/`;
     if (operation2.stagedPath !== null && !operation2.stagedPath.startsWith(internalPrefix) || operation2.backupPath !== null && !operation2.backupPath.startsWith(internalPrefix)) {
       throw new Error(
@@ -8838,7 +9013,8 @@ function parseWorkflowFinalizationPreview(value) {
       [operation2.target, true],
       [operation2.source, true],
       [operation2.stagedPath, false],
-      [operation2.backupPath, false]
+      [operation2.backupPath, false],
+      [operation2.quarantinePath, false]
     ]) {
       if (candidate !== null && (protectedPath && isProtectedRuntimePath(candidate) || !isRelativePathWithin(root.path, candidate))) {
         throw new Error(`${label} operation path escapes its approved root`);
@@ -8854,7 +9030,7 @@ function parseWorkflowFinalizationPreview(value) {
     runId: boundedText2(value.runId, `${label} runId`),
     revision: nonNegativeInteger4(value.revision, `${label} revision`),
     actionId: parseActionId(value.actionId, `${label} actionId`),
-    transactionId: safeId(value.transactionId, `${label} transactionId`),
+    transactionId,
     roots,
     execution: parseExecutionIdentity(value.execution),
     contentSnapshotHash: nullableHash(
@@ -8944,6 +9120,9 @@ function parseOperationReceipt(value, index) {
       "kind",
       "source",
       "target",
+      "stagedPath",
+      "backupPath",
+      "quarantinePath",
       "precondition",
       "expectedPostState",
       "observedPostState",
@@ -8962,6 +9141,9 @@ function parseOperationReceipt(value, index) {
     kind: value.kind,
     source: value.source === null || value.source === void 0 ? null : normalizePath(value.source, `${label}.source`),
     target: normalizePath(value.target, `${label}.target`),
+    stagedPath: value.stagedPath === null || value.stagedPath === void 0 ? null : normalizePath(value.stagedPath, `${label}.stagedPath`),
+    backupPath: value.backupPath === null || value.backupPath === void 0 ? null : normalizePath(value.backupPath, `${label}.backupPath`),
+    quarantinePath: value.quarantinePath === null || value.quarantinePath === void 0 ? null : normalizePath(value.quarantinePath, `${label}.quarantinePath`),
     precondition: parseOperationState(
       value.precondition,
       `${label}.precondition`
@@ -8976,6 +9158,104 @@ function parseOperationReceipt(value, index) {
     ),
     status: value.status
   };
+}
+function parseCleanupEntry(value, index) {
+  const label = `Workflow finalization cleanup entry ${index}`;
+  if (!isRecord6(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields4(
+    value,
+    /* @__PURE__ */ new Set(["operationId", "role", "path", "expected", "status"]),
+    label
+  );
+  if (value.role !== "staged" && value.role !== "backup" && value.role !== "quarantine") {
+    throw new Error(`${label}.role is invalid`);
+  }
+  if (value.status !== "pending" && value.status !== "cleaned" && value.status !== "missing") {
+    throw new Error(`${label}.status is invalid`);
+  }
+  return {
+    operationId: safeId(value.operationId, `${label}.operationId`),
+    role: value.role,
+    path: normalizePath(value.path, `${label}.path`),
+    expected: parseMaterialIdentity(value.expected, `${label}.expected`),
+    status: value.status
+  };
+}
+function parseCleanup(value, label) {
+  if (!isRecord6(value)) throw new Error(`${label} must be an object`);
+  assertKnownFields4(value, /* @__PURE__ */ new Set(["status", "entries"]), label);
+  if (value.status !== "pending" && value.status !== "completed") {
+    throw new Error(`${label}.status is invalid`);
+  }
+  if (!Array.isArray(value.entries) || value.entries.length > 768) {
+    throw new Error(`${label}.entries are outside their bound`);
+  }
+  const entries = value.entries.map(
+    (entry, index) => parseCleanupEntry(entry, index)
+  );
+  const keys = entries.map(
+    (entry) => `${entry.operationId}:${entry.role}:${entry.path}`
+  );
+  if (new Set(keys).size !== keys.length) {
+    throw new Error(`${label}.entries must be unique`);
+  }
+  if (value.status === "completed" && entries.some((entry) => entry.status === "pending")) {
+    throw new Error(`${label}.completed state has pending entries`);
+  }
+  return { status: value.status, entries };
+}
+function cleanupEntryKey(entry) {
+  return `${entry.operationId}:${entry.role}`;
+}
+function validateCleanupEntries(expected, actual, label) {
+  if (expected.length !== actual.entries.length) {
+    throw new Error(`${label}.entries do not match transaction operations`);
+  }
+  const expectedByKey = new Map(
+    expected.map((entry) => [cleanupEntryKey(entry), entry])
+  );
+  const actualKeys = /* @__PURE__ */ new Set();
+  for (const entry of actual.entries) {
+    const key = cleanupEntryKey(entry);
+    const expectedEntry = expectedByKey.get(key);
+    if (!expectedEntry || actualKeys.has(key) || entry.path !== expectedEntry.path || !sameIdentity(entry.expected, expectedEntry.expected)) {
+      throw new Error(`${label}.entry identity is invalid`);
+    }
+    actualKeys.add(key);
+  }
+}
+function receiptCleanupEntries(operations) {
+  const entries = [];
+  for (const operation2 of operations) {
+    const values = [
+      {
+        role: "staged",
+        path: operation2.stagedPath,
+        expected: operation2.expectedPostState.target
+      },
+      {
+        role: "backup",
+        path: operation2.backupPath,
+        expected: operation2.precondition.target
+      },
+      {
+        role: "quarantine",
+        path: operation2.quarantinePath,
+        expected: operation2.kind === "remove" ? operation2.precondition.target : operation2.precondition.source ?? materialIdentity(null)
+      }
+    ];
+    for (const value of values) {
+      if (!value.path || !value.expected.exists) continue;
+      entries.push({
+        operationId: operation2.id,
+        role: value.role,
+        path: value.path,
+        expected: value.expected,
+        status: "pending"
+      });
+    }
+  }
+  return entries;
 }
 function parseFinalizationReceipt(value) {
   const label = "Workflow finalization receipt";
@@ -8998,6 +9278,7 @@ function parseFinalizationReceipt(value) {
       "confirmation",
       "operations",
       "events",
+      "cleanup",
       "recovery",
       "committedAt"
     ]),
@@ -9048,6 +9329,10 @@ function parseFinalizationReceipt(value) {
   const crashBoundaries = value.recovery.crashBoundaries.map(
     (entry) => boundedText2(entry, `${label}.recovery.crashBoundaries`)
   );
+  const cleanup = value.cleanup === void 0 ? { status: "completed", entries: [] } : parseCleanup(value.cleanup, `${label}.cleanup`);
+  if (value.cleanup !== void 0) {
+    validateCleanupEntries(receiptCleanupEntries(operations), cleanup, label);
+  }
   const receipt = {
     schemaVersion: WORKFLOW_FINALIZATION_SCHEMA_VERSION,
     kind: "workflow-finalization-receipt",
@@ -9074,6 +9359,7 @@ function parseFinalizationReceipt(value) {
     })() : parseConfirmationRecord(value.confirmation, `${label}.confirmation`),
     operations,
     events,
+    cleanup,
     recovery: { status: value.recovery.status, crashBoundaries },
     committedAt: parseTimestamp(value.committedAt, `${label}.committedAt`)
   };
@@ -9110,21 +9396,33 @@ function parseTransactionEvent(value, index) {
     "operation-staged",
     "operation-started",
     "operation-completed",
+    "operation-quarantined",
+    "operation-published",
+    "operation-verified",
     "committing",
     "receipt-written",
     "committed",
     "rolling-back",
     "operation-rolled-back",
-    "rolled-back"
+    "rolled-back",
+    "cleanup-started",
+    "cleanup-item",
+    "cleanup-completed"
   ]);
   if (typeof value.type !== "string" || !eventTypes.has(value.type)) {
     throw new Error(`${label}.type is invalid`);
+  }
+  const boundary = boundedText2(value.boundary, `${label}.boundary`);
+  if (!WORKFLOW_FINALIZATION_BOUNDARY_PHASES.some(
+    (phase) => boundary === phase || boundary.startsWith(`${phase}:`)
+  )) {
+    throw new Error(`${label}.boundary is invalid`);
   }
   return {
     sequence: nonNegativeInteger4(value.sequence, `${label}.sequence`),
     type: value.type,
     operationId: value.operationId === null ? null : safeId(value.operationId, `${label}.operationId`),
-    boundary: boundedText2(value.boundary, `${label}.boundary`),
+    boundary,
     timestamp: parseTimestamp(value.timestamp, `${label}.timestamp`)
   };
 }
@@ -9141,6 +9439,7 @@ function parseTransactionOperation(value, index) {
       "target",
       "stagedPath",
       "backupPath",
+      "quarantinePath",
       "precondition",
       "expectedPostState",
       "contentHash",
@@ -9164,6 +9463,10 @@ function parseTransactionOperation(value, index) {
   const statusValues = /* @__PURE__ */ new Set([
     "pending",
     "staged",
+    "target-quarantined",
+    "source-quarantined",
+    "target-published",
+    "verified",
     "applying",
     "committed",
     "rolled-back"
@@ -9229,6 +9532,7 @@ function parseWorkflowFinalizationTransaction(value) {
       "operations",
       "confirmation",
       "events",
+      "cleanup",
       "recovery",
       "receipt",
       "createdAt",
@@ -9297,6 +9601,15 @@ function parseWorkflowFinalizationTransaction(value) {
     throw new Error(`${label}.recovery.crashBoundaries is invalid`);
   }
   const receipt = value.receipt === void 0 ? void 0 : parseFinalizationReceipt(value.receipt);
+  const legacyCleanupEntries = cleanupEntriesForOperations(operations);
+  const cleanup = value.cleanup === void 0 ? legacyCleanupEntries.length > 0 ? { status: "pending", entries: legacyCleanupEntries } : { status: "completed", entries: [] } : parseCleanup(value.cleanup, `${label}.cleanup`);
+  if (value.cleanup !== void 0) {
+    validateCleanupEntries(
+      cleanupEntriesForOperations(operations),
+      cleanup,
+      label
+    );
+  }
   if (value.status === "committed" && !receipt) {
     throw new Error(`${label} committed state is missing its receipt`);
   }
@@ -9325,6 +9638,7 @@ function parseWorkflowFinalizationTransaction(value) {
       throw new Error(`${label}.confirmation is required`);
     })() : parseConfirmationRecord(value.confirmation, `${label}.confirmation`),
     events,
+    cleanup,
     recovery: {
       status: value.recovery.status,
       crashBoundaries: value.recovery.crashBoundaries.map(
@@ -9338,6 +9652,19 @@ function parseWorkflowFinalizationTransaction(value) {
   const reviewerPolicy = normalizeConfirmation(plan.confirmation).reviewer;
   const reviewerSubjects = reviewerPolicy?.subjects ?? [];
   const reviewerAuthorities = reviewerPolicy?.authorities ?? [];
+  if (transaction.status === "committed" && transaction.operations.some((operation2) => operation2.status !== "committed")) {
+    throw new Error(`${label} committed transaction has incomplete operations`);
+  }
+  if (transaction.status === "rolled-back" && transaction.operations.some(
+    (operation2) => operation2.status !== "rolled-back"
+  )) {
+    throw new Error(
+      `${label} rolled-back transaction has incomplete operations`
+    );
+  }
+  if (transaction.cleanup.status === "completed" && transaction.cleanup.entries.some((entry) => entry.status === "pending")) {
+    throw new Error(`${label} completed cleanup has pending entries`);
+  }
   if (reviewerSubjects.length > 0 && !reviewerSubjects.includes(transaction.confirmation.reviewer.subject) || reviewerAuthorities.some(
     (authority) => !transaction.confirmation.reviewer.authorities.includes(authority)
   )) {
@@ -9354,6 +9681,23 @@ function parseWorkflowFinalizationTransaction(value) {
   }
   if (receipt && (receipt.runId !== transaction.runId || receipt.revision !== transaction.revision || receipt.resultingRevision !== transaction.resultingRevision || !sameStableValue2(receipt.execution, transaction.execution) || !sameStableValue2(receipt.confirmation, transaction.confirmation) || transaction.status === "committed" && receipt.recovery.status === "rolled-back" || transaction.status === "rolled-back" && receipt.recovery.status !== "rolled-back")) {
     throw new Error(`${label} receipt identity is invalid`);
+  }
+  if (receipt && transaction.cleanup.status === "completed" && !sameStableValue2(receipt.cleanup, transaction.cleanup)) {
+    throw new Error(`${label} receipt cleanup does not match transaction`);
+  }
+  if (receipt && value.cleanup !== void 0) {
+    const expectedOperations = transaction.operations.map(
+      (operation2) => receiptOperation(
+        operation2,
+        receipt.recovery.status === "rolled-back" ? "rolled-back" : "committed"
+      )
+    );
+    if (!sameStableValue2(receipt.operations, expectedOperations)) {
+      throw new Error(`${label} receipt operations do not match transaction`);
+    }
+    if (transaction.cleanup.status === "completed" && !sameStableValue2(receipt.events, transaction.events)) {
+      throw new Error(`${label} receipt events do not match transaction`);
+    }
   }
   return transaction;
 }
@@ -9476,15 +9820,57 @@ async function removeBaseFile(root, relative, beforeRemove) {
     { label: "Workflow finalization remove target", expected: "file" }
   );
   if (!inspection.exists) return false;
-  return removeContainedFile(inspection.target, {
-    containedRoot: inspection.projectRoot,
-    beforeRemove
-  });
+  try {
+    return await removeContainedFile(inspection.target, {
+      containedRoot: inspection.projectRoot,
+      beforeRemove
+    });
+  } catch (error) {
+    if (error instanceof Error && /Contained file removal target changed before removal/u.test(
+      error.message
+    )) {
+      throw new WorkflowFinalizationConflictError([relative]);
+    }
+    throw error;
+  }
+}
+async function moveBaseFile(root, source, destination, beforeMove) {
+  const destinationParent = path9.posix.dirname(destination);
+  if (destinationParent !== ".") {
+    await ensureProtectedProjectDirectory(
+      path9.resolve(root),
+      destinationParent,
+      {
+        label: "Workflow finalization move destination parent"
+      }
+    );
+  }
+  try {
+    return await moveContainedFile(
+      basePath(root, source, "Workflow finalization move source"),
+      basePath(root, destination, "Workflow finalization move destination"),
+      {
+        containedRoot: path9.resolve(root),
+        beforeMove
+      }
+    );
+  } catch (error) {
+    const code = error.code;
+    if (code === "EEXIST" || error instanceof Error && /Contained file move (?:source|destination) (?:changed|must be missing)/u.test(
+      error.message
+    )) {
+      throw new WorkflowFinalizationConflictError([source, destination]);
+    }
+    throw error;
+  }
 }
 async function operationMaterial(root, operation2, maxBytes) {
   const target = await readMaterial(root, operation2.target, maxBytes);
   const source = operation2.source === null ? null : await readMaterial(root, operation2.source, maxBytes);
-  return { source, target };
+  const staged = operation2.stagedPath === null ? null : await readMaterial(root, operation2.stagedPath, maxBytes);
+  const backup = operation2.backupPath === null ? null : await readMaterial(root, operation2.backupPath, maxBytes);
+  const quarantine = operation2.quarantinePath === null ? null : await readMaterial(root, operation2.quarantinePath, maxBytes);
+  return { source, target, staged, backup, quarantine };
 }
 function operationMatches(actual, expected) {
   return (actual.source === null && expected.source === null || actual.source !== null && expected.source !== null && sameIdentity(actual.source.identity, expected.source)) && sameIdentity(actual.target.identity, expected.target);
@@ -9506,6 +9892,71 @@ function operationPostSourceExpected(operation2) {
 }
 function operationPostTargetExpected(operation2) {
   return operation2.expectedPostState.target;
+}
+function storageContentExpected(operation2, role) {
+  if (role === "staged") {
+    return operation2.kind === "write" ? operation2.content : null;
+  }
+  if (role === "backup") return operation2.previousTargetContent;
+  return operation2.kind === "remove" ? operation2.previousTargetContent : operation2.kind === "move" ? operation2.previousSourceContent : null;
+}
+function storageMaterial(actual, role) {
+  return actual[role];
+}
+function storagePath(operation2, role) {
+  return role === "staged" ? operation2.stagedPath : role === "backup" ? operation2.backupPath : operation2.quarantinePath;
+}
+function storageIsExpectedOrMissing(actual, operation2, role) {
+  const material = storageMaterial(actual, role);
+  const expected = storageContentExpected(operation2, role);
+  if (material === null) return expected === null;
+  if (!material.identity.exists) return true;
+  return expected !== null && sameIdentity(material.identity, materialIdentity(expected));
+}
+function operationStorageUnknownPaths(operation2, actual) {
+  return ["staged", "backup", "quarantine"].flatMap((role) => {
+    const material = storageMaterial(actual, role);
+    if (!material || storageIsExpectedOrMissing(actual, operation2, role)) {
+      return [];
+    }
+    return [storagePath(operation2, role)];
+  });
+}
+function operationProgress(operation2, actual) {
+  const sourcePre = operation2.source === null || actual.source !== null && sameIdentity(actual.source.identity, operationSourceExpected(operation2));
+  const sourcePost = operation2.source === null || actual.source !== null && sameIdentity(
+    actual.source.identity,
+    operationPostSourceExpected(operation2)
+  );
+  const targetPre = sameIdentity(
+    actual.target.identity,
+    operationTargetExpected(operation2)
+  );
+  const targetPost = sameIdentity(
+    actual.target.identity,
+    operationPostTargetExpected(operation2)
+  );
+  if (operation2.kind === "write") {
+    if (targetPost) return "post";
+    if (targetPre) {
+      return actual.staged?.identity.exists ? "staged" : "previous";
+    }
+    if (!actual.target.identity.exists && actual.staged?.identity.exists) {
+      return "staged";
+    }
+    return null;
+  }
+  if (operation2.kind === "remove") {
+    if (targetPre) return "previous";
+    if (targetPost) return "post";
+    return null;
+  }
+  if (sourcePre && targetPre) return "previous";
+  if (sourcePost && targetPre) return "source-quarantined";
+  if (sourcePost && !actual.target.identity.exists) return "source-quarantined";
+  if (sourcePre && targetPost) return "source-quarantined";
+  if (sourcePost && targetPost) return "post";
+  return null;
 }
 function transactionOperationContent(operation2, material) {
   if (operation2.kind === "write") return operation2.content;
@@ -9588,10 +10039,35 @@ function validateWorkflowFinalizationPlanDeclaration(plan, definition) {
       normalized.roots.find((root) => root.id === operation2.root).path,
       operation2.source
     ) : null;
-    if (!planned || planned.id !== operation2.id || planned.kind !== operation2.kind || planned.rootId !== operation2.root || planned.target !== target || planned.source !== source || planned.requiresConfirmation !== true || operation2.kind === "write" && (planned.contentHash !== sha256(operation2.content) || planned.contentBytes !== Buffer.byteLength(operation2.content, "utf8"))) {
+    const prefix = `${joinRelative(
+      normalized.roots.find((root) => root.id === operation2.root).path,
+      `.comet/finalization/${plan.transactionId}`
+    )}/${operation2.id}`;
+    const stagedPath = operation2.kind === "write" ? `${prefix}.stage` : null;
+    const backupPath = plan.operations[index].precondition.target.exists && (operation2.kind === "write" || operation2.kind === "move") ? `${prefix}.backup` : null;
+    const quarantinePath = operation2.kind === "remove" && plan.operations[index].precondition.target.exists || operation2.kind === "move" && plan.operations[index].precondition.source?.exists ? `${prefix}.quarantine` : null;
+    if (!planned || planned.id !== operation2.id || planned.kind !== operation2.kind || planned.rootId !== operation2.root || planned.target !== target || planned.source !== source || planned.stagedPath !== stagedPath || planned.backupPath !== backupPath || planned.quarantinePath !== quarantinePath || planned.requiresConfirmation !== true || operation2.kind === "write" && (planned.contentHash !== sha256(operation2.content) || planned.contentBytes !== Buffer.byteLength(operation2.content, "utf8"))) {
       throw new WorkflowFinalizationConflictError([operation2.id]);
     }
   }
+}
+function cleanupEntriesForOperations(operations) {
+  const entries = [];
+  for (const operation2 of operations) {
+    for (const role of ["staged", "backup", "quarantine"]) {
+      const relative = storagePath(operation2, role);
+      const content = storageContentExpected(operation2, role);
+      if (!relative || content === null) continue;
+      entries.push({
+        operationId: operation2.id,
+        role,
+        path: relative,
+        expected: materialIdentity(content),
+        status: "pending"
+      });
+    }
+  }
+  return entries;
 }
 function newTransaction(request, operations) {
   const timestamp6 = (/* @__PURE__ */ new Date()).toISOString();
@@ -9609,6 +10085,10 @@ function newTransaction(request, operations) {
     operations,
     confirmation: structuredClone(request.confirmation),
     events: [],
+    cleanup: {
+      status: "pending",
+      entries: cleanupEntriesForOperations(operations)
+    },
     recovery: { status: "none", crashBoundaries: [] },
     createdAt: timestamp6,
     updatedAt: timestamp6
@@ -9642,6 +10122,9 @@ function receiptOperation(operation2, status) {
     kind: operation2.kind,
     source: operation2.source,
     target: operation2.target,
+    stagedPath: operation2.stagedPath,
+    backupPath: operation2.backupPath,
+    quarantinePath: operation2.quarantinePath,
     precondition: structuredClone(precondition),
     expectedPostState: structuredClone(expectedPostState),
     observedPostState: status === "committed" ? structuredClone(expectedPostState) : structuredClone(precondition),
@@ -9665,6 +10148,7 @@ function buildFinalizationReceipt(transaction, status) {
       (operation2) => receiptOperation(operation2, status)
     ),
     events: structuredClone(transaction.events),
+    cleanup: structuredClone(transaction.cleanup),
     recovery: structuredClone(transaction.recovery),
     committedAt: transaction.createdAt
   };
@@ -9719,6 +10203,149 @@ async function publishReceipt(runRoot, profile, receipt) {
     }
   }
 }
+async function completeFinalizationCleanup(runRoot, baseRoot, profile, transaction) {
+  if (transaction.cleanup.status === "completed" && transaction.receipt?.cleanup.status === "completed") {
+    for (const entry of transaction.cleanup.entries) {
+      const current = await readMaterial(
+        baseRoot,
+        entry.path,
+        contentMaxBytes(profile)
+      );
+      if (current.identity.exists) {
+        throw new WorkflowFinalizationConflictError([entry.path]);
+      }
+    }
+    return transaction.receipt;
+  }
+  if (!hasTransactionEvent(transaction, "cleanup-started", null, "before-cleanup")) {
+    await appendTransactionEvent(
+      runRoot,
+      profile,
+      transaction,
+      "cleanup-started",
+      { phase: "before-cleanup" },
+      null
+    );
+  }
+  for (const entry of transaction.cleanup.entries) {
+    if (entry.status !== "pending") continue;
+    const operation2 = transaction.operations.find(
+      (candidate) => candidate.id === entry.operationId
+    );
+    if (!operation2) {
+      throw new WorkflowFinalizationConflictError([entry.path]);
+    }
+    const beforeCleanup = {
+      phase: "cleanup-item",
+      operationId: entry.operationId,
+      path: entry.path
+    };
+    if (!hasTransactionPathEvent(
+      transaction,
+      "cleanup-item",
+      entry.operationId,
+      "cleanup-item",
+      entry.path
+    )) {
+      await appendTransactionEvent(
+        runRoot,
+        profile,
+        transaction,
+        "cleanup-item",
+        beforeCleanup,
+        entry.operationId
+      );
+    }
+    let current;
+    try {
+      current = await readMaterial(
+        baseRoot,
+        entry.path,
+        contentMaxBytes(profile)
+      );
+    } catch (error) {
+      throw error;
+    }
+    if (!current.identity.exists) {
+      entry.status = "missing";
+    } else {
+      if (!sameIdentity(current.identity, entry.expected)) {
+        throw new WorkflowFinalizationConflictError([entry.path]);
+      }
+      await removeBaseFile(baseRoot, entry.path, async () => {
+        const latest = await readMaterial(
+          baseRoot,
+          entry.path,
+          contentMaxBytes(profile)
+        );
+        if (!sameIdentity(latest.identity, entry.expected)) {
+          throw new WorkflowFinalizationConflictError([entry.path]);
+        }
+      });
+      const verified = await readMaterial(
+        baseRoot,
+        entry.path,
+        contentMaxBytes(profile)
+      );
+      if (verified.identity.exists) {
+        throw new WorkflowFinalizationConflictError([entry.path]);
+      }
+      entry.status = "cleaned";
+    }
+    await appendTransactionEvent(
+      runRoot,
+      profile,
+      transaction,
+      "cleanup-item",
+      { phase: "cleaned", operationId: entry.operationId, path: entry.path },
+      entry.operationId
+    );
+  }
+  for (const entry of transaction.cleanup.entries) {
+    let current;
+    try {
+      current = await readMaterial(
+        baseRoot,
+        entry.path,
+        contentMaxBytes(profile)
+      );
+    } catch (error) {
+      throw error;
+    }
+    if (current.identity.exists) {
+      throw new WorkflowFinalizationConflictError([entry.path]);
+    }
+  }
+  if (!hasTransactionEvent(transaction, "cleanup-completed", null, "cleaned")) {
+    await appendTransactionEvent(
+      runRoot,
+      profile,
+      transaction,
+      "cleanup-completed",
+      { phase: "cleaned" },
+      null
+    );
+  }
+  transaction.cleanup.status = "completed";
+  if (!hasTransactionEvent(transaction, "receipt-written", null, "cleaned")) {
+    await appendTransactionEvent(
+      runRoot,
+      profile,
+      transaction,
+      "receipt-written",
+      { phase: "cleaned" },
+      null
+    );
+  }
+  const receipt = buildFinalizationReceipt(
+    transaction,
+    transaction.status === "rolled-back" ? "rolled-back" : "committed"
+  );
+  await publishReceipt(runRoot, profile, receipt);
+  transaction.receipt = receipt;
+  await writeTransaction(runRoot, profile, transaction);
+  return receipt;
+}
 async function readWorkflowFinalizationReceipt(runRoot, receiptHash, profile) {
   const hash4 = boundedHash2(receiptHash, "Workflow finalization receipt hash");
   const raw = await readOptionalEngineRunText(
@@ -9760,7 +10387,10 @@ function transactionAffectedPaths(transaction) {
   return uniqueStrings(
     transaction.operations.flatMap((operation2) => [
       operation2.target,
-      ...operation2.source ? [operation2.source] : []
+      ...operation2.source ? [operation2.source] : [],
+      ...operation2.stagedPath ? [operation2.stagedPath] : [],
+      ...operation2.backupPath ? [operation2.backupPath] : [],
+      ...operation2.quarantinePath ? [operation2.quarantinePath] : []
     ])
   );
 }
@@ -9863,8 +10493,14 @@ async function commitTransaction(runRoot, baseRoot, profile, transaction) {
       null
     );
     transaction.status = "committed";
-    transaction.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    await writeTransaction(runRoot, profile, transaction);
+    await appendTransactionEvent(
+      runRoot,
+      profile,
+      transaction,
+      "committed",
+      { phase: "committed" },
+      null
+    );
   }
   if (!transaction.receipt) {
     throw new Error(
@@ -9913,19 +10549,31 @@ async function applyWorkflowFinalization(request) {
     if (existing.status === "committed") {
       if (!existing.receipt)
         throw new Error("Workflow finalization receipt is missing");
+      const receipt2 = await completeFinalizationCleanup(
+        request.runRoot,
+        request.baseRoot,
+        request.profile,
+        existing
+      );
       return {
         status: "committed",
         transaction: existing,
-        receipt: existing.receipt
+        receipt: receipt2
       };
     }
     if (existing.status === "rolled-back") {
       if (!existing.receipt)
         throw new Error("Workflow finalization rollback receipt is missing");
+      const receipt2 = await completeFinalizationCleanup(
+        request.runRoot,
+        request.baseRoot,
+        request.profile,
+        existing
+      );
       return {
         status: "rolled-back",
         transaction: existing,
-        receipt: existing.receipt
+        receipt: receipt2
       };
     }
     throw new WorkflowFinalizationTransactionPendingError(existing);
@@ -9954,7 +10602,13 @@ async function applyWorkflowFinalization(request) {
     transaction,
     false
   );
-  const receipt = await commitTransaction(
+  await commitTransaction(
+    request.runRoot,
+    request.baseRoot,
+    request.profile,
+    transaction
+  );
+  const receipt = await completeFinalizationCleanup(
     request.runRoot,
     request.baseRoot,
     request.profile,
@@ -10009,22 +10663,42 @@ async function recoverWorkflowFinalization(options) {
         unknownPaths: uniqueStrings(unknown)
       };
     }
-    await publishReceipt(options.runRoot, options.profile, transaction.receipt);
-    return {
-      status: "recovered",
-      transaction,
-      receipt: transaction.receipt
-    };
+    try {
+      if (transaction.cleanup.status !== "completed" || transaction.receipt.cleanup.status !== "completed") {
+        transaction.recovery = {
+          status: "recovered",
+          crashBoundaries: uniqueStrings(
+            transaction.events.map((event) => event.boundary)
+          )
+        };
+        await writeTransaction(options.runRoot, options.profile, transaction);
+      }
+      const receipt = await completeFinalizationCleanup(
+        options.runRoot,
+        options.baseRoot,
+        options.profile,
+        transaction
+      );
+      return { status: "recovered", transaction, receipt };
+    } catch (error) {
+      return recoveryBlocked(transaction, error);
+    }
   }
   if (transaction.status === "rolling-back") {
     return rollbackWorkflowFinalization(options);
   }
   if (transaction.status === "rolled-back") {
-    return {
-      status: "rolled-back",
-      transaction,
-      receipt: transaction.receipt
-    };
+    try {
+      const receipt = await completeFinalizationCleanup(
+        options.runRoot,
+        options.baseRoot,
+        options.profile,
+        transaction
+      );
+      return { status: "rolled-back", transaction, receipt };
+    } catch (error) {
+      return recoveryBlocked(transaction, error);
+    }
   }
   transaction.recovery = {
     status: "recovered",
@@ -10040,7 +10714,13 @@ async function recoverWorkflowFinalization(options) {
       transaction,
       true
     );
-    const receipt = await commitTransaction(
+    await commitTransaction(
+      options.runRoot,
+      options.baseRoot,
+      options.profile,
+      transaction
+    );
+    const receipt = await completeFinalizationCleanup(
       options.runRoot,
       options.baseRoot,
       options.profile,
@@ -10093,11 +10773,13 @@ async function rollbackWorkflowFinalization(options) {
     throw new WorkflowFinalizationConflictError(["execution"]);
   }
   if (transaction.status === "rolled-back") {
-    return {
-      status: "rolled-back",
-      transaction,
-      receipt: transaction.receipt
-    };
+    const receipt = await completeFinalizationCleanup(
+      options.runRoot,
+      options.baseRoot,
+      options.profile,
+      transaction
+    );
+    return { status: "rolled-back", transaction, receipt };
   }
   if (transaction.status === "committed") {
     return {
@@ -10122,18 +10804,34 @@ async function rollbackWorkflowFinalization(options) {
         operation2,
         options.profile
       );
-      if (!operationCanResume(operation2, actual)) {
+      if (!operationCanResume(operation2, actual, true)) {
         return {
           status: "blocked",
           transaction,
-          unknownPaths: [
-            operation2.target,
-            ...operation2.source ? [operation2.source] : []
-          ]
+          unknownPaths: operationConflictPaths(operation2, actual)
         };
       }
       if (operation2.status === "rolled-back" && operationMatches(actual, operation2.precondition)) {
         continue;
+      }
+      if (!hasTransactionEvent(
+        transaction,
+        "operation-rolled-back",
+        operation2.id,
+        "before-rollback-operation"
+      )) {
+        await appendTransactionEvent(
+          options.runRoot,
+          options.profile,
+          transaction,
+          "operation-rolled-back",
+          {
+            phase: "before-rollback-operation",
+            operationId: operation2.id,
+            path: operation2.target
+          },
+          operation2.id
+        );
       }
       if (operation2.kind === "move" && operation2.source) {
         await restoreContent(
@@ -10163,6 +10861,18 @@ async function rollbackWorkflowFinalization(options) {
         ]);
       }
       operation2.status = "rolled-back";
+      await appendTransactionEvent(
+        options.runRoot,
+        options.profile,
+        transaction,
+        "operation-rolled-back",
+        {
+          phase: "rollback-verified",
+          operationId: operation2.id,
+          path: operation2.target
+        },
+        operation2.id
+      );
       await appendTransactionEvent(
         options.runRoot,
         options.profile,
@@ -10206,7 +10916,17 @@ async function rollbackWorkflowFinalization(options) {
       { phase: "rolled-back" },
       null
     );
-    return { status: "rolled-back", transaction, receipt };
+    const finalReceipt = await completeFinalizationCleanup(
+      options.runRoot,
+      options.baseRoot,
+      options.profile,
+      transaction
+    );
+    return {
+      status: "rolled-back",
+      transaction,
+      receipt: finalReceipt
+    };
   } catch (error) {
     return recoveryBlocked(transaction, error);
   }
@@ -10220,6 +10940,13 @@ async function clearWorkflowFinalizationTransaction(runRoot, profile, baseRoot) 
   if (transaction.status !== "committed" && transaction.status !== "rolled-back" || !transaction.receipt) {
     throw new WorkflowFinalizationTransactionPendingError(transaction);
   }
+  const receipt = transaction.receipt;
+  if (baseRoot) {
+    await completeFinalizationCleanup(runRoot, baseRoot, profile, transaction);
+  }
+  if (transaction.cleanup.status !== "completed" || transaction.receipt.cleanup.status !== "completed") {
+    throw new WorkflowFinalizationTransactionPendingError(transaction);
+  }
   const removed = await removeEngineRunFile(
     runRoot,
     WORKFLOW_FINALIZATION_TRANSACTION_PATH,
@@ -10230,7 +10957,7 @@ async function clearWorkflowFinalizationTransaction(runRoot, profile, baseRoot) 
           runRoot,
           profile
         );
-        if (!current || current.transactionId !== transaction.transactionId || current.status !== transaction.status) {
+        if (!current || current.transactionId !== transaction.transactionId || current.status !== transaction.status || !current.receipt || current.receipt.receiptHash !== receipt.receiptHash) {
           throw new WorkflowFinalizationConflictError([
             WORKFLOW_FINALIZATION_TRANSACTION_PATH
           ]);
@@ -10238,37 +10965,6 @@ async function clearWorkflowFinalizationTransaction(runRoot, profile, baseRoot) 
       }
     }
   );
-  if (removed && baseRoot) {
-    for (const operation2 of transaction.operations) {
-      const cleanup = async (relative, expected) => {
-        if (!relative || !expected.exists) return;
-        const current = await readMaterial(
-          baseRoot,
-          relative,
-          contentMaxBytes(profile)
-        );
-        if (!sameIdentity(current.identity, expected)) return;
-        await removeBaseFile(baseRoot, relative, async () => {
-          const latest = await readMaterial(
-            baseRoot,
-            relative,
-            contentMaxBytes(profile)
-          );
-          if (!sameIdentity(latest.identity, expected)) {
-            throw new WorkflowFinalizationConflictError([relative]);
-          }
-        });
-      };
-      await cleanup(
-        operation2.stagedPath,
-        operation2.content === null ? materialIdentity(null) : materialIdentity(operation2.content)
-      );
-      await cleanup(
-        operation2.backupPath,
-        materialIdentity(operation2.previousTargetContent)
-      );
-    }
-  }
   if (removed) await invokeFault({ phase: "cleared" });
   return removed;
 }
@@ -10288,69 +10984,91 @@ async function ensureContentFile(root, relative, content, profile) {
 async function currentOperation(root, operation2, profile) {
   return operationMaterial(root, operation2, contentMaxBytes(profile));
 }
-function operationCanResume(operation2, actual) {
-  if (operationMatches(actual, operation2.precondition)) return true;
-  if (operationMatches(actual, operation2.expectedPostState)) return true;
-  if (operation2.kind !== "move" || !actual.source) return false;
-  const sourcePre = sameIdentity(
-    actual.source.identity,
-    operationSourceExpected(operation2)
+function operationCanResume(operation2, actual, allowDurableContent = false) {
+  return operationStorageUnknownPaths(operation2, actual).length === 0 && operationProgress(operation2, actual) !== null && operationStorageMissingRequiredPaths(operation2, actual, allowDurableContent).length === 0;
+}
+function operationStorageMissingRequiredPaths(operation2, actual, allowDurableContent = false) {
+  const missing = [];
+  const has = (role) => actual[role]?.identity.exists === true;
+  const progress = operationProgress(operation2, actual);
+  if (operation2.kind === "write" && progress === "post" && operation2.precondition.target.exists && !has("backup")) {
+    if (operation2.backupPath) missing.push(operation2.backupPath);
+  }
+  if (operation2.kind === "remove" && progress === "post" && operation2.precondition.target.exists && !has("quarantine")) {
+    if (operation2.quarantinePath) missing.push(operation2.quarantinePath);
+  }
+  if (operation2.kind === "move" && progress === "source-quarantined" && !allowDurableContent && !has("quarantine")) {
+    if (operation2.quarantinePath) missing.push(operation2.quarantinePath);
+  }
+  if (operation2.kind === "move" && progress === "post" && operation2.precondition.target.exists && !has("backup")) {
+    if (operation2.backupPath) missing.push(operation2.backupPath);
+  }
+  return missing;
+}
+function operationConflictPaths(operation2, actual) {
+  return uniqueStrings([
+    ...operationStorageUnknownPaths(operation2, actual),
+    ...operationStorageMissingRequiredPaths(operation2, actual),
+    operation2.target,
+    ...operation2.source ? [operation2.source] : []
+  ]);
+}
+function hasTransactionEvent(transaction, type, operationId, boundary) {
+  return transaction.events.some(
+    (event) => event.type === type && event.operationId === operationId && event.boundary.startsWith(boundary)
   );
-  const sourcePost = sameIdentity(
-    actual.source.identity,
-    operationPostSourceExpected(operation2)
+}
+function hasTransactionPathEvent(transaction, type, operationId, phase, relativePath2) {
+  return transaction.events.some(
+    (event) => event.type === type && event.operationId === operationId && event.boundary === `${phase}:${relativePath2}`
   );
-  const targetPre = sameIdentity(
-    actual.target.identity,
-    operationTargetExpected(operation2)
+}
+async function readValidatedOperation(baseRoot, operation2, profile) {
+  const actual = await currentOperation(baseRoot, operation2, profile);
+  if (!operationCanResume(operation2, actual)) {
+    throw new WorkflowFinalizationConflictError(
+      operationConflictPaths(operation2, actual)
+    );
+  }
+  return actual;
+}
+async function appendOperationEvent(runRoot, profile, transaction, operation2, type, phase, path18) {
+  await appendTransactionEvent(
+    runRoot,
+    profile,
+    transaction,
+    type,
+    { phase, operationId: operation2.id, path: path18 },
+    operation2.id
   );
-  const targetPost = sameIdentity(
-    actual.target.identity,
-    operationPostTargetExpected(operation2)
-  );
-  return sourcePre && targetPost || sourcePost && targetPre;
 }
 async function applyTransactionOperation(runRoot, baseRoot, profile, transaction, operation2, recovery) {
-  let actual = await currentOperation(baseRoot, operation2, profile);
-  if (operationMatches(actual, operation2.expectedPostState)) {
-    operation2.status = "committed";
-    if (!transaction.events.some(
-      (event) => event.type === "operation-completed" && event.operationId === operation2.id
+  let actual = await readValidatedOperation(baseRoot, operation2, profile);
+  let progress = operationProgress(operation2, actual);
+  if (progress === null) {
+    throw new WorkflowFinalizationConflictError(
+      operationConflictPaths(operation2, actual)
+    );
+  }
+  if (progress === "post") {
+    operation2.status = "verified";
+  } else if (operation2.status === "pending" || operation2.status === "applying") {
+    if (!hasTransactionEvent(
+      transaction,
+      "operation-staged",
+      operation2.id,
+      "before-staging"
     )) {
-      await appendTransactionEvent(
+      await appendOperationEvent(
         runRoot,
         profile,
         transaction,
-        "operation-completed",
-        {
-          phase: "operation-verified",
-          operationId: operation2.id,
-          path: operation2.target
-        },
-        operation2.id
+        operation2,
+        "operation-staged",
+        "before-staging",
+        operation2.target
       );
     }
-    return;
-  }
-  if (!operationCanResume(operation2, actual)) {
-    throw new WorkflowFinalizationConflictError([
-      operation2.target,
-      ...operation2.source ? [operation2.source] : []
-    ]);
-  }
-  if (operation2.status === "pending" || operation2.status === "applying") {
-    await appendTransactionEvent(
-      runRoot,
-      profile,
-      transaction,
-      "operation-staged",
-      {
-        phase: "before-staging",
-        operationId: operation2.id,
-        path: operation2.target
-      },
-      operation2.id
-    );
     if (operation2.previousTargetContent !== null && operation2.backupPath) {
       await ensureContentFile(
         baseRoot,
@@ -10368,145 +11086,446 @@ async function applyTransactionOperation(runRoot, baseRoot, profile, transaction
       );
     }
     operation2.status = "staged";
-    await appendTransactionEvent(
+    if (!hasTransactionEvent(
+      transaction,
+      "operation-staged",
+      operation2.id,
+      "staged"
+    )) {
+      await appendOperationEvent(
+        runRoot,
+        profile,
+        transaction,
+        operation2,
+        "operation-staged",
+        "staged",
+        operation2.target
+      );
+    }
+    actual = await readValidatedOperation(baseRoot, operation2, profile);
+    progress = operationProgress(operation2, actual);
+  }
+  if (!hasTransactionEvent(
+    transaction,
+    "operation-started",
+    operation2.id,
+    "before-operation"
+  )) {
+    await appendOperationEvent(
       runRoot,
       profile,
       transaction,
-      "operation-staged",
-      { phase: "staged", operationId: operation2.id, path: operation2.target },
-      operation2.id
+      operation2,
+      "operation-started",
+      "before-operation",
+      operation2.target
     );
   }
-  operation2.status = "applying";
-  await appendTransactionEvent(
-    runRoot,
-    profile,
-    transaction,
-    "operation-started",
-    {
-      phase: "before-operation",
-      operationId: operation2.id,
-      path: operation2.target
-    },
-    operation2.id
-  );
-  actual = await currentOperation(baseRoot, operation2, profile);
-  if (operation2.kind === "write") {
-    if (operation2.content === null)
-      throw new Error("Workflow finalization write content is missing");
+  actual = await readValidatedOperation(baseRoot, operation2, profile);
+  progress = operationProgress(operation2, actual);
+  if (progress === null) {
+    throw new WorkflowFinalizationConflictError(
+      operationConflictPaths(operation2, actual)
+    );
+  }
+  if (operation2.kind === "write" && progress !== "post") {
+    if (operation2.content === null || !operation2.stagedPath) {
+      throw new Error("Workflow finalization write staging is missing");
+    }
     if (!sameIdentity(
       actual.target.identity,
       operationPostTargetExpected(operation2)
     )) {
-      await writeBaseText(
-        baseRoot,
-        operation2.target,
-        operation2.content,
-        contentMaxBytes(profile),
-        async () => {
-          const current = await readMaterial(
-            baseRoot,
-            operation2.target,
-            contentMaxBytes(profile)
+      if (!hasTransactionEvent(
+        transaction,
+        "operation-quarantined",
+        operation2.id,
+        "before-target-removal"
+      )) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation2,
+          "operation-quarantined",
+          "before-target-removal",
+          operation2.target
+        );
+      }
+      await removeBaseFile(baseRoot, operation2.target, async () => {
+        const current = await currentOperation(baseRoot, operation2, profile);
+        if (!operationMatches(current, operation2.precondition) || !current.staged?.identity.exists || operation2.backupPath && operation2.precondition.target.exists && !current.backup?.identity.exists) {
+          throw new WorkflowFinalizationConflictError(
+            operationConflictPaths(operation2, current)
           );
-          if (!sameIdentity(current.identity, operationTargetExpected(operation2))) {
-            throw new WorkflowFinalizationConflictError([operation2.target]);
+        }
+      });
+      if (!hasTransactionEvent(
+        transaction,
+        "operation-quarantined",
+        operation2.id,
+        "target-removed"
+      )) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation2,
+          "operation-quarantined",
+          "target-removed",
+          operation2.target
+        );
+      }
+      actual = await readValidatedOperation(baseRoot, operation2, profile);
+    }
+    actual = await readValidatedOperation(baseRoot, operation2, profile);
+    if (!actual.target.identity.exists && actual.staged?.identity.exists) {
+      if (!hasTransactionEvent(
+        transaction,
+        "operation-published",
+        operation2.id,
+        "before-target-publication"
+      )) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation2,
+          "operation-published",
+          "before-target-publication",
+          operation2.target
+        );
+      }
+      const moved = await moveBaseFile(
+        baseRoot,
+        operation2.stagedPath,
+        operation2.target,
+        async () => {
+          const current = await currentOperation(baseRoot, operation2, profile);
+          if (current.target.identity.exists || !current.staged?.identity.exists || operation2.backupPath && operation2.precondition.target.exists && !current.backup?.identity.exists) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation2, current)
+            );
           }
         }
       );
+      if (!moved) {
+        throw new WorkflowFinalizationConflictError([
+          operation2.stagedPath,
+          operation2.target
+        ]);
+      }
+      operation2.status = "target-published";
+      await appendOperationEvent(
+        runRoot,
+        profile,
+        transaction,
+        operation2,
+        "operation-published",
+        "target-published",
+        operation2.target
+      );
     }
-  } else if (operation2.kind === "remove") {
-    if (!sameIdentity(
-      actual.target.identity,
-      operationPostTargetExpected(operation2)
-    )) {
-      await removeBaseFile(baseRoot, operation2.target, async () => {
-        const current = await readMaterial(
+  } else if (operation2.kind === "remove" && progress !== "post") {
+    if (operation2.precondition.target.exists) {
+      if (!operation2.quarantinePath) {
+        throw new Error("Workflow finalization remove quarantine is missing");
+      }
+      actual = await currentOperation(baseRoot, operation2, profile);
+      if (!actual.quarantine?.identity.exists) {
+        if (!hasTransactionEvent(
+          transaction,
+          "operation-quarantined",
+          operation2.id,
+          "before-quarantine"
+        )) {
+          await appendOperationEvent(
+            runRoot,
+            profile,
+            transaction,
+            operation2,
+            "operation-quarantined",
+            "before-quarantine",
+            operation2.target
+          );
+        }
+        const moved = await moveBaseFile(
           baseRoot,
           operation2.target,
-          contentMaxBytes(profile)
+          operation2.quarantinePath,
+          async () => {
+            const current = await currentOperation(
+              baseRoot,
+              operation2,
+              profile
+            );
+            if (!operationMatches(current, operation2.precondition) || current.quarantine?.identity.exists) {
+              throw new WorkflowFinalizationConflictError(
+                operationConflictPaths(operation2, current)
+              );
+            }
+          }
         );
-        if (!sameIdentity(current.identity, operationTargetExpected(operation2))) {
-          throw new WorkflowFinalizationConflictError([operation2.target]);
+        if (!moved) {
+          throw new WorkflowFinalizationConflictError([
+            operation2.target,
+            operation2.quarantinePath
+          ]);
         }
-      });
+      } else {
+        await removeBaseFile(baseRoot, operation2.target, async () => {
+          const current = await currentOperation(baseRoot, operation2, profile);
+          if (!operationMatches(current, operation2.precondition) || !current.quarantine?.identity.exists) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation2, current)
+            );
+          }
+        });
+      }
+      operation2.status = "target-quarantined";
+      if (!hasTransactionEvent(
+        transaction,
+        "operation-quarantined",
+        operation2.id,
+        "quarantined"
+      )) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation2,
+          "operation-quarantined",
+          "quarantined",
+          operation2.target
+        );
+      }
     }
-  } else {
-    if (operation2.content === null)
-      throw new Error("Workflow finalization move content is missing");
-    const sourceBeforeTarget = actual.source?.identity;
-    if (!sameIdentity(
-      actual.target.identity,
-      operationPostTargetExpected(operation2)
-    )) {
-      await writeBaseText(
+  } else if (operation2.kind === "move" && progress !== "post") {
+    if (operation2.content === null || !operation2.source || !operation2.quarantinePath) {
+      throw new Error("Workflow finalization move quarantine is missing");
+    }
+    actual = await currentOperation(baseRoot, operation2, profile);
+    progress = operationProgress(operation2, actual);
+    if (progress === "previous") {
+      if (actual.quarantine?.identity.exists) {
+        await removeBaseFile(baseRoot, operation2.quarantinePath, async () => {
+          const current = await currentOperation(baseRoot, operation2, profile);
+          if (!current.quarantine?.identity.exists || !sameIdentity(
+            current.quarantine.identity,
+            materialIdentity(operation2.previousSourceContent)
+          )) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation2, current)
+            );
+          }
+        });
+      }
+      if (!hasTransactionEvent(
+        transaction,
+        "operation-quarantined",
+        operation2.id,
+        "before-source-removal"
+      )) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation2,
+          "operation-quarantined",
+          "before-source-removal",
+          operation2.source
+        );
+      }
+      const moved = await moveBaseFile(
         baseRoot,
-        operation2.target,
-        operation2.content,
-        contentMaxBytes(profile),
+        operation2.source,
+        operation2.quarantinePath,
         async () => {
           const current = await currentOperation(baseRoot, operation2, profile);
-          if (!sameIdentity(
-            current.target.identity,
-            operationTargetExpected(operation2)
-          ) || !sourceBeforeTarget || !current.source || !sameIdentity(current.source.identity, sourceBeforeTarget)) {
-            throw new WorkflowFinalizationConflictError([
-              operation2.target,
-              ...operation2.source ? [operation2.source] : []
-            ]);
+          if (!operationMatches(current, operation2.precondition) || current.quarantine?.identity.exists) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation2, current)
+            );
           }
         }
+      );
+      if (!moved) {
+        throw new WorkflowFinalizationConflictError([
+          operation2.source,
+          operation2.quarantinePath
+        ]);
+      }
+      operation2.status = "source-quarantined";
+      await appendOperationEvent(
+        runRoot,
+        profile,
+        transaction,
+        operation2,
+        "operation-quarantined",
+        "source-removed",
+        operation2.source
       );
     }
     actual = await currentOperation(baseRoot, operation2, profile);
-    if (actual.source && !sameIdentity(
-      actual.source.identity,
-      operationPostSourceExpected(operation2)
-    )) {
-      await removeBaseFile(baseRoot, operation2.source, async () => {
-        const current = await readMaterial(
-          baseRoot,
-          operation2.source,
-          contentMaxBytes(profile)
-        );
-        if (!sameIdentity(current.identity, operationSourceExpected(operation2))) {
-          throw new WorkflowFinalizationConflictError([operation2.source]);
+    progress = operationProgress(operation2, actual);
+    if (progress === "source-quarantined") {
+      if (actual.target.identity.exists) {
+        if (!hasTransactionEvent(
+          transaction,
+          "operation-quarantined",
+          operation2.id,
+          "before-target-removal"
+        )) {
+          await appendOperationEvent(
+            runRoot,
+            profile,
+            transaction,
+            operation2,
+            "operation-quarantined",
+            "before-target-removal",
+            operation2.target
+          );
         }
-      });
+        await removeBaseFile(baseRoot, operation2.target, async () => {
+          const current = await currentOperation(baseRoot, operation2, profile);
+          if (!current.source || !sameIdentity(
+            current.source.identity,
+            operationPostSourceExpected(operation2)
+          ) || !sameIdentity(
+            current.target.identity,
+            operationTargetExpected(operation2)
+          ) || !current.quarantine?.identity.exists || !operation2.precondition.target.exists || !current.backup?.identity.exists) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation2, current)
+            );
+          }
+        });
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation2,
+          "operation-quarantined",
+          "target-removed",
+          operation2.target
+        );
+        actual = await currentOperation(baseRoot, operation2, profile);
+      }
+      if (!hasTransactionEvent(
+        transaction,
+        "operation-published",
+        operation2.id,
+        "before-target-publication"
+      )) {
+        await appendOperationEvent(
+          runRoot,
+          profile,
+          transaction,
+          operation2,
+          "operation-published",
+          "before-target-publication",
+          operation2.target
+        );
+      }
+      const moved = await moveBaseFile(
+        baseRoot,
+        operation2.quarantinePath,
+        operation2.target,
+        async () => {
+          const current = await currentOperation(baseRoot, operation2, profile);
+          if (!current.source || !sameIdentity(
+            current.source.identity,
+            operationPostSourceExpected(operation2)
+          ) || current.target.identity.exists || !current.quarantine?.identity.exists || operation2.precondition.target.exists && !current.backup?.identity.exists) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation2, current)
+            );
+          }
+        }
+      );
+      if (!moved) {
+        throw new WorkflowFinalizationConflictError([
+          operation2.quarantinePath,
+          operation2.target
+        ]);
+      }
+      operation2.status = "target-published";
+      await appendOperationEvent(
+        runRoot,
+        profile,
+        transaction,
+        operation2,
+        "operation-published",
+        "target-published",
+        operation2.target
+      );
     }
   }
-  await appendTransactionEvent(
-    runRoot,
-    profile,
+  actual = await currentOperation(baseRoot, operation2, profile);
+  progress = operationProgress(operation2, actual);
+  if (progress !== "post" && operation2.kind === "move") {
+    if (progress === "source-quarantined" && actual.quarantine?.identity.exists && actual.target.identity.exists) {
+      throw new WorkflowFinalizationConflictError(
+        operationConflictPaths(operation2, actual)
+      );
+    }
+  }
+  if (!hasTransactionEvent(
     transaction,
     "operation-started",
-    {
-      phase: "after-operation",
-      operationId: operation2.id,
-      path: operation2.target
-    },
-    operation2.id
-  );
+    operation2.id,
+    "after-operation"
+  ) && progress === "post") {
+    await appendOperationEvent(
+      runRoot,
+      profile,
+      transaction,
+      operation2,
+      "operation-started",
+      "after-operation",
+      operation2.target
+    );
+  }
   const verified = await currentOperation(baseRoot, operation2, profile);
   if (!operationMatches(verified, operation2.expectedPostState)) {
-    throw new WorkflowFinalizationConflictError([
-      operation2.target,
-      ...operation2.source ? [operation2.source] : []
-    ]);
+    throw new WorkflowFinalizationConflictError(
+      operationConflictPaths(operation2, verified)
+    );
+  }
+  operation2.status = "verified";
+  if (!hasTransactionEvent(
+    transaction,
+    "operation-verified",
+    operation2.id,
+    "operation-verified"
+  )) {
+    await appendOperationEvent(
+      runRoot,
+      profile,
+      transaction,
+      operation2,
+      "operation-verified",
+      "operation-verified",
+      operation2.target
+    );
   }
   operation2.status = "committed";
-  await appendTransactionEvent(
-    runRoot,
-    profile,
+  if (!hasTransactionEvent(
     transaction,
     "operation-completed",
-    {
-      phase: "operation-verified",
-      operationId: operation2.id,
-      path: operation2.target
-    },
-    operation2.id
-  );
+    operation2.id,
+    "operation-verified"
+  )) {
+    await appendOperationEvent(
+      runRoot,
+      profile,
+      transaction,
+      operation2,
+      "operation-completed",
+      "operation-verified",
+      operation2.target
+    );
+  }
   if (recovery)
     transaction.recovery.crashBoundaries = uniqueStrings([
       ...transaction.recovery.crashBoundaries,

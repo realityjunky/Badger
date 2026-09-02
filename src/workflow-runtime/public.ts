@@ -27,6 +27,9 @@ export type {
 export type {
   WorkflowFinalizationConfirmationPolicy,
   WorkflowFinalizationConfirmationRecord,
+  WorkflowFinalizationCleanup,
+  WorkflowFinalizationCleanupEntry,
+  WorkflowFinalizationCleanupStatus,
   WorkflowFinalizationDefinition,
   WorkflowFinalizationEvent,
   WorkflowFinalizationMaterialIdentity,
