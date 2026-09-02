@@ -1,11 +1,15 @@
 import { promises as fs } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import {
   WORKFLOW_RUNTIME_PHASE3_NEGATIVE_CASES,
+  WORKFLOW_RUNTIME_PHASE4_NEGATIVE_CASES,
   type CreatorState,
 } from "../types.js";
-import { copyDirectory, ensureDirectory } from "../util.js";
+import { copyDirectory, ensureDirectory, isWithin } from "../util.js";
 import { writeState } from "../factory/state.js";
+import { WORKFLOW_FINALIZATION_BOUNDARY_PHASES } from "../workflow-runtime/finalization.js";
+import { WORKFLOW_TRANSITION_BOUNDARY_PHASES } from "../workflow-runtime/transition-journal.js";
 
 function sameStrings(left: unknown, right: unknown): boolean {
   return (
@@ -216,6 +220,365 @@ function phase3EvidenceBlockers(state: CreatorState): string[] {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function requiredTrueFields(
+  value: unknown,
+  fields: readonly string[],
+  label: string,
+): string[] {
+  if (!isRecord(value)) return [`${label} evidence is missing`];
+  return fields
+    .filter((field) => value[field] !== true)
+    .map((field) => `${label} evidence is missing: ${field}`);
+}
+
+function isProtectedPath(candidate: string): boolean {
+  const segments = path.resolve(candidate).split(path.sep);
+  return (
+    segments.includes("raw_data") ||
+    segments.includes("raw_skills") ||
+    segments.some(
+      (segment, index) =>
+        segment === "comet-any-private" && segments[index + 1] === "comet",
+    )
+  );
+}
+
+function phase4DeclaredByPackage(state: CreatorState): boolean {
+  if (state.eval?.runtime?.identity?.durabilityProfile !== undefined) {
+    return true;
+  }
+  const protocolPath = state.generated?.protocolPath;
+  if (!protocolPath) return false;
+  const packageRoot = state.generated?.packageRoot;
+  if (
+    !packageRoot ||
+    !isWithin(packageRoot, protocolPath) ||
+    isProtectedPath(packageRoot) ||
+    isProtectedPath(protocolPath)
+  ) {
+    return true;
+  }
+  try {
+    const realPackageRoot = realpathSync(packageRoot);
+    const realProtocolPath = realpathSync(protocolPath);
+    if (
+      isProtectedPath(realPackageRoot) ||
+      isProtectedPath(realProtocolPath) ||
+      !isWithin(realPackageRoot, realProtocolPath)
+    ) {
+      return true;
+    }
+    const protocol = JSON.parse(readFileSync(realProtocolPath, "utf8")) as {
+      capabilities?: { durability?: unknown };
+    };
+    return protocol.capabilities?.durability !== undefined;
+  } catch {
+    return true;
+  }
+}
+
+function phase4EvidenceBlockersUnchecked(state: CreatorState): string[] {
+  if (!phase4DeclaredByPackage(state)) return [];
+  const runtime = state.eval?.runtime;
+  const raw = runtime?.phase4 as unknown;
+  if (!isRecord(raw)) {
+    return ["WorkflowRuntime Phase 4 certification evidence is missing"];
+  }
+  const blockers: string[] = [];
+  const hashPattern = /^[a-f0-9]{64}$/u;
+  if (raw.fixtureName !== "phase4-certification-workflow") {
+    blockers.push("WorkflowRuntime Phase 4 fixture identity is invalid");
+  }
+  if (raw.status !== "certified" || raw.completed !== true) {
+    blockers.push("WorkflowRuntime Phase 4 certification is incomplete");
+  }
+  for (const [label, value] of [
+    ["generatedPackageHash", raw.generatedPackageHash],
+    ["evaluatedPackageHash", raw.evaluatedPackageHash],
+    ["fixturePackageHash", raw.fixturePackageHash],
+  ] as const) {
+    if (typeof value !== "string" || !hashPattern.test(value)) {
+      blockers.push(`WorkflowRuntime Phase 4 ${label} is invalid`);
+    }
+  }
+  if (
+    typeof state.currentHash !== "string" ||
+    raw.generatedPackageHash !== state.currentHash ||
+    raw.evaluatedPackageHash !== state.currentHash
+  ) {
+    blockers.push(
+      "WorkflowRuntime Phase 4 evidence is stale for the generated package",
+    );
+  }
+  if (!runtime || raw.generatedPackageHash !== runtime.generatedPackageHash) {
+    blockers.push(
+      "WorkflowRuntime Phase 4 evidence is not bound to the runtime report",
+    );
+  }
+
+  const identity = raw.identity;
+  if (!isRecord(identity)) {
+    blockers.push("WorkflowRuntime Phase 4 execution identity is missing");
+  } else {
+    for (const [label, value] of [
+      ["protocolHash", identity.protocolHash],
+      ["packageHash", identity.packageHash],
+      ["snapshotHash", identity.snapshotHash],
+      ["resolverHash", identity.resolverHash],
+    ] as const) {
+      if (typeof value !== "string" || !hashPattern.test(value)) {
+        blockers.push(`WorkflowRuntime Phase 4 identity ${label} is invalid`);
+      }
+    }
+    if (identity.packageHash !== identity.snapshotHash) {
+      blockers.push(
+        "WorkflowRuntime Phase 4 package and snapshot identities differ",
+      );
+    }
+    if (
+      identity.capabilityVersion !== 3 ||
+      identity.findingCatalogVersion !== 1 ||
+      !isRecord(identity.nodeToStep) ||
+      Object.keys(identity.nodeToStep).length === 0 ||
+      Object.values(identity.nodeToStep).some(
+        (stepId) => typeof stepId !== "string" || stepId.length === 0,
+      )
+    ) {
+      blockers.push("WorkflowRuntime Phase 4 Node-to-step identity is invalid");
+    }
+    const profile = identity.durabilityProfile;
+    if (!isRecord(profile)) {
+      blockers.push("WorkflowRuntime Phase 4 durability profile is missing");
+    } else {
+      const rawCapabilities = profile.capabilities;
+      const capabilities = Array.isArray(rawCapabilities)
+        ? rawCapabilities.filter(
+            (capability): capability is string =>
+              typeof capability === "string",
+          )
+        : [];
+      const rawDeclaredCapabilities = raw.declaredCapabilities;
+      const declaredCapabilities = Array.isArray(rawDeclaredCapabilities)
+        ? rawDeclaredCapabilities.filter(
+            (capability): capability is string =>
+              typeof capability === "string",
+          )
+        : [];
+      const requiredCapabilities = [
+        "mutation-locks",
+        "revision-fences",
+        "transition-journal",
+        "verified-checkpoints",
+        "content-snapshots",
+        "verification-receipts",
+        "repair-policy",
+        "transactional-finalization",
+      ];
+      if (
+        !Array.isArray(rawCapabilities) ||
+        !Array.isArray(rawDeclaredCapabilities) ||
+        capabilities.length !== rawCapabilities.length ||
+        declaredCapabilities.length !== rawDeclaredCapabilities.length ||
+        JSON.stringify([...capabilities].sort()) !==
+          JSON.stringify([...declaredCapabilities].sort())
+      ) {
+        blockers.push(
+          "WorkflowRuntime Phase 4 declared capabilities do not match the profile",
+        );
+      }
+      if (
+        requiredCapabilities.some(
+          (capability) => !capabilities.includes(capability),
+        )
+      ) {
+        blockers.push(
+          "WorkflowRuntime Phase 4 durability capabilities are incomplete",
+        );
+      }
+      if (profile.findingCatalogVersion !== 1) {
+        blockers.push("WorkflowRuntime Phase 4 catalog identity is invalid");
+      }
+      const schemaVersions = profile.schemaVersions;
+      const requiredSchemaVersions = [
+        "runState",
+        "pendingAction",
+        "trajectory",
+        "artifacts",
+        "revisionClaim",
+        "transitionJournal",
+        "runLock",
+        "checkpointManifest",
+        "checkpointRecord",
+        "contentSnapshot",
+        "verificationReceipt",
+        "repairEpisode",
+        "finalizationTransaction",
+        "finalizationReceipt",
+      ];
+      if (
+        !isRecord(schemaVersions) ||
+        requiredSchemaVersions.some((key) => schemaVersions[key] !== 1)
+      ) {
+        blockers.push("WorkflowRuntime Phase 4 schema identity is incomplete");
+      }
+    }
+  }
+
+  blockers.push(
+    ...requiredTrueFields(
+      raw.lifecycle,
+      [
+        "machineWork",
+        "persistedDecision",
+        "versionedArtifacts",
+        "verificationRequirement",
+        "contentSnapshot",
+        "contentDrift",
+        "repairEpisode",
+        "verifiedCheckpoint",
+        "finalizationPreview",
+        "finalizationConfirmed",
+        "finalReceipt",
+      ],
+      "WorkflowRuntime Phase 4 lifecycle",
+    ),
+    ...requiredTrueFields(
+      raw.locations,
+      ["manual", "standalone", "equivalent"],
+      "WorkflowRuntime Phase 4 location",
+    ),
+    ...requiredTrueFields(
+      raw.adapters,
+      [
+        "generatedToPublic",
+        "publicToGenerated",
+        "thin",
+        "projectionsConsistent",
+      ],
+      "WorkflowRuntime Phase 4 adapter",
+    ),
+    ...requiredTrueFields(
+      raw.freshProcess,
+      [
+        "pendingAction",
+        "decision",
+        "checkpoint",
+        "finalization",
+        "terminal",
+        "crashBoundaries",
+        "converged",
+      ],
+      "WorkflowRuntime Phase 4 fresh-process",
+    ),
+  );
+  for (const [label, value] of [
+    [
+      "identical",
+      isRecord(raw.concurrency) ? raw.concurrency.identical : undefined,
+    ],
+    [
+      "conflicting",
+      isRecord(raw.concurrency) ? raw.concurrency.conflicting : undefined,
+    ],
+  ] as const) {
+    blockers.push(
+      ...requiredTrueFields(
+        value,
+        [
+          "oneAccepted",
+          "oneConflict",
+          "noDuplicateOutcome",
+          "noDuplicateEvent",
+          "noDuplicateReceipt",
+          "noDuplicateNextAction",
+        ],
+        `WorkflowRuntime Phase 4 ${label} concurrency`,
+      ),
+    );
+  }
+  blockers.push(
+    ...requiredTrueFields(
+      raw.identities,
+      [
+        "protocol",
+        "package",
+        "snapshot",
+        "resolver",
+        "durabilityProfile",
+        "schema",
+        "catalog",
+        "nodeAction",
+        "cycleAttempt",
+        "contentSnapshot",
+        "verificationReceipt",
+        "checkpoint",
+        "finalizationTransaction",
+        "finalizationReceipt",
+        "generatedPackageTree",
+      ],
+      "WorkflowRuntime Phase 4 identity",
+    ),
+  );
+  if (raw.allNegativeCases !== true) {
+    blockers.push(
+      "WorkflowRuntime Phase 4 negative-case evidence is incomplete",
+    );
+  }
+  if (!isRecord(raw.negativeCases)) {
+    blockers.push("WorkflowRuntime Phase 4 negative-case evidence is missing");
+  } else {
+    for (const name of WORKFLOW_RUNTIME_PHASE4_NEGATIVE_CASES) {
+      if (raw.negativeCases[name] !== true) {
+        blockers.push(
+          `WorkflowRuntime Phase 4 negative case is missing: ${name}`,
+        );
+      }
+    }
+  }
+  for (const [label, value, fields] of [
+    [
+      "transition-journal crash boundary",
+      raw.transitionJournalCrashBoundaries,
+      WORKFLOW_TRANSITION_BOUNDARY_PHASES,
+    ],
+    [
+      "finalization crash boundary",
+      raw.finalizationCrashBoundaries,
+      WORKFLOW_FINALIZATION_BOUNDARY_PHASES,
+    ],
+  ] as const) {
+    blockers.push(
+      ...requiredTrueFields(value, fields, `WorkflowRuntime Phase 4 ${label}`),
+    );
+  }
+  if (raw.generatedAdaptersThin !== true) {
+    blockers.push(
+      "WorkflowRuntime Phase 4 generated adapter evidence is missing",
+    );
+  }
+  if (raw.legacyRunUnchanged !== true) {
+    blockers.push("WorkflowRuntime Phase 4 legacy Run evidence is missing");
+  }
+  if (raw.sourceIntegrity !== true) {
+    blockers.push(
+      "WorkflowRuntime Phase 4 source-integrity evidence is missing",
+    );
+  }
+  return blockers;
+}
+
+function phase4EvidenceBlockers(state: CreatorState): string[] {
+  try {
+    return phase4EvidenceBlockersUnchecked(state);
+  } catch {
+    return ["WorkflowRuntime Phase 4 certification evidence is invalid"];
+  }
+}
+
 export function reviewState(state: CreatorState): {
   state: "blocked" | "reviewable" | "publishable";
   blockers: string[];
@@ -236,6 +599,7 @@ export function reviewState(state: CreatorState): {
     );
   blockers.push(...runtimeEvidenceBlockers(state));
   blockers.push(...phase3EvidenceBlockers(state));
+  blockers.push(...phase4EvidenceBlockers(state));
   if (state.review && state.review.hash !== state.currentHash)
     blockers.push("Review evidence is stale");
   const publishable =

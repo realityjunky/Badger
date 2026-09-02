@@ -13,6 +13,7 @@ import type {
 import { createCompletionPlan } from "../workflow-runtime/completion.js";
 import { createWorkflowRuntime } from "../workflow-runtime/public.js";
 import { certifyPhase3Workflow } from "./phase3-certification.js";
+import { certifyPhase4Workflow } from "./phase4-certification.js";
 import type {
   WorkflowContinuation,
   WorkflowExecutionIdentity,
@@ -274,6 +275,7 @@ function certificationFailure(error: unknown): string {
 }
 
 async function certifyRevisionedWorkflow(options: {
+  protocol: WorkflowProtocol;
   generatedPackageHash: string;
   packageRoot: string;
 }): Promise<WorkflowRuntimeCertificationResult> {
@@ -320,7 +322,14 @@ async function certifyRevisionedWorkflow(options: {
       reverseAdapterCompleted: false,
       phase3: phase3.evidence,
     };
-    return { evidence, blockers: phase3.blockers };
+    const phase4 = options.protocol.capabilities?.durability
+      ? await certifyPhase4Workflow(options)
+      : undefined;
+    if (phase4) evidence.phase4 = phase4.evidence;
+    return {
+      evidence,
+      blockers: [...phase3.blockers, ...(phase4?.blockers ?? [])],
+    };
   } catch (error) {
     return {
       evidence: {
@@ -536,6 +545,11 @@ export async function certifyWorkflowRuntime(options: {
     });
     evidence.phase3 = phase3.evidence;
     blockers.push(...phase3.blockers);
+    if (options.protocol.capabilities?.durability) {
+      const phase4 = await certifyPhase4Workflow(options);
+      evidence.phase4 = phase4.evidence;
+      blockers.push(...phase4.blockers);
+    }
     if (!sameStrings(declared, compiled)) {
       blockers.push("Declared Node order does not match compiled Node order");
     }

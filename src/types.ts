@@ -1158,6 +1158,7 @@ export interface WorkflowRuntimeIdentityEvidence {
   packageHash: string;
   snapshotHash: string;
   nodeToStep: Record<string, string>;
+  resolverHash?: string;
   findingCatalogVersion?: 1;
   durabilityProfile?: WorkflowDurabilityProfile;
 }
@@ -1184,6 +1185,116 @@ export interface WorkflowRuntimeCertificationEvidence {
   publicRuntimeCompleted: boolean;
   reverseAdapterCompleted: boolean;
   phase3?: WorkflowRuntimePhase3CertificationEvidence;
+  phase4?: WorkflowRuntimePhase4CertificationEvidence;
+}
+
+export const WORKFLOW_RUNTIME_PHASE4_NEGATIVE_CASES = [
+  "stale-local-lock",
+  "unknown-lock",
+  "changed-journal-identity",
+  "checkpoint-mismatch",
+  "stale-verification-receipt",
+  "content-drift",
+  "snapshot-overflow",
+  "snapshot-instability",
+  "repair-stagnation",
+  "override-exhaustion",
+  "finalization-rollback",
+  "ambiguous-finalization",
+  "legacy-run-compatibility",
+] as const;
+
+export type WorkflowRuntimePhase4NegativeCase =
+  (typeof WORKFLOW_RUNTIME_PHASE4_NEGATIVE_CASES)[number];
+
+export interface WorkflowRuntimePhase4CertificationEvidence {
+  status: "certified" | "failed";
+  fixtureName: string;
+  generatedPackageHash: string;
+  evaluatedPackageHash: string;
+  fixturePackageHash: string;
+  identity: WorkflowRuntimeIdentityEvidence;
+  declaredCapabilities: WorkflowDurabilityCapability[];
+  runId: string;
+  reverseRunId: string;
+  manualRunId: string;
+  standaloneRunId: string;
+  lifecycle: {
+    machineWork: boolean;
+    persistedDecision: boolean;
+    versionedArtifacts: boolean;
+    verificationRequirement: boolean;
+    contentSnapshot: boolean;
+    contentDrift: boolean;
+    repairEpisode: boolean;
+    verifiedCheckpoint: boolean;
+    finalizationPreview: boolean;
+    finalizationConfirmed: boolean;
+    finalReceipt: boolean;
+  };
+  locations: {
+    manual: boolean;
+    standalone: boolean;
+    equivalent: boolean;
+  };
+  adapters: {
+    generatedToPublic: boolean;
+    publicToGenerated: boolean;
+    thin: boolean;
+    projectionsConsistent: boolean;
+  };
+  freshProcess: {
+    pendingAction: boolean;
+    decision: boolean;
+    checkpoint: boolean;
+    finalization: boolean;
+    terminal: boolean;
+    crashBoundaries: boolean;
+    converged: boolean;
+  };
+  transitionJournalCrashBoundaries: Record<string, boolean>;
+  finalizationCrashBoundaries: Record<string, boolean>;
+  concurrency: {
+    identical: {
+      oneAccepted: boolean;
+      oneConflict: boolean;
+      noDuplicateOutcome: boolean;
+      noDuplicateEvent: boolean;
+      noDuplicateReceipt: boolean;
+      noDuplicateNextAction: boolean;
+    };
+    conflicting: {
+      oneAccepted: boolean;
+      oneConflict: boolean;
+      noDuplicateOutcome: boolean;
+      noDuplicateEvent: boolean;
+      noDuplicateReceipt: boolean;
+      noDuplicateNextAction: boolean;
+    };
+  };
+  identities: {
+    protocol: boolean;
+    package: boolean;
+    snapshot: boolean;
+    resolver: boolean;
+    durabilityProfile: boolean;
+    schema: boolean;
+    catalog: boolean;
+    nodeAction: boolean;
+    cycleAttempt: boolean;
+    contentSnapshot: boolean;
+    verificationReceipt: boolean;
+    checkpoint: boolean;
+    finalizationTransaction: boolean;
+    finalizationReceipt: boolean;
+    generatedPackageTree: boolean;
+  };
+  negativeCases: Record<WorkflowRuntimePhase4NegativeCase, boolean>;
+  allNegativeCases: boolean;
+  generatedAdaptersThin: boolean;
+  legacyRunUnchanged: boolean;
+  sourceIntegrity: boolean;
+  completed: boolean;
 }
 
 export const WORKFLOW_RUNTIME_PHASE3_NEGATIVE_CASES = [

@@ -5,8 +5,13 @@ import path from "node:path";
 import { generatePackage } from "../src/factory/generate.js";
 import { certifyWorkflowRuntime } from "../src/eval/workflow-runtime-certification.js";
 import { normalizeWorkflow } from "../src/workflow/contract.js";
+import { reviewState } from "../src/publish/lifecycle.js";
 import { hashDirectory } from "../src/util.js";
-import type { WorkflowInput } from "../src/types.js";
+import type {
+  CreatorState,
+  WorkflowDurabilityProfile,
+  WorkflowInput,
+} from "../src/types.js";
 
 function linearWorkflow(): WorkflowInput {
   return {
@@ -58,6 +63,39 @@ function revisionedWorkflow(): WorkflowInput {
       },
     ],
   };
+}
+
+function phase4Workflow(): WorkflowInput {
+  const input = revisionedWorkflow();
+  input.name = "phase4-host-workflow";
+  input.goal = "Exercise the Phase 4 certification gate.";
+  input.capabilities = {
+    ...input.capabilities!,
+    durability: {
+      version: 1,
+      capabilities: ["mutation-locks", "revision-fences", "transition-journal"],
+      bounds: {
+        runStateBytes: 256 * 1024,
+        pendingActionBytes: 256 * 1024,
+        trajectoryBytes: 2 * 1024 * 1024,
+        artifactsBytes: 256 * 1024,
+        claimBytes: 16 * 1024,
+        transitionJournalBytes: 512 * 1024,
+        runLockBytes: 16 * 1024,
+      },
+      schemaVersions: {
+        runState: 1,
+        pendingAction: 1,
+        trajectory: 1,
+        artifacts: 1,
+        revisionClaim: 1,
+        transitionJournal: 1,
+        runLock: 1,
+      },
+      findingCatalogVersion: 1,
+    } satisfies WorkflowDurabilityProfile,
+  };
+  return input;
 }
 
 describe("WorkflowRuntime Phase 3 certification", () => {
@@ -220,4 +258,166 @@ describe("WorkflowRuntime Phase 3 certification", () => {
       phase3: { status: "certified", completed: true },
     });
   }, 15_000);
+
+  it("exposes a complete current-hash Phase 4 certification", async () => {
+    const input = phase4Workflow();
+    const protocol = normalizeWorkflow(input).protocol;
+    const generated = await generatePackage({
+      proposal: {
+        schemaVersion: 1,
+        name: protocol.name,
+        goal: protocol.goal,
+        intent: "new-skill",
+        planHash: "phase4-certification-plan",
+        workflow: protocol,
+        candidates: [],
+        blockers: [],
+        warnings: [],
+        canInitialize: true,
+      },
+      plan: {
+        schemaVersion: 1,
+        goal: protocol.goal,
+        skillCreatorIntent: "new-skill",
+        preferredSkills: [],
+        workflow: input,
+        defaultLocale: "en",
+      },
+      destination: path.join(root, "phase4-generated"),
+    });
+
+    const generatedPackageHash = await hashDirectory(generated.packageRoot);
+    const result = await certifyWorkflowRuntime({
+      protocol,
+      generatedPackageHash,
+      packageRoot: generated.packageRoot,
+    });
+
+    expect(result.blockers).toEqual([]);
+    expect(result.evidence?.phase4).toMatchObject({
+      status: "certified",
+      fixtureName: "phase4-certification-workflow",
+      generatedPackageHash,
+      evaluatedPackageHash: generatedPackageHash,
+      declaredCapabilities: expect.arrayContaining([
+        "mutation-locks",
+        "verified-checkpoints",
+        "content-snapshots",
+        "verification-receipts",
+        "repair-policy",
+        "transactional-finalization",
+      ]),
+      lifecycle: {
+        machineWork: true,
+        persistedDecision: true,
+        versionedArtifacts: true,
+        verificationRequirement: true,
+        contentSnapshot: true,
+        repairEpisode: true,
+        verifiedCheckpoint: true,
+        finalizationPreview: true,
+        finalizationConfirmed: true,
+        finalReceipt: true,
+        contentDrift: true,
+      },
+      locations: { manual: true, standalone: true, equivalent: true },
+      adapters: {
+        generatedToPublic: true,
+        publicToGenerated: true,
+        thin: true,
+        projectionsConsistent: true,
+      },
+      freshProcess: {
+        pendingAction: true,
+        decision: true,
+        checkpoint: true,
+        finalization: true,
+        terminal: true,
+        crashBoundaries: true,
+        converged: true,
+      },
+      concurrency: {
+        identical: {
+          oneAccepted: true,
+          oneConflict: true,
+          noDuplicateOutcome: true,
+          noDuplicateEvent: true,
+          noDuplicateReceipt: true,
+          noDuplicateNextAction: true,
+        },
+        conflicting: {
+          oneAccepted: true,
+          oneConflict: true,
+          noDuplicateOutcome: true,
+          noDuplicateEvent: true,
+          noDuplicateReceipt: true,
+          noDuplicateNextAction: true,
+        },
+      },
+      allNegativeCases: true,
+      negativeCases: { "content-drift": true },
+      generatedAdaptersThin: true,
+      legacyRunUnchanged: true,
+      sourceIntegrity: true,
+      completed: true,
+    });
+
+    const state: CreatorState = {
+      schemaVersion: 1,
+      name: protocol.name,
+      status: "evaluated",
+      projectRoot: root,
+      planPath: path.join(root, "plan.json"),
+      planHash: "phase4-certification-plan",
+      draftPath: generated.packageRoot,
+      currentHash: generatedPackageHash,
+      candidates: [],
+      generated: {
+        packageRoot: generated.packageRoot,
+        protocolPath: path.join(root, "workflow-protocol.json"),
+        evalPath: path.join(root, "eval.yaml"),
+      },
+      eval: {
+        hash: generatedPackageHash,
+        passed: true,
+        resultPath: path.join(root, "eval.json"),
+        runtime: result.evidence!,
+      },
+    };
+    expect(reviewState(state).state).toBe("reviewable");
+
+    const missingPhase4 = structuredClone(state);
+    delete missingPhase4.eval!.runtime!.phase4;
+    expect(reviewState(missingPhase4).blockers).toContain(
+      "WorkflowRuntime Phase 4 certification evidence is missing",
+    );
+
+    const stalePhase4 = structuredClone(state);
+    stalePhase4.eval!.runtime!.phase4!.evaluatedPackageHash = "0".repeat(64);
+    expect(reviewState(stalePhase4).blockers).toContain(
+      "WorkflowRuntime Phase 4 evidence is stale for the generated package",
+    );
+
+    const incompletePhase4 = structuredClone(state);
+    incompletePhase4.eval!.runtime!.phase4!.lifecycle.contentDrift = false;
+    expect(reviewState(incompletePhase4).blockers).toContain(
+      "WorkflowRuntime Phase 4 lifecycle evidence is missing: contentDrift",
+    );
+
+    const wrongPackagePhase4 = structuredClone(state);
+    wrongPackagePhase4.eval!.runtime!.phase4!.generatedPackageHash = "1".repeat(
+      64,
+    );
+    expect(reviewState(wrongPackagePhase4).blockers).toContain(
+      "WorkflowRuntime Phase 4 evidence is stale for the generated package",
+    );
+
+    const malformedPhase4 = structuredClone(state);
+    malformedPhase4.eval!.runtime!.phase4 = {} as NonNullable<
+      typeof malformedPhase4.eval.runtime.phase4
+    >;
+    expect(reviewState(malformedPhase4).blockers).toContain(
+      "WorkflowRuntime Phase 4 certification is incomplete",
+    );
+  }, 120_000);
 });

@@ -201,8 +201,9 @@ identity evidence.
 
 ## Certification run
 
-`eval` retains the Phase 2 certification for the generated package and adds a
-separate synthetic Phase 3 package. The fixture is generated in a disposable
+`eval` retains the Phase 2 certification for the generated package and adds
+separate synthetic Phase 3 and Phase 4 certifications. The Phase 3 fixture is
+generated in a disposable
 temporary directory and contains a machine-derived conditional branch, a
 scoped authorized decision, a terminal choice, a declared bounded Cycle, a
 repeated review Node, a rework Attempt, and Attempt- and Run-lifetime artifacts.
@@ -226,10 +227,28 @@ silently substituted for the other. Rejected submissions must preserve the
 committed continuation. Readiness requires all evidence to be complete and
 current for the evaluated package hash.
 
+When durability is declared, Phase 4 generates one disposable synthetic
+package containing machine work, a persisted decision, versioned artifacts, a
+verification requirement, a content snapshot, a repair episode, a verified
+checkpoint, and local write/remove/move finalization. It exercises the public
+`start`, `resume`, `submit`, and `recover` operations, with private deterministic
+fault injection used only to interrupt declared durable boundaries. Every
+transition-journal and finalization boundary is recovered in a fresh process;
+identical and conflicting submissions run in separate child processes. The
+report records protocol, package, snapshot, resolver, durability profile,
+schema/catalog, Node/action, Cycle/Attempt, snapshot, receipt, checkpoint,
+repair, transaction, final receipt, generated package-tree, adapter, location,
+concurrency, and source-integrity identities. Readiness requires all evidence
+to be complete and current for the evaluated package hash.
+
 The Phase 2 linear certification remains the compatibility gate for legacy
-packages. Phase 3 certification does not publish or install generated Skills,
-authorize biological execution, start Native-derived durability work, or
-migrate Primer Designer.
+packages. Phase 3 certification remains unchanged. When a package declares a
+durability profile, Phase 4 certification adds one synthetic current-hash
+stop/go scenario covering every declared durability capability, both Run
+locations, both adapter directions, fresh-process crash boundaries, child-
+process contention, negative cases, and source-integrity boundaries. Phase 4
+certification does not publish or install generated Skills, authorize
+biological execution, or migrate Primer Designer.
 
 ## Compatibility
 

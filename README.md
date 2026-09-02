@@ -252,17 +252,17 @@ Generated state and guard adapters may forward `status: "failed"` outcomes and
 repair decision payloads; they do not evaluate budgets, signatures, overrides,
 or stop conditions.
 
-`eval` runs the Phase 2 certification over the generated package and a separate
-synthetic Phase 3 lifecycle certification. The report binds the generated
-package hash to the normalized protocol hash, compiled package hash, immutable
-Engine snapshot hash, resolver-plan identity, capability version, Node/action
-mapping, route and visit evidence, Cycle and Attempt ledgers, artifact versions,
-Decision Receipts, generated projections, fresh-process recovery, and terminal
-completion. Evaluated-package and synthetic-fixture tree hashes are recorded
-separately, while the fixture identity remains bound to its own compiled
-protocol. Review readiness requires every Phase 3 disposition, recovery,
-identity, adapter, source-integrity, and negative-case flag to remain current.
-The fixture uses only disposable synthetic files and does not authorize
+`eval` runs the Phase 2 certification over the generated package and separate
+synthetic Phase 3 and Phase 4 lifecycle certifications. A durability-declaring
+package receives the Phase 4 stop/go matrix over one generated synthetic
+package. The report binds the evaluated package hash to the normalized
+protocol, compiled package, immutable Engine snapshot, resolver-plan,
+capability, Node/action, route, Cycle, Attempt, artifact, decision, snapshot,
+receipt, checkpoint, repair, transaction, final-receipt, projection,
+fresh-process, concurrency, and source-integrity evidence. Evaluated-package
+and synthetic-fixture tree hashes remain distinct. Review readiness fails closed
+on missing, stale, mismatched, truncated, or incomplete Phase 4 evidence.
+The fixtures use only disposable synthetic files and do not authorize
 biological execution, package installation, Native-derived durability, or
 Primer Designer migration.
 

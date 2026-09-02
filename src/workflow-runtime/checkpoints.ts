@@ -1803,13 +1803,34 @@ export async function verifyWorkflowCheckpointCandidate(
     throw new Error("Workflow checkpoint Run status is invalid");
   }
   if (pending) {
-    const step = verifiedPackage.package.definition.orchestration.steps?.find(
-      (candidate) => candidate.id === pending.stepId,
-    );
-    if (!step || !sameActionDefinition(pending, step)) {
-      throw new Error(
-        "Workflow checkpoint pending action definition is invalid",
+    if (pending.finalization) {
+      const finalization = state.workflowRuntime?.finalization;
+      if (
+        !finalization ||
+        finalization.status !== "awaiting-confirmation" ||
+        !finalization.pendingConfirmation ||
+        !sameStableValue(
+          finalization.pendingConfirmation,
+          pending.finalization,
+        ) ||
+        state.currentStep !== null ||
+        pending.stepId !== null ||
+        pending.attemptId !== undefined ||
+        pending.cycleId !== undefined
+      ) {
+        throw new Error(
+          "Workflow checkpoint pending finalization identity is invalid",
+        );
+      }
+    } else {
+      const step = verifiedPackage.package.definition.orchestration.steps?.find(
+        (candidate) => candidate.id === pending.stepId,
       );
+      if (!step || !sameActionDefinition(pending, step)) {
+        throw new Error(
+          "Workflow checkpoint pending action definition is invalid",
+        );
+      }
     }
   }
   if (manifest.pendingAction === null) {
