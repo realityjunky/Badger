@@ -1015,6 +1015,9 @@ export function normalizeWorkflow(input: WorkflowInput): NormalizedWorkflow {
         }
       : {}),
     ...(input.cycles ? { cycles: cloneCycles(input.cycles) } : {}),
+    ...(input.finalization
+      ? { finalization: structuredClone(input.finalization) }
+      : {}),
     state: {
       kind: "workflow-run",
       statePath: `.comet/runs/${input.name}/state.json`,

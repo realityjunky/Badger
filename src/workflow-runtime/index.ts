@@ -12,6 +12,9 @@ import {
 } from "../skill-runtime/snapshot.js";
 import {
   type ManualRunResult,
+  type FinalizationRecovery,
+  type FinalizationRefresh,
+  type PrepareFinalizationOutcome,
   type PreparePendingAction,
   type PrepareOutcomeMutation,
 } from "../engine/manual-run.js";
@@ -49,6 +52,12 @@ import type {
   WorkflowVerificationReceiptProposal,
   WorkflowVerificationReceiptReference,
   WorkflowRepairPendingDecision,
+  WorkflowFinalizationPreview,
+  WorkflowFinalizationConfirmationRecord,
+  WorkflowFinalizationPendingConfirmation,
+  WorkflowFinalizationState,
+  WorkflowFinalizationSubmission,
+  WorkflowFinalizationDefinition,
 } from "../types.js";
 import { sha256, stableValue } from "../util.js";
 import { compileWorkflow } from "./compiler.js";
@@ -164,6 +173,19 @@ import {
   workflowRepairAction,
   type WorkflowRepairFailureFacts,
 } from "./repair.js";
+import {
+  applyWorkflowFinalization,
+  buildWorkflowFinalizationPreview,
+  clearWorkflowFinalizationTransaction,
+  parseWorkflowFinalizationState,
+  readWorkflowFinalizationReceipt,
+  readWorkflowFinalizationTransaction,
+  recoverWorkflowFinalization,
+  rollbackWorkflowFinalization,
+  workflowFinalizationReceiptReference,
+  WorkflowFinalizationConflictError,
+  WorkflowFinalizationTransactionPendingError,
+} from "./finalization.js";
 
 async function withStructuredRuntimeErrors<T>(
   operation: () => Promise<T>,
@@ -191,6 +213,12 @@ function usesWorkflowContentSnapshots(
   profile: WorkflowDurabilityProfile | undefined,
 ): boolean {
   return profile?.capabilities.includes("content-snapshots") ?? false;
+}
+
+function usesWorkflowFinalization(
+  profile: WorkflowDurabilityProfile | undefined,
+): boolean {
+  return profile?.capabilities.includes("transactional-finalization") ?? false;
 }
 
 async function durabilityProfileForLocation(
@@ -434,6 +462,14 @@ function isDecisionSubmission(
   return submission.kind === "decision";
 }
 
+function isWorkflowFinalizationAction(
+  action: EngineAction | null,
+): action is EngineAction & {
+  finalization: WorkflowFinalizationPendingConfirmation;
+} {
+  return Boolean(action?.type === "ask_user" && action.finalization);
+}
+
 const DECISION_SUBMISSION_KEYS = new Set([
   "kind",
   "actionId",
@@ -458,6 +494,7 @@ const DECISION_SUBMISSION_KEYS = new Set([
   "verificationReceiptIds",
   "receiptIds",
   "repair",
+  "finalization",
 ]);
 
 const VERIFICATION_SUBMISSION_KEYS = new Set([
@@ -1190,6 +1227,12 @@ function boundedContinuation(
               ]
             : [],
       );
+  const finalization = value.finalization
+    ? parseWorkflowFinalizationState(
+        value.finalization,
+        value.execution.durabilityProfile,
+      )
+    : undefined;
   const disposition = value.disposition;
   return {
     ...structuredClone(value),
@@ -1205,6 +1248,7 @@ function boundedContinuation(
     ),
     blockers: legacyBlockersFromFindings(disposition, projected.findings),
     ...(value.repair ? { repair: boundedRepairEpisode(value.repair) } : {}),
+    ...(finalization ? { finalization } : {}),
   };
 }
 
@@ -1397,6 +1441,79 @@ function validateReviewer(
   }
 }
 
+function validateFinalizationSubmissionShape(
+  value: WorkflowFinalizationSubmission,
+): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Workflow finalization submission must be an object");
+  }
+  const keys = new Set([
+    "planHash",
+    "decisionId",
+    "choiceId",
+    "contentSnapshotHash",
+    "verificationReceiptIds",
+  ]);
+  const unknown = Object.keys(value).find((key) => !keys.has(key));
+  if (unknown) {
+    throw new Error(
+      `Workflow finalization submission has unknown field: ${unknown}`,
+    );
+  }
+  for (const [key, entry] of [
+    ["planHash", value.planHash],
+    ["decisionId", value.decisionId],
+  ] as const) {
+    if (
+      entry !== undefined &&
+      (typeof entry !== "string" || entry.length === 0)
+    ) {
+      throw new Error(
+        `Workflow finalization ${key} must be a non-empty string`,
+      );
+    }
+  }
+  if (value.planHash !== undefined && !/^[a-f0-9]{64}$/u.test(value.planHash)) {
+    throw new Error("Workflow finalization planHash must be a SHA-256 hash");
+  }
+  if (
+    value.choiceId !== undefined &&
+    value.choiceId !== "confirm" &&
+    value.choiceId !== "cancel"
+  ) {
+    throw new Error("Workflow finalization choiceId is invalid");
+  }
+  if (
+    value.contentSnapshotHash !== undefined &&
+    value.contentSnapshotHash !== null &&
+    (typeof value.contentSnapshotHash !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(value.contentSnapshotHash))
+  ) {
+    throw new Error("Workflow finalization contentSnapshotHash is invalid");
+  }
+  if (value.verificationReceiptIds !== undefined) {
+    if (
+      !Array.isArray(value.verificationReceiptIds) ||
+      value.verificationReceiptIds.length > 256 ||
+      value.verificationReceiptIds.some(
+        (entry) => typeof entry !== "string" || entry.length === 0,
+      )
+    ) {
+      throw new Error(
+        "Workflow finalization verificationReceiptIds are invalid",
+      );
+    }
+    if (
+      new Set(value.verificationReceiptIds).size !==
+      value.verificationReceiptIds.length
+    ) {
+      throw new Error(
+        "Workflow finalization verificationReceiptIds must not contain duplicates",
+      );
+    }
+  }
+}
+
 function validateSubmission(submission: WorkflowSubmission): void {
   if (!submission || typeof submission !== "object") {
     throw new Error("Submission must be an object");
@@ -1421,8 +1538,8 @@ function validateSubmission(submission: WorkflowSubmission): void {
     if (!Number.isSafeInteger(submission.revision) || submission.revision < 0) {
       throw new Error("Decision revision must be a non-negative integer");
     }
-    if (!submission.nodeId) {
-      throw new Error("Decision Node id must be a non-empty string");
+    if (!submission.nodeId && submission.nodeId !== null) {
+      throw new Error("Decision Node id must be a non-empty string or null");
     }
     if (
       submission.cycleId !== null &&
@@ -1430,8 +1547,8 @@ function validateSubmission(submission: WorkflowSubmission): void {
     ) {
       throw new Error("Decision cycle id must be a string or null");
     }
-    if (!submission.attemptId) {
-      throw new Error("Decision Attempt id must be a non-empty string");
+    if (!submission.attemptId && submission.attemptId !== null) {
+      throw new Error("Decision Attempt id must be a non-empty string or null");
     }
     if (!submission.choiceId) {
       throw new Error("Decision choice id must be a non-empty string");
@@ -1457,6 +1574,9 @@ function validateSubmission(submission: WorkflowSubmission): void {
       ) {
         throw new Error("Decision evidence references must be strings");
       }
+    }
+    if (submission.finalization !== undefined) {
+      validateFinalizationSubmissionShape(submission.finalization);
     }
     return;
   }
@@ -1489,6 +1609,9 @@ function validateSubmission(submission: WorkflowSubmission): void {
     throw new Error(
       "Repair decision fields are only valid for decision submissions",
     );
+  }
+  if (submission.finalization !== undefined) {
+    validateFinalizationSubmissionShape(submission.finalization);
   }
   if (
     submission.repairDecision !== undefined ||
@@ -1666,6 +1789,9 @@ function continuation(
     blockers: legacyBlockersFromFindings(disposition, withRepair.findings),
     ...(runtimeState?.repairEpisode
       ? { repair: boundedRepairEpisode(runtimeState.repairEpisode) }
+      : {}),
+    ...(runtimeState?.finalization
+      ? { finalization: structuredClone(runtimeState.finalization) }
       : {}),
   };
 }
@@ -1959,6 +2085,9 @@ export async function projectWorkflowState(
     ),
     ...(runtimeState?.repairEpisode
       ? { repair: boundedRepairEpisode(runtimeState.repairEpisode) }
+      : {}),
+    ...(runtimeState?.finalization
+      ? { finalization: structuredClone(runtimeState.finalization) }
       : {}),
   };
 }
@@ -2730,6 +2859,48 @@ async function verifyStoredRun(location: ResolvedWorkflowRunLocation): Promise<{
     verified.identity,
     verified.package,
   );
+  const finalization = state.workflowRuntime?.finalization;
+  const finalizationDefinition =
+    verified.package.runtime?.protocol.finalization;
+  if (
+    finalization &&
+    (!finalizationDefinition ||
+      !usesWorkflowFinalization(verified.identity.durabilityProfile))
+  ) {
+    throw new Error(
+      "WorkflowRuntime finalization state is not declared by the Run",
+    );
+  }
+  if (
+    finalizationDefinition &&
+    usesWorkflowFinalization(verified.identity.durabilityProfile) &&
+    state.status === "completed" &&
+    finalization?.status !== "committed"
+  ) {
+    throw new Error(
+      "WorkflowRuntime completed Run lacks committed finalization",
+    );
+  }
+  if (finalization?.status === "committed" || finalization?.receipt) {
+    const profile = verified.identity.durabilityProfile;
+    const reference = finalization.receipt;
+    if (!profile || !reference) {
+      throw new Error("WorkflowRuntime finalization receipt is missing");
+    }
+    const receipt = await readWorkflowFinalizationReceipt(
+      location.runRoot,
+      reference.receiptHash,
+      profile,
+    );
+    if (
+      !receipt ||
+      !sameStableValue(workflowFinalizationReceiptReference(receipt), reference)
+    ) {
+      throw new Error(
+        "WorkflowRuntime finalization receipt identity is invalid",
+      );
+    }
+  }
   await verifyStoredRepairEpisode(location.runRoot, state, verified.identity);
   return { state, ...verified, pending };
 }
@@ -2905,7 +3076,21 @@ export async function inspectWorkflowRun(
       );
     }
     try {
-      if (!(await location.readState())) return null;
+      const storedState = await location.readState();
+      if (!storedState) return null;
+      const profile = storedState.runtimeIdentity?.durabilityProfile;
+      if (profile?.capabilities.includes("transactional-finalization")) {
+        const transaction = await readWorkflowFinalizationTransaction(
+          location.runRoot,
+          profile,
+        );
+        if (transaction) {
+          return finalizationRecoveryRequiredContinuation(
+            location,
+            transaction,
+          );
+        }
+      }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "ENOENT" || code === "ENOTDIR") return null;
@@ -2915,6 +3100,52 @@ export async function inspectWorkflowRun(
       await verifyStoredRun(location),
       location.runRoot,
     );
+  });
+}
+
+export async function previewWorkflowFinalization(
+  target: WorkflowRunTarget,
+): Promise<WorkflowFinalizationPreview> {
+  return withStructuredRuntimeErrors(async () => {
+    const location = resolveWorkflowRunLocation(target);
+    const journal = await readWorkflowTransitionJournal(location.runRoot);
+    if (journal) {
+      throw new Error(
+        "Workflow finalization preview is unavailable during recovery",
+      );
+    }
+    const locationProfile = await durabilityProfileForLocation(location);
+    if (locationProfile?.capabilities.includes("transactional-finalization")) {
+      const transaction = await readWorkflowFinalizationTransaction(
+        location.runRoot,
+        locationProfile,
+      );
+      if (transaction) {
+        throw new WorkflowFinalizationTransactionPendingError(transaction);
+      }
+    }
+    const verified = await verifyStoredRun(location);
+    const definition = verified.package.runtime?.protocol.finalization;
+    const profile = verified.identity.durabilityProfile;
+    if (
+      !definition ||
+      !profile?.capabilities.includes("transactional-finalization")
+    ) {
+      throw new Error("Workflow finalization is not enabled for this Run");
+    }
+    await validateFinalizationEvidenceBindings(
+      location,
+      verified.state,
+      definition,
+      profile,
+    );
+    return buildWorkflowFinalizationPreview({
+      baseRoot: location.contentSnapshotRoot,
+      state: verified.state,
+      execution: verified.identity,
+      definition,
+      profile,
+    });
   });
 }
 
@@ -3199,6 +3430,10 @@ function validateDecisionResponse(
   if (pending.type !== "ask_user") {
     throw new Error(`Decision response cannot satisfy ${pending.type} action`);
   }
+  if (isWorkflowFinalizationAction(pending)) {
+    validateFinalizationDecisionResponse(verified, pending, submission);
+    return;
+  }
   if (isWorkflowRepairAction(pending)) {
     validateRepairDecisionResponse(verified, pending, node, submission);
     return;
@@ -3278,6 +3513,91 @@ function validateDecisionResponse(
   if (submission.repair !== undefined) {
     throw new Error(
       "Repair decision fields are only valid for a repair action",
+    );
+  }
+}
+
+function validateFinalizationDecisionResponse(
+  verified: VerifiedWorkflowRun,
+  pending: EngineAction & {
+    finalization: WorkflowFinalizationPendingConfirmation;
+  },
+  submission: WorkflowDecisionSubmission,
+): void {
+  const finalization = pending.finalization;
+  const stateFinalization = verified.state.workflowRuntime?.finalization;
+  if (
+    !stateFinalization ||
+    stateFinalization.status !== "awaiting-confirmation" ||
+    !stateFinalization.pendingConfirmation ||
+    !sameStableValue(stateFinalization.pendingConfirmation, finalization)
+  ) {
+    throw new Error("Workflow finalization confirmation state is invalid");
+  }
+  if (
+    submission.revision !== verified.state.workflowRuntime?.revision ||
+    submission.nodeId !== null ||
+    submission.attemptId !== null ||
+    submission.cycleId !== null
+  ) {
+    throw new Error(
+      "Workflow finalization confirmation context does not match the Run",
+    );
+  }
+  validateDecisionExecution(submission, verified.identity);
+  if (
+    submission.decisionId !== undefined &&
+    submission.decisionId !== finalization.decisionId
+  ) {
+    throw new Error(
+      "Workflow finalization decision id does not match the pending action",
+    );
+  }
+  if (submission.choiceId !== "confirm" && submission.choiceId !== "cancel") {
+    throw new Error("Workflow finalization choice is invalid");
+  }
+  if (submission.inputs && Object.keys(submission.inputs).length > 0) {
+    throw new Error(
+      "Workflow finalization confirmation does not accept inputs",
+    );
+  }
+  if (
+    submission.scope !== undefined ||
+    submission.evidenceReferences !== undefined ||
+    submission.repair !== undefined
+  ) {
+    throw new Error(
+      "Workflow finalization confirmation does not accept extra scope",
+    );
+  }
+  validateReviewer(submission.reviewer, finalization.reviewer);
+  const input = submission.finalization;
+  if (
+    !input ||
+    input.planHash !== finalization.planHash ||
+    input.decisionId !== finalization.decisionId ||
+    input.choiceId !== submission.choiceId ||
+    input.contentSnapshotHash !== finalization.contentSnapshotHash ||
+    !sameStableValue(
+      [...(input.verificationReceiptIds ?? [])].sort((left, right) =>
+        left.localeCompare(right),
+      ),
+      finalization.verificationReceiptIds,
+    )
+  ) {
+    throw new Error("Workflow finalization confirmation is stale");
+  }
+  if (finalization.rationale.required && !submission.rationale) {
+    throw new Error("Workflow finalization confirmation rationale is required");
+  }
+  if (
+    submission.rationale !== undefined &&
+    Buffer.byteLength(submission.rationale, "utf8") >
+      (verified.identity.durabilityProfile?.bounds.finalizationContentBytes ??
+        64 * 1024)
+  ) {
+    throw new Error(
+      "Workflow finalization confirmation rationale exceeds its bound",
     );
   }
 }
@@ -3476,6 +3796,30 @@ function engineOutcome(
   artifactMutation?: WorkflowArtifactMutation,
   repairFailure?: ReturnType<typeof repairFailureForSubmission>,
 ): import("../engine/types.js").ActionOutcome {
+  if (isWorkflowFinalizationAction(prepared.pending)) {
+    if (!isDecisionSubmission(submission) || !submission.finalization) {
+      throw new Error(
+        "Workflow finalization confirmation requires a decision submission",
+      );
+    }
+    return {
+      actionId: prepared.pending.id,
+      status: "succeeded",
+      summary: `Workflow finalization ${submission.choiceId}.`,
+      kind: "decision",
+      decisionId: prepared.pending.finalization.decisionId,
+      choiceId: submission.choiceId as "confirm" | "cancel",
+      reviewer: structuredClone(submission.reviewer),
+      ...(submission.rationale !== undefined
+        ? { rationale: submission.rationale }
+        : {}),
+      finalization: {
+        ...structuredClone(submission.finalization),
+        decisionId: prepared.pending.finalization.decisionId,
+        choiceId: submission.choiceId as "confirm" | "cancel",
+      },
+    };
+  }
   if (isWorkflowRepairAction(prepared.pending)) {
     if (!isDecisionSubmission(submission)) {
       throw new Error(
@@ -3497,7 +3841,9 @@ function engineOutcome(
       revision: submission.revision,
       nodeId: submission.nodeId,
       cycleId: submission.cycleId,
-      attemptId: submission.attemptId,
+      ...(submission.attemptId !== null
+        ? { attemptId: submission.attemptId }
+        : {}),
       repairDecision: {
         decisionId: prepared.pending.repair.decisionId,
         signatureHash: prepared.pending.repair.signatureHash,
@@ -3555,6 +3901,9 @@ function engineOutcome(
           }
         : {}),
       ...(repairFailure ? { repairFailure } : {}),
+      ...(submission.finalization
+        ? { finalization: structuredClone(submission.finalization) }
+        : {}),
     };
   }
   const node = prepared.verified.package.runtime!.protocol.nodes.find(
@@ -3572,7 +3921,9 @@ function engineOutcome(
     revision: submission.revision,
     nodeId: submission.nodeId,
     cycleId: submission.cycleId,
-    attemptId: submission.attemptId,
+    ...(submission.attemptId !== null
+      ? { attemptId: submission.attemptId }
+      : {}),
     decisionId: decision.id,
     choiceId: choice.id,
     reviewer: structuredClone(submission.reviewer),
@@ -3654,7 +4005,11 @@ function routeBlockers(
   artifactMutation?: WorkflowArtifactMutation,
 ): string[] {
   const protocol = prepared.verified.package.runtime!.protocol;
-  if (isWorkflowRepairAction(prepared.pending)) return [];
+  if (
+    isWorkflowRepairAction(prepared.pending) ||
+    isWorkflowFinalizationAction(prepared.pending)
+  )
+    return [];
   if (
     (!isDecisionSubmission(submission) && submission.status !== "succeeded") ||
     !prepared.node ||
@@ -4316,6 +4671,13 @@ function blockedContinuation(
           ),
         }
       : {}),
+    ...(prepared.verified.state.workflowRuntime?.finalization
+      ? {
+          finalization: structuredClone(
+            prepared.verified.state.workflowRuntime.finalization,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -4434,6 +4796,136 @@ async function recoveryRequiredContinuation(
   };
 }
 
+async function finalizationRecoveryRequiredContinuation(
+  location: ResolvedWorkflowRunLocation,
+  transaction: import("./finalization.js").WorkflowFinalizationTransaction,
+  unknownPaths: readonly string[] = [],
+): Promise<WorkflowContinuation> {
+  const verified = await verifyStoredRun(location);
+  return withAdditionalFindings(
+    await continuationFromVerifiedRun(verified, location.runRoot),
+    [
+      recoveryRequiredFinding(
+        verified.state.workflowRuntime?.revision ?? transaction.revision,
+        verified.state.pending,
+        ".comet/finalization/transaction.json",
+      ),
+      ...unknownPaths.map((unknownPath) =>
+        findingFromBlocker(
+          `Workflow finalization observed an unknown file identity: ${unknownPath}`,
+          { path: unknownPath },
+        ),
+      ),
+    ],
+    "blocked",
+  );
+}
+
+async function validateFinalizationEvidenceBindings(
+  location: ResolvedWorkflowRunLocation,
+  state: RunState,
+  definition: WorkflowFinalizationDefinition,
+  profile: WorkflowDurabilityProfile,
+): Promise<void> {
+  for (const receiptId of definition.requiredVerificationReceiptIds ?? []) {
+    const reference = state.workflowRuntime?.verificationReceipts.find(
+      (candidate) => candidate.receiptId === receiptId,
+    );
+    if (!reference) {
+      throw new Error(
+        `Workflow finalization verification receipt is missing: ${receiptId}`,
+      );
+    }
+    if (reference.status !== "passed") {
+      throw new Error(
+        `Workflow finalization verification receipt is not passed: ${receiptId}`,
+      );
+    }
+    const receipt = await readWorkflowVerificationReceipt(
+      location.runRoot,
+      reference.receiptHash,
+      profile,
+    );
+    if (
+      !receipt ||
+      !sameStableValue(workflowVerificationReceiptReference(receipt), reference)
+    ) {
+      throw new Error(
+        `Workflow finalization verification receipt is stale: ${receiptId}`,
+      );
+    }
+  }
+  if (definition.requireContentSnapshot === true) {
+    const reference = state.workflowRuntime?.contentSnapshots?.at(-1);
+    const policy = profile.snapshotPolicy;
+    if (!reference || !policy) {
+      throw new Error("Workflow finalization requires a content snapshot");
+    }
+    const snapshot = await readWorkflowContentSnapshot(
+      location.runRoot,
+      reference.hash,
+      policy.limits.maxManifestBytes,
+    );
+    if (
+      !snapshot ||
+      hashWorkflowContentSnapshot(snapshot) !== reference.hash ||
+      !reference.complete ||
+      !snapshot.complete
+    ) {
+      throw new Error("Workflow finalization content snapshot is stale");
+    }
+  }
+}
+
+async function finalizationSubmissionBlockers(
+  prepared: PreparedWorkflowSubmission,
+  submission: WorkflowSubmission,
+): Promise<string[]> {
+  const definition = prepared.verified.package.runtime?.protocol.finalization;
+  const profile = prepared.verified.identity.durabilityProfile;
+  if (!definition || !profile) return [];
+  if (isWorkflowFinalizationAction(prepared.pending)) {
+    await validateFinalizationEvidenceBindings(
+      prepared.location,
+      prepared.verified.state,
+      definition,
+      profile,
+    );
+    const preview = await buildWorkflowFinalizationPreview({
+      baseRoot: prepared.location.contentSnapshotRoot,
+      state: prepared.verified.state,
+      execution: prepared.verified.identity,
+      definition,
+      profile,
+    });
+    return preview.planHash === prepared.pending.finalization.planHash
+      ? []
+      : ["Workflow finalization preview is stale"];
+  }
+  if (
+    !isDecisionSubmission(submission) &&
+    submission.finalization?.planHash !== undefined
+  ) {
+    await validateFinalizationEvidenceBindings(
+      prepared.location,
+      prepared.verified.state,
+      definition,
+      profile,
+    );
+    const preview = await buildWorkflowFinalizationPreview({
+      baseRoot: prepared.location.contentSnapshotRoot,
+      state: prepared.verified.state,
+      execution: prepared.verified.identity,
+      definition,
+      profile,
+    });
+    return preview.planHash === submission.finalization.planHash
+      ? []
+      : ["Workflow finalization preview is stale"];
+  }
+  return [];
+}
+
 export async function validateWorkflowSubmission(
   target: WorkflowRunTarget,
   submission: WorkflowSubmission,
@@ -4450,6 +4942,16 @@ export async function validateWorkflowSubmission(
         location,
         checkpointRecovery,
       );
+    }
+    const profile = await durabilityProfileForLocation(location);
+    if (usesWorkflowFinalization(profile)) {
+      const transaction = await readWorkflowFinalizationTransaction(
+        location.runRoot,
+        profile!,
+      );
+      if (transaction) {
+        return finalizationRecoveryRequiredContinuation(location, transaction);
+      }
     }
     validateSubmission(submission);
     let prepared: PreparedWorkflowSubmission;
@@ -4484,6 +4986,13 @@ export async function validateWorkflowSubmission(
     const routeFindings = routeBlockers(prepared, submission, mutation);
     if (routeFindings.length > 0) {
       return blockedContinuation(prepared, routeFindings);
+    }
+    const finalizationBlockers = await finalizationSubmissionBlockers(
+      prepared,
+      submission,
+    );
+    if (finalizationBlockers.length > 0) {
+      return blockedContinuation(prepared, finalizationBlockers);
     }
     return continuationFromVerifiedRun(
       prepared.verified,
@@ -4526,6 +5035,9 @@ export async function projectWorkflowHandoff(
     execution,
     nodes: structuredClone(protocol.nodes),
     outputSchemas: structuredClone(protocol.outputSchemas),
+    ...(protocol.finalization
+      ? { finalization: structuredClone(protocol.finalization) }
+      : {}),
     decisionReceipts: boundProjectedLedger(
       projectedCurrent?.decisionReceipts ?? [],
     ),
@@ -4557,25 +5069,40 @@ export async function projectWorkflowHandoff(
     ...(projectedCurrent?.repair
       ? { repair: boundedRepairEpisode(projectedCurrent.repair) }
       : {}),
+    ...(projectedCurrent?.finalization
+      ? { finalizationState: structuredClone(projectedCurrent.finalization) }
+      : {}),
     continuation: projectedCurrent,
   };
 }
 
 async function resumeStoredRun(
   location: ResolvedWorkflowRunLocation,
-  options: ResumeWorkflowRunOptions,
+  options: ResumeWorkflowRunOptions & {
+    finalizationRecovery?: FinalizationRecovery;
+    refreshFinalization?: boolean;
+  },
   forceCheckpoint = false,
   persistCheckpoint = true,
 ): Promise<WorkflowContinuation> {
   const verified = await verifyStoredRun(location);
-  const result = await location.resume({
-    confirmations: options.confirmations ?? [],
-    resolver: resolverForPackage(),
-    prepareAction: prepareWorkflowActionForLocation(
-      location,
-      options.protectedSnapshotRoots,
-    ),
-  });
+  const finalizationRefresh = options.refreshFinalization
+    ? await refreshWorkflowFinalization(location, verified)
+    : undefined;
+  const resumeOptions: import("../engine/manual-run.js").ResumeManualRunOptions =
+    {
+      confirmations: options.confirmations ?? [],
+      resolver: resolverForPackage(),
+      prepareAction: prepareWorkflowActionForLocation(
+        location,
+        options.protectedSnapshotRoots,
+      ),
+      ...(options.finalizationRecovery
+        ? { finalizationRecovery: options.finalizationRecovery }
+        : {}),
+      ...(finalizationRefresh ? { finalizationRefresh } : {}),
+    };
+  const result = await location.resume(resumeOptions);
   const changed =
     !sameStableValue(verified.state, result.state) ||
     !sameStableValue(verified.pending, result.action);
@@ -4685,6 +5212,322 @@ function prepareWorkflowActionForLocation(
     );
 }
 
+function workflowFinalizationConfirmationAction(
+  preview: WorkflowFinalizationPreview,
+  sourceActionId: string,
+  currentRevision = preview.revision,
+): EngineAction {
+  const decisionId = `workflow-finalization-${preview.planHash.slice(0, 24)}`;
+  const actionId = `workflow-finalization-confirm-${sha256(
+    JSON.stringify(
+      stableValue({
+        runId: preview.runId,
+        planHash: preview.planHash,
+        revision: preview.revision,
+        currentRevision,
+      }),
+    ),
+  ).slice(0, 24)}`;
+  const pending: WorkflowFinalizationPendingConfirmation = {
+    schemaVersion: 1,
+    kind: "workflow-finalization-confirmation",
+    decisionId,
+    actionId,
+    sourceActionId,
+    planHash: preview.planHash,
+    revision: currentRevision,
+    planRevision: preview.revision,
+    contentSnapshotHash: preview.contentSnapshotHash,
+    verificationReceiptIds: [...preview.verificationReceiptIds],
+    reviewer: structuredClone(preview.confirmation.reviewer!),
+    rationale: structuredClone(preview.confirmation.rationale!),
+  };
+  return {
+    id: actionId,
+    stepId: null,
+    type: "ask_user",
+    decisionId,
+    question: "Review and confirm the declared local finalization plan.",
+    choices: [
+      { id: "confirm", label: "Apply finalization" },
+      { id: "cancel", label: "Cancel finalization" },
+    ],
+    requiredInputs: { type: "object", fields: [] },
+    rationale: structuredClone(preview.confirmation.rationale!),
+    reviewer: structuredClone(preview.confirmation.reviewer!),
+    finalization: pending,
+  };
+}
+
+function prepareWorkflowFinalizationForLocation(
+  location: ResolvedWorkflowRunLocation,
+  definition: WorkflowFinalizationDefinition,
+  profile: WorkflowDurabilityProfile,
+  execution: WorkflowExecutionIdentity,
+): PrepareFinalizationOutcome {
+  return async (_runRoot, before, outcome, advanced, pending) => {
+    const runtime = advanced.workflowRuntime;
+    if (!runtime)
+      throw new Error("Workflow finalization requires WorkflowRuntime state");
+
+    if (outcome.finalization && isWorkflowFinalizationAction(pending)) {
+      await validateFinalizationEvidenceBindings(
+        location,
+        before,
+        definition,
+        profile,
+      );
+      const pendingConfirmation =
+        before.workflowRuntime?.finalization?.pendingConfirmation;
+      if (!pendingConfirmation || !isWorkflowFinalizationAction(pending)) {
+        throw new Error("Workflow finalization confirmation state is missing");
+      }
+      const plan = await buildWorkflowFinalizationPreview({
+        baseRoot: location.contentSnapshotRoot,
+        state: before,
+        execution,
+        definition,
+        profile,
+      });
+      if (plan.planHash !== pendingConfirmation.planHash) {
+        throw new Error("Workflow finalization preview is stale");
+      }
+      const choiceId = outcome.finalization.choiceId;
+      if (choiceId === "cancel") {
+        return {
+          state: {
+            ...advanced,
+            status: "blocked",
+            currentStep: null,
+            workflowRuntime: {
+              ...runtime,
+              finalization: {
+                schemaVersion: 1,
+                status: "rolled-back",
+                planHash: pendingConfirmation.planHash,
+                revision: runtime.revision,
+                sourceActionId: pendingConfirmation.sourceActionId,
+                planRevision: pendingConfirmation.planRevision,
+                confirmationActionId: pending.id,
+                confirmationCount:
+                  (before.workflowRuntime?.finalization?.confirmationCount ??
+                    0) + 1,
+              },
+            },
+          },
+          action: null,
+          reason: "Workflow finalization was cancelled",
+        };
+      }
+      if (choiceId !== "confirm") {
+        throw new Error("Workflow finalization choice is invalid");
+      }
+      if (!outcome.reviewer) {
+        throw new Error(
+          "Workflow finalization confirmation reviewer is missing",
+        );
+      }
+      const confirmation: WorkflowFinalizationConfirmationRecord = {
+        decisionId: pendingConfirmation.decisionId,
+        actionId: pending.id,
+        sourceActionId: pendingConfirmation.sourceActionId,
+        planHash: pendingConfirmation.planHash,
+        revision: before.workflowRuntime?.revision ?? 0,
+        choiceId: "confirm",
+        reviewer: {
+          subject: outcome.reviewer.subject,
+          authorities: [...outcome.reviewer.authorities].sort((left, right) =>
+            left.localeCompare(right),
+          ),
+        },
+        rationaleHash:
+          outcome.rationale === undefined
+            ? null
+            : sha256(outcome.rationale.trim()),
+        confirmedAt: new Date().toISOString(),
+      };
+      const applied = await applyWorkflowFinalization({
+        runRoot: location.runRoot,
+        baseRoot: location.contentSnapshotRoot,
+        profile,
+        plan,
+        definition,
+        execution,
+        sourceActionId: pendingConfirmation.sourceActionId,
+        resultingRevision: runtime.revision,
+        confirmation,
+      });
+      const receipt = workflowFinalizationReceiptReference(applied.receipt);
+      const rolledBack = applied.status === "rolled-back";
+      return {
+        state: {
+          ...advanced,
+          status: rolledBack ? "blocked" : "completed",
+          currentStep: null,
+          workflowRuntime: {
+            ...runtime,
+            finalization: {
+              schemaVersion: 1,
+              status: rolledBack ? "rolled-back" : "committed",
+              planHash: pendingConfirmation.planHash,
+              revision: runtime.revision,
+              sourceActionId: pendingConfirmation.sourceActionId,
+              planRevision: pendingConfirmation.planRevision,
+              confirmationActionId: pending.id,
+              confirmationCount:
+                (before.workflowRuntime?.finalization?.confirmationCount ?? 0) +
+                1,
+              transactionId: applied.transaction.transactionId,
+              receipt,
+            },
+          },
+        },
+        action: null,
+        ...(rolledBack
+          ? { reason: "Workflow finalization was rolled back" }
+          : {}),
+      };
+    }
+
+    if (advanced.status !== "completed" || definition.operations.length === 0) {
+      return undefined;
+    }
+    await validateFinalizationEvidenceBindings(
+      location,
+      before,
+      definition,
+      profile,
+    );
+    const plan = await buildWorkflowFinalizationPreview({
+      baseRoot: location.contentSnapshotRoot,
+      state: before,
+      execution,
+      definition,
+      profile,
+    });
+    if (
+      outcome.finalization?.planHash !== undefined &&
+      outcome.finalization.planHash !== plan.planHash
+    ) {
+      throw new Error("Workflow finalization preview is stale");
+    }
+    if (!plan.requiresConfirmation) {
+      throw new Error("Workflow finalization confirmation is required");
+    }
+    const action = workflowFinalizationConfirmationAction(
+      plan,
+      pending.id,
+      runtime.revision,
+    );
+    const finalization: WorkflowFinalizationState = {
+      schemaVersion: 1,
+      status: "awaiting-confirmation",
+      planHash: plan.planHash,
+      revision: runtime.revision,
+      sourceActionId: pending.id,
+      planRevision: plan.revision,
+      pendingConfirmation: action.finalization,
+    };
+    return {
+      state: {
+        ...advanced,
+        status: "waiting",
+        pending: action.id,
+        currentStep: null,
+        workflowRuntime: { ...runtime, finalization },
+      },
+      action,
+    };
+  };
+}
+
+async function clearFinalizationAfterResult(
+  location: ResolvedWorkflowRunLocation,
+  result: ManualRunResult,
+): Promise<void> {
+  const profile = result.state.runtimeIdentity?.durabilityProfile;
+  const finalization = result.state.workflowRuntime?.finalization;
+  if (
+    !usesWorkflowFinalization(profile) ||
+    !finalization?.transactionId ||
+    (finalization.status !== "committed" &&
+      finalization.status !== "rolled-back")
+  ) {
+    return;
+  }
+  await clearWorkflowFinalizationTransaction(
+    location.runRoot,
+    profile!,
+    location.contentSnapshotRoot,
+  );
+}
+
+async function refreshWorkflowFinalization(
+  location: ResolvedWorkflowRunLocation,
+  verified: VerifiedWorkflowRun,
+): Promise<FinalizationRefresh | undefined> {
+  const pending = verified.pending;
+  if (!isWorkflowFinalizationAction(pending)) return undefined;
+  const definition = verified.package.runtime?.protocol.finalization;
+  const profile = verified.identity.durabilityProfile;
+  if (!definition || !profile) {
+    throw new Error("Workflow finalization declaration is missing");
+  }
+  await validateFinalizationEvidenceBindings(
+    location,
+    verified.state,
+    definition,
+    profile,
+  );
+  const preview = await buildWorkflowFinalizationPreview({
+    baseRoot: location.contentSnapshotRoot,
+    state: verified.state,
+    execution: verified.identity,
+    definition,
+    profile,
+  });
+  if (preview.planHash === pending.finalization.planHash) return undefined;
+  const runtime = verified.state.workflowRuntime;
+  if (!runtime) {
+    throw new Error("Workflow finalization requires WorkflowRuntime state");
+  }
+  const action = workflowFinalizationConfirmationAction(
+    preview,
+    pending.finalization.sourceActionId,
+    runtime.revision,
+  );
+  if (!action.finalization) {
+    throw new Error("Workflow finalization refresh action is incomplete");
+  }
+  return {
+    action,
+    state: {
+      ...verified.state,
+      pending: action.id,
+      status: "waiting",
+      currentStep: null,
+      workflowRuntime: {
+        ...runtime,
+        finalization: {
+          schemaVersion: 1,
+          status: "awaiting-confirmation",
+          planHash: preview.planHash,
+          revision: runtime.revision,
+          sourceActionId: pending.finalization.sourceActionId,
+          planRevision: preview.revision,
+          ...(runtime.finalization?.confirmationCount
+            ? {
+                confirmationCount: runtime.finalization.confirmationCount,
+                confirmationActionId: runtime.finalization.confirmationActionId,
+              }
+            : {}),
+          pendingConfirmation: action.finalization,
+        },
+      },
+    },
+  };
+}
+
 async function verifyStoredAction(
   runRoot: string,
   state: RunState,
@@ -4701,6 +5544,27 @@ async function verifyStoredAction(
       throw new Error(
         "WorkflowRuntime pending action does not match Run state",
       );
+    }
+    if (isWorkflowFinalizationAction(action)) {
+      const finalization = state.workflowRuntime?.finalization;
+      if (
+        !finalization ||
+        finalization.status !== "awaiting-confirmation" ||
+        !finalization.pendingConfirmation ||
+        !sameStableValue(
+          finalization.pendingConfirmation,
+          action.finalization,
+        ) ||
+        state.currentStep !== null ||
+        action.stepId !== null ||
+        action.attemptId !== undefined ||
+        action.cycleId !== undefined
+      ) {
+        throw new Error(
+          "WorkflowRuntime pending finalization confirmation identity is invalid",
+        );
+      }
+      return action;
     }
     if (isWorkflowRepairAction(action)) {
       const pendingRepair =
@@ -4926,7 +5790,9 @@ function throwCheckpointRecoveryBlocked(
 
 async function recoverCheckpointAwareRun(
   location: ResolvedWorkflowRunLocation,
-  options: ResumeWorkflowRunOptions,
+  options: ResumeWorkflowRunOptions & {
+    finalizationRecovery?: FinalizationRecovery;
+  },
   forceCheckpoint: boolean,
 ): Promise<WorkflowContinuation> {
   const profile = await durabilityProfileForLocation(location);
@@ -5148,6 +6014,17 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               if (journal)
                 throw new WorkflowTransitionJournalPendingError(journal);
             }
+            if (usesWorkflowFinalization(compiled.identity.durabilityProfile)) {
+              const transaction = await readWorkflowFinalizationTransaction(
+                resolved.location.runRoot,
+                compiled.identity.durabilityProfile!,
+              );
+              if (transaction) {
+                throw new WorkflowFinalizationTransactionPendingError(
+                  transaction,
+                );
+              }
+            }
             if (usesWorkflowCheckpoints(compiled.identity.durabilityProfile)) {
               const checkpointRecovery =
                 await readWorkflowCheckpointRecoveryJournal(
@@ -5247,6 +6124,18 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               location.runRoot,
             );
             if (journal) return recoveryRequiredContinuation(location, journal);
+            if (profile?.capabilities.includes("transactional-finalization")) {
+              const transaction = await readWorkflowFinalizationTransaction(
+                location.runRoot,
+                profile,
+              );
+              if (transaction) {
+                return finalizationRecoveryRequiredContinuation(
+                  location,
+                  transaction,
+                );
+              }
+            }
             const checkpointRecovery =
               await readWorkflowCheckpointRecoveryJournal(location.runRoot);
             if (checkpointRecovery) {
@@ -5255,7 +6144,10 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 checkpointRecovery,
               );
             }
-            return resumeStoredRun(location, options);
+            return resumeStoredRun(location, {
+              ...options,
+              refreshFinalization: true,
+            });
           },
           {
             onBlocked: (error) => lockBlockedContinuation(location, error),
@@ -5280,6 +6172,18 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               location.runRoot,
             );
             if (journal) return recoveryRequiredContinuation(location, journal);
+            if (profile?.capabilities.includes("transactional-finalization")) {
+              const transaction = await readWorkflowFinalizationTransaction(
+                location.runRoot,
+                profile,
+              );
+              if (transaction) {
+                return finalizationRecoveryRequiredContinuation(
+                  location,
+                  transaction,
+                );
+              }
+            }
             const checkpointRecovery =
               await readWorkflowCheckpointRecoveryJournal(location.runRoot);
             if (checkpointRecovery) {
@@ -5329,6 +6233,13 @@ export function createWorkflowRuntime(): WorkflowRuntime {
             if (routeFindings.length > 0) {
               return blockedContinuation(prepared, routeFindings);
             }
+            const finalizationBlockers = await finalizationSubmissionBlockers(
+              prepared,
+              submission,
+            );
+            if (finalizationBlockers.length > 0) {
+              return blockedContinuation(prepared, finalizationBlockers);
+            }
             const repairFailure = repairFailureForSubmission(
               prepared,
               submission,
@@ -5340,6 +6251,20 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               mutation,
               repairFailure,
             );
+            const finalizationDefinition =
+              prepared.verified.package.runtime!.protocol.finalization;
+            const finalizationPreparation =
+              finalizationDefinition &&
+              prepared.verified.identity.durabilityProfile?.capabilities.includes(
+                "transactional-finalization",
+              )
+                ? prepareWorkflowFinalizationForLocation(
+                    prepared.location,
+                    finalizationDefinition,
+                    prepared.verified.identity.durabilityProfile,
+                    prepared.verified.identity,
+                  )
+                : undefined;
             if (prepared.verified.identity.durabilityProfile === undefined) {
               const result = await prepared.location.resume(
                 {
@@ -5350,9 +6275,13 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                     mutation,
                     prepared.verified.identity.durabilityProfile,
                   ),
+                  ...(finalizationPreparation
+                    ? { prepareFinalization: finalizationPreparation }
+                    : {}),
                 },
                 mutation,
               );
+              await clearFinalizationAfterResult(prepared.location, result);
               return continuation(result, prepared.verified.identity);
             }
 
@@ -5392,10 +6321,14 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                     assertRevisionFence(prepared.location, claimInput),
                   revisionStateFence: () =>
                     assertRevisionFence(prepared.location, claimInput, false),
+                  ...(finalizationPreparation
+                    ? { prepareFinalization: finalizationPreparation }
+                    : {}),
                 },
                 mutation,
               );
               await claim.commit();
+              await clearFinalizationAfterResult(prepared.location, result);
               await persistWorkflowCheckpoint(
                 prepared.location,
                 result.state,
@@ -5427,6 +6360,28 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                     current.state.workflowRuntime?.revision ?? 0,
                     current.pending?.id ?? current.state.pending ?? null,
                   ),
+                );
+              }
+              if (error instanceof WorkflowFinalizationConflictError) {
+                const transaction = await readWorkflowFinalizationTransaction(
+                  prepared.location.runRoot,
+                  prepared.verified.identity.durabilityProfile!,
+                );
+                if (transaction) {
+                  return finalizationRecoveryRequiredContinuation(
+                    prepared.location,
+                    transaction,
+                  );
+                }
+                await claim.abandon();
+                return blockedContinuation(prepared, [error.message]);
+              }
+              if (
+                error instanceof WorkflowFinalizationTransactionPendingError
+              ) {
+                return finalizationRecoveryRequiredContinuation(
+                  prepared.location,
+                  error.transaction,
                 );
               }
               throw error;
@@ -5482,14 +6437,136 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               }
               transitionRecovered = recovery.status === "recovered";
             }
+            let finalizationRecovery: FinalizationRecovery | undefined;
+            if (usesWorkflowFinalization(profile)) {
+              let persistedRun: RunState | null = null;
+              let recoveryDefinition:
+                WorkflowFinalizationDefinition | undefined;
+              try {
+                persistedRun = await location.readState();
+              } catch {
+                persistedRun = null;
+              }
+              if (persistedRun) {
+                try {
+                  recoveryDefinition = (
+                    await readSkillSnapshot(
+                      location.runRoot,
+                      persistedRun.skillHash,
+                    )
+                  ).runtime?.protocol.finalization;
+                } catch {
+                  recoveryDefinition = undefined;
+                }
+              }
+              const recovery = options.rollbackFinalization
+                ? await rollbackWorkflowFinalization({
+                    runRoot: location.runRoot,
+                    baseRoot: location.contentSnapshotRoot,
+                    profile: profile!,
+                    ...(persistedRun?.runId
+                      ? { runId: persistedRun.runId }
+                      : location.runId
+                        ? { runId: location.runId }
+                        : {}),
+                    ...(persistedRun?.runtimeIdentity
+                      ? { execution: persistedRun.runtimeIdentity }
+                      : {}),
+                    ...(recoveryDefinition
+                      ? { definition: recoveryDefinition }
+                      : {}),
+                  })
+                : await recoverWorkflowFinalization({
+                    runRoot: location.runRoot,
+                    baseRoot: location.contentSnapshotRoot,
+                    profile: profile!,
+                    ...(persistedRun?.runId
+                      ? { runId: persistedRun.runId }
+                      : location.runId
+                        ? { runId: location.runId }
+                        : {}),
+                    ...(persistedRun?.runtimeIdentity
+                      ? { execution: persistedRun.runtimeIdentity }
+                      : {}),
+                    ...(recoveryDefinition
+                      ? { definition: recoveryDefinition }
+                      : {}),
+                  });
+              if (recovery.status === "blocked" && recovery.transaction) {
+                return finalizationRecoveryRequiredContinuation(
+                  location,
+                  recovery.transaction,
+                  recovery.unknownPaths,
+                );
+              }
+              if (recovery.receipt && recovery.transaction) {
+                const current = await location.readState();
+                if (
+                  current?.workflowRuntime?.finalization?.status ===
+                    "awaiting-confirmation" &&
+                  current.pending
+                ) {
+                  finalizationRecovery = {
+                    status:
+                      recovery.receipt.recovery.status === "rolled-back"
+                        ? "rolled-back"
+                        : "committed",
+                    transactionId: recovery.transaction.transactionId,
+                    resultingRevision: recovery.transaction.resultingRevision,
+                    receipt: workflowFinalizationReceiptReference(
+                      recovery.receipt,
+                    ),
+                  };
+                } else if (
+                  current?.workflowRuntime?.finalization?.transactionId ===
+                    recovery.transaction.transactionId &&
+                  (current.workflowRuntime.finalization.status ===
+                    "committed" ||
+                    current.workflowRuntime.finalization.status ===
+                      "rolled-back")
+                ) {
+                  await clearWorkflowFinalizationTransaction(
+                    location.runRoot,
+                    profile!,
+                    location.contentSnapshotRoot,
+                  );
+                }
+              }
+            }
             if (usesWorkflowCheckpoints(profile)) {
-              return recoverCheckpointAwareRun(
+              const result = await recoverCheckpointAwareRun(
                 location,
-                options,
+                {
+                  ...options,
+                  ...(finalizationRecovery ? { finalizationRecovery } : {}),
+                },
                 transitionRecovered,
               );
+              if (finalizationRecovery) {
+                await clearWorkflowFinalizationTransaction(
+                  location.runRoot,
+                  profile!,
+                  location.contentSnapshotRoot,
+                );
+              }
+              return result;
             }
-            return resumeStoredRun(location, options, transitionRecovered);
+            const result = await resumeStoredRun(
+              location,
+              {
+                ...options,
+                ...(finalizationRecovery ? { finalizationRecovery } : {}),
+              },
+              transitionRecovered,
+            );
+            if (finalizationRecovery) {
+              await clearWorkflowFinalizationTransaction(
+                location.runRoot,
+                profile!,
+                location.contentSnapshotRoot,
+              );
+            }
+            return result;
           },
           {
             allowStale: true,

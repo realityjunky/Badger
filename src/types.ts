@@ -284,6 +284,7 @@ export interface WorkflowInput {
   routing?: WorkflowRouting;
   cycles?: WorkflowCycleDefinition[];
   capabilities?: WorkflowProtocolCapabilities;
+  finalization?: WorkflowFinalizationDefinition;
 }
 
 export type TransitionCondition = "success" | "failure" | "pause";
@@ -356,7 +357,237 @@ export type WorkflowDurabilityCapability =
   | "verified-checkpoints"
   | "content-snapshots"
   | "verification-receipts"
-  | "repair-policy";
+  | "repair-policy"
+  | "transactional-finalization";
+
+export type WorkflowFinalizationOperationKind = "write" | "remove" | "move";
+
+export interface WorkflowFinalizationRoot {
+  id: string;
+  path: string;
+}
+
+export interface WorkflowFinalizationWriteOperation {
+  id: string;
+  kind: "write";
+  root: string;
+  target: string;
+  content: string;
+  requiresConfirmation?: boolean;
+}
+
+export interface WorkflowFinalizationRemoveOperation {
+  id: string;
+  kind: "remove";
+  root: string;
+  target: string;
+  requiresConfirmation?: boolean;
+}
+
+export interface WorkflowFinalizationMoveOperation {
+  id: string;
+  kind: "move";
+  root: string;
+  source: string;
+  target: string;
+  requiresConfirmation?: boolean;
+}
+
+export type WorkflowFinalizationOperation =
+  | WorkflowFinalizationWriteOperation
+  | WorkflowFinalizationRemoveOperation
+  | WorkflowFinalizationMoveOperation;
+
+export interface WorkflowFinalizationConfirmationPolicy {
+  required?: boolean;
+  reviewer?: WorkflowReviewerPolicy;
+  rationale?: WorkflowRationalePolicy;
+}
+
+export interface WorkflowFinalizationDefinition {
+  schemaVersion: 1;
+  roots: WorkflowFinalizationRoot[];
+  operations: WorkflowFinalizationOperation[];
+  confirmation?: WorkflowFinalizationConfirmationPolicy;
+  requiredVerificationReceiptIds?: string[];
+  requireContentSnapshot?: boolean;
+}
+
+export interface WorkflowFinalizationMaterialIdentity {
+  exists: boolean;
+  bytes: number;
+  sha256: string | null;
+}
+
+export interface WorkflowFinalizationPlannedOperation {
+  id: string;
+  kind: WorkflowFinalizationOperationKind;
+  rootId: string;
+  source: string | null;
+  target: string;
+  stagedPath: string | null;
+  backupPath: string | null;
+  precondition: {
+    source: WorkflowFinalizationMaterialIdentity | null;
+    target: WorkflowFinalizationMaterialIdentity;
+  };
+  expectedPostState: {
+    source: WorkflowFinalizationMaterialIdentity | null;
+    target: WorkflowFinalizationMaterialIdentity;
+  };
+  contentHash: string | null;
+  contentBytes: number;
+  requiresConfirmation: boolean;
+}
+
+export interface WorkflowFinalizationPreview {
+  schemaVersion: 1;
+  kind: "workflow-finalization-preview";
+  runId: string;
+  revision: number;
+  actionId: string | null;
+  transactionId: string;
+  roots: WorkflowFinalizationRoot[];
+  execution: RuntimeIdentity;
+  contentSnapshotHash: string | null;
+  verificationReceiptIds: string[];
+  operations: WorkflowFinalizationPlannedOperation[];
+  confirmation: WorkflowFinalizationConfirmationPolicy;
+  requiresConfirmation: boolean;
+  planHash: string;
+}
+
+export interface WorkflowFinalizationPendingConfirmation {
+  schemaVersion: 1;
+  kind: "workflow-finalization-confirmation";
+  decisionId: string;
+  actionId: string;
+  sourceActionId: string;
+  planHash: string;
+  revision: number;
+  planRevision: number;
+  contentSnapshotHash: string | null;
+  verificationReceiptIds: string[];
+  reviewer: WorkflowReviewerPolicy;
+  rationale: WorkflowRationalePolicy;
+}
+
+export type WorkflowFinalizationStatus =
+  | "awaiting-confirmation"
+  | "applying"
+  | "committed"
+  | "rolling-back"
+  | "rolled-back"
+  | "blocked";
+
+export interface WorkflowFinalizationState {
+  schemaVersion: 1;
+  status: WorkflowFinalizationStatus;
+  planHash: string;
+  revision: number;
+  sourceActionId: string;
+  planRevision: number;
+  pendingConfirmation?: WorkflowFinalizationPendingConfirmation;
+  confirmationActionId?: string;
+  confirmationCount?: number;
+  transactionId?: string;
+  receipt?: WorkflowFinalizationReceiptReference;
+}
+
+export interface WorkflowFinalizationConfirmationRecord {
+  decisionId: string;
+  actionId: string;
+  sourceActionId: string;
+  planHash: string;
+  revision: number;
+  choiceId: "confirm";
+  reviewer: WorkflowReviewerAttestation;
+  rationaleHash: string | null;
+  confirmedAt: string;
+}
+
+export interface WorkflowFinalizationOperationReceipt {
+  id: string;
+  kind: WorkflowFinalizationOperationKind;
+  source: string | null;
+  target: string;
+  precondition: {
+    source: WorkflowFinalizationMaterialIdentity | null;
+    target: WorkflowFinalizationMaterialIdentity;
+  };
+  expectedPostState: {
+    source: WorkflowFinalizationMaterialIdentity | null;
+    target: WorkflowFinalizationMaterialIdentity;
+  };
+  observedPostState: {
+    source: WorkflowFinalizationMaterialIdentity | null;
+    target: WorkflowFinalizationMaterialIdentity;
+  };
+  status: "committed" | "rolled-back";
+}
+
+export interface WorkflowFinalizationEvent {
+  sequence: number;
+  type:
+    | "prepared"
+    | "applying"
+    | "operation-staged"
+    | "operation-started"
+    | "operation-completed"
+    | "committing"
+    | "receipt-written"
+    | "committed"
+    | "rolling-back"
+    | "operation-rolled-back"
+    | "rolled-back";
+  operationId: string | null;
+  boundary: string;
+  timestamp: string;
+}
+
+export interface WorkflowFinalizationReceipt {
+  schemaVersion: 1;
+  kind: "workflow-finalization-receipt";
+  receiptId: string;
+  receiptHash: string;
+  transactionId: string;
+  runId: string;
+  revision: number;
+  resultingRevision: number;
+  planHash: string;
+  execution: RuntimeIdentity;
+  contentSnapshotHash: string | null;
+  verificationReceiptIds: string[];
+  confirmation: WorkflowFinalizationConfirmationRecord;
+  operations: WorkflowFinalizationOperationReceipt[];
+  events: WorkflowFinalizationEvent[];
+  recovery: {
+    status: "none" | "recovered" | "rolled-back";
+    crashBoundaries: string[];
+  };
+  committedAt: string;
+}
+
+export interface WorkflowFinalizationReceiptReference {
+  schemaVersion: 1;
+  kind: "workflow-finalization-receipt-reference";
+  receiptId: string;
+  receiptHash: string;
+  transactionId: string;
+  planHash: string;
+  runId: string;
+  revision: number;
+  resultingRevision: number;
+  status: "committed" | "rolled-back";
+}
+
+export interface WorkflowFinalizationSubmission {
+  planHash?: string;
+  decisionId?: string;
+  choiceId?: "confirm" | "cancel";
+  contentSnapshotHash?: string | null;
+  verificationReceiptIds?: string[];
+}
 
 export type WorkflowContentSnapshotProvider = "physical-tree" | "git";
 export type WorkflowContentSnapshotOrigin = "explicit";
@@ -532,6 +763,12 @@ export interface WorkflowDurabilityBounds {
   repairEpisodeCount?: number;
   repairHistoryRecords?: number;
   repairEpisodeRecords?: number;
+  finalizationPlanBytes?: number;
+  finalizationTransactionBytes?: number;
+  finalizationReceiptBytes?: number;
+  finalizationContentBytes?: number;
+  finalizationOperationCount?: number;
+  finalizationEventCount?: number;
 }
 
 export interface WorkflowDurabilitySchemaVersions {
@@ -549,6 +786,8 @@ export interface WorkflowDurabilitySchemaVersions {
   repairEpisode?: 1;
   repairHistory?: 1;
   repair?: 1;
+  finalizationTransaction?: 1;
+  finalizationReceipt?: 1;
 }
 
 export interface WorkflowVerificationPolicy {
@@ -778,6 +1017,7 @@ export interface WorkflowProtocol {
   edges: WorkflowTransition[];
   outputSchemas: OutputSchema[];
   capabilities?: WorkflowProtocolCapabilities;
+  finalization?: WorkflowFinalizationDefinition;
   routing?: WorkflowRouting;
   cycles?: WorkflowCycleDefinition[];
   state: {

@@ -161,6 +161,32 @@ automatic operation with a finite execution bound. Retry action materialization
 dispatches through that operation while the originating mutation still owns the
 Run lock and transition journal.
 
+The `transactional-finalization` capability requires the same revision fences,
+mutation lock, and transition journal plus explicit plan, transaction, content,
+operation, and event bounds. Its protocol declaration contains only ordered
+local write, remove, and move effects under approved relative roots. Every
+effect requires a persisted first-class confirmation. A read-only
+preview records deterministic operation ids, target and source coordinates,
+staging or backup coordinates, exact material preconditions, expected
+post-state identities, the current content snapshot binding, required passed
+Verification Receipt ids, and a canonical plan hash. The persisted `ask_user`
+confirmation action is bound to
+the plan, current Run revision, source action, snapshot, receipt ids, reviewer,
+and rationale policy.
+
+Apply prepares `.comet/finalization/transaction.json` before touching an
+approved file. The bounded journal records prepared, applying, committed,
+rolling-back, and rolled-back states plus append-only operation events. Each
+effect rechecks its precondition immediately before mutation, stages new
+content or backs up replaced content, and verifies its expected post-state.
+`recover` classifies every operation as exact previous, exact intended, or
+unknown; it resumes known partial work idempotently, rolls back from durable
+backup evidence when explicitly rolling back, and preserves the journal when
+identity is unknown. A content-addressed final receipt is published before the
+Run can become `done`; preview, confirmation, blocked, applying, and rollback
+states remain non-terminal. Generated adapters expose preview and forward the
+confirmation through the existing `submit` and `recover` operations.
+
 The Creator evaluation report additionally records the generated package tree
 hash. Review readiness rejects missing, stale, mismatched, or incomplete
 identity evidence.

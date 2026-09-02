@@ -21,6 +21,7 @@ import type {
   WorkflowReviewerPolicy,
 } from "../types.js";
 import { parseWorkflowRepairPendingDecision } from "../workflow-runtime/repair.js";
+import { parseWorkflowFinalizationPendingConfirmation } from "../workflow-runtime/finalization.js";
 
 const RUN_FILE_LIMITS = {
   trajectory: 8 * 1024 * 1024,
@@ -69,6 +70,7 @@ const ACTION_KEYS = new Set([
   "visitOrdinal",
   "retryOrdinal",
   "repair",
+  "finalization",
 ]);
 
 const CHECKPOINT_KEYS = new Set([
@@ -384,6 +386,26 @@ function parseAction(value: unknown): EngineAction {
       );
     }
     action.repair = repair;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "finalization")) {
+    if (action.type !== "ask_user") {
+      throw new Error(
+        "Invalid Run pending action: finalization requires ask_user",
+      );
+    }
+    const finalization = parseWorkflowFinalizationPendingConfirmation(
+      value.finalization,
+    );
+    if (
+      finalization.actionId !== action.id ||
+      finalization.decisionId !== action.decisionId ||
+      finalization.sourceActionId.length === 0
+    ) {
+      throw new Error(
+        "Invalid Run pending action: finalization identity does not match action",
+      );
+    }
+    action.finalization = finalization;
   }
   return action;
 }

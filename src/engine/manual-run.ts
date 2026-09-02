@@ -32,7 +32,10 @@ import type {
   TrajectoryEvent,
   WorkflowRuntimeState,
 } from "./types.js";
-import type { WorkflowDurabilityProfile } from "../types.js";
+import type {
+  WorkflowDurabilityProfile,
+  WorkflowFinalizationReceiptReference,
+} from "../types.js";
 import type { WorkflowArtifactMutation } from "./runtime-types.js";
 import {
   createSkillSnapshot,
@@ -76,6 +79,9 @@ export interface ResumeManualRunOptions {
   revisionFence?: () => void | Promise<void>;
   revisionStateFence?: () => void | Promise<void>;
   prepareOutcome?: PrepareOutcomeMutation;
+  prepareFinalization?: PrepareFinalizationOutcome;
+  finalizationRecovery?: FinalizationRecovery;
+  finalizationRefresh?: FinalizationRefresh;
 }
 
 export type PrepareOutcomeMutation = (
@@ -84,6 +90,33 @@ export type PrepareOutcomeMutation = (
   outcome: ActionOutcome,
   mutationOverlay?: EngineRunMutationOverlay,
 ) => Promise<void>;
+
+export interface PreparedFinalizationOutcome {
+  state: RunState;
+  action: EngineAction | null;
+  reason?: string;
+}
+
+export type PrepareFinalizationOutcome = (
+  changeDir: string,
+  state: RunState,
+  outcome: ActionOutcome,
+  advanced: RunState,
+  pending: EngineAction,
+  mutationOverlay?: EngineRunMutationOverlay,
+) => Promise<PreparedFinalizationOutcome | undefined>;
+
+export interface FinalizationRecovery {
+  status: "committed" | "rolled-back";
+  transactionId: string;
+  resultingRevision: number;
+  receipt: WorkflowFinalizationReceiptReference;
+}
+
+export interface FinalizationRefresh {
+  state: RunState;
+  action: EngineAction;
+}
 
 export interface PendingActionPreparation {
   action: EngineAction | null;
@@ -501,6 +534,136 @@ async function resumeManualRunInternal(
     pendingMaxBytes === undefined ? {} : { maxBytes: pendingMaxBytes },
   );
   if (!options.outcome) {
+    if (options.finalizationRefresh) {
+      if (!pending || !pending.finalization || state.status !== "waiting") {
+        throw new Error("Workflow finalization refresh state is missing");
+      }
+      const transition = state.runtimeIdentity?.durabilityProfile
+        ? createWorkflowTransition({
+            runRoot: changeDir,
+            runId: state.runId,
+            operation: "workflow.resume",
+            execution: state.runtimeIdentity,
+            profile: state.runtimeIdentity.durabilityProfile,
+          })
+        : undefined;
+      await clearPendingAction(changeDir, state.pendingRef, {
+        ...(transition ? { overlay: transition } : {}),
+      });
+      await writePendingAction(
+        changeDir,
+        state.pendingRef,
+        options.finalizationRefresh.action,
+        transition ? { overlay: transition } : {},
+      );
+      await appendEvent(
+        changeDir,
+        options.finalizationRefresh.state,
+        "action_proposed",
+        { action: options.finalizationRefresh.action },
+        transition ? { overlay: transition } : {},
+      );
+      await writeRunState(
+        changeDir,
+        options.finalizationRefresh.state,
+        transition ? { overlay: transition } : {},
+      );
+      await transition?.commit();
+      return {
+        state: options.finalizationRefresh.state,
+        action: options.finalizationRefresh.action,
+        evals: [],
+      };
+    }
+    if (options.finalizationRecovery) {
+      if (
+        !pending ||
+        !pending.finalization ||
+        !state.workflowRuntime?.finalization
+      ) {
+        throw new Error("Workflow finalization recovery state is missing");
+      }
+      const transition = state.runtimeIdentity?.durabilityProfile
+        ? createWorkflowTransition({
+            runRoot: changeDir,
+            runId: state.runId,
+            operation: "workflow.submit",
+            execution: state.runtimeIdentity,
+            profile: state.runtimeIdentity.durabilityProfile,
+          })
+        : undefined;
+      const confirmationCount =
+        (state.workflowRuntime.finalization.confirmationCount ?? 0) + 1;
+      const finalization = {
+        schemaVersion: 1 as const,
+        status:
+          options.finalizationRecovery.status === "committed"
+            ? ("committed" as const)
+            : ("rolled-back" as const),
+        planHash: pending.finalization.planHash,
+        revision: options.finalizationRecovery.resultingRevision,
+        sourceActionId: pending.finalization.sourceActionId,
+        planRevision: pending.finalization.planRevision,
+        transactionId: options.finalizationRecovery.transactionId,
+        confirmationActionId: pending.id,
+        confirmationCount,
+        receipt: structuredClone(options.finalizationRecovery.receipt),
+      };
+      const recoveredState: RunState = {
+        ...state,
+        iteration: state.iteration + 1,
+        pending: null,
+        status:
+          options.finalizationRecovery.status === "committed"
+            ? "completed"
+            : "blocked",
+        workflowRuntime: {
+          ...structuredClone(state.workflowRuntime),
+          revision: options.finalizationRecovery.resultingRevision,
+          finalization,
+        },
+      };
+      await appendEvent(
+        changeDir,
+        state,
+        "action_completed",
+        {
+          action: pending,
+          outcome: {
+            actionId: pending.id,
+            status: "succeeded",
+            summary: "Recovered Workflow finalization.",
+            kind: "decision",
+            finalization: {
+              planHash: pending.finalization.planHash,
+              decisionId: pending.finalization.decisionId,
+              choiceId:
+                options.finalizationRecovery.status === "committed"
+                  ? "confirm"
+                  : "cancel",
+            },
+          },
+        },
+        transition ? { overlay: transition } : {},
+      );
+      await clearPendingAction(changeDir, state.pendingRef, {
+        ...(transition ? { overlay: transition } : {}),
+      });
+      await writeRunState(
+        changeDir,
+        recoveredState,
+        transition ? { overlay: transition } : {},
+      );
+      await transition?.commit();
+      return {
+        state: recoveredState,
+        action: null,
+        evals: [],
+        ...(options.finalizationRecovery.status === "rolled-back"
+          ? { reason: "Workflow finalization was rolled back" }
+          : {}),
+      };
+    }
     validatePendingState(state, pending);
     if (pending) {
       return { state, action: pending, evals: [] };
@@ -563,10 +726,23 @@ async function resumeManualRunInternal(
       })
     : undefined;
   await options.prepareOutcome?.(changeDir, state, outcome, transition);
-  const advanced = applyArtifactMutation(
+  let advanced = applyArtifactMutation(
     recordOutcomeWithResolver(pkg, state, outcome, resolver, undefined),
     options.artifactMutation,
   );
+  const preparedFinalization = await options.prepareFinalization?.(
+    changeDir,
+    state,
+    outcome,
+    advanced,
+    pending,
+    transition,
+  );
+  let finalizationAction: EngineAction | null = null;
+  if (preparedFinalization) {
+    advanced = preparedFinalization.state;
+    finalizationAction = preparedFinalization.action;
+  }
   const artifactsMaxBytes = durabilityBound(state, "artifactsBytes");
   const artifactReadOptions = {
     ...(artifactsMaxBytes === undefined ? {} : { maxBytes: artifactsMaxBytes }),
@@ -631,15 +807,16 @@ async function resumeManualRunInternal(
         advanced.workflowRuntime.repairEpisode.pendingDecision,
       )
     : null;
-  if (repairAction) {
-    await writePendingAction(changeDir, advanced.pendingRef, repairAction, {
+  const nextAction = finalizationAction ?? repairAction;
+  if (nextAction) {
+    await writePendingAction(changeDir, advanced.pendingRef, nextAction, {
       ...(transition ? { overlay: transition } : {}),
     });
     await appendEvent(
       changeDir,
       advanced,
       "action_proposed",
-      { action: repairAction },
+      { action: nextAction },
       transition ? { overlay: transition } : {},
     );
   }
@@ -670,9 +847,13 @@ async function resumeManualRunInternal(
     await transition?.commit();
     return {
       state: advanced,
-      action: repairAction,
+      action: nextAction,
       evals,
-      ...(repairAction ? {} : { reason: `Run is ${advanced.status}` }),
+      ...(nextAction
+        ? {}
+        : {
+            reason: preparedFinalization?.reason ?? `Run is ${advanced.status}`,
+          }),
     };
   }
 

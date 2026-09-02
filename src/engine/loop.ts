@@ -509,8 +509,34 @@ export function recordOutcomeWithResolver<TContext>(
       `Outcome does not match pending action: ${outcome.actionId}`,
     );
   }
-  if (state.status === "completed" || state.status === "failed") {
+  if (
+    state.status === "completed" ||
+    state.status === "failed" ||
+    state.status === "blocked"
+  ) {
     throw new Error(`Run is ${state.status}`);
+  }
+  if (outcome.finalization && state.workflowRuntime?.finalization) {
+    const pending = state.workflowRuntime.finalization.pendingConfirmation;
+    if (
+      !pending ||
+      pending.actionId !== outcome.actionId ||
+      outcome.status !== "succeeded"
+    ) {
+      throw new Error(
+        "Workflow finalization confirmation does not match pending action",
+      );
+    }
+    return {
+      ...state,
+      iteration: state.iteration + 1,
+      pending: null,
+      status: "running",
+      workflowRuntime: {
+        ...structuredClone(state.workflowRuntime),
+        revision: state.workflowRuntime.revision + 1,
+      },
+    };
   }
   const repairDecision = outcome.repairDecision;
   if (repairDecision) {

@@ -105,6 +105,10 @@ const WORKFLOW_FINDING_CODES = [
   "repair-iteration-limit",
   "repair-override-exhausted",
   "repair-decision-invalid",
+  "finalization-plan-stale",
+  "finalization-transaction-unknown",
+  "finalization-rollback",
+  "finalization-receipt-invalid",
 ] as const;
 export type WorkflowFindingCode = (typeof WORKFLOW_FINDING_CODES)[number];
 
@@ -798,6 +802,40 @@ const blockerCatalog: Array<{
     },
   },
   {
+    match: /^Workflow finalization preview is stale/u,
+    entry: {
+      code: "finalization-plan-stale",
+      severity: "error",
+      requiredAction: "repair",
+      operationId: "workflow.submit",
+    },
+  },
+  {
+    match: /^Workflow finalization observed an unknown file identity/u,
+    entry: {
+      code: "finalization-transaction-unknown",
+      severity: "error",
+      requiredAction: "repair",
+      operationId: "workflow.recover",
+    },
+  },
+  {
+    match: /^Workflow finalization (?:was cancelled|was rolled back)/u,
+    entry: {
+      code: "finalization-rollback",
+      severity: "error",
+      requiredAction: "stop",
+    },
+  },
+  {
+    match: /^WorkflowRuntime finalization receipt/u,
+    entry: {
+      code: "finalization-receipt-invalid",
+      severity: "error",
+      requiredAction: "stop",
+    },
+  },
+  {
     match: /^Unknown Workflow finding catalog version:/u,
     entry: {
       code: "catalog-version-unsupported",
@@ -1379,7 +1417,9 @@ export function recoveryRequiredFinding(
     message:
       recoveryPath === ".comet/transition-journal.json"
         ? "WorkflowRuntime has an unfinished transition journal. Run explicit recovery before resuming or submitting."
-        : "WorkflowRuntime has unfinished checkpoint recovery evidence. Run explicit recovery before resuming or submitting.",
+        : recoveryPath === ".comet/checkpoint-recovery-journal.json"
+          ? "WorkflowRuntime has unfinished checkpoint recovery evidence. Run explicit recovery before resuming or submitting."
+          : "WorkflowRuntime has an unfinished finalization transaction. Run explicit recovery before resuming or submitting.",
     requiredAction: "repair",
     operation: { id: "workflow.recover", args: [] },
     path: recoveryPath,

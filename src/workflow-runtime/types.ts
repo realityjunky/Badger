@@ -17,6 +17,14 @@ import type {
   WorkflowDecisionReceipt,
   WorkflowDecisionScopeSelection,
   WorkflowDecisionScopeSnapshot,
+  WorkflowFinalizationState,
+  WorkflowFinalizationSubmission,
+  WorkflowFinalizationPendingConfirmation,
+  WorkflowFinalizationPreview,
+  WorkflowFinalizationReceiptReference,
+  WorkflowFinalizationDefinition,
+  WorkflowFinalizationConfirmationPolicy,
+  WorkflowFinalizationReceipt,
   WorkflowProtocol,
   WorkflowRepairEpisodeState,
   WorkflowReviewerAttestation,
@@ -52,9 +60,9 @@ export interface WorkflowDecisionSubmission {
   actionId: string;
   runId?: string;
   revision: number;
-  nodeId: string;
+  nodeId: string | null;
   cycleId: string | null;
-  attemptId: string;
+  attemptId: string | null;
   decisionId?: string;
   choiceId: string;
   reviewer: WorkflowReviewerAttestation;
@@ -83,6 +91,7 @@ export interface WorkflowDecisionSubmission {
     hypothesis?: string;
     summary?: string;
   };
+  finalization?: WorkflowFinalizationSubmission;
 }
 
 export interface ManualWorkflowRunLocation {
@@ -128,6 +137,7 @@ export interface WorkflowContinuation {
   findingSummary: WorkflowFindingSummary;
   requiresUserDecision: boolean;
   repair?: WorkflowRepairEpisodeState;
+  finalization?: WorkflowFinalizationState;
 }
 
 export interface WorkflowHandoff {
@@ -140,6 +150,7 @@ export interface WorkflowHandoff {
   execution: WorkflowExecutionIdentity;
   nodes: NodeProtocol[];
   outputSchemas: OutputSchema[];
+  finalization?: WorkflowFinalizationDefinition;
   decisionReceipts: WorkflowDecisionReceipt[];
   verificationReceipts: WorkflowVerificationReceiptReference[];
   cycles: WorkflowCycleState[];
@@ -155,6 +166,7 @@ export interface WorkflowHandoff {
   findingSummary: WorkflowFindingSummary;
   requiresUserDecision: boolean;
   repair?: WorkflowRepairEpisodeState;
+  finalizationState?: WorkflowFinalizationState;
   continuation: WorkflowContinuation | null;
 }
 
@@ -199,6 +211,7 @@ export interface WorkflowStateProjection {
   findingSummary: WorkflowFindingSummary;
   requiresUserDecision: boolean;
   repair?: WorkflowRepairEpisodeState;
+  finalization?: WorkflowFinalizationState;
 }
 
 export type StartWorkflowRunOptions =
@@ -228,10 +241,21 @@ export interface ResumeWorkflowRunOptions {
   protectedSnapshotRoots?: readonly string[];
 }
 
-export type RecoverWorkflowRunOptions = ResumeWorkflowRunOptions;
+export interface RecoverWorkflowRunOptions extends ResumeWorkflowRunOptions {
+  rollbackFinalization?: boolean;
+}
 
 export type WorkflowSubmission =
   WorkflowMachineSubmission | WorkflowDecisionSubmission;
+
+export type {
+  WorkflowFinalizationConfirmationPolicy,
+  WorkflowFinalizationDefinition,
+  WorkflowFinalizationPendingConfirmation,
+  WorkflowFinalizationPreview,
+  WorkflowFinalizationReceipt,
+  WorkflowFinalizationReceiptReference,
+};
 
 export interface WorkflowRuntime {
   start(options: StartWorkflowRunOptions): Promise<WorkflowContinuation>;

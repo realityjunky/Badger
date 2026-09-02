@@ -33,6 +33,10 @@ import {
   normalizeWorkflowDurabilityProtocol,
 } from "./durability.js";
 import { normalizeWorkflowRepairPolicy } from "./repair.js";
+import {
+  normalizeWorkflowFinalizationDefinition,
+  validateWorkflowFinalizationDefinition,
+} from "./finalization.js";
 
 interface CompiledWorkflow {
   package: SkillPackage;
@@ -148,6 +152,42 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
   } else if (protocol.cycles !== undefined) {
     throw new Error(
       "Workflow Protocol cycle declarations require versioned capabilities",
+    );
+  }
+  const finalizationEnabled =
+    protocol.capabilities?.durability?.capabilities.includes(
+      "transactional-finalization",
+    );
+  if (protocol.finalization !== undefined) {
+    if (!finalizationEnabled) {
+      throw new Error(
+        "Workflow Protocol finalization requires transactional-finalization capability",
+      );
+    }
+    validateWorkflowFinalizationDefinition(protocol.finalization);
+    if (
+      (protocol.finalization.requiredVerificationReceiptIds?.length ?? 0) > 0 &&
+      !protocol.capabilities?.durability?.capabilities.includes(
+        "verification-receipts",
+      )
+    ) {
+      throw new Error(
+        "Workflow Protocol finalization receipt requirements require verification-receipts capability",
+      );
+    }
+    if (
+      protocol.finalization.requireContentSnapshot === true &&
+      !protocol.capabilities?.durability?.capabilities.includes(
+        "content-snapshots",
+      )
+    ) {
+      throw new Error(
+        "Workflow Protocol finalization snapshot requirement requires content-snapshots capability",
+      );
+    }
+  } else if (finalizationEnabled) {
+    throw new Error(
+      "Workflow Protocol transactional-finalization requires a finalization declaration",
     );
   }
   const schemaIds = new Set<string>();
@@ -670,7 +710,15 @@ function compileCompletionPlans(
 export async function compileWorkflow(
   protocol: WorkflowProtocol,
 ): Promise<CompiledWorkflow> {
-  const executableProtocol = normalizeWorkflowDurabilityProtocol(protocol);
+  const normalizedProtocol = normalizeWorkflowDurabilityProtocol(protocol);
+  const executableProtocol = normalizedProtocol.finalization
+    ? {
+        ...normalizedProtocol,
+        finalization: normalizeWorkflowFinalizationDefinition(
+          normalizedProtocol.finalization,
+        ),
+      }
+    : normalizedProtocol;
   validateProtocolShape(executableProtocol);
   validateWorkflowDecisionScopeDefinition(executableProtocol);
   const revisioned = isRevisionedWorkflowProtocol(executableProtocol);

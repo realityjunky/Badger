@@ -94,6 +94,13 @@ function entryMarkdown(proposal: FactoryProposal): string {
         `- One-time override: \`${repairPolicy.allowOneTimeOverride}\``,
       ].join("\n")
     : "- None. The workflow does not opt into evidence-bound repair policy.";
+  const finalization = proposal.workflow.finalization
+    ? [
+        `- Declared operations: ${proposal.workflow.finalization.operations.length}`,
+        `- Approved roots: ${proposal.workflow.finalization.roots.map((root) => root.id).join(", ")}`,
+        `- Confirmation required: ${proposal.workflow.finalization.confirmation?.required !== false}`,
+      ].join("\n")
+    : "- None. The workflow does not opt into transactional finalization.";
   const executableNodeOrder = executableNodeIds
     .map((nodeId) => `\`${nodeId}\``)
     .join(" → ");
@@ -160,6 +167,16 @@ forward failed outcomes and declared decisions to WorkflowRuntime.
 Automatic retries use the declared idempotent \`workflow.resume\` operation inside
 the same locked transition journal.
 
+## Transactional Finalization
+
+${finalization}
+
+Use \`node scripts/workflow-state.mjs preview --json\` to inspect the bounded,
+content-addressed plan. Finalization writes, removes, and moves are protected by
+approved roots, exact preconditions, recoverable staging or backups, and the
+existing \`submit\`/\`recover\` runtime seam. Every local effect requires a
+persisted confirmation; only a durable final receipt permits \`done\`.
+
 Decision Nodes may declare bounded artifact and evidence scope entries. The
 runtime captures only accepted version ids, hashes, and producer identities for
 those entries when it creates the pending question. Generated scripts render
@@ -179,7 +196,10 @@ ${nodes}
 - Check the authoritative run: \`node scripts/workflow-state.mjs status\`.
 - Start a run only when status is \`not-started\`: \`node scripts/workflow-state.mjs init\`.
 - Resume a persisted Run: \`node scripts/workflow-state.mjs resume\`.
+- Recover an interrupted Run or finalization: \`node scripts/workflow-state.mjs recover\`.
+- Explicitly roll back a recoverable finalization: \`node scripts/workflow-state.mjs recover --rollback-finalization\`.
 - Read the persisted action and Node: \`node scripts/workflow-state.mjs next\`.
+- Preview declared local finalization: \`node scripts/workflow-state.mjs preview --json\`.
 - Inspect machine-readable findings with \`--json\`; use each finding's registered operation and argument array rather than constructing a shell command.
 - Submit characterized Node evidence: \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
 - Supply physical updates under \`artifacts\` and explicit accepted version ids under \`artifactVersions\` in the record JSON.

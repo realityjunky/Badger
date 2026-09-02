@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createWorkflowRuntime,
+  previewWorkflowFinalization,
   projectWorkflowState,
   writeWorkflowStateProjection,
 } from "./workflow-runtime.mjs";
@@ -47,6 +48,10 @@ function parseArguments(argv) {
     }
     if (argument === "--rebuild") {
       options.rebuild = true;
+      continue;
+    }
+    if (argument === "--rollback-finalization") {
+      options.rollbackFinalization = true;
       continue;
     }
     if (argument === "--confirm") {
@@ -257,6 +262,9 @@ function ensureCurrentNode(nodeArgument, projection) {
     (currentNode &&
       (nodeArgument === currentNode || nodeArgument === pending?.ref)) ||
     (!currentNode &&
+      pending?.finalization &&
+      nodeArgument === "finalization") ||
+    (!currentNode &&
       pending?.type === "checkpoint" &&
       nodeArgument === "checkpoint")
   ) {
@@ -287,6 +295,12 @@ async function main() {
     return;
   }
 
+  if (command === "preview") {
+    const preview = await previewWorkflowFinalization(target);
+    printJson(preview);
+    return;
+  }
+
   if (command === "init") {
     const runtime = createWorkflowRuntime();
     const startOptions = {
@@ -307,6 +321,16 @@ async function main() {
   if (command === "resume") {
     const continuation = await createWorkflowRuntime().resume(target, {
       confirmations: options.confirmations,
+    });
+    await syncProjection(target, await readProjection(target));
+    if (options.json) printJson(continuation);
+    else printNext(continuation);
+    return;
+  }
+
+  if (command === "recover") {
+    const continuation = await createWorkflowRuntime().recover(target, {
+      rollbackFinalization: options.rollbackFinalization === true,
     });
     await syncProjection(target, await readProjection(target));
     if (options.json) printJson(continuation);

@@ -1,6 +1,7 @@
 export {
   createWorkflowRuntime,
   recoverWorkflowRun,
+  previewWorkflowFinalization,
   resumeWorkflowRun,
   startWorkflowRun,
   submitWorkflowRun,
@@ -22,6 +23,28 @@ export type {
   WorkflowRuntime,
   WorkflowSubmission,
 } from "./types.js";
+
+export type {
+  WorkflowFinalizationConfirmationPolicy,
+  WorkflowFinalizationConfirmationRecord,
+  WorkflowFinalizationDefinition,
+  WorkflowFinalizationEvent,
+  WorkflowFinalizationMaterialIdentity,
+  WorkflowFinalizationOperation,
+  WorkflowFinalizationOperationKind,
+  WorkflowFinalizationOperationReceipt,
+  WorkflowFinalizationPlannedOperation,
+  WorkflowFinalizationPreview,
+  WorkflowFinalizationReceipt,
+  WorkflowFinalizationReceiptReference,
+  WorkflowFinalizationRemoveOperation,
+  WorkflowFinalizationMoveOperation,
+  WorkflowFinalizationRoot,
+  WorkflowFinalizationState,
+  WorkflowFinalizationStatus,
+  WorkflowFinalizationSubmission,
+  WorkflowFinalizationWriteOperation,
+} from "../types.js";
 
 export {
   MAX_WORKFLOW_FINDING_MESSAGE_LENGTH,

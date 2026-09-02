@@ -31,6 +31,7 @@ const CAPABILITIES = new Set([
   "content-snapshots",
   "verification-receipts",
   "repair-policy",
+  "transactional-finalization",
 ]);
 const BOUND_KEY_NAMES = [
   "runStateBytes",
@@ -54,6 +55,12 @@ const BOUND_KEYS = new Set<string>([
   "repairEpisodeCount",
   "repairHistoryRecords",
   "repairEpisodeRecords",
+  "finalizationPlanBytes",
+  "finalizationTransactionBytes",
+  "finalizationReceiptBytes",
+  "finalizationContentBytes",
+  "finalizationOperationCount",
+  "finalizationEventCount",
 ]);
 const SCHEMA_KEY_NAMES = [
   "runState",
@@ -72,11 +79,15 @@ const SCHEMA_KEYS = new Set<string>([
   "verificationReceipt",
   "repairEpisode",
   "repairHistory",
+  "finalizationTransaction",
+  "finalizationReceipt",
 ]);
 const MAX_PROFILE_BOUND = WORKFLOW_DURABILITY_MAX_RECORD_BYTES;
 const MAX_CHECKPOINT_COUNT = 256;
 const MAX_VERIFICATION_RECEIPT_COUNT = 256;
 const MAX_REPAIR_HISTORY_COUNT = 1_024;
+const MAX_FINALIZATION_OPERATION_COUNT = 256;
+const MAX_FINALIZATION_EVENT_COUNT = 1_024;
 const VERIFICATION_POLICY_KEYS = new Set([
   "maxSummaryBytes",
   "maxEvidenceBytes",
@@ -132,6 +143,24 @@ function requiredVerificationReceiptCount(value: unknown): number {
   ) {
     throw new Error(
       "Invalid Workflow durability profile: bounds.verificationReceiptCount must be a positive bounded integer",
+    );
+  }
+  return value;
+}
+
+function requiredFinalizationCount(
+  value: unknown,
+  key: string,
+  maximum: number,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > maximum
+  ) {
+    throw new Error(
+      `Invalid Workflow durability profile: bounds.${key} must be a positive bounded integer`,
     );
   }
   return value;
@@ -252,6 +281,44 @@ export function parseWorkflowDurabilityProfile(
   if (boundsValue.verificationReceiptCount !== undefined) {
     bounds.verificationReceiptCount = requiredVerificationReceiptCount(
       boundsValue.verificationReceiptCount,
+    );
+  }
+  if (boundsValue.finalizationPlanBytes !== undefined) {
+    bounds.finalizationPlanBytes = requiredBound(
+      boundsValue.finalizationPlanBytes,
+      "finalizationPlanBytes",
+    );
+  }
+  if (boundsValue.finalizationTransactionBytes !== undefined) {
+    bounds.finalizationTransactionBytes = requiredBound(
+      boundsValue.finalizationTransactionBytes,
+      "finalizationTransactionBytes",
+    );
+  }
+  if (boundsValue.finalizationReceiptBytes !== undefined) {
+    bounds.finalizationReceiptBytes = requiredBound(
+      boundsValue.finalizationReceiptBytes,
+      "finalizationReceiptBytes",
+    );
+  }
+  if (boundsValue.finalizationContentBytes !== undefined) {
+    bounds.finalizationContentBytes = requiredBound(
+      boundsValue.finalizationContentBytes,
+      "finalizationContentBytes",
+    );
+  }
+  if (boundsValue.finalizationOperationCount !== undefined) {
+    bounds.finalizationOperationCount = requiredFinalizationCount(
+      boundsValue.finalizationOperationCount,
+      "finalizationOperationCount",
+      MAX_FINALIZATION_OPERATION_COUNT,
+    );
+  }
+  if (boundsValue.finalizationEventCount !== undefined) {
+    bounds.finalizationEventCount = requiredFinalizationCount(
+      boundsValue.finalizationEventCount,
+      "finalizationEventCount",
+      MAX_FINALIZATION_EVENT_COUNT,
     );
   }
   const repairHistoryBytes =
@@ -387,6 +454,24 @@ export function parseWorkflowDurabilityProfile(
       "Unsupported Workflow durability schema version: repairEpisode",
     );
   }
+  const finalizationTransaction = value.schemaVersions.finalizationTransaction;
+  if (
+    finalizationTransaction !== undefined &&
+    finalizationTransaction !== WORKFLOW_DURABILITY_SCHEMA_VERSION
+  ) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: finalizationTransaction",
+    );
+  }
+  const finalizationReceipt = value.schemaVersions.finalizationReceipt;
+  if (
+    finalizationReceipt !== undefined &&
+    finalizationReceipt !== WORKFLOW_DURABILITY_SCHEMA_VERSION
+  ) {
+    throw new Error(
+      "Unsupported Workflow durability schema version: finalizationReceipt",
+    );
+  }
   if (
     capabilities.includes("transition-journal") &&
     (bounds.transitionJournalBytes === undefined ||
@@ -394,6 +479,24 @@ export function parseWorkflowDurabilityProfile(
   ) {
     throw new Error(
       "Invalid Workflow durability profile: transition-journal requires its bound and schema version",
+    );
+  }
+  if (
+    capabilities.includes("transactional-finalization") &&
+    (!capabilities.includes("mutation-locks") ||
+      !capabilities.includes("revision-fences") ||
+      !capabilities.includes("transition-journal") ||
+      bounds.finalizationPlanBytes === undefined ||
+      bounds.finalizationTransactionBytes === undefined ||
+      bounds.finalizationReceiptBytes === undefined ||
+      bounds.finalizationContentBytes === undefined ||
+      bounds.finalizationOperationCount === undefined ||
+      bounds.finalizationEventCount === undefined ||
+      finalizationTransaction !== WORKFLOW_DURABILITY_SCHEMA_VERSION ||
+      finalizationReceipt !== WORKFLOW_DURABILITY_SCHEMA_VERSION)
+  ) {
+    throw new Error(
+      "Invalid Workflow durability profile: transactional-finalization requires mutation locks, revision fences, transition journal, finalization bounds, and schema versions",
     );
   }
   if (
@@ -540,6 +643,12 @@ export function parseWorkflowDurabilityProfile(
         : {}),
       ...(repairEpisode === WORKFLOW_DURABILITY_SCHEMA_VERSION
         ? { repairEpisode: WORKFLOW_DURABILITY_SCHEMA_VERSION }
+        : {}),
+      ...(finalizationTransaction === WORKFLOW_DURABILITY_SCHEMA_VERSION
+        ? { finalizationTransaction: WORKFLOW_DURABILITY_SCHEMA_VERSION }
+        : {}),
+      ...(finalizationReceipt === WORKFLOW_DURABILITY_SCHEMA_VERSION
+        ? { finalizationReceipt: WORKFLOW_DURABILITY_SCHEMA_VERSION }
         : {}),
     },
     findingCatalogVersion: WORKFLOW_FINDING_CATALOG_VERSION,

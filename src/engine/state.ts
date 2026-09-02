@@ -36,6 +36,7 @@ import {
   normalizeWorkflowRepairPolicy,
   parseWorkflowRepairEpisode,
 } from "../workflow-runtime/repair.js";
+import { parseWorkflowFinalizationState } from "../workflow-runtime/finalization.js";
 
 export type StateDocument = Record<string, unknown>;
 
@@ -130,7 +131,8 @@ export function runStateFromDocument(doc: StateDocument): RunState | null {
     doc.run_status !== "running" &&
     doc.run_status !== "waiting" &&
     doc.run_status !== "completed" &&
-    doc.run_status !== "failed"
+    doc.run_status !== "failed" &&
+    doc.run_status !== "blocked"
   ) {
     throw new Error("Invalid Run state: run_status is invalid");
   }
@@ -186,7 +188,7 @@ interface RunStateJson {
   contextRef: string;
   artifactsRef: string;
   checkpointRef: string;
-  status: "running" | "waiting" | "completed" | "failed";
+  status: "running" | "waiting" | "completed" | "failed" | "blocked";
   retries: Record<string, number>;
   runtimeIdentity?: RuntimeIdentity;
   workflowRuntime?: WorkflowRuntimeState;
@@ -1052,6 +1054,7 @@ function parseWorkflowRuntime(
     "artifactSelections",
     "contentSnapshots",
     "repairEpisode",
+    "finalization",
   ]);
   const unknown = Object.keys(runtime).find((key) => !keys.has(key));
   if (unknown) {
@@ -1269,6 +1272,67 @@ function parseWorkflowRuntime(
       "Invalid Run state: repair-policy capability requires a repair episode",
     );
   }
+  const finalization =
+    runtime.finalization === undefined
+      ? undefined
+      : (() => {
+          if (
+            !durabilityProfile?.capabilities.includes(
+              "transactional-finalization",
+            )
+          ) {
+            throw new Error(
+              "Invalid Run state: finalization requires transactional-finalization capability",
+            );
+          }
+          return parseWorkflowFinalizationState(
+            runtime.finalization,
+            durabilityProfile,
+          );
+        })();
+  if (finalization) {
+    if (
+      finalization.status === "awaiting-confirmation" &&
+      finalization.revision !== revision
+    ) {
+      throw new Error(
+        "Invalid Run state: awaiting finalization revision does not match Run revision",
+      );
+    }
+    if (
+      finalization.status === "awaiting-confirmation" &&
+      (!finalization.pendingConfirmation ||
+        finalization.pendingConfirmation.revision !== revision)
+    ) {
+      throw new Error(
+        "Invalid Run state: finalization confirmation revision is invalid",
+      );
+    }
+    if (
+      finalization.status !== "awaiting-confirmation" &&
+      finalization.revision !== revision
+    ) {
+      throw new Error(
+        "Invalid Run state: finalization revision does not match Run revision",
+      );
+    }
+    if (finalization.receipt) {
+      const expectedReceiptStatus =
+        finalization.status === "rolled-back" ? "rolled-back" : "committed";
+      if (
+        finalization.receipt.runId !== runId ||
+        finalization.transactionId !== finalization.receipt.transactionId ||
+        finalization.receipt.planHash !== finalization.planHash ||
+        finalization.receipt.revision !== finalization.planRevision ||
+        finalization.receipt.resultingRevision !== revision ||
+        finalization.receipt.status !== expectedReceiptStatus
+      ) {
+        throw new Error(
+          "Invalid Run state: finalization receipt does not match its state",
+        );
+      }
+    }
+  }
   const artifactVersionIds = new Set<string>();
   for (const version of artifactVersions) {
     if (artifactVersionIds.has(version.id)) {
@@ -1400,7 +1464,10 @@ function parseWorkflowRuntime(
       "Invalid Run state: current WorkflowRuntime Attempt does not match current Cycle",
     );
   }
-  if (revision !== outcomeCount) {
+  const finalizationRevisionIncrement =
+    finalization?.confirmationCount ??
+    (finalization?.confirmationActionId === undefined ? 0 : 1);
+  if (revision !== outcomeCount + finalizationRevisionIncrement) {
     throw new Error(
       "Invalid Run state: WorkflowRuntime revision does not match visit outcomes",
     );
@@ -1439,6 +1506,7 @@ function parseWorkflowRuntime(
     artifactSelections,
     ...(contentSnapshots ? { contentSnapshots } : {}),
     ...(repairEpisode ? { repairEpisode } : {}),
+    ...(finalization ? { finalization } : {}),
   };
 }
 
@@ -1489,7 +1557,8 @@ function parseRunStateJson(value: unknown): RunStateJson {
     json.status !== "running" &&
     json.status !== "waiting" &&
     json.status !== "completed" &&
-    json.status !== "failed"
+    json.status !== "failed" &&
+    json.status !== "blocked"
   ) {
     throw new Error("Invalid Run state: run_status is invalid");
   }
@@ -1595,6 +1664,26 @@ function parseRunStateJson(value: unknown): RunStateJson {
     runId,
     runtimeIdentity?.durabilityProfile,
   );
+  if (workflowRuntime?.finalization?.status === "awaiting-confirmation") {
+    if (
+      json.pending !==
+        workflowRuntime.finalization.pendingConfirmation?.actionId ||
+      json.status !== "waiting"
+    ) {
+      throw new Error(
+        "Invalid Run state: finalization confirmation action does not match Run",
+      );
+    }
+  }
+  if (
+    json.status === "completed" &&
+    workflowRuntime?.finalization &&
+    workflowRuntime.finalization.status !== "committed"
+  ) {
+    throw new Error(
+      "Invalid Run state: completed Run requires committed finalization",
+    );
+  }
 
   return {
     runId,

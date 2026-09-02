@@ -10,6 +10,9 @@ import type {
   WorkflowDecisionScopeSnapshot,
   WorkflowContentSnapshotReference,
   WorkflowDurabilityProfile,
+  WorkflowFinalizationPendingConfirmation,
+  WorkflowFinalizationState,
+  WorkflowFinalizationSubmission,
   WorkflowRepairDecisionOutcome,
   WorkflowRepairAutomaticOperation,
   WorkflowRepairEpisodeState,
@@ -19,7 +22,8 @@ import type {
   WorkflowVerificationReceiptReference,
 } from "../types.js";
 
-export type RunStatus = "running" | "waiting" | "completed" | "failed";
+export type RunStatus =
+  "running" | "waiting" | "completed" | "failed" | "blocked";
 
 export interface RuntimeIdentity {
   protocolHash: string;
@@ -89,6 +93,7 @@ export interface WorkflowRuntimeState {
   artifactSelections: WorkflowArtifactSelection[];
   contentSnapshots?: WorkflowContentSnapshotReference[];
   repairEpisode?: WorkflowRepairEpisodeState;
+  finalization?: WorkflowFinalizationState;
 }
 
 export interface RunState {
@@ -119,6 +124,7 @@ export interface EngineAction extends StepAction {
   visitOrdinal?: number;
   retryOrdinal?: number;
   repair?: WorkflowRepairPendingDecision;
+  finalization?: WorkflowFinalizationPendingConfirmation;
 }
 
 export interface ActionOutcome {
@@ -155,6 +161,7 @@ export interface ActionOutcome {
     automaticRepair?: WorkflowRepairAutomaticOperation;
     pendingDecision?: WorkflowRepairPendingDecision;
   };
+  finalization?: WorkflowFinalizationSubmission;
 }
 
 export interface TrajectoryEvent {

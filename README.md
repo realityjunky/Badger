@@ -23,6 +23,7 @@ The package includes:
 - bounded, content-addressed physical-tree and Git-aware snapshots for explicitly declared project scopes;
 - immutable, content-addressed Verification Receipts for automated checks, static inspections, and manual evidence, with bounded redacted summaries and freshness enforcement;
 - evidence-bound repair episodes with finite budgets, stagnation decisions, bounded overrides, and restart-safe history;
+- bounded transactional finalization for protected local writes, removes, and moves with preview, confirmation, recovery, and final receipts;
 - versioned structured findings with bounded redaction, deterministic ordering, continuation dispositions, and derived legacy blockers;
 - official/private differential observations for the pinned Engine behavior.
 

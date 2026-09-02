@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   readOptionalEngineRunText,
+  removeEngineRunFile,
   writeEngineRunText,
 } from "../engine/protected-run-file.js";
 import type { RuntimeIdentity } from "../engine/types.js";
@@ -41,6 +42,7 @@ export interface RevisionClaimHandle {
   readonly claim: WorkflowRevisionClaim;
   readonly acquired: true;
   commit(): Promise<void>;
+  abandon(): Promise<void>;
 }
 
 export interface ExistingRevisionClaim {
@@ -405,6 +407,37 @@ export async function acquireRevisionClaim(
                 ) {
                   throw new Error(
                     "Workflow revision claim changed before commit",
+                  );
+                }
+              },
+            },
+          );
+        },
+        async abandon() {
+          const current = await readClaim(runRoot, input);
+          if (!current) return;
+          if (
+            current.status !== "prepared" ||
+            current.ownerToken !== candidate.ownerToken
+          ) {
+            throw new Error(
+              "Workflow revision claim changed before abandonment",
+            );
+          }
+          await removeEngineRunFile(
+            runRoot,
+            relativePath,
+            "Workflow revision claim",
+            {
+              beforeRemove: async () => {
+                const latest = await readClaim(runRoot, input);
+                if (
+                  !latest ||
+                  latest.status !== "prepared" ||
+                  latest.ownerToken !== candidate.ownerToken
+                ) {
+                  throw new Error(
+                    "Workflow revision claim changed before abandonment",
                   );
                 }
               },

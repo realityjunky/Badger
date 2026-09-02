@@ -245,6 +245,13 @@ function matchesNode(nodeArgument, continuation) {
   if (continuation.currentNode && nodeArgument === continuation.currentNode) {
     return true;
   }
+  if (
+    !continuation.currentNode &&
+    pending.finalization &&
+    nodeArgument === "finalization"
+  ) {
+    return true;
+  }
   if (nodeArgument === pending.ref) return true;
   return (
     !continuation.currentNode &&

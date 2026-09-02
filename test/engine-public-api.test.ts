@@ -15,6 +15,7 @@ describe("public Engine package boundary", () => {
     expect(api.resumeWorkflowRun).toBeTypeOf("function");
     expect(api.submitWorkflowRun).toBeTypeOf("function");
     expect(api.recoverWorkflowRun).toBeTypeOf("function");
+    expect(api.previewWorkflowFinalization).toBeTypeOf("function");
     expect(api.runEngineDifferential).toBeTypeOf("function");
     expect(api.getEngineParityCoverage).toBeTypeOf("function");
     expect(api.certifyEngineDifferential).toBeTypeOf("function");
@@ -67,6 +68,7 @@ describe("public Engine package boundary", () => {
       "resumeWorkflowRun",
       "submitWorkflowRun",
       "recoverWorkflowRun",
+      "previewWorkflowFinalization",
     ]) {
       expect(runtimeApi[operation], operation).toBeTypeOf("function");
     }
