@@ -447,6 +447,131 @@ describe("WorkflowRuntime finalization preview", () => {
     }
   });
 
+  it("blocks when cleanup loses a quarantine before its cleanup event", async () => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "comet-finalization-cleanup-unknown-"),
+    );
+    try {
+      await fs.mkdir(path.join(root, "results"));
+      await fs.writeFile(path.join(root, "results", "source.txt"), "source\n");
+      await fs.writeFile(
+        path.join(root, "results", "obsolete.txt"),
+        "obsolete\n",
+      );
+      const { runtime, current, confirmation } = await preparedOperationsRun(
+        root,
+        "cleanup-unknown-run",
+      );
+      setWorkflowFinalizationFaultForTests({ phase: "before-cleanup" });
+      await expect(
+        confirmOperationsRun(root, current, confirmation),
+      ).rejects.toThrow("deterministic workflow finalization fault");
+      clearWorkflowFinalizationFaultForTests();
+
+      const transaction = await readWorkflowFinalizationTransaction(
+        root,
+        finalizationProfile,
+      );
+      const quarantinePath = transaction!.cleanup.entries.find(
+        (entry) =>
+          entry.operationId === "remove-obsolete" &&
+          entry.role === "quarantine",
+      )!.path;
+      await fs.rm(path.join(root, quarantinePath));
+
+      const blocked = await runtime.recover(root);
+      expect(blocked.disposition).toBe("blocked");
+      expect(blocked.findings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "finalization-transaction-unknown" }),
+        ]),
+      );
+      await expect(
+        fs.stat(path.join(root, ".comet", "finalization", "transaction.json")),
+      ).resolves.toBeDefined();
+    } finally {
+      clearWorkflowFinalizationFaultForTests();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers destructive operations through the standalone location", async () => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "comet-finalization-standalone-destructive-"),
+    );
+    const target = {
+      kind: "standalone",
+      projectRoot: root,
+      runId: "standalone-destructive-run",
+    } as const;
+    try {
+      await fs.mkdir(path.join(root, "results"));
+      await fs.writeFile(path.join(root, "results", "source.txt"), "source\n");
+      await fs.writeFile(
+        path.join(root, "results", "obsolete.txt"),
+        "obsolete\n",
+      );
+      const runtime = createWorkflowRuntime();
+      let current = await runtime.start({
+        protocol: operationsProtocol(),
+        location: target,
+      });
+      current = await runtime.submit(target, {
+        actionId: current.pendingAction!.id,
+        runId: current.runId,
+        revision: current.revision,
+        nodeId: current.currentNode,
+        execution: current.execution,
+        status: "succeeded",
+        summary: "Finish the standalone destructive workflow.",
+      });
+      const confirmation = current.pendingAction!.finalization!;
+      setWorkflowFinalizationFaultForTests({
+        phase: "target-published",
+        operationId: "move-source",
+      });
+      await expect(
+        runtime.submit(target, {
+          kind: "decision",
+          actionId: current.pendingAction!.id,
+          runId: current.runId,
+          revision: current.revision,
+          nodeId: null,
+          cycleId: null,
+          attemptId: null,
+          execution: current.execution,
+          decisionId: confirmation.decisionId,
+          choiceId: "confirm",
+          reviewer: { subject: "operator", authorities: ["workflow-owner"] },
+          rationale: "Recover the standalone destructive workflow.",
+          finalization: {
+            planHash: confirmation.planHash,
+            decisionId: confirmation.decisionId,
+            choiceId: "confirm",
+            contentSnapshotHash: confirmation.contentSnapshotHash,
+            verificationReceiptIds: confirmation.verificationReceiptIds,
+          },
+        }),
+      ).rejects.toThrow("deterministic workflow finalization fault");
+      clearWorkflowFinalizationFaultForTests();
+
+      current = await recoverInFreshProcess(target);
+      expect(current.disposition).toBe("done");
+      await expect(
+        fs.readFile(path.join(root, "results", "moved.txt"), "utf8"),
+      ).resolves.toBe("source\n");
+      await expect(
+        fs.stat(path.join(root, "results", "source.txt")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        fs.stat(path.join(root, "results", "obsolete.txt")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      clearWorkflowFinalizationFaultForTests();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     "before-rollback-operation",
     "rollback-verified",
@@ -952,7 +1077,7 @@ describe("WorkflowRuntime finalization preview", () => {
         fs.readFile(path.join(root, "results", "moved.txt"), "utf8"),
       ).resolves.toBe("newer\n");
 
-      await fs.rm(path.join(root, "results", "moved.txt"));
+      await fs.writeFile(path.join(root, "results", "moved.txt"), "source\n");
       current = await runtime.recover(root, { rollbackFinalization: true });
       expect(current.disposition).toBe("blocked");
       expect(current.finalization?.status).toBe("rolled-back");
@@ -988,6 +1113,8 @@ describe("WorkflowRuntime finalization preview", () => {
     ["quarantined", "remove-obsolete"],
     ["before-source-removal", "move-source"],
     ["source-removed", "move-source"],
+    ["before-target-removal", "move-source"],
+    ["target-removed", "move-source"],
     ["before-target-publication", "move-source"],
     ["target-published", "move-source"],
     ["operation-verified", "move-source"],
@@ -1011,6 +1138,7 @@ describe("WorkflowRuntime finalization preview", () => {
           path.join(root, "results", "obsolete.txt"),
           "obsolete\n",
         );
+        await fs.writeFile(path.join(root, "results", "moved.txt"), "old\n");
         const { runtime, current, confirmation } = await preparedOperationsRun(
           root,
           `boundary-${phase}`,

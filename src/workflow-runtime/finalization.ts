@@ -2251,6 +2251,15 @@ function parseFinalizationReceipt(value: unknown): WorkflowFinalizationReceipt {
     recovery: { status: value.recovery.status, crashBoundaries },
     committedAt: parseTimestamp(value.committedAt, `${label}.committedAt`),
   };
+  if (
+    cleanup.entries.some(
+      (entry) =>
+        entry.status === "missing" &&
+        !cleanupMissingIsExpectedFor(operations, events, entry),
+    )
+  ) {
+    throw new Error(`${label} cleanup missing identity is ambiguous`);
+  }
   if (receipt.confirmation.planHash !== receipt.planHash) {
     throw new Error(`${label} confirmation plan identity is invalid`);
   }
@@ -2625,6 +2634,15 @@ export function parseWorkflowFinalizationTransaction(
     createdAt: parseTimestamp(value.createdAt, `${label}.createdAt`),
     updatedAt: parseTimestamp(value.updatedAt, `${label}.updatedAt`),
   };
+  if (
+    transaction.cleanup.entries.some(
+      (entry) =>
+        entry.status === "missing" &&
+        !cleanupMissingIsExpected(transaction, entry),
+    )
+  ) {
+    throw new Error(`${label} cleanup missing identity is ambiguous`);
+  }
   const reviewerPolicy = normalizeConfirmation(plan.confirmation).reviewer;
   const reviewerSubjects = reviewerPolicy?.subjects ?? [];
   const reviewerAuthorities = reviewerPolicy?.authorities ?? [];
@@ -2918,6 +2936,7 @@ async function moveBaseFile(
   source: string,
   destination: string,
   beforeMove?: () => void | Promise<void>,
+  beforeSourceUnlink?: () => void | Promise<void>,
 ): Promise<boolean> {
   const destinationParent = path.posix.dirname(destination);
   if (destinationParent !== ".") {
@@ -2936,6 +2955,7 @@ async function moveBaseFile(
       {
         containedRoot: path.resolve(root),
         beforeMove,
+        beforeSourceUnlink,
       },
     );
   } catch (error) {
@@ -2943,7 +2963,7 @@ async function moveBaseFile(
     if (
       code === "EEXIST" ||
       (error instanceof Error &&
-        /Contained file move (?:source|destination) (?:changed|must be missing)/u.test(
+        /Contained file move (?:source|destination) (?:changed|must be missing)|Contained file move (?:parent|identity) changed/u.test(
           error.message,
         ))
     ) {
@@ -3066,6 +3086,18 @@ function storageMaterial(
   role: "staged" | "backup" | "quarantine",
 ): OperationMaterial[typeof role] {
   return actual[role];
+}
+
+function storageMatchesContent(
+  actual: OperationMaterial,
+  role: "staged" | "backup" | "quarantine",
+  content: string,
+): boolean {
+  const material = storageMaterial(actual, role);
+  return Boolean(
+    material?.identity.exists &&
+    sameIdentity(material.identity, materialIdentity(content)),
+  );
 }
 
 function storagePath(
@@ -3581,6 +3613,9 @@ async function completeFinalizationCleanup(
       throw error;
     }
     if (!current.identity.exists) {
+      if (!cleanupMissingIsExpected(transaction, entry)) {
+        throw new WorkflowFinalizationConflictError([entry.path]);
+      }
       entry.status = "missing";
     } else {
       if (!sameIdentity(current.identity, entry.expected)) {
@@ -4154,6 +4189,330 @@ async function restoreContent(
   );
 }
 
+function cleanupMissingIsExpectedFor(
+  operations: ReadonlyArray<{
+    id: string;
+    kind: "write" | "remove" | "move";
+    status: string;
+  }>,
+  events: ReadonlyArray<{
+    type: WorkflowFinalizationEventType;
+    operationId: string | null;
+    boundary: string;
+  }>,
+  entry: WorkflowFinalizationCleanupEntry,
+): boolean {
+  const operation = operations.find(
+    (candidate) => candidate.id === entry.operationId,
+  );
+  if (!operation) return false;
+  if (
+    operation.status === "rolled-back" &&
+    events.some(
+      (event) =>
+        event.type === "operation-rolled-back" &&
+        event.operationId === operation.id &&
+        event.boundary.startsWith("rollback-verified"),
+    )
+  ) {
+    return true;
+  }
+  if (
+    entry.role === "staged" &&
+    operation.kind === "write" &&
+    events.some(
+      (event) =>
+        event.type === "operation-published" &&
+        event.operationId === operation.id &&
+        event.boundary.startsWith("target-published"),
+    )
+  ) {
+    return true;
+  }
+  return (
+    entry.role === "quarantine" &&
+    operation.kind === "move" &&
+    events.some(
+      (event) =>
+        event.type === "operation-published" &&
+        event.operationId === operation.id &&
+        event.boundary.startsWith("target-published"),
+    )
+  );
+}
+
+function cleanupMissingIsExpected(
+  transaction: WorkflowFinalizationTransaction,
+  entry: WorkflowFinalizationCleanupEntry,
+): boolean {
+  return cleanupMissingIsExpectedFor(
+    transaction.operations,
+    transaction.events,
+    entry,
+  );
+}
+
+async function rollbackTransactionOperation(
+  baseRoot: string,
+  operation: WorkflowFinalizationTransactionOperation,
+  actual: OperationMaterial,
+  profile: WorkflowDurabilityProfile,
+): Promise<void> {
+  if (operation.kind === "write") {
+    if (operationMatches(actual, operation.precondition)) return;
+    await restoreContent(
+      baseRoot,
+      operation.target,
+      operation.previousTargetContent,
+      actual.target.identity,
+      profile,
+    );
+    return;
+  }
+  if (operation.kind === "remove") {
+    if (!operation.precondition.target.exists) return;
+    if (!operation.quarantinePath || actual.target.identity.exists) {
+      if (!actual.target.identity.exists) {
+        throw new WorkflowFinalizationConflictError([
+          operation.target,
+          ...(operation.quarantinePath ? [operation.quarantinePath] : []),
+        ]);
+      }
+      return;
+    }
+    const moved = await moveBaseFile(
+      baseRoot,
+      operation.quarantinePath,
+      operation.target,
+      async () => {
+        const current = await currentOperation(baseRoot, operation, profile);
+        if (
+          current.target.identity.exists ||
+          !current.quarantine?.identity.exists ||
+          !sameIdentity(
+            current.quarantine.identity,
+            materialIdentity(operation.previousTargetContent!),
+          )
+        ) {
+          throw new WorkflowFinalizationConflictError(
+            operationConflictPaths(operation, current),
+          );
+        }
+      },
+      async () => {
+        const current = await currentOperation(baseRoot, operation, profile);
+        if (
+          !sameIdentity(
+            current.target.identity,
+            operationTargetExpected(operation),
+          ) ||
+          !storageMatchesContent(
+            current,
+            "quarantine",
+            operation.previousTargetContent!,
+          )
+        ) {
+          throw new WorkflowFinalizationConflictError(
+            operationConflictPaths(operation, current),
+          );
+        }
+      },
+    );
+    if (!moved) {
+      throw new WorkflowFinalizationConflictError([
+        operation.quarantinePath,
+        operation.target,
+      ]);
+    }
+    return;
+  }
+  if (!operation.source || !actual.source) {
+    throw new WorkflowFinalizationConflictError([operation.target]);
+  }
+  const sourcePre = sameIdentity(
+    actual.source.identity,
+    operationSourceExpected(operation),
+  );
+  const sourcePost = sameIdentity(
+    actual.source.identity,
+    operationPostSourceExpected(operation),
+  );
+  const targetPre = sameIdentity(
+    actual.target.identity,
+    operationTargetExpected(operation),
+  );
+  const targetPost = sameIdentity(
+    actual.target.identity,
+    operationPostTargetExpected(operation),
+  );
+  if (sourcePre && targetPre) return;
+  if (sourcePost && targetPre) {
+    if (!operation.quarantinePath) {
+      throw new WorkflowFinalizationConflictError([
+        operation.source,
+        operation.target,
+      ]);
+    }
+    const moved = await moveBaseFile(
+      baseRoot,
+      operation.quarantinePath,
+      operation.source,
+      async () => {
+        const current = await currentOperation(baseRoot, operation, profile);
+        if (
+          current.source?.identity.exists ||
+          !sameIdentity(
+            current.target.identity,
+            operationTargetExpected(operation),
+          ) ||
+          !current.quarantine?.identity.exists
+        ) {
+          throw new WorkflowFinalizationConflictError(
+            operationConflictPaths(operation, current),
+          );
+        }
+      },
+      async () => {
+        const current = await currentOperation(baseRoot, operation, profile);
+        if (
+          !current.source ||
+          !sameIdentity(
+            current.source.identity,
+            operationSourceExpected(operation),
+          ) ||
+          !sameIdentity(
+            current.target.identity,
+            operationTargetExpected(operation),
+          ) ||
+          !storageMatchesContent(
+            current,
+            "quarantine",
+            operation.previousSourceContent!,
+          )
+        ) {
+          throw new WorkflowFinalizationConflictError(
+            operationConflictPaths(operation, current),
+          );
+        }
+      },
+    );
+    if (!moved) {
+      throw new WorkflowFinalizationConflictError([
+        operation.quarantinePath,
+        operation.source,
+      ]);
+    }
+    return;
+  }
+  if (sourcePost && targetPost) {
+    const moved = await moveBaseFile(
+      baseRoot,
+      operation.target,
+      operation.source,
+      async () => {
+        const current = await currentOperation(baseRoot, operation, profile);
+        if (
+          current.source?.identity.exists ||
+          !sameIdentity(
+            current.target.identity,
+            operationPostTargetExpected(operation),
+          )
+        ) {
+          throw new WorkflowFinalizationConflictError(
+            operationConflictPaths(operation, current),
+          );
+        }
+      },
+      async () => {
+        const current = await currentOperation(baseRoot, operation, profile);
+        if (
+          !current.source ||
+          !sameIdentity(
+            current.source.identity,
+            operationSourceExpected(operation),
+          ) ||
+          !sameIdentity(
+            current.target.identity,
+            operationPostTargetExpected(operation),
+          )
+        ) {
+          throw new WorkflowFinalizationConflictError(
+            operationConflictPaths(operation, current),
+          );
+        }
+      },
+    );
+    if (!moved) {
+      throw new WorkflowFinalizationConflictError([
+        operation.target,
+        operation.source,
+      ]);
+    }
+    if (operation.precondition.target.exists) {
+      if (!operation.backupPath) {
+        throw new WorkflowFinalizationConflictError([operation.target]);
+      }
+      const restored = await moveBaseFile(
+        baseRoot,
+        operation.backupPath,
+        operation.target,
+        async () => {
+          const current = await currentOperation(baseRoot, operation, profile);
+          if (
+            current.target.identity.exists ||
+            !current.backup?.identity.exists ||
+            !current.source?.identity.exists
+          ) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation, current),
+            );
+          }
+        },
+        async () => {
+          const current = await currentOperation(baseRoot, operation, profile);
+          if (
+            !current.source ||
+            !sameIdentity(
+              current.source.identity,
+              operationSourceExpected(operation),
+            ) ||
+            !sameIdentity(
+              current.target.identity,
+              operationTargetExpected(operation),
+            ) ||
+            !storageMatchesContent(
+              current,
+              "backup",
+              operation.previousTargetContent!,
+            )
+          ) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation, current),
+            );
+          }
+        },
+      );
+      if (!restored) {
+        throw new WorkflowFinalizationConflictError([
+          operation.backupPath,
+          operation.target,
+        ]);
+      }
+    }
+    return;
+  }
+  if (sourcePre && targetPost) {
+    throw new WorkflowFinalizationConflictError([
+      operation.source,
+      operation.target,
+    ]);
+  }
+  throw new WorkflowFinalizationConflictError([
+    operation.source,
+    operation.target,
+  ]);
+}
+
 export async function rollbackWorkflowFinalization(options: {
   runRoot: string;
   baseRoot: string;
@@ -4214,7 +4573,7 @@ export async function rollbackWorkflowFinalization(options: {
         operation,
         options.profile,
       );
-      if (!operationCanResume(operation, actual, true)) {
+      if (!operationCanResume(operation, actual)) {
         return {
           status: "blocked",
           transaction,
@@ -4248,20 +4607,10 @@ export async function rollbackWorkflowFinalization(options: {
           operation.id,
         );
       }
-      if (operation.kind === "move" && operation.source) {
-        await restoreContent(
-          options.baseRoot,
-          operation.source,
-          operation.previousSourceContent,
-          actual.source!.identity,
-          options.profile,
-        );
-      }
-      await restoreContent(
+      await rollbackTransactionOperation(
         options.baseRoot,
-        operation.target,
-        operation.previousTargetContent,
-        actual.target.identity,
+        operation,
+        actual,
         options.profile,
       );
       const verified = await currentOperation(
@@ -4762,6 +5111,27 @@ async function applyTransactionOperation(
             );
           }
         },
+        async () => {
+          const current = await currentOperation(baseRoot, operation, profile);
+          if (
+            !sameIdentity(
+              current.target.identity,
+              operationPostTargetExpected(operation),
+            ) ||
+            !storageMatchesContent(current, "staged", operation.content!) ||
+            (operation.backupPath &&
+              operation.precondition.target.exists &&
+              !storageMatchesContent(
+                current,
+                "backup",
+                operation.previousTargetContent!,
+              ))
+          ) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation, current),
+            );
+          }
+        },
       );
       if (!moved) {
         throw new WorkflowFinalizationConflictError([
@@ -4818,6 +5188,25 @@ async function applyTransactionOperation(
             if (
               !operationMatches(current, operation.precondition) ||
               current.quarantine?.identity.exists
+            ) {
+              throw new WorkflowFinalizationConflictError(
+                operationConflictPaths(operation, current),
+              );
+            }
+          },
+          async () => {
+            const current = await currentOperation(
+              baseRoot,
+              operation,
+              profile,
+            );
+            if (
+              !operationMatches(current, operation.precondition) ||
+              !storageMatchesContent(
+                current,
+                "quarantine",
+                operation.previousTargetContent!,
+              )
             ) {
               throw new WorkflowFinalizationConflictError(
                 operationConflictPaths(operation, current),
@@ -4918,6 +5307,21 @@ async function applyTransactionOperation(
           if (
             !operationMatches(current, operation.precondition) ||
             current.quarantine?.identity.exists
+          ) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation, current),
+            );
+          }
+        },
+        async () => {
+          const current = await currentOperation(baseRoot, operation, profile);
+          if (
+            !operationMatches(current, operation.precondition) ||
+            !storageMatchesContent(
+              current,
+              "quarantine",
+              operation.previousSourceContent!,
+            )
           ) {
             throw new WorkflowFinalizationConflictError(
               operationConflictPaths(operation, current),
@@ -5030,6 +5434,35 @@ async function applyTransactionOperation(
             !current.quarantine?.identity.exists ||
             (operation.precondition.target.exists &&
               !current.backup?.identity.exists)
+          ) {
+            throw new WorkflowFinalizationConflictError(
+              operationConflictPaths(operation, current),
+            );
+          }
+        },
+        async () => {
+          const current = await currentOperation(baseRoot, operation, profile);
+          if (
+            !current.source ||
+            !sameIdentity(
+              current.source.identity,
+              operationPostSourceExpected(operation),
+            ) ||
+            !sameIdentity(
+              current.target.identity,
+              operationPostTargetExpected(operation),
+            ) ||
+            !storageMatchesContent(
+              current,
+              "quarantine",
+              operation.previousSourceContent!,
+            ) ||
+            (operation.precondition.target.exists &&
+              !storageMatchesContent(
+                current,
+                "backup",
+                operation.previousTargetContent!,
+              ))
           ) {
             throw new WorkflowFinalizationConflictError(
               operationConflictPaths(operation, current),

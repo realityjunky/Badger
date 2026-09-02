@@ -151,4 +151,60 @@ describe("contained atomic write", () => {
     await expect(fs.readFile(source, "utf8")).resolves.toBe("replacement");
     await expect(fs.readFile(destination, "utf8")).resolves.toBe("content");
   });
+
+  it("rejects a move when its source parent is displaced before publication", async () => {
+    const sourceDirectory = path.join(root, "source");
+    const source = path.join(sourceDirectory, "file.txt");
+    const destination = path.join(root, "destination.txt");
+    const displaced = path.join(root, "source-displaced");
+    await fs.mkdir(sourceDirectory);
+    await fs.writeFile(source, "content");
+
+    await expect(
+      moveContainedFile(source, destination, {
+        containedRoot: root,
+        beforeMove: async () => {
+          await fs.rename(sourceDirectory, displaced);
+          await fs.symlink(
+            outside,
+            sourceDirectory,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      }),
+    ).rejects.toThrow(/parent changed before move/u);
+    await expect(
+      fs.readFile(destination, "utf8").catch(() => null),
+    ).resolves.toBe(null);
+    await expect(
+      fs.readFile(path.join(displaced, "file.txt"), "utf8"),
+    ).resolves.toBe("content");
+  });
+
+  it("does not unlink a source when its parent changes before source removal", async () => {
+    const sourceDirectory = path.join(root, "source");
+    const source = path.join(sourceDirectory, "file.txt");
+    const destination = path.join(root, "destination.txt");
+    const displaced = path.join(root, "source-displaced");
+    await fs.mkdir(sourceDirectory);
+    await fs.writeFile(source, "content");
+
+    await expect(
+      moveContainedFile(source, destination, {
+        containedRoot: root,
+        beforeSourceUnlink: async () => {
+          await fs.rename(sourceDirectory, displaced);
+          await fs.symlink(
+            outside,
+            sourceDirectory,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      }),
+    ).rejects.toThrow(/parent changed before source removal/u);
+    await expect(fs.readFile(destination, "utf8")).resolves.toBe("content");
+    await expect(
+      fs.readFile(path.join(displaced, "file.txt"), "utf8"),
+    ).resolves.toBe("content");
+  });
 });

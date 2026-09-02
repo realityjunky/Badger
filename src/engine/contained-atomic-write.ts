@@ -19,6 +19,7 @@ export interface ContainedFileRemoveOptions {
 export interface ContainedFileMoveOptions {
   containedRoot: string;
   beforeMove?: () => void | Promise<void>;
+  beforeSourceUnlink?: () => void | Promise<void>;
 }
 
 interface DirectoryIdentity extends FileObjectIdentity {
@@ -446,8 +447,14 @@ export async function moveContainedFile(
   }
 
   await options.beforeMove?.();
-  await verifyDirectoryChain(sourceDirectoryChain);
-  await verifyDirectoryChain(destinationDirectoryChain);
+  try {
+    await verifyDirectoryChain(sourceDirectoryChain);
+    await verifyDirectoryChain(destinationDirectoryChain);
+  } catch (error) {
+    throw new Error("Contained file move parent changed before move", {
+      cause: error,
+    });
+  }
   const [currentSource, currentSourceRealPath] = await Promise.all([
     fs.lstat(lexicalSource),
     fs.realpath(lexicalSource),
@@ -498,9 +505,39 @@ export async function moveContainedFile(
   ) {
     throw new Error("Contained file move destination changed after move");
   }
+  await options.beforeSourceUnlink?.();
+  try {
+    await verifyDirectoryChain(sourceDirectoryChain);
+    await verifyDirectoryChain(destinationDirectoryChain);
+  } catch (error) {
+    throw new Error(
+      "Contained file move parent changed before source removal",
+      {
+        cause: error,
+      },
+    );
+  }
+  const [sourceBeforeUnlink, destinationBeforeUnlink] = await Promise.all([
+    fs.lstat(lexicalSource),
+    fs.lstat(lexicalDestination),
+  ]);
+  if (
+    !sameUnchangedFile(currentSourceAfterLink, sourceBeforeUnlink) ||
+    !sameUnchangedFile(destinationStat, destinationBeforeUnlink)
+  ) {
+    throw new Error(
+      "Contained file move identity changed before source removal",
+    );
+  }
   await fs.unlink(lexicalSource);
-  await verifyDirectoryChain(sourceDirectoryChain);
-  await verifyDirectoryChain(destinationDirectoryChain);
+  try {
+    await verifyDirectoryChain(sourceDirectoryChain);
+    await verifyDirectoryChain(destinationDirectoryChain);
+  } catch (error) {
+    throw new Error("Contained file move parent changed after source removal", {
+      cause: error,
+    });
+  }
   await syncDirectory(path.dirname(lexicalSource));
   if (path.dirname(lexicalSource) !== path.dirname(lexicalDestination)) {
     await syncDirectory(path.dirname(lexicalDestination));
