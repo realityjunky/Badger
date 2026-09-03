@@ -1125,6 +1125,7 @@ export interface CreatorState {
   draftPath: string;
   currentHash: string | null;
   candidates: SkillCandidate[];
+  confirmedProposal?: FactoryProposal;
   generated?: {
     packageRoot: string;
     protocolPath: string;

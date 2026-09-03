@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "official": {
+    "revision": "99fd7495f8b9217efbaae3a46d885f6fa7f4102a",
+    "version": "0.4.0-beta.19",
+    "protocol": "assets/skills/badger/reference/authoring-protocol.json"
+  },
+  "knownUpstreamInconsistencies": [
+    "skill-core-claims",
+    "script-claim-scope",
+    "content-leaf-shape"
+  ],
+  "badgerExtensions": [
+    "workflow-protocol-hash",
+    "source-evidence-hash",
+    "concrete-node-content-leaves",
+    "authoring-plan-hash"
+  ]
+}

@@ -234,6 +234,7 @@ export function createWorkflowKernel(
       draftPath,
       currentHash: null,
       candidates: structuredClone(stateOptions.proposal.candidates),
+      confirmedProposal: structuredClone(stateOptions.proposal),
     };
     await ensureDirectory(draftPath);
     await writeState(state);

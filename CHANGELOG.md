@@ -1,5 +1,13 @@
 # Changelog
 
+## What's Changed [Unreleased]
+
+### Added
+
+- **Authoring preview**: Added a read-only six-lane AuthoringPlan preview with
+  pinned upstream protocol evidence and separate authoring and workflow
+  protocol hashes.
+
 ## What's Changed [0.1.2] - 2026-09-03
 
 ### Changed

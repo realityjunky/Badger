@@ -61,7 +61,15 @@ The CLI is `badger` after `npm run build`:
 
 ```bash
 node bin/badger.js guide --project . --json
+node bin/badger.js authoring-plan prepared-workflow --project . --depth quick --json
 ```
+
+`authoring-plan` is read-only. It accepts a confirmed workflow name after
+initialization, derives the six-lane AuthoringPlan from the persisted normalized
+proposal, and reports separate
+`protocolHash` (AuthoringProtocol) and `workflowProtocolHash` (executable
+WorkflowProtocol) identities. It does not create Creator state, authoring
+records, or package files.
 
 See `assets/skills/badger/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
 

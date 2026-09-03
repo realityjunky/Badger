@@ -1,4 +1,4 @@
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { readPreferenceEntries, findSkills } from "./skill/find.js";
@@ -13,6 +13,7 @@ import {
   reviewState,
 } from "./publish/lifecycle.js";
 import { runDifferentialHarness } from "./differential/run.js";
+import { buildAuthoringPlan } from "./authoring/index.js";
 import {
   runEngineDifferential,
   runOfficialEngineBaseline,
@@ -72,6 +73,28 @@ program
       await buildProposal({
         projectRoot: projectRoot(options.project),
         planPath: plan,
+      }),
+      options.json,
+    );
+  });
+
+program
+  .command("authoring-plan <target>")
+  .description("Preview the read-only AuthoringPlan for a workflow proposal")
+  .option("--project <dir>", "Project root", ".")
+  .addOption(
+    new Option("--depth <depth>", "Authoring depth")
+      .choices(["quick", "full"])
+      .default("quick"),
+  )
+  .option("--json", "JSON output")
+  .action(async (target, options) => {
+    const root = projectRoot(options.project);
+    emit(
+      await buildAuthoringPlan({
+        projectRoot: root,
+        name: target,
+        depth: options.depth,
       }),
       options.json,
     );
