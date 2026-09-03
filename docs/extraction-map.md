@@ -135,6 +135,6 @@ not import or modify the upstream checkout.
 These are intentionally separate future batches:
 
 1. Add a production-quality platform adapter interface with filesystem and in-memory adapters.
-2. Add richer authored content lanes and human review artifacts.
+2. Add injected provider-backed authoring review and richer domain guidance.
 3. Add external eval runners behind an injected adapter.
 4. Add package signing and publication registry integration.

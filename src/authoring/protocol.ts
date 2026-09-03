@@ -1,6 +1,7 @@
 import { sha256 } from "../util.js";
 import type {
   AuthoringCompatibility,
+  AuthoringControlPlaneScript,
   AuthoringDag,
   AuthoringLaneId,
   AuthoringPlanDiagnostic,
@@ -82,22 +83,82 @@ const AUTHORING_PROTOCOL_CONTENT_LEAVES: Record<
   "skill-review": ["reference/skill-review.md"],
 };
 
+export const AUTHORING_CONTROL_PLANE_SCRIPTS = [
+  {
+    id: "workflow-state",
+    role: "workflow-state",
+    upstreamRole: "workflow-state",
+    kind: "runtime-adapter",
+    path: "scripts/workflow-state.mjs",
+    claim: "script:workflow-state",
+    authority: "WorkflowRuntime",
+  },
+  {
+    id: "workflow-guard",
+    role: "workflow-guard",
+    upstreamRole: "workflow-guard",
+    kind: "runtime-adapter",
+    path: "scripts/workflow-guard.mjs",
+    claim: "script:workflow-guard",
+    authority: "WorkflowRuntime",
+  },
+  {
+    id: "workflow-handoff",
+    role: "workflow-handoff",
+    upstreamRole: "workflow-handoff",
+    kind: "runtime-adapter",
+    path: "scripts/workflow-handoff.mjs",
+    claim: "script:workflow-handoff",
+    authority: "WorkflowRuntime",
+  },
+  {
+    id: "badger-plan",
+    role: "badger-plan",
+    upstreamRole: "comet-plan",
+    kind: "plan",
+    path: "scripts/badger-plan.mjs",
+    claim: "script:comet-plan",
+    authority: "Badger assembler",
+  },
+  {
+    id: "badger-check",
+    role: "badger-check",
+    upstreamRole: "comet-check",
+    kind: "check",
+    path: "scripts/badger-check.mjs",
+    claim: "script:comet-check",
+    authority: "Badger assembler",
+  },
+  {
+    id: "badger-hook-guard",
+    role: "badger-hook-guard",
+    upstreamRole: "comet-hook-guard",
+    kind: "hook-guard",
+    path: "scripts/badger-hook-guard.mjs",
+    claim: "script:comet-hook-guard",
+    authority: "Badger assembler",
+  },
+] as const satisfies readonly AuthoringControlPlaneScript[];
+
 export const AUTHORING_DETERMINISTIC_BACKBONE = [
   "reference/workflow-protocol.json",
+  "reference/resolved-skills.json",
+  "reference/authoring-plan.json",
+  "reference/authoring-lanes.json",
+  "reference/composition-report.md",
+  "reference/eval-manifest.json",
+  "reference/package-inventory.json",
+  "scripts/workflow-runtime.mjs",
   "scripts/workflow-state.mjs",
   "scripts/workflow-guard.mjs",
   "scripts/workflow-handoff.mjs",
-  "scripts/comet-plan.mjs",
-  "scripts/comet-check.mjs",
-  "scripts/comet-hook-guard.mjs",
-  "bundle.yaml",
-  "comet/skill.yaml",
-  "comet/guardrails.yaml",
-  "comet/checks.yaml",
-  "comet/eval.yaml",
-  "reference/resolved-skills.json",
-  "reference/composition-report.md",
-  "reference/authoring-lanes.json",
+  "scripts/badger-plan.mjs",
+  "scripts/badger-check.mjs",
+  "scripts/badger-hook-guard.mjs",
+  "badger/skill.yaml",
+  "badger/guardrails.yaml",
+  "badger/checks.yaml",
+  "badger/eval.yaml",
 ] as const;
 
 export const AUTHORING_PROTOCOL = {
@@ -149,6 +210,8 @@ export function hashAuthoringProtocol(): string {
       schemaVersion: 1,
       dag: AUTHORING_DAG,
       lanes: AUTHORING_LANE_CLAIMS,
+      controlPlaneScripts: AUTHORING_CONTROL_PLANE_SCRIPTS,
+      deterministicBackbone: AUTHORING_DETERMINISTIC_BACKBONE,
     }),
   );
 }
@@ -195,6 +258,11 @@ export const AUTHORING_COMPATIBILITY: AuthoringCompatibility = {
       id: "authoring-plan-hash",
       detail:
         "Badger records a canonical hash of the derived AuthoringPlan for future authoring-input binding.",
+    },
+    {
+      id: "control-plane-naming",
+      detail:
+        "Badger preserves the upstream plan, check, and hook roles while emitting them as badger-plan, badger-check, and badger-hook-guard scripts.",
     },
   ],
 };

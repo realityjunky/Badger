@@ -14,6 +14,9 @@
   revision-checked concurrent persistence, fresh-process recovery reporting,
   package-local role briefs, and a credential-free manual file-provider
   fixture.
+- **Protected assembly**: Added staged deterministic scaffold replacement,
+  Auto-zone/Authored-zone validation, a relative package inventory, and the
+  Badger-named plan, check, and hook-guard control-plane roles.
 
 ## What's Changed [0.1.2] - 2026-09-03
 

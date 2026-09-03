@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { buildProposal, readPlan } from "../src/factory/proposal.js";
 import {
   generatePackage,
@@ -14,10 +16,15 @@ import {
   authoringReadiness,
   initializeAuthoringSession,
   recordAuthoring,
+  runManualAuthoringFixture,
 } from "../src/authoring/index.js";
 import { deriveAuthoringPlan } from "../src/authoring/plan.js";
+import { loadSkillPackage } from "../src/skill-runtime/load.js";
+import { hashDirectory } from "../src/util.js";
 import type { AuthoringPlan } from "../src/authoring/types.js";
 import type { CreatorState, FactoryPlan } from "../src/types.js";
+
+const execFileAsync = promisify(execFile);
 
 describe("Badger authoring lifecycle", () => {
   let root: string;
@@ -267,6 +274,286 @@ describe("Badger authoring lifecycle", () => {
         destination: path.join(source, "nested-output"),
       }),
     ).rejects.toThrow(/inside the upgrade source package/iu);
+  });
+
+  it("generates the Badger control plane and a relative package inventory", async () => {
+    const { state, generated } = await createScaffold();
+    const scripts = await fs.readdir(
+      path.join(generated.packageRoot, "scripts"),
+    );
+    expect(scripts).toEqual(
+      expect.arrayContaining([
+        "workflow-runtime.mjs",
+        "workflow-state.mjs",
+        "workflow-guard.mjs",
+        "workflow-handoff.mjs",
+        "badger-plan.mjs",
+        "badger-check.mjs",
+        "badger-hook-guard.mjs",
+      ]),
+    );
+    expect(scripts).not.toEqual(
+      expect.arrayContaining([
+        "comet-plan.mjs",
+        "comet-check.mjs",
+        "comet-hook-guard.mjs",
+      ]),
+    );
+    const hook = await fs.readFile(
+      path.join(generated.packageRoot, "scripts", "badger-hook-guard.mjs"),
+      "utf8",
+    );
+    expect(hook).not.toMatch(/\b(?:Classic|Native)\b/u);
+    const lanes = JSON.parse(
+      await fs.readFile(
+        path.join(generated.packageRoot, "reference", "authoring-lanes.json"),
+        "utf8",
+      ),
+    ) as { controlPlane: { scripts: Array<Record<string, string>> } };
+    expect(lanes.controlPlane.scripts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "badger-plan",
+          kind: "plan",
+          path: "scripts/badger-plan.mjs",
+          claim: "script:comet-plan",
+        }),
+        expect.objectContaining({
+          id: "badger-check",
+          kind: "check",
+          path: "scripts/badger-check.mjs",
+          claim: "script:comet-check",
+        }),
+        expect.objectContaining({
+          id: "badger-hook-guard",
+          kind: "hook-guard",
+          path: "scripts/badger-hook-guard.mjs",
+          claim: "script:comet-hook-guard",
+        }),
+      ]),
+    );
+    expect(generated.inventory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "reference/package-inventory.json",
+          owner: "auto",
+        }),
+      ]),
+    );
+    await expect(
+      loadSkillPackage(generated.packageRoot),
+    ).resolves.toMatchObject({
+      definition: {
+        apiVersion: "badger/v1alpha1",
+        metadata: { name: state.name },
+        orchestration: { mode: "deterministic" },
+      },
+    });
+    const packageDefinition = await loadSkillPackage(generated.packageRoot);
+    expect(packageDefinition.definition.orchestration.steps).toBeUndefined();
+  });
+
+  it("reassembles identical inputs into the same package inventory and hash", async () => {
+    const { state } = await createScaffold();
+    const completed = await runManualAuthoringFixture({ state });
+    const first = await assemblePackage(completed);
+    const firstHash = first.authoring?.assembledPackageHash;
+    const firstInventory = first.generated?.inventory;
+
+    const second = await assemblePackage(first);
+
+    expect(second.authoring?.assembledPackageHash).toBe(firstHash);
+    expect(second.generated?.inventory).toEqual(firstInventory);
+    expect(firstHash).toBe(await hashDirectory(first.generated!.packageRoot));
+  });
+
+  it("runs the assembled Badger plan and completeness scripts", async () => {
+    const { state } = await createScaffold();
+    await runManualAuthoringFixture({ state });
+    const assembled = await assemblePackage(state);
+    const packageRoot = assembled.generated!.packageRoot;
+
+    const plan = await execFileAsync(
+      process.execPath,
+      [path.join(packageRoot, "scripts", "badger-plan.mjs")],
+      { cwd: packageRoot },
+    );
+    expect(JSON.parse(plan.stdout)).toMatchObject({
+      kind: "badger-workflow-plan",
+      workflow: "prepared-workflow",
+    });
+    const check = await execFileAsync(
+      process.execPath,
+      [path.join(packageRoot, "scripts", "badger-check.mjs")],
+      { cwd: packageRoot },
+    );
+    expect(check.stdout).toContain("badger-package-check-ok");
+    await execFileAsync(
+      process.execPath,
+      [path.join(packageRoot, "scripts", "workflow-state.mjs"), "init"],
+      { cwd: packageRoot },
+    );
+    const hook = await execFileAsync(
+      process.execPath,
+      [
+        path.join(packageRoot, "scripts", "badger-hook-guard.mjs"),
+        "before_tool",
+      ],
+      {
+        cwd: packageRoot,
+        env: { ...process.env, BADGER_RUN_ROOT: packageRoot },
+      },
+    );
+    expect(hook.stdout).toContain("workflow-hook-guard-ok");
+  });
+
+  it("rejects Auto-zone drift without changing the package or session", async () => {
+    const { state } = await createScaffold();
+    await runManualAuthoringFixture({ state });
+    const entryPath = path.join(state.generated!.packageRoot, "SKILL.md");
+    const beforeSession = await fs.readFile(
+      state.authoring!.statePath!,
+      "utf8",
+    );
+    const beforePackage = await fs.readFile(entryPath, "utf8");
+    await fs.writeFile(
+      entryPath,
+      beforePackage.replace(
+        "## Runtime Semantics",
+        "## Runtime Semantics\n\nUnapproved runtime authority.",
+      ),
+    );
+
+    await expect(assemblePackage(state)).rejects.toThrow(
+      /Auto-zone file changed/iu,
+    );
+
+    expect(await fs.readFile(entryPath, "utf8")).not.toBe(beforePackage);
+    expect(await fs.readFile(state.authoring!.statePath!, "utf8")).toBe(
+      beforeSession,
+    );
+  });
+
+  it("rejects stale authored artifacts without changing the last package", async () => {
+    const { state } = await createScaffold();
+    await runManualAuthoringFixture({ state });
+    const record = JSON.parse(
+      await fs.readFile(
+        path.join(state.authoring!.recordsPath, "workflow-entry.json"),
+        "utf8",
+      ),
+    ) as { artifacts: Array<{ contentPath: string }> };
+    const artifactPath = record.artifacts[0]!.contentPath;
+    const beforeSession = await fs.readFile(
+      state.authoring!.statePath!,
+      "utf8",
+    );
+    const beforePackage = await fs.readFile(
+      path.join(state.generated!.packageRoot, "SKILL.md"),
+      "utf8",
+    );
+    await fs.appendFile(artifactPath, "\nchanged after acceptance\n");
+
+    await expect(assemblePackage(state)).rejects.toThrow(/stale/iu);
+
+    expect(
+      await fs.readFile(
+        path.join(state.generated!.packageRoot, "SKILL.md"),
+        "utf8",
+      ),
+    ).toBe(beforePackage);
+    expect(await fs.readFile(state.authoring!.statePath!, "utf8")).toBe(
+      beforeSession,
+    );
+  });
+
+  it("rejects undeclared executable commands in authored content", async () => {
+    const { state } = await createScaffold();
+    await runManualAuthoringFixture({ state });
+    const before = await fs.readFile(state.authoring!.statePath!, "utf8");
+
+    await expect(
+      recordAuthoring({
+        state,
+        lane: "workflow-entry",
+        record: {
+          status: "DONE",
+          claims: [
+            {
+              id: "workflow-entry",
+              status: "SUPPORTED",
+              evidence: ["entry evidence"],
+            },
+          ],
+          artifacts: [
+            {
+              id: "SKILL.md",
+              path: "SKILL.md",
+              present: true,
+              content: "Use `rm -rf generated` before continuing.",
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow(/undeclared inline command/iu);
+
+    expect(await fs.readFile(state.authoring!.statePath!, "utf8")).toBe(before);
+  });
+
+  it("rejects common placeholders while allowing ordinary Node references", async () => {
+    const { state } = await createScaffold();
+    await runManualAuthoringFixture({ state });
+
+    await expect(
+      recordAuthoring({
+        state,
+        lane: "workflow-entry",
+        record: {
+          status: "DONE",
+          claims: [
+            {
+              id: "workflow-entry",
+              status: "SUPPORTED",
+              evidence: ["entry evidence"],
+            },
+          ],
+          artifacts: [
+            {
+              id: "SKILL.md",
+              path: "SKILL.md",
+              present: true,
+              content:
+                "Use the `Node` identified by state. TODO: add recovery guidance.",
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow(/placeholder/iu);
+
+    await expect(
+      recordAuthoring({
+        state,
+        lane: "workflow-entry",
+        record: {
+          status: "DONE",
+          claims: [
+            {
+              id: "workflow-entry",
+              status: "SUPPORTED",
+              evidence: ["entry evidence"],
+            },
+          ],
+          artifacts: [
+            {
+              id: "SKILL.md",
+              path: "SKILL.md",
+              present: true,
+              content: "Use the `Node` identified by state.",
+            },
+          ],
+        },
+      }),
+    ).resolves.toMatchObject({ lane: "workflow-entry", status: "DONE" });
   });
 });
 

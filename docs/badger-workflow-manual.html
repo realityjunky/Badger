@@ -261,11 +261,11 @@ p{max-width:79ch;margin:0 0 15px}
     <section class="section" id="section-2">
       <p class="section-number">SECTION 02</p>
       <h2>Architecture: current Badger plus integrated authoring</h2>
-      <p class="lede">This section separates package authoring from generated-workflow execution, then zooms into the current runtime seam and a concrete domain contract. The manual distinguishes delivered Badger behavior, the planned authoring restoration, and future platform or dashboard adapters.</p>
+      <p class="lede">This section separates package authoring from generated-workflow execution, then zooms into the current runtime seam and a concrete domain contract. The manual distinguishes delivered Badger behavior, its integrated authoring lifecycle, and future platform or dashboard adapters.</p>
       <div class="callout warning"><strong>Reading rule.</strong> The authoring plane is a package-construction workflow inside Badger, not a second execution runtime. The current WorkflowRuntime remains the authority for generated Runs; platform and dashboard behavior remains future work.</div>
       <table class="data-table"><thead><tr><th>Boundary</th><th>What it means in this manual</th><th>Evidence status</th></tr></thead><tbody>
         <tr><td>Current foundation</td><td>Skill Runtime, Creator and workflow-kernel foundations, generated adapters, public WorkflowRuntime operations, branches, decisions, Cycles, artifact versions, structured findings, and certified durability capabilities.</td><td><span class="tag current">Delivered evidence</span></td></tr>
-        <tr><td>Authoring restoration target</td><td>An integrated six-lane Authoring Protocol, hash-bound lane evidence, Auto-zone/Authored-zone assembly, authoring review, and a readiness gate joined to the existing deterministic runtime evaluation.</td><td><span class="tag target">Target design</span></td></tr>
+        <tr><td>Integrated authoring</td><td>The six-lane Authoring Protocol, hash-bound lane evidence, Auto-zone/Authored-zone assembly, authoring review, and a readiness gate joined to deterministic runtime evaluation.</td><td><span class="tag current">Delivered evidence</span></td></tr>
         <tr><td>Explicitly outside this manual’s claim</td><td>Classic or Native policy, biological execution, platform and dashboard adapters, automatic external-provider authentication, or any protected raw-data-derived fixture.</td><td><span class="tag boundary">Excluded</span></td></tr>
       </tbody></table>
 
@@ -599,7 +599,7 @@ flowchart TB
       <p class="section-number">SECTION 04</p>
       <h2>Codebase guide: learn Badger as a standalone system</h2>
       <p class="lede">This section changes viewpoint: stop reading the package as a roadmap and read it as a small TypeScript product you could have designed. Start with the user-visible command path, then inspect the data contracts, module seams, durable files, and evidence gates that make each step trustworthy.</p>
-      <div class="callout"><strong>Scope and reading rule.</strong> Treat <code>@rpamis/badger</code> as a standalone design. It is an ESM Node&nbsp;&gt;=22 library and CLI; its source of truth is under <code>src/</code>, its generated runtime assets are projections under <code>assets/runtime/</code>, Creator state lives under <code>.badger/</code>, planned authoring sessions live under <code>.badger/authoring/</code>, and a WorkflowRuntime Run stores its own records under <code>.badger/runs/</code>. Follow exports and persisted identities rather than inferring authority from a filename.</div>
+      <div class="callout"><strong>Scope and reading rule.</strong> Treat <code>@rpamis/badger</code> as a standalone design. It is an ESM Node&nbsp;&gt;=22 library and CLI; its source of truth is under <code>src/</code>, its generated runtime assets are projections under <code>assets/runtime/</code>, Creator state lives under <code>.badger/</code>, authoring sessions live under <code>.badger/authoring/</code>, and a WorkflowRuntime Run stores its own records under <code>.badger/runs/</code>. Follow exports and persisted identities rather than inferring authority from a filename.</div>
 
       <h3 id="private-user-path">4.1 The user-to-code path</h3>
       <p>The first useful narrative is the safe factory journey. A user begins with a goal and a plan, inspects what the project can resolve, previews a normalized protocol, confirms the write, creates a deterministic scaffold, completes the authoring lanes, assembles the package, evaluates its current hash, obtains separate authoring and publication review evidence, and only then publishes or previews distribution. The same package can subsequently be used by the generated adapters or the public WorkflowRuntime API to create a durable Run.</p>
@@ -607,8 +607,8 @@ flowchart TB
         <div class="route-item"><div><b>Inspect context</b><p><code>guide</code> reads preferences and resumable Creator state; <code>candidates</code> resolves real Skill roots, descriptions, references, scripts, and content hashes.</p></div></div>
         <div class="route-item"><div><b>Preview meaning</b><p><code>propose</code> loads the plan, normalizes the Workflow Protocol, and reports candidates, blockers, warnings, and the plan hash without creating Creator state.</p></div></div>
         <div class="route-item"><div><b>Confirm the draft</b><p><code>init --confirm</code> is the explicit write gate. It persists a hash-bound <code>CreatorState</code> with status <code>draft</code> and creates the draft directory.</p></div></div>
-        <div class="route-item"><div><b>Scaffold and author</b><p><code>generate</code> creates the deterministic control-plane scaffold; the planned <code>authoring-plan</code>, lane handoffs, and <code>authoring-record</code> flow supply the semantic content and review evidence. A scaffold is not a ready package.</p></div></div>
-        <div class="route-item"><div><b>Assemble and evaluate</b><p>The planned <code>assemble</code> step merges validated Authored zones with the Auto zone; <code>eval</code> then hashes that exact package and records route, entry, manifest, and WorkflowRuntime certification checks.</p></div></div>
+        <div class="route-item"><div><b>Scaffold and author</b><p><code>generate</code> creates the deterministic control-plane scaffold; the <code>authoring-plan</code>, lane handoffs, and <code>authoring-record</code> flow supply the semantic content and review evidence. A scaffold is not a ready package.</p></div></div>
+        <div class="route-item"><div><b>Assemble and evaluate</b><p>The <code>assemble</code> step stages a deterministic scaffold, merges validated Authored zones with the Auto zone, and swaps the complete package into place; <code>eval</code> then hashes that exact package and records route, entry, manifest, and WorkflowRuntime certification checks.</p></div></div>
         <div class="route-item"><div><b>Review and approve</b><p><code>review</code> reports authoring, runtime, and publication readiness. A publication reviewer must explicitly approve the same current hash with <code>approve --reviewer &lt;id&gt; --confirm</code>.</p></div></div>
         <div class="route-item"><div><b>Publish or preview</b><p><code>publish --confirm</code> copies only an approved current-hash package into <code>.badger/published/</code>; <code>distribute</code> reports destination files and remains preview-only.</p></div></div>
       </div>
@@ -648,7 +648,7 @@ flowchart LR
       </tbody></table></div>
 
       <h3 id="private-user-guide">4.2 Use the tool as a user</h3>
-      <p>Run the Creator from <code>badger/</code> after building the package. Keep the project directory disposable while learning: the tool writes Creator records beneath that project, and it never needs the protected upstream checkout to create or evaluate a local package. The authoring commands shown below are the planned integrated seam; until that upgrade lands, the current CLI stops after deterministic generation.</p>
+      <p>Run the Creator from <code>badger/</code> after building the package. Keep the project directory disposable while learning: the tool writes Creator records beneath that project, and it never needs the protected upstream checkout to create or evaluate a local package. The authoring commands shown below complete the local authoring seam before evaluation and publication.</p>
       <pre class="code-block"><span class="comment"># 1. Discover preferences and resumable state</span>
 node bin/badger.js guide --project ./demo --json
 node bin/badger.js candidates --project ./demo --json
@@ -660,7 +660,7 @@ node bin/badger.js propose ./plans/example.json --project ./demo --json
 node bin/badger.js init ./plans/example.json --project ./demo --confirm --json
 node bin/badger.js generate example-workflow --project ./demo --json
 
-<span class="comment"># 4. Planned authoring lifecycle (target architecture)</span>
+<span class="comment"># 4. Complete the authoring lifecycle</span>
 node bin/badger.js authoring-plan example-workflow --project ./demo --depth quick --json
 node bin/badger.js authoring-status example-workflow --project ./demo --json
 node bin/badger.js authoring-record example-workflow --project ./demo --lane script --file ./reports/script.json --json
@@ -679,7 +679,7 @@ node bin/badger.js distribute example-workflow --project ./demo --destination ./
         <tr><td><code>propose</code></td><td>Plan JSON and resolved Skills.</td><td>Normalized protocol, blockers, warnings, and plan hash.</td><td>Read the entire proposal before confirming.</td></tr>
         <tr><td><code>init</code></td><td>Plan and proposal again.</td><td><code>.badger/states/&lt;name&gt;.json</code> and draft directory.</td><td>Requires <code>--confirm</code>; rejects stale proposal hashes.</td></tr>
         <tr><td><code>generate</code></td><td>Persisted Creator state and plan.</td><td>Deterministic scaffold, authoring-pending markers, references, Node Skills, and runtime scripts.</td><td>It does not imply semantic authoring is complete.</td></tr>
-        <tr><td><code>authoring-plan</code> / <code>authoring-record</code> / <code>assemble</code></td><td>Authoring session, lane briefs, and validated content leaves.</td><td>Lane evidence, authored material, and assembled package.</td><td>Planned authoring integration; records must match current inputs.</td></tr>
+        <tr><td><code>authoring-plan</code> / <code>authoring-record</code> / <code>assemble</code></td><td>Authoring session, lane briefs, and validated content leaves.</td><td>Lane evidence, authored material, and assembled package.</td><td>Records must match current inputs; assembly is a protected staged swap.</td></tr>
         <tr><td><code>eval</code> / <code>review</code></td><td>Assembled package and authoring/runtime evidence.</td><td>Current-hash eval report or structured readiness result.</td><td>Re-run after any package or authored-content change.</td></tr>
         <tr><td><code>approve</code> / <code>publish</code></td><td>Readiness and current-hash state.</td><td>Reviewer or published copy; both are gated mutations.</td><td>Approval must name a reviewer; publication needs confirmation.</td></tr>
         <tr><td><code>distribute</code></td><td>Publishable package inventory.</td><td>Destination file list with <code>preview: true</code>.</td><td>It does not install or copy files.</td></tr>
@@ -703,6 +703,7 @@ node bin/badger.js distribute example-workflow --project ./demo --destination ./
 ├── reference/recovery.md
 ├── reference/skill-review.md
 ├── reference/eval-manifest.json
+├── reference/package-inventory.json
 ├── badger/eval.yaml
 ├── &lt;workflow-node&gt;/SKILL.md
 ├── scripts/workflow-{runtime,state,guard,handoff}.mjs
@@ -755,7 +756,7 @@ node bin/badger.js distribute example-workflow --project ./demo --destination ./
         <tr><td><code>ActionType</code></td><td><code>invoke_skill</code> · <code>call_tool</code> · <code>handoff</code> · <code>ask_user</code> · <code>checkpoint</code></td><td>The pending unit the host must perform or answer; decision Nodes compile to <code>ask_user</code>.</td></tr>
         <tr><td><code>OrchestrationMode</code></td><td><code>deterministic</code> · <code>adaptive</code></td><td>Whether steps and route selection are declared and reproducible, or candidate choice is delegated within guardrails.</td></tr>
         <tr><td><code>CreatorStatus</code></td><td><code>draft</code> → <code>generated</code> → <code>evaluated</code> → <code>review-approved</code> → <code>published</code></td><td>The current hash-bound package lifecycle; the authoring integration will expose lane readiness inside this lifecycle without confusing it with a Run status.</td></tr>
-        <tr><td><code>AuthoringStatus</code></td><td><code>pending</code> · <code>authoring</code> · <code>authored</code> · <code>assembled</code> · <code>blocked</code></td><td>The planned package-construction state; it tracks lane evidence and authored content separately from Creator publication state and Runtime Run state.</td></tr>
+        <tr><td><code>AuthoringStatus</code></td><td><code>pending</code> · <code>authoring</code> · <code>authored</code> · <code>assembled</code> · <code>blocked</code></td><td>The package-construction state; it tracks lane evidence and authored content separately from Creator publication state and Runtime Run state.</td></tr>
         <tr><td><code>RunStatus</code></td><td><code>running</code> · <code>waiting</code> · <code>completed</code> · <code>failed</code></td><td>Persisted Engine state; <code>waiting</code> means an action is pending, not that the process is alive.</td></tr>
         <tr><td>Continuation disposition</td><td><code>continue</code> · <code>await-user</code> · <code>blocked</code> · <code>done</code></td><td>The host-facing answer: machine work, a persisted decision, an unresolved stop/repair condition, or terminal state.</td></tr>
         <tr><td><code>WorkflowArtifactLifetime</code></td><td><code>attempt</code> · <code>cycle</code> · <code>run</code></td><td>How long an accepted artifact version remains the selected scope; omitted lifetime defaults to <code>attempt</code>.</td></tr>
@@ -831,7 +832,7 @@ flowchart LR
         <article class="card"><h4><code>workflow-kernel/hash.ts</code></h4><p>Produces stable fingerprints over sorted regular files and supported links so source evidence can be compared without relying on directory order.</p></article>
         <article class="card"><h4><code>workflow/contract.ts</code></h4><p>Validates Node responsibilities, bindings, schemas, decision definitions, routes, and cycles; then normalizes defaults, edges, capabilities, state shape, and evaluation metadata.</p></article>
         <article class="card"><h4><code>workflow-kernel/foundation.ts</code></h4><p>Owns the shared plan/proposal/state flow. The standalone adapter fixes the namespace to <code>.badger</code> while preserving the contract semantics.</p></article>
-        <article class="card"><h4><code>authoring/*</code> + <code>factory/*</code></h4><p>The planned authoring modules validate lane plans, records, claims, content leaves, and review; factory modules retain proposal, state, scaffold, and deterministic assembly responsibilities. Neither authored prose nor generated adapters becomes a runtime authority.</p></article>
+        <article class="card"><h4><code>authoring/*</code> + <code>factory/*</code></h4><p>The authoring modules validate lane plans, records, claims, content leaves, and review; factory modules retain proposal, state, scaffold, and deterministic assembly responsibilities. Neither authored prose nor generated adapters becomes a runtime authority.</p></article>
         <article class="card"><h4><code>src/cli.ts</code></h4><p>Maps command-line arguments to those seams and emits JSON or formatted values. It should remain orchestration glue, not a second implementation of normalization or lifecycle policy.</p></article>
       </div>
 
@@ -904,9 +905,9 @@ flowchart LR
         <p><strong>Illustration.</strong> Imagine package hash <code>H1</code> has complete authoring evidence, passes runtime evaluation and certification, and receives publication approval. Publication may then copy exactly <code>H1</code> into the published area. If an authored or generated file changes, the package becomes <code>H2</code>; the old authoring review, evaluation, and publication approval no longer prove readiness, so the affected evidence must run again. A failed parity or negative-case check keeps the package from crossing the same gate even when the happy-path command succeeds.</p>
       </div>
       <div class="two-col private-evidence-cards">
-        <article class="card"><h4>Authoring readiness</h4><p>The planned <code>authoring/*</code> seam checks lane dependencies, claims, content leaves, source evidence, and the authoring review before assembly can become publishable.</p></article>
+        <article class="card"><h4>Authoring readiness</h4><p>The <code>authoring/*</code> seam checks lane dependencies, claims, content leaves, source evidence, and the authoring review before assembly can become publishable.</p></article>
         <article class="card"><h4>Current-hash evaluation</h4><p><code>eval/run.ts</code> hashes the assembled tree, checks the entry Skill and <code>workflow-kernel</code> kind, verifies route and entry order, confirms the runtime manifest, and stores WorkflowRuntime certification evidence against that hash.</p></article>
-        <article class="card"><h4>Readiness and publication</h4><p><code>publish/lifecycle.ts</code> will combine unresolved candidates, authoring, evaluation, runtime, and publication evidence. Publication copies only an approved current-hash package; distribution remains a file-list preview.</p></article>
+        <article class="card"><h4>Readiness and publication</h4><p><code>publish/lifecycle.ts</code> combines unresolved candidates, authoring, evaluation, runtime, and publication evidence. Publication copies only an approved current-hash package; distribution remains a file-list preview.</p></article>
         <article class="card"><h4>Creator differential</h4><p><code>differential/</code> compares candidate status, source/reference inventory, source hashes, normalized protocol, generated artifact inventory, and initial readiness between official and standalone observations in disposable projects.</p></article>
         <article class="card"><h4>Engine differential</h4><p><code>differential/engine/</code> characterizes the pinned official Engine and compares Run state, actions, artifacts, trajectories, checkpoints, snapshots, evals, and classified errors. Semantic mismatches block certification.</p></article>
       </div>
@@ -922,7 +923,7 @@ flowchart LR
       </tbody></table></div>
       <h4 class="private-subheading" id="private-test-layers">Test layers that mirror the architecture</h4>
       <div class="private-table-wrap"><table class="data-table private-test-table"><thead><tr><th>Layer</th><th>Representative tests</th><th>Question answered</th></tr></thead><tbody>
-        <tr><td>Authoring, contract, and factory</td><td>Planned authoring tests plus <code>workflow-contract.test.ts</code>, <code>workflow-kernel-foundation.test.ts</code>, and <code>lifecycle.test.ts</code></td><td>Are lane outputs validated, authored content bounded, plans normalized, blockers explicit, state transitions hash-bound, and generated artifacts isolated?</td></tr>
+        <tr><td>Authoring, contract, and factory</td><td>Authoring tests plus <code>workflow-contract.test.ts</code>, <code>workflow-kernel-foundation.test.ts</code>, and <code>lifecycle.test.ts</code></td><td>Are lane outputs validated, authored content bounded, plans normalized, blockers explicit, state transitions hash-bound, and generated artifacts isolated?</td></tr>
         <tr><td>Skill Runtime</td><td><code>skill-load.test.ts</code>, <code>skill-validate.test.ts</code>, <code>skill-snapshot.test.ts</code></td><td>Are package documents valid, references safe, and snapshots immutable and content-addressed?</td></tr>
         <tr><td>Engine substrate</td><td><code>engine-loop.test.ts</code>, <code>engine-runtime.test.ts</code>, <code>engine-run-store.test.ts</code>, <code>engine-foundation.integration.test.ts</code></td><td>Do actions, retries, outcomes, persistence, evals, and recovery behave consistently?</td></tr>
         <tr><td>WorkflowRuntime</td><td><code>workflow-runtime.test.ts</code>, <code>workflow-runtime-branch-attempt.test.ts</code>, <code>workflow-runtime-cycle.test.ts</code>, <code>workflow-runtime-decision.test.ts</code></td><td>Are route identity, decisions, cycles, Attempts, artifacts, and continuations coherent?</td></tr>

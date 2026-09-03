@@ -5,16 +5,26 @@ import {
   atomicWrite,
   hashDirectory,
   isWithin,
+  listFiles,
+  packageRelativePath,
   sha256,
   stableValue,
 } from "../util.js";
 import { readState, writeState } from "../factory/state.js";
+import { readPlan } from "../factory/proposal.js";
 import {
+  generatePackage,
+  inventoryPackage,
+  writePackageInventory,
+} from "../factory/generate.js";
+import {
+  AUTHORING_CONTROL_PLANE_SCRIPTS,
+  AUTHORING_DETERMINISTIC_BACKBONE,
   AUTHORING_LANE_DEPENDENCIES,
   AUTHORING_LANE_IDS,
   AUTHORING_PROTOCOL_HASH,
 } from "./protocol.js";
-import { validateAuthoringPlan } from "./plan.js";
+import { deriveAuthoringPlan, validateAuthoringPlan } from "./plan.js";
 import type {
   AuthoringArtifactEvidence,
   AuthoringArtifactInput,
@@ -39,7 +49,7 @@ import type {
 } from "./types.js";
 import type { GeneratedPackage } from "../factory/generate.js";
 
-export const AUTHORING_GENERATOR_CONTRACT_VERSION = 1 as const;
+export const AUTHORING_GENERATOR_CONTRACT_VERSION = 2 as const;
 const MAX_SUMMARY_BYTES = 8 * 1024;
 const MAX_ARTIFACT_BYTES = 64 * 1024;
 const MAX_RECORD_BYTES = 256 * 1024;
@@ -139,7 +149,10 @@ function recordFile(state: CreatorState, lane: AuthoringLaneId): string {
 function packageRoot(state: CreatorState): string {
   if (!state.generated?.packageRoot)
     throw new Error("Generate the workflow scaffold before authoring");
-  return path.resolve(state.generated.packageRoot);
+  const root = path.resolve(state.generated.packageRoot);
+  if (!isWithin(state.projectRoot, root))
+    throw new Error("Generated package must remain inside the project root");
+  return root;
 }
 
 function packageLeafPath(root: string, leaf: string): string {
@@ -364,6 +377,265 @@ function safeRelativePath(value: unknown): value is string {
     !normalized.startsWith("../../") &&
     !normalized.includes("//")
   );
+}
+
+const SHELL_LANGUAGES = new Set([
+  "bash",
+  "sh",
+  "shell",
+  "zsh",
+  "fish",
+  "powershell",
+  "pwsh",
+  "cmd",
+]);
+
+function authoredHeading(artifactPath: string): string | undefined {
+  if (artifactPath === "SKILL.md") return "Decision Core";
+  if (artifactPath.endsWith("/SKILL.md")) return "Guidance";
+  return undefined;
+}
+
+function startsWithFrontmatter(content: string): boolean {
+  return /^\uFEFF?---[ \t]*(?:\r?\n|$)/u.test(content);
+}
+
+function markdownHeadings(
+  content: string,
+): Array<{ level: number; title: string }> {
+  const headings: Array<{ level: number; title: string }> = [];
+  let fenceCharacter: "`" | "~" | undefined;
+  let fenceLength = 0;
+  for (const line of content.split(/\r?\n/u)) {
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+    if (fence) {
+      const character = fence[1]![0] as "`" | "~";
+      if (!fenceCharacter) {
+        fenceCharacter = character;
+        fenceLength = fence[1]!.length;
+      } else if (
+        character === fenceCharacter &&
+        fence[1]!.length >= fenceLength
+      ) {
+        fenceCharacter = undefined;
+        fenceLength = 0;
+      }
+      continue;
+    }
+    if (fenceCharacter) continue;
+    const heading = /^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/u.exec(line);
+    if (heading) {
+      headings.push({
+        level: heading[1]!.length,
+        title: heading[2]!.trim(),
+      });
+    }
+  }
+  return headings;
+}
+
+function fencedCodeBlocks(content: string): Array<{
+  language: string;
+  body: string;
+}> {
+  const blocks: Array<{ language: string; body: string }> = [];
+  let language: string | undefined;
+  let fenceCharacter: "`" | "~" | undefined;
+  let fenceLength = 0;
+  let body: string[] = [];
+  for (const line of content.split(/\r?\n/u)) {
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+    if (fence) {
+      const character = fence[1]![0] as "`" | "~";
+      if (!fenceCharacter) {
+        fenceCharacter = character;
+        fenceLength = fence[1]!.length;
+        language =
+          fence[2]!
+            .trim()
+            .split(/[ \t]+/u)[0]
+            ?.toLowerCase() || "";
+        body = [];
+      } else if (
+        character === fenceCharacter &&
+        fence[1]!.length >= fenceLength
+      ) {
+        blocks.push({ language: language ?? "", body: body.join("\n") });
+        language = undefined;
+        fenceCharacter = undefined;
+        fenceLength = 0;
+        body = [];
+      }
+      continue;
+    }
+    if (fenceCharacter) body.push(line);
+  }
+  return blocks;
+}
+
+function declaredRuntimeCommand(line: string): boolean {
+  const normalized = line.replace(/^\s*(?:[-*]|\$|>)\s*/u, "").trim();
+  return /^node scripts\/(?:workflow-state|workflow-guard|workflow-handoff|badger-plan|badger-check|badger-hook-guard)\.mjs(?:\s|$)/u.test(
+    normalized,
+  );
+}
+
+const EXECUTABLE_COMMAND =
+  /^(?:[-*]\s*)?(?:rm|rmdir|del|erase|mv|cp|install|curl|wget|sudo|chmod|chown|docker|podman|npm|npx|git|python|perl|ruby|make|tee|bash|sh|zsh|fish|pwsh|powershell)\b/iu;
+const NODE_COMMAND = /^(?:[-*]\s*)?node\s+(?:-[A-Za-z]|scripts\/|\S+)/u;
+const RUNTIME_CODE =
+  /(?:child_process|execSync|spawnSync|process\.exit|<script\b|javascript:)/iu;
+
+function isExecutableCommand(value: string): boolean {
+  const normalized = value.replace(/^\s*(?:[-*]|\$|>)\s*/u, "").trim();
+  return EXECUTABLE_COMMAND.test(normalized) || NODE_COMMAND.test(normalized);
+}
+
+function placeholderFinding(
+  content: string,
+  artifactPath: string,
+): string | undefined {
+  const patterns = [
+    /\b(?:TODO|TBD|FIXME|PLACEHOLDER)\b/iu,
+    /\b(?:not yet authored|to be completed|fill in|insert (?:text|content|guidance))\b/iu,
+    /\{\{[^}\r\n]{1,256}\}\}|\$\{[^}\r\n]{1,256}\}/u,
+    /\[[ \t]*(?:TODO|TBD|FIXME|INSERT|PLACEHOLDER)[^\]\r\n]*\]/iu,
+  ];
+  return patterns.some((pattern) => pattern.test(content))
+    ? `authored content contains a placeholder: ${artifactPath}`
+    : undefined;
+}
+
+function executableContentFindings(
+  content: string,
+  artifactPath: string,
+): string[] {
+  const findings: string[] = [];
+  for (const block of fencedCodeBlocks(content)) {
+    const code = block.body.trim();
+    if (!code) continue;
+    const lines = block.body
+      .split(/\r?\n/u)
+      .map((line) => line.replace(/^\s*#.*$/u, "").trim())
+      .filter(Boolean);
+    const executableLanguage = new Set([
+      "javascript",
+      "js",
+      "typescript",
+      "ts",
+      "jsx",
+      "tsx",
+    ]).has(block.language);
+    if (
+      SHELL_LANGUAGES.has(block.language) ||
+      executableLanguage ||
+      lines.some((line) => isExecutableCommand(line)) ||
+      RUNTIME_CODE.test(code)
+    ) {
+      if (
+        executableLanguage ||
+        !SHELL_LANGUAGES.has(block.language) ||
+        lines.some(
+          (line) =>
+            !declaredRuntimeCommand(line) || /[;&|<>`]|\$\(/u.test(line),
+        )
+      )
+        findings.push(
+          `authored content contains an undeclared executable command: ${artifactPath}`,
+        );
+    }
+  }
+  let inFence = false;
+  for (const line of content.split(/\r?\n/u)) {
+    if (/^ {0,3}(`{3,}|~{3,})/u.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence && isExecutableCommand(line) && !declaredRuntimeCommand(line))
+      findings.push(
+        `authored content contains an undeclared executable command: ${artifactPath}`,
+      );
+  }
+  for (const match of content.matchAll(/(?<!`)`([^`\n]+)`(?!`)/gu)) {
+    const code = match[1]!.trim();
+    if (
+      (isExecutableCommand(code) && !declaredRuntimeCommand(code)) ||
+      RUNTIME_CODE.test(code)
+    )
+      findings.push(
+        `authored content contains an undeclared inline command: ${artifactPath}`,
+      );
+  }
+  if (
+    /^\s*#!\s*\/|\b(?:child_process|execSync|spawnSync|process\.exit)\b/imu.test(
+      content,
+    )
+  )
+    findings.push(
+      `authored content contains executable runtime code: ${artifactPath}`,
+    );
+  return findings;
+}
+
+function authoredContentFindings(
+  content: string,
+  artifactPath: string,
+): string[] {
+  const findings: string[] = [];
+  if (Buffer.byteLength(content, "utf8") > MAX_ARTIFACT_BYTES)
+    findings.push(`authored content is too large: ${artifactPath}`);
+  if (!content.trim())
+    findings.push(`authored content is empty: ${artifactPath}`);
+  if (content.includes("AUTHORING PENDING"))
+    findings.push(
+      `authored content contains a pending marker: ${artifactPath}`,
+    );
+  const placeholder = placeholderFinding(content, artifactPath);
+  if (placeholder) findings.push(placeholder);
+  if (startsWithFrontmatter(content))
+    findings.push(
+      `authored content cannot replace package frontmatter: ${artifactPath}`,
+    );
+  const headings = markdownHeadings(content);
+  const seenHeadings = new Set<string>();
+  for (const heading of headings) {
+    const key = `${heading.level}:${heading.title.toLocaleLowerCase()}`;
+    if (seenHeadings.has(key))
+      findings.push(`duplicate authored section: ${heading.title}`);
+    seenHeadings.add(key);
+  }
+  const expectedHeading = authoredHeading(artifactPath);
+  if (expectedHeading) {
+    const levelTwoHeadings = headings.filter((heading) => heading.level === 2);
+    const expectedCount = levelTwoHeadings.filter(
+      (heading) =>
+        heading.title.toLocaleLowerCase() ===
+        expectedHeading.toLocaleLowerCase(),
+    ).length;
+    if (expectedCount > 1)
+      findings.push(`duplicate authored section: ${expectedHeading}`);
+    for (const heading of headings) {
+      if (heading.level === 1)
+        findings.push(
+          `authored ${artifactPath} cannot add a top-level heading`,
+        );
+      if (
+        heading.level === 2 &&
+        heading.title.toLocaleLowerCase() !==
+          expectedHeading.toLocaleLowerCase()
+      )
+        findings.push(
+          `authored ${artifactPath} cannot replace the generated ${heading.title} section`,
+        );
+    }
+  }
+  findings.push(...executableContentFindings(content, artifactPath));
+  return [...new Set(findings)];
+}
+
+function assertAuthoredContent(content: string, artifactPath: string): void {
+  const findings = authoredContentFindings(content, artifactPath);
+  if (findings.length) throw new Error(findings.join("; "));
 }
 
 function validateFindingList(value: unknown, label: string): string[] {
@@ -834,9 +1106,11 @@ function normalizedArtifact(
       Buffer.byteLength(result.content, "utf8") > MAX_ARTIFACT_BYTES ||
       !result.content.trim() ||
       result.content.includes("AUTHORING PENDING") ||
-      /^---\s*$/mu.test(result.content))
+      startsWithFrontmatter(result.content))
   )
     throw new Error(`${label}.content is invalid`);
+  if (result.content !== undefined)
+    assertAuthoredContent(result.content, String(result.path));
   if (
     result.content !== undefined &&
     result.contentHash !== undefined &&
@@ -1540,7 +1814,7 @@ async function materializeArtifact(
       throw new Error(
         `Authoring artifact contains a pending marker: ${input.path}`,
       );
-    if (/^---\s*$/mu.test(input.content))
+    if (startsWithFrontmatter(input.content))
       throw new Error(
         `Authoring artifact cannot replace package frontmatter: ${input.path}`,
       );
@@ -1587,7 +1861,7 @@ async function materializeArtifact(
       throw new Error(
         `Authoring artifact contains a pending marker: ${input.path}`,
       );
-    if (/^---\s*$/mu.test(suppliedContent))
+    if (startsWithFrontmatter(suppliedContent))
       throw new Error(
         `Authoring artifact cannot replace package frontmatter: ${input.path}`,
       );
@@ -1600,6 +1874,7 @@ async function materializeArtifact(
     );
     content = suppliedContent;
   }
+  if (content !== undefined) assertAuthoredContent(content, input.path);
   if (input.contentHash !== undefined && input.contentHash !== contentHash)
     throw new Error(
       `Authoring artifact hash does not match content: ${input.path}`,
@@ -1879,7 +2154,10 @@ function escapeRegExp(value: string): string {
 }
 
 function sectionBody(content: string, heading: string): string {
-  const headingPattern = new RegExp(`^## ${escapeRegExp(heading)}\\s*$`, "mu");
+  const headingPattern = new RegExp(
+    `^## ${escapeRegExp(heading)}[ \\t]*$`,
+    "mu",
+  );
   const match = headingPattern.exec(content);
   if (!match) return content.trim();
   const bodyStart = match.index + match[0].length;
@@ -1924,10 +2202,11 @@ async function readArtifactContent(
     throw new Error(
       `Authoring artifact contains a pending marker: ${artifact.path}`,
     );
-  if (/^---\s*$/mu.test(content))
+  if (startsWithFrontmatter(content))
     throw new Error(
       `Authoring artifact cannot replace package frontmatter: ${artifact.path}`,
     );
+  assertAuthoredContent(content, artifact.path);
   return content;
 }
 
@@ -1936,7 +2215,10 @@ function replaceSection(
   heading: string,
   authoredContent: string,
 ): string {
-  const headingPattern = new RegExp(`^## ${escapeRegExp(heading)}\\s*$`, "mu");
+  const headingPattern = new RegExp(
+    `^## ${escapeRegExp(heading)}[ \\t]*$`,
+    "mu",
+  );
   const match = headingPattern.exec(original);
   if (!match) throw new Error(`Generated package is missing ## ${heading}`);
   const bodyStart = match.index + match[0].length;
@@ -1962,8 +2244,30 @@ function authoringLanesDocument(
         sourceEvidenceHash: plan.sourceEvidenceHash,
         authoringInputHash: state.authoring?.authoringInputHash,
         status: "assembled",
+        dag: plan.dag,
+        deterministicBackbone: [...AUTHORING_DETERMINISTIC_BACKBONE],
+        controlPlane: {
+          authority: "Badger assembler",
+          scripts: AUTHORING_CONTROL_PLANE_SCRIPTS.map((script) => ({
+            ...script,
+          })),
+          distinction: {
+            plan: "badger-plan.mjs inspects the normalized WorkflowProtocol without mutating state.",
+            check:
+              "badger-check.mjs validates generated package completeness and assembled authoring status.",
+            hook: "badger-hook-guard.mjs enforces the active WorkflowRuntime hook boundary.",
+          },
+        },
         lanes: AUTHORING_LANE_IDS.map((lane) => ({
           id: lane,
+          dependencies: laneDefinition(plan, lane).dependencies,
+          claims: expectedClaims(laneDefinition(plan, lane)),
+          artifacts:
+            records[lane]?.artifacts.map((artifact) => ({
+              id: artifact.id,
+              path: artifact.path,
+              contentHash: artifact.contentHash ?? null,
+            })) ?? [],
           status: records[lane]?.status ?? "PENDING",
           authoringMaterialHash: records[lane]?.authoredMaterialHash ?? null,
         })),
@@ -1975,7 +2279,11 @@ function authoringLanesDocument(
   );
 }
 
-function compositionReport(plan: AuthoringPlan, state: CreatorState): string {
+function compositionReport(
+  plan: AuthoringPlan,
+  state: CreatorState,
+  records: Partial<Record<AuthoringLaneId, AuthoringRecord>> = {},
+): string {
   const selected = plan.sourceEvidence
     .map((candidate) => {
       const sources = candidate.sources
@@ -1984,6 +2292,14 @@ function compositionReport(plan: AuthoringPlan, state: CreatorState): string {
       return `### ${candidate.query}\n${sources || "- No source selected"}`;
     })
     .join("\n\n");
+  const laneEvidence = AUTHORING_LANE_IDS.map((laneId) => {
+    const lane = laneDefinition(plan, laneId);
+    const record = records[laneId];
+    const claims = record?.claims.map((claim) => claim.id).join(", ") || "none";
+    const artifacts =
+      record?.artifacts.map((artifact) => artifact.path).join(", ") || "none";
+    return `- ${laneId}: ${record?.status ?? "PENDING"}; claims=${claims}; artifacts=${artifacts}; required=${expectedClaims(lane).join(", ") || "none"}`;
+  }).join("\n");
   return `# Composition Report
 
 This deterministic report records the source and protocol identities used to assemble the package. It is audit evidence, not user guidance.
@@ -1992,6 +2308,11 @@ This deterministic report records the source and protocol identities used to ass
 - Workflow Protocol: \`${plan.workflowProtocolHash}\`
 - Source evidence: \`${plan.sourceEvidenceHash}\`
 - Authoring input: \`${state.authoring?.authoringInputHash ?? "(missing)"}\`
+- Authored material: \`${state.authoring?.authoredMaterialHash ?? "(pending)"}\`
+
+## Authoring Lanes
+
+${laneEvidence}
 
 ## Resolved Skills
 
@@ -2408,6 +2729,309 @@ export async function authoringReadiness(
 
 export const readAuthoringStatus = authoringReadiness;
 
+function authoredLeafPaths(plan: AuthoringPlan): string[] {
+  return plan.lanes.flatMap((lane) =>
+    lane.contentLeaves.map(packageRelativePath),
+  );
+}
+
+async function assertAuthoringPlanCurrent(
+  state: CreatorState,
+  plan: AuthoringPlan,
+): Promise<void> {
+  const proposal = state.confirmedProposal;
+  if (!proposal)
+    throw new Error("Confirmed workflow proposal is missing for assembly");
+  if (proposal.name !== plan.name)
+    throw new Error(
+      "Authoring plan workflow does not match the confirmed proposal",
+    );
+  if (proposal.planHash !== plan.planHash)
+    throw new Error("Authoring plan is stale for the confirmed Factory plan");
+  if (sha256(JSON.stringify(proposal.workflow)) !== plan.workflowProtocolHash)
+    throw new Error(
+      "Authoring plan is stale for the confirmed WorkflowProtocol",
+    );
+  const canonicalPlan = deriveAuthoringPlan({
+    proposal,
+    depth: plan.depth,
+  });
+  if (
+    JSON.stringify(stableValue(canonicalPlan)) !==
+    JSON.stringify(stableValue(plan))
+  )
+    throw new Error(
+      "Authoring plan is not the canonical plan for this proposal",
+    );
+  const factoryPlan = await readPlan(state.planPath);
+  if (sha256(JSON.stringify(factoryPlan)) !== proposal.planHash)
+    throw new Error("Factory plan input is stale for the confirmed proposal");
+}
+
+async function assertSourceEvidenceCurrent(
+  state: CreatorState,
+  plan: AuthoringPlan,
+): Promise<void> {
+  for (const candidate of plan.sourceEvidence) {
+    for (const source of candidate.sources) {
+      let currentHash: string;
+      try {
+        currentHash = await hashDirectory(source.root);
+      } catch (error) {
+        throw new Error(
+          `Authoring source evidence is unavailable for ${source.name}: ${String(error)}`,
+        );
+      }
+      if (currentHash !== source.hash)
+        throw new Error(`Authoring source evidence is stale: ${source.name}`);
+    }
+  }
+  if (state.generated?.sourceRoot && state.generated.sourceHash) {
+    const currentHash = await hashDirectory(state.generated.sourceRoot);
+    if (currentHash !== state.generated.sourceHash)
+      throw new Error(
+        "Upgrade source evidence is stale; regenerate the scaffold",
+      );
+  }
+}
+
+async function readPackageInventoryProjection(
+  root: string,
+  authoredPaths: readonly string[],
+  status: "scaffold" | "assembled",
+): Promise<string> {
+  const inventoryPath = path.join(root, "reference", "package-inventory.json");
+  const value = JSON.parse(await fs.readFile(inventoryPath, "utf8")) as {
+    schemaVersion: number;
+    kind: string;
+    status: string;
+    files: Array<{ path: string; owner: string }>;
+  };
+  const authored = new Set(authoredPaths);
+  return (
+    JSON.stringify(
+      {
+        ...value,
+        status,
+        files: value.files.map((file) => ({
+          ...file,
+          owner: file.path.startsWith("source/")
+            ? "source"
+            : authored.has(file.path)
+              ? "authored"
+              : "auto",
+        })),
+      },
+      null,
+      2,
+    ) + "\n"
+  );
+}
+
+async function assertCurrentPackageMatchesScaffold(options: {
+  currentRoot: string;
+  scaffoldRoot: string;
+  state: CreatorState;
+  plan: AuthoringPlan;
+  records: Partial<Record<AuthoringLaneId, AuthoringRecord>>;
+}): Promise<void> {
+  const currentStats = await fs.lstat(options.currentRoot);
+  if (!currentStats.isDirectory() || currentStats.isSymbolicLink())
+    throw new Error("Generated package root is not a regular directory");
+  const projectRoot = await fs.realpath(options.state.projectRoot);
+  const currentRoot = await fs.realpath(options.currentRoot);
+  if (!isWithin(projectRoot, currentRoot))
+    throw new Error("Generated package resolves outside the project root");
+  const actualPaths = await listFiles(options.currentRoot);
+  const expectedPaths = await listFiles(options.scaffoldRoot);
+  const actualSet = new Set(
+    actualPaths.map((value) => value.replaceAll("\\", "/")),
+  );
+  const expectedSet = new Set(
+    expectedPaths.map((value) => value.replaceAll("\\", "/")),
+  );
+  const extra = [...actualSet].filter((value) => !expectedSet.has(value));
+  const missing = [...expectedSet].filter((value) => !actualSet.has(value));
+  if (extra.length)
+    throw new Error(
+      `Generated package contains unauthorized files: ${extra.sort().join(", ")}`,
+    );
+  if (missing.length)
+    throw new Error(
+      `Generated package is missing deterministic files: ${missing.sort().join(", ")}`,
+    );
+
+  const authored = new Set(authoredLeafPaths(options.plan));
+  const assembled = options.state.authoring?.status === "assembled";
+  for (const relativePath of [...expectedSet].sort()) {
+    if (authored.has(relativePath) && !authoredHeading(relativePath)) continue;
+    const currentPath = path.join(options.currentRoot, relativePath);
+    const scaffoldPath = path.join(options.scaffoldRoot, relativePath);
+    let expected = await fs.readFile(scaffoldPath, "utf8");
+    if (assembled && relativePath === "reference/authoring-lanes.json")
+      expected = authoringLanesDocument(
+        options.plan,
+        options.state,
+        options.records,
+      );
+    if (assembled && relativePath === "reference/composition-report.md")
+      expected = compositionReport(
+        options.plan,
+        options.state,
+        options.records,
+      );
+    if (assembled && relativePath === "reference/package-inventory.json")
+      expected = await readPackageInventoryProjection(
+        options.scaffoldRoot,
+        [...authored],
+        "assembled",
+      );
+    const current = await fs.readFile(currentPath, "utf8");
+    const heading = authoredHeading(relativePath);
+    const comparable = heading
+      ? replaceSection(current, heading, "__AUTHORED_SECTION_IGNORED__")
+      : current;
+    const expectedComparable = heading
+      ? replaceSection(expected, heading, "__AUTHORED_SECTION_IGNORED__")
+      : expected;
+    if (comparable !== expectedComparable)
+      throw new Error(`Generated Auto-zone file changed: ${relativePath}`);
+  }
+}
+
+async function assertAssembledPackage(
+  root: string,
+  authoredPaths: readonly string[],
+): Promise<void> {
+  const paths = await listFiles(root);
+  const pathSet = new Set(paths.map((value) => value.replaceAll("\\", "/")));
+  for (const relativePath of AUTHORING_DETERMINISTIC_BACKBONE) {
+    if (!pathSet.has(relativePath))
+      throw new Error(
+        `Assembled package is missing deterministic file: ${relativePath}`,
+      );
+  }
+  const lanesPath = path.join(root, "reference", "authoring-lanes.json");
+  const lanes = JSON.parse(await fs.readFile(lanesPath, "utf8")) as {
+    status?: unknown;
+    deterministicBackbone?: unknown;
+    controlPlane?: { scripts?: unknown };
+  };
+  if (lanes.status !== "assembled")
+    throw new Error(
+      "Assembled authoring-lanes metadata is not marked assembled",
+    );
+  if (
+    JSON.stringify(lanes.deterministicBackbone) !==
+    JSON.stringify(AUTHORING_DETERMINISTIC_BACKBONE)
+  )
+    throw new Error("Assembled deterministic backbone metadata is invalid");
+  if (
+    JSON.stringify(lanes.controlPlane?.scripts ?? []) !==
+    JSON.stringify(AUTHORING_CONTROL_PLANE_SCRIPTS)
+  )
+    throw new Error("Assembled Badger control-plane mapping is invalid");
+  const inventory = JSON.parse(
+    await fs.readFile(
+      path.join(root, "reference", "package-inventory.json"),
+      "utf8",
+    ),
+  ) as { status?: unknown; files?: Array<{ path?: unknown }> };
+  if (inventory.status !== "assembled")
+    throw new Error("Assembled package inventory is not marked assembled");
+  const inventoryPaths = new Set(
+    (inventory.files ?? [])
+      .filter((file): file is { path: string } => typeof file.path === "string")
+      .map((file) => file.path),
+  );
+  if (
+    paths.some(
+      (relativePath) => !inventoryPaths.has(relativePath.replaceAll("\\", "/")),
+    ) ||
+    [...inventoryPaths].some((relativePath) => !pathSet.has(relativePath))
+  )
+    throw new Error(
+      "Assembled package inventory does not match the package tree",
+    );
+  for (const relativePath of authoredPaths) {
+    const content = await fs.readFile(path.join(root, relativePath), "utf8");
+    if (content.includes("AUTHORING PENDING"))
+      throw new Error(
+        `Assembled package contains a pending marker: ${relativePath}`,
+      );
+    const heading = authoredHeading(relativePath);
+    assertAuthoredContent(
+      heading ? sectionBody(content, heading) : content,
+      relativePath,
+    );
+  }
+}
+
+interface AssemblyDirectorySwap {
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+}
+
+async function swapAssemblyDirectory(
+  source: string,
+  destination: string,
+): Promise<AssemblyDirectorySwap> {
+  const sourceStats = await fs.lstat(source);
+  if (!sourceStats.isDirectory() || sourceStats.isSymbolicLink())
+    throw new Error("Assembly staging root is not a regular directory");
+  const parent = path.dirname(destination);
+  const backup = path.join(
+    parent,
+    `.${path.basename(destination)}.${path.basename(source)}.backup`,
+  );
+  let hasBackup = false;
+  try {
+    const destinationStats = await fs.lstat(destination);
+    if (destinationStats.isSymbolicLink() || !destinationStats.isDirectory())
+      throw new Error("Generated package root is not a regular directory");
+    await fs.rm(backup, { recursive: true, force: true });
+    await fs.rename(destination, backup);
+    hasBackup = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  try {
+    await fs.rename(source, destination);
+  } catch (error) {
+    if (hasBackup) await fs.rename(backup, destination).catch(() => undefined);
+    throw error;
+  }
+  return {
+    async commit() {
+      if (hasBackup)
+        await fs
+          .rm(backup, { recursive: true, force: true })
+          .catch(() => undefined);
+    },
+    async rollback() {
+      await fs.rm(destination, { recursive: true, force: true });
+      if (hasBackup) await fs.rename(backup, destination);
+    },
+  };
+}
+
+async function readOptionalText(file: string): Promise<string | undefined> {
+  try {
+    return await fs.readFile(file, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function restoreOptionalText(
+  file: string,
+  content: string | undefined,
+): Promise<void> {
+  if (content === undefined) await fs.rm(file, { force: true });
+  else await atomicWrite(file, content);
+}
+
 export async function assemblePackage(
   state: CreatorState,
 ): Promise<CreatorState> {
@@ -2446,66 +3070,180 @@ export async function assemblePackage(
       stored.records,
     );
     const packageDirectory = packageRoot(current);
-    for (const laneId of AUTHORING_LANE_IDS) {
-      const record = stored.records[laneId]!;
-      for (const artifact of record.artifacts) {
-        const content = await readArtifactContent(current, artifact);
-        const target = packageLeafPath(packageDirectory, artifact.path);
-        if (artifact.path === "SKILL.md") {
-          const original = await fs.readFile(target, "utf8");
+    await assertAuthoringPlanCurrent(current, plan);
+    await assertSourceEvidenceCurrent(current, plan);
+    const factoryPlan = await readPlan(current.planPath);
+    if (factoryPlan.sourceRoot)
+      factoryPlan.sourceRoot = path.resolve(
+        current.projectRoot,
+        factoryPlan.sourceRoot,
+      );
+    const stagingRoot = await fs.mkdtemp(
+      path.join(
+        path.dirname(packageDirectory),
+        `.${path.basename(packageDirectory)}.assembly-`,
+      ),
+    );
+    let moved = false;
+    try {
+      const scaffold = await generatePackage({
+        proposal: current.confirmedProposal!,
+        plan: factoryPlan,
+        destination: stagingRoot,
+      });
+      if (current.authoring.scaffoldHash !== scaffold.scaffoldHash)
+        throw new Error(
+          "Generated scaffold is stale for the authoring session",
+        );
+      await assertCurrentPackageMatchesScaffold({
+        currentRoot: packageDirectory,
+        scaffoldRoot: scaffold.packageRoot,
+        state: current,
+        plan,
+        records: stored.records,
+      });
+      const authoredPaths = authoredLeafPaths(plan);
+      const artifactTargets = new Set<string>();
+      for (const laneId of AUTHORING_LANE_IDS) {
+        const record = stored.records[laneId]!;
+        for (const artifact of record.artifacts) {
+          const content = await readArtifactContent(current, artifact);
+          const relativePath = packageRelativePath(artifact.path);
+          if (artifactTargets.has(relativePath))
+            throw new Error(
+              `Duplicate authored package target: ${artifact.path}`,
+            );
+          artifactTargets.add(relativePath);
+          const target = packageLeafPath(scaffold.packageRoot, artifact.path);
+          const targetStats = await fs.lstat(target);
+          if (!targetStats.isFile() || targetStats.isSymbolicLink())
+            throw new Error(
+              `Authored package target is not a regular file: ${artifact.path}`,
+            );
+          const heading = authoredHeading(artifact.path);
           await atomicWrite(
             target,
-            replaceSection(original, "Decision Core", content),
-          );
-        } else if (artifact.path.endsWith("/SKILL.md")) {
-          const original = await fs.readFile(target, "utf8");
-          await atomicWrite(
-            target,
-            replaceSection(original, "Guidance", content),
-          );
-        } else {
-          await atomicWrite(
-            target,
-            content.endsWith("\n") ? content : `${content}\n`,
+            heading
+              ? replaceSection(
+                  await fs.readFile(target, "utf8"),
+                  heading,
+                  content,
+                )
+              : content.endsWith("\n")
+                ? content
+                : `${content}\n`,
           );
         }
       }
+      for (const authoredPath of authoredPaths)
+        if (!artifactTargets.has(authoredPath))
+          throw new Error(`Missing authored package target: ${authoredPath}`);
+      await atomicWrite(
+        path.join(scaffold.packageRoot, "reference", "authoring-lanes.json"),
+        authoringLanesDocument(plan, current, stored.records),
+      );
+      await atomicWrite(
+        path.join(scaffold.packageRoot, "reference", "composition-report.md"),
+        compositionReport(plan, current, stored.records),
+      );
+      await writePackageInventory(
+        scaffold.packageRoot,
+        "assembled",
+        authoredPaths,
+      );
+      await assertAssembledPackage(scaffold.packageRoot, authoredPaths);
+      const assembledPackageHash = await hashDirectory(scaffold.packageRoot);
+      const inventory = await inventoryPackage(
+        scaffold.packageRoot,
+        authoredPaths,
+      );
+      const authoredMaterialHash = recordsMaterialHash(stored.records);
+      const authoring = current.authoring;
+      const generated = current.generated;
+      if (!authoring || !generated)
+        throw new Error("Authoring session disappeared during assembly");
+      const stateFile = path.join(
+        current.projectRoot,
+        ".badger",
+        "states",
+        `${current.name}.json`,
+      );
+      const previousSession = await readOptionalText(
+        sessionSummaryPath(current),
+      );
+      const previousState = await readOptionalText(stateFile);
+      const nextAuthoring: AuthoringStateSummary = {
+        ...authoring,
+        statePath: sessionSummaryPath(current),
+        conflict: undefined,
+        status: "assembled",
+        revision: authoring.revision + 1,
+        authoredMaterialHash,
+        assembledPackageHash,
+        invalidatedLanes: undefined,
+      };
+      const nextGenerated = {
+        ...generated,
+        packageRoot: packageDirectory,
+        protocolPath: path.join(
+          packageDirectory,
+          "reference",
+          "workflow-protocol.json",
+        ),
+        evalPath: path.join(packageDirectory, "badger", "eval.yaml"),
+        authoringPlanPath: path.join(
+          packageDirectory,
+          "reference",
+          "authoring-plan.json",
+        ),
+        inventory,
+        assembledPackageHash,
+      };
+      const swap = await swapAssemblyDirectory(
+        scaffold.packageRoot,
+        packageDirectory,
+      );
+      try {
+        current.authoring = nextAuthoring;
+        current.generated = nextGenerated;
+        current.currentHash = null;
+        current.eval = undefined;
+        current.review = undefined;
+        current.status = "generated";
+        await writeSessionSummary(current);
+        await writeState(current);
+        await swap.commit();
+        moved = true;
+        Object.assign(state, current);
+        return current;
+      } catch (error) {
+        let rollbackError: unknown;
+        try {
+          await restoreOptionalText(stateFile, previousState);
+        } catch (restoreError) {
+          rollbackError = restoreError;
+        }
+        try {
+          await restoreOptionalText(
+            sessionSummaryPath(current),
+            previousSession,
+          );
+        } catch (restoreError) {
+          rollbackError ??= restoreError;
+        }
+        try {
+          await swap.rollback();
+        } catch (restoreError) {
+          rollbackError ??= restoreError;
+        }
+        if (rollbackError)
+          throw new Error(
+            `Assembly rollback failed after persistence error: ${String(rollbackError)}; original error: ${String(error)}`,
+          );
+        throw error;
+      }
+    } finally {
+      if (!moved) await fs.rm(stagingRoot, { recursive: true, force: true });
     }
-    await atomicWrite(
-      path.join(packageDirectory, "reference", "authoring-lanes.json"),
-      authoringLanesDocument(plan, current, stored.records),
-    );
-    await atomicWrite(
-      path.join(packageDirectory, "reference", "composition-report.md"),
-      compositionReport(plan, current),
-    );
-    const assembledPackageHash = await hashDirectory(packageDirectory);
-    const authoredMaterialHash = recordsMaterialHash(stored.records);
-    const authoring = current.authoring;
-    const generated = current.generated;
-    if (!authoring || !generated)
-      throw new Error("Authoring session disappeared during assembly");
-    current.authoring = {
-      ...authoring,
-      statePath: sessionSummaryPath(current),
-      conflict: undefined,
-      status: "assembled",
-      revision: authoring.revision + 1,
-      authoredMaterialHash,
-      assembledPackageHash,
-      invalidatedLanes: undefined,
-    };
-    current.generated = {
-      ...generated,
-      assembledPackageHash,
-    };
-    current.currentHash = null;
-    current.eval = undefined;
-    current.review = undefined;
-    current.status = "generated";
-    await writeSessionSummary(current);
-    await writeState(current);
-    Object.assign(state, current);
-    return current;
   });
 }

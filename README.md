@@ -12,6 +12,10 @@ The package includes:
 - confirmed plan/state lifecycle in the standalone `.badger` namespace;
 - generated authoring-pending scaffolds with resumable six-lane authoring
   sessions and protocol/evidence references;
+- protected deterministic assembly with separate Auto-zone, Authored-zone, and
+  source inventory ownership;
+- generated Badger plan, check, hook-guard, and WorkflowRuntime control-plane
+  scripts;
 - current-hash evaluation, WorkflowRuntime certification, review approval, publication, and distribution preview;
 - private Skill runtime loading, validation, content identity, and immutable snapshots;
 - deterministic and adaptive Engine loop behavior with manual and standalone Run façades;
@@ -92,6 +96,13 @@ lanes, executable dependency waves, claims, artifacts, findings, and fresh-
 process recovery paths. A deterministic manual file-provider fixture is
 available through the exported `runManualAuthoringFixture` API for tests and
 local certification without provider credentials.
+
+Assembly rebuilds a staged scaffold, validates every current lane artifact, and
+swaps it into place only after the complete package passes the deterministic
+inventory and control-plane checks. The generated
+`reference/package-inventory.json` records relative paths and ownership
+(`auto`, `authored`, or `source`); the typed `GeneratedPackage.inventory`
+additionally carries byte counts and hashes.
 
 The public package façade plus the `@rpamis/badger/engine` and
 `@rpamis/badger/workflow-runtime` subpaths export the runtime

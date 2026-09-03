@@ -36,6 +36,11 @@ export function isWithin(root: string, candidate: string): boolean {
   );
 }
 
+export function packageRelativePath(value: string): string {
+  const normalized = value.replaceAll("\\", "/");
+  return normalized.startsWith("../") ? normalized.slice(3) : normalized;
+}
+
 export async function ensureDirectory(directory: string): Promise<void> {
   await fs.mkdir(directory, { recursive: true });
 }
@@ -65,6 +70,37 @@ export async function copyDirectory(
     errorOnExist: true,
     force: false,
   });
+}
+
+export async function replaceDirectory(
+  source: string,
+  destination: string,
+): Promise<void> {
+  const target = path.resolve(destination);
+  const parent = path.dirname(target);
+  await ensureDirectory(parent);
+  let backup: string | undefined;
+  try {
+    const stats = await fs.lstat(target);
+    if (stats.isSymbolicLink() || !stats.isDirectory())
+      throw new Error(
+        `Directory replacement target is not a regular directory: ${destination}`,
+      );
+    backup = path.join(
+      parent,
+      `.${path.basename(target)}.${process.pid}.${randomUUID()}.bak`,
+    );
+    await fs.rename(target, backup);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  try {
+    await fs.rename(source, target);
+  } catch (error) {
+    if (backup) await fs.rename(backup, target).catch(() => undefined);
+    throw error;
+  }
+  if (backup) await fs.rm(backup, { recursive: true, force: true });
 }
 
 export async function listFiles(

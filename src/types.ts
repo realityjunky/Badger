@@ -1088,6 +1088,15 @@ export interface SkillCandidate {
   sources: SkillSource[];
 }
 
+export type GeneratedPackageFileOwner = "auto" | "authored" | "source";
+
+export interface GeneratedPackageFile {
+  path: string;
+  bytes: number;
+  sha256: string;
+  owner: GeneratedPackageFileOwner;
+}
+
 export interface FactoryPlan {
   schemaVersion: 1;
   goal: string;
@@ -1136,6 +1145,7 @@ export interface CreatorState {
     sourceRoot?: string;
     sourceHash?: string;
     assembledPackageHash?: string;
+    inventory?: GeneratedPackageFile[];
   };
   eval?: {
     hash: string;

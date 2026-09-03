@@ -10,6 +10,19 @@ export type AuthoringLaneId =
   | "skill-core"
   | "skill-review";
 
+export type AuthoringControlPlaneScriptKind =
+  "runtime-adapter" | "plan" | "check" | "hook-guard";
+
+export interface AuthoringControlPlaneScript {
+  id: string;
+  role: string;
+  upstreamRole: string;
+  kind: AuthoringControlPlaneScriptKind;
+  path: string;
+  claim: string;
+  authority: "WorkflowRuntime" | "Badger assembler";
+}
+
 export interface AuthoringDag {
   wave1: AuthoringLaneId[];
   wave2: AuthoringLaneId[];
@@ -326,7 +339,7 @@ export interface AuthoringStateSummary {
   planPath: string;
   recordsPath: string;
   revision: number;
-  generatorContractVersion: 1;
+  generatorContractVersion: 2;
   planHash: string;
   protocolHash: string;
   workflowProtocolHash: string;

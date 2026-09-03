@@ -45,6 +45,8 @@ The standalone package deliberately excludes Classic customization, Native workf
 - Control Nodes cannot be overridden. Producer overrides must declare every Output Schema they satisfy.
 - Unresolved or ambiguous Skill candidates, stale hashes, failed eval, missing review, and missing confirmation block the next mutating step.
 - Confirmed generation creates a resumable authoring session under `.badger/authoring/<name>`; a scaffold is not authored, assembled, evaluated, or publishable until current lane records are assembled.
+- Assembly uses a staged deterministic scaffold and one protected swap; it preserves source-owned files, inserts authored material only at declared leaves, and records the final relative package inventory.
+- The generated control plane contains `workflow-state`, `workflow-guard`, and `workflow-handoff` adapters over WorkflowRuntime plus Badger-named `badger-plan`, `badger-check`, and `badger-hook-guard` roles. Their mapping and claim ownership are recorded in `reference/authoring-lanes.json`.
 - Lane outputs preserve `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, and `NEEDS_CONTEXT`. Blocking statuses require a bounded explanation and stop dependents; concerns remain visible and block final authoring readiness until resolved.
 - Authoring status reports completed lanes, next executable lanes, dependency waves, claims, artifacts, findings, input hashes, revision, and fresh-process recovery paths. Use expected revisions for concurrent submissions.
 - Providers receive only file handoffs and bounded capability metadata. They cannot write Creator or authoring state, execute candidate Skills, publish, distribute, or access credentials. The manual file-provider fixture uses the same submission path without credentials.
