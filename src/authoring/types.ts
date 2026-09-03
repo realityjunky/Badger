@@ -153,6 +153,70 @@ export type AuthoringStatus =
   | "BLOCKED"
   | "NEEDS_CONTEXT";
 
+export type AuthoringLaneOutputStatus =
+  "DONE" | "DONE_WITH_CONCERNS" | "BLOCKED" | "NEEDS_CONTEXT";
+
+export type AuthoringFindingSeverity = "critical" | "important" | "minor";
+
+export type AuthoringEvidenceSource =
+  "deterministic-check-only" | "llm-single" | "llm-multivote";
+
+export interface AuthoringLaneFinding {
+  severity: AuthoringFindingSeverity;
+  path?: string;
+  claim?: string;
+  problem: string;
+  impact?: string;
+  fix?: string;
+}
+
+export interface AuthoringLaneClaimOutput {
+  id: string;
+  kind?: string;
+  paths?: string[];
+  summary?: string;
+  status?: AuthoringClaimStatus;
+  evidence?: string[];
+}
+
+export interface AuthoringLaneArtifactOutput {
+  path: string;
+  kind?: string;
+  id?: string;
+  present?: boolean;
+  content?: string;
+  contentPath?: string;
+  contentHash?: string;
+}
+
+export interface AuthoringLaneReviewOutput {
+  passed: boolean;
+  evidenceSource: AuthoringEvidenceSource;
+  voters?: number;
+  lenses?: string[];
+  rounds?: number;
+  findings: AuthoringLaneFinding[];
+  reviewedAt: string;
+}
+
+export interface AuthoringLaneOutput {
+  lane: string;
+  status: AuthoringLaneOutputStatus;
+  dispatchMode?: string;
+  model?: string;
+  summary?: string;
+  protocolHash?: string;
+  authoringPlanHash?: string;
+  workflowProtocolHash?: string;
+  sourceEvidenceHash?: string;
+  authoringInputHash?: string;
+  expectedRevision?: number;
+  artifacts?: AuthoringLaneArtifactOutput[];
+  claims?: AuthoringLaneClaimOutput[];
+  findings?: AuthoringLaneFinding[];
+  review?: AuthoringLaneReviewOutput;
+}
+
 export type AuthoringClaimStatus =
   "SUPPORTED" | "UNSUPPORTED" | "NEEDS_CONTEXT";
 
@@ -160,6 +224,9 @@ export interface AuthoringClaimEvidence {
   id: string;
   status: AuthoringClaimStatus;
   evidence: string[];
+  kind?: string;
+  paths?: string[];
+  summary?: string;
 }
 
 export interface AuthoringArtifactEvidence {
@@ -168,6 +235,7 @@ export interface AuthoringArtifactEvidence {
   present: boolean;
   contentHash?: string;
   contentPath?: string;
+  kind?: string;
 }
 
 export interface AuthoringArtifactInput extends Omit<
@@ -184,6 +252,13 @@ export interface AuthoringReviewOutput {
   summary: string;
   blockingFindings: string[];
   warnings: string[];
+  passed?: boolean;
+  evidenceSource?: AuthoringEvidenceSource;
+  voters?: number;
+  lenses?: string[];
+  rounds?: number;
+  findings?: AuthoringLaneFinding[];
+  reviewedAt?: string;
   contractFit?: "pass" | "fail" | "needs_context";
   usability?: "pass" | "fail" | "needs_context";
 }
@@ -191,6 +266,7 @@ export interface AuthoringReviewOutput {
 export interface AuthoringRecord {
   schemaVersion: 1;
   kind: "authoring-record";
+  revision?: number;
   workflow: string;
   lane: AuthoringLaneId;
   status: AuthoringStatus;
@@ -202,6 +278,9 @@ export interface AuthoringRecord {
   authoredMaterialHash: string;
   claims: AuthoringClaimEvidence[];
   artifacts: AuthoringArtifactEvidence[];
+  findings?: AuthoringLaneFinding[];
+  dispatchMode?: string;
+  model?: string;
   review?: AuthoringReviewOutput;
   summary?: string;
   at: string;
@@ -212,8 +291,12 @@ export interface AuthoringRecordInput {
   status: AuthoringStatus;
   claims?: AuthoringClaimEvidence[];
   artifacts?: AuthoringArtifactInput[];
+  findings?: AuthoringLaneFinding[];
+  dispatchMode?: string;
+  model?: string;
   review?: AuthoringReviewOutput;
   summary?: string;
+  expectedRevision?: number;
   protocolHash?: string;
   authoringPlanHash?: string;
   workflowProtocolHash?: string;
@@ -226,15 +309,20 @@ export type AuthoringSessionStatus =
 
 export interface AuthoringRecordSummary {
   path: string;
+  revision?: number;
   status: AuthoringStatus;
   authoringInputHash: string;
   authoredMaterialHash: string;
+  claims?: string[];
+  artifacts?: string[];
+  findingCount?: number;
 }
 
 export interface AuthoringStateSummary {
   schemaVersion: 1;
   status: AuthoringSessionStatus;
   sessionPath: string;
+  statePath?: string;
   planPath: string;
   recordsPath: string;
   revision: number;
@@ -250,6 +338,46 @@ export interface AuthoringStateSummary {
   assembledPackageHash: string | null;
   records: Partial<Record<AuthoringLaneId, AuthoringRecordSummary>>;
   invalidatedLanes?: AuthoringLaneId[];
+  conflict?: AuthoringRevisionConflict;
+}
+
+export interface AuthoringRevisionConflict {
+  lane: AuthoringLaneId;
+  expectedRevision: number;
+  actualRevision: number;
+  at: string;
+}
+
+export interface AuthoringLaneReadiness {
+  id: AuthoringLaneId;
+  dependencies: AuthoringLaneId[];
+  status: AuthoringStatus;
+  executable: boolean;
+  blockers: string[];
+  claims: AuthoringClaimEvidence[];
+  artifacts: AuthoringArtifactEvidence[];
+  findings: AuthoringLaneFinding[];
+  summary?: string;
+}
+
+export interface AuthoringWaveReadiness {
+  id: "wave1" | "wave2" | "barrier";
+  lanes: AuthoringLaneId[];
+  completed: AuthoringLaneId[];
+  next: AuthoringLaneId[];
+  blocked: Partial<Record<AuthoringLaneId, string[]>>;
+}
+
+export interface AuthoringRecoveryInfo {
+  resumable: boolean;
+  freshProcess: boolean;
+  revision: number;
+  sessionPath: string;
+  statePath: string;
+  planPath: string;
+  recordsPath: string;
+  invalidatedLanes: AuthoringLaneId[];
+  conflict?: AuthoringRevisionConflict;
 }
 
 export interface AuthoringReadiness {
@@ -260,4 +388,8 @@ export interface AuthoringReadiness {
   evidence: Record<string, string>;
   records: Partial<Record<AuthoringLaneId, AuthoringRecord>>;
   nextLanes: AuthoringLaneId[];
+  completedLanes: AuthoringLaneId[];
+  lanes: Record<AuthoringLaneId, AuthoringLaneReadiness>;
+  waves: AuthoringWaveReadiness[];
+  recovery: AuthoringRecoveryInfo;
 }

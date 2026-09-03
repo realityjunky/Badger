@@ -311,6 +311,26 @@ async function runtimeAsset(name: string): Promise<string> {
   throw new Error(`Runtime asset not found: ${name}`);
 }
 
+async function authoringReference(relativePath: string): Promise<string> {
+  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(moduleDirectory, "../../assets/skills/badger", relativePath),
+    path.resolve(
+      moduleDirectory,
+      "../../../assets/skills/badger",
+      relativePath,
+    ),
+  ];
+  for (const candidate of candidates) {
+    try {
+      return await fs.readFile(candidate, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  throw new Error(`Authoring reference not found: ${relativePath}`);
+}
+
 export async function generatePackage(options: {
   proposal: FactoryProposal;
   plan: FactoryPlan;
@@ -352,6 +372,12 @@ export async function generatePackage(options: {
       authoringPlanPath,
       JSON.stringify(authoringPlan, null, 2) + "\n",
     );
+    for (const lane of authoringPlan.lanes) {
+      await atomicWrite(
+        path.join(root, lane.brief),
+        await authoringReference(lane.brief),
+      );
+    }
     await atomicWrite(
       path.join(root, "reference", "authoring-lanes.json"),
       JSON.stringify(

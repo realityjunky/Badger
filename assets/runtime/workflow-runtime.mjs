@@ -695,7 +695,7 @@ async function readProtectedProjectFile(projectRoot, relativePath2, maxBytes, op
 }
 
 // src/skill-runtime/snapshot.ts
-import { createHash as createHash3, randomUUID as randomUUID2 } from "crypto";
+import { createHash as createHash3, randomUUID as randomUUID3 } from "crypto";
 import { promises as fs5 } from "fs";
 import path8 from "path";
 
@@ -703,7 +703,7 @@ import path8 from "path";
 import path6 from "path";
 
 // src/util.ts
-import { createHash } from "node:crypto";
+import { createHash, randomUUID as randomUUID2 } from "node:crypto";
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -7451,7 +7451,7 @@ async function createSkillSnapshot(pkg, changeDir) {
     await verifyPublishedSnapshot(snapshotDir, material);
     return { hash: material.hash, snapshotDir };
   }
-  const temporaryDir = path8.join(snapshotsRoot, `.tmp-${randomUUID2()}`);
+  const temporaryDir = path8.join(snapshotsRoot, `.tmp-${randomUUID3()}`);
   assertInside(snapshotsRoot, temporaryDir, "Temporary snapshot");
   assertInside(snapshotsRoot, snapshotDir, "Published snapshot");
   try {
@@ -7523,7 +7523,7 @@ import { promises as fs6 } from "node:fs";
 import path9 from "node:path";
 
 // src/workflow-runtime/revision-claim.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 var CLAIM_DIRECTORY = ".badger/revision-claims";
 var CLAIM_MAX_IDENTIFIER_LENGTH = 256;
 var CLAIM_WAIT_TIMEOUT_MS = 5e3;
@@ -7727,7 +7727,7 @@ function createClaim(input) {
     expectedActionId: input.expectedActionId,
     intendedRevision: input.intendedRevision,
     execution: structuredClone(input.execution),
-    ownerToken: randomUUID3(),
+    ownerToken: randomUUID4(),
     createdAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
@@ -17648,7 +17648,7 @@ function resolverForPackage() {
 }
 
 // src/workflow-runtime/transition-journal.ts
-import { randomUUID as randomUUID4 } from "node:crypto";
+import { randomUUID as randomUUID5 } from "node:crypto";
 import path13 from "node:path";
 var WORKFLOW_TRANSITION_JOURNAL_PATH = ".badger/transition-journal.json";
 var WORKFLOW_TRANSITION_JOURNAL_SCHEMA_VERSION = 1;
@@ -18461,7 +18461,7 @@ var WorkflowTransitionImpl = class {
     this.input = input;
   }
   input;
-  journalId = randomUUID4();
+  journalId = randomUUID5();
   staged = /* @__PURE__ */ new Map();
   baseline = /* @__PURE__ */ new Map();
   committing = false;
@@ -18837,7 +18837,7 @@ async function recoverWorkflowTransition(runRoot, profile) {
 }
 
 // src/workflow-runtime/run-lock.ts
-import { randomUUID as randomUUID5 } from "node:crypto";
+import { randomUUID as randomUUID6 } from "node:crypto";
 import { promises as fs8 } from "node:fs";
 import os from "node:os";
 import path14 from "node:path";
@@ -19158,7 +19158,7 @@ function newLockRecord(operation2) {
   return {
     schemaVersion: WORKFLOW_RUN_LOCK_SCHEMA_VERSION,
     kind: "workflow-run-lock",
-    ownerToken: randomUUID5(),
+    ownerToken: randomUUID6(),
     pid: process.pid,
     hostname: os.hostname(),
     createdAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -19219,7 +19219,7 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
     WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY,
     { label: "Workflow Run lock quarantine" }
   );
-  const quarantinePath = `${WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY}/${currentSnapshot.owner.ownerToken}-${randomUUID5()}.json`;
+  const quarantinePath = `${WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY}/${currentSnapshot.owner.ownerToken}-${randomUUID6()}.json`;
   const quarantine = await inspectProtectedProjectPath(
     runRoot,
     quarantinePath,
@@ -19526,7 +19526,7 @@ async function recordWorkflowRunLockTakeover(runRoot, evidence, maxBytes = WORKF
 }
 
 // src/workflow-runtime/checkpoints.ts
-import { randomUUID as randomUUID6 } from "node:crypto";
+import { randomUUID as randomUUID7 } from "node:crypto";
 import { promises as fs9 } from "node:fs";
 import path15 from "node:path";
 var WORKFLOW_CHECKPOINT_DIRECTORY = ".badger/checkpoints";
@@ -21016,7 +21016,7 @@ function recoveryJournalFor(runId, identity, checkpointRecordHash, records, reco
     schemaVersion: WORKFLOW_CHECKPOINT_RECOVERY_SCHEMA_VERSION,
     kind: "workflow-checkpoint-recovery-journal",
     status: "prepared",
-    journalId: randomUUID6(),
+    journalId: randomUUID7(),
     runId,
     execution: structuredClone(identity),
     checkpointRecordHash,
@@ -21273,10 +21273,10 @@ async function restoreWorkflowCheckpoint(runRoot, profile, candidate) {
 
 // src/workflow-runtime/location.ts
 import { promises as fs11 } from "node:fs";
-import { randomUUID as randomUUID8 } from "node:crypto";
+import { randomUUID as randomUUID9 } from "node:crypto";
 
 // src/engine/manual-run.ts
-import { randomUUID as randomUUID7 } from "crypto";
+import { randomUUID as randomUUID8 } from "crypto";
 
 // src/engine/evals.ts
 function evaluateRuntime(definitions, scope, state, artifacts) {
@@ -22066,7 +22066,7 @@ async function startManualRun(pkg, changeDir, options = []) {
   }
   const state = startRun(
     pkg,
-    startOptions.runId ?? randomUUID7(),
+    startOptions.runId ?? randomUUID8(),
     snapshot.hash,
     startOptions.workflowRuntime
   );
@@ -22678,12 +22678,12 @@ function resolveWorkflowStartLocation(options) {
     }
     return {
       location,
-      runId: ("runId" in options ? options.runId : void 0) ?? randomUUID8()
+      runId: ("runId" in options ? options.runId : void 0) ?? randomUUID9()
     };
   }
   return {
     location: manualLocation(options.runRoot),
-    runId: options.runId ?? randomUUID8()
+    runId: options.runId ?? randomUUID9()
   };
 }
 

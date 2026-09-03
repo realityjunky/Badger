@@ -16,9 +16,10 @@ import { runDifferentialHarness } from "./differential/run.js";
 import {
   assemblePackage,
   authoringReadiness,
+  buildAuthoringHandoff,
   buildAuthoringPlan,
   initializeAuthoringSession,
-  recordAuthoring,
+  recordAuthoringFile,
 } from "./authoring/index.js";
 import {
   runEngineDifferential,
@@ -125,18 +126,41 @@ program
   .command("authoring-record <name>")
   .requiredOption("--lane <lane>", "Authoring lane")
   .requiredOption("--file <file>", "Authoring record JSON")
+  .option(
+    "--expected-revision <revision>",
+    "Expected authoring session revision",
+  )
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (name, options) => {
     const root = projectRoot(options.project);
-    const record = JSON.parse(
-      await fs.readFile(path.resolve(options.file), "utf8"),
-    );
     emit(
-      await recordAuthoring({
+      await recordAuthoringFile({
         state: await readState(root, name),
         lane: options.lane,
-        record,
+        file: options.file,
+        expectedRevision:
+          options.expectedRevision === undefined
+            ? undefined
+            : Number(options.expectedRevision),
+      }),
+      options.json,
+    );
+  });
+
+program
+  .command("authoring-dispatch <name>")
+  .description("Create a provider-neutral authoring file handoff")
+  .requiredOption("--lane <lane>", "Authoring lane")
+  .requiredOption("--output <file>", "Provider output JSON path")
+  .option("--project <dir>", "Project root", ".")
+  .option("--json", "JSON output")
+  .action(async (name, options) => {
+    emit(
+      await buildAuthoringHandoff({
+        state: await readState(projectRoot(options.project), name),
+        lane: options.lane,
+        outputPath: options.output,
       }),
       options.json,
     );

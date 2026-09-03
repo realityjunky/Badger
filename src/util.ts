@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { hashDirectory as canonicalHashDirectory } from "./workflow-kernel/hash.js";
@@ -47,7 +47,7 @@ export async function atomicWrite(
   await ensureDirectory(path.dirname(file));
   const temporary = path.join(
     path.dirname(file),
-    `.${path.basename(file)}.${process.pid}.tmp`,
+    `.${path.basename(file)}.${process.pid}.${randomUUID()}.tmp`,
   );
   await fs.writeFile(temporary, content, { encoding: "utf8", flag: "wx" });
   await fs.rename(temporary, file).catch(async (error) => {

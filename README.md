@@ -64,6 +64,7 @@ The CLI is `badger` after `npm run build`:
 node bin/badger.js guide --project . --json
 node bin/badger.js authoring-plan prepared-workflow --project . --depth quick --json
 node bin/badger.js authoring-status prepared-workflow --project . --json
+node bin/badger.js authoring-dispatch prepared-workflow --lane script --output /tmp/script.json --project . --json
 node bin/badger.js assemble prepared-workflow --project . --json
 ```
 
@@ -79,9 +80,18 @@ See `assets/skills/badger/SKILL.md` for the user-facing confirmation protocol an
 `generate` creates a deterministic scaffold and an authoring session under
 `.badger/authoring/<name>`. The scaffold remains visibly pending until all
 current lane records are submitted with `authoring-record` and the package is
-assembled. Authoring input, authored material, scaffold, and assembled package
-hashes are stored separately; source changes retain old records as explicit
-stale evidence instead of silently treating them as current.
+assembled. Use `authoring-dispatch` to create a bounded file handoff for a
+lane; the handoff exposes role-brief, input, output, dependency, and hash paths
+but no Creator-state, execution, publication, distribution, or credential
+authority. Submit the returned JSON with `authoring-record`; pass the status
+revision with `--expected-revision` when coordinating concurrent lanes.
+Authoring input, authored material, scaffold, and assembled package hashes are
+stored separately; source changes retain old records as explicit stale evidence
+instead of silently treating them as current. Status output includes completed
+lanes, executable dependency waves, claims, artifacts, findings, and fresh-
+process recovery paths. A deterministic manual file-provider fixture is
+available through the exported `runManualAuthoringFixture` API for tests and
+local certification without provider credentials.
 
 The public package façade plus the `@rpamis/badger/engine` and
 `@rpamis/badger/workflow-runtime` subpaths export the runtime

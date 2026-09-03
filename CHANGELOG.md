@@ -10,6 +10,10 @@
 - **Resumable authoring scaffold**: Confirmed generation now creates an
   authoring-pending scaffold, durable lane-session state, hash-bound record
   storage, and an explicit assembly command.
+- **Six-lane authoring handoff**: Added upstream lane-output validation,
+  revision-checked concurrent persistence, fresh-process recovery reporting,
+  package-local role briefs, and a credential-free manual file-provider
+  fixture.
 
 ## What's Changed [0.1.2] - 2026-09-03
 

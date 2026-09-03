@@ -8,31 +8,84 @@ import {
   sha256,
   stableValue,
 } from "../util.js";
-import { writeState } from "../factory/state.js";
-import { AUTHORING_LANE_IDS, AUTHORING_PROTOCOL_HASH } from "./protocol.js";
+import { readState, writeState } from "../factory/state.js";
+import {
+  AUTHORING_LANE_DEPENDENCIES,
+  AUTHORING_LANE_IDS,
+  AUTHORING_PROTOCOL_HASH,
+} from "./protocol.js";
 import { validateAuthoringPlan } from "./plan.js";
 import type {
   AuthoringArtifactEvidence,
   AuthoringArtifactInput,
   AuthoringClaimEvidence,
+  AuthoringLaneFinding,
+  AuthoringLaneReadiness,
+  AuthoringLaneOutputStatus,
   AuthoringLane,
   AuthoringLaneId,
   AuthoringPlan,
   AuthoringReadiness,
+  AuthoringRecoveryInfo,
   AuthoringRecord,
   AuthoringRecordInput,
   AuthoringRecordSummary,
+  AuthoringReviewOutput,
+  AuthoringRevisionConflict,
   AuthoringSessionStatus,
+  AuthoringStateSummary,
   AuthoringStatus,
+  AuthoringWaveReadiness,
 } from "./types.js";
 import type { GeneratedPackage } from "../factory/generate.js";
 
 export const AUTHORING_GENERATOR_CONTRACT_VERSION = 1 as const;
 const MAX_SUMMARY_BYTES = 8 * 1024;
 const MAX_ARTIFACT_BYTES = 64 * 1024;
+const MAX_RECORD_BYTES = 256 * 1024;
+const MAX_ARRAY_LENGTH = 128;
+const MAX_TEXT_BYTES = 8 * 1024;
+const MAX_PATH_BYTES = 512;
 const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 
 const COMPLETE_STATUSES: readonly AuthoringStatus[] = ["COMPLETE", "DONE"];
+const LANE_OUTPUT_STATUSES: readonly AuthoringLaneOutputStatus[] = [
+  "DONE",
+  "DONE_WITH_CONCERNS",
+  "BLOCKED",
+  "NEEDS_CONTEXT",
+];
+const FINDING_SEVERITIES = ["critical", "important", "minor"] as const;
+const EVIDENCE_SOURCES = [
+  "deterministic-check-only",
+  "llm-single",
+  "llm-multivote",
+] as const;
+
+export class AuthoringRevisionConflictError extends Error {
+  readonly expectedRevision: number;
+  readonly actualRevision: number;
+  readonly conflict: AuthoringRevisionConflict;
+
+  constructor(
+    lane: AuthoringLaneId,
+    expectedRevision: number,
+    actualRevision: number,
+  ) {
+    super(
+      `Authoring session revision conflict for ${lane}: expected ${expectedRevision}, actual ${actualRevision}`,
+    );
+    this.name = "AuthoringRevisionConflictError";
+    this.expectedRevision = expectedRevision;
+    this.actualRevision = actualRevision;
+    this.conflict = {
+      lane,
+      expectedRevision,
+      actualRevision,
+      at: new Date().toISOString(),
+    };
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -53,6 +106,10 @@ function sessionRoot(state: CreatorState): string {
   return path.join(state.projectRoot, ".badger", "authoring", state.name);
 }
 
+export function authoringSessionPath(state: CreatorState): string {
+  return sessionRoot(state);
+}
+
 function sessionPlanPath(state: CreatorState): string {
   return (
     (state.authoring
@@ -63,8 +120,16 @@ function sessionPlanPath(state: CreatorState): string {
   );
 }
 
+export function authoringPlanPath(state: CreatorState): string {
+  return sessionPlanPath(state);
+}
+
 function recordsRoot(state: CreatorState): string {
   return path.join(sessionRoot(state), "records");
+}
+
+export function authoringRecordsPath(state: CreatorState): string {
+  return recordsRoot(state);
 }
 
 function recordFile(state: CreatorState, lane: AuthoringLaneId): string {
@@ -103,6 +168,29 @@ function laneDefinition(
   return definition;
 }
 
+function dependentLanes(
+  plan: AuthoringPlan,
+  lane: AuthoringLaneId,
+): AuthoringLaneId[] {
+  const affected = new Set<AuthoringLaneId>([lane]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const definition of plan.lanes) {
+      if (
+        !affected.has(definition.id) &&
+        definition.dependencies.some((dependency) => affected.has(dependency))
+      ) {
+        affected.add(definition.id);
+        changed = true;
+      }
+    }
+  }
+  return AUTHORING_LANE_IDS.filter(
+    (laneId) => laneId !== lane && affected.has(laneId),
+  );
+}
+
 function authoringInputHash(plan: AuthoringPlan): string {
   return sha256(
     JSON.stringify(
@@ -120,6 +208,7 @@ function authoringInputHash(plan: AuthoringPlan): string {
 
 function canonicalRecord(record: AuthoringRecord): unknown {
   return {
+    ...(record.revision !== undefined ? { revision: record.revision } : {}),
     workflow: record.workflow,
     lane: record.lane,
     status: record.status,
@@ -134,6 +223,9 @@ function canonicalRecord(record: AuthoringRecord): unknown {
         id: claim.id,
         status: claim.status,
         evidence: [...claim.evidence],
+        ...(claim.kind ? { kind: claim.kind } : {}),
+        ...(claim.paths ? { paths: [...claim.paths] } : {}),
+        ...(claim.summary ? { summary: claim.summary } : {}),
       })),
     artifacts: [...record.artifacts]
       .sort((left, right) => left.path.localeCompare(right.path))
@@ -142,7 +234,22 @@ function canonicalRecord(record: AuthoringRecord): unknown {
         path: artifact.path,
         present: artifact.present,
         contentHash: artifact.contentHash ?? null,
+        ...(artifact.kind ? { kind: artifact.kind } : {}),
       })),
+    ...(record.findings
+      ? {
+          findings: record.findings.map((finding) => ({
+            severity: finding.severity,
+            ...(finding.path ? { path: finding.path } : {}),
+            ...(finding.claim ? { claim: finding.claim } : {}),
+            problem: finding.problem,
+            ...(finding.impact ? { impact: finding.impact } : {}),
+            ...(finding.fix ? { fix: finding.fix } : {}),
+          })),
+        }
+      : {}),
+    ...(record.dispatchMode ? { dispatchMode: record.dispatchMode } : {}),
+    ...(record.model ? { model: record.model } : {}),
     review: record.review
       ? {
           decision: record.review.decision,
@@ -150,6 +257,27 @@ function canonicalRecord(record: AuthoringRecord): unknown {
           summary: record.review.summary,
           blockingFindings: [...record.review.blockingFindings],
           warnings: [...record.review.warnings],
+          ...(record.review.passed !== undefined
+            ? { passed: record.review.passed }
+            : {}),
+          ...(record.review.evidenceSource
+            ? { evidenceSource: record.review.evidenceSource }
+            : {}),
+          ...(record.review.voters !== undefined
+            ? { voters: record.review.voters }
+            : {}),
+          ...(record.review.lenses
+            ? { lenses: [...record.review.lenses] }
+            : {}),
+          ...(record.review.rounds !== undefined
+            ? { rounds: record.review.rounds }
+            : {}),
+          ...(record.review.findings
+            ? { findings: [...record.review.findings] }
+            : {}),
+          ...(record.review.reviewedAt
+            ? { reviewedAt: record.review.reviewedAt }
+            : {}),
           contractFit: record.review.contractFit ?? null,
           usability: record.review.usability ?? null,
         }
@@ -183,9 +311,13 @@ function recordSummary(
 ): AuthoringRecordSummary {
   return {
     path: file,
+    ...(record.revision !== undefined ? { revision: record.revision } : {}),
     status: record.status,
     authoringInputHash: record.authoringInputHash,
     authoredMaterialHash: record.authoredMaterialHash,
+    claims: record.claims.map((claim) => claim.id),
+    artifacts: record.artifacts.map((artifact) => artifact.path),
+    findingCount: record.findings?.length ?? 0,
   };
 }
 
@@ -205,6 +337,72 @@ function validRecordStatuses(): readonly AuthoringStatus[] {
   ];
 }
 
+function validOutputStatus(value: unknown): value is AuthoringLaneOutputStatus {
+  return LANE_OUTPUT_STATUSES.includes(value as AuthoringLaneOutputStatus);
+}
+
+function boundedText(
+  value: unknown,
+  maximum = MAX_TEXT_BYTES,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    Buffer.byteLength(value, "utf8") <= maximum
+  );
+}
+
+function safeRelativePath(value: unknown): value is string {
+  if (!boundedText(value, MAX_PATH_BYTES)) return false;
+  const pathValue = value as string;
+  if (path.isAbsolute(pathValue) || pathValue.includes("\0")) return false;
+  const normalized = pathValue.replaceAll("\\", "/");
+  return (
+    normalized === path.posix.normalize(normalized) &&
+    normalized !== "." &&
+    normalized !== ".." &&
+    !normalized.startsWith("../../") &&
+    !normalized.includes("//")
+  );
+}
+
+function validateFindingList(value: unknown, label: string): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return [`${label} must be an array`];
+  const findings: string[] = [];
+  if (value.length > MAX_ARRAY_LENGTH)
+    findings.push(`${label} exceeds its maximum length`);
+  for (const [index, item] of value.entries()) {
+    if (!isRecord(item)) {
+      findings.push(`${label}[${index}] must be an object`);
+      continue;
+    }
+    if (!FINDING_SEVERITIES.includes(item.severity as never))
+      findings.push(`${label}[${index}].severity is invalid`);
+    if (!boundedText(item.problem))
+      findings.push(`${label}[${index}].problem is invalid`);
+    for (const field of ["path", "claim"] as const) {
+      if (item[field] !== undefined && !safeRelativePath(item[field]))
+        findings.push(`${label}[${index}].${field} is invalid`);
+    }
+    for (const field of ["impact", "fix"] as const) {
+      if (item[field] !== undefined && !boundedText(item[field]))
+        findings.push(`${label}[${index}].${field} is invalid`);
+    }
+  }
+  return findings;
+}
+
+function validateStringList(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) return [`${label} must be an array`];
+  const findings: string[] = [];
+  if (value.length > MAX_ARRAY_LENGTH)
+    findings.push(`${label} exceeds its maximum length`);
+  for (const [index, item] of value.entries())
+    if (!boundedText(item)) findings.push(`${label}[${index}] is invalid`);
+  return findings;
+}
+
 function validateReview(value: unknown, required: boolean): string[] {
   if (value === undefined || value === null)
     return required ? ["authoring review is required"] : [];
@@ -214,20 +412,52 @@ function validateReview(value: unknown, required: boolean): string[] {
     !["approved", "rejected", "needs_context"].includes(String(value.decision))
   )
     findings.push("authoring review decision is invalid");
-  if (typeof value.reviewer !== "string" || !value.reviewer.trim())
+  if (!boundedText(value.reviewer))
     findings.push("authoring review reviewer is required");
-  if (typeof value.summary !== "string" || !value.summary.trim())
+  if (!boundedText(value.summary))
     findings.push("authoring review summary is required");
-  if (!Array.isArray(value.blockingFindings))
-    findings.push("authoring review blockingFindings must be an array");
-  if (!Array.isArray(value.warnings))
-    findings.push("authoring review warnings must be an array");
+  findings.push(
+    ...validateStringList(
+      value.blockingFindings,
+      "authoring review blockingFindings",
+    ),
+    ...validateStringList(value.warnings, "authoring review warnings"),
+    ...validateFindingList(value.findings, "authoring review findings"),
+  );
   if (
     value.decision === "approved" &&
     Array.isArray(value.blockingFindings) &&
     value.blockingFindings.length > 0
   )
     findings.push("approved authoring review cannot contain blocking findings");
+  if (value.passed !== undefined && typeof value.passed !== "boolean")
+    findings.push("authoring review passed is invalid");
+  if (
+    value.evidenceSource !== undefined &&
+    !EVIDENCE_SOURCES.includes(value.evidenceSource as never)
+  )
+    findings.push("authoring review evidenceSource is invalid");
+  for (const field of ["voters", "rounds"] as const) {
+    if (
+      value[field] !== undefined &&
+      (!Number.isInteger(value[field]) ||
+        Number(value[field]) < 0 ||
+        Number(value[field]) > MAX_ARRAY_LENGTH)
+    )
+      findings.push(`authoring review ${field} is invalid`);
+  }
+  if (value.lenses !== undefined)
+    findings.push(
+      ...validateStringList(value.lenses, "authoring review lenses"),
+    );
+  if (value.reviewedAt !== undefined && !boundedText(value.reviewedAt))
+    findings.push("authoring review reviewedAt is invalid");
+  if (
+    value.passed === true &&
+    Array.isArray(value.blockingFindings) &&
+    value.blockingFindings.length > 0
+  )
+    findings.push("passed authoring review cannot contain blocking findings");
   for (const field of ["contractFit", "usability"] as const) {
     if (
       value[field] !== undefined &&
@@ -250,45 +480,63 @@ export function validateAuthoringRecord(
     return [`unknown authoring lane: ${String(laneValue)}`];
   const lane = laneDefinition(plan, laneValue);
   const findings: string[] = [];
-  if (record.lane !== undefined && record.lane !== laneValue)
+  if (record.lane !== laneValue)
     findings.push(`authoring record lane mismatch: ${String(record.lane)}`);
-  if (record.schemaVersion !== undefined && record.schemaVersion !== 1)
+  if (record.schemaVersion !== 1)
     findings.push("authoring record schemaVersion must be 1");
-  if (record.kind !== undefined && record.kind !== "authoring-record")
+  if (record.kind !== "authoring-record")
     findings.push("authoring record kind is invalid");
-  if (record.workflow !== undefined && record.workflow !== plan.name)
+  if (record.workflow !== plan.name)
     findings.push("authoring record workflow does not match the plan");
   if (
-    record.protocolHash !== undefined &&
-    record.protocolHash !== plan.protocolHash
+    record.revision !== undefined &&
+    (!Number.isInteger(record.revision) || Number(record.revision) < 1)
   )
+    findings.push("authoring record revision is invalid");
+  if (record.protocolHash !== plan.protocolHash)
     findings.push("authoring record protocolHash is stale");
   for (const [field, expected] of [
     ["authoringPlanHash", plan.authoringPlanHash],
     ["workflowProtocolHash", plan.workflowProtocolHash],
     ["sourceEvidenceHash", plan.sourceEvidenceHash],
+    ["authoringInputHash", authoringInputHash(plan)],
   ] as const) {
-    if (record[field] !== undefined && record[field] !== expected)
+    if (record[field] !== expected)
       findings.push(`authoring record ${field} is stale`);
   }
   for (const field of [
+    "protocolHash",
     "authoringPlanHash",
     "workflowProtocolHash",
     "sourceEvidenceHash",
     "authoringInputHash",
     "authoredMaterialHash",
   ]) {
-    if (
-      record[field] !== undefined &&
-      !HASH_PATTERN.test(String(record[field]))
-    )
+    if (!HASH_PATTERN.test(String(record[field])))
       findings.push(`authoring record ${field} must be a SHA-256 hash`);
   }
+  if (!boundedText(record.at)) findings.push("authoring record at is invalid");
+  if (record.summary !== undefined && !summaryWithinBounds(record.summary))
+    findings.push("authoring record summary is missing or too large");
   const status = record.status as AuthoringStatus;
   if (!validRecordStatuses().includes(status))
     findings.push(`invalid authoring status: ${String(record.status)}`);
+  if (status === "PENDING" || status === "IN_PROGRESS")
+    findings.push(`authoring status is not a lane output: ${status}`);
+
+  findings.push(
+    ...validateFindingList(record.findings, "authoring record findings"),
+  );
+  for (const field of ["dispatchMode", "model"] as const) {
+    if (record[field] !== undefined && !boundedText(record[field]))
+      findings.push(`authoring record ${field} is invalid`);
+  }
 
   const claims = Array.isArray(record.claims) ? record.claims : [];
+  if (!Array.isArray(record.claims))
+    findings.push("authoring record claims must be an array");
+  if (claims.length > MAX_ARRAY_LENGTH)
+    findings.push("authoring record claims exceeds its maximum length");
   const requiredClaimIds = expectedClaims(lane);
   const claimIds = new Set<string>();
   for (const [index, claimValue] of claims.entries()) {
@@ -297,7 +545,7 @@ export function validateAuthoringRecord(
       continue;
     }
     const id = claimValue.id;
-    if (typeof id !== "string" || !id.trim()) {
+    if (!boundedText(id)) {
       findings.push(`authoring claim at index ${index} requires an id`);
     } else if (claimIds.has(id)) {
       findings.push(`duplicate authoring claim: ${id}`);
@@ -316,9 +564,25 @@ export function validateAuthoringRecord(
       );
     if (
       !Array.isArray(claimValue.evidence) ||
-      claimValue.evidence.some((item) => typeof item !== "string")
+      claimValue.evidence.length > MAX_ARRAY_LENGTH ||
+      claimValue.evidence.some((item) => !boundedText(item))
     )
       findings.push(`invalid evidence for authoring claim: ${String(id)}`);
+    if (claimValue.kind !== undefined && !boundedText(claimValue.kind))
+      findings.push(`invalid kind for authoring claim: ${String(id)}`);
+    if (claimValue.paths !== undefined) {
+      findings.push(
+        ...validateStringList(
+          claimValue.paths,
+          `paths for authoring claim ${String(id)}`,
+        ),
+      );
+      for (const pathValue of claimValue.paths as unknown[])
+        if (!safeRelativePath(pathValue))
+          findings.push(`invalid path for authoring claim: ${String(id)}`);
+    }
+    if (claimValue.summary !== undefined && !boundedText(claimValue.summary))
+      findings.push(`invalid summary for authoring claim: ${String(id)}`);
   }
   if (statusRequiresCompleteEvidence(status)) {
     for (const id of requiredClaimIds) {
@@ -332,6 +596,10 @@ export function validateAuthoringRecord(
   }
 
   const artifacts = Array.isArray(record.artifacts) ? record.artifacts : [];
+  if (!Array.isArray(record.artifacts))
+    findings.push("authoring record artifacts must be an array");
+  if (artifacts.length > MAX_ARRAY_LENGTH)
+    findings.push("authoring record artifacts exceeds its maximum length");
   const allowedLeaves = new Set(lane.contentLeaves);
   const artifactPaths = new Set<string>();
   for (const [index, artifactValue] of artifacts.entries()) {
@@ -340,7 +608,7 @@ export function validateAuthoringRecord(
       continue;
     }
     const artifactPath = artifactValue.path;
-    if (typeof artifactPath !== "string" || !artifactPath.trim()) {
+    if (!safeRelativePath(artifactPath)) {
       findings.push(`authoring artifact at index ${index} requires a path`);
       continue;
     }
@@ -349,7 +617,7 @@ export function validateAuthoringRecord(
     if (artifactPaths.has(artifactPath))
       findings.push(`duplicate authoring artifact path: ${artifactPath}`);
     artifactPaths.add(artifactPath);
-    if (typeof artifactValue.id !== "string" || !artifactValue.id.trim())
+    if (!boundedText(artifactValue.id))
       findings.push(`authoring artifact id is required: ${artifactPath}`);
     if (typeof artifactValue.present !== "boolean")
       findings.push(`authoring artifact presence is invalid: ${artifactPath}`);
@@ -358,6 +626,24 @@ export function validateAuthoringRecord(
       !HASH_PATTERN.test(String(artifactValue.contentHash))
     )
       findings.push(`authoring artifact hash is invalid: ${artifactPath}`);
+    if (
+      artifactValue.contentPath !== undefined &&
+      !boundedText(artifactValue.contentPath, MAX_PATH_BYTES)
+    )
+      findings.push(
+        `authoring artifact content path is invalid: ${artifactPath}`,
+      );
+    if (artifactValue.kind !== undefined && !boundedText(artifactValue.kind))
+      findings.push(`authoring artifact kind is invalid: ${artifactPath}`);
+    if (
+      statusRequiresCompleteEvidence(status) &&
+      allowedLeaves.has(artifactPath) &&
+      artifactValue.present === true &&
+      !HASH_PATTERN.test(String(artifactValue.contentHash))
+    )
+      findings.push(
+        `complete authoring artifact has no content hash: ${artifactPath}`,
+      );
   }
   if (statusRequiresCompleteEvidence(status)) {
     for (const leaf of lane.contentLeaves)
@@ -381,13 +667,459 @@ export function validateAuthoringRecord(
       lane.id === "skill-review" && statusRequiresCompleteEvidence(status),
     ),
   );
+  if (isRecord(record.review)) {
+    if (
+      Array.isArray(record.review.lenses) &&
+      (record.review.lenses.length !== plan.verify.lenses.length ||
+        record.review.lenses.some(
+          (lens, index) => lens !== plan.verify.lenses[index],
+        ))
+    )
+      findings.push("authoring review lenses do not match the AuthoringPlan");
+    if (
+      record.review.evidenceSource === "llm-single" &&
+      record.review.voters !== undefined &&
+      record.review.voters !== plan.verify.voters
+    )
+      findings.push("single-vote authoring review voter count is invalid");
+    if (
+      record.review.evidenceSource === "llm-multivote" &&
+      record.review.voters !== undefined &&
+      record.review.voters !== plan.verify.voters
+    )
+      findings.push("multi-vote authoring review voter count is invalid");
+    if (
+      record.review.rounds !== undefined &&
+      (typeof record.review.rounds !== "number" ||
+        record.review.rounds < 1 ||
+        record.review.rounds > plan.verify.maxRounds)
+    )
+      findings.push("authoring review round count is invalid");
+    if (record.review.passed === true && record.review.decision !== "approved")
+      findings.push("passed authoring review must be approved");
+  }
   if (
     lane.id === "skill-review" &&
     statusRequiresCompleteEvidence(status) &&
     (!isRecord(record.review) || record.review.decision !== "approved")
   )
     findings.push("skill-review must have an approved authoring review");
+  if (
+    isRecord(record.review) &&
+    record.review.passed === false &&
+    statusRequiresCompleteEvidence(status)
+  )
+    findings.push("complete authoring record cannot have a failed review");
+  if (HASH_PATTERN.test(String(record.authoredMaterialHash))) {
+    try {
+      if (
+        record.authoredMaterialHash !==
+        recordMaterialHash(record as unknown as AuthoringRecord)
+      )
+        findings.push("authoring record authoredMaterialHash is inconsistent");
+    } catch {
+      findings.push("authoring record authoredMaterialHash cannot be verified");
+    }
+  }
   return findings;
+}
+
+function normalizedFinding(
+  value: unknown,
+  label: string,
+): AuthoringLaneFinding {
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  const findings = validateFindingList([value], label);
+  if (findings.length) throw new Error(findings.join("; "));
+  return {
+    severity: value.severity as AuthoringLaneFinding["severity"],
+    ...(value.path !== undefined ? { path: value.path as string } : {}),
+    ...(value.claim !== undefined ? { claim: value.claim as string } : {}),
+    problem: value.problem as string,
+    ...(value.impact !== undefined ? { impact: value.impact as string } : {}),
+    ...(value.fix !== undefined ? { fix: value.fix as string } : {}),
+  };
+}
+
+function normalizedFindings(
+  value: unknown,
+  label: string,
+): AuthoringLaneFinding[] {
+  if (value === undefined) return [];
+  const findings = validateFindingList(value, label);
+  if (findings.length) throw new Error(findings.join("; "));
+  return (value as unknown[]).map((item, index) =>
+    normalizedFinding(item, `${label}[${index}]`),
+  );
+}
+
+function normalizedClaim(
+  value: unknown,
+  label: string,
+): AuthoringClaimEvidence {
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  if (!boundedText(value.id)) throw new Error(`${label}.id is invalid`);
+  const evidence =
+    value.evidence === undefined
+      ? [
+          ...(boundedText(value.summary) ? [value.summary as string] : []),
+          ...(Array.isArray(value.paths) ? (value.paths as string[]) : []),
+        ]
+      : value.evidence;
+  if (!Array.isArray(evidence) || evidence.some((item) => !boundedText(item)))
+    throw new Error(`${label}.evidence is invalid`);
+  if (evidence.length > MAX_ARRAY_LENGTH)
+    throw new Error(`${label}.evidence exceeds its maximum length`);
+  const status = value.status ?? "SUPPORTED";
+  if (!["SUPPORTED", "UNSUPPORTED", "NEEDS_CONTEXT"].includes(String(status)))
+    throw new Error(`${label}.status is invalid`);
+  let paths: string[] | undefined;
+  if (value.paths !== undefined) {
+    if (
+      !Array.isArray(value.paths) ||
+      value.paths.some((item) => !safeRelativePath(item))
+    )
+      throw new Error(`${label}.paths is invalid`);
+    paths = [...(value.paths as string[])];
+  }
+  if (value.kind !== undefined && !boundedText(value.kind))
+    throw new Error(`${label}.kind is invalid`);
+  if (value.summary !== undefined && !boundedText(value.summary))
+    throw new Error(`${label}.summary is invalid`);
+  return {
+    id: value.id as string,
+    status: status as AuthoringClaimEvidence["status"],
+    evidence: [...(evidence as string[])],
+    ...(value.kind !== undefined ? { kind: value.kind as string } : {}),
+    ...(paths ? { paths } : {}),
+    ...(value.summary !== undefined
+      ? { summary: value.summary as string }
+      : {}),
+  };
+}
+
+function normalizedArtifact(
+  value: unknown,
+  lane: AuthoringLane,
+  label: string,
+): AuthoringArtifactInput {
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  if (!safeRelativePath(value.path))
+    throw new Error(`${label}.path is invalid`);
+  if (!lane.contentLeaves.includes(value.path as string))
+    throw new Error(`Unknown authoring artifact path: ${String(value.path)}`);
+  const result: AuthoringArtifactInput = {
+    id: (value.id ?? value.path) as string,
+    path: value.path as string,
+    present: value.present === undefined ? true : (value.present as boolean),
+    ...(value.content !== undefined
+      ? { content: value.content as string }
+      : {}),
+    ...(value.contentPath !== undefined
+      ? { contentPath: value.contentPath as string }
+      : {}),
+    ...(value.contentHash !== undefined
+      ? { contentHash: value.contentHash as string }
+      : {}),
+    ...(value.kind !== undefined ? { kind: value.kind as string } : {}),
+  };
+  if (!boundedText(result.id)) throw new Error(`${label}.id is invalid`);
+  if (typeof result.present !== "boolean")
+    throw new Error(`${label}.present is invalid`);
+  if (result.content !== undefined && typeof result.content !== "string")
+    throw new Error(`${label}.content is invalid`);
+  if (
+    result.content !== undefined &&
+    (result.present !== true ||
+      Buffer.byteLength(result.content, "utf8") > MAX_ARTIFACT_BYTES ||
+      !result.content.trim() ||
+      result.content.includes("AUTHORING PENDING") ||
+      /^---\s*$/mu.test(result.content))
+  )
+    throw new Error(`${label}.content is invalid`);
+  if (
+    result.content !== undefined &&
+    result.contentHash !== undefined &&
+    sha256(result.content) !== result.contentHash
+  )
+    throw new Error(`${label}.contentHash does not match content`);
+  if (result.contentPath !== undefined && result.present !== true)
+    throw new Error(`${label}.contentPath requires present=true`);
+  if (
+    result.contentPath !== undefined &&
+    !boundedText(result.contentPath, MAX_PATH_BYTES)
+  )
+    throw new Error(`${label}.contentPath is invalid`);
+  if (
+    result.contentHash !== undefined &&
+    !HASH_PATTERN.test(result.contentHash)
+  )
+    throw new Error(`${label}.contentHash is invalid`);
+  if (result.kind !== undefined && !boundedText(result.kind))
+    throw new Error(`${label}.kind is invalid`);
+  return result;
+}
+
+function normalizedReview(
+  value: unknown,
+  model: unknown,
+): AuthoringReviewOutput | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("Authoring review must be an object");
+  if (typeof value.passed === "boolean") {
+    if (!EVIDENCE_SOURCES.includes(value.evidenceSource as never))
+      throw new Error("Authoring review evidenceSource is invalid");
+    if (!boundedText(value.reviewedAt))
+      throw new Error("Authoring review reviewedAt is invalid");
+    if (!Array.isArray(value.findings))
+      throw new Error("Authoring review findings must be an array");
+    const findings = normalizedFindings(
+      value.findings,
+      "authoring review findings",
+    );
+    const blockingFindings = findings
+      .filter((finding) => finding.severity !== "minor")
+      .map((finding) => finding.problem);
+    const warnings = findings
+      .filter((finding) => finding.severity === "minor")
+      .map((finding) => finding.problem);
+    if (value.passed && blockingFindings.length)
+      throw new Error(
+        "Passed authoring review cannot contain blocking findings",
+      );
+    return {
+      decision: value.passed ? "approved" : "rejected",
+      reviewer: boundedText(model) ? (model as string) : "authoring-provider",
+      summary: value.passed
+        ? "Authoring review passed."
+        : findings.map((finding) => finding.problem).join("; ") ||
+          "Authoring review did not pass.",
+      blockingFindings,
+      warnings,
+      passed: value.passed,
+      evidenceSource:
+        value.evidenceSource as AuthoringReviewOutput["evidenceSource"],
+      ...(value.voters !== undefined ? { voters: value.voters as number } : {}),
+      ...(value.lenses !== undefined
+        ? { lenses: value.lenses as string[] }
+        : {}),
+      ...(value.rounds !== undefined ? { rounds: value.rounds as number } : {}),
+      findings,
+      reviewedAt: value.reviewedAt as string,
+    };
+  }
+  return value as unknown as AuthoringReviewOutput;
+}
+
+function normalizeLaneOutput(
+  value: unknown,
+  plan: AuthoringPlan,
+  expectedLane: AuthoringLaneId,
+): AuthoringRecordInput {
+  if (!isRecord(value))
+    throw new Error("Authoring lane output must be an object");
+  if (value.lane !== undefined && value.lane !== expectedLane)
+    throw new Error(
+      `Authoring lane output lane mismatch: expected ${expectedLane}`,
+    );
+  const status = value.status;
+  if (status === "PENDING" || status === "IN_PROGRESS")
+    throw new Error(
+      `Authoring lane output status is invalid: ${String(status)}`,
+    );
+  if (status !== "COMPLETE" && !validOutputStatus(status))
+    throw new Error(
+      `Authoring lane output status is invalid: ${String(status)}`,
+    );
+  const lane = laneDefinition(plan, expectedLane);
+  const claimsValue = value.claims;
+  if (claimsValue !== undefined && !Array.isArray(claimsValue))
+    throw new Error("Authoring lane output claims must be an array");
+  if (Array.isArray(claimsValue) && claimsValue.length > MAX_ARRAY_LENGTH)
+    throw new Error("Authoring lane output claims exceeds its maximum length");
+  const claims = (claimsValue ?? []).map((claim, index) =>
+    normalizedClaim(claim, `Authoring lane output claims[${index}]`),
+  );
+  const artifactsValue = value.artifacts;
+  if (artifactsValue !== undefined && !Array.isArray(artifactsValue))
+    throw new Error("Authoring lane output artifacts must be an array");
+  if (Array.isArray(artifactsValue) && artifactsValue.length > MAX_ARRAY_LENGTH)
+    throw new Error(
+      "Authoring lane output artifacts exceeds its maximum length",
+    );
+  const artifacts = (artifactsValue ?? []).map((artifact, index) =>
+    normalizedArtifact(
+      artifact,
+      lane,
+      `Authoring lane output artifacts[${index}]`,
+    ),
+  );
+  const findings = normalizedFindings(
+    value.findings,
+    "Authoring lane output findings",
+  );
+  let summary = value.summary;
+  if (summary !== undefined && !summaryWithinBounds(summary))
+    throw new Error("Authoring lane output summary is missing or too large");
+  if (
+    (status === "BLOCKED" ||
+      status === "NEEDS_CONTEXT" ||
+      status === "DONE_WITH_CONCERNS") &&
+    !summary &&
+    findings.length
+  )
+    summary = findings.map((finding) => finding.problem).join("; ");
+  if (
+    (status === "BLOCKED" ||
+      status === "NEEDS_CONTEXT" ||
+      status === "DONE_WITH_CONCERNS") &&
+    !summary
+  )
+    throw new Error(`${status} authoring lane output requires a summary`);
+  if (summary !== undefined && !summaryWithinBounds(summary))
+    throw new Error("Authoring lane output summary is missing or too large");
+  if (value.dispatchMode !== undefined && !boundedText(value.dispatchMode))
+    throw new Error("Authoring lane output dispatchMode is invalid");
+  if (value.model !== undefined && !boundedText(value.model))
+    throw new Error("Authoring lane output model is invalid");
+  if (
+    value.expectedRevision !== undefined &&
+    (!Number.isInteger(value.expectedRevision) ||
+      Number(value.expectedRevision) < 0)
+  )
+    throw new Error("Authoring lane output expectedRevision is invalid");
+  const review = normalizedReview(value.review, value.model);
+  return {
+    status: status as AuthoringStatus,
+    claims,
+    artifacts,
+    findings,
+    ...(value.dispatchMode !== undefined
+      ? { dispatchMode: value.dispatchMode as string }
+      : {}),
+    ...(value.model !== undefined ? { model: value.model as string } : {}),
+    ...(summary !== undefined ? { summary: summary as string } : {}),
+    ...(value.expectedRevision !== undefined
+      ? { expectedRevision: value.expectedRevision as number }
+      : {}),
+    ...(value.protocolHash !== undefined
+      ? { protocolHash: value.protocolHash as string }
+      : {}),
+    ...(value.authoringPlanHash !== undefined
+      ? { authoringPlanHash: value.authoringPlanHash as string }
+      : {}),
+    ...(value.workflowProtocolHash !== undefined
+      ? { workflowProtocolHash: value.workflowProtocolHash as string }
+      : {}),
+    ...(value.sourceEvidenceHash !== undefined
+      ? { sourceEvidenceHash: value.sourceEvidenceHash as string }
+      : {}),
+    ...(value.authoringInputHash !== undefined
+      ? { authoringInputHash: value.authoringInputHash as string }
+      : {}),
+    ...(review ? { review } : {}),
+  };
+}
+
+function validateNormalizedLaneInput(
+  input: AuthoringRecordInput,
+  plan: AuthoringPlan,
+  laneId: AuthoringLaneId,
+): string[] {
+  const lane = laneDefinition(plan, laneId);
+  const findings: string[] = [];
+  const claims = input.claims ?? [];
+  const claimIds = new Set<string>();
+  for (const claim of claims) {
+    if (claimIds.has(claim.id))
+      findings.push(`duplicate authoring claim: ${claim.id}`);
+    claimIds.add(claim.id);
+    if (!expectedClaims(lane).includes(claim.id))
+      findings.push(`unknown authoring claim: ${claim.id}`);
+  }
+  if (statusRequiresCompleteEvidence(input.status)) {
+    for (const claimId of expectedClaims(lane)) {
+      const claim = claims.find((item) => item.id === claimId);
+      if (!claim) findings.push(`missing authoring claim: ${claimId}`);
+      else if (claim.status !== "SUPPORTED" || claim.evidence.length === 0)
+        findings.push(`complete authoring claim is not supported: ${claimId}`);
+    }
+  }
+  const artifacts = input.artifacts ?? [];
+  const artifactPaths = new Set<string>();
+  for (const artifact of artifacts) {
+    if (artifactPaths.has(artifact.path))
+      findings.push(`duplicate authoring artifact path: ${artifact.path}`);
+    artifactPaths.add(artifact.path);
+    if (!lane.contentLeaves.includes(artifact.path))
+      findings.push(`unknown authoring artifact path: ${artifact.path}`);
+    if (statusRequiresCompleteEvidence(input.status)) {
+      if (artifact.present !== true)
+        findings.push(
+          `complete authoring artifact is missing: ${artifact.path}`,
+        );
+      if (
+        lane.contentLeaves.includes(artifact.path) &&
+        artifact.content === undefined &&
+        artifact.contentPath === undefined
+      )
+        findings.push(
+          `complete authoring artifact has no content: ${artifact.path}`,
+        );
+      if (
+        artifact.content !== undefined &&
+        artifact.contentHash !== undefined &&
+        sha256(artifact.content) !== artifact.contentHash
+      )
+        findings.push(
+          `authoring artifact hash does not match content: ${artifact.path}`,
+        );
+    }
+  }
+  if (statusRequiresCompleteEvidence(input.status)) {
+    for (const leaf of lane.contentLeaves)
+      if (!artifactPaths.has(leaf))
+        findings.push(`missing authoring artifact: ${leaf}`);
+  }
+  findings.push(
+    ...validateReview(
+      input.review,
+      laneId === "skill-review" && statusRequiresCompleteEvidence(input.status),
+    ),
+  );
+  return findings;
+}
+
+export function validateAuthoringLaneOutput(
+  value: unknown,
+  plan: AuthoringPlan,
+  expectedLane: AuthoringLaneId,
+): string[] {
+  if (!isRecord(value) || typeof value.lane !== "string")
+    return ["Authoring lane output lane is required"];
+  if (value.status === "COMPLETE")
+    return ["Authoring lane output status is invalid: COMPLETE"];
+  try {
+    const normalized = normalizeLaneOutput(value, plan, expectedLane);
+    const findings = validateNormalizedLaneInput(
+      normalized,
+      plan,
+      expectedLane,
+    );
+    for (const [field, expected] of [
+      ["protocolHash", plan.protocolHash],
+      ["authoringPlanHash", plan.authoringPlanHash],
+      ["workflowProtocolHash", plan.workflowProtocolHash],
+      ["sourceEvidenceHash", plan.sourceEvidenceHash],
+      ["authoringInputHash", authoringInputHash(plan)],
+    ] as const) {
+      if (normalized[field] !== undefined && normalized[field] !== expected)
+        findings.push(`Authoring lane output ${field} is stale`);
+    }
+    return findings;
+  } catch (error) {
+    return [error instanceof Error ? error.message : String(error)];
+  }
 }
 
 export async function readAuthoringPlan(
@@ -397,12 +1129,17 @@ export async function readAuthoringPlan(
     const expectedRoot = sessionRoot(state);
     if (
       state.authoring.sessionPath !== expectedRoot ||
+      (state.authoring.statePath !== undefined &&
+        state.authoring.statePath !== sessionSummaryPath(state)) ||
       state.authoring.planPath !== path.join(expectedRoot, "plan.json") ||
       state.authoring.recordsPath !== path.join(expectedRoot, "records")
     )
       throw new Error("Authoring session paths are invalid");
   }
   const file = sessionPlanPath(state);
+  const stats = await fs.lstat(file);
+  if (!stats.isFile() || stats.size > MAX_RECORD_BYTES)
+    throw new Error("Authoring plan is not a bounded regular file");
   const value = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
   const findings = validateAuthoringPlan(value, { requireExtensions: true });
   if (findings.length)
@@ -418,13 +1155,43 @@ async function acquireSessionLock(root: string): Promise<() => Promise<void>> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
       const handle = await fs.open(lock, "wx");
-      await handle.writeFile(`${process.pid}\n`, "utf8");
+      await handle.writeFile(
+        JSON.stringify({ pid: process.pid, at: new Date().toISOString() }) +
+          "\n",
+        "utf8",
+      );
       await handle.close();
       return async () => {
         await fs.rm(lock, { force: true });
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      let stale = false;
+      try {
+        const value = await fs.readFile(lock, "utf8");
+        let pid: number | undefined;
+        try {
+          const parsed = JSON.parse(value) as { pid?: unknown };
+          if (Number.isInteger(parsed.pid)) pid = parsed.pid as number;
+        } catch {
+          const parsed = Number(value.trim());
+          if (Number.isInteger(parsed)) pid = parsed;
+        }
+        if (pid !== undefined) {
+          try {
+            process.kill(pid, 0);
+          } catch (processError) {
+            stale = (processError as NodeJS.ErrnoException).code === "ESRCH";
+          }
+        }
+      } catch (readError) {
+        if ((readError as NodeJS.ErrnoException).code !== "ENOENT")
+          throw readError;
+      }
+      if (stale) {
+        await fs.rm(lock, { force: true });
+        continue;
+      }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }
@@ -455,6 +1222,15 @@ async function readStoredRecords(
   for (const lane of AUTHORING_LANE_IDS) {
     const file = recordFile(state, lane);
     try {
+      const stats = await fs.lstat(file);
+      if (!stats.isFile()) {
+        errors.push(`cannot read authoring record ${lane}: not a regular file`);
+        continue;
+      }
+      if (stats.size > MAX_RECORD_BYTES) {
+        errors.push(`cannot read authoring record ${lane}: file is too large`);
+        continue;
+      }
       const value = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
       const findings = validateAuthoringRecord(value, plan, lane);
       if (findings.length) {
@@ -470,6 +1246,114 @@ async function readStoredRecords(
   return { records, errors };
 }
 
+function sessionSummaryPath(state: CreatorState): string {
+  return path.join(sessionRoot(state), "state.json");
+}
+
+function validAuthoringSummary(value: unknown): value is AuthoringStateSummary {
+  if (!isRecord(value)) return false;
+  return (
+    value.schemaVersion === 1 &&
+    typeof value.status === "string" &&
+    typeof value.sessionPath === "string" &&
+    typeof value.planPath === "string" &&
+    typeof value.recordsPath === "string" &&
+    Number.isInteger(value.revision) &&
+    Number(value.revision) >= 0 &&
+    value.generatorContractVersion === AUTHORING_GENERATOR_CONTRACT_VERSION &&
+    typeof value.planHash === "string" &&
+    typeof value.protocolHash === "string" &&
+    typeof value.workflowProtocolHash === "string" &&
+    typeof value.sourceEvidenceHash === "string" &&
+    typeof value.authoringPlanHash === "string" &&
+    typeof value.authoringInputHash === "string" &&
+    typeof value.scaffoldHash === "string" &&
+    (value.authoredMaterialHash === null ||
+      typeof value.authoredMaterialHash === "string") &&
+    (value.assembledPackageHash === null ||
+      typeof value.assembledPackageHash === "string") &&
+    isRecord(value.records)
+  );
+}
+
+async function readSessionSummary(
+  state: CreatorState,
+): Promise<AuthoringStateSummary | undefined> {
+  try {
+    const stats = await fs.lstat(sessionSummaryPath(state));
+    if (!stats.isFile() || stats.size > MAX_RECORD_BYTES)
+      throw new Error("Authoring session summary is invalid");
+    const value = JSON.parse(
+      await fs.readFile(sessionSummaryPath(state), "utf8"),
+    ) as unknown;
+    if (!validAuthoringSummary(value))
+      throw new Error("Authoring session summary is invalid");
+    const root = sessionRoot(state);
+    const statePath =
+      typeof value.statePath === "string"
+        ? value.statePath
+        : sessionSummaryPath(state);
+    if (
+      value.sessionPath !== root ||
+      statePath !== sessionSummaryPath(state) ||
+      value.planPath !== path.join(root, "plan.json") ||
+      value.recordsPath !== recordsRoot(state)
+    )
+      throw new Error("Authoring session summary paths are invalid");
+    return { ...value, statePath };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function currentAuthoringSummary(
+  state: CreatorState,
+): Promise<AuthoringStateSummary | undefined> {
+  let session: AuthoringStateSummary | undefined;
+  try {
+    session = await readSessionSummary(state);
+  } catch {
+    return state.authoring;
+  }
+  if (
+    session &&
+    (!state.authoring || session.revision >= state.authoring.revision)
+  )
+    return session;
+  return state.authoring;
+}
+
+function reconcileRecordRevision(
+  state: CreatorState,
+  authoring: AuthoringStateSummary,
+  records: Partial<Record<AuthoringLaneId, AuthoringRecord>>,
+): AuthoringStateSummary {
+  const revisions = Object.values(records)
+    .map((record) => record?.revision ?? 0)
+    .filter((revision) => Number.isInteger(revision));
+  const highestRevision = Math.max(authoring.revision, ...revisions);
+  const recordSummaries = Object.fromEntries(
+    Object.entries(records).map(([lane, record]) => [
+      lane,
+      recordSummary(record!, recordFile(state, lane as AuthoringLaneId)),
+    ]),
+  );
+  if (
+    highestRevision === authoring.revision &&
+    Object.keys(recordSummaries).length === 0
+  )
+    return authoring;
+  return {
+    ...authoring,
+    revision: highestRevision,
+    records: {
+      ...authoring.records,
+      ...recordSummaries,
+    },
+  };
+}
+
 function summaryStatus(
   records: Partial<Record<AuthoringLaneId, AuthoringRecord>>,
 ): AuthoringSessionStatus {
@@ -482,9 +1366,13 @@ function summaryStatus(
 
 async function writeSessionSummary(state: CreatorState): Promise<void> {
   if (!state.authoring) return;
+  const summary = {
+    ...state.authoring,
+    statePath: sessionSummaryPath(state),
+  } satisfies AuthoringStateSummary;
   await atomicWrite(
-    path.join(sessionRoot(state), "state.json"),
-    JSON.stringify(state.authoring, null, 2) + "\n",
+    sessionSummaryPath(state),
+    JSON.stringify(summary, null, 2) + "\n",
   );
 }
 
@@ -508,9 +1396,19 @@ export async function initializeAuthoringSession(options: {
   const root = sessionRoot(state);
   const inputHash = authoringInputHash(options.plan);
   return withSessionLock(root, async () => {
-    const previous = state.authoring;
+    let persisted: CreatorState;
+    try {
+      persisted = await readState(state.projectRoot, state.name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      persisted = state;
+    }
+    const sessionPrevious = await readSessionSummary(persisted).catch(
+      () => undefined,
+    );
+    const previous = sessionPrevious ?? persisted.authoring;
     const sameInput = previous?.authoringInputHash === inputHash;
-    await fs.mkdir(recordsRoot(state), { recursive: true });
+    await fs.mkdir(recordsRoot(persisted), { recursive: true });
     await atomicWrite(
       path.join(root, "plan.json"),
       JSON.stringify(options.plan, null, 2) + "\n",
@@ -534,8 +1432,8 @@ export async function initializeAuthoringSession(options: {
           "authoring-plan.json",
         ),
     };
-    state.generated = generated;
-    state.authoring = {
+    persisted.generated = generated;
+    persisted.authoring = {
       schemaVersion: 1,
       status: sameInput
         ? previous?.status === "assembled"
@@ -545,8 +1443,9 @@ export async function initializeAuthoringSession(options: {
           ? "stale"
           : "pending",
       sessionPath: root,
+      statePath: sessionSummaryPath(persisted),
       planPath: path.join(root, "plan.json"),
-      recordsPath: recordsRoot(state),
+      recordsPath: recordsRoot(persisted),
       revision: (previous?.revision ?? 0) + 1,
       generatorContractVersion: AUTHORING_GENERATOR_CONTRACT_VERSION,
       planHash: options.plan.planHash,
@@ -561,17 +1460,36 @@ export async function initializeAuthoringSession(options: {
         ? (previous?.authoredMaterialHash ?? null)
         : null,
       assembledPackageHash: null,
-      records: sameInput ? retainedRecords : retainedRecords,
+      records: retainedRecords,
       ...(invalidatedLanes?.length ? { invalidatedLanes } : {}),
     };
-    state.currentHash = null;
-    state.eval = undefined;
-    state.review = undefined;
-    state.status = "generated";
-    await writeSessionSummary(state);
-    await writeState(state);
-    return state;
+    persisted.currentHash = null;
+    persisted.eval = undefined;
+    persisted.review = undefined;
+    persisted.status = "generated";
+    await writeSessionSummary(persisted);
+    await writeState(persisted);
+    Object.assign(state, persisted);
+    return persisted;
   });
+}
+
+export const createAuthoringSession = initializeAuthoringSession;
+
+export async function readAuthoringSession(
+  projectRoot: string,
+  name: string,
+): Promise<AuthoringStateSummary> {
+  const state = await readState(projectRoot, name);
+  const summary = await currentAuthoringSummary(state);
+  if (!summary) throw new Error(`Authoring session is missing: ${name}`);
+  try {
+    const plan = await readAuthoringPlan(state);
+    const stored = await readStoredRecords(state, plan);
+    return reconcileRecordRevision(state, summary, stored.records);
+  } catch {
+    return summary;
+  }
 }
 
 function artifactInput(value: unknown): AuthoringArtifactInput | null {
@@ -596,18 +1514,24 @@ async function materializeArtifact(
   lane: AuthoringLaneId,
   input: AuthoringArtifactInput,
 ): Promise<{ artifact: AuthoringArtifactEvidence; content?: string }> {
-  if (typeof input.path !== "string" || !input.path.trim())
+  if (!safeRelativePath(input.path))
     throw new Error("Authoring artifact path is required");
-  if (typeof input.id !== "string" || !input.id.trim())
+  if (!boundedText(input.id))
     throw new Error(`Authoring artifact id is required: ${input.path}`);
   if (typeof input.present !== "boolean")
     throw new Error(`Authoring artifact presence is invalid: ${input.path}`);
+  if (input.kind !== undefined && !boundedText(input.kind))
+    throw new Error(`Authoring artifact kind is invalid: ${input.path}`);
   let contentHash = input.contentHash;
   let contentPath: string | undefined;
   let content: string | undefined;
   if (input.content !== undefined) {
     if (typeof input.content !== "string")
       throw new Error(`Authoring artifact content is invalid: ${input.path}`);
+    if (input.present !== true)
+      throw new Error(
+        `Authoring artifact content is not present: ${input.path}`,
+      );
     if (Buffer.byteLength(input.content, "utf8") > MAX_ARTIFACT_BYTES)
       throw new Error(`Authoring artifact content is too large: ${input.path}`);
     if (!input.content.trim())
@@ -626,7 +1550,7 @@ async function materializeArtifact(
       sessionRoot(state),
       "artifacts",
       lane,
-      `${sha256(input.path)}.md`,
+      `${sha256(`${input.path}:${contentHash}`)}.md`,
     );
   } else if (input.contentPath !== undefined) {
     const suppliedPath = path.resolve(state.projectRoot, input.contentPath);
@@ -634,7 +1558,27 @@ async function materializeArtifact(
       throw new Error(
         `Authoring artifact content path escapes the project: ${input.path}`,
       );
+    const realSuppliedPath = await fs.realpath(suppliedPath);
+    if (!isWithin(state.projectRoot, realSuppliedPath))
+      throw new Error(
+        `Authoring artifact content path escapes the project: ${input.path}`,
+      );
+    if (isWithin(path.join(state.projectRoot, ".badger"), realSuppliedPath))
+      throw new Error(
+        `Authoring artifact content path is protected: ${input.path}`,
+      );
+    const suppliedStats = await fs.lstat(suppliedPath);
+    if (!suppliedStats.isFile())
+      throw new Error(
+        `Authoring artifact content path is not a file: ${input.path}`,
+      );
+    if (suppliedStats.size > MAX_ARTIFACT_BYTES)
+      throw new Error(`Authoring artifact content is too large: ${input.path}`);
     const suppliedContent = await fs.readFile(suppliedPath, "utf8");
+    if (input.present !== true)
+      throw new Error(
+        `Authoring artifact content is not present: ${input.path}`,
+      );
     if (Buffer.byteLength(suppliedContent, "utf8") > MAX_ARTIFACT_BYTES)
       throw new Error(`Authoring artifact content is too large: ${input.path}`);
     if (!suppliedContent.trim())
@@ -652,7 +1596,7 @@ async function materializeArtifact(
       sessionRoot(state),
       "artifacts",
       lane,
-      `${sha256(input.path)}.md`,
+      `${sha256(`${input.path}:${contentHash}`)}.md`,
     );
     content = suppliedContent;
   }
@@ -669,6 +1613,7 @@ async function materializeArtifact(
       present: input.present,
       ...(contentHash ? { contentHash } : {}),
       ...(contentPath ? { contentPath } : {}),
+      ...(input.kind ? { kind: input.kind } : {}),
     },
     ...(content !== undefined ? { content } : {}),
   };
@@ -678,6 +1623,7 @@ export async function recordAuthoring(options: {
   state: CreatorState;
   lane: AuthoringLaneId;
   record: unknown;
+  expectedRevision?: number;
 }): Promise<AuthoringRecord> {
   if (!isAuthoringLane(options.lane))
     throw new Error(`Unknown authoring lane: ${String(options.lane)}`);
@@ -695,29 +1641,70 @@ export async function recordAuthoring(options: {
   }
   const root = sessionRoot(options.state);
   return withSessionLock(root, async () => {
-    const input = isRecord(options.record)
-      ? (options.record as unknown as AuthoringRecordInput)
-      : null;
-    if (!input) throw new Error("Authoring record must be an object");
-    if (input.lane !== undefined && input.lane !== options.lane)
-      throw new Error(`Authoring record lane mismatch: ${String(input.lane)}`);
-    if (!validRecordStatuses().includes(input.status))
-      throw new Error(`Invalid authoring status: ${String(input.status)}`);
-    const lane = laneDefinition(plan, options.lane);
-    const currentInputHash = authoringInputHash(plan);
-    if (options.state.authoring!.authoringInputHash !== currentInputHash)
+    let current: CreatorState;
+    try {
+      current = await readState(options.state.projectRoot, options.state.name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      current = options.state;
+    }
+    const sessionSummary = await currentAuthoringSummary(current);
+    if (sessionSummary) current.authoring = sessionSummary;
+    if (!current.generated || !current.authoring)
+      throw new Error(
+        "Generate the workflow scaffold before recording authoring",
+      );
+    const currentPlan = await readAuthoringPlan(current);
+    const input = normalizeLaneOutput(
+      options.record,
+      currentPlan,
+      options.lane,
+    );
+    const expectedRevision = options.expectedRevision ?? input.expectedRevision;
+    if (
+      expectedRevision !== undefined &&
+      (!Number.isInteger(expectedRevision) || expectedRevision < 0)
+    )
+      throw new Error("Authoring expected revision is invalid");
+    const lane = laneDefinition(currentPlan, options.lane);
+    const currentInputHash = authoringInputHash(currentPlan);
+    if (current.authoring.authoringInputHash !== currentInputHash)
       throw new Error("Authoring session input evidence is stale");
     for (const [field, expected] of [
-      ["protocolHash", plan.protocolHash],
-      ["authoringPlanHash", plan.authoringPlanHash],
-      ["workflowProtocolHash", plan.workflowProtocolHash],
-      ["sourceEvidenceHash", plan.sourceEvidenceHash],
-      ["authoringInputHash", options.state.authoring?.authoringInputHash],
+      ["protocolHash", currentPlan.protocolHash],
+      ["authoringPlanHash", currentPlan.authoringPlanHash],
+      ["workflowProtocolHash", currentPlan.workflowProtocolHash],
+      ["sourceEvidenceHash", currentPlan.sourceEvidenceHash],
+      ["authoringInputHash", current.authoring.authoringInputHash],
     ] as const) {
       if (input[field] !== undefined && input[field] !== expected)
         throw new Error(`Authoring record ${field} is stale`);
     }
-    const stored = await readStoredRecords(options.state, plan);
+    const stored = await readStoredRecords(current, currentPlan);
+    current.authoring = reconcileRecordRevision(
+      current,
+      current.authoring,
+      stored.records,
+    );
+    if (
+      expectedRevision !== undefined &&
+      expectedRevision !== current.authoring.revision
+    ) {
+      const conflict = new AuthoringRevisionConflictError(
+        options.lane,
+        expectedRevision,
+        current.authoring.revision,
+      );
+      current.authoring = {
+        ...current.authoring,
+        statePath: sessionSummaryPath(current),
+        conflict: conflict.conflict,
+      };
+      await writeSessionSummary(current);
+      await writeState(current);
+      Object.assign(options.state, current);
+      throw conflict;
+    }
     for (const dependency of lane.dependencies) {
       const dependencyRecord = stored.records[dependency];
       if (!dependencyRecord || !isCompleteStatus(dependencyRecord.status))
@@ -726,7 +1713,7 @@ export async function recordAuthoring(options: {
         );
       if (
         dependencyRecord.authoringInputHash !==
-        options.state.authoring!.authoringInputHash
+        current.authoring.authoringInputHash
       )
         throw new Error(
           `Authoring lane ${options.lane} is blocked by stale ${dependency} evidence`,
@@ -753,7 +1740,7 @@ export async function recordAuthoring(options: {
     for (const artifact of artifacts) {
       if (!artifact) continue;
       const materialized = await materializeArtifact(
-        options.state,
+        current,
         options.lane,
         artifact,
       );
@@ -773,42 +1760,56 @@ export async function recordAuthoring(options: {
       (typeof summary !== "string" || !summaryWithinBounds(summary))
     )
       throw new Error("Authoring record summary is missing or too large");
+    const prior = current.authoring;
     const record: AuthoringRecord = {
       schemaVersion: 1,
       kind: "authoring-record",
-      workflow: plan.name,
+      revision: prior.revision + 1,
+      workflow: currentPlan.name,
       lane: options.lane,
       status: input.status,
-      protocolHash: plan.protocolHash,
-      authoringPlanHash: plan.authoringPlanHash,
-      workflowProtocolHash: plan.workflowProtocolHash,
-      sourceEvidenceHash: plan.sourceEvidenceHash,
+      protocolHash: currentPlan.protocolHash,
+      authoringPlanHash: currentPlan.authoringPlanHash,
+      workflowProtocolHash: currentPlan.workflowProtocolHash,
+      sourceEvidenceHash: currentPlan.sourceEvidenceHash,
       authoringInputHash: currentInputHash,
       authoredMaterialHash: "0".repeat(64),
       claims: claims as AuthoringClaimEvidence[],
       artifacts: normalizedArtifacts,
+      ...(input.findings?.length ? { findings: input.findings } : {}),
+      ...(input.dispatchMode ? { dispatchMode: input.dispatchMode } : {}),
+      ...(input.model ? { model: input.model } : {}),
       ...(input.review ? { review: input.review } : {}),
       ...(summary !== undefined ? { summary } : {}),
       at: new Date().toISOString(),
     };
     record.authoredMaterialHash = recordMaterialHash(record);
-    const findings = validateAuthoringRecord(record, plan, options.lane);
+    const findings = validateAuthoringRecord(record, currentPlan, options.lane);
     if (findings.length)
       throw new Error(`Invalid authoring record:\n${findings.join("\n")}`);
     for (const artifact of pendingArtifacts)
       await atomicWrite(artifact.path, artifact.content);
     await atomicWrite(
-      recordFile(options.state, options.lane),
+      recordFile(current, options.lane),
       JSON.stringify(record, null, 2) + "\n",
     );
     stored.records[options.lane] = record;
-    const prior = options.state.authoring!;
     const remainingInvalidated = prior.invalidatedLanes?.filter(
       (laneId) => laneId !== options.lane,
     );
-    options.state.authoring = {
+    const invalidatedLanes = new Set(remainingInvalidated ?? []);
+    for (const dependent of dependentLanes(currentPlan, options.lane)) {
+      if (stored.records[dependent] || prior.records[dependent])
+        invalidatedLanes.add(dependent);
+    }
+    const orderedInvalidated = AUTHORING_LANE_IDS.filter((laneId) =>
+      invalidatedLanes.has(laneId),
+    );
+    current.authoring = {
       ...prior,
-      status: remainingInvalidated?.length
+      statePath: sessionSummaryPath(current),
+      conflict: undefined,
+      status: orderedInvalidated.length
         ? "stale"
         : summaryStatus(stored.records),
       revision: prior.revision + 1,
@@ -818,26 +1819,58 @@ export async function recordAuthoring(options: {
         ...prior.records,
         [options.lane]: recordSummary(
           record,
-          recordFile(options.state, options.lane),
+          recordFile(current, options.lane),
         ),
       },
-      ...(remainingInvalidated?.length
+      ...(orderedInvalidated.length
         ? {
-            invalidatedLanes: remainingInvalidated,
+            invalidatedLanes: orderedInvalidated,
           }
         : { invalidatedLanes: undefined }),
     };
-    options.state.generated = {
-      ...options.state.generated!,
+    current.generated = {
+      ...current.generated,
       assembledPackageHash: undefined,
     };
-    options.state.currentHash = null;
-    options.state.eval = undefined;
-    options.state.review = undefined;
-    options.state.status = "generated";
-    await writeSessionSummary(options.state);
-    await writeState(options.state);
+    current.currentHash = null;
+    current.eval = undefined;
+    current.review = undefined;
+    current.status = "generated";
+    await writeSessionSummary(current);
+    await writeState(current);
+    Object.assign(options.state, current);
     return record;
+  });
+}
+
+export async function recordAuthoringFile(options: {
+  state: CreatorState;
+  lane: AuthoringLaneId;
+  file: string;
+  expectedRevision?: number;
+}): Promise<AuthoringRecord> {
+  const file = path.resolve(options.file);
+  if (isWithin(path.join(options.state.projectRoot, ".badger"), file))
+    throw new Error("Authoring lane output cannot be read from .badger state");
+  const stats = await fs.lstat(file);
+  if (!stats.isFile()) throw new Error("Authoring lane output is not a file");
+  if (stats.size > MAX_RECORD_BYTES)
+    throw new Error("Authoring lane output exceeds its size limit");
+  let value: unknown;
+  try {
+    value = JSON.parse(await fs.readFile(file, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Authoring lane output is not valid JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  return recordAuthoring({
+    state: options.state,
+    lane: options.lane,
+    record: value,
+    expectedRevision: options.expectedRevision,
   });
 }
 
@@ -865,6 +1898,20 @@ async function readArtifactContent(
   if (!isWithin(sessionRoot(state), target))
     throw new Error(
       `Authoring artifact content path escapes the session: ${artifact.path}`,
+    );
+  const realTarget = await fs.realpath(target);
+  if (!isWithin(sessionRoot(state), realTarget))
+    throw new Error(
+      `Authoring artifact content path escapes the session: ${artifact.path}`,
+    );
+  const stats = await fs.lstat(target);
+  if (!stats.isFile())
+    throw new Error(
+      `Authoring artifact content is not a file: ${artifact.path}`,
+    );
+  if (stats.size > MAX_ARTIFACT_BYTES)
+    throw new Error(
+      `Authoring artifact content is too large: ${artifact.path}`,
     );
   const content = await fs.readFile(target, "utf8");
   if (sha256(content) !== artifact.contentHash)
@@ -952,11 +1999,122 @@ ${selected || "- None"}
 `;
 }
 
+function waveReadiness(
+  id: AuthoringWaveReadiness["id"],
+  lanes: readonly AuthoringLaneId[],
+  records: Partial<Record<AuthoringLaneId, AuthoringRecord>>,
+  nextLanes: readonly AuthoringLaneId[],
+  plan?: AuthoringPlan,
+  invalidated = new Set<AuthoringLaneId>(),
+): AuthoringWaveReadiness {
+  const completed = lanes.filter(
+    (lane) => !invalidated.has(lane) && isCompleteStatus(records[lane]?.status),
+  );
+  const blocked: Partial<Record<AuthoringLaneId, string[]>> = {};
+  for (const lane of lanes) {
+    const definition = plan?.lanes.find((item) => item.id === lane);
+    const dependencies =
+      definition?.dependencies ?? AUTHORING_LANE_DEPENDENCIES[lane];
+    const reasons = dependencies
+      .filter(
+        (dependency) =>
+          invalidated.has(dependency) ||
+          !isCompleteStatus(records[dependency]?.status),
+      )
+      .map((dependency) =>
+        invalidated.has(dependency)
+          ? `blocked by stale ${dependency}`
+          : `blocked by ${dependency}`,
+      );
+    if (invalidated.has(lane)) reasons.push("lane has stale evidence");
+    if (records[lane]?.status === "BLOCKED") reasons.push("lane is BLOCKED");
+    if (records[lane]?.status === "NEEDS_CONTEXT")
+      reasons.push("lane NEEDS_CONTEXT");
+    if (records[lane]?.status === "DONE_WITH_CONCERNS")
+      reasons.push("lane has concerns");
+    if (reasons.length) blocked[lane] = reasons;
+  }
+  return {
+    id,
+    lanes: [...lanes],
+    completed,
+    next: lanes.filter((lane) => nextLanes.includes(lane)),
+    blocked,
+  };
+}
+
+function readinessLanes(
+  plan: AuthoringPlan | undefined,
+  records: Partial<Record<AuthoringLaneId, AuthoringRecord>>,
+  nextLanes: readonly AuthoringLaneId[],
+  blockers: readonly string[],
+  invalidated = new Set<AuthoringLaneId>(),
+): Record<AuthoringLaneId, AuthoringLaneReadiness> {
+  return Object.fromEntries(
+    AUTHORING_LANE_IDS.map((lane) => {
+      const record = records[lane];
+      const definition = plan?.lanes.find((item) => item.id === lane);
+      const laneBlockers = [
+        ...blockers.filter(
+          (blocker) =>
+            blocker.includes(`: ${lane}`) ||
+            blocker.includes(` ${lane}`) ||
+            blocker.includes(`by ${lane}`),
+        ),
+        ...(invalidated.has(lane) &&
+        !blockers.some(
+          (blocker) => blocker === `stale authoring record: ${lane}`,
+        )
+          ? [`stale authoring record: ${lane}`]
+          : []),
+      ];
+      return [
+        lane,
+        {
+          id: lane,
+          dependencies: [
+            ...(definition?.dependencies ?? AUTHORING_LANE_DEPENDENCIES[lane]),
+          ],
+          status: record?.status ?? "PENDING",
+          executable: nextLanes.includes(lane),
+          blockers: laneBlockers,
+          claims: record?.claims ?? [],
+          artifacts: record?.artifacts ?? [],
+          findings: record?.findings ?? [],
+          ...(record?.summary ? { summary: record.summary } : {}),
+        } satisfies AuthoringLaneReadiness,
+      ];
+    }),
+  ) as Record<AuthoringLaneId, AuthoringLaneReadiness>;
+}
+
+function recoveryInfo(
+  state: CreatorState,
+  authoring?: AuthoringStateSummary,
+): AuthoringRecoveryInfo {
+  const session = authoring?.sessionPath ?? sessionRoot(state);
+  return {
+    resumable: Boolean(authoring),
+    freshProcess: true,
+    revision: authoring?.revision ?? 0,
+    sessionPath: session,
+    statePath: authoring?.statePath ?? path.join(session, "state.json"),
+    planPath: authoring?.planPath ?? path.join(session, "plan.json"),
+    recordsPath: authoring?.recordsPath ?? path.join(session, "records"),
+    invalidatedLanes: [...(authoring?.invalidatedLanes ?? [])],
+    ...(authoring?.conflict ? { conflict: authoring.conflict } : {}),
+  };
+}
+
 export async function authoringReadiness(
   state: CreatorState,
 ): Promise<AuthoringReadiness> {
   const emptyRecords: Partial<Record<AuthoringLaneId, AuthoringRecord>> = {};
-  if (!state.generated || !state.authoring)
+  const emptyLanes = readinessLanes(undefined, emptyRecords, [], []);
+  const recoveredSummary = state.authoring
+    ? state.authoring
+    : await currentAuthoringSummary(state);
+  if (!state.generated || !recoveredSummary)
     return {
       state: "blocked",
       status: "pending",
@@ -965,7 +2123,58 @@ export async function authoringReadiness(
       evidence: { draft: state.draftPath },
       records: emptyRecords,
       nextLanes: [],
+      completedLanes: [],
+      lanes: emptyLanes,
+      waves: [
+        waveReadiness(
+          "wave1",
+          ["script", "reference", "pause-points"],
+          emptyRecords,
+          [],
+        ),
+        waveReadiness(
+          "wave2",
+          ["workflow-entry", "skill-core"],
+          emptyRecords,
+          [],
+        ),
+        waveReadiness("barrier", ["skill-review"], emptyRecords, []),
+      ],
+      recovery: recoveryInfo(state),
     };
+  if (!state.authoring) state.authoring = recoveredSummary;
+  let authoring: AuthoringStateSummary = recoveredSummary;
+  try {
+    authoring = (await currentAuthoringSummary(state)) ?? state.authoring;
+  } catch (error) {
+    return {
+      state: "blocked",
+      status: "stale",
+      blockers: [String(error)],
+      warnings: [],
+      evidence: { session: sessionRoot(state), plan: sessionPlanPath(state) },
+      records: emptyRecords,
+      nextLanes: [],
+      completedLanes: [],
+      lanes: emptyLanes,
+      waves: [
+        waveReadiness(
+          "wave1",
+          ["script", "reference", "pause-points"],
+          emptyRecords,
+          [],
+        ),
+        waveReadiness(
+          "wave2",
+          ["workflow-entry", "skill-core"],
+          emptyRecords,
+          [],
+        ),
+        waveReadiness("barrier", ["skill-review"], emptyRecords, []),
+      ],
+      recovery: recoveryInfo(state, authoring),
+    };
+  }
   let plan: AuthoringPlan;
   try {
     plan = await readAuthoringPlan(state);
@@ -978,20 +2187,44 @@ export async function authoringReadiness(
       evidence: { session: sessionRoot(state), plan: sessionPlanPath(state) },
       records: emptyRecords,
       nextLanes: [],
+      completedLanes: [],
+      lanes: emptyLanes,
+      waves: [
+        waveReadiness(
+          "wave1",
+          ["script", "reference", "pause-points"],
+          emptyRecords,
+          [],
+        ),
+        waveReadiness(
+          "wave2",
+          ["workflow-entry", "skill-core"],
+          emptyRecords,
+          [],
+        ),
+        waveReadiness("barrier", ["skill-review"], emptyRecords, []),
+      ],
+      recovery: recoveryInfo(state, authoring),
     };
   }
   const blockers: string[] = [];
   const warnings: string[] = [];
   const stored = await readStoredRecords(state, plan);
   blockers.push(...stored.errors);
+  authoring = reconcileRecordRevision(state, authoring, stored.records);
+  const invalidated = new Set(authoring.invalidatedLanes ?? []);
   const currentInputHash = authoringInputHash(plan);
-  if (state.authoring.authoringInputHash !== currentInputHash)
+  if (authoring.authoringInputHash !== currentInputHash)
     blockers.push("Authoring input evidence is stale; regenerate the scaffold");
-  if (!HASH_PATTERN.test(state.authoring.scaffoldHash))
+  if (!HASH_PATTERN.test(authoring.scaffoldHash))
     blockers.push("Authoring scaffold hash is invalid");
-  if (state.authoring.invalidatedLanes?.length)
+  if (authoring.invalidatedLanes?.length)
     blockers.push(
-      `Authoring records were invalidated for changed inputs: ${state.authoring.invalidatedLanes.join(", ")}`,
+      `Authoring records were invalidated for changed inputs: ${authoring.invalidatedLanes.join(", ")}`,
+    );
+  if (authoring.conflict)
+    blockers.push(
+      `Authoring revision conflict for ${authoring.conflict.lane}: expected ${authoring.conflict.expectedRevision}, actual ${authoring.conflict.actualRevision}`,
     );
   let hasContext = false;
   for (const laneId of AUTHORING_LANE_IDS) {
@@ -1001,6 +2234,8 @@ export async function authoringReadiness(
       blockers.push(`missing authoring record: ${laneId}`);
       continue;
     }
+    if (invalidated.has(laneId))
+      blockers.push(`stale authoring record: ${laneId}`);
     if (record.authoringInputHash !== currentInputHash)
       blockers.push(`stale authoring record: ${laneId}`);
     if (record.status === "BLOCKED")
@@ -1017,8 +2252,16 @@ export async function authoringReadiness(
       blockers.push(`Authoring lane is not complete: ${laneId}`);
     for (const dependency of lane.dependencies) {
       const dependencyRecord = stored.records[dependency];
-      if (!dependencyRecord || !isCompleteStatus(dependencyRecord.status))
-        blockers.push(`Authoring lane ${laneId} is blocked by ${dependency}`);
+      if (
+        !dependencyRecord ||
+        invalidated.has(dependency) ||
+        !isCompleteStatus(dependencyRecord.status)
+      )
+        blockers.push(
+          `Authoring lane ${laneId} is blocked by${
+            invalidated.has(dependency) ? " stale" : ""
+          } ${dependency}`,
+        );
     }
     for (const artifact of record.artifacts) {
       if (artifact.present !== true) continue;
@@ -1043,13 +2286,10 @@ export async function authoringReadiness(
       }
     }
   }
-  if (
-    state.authoring.status === "assembled" &&
-    state.authoring.assembledPackageHash
-  ) {
+  if (authoring.status === "assembled" && authoring.assembledPackageHash) {
     try {
       const currentPackageHash = await hashDirectory(packageRoot(state));
-      if (currentPackageHash !== state.authoring.assembledPackageHash)
+      if (currentPackageHash !== authoring.assembledPackageHash)
         blockers.push(
           "Assembled package changed outside the deterministic assembler",
         );
@@ -1057,26 +2297,43 @@ export async function authoringReadiness(
       blockers.push(`Unable to hash assembled package: ${String(error)}`);
     }
   }
-  const allRecordsComplete = AUTHORING_LANE_IDS.every((lane) =>
-    isCompleteStatus(stored.records[lane]?.status),
+  const allRecordsComplete = AUTHORING_LANE_IDS.every(
+    (lane) =>
+      !invalidated.has(lane) && isCompleteStatus(stored.records[lane]?.status),
   );
   const pendingMarkers = allRecordsComplete
     ? []
     : ["Generated scaffold contains authoring-pending content"];
   blockers.push(...pendingMarkers);
   const nextLanes = AUTHORING_LANE_IDS.filter((lane) => {
-    if (stored.records[lane] && isCompleteStatus(stored.records[lane]!.status))
+    if (
+      stored.records[lane] &&
+      !invalidated.has(lane) &&
+      isCompleteStatus(stored.records[lane]!.status)
+    )
       return false;
-    return laneDefinition(plan, lane).dependencies.every((dependency) =>
-      isCompleteStatus(stored.records[dependency]?.status),
+    return laneDefinition(plan, lane).dependencies.every(
+      (dependency) =>
+        !invalidated.has(dependency) &&
+        isCompleteStatus(stored.records[dependency]?.status),
     );
   });
   const ready = blockers.length === 0 && allRecordsComplete;
+  const completedLanes = AUTHORING_LANE_IDS.filter(
+    (lane) =>
+      !invalidated.has(lane) && isCompleteStatus(stored.records[lane]?.status),
+  );
+  const lanes = readinessLanes(
+    plan,
+    stored.records,
+    nextLanes,
+    blockers,
+    invalidated,
+  );
   const status: AuthoringSessionStatus =
-    state.authoring.status === "assembled" &&
-    state.authoring.assembledPackageHash
+    authoring.status === "assembled" && authoring.assembledPackageHash && ready
       ? "assembled"
-      : state.authoring.status === "stale" ||
+      : authoring.status === "stale" ||
           blockers.some(
             (blocker) =>
               blocker.includes("stale") || blocker.includes("invalidated"),
@@ -1096,16 +2353,56 @@ export async function authoringReadiness(
       session: sessionRoot(state),
       plan: sessionPlanPath(state),
       records: recordsRoot(state),
-      scaffold: state.authoring.scaffoldHash,
-      ...(state.authoring.authoredMaterialHash
-        ? { authoredMaterial: state.authoring.authoredMaterialHash }
+      scaffold: authoring.scaffoldHash,
+      planHash: plan.planHash,
+      protocol: plan.protocolHash,
+      authoringPlan: plan.authoringPlanHash,
+      workflowProtocol: plan.workflowProtocolHash,
+      sourceEvidence: plan.sourceEvidenceHash,
+      authoringInput: authoring.authoringInputHash,
+      protocolHash: plan.protocolHash,
+      authoringPlanHash: plan.authoringPlanHash,
+      workflowProtocolHash: plan.workflowProtocolHash,
+      sourceEvidenceHash: plan.sourceEvidenceHash,
+      authoringInputHash: authoring.authoringInputHash,
+      ...(authoring.authoredMaterialHash
+        ? { authoredMaterial: authoring.authoredMaterialHash }
         : {}),
-      ...(state.authoring.assembledPackageHash
-        ? { assembledPackage: state.authoring.assembledPackageHash }
+      ...(authoring.assembledPackageHash
+        ? { assembledPackage: authoring.assembledPackageHash }
         : {}),
     },
     records: stored.records,
     nextLanes,
+    completedLanes,
+    lanes,
+    waves: [
+      waveReadiness(
+        "wave1",
+        ["script", "reference", "pause-points"],
+        stored.records,
+        nextLanes,
+        plan,
+        invalidated,
+      ),
+      waveReadiness(
+        "wave2",
+        ["workflow-entry", "skill-core"],
+        stored.records,
+        nextLanes,
+        plan,
+        invalidated,
+      ),
+      waveReadiness(
+        "barrier",
+        ["skill-review"],
+        stored.records,
+        nextLanes,
+        plan,
+        invalidated,
+      ),
+    ],
+    recovery: recoveryInfo(state, authoring),
   };
 }
 
@@ -1114,26 +2411,45 @@ export const readAuthoringStatus = authoringReadiness;
 export async function assemblePackage(
   state: CreatorState,
 ): Promise<CreatorState> {
-  if (!state.generated || !state.authoring)
+  if (!state.generated)
+    throw new Error("Generate the workflow scaffold before assembly");
+  state.authoring ??= await currentAuthoringSummary(state);
+  if (!state.authoring)
     throw new Error("Generate the workflow scaffold before assembly");
   const root = sessionRoot(state);
   return withSessionLock(root, async () => {
-    const readiness = await authoringReadiness(state);
+    let current: CreatorState;
+    try {
+      current = await readState(state.projectRoot, state.name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      current = state;
+    }
+    const sessionSummary = await currentAuthoringSummary(current);
+    if (sessionSummary) current.authoring = sessionSummary;
+    if (!current.generated || !current.authoring)
+      throw new Error("Generate the workflow scaffold before assembly");
+    const readiness = await authoringReadiness(current);
     if (readiness.state !== "ready")
       throw new Error(
         `Cannot assemble blocked authoring session:\n${readiness.blockers.join("\n")}`,
       );
-    const plan = await readAuthoringPlan(state);
-    const stored = await readStoredRecords(state, plan);
+    const plan = await readAuthoringPlan(current);
+    const stored = await readStoredRecords(current, plan);
     if (stored.errors.length)
       throw new Error(
         `Cannot assemble invalid authoring records:\n${stored.errors.join("\n")}`,
       );
-    const packageDirectory = packageRoot(state);
+    current.authoring = reconcileRecordRevision(
+      current,
+      current.authoring,
+      stored.records,
+    );
+    const packageDirectory = packageRoot(current);
     for (const laneId of AUTHORING_LANE_IDS) {
       const record = stored.records[laneId]!;
       for (const artifact of record.artifacts) {
-        const content = await readArtifactContent(state, artifact);
+        const content = await readArtifactContent(current, artifact);
         const target = packageLeafPath(packageDirectory, artifact.path);
         if (artifact.path === "SKILL.md") {
           const original = await fs.readFile(target, "utf8");
@@ -1157,36 +2473,39 @@ export async function assemblePackage(
     }
     await atomicWrite(
       path.join(packageDirectory, "reference", "authoring-lanes.json"),
-      authoringLanesDocument(plan, state, stored.records),
+      authoringLanesDocument(plan, current, stored.records),
     );
     await atomicWrite(
       path.join(packageDirectory, "reference", "composition-report.md"),
-      compositionReport(plan, state),
+      compositionReport(plan, current),
     );
     const assembledPackageHash = await hashDirectory(packageDirectory);
     const authoredMaterialHash = recordsMaterialHash(stored.records);
-    const authoring = state.authoring;
-    const generated = state.generated;
+    const authoring = current.authoring;
+    const generated = current.generated;
     if (!authoring || !generated)
       throw new Error("Authoring session disappeared during assembly");
-    state.authoring = {
+    current.authoring = {
       ...authoring,
+      statePath: sessionSummaryPath(current),
+      conflict: undefined,
       status: "assembled",
       revision: authoring.revision + 1,
       authoredMaterialHash,
       assembledPackageHash,
       invalidatedLanes: undefined,
     };
-    state.generated = {
+    current.generated = {
       ...generated,
       assembledPackageHash,
     };
-    state.currentHash = null;
-    state.eval = undefined;
-    state.review = undefined;
-    state.status = "generated";
-    await writeSessionSummary(state);
-    await writeState(state);
-    return state;
+    current.currentHash = null;
+    current.eval = undefined;
+    current.review = undefined;
+    current.status = "generated";
+    await writeSessionSummary(current);
+    await writeState(current);
+    Object.assign(state, current);
+    return current;
   });
 }

@@ -24,7 +24,7 @@ The standalone package deliberately excludes Classic customization, Native workf
 5. Wait for explicit confirmation. Do not initialize state or generate files before confirmation.
 6. Run `badger init <plan.json> --confirm --project <dir>`.
 7. Run `badger generate <name> --project <dir>` to create the deterministic authoring-pending scaffold.
-8. Run `badger authoring-status <name> --project <dir> --json`, submit validated lane outputs with `badger authoring-record`, and run `badger assemble <name>` only after all six lanes are complete.
+8. Run `badger authoring-status <name> --project <dir> --json`. For each executable lane, create a bounded file handoff with `badger authoring-dispatch <name> --lane <lane> --output <file>`, have the provider return the upstream lane-output JSON, then submit it with `badger authoring-record <name> --lane <lane> --file <file> --expected-revision <revision>`. Run `badger assemble <name>` only after all six lanes are complete.
 9. Run `badger eval <name> --project <dir>` and show `badger review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
 10. Run `badger approve <name> --reviewer <id> --confirm`, then `badger publish <name> --confirm`.
 11. Start with `badger distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
@@ -45,5 +45,8 @@ The standalone package deliberately excludes Classic customization, Native workf
 - Control Nodes cannot be overridden. Producer overrides must declare every Output Schema they satisfy.
 - Unresolved or ambiguous Skill candidates, stale hashes, failed eval, missing review, and missing confirmation block the next mutating step.
 - Confirmed generation creates a resumable authoring session under `.badger/authoring/<name>`; a scaffold is not authored, assembled, evaluated, or publishable until current lane records are assembled.
+- Lane outputs preserve `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, and `NEEDS_CONTEXT`. Blocking statuses require a bounded explanation and stop dependents; concerns remain visible and block final authoring readiness until resolved.
+- Authoring status reports completed lanes, next executable lanes, dependency waves, claims, artifacts, findings, input hashes, revision, and fresh-process recovery paths. Use expected revisions for concurrent submissions.
+- Providers receive only file handoffs and bounded capability metadata. They cannot write Creator or authoring state, execute candidate Skills, publish, distribute, or access credentials. The manual file-provider fixture uses the same submission path without credentials.
 - `badger eval` includes a current-hash synthetic Phase 3 decision-and-cycle certification; passing it does not authorize biological execution, package installation, Native-derived durability, or Primer Designer migration.
 - Generated packages and published copies are local filesystem artifacts. Review the preview before copying them elsewhere.
