@@ -9,7 +9,7 @@ describe("standalone Skill discovery", () => {
   let project: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-any-find-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-find-"));
     project = path.join(root, "project");
     await fs.mkdir(project, { recursive: true });
   });

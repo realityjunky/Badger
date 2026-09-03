@@ -67,7 +67,7 @@ export function validateSkillPackage(pkg: SkillPackage): string[] {
   const errors: string[] = [];
   const { definition, guardrails, evals } = pkg;
 
-  if (definition.apiVersion !== "comet/v1alpha1")
+  if (definition.apiVersion !== "badger/v1alpha1")
     errors.push("unsupported apiVersion");
   if (definition.kind !== "Skill") errors.push("kind must be Skill");
   if (!definition.metadata.name) errors.push("metadata.name is required");

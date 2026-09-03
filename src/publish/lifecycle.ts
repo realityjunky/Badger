@@ -242,7 +242,7 @@ function isProtectedPath(candidate: string): boolean {
     segments.includes("raw_skills") ||
     segments.some(
       (segment, index) =>
-        segment === "comet-any-private" && segments[index + 1] === "comet",
+        segment === "repos" && segments[index + 1] === "comet",
     )
   );
 }
@@ -653,7 +653,7 @@ export async function publishState(state: CreatorState): Promise<CreatorState> {
     );
   const destination = path.join(
     state.projectRoot,
-    ".comet-any",
+    ".badger",
     "published",
     state.name,
   );

@@ -16,12 +16,21 @@ import type {
 
 type RecordValue = Record<string, unknown>;
 
-const DEFAULT_RUN_REFS = {
-  pendingAction: ".comet/pending-action.json",
-  trajectory: ".comet/trajectory.jsonl",
-  artifacts: ".comet/artifacts.json",
-  checkpoint: ".comet/checkpoint.json",
-} as const;
+type RuntimeDirectory = ".badger" | ".comet";
+
+function defaultRunRefs(runtimeDirectory: RuntimeDirectory): {
+  pendingAction: string;
+  trajectory: string;
+  artifacts: string;
+  checkpoint: string;
+} {
+  return {
+    pendingAction: `${runtimeDirectory}/pending-action.json`,
+    trajectory: `${runtimeDirectory}/trajectory.jsonl`,
+    artifacts: `${runtimeDirectory}/artifacts.json`,
+    checkpoint: `${runtimeDirectory}/checkpoint.json`,
+  };
+}
 
 function record(value: unknown): RecordValue | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -211,6 +220,7 @@ async function readTrajectory(
 async function readSkillSnapshot(
   runRoot: string,
   state: RecordValue | null,
+  runtimeDirectory: RuntimeDirectory,
   errors: ClassifiedEngineError[],
 ): Promise<DirectorySnapshot | null> {
   const hash = state?.skillHash;
@@ -226,7 +236,7 @@ async function readSkillSnapshot(
   }
   try {
     return await snapshotDirectory(
-      path.join(runRoot, ".comet", "skill-snapshots", hash),
+      path.join(runRoot, runtimeDirectory, "skill-snapshots", hash),
     );
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -310,15 +320,37 @@ function replaceCoordinates(
   );
 }
 
+function normalizeRuntimeValue(
+  value: unknown,
+  runtimeDirectory: RuntimeDirectory,
+): unknown {
+  if (typeof value === "string") {
+    return value.replaceAll(runtimeDirectory, "<runtime>");
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeRuntimeValue(item, runtimeDirectory));
+  }
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+      key,
+      normalizeRuntimeValue(item, runtimeDirectory),
+    ]),
+  );
+}
+
 export async function observeEngineRun(options: {
   scenario: EngineScenario;
   coordinates: EngineScenarioObservation["coordinates"];
   commands: EngineCommandObservation[];
+  runtimeDirectory?: RuntimeDirectory;
 }): Promise<EngineScenarioObservation> {
   const errors: ClassifiedEngineError[] = [];
+  const runtimeDirectory = options.runtimeDirectory ?? ".badger";
+  const runRefs = defaultRunRefs(runtimeDirectory);
   const statePath = path.join(
     options.coordinates.runRoot,
-    ".comet",
+    runtimeDirectory,
     "run-state.json",
   );
   const state = await readOptionalJson(
@@ -331,28 +363,28 @@ export async function observeEngineRun(options: {
   const pendingPath = safeRunFile(
     options.coordinates.runRoot,
     stateDocument?.pendingRef,
-    DEFAULT_RUN_REFS.pendingAction,
+    runRefs.pendingAction,
     "pendingRef",
     errors,
   );
   const trajectoryPath = safeRunFile(
     options.coordinates.runRoot,
     stateDocument?.trajectoryRef,
-    DEFAULT_RUN_REFS.trajectory,
+    runRefs.trajectory,
     "trajectoryRef",
     errors,
   );
   const artifactsPath = safeRunFile(
     options.coordinates.runRoot,
     stateDocument?.artifactsRef,
-    DEFAULT_RUN_REFS.artifacts,
+    runRefs.artifacts,
     "artifactsRef",
     errors,
   );
   const checkpointPath = safeRunFile(
     options.coordinates.runRoot,
     stateDocument?.checkpointRef,
-    DEFAULT_RUN_REFS.checkpoint,
+    runRefs.checkpoint,
     "checkpointRef",
     errors,
   );
@@ -371,6 +403,7 @@ export async function observeEngineRun(options: {
   const snapshot = await readSkillSnapshot(
     options.coordinates.runRoot,
     stateDocument,
+    runtimeDirectory,
     errors,
   );
   const artifacts = rawArtifacts === null ? {} : rawArtifacts;
@@ -408,9 +441,13 @@ export async function observeEngineRun(options: {
 
 export function normalizeEngineObservation(
   observation: EngineScenarioObservation,
-  options: { preserveCoordinates?: boolean } = {},
+  options: {
+    preserveCoordinates?: boolean;
+    runtimeDirectory?: RuntimeDirectory;
+  } = {},
 ): EngineScenarioObservation {
   const coordinates = observation.coordinates;
+  const runtimeDirectory = options.runtimeDirectory ?? ".badger";
   return {
     ...observation,
     coordinates: options.preserveCoordinates
@@ -421,34 +458,68 @@ export function normalizeEngineObservation(
           skillRoot: "<skill-root>",
           runRoot: "<run-root>",
         },
-    commands: observation.commands.map((command) => ({
-      ...command,
-      args: command.args.map((argument) =>
-        replaceCoordinates(argument, coordinates),
-      ),
-      ...(command.error
-        ? {
-            error: {
-              ...command.error,
-              message: replaceCoordinates(command.error.message, coordinates),
-            },
-          }
-        : {}),
-    })),
+    commands: observation.commands.map(
+      (command) =>
+        normalizeRuntimeValue(
+          {
+            ...command,
+            args: command.args.map((argument) =>
+              replaceCoordinates(argument, coordinates),
+            ),
+            ...(command.error
+              ? {
+                  error: {
+                    ...command.error,
+                    message: replaceCoordinates(
+                      command.error.message,
+                      coordinates,
+                    ),
+                  },
+                }
+              : {}),
+          },
+          runtimeDirectory,
+        ) as EngineCommandObservation,
+    ),
     run: {
       ...observation.run,
-      trajectory: observation.run.trajectory.map(normalizeTimestamp),
+      state: normalizeRuntimeValue(observation.run.state, runtimeDirectory),
+      pendingAction: normalizeRuntimeValue(
+        observation.run.pendingAction,
+        runtimeDirectory,
+      ),
+      outcomes: normalizeRuntimeValue(
+        observation.run.outcomes,
+        runtimeDirectory,
+      ) as unknown[],
+      artifacts: normalizeRuntimeValue(
+        observation.run.artifacts,
+        runtimeDirectory,
+      ),
+      trajectory: observation.run.trajectory
+        .map(normalizeTimestamp)
+        .map((event) => normalizeRuntimeValue(event, runtimeDirectory)),
+      checkpoint: normalizeRuntimeValue(
+        observation.run.checkpoint,
+        runtimeDirectory,
+      ),
       snapshot: observation.run.snapshot
         ? normalizedSnapshot(observation.run.snapshot, "<snapshot-root>")
         : null,
       errors: observation.run.errors.map((error) => ({
         ...error,
-        message: replaceCoordinates(error.message, coordinates),
+        message: replaceCoordinates(error.message, coordinates).replaceAll(
+          runtimeDirectory,
+          "<runtime>",
+        ),
       })),
     },
     errors: observation.errors.map((error) => ({
       ...error,
-      message: replaceCoordinates(error.message, coordinates),
+      message: replaceCoordinates(error.message, coordinates).replaceAll(
+        runtimeDirectory,
+        "<runtime>",
+      ),
     })),
   };
 }
@@ -498,6 +569,12 @@ function expectedPackagingPath(
   official: unknown,
   privateValue: unknown,
 ): boolean {
+  if (
+    currentPath === "$.run.snapshot" ||
+    currentPath.startsWith("$.run.snapshot.")
+  ) {
+    return true;
+  }
   if (
     currentPath === "$.coordinates.projectRoot" ||
     currentPath === "$.coordinates.homeDir" ||

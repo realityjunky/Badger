@@ -401,7 +401,7 @@ describe("WorkflowRuntime repair policy", () => {
 
   it("persists the finite repair lifecycle through the public runtime", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-repair-runtime-"),
+      path.join(os.tmpdir(), "badger-workflow-repair-runtime-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -518,7 +518,7 @@ describe("WorkflowRuntime repair policy", () => {
 
   it("accepts one bound override and rejects its replay without mutation", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-repair-override-"),
+      path.join(os.tmpdir(), "badger-workflow-repair-override-"),
     );
     try {
       const profile = {
@@ -614,7 +614,7 @@ describe("WorkflowRuntime repair policy", () => {
 
   it("stops on contract change without changing the captured identity", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-repair-contract-"),
+      path.join(os.tmpdir(), "badger-workflow-repair-contract-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -661,7 +661,7 @@ describe("WorkflowRuntime repair policy", () => {
 
   it("keeps generated adapters as projections over repair policy", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-repair-generated-"),
+      path.join(os.tmpdir(), "badger-workflow-repair-generated-"),
     );
     try {
       const protocol = runtimeProtocol(
@@ -764,7 +764,7 @@ describe("WorkflowRuntime repair policy", () => {
 
   it("keeps repair episodes equivalent across manual and standalone locations", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-repair-parity-"),
+      path.join(os.tmpdir(), "badger-workflow-repair-parity-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -820,7 +820,7 @@ describe("WorkflowRuntime repair policy", () => {
 
   it("binds failures to stable failed-receipt coverage rather than receipt identity", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-repair-receipts-"),
+      path.join(os.tmpdir(), "badger-workflow-repair-receipts-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -895,7 +895,7 @@ describe("WorkflowRuntime repair policy", () => {
 
   it("does not recover a state projection that erases committed repair history", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-repair-history-"),
+      path.join(os.tmpdir(), "badger-workflow-repair-history-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -913,7 +913,7 @@ describe("WorkflowRuntime repair policy", () => {
         status: "failed",
         summary: "The first failure is committed.",
       });
-      const statePath = path.join(root, ".comet", "run-state.json");
+      const statePath = path.join(root, ".badger", "run-state.json");
       const state = JSON.parse(await fs.readFile(statePath, "utf8")) as {
         workflowRuntime: { repairEpisode: { history: unknown[] } };
       };
@@ -933,7 +933,7 @@ describe("WorkflowRuntime repair policy", () => {
 
   it("keeps repair decision actions valid at verified checkpoint boundaries", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-repair-checkpoint-"),
+      path.join(os.tmpdir(), "badger-workflow-repair-checkpoint-"),
     );
     try {
       const runtime = createWorkflowRuntime();

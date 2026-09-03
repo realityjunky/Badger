@@ -113,7 +113,9 @@ describe("WorkflowRuntime physical content snapshots", () => {
   let root: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-snapshot-"));
+    root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "badger-workflow-snapshot-"),
+    );
     await fs.mkdir(path.join(root, "nested"));
     await Promise.all([
       fs.writeFile(path.join(root, "z.txt"), "last\n"),
@@ -428,7 +430,7 @@ describe("WorkflowRuntime physical content snapshots", () => {
   it("does not follow a directory replaced by a symlink during enumeration", async () => {
     if (process.platform === "win32") return;
     const outside = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-snapshot-outside-"),
+      path.join(os.tmpdir(), "badger-workflow-snapshot-outside-"),
     );
     const original = path.join(root, "nested");
     const moved = path.join(root, "nested-moved");
@@ -542,7 +544,7 @@ describe("WorkflowRuntime physical content snapshots", () => {
         kind: "workflow-content-snapshot-reference",
         hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
         path: expect.stringMatching(
-          /^\.comet\/content-snapshots\/[a-f0-9]{64}\.json$/u,
+          /^\.badger\/content-snapshots\/[a-f0-9]{64}\.json$/u,
         ),
         provider: "physical-tree",
         complete: true,
@@ -550,7 +552,7 @@ describe("WorkflowRuntime physical content snapshots", () => {
     ]);
     const snapshotPath = path.join(
       projectRoot,
-      ".comet",
+      ".badger",
       "runs",
       location.runId,
       started.contentSnapshots[0]!.path,
@@ -591,7 +593,7 @@ describe("WorkflowRuntime physical content snapshots", () => {
     setWorkflowTransitionFaultForTests((boundary) => {
       if (
         boundary.phase === "record-write" &&
-        boundary.path?.startsWith(".comet/content-snapshots/")
+        boundary.path?.startsWith(".badger/content-snapshots/")
       ) {
         throw new Error("deterministic workflow transition fault");
       }
@@ -660,8 +662,8 @@ describe("WorkflowRuntime physical content snapshots", () => {
   });
 
   it("rejects broad scopes that overlap the runtime metadata tree", async () => {
-    await fs.mkdir(path.join(root, ".comet"));
-    await fs.writeFile(path.join(root, ".comet", "runtime.json"), "runtime\n");
+    await fs.mkdir(path.join(root, ".badger"));
+    await fs.writeFile(path.join(root, ".badger", "runtime.json"), "runtime\n");
     await expect(
       captureWorkflowContentSnapshot({
         root,
@@ -701,13 +703,13 @@ describe("WorkflowRuntime physical content snapshots", () => {
     const manifest = await captureWorkflowContentSnapshot({ root, policy });
     const snapshotHash = hashWorkflowContentSnapshot(manifest);
     const storageRoot = path.join(root, "storage");
-    await fs.mkdir(path.join(storageRoot, ".comet", "content-snapshots"), {
+    await fs.mkdir(path.join(storageRoot, ".badger", "content-snapshots"), {
       recursive: true,
     });
     await fs.writeFile(
       path.join(
         storageRoot,
-        ".comet",
+        ".badger",
         "content-snapshots",
         `${snapshotHash}.json`,
       ),

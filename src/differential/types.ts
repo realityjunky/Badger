@@ -66,6 +66,7 @@ export interface OfficialCommandRunner {
 export interface DifferentialHarnessOptions {
   repositoryRoot: string;
   fixturePath: string;
+  fixtureSkillsRoot?: string;
   officialRoot: string;
   officialCli?: string;
   officialRevision?: string;

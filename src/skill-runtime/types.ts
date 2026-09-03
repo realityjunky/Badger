@@ -62,7 +62,7 @@ export interface SkillStep {
 }
 
 export interface SkillDefinition {
-  apiVersion: "comet/v1alpha1";
+  apiVersion: "badger/v1alpha1";
   kind: "Skill";
   metadata: {
     name: string;

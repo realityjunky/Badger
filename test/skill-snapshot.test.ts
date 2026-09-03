@@ -12,7 +12,7 @@ import type { SkillPackage } from "../src/skill-runtime/types.js";
 const pkg = (root: string): SkillPackage => ({
   root,
   definition: {
-    apiVersion: "comet/v1alpha1",
+    apiVersion: "badger/v1alpha1",
     kind: "Skill",
     metadata: { name: "demo", version: "1", description: "Demo" },
     goal: { statement: "Done", inputs: [], outputs: [], success: ["done"] },
@@ -54,7 +54,7 @@ describe("Skill snapshots", () => {
   let changeDir: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-snapshot-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-snapshot-"));
     changeDir = path.join(root, "change");
     await fs.mkdir(path.join(root, "skill"), { recursive: true });
     await fs.writeFile(path.join(root, "skill", "SKILL.md"), "# Demo\n");

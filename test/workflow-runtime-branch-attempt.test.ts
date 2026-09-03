@@ -122,7 +122,7 @@ describe("WorkflowRuntime revisioned branches and Attempts", () => {
   let runRoot: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-branch-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-workflow-branch-"));
     runRoot = path.join(root, "change");
     await fs.mkdir(runRoot, { recursive: true });
   });
@@ -478,11 +478,11 @@ describe("WorkflowRuntime revisioned branches and Attempts", () => {
         runId: "invalid-run",
       }),
     ).rejects.toThrow(message);
-    await expect(fs.access(path.join(runRoot, ".comet"))).rejects.toMatchObject(
-      {
-        code: "ENOENT",
-      },
-    );
+    await expect(
+      fs.access(path.join(runRoot, ".badger")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("rejects an unreachable required Node before Run creation", async () => {
@@ -493,11 +493,11 @@ describe("WorkflowRuntime revisioned branches and Attempts", () => {
     await expect(
       createWorkflowRuntime().start({ protocol, runRoot, runId: "orphan-run" }),
     ).rejects.toThrow("required Node is unreachable: orphan");
-    await expect(fs.access(path.join(runRoot, ".comet"))).rejects.toMatchObject(
-      {
-        code: "ENOENT",
-      },
-    );
+    await expect(
+      fs.access(path.join(runRoot, ".badger")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("requires an explicit revisioned capability for direct branch protocols", async () => {
@@ -512,9 +512,9 @@ describe("WorkflowRuntime revisioned branches and Attempts", () => {
     ).rejects.toThrow(
       "revisioned capabilities are required for branch routing",
     );
-    await expect(fs.access(path.join(runRoot, ".comet"))).rejects.toMatchObject(
-      { code: "ENOENT" },
-    );
+    await expect(
+      fs.access(path.join(runRoot, ".badger")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("returns equivalent branch continuations for manual and standalone locations", async () => {

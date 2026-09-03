@@ -167,7 +167,7 @@ describe("generated WorkflowRuntime guard and handoff adapters", () => {
   });
 
   it("generates thin guard and handoff adapters", async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-guard-handoff-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-guard-handoff-"));
     const { projectRoot, packageRoot } = await createGeneratedProject(root);
     const guard = await fs.readFile(
       scriptPath(packageRoot, "workflow-guard.mjs"),
@@ -202,12 +202,12 @@ describe("generated WorkflowRuntime guard and handoff adapters", () => {
     expect(entry).toContain("node scripts/workflow-guard.mjs exit <node>");
     expect(entry).toContain("node scripts/workflow-handoff.mjs --json");
     await expect(
-      fs.access(path.join(projectRoot, ".comet")),
+      fs.access(path.join(projectRoot, ".badger")),
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("verifies, guards, validates, applies, and hands off a manual Run", async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-guard-handoff-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-guard-handoff-"));
     const { projectRoot, packageRoot } = await createGeneratedProject(root);
     const guard = scriptPath(packageRoot, "workflow-guard.mjs");
     const handoff = scriptPath(packageRoot, "workflow-handoff.mjs");
@@ -239,7 +239,7 @@ describe("generated WorkflowRuntime guard and handoff adapters", () => {
     expect(beforeRun.continuation).toBeNull();
 
     await runScript(state, projectRoot, ["init", "--run-id", "manual-run"]);
-    const runStatePath = path.join(projectRoot, ".comet", "run-state.json");
+    const runStatePath = path.join(projectRoot, ".badger", "run-state.json");
     const runStateBefore = await fs.readFile(runStatePath, "utf8");
     const runState = JSON.parse(runStateBefore) as { trajectoryRef: string };
     const trajectoryPath = path.join(projectRoot, runState.trajectoryRef);
@@ -371,7 +371,7 @@ describe("generated WorkflowRuntime guard and handoff adapters", () => {
   });
 
   it("uses the same guard and handoff adapters for standalone Runs", async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-guard-handoff-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-guard-handoff-"));
     const { projectRoot, packageRoot } = await createGeneratedProject(root);
     const guard = scriptPath(packageRoot, "workflow-guard.mjs");
     const handoff = scriptPath(packageRoot, "workflow-handoff.mjs");
@@ -397,7 +397,13 @@ describe("generated WorkflowRuntime guard and handoff adapters", () => {
       currentNode: "prepare",
     });
     await fs.writeFile(
-      path.join(projectRoot, ".comet", "runs", "standalone-run", "prepare.txt"),
+      path.join(
+        projectRoot,
+        ".badger",
+        "runs",
+        "standalone-run",
+        "prepare.txt",
+      ),
       "prepared\n",
     );
     await runScript(guard, projectRoot, [

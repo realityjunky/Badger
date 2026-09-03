@@ -103,7 +103,7 @@ export async function evaluatePackage(
   };
   const resultPath = path.join(
     state.projectRoot,
-    ".comet-any",
+    ".badger",
     "eval",
     `${state.name}.json`,
   );

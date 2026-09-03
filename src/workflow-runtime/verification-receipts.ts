@@ -20,7 +20,7 @@ import { parseWorkflowDurabilityProfile } from "./durability.js";
 import { parseExecutionIdentity } from "./revision-claim.js";
 
 export const WORKFLOW_VERIFICATION_RECEIPT_DIRECTORY =
-  ".comet/verification-receipts";
+  ".badger/verification-receipts";
 export const WORKFLOW_VERIFICATION_RECEIPT_SCHEMA_VERSION = 1 as const;
 export const WORKFLOW_VERIFICATION_RECEIPT_MAX_REFERENCES = 256;
 export const WORKFLOW_VERIFICATION_RECEIPT_MAX_SCOPE_ENTRIES = 64;

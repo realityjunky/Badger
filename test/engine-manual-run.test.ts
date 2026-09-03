@@ -28,11 +28,11 @@ async function writeSkill(
   const version = options.version ?? "1.0.0";
   const mode = options.mode ?? "deterministic";
   const secondStep = options.secondStep ?? "finish";
-  await fs.mkdir(path.join(root, "comet"), { recursive: true });
+  await fs.mkdir(path.join(root, "badger"), { recursive: true });
   await fs.writeFile(path.join(root, "SKILL.md"), `# Demo ${version}\n`);
   await fs.writeFile(
-    path.join(root, "comet", "skill.yaml"),
-    `apiVersion: comet/v1alpha1
+    path.join(root, "badger", "skill.yaml"),
+    `apiVersion: badger/v1alpha1
 kind: Skill
 metadata:
   name: demo
@@ -66,7 +66,7 @@ tools:
 ${options.requireConfirmation ? "    requiresConfirmation: true\n" : ""}`,
   );
   await fs.writeFile(
-    path.join(root, "comet", "checks.yaml"),
+    path.join(root, "badger", "checks.yaml"),
     `runtime:
   - id: draft-artifact
     scope: step
@@ -86,7 +86,7 @@ describe("manual Skill run service", () => {
   let changeDir: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-manual-run-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-manual-run-"));
     skillRoot = path.join(root, "skill");
     changeDir = path.join(root, "change");
     await writeSkill(skillRoot);
@@ -347,7 +347,7 @@ describe("manual Skill run service", () => {
   it("rejects a pending action attached to a terminal Run", async () => {
     const pkg = await loadSkillPackage(skillRoot);
     const started = await startManualRun(pkg, changeDir);
-    const statePath = path.join(changeDir, ".comet", "run-state.json");
+    const statePath = path.join(changeDir, ".badger", "run-state.json");
     const state = JSON.parse(await fs.readFile(statePath, "utf8")) as Record<
       string,
       unknown
@@ -366,7 +366,7 @@ describe("manual Skill run service", () => {
   it("rejects Run state that does not match its Skill snapshot", async () => {
     const pkg = await loadSkillPackage(skillRoot);
     const started = await startManualRun(pkg, changeDir);
-    const statePath = path.join(changeDir, ".comet", "run-state.json");
+    const statePath = path.join(changeDir, ".badger", "run-state.json");
     const state = JSON.parse(await fs.readFile(statePath, "utf8")) as Record<
       string,
       unknown

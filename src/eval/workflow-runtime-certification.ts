@@ -283,7 +283,7 @@ async function certifyRevisionedWorkflow(options: {
     generatedPackageHash: options.generatedPackageHash,
   });
   const temporaryRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), "comet-workflow-revisioned-certification-"),
+    path.join(os.tmpdir(), "badger-workflow-revisioned-certification-"),
   );
   const runRoot = path.join(temporaryRoot, "run");
   const runId = `certification-${options.generatedPackageHash.slice(0, 16)}`;
@@ -371,7 +371,7 @@ export async function certifyWorkflowRuntime(options: {
     return certifyRevisionedWorkflow(options);
   }
   const temporaryRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), "comet-workflow-runtime-certification-"),
+    path.join(os.tmpdir(), "badger-workflow-runtime-certification-"),
   );
   const runRoot = path.join(temporaryRoot, "run");
   const reverseRunRoot = path.join(temporaryRoot, "reverse-run");

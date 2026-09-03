@@ -19,13 +19,13 @@ import type { SkillPackage } from "../src/skill-runtime/types.js";
 
 function runtimePackage(): SkillPackage {
   return {
-    root: "/runtime/comet-native",
+    root: "/runtime/badger-native",
     packageKind: "runtime",
     definition: {
-      apiVersion: "comet/v1alpha1",
+      apiVersion: "badger/v1alpha1",
       kind: "Skill",
       metadata: {
-        name: "comet-native-runtime",
+        name: "badger-native-runtime",
         version: "1",
         description: "Native runtime",
       },
@@ -61,7 +61,7 @@ describe("Engine Run storage layouts", () => {
 
   beforeEach(async () => {
     changeDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-engine-storage-"),
+      path.join(os.tmpdir(), "badger-engine-storage-"),
     );
   });
 
@@ -71,13 +71,13 @@ describe("Engine Run storage layouts", () => {
 
   it("publishes stable Classic and Native layouts", () => {
     expect(CLASSIC_RUN_STORAGE).toEqual({
-      stateRef: ".comet/run-state.json",
-      pendingRef: ".comet/pending-action.json",
-      trajectoryRef: ".comet/trajectory.jsonl",
-      contextRef: ".comet/context.md",
-      artifactsRef: ".comet/artifacts.json",
-      checkpointRef: ".comet/checkpoint.json",
-      snapshotsRef: ".comet/skill-snapshots",
+      stateRef: ".badger/run-state.json",
+      pendingRef: ".badger/pending-action.json",
+      trajectoryRef: ".badger/trajectory.jsonl",
+      contextRef: ".badger/context.md",
+      artifactsRef: ".badger/artifacts.json",
+      checkpointRef: ".badger/checkpoint.json",
+      snapshotsRef: ".badger/skill-snapshots",
     });
     expect(NATIVE_RUN_STORAGE).toEqual({
       stateRef: "runtime/run-state.json",
@@ -92,12 +92,12 @@ describe("Engine Run storage layouts", () => {
 
   it("keeps the existing startRun function on Classic refs", () => {
     const state = startRun(runtimePackage(), "classic-run", "a".repeat(64));
-    expect(state.pendingRef).toBe(".comet/pending-action.json");
-    expect(state.trajectoryRef).toBe(".comet/trajectory.jsonl");
-    expect(state.checkpointRef).toBe(".comet/checkpoint.json");
+    expect(state.pendingRef).toBe(".badger/pending-action.json");
+    expect(state.trajectoryRef).toBe(".badger/trajectory.jsonl");
+    expect(state.checkpointRef).toBe(".badger/checkpoint.json");
   });
 
-  it("writes and removes Native state without creating a .comet directory", async () => {
+  it("writes and removes Native state without creating a .badger directory", async () => {
     const state = startRunWithStorage(
       runtimePackage(),
       "native-run",
@@ -112,7 +112,7 @@ describe("Engine Run storage layouts", () => {
       await fs.stat(path.join(changeDir, "runtime", "run-state.json")),
     ).toBeDefined();
     await expect(
-      fs.access(path.join(changeDir, ".comet")),
+      fs.access(path.join(changeDir, ".badger")),
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -147,7 +147,7 @@ describe("Engine Run storage layouts", () => {
       NATIVE_RUN_STORAGE,
     );
     const outside = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-engine-storage-outside-"),
+      path.join(os.tmpdir(), "badger-engine-storage-outside-"),
     );
     const runtime = path.join(changeDir, "runtime");
 

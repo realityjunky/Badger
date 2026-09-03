@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 const event = process.argv[2] ?? 'before_tool';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
-const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd();
+const runRoot = process.env.BADGER_RUN_ROOT ? path.resolve(process.env.BADGER_RUN_ROOT) : process.cwd();
 const protocolPath = path.join(packageRoot, 'reference', 'workflow-protocol.json');
 
 
@@ -280,7 +280,7 @@ function workflowRelativeSegments(value, label, allowWildcards = false) {
 
 function workflowYamlError(message, line) {
   const suffix = Number.isInteger(line) ? ' at line ' + String(line) : '';
-  throw new Error('Invalid .comet/config.yaml: ' + message + suffix);
+  throw new Error('Invalid .badger/config.yaml: ' + message + suffix);
 }
 
 function workflowYamlStripComment(value) {
@@ -875,17 +875,17 @@ function validateWorkflowPendingRootMove(value) {
 }
 
 function managedWorkflowConfigFields(source) {
-  const root = workflowConfigRecord(parseWorkflowProjectYaml(source), '.comet/config.yaml');
+  const root = workflowConfigRecord(parseWorkflowProjectYaml(source), '.badger/config.yaml');
   const hasProjectMarker =
     root.schema !== undefined ||
     root.default_workflow !== undefined ||
     root.workflows !== undefined ||
     root.native !== undefined;
-  if (hasProjectMarker && root.schema !== 'comet.project.v1') {
-    throw new Error('Unsupported Comet project schema');
+  if (hasProjectMarker && root.schema !== 'badger.project.v1') {
+    throw new Error('Unsupported Badger project schema');
   }
   if (
-    root.schema === 'comet.project.v1' &&
+    root.schema === 'badger.project.v1' &&
     root.default_workflow !== 'native' &&
     root.default_workflow !== 'classic'
   ) {
@@ -1021,13 +1021,13 @@ function managedWorkflowConfigFields(source) {
 }
 
 async function readWorkflowProjectPathConfig(projectRoot) {
-  const file = path.join(projectRoot, '.comet', 'config.yaml');
+  const file = path.join(projectRoot, '.badger', 'config.yaml');
   let inspection;
   try {
     inspection = await inspectWorkflowProtectedPath(
       projectRoot,
       file,
-      '.comet/config.yaml',
+      '.badger/config.yaml',
       'file',
     );
   } catch (error) {
@@ -1052,7 +1052,7 @@ async function readWorkflowProjectPathConfig(projectRoot) {
   const source = await readWorkflowProtectedFile(
     projectRoot,
     file,
-    '.comet/config.yaml',
+    '.badger/config.yaml',
     WORKFLOW_PROJECT_CONFIG_MAX_BYTES,
   );
   return managedWorkflowConfigFields(source.toString('utf8'));
@@ -1074,8 +1074,8 @@ function resolveWorkflowRelativePath(base, value, label, allowWildcards = false)
 }
 
 
-function isCometOverlay(protocol) {
-  return protocol.kind === 'comet-five-phase-overlay';
+function isBadgerOverlay(protocol) {
+  return protocol.kind === 'badger-five-phase-overlay';
 }
 
 function parseSimpleYaml(raw) {
@@ -1114,7 +1114,7 @@ async function workflowPathBaseRoot(pathBase) {
   let configuredClassicRoot = null;
   if (pathBase === 'classic-openspec-root' || pathBase === 'classic-superpowers-root') {
     if (!config.classicEnabled || config.classicArtifactLayout === null) {
-      throw new Error('Classic workflow is not enabled by .comet/config.yaml');
+      throw new Error('Classic workflow is not enabled by .badger/config.yaml');
     }
     configuredClassicRoot = config.classicArtifactLayout === 'docs'
       ? path.join(runRoot, 'docs', 'openspec')
@@ -1126,7 +1126,7 @@ async function workflowPathBaseRoot(pathBase) {
     resolved = path.join(runRoot, 'docs', 'superpowers');
   } else if (pathBase === 'native-root') {
     if (!config.nativeEnabled || config.nativeArtifactRoot === null) {
-      throw new Error('Native workflow is not enabled by .comet/config.yaml');
+      throw new Error('Native workflow is not enabled by .badger/config.yaml');
     }
     resolved = resolveWorkflowRelativePath(
       runRoot,
@@ -1167,7 +1167,7 @@ async function workflowPathBaseRoot(pathBase) {
   return resolved;
 }
 
-async function activeCometChanges() {
+async function activeBadgerChanges() {
   const changesRoot = path.join(await workflowPathBaseRoot('classic-openspec-root'), 'changes');
   const inspection = await inspectWorkflowProtectedPath(
     runRoot,
@@ -1198,7 +1198,7 @@ async function activeCometChanges() {
       'Classic change directory',
       'directory',
     );
-    const statePath = path.join(changeRoot, '.comet.yaml');
+    const statePath = path.join(changeRoot, '.badger.yaml');
     const stateInspection = await inspectWorkflowProtectedPath(
       runRoot,
       statePath,
@@ -1234,16 +1234,16 @@ async function activeCometChanges() {
   return changes.sort((left, right) => left.name.localeCompare(right.name));
 }
 
-async function resolveCometOverlayChange() {
-  const changes = await activeCometChanges();
+async function resolveBadgerOverlayChange() {
+  const changes = await activeBadgerChanges();
   if (changes.length === 0) {
     throw new Error(
-      'No active Comet change; use /comet-open or the permanent /comet-classic entry to create one.',
+      'No active Badger change; use /badger-open or the permanent /badger-classic entry to create one.',
     );
   }
   if (changes.length > 1) {
     throw new Error(
-      'Multiple active Comet changes: ' +
+      'Multiple active Badger changes: ' +
         changes.map((change) => change.name).join(', ') +
         '. Ask the user which change to resume.',
     );
@@ -1299,7 +1299,7 @@ function evidencePathFor(protocol, change) {
   const changeName = typeof change === 'string' ? change : change.name;
   return resolveWorkflowRelativePath(
     runRoot,
-    ['.comet', 'workflow-evidence', changeName, protocol.name + '.json'].join('/'),
+    ['.badger', 'workflow-evidence', changeName, protocol.name + '.json'].join('/'),
     'workflow evidence path',
   ).target;
 }
@@ -1639,12 +1639,12 @@ async function main() {
   if (nodes.length === 0) {
     throw new Error('workflow protocol has no enabled nodes');
   }
-  if (isCometOverlay(protocol)) {
-    const change = await resolveCometOverlayChange();
+  if (isBadgerOverlay(protocol)) {
+    const change = await resolveBadgerOverlayChange();
     const evidence = await readOverlayEvidence(protocol, change);
     const current = overlayNodeFromState(change.state, evidence);
     if (!current || !nodes.some((node) => node.id === current)) {
-      throw new Error('active Comet change has no valid workflow Node');
+      throw new Error('active Badger change has no valid workflow Node');
     }
     console.log('workflow-hook-guard-ok');
     console.log('EVENT: ' + event);

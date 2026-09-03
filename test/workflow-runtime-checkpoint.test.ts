@@ -133,7 +133,7 @@ describe("WorkflowRuntime verified checkpoints", () => {
 
   beforeEach(async () => {
     root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-checkpoint-"),
+      path.join(os.tmpdir(), "badger-workflow-checkpoint-"),
     );
     runRoot = path.join(root, "change");
     await fs.mkdir(runRoot);
@@ -208,7 +208,7 @@ describe("WorkflowRuntime verified checkpoints", () => {
   it("does not publish checkpoint state for an interrupted transition", async () => {
     setWorkflowTransitionFaultForTests({
       phase: "record-write",
-      path: ".comet/run-state.json",
+      path: ".badger/run-state.json",
     });
 
     await expect(
@@ -268,7 +268,7 @@ describe("WorkflowRuntime verified checkpoints", () => {
     const index = await readWorkflowCheckpointIndex(runRoot, checkpointProfile);
     const latestPath = path.join(
       runRoot,
-      ".comet",
+      ".badger",
       "checkpoints",
       "manifests",
       `${index!.records[0].manifestHash}.json`,
@@ -425,16 +425,16 @@ describe("WorkflowRuntime verified checkpoints", () => {
       "utf8",
     );
     await fs.writeFile(
-      path.join(runRoot, ".comet", "trajectory.jsonl"),
+      path.join(runRoot, ".badger", "trajectory.jsonl"),
       olderTrajectory,
     );
     await fs.writeFile(
-      path.join(runRoot, ".comet", "run-state.json"),
+      path.join(runRoot, ".badger", "run-state.json"),
       "{not-a-run-state}\n",
     );
     const latestPath = path.join(
       runRoot,
-      ".comet",
+      ".badger",
       "checkpoints",
       "manifests",
       `${index!.records[0].manifestHash}.json`,
@@ -459,7 +459,7 @@ describe("WorkflowRuntime verified checkpoints", () => {
       ]),
     );
     const trajectory = await fs.readFile(
-      path.join(runRoot, ".comet", "trajectory.jsonl"),
+      path.join(runRoot, ".badger", "trajectory.jsonl"),
       "utf8",
     );
     expect(
@@ -483,14 +483,14 @@ describe("WorkflowRuntime verified checkpoints", () => {
       index!.records[0],
     );
     await fs.writeFile(
-      path.join(runRoot, ".comet", "trajectory.jsonl"),
+      path.join(runRoot, ".badger", "trajectory.jsonl"),
       await fs.readFile(
         path.join(runRoot, checkpoint.trajectory.contentPath!),
         "utf8",
       ),
     );
     await fs.writeFile(
-      path.join(runRoot, ".comet", "run-state.json"),
+      path.join(runRoot, ".badger", "run-state.json"),
       "{not-a-run-state}\n",
     );
 
@@ -557,20 +557,20 @@ it("recovers the checkpoint in a new process", async () => {
       index!.records[0],
     );
     await fs.writeFile(
-      path.join(runRoot, ".comet", "trajectory.jsonl"),
+      path.join(runRoot, ".badger", "trajectory.jsonl"),
       await fs.readFile(
         path.join(runRoot, checkpoint.trajectory.contentPath!),
         "utf8",
       ),
     );
     await fs.writeFile(
-      path.join(runRoot, ".comet", "run-state.json"),
+      path.join(runRoot, ".badger", "run-state.json"),
       "{not-a-run-state}\n",
     );
     setWorkflowCheckpointFaultForTests(({ phase, path: boundaryPath }) => {
       if (
         phase === "checkpoint-recovery-record-write" &&
-        boundaryPath === ".comet/run-state.json"
+        boundaryPath === ".badger/run-state.json"
       ) {
         throw new Error("deterministic workflow checkpoint fault");
       }
@@ -679,9 +679,9 @@ it("recovers the checkpoint in a new process", async () => {
       const recoveredLocation =
         locationKind === "manual"
           ? runRoot
-          : path.join(root, ".comet", "runs", "location-run");
+          : path.join(root, ".badger", "runs", "location-run");
       await fs.writeFile(
-        path.join(recoveredLocation, ".comet", "run-state.json"),
+        path.join(recoveredLocation, ".badger", "run-state.json"),
         "{not-a-run-state}\n",
       );
 
@@ -715,7 +715,7 @@ it("recovers the checkpoint in a new process", async () => {
     const index = await readWorkflowCheckpointIndex(runRoot, checkpointProfile);
     const latestPath = path.join(
       runRoot,
-      ".comet",
+      ".badger",
       "checkpoints",
       "manifests",
       `${index!.records[0].manifestHash}.json`,
@@ -727,7 +727,7 @@ it("recovers the checkpoint in a new process", async () => {
     latest.revision = 99;
     await fs.writeFile(latestPath, JSON.stringify(latest, null, 2) + "\n");
     await fs.writeFile(
-      path.join(runRoot, ".comet", "run-state.json"),
+      path.join(runRoot, ".badger", "run-state.json"),
       "{not-a-run-state}\n",
     );
 
@@ -740,7 +740,10 @@ it("recovers the checkpoint in a new process", async () => {
       ]),
     });
     expect(
-      await fs.readFile(path.join(runRoot, ".comet", "run-state.json"), "utf8"),
+      await fs.readFile(
+        path.join(runRoot, ".badger", "run-state.json"),
+        "utf8",
+      ),
     ).toBe("{not-a-run-state}\n");
   });
 });

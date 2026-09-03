@@ -28,7 +28,7 @@ describe("official Engine characterization harness", () => {
 
   beforeEach(async () => {
     root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-engine-characterization-test-"),
+      path.join(os.tmpdir(), "badger-engine-characterization-test-"),
     );
   });
 
@@ -98,7 +98,7 @@ describe("official Engine characterization harness", () => {
     const fixturePath = path.join(fixtureRoot, "engine-characterization.json");
     const manifestPath = path.join(fixtureRoot, "manifest.json");
     const skillRoot = path.join(fixtureRoot, "skills", "demo");
-    await fs.mkdir(path.join(skillRoot, "comet"), { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "badger"), { recursive: true });
     await fs.mkdir(officialRoot, { recursive: true });
     await fs.writeFile(
       path.join(officialRoot, "engine.ts"),
@@ -109,8 +109,8 @@ describe("official Engine characterization harness", () => {
       "# Synthetic Engine fixture\n",
     );
     await fs.writeFile(
-      path.join(skillRoot, "comet", "skill.yaml"),
-      "apiVersion: comet/v1alpha1\nkind: Skill\n",
+      path.join(skillRoot, "badger", "skill.yaml"),
+      "apiVersion: badger/v1alpha1\nkind: Skill\n",
     );
     await execFileAsync("git", ["init", "--quiet", officialRoot]);
     await execFileAsync("git", [
@@ -333,10 +333,10 @@ function fakeOfficialRunner(): EngineCommandRunner {
     async run(args, options) {
       const isStart = args[0] === "skill" && args[1] === "run";
       const runId = argument(args, "--run-id") ?? "manual-run";
-      const runRoot = path.join(options.cwd, ".comet", "runs", runId);
-      const statePath = path.join(runRoot, ".comet", "run-state.json");
-      const pendingPath = path.join(runRoot, ".comet", "pending-action.json");
-      const trajectoryPath = path.join(runRoot, ".comet", "trajectory.jsonl");
+      const runRoot = path.join(options.cwd, ".badger", "runs", runId);
+      const statePath = path.join(runRoot, ".badger", "run-state.json");
+      const pendingPath = path.join(runRoot, ".badger", "pending-action.json");
+      const trajectoryPath = path.join(runRoot, ".badger", "trajectory.jsonl");
       const state = {
         runId,
         skill: "demo",
@@ -346,11 +346,11 @@ function fakeOfficialRunner(): EngineCommandRunner {
         currentStep: "finish",
         iteration: 0,
         pending: "action-1",
-        pendingRef: ".comet/pending-action.json",
-        trajectoryRef: ".comet/trajectory.jsonl",
-        contextRef: ".comet/context.md",
-        artifactsRef: ".comet/artifacts.json",
-        checkpointRef: ".comet/checkpoint.json",
+        pendingRef: ".badger/pending-action.json",
+        trajectoryRef: ".badger/trajectory.jsonl",
+        contextRef: ".badger/context.md",
+        artifactsRef: ".badger/artifacts.json",
+        checkpointRef: ".badger/checkpoint.json",
         status: "waiting",
         retries: {},
       };
@@ -387,7 +387,7 @@ function fakeOfficialRunner(): EngineCommandRunner {
         summary: argument(args, "--summary"),
       };
       await fs.writeFile(
-        path.join(runRoot, ".comet", "artifacts.json"),
+        path.join(runRoot, ".badger", "artifacts.json"),
         JSON.stringify({ report: "report.md" }, null, 2),
       );
       await appendFakeEvent(trajectoryPath, "action_completed", runId, {

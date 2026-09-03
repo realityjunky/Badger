@@ -266,7 +266,7 @@ describe("WorkflowRuntime finalization preview", () => {
     "is deterministic and read-only for %s Runs",
     async (_kind, targetFor) => {
       const root = await fs.mkdtemp(
-        path.join(os.tmpdir(), "comet-finalization-preview-"),
+        path.join(os.tmpdir(), "badger-finalization-preview-"),
       );
       try {
         const target = targetFor(root);
@@ -278,13 +278,13 @@ describe("WorkflowRuntime finalization preview", () => {
         });
         const before = await fs.readFile(
           typeof target === "string"
-            ? path.join(target, ".comet", "run-state.json")
+            ? path.join(target, ".badger", "run-state.json")
             : path.join(
                 target.projectRoot,
-                ".comet",
+                ".badger",
                 "runs",
                 target.runId,
-                ".comet",
+                ".badger",
                 "run-state.json",
               ),
           "utf8",
@@ -326,13 +326,13 @@ describe("WorkflowRuntime finalization preview", () => {
         ).rejects.toMatchObject({ code: "ENOENT" });
         const after = await fs.readFile(
           typeof target === "string"
-            ? path.join(target, ".comet", "run-state.json")
+            ? path.join(target, ".badger", "run-state.json")
             : path.join(
                 target.projectRoot,
-                ".comet",
+                ".badger",
                 "runs",
                 target.runId,
-                ".comet",
+                ".badger",
                 "run-state.json",
               ),
           "utf8",
@@ -346,7 +346,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("blocks when a quarantined identity is replaced during recovery", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-quarantine-unknown-"),
+      path.join(os.tmpdir(), "badger-finalization-quarantine-unknown-"),
     );
     try {
       await fs.mkdir(path.join(root, "results"));
@@ -385,7 +385,7 @@ describe("WorkflowRuntime finalization preview", () => {
         ]),
       );
       await expect(
-        fs.stat(path.join(root, ".comet", "finalization", "transaction.json")),
+        fs.stat(path.join(root, ".badger", "finalization", "transaction.json")),
       ).resolves.toBeDefined();
     } finally {
       clearWorkflowFinalizationFaultForTests();
@@ -395,7 +395,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("keeps the transaction anchor until cleanup completes", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-cleanup-recovery-"),
+      path.join(os.tmpdir(), "badger-finalization-cleanup-recovery-"),
     );
     try {
       await fs.mkdir(path.join(root, "results"));
@@ -418,13 +418,13 @@ describe("WorkflowRuntime finalization preview", () => {
       clearWorkflowFinalizationFaultForTests();
 
       await expect(
-        fs.stat(path.join(root, ".comet", "finalization", "transaction.json")),
+        fs.stat(path.join(root, ".badger", "finalization", "transaction.json")),
       ).resolves.toBeDefined();
       const recovered = await runtime.recover(root);
       expect(recovered.disposition).toBe("done");
       expect(recovered.finalization?.receipt).toBeDefined();
       await expect(
-        fs.stat(path.join(root, ".comet", "finalization", "transaction.json")),
+        fs.stat(path.join(root, ".badger", "finalization", "transaction.json")),
       ).rejects.toMatchObject({ code: "ENOENT" });
       const receipt = await readWorkflowFinalizationReceipt(
         root,
@@ -449,7 +449,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("blocks when cleanup loses a quarantine before its cleanup event", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-cleanup-unknown-"),
+      path.join(os.tmpdir(), "badger-finalization-cleanup-unknown-"),
     );
     try {
       await fs.mkdir(path.join(root, "results"));
@@ -487,7 +487,7 @@ describe("WorkflowRuntime finalization preview", () => {
         ]),
       );
       await expect(
-        fs.stat(path.join(root, ".comet", "finalization", "transaction.json")),
+        fs.stat(path.join(root, ".badger", "finalization", "transaction.json")),
       ).resolves.toBeDefined();
     } finally {
       clearWorkflowFinalizationFaultForTests();
@@ -497,7 +497,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("recovers destructive operations through the standalone location", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-standalone-destructive-"),
+      path.join(os.tmpdir(), "badger-finalization-standalone-destructive-"),
     );
     const target = {
       kind: "standalone",
@@ -578,7 +578,7 @@ describe("WorkflowRuntime finalization preview", () => {
     "rolled-back",
   ] as const)("recovers rollback after the %s boundary", async (phase) => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-rollback-boundary-"),
+      path.join(os.tmpdir(), "badger-finalization-rollback-boundary-"),
     );
     try {
       await fs.mkdir(path.join(root, "results"));
@@ -630,7 +630,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("requires the persisted confirmation action before applying effects", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-apply-"),
+      path.join(os.tmpdir(), "badger-finalization-apply-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -698,13 +698,13 @@ describe("WorkflowRuntime finalization preview", () => {
         fs.readFile(path.join(root, "results", "report.txt"), "utf8"),
       ).resolves.toBe("finalized\n");
       await expect(
-        fs.stat(path.join(root, ".comet", "finalization", "transaction.json")),
+        fs.stat(path.join(root, ".badger", "finalization", "transaction.json")),
       ).rejects.toMatchObject({ code: "ENOENT" });
       await expect(
         fs.stat(
           path.join(
             root,
-            ".comet",
+            ".badger",
             "finalization",
             "receipts",
             `${current.finalization!.receipt!.receiptHash}.json`,
@@ -718,7 +718,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("recovers an interrupted write through the public recover seam", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-recovery-"),
+      path.join(os.tmpdir(), "badger-finalization-recovery-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -787,7 +787,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("rejects a preview after its target precondition changes", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-stale-"),
+      path.join(os.tmpdir(), "badger-finalization-stale-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -816,7 +816,7 @@ describe("WorkflowRuntime finalization preview", () => {
       expect(blocked.pendingAction?.id).toBe(stateBefore?.id);
       expect(blocked.revision).toBe(current.revision);
       await expect(
-        fs.readFile(path.join(root, ".comet", "run-state.json"), "utf8"),
+        fs.readFile(path.join(root, ".badger", "run-state.json"), "utf8"),
       ).resolves.toContain(stateBefore!.id);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -825,7 +825,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("applies write, move, and remove operations with one receipt", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-operations-"),
+      path.join(os.tmpdir(), "badger-finalization-operations-"),
     );
     try {
       await fs.mkdir(path.join(root, "results"));
@@ -916,7 +916,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("recovers quarantined move and remove effects with durable cleanup evidence", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-quarantine-recovery-"),
+      path.join(os.tmpdir(), "badger-finalization-quarantine-recovery-"),
     );
     try {
       await fs.mkdir(path.join(root, "results"));
@@ -1013,7 +1013,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("rolls back quarantined destructive effects without overwriting newer content", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-quarantine-rollback-"),
+      path.join(os.tmpdir(), "badger-finalization-quarantine-rollback-"),
     );
     try {
       await fs.mkdir(path.join(root, "results"));
@@ -1126,7 +1126,7 @@ describe("WorkflowRuntime finalization preview", () => {
     "recovers destructive finalization after the %s boundary",
     async (phase, operationId) => {
       const root = await fs.mkdtemp(
-        path.join(os.tmpdir(), "comet-finalization-destructive-boundary-"),
+        path.join(os.tmpdir(), "badger-finalization-destructive-boundary-"),
       );
       try {
         await fs.mkdir(path.join(root, "results"));
@@ -1175,7 +1175,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("forwards preview and finalization confirmation through generated adapters", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-generated-"),
+      path.join(os.tmpdir(), "badger-finalization-generated-"),
     );
     try {
       const generated = await generatePackage({
@@ -1277,7 +1277,7 @@ describe("WorkflowRuntime finalization preview", () => {
     "receipt-written",
   ] as const)("recovers a transaction fault at %s", async (phase) => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-boundary-"),
+      path.join(os.tmpdir(), "badger-finalization-boundary-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -1345,7 +1345,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("recovers an interrupted standalone finalization in a fresh process", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-standalone-recovery-"),
+      path.join(os.tmpdir(), "badger-finalization-standalone-recovery-"),
     );
     const target = {
       kind: "standalone",
@@ -1400,7 +1400,7 @@ describe("WorkflowRuntime finalization preview", () => {
         fs.readFile(path.join(root, "results", "report.txt"), "utf8"),
       ).resolves.toBe("finalized\n");
       await expect(
-        fs.stat(path.join(root, ".comet", "finalization", "transaction.json")),
+        fs.stat(path.join(root, ".badger", "finalization", "transaction.json")),
       ).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       clearWorkflowFinalizationFaultForTests();
@@ -1410,7 +1410,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("blocks recovery when an affected identity is neither previous nor intended", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-unknown-"),
+      path.join(os.tmpdir(), "badger-finalization-unknown-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -1468,7 +1468,7 @@ describe("WorkflowRuntime finalization preview", () => {
         ]),
       );
       await expect(
-        fs.stat(path.join(root, ".comet", "finalization", "transaction.json")),
+        fs.stat(path.join(root, ".badger", "finalization", "transaction.json")),
       ).resolves.toBeDefined();
     } finally {
       clearWorkflowFinalizationFaultForTests();
@@ -1478,7 +1478,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("rejects stale confirmation without consuming the revision claim", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-confirmation-stale-"),
+      path.join(os.tmpdir(), "badger-finalization-confirmation-stale-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -1553,7 +1553,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("keeps a cancelled finalization non-terminal", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-cancel-"),
+      path.join(os.tmpdir(), "badger-finalization-cancel-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -1608,7 +1608,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("records rollback evidence and never converts rollback into done", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-rollback-"),
+      path.join(os.tmpdir(), "badger-finalization-rollback-"),
     );
     try {
       const runtime = createWorkflowRuntime();
@@ -1705,7 +1705,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("rejects unsafe and unregistered finalization declarations before creating a Run", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-contract-"),
+      path.join(os.tmpdir(), "badger-finalization-contract-"),
     );
     try {
       const unsafePath = {
@@ -1754,7 +1754,7 @@ describe("WorkflowRuntime finalization preview", () => {
 
   it("requires currently passed Verification Receipts before preview", async () => {
     const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-finalization-evidence-"),
+      path.join(os.tmpdir(), "badger-finalization-evidence-"),
     );
     try {
       await createWorkflowRuntime().start({

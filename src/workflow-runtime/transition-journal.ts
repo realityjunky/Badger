@@ -24,13 +24,13 @@ import {
 } from "./revision-claim.js";
 
 export const WORKFLOW_TRANSITION_JOURNAL_PATH =
-  ".comet/transition-journal.json";
+  ".badger/transition-journal.json";
 export const WORKFLOW_TRANSITION_JOURNAL_SCHEMA_VERSION = 1 as const;
 export const WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS = 16;
 
 const MAX_IDENTIFIER_LENGTH = 256;
 const JOURNAL_LABEL = "Workflow transition journal";
-const STATE_PATH = ".comet/run-state.json";
+const STATE_PATH = ".badger/run-state.json";
 const TRANSITION_OPERATION_IDS = [
   "workflow.start",
   "workflow.resume",
@@ -375,11 +375,11 @@ function recordKind(relativePath: string): WorkflowTransitionRecordKind {
   if (relativePath === STATE_PATH) return "state";
   if (relativePath.endsWith("/pending-action.json")) return "pending";
   if (relativePath.endsWith("/artifacts.json")) return "artifacts";
-  if (relativePath.startsWith(".comet/verification-receipts/")) {
+  if (relativePath.startsWith(".badger/verification-receipts/")) {
     return "verification-receipt";
   }
   if (relativePath.endsWith("/trajectory.jsonl")) return "trajectory";
-  if (relativePath.startsWith(".comet/revision-claims/")) {
+  if (relativePath.startsWith(".badger/revision-claims/")) {
     return "revision-claim";
   }
   return "other";
@@ -1004,7 +1004,7 @@ function eventBoundary(boundary: WorkflowTransitionBoundary): string {
 async function invokeConfiguredFault(
   boundary: WorkflowTransitionBoundary,
 ): Promise<void> {
-  const envBoundary = process.env.COMET_WORKFLOW_TEST_FAULT_BOUNDARY;
+  const envBoundary = process.env.BADGER_WORKFLOW_TEST_FAULT_BOUNDARY;
   if (
     envBoundary &&
     (envBoundary === boundary.phase || envBoundary === eventBoundary(boundary))

@@ -29,7 +29,7 @@ Each custom Node declares:
 - `outputSchemas` attached to the Node;
 - optional `requiredSkillCalls`, `augmentations`, and `guardrails`.
 
-The normalizer emits success, failure self-loop, and pause self-loop edges for every Node. A workflow-kernel uses `.comet/runs/<name>/state.json` with `currentNode`, `completedNodes`, and `evidence` fields.
+The normalizer emits success, failure self-loop, and pause self-loop edges for every Node. A workflow-kernel uses `.badger/runs/<name>/state.json` with `currentNode`, `completedNodes`, and `evidence` fields.
 
 An opted-in revisioned workflow adds `routing.fields` (or a field map) with
 allowed scalar values and uses structured `when` predicates on success edges.

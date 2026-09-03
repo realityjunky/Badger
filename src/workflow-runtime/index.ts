@@ -1823,7 +1823,7 @@ function checkpointFindings(
     .map((inspection) =>
       checkpointInvalidFinding(
         `Workflow checkpoint revision ${inspection.entry.revision} is invalid: ${inspection.error}`,
-        `.comet/checkpoints/manifests/${inspection.entry.manifestHash}.json`,
+        `.badger/checkpoints/manifests/${inspection.entry.manifestHash}.json`,
         severity,
       ),
     );
@@ -1837,7 +1837,7 @@ function checkpointIndexFinding(
     `Workflow checkpoint index is invalid: ${
       error instanceof Error ? error.message : String(error)
     }`,
-    ".comet/checkpoints/index.json",
+    ".badger/checkpoints/index.json",
     severity,
   );
 }
@@ -1875,7 +1875,7 @@ async function checkpointRecoveryRequiredContinuation(
       recoveryRequiredFinding(
         base.revision,
         base.pendingAction?.id ?? null,
-        ".comet/checkpoint-recovery-journal.json",
+        ".badger/checkpoint-recovery-journal.json",
       ),
     ],
     "blocked",
@@ -2851,7 +2851,7 @@ async function verifyStoredRun(location: ResolvedWorkflowRunLocation): Promise<{
   pending: EngineAction | null;
 }> {
   const state = await location.readState();
-  if (!state) throw new Error(`No Comet Run found in: ${location.runRoot}`);
+  if (!state) throw new Error(`No Badger Run found in: ${location.runRoot}`);
   const verified = await verifyStoredPackage(location.runRoot, state);
   const pending = await verifyStoredAction(
     location.runRoot,
@@ -4808,7 +4808,7 @@ async function finalizationRecoveryRequiredContinuation(
       recoveryRequiredFinding(
         verified.state.workflowRuntime?.revision ?? transaction.revision,
         verified.state.pending,
-        ".comet/finalization/transaction.json",
+        ".badger/finalization/transaction.json",
       ),
       ...unknownPaths.map((unknownPath) =>
         findingFromBlocker(
@@ -5749,7 +5749,7 @@ class WorkflowCheckpointRecoveryPendingError extends Error {
     const finding = recoveryRequiredFinding(
       undefined,
       undefined,
-      ".comet/checkpoint-recovery-journal.json",
+      ".badger/checkpoint-recovery-journal.json",
     );
     super(finding.message);
     this.name = "WorkflowCheckpointRecoveryPendingError";
@@ -5898,7 +5898,7 @@ async function recoverCheckpointAwareRun(
           `Workflow checkpoint authoritative-head verification failed: ${
             headError instanceof Error ? headError.message : String(headError)
           }`,
-          ".comet/checkpoints/index.json",
+          ".badger/checkpoints/index.json",
         ),
         ...auditFindings,
       ]);
@@ -5912,7 +5912,7 @@ async function recoverCheckpointAwareRun(
       return checkpointBlockedContinuation(location, [
         checkpointHistoryAmbiguousFinding(
           `Workflow checkpoint revision ${newerCheckpoint.verification.manifest.revision} is newer than the authoritative Run head revision ${currentRevision}; recovery will not rewind or discard accepted history.`,
-          ".comet/checkpoints/index.json",
+          ".badger/checkpoints/index.json",
         ),
         ...auditFindings,
       ]);
@@ -5950,7 +5950,7 @@ async function recoverCheckpointAwareRun(
         `No completely verified checkpoint can restore the Run: ${
           headError instanceof Error ? headError.message : String(headError)
         }`,
-        ".comet/run-state.json",
+        ".badger/run-state.json",
       ),
     ]);
   }
@@ -5973,7 +5973,7 @@ async function recoverCheckpointAwareRun(
         ...auditFindings,
         checkpointHistoryAmbiguousFinding(
           error instanceof Error ? error.message : String(error),
-          ".comet/trajectory.jsonl",
+          ".badger/trajectory.jsonl",
         ),
       ],
       selected,

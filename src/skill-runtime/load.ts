@@ -334,7 +334,7 @@ function narrowSkillDefinition(
   filePath: string,
 ): SkillDefinition {
   assertObject(document, filePath);
-  assertEnum(document.apiVersion, ["comet/v1alpha1"], filePath, "apiVersion");
+  assertEnum(document.apiVersion, ["badger/v1alpha1"], filePath, "apiVersion");
   assertEnum(document.kind, ["Skill"], filePath, "kind");
 
   assertObject(document.metadata, filePath, "metadata");
@@ -563,11 +563,11 @@ async function yamlFileExists(filePath: string): Promise<boolean> {
   }
 }
 
-async function readRuntimeChecks(cometRoot: string): Promise<{
+async function readRuntimeChecks(badgerRoot: string): Promise<{
   document: { runtime?: RuntimeEvalDefinition[] } | null;
 }> {
-  const checksPath = path.join(cometRoot, "checks.yaml");
-  const evalsPath = path.join(cometRoot, "evals.yaml");
+  const checksPath = path.join(badgerRoot, "checks.yaml");
+  const evalsPath = path.join(badgerRoot, "evals.yaml");
   const [hasChecks, hasEvals] = await Promise.all([
     yamlFileExists(checksPath),
     yamlFileExists(evalsPath),
@@ -640,7 +640,7 @@ export async function loadSkillPackage(root: string): Promise<SkillPackage> {
   const packageRoot = path.resolve(root);
   return loadPackageFromLayout({
     root: packageRoot,
-    controlRoot: path.join(packageRoot, "comet"),
+    controlRoot: path.join(packageRoot, "badger"),
     packageKind: "skill",
     requireSkillMarkdown: true,
   });

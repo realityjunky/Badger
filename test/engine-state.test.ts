@@ -18,11 +18,11 @@ const state = (): RunState => ({
   currentStep: "start",
   iteration: 0,
   pending: null,
-  pendingRef: ".comet/pending-action.json",
-  trajectoryRef: ".comet/trajectory.jsonl",
-  contextRef: ".comet/context.md",
-  artifactsRef: ".comet/artifacts.json",
-  checkpointRef: ".comet/checkpoint.json",
+  pendingRef: ".badger/pending-action.json",
+  trajectoryRef: ".badger/trajectory.jsonl",
+  contextRef: ".badger/context.md",
+  artifactsRef: ".badger/artifacts.json",
+  checkpointRef: ".badger/checkpoint.json",
   status: "running",
   retries: {},
 });
@@ -32,12 +32,14 @@ describe("engine state projection", () => {
   let outsideRoot: string;
 
   beforeEach(async () => {
-    changeDir = await fs.mkdtemp(path.join(os.tmpdir(), "comet-engine-state-"));
+    changeDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "badger-engine-state-"),
+    );
     outsideRoot = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-engine-state-outside-"),
+      path.join(os.tmpdir(), "badger-engine-state-outside-"),
     );
     await fs.writeFile(
-      path.join(changeDir, ".comet.yaml"),
+      path.join(changeDir, ".badger.yaml"),
       "workflow: full\nphase: build\ncustom_user_field: keep-me\n",
     );
   });
@@ -60,7 +62,7 @@ describe("engine state projection", () => {
     expect(json.skill).toBe("demo");
   });
 
-  it("creates .comet/run-state.json when the state file is absent", async () => {
+  it("creates .badger/run-state.json when the state file is absent", async () => {
     await writeRunState(changeDir, state());
 
     expect(await readRunState(changeDir)).toEqual(state());
@@ -68,7 +70,7 @@ describe("engine state projection", () => {
 
   it("does not commit Run state through a parent replaced before commit", async () => {
     await writeRunState(changeDir, state());
-    const parent = path.join(changeDir, ".comet");
+    const parent = path.join(changeDir, ".badger");
     const held = `${changeDir}-held`;
     const writeWithHook = writeRunState as unknown as (
       changeDir: string,
@@ -117,7 +119,7 @@ describe("engine state projection", () => {
 
   it("rejects Run state when its parent changes during the bounded read", async () => {
     await writeRunState(changeDir, state());
-    const parent = path.join(changeDir, ".comet");
+    const parent = path.join(changeDir, ".badger");
     const held = `${changeDir}-held`;
     const readWithHooks = readRunState as unknown as (
       changeDir: string,
@@ -150,7 +152,7 @@ describe("engine state projection", () => {
     }
   });
 
-  it("does not replace .comet/run-state.json when writing fails", async () => {
+  it("does not replace .badger/run-state.json when writing fails", async () => {
     const file = path.join(changeDir, RUN_STATE_FILE);
     await fs.mkdir(file, { recursive: true });
 
@@ -161,7 +163,7 @@ describe("engine state projection", () => {
   });
 
   it("rejects incomplete Run projections", async () => {
-    await fs.mkdir(path.join(changeDir, ".comet"), { recursive: true });
+    await fs.mkdir(path.join(changeDir, ".badger"), { recursive: true });
     await fs.writeFile(
       path.join(changeDir, RUN_STATE_FILE),
       JSON.stringify({ runId: "run-1" }),

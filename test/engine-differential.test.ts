@@ -16,7 +16,7 @@ describe("private Engine differential runner", () => {
 
   beforeEach(async () => {
     root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-engine-differential-"),
+      path.join(os.tmpdir(), "badger-engine-differential-"),
     );
   });
 
@@ -30,13 +30,13 @@ describe("private Engine differential runner", () => {
     const skillRoot = path.join(fixtureRoot, "skills", "demo");
     const fixturePath = path.join(fixtureRoot, "engine.json");
     const manifestPath = path.join(fixtureRoot, "manifest.json");
-    await fs.mkdir(path.join(skillRoot, "comet"), { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "badger"), { recursive: true });
     await fs.mkdir(officialRoot, { recursive: true });
     await fs.writeFile(path.join(skillRoot, "SKILL.md"), "# Demo\n");
     await fs.writeFile(
-      path.join(skillRoot, "comet", "skill.yaml"),
+      path.join(skillRoot, "badger", "skill.yaml"),
       [
-        "apiVersion: comet/v1alpha1",
+        "apiVersion: badger/v1alpha1",
         "kind: Skill",
         'metadata: { name: demo, version: "1", description: Demo }',
         "goal: { statement: Complete demo, inputs: [], outputs: [], success: [done] }",

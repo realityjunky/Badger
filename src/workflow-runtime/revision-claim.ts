@@ -10,7 +10,7 @@ import type { WorkflowDurabilityProfile } from "../types.js";
 import { stableValue, sha256 } from "../util.js";
 import { parseWorkflowDurabilityProfile } from "./durability.js";
 
-const CLAIM_DIRECTORY = ".comet/revision-claims";
+const CLAIM_DIRECTORY = ".badger/revision-claims";
 const CLAIM_MAX_IDENTIFIER_LENGTH = 256;
 const CLAIM_WAIT_TIMEOUT_MS = 5_000;
 const CLAIM_POLL_INTERVAL_MS = 10;

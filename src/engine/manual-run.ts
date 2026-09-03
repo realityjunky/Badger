@@ -165,7 +165,7 @@ async function existingRun(changeDir: string): Promise<RunState | null> {
 
 async function requiredRun(changeDir: string): Promise<RunState> {
   const state = await existingRun(changeDir);
-  if (!state) throw new Error(`No Comet Run found in: ${changeDir}`);
+  if (!state) throw new Error(`No Badger Run found in: ${changeDir}`);
   return state;
 }
 
@@ -445,7 +445,7 @@ export async function startManualRun(
     throw new Error("Adaptive orchestration requires an Agent candidate");
   }
   if (await existingRun(changeDir)) {
-    throw new Error(`A Comet Run already exists in: ${changeDir}`);
+    throw new Error(`A Badger Run already exists in: ${changeDir}`);
   }
 
   const snapshot = await createSkillSnapshot(pkg, changeDir);

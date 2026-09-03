@@ -102,7 +102,7 @@ describe("WorkflowRuntime Phase 3 certification", () => {
   let root: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-certification-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-certification-"));
   });
 
   afterEach(async () => fs.rm(root, { recursive: true, force: true }));

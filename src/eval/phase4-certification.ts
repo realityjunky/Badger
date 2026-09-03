@@ -177,7 +177,7 @@ function isProtectedPath(candidate: string): boolean {
     segments.includes("raw_skills") ||
     segments.some(
       (segment, index) =>
-        segment === "comet-any-private" && segments[index + 1] === "comet",
+        segment === "repos" && segments[index + 1] === "comet",
     )
   );
 }
@@ -433,7 +433,7 @@ function cleanEnvironment(
 function locationRoot(location: WorkflowRunLocation): string {
   return location.kind === "manual"
     ? location.runRoot
-    : path.join(location.projectRoot, ".comet", "runs", location.runId);
+    : path.join(location.projectRoot, ".badger", "runs", location.runId);
 }
 
 function baseRoot(location: WorkflowRunLocation): string {
@@ -1305,7 +1305,7 @@ async function checkpointNegativeCase(
   if (!latest) return false;
   const manifestPath = path.join(
     runRoot,
-    ".comet",
+    ".badger",
     "checkpoints",
     "manifests",
     `${latest.manifestHash}.json`,
@@ -1378,7 +1378,7 @@ async function staleReceiptNegativeCase(
   await fs.rm(
     path.join(
       locationRoot(location),
-      ".comet",
+      ".badger",
       "verification-receipts",
       `${receipt.receiptHash}.json`,
     ),
@@ -1429,7 +1429,7 @@ async function contentDriftNegativeCase(
   );
   const trajectoryPath = path.join(
     locationRoot(location),
-    ".comet",
+    ".badger",
     "trajectory.jsonl",
   );
   const beforeTrajectory = await fs.readFile(trajectoryPath, "utf8");
@@ -1632,7 +1632,7 @@ async function lockNegativeCases(
     runId: "phase4-stale-lock",
   });
   await fs.writeFile(
-    path.join(staleRoot, ".comet", "run-lock.json"),
+    path.join(staleRoot, ".badger", "run-lock.json"),
     JSON.stringify({
       schemaVersion: 1,
       kind: "workflow-run-lock",
@@ -1660,7 +1660,7 @@ async function lockNegativeCases(
   });
   const unknownBefore = await readRunState(unknownRoot);
   await fs.writeFile(
-    path.join(unknownRoot, ".comet", "run-lock.json"),
+    path.join(unknownRoot, ".badger", "run-lock.json"),
     JSON.stringify({
       schemaVersion: 1,
       kind: "workflow-run-lock",
@@ -1704,7 +1704,7 @@ async function changedJournalNegativeCase(
   });
   setWorkflowTransitionFaultForTests({
     phase: "record-write",
-    path: ".comet/run-state.json",
+    path: ".badger/run-state.json",
   });
   try {
     await runtime.submit(
@@ -1727,7 +1727,7 @@ async function changedJournalNegativeCase(
     clearWorkflowTransitionFaultForTests();
   }
   await fs.writeFile(
-    path.join(runRoot, ".comet", "run-state.json"),
+    path.join(runRoot, ".badger", "run-state.json"),
     '{"tampered":true}\n',
     "utf8",
   );
@@ -1935,7 +1935,7 @@ async function transitionBoundaryMatrix(
         "start",
         location,
         undefined,
-        { COMET_WORKFLOW_TEST_FAULT_BOUNDARY: phase },
+        { BADGER_WORKFLOW_TEST_FAULT_BOUNDARY: phase },
       );
       const afterFault = await childCall<WorkflowContinuation>(
         fixture.packageRoot,
@@ -1959,7 +1959,7 @@ async function transitionBoundaryMatrix(
       });
       setWorkflowTransitionFaultForTests({
         phase: "record-write",
-        path: ".comet/run-state.json",
+        path: ".badger/run-state.json",
       });
       try {
         const prepare = nodeFor(fixture.protocol, "prepare");
@@ -1989,7 +1989,7 @@ async function transitionBoundaryMatrix(
         "recover",
         location,
         undefined,
-        { COMET_WORKFLOW_TEST_FAULT_BOUNDARY: phase },
+        { BADGER_WORKFLOW_TEST_FAULT_BOUNDARY: phase },
       );
       const afterFault = await childCall<WorkflowContinuation>(
         fixture.packageRoot,
@@ -2047,14 +2047,14 @@ async function finalizationBoundaryMatrix(
         "submit",
         prepared.location,
         submission,
-        { COMET_WORKFLOW_TEST_FINALIZATION_FAULT_BOUNDARY: "after-operation" },
+        { BADGER_WORKFLOW_TEST_FINALIZATION_FAULT_BOUNDARY: "after-operation" },
       );
       firstFault = await childCall<WorkflowContinuation>(
         fixture.packageRoot,
         "recover",
         prepared.location,
         { rollbackFinalization: true },
-        { COMET_WORKFLOW_TEST_FINALIZATION_FAULT_BOUNDARY: phase },
+        { BADGER_WORKFLOW_TEST_FINALIZATION_FAULT_BOUNDARY: phase },
       );
       const recovered = await childCall<WorkflowContinuation>(
         fixture.packageRoot,
@@ -2073,7 +2073,7 @@ async function finalizationBoundaryMatrix(
         "submit",
         prepared.location,
         submission,
-        { COMET_WORKFLOW_TEST_FINALIZATION_FAULT_BOUNDARY: phase },
+        { BADGER_WORKFLOW_TEST_FINALIZATION_FAULT_BOUNDARY: phase },
       );
       const recovered = await childCall<WorkflowContinuation>(
         fixture.packageRoot,
@@ -2259,7 +2259,7 @@ async function transitionRecoverySettled(
     return false;
   }
   try {
-    const claimRoot = path.join(runRoot, ".comet", "revision-claims");
+    const claimRoot = path.join(runRoot, ".badger", "revision-claims");
     const entries = await fs.readdir(claimRoot, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith(".json")) {
@@ -2428,7 +2428,7 @@ export async function certifyPhase4Workflow(options: {
   packageRoot: string;
 }): Promise<Phase4CertificationResult> {
   const temporaryRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), "comet-phase4-certification-"),
+    path.join(os.tmpdir(), "badger-phase4-certification-"),
   );
   const evidence = initialEvidence(options.generatedPackageHash);
   const blockers: string[] = [];
@@ -2461,7 +2461,7 @@ export async function certifyPhase4Workflow(options: {
       !isProtectedPath(fixture.packageRoot) &&
       !JSON.stringify(fixture.protocol).includes("raw_data") &&
       !JSON.stringify(fixture.protocol).includes("raw_skills") &&
-      !JSON.stringify(fixture.protocol).includes("comet-any-private/comet");
+      !JSON.stringify(fixture.protocol).includes("repos/comet");
     const expectedIdentity = await verifyWorkflowProtocol(fixture.protocol);
     const terminal = await runMainLifecycle(fixture, temporaryRoot, evidence);
     const reverse = await runReverseAdapterLifecycle(

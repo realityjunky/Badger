@@ -23,10 +23,11 @@ import { RaceSafeReadError } from "../engine/race-safe-read.js";
 import { stableValue } from "../util.js";
 import { createWorkflowFinding, type WorkflowFinding } from "./findings.js";
 
-export const WORKFLOW_RUN_LOCK_PATH = ".comet/run-lock.json";
-export const WORKFLOW_RUN_LOCK_RECOVERY_PATH = ".comet/run-lock-recovery.jsonl";
+export const WORKFLOW_RUN_LOCK_PATH = ".badger/run-lock.json";
+export const WORKFLOW_RUN_LOCK_RECOVERY_PATH =
+  ".badger/run-lock-recovery.jsonl";
 export const WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY =
-  ".comet/run-lock-quarantine";
+  ".badger/run-lock-quarantine";
 export const WORKFLOW_RUN_LOCK_SCHEMA_VERSION = 1 as const;
 export const WORKFLOW_RUN_LOCK_MAX_BYTES = 16 * 1024;
 
@@ -552,7 +553,7 @@ async function ensureLockDirectory(
   operation: WorkflowRunLockOperation,
 ): Promise<void> {
   try {
-    await ensureProtectedProjectDirectory(runRoot, ".comet", {
+    await ensureProtectedProjectDirectory(runRoot, ".badger", {
       label: "Workflow Run lock",
     });
   } catch (error) {
@@ -793,7 +794,7 @@ async function releaseLock(
 }
 
 async function holdLockForTests(): Promise<void> {
-  const value = process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS;
+  const value = process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS;
   if (value === undefined) return;
   const milliseconds = Number(value);
   if (

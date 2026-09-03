@@ -1,9 +1,9 @@
 # Creator Lifecycle Reference
 
-The standalone Creator keeps state under the project’s `.comet-any/` directory:
+The standalone Creator keeps state under the project’s `.badger/` directory:
 
 ```text
-.comet-any/
+.badger/
 ├── states/<name>.json
 ├── drafts/<name>/
 ├── eval/<name>.json

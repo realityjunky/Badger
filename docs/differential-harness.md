@@ -1,12 +1,12 @@
 # Primer Designer Differential Harness
 
-The differential harness compares the standalone Creator with the pinned official Comet Creator using the same `workflow-kernel` workflow definition and byte-identical copies of the three reorganized Primer Designer Skills.
+The differential harness compares the standalone Badger Creator with the pinned upstream reference Creator using the same `workflow-kernel` workflow definition and byte-identical copies of the three reorganized Primer Designer Skills.
 
 ## Safety boundary
 
 - The source fixture is limited to `primer_designer_harness/skills/`.
 - `primer_designer_harness/raw_data/` is rejected before any source read.
-- `comet-any-private/comet/` is read only and is checked against the revision in the extraction manifest.
+- `/home/hugo/AI/repos/comet/` is read only and is checked against the revision in the extraction manifest.
 - Both Creators run against disposable temporary projects and temporary home directories.
 - The harness does not execute biological scripts, submit scheduler jobs, download genomes, or install host-platform files.
 
@@ -16,10 +16,11 @@ The official CLI must already be built from the pinned official checkout or from
 
 ```bash
 npm run build
-node bin/comet-any.js differential \
-  primer_designer_harness/differential/primer-designer-workflow.json \
+node bin/badger.js differential \
+  /home/hugo/AI/Badger-workflows/primer_designer_harness/differential/primer-designer-workflow.json \
   --repo . \
-  --official-root /path/to/pinned/comet \
+  --fixture-skills-root /home/hugo/AI/Badger-workflows/primer_designer_harness/skills \
+  --official-root /path/to/pinned/reference-checkout \
   --json
 ```
 

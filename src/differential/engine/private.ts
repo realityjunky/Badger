@@ -1,3 +1,6 @@
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   evaluateManualRun,
   resumeManualRun,
@@ -125,6 +128,49 @@ function assertUpgradeArgs(args: string[]): void {
   }
 }
 
+async function hasFile(target: string): Promise<boolean> {
+  try {
+    await fs.access(target);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return false;
+    throw error;
+  }
+}
+
+async function withBadgerSkillPackage<T>(
+  root: string,
+  action: (normalizedRoot: string) => Promise<T>,
+): Promise<T> {
+  if (await hasFile(path.join(root, "badger", "skill.yaml"))) {
+    return action(root);
+  }
+  if (!(await hasFile(path.join(root, "comet", "skill.yaml")))) {
+    return action(root);
+  }
+
+  const temporaryRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), "badger-engine-compat-"),
+  );
+  try {
+    await fs.cp(root, temporaryRoot, { recursive: true });
+    const legacyControlRoot = path.join(temporaryRoot, "comet");
+    const badgerControlRoot = path.join(temporaryRoot, "badger");
+    await fs.rename(legacyControlRoot, badgerControlRoot);
+    const skillDefinitionPath = path.join(badgerControlRoot, "skill.yaml");
+    const skillDefinition = await fs.readFile(skillDefinitionPath, "utf8");
+    await fs.writeFile(
+      skillDefinitionPath,
+      skillDefinition.replaceAll("comet/v1alpha1", "badger/v1alpha1"),
+      "utf8",
+    );
+    return await action(temporaryRoot);
+  } finally {
+    await fs.rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
 export function createPrivateEngineCommandRunner(): EngineCommandRunner {
   return {
     async run(args, options) {
@@ -142,19 +188,21 @@ export function createPrivateEngineCommandRunner(): EngineCommandRunner {
         if (Boolean(runId) === Boolean(changeDir)) {
           throw new Error("Pass exactly one of --change or --run-id");
         }
-        const pkg = await loadSkillPackage(skillRoot);
-        if (runId) {
+        return withBadgerSkillPackage(skillRoot, async (normalizedRoot) => {
+          const pkg = await loadSkillPackage(normalizedRoot);
+          if (runId) {
+            return resultWithChecks(
+              await startStandaloneRun(pkg, {
+                projectRoot: optionValue(args, "--project") ?? options.cwd,
+                runId,
+                confirmations,
+              }),
+            );
+          }
           return resultWithChecks(
-            await startStandaloneRun(pkg, {
-              projectRoot: optionValue(args, "--project") ?? options.cwd,
-              runId,
-              confirmations,
-            }),
+            await startManualRun(pkg, changeDir!, confirmations),
           );
-        }
-        return resultWithChecks(
-          await startManualRun(pkg, changeDir!, confirmations),
-        );
+        });
       }
 
       if (args[1] === "continue") {
@@ -162,10 +210,12 @@ export function createPrivateEngineCommandRunner(): EngineCommandRunner {
         const upgradeRoot = optionValue(args, "--upgrade");
         if (upgradeRoot) {
           assertUpgradeArgs(args);
-          const pkg = await loadSkillPackage(upgradeRoot);
-          return target.kind === "standalone"
-            ? upgradeStandaloneRun(target.projectRoot, target.runId, pkg)
-            : upgradeManualRun(target.changeDir, pkg);
+          return withBadgerSkillPackage(upgradeRoot, async (normalizedRoot) => {
+            const pkg = await loadSkillPackage(normalizedRoot);
+            return target.kind === "standalone"
+              ? upgradeStandaloneRun(target.projectRoot, target.runId, pkg)
+              : upgradeManualRun(target.changeDir, pkg);
+          });
         }
         const continuation =
           target.kind === "standalone"

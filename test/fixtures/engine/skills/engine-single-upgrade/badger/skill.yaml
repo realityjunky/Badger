@@ -1,9 +1,9 @@
-apiVersion: comet/v1alpha1
+apiVersion: badger/v1alpha1
 kind: Skill
 metadata:
   name: engine-single
-  version: "1.0.0"
-  description: Synthetic single-step Engine fixture
+  version: "2.0.0"
+  description: Synthetic upgraded single-step Engine fixture
 goal:
   statement: Complete one synthetic Engine action
   inputs: []

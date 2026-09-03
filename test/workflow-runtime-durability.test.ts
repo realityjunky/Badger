@@ -157,7 +157,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
 
   beforeEach(async () => {
     root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-durability-"),
+      path.join(os.tmpdir(), "badger-workflow-durability-"),
     );
     runRoot = path.join(root, "change");
     await fs.mkdir(runRoot, { recursive: true });
@@ -313,7 +313,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
 
     setWorkflowTransitionFaultForTests({
       phase: "record-write",
-      path: ".comet/artifacts.json",
+      path: ".badger/artifacts.json",
     });
     await expect(runtime.submit(runRoot, submission)).rejects.toThrow(
       "deterministic workflow transition fault",
@@ -326,14 +326,14 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
       intended: { revision: 1, actionId: expect.any(String) },
     });
     expect(journal?.records.slice(0, 4).map((record) => record.path)).toEqual([
-      ".comet/run-state.json",
-      ".comet/pending-action.json",
-      ".comet/artifacts.json",
-      ".comet/trajectory.jsonl",
+      ".badger/run-state.json",
+      ".badger/pending-action.json",
+      ".badger/artifacts.json",
+      ".badger/trajectory.jsonl",
     ]);
     expect(journal?.records.at(-1)).toMatchObject({
       kind: "revision-claim",
-      path: expect.stringMatching(/^\.comet\/revision-claims\//u),
+      path: expect.stringMatching(/^\.badger\/revision-claims\//u),
     });
     clearWorkflowTransitionFaultForTests();
 
@@ -358,7 +358,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
     expect(
       trajectory.find((event) => event.type === "recovery_reconciled")?.data,
     ).toMatchObject({
-      crashBoundary: "record-write:.comet/artifacts.json",
+      crashBoundary: "record-write:.badger/artifacts.json",
     });
     expect(await runtime.recover(runRoot)).toEqual(recovered);
     const completed = await runtime.submit(runRoot, {
@@ -380,8 +380,8 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
   it.each([
     ["journal-prepared", undefined],
     ["journal-verified", undefined],
-    ["record-write", ".comet/run-state.json"],
-    ["record-verification", ".comet/run-state.json"],
+    ["record-write", ".badger/run-state.json"],
+    ["record-verification", ".badger/run-state.json"],
     ["commit-evidence", undefined],
     ["commit-evidence-written", undefined],
     ["journal-clearance", undefined],
@@ -428,14 +428,14 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
 
     setWorkflowTransitionFaultForTests({
       phase: "record-write",
-      path: ".comet/run-state.json",
+      path: ".badger/run-state.json",
     });
     await expect(runtime.submit(runRoot, submission)).rejects.toThrow(
       "deterministic workflow transition fault",
     );
     clearWorkflowTransitionFaultForTests();
     await fs.writeFile(
-      path.join(runRoot, ".comet", "artifacts.json"),
+      path.join(runRoot, ".badger", "artifacts.json"),
       '{"tampered":true}\n',
     );
 
@@ -445,7 +445,10 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
       findings: [expect.objectContaining({ code: "recovery-required" })],
     });
     expect(
-      await fs.readFile(path.join(runRoot, ".comet", "artifacts.json"), "utf8"),
+      await fs.readFile(
+        path.join(runRoot, ".badger", "artifacts.json"),
+        "utf8",
+      ),
     ).toBe('{"tampered":true}\n');
     expect(
       (
@@ -479,7 +482,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
 
     setWorkflowTransitionFaultForTests({
       phase: "record-verification",
-      path: ".comet/run-state.json",
+      path: ".badger/run-state.json",
     });
     await expect(runtime.submit(runRoot, response)).rejects.toThrow(
       "deterministic workflow transition fault",
@@ -510,7 +513,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
     };
     setWorkflowTransitionFaultForTests({
       phase: "record-write",
-      path: ".comet/pending-action.json",
+      path: ".badger/pending-action.json",
     });
     await expect(runtime.submit(runRoot, terminalSubmission)).rejects.toThrow(
       "deterministic workflow transition fault",
@@ -564,7 +567,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
     };
     setWorkflowTransitionFaultForTests({
       phase: "record-write",
-      path: ".comet/run-state.json",
+      path: ".badger/run-state.json",
     });
     await expect(runtime.submit(runRoot, submission)).rejects.toThrow(
       "deterministic workflow transition fault",
@@ -833,8 +836,8 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
         ],
         {
           ...process.env,
-          COMET_WORKFLOW_TEST_FAULT_BOUNDARY:
-            "record-write:.comet/run-state.json",
+          BADGER_WORKFLOW_TEST_FAULT_BOUNDARY:
+            "record-write:.badger/run-state.json",
         },
       ),
     ).rejects.toThrow();
@@ -907,17 +910,17 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
       run(["init", "--run-root", runRoot, "--run-id", runId]);
     const faultEnv = (boundary: string): NodeJS.ProcessEnv => ({
       ...process.env,
-      COMET_WORKFLOW_TEST_FAULT_BOUNDARY: boundary,
+      BADGER_WORKFLOW_TEST_FAULT_BOUNDARY: boundary,
     });
     const startBoundaries = [
       "journal-prepared",
       "journal-verified",
-      "record-write:.comet/run-state.json",
-      "record-verification:.comet/run-state.json",
-      "record-write:.comet/pending-action.json",
-      "record-verification:.comet/pending-action.json",
-      "record-write:.comet/trajectory.jsonl",
-      "record-verification:.comet/trajectory.jsonl",
+      "record-write:.badger/run-state.json",
+      "record-verification:.badger/run-state.json",
+      "record-write:.badger/pending-action.json",
+      "record-verification:.badger/pending-action.json",
+      "record-write:.badger/trajectory.jsonl",
+      "record-verification:.badger/trajectory.jsonl",
       "commit-evidence",
       "commit-evidence-written",
       "journal-clearance",
@@ -964,7 +967,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
             runRoot,
             "--json",
           ],
-          faultEnv("record-write:.comet/run-state.json"),
+          faultEnv("record-write:.badger/run-state.json"),
         ),
       ).rejects.toThrow();
       await expect(recover(runRoot, faultEnv(boundary))).rejects.toThrow();

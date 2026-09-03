@@ -120,7 +120,7 @@ const execFileAsync = promisify(execFile);
 function locationRunRoot(location: WorkflowRunLocation): string {
   return location.kind === "manual"
     ? location.runRoot
-    : path.join(location.projectRoot, ".comet", "runs", location.runId);
+    : path.join(location.projectRoot, ".badger", "runs", location.runId);
 }
 
 async function recoverInFreshProcess(
@@ -178,7 +178,7 @@ describe("WorkflowRuntime shared conformance", () => {
 
     beforeEach(async () => {
       root = await fs.mkdtemp(
-        path.join(os.tmpdir(), "comet-workflow-location-"),
+        path.join(os.tmpdir(), "badger-workflow-location-"),
       );
     });
 
@@ -271,7 +271,7 @@ describe("WorkflowRuntime shared conformance", () => {
       const runRoot =
         location.kind === "manual"
           ? location.runRoot
-          : path.join(location.projectRoot, ".comet", "runs", location.runId);
+          : path.join(location.projectRoot, ".badger", "runs", location.runId);
       await fs.writeFile(path.join(runRoot, "prepare.txt"), "prepared\n");
       const second = await runtime.submit(location, {
         actionId: started.pendingAction!.id,
@@ -375,7 +375,7 @@ describe("WorkflowRuntime shared conformance", () => {
         await runtime.start(startOptions(location, protocol(), runId));
         const statePath = path.join(
           locationRunRoot(location),
-          ".comet",
+          ".badger",
           "run-state.json",
         );
         const state = JSON.parse(await fs.readFile(statePath, "utf8")) as {
@@ -402,7 +402,7 @@ describe("WorkflowRuntime shared conformance", () => {
       );
       const snapshotPath = path.join(
         locationRunRoot(location),
-        ".comet",
+        ".badger",
         "skill-snapshots",
         started.execution.snapshotHash,
         "package.json",
@@ -428,7 +428,7 @@ describe("WorkflowRuntime shared conformance", () => {
       await runtime.start(startOptions(location, protocol(), runId));
       const pendingPath = path.join(
         locationRunRoot(location),
-        ".comet",
+        ".badger",
         "pending-action.json",
       );
       const pending = JSON.parse(await fs.readFile(pendingPath, "utf8")) as {
@@ -448,7 +448,7 @@ describe("WorkflowRuntime cross-location parity", () => {
   let root: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-parity-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-workflow-parity-"));
   });
 
   afterEach(async () => {
@@ -511,7 +511,7 @@ describe("WorkflowRuntime standalone coordinates and Run-id validation", () => {
 
   beforeEach(async () => {
     root = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-workflow-standalone-"),
+      path.join(os.tmpdir(), "badger-workflow-standalone-"),
     );
   });
 
@@ -575,7 +575,7 @@ describe("WorkflowRuntime standalone coordinates and Run-id validation", () => {
       createWorkflowRuntime().start({ protocol: protocol(), location }),
     ).rejects.toThrow("Standalone project root cannot cross a symbolic link");
     await expect(
-      fs.access(path.join(outsideRoot, ".comet")),
+      fs.access(path.join(outsideRoot, ".badger")),
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -585,7 +585,7 @@ describe("WorkflowRuntime standalone coordinates and Run-id validation", () => {
     const projectRoot = path.join(root, "project");
     await fs.mkdir(projectRoot, { recursive: true });
     await fs.mkdir(outsideRoot);
-    await fs.symlink(outsideRoot, path.join(projectRoot, ".comet"), "dir");
+    await fs.symlink(outsideRoot, path.join(projectRoot, ".badger"), "dir");
     const location = {
       kind: "standalone" as const,
       projectRoot,
@@ -607,10 +607,10 @@ describe("WorkflowRuntime standalone coordinates and Run-id validation", () => {
     await runtime.start({ protocol: protocol(), location });
     const statePath = path.join(
       location.projectRoot,
-      ".comet",
+      ".badger",
       "runs",
       location.runId,
-      ".comet",
+      ".badger",
       "run-state.json",
     );
     const state = JSON.parse(await fs.readFile(statePath, "utf8")) as Record<

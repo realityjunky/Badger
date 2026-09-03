@@ -16,7 +16,9 @@ describe("differential fixture snapshots", () => {
   let root: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-differential-test-"));
+    root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "badger-differential-test-"),
+    );
     await fs.mkdir(path.join(root, "skills", "one"), { recursive: true });
     await fs.writeFile(path.join(root, "skills", "one", "SKILL.md"), "one\n");
     await fs.writeFile(
@@ -62,12 +64,86 @@ describe("differential fixture snapshots", () => {
   });
 
   it("records both Creator observations without changing the source fixture", async () => {
-    const repositoryRoot = path.resolve(process.cwd(), "..");
-    const fixturePath = path.join(
-      repositoryRoot,
-      "primer_designer_harness",
-      "differential",
-      "primer-designer-workflow.json",
+    const repositoryRoot = path.resolve(process.cwd());
+    const fixtureRoot = path.join(root, "fixture");
+    const fixtureSkillsRoot = path.join(fixtureRoot, "skills");
+    const skillNames = ["genome-download", "primer-design", "primer-pool-add"];
+    for (const skillName of skillNames) {
+      const skillRoot = path.join(fixtureSkillsRoot, skillName);
+      await fs.mkdir(skillRoot, { recursive: true });
+      await fs.writeFile(
+        path.join(skillRoot, "SKILL.md"),
+        `---\nname: ${skillName}\ndescription: Synthetic ${skillName} fixture.\n---\n\n# ${skillName}\n`,
+        "utf8",
+      );
+    }
+    await fs.writeFile(
+      path.join(fixtureRoot, "extraction-manifest.json"),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          official: { revision: "99fd7495f8b9217efbaae3a46d885f6fa7f4102a" },
+          reusableWorkflowKernel: { workflowContract: [] },
+          excluded: {
+            classic: [],
+            native: [],
+            entry: [],
+            installer: [],
+            engine: [],
+            hostPlatform: [],
+          },
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+    const fixturePath = path.join(fixtureRoot, "primer-designer-workflow.json");
+    await fs.writeFile(
+      fixturePath,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          id: "primer-designer-three-skill",
+          skills: skillNames.map((name) => ({
+            name,
+            path: `skills/${name}`,
+          })),
+          extractionManifest: "extraction-manifest.json",
+          plan: {
+            schemaVersion: 1,
+            goal: "Compose a synthetic three-Skill workflow.",
+            skillCreatorIntent: "new-skill",
+            preferredSkills: skillNames,
+            defaultLocale: "en",
+            workflow: {
+              kind: "workflow-kernel",
+              name: "primer-designer-workflow",
+              goal: "Compose a synthetic three-Skill workflow.",
+              customNodes: [
+                {
+                  id: "prepare",
+                  label: "Prepare",
+                  kind: "action",
+                  responsibility: "Prepare the synthetic workflow.",
+                  implementation: {
+                    skill: "primer-design",
+                    operation: "default",
+                    scope: "main",
+                  },
+                  operations: ["require", "augment", "disable"],
+                  outputSchemas: [],
+                  guardrails: [],
+                },
+              ],
+              outputSchemas: [],
+            },
+          },
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
     );
     const fakeRunner: OfficialCommandRunner = {
       async run(args, options) {
@@ -152,6 +228,7 @@ describe("differential fixture snapshots", () => {
     const report = await runDifferentialHarness({
       repositoryRoot,
       fixturePath,
+      fixtureSkillsRoot,
       officialRoot: path.join(root, "official"),
       officialRevision: "99fd7495f8b9217efbaae3a46d885f6fa7f4102a",
       officialRunner: fakeRunner,

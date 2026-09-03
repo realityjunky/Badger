@@ -1,7 +1,7 @@
 # Official Engine Characterization and Phase 1 Parity
 
 The Engine characterization harness records a read-only behavioral baseline for
-the pinned official Comet Engine and compares it with the extracted private
+the pinned upstream reference Engine and compares it with the extracted Badger
 Engine. The complete Phase 1 certification contract is in
 `docs/engine-phase-1-certification.md`.
 
@@ -24,14 +24,14 @@ upstream checkout.
 
 ## Run
 
-From `comet-any-private/`:
+From the package root:
 
 ```bash
 npm run build
-node bin/comet-any.js engine-differential \
+node bin/badger.js engine-differential \
   test/fixtures/engine/engine-characterization.json \
   --repo . \
-  --official-root /path/to/pinned/comet \
+  --official-root /path/to/pinned/reference-checkout \
   --private \
   --output /tmp/official-engine-baseline.json \
   --confirm-output \

@@ -16,7 +16,9 @@ describe("workflow-kernel foundation", () => {
   let home: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-kernel-foundation-"));
+    root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "badger-kernel-foundation-"),
+    );
     project = path.join(root, "project");
     home = path.join(root, "home");
     await fs.mkdir(project, { recursive: true });
@@ -168,21 +170,16 @@ describe("workflow-kernel foundation", () => {
     });
 
     expect(state.draftPath).toBe(
-      path.join(project, ".comet-any", "drafts", "primer-design-workflow"),
+      path.join(project, ".badger", "drafts", "primer-design-workflow"),
     );
     await expect(
       fs.stat(
-        path.join(
-          project,
-          ".comet-any",
-          "states",
-          "primer-design-workflow.json",
-        ),
+        path.join(project, ".badger", "states", "primer-design-workflow.json"),
       ),
     ).resolves.toBeTruthy();
-    await expect(fs.stat(path.join(project, ".comet"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    await expect(fs.stat(path.join(project, ".badger"))).resolves.toMatchObject(
+      { isDirectory: expect.any(Function) },
+    );
   });
 
   it("routes existing proposal callers through the same foundation", async () => {
@@ -191,7 +188,7 @@ describe("workflow-kernel foundation", () => {
     const kernelProposal = await createWorkflowKernel({
       projectRoot: project,
       homeDir: home,
-      stateNamespace: ".comet-any",
+      stateNamespace: ".badger",
     }).buildProposal(planPath);
     const adapterProposal = await buildProposal({
       projectRoot: project,

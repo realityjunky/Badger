@@ -79,11 +79,12 @@ async function sourceSnapshots(
   repositoryRoot: string,
   fixturePath: string,
   skills: Array<{ name: string; path: string }>,
+  fixtureSkillsRoot: string,
 ): Promise<DirectorySnapshot[]> {
   return Promise.all(
     skills.map(async (skill) => {
       const source = fixtureSkillPath(fixturePath, skill);
-      assertFixtureSourcePath(repositoryRoot, source);
+      assertFixtureSourcePath(repositoryRoot, source, fixtureSkillsRoot);
       await fs.access(path.join(source, "SKILL.md"));
       return snapshotDirectory(source);
     }),
@@ -111,6 +112,7 @@ async function prepareProject(
   fixturePath: string,
   projectRoot: string,
   skills: Array<{ name: string; path: string }>,
+  fixtureSkillsRoot: string,
 ): Promise<void> {
   await fs.mkdir(path.join(projectRoot, ".agents", "skills"), {
     recursive: true,
@@ -120,6 +122,7 @@ async function prepareProject(
       repositoryRoot,
       fixtureSkillPath(fixturePath, skill),
       path.join(projectRoot, ".agents", "skills", skill.name),
+      fixtureSkillsRoot,
     );
   }
 }
@@ -129,6 +132,10 @@ export async function runDifferentialHarness(
 ): Promise<DifferentialReport> {
   const repositoryRoot = path.resolve(options.repositoryRoot);
   const fixturePath = path.resolve(options.fixturePath);
+  const fixtureSkillsRoot = path.resolve(
+    repositoryRoot,
+    options.fixtureSkillsRoot ?? path.join("primer_designer_harness", "skills"),
+  );
   const fixture = await readFixture(fixturePath);
   const manifestPath = path.resolve(
     path.dirname(fixturePath),
@@ -148,9 +155,10 @@ export async function runDifferentialHarness(
     repositoryRoot,
     fixturePath,
     fixture.skills,
+    fixtureSkillsRoot,
   );
   const temporaryRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), "comet-differential-"),
+    path.join(os.tmpdir(), "badger-differential-"),
   );
   const officialProject = path.join(temporaryRoot, "official-project");
   const standaloneProject = path.join(temporaryRoot, "standalone-project");
@@ -163,12 +171,14 @@ export async function runDifferentialHarness(
         fixturePath,
         officialProject,
         fixture.skills,
+        fixtureSkillsRoot,
       ),
       prepareProject(
         repositoryRoot,
         fixturePath,
         standaloneProject,
         fixture.skills,
+        fixtureSkillsRoot,
       ),
       fs.mkdir(officialHome, { recursive: true }),
       fs.mkdir(standaloneHome, { recursive: true }),
@@ -195,6 +205,7 @@ export async function runDifferentialHarness(
       repositoryRoot,
       fixturePath,
       fixture.skills,
+      fixtureSkillsRoot,
     );
     const unchanged = sourceIntegrity(sourceBefore, sourceAfter);
     if (!unchanged)

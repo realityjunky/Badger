@@ -5,7 +5,7 @@
     "remote": "git@github.com:rpamis/comet.git",
     "revision": "99fd7495f8b9217efbaae3a46d885f6fa7f4102a",
     "version": "0.4.0-beta.19",
-    "checkout": "comet-any-private/comet",
+    "checkout": "../repos/comet",
     "readOnly": true,
     "sourcePaths": [
       "domains/engine/evals.ts",

@@ -35,7 +35,7 @@ export async function observeStandalone(options: {
   });
   let generatedRoot = path.join(
     projectRoot,
-    ".comet-any",
+    ".badger",
     "drafts",
     plan.workflow.name,
   );

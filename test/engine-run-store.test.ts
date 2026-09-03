@@ -26,9 +26,9 @@ describe("run store", () => {
   let outsideRoot: string;
 
   beforeEach(async () => {
-    changeDir = await fs.mkdtemp(path.join(os.tmpdir(), "comet-run-store-"));
+    changeDir = await fs.mkdtemp(path.join(os.tmpdir(), "badger-run-store-"));
     outsideRoot = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-run-store-outside-"),
+      path.join(os.tmpdir(), "badger-run-store-outside-"),
     );
   });
 
@@ -63,51 +63,53 @@ describe("run store", () => {
       createdAt: "2026-06-13T00:00:00.000Z",
     };
 
-    await appendTrajectory(changeDir, ".comet/trajectory.jsonl", event);
-    await writeArtifacts(changeDir, ".comet/artifacts.json", {
+    await appendTrajectory(changeDir, ".badger/trajectory.jsonl", event);
+    await writeArtifacts(changeDir, ".badger/artifacts.json", {
       report: "report.md",
     });
-    await writeContext(changeDir, ".comet/context.md", "# Context\n");
-    await writePendingAction(changeDir, ".comet/pending-action.json", action);
-    await writeCheckpoint(changeDir, ".comet/checkpoint.json", checkpoint);
+    await writeContext(changeDir, ".badger/context.md", "# Context\n");
+    await writePendingAction(changeDir, ".badger/pending-action.json", action);
+    await writeCheckpoint(changeDir, ".badger/checkpoint.json", checkpoint);
 
-    expect(await readArtifacts(changeDir, ".comet/artifacts.json")).toEqual({
+    expect(await readArtifacts(changeDir, ".badger/artifacts.json")).toEqual({
       report: "report.md",
     });
     expect(
-      await readPendingAction(changeDir, ".comet/pending-action.json"),
+      await readPendingAction(changeDir, ".badger/pending-action.json"),
     ).toEqual(action);
-    await clearPendingAction(changeDir, ".comet/pending-action.json");
+    await clearPendingAction(changeDir, ".badger/pending-action.json");
     expect(
-      await readPendingAction(changeDir, ".comet/pending-action.json"),
+      await readPendingAction(changeDir, ".badger/pending-action.json"),
     ).toBeNull();
-    expect(await readContext(changeDir, ".comet/context.md")).toBe(
+    expect(await readContext(changeDir, ".badger/context.md")).toBe(
       "# Context\n",
     );
-    expect(await readCheckpoint(changeDir, ".comet/checkpoint.json")).toEqual(
+    expect(await readCheckpoint(changeDir, ".badger/checkpoint.json")).toEqual(
       checkpoint,
     );
-    expect(await readTrajectory(changeDir, ".comet/trajectory.jsonl")).toEqual([
-      event,
-    ]);
+    expect(await readTrajectory(changeDir, ".badger/trajectory.jsonl")).toEqual(
+      [event],
+    );
   });
 
   it("returns empty recovery values when optional Run files do not exist", async () => {
-    expect(await readArtifacts(changeDir, ".comet/artifacts.json")).toEqual({});
-    expect(await readContext(changeDir, ".comet/context.md")).toBeNull();
+    expect(await readArtifacts(changeDir, ".badger/artifacts.json")).toEqual(
+      {},
+    );
+    expect(await readContext(changeDir, ".badger/context.md")).toBeNull();
     expect(
-      await readPendingAction(changeDir, ".comet/pending-action.json"),
+      await readPendingAction(changeDir, ".badger/pending-action.json"),
     ).toBeNull();
     expect(
-      await readCheckpoint(changeDir, ".comet/checkpoint.json"),
+      await readCheckpoint(changeDir, ".badger/checkpoint.json"),
     ).toBeNull();
-    expect(await readTrajectory(changeDir, ".comet/trajectory.jsonl")).toEqual(
+    expect(await readTrajectory(changeDir, ".badger/trajectory.jsonl")).toEqual(
       [],
     );
   });
 
   it("reports the malformed Trajectory line during recovery", async () => {
-    const file = path.join(changeDir, ".comet", "trajectory.jsonl");
+    const file = path.join(changeDir, ".badger", "trajectory.jsonl");
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(
       file,
@@ -115,7 +117,7 @@ describe("run store", () => {
     );
 
     await expect(
-      readTrajectory(changeDir, ".comet/trajectory.jsonl"),
+      readTrajectory(changeDir, ".badger/trajectory.jsonl"),
     ).rejects.toThrow("Invalid Trajectory event at line 2");
   });
 
@@ -127,18 +129,18 @@ describe("run store", () => {
       runId: "run-1",
       data: {},
     };
-    await appendTrajectory(changeDir, ".comet/trajectory.jsonl", first);
+    await appendTrajectory(changeDir, ".badger/trajectory.jsonl", first);
 
     await expect(
-      appendTrajectory(changeDir, ".comet/trajectory.jsonl", {
+      appendTrajectory(changeDir, ".badger/trajectory.jsonl", {
         ...first,
         sequence: 3,
       }),
     ).rejects.toThrow("Run trajectory sequence must be 2, got 3");
 
-    expect(await readTrajectory(changeDir, ".comet/trajectory.jsonl")).toEqual([
-      first,
-    ]);
+    expect(await readTrajectory(changeDir, ".badger/trajectory.jsonl")).toEqual(
+      [first],
+    );
   });
 
   it("serializes concurrent trajectory appends without duplicate sequences", async () => {
@@ -149,15 +151,15 @@ describe("run store", () => {
       runId: "run-1",
       data: {},
     };
-    await appendTrajectory(changeDir, ".comet/trajectory.jsonl", first);
+    await appendTrajectory(changeDir, ".badger/trajectory.jsonl", first);
 
     const results = await Promise.allSettled([
-      appendTrajectory(changeDir, ".comet/trajectory.jsonl", {
+      appendTrajectory(changeDir, ".badger/trajectory.jsonl", {
         ...first,
         sequence: 2,
         data: { branch: "one" },
       }),
-      appendTrajectory(changeDir, ".comet/trajectory.jsonl", {
+      appendTrajectory(changeDir, ".badger/trajectory.jsonl", {
         ...first,
         sequence: 2,
         data: { branch: "two" },
@@ -168,30 +170,30 @@ describe("run store", () => {
       results.filter((result) => result.status === "fulfilled"),
     ).toHaveLength(1);
     expect(
-      await readTrajectory(changeDir, ".comet/trajectory.jsonl"),
+      await readTrajectory(changeDir, ".badger/trajectory.jsonl"),
     ).toHaveLength(2);
   });
 
   it("validates pending actions, artifacts, and checkpoints during recovery", async () => {
-    await fs.mkdir(path.join(changeDir, ".comet"), { recursive: true });
+    await fs.mkdir(path.join(changeDir, ".badger"), { recursive: true });
     await fs.writeFile(
-      path.join(changeDir, ".comet", "pending-action.json"),
+      path.join(changeDir, ".badger", "pending-action.json"),
       JSON.stringify({ id: "action-1", stepId: null, type: "unknown" }),
     );
     await expect(
-      readPendingAction(changeDir, ".comet/pending-action.json"),
+      readPendingAction(changeDir, ".badger/pending-action.json"),
     ).rejects.toThrow("Invalid Run pending action: type is invalid");
 
     await fs.writeFile(
-      path.join(changeDir, ".comet", "artifacts.json"),
+      path.join(changeDir, ".badger", "artifacts.json"),
       JSON.stringify({ report: 42 }),
     );
     await expect(
-      readArtifacts(changeDir, ".comet/artifacts.json"),
+      readArtifacts(changeDir, ".badger/artifacts.json"),
     ).rejects.toThrow("Invalid Run artifacts: artifact values must be strings");
 
     await fs.writeFile(
-      path.join(changeDir, ".comet", "checkpoint.json"),
+      path.join(changeDir, ".badger", "checkpoint.json"),
       JSON.stringify({
         runId: "run-1",
         stateVersion: "1",
@@ -202,7 +204,7 @@ describe("run store", () => {
       }),
     );
     await expect(
-      readCheckpoint(changeDir, ".comet/checkpoint.json"),
+      readCheckpoint(changeDir, ".badger/checkpoint.json"),
     ).rejects.toThrow(
       "Invalid Run checkpoint: stateVersion must be a non-negative integer",
     );
@@ -223,8 +225,8 @@ describe("run store", () => {
       data: {},
     };
     const next = { ...original, sequence: 2 };
-    await appendTrajectory(changeDir, ".comet/trajectory.jsonl", original);
-    const parent = path.join(changeDir, ".comet");
+    await appendTrajectory(changeDir, ".badger/trajectory.jsonl", original);
+    const parent = path.join(changeDir, ".badger");
     const held = `${changeDir}-held`;
     const appendWithHook = appendTrajectory as unknown as (
       changeDir: string,
@@ -235,7 +237,7 @@ describe("run store", () => {
 
     try {
       await expect(
-        appendWithHook(changeDir, ".comet/trajectory.jsonl", next, {
+        appendWithHook(changeDir, ".badger/trajectory.jsonl", next, {
           beforeCommit: async () => {
             await fs.rename(parent, held);
             await fs.writeFile(
@@ -268,8 +270,8 @@ describe("run store", () => {
       artifactsHash: "a".repeat(64),
       createdAt: "2026-06-13T00:00:00.000Z",
     };
-    await writeCheckpoint(changeDir, ".comet/checkpoint.json", checkpoint);
-    const parent = path.join(changeDir, ".comet");
+    await writeCheckpoint(changeDir, ".badger/checkpoint.json", checkpoint);
+    const parent = path.join(changeDir, ".badger");
     const held = `${changeDir}-held`;
     const readWithHooks = readCheckpoint as unknown as (
       changeDir: string,
@@ -279,7 +281,7 @@ describe("run store", () => {
 
     try {
       await expect(
-        readWithHooks(changeDir, ".comet/checkpoint.json", {
+        readWithHooks(changeDir, ".badger/checkpoint.json", {
           hooks: {
             afterOpen: async () => {
               await fs.rename(parent, held);
@@ -311,8 +313,8 @@ describe("run store", () => {
       type: "invoke_skill",
       ref: "writing-plans",
     };
-    await writePendingAction(changeDir, ".comet/pending-action.json", action);
-    const parent = path.join(changeDir, ".comet");
+    await writePendingAction(changeDir, ".badger/pending-action.json", action);
+    const parent = path.join(changeDir, ".badger");
     const held = `${changeDir}-held`;
     const clearWithHook = clearPendingAction as unknown as (
       changeDir: string,
@@ -322,7 +324,7 @@ describe("run store", () => {
 
     try {
       await expect(
-        clearWithHook(changeDir, ".comet/pending-action.json", {
+        clearWithHook(changeDir, ".badger/pending-action.json", {
           beforeRemove: async () => {
             await fs.rename(parent, held);
             await fs.writeFile(

@@ -21,8 +21,8 @@ import {
 import type { WorkflowInput, WorkflowProtocol } from "../src/types.js";
 
 const execFileAsync = promisify(execFile);
-const LOCK_PATH = ".comet/run-lock.json";
-const LOCK_EVENTS_PATH = ".comet/run-lock-recovery.jsonl";
+const LOCK_PATH = ".badger/run-lock.json";
+const LOCK_EVENTS_PATH = ".badger/run-lock-recovery.jsonl";
 
 const mutationLockProfile = {
   version: 1,
@@ -237,7 +237,7 @@ describe("WorkflowRuntime mutation locks", () => {
   let runRoot: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-lock-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-workflow-lock-"));
     runRoot = path.join(root, "change");
     await fs.mkdir(runRoot, { recursive: true });
   });
@@ -245,7 +245,7 @@ describe("WorkflowRuntime mutation locks", () => {
   afterEach(async () => {
     clearWorkflowTransitionFaultForTests();
     clearWorkflowRunLockFaultForTests();
-    delete process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS;
+    delete process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS;
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -288,8 +288,8 @@ describe("WorkflowRuntime mutation locks", () => {
       runRoot,
       runId: "active-lock-run",
     });
-    const previousHold = process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS;
-    process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS = "300";
+    const previousHold = process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS;
+    process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS = "300";
 
     try {
       const firstPromise = runtime.submit(runRoot, submission(started));
@@ -322,7 +322,7 @@ describe("WorkflowRuntime mutation locks", () => {
         requiredAction: "retry",
       });
     } finally {
-      restoreEnvironment("COMET_WORKFLOW_TEST_LOCK_HOLD_MS", previousHold);
+      restoreEnvironment("BADGER_WORKFLOW_TEST_LOCK_HOLD_MS", previousHold);
     }
   });
 
@@ -333,8 +333,8 @@ describe("WorkflowRuntime mutation locks", () => {
       runRoot,
       runId: "decision-lock-run",
     });
-    const previousHold = process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS;
-    process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS = "300";
+    const previousHold = process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS;
+    process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS = "300";
 
     try {
       const firstPromise = runtime.submit(
@@ -368,7 +368,7 @@ describe("WorkflowRuntime mutation locks", () => {
         trajectory.filter((event) => event.type === "action_completed"),
       ).toHaveLength(1);
     } finally {
-      restoreEnvironment("COMET_WORKFLOW_TEST_LOCK_HOLD_MS", previousHold);
+      restoreEnvironment("BADGER_WORKFLOW_TEST_LOCK_HOLD_MS", previousHold);
     }
   });
 
@@ -446,7 +446,7 @@ describe("WorkflowRuntime mutation locks", () => {
     });
     setWorkflowTransitionFaultForTests({
       phase: "record-write",
-      path: ".comet/artifacts.json",
+      path: ".badger/artifacts.json",
     });
     await expect(runtime.submit(runRoot, submission(started))).rejects.toThrow(
       "deterministic workflow transition fault",
@@ -480,7 +480,7 @@ describe("WorkflowRuntime mutation locks", () => {
       ownerToken: stale.ownerToken,
       ownerOperation: "workflow.submit",
       operation: "workflow.recover",
-      quarantinePath: expect.stringContaining(".comet/run-lock-quarantine/"),
+      quarantinePath: expect.stringContaining(".badger/run-lock-quarantine/"),
     });
   });
 
@@ -491,8 +491,8 @@ describe("WorkflowRuntime mutation locks", () => {
       runRoot,
       runId: "release-lock-run",
     });
-    const previousHold = process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS;
-    process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS = "300";
+    const previousHold = process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS;
+    process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS = "300";
 
     try {
       const promise = runtime.submit(runRoot, submission(started));
@@ -516,7 +516,7 @@ describe("WorkflowRuntime mutation locks", () => {
       );
       expect((await readRunState(runRoot))?.workflowRuntime?.revision).toBe(1);
     } finally {
-      restoreEnvironment("COMET_WORKFLOW_TEST_LOCK_HOLD_MS", previousHold);
+      restoreEnvironment("BADGER_WORKFLOW_TEST_LOCK_HOLD_MS", previousHold);
     }
   });
 
@@ -527,8 +527,8 @@ describe("WorkflowRuntime mutation locks", () => {
       runRoot,
       runId: "replacement-file-lock-run",
     });
-    const previousHold = process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS;
-    process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS = "300";
+    const previousHold = process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS;
+    process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS = "300";
 
     try {
       const promise = runtime.submit(runRoot, submission(started));
@@ -553,7 +553,7 @@ describe("WorkflowRuntime mutation locks", () => {
         original.ownerToken,
       );
     } finally {
-      restoreEnvironment("COMET_WORKFLOW_TEST_LOCK_HOLD_MS", previousHold);
+      restoreEnvironment("BADGER_WORKFLOW_TEST_LOCK_HOLD_MS", previousHold);
     }
   });
 
@@ -666,7 +666,7 @@ describe("WorkflowRuntime mutation locks", () => {
         {
           env: {
             ...process.env,
-            ...(hold ? { COMET_WORKFLOW_TEST_LOCK_HOLD_MS: "400" } : {}),
+            ...(hold ? { BADGER_WORKFLOW_TEST_LOCK_HOLD_MS: "400" } : {}),
           },
         },
       );

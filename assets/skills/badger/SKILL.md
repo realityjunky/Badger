@@ -1,12 +1,12 @@
 ---
-name: comet-any
-description: Create a new workflow Skill or upgrade an existing Skill through the standalone Comet-any Creator. Not for general Skill cleanup, Classic/Native workflow management, or platform installation.
+name: badger
+description: Create a new workflow Skill or upgrade an existing Skill through the standalone Badger Creator. Not for general Skill cleanup, Classic/Native workflow management, or platform installation.
 disable-model-invocation: true
 ---
 
-# Comet-any Creator
+# Badger Creator
 
-This Skill is the user-facing coordinator for the standalone Comet-any factory. It turns a goal plus real Skill evidence into a deterministic `workflow-kernel` package.
+This Skill is the user-facing coordinator for the standalone Badger factory. It turns a goal plus real Skill evidence into a deterministic `workflow-kernel` package.
 
 ## Supported intents
 
@@ -17,16 +17,16 @@ The standalone package deliberately excludes Classic customization, Native workf
 
 ## Confirmation protocol
 
-1. Run `comet-any guide --project <dir> --json` to inspect preferences and resumable Creator state.
-2. Run `comet-any candidates --project <dir> --json` and inspect real Skill roots, descriptions, references, scripts, and hashes.
-3. Write a complete plan JSON and run `comet-any propose <plan.json> --project <dir> --json`.
+1. Run `badger guide --project <dir> --json` to inspect preferences and resumable Creator state.
+2. Run `badger candidates --project <dir> --json` and inspect real Skill roots, descriptions, references, scripts, and hashes.
+3. Write a complete plan JSON and run `badger propose <plan.json> --project <dir> --json`.
 4. Show the user the goal, intent, Nodes, implementations, Required Skill Calls, Output Schemas, blockers, and warnings.
 5. Wait for explicit confirmation. Do not initialize state or generate files before confirmation.
-6. Run `comet-any init <plan.json> --confirm --project <dir>`.
-7. Run `comet-any generate <name> --project <dir>`, then `comet-any eval <name> --project <dir>`.
-8. Show `comet-any review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
-9. Run `comet-any approve <name> --reviewer <id> --confirm`, then `comet-any publish <name> --confirm`.
-10. Start with `comet-any distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
+6. Run `badger init <plan.json> --confirm --project <dir>`.
+7. Run `badger generate <name> --project <dir>`, then `badger eval <name> --project <dir>`.
+8. Show `badger review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
+9. Run `badger approve <name> --reviewer <id> --confirm`, then `badger publish <name> --confirm`.
+10. Start with `badger distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
 
 ## Contract rules
 
@@ -43,5 +43,5 @@ The standalone package deliberately excludes Classic customization, Native workf
 - `continue` means executable machine work is available, `await-user` means a persisted decision is pending, `blocked` means an unresolved repair or stop condition prevents advancement, and `done` means the Run is terminal. Adapters must render these values without reclassification.
 - Control Nodes cannot be overridden. Producer overrides must declare every Output Schema they satisfy.
 - Unresolved or ambiguous Skill candidates, stale hashes, failed eval, missing review, and missing confirmation block the next mutating step.
-- `comet-any eval` includes a current-hash synthetic Phase 3 decision-and-cycle certification; passing it does not authorize biological execution, package installation, Native-derived durability, or Primer Designer migration.
+- `badger eval` includes a current-hash synthetic Phase 3 decision-and-cycle certification; passing it does not authorize biological execution, package installation, Native-derived durability, or Primer Designer migration.
 - Generated packages and published copies are local filesystem artifacts. Review the preview before copying them elsewhere.

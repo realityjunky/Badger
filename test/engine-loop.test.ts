@@ -14,7 +14,7 @@ function deterministic(): SkillPackage {
   return {
     root: "/repo/demo",
     definition: {
-      apiVersion: "comet/v1alpha1",
+      apiVersion: "badger/v1alpha1",
       kind: "Skill",
       metadata: { name: "demo", version: "1", description: "Demo" },
       goal: { statement: "Done", inputs: [], outputs: [], success: ["done"] },

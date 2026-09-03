@@ -40,9 +40,9 @@ import { parseExecutionIdentity } from "./revision-claim.js";
 
 export const WORKFLOW_FINALIZATION_SCHEMA_VERSION = 1 as const;
 export const WORKFLOW_FINALIZATION_TRANSACTION_PATH =
-  ".comet/finalization/transaction.json";
+  ".badger/finalization/transaction.json";
 export const WORKFLOW_FINALIZATION_RECEIPT_DIRECTORY =
-  ".comet/finalization/receipts";
+  ".badger/finalization/receipts";
 export const WORKFLOW_FINALIZATION_MAX_OPERATIONS = 256;
 export const WORKFLOW_FINALIZATION_MAX_EVENTS = 1_024;
 export const WORKFLOW_FINALIZATION_MAX_TEXT_BYTES = 64 * 1024;
@@ -50,7 +50,7 @@ export const WORKFLOW_FINALIZATION_MAX_TEXT_BYTES = 64 * 1024;
 const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const MAX_IDENTIFIER_LENGTH = 256;
-const PROTECTED_RUNTIME_DIRECTORY = ".comet";
+const PROTECTED_RUNTIME_DIRECTORY = ".badger";
 
 export type WorkflowFinalizationBoundaryPhase =
   | "prepared"
@@ -166,7 +166,7 @@ async function invokeFault(
   boundary: WorkflowFinalizationBoundary,
 ): Promise<void> {
   const configured =
-    process.env.COMET_WORKFLOW_TEST_FINALIZATION_FAULT_BOUNDARY;
+    process.env.BADGER_WORKFLOW_TEST_FINALIZATION_FAULT_BOUNDARY;
   const qualified = boundary.operationId
     ? `${boundary.phase}:${boundary.operationId}`
     : boundary.phase;
@@ -1234,7 +1234,7 @@ export async function buildWorkflowFinalizationPreview(options: {
   const confirmation = normalizeConfirmation(definition.confirmation);
   const operations = baseOperations.map((operation) => {
     const rootPath = roots.get(operation.rootId)!;
-    const prefix = `${joinRelative(rootPath, ".comet/finalization")}/${transactionId}`;
+    const prefix = `${joinRelative(rootPath, ".badger/finalization")}/${transactionId}`;
     const backupPath =
       operation.precondition.target.exists &&
       (operation.kind === "write" || operation.kind === "move")
@@ -1749,7 +1749,7 @@ export function parseWorkflowFinalizationPreview(
     if (!root) throw new Error(`${label} operation root is not declared`);
     const operationPrefix = `${joinRelative(
       root.path,
-      `.comet/finalization/${transactionId}`,
+      `.badger/finalization/${transactionId}`,
     )}/${operation.id}`;
     const expectedStagedPath =
       operation.kind === "write" ? `${operationPrefix}.stage` : null;
@@ -1774,7 +1774,7 @@ export function parseWorkflowFinalizationPreview(
     }
     const internalPrefix = `${joinRelative(
       root.path,
-      `.comet/finalization/${transactionId}`,
+      `.badger/finalization/${transactionId}`,
     )}/`;
     if (
       (operation.stagedPath !== null &&
@@ -3313,7 +3313,7 @@ export function validateWorkflowFinalizationPlanDeclaration(
         : null;
     const prefix = `${joinRelative(
       normalized.roots.find((root) => root.id === operation.root)!.path,
-      `.comet/finalization/${plan.transactionId}`,
+      `.badger/finalization/${plan.transactionId}`,
     )}/${operation.id}`;
     const stagedPath = operation.kind === "write" ? `${prefix}.stage` : null;
     const backupPath =

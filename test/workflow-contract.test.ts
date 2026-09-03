@@ -49,7 +49,7 @@ describe("workflow-kernel contract", () => {
     };
     const normalized = normalizeWorkflow(input);
     expect(normalized.protocol.state.statePath).toBe(
-      ".comet/runs/primer-workflow/state.json",
+      ".badger/runs/primer-workflow/state.json",
     );
     expect(normalized.protocol.edges).toEqual([
       { from: "prepare", to: null, condition: "success" },

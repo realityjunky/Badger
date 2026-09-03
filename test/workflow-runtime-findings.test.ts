@@ -152,7 +152,9 @@ describe("WorkflowRuntime findings at the public seam", () => {
   let runRoot: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-findings-"));
+    root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "badger-workflow-findings-"),
+    );
     runRoot = path.join(root, "manual-run");
     await fs.mkdir(runRoot, { recursive: true });
   });
@@ -344,7 +346,7 @@ describe("WorkflowRuntime findings at the public seam", () => {
       runRoot,
       runId: "error-finding-run",
     });
-    const statePath = path.join(runRoot, ".comet", "run-state.json");
+    const statePath = path.join(runRoot, ".badger", "run-state.json");
     const state = JSON.parse(await fs.readFile(statePath, "utf8")) as {
       runtimeIdentity: { protocolHash: string };
     };

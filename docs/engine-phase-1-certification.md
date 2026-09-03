@@ -2,7 +2,7 @@
 
 ## Baseline
 
-- Official Comet: `0.4.0-beta.19`
+- Upstream reference Engine: `0.4.0-beta.19`
 - Revision: `99fd7495f8b9217efbaae3a46d885f6fa7f4102a`
 - Source manifest: `test/fixtures/engine/manifest.json`
 - Scenario fixture: `test/fixtures/engine/engine-characterization.json`
@@ -12,7 +12,7 @@ private package contains no runtime import from that checkout.
 
 ## Supported interface
 
-The `@rpamis/comet-any-private/engine` subpath exposes the core Engine
+The `@rpamis/badger/engine` subpath exposes the core Engine
 interface, while the package root adds Skill-runtime and differential
 certification operations for:
 
@@ -51,7 +51,7 @@ classified as expected packaging differences.
 
 ## Certification gate
 
-Run the following from `comet-any-private/` with a disposable build of the
+Run the following from the package root with a disposable build of the
 pinned official checkout:
 
 ```bash
@@ -60,10 +60,10 @@ npm test
 npm run build
 npm run format:check
 npm pack --dry-run
-node bin/comet-any.js engine-differential \
+node bin/badger.js engine-differential \
   test/fixtures/engine/engine-characterization.json \
   --repo . \
-  --official-root /path/to/pinned/comet \
+  --official-root /path/to/pinned/reference-checkout \
   --private \
   --output /tmp/engine-phase-1-report.json \
   --confirm-output \

@@ -1020,7 +1020,7 @@ export function normalizeWorkflow(input: WorkflowInput): NormalizedWorkflow {
       : {}),
     state: {
       kind: "workflow-run",
-      statePath: `.comet/runs/${input.name}/state.json`,
+      statePath: `.badger/runs/${input.name}/state.json`,
       currentNodeField: "currentNode",
       completedNodesField: "completedNodes",
       evidenceField: "evidence",

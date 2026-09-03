@@ -1,4 +1,4 @@
-# Standalone Comet-any
+# Standalone Badger
 
 - Keep this package focused on workflow-kernel creation and upgrade flows.
 - Keep formal Skills, references, tests, and package documentation in English.

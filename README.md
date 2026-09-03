@@ -1,6 +1,6 @@
-# Standalone Comet-any
+# Standalone Badger
 
-This repository extracts the Comet-any Creator and Engine seams from the upstream Comet checkout. It provides a focused, filesystem-based factory for creating and upgrading Skill packages, plus a private Engine foundation for loading, snapshotting, and running Engine-compatible Skills.
+This repository contains the Badger Creator and Engine seams, originally extracted from an upstream reference checkout. It provides a focused, filesystem-based factory for creating and upgrading Skill packages, plus a private Engine foundation for loading, snapshotting, and running Badger-compatible Skills.
 
 ## Scope
 
@@ -9,7 +9,7 @@ The package includes:
 - a shared workflow-kernel foundation behind the standalone Creator adapters;
 - real local Skill discovery with stable source hashes, strict preferences, and ambiguity reporting;
 - deterministic Workflow Contract normalization and validation;
-- confirmed plan/state lifecycle in the standalone `.comet-any` namespace;
+- confirmed plan/state lifecycle in the standalone `.badger` namespace;
 - generated entry and Node Skills with protocol/evidence references;
 - current-hash evaluation, WorkflowRuntime certification, review approval, publication, and distribution preview;
 - private Skill runtime loading, validation, content identity, and immutable snapshots;
@@ -27,7 +27,7 @@ The package includes:
 - versioned structured findings with bounded redaction, deterministic ordering, continuation dispositions, and derived legacy blockers;
 - official/private differential observations for the pinned Engine behavior.
 
-It intentionally excludes Comet Classic policy, Comet Native policy and hardening, Comet Entry, host platform installers, ambient resume routing, and external platform adapters.
+It intentionally excludes Classic and Native policy, Entry routing, host platform installers, ambient resume routing, and external platform adapters.
 
 ## Run persistence
 
@@ -42,7 +42,7 @@ failed writes are rejected without replacing the last valid state.
 
 Use `startStandaloneRun`, `resumeStandaloneRun`, `evaluateStandaloneRun`, and
 `upgradeStandaloneRun` with a project root and a validated Run id. The adapter
-maps each Run to `<projectRoot>/.comet/runs/<run-id>` and keeps the manual
+maps each Run to `<projectRoot>/.badger/runs/<run-id>` and keeps the manual
 Engine storage layout inside that location. It validates the id before
 resolving or creating any Run path, and verifies that recovered state belongs
 to the requested id. Execution, retry, snapshot, artifact, trajectory, eval,
@@ -57,20 +57,20 @@ npm run build
 npm run format:check
 ```
 
-The CLI is `comet-any` after `npm run build`:
+The CLI is `badger` after `npm run build`:
 
 ```bash
-node bin/comet-any.js guide --project . --json
+node bin/badger.js guide --project . --json
 ```
 
-See `assets/skills/comet-any/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
+See `assets/skills/badger/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
 
-The public package façade plus the `@rpamis/comet-any-private/engine` and
-`@rpamis/comet-any-private/workflow-runtime` subpaths export the runtime
+The public package façade plus the `@rpamis/badger/engine` and
+`@rpamis/badger/workflow-runtime` subpaths export the runtime
 operations needed by callers. The WorkflowRuntime subpath exposes only one
 constructor and its four core operations; compiler, location, projection,
 Run-file storage, and protected filesystem implementation modules remain
-internal. The Engine closure is pinned to Comet
+internal. The Engine closure is pinned to the upstream reference
 `0.4.0-beta.19` at revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a` and
 contains no runtime import from the upstream checkout.
 
@@ -169,7 +169,7 @@ cannot advance the Run twice. Output Schema evidence is supplied
 under `evidence`, while required Skill-call, augmentation, and guardrail proof
 may use the corresponding check identifiers in `evidence.completedChecks`.
 Phase 4 mutations are first staged behind a protected write-ahead journal at
-`.comet/transition-journal.json`. The journal records the operation, execution
+`.badger/transition-journal.json`. The journal records the operation, execution
 identity, revision/action boundary, and exact previous and intended material for
 each affected Run record. `resume` and `submit` return a `recovery-required`
 finding while that journal is pending; only explicit `recover` classifies each
@@ -178,12 +178,12 @@ appends one bounded `recovery_reconciled` event. Unknown material remains
 untouched and blocks recovery.
 Profiles that enable `mutation-locks` additionally serialize every mutating
 `start`, `resume`, `submit`, and `recover` operation through
-`.comet/run-lock.json`. Lock owners carry bounded operation, process, host, and
+`.badger/run-lock.json`. Lock owners carry bounded operation, process, host, and
 creation-time metadata. Active, foreign, malformed, oversized, or replaced
 locks return structured findings and are never stolen; only `recover` may
 quarantine a lock whose local owner process is proven absent. Release checks
 the owner token and file identity, and takeover evidence is appended to
-`.comet/run-lock-recovery.jsonl` before journal recovery continues.
+`.badger/run-lock-recovery.jsonl` before journal recovery continues.
 
 Profiles that enable `verified-checkpoints` additionally publish a bounded
 content-addressed manifest and checkpoint record after each committed logical
@@ -244,7 +244,7 @@ explicit apply all use the runtime's protocol and pending-action identity;
 handoff only reads protocol metadata and the current continuation. `status`,
 `next`, guard entry, dry guard exit, and handoff are read-only. Rebuild a
 deleted or stale projection with `status --rebuild --confirm legacy-state`.
-Use `COMET_RUN_ROOT` or `--run-root` for manual Runs; use
+Use `BADGER_RUN_ROOT` or `--run-root` for manual Runs; use
 `--project <dir> --run-id <id>` for standalone Runs.
 Lock coordination remains private to the bundled runtime; generated adapters
 cannot acquire, release, diagnose, or recover locks independently.

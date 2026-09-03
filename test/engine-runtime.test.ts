@@ -14,14 +14,14 @@ describe("public Engine runtime", () => {
   let skillRoot: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-private-engine-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-private-engine-"));
     skillRoot = path.join(root, "skill");
-    await fs.mkdir(path.join(skillRoot, "comet"), { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "badger"), { recursive: true });
     await fs.writeFile(path.join(skillRoot, "SKILL.md"), "# Demo\n");
     await fs.writeFile(
-      path.join(skillRoot, "comet", "skill.yaml"),
+      path.join(skillRoot, "badger", "skill.yaml"),
       [
-        "apiVersion: comet/v1alpha1",
+        "apiVersion: badger/v1alpha1",
         "kind: Skill",
         'metadata: { name: demo, version: "1.0.0", description: Demo }',
         "goal:",

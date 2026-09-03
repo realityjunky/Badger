@@ -20,7 +20,7 @@ describe("standalone Creator lifecycle", () => {
   let planPath: string;
 
   beforeEach(async () => {
-    project = await fs.mkdtemp(path.join(os.tmpdir(), "comet-any-lifecycle-"));
+    project = await fs.mkdtemp(path.join(os.tmpdir(), "badger-lifecycle-"));
     skillRoot = path.join(project, ".agents", "skills", "primer-design");
     await fs.mkdir(skillRoot, { recursive: true });
     await fs.writeFile(

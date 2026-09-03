@@ -19,9 +19,7 @@ import {
 } from "./differential/engine/run.js";
 
 const program = new Command();
-program
-  .name("comet-any")
-  .description("Standalone Comet-any workflow Skill factory");
+program.name("badger").description("Standalone Badger workflow Skill factory");
 
 function projectRoot(value?: string): string {
   return path.resolve(value ?? ".");
@@ -45,7 +43,7 @@ program
       {
         schemaVersion: 1,
         intent: ["new-skill", "upgrade-existing"],
-        preferenceFile: path.join(root, ".comet-any", "skill-preferences.yaml"),
+        preferenceFile: path.join(root, ".badger", "skill-preferences.yaml"),
         preferences,
         resumable: states.map((state) => ({
           name: state.name,
@@ -205,10 +203,11 @@ program
 
 program
   .command("differential <fixture>")
-  .requiredOption("--official-root <dir>", "Pinned official Comet checkout")
-  .option("--official-cli <file>", "Official Comet CLI entrypoint")
+  .requiredOption("--official-root <dir>", "Pinned upstream reference checkout")
+  .option("--official-cli <file>", "Upstream reference CLI entrypoint")
   .option("--official-revision <sha>", "Expected official revision")
-  .option("--repo <dir>", "Skill harness repository root", ".")
+  .option("--fixture-skills-root <dir>", "Reorganized Skill fixture root")
+  .option("--repo <dir>", "Badger repository root", ".")
   .option("--json", "JSON output")
   .action(async (fixture, options) => {
     const root = projectRoot(options.repo);
@@ -216,6 +215,9 @@ program
       await runDifferentialHarness({
         repositoryRoot: root,
         fixturePath: path.resolve(root, fixture),
+        fixtureSkillsRoot: options.fixtureSkillsRoot
+          ? path.resolve(root, options.fixtureSkillsRoot)
+          : undefined,
         officialRoot: path.resolve(root, options.officialRoot),
         officialCli: options.officialCli
           ? path.resolve(root, options.officialCli)
@@ -229,10 +231,10 @@ program
 program
   .command("engine-differential <fixture>")
   .description("Characterize the pinned official Engine in disposable Runs")
-  .requiredOption("--official-root <dir>", "Pinned official Comet checkout")
-  .option("--official-cli <file>", "Official Comet CLI entrypoint")
+  .requiredOption("--official-root <dir>", "Pinned upstream reference checkout")
+  .option("--official-cli <file>", "Upstream reference CLI entrypoint")
   .option("--private", "Run the same fixture through the private Engine")
-  .option("--repo <dir>", "Skill harness repository root", ".")
+  .option("--repo <dir>", "Badger repository root", ".")
   .option("--confirm-output", "Confirm writing the baseline report")
   .option("--output <file>", "Write the baseline report to a JSON file")
   .option("--json", "JSON output")
@@ -268,7 +270,7 @@ program
 async function safeStates(root: string) {
   try {
     const { readdir } = await import("node:fs/promises");
-    const directory = path.join(root, ".comet-any", "states");
+    const directory = path.join(root, ".badger", "states");
     const entries = await readdir(directory, { withFileTypes: true });
     const states = [];
     for (const entry of entries.filter(

@@ -37,25 +37,25 @@ import {
 import { parseWorkflowDurabilityProfile } from "./durability.js";
 import { sha256, stableValue } from "../util.js";
 
-export const WORKFLOW_CHECKPOINT_DIRECTORY = ".comet/checkpoints";
-export const WORKFLOW_CHECKPOINT_INDEX_PATH = ".comet/checkpoints/index.json";
+export const WORKFLOW_CHECKPOINT_DIRECTORY = ".badger/checkpoints";
+export const WORKFLOW_CHECKPOINT_INDEX_PATH = ".badger/checkpoints/index.json";
 export const WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY =
-  ".comet/checkpoints/manifests";
+  ".badger/checkpoints/manifests";
 export const WORKFLOW_CHECKPOINT_RECORD_DIRECTORY =
-  ".comet/checkpoints/records";
+  ".badger/checkpoints/records";
 export const WORKFLOW_CHECKPOINT_CONTENT_DIRECTORY =
-  ".comet/checkpoints/content";
+  ".badger/checkpoints/content";
 export const WORKFLOW_CHECKPOINT_RECOVERY_JOURNAL_PATH =
-  ".comet/checkpoint-recovery-journal.json";
+  ".badger/checkpoint-recovery-journal.json";
 export const WORKFLOW_CHECKPOINT_SCHEMA_VERSION = 1 as const;
 export const WORKFLOW_CHECKPOINT_RECOVERY_SCHEMA_VERSION = 1 as const;
 
-const STATE_PATH = ".comet/run-state.json";
-const PENDING_PATH = ".comet/pending-action.json";
-const ARTIFACTS_PATH = ".comet/artifacts.json";
-const CONTEXT_PATH = ".comet/context.md";
-const TRAJECTORY_PATH = ".comet/trajectory.jsonl";
-const TRANSITION_JOURNAL_PATH = ".comet/transition-journal.json";
+const STATE_PATH = ".badger/run-state.json";
+const PENDING_PATH = ".badger/pending-action.json";
+const ARTIFACTS_PATH = ".badger/artifacts.json";
+const CONTEXT_PATH = ".badger/context.md";
+const TRAJECTORY_PATH = ".badger/trajectory.jsonl";
+const TRANSITION_JOURNAL_PATH = ".badger/transition-journal.json";
 const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 const MAX_IDENTIFIER_LENGTH = 256;
 const MAX_CHECKPOINT_ENTRIES = 256;
@@ -1627,7 +1627,7 @@ async function invokeFault(boundary: {
   phase: string;
   path?: string;
 }): Promise<void> {
-  const configured = process.env.COMET_WORKFLOW_TEST_CHECKPOINT_FAULT_BOUNDARY;
+  const configured = process.env.BADGER_WORKFLOW_TEST_CHECKPOINT_FAULT_BOUNDARY;
   const value = boundary.path
     ? `${boundary.phase}:${boundary.path}`
     : boundary.phase;

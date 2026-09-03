@@ -213,13 +213,13 @@ ${nodes}
 - Validate and apply a decision through the runtime: \`node scripts/workflow-guard.mjs decision <node> '<json response>' --apply\`.
 - Produce a read-only workflow handoff: \`node scripts/workflow-handoff.mjs --json\`.
 - Rebuild a deleted or stale compatibility projection explicitly: \`node scripts/workflow-state.mjs status --rebuild --confirm legacy-state\`.
-- Use \`COMET_RUN_ROOT\` or \`--run-root\` for a change-bound Run; use \`--project <dir> --run-id <id>\` for a standalone Run.
+- Use \`BADGER_RUN_ROOT\` or \`--run-root\` for a change-bound Run; use \`--project <dir> --run-id <id>\` for a standalone Run.
 
 The state document at \`${proposal.workflow.state.statePath}\` is a derived compatibility projection. It is never used for routing or recovery and may be rebuilt from the authoritative Run.
 
 ## Certification boundary
 
-\`comet-any eval\` runs current-hash WorkflowRuntime checks, including a
+\`badger eval\` runs current-hash WorkflowRuntime checks, including a
 synthetic Phase 3 decision-and-cycle lifecycle. Passing evaluation proves only
 deterministic runtime and adapter behavior; it does not authorize biological
 execution, package installation, Native-derived durability, or Primer Designer
@@ -230,7 +230,7 @@ migration.
 - Reusable runtime: \`scripts/workflow-runtime.mjs\`
 - Protocol: \`reference/workflow-protocol.json\`
 - Resolved source evidence: \`reference/resolved-skills.json\`
-- Eval manifest: \`comet/eval.yaml\`
+- Eval manifest: \`badger/eval.yaml\`
 `;
 }
 
@@ -314,7 +314,7 @@ export async function generatePackage(options: {
     await copyDirectory(options.plan.sourceRoot, root);
   }
   await ensureDirectory(path.join(root, "reference"));
-  await ensureDirectory(path.join(root, "comet"));
+  await ensureDirectory(path.join(root, "badger"));
   await ensureDirectory(path.join(root, "scripts"));
   await atomicWrite(path.join(root, "SKILL.md"), entryMarkdown(proposal));
   await atomicWrite(
@@ -334,7 +334,7 @@ export async function generatePackage(options: {
     );
   }
   const evalManifest = {
-    apiVersion: "comet.eval/v1alpha1",
+    apiVersion: "badger.eval/v1alpha1",
     kind: "SkillEvalManifest",
     metadata: { name: proposal.name },
     skill: { name: proposal.name, source: root },
@@ -346,8 +346,8 @@ export async function generatePackage(options: {
     },
   };
   await atomicWrite(
-    path.join(root, "comet", "eval.yaml"),
-    `apiVersion: comet.eval/v1alpha1\nkind: SkillEvalManifest\nmetadata:\n  name: ${proposal.name}\nskill:\n  name: ${proposal.name}\n  source: ..\nevaluation:\n  tasks:\n    - workflow-route-conformance\n    - ${WORKFLOW_RUNTIME_CERTIFICATION_TASK}\n`,
+    path.join(root, "badger", "eval.yaml"),
+    `apiVersion: badger.eval/v1alpha1\nkind: SkillEvalManifest\nmetadata:\n  name: ${proposal.name}\nskill:\n  name: ${proposal.name}\n  source: ..\nevaluation:\n  tasks:\n    - workflow-route-conformance\n    - ${WORKFLOW_RUNTIME_CERTIFICATION_TASK}\n`,
   );
   await atomicWrite(
     path.join(root, "reference", "eval-manifest.json"),
@@ -372,6 +372,6 @@ export async function generatePackage(options: {
   return {
     packageRoot: root,
     protocolPath: path.join(root, "reference", "workflow-protocol.json"),
-    evalPath: path.join(root, "comet", "eval.yaml"),
+    evalPath: path.join(root, "badger", "eval.yaml"),
   };
 }

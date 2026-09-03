@@ -161,7 +161,7 @@ export async function createSkillSnapshot(
   changeDir: string,
 ): Promise<{ hash: string; snapshotDir: string }> {
   const material = await snapshotMaterial(pkg);
-  const snapshotsRoot = path.resolve(changeDir, ".comet", "skill-snapshots");
+  const snapshotsRoot = path.resolve(changeDir, ".badger", "skill-snapshots");
   const snapshotDir = path.join(snapshotsRoot, material.hash);
   await fs.mkdir(snapshotsRoot, { recursive: true });
   if (await pathExists(snapshotDir)) {
@@ -210,7 +210,7 @@ export async function readSkillSnapshot(
   if (!/^[a-f0-9]{64}$/u.test(hash)) {
     throw new Error(`Invalid Skill snapshot hash: ${hash}`);
   }
-  const snapshotsRoot = path.resolve(changeDir, ".comet", "skill-snapshots");
+  const snapshotsRoot = path.resolve(changeDir, ".badger", "skill-snapshots");
   const snapshotDir = path.join(snapshotsRoot, hash);
   assertInside(snapshotsRoot, snapshotDir, "Skill snapshot");
 

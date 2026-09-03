@@ -68,7 +68,7 @@ current action identity, and a stable `revision-conflict` finding.
 
 Every Phase 4 start, resume-time action materialization, and accepted submission
 is staged through one protected write-ahead transition journal at
-`.comet/transition-journal.json`. The bounded journal contains canonical
+`.badger/transition-journal.json`. The bounded journal contains canonical
 previous and intended material plus content identities for every affected state,
 pending-action, artifacts, and trajectory record. Records are applied in a
 fixed order and re-read before commit evidence is written. A pending journal
@@ -81,14 +81,14 @@ repaired identities, then clears the journal only after commit evidence is
 durable.
 
 When `mutation-locks` is enabled, each mutating public operation first
-publishes an exclusive `.comet/run-lock.json` record with a unique owner token,
+publishes an exclusive `.badger/run-lock.json` record with a unique owner token,
 operation, process id, host, and creation time. A local lock is stale only when
 the owner process is proven absent; age never establishes staleness, and a
 foreign-host or unverifiable owner remains unknown. Ordinary operations never
 remove stale, malformed, oversized, symlinked, or replaced locks. Explicit
 `recover` revalidates the owner token and file identity, moves a proven-stale
 record into a bounded-path quarantine, and appends takeover evidence to
-`.comet/run-lock-recovery.jsonl` before settling a pending journal. Release
+`.badger/run-lock-recovery.jsonl` before settling a pending journal. Release
 performs the same owner and file-identity check and preserves a changed lock.
 The lock wraps manual and standalone locations identically, while generated
 adapters remain projections over the four public operations.
@@ -174,7 +174,7 @@ confirmation action is bound to
 the plan, current Run revision, source action, snapshot, receipt ids, reviewer,
 and rationale policy.
 
-Apply prepares `.comet/finalization/transaction.json` before touching an
+Apply prepares `.badger/finalization/transaction.json` before touching an
 approved file. The bounded journal records prepared, applying, committed,
 rolling-back, and rolled-back states plus append-only operation events. Each
 effect rechecks its precondition immediately before mutation, stages new
@@ -259,7 +259,7 @@ identity, eval truth, or readiness. A Run started through a generated adapter
 can be resumed and completed through the public runtime, and a public-runtime
 Run can be resumed and completed through the generated adapter.
 
-The public `@rpamis/comet-any-private/workflow-runtime` package seam exposes
+The public `@rpamis/badger/workflow-runtime` package seam exposes
 only runtime construction and the four operations `start`, `resume`, `submit`,
 and `recover`. Revisioned continuations add `revision`, `attemptId`,
 `visitOrdinal`, `retryOrdinal`, `cycleId`, Cycle and visit ledgers, and

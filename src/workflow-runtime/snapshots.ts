@@ -37,7 +37,7 @@ import type {
   WorkflowPhysicalSnapshotSelectionStream,
 } from "../types.js";
 
-export const WORKFLOW_CONTENT_SNAPSHOT_DIRECTORY = ".comet/content-snapshots";
+export const WORKFLOW_CONTENT_SNAPSHOT_DIRECTORY = ".badger/content-snapshots";
 export const WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 export const WORKFLOW_CONTENT_SNAPSHOT_POLICY_SCHEMA_VERSION = 1 as const;
 export const WORKFLOW_CONTENT_SNAPSHOT_SELECTION_SCHEMA_VERSION = 1 as const;
@@ -145,7 +145,7 @@ const SNAPSHOT_OMISSION_KEYS = new Set(["path", "size", "type", "reason"]);
 const SNAPSHOT_OVERFLOW_KEYS = new Set(["ref", "hash", "count"]);
 const PHYSICAL_PROVIDER = "physical-tree" as const;
 const GIT_PROVIDER = "git" as const;
-const DEFAULT_PROTECTED_SNAPSHOT_ROOTS = [".comet"] as const;
+const DEFAULT_PROTECTED_SNAPSHOT_ROOTS = [".badger"] as const;
 const INTEGRITY_OMISSION_REASONS = new Set([
   "physical-enumeration-limit",
   "physical-selection-changed",

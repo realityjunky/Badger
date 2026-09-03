@@ -1,11 +1,11 @@
-# Comet-any Extraction Map
+# Badger Extraction Map
 
 ## Upstream provenance
 
-- Upstream checkout: `comet-any-private/comet`
+- Upstream checkout: `/home/hugo/AI/repos/comet`
 - Upstream remote: `git@github.com:rpamis/comet.git`
 - Audited upstream commit: `99fd749` (`0.4.0-beta.19`)
-- Source scenario: `assets/skills/comet-any/SKILL.md`, `domains/workflow-contract/`, `domains/bundle/`, `domains/factory/`, the Creator CLI facade, and the audited Engine closure in `domains/engine/`.
+- Source scenario: `assets/skills/badger/SKILL.md`, `domains/workflow-contract/`, `domains/bundle/`, `domains/factory/`, the Creator CLI facade, and the audited Engine closure in `domains/engine/`.
 
 ## Standalone seam
 
@@ -18,7 +18,7 @@
 | `src/skill/find.ts`                 | Compatibility adapter to the shared discovery seam                                                                                                    |
 | `src/factory/proposal.ts`           | Standalone compatibility adapter to the shared proposal seam                                                                                          |
 | `src/factory/generate.ts`           | Deterministic entry/Node package generation and protocol/evidence artifacts                                                                           |
-| `src/factory/state.ts`              | Standalone compatibility adapter to the shared state seam and `.comet-any` namespace                                                                  |
+| `src/factory/state.ts`              | Standalone compatibility adapter to the shared state seam and `.badger` namespace                                                                      |
 | `src/eval/run.ts`                   | Current-package hash, route-conformance evidence, and WorkflowRuntime certification                                                                   |
 | `src/publish/lifecycle.ts`          | Readiness, reviewer approval, hash-bound publication, and distribution preview                                                                        |
 | `src/cli.ts`                        | Thin Creator-facing command interface                                                                                                                 |
@@ -27,15 +27,15 @@
 
 ## Deliberate exclusions
 
-The upstream Creator closure also reaches `domains/comet-classic`, `domains/comet-native`, `domains/comet-entry`, `domains/skill/platform-install`, and host platform registries through the general Comet Bundle distribution path. Those policy and platform modules are not copied or imported here. The standalone seam uses local package publication and preview-only distribution instead.
+The upstream Creator closure also reaches `domains/comet-classic`, `domains/comet-native`, `domains/comet-entry`, `domains/skill/platform-install`, and host platform registries through the general upstream Bundle distribution path. Those policy and platform modules are not copied or imported here. The standalone seam uses local package publication and preview-only distribution instead.
 
 The upstream `comet-five-phase-overlay` and `comet-native` built-in contracts are excluded. Only `workflow-kernel` is accepted by the standalone plan loader. The source checkout remains available for comparison and is protected from edits by the parent repository instructions.
 
-The extracted foundation accepts a project root, optional home directory, and state namespace. The standalone adapter fixes the namespace to `.comet-any`; it does not change the workflow contract or candidate-resolution semantics. Strict preference resolution is fail-closed: a missing or ambiguous source remains a proposal blocker.
+The extracted foundation accepts a project root, optional home directory, and state namespace. The standalone adapter fixes the namespace to `.badger`; it does not change the workflow contract or candidate-resolution semantics. Strict preference resolution is fail-closed: a missing or ambiguous source remains a proposal blocker.
 
 ## Creator differential baseline
 
-`primer_designer_harness/differential/primer-designer-workflow.json` is the pinned three-Skill fixture for comparing candidate resolution, source/reference evidence, source hashes, normalized workflow protocol, generated artifact inventory, and initial readiness. `primer_designer_harness/differential/extraction-manifest.json` records the reusable workflow-kernel closure and the deliberate Classic, Native, installer, Engine, and host-platform exclusions.
+`/home/hugo/AI/Badger-workflows/primer_designer_harness/differential/primer-designer-workflow.json` is the pinned three-Skill fixture for comparing candidate resolution, source/reference evidence, source hashes, normalized workflow protocol, generated artifact inventory, and initial readiness. `/home/hugo/AI/Badger-workflows/primer_designer_harness/differential/extraction-manifest.json` records the reusable workflow-kernel closure and the deliberate Classic, Native, installer, Engine, and host-platform exclusions.
 
 The differential runner uses disposable projects and home directories. It never builds or writes the upstream checkout, reads `primer_designer_harness/raw_data/`, executes biological resources, submits schedulers, or installs host-platform files.
 
@@ -68,10 +68,10 @@ read-only, and the harness never reads or derives data from
 ## Private Engine closure
 
 The extracted closure is derived from the audited imports and official
-characterization at Comet `0.4.0-beta.19`, revision
+characterization at the upstream reference Engine `0.4.0-beta.19`, revision
 `99fd7495f8b9217efbaae3a46d885f6fa7f4102a`:
 
-- `src/skill-runtime/` owns the `comet/v1alpha1` Skill definition, guardrail,
+- `src/skill-runtime/` owns the `badger/v1alpha1` Skill definition, guardrail,
   runtime-eval, YAML layout, validation, hashing, and snapshot contracts.
 - `src/engine/` owns deterministic and adaptive loop decisions, resolver
   injection, Run state validation, eval evidence, manual/standalone adapters,
@@ -86,7 +86,7 @@ layout adapters, or protected filesystem helpers. Classic, Native, Entry,
 platform installation, and host registry behavior remain excluded.
 
 The standalone Run façade validates the caller-provided Run id before deriving
-the `<projectRoot>/.comet/runs/<run-id>` location, checks recovered state
+the `<projectRoot>/.badger/runs/<run-id>` location, checks recovered state
 identity, and delegates all execution operations to the manual Run service.
 This keeps storage coordinates and caller inputs separate from the shared
 Engine loop and its persisted semantics.
@@ -121,7 +121,7 @@ synthetic fixture matrix. `createPrivateEngineCommandRunner` is an injected
 command-bound adapter used by the differential harness; it is not an upstream
 CLI dependency.
 
-The copied parity responsibilities are the `comet/v1alpha1` Skill data model,
+The copied parity responsibilities are the `badger/v1alpha1` Skill data model,
 YAML narrowing, validation messages, stable package hashing, snapshot document
 format, Run state shape, resolver contract, loop transitions, guardrails, eval
 evidence, and storage references. Private packaging adaptations are module

@@ -75,7 +75,7 @@ describe("generated WorkflowRuntime state adapter", () => {
   });
 
   it("ships one runtime asset and a thin state adapter", async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-adapter-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-workflow-adapter-"));
     const destination = path.join(root, "generated");
     const generated = await generatePackage({
       ...proposal(),
@@ -113,12 +113,12 @@ describe("generated WorkflowRuntime state adapter", () => {
     expect(entrySkill).toContain("node scripts/workflow-state.mjs next");
     expect(entrySkill).toContain("Executable Node Order: `prepare`");
     expect(
-      await fs.readFile(path.join(destination, "comet", "eval.yaml"), "utf8"),
+      await fs.readFile(path.join(destination, "badger", "eval.yaml"), "utf8"),
     ).toContain("workflow-runtime-certification");
   });
 
   it("runs manual commands through the authoritative runtime", async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-adapter-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-workflow-adapter-"));
     const projectRoot = path.join(root, "project");
     await fs.mkdir(projectRoot, { recursive: true });
     const generated = await generatePackage({
@@ -144,7 +144,7 @@ describe("generated WorkflowRuntime state adapter", () => {
       '"currentNode": "prepare"',
     );
 
-    const stateFile = path.join(projectRoot, ".comet", "run-state.json");
+    const stateFile = path.join(projectRoot, ".badger", "run-state.json");
     const stateBefore = await fs.readFile(stateFile, "utf8");
     const state = JSON.parse(stateBefore) as { trajectoryRef: string };
     const trajectoryFile = path.join(projectRoot, state.trajectoryRef);
@@ -186,7 +186,7 @@ describe("generated WorkflowRuntime state adapter", () => {
 
     const legacyPath = path.join(
       projectRoot,
-      ".comet",
+      ".badger",
       "runs",
       "adapter-workflow",
       "state.json",
@@ -239,7 +239,7 @@ describe("generated WorkflowRuntime state adapter", () => {
   });
 
   it("supports adapter and public runtime entry in either direction", async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-adapter-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-workflow-adapter-"));
     const projectRoot = path.join(root, "project");
     await fs.mkdir(projectRoot, { recursive: true });
     const generated = await generatePackage({
@@ -307,7 +307,7 @@ describe("generated WorkflowRuntime state adapter", () => {
   });
 
   it("runs isolated standalone commands through the same runtime", async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-adapter-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-workflow-adapter-"));
     const projectRoot = path.join(root, "project");
     await fs.mkdir(projectRoot, { recursive: true });
     const generated = await generatePackage({
@@ -416,7 +416,7 @@ describe("generated WorkflowRuntime state adapter", () => {
   });
 
   it("preserves a blocked completion submission for the same action", async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-adapter-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-workflow-adapter-"));
     const projectRoot = path.join(root, "project");
     await fs.mkdir(projectRoot, { recursive: true });
     const fixture = proposal();
@@ -483,7 +483,7 @@ describe("generated WorkflowRuntime state adapter", () => {
   });
 
   it("reports an absent Run without creating compatibility state", async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-adapter-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-workflow-adapter-"));
     const projectRoot = path.join(root, "project");
     await fs.mkdir(projectRoot, { recursive: true });
     const generated = await generatePackage({
@@ -513,14 +513,14 @@ describe("generated WorkflowRuntime state adapter", () => {
       ),
     });
     await expect(
-      fs.access(path.join(projectRoot, ".comet")),
+      fs.access(path.join(projectRoot, ".badger")),
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
 
   it("projects exhausted Engine retries as blocked", async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-adapter-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-workflow-adapter-"));
     const projectRoot = path.join(root, "project");
     await fs.mkdir(projectRoot, { recursive: true });
     const generated = await generatePackage({

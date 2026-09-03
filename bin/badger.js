@@ -5,7 +5,7 @@ import { access } from 'node:fs/promises';
 try {
   await access(new URL('../dist/src/cli.js', import.meta.url));
 } catch {
-  console.error('Standalone Comet-any is not built. Run `npm run build` first.');
+  console.error('Standalone Badger is not built. Run `npm run build` first.');
   process.exit(1);
 }
 

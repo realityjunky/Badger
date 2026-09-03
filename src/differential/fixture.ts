@@ -20,30 +20,37 @@ function portablePath(value: string): string {
   return value.split(path.sep).join("/");
 }
 
-function protectedRawDataRoot(repositoryRoot: string): string {
-  return path.resolve(repositoryRoot, "primer_designer_harness", "raw_data");
-}
-
 function reorganizedSkillsRoot(repositoryRoot: string): string {
   return path.resolve(repositoryRoot, "primer_designer_harness", "skills");
+}
+
+function resolveFixtureSkillsRoot(
+  repositoryRoot: string,
+  configuredRoot?: string,
+): string {
+  return path.resolve(configuredRoot ?? reorganizedSkillsRoot(repositoryRoot));
 }
 
 export function assertFixtureSourcePath(
   repositoryRoot: string,
   sourcePath: string,
+  configuredSkillsRoot?: string,
 ): void {
   const candidate = path.resolve(sourcePath);
-  const skillsRoot = reorganizedSkillsRoot(repositoryRoot);
-  if (isWithin(protectedRawDataRoot(repositoryRoot), candidate))
+  const skillsRoot = resolveFixtureSkillsRoot(
+    repositoryRoot,
+    configuredSkillsRoot,
+  );
+  if (candidate.split(path.sep).includes("raw_data"))
     throw new Error(
-      `Fixture sources must not use primer_designer_harness/raw_data: ${candidate}`,
+      `Fixture sources must not use protected raw_data: ${candidate}`,
     );
   if (
     !isWithin(skillsRoot, candidate) ||
     path.dirname(candidate) !== skillsRoot
   )
     throw new Error(
-      `Fixture sources must be under primer_designer_harness/skills: ${candidate}`,
+      `Fixture sources must be under the configured Skill fixture root: ${candidate}`,
     );
 }
 
@@ -112,10 +119,11 @@ export async function copyFixtureSkill(
   repositoryRoot: string,
   sourcePath: string,
   destination: string,
+  configuredSkillsRoot?: string,
 ): Promise<void> {
-  assertFixtureSourcePath(repositoryRoot, sourcePath);
+  assertFixtureSourcePath(repositoryRoot, sourcePath, configuredSkillsRoot);
   const realSource = await fs.realpath(path.resolve(sourcePath));
-  assertFixtureSourcePath(repositoryRoot, realSource);
+  assertFixtureSourcePath(repositoryRoot, realSource, configuredSkillsRoot);
   await ensureDirectory(path.dirname(destination));
   await copyDirectory(realSource, path.resolve(destination));
   const sourceSnapshot = await snapshotDirectory(realSource);

@@ -19,9 +19,9 @@ describe("contained atomic write", () => {
   let outside: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-contained-write-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-contained-write-"));
     outside = await fs.mkdtemp(
-      path.join(os.tmpdir(), "comet-contained-write-outside-"),
+      path.join(os.tmpdir(), "badger-contained-write-outside-"),
     );
   });
 
@@ -32,7 +32,7 @@ describe("contained atomic write", () => {
 
   it("commits a normal write even though writing changes size and ctime", async () => {
     const target = path.join(root, "state.yaml");
-    await atomicWriteContainedText(target, "schema: comet.project.v1\n", {
+    await atomicWriteContainedText(target, "schema: badger.project.v1\n", {
       containedRoot: root,
       beforeCommit: async () => {
         // Mirror the real caller's guard work between write and commit.
@@ -42,7 +42,7 @@ describe("contained atomic write", () => {
     });
 
     expect(await fs.readFile(target, "utf8")).toBe(
-      "schema: comet.project.v1\n",
+      "schema: badger.project.v1\n",
     );
     expect(await temporaryFiles(root)).toEqual([]);
   });

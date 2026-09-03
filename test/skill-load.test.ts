@@ -7,7 +7,7 @@ import {
   loadSkillPackage,
 } from "../src/skill-runtime/load.js";
 
-const skillDefinition = `apiVersion: comet/v1alpha1
+const skillDefinition = `apiVersion: badger/v1alpha1
 kind: Skill
 metadata:
   name: demo
@@ -41,12 +41,12 @@ describe("loadSkillPackage", () => {
   let skillRoot: string;
 
   beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "comet-skill-load-"));
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "badger-skill-load-"));
     skillRoot = path.join(tmpDir, "demo");
-    await fs.mkdir(path.join(skillRoot, "comet"), { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "badger"), { recursive: true });
     await fs.writeFile(path.join(skillRoot, "SKILL.md"), "# Demo\n");
     await fs.writeFile(
-      path.join(skillRoot, "comet", "skill.yaml"),
+      path.join(skillRoot, "badger", "skill.yaml"),
       skillDefinition,
     );
   });
@@ -73,7 +73,7 @@ describe("loadSkillPackage", () => {
 
   it("loads explicit guardrails and runtime checks", async () => {
     await fs.writeFile(
-      path.join(skillRoot, "comet", "guardrails.yaml"),
+      path.join(skillRoot, "badger", "guardrails.yaml"),
       `allowedSkills:
   - writing-plans
 allowedAgents: []
@@ -84,7 +84,7 @@ confirmationRequiredFor: []
 `,
     );
     await fs.writeFile(
-      path.join(skillRoot, "comet", "checks.yaml"),
+      path.join(skillRoot, "badger", "checks.yaml"),
       `runtime:
   - id: report
     scope: completion
@@ -113,9 +113,9 @@ confirmationRequiredFor: []
     ]);
   });
 
-  it("loads runtime checks from comet/checks.yaml", async () => {
+  it("loads runtime checks from badger/checks.yaml", async () => {
     await fs.writeFile(
-      path.join(skillRoot, "comet", "checks.yaml"),
+      path.join(skillRoot, "badger", "checks.yaml"),
       `runtime:
   - id: completed
     scope: completion
@@ -202,9 +202,9 @@ confirmationRequiredFor: []
     );
   });
 
-  it("rejects legacy comet/evals.yaml instead of loading runtime checks from it", async () => {
+  it("rejects legacy badger/evals.yaml instead of loading runtime checks from it", async () => {
     await fs.writeFile(
-      path.join(skillRoot, "comet", "evals.yaml"),
+      path.join(skillRoot, "badger", "evals.yaml"),
       `runtime:
   - id: legacy-completed
     scope: completion
@@ -221,11 +221,11 @@ confirmationRequiredFor: []
 
   it("rejects packages that still include evals.yaml even when checks.yaml exists", async () => {
     await fs.writeFile(
-      path.join(skillRoot, "comet", "checks.yaml"),
+      path.join(skillRoot, "badger", "checks.yaml"),
       "runtime: []\n",
     );
     await fs.writeFile(
-      path.join(skillRoot, "comet", "evals.yaml"),
+      path.join(skillRoot, "badger", "evals.yaml"),
       "runtime: []\n",
     );
 
@@ -244,23 +244,23 @@ confirmationRequiredFor: []
       yaml: skillDefinition.replace("version: 1.0.0", "version: 1"),
     },
   ])("rejects skill.yaml with $name", async ({ yaml }) => {
-    await fs.writeFile(path.join(skillRoot, "comet", "skill.yaml"), yaml);
+    await fs.writeFile(path.join(skillRoot, "badger", "skill.yaml"), yaml);
 
     await expect(loadSkillPackage(skillRoot)).rejects.toThrow(
-      /comet[\\/]skill\.yaml/,
+      /badger[\\/]skill\.yaml/,
     );
   });
 
   it("rejects guardrails.yaml with a top-level sequence", async () => {
     await fs.writeFile(
-      path.join(skillRoot, "comet", "guardrails.yaml"),
+      path.join(skillRoot, "badger", "guardrails.yaml"),
       `- allowedSkills
 - writing-plans
 `,
     );
 
     await expect(loadSkillPackage(skillRoot)).rejects.toThrow(
-      /comet[\\/]guardrails\.yaml/,
+      /badger[\\/]guardrails\.yaml/,
     );
   });
 
@@ -274,28 +274,28 @@ confirmationRequiredFor: []
       yaml: `runtime:\n  id: report\n`,
     },
   ])("rejects checks.yaml with $name", async ({ yaml }) => {
-    await fs.writeFile(path.join(skillRoot, "comet", "checks.yaml"), yaml);
+    await fs.writeFile(path.join(skillRoot, "badger", "checks.yaml"), yaml);
 
     await expect(loadSkillPackage(skillRoot)).rejects.toThrow(
-      /comet[\\/]checks\.yaml/,
+      /badger[\\/]checks\.yaml/,
     );
   });
 
   it("rejects checks.yaml with its file path and field path", async () => {
     await fs.writeFile(
-      path.join(skillRoot, "comet", "checks.yaml"),
+      path.join(skillRoot, "badger", "checks.yaml"),
       `runtime:\n  id: report\n`,
     );
 
     await expect(loadSkillPackage(skillRoot)).rejects.toThrow(
-      /comet[\\/]checks\.yaml.*runtime/,
+      /badger[\\/]checks\.yaml.*runtime/,
     );
   });
 
   it("loads a structurally complete nested skill definition", async () => {
     await fs.writeFile(
-      path.join(skillRoot, "comet", "skill.yaml"),
-      `apiVersion: comet/v1alpha1
+      path.join(skillRoot, "badger", "skill.yaml"),
+      `apiVersion: badger/v1alpha1
 kind: Skill
 metadata:
   name: complete
@@ -458,10 +458,10 @@ tools:
   ])(
     "rejects skill.yaml with $name and reports its field path",
     async ({ yaml, field }) => {
-      await fs.writeFile(path.join(skillRoot, "comet", "skill.yaml"), yaml);
+      await fs.writeFile(path.join(skillRoot, "badger", "skill.yaml"), yaml);
 
       await expect(loadSkillPackage(skillRoot)).rejects.toThrow(
-        new RegExp(`comet[\\\\/]skill\\.yaml.*${field}`),
+        new RegExp(`badger[\\\\/]skill\\.yaml.*${field}`),
       );
     },
   );
@@ -486,12 +486,12 @@ tools:
     "rejects guardrails.yaml with $name and reports its field path",
     async ({ yaml, field }) => {
       await fs.writeFile(
-        path.join(skillRoot, "comet", "guardrails.yaml"),
+        path.join(skillRoot, "badger", "guardrails.yaml"),
         yaml,
       );
 
       await expect(loadSkillPackage(skillRoot)).rejects.toThrow(
-        new RegExp(`comet[\\\\/]guardrails\\.yaml.*${field}`),
+        new RegExp(`badger[\\\\/]guardrails\\.yaml.*${field}`),
       );
     },
   );
@@ -520,10 +520,10 @@ tools:
   ])(
     "rejects checks.yaml with $name and reports its field path",
     async ({ yaml, field }) => {
-      await fs.writeFile(path.join(skillRoot, "comet", "checks.yaml"), yaml);
+      await fs.writeFile(path.join(skillRoot, "badger", "checks.yaml"), yaml);
 
       await expect(loadSkillPackage(skillRoot)).rejects.toThrow(
-        new RegExp(`comet[\\\\/]checks\\.yaml.*${field}`),
+        new RegExp(`badger[\\\\/]checks\\.yaml.*${field}`),
       );
     },
   );

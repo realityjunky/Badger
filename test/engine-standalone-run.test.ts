@@ -19,11 +19,11 @@ import { readRunState } from "../src/engine/state.js";
 import { loadSkillPackage } from "../src/skill-runtime/load.js";
 
 async function writeSkill(root: string): Promise<void> {
-  await fs.mkdir(path.join(root, "comet"), { recursive: true });
+  await fs.mkdir(path.join(root, "badger"), { recursive: true });
   await fs.writeFile(path.join(root, "SKILL.md"), "# Demo\n");
   await fs.writeFile(
-    path.join(root, "comet", "skill.yaml"),
-    `apiVersion: comet/v1alpha1
+    path.join(root, "badger", "skill.yaml"),
+    `apiVersion: badger/v1alpha1
 kind: Skill
 metadata:
   name: demo
@@ -46,7 +46,7 @@ tools: []
 `,
   );
   await fs.writeFile(
-    path.join(root, "comet", "checks.yaml"),
+    path.join(root, "badger", "checks.yaml"),
     `runtime:
   - id: report
     scope: completion
@@ -62,7 +62,7 @@ describe("standalone Skill runs", () => {
   let skillRoot: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-standalone-run-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-standalone-run-"));
     projectRoot = path.join(root, "project");
     skillRoot = path.join(root, "skill");
     await writeSkill(skillRoot);
@@ -72,7 +72,7 @@ describe("standalone Skill runs", () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  it("starts, resumes, and evaluates a run under .comet/runs/<run-id>", async () => {
+  it("starts, resumes, and evaluates a run under .badger/runs/<run-id>", async () => {
     const pkg = await loadSkillPackage(skillRoot);
     const runDir = standaloneRunDir(projectRoot, "demo-run");
 
@@ -146,7 +146,7 @@ describe("standalone Skill runs", () => {
     });
     const statePath = path.join(
       standaloneRunDir(projectRoot, "demo-run"),
-      ".comet",
+      ".badger",
       "run-state.json",
     );
     const state = JSON.parse(await fs.readFile(statePath, "utf8")) as Record<

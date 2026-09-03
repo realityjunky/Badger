@@ -12,13 +12,13 @@ export interface RunStorageLayout {
 
 export const CLASSIC_RUN_STORAGE: Readonly<RunStorageLayout> =
   /* @__PURE__ */ Object.freeze({
-    stateRef: ".comet/run-state.json",
-    pendingRef: ".comet/pending-action.json",
-    trajectoryRef: ".comet/trajectory.jsonl",
-    contextRef: ".comet/context.md",
-    artifactsRef: ".comet/artifacts.json",
-    checkpointRef: ".comet/checkpoint.json",
-    snapshotsRef: ".comet/skill-snapshots",
+    stateRef: ".badger/run-state.json",
+    pendingRef: ".badger/pending-action.json",
+    trajectoryRef: ".badger/trajectory.jsonl",
+    contextRef: ".badger/context.md",
+    artifactsRef: ".badger/artifacts.json",
+    checkpointRef: ".badger/checkpoint.json",
+    snapshotsRef: ".badger/skill-snapshots",
   });
 
 export const NATIVE_RUN_STORAGE: Readonly<RunStorageLayout> =

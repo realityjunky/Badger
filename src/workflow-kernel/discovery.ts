@@ -111,7 +111,7 @@ async function readSource(
 
 function defaultRoots(projectRoot: string, homeDir: string): SearchRoot[] {
   return [
-    { root: path.join(projectRoot, ".comet", "skills"), origin: "project" },
+    { root: path.join(projectRoot, ".badger", "skills"), origin: "project" },
     { root: path.join(projectRoot, ".agents", "skills"), origin: "project" },
     { root: path.join(projectRoot, ".codex", "skills"), origin: "project" },
     { root: path.join(homeDir, ".agents", "skills"), origin: "global" },
@@ -125,7 +125,7 @@ function preferenceFile(projectRoot: string, stateNamespace: string): string {
 
 export async function readPreferenceEntries(
   projectRoot: string,
-  stateNamespace = ".comet-any",
+  stateNamespace = ".badger",
 ): Promise<PreferenceEntry[]> {
   const file = preferenceFile(projectRoot, stateNamespace);
   try {
@@ -170,7 +170,7 @@ export async function findSkills(options: {
     options.preferences ??
     (await readPreferenceEntries(
       projectRoot,
-      options.stateNamespace ?? ".comet-any",
+      options.stateNamespace ?? ".badger",
     ));
   const queries = preferences.length
     ? preferences

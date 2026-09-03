@@ -1,7 +1,7 @@
 {
-  "name": "@rpamis/comet-any-private",
-  "version": "0.1.0",
-  "description": "Standalone Comet-any workflow Skill factory",
+  "name": "@rpamis/badger",
+  "version": "0.1.2",
+  "description": "Standalone Badger workflow Skill factory",
   "license": "MIT",
   "type": "module",
   "files": [
@@ -9,10 +9,11 @@
     "bin",
     "assets",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "bin": {
-    "comet-any": "bin/comet-any.js"
+    "badger": "bin/badger.js"
   },
   "exports": {
     ".": {

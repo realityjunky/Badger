@@ -1235,7 +1235,7 @@ function parseWorkflowFindingSummary(value) {
 }
 var blockerCatalog = [
   {
-    match: /^No Comet Run found:/u,
+    match: /^No Badger Run found:/u,
     entry: {
       code: "run-not-found",
       severity: "error",
@@ -1875,11 +1875,11 @@ function revisionConflictFinding(currentRevision, currentActionId) {
     currentActionId
   });
 }
-function recoveryRequiredFinding(currentRevision, currentActionId, recoveryPath = ".comet/transition-journal.json") {
+function recoveryRequiredFinding(currentRevision, currentActionId, recoveryPath = ".badger/transition-journal.json") {
   return createWorkflowFinding({
     code: "recovery-required",
     severity: "error",
-    message: recoveryPath === ".comet/transition-journal.json" ? "WorkflowRuntime has an unfinished transition journal. Run explicit recovery before resuming or submitting." : recoveryPath === ".comet/checkpoint-recovery-journal.json" ? "WorkflowRuntime has unfinished checkpoint recovery evidence. Run explicit recovery before resuming or submitting." : "WorkflowRuntime has an unfinished finalization transaction. Run explicit recovery before resuming or submitting.",
+    message: recoveryPath === ".badger/transition-journal.json" ? "WorkflowRuntime has an unfinished transition journal. Run explicit recovery before resuming or submitting." : recoveryPath === ".badger/checkpoint-recovery-journal.json" ? "WorkflowRuntime has unfinished checkpoint recovery evidence. Run explicit recovery before resuming or submitting." : "WorkflowRuntime has an unfinished finalization transaction. Run explicit recovery before resuming or submitting.",
     requiredAction: "repair",
     operation: { id: "workflow.recover", args: [] },
     path: recoveryPath,
@@ -3493,7 +3493,7 @@ async function removeEngineRunFile(changeDir, relativePath2, label, options = {}
 }
 
 // src/workflow-runtime/snapshots.ts
-var WORKFLOW_CONTENT_SNAPSHOT_DIRECTORY = ".comet/content-snapshots";
+var WORKFLOW_CONTENT_SNAPSHOT_DIRECTORY = ".badger/content-snapshots";
 var WORKFLOW_CONTENT_SNAPSHOT_SCHEMA_VERSION = 1;
 var WORKFLOW_CONTENT_SNAPSHOT_POLICY_SCHEMA_VERSION = 1;
 var WORKFLOW_CONTENT_SNAPSHOT_SELECTION_SCHEMA_VERSION = 1;
@@ -3599,7 +3599,7 @@ var SNAPSHOT_OMISSION_KEYS = /* @__PURE__ */ new Set(["path", "size", "type", "r
 var SNAPSHOT_OVERFLOW_KEYS = /* @__PURE__ */ new Set(["ref", "hash", "count"]);
 var PHYSICAL_PROVIDER = "physical-tree";
 var GIT_PROVIDER = "git";
-var DEFAULT_PROTECTED_SNAPSHOT_ROOTS = [".comet"];
+var DEFAULT_PROTECTED_SNAPSHOT_ROOTS = [".badger"];
 var INTEGRITY_OMISSION_REASONS = /* @__PURE__ */ new Set([
   "physical-enumeration-limit",
   "physical-selection-changed",
@@ -7050,7 +7050,7 @@ function validateOrchestration(value, filePath) {
 }
 function narrowSkillDefinition(document, filePath) {
   assertObject(document, filePath);
-  assertEnum(document.apiVersion, ["comet/v1alpha1"], filePath, "apiVersion");
+  assertEnum(document.apiVersion, ["badger/v1alpha1"], filePath, "apiVersion");
   assertEnum(document.kind, ["Skill"], filePath, "kind");
   assertObject(document.metadata, filePath, "metadata");
   assertString(document.metadata.name, filePath, "metadata.name");
@@ -7275,7 +7275,7 @@ function validatesAction(action, pkg, errors, stepId2) {
 function validateSkillPackage(pkg) {
   const errors = [];
   const { definition, guardrails, evals } = pkg;
-  if (definition.apiVersion !== "comet/v1alpha1")
+  if (definition.apiVersion !== "badger/v1alpha1")
     errors.push("unsupported apiVersion");
   if (definition.kind !== "Skill") errors.push("kind must be Skill");
   if (!definition.metadata.name) errors.push("metadata.name is required");
@@ -7444,7 +7444,7 @@ async function verifyPublishedSnapshot(snapshotDir, material) {
 }
 async function createSkillSnapshot(pkg, changeDir) {
   const material = await snapshotMaterial(pkg);
-  const snapshotsRoot = path8.resolve(changeDir, ".comet", "skill-snapshots");
+  const snapshotsRoot = path8.resolve(changeDir, ".badger", "skill-snapshots");
   const snapshotDir = path8.join(snapshotsRoot, material.hash);
   await fs5.mkdir(snapshotsRoot, { recursive: true });
   if (await pathExists(snapshotDir)) {
@@ -7486,7 +7486,7 @@ async function readSkillSnapshot(changeDir, hash4) {
   if (!/^[a-f0-9]{64}$/u.test(hash4)) {
     throw new Error(`Invalid Skill snapshot hash: ${hash4}`);
   }
-  const snapshotsRoot = path8.resolve(changeDir, ".comet", "skill-snapshots");
+  const snapshotsRoot = path8.resolve(changeDir, ".badger", "skill-snapshots");
   const snapshotDir = path8.join(snapshotsRoot, hash4);
   assertInside(snapshotsRoot, snapshotDir, "Skill snapshot");
   try {
@@ -7524,7 +7524,7 @@ import path9 from "node:path";
 
 // src/workflow-runtime/revision-claim.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
-var CLAIM_DIRECTORY = ".comet/revision-claims";
+var CLAIM_DIRECTORY = ".badger/revision-claims";
 var CLAIM_MAX_IDENTIFIER_LENGTH = 256;
 var CLAIM_WAIT_TIMEOUT_MS = 5e3;
 var CLAIM_POLL_INTERVAL_MS = 10;
@@ -7895,15 +7895,15 @@ function committedRevisionClaimText(raw) {
 
 // src/workflow-runtime/finalization.ts
 var WORKFLOW_FINALIZATION_SCHEMA_VERSION = 1;
-var WORKFLOW_FINALIZATION_TRANSACTION_PATH = ".comet/finalization/transaction.json";
-var WORKFLOW_FINALIZATION_RECEIPT_DIRECTORY = ".comet/finalization/receipts";
+var WORKFLOW_FINALIZATION_TRANSACTION_PATH = ".badger/finalization/transaction.json";
+var WORKFLOW_FINALIZATION_RECEIPT_DIRECTORY = ".badger/finalization/receipts";
 var WORKFLOW_FINALIZATION_MAX_OPERATIONS = 256;
 var WORKFLOW_FINALIZATION_MAX_EVENTS = 1024;
 var WORKFLOW_FINALIZATION_MAX_TEXT_BYTES = 64 * 1024;
 var HASH_PATTERN3 = /^[a-f0-9]{64}$/u;
 var SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 var MAX_IDENTIFIER_LENGTH = 256;
-var PROTECTED_RUNTIME_DIRECTORY = ".comet";
+var PROTECTED_RUNTIME_DIRECTORY = ".badger";
 var WORKFLOW_FINALIZATION_BOUNDARY_PHASES = [
   "prepared",
   "applying",
@@ -7941,7 +7941,7 @@ var WorkflowFinalizationInjectedFaultError = class extends Error {
   }
 };
 async function invokeFault(boundary) {
-  const configured = process.env.COMET_WORKFLOW_TEST_FINALIZATION_FAULT_BOUNDARY;
+  const configured = process.env.BADGER_WORKFLOW_TEST_FINALIZATION_FAULT_BOUNDARY;
   const qualified = boundary.operationId ? `${boundary.phase}:${boundary.operationId}` : boundary.phase;
   if (configured === boundary.phase || configured === qualified) {
     throw new WorkflowFinalizationInjectedFaultError();
@@ -8727,7 +8727,7 @@ async function buildWorkflowFinalizationPreview(options) {
   const confirmation = normalizeConfirmation(definition.confirmation);
   const operations = baseOperations.map((operation2) => {
     const rootPath = roots.get(operation2.rootId);
-    const prefix = `${joinRelative(rootPath, ".comet/finalization")}/${transactionId}`;
+    const prefix = `${joinRelative(rootPath, ".badger/finalization")}/${transactionId}`;
     const backupPath = operation2.precondition.target.exists && (operation2.kind === "write" || operation2.kind === "move") ? `${prefix}/${operation2.id}.backup` : null;
     const stagedPath = operation2.kind === "write" ? `${prefix}/${operation2.id}.stage` : null;
     const quarantinePath = operation2.kind === "remove" && operation2.precondition.target.exists || operation2.kind === "move" && operation2.precondition.source?.exists ? `${prefix}/${operation2.id}.quarantine` : null;
@@ -9025,7 +9025,7 @@ function parseWorkflowFinalizationPreview(value) {
     if (!root) throw new Error(`${label} operation root is not declared`);
     const operationPrefix = `${joinRelative(
       root.path,
-      `.comet/finalization/${transactionId}`
+      `.badger/finalization/${transactionId}`
     )}/${operation2.id}`;
     const expectedStagedPath = operation2.kind === "write" ? `${operationPrefix}.stage` : null;
     const expectedBackupPath = operation2.precondition.target.exists && (operation2.kind === "write" || operation2.kind === "move") ? `${operationPrefix}.backup` : null;
@@ -9035,7 +9035,7 @@ function parseWorkflowFinalizationPreview(value) {
     }
     const internalPrefix = `${joinRelative(
       root.path,
-      `.comet/finalization/${transactionId}`
+      `.badger/finalization/${transactionId}`
     )}/`;
     if (operation2.stagedPath !== null && !operation2.stagedPath.startsWith(internalPrefix) || operation2.backupPath !== null && !operation2.backupPath.startsWith(internalPrefix)) {
       throw new Error(
@@ -10091,7 +10091,7 @@ function validateWorkflowFinalizationPlanDeclaration(plan, definition) {
     ) : null;
     const prefix = `${joinRelative(
       normalized.roots.find((root) => root.id === operation2.root).path,
-      `.comet/finalization/${plan.transactionId}`
+      `.badger/finalization/${plan.transactionId}`
     )}/${operation2.id}`;
     const stagedPath = operation2.kind === "write" ? `${prefix}.stage` : null;
     const backupPath = plan.operations[index].precondition.target.exists && (operation2.kind === "write" || operation2.kind === "move") ? `${prefix}.backup` : null;
@@ -12520,7 +12520,7 @@ async function clearPendingAction(changeDir, relativePath2, options = {}) {
 import path11 from "path";
 
 // src/workflow-runtime/verification-receipts.ts
-var WORKFLOW_VERIFICATION_RECEIPT_DIRECTORY = ".comet/verification-receipts";
+var WORKFLOW_VERIFICATION_RECEIPT_DIRECTORY = ".badger/verification-receipts";
 var WORKFLOW_VERIFICATION_RECEIPT_SCHEMA_VERSION = 1;
 var WORKFLOW_VERIFICATION_RECEIPT_MAX_SCOPE_ENTRIES = 64;
 var WORKFLOW_VERIFICATION_RECEIPT_DEFAULT_SUMMARY_BYTES = 4 * 1024;
@@ -13352,7 +13352,7 @@ function assertSafeRunReference(value, key) {
     );
   }
 }
-var RUN_STATE_FILE = ".comet/run-state.json";
+var RUN_STATE_FILE = ".badger/run-state.json";
 var RUN_STATE_MAX_BYTES = 256 * 1024;
 var RUN_STATE_READ_MAX_BYTES = Math.max(
   RUN_STATE_MAX_BYTES,
@@ -17426,7 +17426,7 @@ function compileDefinition(protocol, nodes, linear) {
     (id) => ({ id })
   );
   return {
-    apiVersion: "comet/v1alpha1",
+    apiVersion: "badger/v1alpha1",
     kind: "Skill",
     metadata: {
       name: protocol.name,
@@ -17650,12 +17650,12 @@ function resolverForPackage() {
 // src/workflow-runtime/transition-journal.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
 import path13 from "node:path";
-var WORKFLOW_TRANSITION_JOURNAL_PATH = ".comet/transition-journal.json";
+var WORKFLOW_TRANSITION_JOURNAL_PATH = ".badger/transition-journal.json";
 var WORKFLOW_TRANSITION_JOURNAL_SCHEMA_VERSION = 1;
 var WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS = 16;
 var MAX_IDENTIFIER_LENGTH2 = 256;
 var JOURNAL_LABEL = "Workflow transition journal";
-var STATE_PATH = ".comet/run-state.json";
+var STATE_PATH = ".badger/run-state.json";
 var TRANSITION_OPERATION_IDS = [
   "workflow.start",
   "workflow.resume",
@@ -17788,11 +17788,11 @@ function recordKind(relativePath2) {
   if (relativePath2 === STATE_PATH) return "state";
   if (relativePath2.endsWith("/pending-action.json")) return "pending";
   if (relativePath2.endsWith("/artifacts.json")) return "artifacts";
-  if (relativePath2.startsWith(".comet/verification-receipts/")) {
+  if (relativePath2.startsWith(".badger/verification-receipts/")) {
     return "verification-receipt";
   }
   if (relativePath2.endsWith("/trajectory.jsonl")) return "trajectory";
-  if (relativePath2.startsWith(".comet/revision-claims/")) {
+  if (relativePath2.startsWith(".badger/revision-claims/")) {
     return "revision-claim";
   }
   return "other";
@@ -18255,7 +18255,7 @@ function eventBoundary(boundary) {
   return boundary.path ? `${boundary.phase}:${boundary.path}` : boundary.phase;
 }
 async function invokeConfiguredFault(boundary) {
-  const envBoundary = process.env.COMET_WORKFLOW_TEST_FAULT_BOUNDARY;
+  const envBoundary = process.env.BADGER_WORKFLOW_TEST_FAULT_BOUNDARY;
   if (envBoundary && (envBoundary === boundary.phase || envBoundary === eventBoundary(boundary))) {
     throw new Error("deterministic workflow transition fault");
   }
@@ -18841,9 +18841,9 @@ import { randomUUID as randomUUID5 } from "node:crypto";
 import { promises as fs8 } from "node:fs";
 import os from "node:os";
 import path14 from "node:path";
-var WORKFLOW_RUN_LOCK_PATH = ".comet/run-lock.json";
-var WORKFLOW_RUN_LOCK_RECOVERY_PATH = ".comet/run-lock-recovery.jsonl";
-var WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY = ".comet/run-lock-quarantine";
+var WORKFLOW_RUN_LOCK_PATH = ".badger/run-lock.json";
+var WORKFLOW_RUN_LOCK_RECOVERY_PATH = ".badger/run-lock-recovery.jsonl";
+var WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY = ".badger/run-lock-quarantine";
 var WORKFLOW_RUN_LOCK_SCHEMA_VERSION = 1;
 var WORKFLOW_RUN_LOCK_MAX_BYTES = 16 * 1024;
 var MAX_LOCK_TEXT_LENGTH = 256;
@@ -19171,7 +19171,7 @@ function serializedLock(record) {
 }
 async function ensureLockDirectory(runRoot, operation2) {
   try {
-    await ensureProtectedProjectDirectory(runRoot, ".comet", {
+    await ensureProtectedProjectDirectory(runRoot, ".badger", {
       label: "Workflow Run lock"
     });
   } catch (error) {
@@ -19376,7 +19376,7 @@ async function releaseLock(runRoot, handle) {
   }
 }
 async function holdLockForTests() {
-  const value = process.env.COMET_WORKFLOW_TEST_LOCK_HOLD_MS;
+  const value = process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS;
   if (value === void 0) return;
   const milliseconds = Number(value);
   if (!Number.isSafeInteger(milliseconds) || milliseconds < 1 || milliseconds > 3e4) {
@@ -19529,20 +19529,20 @@ async function recordWorkflowRunLockTakeover(runRoot, evidence, maxBytes = WORKF
 import { randomUUID as randomUUID6 } from "node:crypto";
 import { promises as fs9 } from "node:fs";
 import path15 from "node:path";
-var WORKFLOW_CHECKPOINT_DIRECTORY = ".comet/checkpoints";
-var WORKFLOW_CHECKPOINT_INDEX_PATH = ".comet/checkpoints/index.json";
-var WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY = ".comet/checkpoints/manifests";
-var WORKFLOW_CHECKPOINT_RECORD_DIRECTORY = ".comet/checkpoints/records";
-var WORKFLOW_CHECKPOINT_CONTENT_DIRECTORY = ".comet/checkpoints/content";
-var WORKFLOW_CHECKPOINT_RECOVERY_JOURNAL_PATH = ".comet/checkpoint-recovery-journal.json";
+var WORKFLOW_CHECKPOINT_DIRECTORY = ".badger/checkpoints";
+var WORKFLOW_CHECKPOINT_INDEX_PATH = ".badger/checkpoints/index.json";
+var WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY = ".badger/checkpoints/manifests";
+var WORKFLOW_CHECKPOINT_RECORD_DIRECTORY = ".badger/checkpoints/records";
+var WORKFLOW_CHECKPOINT_CONTENT_DIRECTORY = ".badger/checkpoints/content";
+var WORKFLOW_CHECKPOINT_RECOVERY_JOURNAL_PATH = ".badger/checkpoint-recovery-journal.json";
 var WORKFLOW_CHECKPOINT_SCHEMA_VERSION = 1;
 var WORKFLOW_CHECKPOINT_RECOVERY_SCHEMA_VERSION = 1;
-var STATE_PATH2 = ".comet/run-state.json";
-var PENDING_PATH = ".comet/pending-action.json";
-var ARTIFACTS_PATH = ".comet/artifacts.json";
-var CONTEXT_PATH = ".comet/context.md";
-var TRAJECTORY_PATH = ".comet/trajectory.jsonl";
-var TRANSITION_JOURNAL_PATH = ".comet/transition-journal.json";
+var STATE_PATH2 = ".badger/run-state.json";
+var PENDING_PATH = ".badger/pending-action.json";
+var ARTIFACTS_PATH = ".badger/artifacts.json";
+var CONTEXT_PATH = ".badger/context.md";
+var TRAJECTORY_PATH = ".badger/trajectory.jsonl";
+var TRANSITION_JOURNAL_PATH = ".badger/transition-journal.json";
 var HASH_PATTERN5 = /^[a-f0-9]{64}$/u;
 var MAX_IDENTIFIER_LENGTH3 = 256;
 var MAX_CHECKPOINT_ENTRIES = 256;
@@ -20592,7 +20592,7 @@ async function verifyPackageIdentity(runRoot, state, manifest) {
   return { identity, package: pkg };
 }
 async function invokeFault2(boundary) {
-  const configured = process.env.COMET_WORKFLOW_TEST_CHECKPOINT_FAULT_BOUNDARY;
+  const configured = process.env.BADGER_WORKFLOW_TEST_CHECKPOINT_FAULT_BOUNDARY;
   const value = boundary.path ? `${boundary.phase}:${boundary.path}` : boundary.phase;
   if (configured === boundary.phase || configured === value) {
     throw new Error("deterministic workflow checkpoint fault");
@@ -21632,11 +21632,11 @@ function startRun(pkg, runId, skillHash, workflowRuntime) {
     currentStep: pkg.definition.orchestration.entry ?? null,
     iteration: 0,
     pending: null,
-    pendingRef: ".comet/pending-action.json",
-    trajectoryRef: ".comet/trajectory.jsonl",
-    contextRef: ".comet/context.md",
-    artifactsRef: ".comet/artifacts.json",
-    checkpointRef: ".comet/checkpoint.json",
+    pendingRef: ".badger/pending-action.json",
+    trajectoryRef: ".badger/trajectory.jsonl",
+    contextRef: ".badger/context.md",
+    artifactsRef: ".badger/artifacts.json",
+    checkpointRef: ".badger/checkpoint.json",
     status: "running",
     retries: {},
     ...workflowRuntime ? { workflowRuntime: structuredClone(workflowRuntime) } : {}
@@ -21841,7 +21841,7 @@ async function existingRun(changeDir) {
 }
 async function requiredRun(changeDir) {
   const state = await existingRun(changeDir);
-  if (!state) throw new Error(`No Comet Run found in: ${changeDir}`);
+  if (!state) throw new Error(`No Badger Run found in: ${changeDir}`);
   return state;
 }
 function validateStringRecord(value, label) {
@@ -22058,7 +22058,7 @@ async function startManualRun(pkg, changeDir, options = []) {
     throw new Error("Adaptive orchestration requires an Agent candidate");
   }
   if (await existingRun(changeDir)) {
-    throw new Error(`A Comet Run already exists in: ${changeDir}`);
+    throw new Error(`A Badger Run already exists in: ${changeDir}`);
   }
   const snapshot = await createSkillSnapshot(pkg, changeDir);
   if (startOptions.runtimeIdentity && (startOptions.runtimeIdentity.snapshotHash !== snapshot.hash || startOptions.runtimeIdentity.packageHash !== snapshot.hash)) {
@@ -22462,7 +22462,7 @@ function validateProjectRoot(projectRoot) {
 function standaloneRunDir(projectRoot, runId) {
   validateRunId(runId);
   validateProjectRoot(projectRoot);
-  return path16.resolve(projectRoot, ".comet", "runs", runId);
+  return path16.resolve(projectRoot, ".badger", "runs", runId);
 }
 function pathSegments(projectRoot) {
   const lexicalRoot = path16.resolve(projectRoot);
@@ -23861,7 +23861,7 @@ function checkpointFindings(inspections, severity) {
   return inspections.filter((inspection) => inspection.error !== void 0).map(
     (inspection) => checkpointInvalidFinding(
       `Workflow checkpoint revision ${inspection.entry.revision} is invalid: ${inspection.error}`,
-      `.comet/checkpoints/manifests/${inspection.entry.manifestHash}.json`,
+      `.badger/checkpoints/manifests/${inspection.entry.manifestHash}.json`,
       severity
     )
   );
@@ -23869,7 +23869,7 @@ function checkpointFindings(inspections, severity) {
 function checkpointIndexFinding(error, severity) {
   return checkpointInvalidFinding(
     `Workflow checkpoint index is invalid: ${error instanceof Error ? error.message : String(error)}`,
-    ".comet/checkpoints/index.json",
+    ".badger/checkpoints/index.json",
     severity
   );
 }
@@ -23903,7 +23903,7 @@ async function checkpointRecoveryRequiredContinuation(location, journal) {
       recoveryRequiredFinding(
         base.revision,
         base.pendingAction?.id ?? null,
-        ".comet/checkpoint-recovery-journal.json"
+        ".badger/checkpoint-recovery-journal.json"
       )
     ],
     "blocked"
@@ -24618,7 +24618,7 @@ async function verifyStoredRepairEpisode(runRoot, state, identity) {
 }
 async function verifyStoredRun(location) {
   const state = await location.readState();
-  if (!state) throw new Error(`No Comet Run found in: ${location.runRoot}`);
+  if (!state) throw new Error(`No Badger Run found in: ${location.runRoot}`);
   const verified = await verifyStoredPackage(location.runRoot, state);
   const pending = await verifyStoredAction(
     location.runRoot,
@@ -26093,7 +26093,7 @@ async function finalizationRecoveryRequiredContinuation(location, transaction, u
       recoveryRequiredFinding(
         verified.state.workflowRuntime?.revision ?? transaction.revision,
         verified.state.pending,
-        ".comet/finalization/transaction.json"
+        ".badger/finalization/transaction.json"
       ),
       ...unknownPaths.map(
         (unknownPath) => findingFromBlocker(
@@ -26828,7 +26828,7 @@ var WorkflowCheckpointRecoveryPendingError = class extends Error {
     const finding = recoveryRequiredFinding(
       void 0,
       void 0,
-      ".comet/checkpoint-recovery-journal.json"
+      ".badger/checkpoint-recovery-journal.json"
     );
     super(finding.message);
     this.name = "WorkflowCheckpointRecoveryPendingError";
@@ -26939,7 +26939,7 @@ async function recoverCheckpointAwareRun(location, options, forceCheckpoint) {
       return checkpointBlockedContinuation(location, [
         checkpointInvalidFinding(
           `Workflow checkpoint authoritative-head verification failed: ${headError instanceof Error ? headError.message : String(headError)}`,
-          ".comet/checkpoints/index.json"
+          ".badger/checkpoints/index.json"
         ),
         ...auditFindings
       ]);
@@ -26952,7 +26952,7 @@ async function recoverCheckpointAwareRun(location, options, forceCheckpoint) {
       return checkpointBlockedContinuation(location, [
         checkpointHistoryAmbiguousFinding(
           `Workflow checkpoint revision ${newerCheckpoint.verification.manifest.revision} is newer than the authoritative Run head revision ${currentRevision}; recovery will not rewind or discard accepted history.`,
-          ".comet/checkpoints/index.json"
+          ".badger/checkpoints/index.json"
         ),
         ...auditFindings
       ]);
@@ -26980,7 +26980,7 @@ async function recoverCheckpointAwareRun(location, options, forceCheckpoint) {
       ...auditFindings,
       checkpointInvalidFinding(
         `No completely verified checkpoint can restore the Run: ${headError instanceof Error ? headError.message : String(headError)}`,
-        ".comet/run-state.json"
+        ".badger/run-state.json"
       )
     ]);
   }
@@ -27003,7 +27003,7 @@ async function recoverCheckpointAwareRun(location, options, forceCheckpoint) {
         ...auditFindings,
         checkpointHistoryAmbiguousFinding(
           error instanceof Error ? error.message : String(error),
-          ".comet/trajectory.jsonl"
+          ".badger/trajectory.jsonl"
         )
       ],
       selected

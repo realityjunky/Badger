@@ -46,6 +46,90 @@ import type {
 
 type RecordValue = Record<string, unknown>;
 
+type DifferentialSide = "official" | "private";
+type RuntimeDirectory = ".badger" | ".comet";
+
+const BADGER_RUNTIME_DIRECTORY: RuntimeDirectory = ".badger";
+const OFFICIAL_RUNTIME_DIRECTORY: RuntimeDirectory = ".comet";
+
+function preferredRuntimeDirectory(side: DifferentialSide): RuntimeDirectory {
+  return side === "official"
+    ? OFFICIAL_RUNTIME_DIRECTORY
+    : BADGER_RUNTIME_DIRECTORY;
+}
+
+function alternateRuntimeDirectory(
+  runtimeDirectory: RuntimeDirectory,
+): RuntimeDirectory {
+  return runtimeDirectory === BADGER_RUNTIME_DIRECTORY
+    ? OFFICIAL_RUNTIME_DIRECTORY
+    : BADGER_RUNTIME_DIRECTORY;
+}
+
+async function isDirectory(target: string): Promise<boolean> {
+  try {
+    return (await fs.stat(target)).isDirectory();
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return false;
+    throw error;
+  }
+}
+
+async function resolveStandaloneRunRoot(
+  projectRoot: string,
+  runId: string,
+  preferred: RuntimeDirectory,
+): Promise<{ runRoot: string; runtimeDirectory: RuntimeDirectory }> {
+  for (const runtimeDirectory of [
+    preferred,
+    alternateRuntimeDirectory(preferred),
+  ]) {
+    const runRoot = path.join(projectRoot, runtimeDirectory, "runs", runId);
+    if (await isDirectory(runRoot)) return { runRoot, runtimeDirectory };
+  }
+  return {
+    runRoot: path.join(projectRoot, preferred, "runs", runId),
+    runtimeDirectory: preferred,
+  };
+}
+
+async function resolveRunRuntimeDirectory(
+  runRoot: string,
+  preferred: RuntimeDirectory,
+): Promise<RuntimeDirectory> {
+  for (const runtimeDirectory of [
+    preferred,
+    alternateRuntimeDirectory(preferred),
+  ]) {
+    if (await isDirectory(path.join(runRoot, runtimeDirectory))) {
+      return runtimeDirectory;
+    }
+  }
+  return preferred;
+}
+
+async function prepareFixtureSkill(
+  side: DifferentialSide,
+  repositoryRoot: string,
+  fixturePath: string,
+  skill: EngineCharacterizationFixture["skills"][number],
+  destination: string,
+): Promise<void> {
+  await copyEngineFixtureSkill(repositoryRoot, fixturePath, skill, destination);
+  if (side !== "official") return;
+  const badgerControlRoot = path.join(destination, "badger");
+  const officialControlRoot = path.join(destination, "comet");
+  await fs.rename(badgerControlRoot, officialControlRoot);
+  const skillDefinitionPath = path.join(officialControlRoot, "skill.yaml");
+  const skillDefinition = await fs.readFile(skillDefinitionPath, "utf8");
+  await fs.writeFile(
+    skillDefinitionPath,
+    skillDefinition.replaceAll("badger/v1alpha1", "comet/v1alpha1"),
+    "utf8",
+  );
+}
+
 function record(value: unknown, label: string): RecordValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);
@@ -267,9 +351,10 @@ async function runOfficialCommand(
 
 async function patchState(
   runRoot: string,
+  runtimeDirectory: RuntimeDirectory,
   patch: Record<string, unknown>,
 ): Promise<RecordValue> {
-  const file = path.join(runRoot, ".comet", "run-state.json");
+  const file = path.join(runRoot, runtimeDirectory, "run-state.json");
   const current = record(
     JSON.parse(await fs.readFile(file, "utf8")) as unknown,
     "Run state",
@@ -305,11 +390,14 @@ async function runMutation(
   };
 }
 
-async function removePending(runRoot: string): Promise<RecordValue> {
-  await fs.rm(path.join(runRoot, ".comet", "pending-action.json"), {
+async function removePending(
+  runRoot: string,
+  runtimeDirectory: RuntimeDirectory,
+): Promise<RecordValue> {
+  await fs.rm(path.join(runRoot, runtimeDirectory, "pending-action.json"), {
     force: true,
   });
-  return { removed: ".comet/pending-action.json" };
+  return { removed: `${runtimeDirectory}/pending-action.json` };
 }
 
 async function mutateSkill(
@@ -335,11 +423,12 @@ async function mutateSkill(
 
 async function writeCheckpoint(
   runRoot: string,
+  runtimeDirectory: RuntimeDirectory,
   checkpoint: Checkpoint,
 ): Promise<RecordValue> {
-  const file = path.join(runRoot, ".comet", "checkpoint.json");
+  const file = path.join(runRoot, runtimeDirectory, "checkpoint.json");
   await fs.writeFile(file, JSON.stringify(checkpoint, null, 2) + "\n", "utf8");
-  return { written: ".comet/checkpoint.json" };
+  return { written: `${runtimeDirectory}/checkpoint.json` };
 }
 
 async function observeScenario(options: {
@@ -349,6 +438,7 @@ async function observeScenario(options: {
   fixturePath: string;
   temporaryRoot: string;
   runner: EngineCommandRunner;
+  side: DifferentialSide;
 }): Promise<EngineScenarioObservation> {
   const scenarioRoot = path.join(
     options.temporaryRoot,
@@ -359,10 +449,12 @@ async function observeScenario(options: {
   const homeDir = path.join(scenarioRoot, "home");
   const skillRoot = path.join(projectRoot, "skills", options.scenario.skill);
   const runId = options.scenario.runId ?? options.scenario.id;
-  const runRoot =
+  const preferred = preferredRuntimeDirectory(options.side);
+  let runtimeDirectory = preferred;
+  let runRoot =
     options.scenario.runner === "manual"
       ? path.join(scenarioRoot, "change")
-      : path.join(projectRoot, ".comet", "runs", runId);
+      : path.join(projectRoot, preferred, "runs", runId);
   const skill = options.fixture.skills.find(
     (candidate) => candidate.name === options.scenario.skill,
   );
@@ -372,7 +464,8 @@ async function observeScenario(options: {
     );
   await fs.mkdir(projectRoot, { recursive: true });
   await fs.mkdir(homeDir, { recursive: true });
-  await copyEngineFixtureSkill(
+  await prepareFixtureSkill(
+    options.side,
     options.repositoryRoot,
     options.fixturePath,
     skill,
@@ -395,7 +488,8 @@ async function observeScenario(options: {
       "replacement-skills",
       replacement.name,
     );
-    await copyEngineFixtureSkill(
+    await prepareFixtureSkill(
+      options.side,
       options.repositoryRoot,
       options.fixturePath,
       replacement,
@@ -406,10 +500,24 @@ async function observeScenario(options: {
 
   const commands: EngineCommandObservation[] = [];
   for (const operation of options.scenario.operations) {
+    if (options.scenario.runner === "standalone") {
+      const resolved = await resolveStandaloneRunRoot(
+        projectRoot,
+        runId,
+        preferred,
+      );
+      runRoot = resolved.runRoot;
+      runtimeDirectory = resolved.runtimeDirectory;
+    } else {
+      runtimeDirectory = await resolveRunRuntimeDirectory(
+        runRoot,
+        runtimeDirectory,
+      );
+    }
     if (operation.type === "patch-state") {
       commands.push(
         await runMutation(options.scenario, operation, () =>
-          patchState(runRoot, operation.patch),
+          patchState(runRoot, runtimeDirectory, operation.patch),
         ),
       );
       continue;
@@ -417,7 +525,7 @@ async function observeScenario(options: {
     if (operation.type === "remove-pending") {
       commands.push(
         await runMutation(options.scenario, operation, () =>
-          removePending(runRoot),
+          removePending(runRoot, runtimeDirectory),
         ),
       );
       continue;
@@ -433,7 +541,7 @@ async function observeScenario(options: {
     if (operation.type === "write-checkpoint") {
       commands.push(
         await runMutation(options.scenario, operation, () =>
-          writeCheckpoint(runRoot, operation.checkpoint),
+          writeCheckpoint(runRoot, runtimeDirectory, operation.checkpoint),
         ),
       );
       continue;
@@ -456,14 +564,29 @@ async function observeScenario(options: {
         homeDir,
       ),
     );
+    if (options.scenario.runner === "standalone") {
+      const resolved = await resolveStandaloneRunRoot(
+        projectRoot,
+        runId,
+        preferred,
+      );
+      runRoot = resolved.runRoot;
+      runtimeDirectory = resolved.runtimeDirectory;
+    } else {
+      runtimeDirectory = await resolveRunRuntimeDirectory(
+        runRoot,
+        runtimeDirectory,
+      );
+    }
   }
 
   const observation = await observeEngineRun({
     scenario: options.scenario,
     coordinates: { projectRoot, homeDir, skillRoot, runRoot },
     commands,
+    runtimeDirectory,
   });
-  return normalizeEngineObservation(observation);
+  return normalizeEngineObservation(observation, { runtimeDirectory });
 }
 
 function normalizedFixtureSnapshot(
@@ -515,7 +638,7 @@ export async function runOfficialEngineBaseline(
     fixture.skills,
   );
   const temporaryRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), "comet-engine-baseline-"),
+    path.join(os.tmpdir(), "badger-engine-baseline-"),
   );
   const runner =
     options.officialRunner ??
@@ -535,6 +658,7 @@ export async function runOfficialEngineBaseline(
           fixturePath,
           temporaryRoot,
           runner,
+          side: "official",
         }),
       );
     }
@@ -614,7 +738,7 @@ async function runPrivateEngineScenarios(options: {
     fixture.skills,
   );
   const temporaryRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), "comet-private-engine-"),
+    path.join(os.tmpdir(), "badger-private-engine-"),
   );
   try {
     const scenarios: EngineScenarioObservation[] = [];
@@ -627,6 +751,7 @@ async function runPrivateEngineScenarios(options: {
           fixturePath,
           temporaryRoot,
           runner: options.runner,
+          side: "private",
         }),
       );
     }

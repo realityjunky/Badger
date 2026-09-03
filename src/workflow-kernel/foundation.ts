@@ -43,7 +43,7 @@ export interface WorkflowKernel {
   ): Promise<CreatorState>;
 }
 
-const standaloneStateNamespace = ".comet-any";
+const standaloneStateNamespace = ".badger";
 
 function validateName(name: string): void {
   if (!/^[a-z][a-z0-9-]{1,63}$/u.test(name))
@@ -77,7 +77,7 @@ export async function readPlan(file: string): Promise<FactoryPlan> {
   if (value.skillCreatorIntent === "upgrade-existing" && !value.sourceRoot)
     throw new Error("upgrade-existing plans require sourceRoot");
   if (value.workflow.kind !== "workflow-kernel")
-    throw new Error("Standalone Comet-any supports workflow-kernel plans only");
+    throw new Error("Standalone Badger supports workflow-kernel plans only");
   return value;
 }
 
@@ -114,7 +114,7 @@ export function createWorkflowKernel(
 ): WorkflowKernel {
   const projectRoot = path.resolve(options.projectRoot);
   const homeDir = options.homeDir ? path.resolve(options.homeDir) : undefined;
-  const stateNamespace = options.stateNamespace ?? ".comet";
+  const stateNamespace = options.stateNamespace ?? ".badger";
   validateStateNamespace(stateNamespace);
   const stateRoot = path.resolve(projectRoot, stateNamespace);
 

@@ -54,7 +54,7 @@ function validateProjectRoot(
 export function standaloneRunDir(projectRoot: string, runId: string): string {
   validateRunId(runId);
   validateProjectRoot(projectRoot);
-  return path.resolve(projectRoot, ".comet", "runs", runId);
+  return path.resolve(projectRoot, ".badger", "runs", runId);
 }
 
 function pathSegments(projectRoot: string): string[] {

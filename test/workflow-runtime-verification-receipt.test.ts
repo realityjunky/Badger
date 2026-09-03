@@ -283,7 +283,7 @@ describe("Workflow Verification Receipt contract", () => {
 
     beforeEach(async () => {
       root = await fs.mkdtemp(
-        path.join(os.tmpdir(), "comet-workflow-receipt-runtime-"),
+        path.join(os.tmpdir(), "badger-workflow-receipt-runtime-"),
       );
       runRoot = path.join(root, "run");
       await fs.mkdir(runRoot);

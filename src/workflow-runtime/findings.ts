@@ -736,7 +736,7 @@ const blockerCatalog: Array<{
   entry: BlockerCatalogEntry;
 }> = [
   {
-    match: /^No Comet Run found:/u,
+    match: /^No Badger Run found:/u,
     entry: {
       code: "run-not-found",
       severity: "error",
@@ -1409,15 +1409,15 @@ export function revisionConflictFinding(
 export function recoveryRequiredFinding(
   currentRevision?: number,
   currentActionId?: string | null,
-  recoveryPath = ".comet/transition-journal.json",
+  recoveryPath = ".badger/transition-journal.json",
 ): WorkflowFinding {
   return createWorkflowFinding({
     code: "recovery-required",
     severity: "error",
     message:
-      recoveryPath === ".comet/transition-journal.json"
+      recoveryPath === ".badger/transition-journal.json"
         ? "WorkflowRuntime has an unfinished transition journal. Run explicit recovery before resuming or submitting."
-        : recoveryPath === ".comet/checkpoint-recovery-journal.json"
+        : recoveryPath === ".badger/checkpoint-recovery-journal.json"
           ? "WorkflowRuntime has unfinished checkpoint recovery evidence. Run explicit recovery before resuming or submitting."
           : "WorkflowRuntime has an unfinished finalization transaction. Run explicit recovery before resuming or submitting.",
     requiredAction: "repair",

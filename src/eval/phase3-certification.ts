@@ -248,7 +248,7 @@ async function createFixture(root: string): Promise<GeneratedFixture> {
 function locationRoot(location: WorkflowRunLocation): string {
   return location.kind === "manual"
     ? location.runRoot
-    : path.join(location.projectRoot, ".comet", "runs", location.runId);
+    : path.join(location.projectRoot, ".badger", "runs", location.runId);
 }
 
 function concretePath(pattern: string, attemptId: string): string {
@@ -559,7 +559,7 @@ async function assertUnchanged(
 ): Promise<boolean> {
   const trajectoryPath = path.join(
     locationRoot(location),
-    ".comet",
+    ".badger",
     "trajectory.jsonl",
   );
   const trajectoryBefore = await fs.readFile(trajectoryPath, "utf8");
@@ -715,7 +715,7 @@ async function routeNegatives(
   } catch {
     let runWasCreated = true;
     try {
-      await fs.access(path.join(ambiguousRunRoot, ".comet"));
+      await fs.access(path.join(ambiguousRunRoot, ".badger"));
     } catch {
       runWasCreated = false;
     }
@@ -767,7 +767,7 @@ async function routeNegatives(
   const before = await runtime.recover(location);
   const trajectoryPath = path.join(
     locationRoot(location),
-    ".comet",
+    ".badger",
     "trajectory.jsonl",
   );
   const trajectoryBefore = await fs.readFile(trajectoryPath, "utf8");
@@ -1055,7 +1055,7 @@ async function generatedContractCheck(
 ): Promise<boolean> {
   const entry = await fs.readFile(path.join(packageRoot, "SKILL.md"), "utf8");
   const evalManifest = await fs.readFile(
-    path.join(packageRoot, "comet", "eval.yaml"),
+    path.join(packageRoot, "badger", "eval.yaml"),
     "utf8",
   );
   const protocolDocument = await fs.readFile(
@@ -1162,7 +1162,7 @@ export async function certifyPhase3Workflow(options: {
   generatedPackageHash: string;
 }): Promise<Phase3CertificationResult> {
   const temporaryRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), "comet-phase3-certification-"),
+    path.join(os.tmpdir(), "badger-phase3-certification-"),
   );
   const evidence = initialEvidence(options.generatedPackageHash);
   const blockers: string[] = [];

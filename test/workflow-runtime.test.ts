@@ -72,7 +72,7 @@ describe("WorkflowRuntime", () => {
   let runRoot: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-runtime-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-workflow-runtime-"));
     runRoot = path.join(root, "change");
     await fs.mkdir(runRoot, { recursive: true });
   });
@@ -698,10 +698,10 @@ describe("WorkflowRuntime", () => {
     await expect(
       runtime.start({ protocol, runRoot, runId: "rejected-run" }),
     ).rejects.toThrow(error);
-    await expect(fs.access(path.join(runRoot, ".comet"))).rejects.toMatchObject(
-      {
-        code: "ENOENT",
-      },
-    );
+    await expect(
+      fs.access(path.join(runRoot, ".badger")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 });

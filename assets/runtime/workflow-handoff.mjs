@@ -53,9 +53,9 @@ function parseArguments(argv) {
 }
 
 function resolveTarget(options) {
-  const projectRoot = options.project ?? process.env.COMET_PROJECT_ROOT;
+  const projectRoot = options.project ?? process.env.BADGER_PROJECT_ROOT;
   if (projectRoot !== undefined) {
-    const runId = options.runid ?? process.env.COMET_RUN_ID;
+    const runId = options.runid ?? process.env.BADGER_RUN_ID;
     if (!runId) {
       throw new Error("Standalone workflow commands require --run-id.");
     }
@@ -66,7 +66,7 @@ function resolveTarget(options) {
     };
   }
   return path.resolve(
-    options.runroot ?? process.env.COMET_RUN_ROOT ?? process.cwd(),
+    options.runroot ?? process.env.BADGER_RUN_ROOT ?? process.cwd(),
   );
 }
 

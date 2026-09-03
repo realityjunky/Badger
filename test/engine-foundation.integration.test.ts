@@ -24,16 +24,16 @@ describe("Skill Engine Foundation integration", () => {
   let changeDir: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-foundation-"));
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-foundation-"));
     skillDir = path.join(root, "skill");
     changeDir = path.join(root, "change");
-    await fs.mkdir(path.join(skillDir, "comet"), { recursive: true });
+    await fs.mkdir(path.join(skillDir, "badger"), { recursive: true });
     await fs.mkdir(changeDir, { recursive: true });
     await fs.writeFile(path.join(skillDir, "SKILL.md"), "# Demo\n");
     await fs.writeFile(
-      path.join(skillDir, "comet", "skill.yaml"),
+      path.join(skillDir, "badger", "skill.yaml"),
       [
-        "apiVersion: comet/v1alpha1",
+        "apiVersion: badger/v1alpha1",
         "kind: Skill",
         'metadata: { name: demo, version: "1", description: Demo }',
         "goal:",
@@ -54,7 +54,7 @@ describe("Skill Engine Foundation integration", () => {
       ].join("\n"),
     );
     await fs.writeFile(
-      path.join(changeDir, ".comet.yaml"),
+      path.join(changeDir, ".badger.yaml"),
       "workflow: full\nphase: build\n",
     );
   });
@@ -125,16 +125,16 @@ describe("Skill Engine Foundation integration", () => {
     expect(await readTrajectory(changeDir, state.trajectoryRef)).toHaveLength(
       2,
     );
-    const raw = await fs.readFile(path.join(changeDir, ".comet.yaml"), "utf8");
+    const raw = await fs.readFile(path.join(changeDir, ".badger.yaml"), "utf8");
     expect(raw).toContain("workflow: full");
     expect(raw).toContain("phase: build");
   });
 
   it("advances through multiple deterministic steps until completion", async () => {
     await fs.writeFile(
-      path.join(skillDir, "comet", "skill.yaml"),
+      path.join(skillDir, "badger", "skill.yaml"),
       [
-        "apiVersion: comet/v1alpha1",
+        "apiVersion: badger/v1alpha1",
         "kind: Skill",
         'metadata: { name: two-step, version: "1", description: Two steps }',
         "goal:",

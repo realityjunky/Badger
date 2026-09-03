@@ -225,7 +225,7 @@ async function committedEvidence(runRoot: string) {
 function runRootFor(location: WorkflowRunLocation): string {
   return location.kind === "manual"
     ? location.runRoot
-    : path.join(location.projectRoot, ".comet", "runs", location.runId);
+    : path.join(location.projectRoot, ".badger", "runs", location.runId);
 }
 
 function artifactProjection(continuation: WorkflowContinuation) {
@@ -295,7 +295,9 @@ describe("WorkflowRuntime artifact versions", () => {
   let runRoot: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "comet-workflow-artifact-"));
+    root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "badger-workflow-artifact-"),
+    );
     runRoot = path.join(root, "run");
     await fs.mkdir(runRoot);
   });
@@ -552,11 +554,11 @@ describe("WorkflowRuntime artifact versions", () => {
         runId: "missing-artifact-capability-run",
       }),
     ).rejects.toThrow("requires versioned-artifacts capability");
-    await expect(fs.access(path.join(runRoot, ".comet"))).rejects.toMatchObject(
-      {
-        code: "ENOENT",
-      },
-    );
+    await expect(
+      fs.access(path.join(runRoot, ".badger")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("rejects a Cycle-persistent update outside a declared Cycle", async () => {
@@ -892,7 +894,7 @@ describe("WorkflowRuntime artifact versions", () => {
       evidence: { summary: "captured" },
       artifacts: { result: "result.txt" },
     });
-    const statePath = path.join(runRoot, ".comet", "run-state.json");
+    const statePath = path.join(runRoot, ".badger", "run-state.json");
     const state = JSON.parse(await fs.readFile(statePath, "utf8")) as {
       workflowRuntime: {
         artifactVersions: Array<{

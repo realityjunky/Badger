@@ -656,7 +656,7 @@ function compileDefinition(
     (id) => ({ id }),
   );
   return {
-    apiVersion: "comet/v1alpha1",
+    apiVersion: "badger/v1alpha1",
     kind: "Skill",
     metadata: {
       name: protocol.name,

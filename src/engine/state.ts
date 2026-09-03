@@ -155,7 +155,7 @@ export function runStateFromDocument(doc: StateDocument): RunState | null {
   };
 }
 
-/** Write only run_id onto a yaml document (the rest of Run state lives in .comet/run-state.json). */
+/** Write only run_id onto a yaml document (the rest of Run state lives in .badger/run-state.json). */
 export function applyRunStateToDocument(
   doc: StateDocument,
   state: RunState | null,
@@ -167,7 +167,7 @@ export function applyRunStateToDocument(
   }
 }
 
-export const RUN_STATE_FILE = ".comet/run-state.json";
+export const RUN_STATE_FILE = ".badger/run-state.json";
 export const RUN_STATE_MAX_BYTES = 256 * 1024;
 const RUN_STATE_READ_MAX_BYTES = Math.max(
   RUN_STATE_MAX_BYTES,
