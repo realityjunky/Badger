@@ -5,17 +5,30 @@ import type { FactoryPlan, FactoryProposal, NodeProtocol } from "../types.js";
 import {
   copyDirectory,
   ensureDirectory,
+  hashDirectory,
   isWithin,
   slug,
   atomicWrite,
 } from "../util.js";
 import { normalizeWorkflowRepairPolicy } from "../workflow-runtime/repair.js";
+import { deriveAuthoringPlan } from "../authoring/plan.js";
 
 function nodeSkillName(workflow: string, node: string): string {
   return `${slug(workflow) || "workflow"}-${slug(node) || "node"}`;
 }
 
 const WORKFLOW_RUNTIME_CERTIFICATION_TASK = "workflow-runtime-certification";
+
+export interface GeneratedPackage {
+  packageRoot: string;
+  protocolPath: string;
+  evalPath: string;
+  authoringPlanPath: string;
+  scaffoldHash: string;
+  sourceRoot?: string;
+  sourceHash?: string;
+  assembledPackageHash?: string;
+}
 
 function entryMarkdown(proposal: FactoryProposal): string {
   const descriptionGoal = proposal.goal.replace(/[.!?]+$/u, "");
@@ -112,6 +125,11 @@ description: ${JSON.stringify(`Run the ${proposal.name} workflow: ${descriptionG
 # ${proposal.workflow.name}
 
 ## Decision Core
+
+<!-- AUTHORING PENDING -->
+**Not yet authored.** The workflow-entry lane must add the semantic Decision Core before this scaffold can be assembled. Until then, use the persisted WorkflowRuntime continuation for routing and do not treat this package as authored.
+
+## Runtime Semantics
 
 Read the WorkflowRuntime continuation before entering a Node. The runtime owns route selection, pending actions, evidence submission, and state transitions. Load only the Node named by the persisted pending action and follow the structured finding required action when one is present.
 
@@ -274,7 +292,7 @@ function nodeMarkdown(workflow: string, node: NodeProtocol): string {
           "\n",
         )}\n\n${decisionScope}\n\nSubmit the typed response through \`scripts/workflow-state.mjs decide\`; WorkflowRuntime validates the choice, inputs, rationale, reviewer attestation, and immutable scope references.\n`
     : "";
-  return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}\n${verifications ? `\n## Verification\n\n${verifications}\n\nSubmit bounded receipt evidence or exact receipt references through WorkflowRuntime; receipt contents and issue time are runtime-owned.\n` : ""}\n${decision}\nRecord completion evidence before advancing to the next Node.\n`;
+  return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n## Guidance\n\n<!-- AUTHORING PENDING -->\n**Not yet authored.** The skill-core lane must add prerequisites, domain steps, completion reasoning, red flags, and recovery guidance before this scaffold can be assembled.\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}\n${verifications ? `\n## Verification\n\n${verifications}\n\nSubmit bounded receipt evidence or exact receipt references through WorkflowRuntime; receipt contents and issue time are runtime-owned.\n` : ""}\n${decision}\nRecord completion evidence before advancing to the next Node.\n`;
 }
 
 async function runtimeAsset(name: string): Promise<string> {
@@ -297,21 +315,23 @@ export async function generatePackage(options: {
   proposal: FactoryProposal;
   plan: FactoryPlan;
   destination: string;
-}): Promise<{ packageRoot: string; protocolPath: string; evalPath: string }> {
+}): Promise<GeneratedPackage> {
   const root = path.resolve(options.destination);
-  if (options.plan.sourceRoot && isWithin(options.plan.sourceRoot, root)) {
+  const sourceRoot = options.plan.sourceRoot
+    ? path.resolve(options.plan.sourceRoot)
+    : undefined;
+  if (sourceRoot && isWithin(sourceRoot, root)) {
     throw new Error(
       "Generation destination must not be inside the upgrade source package",
     );
   }
+  const sourceHash = sourceRoot ? await hashDirectory(sourceRoot) : undefined;
   await fs.rm(root, { recursive: true, force: true });
   await ensureDirectory(root);
   const proposal = options.proposal;
-  if (
-    options.plan.skillCreatorIntent === "upgrade-existing" &&
-    options.plan.sourceRoot
-  ) {
-    await copyDirectory(options.plan.sourceRoot, root);
+  if (options.plan.skillCreatorIntent === "upgrade-existing" && sourceRoot) {
+    await fs.cp(sourceRoot, root, { recursive: true, force: false });
+    await copyDirectory(sourceRoot, path.join(root, "source"));
   }
   await ensureDirectory(path.join(root, "reference"));
   await ensureDirectory(path.join(root, "badger"));
@@ -325,6 +345,59 @@ export async function generatePackage(options: {
     path.join(root, "reference", "resolved-skills.json"),
     JSON.stringify(proposal.candidates, null, 2) + "\n",
   );
+  const authoringPlanPath = path.join(root, "reference", "authoring-plan.json");
+  if (/^[a-f0-9]{64}$/u.test(proposal.planHash)) {
+    const authoringPlan = deriveAuthoringPlan({ proposal });
+    await atomicWrite(
+      authoringPlanPath,
+      JSON.stringify(authoringPlan, null, 2) + "\n",
+    );
+    await atomicWrite(
+      path.join(root, "reference", "authoring-lanes.json"),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          authoringProtocolHash: authoringPlan.protocolHash,
+          authoringPlanHash: authoringPlan.authoringPlanHash,
+          workflowProtocolHash: authoringPlan.workflowProtocolHash,
+          status: "pending",
+          lanes: authoringPlan.lanes.map((lane) => ({
+            id: lane.id,
+            dependencies: lane.dependencies,
+            status: "PENDING",
+          })),
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    await atomicWrite(
+      path.join(root, "reference", "decision-points.md"),
+      "# Decision Points\n\n<!-- AUTHORING PENDING -->\nNo decision points have been authored. Classify each candidate as a genuine user decision, automatic handling, a stop condition, or a manual handoff before adding guidance.\n",
+    );
+    await atomicWrite(
+      path.join(root, "reference", "recovery.md"),
+      "# Recovery\n\n<!-- AUTHORING PENDING -->\nNo authoring recovery guidance has been recorded. Resume from the persisted Creator and WorkflowRuntime state rather than conversation history.\n",
+    );
+    await atomicWrite(
+      path.join(root, "reference", "skill-review.md"),
+      "# Skill Review\n\n<!-- AUTHORING PENDING -->\nNo authoring review has been recorded. This scaffold is not authored, assembled, evaluated, or publishable.\n",
+    );
+    await atomicWrite(
+      path.join(root, "reference", "composition-report.md"),
+      `# Composition Report\n\nAuthoring evidence will be rendered here after the six lane records are validated.\n\n- Authoring Protocol: \`${authoringPlan.protocolHash}\`\n- Workflow Protocol: \`${authoringPlan.workflowProtocolHash}\`\n- Source evidence: \`${authoringPlan.sourceEvidenceHash}\`\n`,
+    );
+    if (sourceRoot && sourceHash) {
+      await atomicWrite(
+        path.join(root, "reference", "source-evidence.json"),
+        JSON.stringify(
+          { schemaVersion: 1, sourceRoot, sourceHash, preservedAt: "scaffold" },
+          null,
+          2,
+        ) + "\n",
+      );
+    }
+  }
   for (const node of proposal.workflow.nodes.filter((item) => !item.disabled)) {
     const directory = path.join(root, nodeSkillName(proposal.name, node.id));
     await ensureDirectory(directory);
@@ -369,9 +442,14 @@ export async function generatePackage(options: {
     path.join(root, "scripts", "workflow-handoff.mjs"),
     await runtimeAsset("workflow-handoff.mjs"),
   );
+  const scaffoldHash = await hashDirectory(root);
   return {
     packageRoot: root,
     protocolPath: path.join(root, "reference", "workflow-protocol.json"),
     evalPath: path.join(root, "badger", "eval.yaml"),
+    authoringPlanPath,
+    scaffoldHash,
+    ...(sourceRoot ? { sourceRoot } : {}),
+    ...(sourceHash ? { sourceHash } : {}),
   };
 }

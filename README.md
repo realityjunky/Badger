@@ -10,7 +10,8 @@ The package includes:
 - real local Skill discovery with stable source hashes, strict preferences, and ambiguity reporting;
 - deterministic Workflow Contract normalization and validation;
 - confirmed plan/state lifecycle in the standalone `.badger` namespace;
-- generated entry and Node Skills with protocol/evidence references;
+- generated authoring-pending scaffolds with resumable six-lane authoring
+  sessions and protocol/evidence references;
 - current-hash evaluation, WorkflowRuntime certification, review approval, publication, and distribution preview;
 - private Skill runtime loading, validation, content identity, and immutable snapshots;
 - deterministic and adaptive Engine loop behavior with manual and standalone Run façades;
@@ -62,6 +63,8 @@ The CLI is `badger` after `npm run build`:
 ```bash
 node bin/badger.js guide --project . --json
 node bin/badger.js authoring-plan prepared-workflow --project . --depth quick --json
+node bin/badger.js authoring-status prepared-workflow --project . --json
+node bin/badger.js assemble prepared-workflow --project . --json
 ```
 
 `authoring-plan` is read-only. It accepts a confirmed workflow name after
@@ -72,6 +75,13 @@ WorkflowProtocol) identities. It does not create Creator state, authoring
 records, or package files.
 
 See `assets/skills/badger/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
+
+`generate` creates a deterministic scaffold and an authoring session under
+`.badger/authoring/<name>`. The scaffold remains visibly pending until all
+current lane records are submitted with `authoring-record` and the package is
+assembled. Authoring input, authored material, scaffold, and assembled package
+hashes are stored separately; source changes retain old records as explicit
+stale evidence instead of silently treating them as current.
 
 The public package façade plus the `@rpamis/badger/engine` and
 `@rpamis/badger/workflow-runtime` subpaths export the runtime

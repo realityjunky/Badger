@@ -18,6 +18,7 @@
 | `src/skill/find.ts`                 | Compatibility adapter to the shared discovery seam                                                                                                    |
 | `src/factory/proposal.ts`           | Standalone compatibility adapter to the shared proposal seam                                                                                          |
 | `src/factory/generate.ts`           | Deterministic entry/Node package generation and protocol/evidence artifacts                                                                           |
+| `src/authoring/`                    | Hash-bound six-lane authoring sessions, record validation, readiness, and deterministic authored-content assembly                                     |
 | `src/factory/state.ts`              | Standalone compatibility adapter to the shared state seam and `.badger` namespace                                                                      |
 | `src/eval/run.ts`                   | Current-package hash, route-conformance evidence, and WorkflowRuntime certification                                                                   |
 | `src/publish/lifecycle.ts`          | Readiness, reviewer approval, hash-bound publication, and distribution preview                                                                        |

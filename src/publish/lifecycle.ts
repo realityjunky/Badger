@@ -588,6 +588,15 @@ export function reviewState(state: CreatorState): {
   if (state.candidates.some((candidate) => candidate.status !== "available"))
     blockers.push("Unresolved Skill candidates remain");
   if (!state.generated) blockers.push("Generated package is missing");
+  if (state.authoring) {
+    if (state.authoring.status !== "assembled")
+      blockers.push("Authoring session is not assembled");
+    if (
+      state.currentHash &&
+      state.authoring.assembledPackageHash !== state.currentHash
+    )
+      blockers.push("Authoring assembly is stale for the current package hash");
+  }
   if (
     !state.currentHash ||
     !state.eval ||
@@ -616,6 +625,7 @@ export function reviewState(state: CreatorState): {
     evidence: {
       draft: state.draftPath,
       ...(state.generated ? { generated: state.generated.packageRoot } : {}),
+      ...(state.authoring ? { authoring: state.authoring.sessionPath } : {}),
       ...(state.eval ? { eval: state.eval.resultPath } : {}),
     },
   };

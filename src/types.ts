@@ -1,4 +1,5 @@
 import type { RuntimeIdentity } from "./engine/types.js";
+import type { AuthoringStateSummary } from "./authoring/types.js";
 
 export type CreatorIntent = "new-skill" | "upgrade-existing";
 
@@ -1130,6 +1131,11 @@ export interface CreatorState {
     packageRoot: string;
     protocolPath: string;
     evalPath: string;
+    authoringPlanPath?: string;
+    scaffoldHash?: string;
+    sourceRoot?: string;
+    sourceHash?: string;
+    assembledPackageHash?: string;
   };
   eval?: {
     hash: string;
@@ -1137,6 +1143,7 @@ export interface CreatorState {
     resultPath: string;
     runtime?: WorkflowRuntimeCertificationEvidence;
   };
+  authoring?: AuthoringStateSummary;
   review?: {
     hash: string;
     decision: "approved" | "rejected";

@@ -23,10 +23,11 @@ The standalone package deliberately excludes Classic customization, Native workf
 4. Show the user the goal, intent, Nodes, implementations, Required Skill Calls, Output Schemas, blockers, and warnings.
 5. Wait for explicit confirmation. Do not initialize state or generate files before confirmation.
 6. Run `badger init <plan.json> --confirm --project <dir>`.
-7. Run `badger generate <name> --project <dir>`, then `badger eval <name> --project <dir>`.
-8. Show `badger review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
-9. Run `badger approve <name> --reviewer <id> --confirm`, then `badger publish <name> --confirm`.
-10. Start with `badger distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
+7. Run `badger generate <name> --project <dir>` to create the deterministic authoring-pending scaffold.
+8. Run `badger authoring-status <name> --project <dir> --json`, submit validated lane outputs with `badger authoring-record`, and run `badger assemble <name>` only after all six lanes are complete.
+9. Run `badger eval <name> --project <dir>` and show `badger review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
+10. Run `badger approve <name> --reviewer <id> --confirm`, then `badger publish <name> --confirm`.
+11. Start with `badger distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
 
 ## Contract rules
 
@@ -43,5 +44,6 @@ The standalone package deliberately excludes Classic customization, Native workf
 - `continue` means executable machine work is available, `await-user` means a persisted decision is pending, `blocked` means an unresolved repair or stop condition prevents advancement, and `done` means the Run is terminal. Adapters must render these values without reclassification.
 - Control Nodes cannot be overridden. Producer overrides must declare every Output Schema they satisfy.
 - Unresolved or ambiguous Skill candidates, stale hashes, failed eval, missing review, and missing confirmation block the next mutating step.
+- Confirmed generation creates a resumable authoring session under `.badger/authoring/<name>`; a scaffold is not authored, assembled, evaluated, or publishable until current lane records are assembled.
 - `badger eval` includes a current-hash synthetic Phase 3 decision-and-cycle certification; passing it does not authorize biological execution, package installation, Native-derived durability, or Primer Designer migration.
 - Generated packages and published copies are local filesystem artifacts. Review the preview before copying them elsewhere.

@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import { readPreferenceEntries, findSkills } from "./skill/find.js";
 import { buildProposal, readPlan } from "./factory/proposal.js";
 import { generatePackage } from "./factory/generate.js";
-import { initializeState, readState, writeState } from "./factory/state.js";
+import { initializeState, readState } from "./factory/state.js";
 import { evaluatePackage } from "./eval/run.js";
 import {
   approveReview,
@@ -13,7 +13,13 @@ import {
   reviewState,
 } from "./publish/lifecycle.js";
 import { runDifferentialHarness } from "./differential/run.js";
-import { buildAuthoringPlan } from "./authoring/index.js";
+import {
+  assemblePackage,
+  authoringReadiness,
+  buildAuthoringPlan,
+  initializeAuthoringSession,
+  recordAuthoring,
+} from "./authoring/index.js";
 import {
   runEngineDifferential,
   runOfficialEngineBaseline,
@@ -49,6 +55,7 @@ program
         resumable: states.map((state) => ({
           name: state.name,
           status: state.status,
+          authoring: state.authoring?.status ?? "legacy-scaffold",
         })),
       },
       options.json,
@@ -101,6 +108,61 @@ program
   });
 
 program
+  .command("authoring-status <name>")
+  .description("Show resumable authoring lane status")
+  .option("--project <dir>", "Project root", ".")
+  .option("--json", "JSON output")
+  .action(async (name, options) => {
+    emit(
+      await authoringReadiness(
+        await readState(projectRoot(options.project), name),
+      ),
+      options.json,
+    );
+  });
+
+program
+  .command("authoring-record <name>")
+  .requiredOption("--lane <lane>", "Authoring lane")
+  .requiredOption("--file <file>", "Authoring record JSON")
+  .option("--project <dir>", "Project root", ".")
+  .option("--json", "JSON output")
+  .action(async (name, options) => {
+    const root = projectRoot(options.project);
+    const record = JSON.parse(
+      await fs.readFile(path.resolve(options.file), "utf8"),
+    );
+    emit(
+      await recordAuthoring({
+        state: await readState(root, name),
+        lane: options.lane,
+        record,
+      }),
+      options.json,
+    );
+  });
+
+program
+  .command("assemble <name>")
+  .description("Assemble a current authored workflow package")
+  .option("--project <dir>", "Project root", ".")
+  .option("--json", "JSON output")
+  .action(async (name, options) => {
+    const state = await assemblePackage(
+      await readState(projectRoot(options.project), name),
+    );
+    emit(
+      {
+        name,
+        status: state.status,
+        authoring: state.authoring,
+        generated: state.generated,
+      },
+      options.json,
+    );
+  });
+
+program
   .command("init <plan>")
   .option("--confirm", "Confirm the displayed proposal")
   .option("--project <dir>", "Project root", ".")
@@ -136,6 +198,8 @@ program
       projectRoot: root,
       planPath: state.planPath,
     });
+    if (proposal.name !== state.name)
+      throw new Error("Plan workflow name does not match Creator state");
     if (!proposal.canInitialize)
       throw new Error(
         `Cannot generate blocked proposal:\n${proposal.blockers.join("\n")}`,
@@ -148,12 +212,22 @@ program
       destination: state.draftPath,
     });
     state.generated = generated;
+    state.planHash = proposal.planHash;
+    state.confirmedProposal = structuredClone(proposal);
+    state.candidates = proposal.candidates;
     state.status = "generated";
     state.currentHash = null;
     state.eval = undefined;
     state.review = undefined;
-    await writeState(state);
-    emit({ name, status: state.status, generated }, options.json);
+    await initializeAuthoringSession({
+      state,
+      plan: await buildAuthoringPlan({ proposal }),
+      generated,
+    });
+    emit(
+      { name, status: state.status, authoring: state.authoring, generated },
+      options.json,
+    );
   });
 
 program

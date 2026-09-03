@@ -143,3 +143,121 @@ export interface DeriveAuthoringPlanOptions {
   proposal: FactoryProposal;
   depth?: AuthoringDepth;
 }
+
+export type AuthoringStatus =
+  | "PENDING"
+  | "IN_PROGRESS"
+  | "COMPLETE"
+  | "DONE"
+  | "DONE_WITH_CONCERNS"
+  | "BLOCKED"
+  | "NEEDS_CONTEXT";
+
+export type AuthoringClaimStatus =
+  "SUPPORTED" | "UNSUPPORTED" | "NEEDS_CONTEXT";
+
+export interface AuthoringClaimEvidence {
+  id: string;
+  status: AuthoringClaimStatus;
+  evidence: string[];
+}
+
+export interface AuthoringArtifactEvidence {
+  id: string;
+  path: string;
+  present: boolean;
+  contentHash?: string;
+  contentPath?: string;
+}
+
+export interface AuthoringArtifactInput extends Omit<
+  AuthoringArtifactEvidence,
+  "contentPath"
+> {
+  content?: string;
+  contentPath?: string;
+}
+
+export interface AuthoringReviewOutput {
+  decision: "approved" | "rejected" | "needs_context";
+  reviewer: string;
+  summary: string;
+  blockingFindings: string[];
+  warnings: string[];
+  contractFit?: "pass" | "fail" | "needs_context";
+  usability?: "pass" | "fail" | "needs_context";
+}
+
+export interface AuthoringRecord {
+  schemaVersion: 1;
+  kind: "authoring-record";
+  workflow: string;
+  lane: AuthoringLaneId;
+  status: AuthoringStatus;
+  protocolHash: string;
+  authoringPlanHash: string;
+  workflowProtocolHash: string;
+  sourceEvidenceHash: string;
+  authoringInputHash: string;
+  authoredMaterialHash: string;
+  claims: AuthoringClaimEvidence[];
+  artifacts: AuthoringArtifactEvidence[];
+  review?: AuthoringReviewOutput;
+  summary?: string;
+  at: string;
+}
+
+export interface AuthoringRecordInput {
+  lane?: AuthoringLaneId;
+  status: AuthoringStatus;
+  claims?: AuthoringClaimEvidence[];
+  artifacts?: AuthoringArtifactInput[];
+  review?: AuthoringReviewOutput;
+  summary?: string;
+  protocolHash?: string;
+  authoringPlanHash?: string;
+  workflowProtocolHash?: string;
+  sourceEvidenceHash?: string;
+  authoringInputHash?: string;
+}
+
+export type AuthoringSessionStatus =
+  "pending" | "in-progress" | "stale" | "authored" | "assembled";
+
+export interface AuthoringRecordSummary {
+  path: string;
+  status: AuthoringStatus;
+  authoringInputHash: string;
+  authoredMaterialHash: string;
+}
+
+export interface AuthoringStateSummary {
+  schemaVersion: 1;
+  status: AuthoringSessionStatus;
+  sessionPath: string;
+  planPath: string;
+  recordsPath: string;
+  revision: number;
+  generatorContractVersion: 1;
+  planHash: string;
+  protocolHash: string;
+  workflowProtocolHash: string;
+  sourceEvidenceHash: string;
+  authoringPlanHash: string;
+  authoringInputHash: string;
+  scaffoldHash: string;
+  authoredMaterialHash: string | null;
+  assembledPackageHash: string | null;
+  records: Partial<Record<AuthoringLaneId, AuthoringRecordSummary>>;
+  invalidatedLanes?: AuthoringLaneId[];
+}
+
+export interface AuthoringReadiness {
+  state: "blocked" | "needs-context" | "ready";
+  status: AuthoringSessionStatus;
+  blockers: string[];
+  warnings: string[];
+  evidence: Record<string, string>;
+  records: Partial<Record<AuthoringLaneId, AuthoringRecord>>;
+  nextLanes: AuthoringLaneId[];
+}

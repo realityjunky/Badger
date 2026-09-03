@@ -4,6 +4,7 @@ import type { CreatorState, EvalReport, WorkflowProtocol } from "../types.js";
 import { hashDirectory, atomicWrite } from "../util.js";
 import { writeState } from "../factory/state.js";
 import { certifyWorkflowRuntime } from "./workflow-runtime-certification.js";
+import { authoringReadiness } from "../authoring/lifecycle.js";
 
 export async function evaluatePackage(
   state: CreatorState,
@@ -80,6 +81,20 @@ export async function evaluatePackage(
     passed: await exists(state.generated.evalPath),
     detail: state.generated.evalPath,
   });
+  if (state.authoring) {
+    const authoring = await authoringReadiness(state);
+    const assembled =
+      authoring.state === "ready" &&
+      authoring.status === "assembled" &&
+      state.authoring.assembledPackageHash === hash;
+    checks.push({
+      id: "authoring-assembly",
+      passed: assembled,
+      detail: assembled
+        ? "Authoring evidence and assembled package match the current hash"
+        : authoring.blockers.join("; ") || "Current package is not assembled",
+    });
+  }
   const runtime = await certifyWorkflowRuntime({
     protocol,
     generatedPackageHash: hash,
