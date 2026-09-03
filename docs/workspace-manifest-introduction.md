@@ -16,52 +16,80 @@ The recommended Badger workspace has three kinds of repository:
 /home/hugo/AI/repos/comet                          # public upstream reference
 ```
 
+## Current manifest
+
+The concrete manifest is [`badger-workspace.yaml`](../../badger-workspace.yaml)
+at the workspace root. Its companion JSON Schema is
+[`badger-workspace.schema.json`](../../badger-workspace.schema.json). The
+manifest is intentionally relative to its own directory, so the same file can
+describe another checkout of the workspace without embedding a user-specific
+absolute path.
+
 ## What it records
 
-A future `badger-workspace.yaml` could look like this:
+The current `badger-workspace.yaml` is:
 
 ```yaml
+$schema: ./badger-workspace.schema.json
 version: 1
 name: badger-workspace
+pathBase: manifest-directory
 
 repositories:
   - id: badger
     role: core
     visibility: private
-    path: /home/hugo/AI/Badger
-    remote: <badger-private-remote>
+    path: Badger
+    remote: git@github.com:realityjunky/Badger.git
     ref: main
+    commit: f930d8ac864e0bf7f7b96c88726217dae0d5c132
+    package:
+      name: '@rpamis/badger'
+      version: 0.1.2
 
   - id: primer-designer-harness
     role: domain-workflow
     visibility: private
-    path: /home/hugo/AI/Badger-workflows/primer_designer_harness
-    remote: <primer-designer-private-remote>
+    path: Badger-workflows/primer_designer_harness
+    remote: git@github.com:realityjunky/Badger-workflows.git
     ref: main
+    commit: a8aec3bddbf557ae3798947ae55bda60608b52b0
 
   - id: comet
     role: upstream-reference
     visibility: public
-    path: /home/hugo/AI/repos/comet
+    path: repos/comet
     remote: git@github.com:rpamis/comet.git
+    ref: master
     commit: 99fd7495f8b9217efbaae3a46d885f6fa7f4102a
+    readOnly: true
 
 integrations:
-  - core: badger
+  - id: primer-designer-v1
+    core: badger
     domain: primer-designer-harness
+    pathBase: domain-repository
+    workflow: workflows/primer-designer-v1
     fixture: differential/primer-designer-workflow.json
     fixtureSkillsRoot: skills
     badgerMinimum: 0.1.2
+    upstream: comet
 ```
 
-The exact schema is not implemented yet. The example illustrates the
-important distinctions:
+The manifest format is versioned by `version` and validated against the
+companion schema. Paths under `repositories` resolve from the manifest
+directory. Paths under an integration resolve from the declared domain
+repository.
 
+The important distinctions are:
+
+- `pathBase` makes path resolution explicit;
 - `remote` identifies where a repository comes from;
 - `ref` is a moving development branch;
 - `commit` is an immutable evidence or certification pin;
 - `role` explains whether a repository is core, domain-owned, or upstream;
 - `fixtureSkillsRoot` tells Badger where domain Skill evidence lives;
+- `upstream` refers to the pinned upstream repository entry;
 - `integrations` describes relationships without making the repositories one
   Git history.
 
@@ -80,7 +108,7 @@ The useful workflow is explicit:
 5. Port selected changes into a Badger branch or worktree.
 6. Update the manifest and extraction evidence after validation.
 
-For Comet, the manifest should pin the upstream commit used by the Badger
+For Comet, this manifest pins the upstream commit used by the Badger
 extraction. A later upstream pull can then be reviewed as a bounded change
 from the old pin to the new pin, rather than as an untraceable replacement of
 the entire source tree.
