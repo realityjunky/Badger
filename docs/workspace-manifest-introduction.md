@@ -11,7 +11,7 @@ source trees.
 The recommended Badger workspace has three kinds of repository:
 
 ```text
-/home/hugo/AI/badger                              # Badger core
+/home/hugo/AI/Badger                              # Badger core
 /home/hugo/AI/Badger-workflows/primer_designer_harness  # private domain harness
 /home/hugo/AI/repos/comet                          # public upstream reference
 ```
@@ -28,7 +28,7 @@ repositories:
   - id: badger
     role: core
     visibility: private
-    path: /home/hugo/AI/badger
+    path: /home/hugo/AI/Badger
     remote: <badger-private-remote>
     ref: main
 
