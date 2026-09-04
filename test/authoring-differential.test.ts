@@ -120,6 +120,8 @@ async function writeSyntheticOfficialRoot(root: string): Promise<string> {
     "domains/bundle/authoring.ts",
     "assets/skills/comet-any/reference/bundle-authoring.md",
     "assets/skills/comet-any/reference/authoring-subagents.md",
+    "assets/skills/comet-any/reference/authored-zone-example.md",
+    "assets/skills/comet-any/reference/eval-provider.md",
     "assets/skills/comet-any/reference/subagents/script-author.md",
     "assets/skills/comet-any/reference/subagents/reference-author.md",
     "assets/skills/comet-any/reference/subagents/pause-points-author.md",

@@ -1,17 +1,24 @@
 # Badger Authoring Integration Upgrade Plan
 
-Status: Draft for iterative review
+Status: Implemented delivery record
 
-Date: 2026-09-03
+Date: 2026-09-04
+
+The implementation phases in this document are complete through Phase 7. This
+file remains the design and provenance record; its historical `target`,
+`recommended`, and `Add` language records decisions made before implementation.
+For the current shipped surface, artifact inventory, and release commands, see
+`docs/release-artifacts.md`. The package-facing contract is kept in
+`assets/skills/badger/SKILL.md` and its references.
 
 ## 1. Executive decision
 
-Badger should regain authoring as a first-class subsystem of the Badger Creator.
-It must not be implemented as a separate orchestration product layered above
-Badger, and it must not be confused with the execution of a generated
-workflow.
+The delivery decision is to keep authoring as a first-class subsystem of the
+Badger Creator. It is implemented inside Badger rather than as a separate
+orchestration product layered above it, and it remains distinct from execution
+of a generated workflow.
 
-The target is an integrated two-stage system:
+The implemented system is an integrated two-stage system:
 
 1. Badger authoring turns a confirmed goal and real Skill evidence into a
    reviewable, high-quality workflow package.
@@ -76,13 +83,14 @@ separated:
 - decision-point and recovery guidance;
 - independent authoring review.
 
-The current Badger package retains the workflow-kernel contract and has added
-substantial runtime capabilities, but its Creator currently accepts a plan,
-normalizes it, generates deterministic Markdown templates, evaluates runtime
-behavior, and records publication approval. It does not author or review the
-semantic content of the generated Skill.
+At the time this plan was written, the Badger package retained the
+workflow-kernel contract and its Creator accepted a plan, normalized it,
+generated deterministic Markdown templates, evaluated runtime behavior, and
+recorded publication approval. The delivered implementation now adds the
+six-lane authoring session, authored-leaf assembly, review, and readiness
+evidence described in this document.
 
-The current architecture therefore has this gap:
+The planning baseline had this gap:
 
     goal and plan
         |
@@ -111,7 +119,7 @@ The required architecture is:
         v
     runtime evaluation and publication approval
 
-The implementation must make the second flow the normal path for new and
+The delivered implementation makes the second flow the normal path for new and
 upgrade-existing workflows. A deterministic scaffold without authored content
 must remain visibly incomplete, not silently become a ready Skill.
 
@@ -241,14 +249,14 @@ Badger policy must not silently be presented as original Comet behavior.
 
 ### 3.3 Current Badger seams that authoring must respect
 
-The current Badger implementation creates a Creator state under
-.badger/states, generates a package under the configured draft root, hashes
-that package during evaluation, and runs WorkflowRuntime certification against
-the generated package. Its package generator currently owns both directory
-cleanup and Markdown rendering, while its Creator state has no authoring
-record or authored-content fields.
+The current Badger implementation creates Creator state under `.badger/states`,
+generates a package under the configured draft root, hashes the package during
+evaluation, and runs WorkflowRuntime certification against the generated
+package. Authoring sessions now live under `.badger/authoring`, while the
+package generator and `src/authoring/lifecycle.ts` keep scaffold, authored
+material, assembled-package, evaluation, and publication identities distinct.
 
-The first implementation must address these seams explicitly:
+The implementation addresses these seams explicitly:
 
 - refactor generation so scaffold creation cannot erase an authoring session
   or valid source evidence;
@@ -264,9 +272,8 @@ The first implementation must address these seams explicitly:
 - retain upgrade-existing source preservation and the existing destination
   containment check.
 
-No authoring design is complete until it explains how it interacts with the
-current destructive draft regeneration behavior, rather than assuming the
-current generator is already an assembly pipeline.
+The release ledger in `docs/release-artifacts.md` records the resulting
+artifact set and the checks that keep these seams aligned.
 
 ## 4. Authoring responsibilities
 
@@ -401,11 +408,11 @@ It must inspect:
 It must report concrete findings with paths, claims, impact, and recommended
 fixes. A review cannot pass while a Critical or Important finding remains.
 
-## 5. Target architecture
+## 5. Implemented architecture and retained design decisions
 
 ### 5.1 Integrated layers
 
-The target Badger architecture contains four internal layers:
+The implemented Badger architecture contains four internal layers:
 
     Authoring plane
       AuthoringProtocol, lane DAG, providers, records, authored content,
@@ -429,9 +436,9 @@ The first three layers belong inside Badger. The publication boundary exposes
 provider-neutral contracts that future platform and dashboard adapters may
 consume.
 
-### 5.2 Module boundaries
+### 5.2 Delivered module boundaries
 
-Add an authoring package under src/authoring:
+The delivered authoring modules are:
 
 - src/authoring/types.ts
   AuthoringProtocol, lanes, claims, artifact evidence, records, review
@@ -442,23 +449,18 @@ Add an authoring package under src/authoring:
 - src/authoring/plan.ts
   Derive and validate an AuthoringPlan from the normalized WorkflowProtocol
   and resolved source evidence.
-- src/authoring/records.ts
-  Validate, persist, read, and summarize hash-bound lane records.
-- src/authoring/readiness.ts
-  Evaluate lane completeness, dependency order, evidence freshness, content
-  quality markers, and review verdicts.
+- src/authoring/lifecycle.ts
+  Owns session storage, record validation, dependency and readiness evaluation,
+  authored-leaf assembly, atomic writes, safe paths, and mutation serialization.
 - src/authoring/dispatch.ts
   Provider-neutral dispatch and file-handoff contracts. The first provider
   may be manual file submission; external providers remain injected adapters.
-- src/authoring/assembly.ts
-  Validate authored content leaves and compose them with deterministic Auto
-  zones.
 - src/authoring/review.ts
   Normalize quick/full review results and combine independent findings without
   fabricating approval.
-- src/authoring/storage.ts
-  Bounded authoring-session paths, atomic writes, safe path validation, and
-  mutation serialization.
+- src/authoring/cross-validation.ts
+  Check authored content against declared decisions, routes, calls, schemas,
+  guardrails, recovery, and artifact selection.
 
 Reuse existing modules rather than duplicating them:
 
@@ -492,7 +494,7 @@ generated-workflow Run. The two processes have different semantics:
 
 Forcing the authoring DAG into WorkflowRuntime would require new parallel-Run
 semantics and would mix package-construction state with execution state. The
-target therefore uses an in-process AuthoringLifecycle with shared hashing,
+The implementation therefore uses an in-process AuthoringLifecycle with shared hashing,
 atomic-write, findings, and safe-path primitives. WorkflowRuntime remains the
 sole authority once the assembled package is executed.
 
@@ -778,11 +780,11 @@ The integrated lifecycle should be:
       -> review-approved
       -> published
 
-The externally visible CreatorStatus may preserve the current statuses while
-exposing authoring readiness as a nested status. A more explicit status is
-preferred for new work, provided older state documents remain readable.
+The externally visible CreatorStatus preserves the current statuses while
+exposing authoring readiness as a nested status. Older state documents remain
+readable, while new reports use the explicit authoring status.
 
-Recommended behavior:
+Delivered behavior:
 
 1. guide reads Creator state and authoring session state.
 2. candidates discovers real Skills and source evidence.
@@ -804,12 +806,12 @@ Recommended behavior:
 12. approve requires current authoring review, current deterministic
     evaluation, and explicit reviewer confirmation.
 13. publish copies only the approved current-hash package.
-14. distribute remains local preview-only until a future adapter is explicitly
-    added.
+14. distribute remains local preview-only; platform and dashboard adapters are
+future work.
 
-The existing generate command may remain as the scaffold command for backward
-compatibility. A distinct assemble command is recommended so users and tools
-cannot mistake a scaffold for a ready package.
+The existing generate command remains the scaffold command for backward
+compatibility. The distinct assemble command prevents users and tools from
+mistaking a scaffold for a ready package.
 
 ## 10. CLI and API changes
 
@@ -1323,8 +1325,9 @@ Control:
 
 ## 18. Implementation phases
 
-Each phase should be delivered as a separately reviewed and explicitly
-approved mutation batch.
+The phases below record separately reviewed delivery batches. Phases 0 through
+7 are complete on the current branch; the acceptance lists remain useful
+regression criteria for future changes.
 
 ### Phase 0: Contract and evidence baseline
 
@@ -1472,6 +1475,9 @@ Acceptance:
 
 ### Phase 7: Documentation, fixtures, and release
 
+Status: Complete. See `docs/release-artifacts.md` for the shipped artifact map
+and release gate.
+
 Deliver:
 
 - Badger Skill entrypoint updated with authoring protocol;
@@ -1591,9 +1597,17 @@ Update:
 
 All formal Skill and package-facing documentation remains in English.
 
-## 21. Decisions to resolve during polishing
+The completed Phase 7 release artifacts are indexed in
+`docs/release-artifacts.md`. The checked-in
+`assets/skills/badger/reference/package-inventory.example.json` covers every
+deterministic backbone path and all six role briefs without session or audit
+material. The compatibility fixture and differential source snapshots include
+the reference set and explicit excluded scopes.
 
-The following choices should be settled before implementation:
+## 21. Retained delivery decisions
+
+The following choices were settled by the implementation and remain the
+compatibility policy:
 
 1. Default mode:
    Recommended: authoring is required for all new and upgrade-existing

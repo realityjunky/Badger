@@ -34,6 +34,28 @@ The upstream `comet-five-phase-overlay` and `comet-native` built-in contracts ar
 
 The extracted foundation accepts a project root, optional home directory, and state namespace. The standalone adapter fixes the namespace to `.badger`; it does not change the workflow contract or candidate-resolution semantics. Strict preference resolution is fail-closed: a missing or ambiguous source remains a proposal blocker.
 
+## Authoring delivery map
+
+Badger now owns the package-construction authoring plane inside the Creator.
+The six-lane `AuthoringProtocol` is restored from the pinned upstream contract;
+Badger's durable records, fresh-process recovery, revision fencing, bounded
+file handoff, cross-validation, and current-hash readiness are explicit Badger
+extensions.
+
+| Delivery surface | Current authority |
+| --- | --- |
+| Lane DAG, claims, review depth, and content leaves | `src/authoring/protocol.ts` and `assets/skills/badger/reference/authoring-protocol.json` |
+| Plan, handoff, records, assembly, and readiness | `src/authoring/plan.ts`, `dispatch.ts`, `lifecycle.ts`, `review.ts`, and `cross-validation.ts` |
+| Generated package inventory and control plane | `src/factory/generate.ts` and `reference/package-inventory.json` in each assembled package |
+| User-facing role and quality guidance | `assets/skills/badger/reference/authoring-subagents.md`, `bundle-authoring.md`, `authored-zone-example.md`, and `eval-provider.md` |
+| Compatibility and release evidence | `test/fixtures/authoring/authoring-compatibility.json`, `src/differential/authoring/`, and `docs/release-artifacts.md` |
+
+The generated `workflow-state`, `workflow-guard`, and `workflow-handoff` files
+remain adapters. WorkflowRuntime remains the only authority for executable
+routes, Run state, Decision Receipts, artifact versions, and runtime recovery.
+Platform or dashboard adapters are future consumers of these local contracts,
+not part of the standalone package.
+
 ## Creator differential baseline
 
 `/home/hugo/AI/Badger-workflows/primer_designer_harness/differential/primer-designer-workflow.json` is the pinned three-Skill fixture for comparing candidate resolution, source/reference evidence, source hashes, normalized workflow protocol, generated artifact inventory, and initial readiness. `/home/hugo/AI/Badger-workflows/primer_designer_harness/differential/extraction-manifest.json` records the reusable workflow-kernel closure and the deliberate Classic, Native, installer, Engine, and host-platform exclusions.
@@ -135,6 +157,6 @@ not import or modify the upstream checkout.
 These are intentionally separate future batches:
 
 1. Add a production-quality platform adapter interface with filesystem and in-memory adapters.
-2. Add injected provider-backed authoring review and richer domain guidance.
+2. Add additional injected provider-backed authoring review and richer domain guidance.
 3. Add external eval runners behind an injected adapter.
 4. Add package signing and publication registry integration.

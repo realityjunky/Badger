@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Documentation and release alignment**: Added the complete package-facing
+  authoring reference set, a substantive Authored-zone example, a safe assembled
+  package-inventory example, and a release artifact ledger. Updated the
+  compatibility fixture, differential source evidence, README, extraction map,
+  and bilingual workflow manual to distinguish delivered Badger behavior,
+  restored upstream authoring contracts, and future platform or dashboard
+  adapters.
+
 - **Authoring differential certification**: Added pinned upstream authoring parity evidence, synthetic six-lane lifecycle certification, expected Badger extension classification, source-integrity snapshots, and readiness identities.
 
 - **Legacy draft migration**: Added source-identity manifests, explicit

@@ -13,7 +13,7 @@ This Skill is the user-facing coordinator for the standalone Badger factory. It 
 - **Create a new workflow Skill**: design custom Workflow Nodes, bindings, Output Schemas, guardrails, and handoffs from the goal and resolved source Skills.
 - **Upgrade an existing Skill**: copy a selected source package, add the workflow control plane, and preserve the source package identity in the draft evidence.
 
-The standalone package deliberately excludes Classic customization, Native workflow management, ambient Entry routing, host platform installers, and Engine execution adapters.
+The standalone package deliberately excludes Classic customization, Native workflow management, ambient Entry routing, and host platform installers. Its generated runtime adapters are thin projections over Badger WorkflowRuntime; they are not a second execution authority.
 
 ## Confirmation protocol
 
@@ -29,6 +29,44 @@ The standalone package deliberately excludes Classic customization, Native workf
 10. Run `badger eval <name> --project <dir>` and show `badger review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
 11. Run `badger approve <name> --reviewer <id> --confirm`, then `badger publish <name> --confirm`.
 12. Start with `badger distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
+
+## Authoring contract
+
+Badger restores the upstream-compatible six-lane package-construction
+contract and adds durable, hash-bound records around it. The lanes are:
+
+| Lane | Dependency wave | Output boundary |
+| --- | --- | --- |
+| `script` | Wave 1 | Claims for the three WorkflowRuntime adapters and three Badger-named plan/check/hook roles; no authored leaves. |
+| `reference` | Wave 1 | Resolved Skills, normalized `WorkflowProtocol`, composition evidence, and lane metadata; no authored leaves. |
+| `pause-points` | Wave 1 | `reference/decision-points.md` and `reference/recovery.md`. |
+| `workflow-entry` | Wave 2 after `script` | The entry `SKILL.md` Decision Core. |
+| `skill-core` | Wave 2 after `script` | One substantive Guidance section for every active internal Node Skill. |
+| `skill-review` | Barrier | `reference/skill-review.md` and the authoring review verdict. |
+
+Wave 1 runs `script`, `reference`, and `pause-points` independently. Wave 2
+runs `workflow-entry` and `skill-core` after the script contract is accepted.
+`skill-review` waits for every preceding lane. The detailed claims, role-brief
+paths, review settings, deterministic backbone, and content-leaf allowlist are
+in `reference/authoring-protocol.json` and
+`reference/authoring-subagents.md`.
+
+Each lane uses provider-neutral file handoff. A provider receives only its
+role brief, bounded common inputs, dependency artifacts, and input identities;
+it returns a bounded report with status, claims, artifacts, and findings. It
+cannot write Creator or authoring state, execute candidate Skills, publish,
+distribute, access credentials, or invent routes. `BLOCKED` and `NEEDS_CONTEXT`
+stop dependent lanes while preserving their evidence.
+
+Assembly keeps the deterministic Auto zone separate from the Authored zone.
+The Auto zone owns protocol and source references, manifests, package
+inventory, generated runtime and Badger control-plane scripts, guardrails,
+checks, and evaluation declarations. The Authored zone is limited to the
+declared Decision Core, Node Guidance, decision-point, recovery, and review
+leaves. Missing or placeholder content keeps assembly blocked. See
+`reference/bundle-authoring.md` and
+`reference/package-inventory.example.json` for the package-facing contract and
+a safe inventory example.
 
 ## Review and readiness
 

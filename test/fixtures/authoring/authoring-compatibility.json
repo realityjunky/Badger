@@ -3,7 +3,13 @@
   "official": {
     "revision": "99fd7495f8b9217efbaae3a46d885f6fa7f4102a",
     "version": "0.4.0-beta.19",
-    "protocol": "assets/skills/badger/reference/authoring-protocol.json"
+    "protocol": "assets/skills/badger/reference/authoring-protocol.json",
+    "references": [
+      "assets/skills/comet-any/reference/bundle-authoring.md",
+      "assets/skills/comet-any/reference/authoring-subagents.md",
+      "assets/skills/comet-any/reference/authored-zone-example.md",
+      "assets/skills/comet-any/reference/eval-provider.md"
+    ]
   },
   "knownUpstreamInconsistencies": [
     "skill-core-claims",
@@ -16,5 +22,27 @@
     "concrete-node-content-leaves",
     "authoring-plan-hash",
     "control-plane-naming"
-  ]
+  ],
+  "documentation": {
+    "skill": "assets/skills/badger/SKILL.md",
+    "references": [
+      "assets/skills/badger/reference/authoring-protocol.json",
+      "assets/skills/badger/reference/authoring-subagents.md",
+      "assets/skills/badger/reference/bundle-authoring.md",
+      "assets/skills/badger/reference/authored-zone-example.md",
+      "assets/skills/badger/reference/eval-provider.md",
+      "assets/skills/badger/reference/package-inventory.example.json"
+    ],
+    "inventoryExample": "assets/skills/badger/reference/package-inventory.example.json",
+    "excludedScopes": [
+      "Classic",
+      "Native",
+      "Entry",
+      "platform",
+      "dashboard",
+      "biological-execution",
+      "credentials",
+      "protected-raw-data"
+    ]
+  }
 }

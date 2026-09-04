@@ -142,7 +142,7 @@ p{max-width:79ch;margin:0 0 15px}
     <div class="hero-bar"><p class="eyebrow">Skill Harness / Badger</p><div class="language-toggle" role="group" aria-label="Language"><button type="button" data-language="en" aria-pressed="true">English</button><button type="button" data-language="zh" aria-pressed="false">中文</button></div></div>
     <h1>From Markdown Skills to durable workflow systems</h1>
     <p class="hero-lede">An educational, interview-ready manual for understanding Badger, the Skill Harness, and the Primer Designer workflow as a generated instance.</p>
-    <div class="hero-meta"><span class="pill">Sections 1–4 are the study path</span><span class="pill">Mermaid architecture views</span><span class="pill">Integrated authoring target</span><span class="pill">Updated 2026-09-03</span></div>
+    <div class="hero-meta"><span class="pill">Sections 1–4 are the study path</span><span class="pill">Mermaid architecture views</span><span class="pill">Integrated authoring delivered</span><span class="pill">Updated 2026-09-04</span></div>
     <div class="language-status" id="language-status" role="status" aria-live="polite"></div>
   </div>
 </header>
@@ -755,7 +755,7 @@ node bin/badger.js distribute example-workflow --project ./demo --destination ./
         <tr><td><code>ValidationKind</code></td><td><code>evidence-only</code> · <code>artifact-exists</code> · <code>artifact-structured</code> · <code>semantic</code> · <code>state-transition</code></td><td>The strength and subject of an Output Schema check, from recorded proof through structure, meaning, and state behavior.</td></tr>
         <tr><td><code>ActionType</code></td><td><code>invoke_skill</code> · <code>call_tool</code> · <code>handoff</code> · <code>ask_user</code> · <code>checkpoint</code></td><td>The pending unit the host must perform or answer; decision Nodes compile to <code>ask_user</code>.</td></tr>
         <tr><td><code>OrchestrationMode</code></td><td><code>deterministic</code> · <code>adaptive</code></td><td>Whether steps and route selection are declared and reproducible, or candidate choice is delegated within guardrails.</td></tr>
-        <tr><td><code>CreatorStatus</code></td><td><code>draft</code> → <code>generated</code> → <code>evaluated</code> → <code>review-approved</code> → <code>published</code></td><td>The current hash-bound package lifecycle; the authoring integration will expose lane readiness inside this lifecycle without confusing it with a Run status.</td></tr>
+        <tr><td><code>CreatorStatus</code></td><td><code>draft</code> → <code>generated</code> → <code>evaluated</code> → <code>review-approved</code> → <code>published</code></td><td>The current hash-bound package lifecycle; nested authoring readiness exposes lane progress without confusing it with a Run status.</td></tr>
         <tr><td><code>AuthoringStatus</code></td><td><code>pending</code> · <code>authoring</code> · <code>authored</code> · <code>assembled</code> · <code>blocked</code></td><td>The package-construction state; it tracks lane evidence and authored content separately from Creator publication state and Runtime Run state.</td></tr>
         <tr><td><code>RunStatus</code></td><td><code>running</code> · <code>waiting</code> · <code>completed</code> · <code>failed</code></td><td>Persisted Engine state; <code>waiting</code> means an action is pending, not that the process is alive.</td></tr>
         <tr><td>Continuation disposition</td><td><code>continue</code> · <code>await-user</code> · <code>blocked</code> · <code>done</code></td><td>The host-facing answer: machine work, a persisted decision, an unresolved stop/repair condition, or terminal state.</td></tr>
@@ -960,11 +960,12 @@ flowchart LR
     <section class="section" id="section-6">
       <p class="section-number">SECTION 06</p>
       <h2>Source ledger and study notes</h2>
-      <p class="lede">This manual is an educational synthesis. The authoring integration plan, current Badger package, official Comet-any authoring references, and the Primer Designer contract provide the implementation vocabulary.</p>
+      <p class="lede">This manual is an educational synthesis. The authoring integration delivery record, current Badger package, official Comet-any authoring references, and the Primer Designer contract provide the implementation vocabulary.</p>
       <div class="private-table-wrap"><table class="data-table"><thead><tr><th>Source</th><th>What to learn from it</th><th>How this manual uses it</th></tr></thead><tbody>
-        <tr><td><a href="authoring-integration-upgrade-plan.md"><code>docs/authoring-integration-upgrade-plan.md</code></a></td><td>The integrated six-lane authoring target, upstream compatibility baseline, Badger hardening, state/hash boundaries, assembly rules, and phased acceptance criteria.</td><td>Primary source for the authoring restoration target and its distinction from delivered Runtime behavior.</td></tr>
+        <tr><td><a href="authoring-integration-upgrade-plan.md"><code>docs/authoring-integration-upgrade-plan.md</code></a></td><td>The integrated six-lane authoring delivery record, upstream compatibility baseline, Badger hardening, state/hash boundaries, assembly rules, and acceptance criteria.</td><td>Primary source for the restored authoring contract and its distinction from Runtime behavior.</td></tr>
         <tr><td><a href="../assets/skills/badger/SKILL.md"><code>assets/skills/badger/SKILL.md</code></a></td><td>The current Badger Creator entrypoint, supported workflow-kernel scope, confirmation protocol, and runtime boundary.</td><td>User-facing vocabulary and the boundary between package construction and Run execution.</td></tr>
         <tr><td><a href="../docs/extraction-map.md"><code>docs/extraction-map.md</code></a></td><td>Badger provenance, retained workflow-kernel responsibilities, Engine and WorkflowRuntime closure, and explicit exclusions.</td><td>Evidence for what the standalone package currently owns.</td></tr>
+        <tr><td><a href="release-artifacts.md"><code>docs/release-artifacts.md</code></a></td><td>The current/restored/future status boundary, generated inventory example, compatibility fixture, and release gate.</td><td>Release-facing index for keeping documentation and generated artifacts aligned.</td></tr>
         <tr><td><a href="https://github.com/rpamis/comet/blob/99fd7495f8b9217efbaae3a46d885f6fa7f4102a/assets/skills/comet-any/reference/authoring-protocol.json"><code>upstream comet/assets/skills/comet-any/reference/authoring-protocol.json</code></a></td><td>The original lane DAG, claims, review depth, deterministic backbone, and authored content leaves.</td><td>Compatibility baseline for restoring authoring without Classic or Native policy.</td></tr>
         <tr><td><a href="https://github.com/rpamis/comet/blob/99fd7495f8b9217efbaae3a46d885f6fa7f4102a/domains/bundle/authoring.ts"><code>upstream comet/domains/bundle/authoring.ts</code></a></td><td>The original TypeScript lane constants, plan builder, lane-output validator, content-leaf filter, and authoring-review adapter.</td><td>Implementation baseline for the proposed Badger authoring modules.</td></tr>
         <tr><td><a href="../docs/workflow-runtime-certification.md"><code>docs/workflow-runtime-certification.md</code></a></td><td>WorkflowRuntime identity, decisions, branches, Cycles, artifacts, projections, and fresh-process certification expectations.</td><td>Runtime authority and cross-validation boundary for authored packages.</td></tr>
@@ -1629,7 +1630,7 @@ flowchart LR
       eyebrow: 'Skill Harness / Badger',
       heading: '从 Markdown Skill 到持久化工作流系统',
       lede: '面向学习与面试表达的教育手册：理解 Badger、Skill Harness，以及作为生成实例的 Primer Designer 工作流。',
-      pills: ['第 1–4 节为学习路径', 'Mermaid 架构视图', '集成式创作目标', '更新于 2026-09-03']
+      pills: ['第 1–4 节为学习路径', 'Mermaid 架构视图', '集成式创作已交付', '更新于 2026-09-04']
     },
     nav: ['本页导航', '1 · 术语', '说明与组合', '契约词汇', '运行时词汇', '证据词汇', '2 · 架构', '2.1 目标架构', '2.2 抽象层级', '2.3 运行时内部', '2.4 Primer 实例', '2.5 适配性定位', '3 · 生命周期', '3.1 软件包生命周期', '3.2 Run 生命周期', '3.3 公共操作', '3.4 决策与恢复', '4 · 代码库指南', '4.1 用户到代码路径', '4.2 使用工具', '4.3 参数与枚举', '4.4 软件包模块与接口', '4.5 证据、测试与维护', '5 · 面试练习', '6 · 来源账本'],
     sectionNumbers: ['第 01 节', '第 02 节', '第 03 节', '第 04 节', '第 05 节', '第 06 节'],
@@ -1702,12 +1703,12 @@ flowchart LR
     },
     section2: {
       heading: '架构：当前 Badger 与集成式创作',
-      lede: '本节把软件包创作与生成工作流执行分开，然后缩放到当前 Runtime 接口和一个具体领域契约。手册明确区分已经交付的 Badger 行为、计划中的创作恢复，以及未来的平台或 Dashboard 适配器。',
+      lede: '本节把软件包创作与生成工作流执行分开，然后缩放到当前 Runtime 接口和一个具体领域契约。手册明确区分已经交付的 Badger 行为、已交付的集成式创作生命周期，以及未来的平台或 Dashboard 适配器。',
       callout: '<strong>阅读规则。</strong> 创作平面是 Badger 内的软件包构建工作流，不是第二个执行 Runtime。当前 WorkflowRuntime 仍是生成 Run 的权威；平台和 Dashboard 行为仍属于未来工作。',
       boundaryTable: [
         ['边界', '本手册中的含义', '证据状态'],
         ['当前基础', 'Skill Runtime、Creator 与 workflow-kernel 基础、生成适配器、公开 WorkflowRuntime 操作、分支、决策、Cycle、产物版本、结构化 findings 和经过认证的持久化能力。', '<span class="tag current">已交付证据</span>'],
-        ['创作恢复目标', '在 Badger 内集成六个 authoring lane、哈希绑定的 lane 证据、Auto zone/Authored zone 组装、创作审查，并与现有确定性 Runtime 评估连接。', '<span class="tag target">目标设计</span>'],
+        ['集成式创作', '在 Badger 内运行六个 authoring lane、哈希绑定的 lane 证据、Auto zone/Authored zone 组装、创作审查，并与现有确定性 Runtime 评估连接。', '<span class="tag current">已交付证据</span>'],
         ['明确不在本手册声明内', 'Classic 或 Native 策略、生物学执行、平台与 Dashboard 适配器、自动外部提供方认证，以及任何从受保护 raw data 派生的测试样例。', '<span class="tag boundary">排除项</span>']
       ],
       heads: ['2.1 顶层目标', '2.2 抽象层级', '2.3 代码库中的 WorkflowRuntime', '2.4 Primer Designer 作为工作流实例', '2.5 为什么这个设计适合 Skill Harness'],
@@ -2023,9 +2024,10 @@ flowchart LR
       lede: '这份手册是教育性综合材料。Authoring integration plan、当前 Badger 软件包、官方 Comet-any authoring 参考资料和 Primer Designer 契约提供当前实现词汇。',
       sourceHeaders: ['来源', '从中学习什么', '本手册如何使用'],
       sourceCells: [
-        ['<a href="authoring-integration-upgrade-plan.md"><code>docs/authoring-integration-upgrade-plan.md</code></a>', '集成式六 lane authoring 目标、上游兼容基线、Badger 加固、状态/哈希边界、组装规则和分阶段验收标准。', '创作恢复目标以及它与已交付 Runtime 行为之间的主要来源。'],
+        ['<a href="authoring-integration-upgrade-plan.md"><code>docs/authoring-integration-upgrade-plan.md</code></a>', '集成式六 lane authoring 的交付记录、上游兼容基线、Badger 加固、状态/哈希边界、组装规则和验收标准。', '已交付创作生命周期以及它与 Runtime 行为之间边界的主要来源。'],
         ['<a href="../assets/skills/badger/SKILL.md"><code>assets/skills/badger/SKILL.md</code></a>', '当前 Badger Creator 入口、workflow-kernel 范围、确认协议和 Runtime 边界。', '用户可见词汇以及软件包构建与 Run 执行之间的边界。'],
         ['<a href="../docs/extraction-map.md"><code>docs/extraction-map.md</code></a>', 'Badger 来源、保留的 workflow-kernel 职责、Engine 与 WorkflowRuntime 闭包以及明确排除项。', '当前 standalone 软件包实际拥有的职责证据。'],
+        ['<a href="release-artifacts.md"><code>docs/release-artifacts.md</code></a>', '当前、恢复和未来的状态边界、生成 inventory 示例、兼容性 fixture 以及 release gate。', '保持文档与生成产物一致的交付索引。'],
         ['<a href="https://github.com/rpamis/comet/blob/99fd7495f8b9217efbaae3a46d885f6fa7f4102a/assets/skills/comet-any/reference/authoring-protocol.json"><code>upstream comet/assets/skills/comet-any/reference/authoring-protocol.json</code></a>', '原始 lane DAG、claims、审查深度、确定性 backbone 和 Authored content leaf。', '在不引入 Classic 或 Native 策略的前提下恢复 authoring 的兼容基线。'],
         ['<a href="https://github.com/rpamis/comet/blob/99fd7495f8b9217efbaae3a46d885f6fa7f4102a/domains/bundle/authoring.ts"><code>upstream comet/domains/bundle/authoring.ts</code></a>', '原始 TypeScript lane 常量、plan builder、lane 输出校验、content-leaf 过滤和 authoring-review 适配器。', 'Badger authoring 模块的实现基线。'],
         ['<a href="../docs/workflow-runtime-certification.md"><code>docs/workflow-runtime-certification.md</code></a>', 'WorkflowRuntime 身份、决策、分支、Cycle、产物、投影和新进程认证预期。', '组装后软件包的 Runtime 权威与交叉校验边界。'],

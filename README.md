@@ -36,6 +36,21 @@ The package includes:
 
 It intentionally excludes Classic and Native policy, Entry routing, host platform installers, ambient resume routing, and external platform adapters.
 
+## Delivery status
+
+The current standalone package has three clearly separated surfaces:
+
+| Surface | Status | Contract |
+| --- | --- | --- |
+| Badger Creator and WorkflowRuntime | Delivered | Local workflow-kernel package creation, six-lane authoring, deterministic assembly, durable Run execution, current-hash evaluation, publication approval, and distribution preview. |
+| Upstream Comet-any authoring contract | Restored and extended | The six lane identities, dependency waves, claim/output envelope, review depths, authored leaves, and deterministic backbone are preserved from pinned revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a`. Badger-only storage, recovery, concurrency, hash, and naming extensions are reported separately. |
+| Platform and dashboard integration | Future / out of scope | Host installers, web or visual authoring, external provider authentication, automatic distribution, biological execution, scheduler submission, and protected raw-data-derived fixtures are not part of this package. |
+
+The release-facing artifact map and verification commands are in
+`docs/release-artifacts.md`. It is the authoritative checklist for keeping
+the formal Skill references, generated package inventory, compatibility
+fixture, workflow manual, and release gate aligned.
+
 ## Run persistence
 
 Run files are stored through protected, bounded, atomic adapters. Missing Run
@@ -129,6 +144,25 @@ internal. The Engine closure is pinned to the upstream reference
 contains no runtime import from the upstream checkout.
 
 The pinned three-Skill differential harness is documented in `docs/differential-harness.md`. The Engine parity matrix and certification gate are documented in `docs/engine-phase-1-certification.md`. Both harnesses run only in disposable temporary projects and reject protected raw-data paths.
+
+## Authoring references
+
+The installed Badger Skill keeps the package-construction contract close to its
+entrypoint:
+
+- `assets/skills/badger/reference/authoring-protocol.json` defines the
+  machine-readable lane DAG and deterministic backbone.
+- `assets/skills/badger/reference/authoring-subagents.md` defines bounded file
+  handoffs and the six role briefs.
+- `assets/skills/badger/reference/bundle-authoring.md` describes scaffold,
+  assembly, content leaves, and upgrade-existing behavior.
+- `assets/skills/badger/reference/authored-zone-example.md` shows the required
+  level of substantive Decision Core and Node Guidance content.
+- `assets/skills/badger/reference/eval-provider.md` separates authoring review,
+  deterministic evaluation, WorkflowRuntime certification, and publication
+  approval.
+- `assets/skills/badger/reference/package-inventory.example.json` shows the
+  safe relative-path and ownership view of an assembled package.
 
 ## WorkflowRuntime
 
