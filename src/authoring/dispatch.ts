@@ -183,18 +183,62 @@ function substantiveFixtureContent(
             (binding) =>
               "- " +
               binding.skill +
-              ": load this required Skill Call for the declared scope and record its completion check before advancing.",
+              `: Required Skill Call operation ${binding.operation} scope ${binding.scope} enforcement ${binding.enforcement}; load it for the declared scope and record its completion check before advancing.`,
           )
           .join("\n")
       : "- No additional Skill Calls are required for this Node; use the declared implementation only.";
+    const guardrailDetails = node?.guardrails.length
+      ? node.guardrails
+          .map((guardrail) => {
+            const verification = guardrail.verification;
+            const kinds = verification
+              ? Array.isArray(verification.kind)
+                ? verification.kind.join(", ")
+                : verification.kind
+              : undefined;
+            return (
+              "- Guardrail: " +
+              guardrail.id +
+              (verification
+                ? `; verification role ${verification.role} kind ${kinds}.`
+                : ".")
+            );
+          })
+          .join("\n")
+      : "- Guardrails: none are declared for this Node.";
     const outputEvidence = node?.outputSchemas.length
       ? node.outputSchemas
-          .map(
-            (schemaId) =>
+          .map((schemaId) => {
+            const schema = workflow?.outputSchemas.find(
+              (candidate) => candidate.id === schemaId,
+            );
+            const versionedArtifacts =
+              schema?.artifacts
+                .filter((artifact) => artifact.lifetime !== undefined)
+                .map((artifact) => artifact.id) ?? [];
+            const requiredArtifacts =
+              schema?.artifacts
+                .filter((artifact) => artifact.required)
+                .map((artifact) => artifact.id) ?? [];
+            const requiredEvidence =
+              schema?.evidence
+                .filter((evidence) => evidence.required)
+                .map((evidence) => evidence.id) ?? [];
+            return (
               "- Capture evidence for output schema " +
               schemaId +
-              " and connect it to the completion summary.",
-          )
+              (requiredArtifacts.length
+                ? `; required artifacts ${requiredArtifacts.join(", ")}`
+                : "") +
+              (requiredEvidence.length
+                ? `; required evidence ${requiredEvidence.join(", ")}`
+                : "") +
+              " and connect it to the completion summary." +
+              (versionedArtifacts.length
+                ? ` Select the exact accepted version and content hash for ${versionedArtifacts.join(", ")} with producer identity.`
+                : "")
+            );
+          })
           .join("\n")
       : "- Record the bounded completion summary and any declared artifact evidence.";
     const nodeContext = node
@@ -228,6 +272,9 @@ function substantiveFixtureContent(
       "",
       "### Required Skill Calls",
       requiredCalls,
+      "",
+      "### Guardrails",
+      guardrailDetails,
       "",
       "### Evidence",
       outputEvidence,
@@ -293,6 +340,8 @@ function substantiveFixtureContent(
   if (pathValue.endsWith("recovery.md")) {
     return [
       "# Recovery",
+      "",
+      "WorkflowRuntime remains the recovery authority; authoring guidance only explains its persisted boundary.",
       "",
       "## State First",
       "Start from persisted authoring and WorkflowRuntime state in a fresh process. Read the current Node, revision, lane records, and bounded findings before relying on any remembered context.",

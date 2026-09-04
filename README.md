@@ -13,6 +13,7 @@ The package includes:
 - generated authoring-pending scaffolds with resumable six-lane authoring
   sessions and protocol/evidence references;
 - hash-bound quick/full authoring review with deterministic self-consistency findings and composite authoring/runtime/publication readiness;
+- WorkflowProtocol-bound cross-validation of authored decisions, routes, Skill Calls, Output Schemas, guardrails, recovery, and artifact selection;
 - protected deterministic assembly with separate Auto-zone, Authored-zone, and
   source inventory ownership;
 - generated Badger plan, check, hook-guard, and WorkflowRuntime control-plane
@@ -44,7 +45,7 @@ missing context returns `null`. Existing files are validated before recovery,
 and unsafe references, path escapes, link traversal, oversized content, and
 failed writes are rejected without replacing the last valid state.
 
-Authoring leaves are substantive content boundaries, not free-form package edits. Entry Decision Core and Node Guidance must explain their semantic decisions, evidence, completion reasoning, red flags, and recovery behavior; decision-point leaves must distinguish genuine user decisions, automatic handling, stop conditions, and manual handoffs. Placeholder or underspecified content, undeclared route or choice references, and implicit latest-artifact selection keep assembly blocked.
+Authoring leaves are substantive content boundaries, not free-form package edits. Entry Decision Core and Node Guidance must explain their semantic decisions, evidence, completion reasoning, red flags, and recovery behavior; decision-point leaves must distinguish genuine user decisions, automatic handling, stop conditions, and manual handoffs. Placeholder or underspecified content, undeclared route or choice references, contradictory transitions, direct Run-state instructions, alternate recovery authorities, and implicit latest-artifact selection keep assembly blocked. Cross-validation evidence is recorded separately inside the hash-bound authoring review; it does not select routes or mutate WorkflowRuntime state.
 
 ## Standalone Run locations
 
@@ -76,7 +77,7 @@ node bin/badger.js authoring-dispatch prepared-workflow --lane script --output /
 node bin/badger.js assemble prepared-workflow --project . --json
 ```
 
-`badger review <name> --json` reports distinct authoring, runtime, and publication readiness. The `skill-review` lane records quick or full authoring evidence; full review requires three independent voter records and all four review lenses. Deterministic self-consistency findings are never replaced by provider findings. `badger approve` records only human publication approval after authoring, evaluation, and WorkflowRuntime evidence are current.
+`badger review <name> --json` reports distinct authoring, runtime, and publication readiness. The `skill-review` lane records quick or full authoring evidence; full review requires three independent voter records and all four review lenses. Deterministic self-consistency and WorkflowProtocol cross-validation findings never replace provider findings or WorkflowRuntime certification. `badger approve` records only human publication approval after authoring, evaluation, and WorkflowRuntime evidence are current.
 
 `authoring-plan` is read-only. It accepts a confirmed workflow name after
 initialization, derives the six-lane AuthoringPlan from the persisted normalized

@@ -199,6 +199,60 @@ export interface AuthoringReviewFinding extends AuthoringLaneFinding {
   voterIds?: string[];
 }
 
+export const AUTHORING_CROSS_VALIDATION_CODES = [
+  "invalid-workflow-protocol",
+  "workflow-protocol-hash-mismatch",
+  "duplicate-authored-document",
+  "missing-authored-document",
+  "missing-decision",
+  "missing-choice",
+  "undeclared-decision",
+  "undeclared-choice",
+  "missing-route",
+  "undeclared-route",
+  "hidden-exit",
+  "contradictory-transition",
+  "missing-required-skill-call",
+  "incomplete-required-skill-call",
+  "undeclared-skill-call",
+  "missing-output-schema",
+  "incomplete-output-schema",
+  "undeclared-output-schema",
+  "missing-guardrail",
+  "incomplete-guardrail",
+  "undeclared-guardrail",
+  "missing-recovery-reference",
+  "alternate-recovery-authority",
+  "alternate-route-authority",
+  "direct-run-state-instruction",
+  "implicit-latest-artifact",
+  "artifact-selection-without-version",
+] as const;
+
+export type AuthoringCrossValidationCode =
+  (typeof AUTHORING_CROSS_VALIDATION_CODES)[number];
+
+export interface AuthoringCrossValidationFinding {
+  code: AuthoringCrossValidationCode;
+  severity: AuthoringFindingSeverity;
+  lens: AuthoringReviewLens;
+  path: string;
+  subject: string;
+  message: string;
+  expected?: string;
+  observed?: string;
+}
+
+export interface AuthoringCrossValidationResult {
+  schemaVersion: 1;
+  authority: "WorkflowProtocol";
+  workflowProtocolHash: string;
+  checkedArtifacts: string[];
+  findings: AuthoringCrossValidationFinding[];
+  passed: boolean;
+  crossValidationHash: string;
+}
+
 export interface AuthoringReviewVoterEvidence {
   id: string;
   provider: string;
@@ -333,6 +387,7 @@ export interface AuthoringReviewResult {
   packageHash: string;
   reviewHash: string;
   voterEvidence: AuthoringReviewVoterEvidence[];
+  crossValidation?: AuthoringCrossValidationResult;
 }
 
 export interface AuthoringRecord {

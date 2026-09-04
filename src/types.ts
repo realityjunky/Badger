@@ -1,5 +1,6 @@
 import type { RuntimeIdentity } from "./engine/types.js";
 import type {
+  AuthoringCrossValidationResult,
   AuthoringReviewResult,
   AuthoringStateSummary,
 } from "./authoring/types.js";
@@ -1174,6 +1175,7 @@ export interface CreatorState {
     hash: string;
     passed: boolean;
     resultPath: string;
+    authoringCrossValidation?: AuthoringCrossValidationResult;
     runtime?: WorkflowRuntimeCertificationEvidence;
   };
   authoring?: AuthoringStateSummary;
@@ -1191,6 +1193,7 @@ export interface EvalReport {
   hash: string;
   passed: boolean;
   checks: Array<{ id: string; passed: boolean; detail: string }>;
+  authoringCrossValidation?: AuthoringCrossValidationResult;
   runtime?: WorkflowRuntimeCertificationEvidence;
 }
 

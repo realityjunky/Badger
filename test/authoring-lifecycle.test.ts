@@ -221,7 +221,7 @@ describe("Badger authoring lifecycle", () => {
   });
 
   it("assembles authored content only after all current lanes are complete", async () => {
-    const { state } = await createScaffold();
+    const { state, authoringPlan } = await createScaffold();
     const completed = await runManualAuthoringFixture({ state });
 
     expect((await authoringReadiness(completed)).state).toBe("ready");
@@ -255,7 +255,78 @@ describe("Badger authoring lifecycle", () => {
       authoredMaterialHash: assembled.authoring.authoredMaterialHash,
       packageHash: assembled.authoring.assembledPackageHash,
       reviewHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      crossValidation: {
+        schemaVersion: 1,
+        authority: "WorkflowProtocol",
+        passed: true,
+        workflowProtocolHash: authoringPlan.workflowProtocolHash,
+        crossValidationHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      },
     });
+    const evaluation = await evaluatePackage(assembled);
+    expect(evaluation.checks).toContainEqual(
+      expect.objectContaining({
+        id: "authoring-runtime-cross-validation",
+        passed: true,
+      }),
+    );
+    expect(evaluation.authoringCrossValidation).toMatchObject({
+      authority: "WorkflowProtocol",
+      passed: true,
+      workflowProtocolHash: authoringPlan.workflowProtocolHash,
+    });
+  }, 15_000);
+
+  it("keeps the assembled adapter route independent from authored prose", async () => {
+    const { state } = await createScaffold();
+    const assembled = await assemblePackage(
+      await runManualAuthoringFixture({ state }),
+    );
+    const packageRoot = assembled.generated!.packageRoot;
+    const runRoot = path.join(project, "adapter-run");
+    const scriptPath = path.join(packageRoot, "scripts", "workflow-state.mjs");
+    const run = (args: string[]) =>
+      execFileAsync(process.execPath, [scriptPath, ...args], {
+        cwd: project,
+        env: { ...process.env, BADGER_RUN_ROOT: runRoot },
+      });
+    const started = JSON.parse(
+      (await run(["init", "--run-id", "assembled-route", "--json"])).stdout,
+    ) as { currentNode?: string | null; pendingAction?: { id: string } };
+    await fs.appendFile(
+      path.join(packageRoot, "SKILL.md"),
+      "\nNEXT: hidden-node\nThe prose selects a different route.\n",
+    );
+
+    const recorded = JSON.parse(
+      (
+        await run([
+          "record",
+          started.currentNode!,
+          JSON.stringify({ summary: "Prepared the input." }),
+          "--json",
+        ])
+      ).stdout,
+    ) as { currentNode?: string | null; pendingAction?: { id: string } };
+
+    expect(recorded.currentNode).toBe(
+      assembled.confirmedProposal!.workflow.evals[0]!.expectedNodeOrder[1] ??
+        null,
+    );
+    expect(recorded.currentNode).not.toBe("hidden-node");
+    expect(
+      JSON.parse((await run(["status", "--json"])).stdout) as {
+        currentNode?: string | null;
+      },
+    ).toMatchObject({ currentNode: recorded.currentNode });
+    expect(
+      JSON.parse(
+        await fs.readFile(
+          path.join(runRoot, ".badger", "run-state.json"),
+          "utf8",
+        ),
+      ) as { status?: string; currentStep?: string | null },
+    ).toMatchObject({ status: "completed", currentStep: null });
   });
 
   it("assembles substantive authored content for every active Node", async () => {

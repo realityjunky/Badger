@@ -11,8 +11,13 @@ import {
   AUTHORING_LANE_IDS,
 } from "./protocol.js";
 import {
+  crossValidateAuthoringPackage,
+  validateAuthoringCrossValidationResult,
+} from "./cross-validation.js";
+import {
   AUTHORING_REVIEW_LENSES,
   type AuthoringDepth,
+  type AuthoringCrossValidationResult,
   type AuthoringLaneFinding,
   type AuthoringLaneId,
   type AuthoringPlan,
@@ -246,6 +251,11 @@ export function validateAuthoringReviewResult(value: unknown): string[] {
         });
       }
     });
+  }
+  if (value.crossValidation !== undefined) {
+    findings.push(
+      ...validateAuthoringCrossValidationResult(value.crossValidation),
+    );
   }
   return [...new Set(findings)];
 }
@@ -585,6 +595,7 @@ export function composeAuthoringReview(options: {
   authoringInputHash: string;
   authoredMaterialHash: string;
   packageHash: string;
+  crossValidation?: AuthoringCrossValidationResult;
 }): AuthoringReviewResult {
   const source = options.input.evidenceSource ?? "deterministic-check-only";
   const mode = (options.input.mode ?? options.plan.depth) as AuthoringDepth;
@@ -707,6 +718,9 @@ export function composeAuthoringReview(options: {
         normalizeFinding(finding, "provider"),
       ),
     })),
+    ...(options.crossValidation
+      ? { crossValidation: options.crossValidation }
+      : {}),
   };
   return {
     ...resultWithoutHash,
@@ -1044,8 +1058,32 @@ export async function buildAuthoringReview(
     dryRounds: 1,
     reviewedAt: "1970-01-01T00:00:00.000Z",
   };
+  const crossValidation = options.assembled
+    ? await crossValidateAuthoringPackage({
+        packageRoot: options.packageRoot,
+        plan: options.plan,
+      })
+    : undefined;
+  const crossValidationFindings = (crossValidation?.findings ?? []).map(
+    (item) =>
+      ({
+        severity: item.severity,
+        lens: item.lens,
+        source: "deterministic" as const,
+        path: item.path,
+        claim: item.subject,
+        problem: item.message,
+        impact: item.observed
+          ? `Observed authored value: ${item.observed}.`
+          : "Authored content does not match the declared WorkflowProtocol.",
+        fix: item.expected
+          ? `Align authored guidance with ${item.expected}.`
+          : "Align authored guidance with the declared WorkflowProtocol.",
+      }) satisfies AuthoringReviewFinding,
+  );
   const deterministicFindings = [
     ...recordFindings(options.plan, options.records),
+    ...crossValidationFindings,
     ...(await packageFindings(options)),
   ];
   const inputValidation = validateAuthoringReviewInput(
@@ -1071,5 +1109,6 @@ export async function buildAuthoringReview(
     authoringInputHash: options.authoringInputHash,
     authoredMaterialHash: options.authoredMaterialHash,
     packageHash: options.packageHash,
+    crossValidation,
   });
 }

@@ -4,7 +4,11 @@ import type { CreatorState, EvalReport, WorkflowProtocol } from "../types.js";
 import { hashDirectory, atomicWrite } from "../util.js";
 import { writeState } from "../factory/state.js";
 import { certifyWorkflowRuntime } from "./workflow-runtime-certification.js";
-import { authoringReadiness } from "../authoring/lifecycle.js";
+import {
+  authoringReadiness,
+  readAuthoringPlan,
+} from "../authoring/lifecycle.js";
+import { crossValidateAuthoringPackage } from "../authoring/cross-validation.js";
 
 export async function evaluatePackage(
   state: CreatorState,
@@ -14,6 +18,7 @@ export async function evaluatePackage(
   const root = state.generated.packageRoot;
   const hash = await hashDirectory(root);
   const checks: EvalReport["checks"] = [];
+  let authoringCrossValidation: EvalReport["authoringCrossValidation"];
   const protocolPath = state.generated.protocolPath;
   const protocol = JSON.parse(
     await fs.readFile(protocolPath, "utf8"),
@@ -94,6 +99,37 @@ export async function evaluatePackage(
         ? "Authoring evidence and assembled package match the current hash"
         : authoring.blockers.join("; ") || "Current package is not assembled",
     });
+    if (state.authoring.status !== "assembled") {
+      checks.push({
+        id: "authoring-runtime-cross-validation",
+        passed: false,
+        detail: "WorkflowProtocol cross-validation is deferred until assembly",
+      });
+    } else {
+      try {
+        const plan = await readAuthoringPlan(state);
+        const crossValidation = await crossValidateAuthoringPackage({
+          packageRoot: root,
+          plan,
+        });
+        authoringCrossValidation = crossValidation;
+        checks.push({
+          id: "authoring-runtime-cross-validation",
+          passed: crossValidation.passed,
+          detail: crossValidation.passed
+            ? `WorkflowProtocol-bound authored guidance validated (${crossValidation.crossValidationHash})`
+            : crossValidation.findings
+                .map((finding) => finding.message)
+                .join("; "),
+        });
+      } catch (error) {
+        checks.push({
+          id: "authoring-runtime-cross-validation",
+          passed: false,
+          detail: `Unable to cross-validate authored guidance: ${String(error)}`,
+        });
+      }
+    }
   }
   const runtime = await certifyWorkflowRuntime({
     protocol,
@@ -114,6 +150,7 @@ export async function evaluatePackage(
     hash,
     passed,
     checks,
+    ...(authoringCrossValidation ? { authoringCrossValidation } : {}),
     ...(runtime.evidence ? { runtime: runtime.evidence } : {}),
   };
   const resultPath = path.join(
@@ -128,6 +165,7 @@ export async function evaluatePackage(
     hash,
     passed,
     resultPath,
+    ...(authoringCrossValidation ? { authoringCrossValidation } : {}),
     ...(runtime.evidence ? { runtime: runtime.evidence } : {}),
   };
   state.status = passed ? "evaluated" : "generated";
