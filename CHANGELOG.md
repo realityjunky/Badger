@@ -4,6 +4,10 @@
 
 ### Added
 
+- **Legacy draft migration**: Added source-identity manifests, explicit
+  retained/replaced/wrapped upgrade decisions, legacy scaffold classification,
+  and a confirmed sibling migration path into authoring.
+
 - **Authoring preview**: Added a read-only six-lane AuthoringPlan preview with
   pinned upstream protocol evidence and separate authoring and workflow
   protocol hashes.

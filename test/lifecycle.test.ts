@@ -7,6 +7,12 @@ import { generatePackage } from "../src/factory/generate.js";
 import { initializeState, readState } from "../src/factory/state.js";
 import { evaluatePackage } from "../src/eval/run.js";
 import {
+  assemblePackage,
+  initializeAuthoringSession,
+  runManualAuthoringFixture,
+} from "../src/authoring/index.js";
+import { deriveAuthoringPlan } from "../src/authoring/plan.js";
+import {
   approveReview,
   distributePreview,
   publishState,
@@ -103,6 +109,17 @@ describe("standalone Creator lifecycle", () => {
       destination: initial.draftPath,
     });
     initial.generated = generated;
+    await initializeAuthoringSession({
+      state: initial,
+      plan: deriveAuthoringPlan({ proposal }),
+      generated,
+    });
+    Object.assign(
+      initial,
+      await assemblePackage(
+        await runManualAuthoringFixture({ state: initial }),
+      ),
+    );
     const report = await evaluatePackage(initial);
     expect(report.passed).toBe(true);
     expect(report.runtime).toMatchObject({

@@ -22,6 +22,10 @@ import {
   recordAuthoringFile,
 } from "./authoring/index.js";
 import {
+  classifyCreatorDraft,
+  migrateLegacyDraft,
+} from "./factory/migration.js";
+import {
   runEngineDifferential,
   runOfficialEngineBaseline,
 } from "./differential/engine/run.js";
@@ -56,6 +60,7 @@ program
         resumable: states.map((state) => ({
           name: state.name,
           status: state.status,
+          classification: classifyCreatorDraft(state),
           authoring: state.authoring?.status ?? "legacy-scaffold",
         })),
       },
@@ -118,6 +123,44 @@ program
       await authoringReadiness(
         await readState(projectRoot(options.project), name),
       ),
+      options.json,
+    );
+  });
+
+program
+  .command("migrate <name>")
+  .alias("migrate-legacy")
+  .description("Migrate a legacy deterministic draft into authoring")
+  .requiredOption("--confirm", "Confirm migration writes")
+  .addOption(
+    new Option("--depth <depth>", "Authoring review depth")
+      .choices(["quick", "full"])
+      .default("quick"),
+  )
+  .option("--destination <dir>", "Destination for the migrated package")
+  .option("--project <dir>", "Project root", ".")
+  .option("--json", "JSON output")
+  .action(async (name, options) => {
+    const root = projectRoot(options.project);
+    const result = await migrateLegacyDraft({
+      state: await readState(root, name),
+      confirmed: options.confirm,
+      depth: options.depth,
+      ...(options.destination
+        ? { destination: path.resolve(root, options.destination) }
+        : {}),
+    });
+    emit(
+      {
+        name,
+        status: result.state.status,
+        classification: "authoring-required",
+        sourceRoot: result.sourceRoot,
+        destination: result.destination,
+        migrationPath: result.migrationPath,
+        authoring: result.state.authoring,
+        generated: result.state.generated,
+      },
       options.json,
     );
   });
@@ -279,10 +322,9 @@ program
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (name, options) => {
-    emit(
-      reviewState(await readState(projectRoot(options.project), name)),
-      options.json,
-    );
+    const state = await readState(projectRoot(options.project), name);
+    await authoringReadiness(state);
+    emit(reviewState(state), options.json);
   });
 
 program

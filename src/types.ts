@@ -1085,6 +1085,41 @@ export interface SkillSource {
   hash: string;
 }
 
+export interface UpgradeSourceFileEvidence {
+  path: string;
+  bytes: number;
+  hash: string;
+}
+
+export interface UpgradeSourceEvidence {
+  schemaVersion: 1;
+  kind: "badger-upgrade-source";
+  root: string;
+  hash: string;
+  files: UpgradeSourceFileEvidence[];
+}
+
+export type UpgradeMigrationDecisionKind = "retained" | "replaced" | "wrapped";
+
+export interface UpgradeMigrationDecision {
+  sourcePath: string;
+  preservedPath: string;
+  destinationPath: string;
+  sourceHash: string;
+  decision: UpgradeMigrationDecisionKind;
+  reason: string;
+}
+
+export interface UpgradeMigrationManifest {
+  schemaVersion: 1;
+  kind: "badger-upgrade-migration";
+  sourceRoot: string;
+  sourceHash: string;
+  files: UpgradeSourceFileEvidence[];
+  decisions: UpgradeMigrationDecision[];
+  preservedAt: "scaffold" | "assembled";
+}
+
 export interface SkillCandidate {
   query: string;
   preferenceIndex: number | null;
@@ -1124,10 +1159,15 @@ export interface FactoryProposal {
   blockers: string[];
   warnings: string[];
   canInitialize: boolean;
+  sourceRoot?: string;
+  upgradeSource?: UpgradeSourceEvidence;
 }
 
 export type CreatorStatus =
   "draft" | "generated" | "evaluated" | "review-approved" | "published";
+
+export type CreatorDraftClassification =
+  "uninitialized" | "legacy-scaffold-only" | "authoring-required";
 
 export interface ReadinessSection {
   state: "blocked" | "ready";
@@ -1170,6 +1210,8 @@ export interface CreatorState {
     sourceHash?: string;
     assembledPackageHash?: string;
     inventory?: GeneratedPackageFile[];
+    sourceEvidencePath?: string;
+    sourceEvidence?: UpgradeMigrationManifest;
   };
   eval?: {
     hash: string;

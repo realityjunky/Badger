@@ -73,6 +73,38 @@ function sourceEvidence(proposal: FactoryProposal): AuthoringSourceEvidence[] {
   }));
 }
 
+function validateUpgradeSource(
+  value: unknown,
+  diagnostics: AuthoringPlanDiagnostic[],
+): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) {
+    diagnostics.push(
+      diagnostic(
+        "invalid-plan",
+        "AuthoringPlan.upgradeSource must be an object",
+        "upgradeSource",
+      ),
+    );
+    return;
+  }
+  if (
+    value.schemaVersion !== 1 ||
+    value.kind !== "badger-upgrade-source" ||
+    typeof value.root !== "string" ||
+    !hashPattern.test(String(value.hash)) ||
+    !Array.isArray(value.files)
+  ) {
+    diagnostics.push(
+      diagnostic(
+        "invalid-plan",
+        "AuthoringPlan.upgradeSource evidence is invalid",
+        "upgradeSource",
+      ),
+    );
+  }
+}
+
 function proposalDiagnostics(
   proposal: FactoryProposal,
 ): AuthoringPlanDiagnostic[] {
@@ -152,6 +184,12 @@ function planForProposal(
   const workflowProtocolHash = sha256(
     JSON.stringify(options.proposal.workflow),
   );
+  const sourceEvidenceValue = options.proposal.upgradeSource
+    ? {
+        candidates: source,
+        upgradeSource: options.proposal.upgradeSource,
+      }
+    : source;
   return {
     schemaVersion: 1,
     kind: "authoring-plan",
@@ -160,7 +198,9 @@ function planForProposal(
     protocolHash: AUTHORING_PROTOCOL_HASH,
     workflowProtocolHash,
     planHash: options.proposal.planHash,
-    sourceEvidenceHash: sha256(JSON.stringify(stableValue(source))),
+    sourceEvidenceHash: sha256(
+      JSON.stringify(stableValue(sourceEvidenceValue)),
+    ),
     dag: {
       wave1: [...AUTHORING_DAG.wave1],
       wave2: [...AUTHORING_DAG.wave2],
@@ -182,6 +222,9 @@ function planForProposal(
       contentLeaves,
     },
     sourceEvidence: source,
+    ...(options.proposal.upgradeSource
+      ? { upgradeSource: structuredClone(options.proposal.upgradeSource) }
+      : {}),
     compatibility: structuredClone(AUTHORING_COMPATIBILITY),
   };
 }
@@ -488,6 +531,7 @@ export function validateAuthoringPlan(
       ),
     );
   validateDag(value.dag, diagnostics);
+  validateUpgradeSource(value.upgradeSource, diagnostics);
   const requireExtensions = options.requireExtensions === true;
   validateLaneArray(value.lanes, diagnostics, requireExtensions);
   if (!isRecord(value.verify))

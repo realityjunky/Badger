@@ -410,6 +410,7 @@ const SHELL_LANGUAGES = new Set([
 ]);
 
 function authoredHeading(artifactPath: string): string | undefined {
+  if (artifactPath.startsWith("source/")) return undefined;
   if (artifactPath === "SKILL.md") return "Decision Core";
   if (artifactPath.endsWith("/SKILL.md")) return "Guidance";
   return undefined;
@@ -576,12 +577,12 @@ function sourceBody(content: string): string {
   return (frontmatter ? content.slice(frontmatter[0].length) : content).trim();
 }
 
-function copiesCompleteSourceSkillBody(
+async function copiesCompleteSourceSkillBody(
   state: CreatorState,
   content: string,
-): boolean {
+): Promise<boolean> {
   const normalizedContent = content.trim();
-  return (
+  if (
     state.confirmedProposal?.candidates.some((candidate) =>
       candidate.sources.some((source) => {
         const normalizedSource = sourceBody(source.skillMd);
@@ -589,8 +590,34 @@ function copiesCompleteSourceSkillBody(
           normalizedSource.length > 0 && normalizedSource === normalizedContent
         );
       }),
-    ) ?? false
-  );
+    )
+  ) {
+    return true;
+  }
+  const sourceRoots = [
+    state.generated?.sourceRoot,
+    state.generated?.packageRoot
+      ? path.join(state.generated.packageRoot, "source")
+      : undefined,
+  ].filter((root): root is string => root !== undefined);
+  for (const sourceRoot of sourceRoots) {
+    try {
+      const sourceContent = await fs.readFile(
+        path.join(sourceRoot, "SKILL.md"),
+        "utf8",
+      );
+      const normalizedSource = sourceBody(sourceContent);
+      if (
+        normalizedSource.length > 0 &&
+        normalizedSource === normalizedContent
+      ) {
+        return true;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return false;
 }
 
 function substantiveContentFindings(
@@ -2368,7 +2395,7 @@ async function materializeArtifact(
     content = suppliedContent;
   }
   if (content !== undefined) {
-    if (copiesCompleteSourceSkillBody(state, content)) {
+    if (await copiesCompleteSourceSkillBody(state, content)) {
       throw new Error(
         `Authoring content copies a complete source Skill body: ${input.path}`,
       );
@@ -2711,7 +2738,7 @@ async function readArtifactContent(
     throw new Error(
       `Authoring artifact cannot replace package frontmatter: ${artifact.path}`,
     );
-  if (copiesCompleteSourceSkillBody(state, content)) {
+  if (await copiesCompleteSourceSkillBody(state, content)) {
     throw new Error(
       `Authoring content copies a complete source Skill body: ${artifact.path}`,
     );
@@ -2949,13 +2976,21 @@ export async function authoringReadiness(
   const recoveredSummary = state.authoring
     ? state.authoring
     : await currentAuthoringSummary(state);
-  if (!state.generated || !recoveredSummary)
+  if (!state.generated || !recoveredSummary) {
+    const legacyDraft = Boolean(state.generated);
     return {
       state: "blocked",
-      status: "pending",
-      blockers: ["Authoring session is missing; generate a confirmed scaffold"],
+      status: legacyDraft ? "legacy" : "pending",
+      blockers: [
+        legacyDraft
+          ? "Legacy deterministic scaffold is scaffold-only; migrate before authoring or publication"
+          : "Authoring session is missing; generate a confirmed scaffold",
+      ],
       warnings: [],
-      evidence: { draft: state.draftPath },
+      evidence: {
+        draft: state.draftPath,
+        ...(state.generated ? { generated: state.generated.packageRoot } : {}),
+      },
       records: emptyRecords,
       nextLanes: [],
       completedLanes: [],
@@ -2977,6 +3012,7 @@ export async function authoringReadiness(
       ],
       recovery: recoveryInfo(state),
     };
+  }
   if (!state.authoring) state.authoring = recoveredSummary;
   let authoring: AuthoringStateSummary = recoveredSummary;
   try {
@@ -3048,6 +3084,22 @@ export async function authoringReadiness(
   blockers.push(...stored.errors);
   authoring = reconcileRecordRevision(state, authoring, stored.records);
   const invalidated = new Set(authoring.invalidatedLanes ?? []);
+  const sourceDrift = await sourceEvidenceDrift(state, plan);
+  if (sourceDrift.length) {
+    for (const lane of AUTHORING_LANE_IDS) invalidated.add(lane);
+    authoring = {
+      ...authoring,
+      status: "stale",
+      invalidatedLanes: AUTHORING_LANE_IDS.filter((lane) =>
+        invalidated.has(lane),
+      ),
+    };
+    blockers.push(...sourceDrift);
+    blockers.push(
+      "Source evidence drift invalidates all authoring lanes; regenerate and re-record them",
+    );
+    state.authoring = authoring;
+  }
   const currentInputHash = authoringInputHash(plan);
   if (authoring.authoringInputHash !== currentInputHash)
     blockers.push("Authoring input evidence is stale; regenerate the scaffold");
@@ -3320,31 +3372,52 @@ async function assertAuthoringPlanCurrent(
     throw new Error("Factory plan input is stale for the confirmed proposal");
 }
 
+async function sourceEvidenceDrift(
+  state: CreatorState,
+  plan: AuthoringPlan,
+): Promise<string[]> {
+  const sources = new Map<string, { label: string; hash: string }>();
+  for (const candidate of plan.sourceEvidence) {
+    for (const source of candidate.sources) {
+      sources.set(source.root, { label: source.name, hash: source.hash });
+    }
+  }
+  if (plan.upgradeSource) {
+    sources.set(plan.upgradeSource.root, {
+      label: "upgrade source",
+      hash: plan.upgradeSource.hash,
+    });
+  }
+  if (state.generated?.sourceRoot && state.generated.sourceHash) {
+    sources.set(state.generated.sourceRoot, {
+      label: "upgrade source",
+      hash: state.generated.sourceHash,
+    });
+  }
+  const findings: string[] = [];
+  for (const [root, source] of sources) {
+    let currentHash: string;
+    try {
+      currentHash = await hashDirectory(root);
+    } catch (error) {
+      findings.push(
+        `Authoring source evidence is unavailable for ${source.label}: ${String(error)}`,
+      );
+      continue;
+    }
+    if (currentHash !== source.hash) {
+      findings.push(`Authoring source evidence is stale: ${source.label}`);
+    }
+  }
+  return findings;
+}
+
 async function assertSourceEvidenceCurrent(
   state: CreatorState,
   plan: AuthoringPlan,
 ): Promise<void> {
-  for (const candidate of plan.sourceEvidence) {
-    for (const source of candidate.sources) {
-      let currentHash: string;
-      try {
-        currentHash = await hashDirectory(source.root);
-      } catch (error) {
-        throw new Error(
-          `Authoring source evidence is unavailable for ${source.name}: ${String(error)}`,
-        );
-      }
-      if (currentHash !== source.hash)
-        throw new Error(`Authoring source evidence is stale: ${source.name}`);
-    }
-  }
-  if (state.generated?.sourceRoot && state.generated.sourceHash) {
-    const currentHash = await hashDirectory(state.generated.sourceRoot);
-    if (currentHash !== state.generated.sourceHash)
-      throw new Error(
-        "Upgrade source evidence is stale; regenerate the scaffold",
-      );
-  }
+  const findings = await sourceEvidenceDrift(state, plan);
+  if (findings.length) throw new Error(findings.join("\n"));
 }
 
 async function readPackageInventoryProjection(
@@ -3438,7 +3511,17 @@ async function assertCurrentPackageMatchesScaffold(options: {
         [...authored],
         "assembled",
       );
-    const current = await fs.readFile(currentPath, "utf8");
+    let current = await fs.readFile(currentPath, "utf8");
+    if (relativePath === "reference/source-evidence.json") {
+      const normalizeSourceEvidence = (content: string): string => {
+        const value = JSON.parse(content) as Record<string, unknown>;
+        return (
+          JSON.stringify({ ...value, preservedAt: "scaffold" }, null, 2) + "\n"
+        );
+      };
+      current = normalizeSourceEvidence(current);
+      expected = normalizeSourceEvidence(expected);
+    }
     const heading = authoredHeading(relativePath);
     const comparable = heading
       ? replaceSection(current, heading, "__AUTHORED_SECTION_IGNORED__")
@@ -3654,6 +3737,15 @@ export async function assemblePackage(
         plan,
         records: stored.records,
       });
+      const assembledSourceEvidence = scaffold.sourceEvidence
+        ? { ...scaffold.sourceEvidence, preservedAt: "assembled" as const }
+        : undefined;
+      if (assembledSourceEvidence) {
+        await atomicWrite(
+          path.join(scaffold.packageRoot, "reference", "source-evidence.json"),
+          JSON.stringify(assembledSourceEvidence, null, 2) + "\n",
+        );
+      }
       const authoredPaths = authoredLeafPaths(plan);
       const artifactTargets = new Set<string>();
       for (const laneId of AUTHORING_LANE_IDS) {
@@ -3765,6 +3857,9 @@ export async function assemblePackage(
         ),
         inventory,
         assembledPackageHash,
+        ...(assembledSourceEvidence
+          ? { sourceEvidence: assembledSourceEvidence }
+          : {}),
       };
       const swap = await swapAssemblyDirectory(
         scaffold.packageRoot,

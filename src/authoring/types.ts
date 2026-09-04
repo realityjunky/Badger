@@ -1,4 +1,8 @@
-import type { FactoryProposal, SkillCandidate } from "../types.js";
+import type {
+  FactoryProposal,
+  SkillCandidate,
+  UpgradeSourceEvidence,
+} from "../types.js";
 
 export type AuthoringDepth = "quick" | "full";
 
@@ -128,6 +132,7 @@ export interface AuthoringPlan {
   verify: AuthoringVerificationSettings;
   merge: AuthoringMergeContract;
   sourceEvidence: AuthoringSourceEvidence[];
+  upgradeSource?: UpgradeSourceEvidence;
   compatibility: AuthoringCompatibility;
 }
 
@@ -432,7 +437,7 @@ export interface AuthoringRecordInput {
 }
 
 export type AuthoringSessionStatus =
-  "pending" | "in-progress" | "stale" | "authored" | "assembled";
+  "pending" | "in-progress" | "stale" | "authored" | "assembled" | "legacy";
 
 export interface AuthoringRecordSummary {
   path: string;

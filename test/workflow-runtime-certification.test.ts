@@ -384,7 +384,10 @@ describe("WorkflowRuntime Phase 3 certification", () => {
         runtime: result.evidence!,
       },
     };
-    expect(reviewState(state).state).toBe("reviewable");
+    expect(reviewState(state).state).toBe("blocked");
+    expect(reviewState(state).authoring.blockers).toContain(
+      "Legacy deterministic scaffold is scaffold-only; migrate before authoring or publication",
+    );
 
     const missingPhase4 = structuredClone(state);
     delete missingPhase4.eval!.runtime!.phase4;

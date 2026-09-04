@@ -7,6 +7,8 @@ import type {
   FactoryProposal,
   GeneratedPackageFile,
   NodeProtocol,
+  UpgradeMigrationManifest,
+  UpgradeSourceEvidence,
 } from "../types.js";
 import {
   copyDirectory,
@@ -32,6 +34,11 @@ import {
 import { normalizeWorkflowRepairPolicy } from "../workflow-runtime/repair.js";
 import { deriveAuthoringPlan } from "../authoring/plan.js";
 import type { AuthoringDepth } from "../authoring/types.js";
+import {
+  assertUpgradeDestinationOutsideSource,
+  createUpgradeMigrationManifest,
+  inspectUpgradeSource,
+} from "./source.js";
 
 function nodeSkillName(workflow: string, node: string): string {
   return `${slug(workflow) || "workflow"}-${slug(node) || "node"}`;
@@ -49,6 +56,8 @@ export interface GeneratedPackage {
   sourceRoot?: string;
   sourceHash?: string;
   assembledPackageHash?: string;
+  sourceEvidencePath?: string;
+  sourceEvidence?: UpgradeMigrationManifest;
 }
 
 function entryMarkdown(proposal: FactoryProposal): string {
@@ -138,6 +147,9 @@ function entryMarkdown(proposal: FactoryProposal): string {
   const executableNodeOrder = executableNodeIds
     .map((nodeId) => `\`${nodeId}\``)
     .join(" → ");
+  const upgradeSourceSection = proposal.upgradeSource
+    ? "\n## Upgrade Source\n\nThe original Skill package is preserved unchanged under `source/`. The migration manifest at `reference/source-evidence.json` records the source identity and whether each source path was retained, replaced by Badger control-plane material, or wrapped by authored guidance.\n"
+    : "";
   return `---
 name: ${proposal.name}
 description: ${JSON.stringify(`Run the ${proposal.name} workflow: ${descriptionGoal}.`)}
@@ -232,6 +244,8 @@ references themselves.
 ## Executable Node Order
 
 Executable Node Order: ${executableNodeOrder || "(empty)"}
+
+${upgradeSourceSection}
 
 ## Workflow Nodes
 
@@ -363,6 +377,37 @@ const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 
 function activeNodes(proposal: FactoryProposal): NodeProtocol[] {
   return proposal.workflow.nodes.filter((node) => !node.disabled);
+}
+
+function generatedPackagePaths(
+  proposal: FactoryProposal,
+  hasAuthoringPlan: boolean,
+  hasSourceEvidence: boolean,
+): string[] {
+  return [
+    "SKILL.md",
+    ...activeNodes(proposal).map(
+      (node) => `${nodeSkillName(proposal.name, node.id)}/SKILL.md`,
+    ),
+    "reference/workflow-protocol.json",
+    "reference/resolved-skills.json",
+    ...(hasAuthoringPlan ? ["reference/authoring-plan.json"] : []),
+    "reference/authoring-lanes.json",
+    "reference/composition-report.md",
+    "reference/decision-points.md",
+    "reference/recovery.md",
+    "reference/skill-review.md",
+    "reference/eval-manifest.json",
+    ...AUTHORING_LANE_IDS.map((lane) => AUTHORING_PROTOCOL.lanes[lane].brief),
+    ...AUTHORING_CONTROL_PLANE_SCRIPTS.map((script) => script.path),
+    "scripts/workflow-runtime.mjs",
+    "reference/package-inventory.json",
+    ...(hasSourceEvidence ? ["reference/source-evidence.json"] : []),
+    "badger/skill.yaml",
+    "badger/guardrails.yaml",
+    "badger/checks.yaml",
+    "badger/eval.yaml",
+  ];
 }
 
 function authoringLanesScaffold(
@@ -586,30 +631,11 @@ function badgerCheckScript(
   hasSourceEvidence: boolean,
   sourcePaths: readonly string[],
 ): string {
-  const required = [
-    "SKILL.md",
-    ...activeNodes(proposal).map(
-      (node) => `${nodeSkillName(proposal.name, node.id)}/SKILL.md`,
-    ),
-    "reference/workflow-protocol.json",
-    "reference/resolved-skills.json",
-    ...(hasAuthoringPlan ? ["reference/authoring-plan.json"] : []),
-    "reference/authoring-lanes.json",
-    "reference/composition-report.md",
-    "reference/decision-points.md",
-    "reference/recovery.md",
-    "reference/skill-review.md",
-    "reference/eval-manifest.json",
-    ...AUTHORING_LANE_IDS.map((lane) => AUTHORING_PROTOCOL.lanes[lane].brief),
-    ...AUTHORING_CONTROL_PLANE_SCRIPTS.map((script) => script.path),
-    "scripts/workflow-runtime.mjs",
-    "reference/package-inventory.json",
-    ...(hasSourceEvidence ? ["reference/source-evidence.json"] : []),
-    "badger/skill.yaml",
-    "badger/guardrails.yaml",
-    "badger/checks.yaml",
-    "badger/eval.yaml",
-  ];
+  const required = generatedPackagePaths(
+    proposal,
+    hasAuthoringPlan,
+    hasSourceEvidence,
+  );
   const expectedScripts = AUTHORING_CONTROL_PLANE_SCRIPTS.map((script) => ({
     ...script,
   }));
@@ -740,13 +766,14 @@ async function writeScaffold(options: {
   proposal: FactoryProposal;
   plan: FactoryPlan;
   root: string;
-  sourceRoot?: string;
-  sourceHash?: string;
+  sourceEvidence?: UpgradeSourceEvidence;
   authoringDepth?: AuthoringDepth;
 }): Promise<{
   authoringPlanPath: string;
   sourceRoot?: string;
   sourceHash?: string;
+  sourceEvidencePath?: string;
+  sourceEvidence?: UpgradeMigrationManifest;
 }> {
   const root = path.resolve(options.root);
   const proposal = options.proposal;
@@ -754,15 +781,19 @@ async function writeScaffold(options: {
   const authoringPlan = HASH_PATTERN.test(proposal.planHash)
     ? deriveAuthoringPlan({ proposal, depth: options.authoringDepth })
     : undefined;
-  const sourcePaths = options.sourceRoot
-    ? (await listFiles(options.sourceRoot)).flatMap((relativePath) => [
-        relativePath.replaceAll("\\", "/"),
-        `source/${relativePath.replaceAll("\\", "/")}`,
+  const sourcePaths = options.sourceEvidence
+    ? options.sourceEvidence.files.flatMap((file) => [
+        file.path,
+        `source/${file.path}`,
       ])
     : [];
-  if (options.sourceRoot) {
-    await fs.cp(options.sourceRoot, root, { recursive: true, force: false });
-    await copyDirectory(options.sourceRoot, path.join(root, "source"));
+  if (options.sourceEvidence) {
+    await fs.cp(options.sourceEvidence.root, root, {
+      recursive: true,
+      force: false,
+    });
+    await fs.rm(path.join(root, "source"), { recursive: true, force: true });
+    await copyDirectory(options.sourceEvidence.root, path.join(root, "source"));
   }
   await ensureDirectory(path.join(root, "reference"));
   await ensureDirectory(path.join(root, "badger"));
@@ -810,18 +841,16 @@ async function writeScaffold(options: {
       ? `# Composition Report\n\nAuthoring evidence will be rendered here after the six lane records are validated.\n\n- Authoring Protocol: \`${authoringPlan.protocolHash}\`\n- Workflow Protocol: \`${authoringPlan.workflowProtocolHash}\`\n- Source evidence: \`${authoringPlan.sourceEvidenceHash}\`\n`
       : "# Composition Report\n\nThis legacy scaffold has no authoring plan.\n",
   );
-  if (options.sourceRoot && options.sourceHash) {
+  const sourceMigration = options.sourceEvidence
+    ? createUpgradeMigrationManifest(
+        options.sourceEvidence,
+        generatedPackagePaths(proposal, Boolean(authoringPlan), true),
+      )
+    : undefined;
+  if (sourceMigration) {
     await atomicWrite(
       path.join(root, "reference", "source-evidence.json"),
-      JSON.stringify(
-        {
-          schemaVersion: 1,
-          sourceHash: options.sourceHash,
-          preservedAt: "scaffold",
-        },
-        null,
-        2,
-      ) + "\n",
+      JSON.stringify(sourceMigration, null, 2) + "\n",
     );
   }
   for (const node of activeNodes(proposal)) {
@@ -876,7 +905,7 @@ async function writeScaffold(options: {
     badgerCheckScript(
       proposal,
       Boolean(authoringPlan),
-      Boolean(options.sourceRoot),
+      Boolean(options.sourceEvidence),
       sourcePaths,
     ),
   );
@@ -887,8 +916,22 @@ async function writeScaffold(options: {
   await writePackageInventory(root, "scaffold");
   return {
     authoringPlanPath,
-    ...(options.sourceRoot ? { sourceRoot: options.sourceRoot } : {}),
-    ...(options.sourceHash ? { sourceHash: options.sourceHash } : {}),
+    ...(options.sourceEvidence
+      ? { sourceRoot: options.sourceEvidence.root }
+      : {}),
+    ...(options.sourceEvidence
+      ? { sourceHash: options.sourceEvidence.hash }
+      : {}),
+    ...(sourceMigration
+      ? {
+          sourceEvidencePath: path.join(
+            root,
+            "reference",
+            "source-evidence.json",
+          ),
+        }
+      : {}),
+    ...(sourceMigration ? { sourceEvidence: sourceMigration } : {}),
   };
 }
 
@@ -907,7 +950,19 @@ export async function generatePackage(options: {
       "Generation destination must not be inside the upgrade source package",
     );
   }
-  const sourceHash = sourceRoot ? await hashDirectory(sourceRoot) : undefined;
+  const sourceEvidence = sourceRoot
+    ? await inspectUpgradeSource(sourceRoot)
+    : undefined;
+  if (sourceRoot) {
+    await assertUpgradeDestinationOutsideSource(sourceRoot, root);
+  }
+  const proposal = sourceEvidence
+    ? {
+        ...options.proposal,
+        sourceRoot,
+        upgradeSource: sourceEvidence,
+      }
+    : options.proposal;
   await ensureDirectory(path.dirname(root));
   const stagingRoot = await fs.mkdtemp(
     path.join(path.dirname(root), `.${path.basename(root)}.scaffold-`),
@@ -915,11 +970,10 @@ export async function generatePackage(options: {
   let moved = false;
   try {
     const scaffold = await writeScaffold({
-      proposal: options.proposal,
+      proposal,
       plan: options.plan,
       root: stagingRoot,
-      ...(sourceRoot ? { sourceRoot } : {}),
-      ...(sourceHash ? { sourceHash } : {}),
+      ...(sourceEvidence ? { sourceEvidence } : {}),
       ...(options.authoringDepth
         ? { authoringDepth: options.authoringDepth }
         : {}),
@@ -936,7 +990,18 @@ export async function generatePackage(options: {
       scaffoldHash,
       inventory,
       ...(sourceRoot ? { sourceRoot } : {}),
-      ...(sourceHash ? { sourceHash } : {}),
+      ...(sourceEvidence ? { sourceHash: sourceEvidence.hash } : {}),
+      ...(scaffold.sourceEvidencePath
+        ? {
+            sourceEvidencePath: scaffold.sourceEvidencePath.replace(
+              stagingRoot,
+              root,
+            ),
+          }
+        : {}),
+      ...(scaffold.sourceEvidence
+        ? { sourceEvidence: scaffold.sourceEvidence }
+        : {}),
     };
   } finally {
     if (!moved) await fs.rm(stagingRoot, { recursive: true, force: true });

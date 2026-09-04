@@ -6,6 +6,7 @@ The standalone Creator keeps state under the project’s `.badger/` directory:
 .badger/
 ├── states/<name>.json
 ├── drafts/<name>/
+├── migrations/<name>/
 ├── eval/<name>.json
 └── published/<name>/
 ```
@@ -15,6 +16,14 @@ The state machine is hash-bound:
 ```text
 draft → generated → evaluated → review-approved → published
 ```
+
+Deterministic drafts created before authoring are classified
+`legacy-scaffold-only`. They remain readable compatibility artifacts, but they
+are not authoring-complete or publishable. `badger migrate <name> --confirm`
+creates a sibling upgrade package, preserves the original package under
+`source/`, derives a fresh `AuthoringPlan`, and records retained, replaced, or
+wrapped source decisions. All current authoring lanes must be re-recorded
+before assembly.
 
 - Generation clears and rebuilds the draft package.
 - Evaluation hashes the generated package and records checks against that hash.

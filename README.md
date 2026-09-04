@@ -75,6 +75,7 @@ node bin/badger.js generate prepared-workflow --project . --depth full --json
 node bin/badger.js authoring-status prepared-workflow --project . --json
 node bin/badger.js authoring-dispatch prepared-workflow --lane script --output /tmp/script.json --project . --json
 node bin/badger.js assemble prepared-workflow --project . --json
+node bin/badger.js migrate prepared-workflow --confirm --project . --json
 ```
 
 `badger review <name> --json` reports distinct authoring, runtime, and publication readiness. The `skill-review` lane records quick or full authoring evidence; full review requires three independent voter records and all four review lenses. Deterministic self-consistency and WorkflowProtocol cross-validation findings never replace provider findings or WorkflowRuntime certification. `badger approve` records only human publication approval after authoring, evaluation, and WorkflowRuntime evidence are current.
@@ -103,6 +104,13 @@ lanes, executable dependency waves, claims, artifacts, findings, and fresh-
 process recovery paths. A deterministic manual file-provider fixture is
 available through the exported `runManualAuthoringFixture` API for tests and
 local certification without provider credentials.
+
+Legacy deterministic drafts without an authoring session are classified
+`legacy-scaffold-only`. They remain readable compatibility artifacts but are
+not authoring-complete or publishable. `badger migrate <name> --confirm`
+preserves the draft as source evidence, writes a sibling authoring package,
+records retained, replaced, and wrapped source decisions, and requires all six
+current lanes before assembly.
 
 Assembly rebuilds a staged scaffold, validates every current lane artifact, and
 swaps it into place only after the complete package passes the deterministic

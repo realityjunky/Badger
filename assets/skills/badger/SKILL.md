@@ -23,11 +23,12 @@ The standalone package deliberately excludes Classic customization, Native workf
 4. Show the user the goal, intent, Nodes, implementations, Required Skill Calls, Output Schemas, blockers, and warnings.
 5. Wait for explicit confirmation. Do not initialize state or generate files before confirmation.
 6. Run `badger init <plan.json> --confirm --project <dir>`.
-7. Run `badger generate <name> --project <dir>` to create the deterministic authoring-pending scaffold.
+7. Run `badger generate <name> --project <dir>` to create the deterministic authoring-pending scaffold. Existing deterministic drafts without an authoring session are `legacy-scaffold-only`: they remain readable compatibility artifacts but are not authoring-complete or publishable. Use `badger migrate <name> --confirm` to preserve the draft as source evidence, derive a fresh AuthoringPlan, and resume all required lanes.
 8. Run `badger authoring-status <name> --project <dir> --json`. For each executable lane, create a bounded file handoff with `badger authoring-dispatch <name> --lane <lane> --output <file>`, have the provider return the upstream lane-output JSON, then submit it with `badger authoring-record <name> --lane <lane> --file <file> --expected-revision <revision>`. Run `badger assemble <name>` only after all six lanes are complete.
-9. Run `badger eval <name> --project <dir>` and show `badger review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
-10. Run `badger approve <name> --reviewer <id> --confirm`, then `badger publish <name> --confirm`.
-11. Start with `badger distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
+9. Upgrade-existing migration records a source tree hash and explicit `retained`, `replaced`, or `wrapped` decision for every source file. The original source tree remains under `source/`; generated summaries never silently replace source bodies.
+10. Run `badger eval <name> --project <dir>` and show `badger review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
+11. Run `badger approve <name> --reviewer <id> --confirm`, then `badger publish <name> --confirm`.
+12. Start with `badger distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
 
 ## Review and readiness
 

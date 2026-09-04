@@ -13,6 +13,7 @@ import {
 } from "./discovery.js";
 import { normalizeWorkflow } from "../workflow/contract.js";
 import { atomicWrite, ensureDirectory, sha256 } from "../util.js";
+import { inspectUpgradeSource } from "../factory/source.js";
 
 export interface WorkflowKernelOptions {
   projectRoot: string;
@@ -153,11 +154,12 @@ export function createWorkflowKernel(
     const sourceRoot = plan.sourceRoot
       ? path.resolve(projectRoot, plan.sourceRoot)
       : undefined;
+    let upgradeSource;
     if (plan.skillCreatorIntent === "upgrade-existing" && sourceRoot) {
       try {
-        await fs.access(path.join(sourceRoot, "SKILL.md"));
-      } catch {
-        blockers.push(`Upgrade source is not a Skill directory: ${sourceRoot}`);
+        upgradeSource = await inspectUpgradeSource(sourceRoot);
+      } catch (error) {
+        blockers.push(error instanceof Error ? error.message : String(error));
       }
     }
     return {
@@ -174,6 +176,8 @@ export function createWorkflowKernel(
           ? ["Upgrade mode copies the source package before generation."]
           : [],
       canInitialize: blockers.length === 0,
+      ...(sourceRoot ? { sourceRoot } : {}),
+      ...(upgradeSource ? { upgradeSource } : {}),
     };
   }
 

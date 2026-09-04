@@ -12,6 +12,7 @@ import { writeState } from "../factory/state.js";
 import { WORKFLOW_FINALIZATION_BOUNDARY_PHASES } from "../workflow-runtime/finalization.js";
 import { WORKFLOW_TRANSITION_BOUNDARY_PHASES } from "../workflow-runtime/transition-journal.js";
 import { validateAuthoringReviewResult } from "../authoring/review.js";
+import { authoringReadiness } from "../authoring/lifecycle.js";
 
 function sameStrings(left: unknown, right: unknown): boolean {
   return (
@@ -595,7 +596,19 @@ function authoringReadinessSection(
     review: authoring?.review?.reviewHash ?? null,
   };
   if (!authoring) {
-    return { state: "ready", blockers, warnings, evidence: {}, hashes };
+    return {
+      state: "blocked",
+      blockers: [
+        state.generated
+          ? "Legacy deterministic scaffold is scaffold-only; migrate before authoring or publication"
+          : "Authoring session is missing; generate a confirmed scaffold",
+      ],
+      warnings,
+      evidence: state.generated
+        ? { generated: state.generated.packageRoot }
+        : {},
+      hashes,
+    };
   }
   if (authoring.status !== "assembled") {
     blockers.push("Authoring session is not assembled");
@@ -784,6 +797,7 @@ export async function approveReview(options: {
       "Publication reviewer must differ from the authoring reviewer",
     );
   }
+  await authoringReadiness(options.state);
   const readiness = reviewState(options.state);
   if (readiness.blockers.length)
     throw new Error(
@@ -801,6 +815,7 @@ export async function approveReview(options: {
 }
 
 export async function publishState(state: CreatorState): Promise<CreatorState> {
+  await authoringReadiness(state);
   const readiness = reviewState(state);
   if (readiness.state !== "publishable")
     throw new Error(
