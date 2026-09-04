@@ -39,3 +39,23 @@ The JSON report records:
 - deterministic comparison flags and official-only or standalone-only artifact paths.
 
 The official plan is the shared fixture plan with the standalone-only `schemaVersion` wrapper removed because the pinned official parser does not accept that wrapper. The workflow definition, goal, preferences, and locale remain identical.
+
+## Authoring parity certification
+
+The authoring certification uses the same protected fixture boundary and pinned upstream checkout. It compares the six-lane DAG, lane claims, quick/full review depth, authored content leaves, deterministic backbone, lane-output envelope, and readiness gate states. Badger's documented naming, namespace, storage, recovery, concurrency, and hash extensions are reported separately from semantic mismatches and missing functionality.
+
+```bash
+npm run build
+node bin/badger.js authoring-differential \
+  /home/hugo/AI/Badger-workflows/primer_designer_harness/differential/primer-designer-workflow.json \
+  --repo . \
+  --fixture-skills-root /home/hugo/AI/Badger-workflows/primer_designer_harness/skills \
+  --official-root /path/to/pinned/reference-checkout \
+  --depth quick \
+  --output /tmp/badger-authoring-differential.json \
+  --json
+```
+
+The command runs a credential-free synthetic six-lane fixture through Badger assembly and readiness, and drives the pinned official Creator through its authoring plan, lane records, generation, and read-only publication review. It snapshots the official authoring sources and fixture inputs before and after execution. The report preserves evidence paths, workflow and authoring input identities, scaffold and package hashes, lane statuses, readiness blockers, and unresolved differences. It never claims parity for excluded Classic, Native, Entry, platform, dashboard, biological-execution, credential, or protected raw-data behavior.
+
+`comparison.compatible` is the machine-readable gate. A certified report has no semantic mismatches or missing functionality, complete authoring lifecycles on both sides, unchanged sources, and a verified official revision. Expected Badger extensions remain visible in `comparison.expectedExtensions` and `extensions`.

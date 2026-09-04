@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Authoring differential certification**: Added pinned upstream authoring parity evidence, synthetic six-lane lifecycle certification, expected Badger extension classification, source-integrity snapshots, and readiness identities.
+
 - **Legacy draft migration**: Added source-identity manifests, explicit
   retained/replaced/wrapped upgrade decisions, legacy scaffold classification,
   and a confirmed sibling migration path into authoring.

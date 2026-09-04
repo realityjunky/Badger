@@ -13,6 +13,7 @@ import {
   reviewState,
 } from "./publish/lifecycle.js";
 import { runDifferentialHarness } from "./differential/run.js";
+import { runAuthoringDifferentialHarness } from "./differential/authoring/run.js";
 import {
   assemblePackage,
   authoringReadiness,
@@ -397,6 +398,57 @@ program
       }),
       options.json,
     );
+  });
+
+program
+  .command("authoring-differential <fixture>")
+  .description("Certify pinned upstream and Badger authoring parity")
+  .requiredOption("--official-root <dir>", "Pinned upstream reference checkout")
+  .option("--official-cli <file>", "Upstream reference CLI entrypoint")
+  .option("--official-revision <sha>", "Expected official revision")
+  .option(
+    "--official-protocol-path <path>",
+    "Upstream authoring protocol path relative to the checkout",
+  )
+  .option(
+    "--official-authoring-source-path <path>",
+    "Upstream authoring implementation path relative to the checkout",
+  )
+  .option("--fixture-skills-root <dir>", "Reorganized Skill fixture root")
+  .addOption(
+    new Option("--depth <depth>", "Authoring review depth")
+      .choices(["quick", "full"])
+      .default("quick"),
+  )
+  .option("--repo <dir>", "Badger repository root", ".")
+  .option("--output <file>", "Write certification report JSON")
+  .option("--json", "JSON output")
+  .action(async (fixture, options) => {
+    const root = projectRoot(options.repo);
+    const report = await runAuthoringDifferentialHarness({
+      repositoryRoot: root,
+      fixturePath: path.resolve(root, fixture),
+      fixtureSkillsRoot: options.fixtureSkillsRoot
+        ? path.resolve(root, options.fixtureSkillsRoot)
+        : undefined,
+      officialRoot: path.resolve(root, options.officialRoot),
+      officialCli: options.officialCli
+        ? path.resolve(root, options.officialCli)
+        : undefined,
+      officialRevision: options.officialRevision,
+      officialProtocolPath: options.officialProtocolPath,
+      officialAuthoringSourcePath: options.officialAuthoringSourcePath,
+      depth: options.depth,
+    });
+    if (options.output) {
+      await fs.writeFile(
+        path.resolve(root, options.output),
+        JSON.stringify(report, null, 2) + "\n",
+        "utf8",
+      );
+    }
+    emit(report, options.json);
+    if (report.certification.status !== "certified") process.exitCode = 1;
   });
 
 program
