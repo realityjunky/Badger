@@ -163,6 +163,42 @@ describe("standalone Creator lifecycle", () => {
     expect((await readState(project, initial.name)).eval?.runtime).toEqual(
       report.runtime,
     );
+    const evaluationPath = initial.eval!.resultPath;
+    const evaluationDocument = await fs.readFile(evaluationPath, "utf8");
+    const tamperedEvaluation = JSON.parse(evaluationDocument) as {
+      runtime: NonNullable<typeof report.runtime>;
+    };
+    tamperedEvaluation.runtime.completed = false;
+    await fs.writeFile(
+      evaluationPath,
+      JSON.stringify(tamperedEvaluation, null, 2) + "\n",
+    );
+    expect(reviewState(initial).blockers).toContain(
+      "WorkflowRuntime certification evidence does not match evaluation",
+    );
+    await fs.writeFile(evaluationPath, evaluationDocument);
+    const invalidChecks = JSON.parse(evaluationDocument) as {
+      checks: unknown[];
+    };
+    invalidChecks.checks = [];
+    await fs.writeFile(
+      evaluationPath,
+      JSON.stringify(invalidChecks, null, 2) + "\n",
+    );
+    expect(reviewState(initial).blockers).toContain(
+      "Evaluation evidence checks are invalid",
+    );
+    await fs.writeFile(evaluationPath, evaluationDocument);
+    const conflictingSourceState = structuredClone(initial);
+    const firstCandidate =
+      conflictingSourceState.confirmedProposal!.candidates[0]!;
+    const firstSource = firstCandidate.sources[0]!;
+    firstCandidate.sources.push({ ...firstSource, hash: "0".repeat(64) });
+    expect(reviewState(conflictingSourceState).blockers).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/Source evidence hashes conflict/iu),
+      ]),
+    );
     const missingPhase3 = structuredClone(
       await readState(project, initial.name),
     );
@@ -198,8 +234,58 @@ describe("standalone Creator lifecycle", () => {
       approve: true,
     });
     expect(reviewState(approved).state).toBe("publishable");
-    const published = await publishState(approved);
+    expect(approved.review).toMatchObject({
+      reviewer: "test-reviewer",
+      hash: report.hash,
+      readiness: {
+        packageHash: report.hash,
+        evaluationHash: report.hash,
+        evaluationReportHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        readinessHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      },
+      readinessHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      approvalHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    const changedEvaluation = JSON.parse(evaluationDocument) as {
+      checks: Array<{ detail: string }>;
+    };
+    changedEvaluation.checks[0]!.detail = "Changed evaluation evidence.";
+    await fs.writeFile(
+      evaluationPath,
+      JSON.stringify(changedEvaluation, null, 2) + "\n",
+    );
+    expect(reviewState(approved).blockers).toContain(
+      "Publication approval evidence is stale for current readiness",
+    );
+    await fs.writeFile(evaluationPath, evaluationDocument);
+    const changedCertification = JSON.parse(evaluationDocument) as {
+      runtime: NonNullable<typeof report.runtime>;
+    };
+    changedCertification.runtime.completed = false;
+    await fs.writeFile(
+      evaluationPath,
+      JSON.stringify(changedCertification, null, 2) + "\n",
+    );
+    expect(reviewState(approved).blockers).toContain(
+      "WorkflowRuntime certification evidence does not match evaluation",
+    );
+    await fs.writeFile(evaluationPath, evaluationDocument);
+    const tamperedApproval = structuredClone(approved);
+    tamperedApproval.review!.reviewer = "intruder";
+    expect(reviewState(tamperedApproval).blockers).toContain(
+      "Publication approval integrity evidence is invalid",
+    );
+    const staleApproval = structuredClone(approved);
+    staleApproval.review!.readinessHash = "0".repeat(64);
+    const reapproved = await approveReview({
+      state: staleApproval,
+      reviewer: "replacement-reviewer",
+      approve: true,
+    });
+    expect(reapproved.review?.reviewer).toBe("replacement-reviewer");
+    const published = await publishState(reapproved);
     expect(published.status).toBe("published");
+    expect(published.published?.hash).toBe(report.hash);
     const preview = await distributePreview(
       published,
       path.join(project, "install-preview"),
@@ -208,6 +294,51 @@ describe("standalone Creator lifecycle", () => {
     expect(preview.files).toContain(
       path.join(project, "install-preview", "SKILL.md"),
     );
+    await expect(
+      fs.stat(path.join(project, "install-preview")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    const sourceSkillPath = path.join(skillRoot, "SKILL.md");
+    const sourceSkillContent = await fs.readFile(sourceSkillPath, "utf8");
+    await fs.appendFile(sourceSkillPath, "\nChanged source evidence.\n");
+    expect(reviewState(published).blockers).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/Source evidence is stale/iu),
+      ]),
+    );
+    await expect(
+      distributePreview(published, path.join(project, "source-preview")),
+    ).rejects.toThrow(/source evidence/iu);
+    await fs.writeFile(sourceSkillPath, sourceSkillContent);
+
+    const reviewRecordPath = path.join(
+      published.authoring!.recordsPath,
+      "skill-review.json",
+    );
+    const reviewRecordDocument = await fs.readFile(reviewRecordPath, "utf8");
+    const reviewRecord = JSON.parse(reviewRecordDocument) as {
+      summary?: string;
+    };
+    reviewRecord.summary = `${reviewRecord.summary ?? ""}\nChanged authored evidence.`;
+    await fs.writeFile(
+      reviewRecordPath,
+      JSON.stringify(reviewRecord, null, 2) + "\n",
+    );
+    await expect(
+      distributePreview(published, path.join(project, "authored-preview")),
+    ).rejects.toThrow(/authoring|stale/iu);
+    await fs.writeFile(reviewRecordPath, reviewRecordDocument);
+
+    await fs.appendFile(
+      path.join(published.generated!.packageRoot, "SKILL.md"),
+      "\nChanged after approval.\n",
+    );
+    expect(reviewState(published).state).toBe("blocked");
+    await expect(
+      distributePreview(published, path.join(project, "changed-preview")),
+    ).rejects.toThrow(/current package hash/iu);
   }, 15_000);
 
   it("resolves shared Skill roots and isolates generated artifacts", async () => {

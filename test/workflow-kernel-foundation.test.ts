@@ -7,7 +7,10 @@ import {
   createStandaloneWorkflowKernel,
   createWorkflowKernel,
 } from "../src/workflow-kernel/foundation.js";
-import { hashDirectory } from "../src/workflow-kernel/hash.js";
+import {
+  hashDirectory,
+  hashDirectorySync,
+} from "../src/workflow-kernel/hash.js";
 import type { FactoryPlan } from "../src/types.js";
 
 describe("workflow-kernel foundation", () => {
@@ -115,6 +118,12 @@ describe("workflow-kernel foundation", () => {
     const after = await hashDirectory(directory);
 
     expect(after).not.toBe(before);
+  });
+
+  it("keeps synchronous and asynchronous directory hashes identical", async () => {
+    const directory = await writeSkill("hash-parity");
+
+    expect(hashDirectorySync(directory)).toBe(await hashDirectory(directory));
   });
 
   it("uses strict candidate resolution for missing and ambiguous Skills", async () => {

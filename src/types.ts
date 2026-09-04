@@ -1189,6 +1189,19 @@ export interface CompositeReadiness {
   publication: ReadinessSection;
 }
 
+export interface PublicationReadinessEvidence {
+  packageHash: string;
+  sourceEvidenceHash: string | null;
+  authoringInputHash: string | null;
+  authoredMaterialHash: string | null;
+  assembledPackageHash: string | null;
+  authoringReviewHash: string | null;
+  evaluationHash: string | null;
+  evaluationReportHash: string | null;
+  runtimeEvidenceHash: string | null;
+  readinessHash: string;
+}
+
 export interface CreatorState {
   schemaVersion: 1;
   name: string;
@@ -1226,6 +1239,9 @@ export interface CreatorState {
     decision: "approved" | "rejected";
     reviewer: string;
     at: string;
+    readiness?: PublicationReadinessEvidence;
+    readinessHash?: string;
+    approvalHash?: string;
   };
   published?: { hash: string; path: string; at: string };
 }

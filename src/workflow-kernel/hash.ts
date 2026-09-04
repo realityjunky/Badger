@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import {
+  lstatSync,
+  readFileSync,
+  readlinkSync,
+  readdirSync,
+  promises as fs,
+} from "node:fs";
 import path from "node:path";
 
 function portablePath(value: string): string {
@@ -51,12 +57,41 @@ async function collectHashEntries(
   return files;
 }
 
-export async function hashDirectory(root: string): Promise<string> {
-  const absoluteRoot = path.resolve(root);
-  const stats = await fs.lstat(absoluteRoot);
-  if (!stats.isDirectory() || stats.isSymbolicLink())
-    throw new Error(`Directory hash requires a regular directory: ${root}`);
-  const files = await collectHashEntries(absoluteRoot);
+function collectHashEntriesSync(directory: string, relative = ""): HashEntry[] {
+  const entries = readdirSync(directory, { withFileTypes: true }).sort(
+    (left, right) => compareText(left.name, right.name),
+  );
+  const files: HashEntry[] = [];
+  for (const entry of entries) {
+    const target = path.join(directory, entry.name);
+    const relativePath = relative ? `${relative}/${entry.name}` : entry.name;
+    const stats = lstatSync(target);
+    if (stats.isDirectory()) {
+      files.push(...collectHashEntriesSync(target, relativePath));
+      continue;
+    }
+    if (stats.isFile()) {
+      files.push({
+        relativePath: portablePath(relativePath),
+        kind: "file",
+        content: readFileSync(target),
+      });
+      continue;
+    }
+    if (stats.isSymbolicLink()) {
+      files.push({
+        relativePath: portablePath(relativePath),
+        kind: "symlink",
+        content: Buffer.from(readlinkSync(target)),
+      });
+      continue;
+    }
+    throw new Error(`Unsupported special file: ${relativePath}`);
+  }
+  return files;
+}
+
+function digestHashEntries(files: readonly HashEntry[]): string {
   const hash = createHash("sha256");
   for (const file of files) {
     const normalizedPath = Buffer.from(file.relativePath);
@@ -72,4 +107,21 @@ export async function hashDirectory(root: string): Promise<string> {
     hash.update("\0");
   }
   return hash.digest("hex");
+}
+
+export async function hashDirectory(root: string): Promise<string> {
+  const absoluteRoot = path.resolve(root);
+  const stats = await fs.lstat(absoluteRoot);
+  if (!stats.isDirectory() || stats.isSymbolicLink())
+    throw new Error(`Directory hash requires a regular directory: ${root}`);
+  const files = await collectHashEntries(absoluteRoot);
+  return digestHashEntries(files);
+}
+
+export function hashDirectorySync(root: string): string {
+  const absoluteRoot = path.resolve(root);
+  const stats = lstatSync(absoluteRoot);
+  if (!stats.isDirectory() || stats.isSymbolicLink())
+    throw new Error(`Directory hash requires regular directory: ${root}`);
+  return digestHashEntries(collectHashEntriesSync(absoluteRoot));
 }

@@ -8,7 +8,7 @@ export {
   type WorkflowKernel,
   type WorkflowKernelOptions,
 } from "./workflow-kernel/foundation.js";
-export { hashDirectory } from "./workflow-kernel/hash.js";
+export { hashDirectory, hashDirectorySync } from "./workflow-kernel/hash.js";
 export * from "./factory/proposal.js";
 export * from "./factory/generate.js";
 export * from "./factory/state.js";

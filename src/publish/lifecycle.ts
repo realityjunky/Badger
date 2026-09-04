@@ -6,13 +6,22 @@ import {
   WORKFLOW_RUNTIME_PHASE4_NEGATIVE_CASES,
   type CompositeReadiness,
   type CreatorState,
+  type PublicationReadinessEvidence,
 } from "../types.js";
-import { copyDirectory, ensureDirectory, isWithin } from "../util.js";
+import {
+  copyDirectory,
+  ensureDirectory,
+  hashDirectory,
+  isWithin,
+  sha256,
+  stableValue,
+} from "../util.js";
 import { writeState } from "../factory/state.js";
 import { WORKFLOW_FINALIZATION_BOUNDARY_PHASES } from "../workflow-runtime/finalization.js";
 import { WORKFLOW_TRANSITION_BOUNDARY_PHASES } from "../workflow-runtime/transition-journal.js";
 import { validateAuthoringReviewResult } from "../authoring/review.js";
 import { authoringReadiness } from "../authoring/lifecycle.js";
+import { hashDirectorySync } from "../workflow-kernel/hash.js";
 
 function sameStrings(left: unknown, right: unknown): boolean {
   return (
@@ -20,6 +29,293 @@ function sameStrings(left: unknown, right: unknown): boolean {
     Array.isArray(right) &&
     JSON.stringify(left) === JSON.stringify(right)
   );
+}
+
+interface PackageHashCheck {
+  currentHash: string | null;
+  blockers: string[];
+}
+
+function currentPackageHashCheck(state: CreatorState): PackageHashCheck {
+  if (!state.generated) return { currentHash: null, blockers: [] };
+  let currentHash: string;
+  try {
+    currentHash = hashDirectorySync(state.generated.packageRoot);
+  } catch (error) {
+    return {
+      currentHash: null,
+      blockers: [
+        `Current generated package hash is unavailable: ${String(error)}`,
+      ],
+    };
+  }
+  const blockers: string[] = [];
+  if (!/^[a-f0-9]{64}$/u.test(state.currentHash ?? "")) {
+    blockers.push("Current generated package hash evidence is missing");
+  } else if (state.currentHash !== currentHash) {
+    blockers.push(
+      "Current generated package hash does not match the persisted current package hash",
+    );
+  }
+  if (
+    state.authoring?.assembledPackageHash &&
+    state.authoring.assembledPackageHash !== currentHash
+  ) {
+    blockers.push("Authoring assembly is stale for the current package hash");
+  }
+  if (
+    state.generated.assembledPackageHash &&
+    state.generated.assembledPackageHash !== currentHash
+  ) {
+    blockers.push(
+      "Generated package evidence is stale for the current package hash",
+    );
+  }
+  return { currentHash, blockers };
+}
+
+interface SourceEvidenceCheck {
+  currentHash: string | null;
+  blockers: string[];
+}
+
+function sourceEvidenceCheck(state: CreatorState): SourceEvidenceCheck {
+  const expected = new Map<string, string>();
+  const conflictingRoots = new Set<string>();
+  const rememberSource = (root: string, hash: string) => {
+    const previousHash = expected.get(root);
+    if (previousHash !== undefined && previousHash !== hash) {
+      conflictingRoots.add(root);
+      return;
+    }
+    expected.set(root, hash);
+  };
+  for (const candidate of state.confirmedProposal?.candidates ?? []) {
+    for (const source of candidate.sources)
+      rememberSource(source.root, source.hash);
+  }
+  const upgradeSource = state.confirmedProposal?.upgradeSource;
+  if (upgradeSource) rememberSource(upgradeSource.root, upgradeSource.hash);
+  if (state.generated?.sourceRoot && state.generated.sourceHash) {
+    rememberSource(state.generated.sourceRoot, state.generated.sourceHash);
+  }
+  if (state.generated?.sourceEvidence) {
+    rememberSource(
+      state.generated.sourceEvidence.sourceRoot,
+      state.generated.sourceEvidence.sourceHash,
+    );
+  }
+  if (expected.size === 0) return { currentHash: null, blockers: [] };
+
+  const entries: Array<{
+    root: string;
+    expectedHash: string;
+    currentHash: string | null;
+  }> = [];
+  const blockers = [...conflictingRoots].map(
+    (root) => `Source evidence hashes conflict for root: ${root}`,
+  );
+  for (const [root, expectedHash] of expected) {
+    let currentHash: string | null = null;
+    if (!/^[a-f0-9]{64}$/u.test(expectedHash)) {
+      blockers.push(`Source evidence hash is invalid: ${root}`);
+    } else {
+      try {
+        currentHash = hashDirectorySync(root);
+      } catch (error) {
+        blockers.push(
+          `Source evidence hash is unavailable: ${root}: ${String(error)}`,
+        );
+      }
+      if (currentHash !== null && currentHash !== expectedHash) {
+        blockers.push(`Source evidence is stale for current package: ${root}`);
+      }
+    }
+    entries.push({ root, expectedHash, currentHash });
+  }
+  entries.sort((left, right) => left.root.localeCompare(right.root));
+  return {
+    currentHash: sha256(JSON.stringify(stableValue(entries))),
+    blockers,
+  };
+}
+
+interface EvaluationEvidenceCheck {
+  reportHash: string | null;
+  blockers: string[];
+}
+
+function evaluationEvidenceCheck(state: CreatorState): EvaluationEvidenceCheck {
+  const evaluation = state.eval;
+  if (!evaluation) return { reportHash: null, blockers: [] };
+  if (!isWithin(state.projectRoot, evaluation.resultPath)) {
+    return {
+      reportHash: null,
+      blockers: ["Evaluation evidence path is outside the project root"],
+    };
+  }
+  try {
+    const stats = realpathSync(evaluation.resultPath);
+    if (!isWithin(state.projectRoot, stats)) {
+      return {
+        reportHash: null,
+        blockers: [
+          "Evaluation evidence path resolves outside the project root",
+        ],
+      };
+    }
+    const reportDocument = readFileSync(stats);
+    const report = JSON.parse(reportDocument.toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+    const blockers: string[] = [];
+    if (!Array.isArray(report.checks) || report.checks.length === 0) {
+      blockers.push("Evaluation evidence checks are invalid");
+    } else if (
+      report.checks.some(
+        (check) =>
+          !isRecord(check) ||
+          typeof check.id !== "string" ||
+          check.id.length === 0 ||
+          typeof check.passed !== "boolean" ||
+          typeof check.detail !== "string",
+      )
+    ) {
+      blockers.push("Evaluation evidence checks are invalid");
+    } else if (
+      report.passed !==
+      report.checks.every((check) => isRecord(check) && check.passed === true)
+    ) {
+      blockers.push("Evaluation evidence result does not match checks");
+    }
+    if (report.schemaVersion !== 1) {
+      blockers.push("Evaluation evidence schema is invalid");
+    }
+    if (report.hash !== evaluation.hash) {
+      blockers.push(
+        "Evaluation evidence hash does not match the persisted report",
+      );
+    }
+    if (report.passed !== evaluation.passed) {
+      blockers.push(
+        "Evaluation evidence result does not match the persisted report",
+      );
+    }
+    if (
+      JSON.stringify(stableValue(report.runtime)) !==
+      JSON.stringify(stableValue(evaluation.runtime))
+    ) {
+      blockers.push(
+        "WorkflowRuntime certification evidence does not match evaluation",
+      );
+    }
+    if (
+      JSON.stringify(stableValue(report.authoringCrossValidation)) !==
+      JSON.stringify(stableValue(evaluation.authoringCrossValidation))
+    ) {
+      blockers.push(
+        "Authoring cross-validation evidence does not match evaluation",
+      );
+    }
+    return { reportHash: sha256(reportDocument), blockers };
+  } catch (error) {
+    return {
+      reportHash: null,
+      blockers: [`Evaluation evidence is unavailable: ${String(error)}`],
+    };
+  }
+}
+
+function publicationReadinessEvidence(
+  state: CreatorState,
+  readiness: Pick<CompositeReadiness, "authoring" | "runtime">,
+  packageHash: string | null,
+  sourceEvidenceHash: string | null,
+  evaluationReportHash: string | null,
+): PublicationReadinessEvidence | null {
+  if (!packageHash) return null;
+  const evidence = {
+    packageHash,
+    sourceEvidenceHash,
+    authoringInputHash: readiness.authoring.hashes.authoringInput ?? null,
+    authoredMaterialHash: readiness.authoring.hashes.authoredMaterial ?? null,
+    assembledPackageHash: readiness.authoring.hashes.assembledPackage ?? null,
+    authoringReviewHash: readiness.authoring.hashes.review ?? null,
+    evaluationHash: readiness.runtime.hashes.evaluation ?? null,
+    evaluationReportHash,
+    runtimeEvidenceHash: state.eval?.runtime
+      ? sha256(JSON.stringify(stableValue(state.eval.runtime)))
+      : null,
+  };
+  return {
+    ...evidence,
+    readinessHash: sha256(
+      JSON.stringify(
+        stableValue({
+          authoring: readiness.authoring,
+          runtime: readiness.runtime,
+          evidence,
+        }),
+      ),
+    ),
+  };
+}
+
+function publicationApprovalHash(value: {
+  hash: string;
+  decision: "approved" | "rejected";
+  reviewer: string;
+  at: string;
+  readinessHash?: string;
+}): string {
+  return sha256(
+    JSON.stringify(
+      stableValue({
+        hash: value.hash,
+        decision: value.decision,
+        reviewer: value.reviewer,
+        at: value.at,
+        readinessHash: value.readinessHash ?? null,
+      }),
+    ),
+  );
+}
+
+function publicationApprovalBlockers(
+  state: CreatorState,
+  current: PublicationReadinessEvidence | null,
+): string[] {
+  if (!state.review || state.review.decision !== "approved") return [];
+  if (!state.review.readiness || !state.review.readinessHash) {
+    return ["Publication approval readiness evidence is missing"];
+  }
+  if (!state.review.approvalHash) {
+    return ["Publication approval integrity evidence is missing"];
+  }
+  if (state.review.approvalHash !== publicationApprovalHash(state.review)) {
+    return ["Publication approval integrity evidence is invalid"];
+  }
+  if (!current)
+    return ["Publication approval readiness evidence is unavailable"];
+  if (
+    state.review.readinessHash !== current.readinessHash ||
+    JSON.stringify(stableValue(state.review.readiness)) !==
+      JSON.stringify(stableValue(current))
+  ) {
+    return ["Publication approval evidence is stale for current readiness"];
+  }
+  return [];
+}
+
+async function publicationGate(state: CreatorState) {
+  const authoring = await authoringReadiness(state);
+  const readiness = reviewState(state);
+  return {
+    authoring,
+    readiness,
+    blockers: [...new Set([...authoring.blockers, ...readiness.blockers])],
+  };
 }
 
 function runtimeEvidenceBlockers(state: CreatorState): string[] {
@@ -687,6 +983,9 @@ export function reviewState(state: CreatorState): CompositeReadiness {
   const authoring = authoringReadinessSection(state);
   const blockers: string[] = [...authoring.blockers];
   const runtimeBlockers: string[] = [];
+  const packageHash = currentPackageHashCheck(state);
+  const sourceEvidence = sourceEvidenceCheck(state);
+  const evaluation = evaluationEvidenceCheck(state);
   if (state.candidates.some((candidate) => candidate.status !== "available"))
     blockers.push("Unresolved Skill candidates remain");
   if (!state.generated) blockers.push("Generated package is missing");
@@ -700,6 +999,9 @@ export function reviewState(state: CreatorState): CompositeReadiness {
       "Passing evaluation evidence for the current package hash is missing",
     );
   runtimeBlockers.push(...runtimeEvidenceBlockers(state));
+  runtimeBlockers.push(...packageHash.blockers);
+  runtimeBlockers.push(...sourceEvidence.blockers);
+  runtimeBlockers.push(...evaluation.blockers);
   runtimeBlockers.push(...phase3EvidenceBlockers(state));
   runtimeBlockers.push(...phase4EvidenceBlockers(state));
   blockers.push(...runtimeBlockers);
@@ -712,21 +1014,39 @@ export function reviewState(state: CreatorState): CompositeReadiness {
       ...(state.eval ? { eval: state.eval.resultPath } : {}),
     },
     hashes: {
-      package: state.currentHash,
+      package: packageHash.currentHash ?? state.currentHash,
       evaluation: state.eval?.hash ?? null,
+      evaluationReport: evaluation.reportHash,
       runtimePackage: state.eval?.runtime?.generatedPackageHash ?? null,
+      sourceEvidence: sourceEvidence.currentHash,
     },
   } satisfies CompositeReadiness["runtime"];
+  const currentApprovalEvidence = publicationReadinessEvidence(
+    state,
+    { authoring, runtime },
+    packageHash.currentHash,
+    sourceEvidence.currentHash,
+    evaluation.reportHash,
+  );
   const publicationBlockers: string[] = [];
+  const expectedPackageHash = packageHash.currentHash ?? state.currentHash;
   if (
     !state.review ||
     state.review.decision !== "approved" ||
-    state.review.hash !== state.currentHash
+    state.review.hash !== expectedPackageHash
   ) {
     publicationBlockers.push("Publication approval is missing");
   }
-  if (state.review && state.review.hash !== state.currentHash) {
+  if (state.review && state.review.hash !== expectedPackageHash) {
     publicationBlockers.push("Review evidence is stale");
+  }
+  const approvalEvidenceBlockers = publicationApprovalBlockers(
+    state,
+    currentApprovalEvidence,
+  );
+  if (approvalEvidenceBlockers.length) {
+    publicationBlockers.push(...approvalEvidenceBlockers);
+    blockers.push(...approvalEvidenceBlockers);
   }
   const publication = {
     state: publicationBlockers.length === 0 ? "ready" : "blocked",
@@ -734,19 +1054,25 @@ export function reviewState(state: CreatorState): CompositeReadiness {
     warnings: [],
     evidence: {
       ...(state.review ? { approval: state.review.reviewer } : {}),
+      ...(state.review?.readinessHash
+        ? { approvalReadiness: state.review.readinessHash }
+        : {}),
       ...(state.published ? { published: state.published.path } : {}),
     },
     hashes: {
-      package: state.currentHash,
+      package: packageHash.currentHash ?? state.currentHash,
       approval: state.review?.hash ?? null,
+      sourceEvidence: sourceEvidence.currentHash,
+      approvalReadiness: state.review?.readinessHash ?? null,
     },
   } satisfies CompositeReadiness["publication"];
-  if (state.review && state.review.hash !== state.currentHash)
+  if (state.review && state.review.hash !== expectedPackageHash)
     blockers.push("Review evidence is stale");
   const publishable =
     blockers.length === 0 &&
+    publicationBlockers.length === 0 &&
     state.review?.decision === "approved" &&
-    state.review.hash === state.currentHash;
+    state.review.hash === expectedPackageHash;
   return {
     state: publishable
       ? "publishable"
@@ -766,13 +1092,15 @@ export function reviewState(state: CreatorState): CompositeReadiness {
       ...publication.warnings,
     ],
     hashes: {
-      package: state.currentHash,
+      package: packageHash.currentHash ?? state.currentHash,
       authoringInput: state.authoring?.authoringInputHash ?? null,
       authoredMaterial: state.authoring?.authoredMaterialHash ?? null,
       assembledPackage: state.authoring?.assembledPackageHash ?? null,
       authoringReview: state.authoring?.review?.reviewHash ?? null,
       evaluation: state.eval?.hash ?? null,
       publicationApproval: state.review?.hash ?? null,
+      sourceEvidence: sourceEvidence.currentHash,
+      publicationReadiness: currentApprovalEvidence?.readinessHash ?? null,
     },
     authoring,
     runtime,
@@ -788,26 +1116,54 @@ export async function approveReview(options: {
   if (!options.approve) throw new Error("Review approval was not confirmed");
   if (!options.reviewer.trim())
     throw new Error("A reviewer identity is required");
+  const publicationReviewer = options.reviewer.trim();
   const authoringReviewer =
     typeof options.state.authoring?.review?.reviewer === "string"
       ? options.state.authoring.review.reviewer.trim()
       : undefined;
-  if (authoringReviewer && authoringReviewer === options.reviewer.trim()) {
+  if (authoringReviewer && authoringReviewer === publicationReviewer) {
     throw new Error(
       "Publication reviewer must differ from the authoring reviewer",
     );
   }
-  await authoringReadiness(options.state);
-  const readiness = reviewState(options.state);
-  if (readiness.blockers.length)
+  const authoring = await authoringReadiness(options.state);
+  if (authoring.state !== "ready") {
+    throw new Error(
+      `Cannot approve blocked authoring session:\n${authoring.blockers.join("\n")}`,
+    );
+  }
+  const readiness = reviewState({
+    ...options.state,
+    review: undefined,
+  });
+  if (readiness.state !== "reviewable" || readiness.blockers.length)
     throw new Error(
       `Cannot approve blocked workflow:\n${readiness.blockers.join("\n")}`,
     );
-  options.state.review = {
-    hash: options.state.currentHash!,
-    decision: "approved",
-    reviewer: options.reviewer,
+  const packageHash = currentPackageHashCheck(options.state);
+  const sourceEvidence = sourceEvidenceCheck(options.state);
+  const evaluation = evaluationEvidenceCheck(options.state);
+  const approvalEvidence = publicationReadinessEvidence(
+    options.state,
+    readiness,
+    packageHash.currentHash,
+    sourceEvidence.currentHash,
+    evaluation.reportHash,
+  );
+  if (!approvalEvidence) {
+    throw new Error("Cannot approve workflow without current package evidence");
+  }
+  const review = {
+    hash: approvalEvidence.packageHash,
+    decision: "approved" as const,
+    reviewer: publicationReviewer,
     at: new Date().toISOString(),
+    readiness: approvalEvidence,
+    readinessHash: approvalEvidence.readinessHash,
+  };
+  options.state.review = {
+    ...review,
+    approvalHash: publicationApprovalHash(review),
   };
   options.state.status = "review-approved";
   await writeState(options.state);
@@ -815,12 +1171,24 @@ export async function approveReview(options: {
 }
 
 export async function publishState(state: CreatorState): Promise<CreatorState> {
-  await authoringReadiness(state);
-  const readiness = reviewState(state);
-  if (readiness.state !== "publishable")
+  const gate = await publicationGate(state);
+  if (
+    gate.authoring.state !== "ready" ||
+    gate.readiness.state !== "publishable"
+  )
     throw new Error(
-      `Workflow is not publishable:\n${readiness.blockers.join("\n")}`,
+      `Workflow is not publishable:\n${[...gate.blockers].join("\n")}`,
     );
+  const approvedPackageHash = state.review?.readiness?.packageHash;
+  if (!approvedPackageHash) {
+    throw new Error("Publication approval package hash evidence is missing");
+  }
+  const packageHashBeforeCopy = await hashDirectory(
+    state.generated!.packageRoot,
+  );
+  if (packageHashBeforeCopy !== approvedPackageHash) {
+    throw new Error("Generated package changed before publication");
+  }
   const destination = path.join(
     state.projectRoot,
     ".badger",
@@ -830,8 +1198,13 @@ export async function publishState(state: CreatorState): Promise<CreatorState> {
   await ensureDirectory(path.dirname(destination));
   await fs.rm(destination, { recursive: true, force: true });
   await copyDirectory(state.generated!.packageRoot, destination);
+  const publishedHash = await hashDirectory(destination);
+  if (publishedHash !== approvedPackageHash) {
+    await fs.rm(destination, { recursive: true, force: true });
+    throw new Error("Published package hash does not match approval");
+  }
   state.published = {
-    hash: state.currentHash!,
+    hash: publishedHash,
     path: destination,
     at: new Date().toISOString(),
   };
@@ -844,10 +1217,15 @@ export async function distributePreview(
   state: CreatorState,
   destination: string,
 ): Promise<{ destination: string; files: string[]; preview: true }> {
-  const readiness = reviewState(state);
-  if (readiness.state !== "publishable")
+  const gate = await publicationGate(state);
+  if (
+    gate.authoring.state !== "ready" ||
+    gate.readiness.state !== "publishable"
+  )
     throw new Error(
-      `Workflow must be publishable before distribution:\n${readiness.blockers.join("\n")}`,
+      `Workflow must be publishable before distribution:\n${[
+        ...gate.blockers,
+      ].join("\n")}`,
     );
   const files = await listFiles(state.generated!.packageRoot);
   return {

@@ -18,7 +18,7 @@ The package includes:
   source inventory ownership;
 - generated Badger plan, check, hook-guard, and WorkflowRuntime control-plane
   scripts;
-- current-hash evaluation, WorkflowRuntime certification, review approval, publication, and distribution preview;
+- current-hash evaluation, WorkflowRuntime certification, integrity-checked review approval, publication, and non-mutating distribution preview;
 - private Skill runtime loading, validation, content identity, and immutable snapshots;
 - deterministic and adaptive Engine loop behavior with manual and standalone Run façades;
 - protected Run state, pending-action, trajectory, artifact, context, and checkpoint storage;
