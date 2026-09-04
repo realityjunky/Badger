@@ -18,6 +18,8 @@
   Auto-zone/Authored-zone validation, a relative package inventory, and the
   Badger-named plan, check, and hook-guard control-plane roles.
 
+- **Substantive authored leaves**: Added quality-bar validation and a multi-Node manual fixture for semantic Decision Core, Node Guidance, pause-point, recovery, and review content.
+
 ## What's Changed [0.1.2] - 2026-09-03
 
 ### Changed

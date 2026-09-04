@@ -240,7 +240,8 @@ describe("resumable authoring session", () => {
             id: "SKILL.md",
             path: "SKILL.md",
             present: true,
-            content: "Detect the current Node from persisted state.",
+            content:
+              "## Decision Core\n\n### Automatic Node Detection\nRead the current Node from persisted state and compare the request topic with declared responsibilities.\n\n### Resume And Drift\nOn resume, re-read persisted state instead of trusting conversation history, and handle topic changes explicitly.\n\n### Decision Classification And Decision Points\nClassify every user decision, automatic handling case, stop condition, and manual handoff before continuing.\n\n### Red Flags\nDo not skip the current Node or treat missing evidence as complete.",
           },
         ],
       },

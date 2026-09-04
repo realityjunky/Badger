@@ -9,7 +9,7 @@ import {
   generatePackage,
   type GeneratedPackage,
 } from "../src/factory/generate.js";
-import { initializeState } from "../src/factory/state.js";
+import { initializeState, readState } from "../src/factory/state.js";
 import { evaluatePackage } from "../src/eval/run.js";
 import {
   assemblePackage,
@@ -205,18 +205,11 @@ describe("Badger authoring lifecycle", () => {
   });
 
   it("assembles authored content only after all current lanes are complete", async () => {
-    const { state, authoringPlan } = await createScaffold();
-    const plan = authoringPlan;
-    for (const lane of plan.lanes.map((item) => item.id)) {
-      await recordAuthoring({
-        state,
-        lane,
-        record: completeRecord(plan, lane),
-      });
-    }
+    const { state } = await createScaffold();
+    const completed = await runManualAuthoringFixture({ state });
 
-    expect((await authoringReadiness(state)).state).toBe("ready");
-    const assembled = await assemblePackage(state);
+    expect((await authoringReadiness(completed)).state).toBe("ready");
+    const assembled = await assemblePackage(completed);
     const entry = await fs.readFile(
       path.join(assembled.generated!.packageRoot, "SKILL.md"),
       "utf8",
@@ -229,14 +222,202 @@ describe("Badger authoring lifecycle", () => {
       ),
       "utf8",
     );
-    expect(entry).toContain("Detect the current Node from persisted state.");
-    expect(node).toContain("Load the bound Skill only after the entry check.");
+    expect(entry).toContain("### Automatic Node Detection");
+    expect(node).toContain("### Prerequisites");
     expect(entry).not.toContain("AUTHORING PENDING");
     expect(node).not.toContain("AUTHORING PENDING");
     expect(assembled.authoring?.status).toBe("assembled");
     expect(assembled.authoring?.assembledPackageHash).toMatch(
       /^[a-f0-9]{64}$/u,
     );
+  });
+
+  it("assembles substantive authored content for every active Node", async () => {
+    const plan = JSON.parse(await fs.readFile(planPath, "utf8")) as FactoryPlan;
+    plan.workflow.customNodes.push({
+      id: "review",
+      label: "Review",
+      kind: "producer",
+      responsibility: "Review the prepared workflow result.",
+      implementation: {
+        skill: "prepare",
+        operation: "default",
+        scope: "main",
+      },
+      requiredSkillCalls: [
+        {
+          skill: "prepare",
+          operation: "require",
+          scope: "main",
+          enforcement: "guarded",
+          reason: "Reuse the prepared workflow before review.",
+        },
+      ],
+      operations: ["require", "augment", "disable"],
+      outputSchemas: [],
+      guardrails: [],
+    });
+    await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
+
+    const { state } = await createScaffold();
+    const scaffoldEntry = await fs.readFile(
+      path.join(state.generated!.packageRoot, "SKILL.md"),
+      "utf8",
+    );
+    const completed = await runManualAuthoringFixture({ state });
+    const assembled = await assemblePackage(completed);
+    const entry = await fs.readFile(
+      path.join(assembled.generated!.packageRoot, "SKILL.md"),
+      "utf8",
+    );
+
+    expect(entry).toContain("### Automatic Node Detection");
+    expect(entry).toContain("### Decision Classification And Decision Points");
+    expect(entry).toContain("### Red Flags");
+    expect(entry.slice(entry.indexOf("## Badger Control Plane"))).toBe(
+      scaffoldEntry.slice(scaffoldEntry.indexOf("## Badger Control Plane")),
+    );
+
+    for (const nodeName of [
+      "prepared-workflow-prepare",
+      "prepared-workflow-review",
+    ]) {
+      const node = await fs.readFile(
+        path.join(assembled.generated!.packageRoot, nodeName, "SKILL.md"),
+        "utf8",
+      );
+      expect(node).toContain("### Prerequisites");
+      expect(node).toContain("### Steps");
+      expect(node).toContain("### Required Skill Calls");
+      expect(node).toContain("### Evidence");
+      expect(node).toContain("### Completion reasoning");
+      expect(node).toContain("### Red flags");
+      expect(node).toContain("### Recovery");
+    }
+
+    const decisionPoints = await fs.readFile(
+      path.join(
+        assembled.generated!.packageRoot,
+        "reference",
+        "decision-points.md",
+      ),
+      "utf8",
+    );
+    expect(decisionPoints).toMatch(
+      /genuine user decision[\s\S]*automatic handling[\s\S]*stop condition[\s\S]*manual handoff/iu,
+    );
+    const recovery = await fs.readFile(
+      path.join(assembled.generated!.packageRoot, "reference", "recovery.md"),
+      "utf8",
+    );
+    expect(recovery).toMatch(
+      /fresh process[\s\S]*current Node[\s\S]*blocked/iu,
+    );
+  });
+
+  it("rejects one-line semantic content before mutating authoring state", async () => {
+    const { state, authoringPlan } = await createScaffold();
+    await runManualAuthoringFixture({ state });
+    const before = await readState(project, state.name);
+
+    await expect(
+      recordAuthoring({
+        state,
+        lane: "workflow-entry",
+        record: {
+          status: "DONE",
+          claims: [
+            {
+              id: "workflow-entry",
+              status: "SUPPORTED",
+              evidence: ["The entry was reviewed."],
+            },
+          ],
+          artifacts: [
+            {
+              id: "SKILL.md",
+              path: "SKILL.md",
+              present: true,
+              content: "Detect the current Node from persisted state.",
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow(/substantive|Decision Core|Automatic Node Detection/iu);
+
+    const after = await readState(project, state.name);
+    expect(after.authoring?.revision).toBe(before.authoring?.revision);
+    expect(after.authoring?.records).toEqual(before.authoring?.records);
+    expect(
+      authoringPlan.lanes.find((lane) => lane.id === "workflow-entry"),
+    ).toBeDefined();
+  });
+
+  it("rejects undeclared routes and implicit latest artifact selection", async () => {
+    const { state } = await createScaffold();
+    await runManualAuthoringFixture({ state });
+    const record = JSON.parse(
+      await fs.readFile(
+        path.join(state.authoring!.recordsPath, "workflow-entry.json"),
+        "utf8",
+      ),
+    ) as {
+      claims: unknown[];
+      artifacts: Array<{ contentPath: string }>;
+    };
+    const authoredContent = await fs.readFile(
+      record.artifacts[0]!.contentPath,
+      "utf8",
+    );
+    const sourceBody = state
+      .confirmedProposal!.candidates[0]!.sources[0]!.skillMd.replace(
+        /^\uFEFF?---[ \t]*(?:\r?\n|$)[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/u,
+        "",
+      )
+      .trim();
+    const cases = [
+      {
+        content: sourceBody,
+        message: /complete source Skill body/iu,
+      },
+      {
+        content: authoredContent + "\nUse route: hidden.",
+        message: /undeclared route/iu,
+      },
+      {
+        content: authoredContent + "\nNEXT: hidden.",
+        message: /undeclared NEXT target/iu,
+      },
+      {
+        content: authoredContent + "\nSKILL: hidden.",
+        message: /undeclared SKILL target/iu,
+      },
+      {
+        content: authoredContent + "\nUse the latest artifact version.",
+        message: /implicit latest artifact/iu,
+      },
+    ];
+
+    for (const testCase of cases) {
+      await expect(
+        recordAuthoring({
+          state,
+          lane: "workflow-entry",
+          record: {
+            status: "DONE",
+            claims: record.claims,
+            artifacts: [
+              {
+                id: "SKILL.md",
+                path: "SKILL.md",
+                present: true,
+                content: testCase.content,
+              },
+            ],
+          },
+        }),
+      ).rejects.toThrow(testCase.message);
+    }
   });
 
   it("preserves upgrade sources and rejects destinations inside them", async () => {
@@ -548,7 +729,21 @@ describe("Badger authoring lifecycle", () => {
               id: "SKILL.md",
               path: "SKILL.md",
               present: true,
-              content: "Use the `Node` identified by state.",
+              content: [
+                "## Decision Core",
+                "",
+                "### Automatic Node Detection",
+                "Read the current Node from persisted state before acting.",
+                "",
+                "### Resume And Drift",
+                "On resume, re-read persisted state instead of trusting conversation history and handle topic changes explicitly.",
+                "",
+                "### Decision Classification And Decision Points",
+                "Classify a genuine user decision, automatic handling, stop condition, or manual handoff before continuing.",
+                "",
+                "### Red Flags",
+                "Do not skip the current Node or treat missing evidence as complete.",
+              ].join("\n"),
             },
           ],
         },

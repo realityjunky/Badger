@@ -43,6 +43,8 @@ missing context returns `null`. Existing files are validated before recovery,
 and unsafe references, path escapes, link traversal, oversized content, and
 failed writes are rejected without replacing the last valid state.
 
+Authoring leaves are substantive content boundaries, not free-form package edits. Entry Decision Core and Node Guidance must explain their semantic decisions, evidence, completion reasoning, red flags, and recovery behavior; decision-point leaves must distinguish genuine user decisions, automatic handling, stop conditions, and manual handoffs. Placeholder or underspecified content, undeclared route or choice references, and implicit latest-artifact selection keep assembly blocked.
+
 ## Standalone Run locations
 
 Use `startStandaloneRun`, `resumeStandaloneRun`, `evaluateStandaloneRun`, and

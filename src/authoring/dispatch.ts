@@ -2,8 +2,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CreatorState } from "../types.js";
-import { atomicWrite, isWithin } from "../util.js";
+import type { CreatorState, NodeProtocol } from "../types.js";
+import { atomicWrite, isWithin, slug } from "../util.js";
 import { readState } from "../factory/state.js";
 import {
   authoringPlanPath,
@@ -124,19 +124,210 @@ function commonInputPath(outputPath: string): string {
   );
 }
 
-function fixtureContent(pathValue: string): string {
-  if (pathValue === "SKILL.md")
-    return "Detect the current Node from persisted state before explaining the next action.";
-  if (pathValue.endsWith("/SKILL.md"))
-    return "Load the bound Skill only after the entry check, then record bounded completion evidence.";
-  if (pathValue.endsWith("decision-points.md"))
-    return "Pause only for a declared user decision; automatic handling and stop conditions do not ask for confirmation.";
-  if (pathValue.endsWith("recovery.md"))
-    return "Resume from persisted authoring records and WorkflowRuntime state in a fresh process, not from conversation history.";
-  return "The deterministic authoring fixture completed its review without blocking findings.";
+function fixtureNode(
+  state: CreatorState,
+  pathValue: string,
+): NodeProtocol | undefined {
+  const workflow = state.confirmedProposal?.workflow;
+  if (!workflow) return undefined;
+  return workflow.nodes.find(
+    (node) =>
+      !node.disabled &&
+      ("../" +
+        (slug(state.confirmedProposal?.name ?? workflow.name) || "workflow") +
+        "-" +
+        (slug(node.id) || "node") +
+        "/SKILL.md" ===
+        pathValue ||
+        pathValue.endsWith("-" + (slug(node.id) || "node") + "/SKILL.md")),
+  );
+}
+
+function substantiveFixtureContent(
+  state: CreatorState,
+  pathValue: string,
+): string {
+  const workflow = state.confirmedProposal?.workflow;
+  if (pathValue === "SKILL.md") {
+    return [
+      "## Decision Core",
+      "",
+      "### Automatic Node Detection",
+      "1. Read the ordered active Nodes and compare the request topic with each Node responsibility.",
+      "2. Read persisted WorkflowRuntime state and use the first incomplete current Node; do not load multiple Nodes at once.",
+      "3. If the topic belongs to an earlier or later Node, explain the ordering conflict before acting.",
+      "",
+      "### Resume And Drift",
+      "On every resume, read persisted state and the current files again rather than trusting conversation history. If state says a Node is complete but its evidence is missing, treat it as incomplete. A topic change requires confirming whether to continue the current Node or return to the declared Node that owns the new scope.",
+      "",
+      "### Decision Classification And Decision Points",
+      "Classify each interruption as a genuine user decision, automatic handling, a stop condition, or a manual handoff. Pause only for a genuine user decision with at least two declared options that change scope, behavior, risk, or an irreversible outcome. Apply the sole safe automatic handling directly; report a stop condition with its recovery requirement; return a manual handoff without inventing a runtime route.",
+      "",
+      "### Red Flags",
+      "- Treating conversation history as the source of current Node state hides drift after a fresh process.",
+      "- Treating every guard failure as a user decision creates unnecessary pauses instead of applying the safe repair.",
+      "- Loading a later Node before the persisted current Node is complete skips required evidence.",
+      workflow
+        ? "The declared workflow is " +
+          workflow.name +
+          "; route and choice references remain limited to its protocol."
+        : "",
+    ].join("\n");
+  }
+  if (pathValue.endsWith("/SKILL.md")) {
+    const node = fixtureNode(state, pathValue);
+    const requiredSkillCalls = node?.requiredSkillCalls ?? [];
+    const requiredCalls = requiredSkillCalls.length
+      ? requiredSkillCalls
+          .map(
+            (binding) =>
+              "- " +
+              binding.skill +
+              ": load this required Skill Call for the declared scope and record its completion check before advancing.",
+          )
+          .join("\n")
+      : "- No additional Skill Calls are required for this Node; use the declared implementation only.";
+    const outputEvidence = node?.outputSchemas.length
+      ? node.outputSchemas
+          .map(
+            (schemaId) =>
+              "- Capture evidence for output schema " +
+              schemaId +
+              " and connect it to the completion summary.",
+          )
+          .join("\n")
+      : "- Record the bounded completion summary and any declared artifact evidence.";
+    const nodeContext = node
+      ? "This Guidance belongs to the " +
+        node.label +
+        " Node (" +
+        node.id +
+        "), whose responsibility is: " +
+        node.responsibility
+      : "This Guidance belongs to an active workflow Node with a declared responsibility.";
+    const implementationContext = node
+      ? "Use the declared implementation Skill " +
+        node.implementation.skill +
+        " for this Node; do not replace it with an unregistered capability."
+      : "Use only the implementation declared by the workflow protocol.";
+    return [
+      "## Guidance",
+      "",
+      nodeContext,
+      implementationContext,
+      "",
+      "### Prerequisites",
+      "- The entry Decision Core has confirmed the current Node and its topic scope from persisted state.",
+      "- The bound implementation is available and its prerequisites are satisfied; stop rather than improvise when a required dependency is missing.",
+      "",
+      "### Steps",
+      "1. Re-read the current Node state, responsibility, and declared inputs before doing domain work.",
+      "2. Load the bound Skill by its declared name and apply its domain method only to the confirmed scope.",
+      "3. Check the result against the Node's completion judgment, rejecting shallow or unverified work that merely looks complete.",
+      "4. Record bounded evidence before the mechanical exit check and before handing control to the next declared Node.",
+      "",
+      "### Required Skill Calls",
+      requiredCalls,
+      "",
+      "### Evidence",
+      outputEvidence,
+      "The evidence must explain what was done, what was observed, and why the result satisfies this Node rather than only repeating the route metadata.",
+      "",
+      "### Completion reasoning",
+      "Consider this Node complete only when the domain result is sufficient for its responsibility, required Skill Calls are evidenced, and the recorded output can support the next Node without hidden assumptions.",
+      "",
+      "### Red flags",
+      "- Advancing after a command or checklist ran while the domain result remains empty, ambiguous, or unverified.",
+      "- Copying a bound Skill body instead of recording the decisions and evidence specific to this Node.",
+      "- Selecting an artifact by recency or guessing a missing dependency instead of stopping with a bounded finding.",
+      "",
+      "### Recovery",
+      "On resume, read the persisted current Node and its evidence in a fresh process. If evidence is stale, incomplete, or the Node is blocked, preserve the blocked reason, correct the declared prerequisite, and re-enter this Node before continuing.",
+    ].join("\n");
+  }
+  if (pathValue.endsWith("decision-points.md")) {
+    const choices =
+      workflow?.nodes.flatMap(
+        (node) => node.decision?.choices.map((choice) => choice.id) ?? [],
+      ) ?? [];
+    const routes = [
+      ...(workflow?.routing?.routes ?? []),
+      ...(workflow?.evals.flatMap(
+        (evaluation) => evaluation.expectedRoutes ?? [],
+      ) ?? []),
+    ].filter(
+      (route, index, allRoutes) =>
+        allRoutes.findIndex((candidate) => candidate.id === route.id) === index,
+    );
+    const declarations = choices.length
+      ? choices
+          .map((choice) => "- Declared choice: choice: " + choice + ".")
+          .join("\n")
+      : "- No declared runtime choices exist for this synthetic workflow.";
+    const routeDeclarations = routes.length
+      ? routes.map((route) => "- Declared route " + route.id + ".").join("\n")
+      : "- No declared route choices exist for this synthetic workflow.";
+    return [
+      "# Decision Points",
+      "",
+      "## Classification",
+      "Every interruption is classified before it is presented to a user. The classification is based on the current WorkflowProtocol and persisted evidence, not on conversation momentum.",
+      "",
+      "### Genuine User Decisions",
+      "Pause only when at least two currently executable options change scope, behavior, accepted risk, or an irreversible outcome. Use only these declared runtime choices:",
+      declarations,
+      "",
+      "### Automatic Handling",
+      "Apply deterministic retries, state reconciliation, and the sole safe repair automatically. Automatic handling is not a genuine user decision and must not ask for confirmation.",
+      "",
+      "### Stop Conditions",
+      "Missing context, corrupt evidence, stale identity, and guard failures with no safe continuation are stop conditions. Report the reason and required recovery without inventing a choice or route.",
+      "",
+      "### Manual Handoffs",
+      "A manual handoff returns control to the responsible person when the protocol requires work outside the current process. It does not add a hidden runtime action or undeclared route.",
+      "",
+      "### Declared Routes",
+      routeDeclarations,
+    ].join("\n");
+  }
+  if (pathValue.endsWith("recovery.md")) {
+    return [
+      "# Recovery",
+      "",
+      "## State First",
+      "Start from persisted authoring and WorkflowRuntime state in a fresh process. Read the current Node, revision, lane records, and bounded findings before relying on any remembered context.",
+      "",
+      "## Resume Procedure",
+      "Use the recorded next step for the current Node or authoring lane. Reuse valid persisted choices and evidence; do not ask the user to repeat a choice that remains bound to the same protocol and input hashes.",
+      "",
+      "## Drift Handling",
+      "If the current Node, source evidence, package identity, or authoring input has drifted, report the blocked reason and keep the last valid record. Regenerate or re-author only the affected lane, then verify the next step from the fresh persisted state.",
+      "",
+      "## Manual Recovery",
+      "When no automatic repair is safe, preserve the finding and hand off the exact recovery requirement. Never select an implicit latest artifact, mutate Run state from authored prose, or create a route that is absent from the WorkflowProtocol.",
+    ].join("\n");
+  }
+  return [
+    "# Skill Review",
+    "",
+    "## Contract Fit",
+    "The six authoring lanes, their claims, dependencies, and content leaves match the declared AuthoringProtocol. The review verdict is approved only when all active Node guidance is substantive and executable metadata remains generator-owned.",
+    "",
+    "## Usability",
+    "The assembled package explains how to start, resume, distinguish a genuine user decision from automatic handling, and recover a blocked Node without conversation history.",
+    "",
+    "## Strengths",
+    "The semantic leaves add domain judgment while the deterministic Auto-zone preserves route, evidence, guard, and runtime ownership.",
+    "",
+    "## Findings",
+    "No blocking findings remain. Minor wording findings do not change protocol behavior; blocking findings would prevent approval and require re-authoring before assembly.",
+    "",
+    "Verdict: approved; blocking findings: none.",
+  ].join("\n");
 }
 
 function fixtureOutput(
+  state: CreatorState,
   plan: AuthoringPlan,
   lane: AuthoringLaneId,
 ): AuthoringLaneOutput {
@@ -152,7 +343,7 @@ function fixtureOutput(
     artifacts: definition.contentLeaves.map((pathValue) => ({
       path: pathValue,
       kind: "markdown",
-      content: fixtureContent(pathValue),
+      content: substantiveFixtureContent(state, pathValue),
     })),
     findings: [],
   };
@@ -287,7 +478,7 @@ async function dispatchFixtureLane(
   await buildAuthoringHandoff({ state, lane, outputPath });
   await atomicWrite(
     outputPath,
-    JSON.stringify(fixtureOutput(plan, lane), null, 2) + "\n",
+    JSON.stringify(fixtureOutput(state, plan, lane), null, 2) + "\n",
   );
   await recordAuthoringFile({ state, lane, file: outputPath });
 }

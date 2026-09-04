@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { CreatorState } from "../types.js";
+import type { CreatorState, WorkflowProtocol } from "../types.js";
 import {
   atomicWrite,
   hashDirectory,
@@ -8,6 +8,7 @@ import {
   listFiles,
   packageRelativePath,
   sha256,
+  slug,
   stableValue,
 } from "../util.js";
 import { readState, writeState } from "../factory/state.js";
@@ -396,6 +397,371 @@ function authoredHeading(artifactPath: string): string | undefined {
   return undefined;
 }
 
+type AuthoredContentTarget =
+  "entry" | "node" | "decision-points" | "recovery" | "review" | undefined;
+
+function authoredContentTarget(artifactPath: string): AuthoredContentTarget {
+  if (artifactPath === "SKILL.md") return "entry";
+  if (artifactPath.endsWith("/SKILL.md")) return "node";
+  if (artifactPath === "reference/decision-points.md") {
+    return "decision-points";
+  }
+  if (artifactPath === "reference/recovery.md") return "recovery";
+  if (artifactPath === "reference/skill-review.md") return "review";
+  return undefined;
+}
+
+function normalizedHeadingTitle(title: string): string {
+  return title
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim();
+}
+
+function hasHeading(
+  headings: Array<{ level: number; title: string }>,
+  aliases: readonly string[],
+): boolean {
+  const normalizedAliases = aliases.map(normalizedHeadingTitle);
+  return headings.some((heading) =>
+    normalizedAliases.includes(normalizedHeadingTitle(heading.title)),
+  );
+}
+
+function generatedNodeSkillPath(workflowName: string, nodeId: string): string {
+  return `../${slug(workflowName) || "workflow"}-${slug(nodeId) || "node"}/SKILL.md`;
+}
+
+function containsToken(content: string, token: string): boolean {
+  return new RegExp(
+    `(?:^|[^A-Za-z0-9_-])${escapeRegExp(token)}(?:$|[^A-Za-z0-9_-])`,
+    "iu",
+  ).test(content);
+}
+
+function declaredReferenceFindings(
+  content: string,
+  artifactPath: string,
+  workflow: WorkflowProtocol | undefined,
+): string[] {
+  if (!workflow) return [];
+  const choiceIds = new Set(
+    workflow.nodes.flatMap(
+      (node) => node.decision?.choices.map((choice) => choice.id) ?? [],
+    ),
+  );
+  const routeIds = declaredRouteIds(workflow);
+  const findings: string[] = [];
+  for (const match of content.matchAll(
+    /\bchoice\s*[:=]\s*`?([A-Za-z0-9][A-Za-z0-9._-]*)`?/giu,
+  )) {
+    const choiceId = match[1]!;
+    if (!choiceIds.has(choiceId)) {
+      findings.push(
+        `authored content references undeclared choice ${choiceId}: ${artifactPath}`,
+      );
+    }
+  }
+  for (const match of content.matchAll(
+    /\broute\s*[:=]\s*`?([A-Za-z0-9][A-Za-z0-9._-]*)`?/giu,
+  )) {
+    const routeId = match[1]!;
+    if (!routeIds.has(routeId)) {
+      findings.push(
+        `authored content references undeclared route ${routeId}: ${artifactPath}`,
+      );
+    }
+  }
+  return findings;
+}
+
+function declaredRouteIds(workflow: WorkflowProtocol): Set<string> {
+  return new Set([
+    ...(workflow.routing?.routes ?? []).map((route) => route.id),
+    ...workflow.evals.flatMap(
+      (evaluation) => evaluation.expectedRoutes?.map((route) => route.id) ?? [],
+    ),
+  ]);
+}
+
+function declaredRuntimeReferenceFindings(
+  content: string,
+  artifactPath: string,
+  workflow: WorkflowProtocol | undefined,
+): string[] {
+  if (!workflow) return [];
+  const activeNodes = workflow.nodes.filter((node) => !node.disabled);
+  const routeIds = declaredRouteIds(workflow);
+  const allowedNextTargets = new Set([
+    "auto",
+    "manual",
+    "done",
+    ...activeNodes.map((node) => node.id),
+    ...routeIds,
+  ]);
+  const findings: string[] = [];
+  for (const match of content.matchAll(
+    /\bNEXT\s*:\s*`?([A-Za-z0-9][A-Za-z0-9._/-]*)`?/gu,
+  )) {
+    const nextTarget = match[1]!;
+    if (!allowedNextTargets.has(nextTarget)) {
+      findings.push(
+        `authored content references undeclared NEXT target ${nextTarget}: ${artifactPath}`,
+      );
+    }
+  }
+  const allowedSkillTargets = new Set(
+    activeNodes.flatMap((node) => [
+      node.id,
+      generatedNodeSkillPath(workflow.name, node.id).slice(
+        3,
+        -"/SKILL.md".length,
+      ),
+    ]),
+  );
+  for (const match of content.matchAll(
+    /\bSKILL\s*:\s*`?([A-Za-z0-9][A-Za-z0-9._/-]*)`?/gu,
+  )) {
+    const skillTarget = match[1]!;
+    if (!allowedSkillTargets.has(skillTarget)) {
+      findings.push(
+        `authored content references undeclared SKILL target ${skillTarget}: ${artifactPath}`,
+      );
+    }
+  }
+  return findings;
+}
+
+function containsImplicitLatestSelection(content: string): boolean {
+  const pattern =
+    /\b(?:latest|newest|most recent)\s+(?:artifact|version|output|result)\b/giu;
+  for (const match of content.matchAll(pattern)) {
+    const before = content.slice(
+      Math.max(0, (match.index ?? 0) - 80),
+      match.index,
+    );
+    if (
+      /\b(?:not|never|cannot|must not|do not)\b[^.!?\n]{0,70}$/iu.test(before)
+    ) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+function sourceBody(content: string): string {
+  const frontmatter =
+    /^\uFEFF?---[ \t]*(?:\r?\n|$)[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/u.exec(
+      content,
+    );
+  return (frontmatter ? content.slice(frontmatter[0].length) : content).trim();
+}
+
+function copiesCompleteSourceSkillBody(
+  state: CreatorState,
+  content: string,
+): boolean {
+  const normalizedContent = content.trim();
+  return (
+    state.confirmedProposal?.candidates.some((candidate) =>
+      candidate.sources.some((source) => {
+        const normalizedSource = sourceBody(source.skillMd);
+        return (
+          normalizedSource.length > 0 && normalizedSource === normalizedContent
+        );
+      }),
+    ) ?? false
+  );
+}
+
+function substantiveContentFindings(
+  content: string,
+  artifactPath: string,
+  workflow?: WorkflowProtocol,
+): string[] {
+  const target = authoredContentTarget(artifactPath);
+  if (!target) return [];
+  const headings = markdownHeadings(content);
+  const findings: string[] = [];
+  const minimumWords =
+    target === "node" || target === "entry"
+      ? 45
+      : target === "review"
+        ? 30
+        : 24;
+  const wordCount = content.match(/[A-Za-z0-9][A-Za-z0-9'-]*/gu)?.length ?? 0;
+  if (wordCount < minimumWords) {
+    findings.push(`authored content is not substantive: ${artifactPath}`);
+  }
+  const requiredHeadings: Record<
+    Exclude<AuthoredContentTarget, undefined>,
+    readonly (readonly string[])[]
+  > = {
+    entry: [
+      ["Automatic Node Detection"],
+      ["Resume And Drift", "Resume Rules", "Error Handling And Resume Rules"],
+      ["Decision Classification And Decision Points", "Decision Points"],
+      ["Red Flags"],
+    ],
+    node: [
+      ["Prerequisites"],
+      ["Steps"],
+      ["Required Skill Calls", "Required Bindings"],
+      ["Evidence"],
+      ["Completion Reasoning"],
+      ["Red Flags"],
+      ["Recovery"],
+    ],
+    "decision-points": [
+      ["Classification"],
+      ["Genuine User Decisions"],
+      ["Automatic Handling"],
+      ["Stop Conditions"],
+      ["Manual Handoffs"],
+    ],
+    recovery: [
+      ["State First", "State"],
+      ["Resume Procedure", "Resume"],
+      ["Drift Handling", "Drift"],
+    ],
+    review: [["Contract Fit"], ["Usability"], ["Strengths"], ["Findings"]],
+  };
+  for (const aliases of requiredHeadings[target]) {
+    if (!hasHeading(headings, aliases)) {
+      findings.push(
+        `authored content missing substantive section ${aliases[0]}: ${artifactPath}`,
+      );
+    }
+  }
+  if (target === "entry") {
+    const requiredPhrases = [
+      ["current Node", /current\s+Node/iu],
+      ["persisted state", /persisted[\s\w-]{0,30}state/iu],
+      ["conversation history", /conversation\s+history/iu],
+      ["topic change", /topic[\s\w-]{0,30}(?:change|shift|different)/iu],
+      ["automatic handling", /automatic\s+handling/iu],
+      ["manual handoff", /manual\s+handoff/iu],
+      ["user decision", /user\s+decision/iu],
+    ] as const;
+    for (const [label, pattern] of requiredPhrases) {
+      if (!pattern.test(content)) {
+        findings.push(
+          `authored entry content missing ${label}: ${artifactPath}`,
+        );
+      }
+    }
+  }
+  if (target === "node") {
+    const orderedSteps = content.match(/^\s*\d+[.)]\s+\S/gmu)?.length ?? 0;
+    if (orderedSteps < 2) {
+      findings.push(
+        `authored Node guidance needs ordered domain steps: ${artifactPath}`,
+      );
+    }
+    if (workflow) {
+      const node = workflow.nodes.find(
+        (candidate) =>
+          !candidate.disabled &&
+          (generatedNodeSkillPath(workflow.name, candidate.id) ===
+            artifactPath ||
+            artifactPath.endsWith(
+              "-" + (slug(candidate.id) || "node") + "/SKILL.md",
+            )),
+      );
+      const requiredSkillCalls = node?.requiredSkillCalls ?? [];
+      if (requiredSkillCalls.length === 0) {
+        if (
+          !/no\s+(?:additional\s+)?Skill\s+Calls|no\s+required\s+Skill\s+Calls|none/iu.test(
+            content,
+          )
+        ) {
+          findings.push(
+            `authored Node guidance must classify required Skill Calls: ${artifactPath}`,
+          );
+        }
+      } else {
+        for (const binding of requiredSkillCalls) {
+          if (!containsToken(content, binding.skill)) {
+            findings.push(
+              `authored Node guidance omits required Skill Call ${binding.skill}: ${artifactPath}`,
+            );
+          }
+        }
+      }
+      for (const schemaId of node?.outputSchemas ?? []) {
+        if (!containsToken(content, schemaId)) {
+          findings.push(
+            `authored Node guidance omits output evidence ${schemaId}: ${artifactPath}`,
+          );
+        }
+      }
+    }
+    if (
+      !/\b(?:record|capture|submit|verify)\b[\s\w-]{0,50}\bevidence\b/iu.test(
+        content,
+      )
+    ) {
+      findings.push(
+        `authored Node guidance must explain evidence handling: ${artifactPath}`,
+      );
+    }
+    if (!/\b(?:persisted|resume|recover|re-enter)\b/iu.test(content)) {
+      findings.push(
+        `authored Node guidance must explain recovery: ${artifactPath}`,
+      );
+    }
+  }
+  if (target === "decision-points") {
+    for (const category of [
+      "genuine user decision",
+      "automatic handling",
+      "stop condition",
+      "manual handoff",
+    ]) {
+      if (!content.toLocaleLowerCase().includes(category)) {
+        findings.push(
+          `decision-point content missing ${category}: ${artifactPath}`,
+        );
+      }
+    }
+  }
+  if (target === "recovery") {
+    const requiredPhrases = [
+      ["fresh process", /fresh\s+process/iu],
+      ["current Node", /current\s+Node/iu],
+      ["blocked reason", /blocked[\s\w-]{0,30}(?:reason|condition)/iu],
+      ["next step", /next\s+step/iu],
+      ["persisted state", /persisted[\s\w-]{0,30}state/iu],
+    ] as const;
+    for (const [label, pattern] of requiredPhrases) {
+      if (!pattern.test(content)) {
+        findings.push(`recovery content missing ${label}: ${artifactPath}`);
+      }
+    }
+  }
+  if (target === "review") {
+    if (!/\b(?:approved|passed|rejected|blocked)\b/iu.test(content)) {
+      findings.push(`review content must record a verdict: ${artifactPath}`);
+    }
+    if (!/\bblocking\b/iu.test(content)) {
+      findings.push(
+        `review content must classify blocking findings: ${artifactPath}`,
+      );
+    }
+  }
+  if (containsImplicitLatestSelection(content)) {
+    findings.push(
+      `authored content cannot select an implicit latest artifact or version: ${artifactPath}`,
+    );
+  }
+  findings.push(...declaredReferenceFindings(content, artifactPath, workflow));
+  findings.push(
+    ...declaredRuntimeReferenceFindings(content, artifactPath, workflow),
+  );
+  return findings;
+}
+
 function startsWithFrontmatter(content: string): boolean {
   return /^\uFEFF?---[ \t]*(?:\r?\n|$)/u.test(content);
 }
@@ -500,6 +866,7 @@ function placeholderFinding(
     /\b(?:not yet authored|to be completed|fill in|insert (?:text|content|guidance))\b/iu,
     /\{\{[^}\r\n]{1,256}\}\}|\$\{[^}\r\n]{1,256}\}/u,
     /\[[ \t]*(?:TODO|TBD|FIXME|INSERT|PLACEHOLDER)[^\]\r\n]*\]/iu,
+    /\b(?:NEXT|SKILL|route|choice)\s*:\s*<[^>\r\n]{1,256}>/iu,
   ];
   return patterns.some((pattern) => pattern.test(content))
     ? `authored content contains a placeholder: ${artifactPath}`
@@ -580,6 +947,7 @@ function executableContentFindings(
 function authoredContentFindings(
   content: string,
   artifactPath: string,
+  workflow?: WorkflowProtocol,
 ): string[] {
   const findings: string[] = [];
   if (Buffer.byteLength(content, "utf8") > MAX_ARTIFACT_BYTES)
@@ -630,11 +998,16 @@ function authoredContentFindings(
     }
   }
   findings.push(...executableContentFindings(content, artifactPath));
+  findings.push(...substantiveContentFindings(content, artifactPath, workflow));
   return [...new Set(findings)];
 }
 
-function assertAuthoredContent(content: string, artifactPath: string): void {
-  const findings = authoredContentFindings(content, artifactPath);
+function assertAuthoredContent(
+  content: string,
+  artifactPath: string,
+  workflow?: WorkflowProtocol,
+): void {
+  const findings = authoredContentFindings(content, artifactPath, workflow);
   if (findings.length) throw new Error(findings.join("; "));
 }
 
@@ -1109,8 +1482,6 @@ function normalizedArtifact(
       startsWithFrontmatter(result.content))
   )
     throw new Error(`${label}.content is invalid`);
-  if (result.content !== undefined)
-    assertAuthoredContent(result.content, String(result.path));
   if (
     result.content !== undefined &&
     result.contentHash !== undefined &&
@@ -1874,7 +2245,18 @@ async function materializeArtifact(
     );
     content = suppliedContent;
   }
-  if (content !== undefined) assertAuthoredContent(content, input.path);
+  if (content !== undefined) {
+    if (copiesCompleteSourceSkillBody(state, content)) {
+      throw new Error(
+        `Authoring content copies a complete source Skill body: ${input.path}`,
+      );
+    }
+    assertAuthoredContent(
+      content,
+      input.path,
+      state.confirmedProposal?.workflow,
+    );
+  }
   if (input.contentHash !== undefined && input.contentHash !== contentHash)
     throw new Error(
       `Authoring artifact hash does not match content: ${input.path}`,
@@ -2206,7 +2588,16 @@ async function readArtifactContent(
     throw new Error(
       `Authoring artifact cannot replace package frontmatter: ${artifact.path}`,
     );
-  assertAuthoredContent(content, artifact.path);
+  if (copiesCompleteSourceSkillBody(state, content)) {
+    throw new Error(
+      `Authoring content copies a complete source Skill body: ${artifact.path}`,
+    );
+  }
+  assertAuthoredContent(
+    content,
+    artifact.path,
+    state.confirmedProposal?.workflow,
+  );
   return content;
 }
 
