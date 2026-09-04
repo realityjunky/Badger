@@ -77,7 +77,7 @@ describe("Badger authoring lifecycle", () => {
 
   afterEach(async () => fs.rm(root, { recursive: true, force: true }));
 
-  async function createScaffold(): Promise<{
+  async function createScaffold(depth: "quick" | "full" = "quick"): Promise<{
     state: CreatorState;
     plan: FactoryPlan;
     generated: GeneratedPackage;
@@ -96,9 +96,10 @@ describe("Badger authoring lifecycle", () => {
       proposal,
       plan,
       destination: state.draftPath,
+      authoringDepth: depth,
     });
     state.generated = generated;
-    const authoringPlan = deriveAuthoringPlan({ proposal });
+    const authoringPlan = deriveAuthoringPlan({ proposal, depth });
     await initializeAuthoringSession({
       state,
       plan: authoringPlan,
@@ -106,6 +107,21 @@ describe("Badger authoring lifecycle", () => {
     });
     return { state, plan, generated, authoringPlan };
   }
+
+  it("persists the selected review depth in the generated authoring plan", async () => {
+    const { generated, authoringPlan } = await createScaffold("full");
+    const persisted = JSON.parse(
+      await fs.readFile(generated.authoringPlanPath, "utf8"),
+    ) as AuthoringPlan;
+
+    expect(persisted.depth).toBe("full");
+    expect(persisted.verify).toMatchObject({
+      voters: 3,
+      maxRounds: 4,
+      dryThreshold: 2,
+    });
+    expect(persisted.authoringPlanHash).toBe(authoringPlan.authoringPlanHash);
+  });
 
   it("creates a pending session and preserves records across unchanged regeneration", async () => {
     const { state, generated, authoringPlan } = await createScaffold();
@@ -230,6 +246,16 @@ describe("Badger authoring lifecycle", () => {
     expect(assembled.authoring?.assembledPackageHash).toMatch(
       /^[a-f0-9]{64}$/u,
     );
+    expect(assembled.authoring?.review).toMatchObject({
+      schemaVersion: 1,
+      decision: "approved",
+      passed: true,
+      evidenceSource: "deterministic-check-only",
+      authoringInputHash: assembled.authoring.authoringInputHash,
+      authoredMaterialHash: assembled.authoring.authoredMaterialHash,
+      packageHash: assembled.authoring.assembledPackageHash,
+      reviewHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
   });
 
   it("assembles substantive authored content for every active Node", async () => {

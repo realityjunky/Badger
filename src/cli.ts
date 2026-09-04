@@ -214,6 +214,11 @@ program
 program
   .command("generate <name>")
   .option("--project <dir>", "Project root", ".")
+  .addOption(
+    new Option("--depth <depth>", "Authoring review depth")
+      .choices(["quick", "full"])
+      .default("quick"),
+  )
   .option("--json", "JSON output")
   .action(async (name, options) => {
     const root = projectRoot(options.project);
@@ -234,6 +239,7 @@ program
       proposal,
       plan,
       destination: state.draftPath,
+      authoringDepth: options.depth,
     });
     state.generated = generated;
     state.planHash = proposal.planHash;
@@ -245,7 +251,7 @@ program
     state.review = undefined;
     await initializeAuthoringSession({
       state,
-      plan: await buildAuthoringPlan({ proposal }),
+      plan: await buildAuthoringPlan({ proposal, depth: options.depth }),
       generated,
     });
     emit(
@@ -269,6 +275,7 @@ program
 
 program
   .command("review <name>")
+  .description("Show composite authoring, runtime, and publication readiness")
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (name, options) => {
@@ -280,6 +287,7 @@ program
 
 program
   .command("approve <name>")
+  .description("Record distinct human publication approval")
   .requiredOption("--reviewer <id>", "Reviewer identity")
   .option("--confirm", "Confirm approval")
   .option("--project <dir>", "Project root", ".")

@@ -29,6 +29,12 @@ The standalone package deliberately excludes Classic customization, Native workf
 10. Run `badger approve <name> --reviewer <id> --confirm`, then `badger publish <name> --confirm`.
 11. Start with `badger distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
 
+## Review and readiness
+
+`badger review <name> --json` reports separate authoring, runtime, and publication sections. Authoring review is the `skill-review` lane barrier: quick mode records one voter and one round; full mode records three independent voters, all four lenses, a two-round dry threshold, and no more than four rounds. Provider findings require bound voter evidence and are confirmed by majority in full mode. Deterministic self-consistency checks always remain separate and inspect commands, paths, claims, generated artifacts, and package identity.
+
+Critical or Important findings, unresolved concerns, missing or stale review hashes, and unbound provider evidence block authoring readiness. A passing authoring review never substitutes for deterministic evaluation or WorkflowRuntime certification. `badger approve` records only distinct human publication approval after every earlier readiness section passes and requires `--confirm`.
+
 ## Contract rules
 
 - `reference/workflow-protocol.json` is the single runtime contract for Node order, state, Output Schemas, and recovery edges.

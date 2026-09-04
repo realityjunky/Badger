@@ -174,6 +174,16 @@ export type AuthoringFindingSeverity = "critical" | "important" | "minor";
 export type AuthoringEvidenceSource =
   "deterministic-check-only" | "llm-single" | "llm-multivote";
 
+export const AUTHORING_REVIEW_LENSES = [
+  "contract-fit",
+  "usability",
+  "evidence-trace",
+  "self-consistency",
+] as const;
+
+export type AuthoringReviewLens = (typeof AUTHORING_REVIEW_LENSES)[number];
+export type AuthoringReviewFindingSource = "provider" | "deterministic";
+
 export interface AuthoringLaneFinding {
   severity: AuthoringFindingSeverity;
   path?: string;
@@ -181,6 +191,22 @@ export interface AuthoringLaneFinding {
   problem: string;
   impact?: string;
   fix?: string;
+}
+
+export interface AuthoringReviewFinding extends AuthoringLaneFinding {
+  lens?: AuthoringReviewLens;
+  source?: AuthoringReviewFindingSource;
+  voterIds?: string[];
+}
+
+export interface AuthoringReviewVoterEvidence {
+  id: string;
+  provider: string;
+  model: string;
+  inputHash: string;
+  evidenceHash: string;
+  passed: boolean;
+  findings: AuthoringReviewFinding[];
 }
 
 export interface AuthoringLaneClaimOutput {
@@ -208,7 +234,11 @@ export interface AuthoringLaneReviewOutput {
   voters?: number;
   lenses?: string[];
   rounds?: number;
-  findings: AuthoringLaneFinding[];
+  dryRounds?: number;
+  mode?: AuthoringDepth;
+  inputHash?: string;
+  findings: AuthoringReviewFinding[];
+  voterEvidence?: AuthoringReviewVoterEvidence[];
   reviewedAt: string;
 }
 
@@ -270,10 +300,39 @@ export interface AuthoringReviewOutput {
   voters?: number;
   lenses?: string[];
   rounds?: number;
-  findings?: AuthoringLaneFinding[];
+  dryRounds?: number;
+  findings?: AuthoringReviewFinding[];
   reviewedAt?: string;
   contractFit?: "pass" | "fail" | "needs_context";
   usability?: "pass" | "fail" | "needs_context";
+  mode?: AuthoringDepth;
+  inputHash?: string;
+  voterEvidence?: AuthoringReviewVoterEvidence[];
+}
+
+export interface AuthoringReviewResult {
+  schemaVersion: 1;
+  mode: AuthoringDepth;
+  decision: "approved" | "rejected" | "needs_context";
+  passed: boolean;
+  contractFit: "pass" | "fail" | "needs_context";
+  usability: "pass" | "fail" | "needs_context";
+  evidenceSource: AuthoringEvidenceSource;
+  voters: number;
+  lenses: AuthoringReviewLens[];
+  rounds: number;
+  dryRounds: number;
+  reviewer: string;
+  summary: string;
+  blockingFindings: string[];
+  warnings: string[];
+  findings: AuthoringReviewFinding[];
+  reviewedAt: string;
+  authoringInputHash: string;
+  authoredMaterialHash: string;
+  packageHash: string;
+  reviewHash: string;
+  voterEvidence: AuthoringReviewVoterEvidence[];
 }
 
 export interface AuthoringRecord {
@@ -352,6 +411,7 @@ export interface AuthoringStateSummary {
   records: Partial<Record<AuthoringLaneId, AuthoringRecordSummary>>;
   invalidatedLanes?: AuthoringLaneId[];
   conflict?: AuthoringRevisionConflict;
+  review?: AuthoringReviewResult;
 }
 
 export interface AuthoringRevisionConflict {
@@ -405,4 +465,5 @@ export interface AuthoringReadiness {
   lanes: Record<AuthoringLaneId, AuthoringLaneReadiness>;
   waves: AuthoringWaveReadiness[];
   recovery: AuthoringRecoveryInfo;
+  review?: AuthoringReviewResult;
 }

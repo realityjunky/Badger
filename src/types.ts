@@ -1,5 +1,8 @@
 import type { RuntimeIdentity } from "./engine/types.js";
-import type { AuthoringStateSummary } from "./authoring/types.js";
+import type {
+  AuthoringReviewResult,
+  AuthoringStateSummary,
+} from "./authoring/types.js";
 
 export type CreatorIntent = "new-skill" | "upgrade-existing";
 
@@ -1124,6 +1127,26 @@ export interface FactoryProposal {
 
 export type CreatorStatus =
   "draft" | "generated" | "evaluated" | "review-approved" | "published";
+
+export interface ReadinessSection {
+  state: "blocked" | "ready";
+  blockers: string[];
+  warnings: string[];
+  evidence: Record<string, string>;
+  hashes: Record<string, string | null>;
+  review?: AuthoringReviewResult;
+}
+
+export interface CompositeReadiness {
+  state: "blocked" | "reviewable" | "publishable";
+  blockers: string[];
+  warnings: string[];
+  evidence: Record<string, string>;
+  hashes: Record<string, string | null>;
+  authoring: ReadinessSection;
+  runtime: ReadinessSection;
+  publication: ReadinessSection;
+}
 
 export interface CreatorState {
   schemaVersion: 1;

@@ -31,6 +31,7 @@ import {
 } from "../authoring/protocol.js";
 import { normalizeWorkflowRepairPolicy } from "../workflow-runtime/repair.js";
 import { deriveAuthoringPlan } from "../authoring/plan.js";
+import type { AuthoringDepth } from "../authoring/types.js";
 
 function nodeSkillName(workflow: string, node: string): string {
   return `${slug(workflow) || "workflow"}-${slug(node) || "node"}`;
@@ -741,6 +742,7 @@ async function writeScaffold(options: {
   root: string;
   sourceRoot?: string;
   sourceHash?: string;
+  authoringDepth?: AuthoringDepth;
 }): Promise<{
   authoringPlanPath: string;
   sourceRoot?: string;
@@ -750,7 +752,7 @@ async function writeScaffold(options: {
   const proposal = options.proposal;
   const authoringPlanPath = path.join(root, "reference", "authoring-plan.json");
   const authoringPlan = HASH_PATTERN.test(proposal.planHash)
-    ? deriveAuthoringPlan({ proposal })
+    ? deriveAuthoringPlan({ proposal, depth: options.authoringDepth })
     : undefined;
   const sourcePaths = options.sourceRoot
     ? (await listFiles(options.sourceRoot)).flatMap((relativePath) => [
@@ -894,6 +896,7 @@ export async function generatePackage(options: {
   proposal: FactoryProposal;
   plan: FactoryPlan;
   destination: string;
+  authoringDepth?: AuthoringDepth;
 }): Promise<GeneratedPackage> {
   const root = path.resolve(options.destination);
   const sourceRoot = options.plan.sourceRoot
@@ -917,6 +920,9 @@ export async function generatePackage(options: {
       root: stagingRoot,
       ...(sourceRoot ? { sourceRoot } : {}),
       ...(sourceHash ? { sourceHash } : {}),
+      ...(options.authoringDepth
+        ? { authoringDepth: options.authoringDepth }
+        : {}),
     });
     const scaffoldHash = await hashDirectory(stagingRoot);
     const inventory = await inventoryPackage(stagingRoot);

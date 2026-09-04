@@ -26,6 +26,11 @@ import {
   AUTHORING_PROTOCOL_HASH,
 } from "./protocol.js";
 import { deriveAuthoringPlan, validateAuthoringPlan } from "./plan.js";
+import {
+  AUTHORING_REVIEW_LENSES,
+  buildAuthoringReview,
+  validateAuthoringReviewInput,
+} from "./review.js";
 import type {
   AuthoringArtifactEvidence,
   AuthoringArtifactInput,
@@ -41,7 +46,10 @@ import type {
   AuthoringRecord,
   AuthoringRecordInput,
   AuthoringRecordSummary,
+  AuthoringReviewFinding,
   AuthoringReviewOutput,
+  AuthoringReviewResult,
+  AuthoringReviewVoterEvidence,
   AuthoringRevisionConflict,
   AuthoringSessionStatus,
   AuthoringStateSummary,
@@ -286,11 +294,21 @@ function canonicalRecord(record: AuthoringRecord): unknown {
           ...(record.review.rounds !== undefined
             ? { rounds: record.review.rounds }
             : {}),
+          ...(record.review.dryRounds !== undefined
+            ? { dryRounds: record.review.dryRounds }
+            : {}),
           ...(record.review.findings
             ? { findings: [...record.review.findings] }
             : {}),
           ...(record.review.reviewedAt
             ? { reviewedAt: record.review.reviewedAt }
+            : {}),
+          ...(record.review.mode ? { mode: record.review.mode } : {}),
+          ...(record.review.inputHash
+            ? { inputHash: record.review.inputHash }
+            : {}),
+          ...(record.review.voterEvidence
+            ? { voterEvidence: [...record.review.voterEvidence] }
             : {}),
           contractFit: record.review.contractFit ?? null,
           usability: record.review.usability ?? null,
@@ -1312,6 +1330,19 @@ export function validateAuthoringRecord(
       lane.id === "skill-review" && statusRequiresCompleteEvidence(status),
     ),
   );
+  if (
+    lane.id === "skill-review" &&
+    isRecord(record.review) &&
+    statusRequiresCompleteEvidence(status)
+  ) {
+    findings.push(
+      ...validateAuthoringReviewInput(
+        record.review,
+        plan,
+        authoringInputHash(plan),
+      ),
+    );
+  }
   if (isRecord(record.review)) {
     if (
       Array.isArray(record.review.lenses) &&
@@ -1396,6 +1427,54 @@ function normalizedFindings(
   return (value as unknown[]).map((item, index) =>
     normalizedFinding(item, `${label}[${index}]`),
   );
+}
+
+function normalizedReviewFindings(
+  value: unknown,
+  label: string,
+): AuthoringReviewFinding[] {
+  if (value === undefined) return [];
+  const findings = validateFindingList(value, label);
+  if (findings.length) throw new Error(findings.join("; "));
+  return (value as unknown[]).map((item, index) => {
+    const finding = normalizedFinding(
+      item,
+      `${label}[${index}]`,
+    ) as AuthoringReviewFinding;
+    if (!isRecord(item)) return finding;
+    if (
+      item.lens !== undefined &&
+      !AUTHORING_REVIEW_LENSES.includes(
+        item.lens as (typeof AUTHORING_REVIEW_LENSES)[number],
+      )
+    ) {
+      throw new Error(`${label}[${index}].lens is invalid`);
+    }
+    if (
+      item.source !== undefined &&
+      !["provider", "deterministic"].includes(String(item.source))
+    ) {
+      throw new Error(`${label}[${index}].source is invalid`);
+    }
+    if (item.voterIds !== undefined) {
+      if (
+        !Array.isArray(item.voterIds) ||
+        item.voterIds.some((voterId) => !boundedText(voterId))
+      ) {
+        throw new Error(`${label}[${index}].voterIds is invalid`);
+      }
+    }
+    return {
+      ...finding,
+      ...(item.lens
+        ? { lens: item.lens as AuthoringReviewFinding["lens"] }
+        : {}),
+      ...(item.source
+        ? { source: item.source as AuthoringReviewFinding["source"] }
+        : {}),
+      ...(item.voterIds ? { voterIds: [...(item.voterIds as string[])] } : {}),
+    };
+  });
 }
 
 function normalizedClaim(
@@ -1518,7 +1597,7 @@ function normalizedReview(
       throw new Error("Authoring review reviewedAt is invalid");
     if (!Array.isArray(value.findings))
       throw new Error("Authoring review findings must be an array");
-    const findings = normalizedFindings(
+    const findings = normalizedReviewFindings(
       value.findings,
       "authoring review findings",
     );
@@ -1533,14 +1612,33 @@ function normalizedReview(
         "Passed authoring review cannot contain blocking findings",
       );
     return {
-      decision: value.passed ? "approved" : "rejected",
-      reviewer: boundedText(model) ? (model as string) : "authoring-provider",
-      summary: value.passed
-        ? "Authoring review passed."
-        : findings.map((finding) => finding.problem).join("; ") ||
-          "Authoring review did not pass.",
-      blockingFindings,
-      warnings,
+      decision:
+        value.decision === "needs_context"
+          ? "needs_context"
+          : value.decision === "rejected" || !value.passed
+            ? "rejected"
+            : "approved",
+      reviewer: boundedText(value.reviewer)
+        ? value.reviewer
+        : boundedText(model)
+          ? (model as string)
+          : "authoring-provider",
+      summary: boundedText(value.summary)
+        ? value.summary
+        : value.passed
+          ? "Authoring review passed."
+          : findings.map((finding) => finding.problem).join("; ") ||
+            "Authoring review did not pass.",
+      blockingFindings: Array.isArray(value.blockingFindings)
+        ? value.blockingFindings.filter(
+            (finding): finding is string => typeof finding === "string",
+          )
+        : blockingFindings,
+      warnings: Array.isArray(value.warnings)
+        ? value.warnings.filter(
+            (warning): warning is string => typeof warning === "string",
+          )
+        : warnings,
       passed: value.passed,
       evidenceSource:
         value.evidenceSource as AuthoringReviewOutput["evidenceSource"],
@@ -1549,6 +1647,26 @@ function normalizedReview(
         ? { lenses: value.lenses as string[] }
         : {}),
       ...(value.rounds !== undefined ? { rounds: value.rounds as number } : {}),
+      ...(value.dryRounds !== undefined
+        ? { dryRounds: value.dryRounds as number }
+        : {}),
+      ...(value.mode !== undefined
+        ? { mode: value.mode as AuthoringReviewOutput["mode"] }
+        : {}),
+      ...(value.inputHash !== undefined
+        ? { inputHash: value.inputHash as string }
+        : {}),
+      ...(value.decision !== undefined
+        ? {
+            decision: value.decision as AuthoringReviewOutput["decision"],
+          }
+        : {}),
+      ...(Array.isArray(value.voterEvidence)
+        ? {
+            voterEvidence:
+              value.voterEvidence as AuthoringReviewVoterEvidence[],
+          }
+        : {}),
       findings,
       reviewedAt: value.reviewedAt as string,
     };
@@ -2105,6 +2223,10 @@ export async function initializeAuthoringSession(options: {
         ? (previous?.authoredMaterialHash ?? null)
         : null,
       assembledPackageHash: null,
+      review:
+        sameInput && previous?.scaffoldHash === options.generated.scaffoldHash
+          ? previous?.review
+          : undefined,
       records: retainedRecords,
       ...(invalidatedLanes?.length ? { invalidatedLanes } : {}),
     };
@@ -2466,6 +2588,7 @@ export async function recordAuthoring(options: {
       ...prior,
       statePath: sessionSummaryPath(current),
       conflict: undefined,
+      review: undefined,
       status: orderedInvalidated.length
         ? "stale"
         : summaryStatus(stored.records),
@@ -3013,6 +3136,41 @@ export async function authoringReadiness(
     (lane) =>
       !invalidated.has(lane) && isCompleteStatus(stored.records[lane]?.status),
   );
+  let review: AuthoringReviewResult | undefined;
+  if (allRecordsComplete && blockers.length === 0) {
+    try {
+      const packageHash = await hashDirectory(packageRoot(state));
+      review = await buildAuthoringReview({
+        plan,
+        records: stored.records,
+        packageRoot: packageRoot(state),
+        packageHash,
+        authoringInputHash: currentInputHash,
+        authoredMaterialHash:
+          authoring.authoredMaterialHash ?? recordsMaterialHash(stored.records),
+        assembled: authoring.status === "assembled",
+      });
+      warnings.push(...review.warnings);
+      if (!review.passed) {
+        blockers.push(
+          `Authoring review did not pass${
+            review.blockingFindings.length
+              ? `: ${review.blockingFindings.join("; ")}`
+              : ""
+          }`,
+        );
+      }
+      if (authoring.status === "assembled") {
+        if (!authoring.review) {
+          blockers.push("Authoring review evidence is missing");
+        } else if (authoring.review.reviewHash !== review.reviewHash) {
+          blockers.push("Authoring review evidence is stale");
+        }
+      }
+    } catch (error) {
+      blockers.push(`Unable to build authoring review: ${String(error)}`);
+    }
+  }
   const pendingMarkers = allRecordsComplete
     ? []
     : ["Generated scaffold contains authoring-pending content"];
@@ -3115,6 +3273,9 @@ export async function authoringReadiness(
       ),
     ],
     recovery: recoveryInfo(state, authoring),
+    ...((review ?? authoring.review)
+      ? { review: review ?? authoring.review }
+      : {}),
   };
 }
 
@@ -3549,6 +3710,20 @@ export async function assemblePackage(
         authoredPaths,
       );
       const authoredMaterialHash = recordsMaterialHash(stored.records);
+      const authoringReview = await buildAuthoringReview({
+        plan,
+        records: stored.records,
+        packageRoot: scaffold.packageRoot,
+        packageHash: assembledPackageHash,
+        authoringInputHash: current.authoring.authoringInputHash,
+        authoredMaterialHash,
+        assembled: true,
+      });
+      if (!authoringReview.passed) {
+        throw new Error(
+          `Cannot assemble failed authoring review:\n${authoringReview.blockingFindings.join("\n")}`,
+        );
+      }
       const authoring = current.authoring;
       const generated = current.generated;
       if (!authoring || !generated)
@@ -3571,6 +3746,7 @@ export async function assemblePackage(
         revision: authoring.revision + 1,
         authoredMaterialHash,
         assembledPackageHash,
+        review: authoringReview,
         invalidatedLanes: undefined,
       };
       const nextGenerated = {

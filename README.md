@@ -12,6 +12,7 @@ The package includes:
 - confirmed plan/state lifecycle in the standalone `.badger` namespace;
 - generated authoring-pending scaffolds with resumable six-lane authoring
   sessions and protocol/evidence references;
+- hash-bound quick/full authoring review with deterministic self-consistency findings and composite authoring/runtime/publication readiness;
 - protected deterministic assembly with separate Auto-zone, Authored-zone, and
   source inventory ownership;
 - generated Badger plan, check, hook-guard, and WorkflowRuntime control-plane
@@ -69,10 +70,13 @@ The CLI is `badger` after `npm run build`:
 ```bash
 node bin/badger.js guide --project . --json
 node bin/badger.js authoring-plan prepared-workflow --project . --depth quick --json
+node bin/badger.js generate prepared-workflow --project . --depth full --json
 node bin/badger.js authoring-status prepared-workflow --project . --json
 node bin/badger.js authoring-dispatch prepared-workflow --lane script --output /tmp/script.json --project . --json
 node bin/badger.js assemble prepared-workflow --project . --json
 ```
+
+`badger review <name> --json` reports distinct authoring, runtime, and publication readiness. The `skill-review` lane records quick or full authoring evidence; full review requires three independent voter records and all four review lenses. Deterministic self-consistency findings are never replaced by provider findings. `badger approve` records only human publication approval after authoring, evaluation, and WorkflowRuntime evidence are current.
 
 `authoring-plan` is read-only. It accepts a confirmed workflow name after
 initialization, derives the six-lane AuthoringPlan from the persisted normalized

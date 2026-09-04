@@ -4,12 +4,14 @@ import path from "node:path";
 import {
   WORKFLOW_RUNTIME_PHASE3_NEGATIVE_CASES,
   WORKFLOW_RUNTIME_PHASE4_NEGATIVE_CASES,
+  type CompositeReadiness,
   type CreatorState,
 } from "../types.js";
 import { copyDirectory, ensureDirectory, isWithin } from "../util.js";
 import { writeState } from "../factory/state.js";
 import { WORKFLOW_FINALIZATION_BOUNDARY_PHASES } from "../workflow-runtime/finalization.js";
 import { WORKFLOW_TRANSITION_BOUNDARY_PHASES } from "../workflow-runtime/transition-journal.js";
+import { validateAuthoringReviewResult } from "../authoring/review.js";
 
 function sameStrings(left: unknown, right: unknown): boolean {
   return (
@@ -579,36 +581,153 @@ function phase4EvidenceBlockers(state: CreatorState): string[] {
   }
 }
 
-export function reviewState(state: CreatorState): {
-  state: "blocked" | "reviewable" | "publishable";
-  blockers: string[];
-  evidence: Record<string, string>;
-} {
+function authoringReadinessSection(
+  state: CreatorState,
+): CompositeReadiness["authoring"] {
   const blockers: string[] = [];
+  const warnings: string[] = [];
+  const authoring = state.authoring;
+  const hashes = {
+    authoringInput: authoring?.authoringInputHash ?? null,
+    scaffold: authoring?.scaffoldHash ?? null,
+    authoredMaterial: authoring?.authoredMaterialHash ?? null,
+    assembledPackage: authoring?.assembledPackageHash ?? null,
+    review: authoring?.review?.reviewHash ?? null,
+  };
+  if (!authoring) {
+    return { state: "ready", blockers, warnings, evidence: {}, hashes };
+  }
+  if (authoring.status !== "assembled") {
+    blockers.push("Authoring session is not assembled");
+  }
+  if (
+    state.currentHash &&
+    authoring.assembledPackageHash !== state.currentHash
+  ) {
+    blockers.push("Authoring assembly is stale for current package hash");
+  }
+  const review = authoring.review;
+  if (!review) {
+    blockers.push("Authoring review evidence is missing");
+  } else {
+    const reviewValidation = validateAuthoringReviewResult(review);
+    if (reviewValidation.length) {
+      blockers.push(
+        `Authoring review evidence is invalid: ${reviewValidation.join("; ")}`,
+      );
+    }
+    const reviewWarnings = Array.isArray(review.warnings)
+      ? review.warnings
+      : [];
+    const reviewBlockers = Array.isArray(review.blockingFindings)
+      ? review.blockingFindings
+      : [];
+    warnings.push(...reviewWarnings);
+    if (
+      !Array.isArray(review.warnings) ||
+      !Array.isArray(review.blockingFindings)
+    ) {
+      blockers.push("Authoring review evidence is malformed");
+    }
+    if (
+      !review.passed ||
+      review.decision !== "approved" ||
+      reviewBlockers.length
+    ) {
+      blockers.push(
+        `Authoring review did not pass${
+          reviewBlockers.length ? `: ${reviewBlockers.join("; ")}` : ""
+        }`,
+      );
+    }
+    if (review.authoringInputHash !== authoring.authoringInputHash) {
+      blockers.push("Authoring review is stale for authoring input");
+    }
+    if (
+      authoring.authoredMaterialHash &&
+      review.authoredMaterialHash !== authoring.authoredMaterialHash
+    ) {
+      blockers.push("Authoring review is stale for authored material");
+    }
+    const expectedPackageHash =
+      authoring.assembledPackageHash ?? state.currentHash;
+    if (expectedPackageHash && review.packageHash !== expectedPackageHash) {
+      blockers.push("Authoring review is stale for assembled package");
+    }
+  }
+  return {
+    state: blockers.length === 0 ? "ready" : "blocked",
+    blockers,
+    warnings,
+    evidence: {
+      session: authoring.sessionPath,
+      ...(authoring.review
+        ? { authoringReview: authoring.review.reviewHash }
+        : {}),
+    },
+    hashes,
+    ...(authoring.review ? { review: authoring.review } : {}),
+  };
+}
+
+export function reviewState(state: CreatorState): CompositeReadiness {
+  const authoring = authoringReadinessSection(state);
+  const blockers: string[] = [...authoring.blockers];
+  const runtimeBlockers: string[] = [];
   if (state.candidates.some((candidate) => candidate.status !== "available"))
     blockers.push("Unresolved Skill candidates remain");
   if (!state.generated) blockers.push("Generated package is missing");
-  if (state.authoring) {
-    if (state.authoring.status !== "assembled")
-      blockers.push("Authoring session is not assembled");
-    if (
-      state.currentHash &&
-      state.authoring.assembledPackageHash !== state.currentHash
-    )
-      blockers.push("Authoring assembly is stale for the current package hash");
-  }
   if (
     !state.currentHash ||
     !state.eval ||
     state.eval.hash !== state.currentHash ||
     !state.eval.passed
   )
-    blockers.push(
+    runtimeBlockers.push(
       "Passing evaluation evidence for the current package hash is missing",
     );
-  blockers.push(...runtimeEvidenceBlockers(state));
-  blockers.push(...phase3EvidenceBlockers(state));
-  blockers.push(...phase4EvidenceBlockers(state));
+  runtimeBlockers.push(...runtimeEvidenceBlockers(state));
+  runtimeBlockers.push(...phase3EvidenceBlockers(state));
+  runtimeBlockers.push(...phase4EvidenceBlockers(state));
+  blockers.push(...runtimeBlockers);
+  const runtime = {
+    state: runtimeBlockers.length === 0 ? "ready" : "blocked",
+    blockers: [...new Set(runtimeBlockers)],
+    warnings: [],
+    evidence: {
+      ...(state.generated ? { generated: state.generated.packageRoot } : {}),
+      ...(state.eval ? { eval: state.eval.resultPath } : {}),
+    },
+    hashes: {
+      package: state.currentHash,
+      evaluation: state.eval?.hash ?? null,
+      runtimePackage: state.eval?.runtime?.generatedPackageHash ?? null,
+    },
+  } satisfies CompositeReadiness["runtime"];
+  const publicationBlockers: string[] = [];
+  if (
+    !state.review ||
+    state.review.decision !== "approved" ||
+    state.review.hash !== state.currentHash
+  ) {
+    publicationBlockers.push("Publication approval is missing");
+  }
+  if (state.review && state.review.hash !== state.currentHash) {
+    publicationBlockers.push("Review evidence is stale");
+  }
+  const publication = {
+    state: publicationBlockers.length === 0 ? "ready" : "blocked",
+    blockers: [...new Set(publicationBlockers)],
+    warnings: [],
+    evidence: {
+      ...(state.review ? { approval: state.review.reviewer } : {}),
+      ...(state.published ? { published: state.published.path } : {}),
+    },
+    hashes: {
+      package: state.currentHash,
+      approval: state.review?.hash ?? null,
+    },
+  } satisfies CompositeReadiness["publication"];
   if (state.review && state.review.hash !== state.currentHash)
     blockers.push("Review evidence is stale");
   const publishable =
@@ -628,6 +747,23 @@ export function reviewState(state: CreatorState): {
       ...(state.authoring ? { authoring: state.authoring.sessionPath } : {}),
       ...(state.eval ? { eval: state.eval.resultPath } : {}),
     },
+    warnings: [
+      ...authoring.warnings,
+      ...runtime.warnings,
+      ...publication.warnings,
+    ],
+    hashes: {
+      package: state.currentHash,
+      authoringInput: state.authoring?.authoringInputHash ?? null,
+      authoredMaterial: state.authoring?.authoredMaterialHash ?? null,
+      assembledPackage: state.authoring?.assembledPackageHash ?? null,
+      authoringReview: state.authoring?.review?.reviewHash ?? null,
+      evaluation: state.eval?.hash ?? null,
+      publicationApproval: state.review?.hash ?? null,
+    },
+    authoring,
+    runtime,
+    publication,
   };
 }
 
@@ -636,14 +772,23 @@ export async function approveReview(options: {
   reviewer: string;
   approve: boolean;
 }): Promise<CreatorState> {
-  const readiness = reviewState(options.state);
   if (!options.approve) throw new Error("Review approval was not confirmed");
+  if (!options.reviewer.trim())
+    throw new Error("A reviewer identity is required");
+  const authoringReviewer =
+    typeof options.state.authoring?.review?.reviewer === "string"
+      ? options.state.authoring.review.reviewer.trim()
+      : undefined;
+  if (authoringReviewer && authoringReviewer === options.reviewer.trim()) {
+    throw new Error(
+      "Publication reviewer must differ from the authoring reviewer",
+    );
+  }
+  const readiness = reviewState(options.state);
   if (readiness.blockers.length)
     throw new Error(
       `Cannot approve blocked workflow:\n${readiness.blockers.join("\n")}`,
     );
-  if (!options.reviewer.trim())
-    throw new Error("A reviewer identity is required");
   options.state.review = {
     hash: options.state.currentHash!,
     decision: "approved",
