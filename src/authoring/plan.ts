@@ -58,8 +58,7 @@ function concreteNodeSkillPath(workflowName: string, nodeId: string): string {
 
 function sourceEvidence(proposal: FactoryProposal): AuthoringSourceEvidence[] {
   return proposal.candidates.map((candidate) => ({
-    query: candidate.query,
-    preferenceIndex: candidate.preferenceIndex,
+    name: candidate.name,
     status: candidate.status,
     sources: candidate.sources.map((source) => ({
       name: source.name,

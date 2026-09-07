@@ -66,7 +66,9 @@ async function writeSyntheticFixture(root: string): Promise<{
     schemaVersion: 1,
     goal: "Create a prepared workflow.",
     skillCreatorIntent: "new-skill",
-    preferredSkills: ["prepare"],
+    skillSources: [
+      { name: "prepare", location: path.join(".agents", "skills", "prepare") },
+    ],
     defaultLocale: "en",
     workflow: {
       kind: "workflow-kernel",

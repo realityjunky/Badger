@@ -223,7 +223,7 @@ function certificationProposal(
       schemaVersion: 1,
       goal: protocol.goal,
       skillCreatorIntent: "new-skill",
-      preferredSkills: [],
+      skillSources: [],
       workflow: input,
       defaultLocale: "en",
     },

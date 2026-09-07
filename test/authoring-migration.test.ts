@@ -37,7 +37,7 @@ describe("Badger upgrade and legacy migration", () => {
       schemaVersion: 1,
       goal: "Create a prepared workflow.",
       skillCreatorIntent: "new-skill",
-      preferredSkills: ["prepare"],
+      skillSources: [{ name: "prepare", location: skillRoot }],
       defaultLocale: "en",
       workflow: {
         kind: "workflow-kernel",
@@ -77,6 +77,13 @@ describe("Badger upgrade and legacy migration", () => {
     const plan = await readPlan(planPath);
     plan.skillCreatorIntent = "upgrade-existing";
     plan.sourceRoot = sourceRoot;
+    const skillMd = await fs.readFile(
+      path.join(sourceRoot, "SKILL.md"),
+      "utf8",
+    );
+    const name =
+      skillMd.match(/^name:\s*(\S+)/mu)?.[1] ?? path.basename(sourceRoot);
+    plan.skillSources = [...plan.skillSources, { name, location: sourceRoot }];
     await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
     return {
       plan,
@@ -196,6 +203,21 @@ describe("Badger upgrade and legacy migration", () => {
         "utf8",
       ),
     ).resolves.toBe("Prior source evidence.\n");
+  });
+
+  it("derives and deduplicates the upgrade source declaration", async () => {
+    const sourceRoot = path.join(project, "legacy-source");
+    await fs.mkdir(sourceRoot, { recursive: true });
+    await fs.writeFile(
+      path.join(sourceRoot, "SKILL.md"),
+      "---\nname: legacy-source\ndescription: Legacy source.\n---\n",
+    );
+    const { plan, proposal } = await createUpgradePlan(sourceRoot);
+
+    expect(proposal.canInitialize).toBe(true);
+    expect(
+      plan.skillSources.filter((source) => source.name === "legacy-source"),
+    ).toHaveLength(1);
   });
 
   it("keeps legacy scaffolds blocked and readable until migrated", async () => {

@@ -28,9 +28,8 @@ export interface CanonicalCandidateSource {
 }
 
 export interface CanonicalCandidate {
-  query: string;
-  preferenceIndex: number | null;
-  status: "available" | "missing" | "ambiguous";
+  name: string;
+  status: "available" | "missing" | "invalid" | "unsafe" | "ambiguous";
   sources: CanonicalCandidateSource[];
 }
 

@@ -25,10 +25,6 @@ function stringValue(value: unknown, label: string): string {
   return value;
 }
 
-function nullableIndex(value: unknown): number | null {
-  return typeof value === "number" ? value : null;
-}
-
 function canonicalReferences(
   value: unknown,
 ): Array<{ path: string; contentHash: string }> {
@@ -87,15 +83,13 @@ export function canonicalizeCandidates(value: unknown): CanonicalCandidate[] {
     if (
       status !== "available" &&
       status !== "missing" &&
+      status !== "invalid" &&
+      status !== "unsafe" &&
       status !== "ambiguous"
     )
       throw new Error(`candidate ${index}.status is invalid`);
     return {
-      query: stringValue(
-        candidate.query ?? candidate.name,
-        `candidate ${index}.query`,
-      ),
-      preferenceIndex: nullableIndex(candidate.preferenceIndex),
+      name: stringValue(candidate.name, `candidate ${index}.name`),
       status,
       sources: Array.isArray(candidate.sources)
         ? candidate.sources.map((source, sourceIndex) =>
@@ -219,9 +213,8 @@ function candidateStatusSignature(
   observation: DifferentialObservation,
 ): string {
   return JSON.stringify(
-    observation.candidates.map(({ query, preferenceIndex, status }) => ({
-      query,
-      preferenceIndex,
+    observation.candidates.map(({ name, status }) => ({
+      name,
       status,
     })),
   );

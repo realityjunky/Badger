@@ -16,16 +16,13 @@ import type { FactoryPlan } from "../src/types.js";
 describe("workflow-kernel foundation", () => {
   let root: string;
   let project: string;
-  let home: string;
 
   beforeEach(async () => {
     root = await fs.mkdtemp(
       path.join(os.tmpdir(), "badger-kernel-foundation-"),
     );
     project = path.join(root, "project");
-    home = path.join(root, "home");
     await fs.mkdir(project, { recursive: true });
-    await fs.mkdir(home, { recursive: true });
   });
 
   afterEach(async () => fs.rm(root, { recursive: true, force: true }));
@@ -51,7 +48,9 @@ describe("workflow-kernel foundation", () => {
       schemaVersion: 1,
       goal: `Create a ${skill} workflow.`,
       skillCreatorIntent: "new-skill",
-      preferredSkills: [skill],
+      skillSources: [
+        { name: skill, location: path.join(".agents", "skills", skill) },
+      ],
       defaultLocale: "en",
       workflow: {
         kind: "workflow-kernel",
@@ -127,7 +126,18 @@ describe("workflow-kernel foundation", () => {
   });
 
   it("uses strict candidate resolution for missing and ambiguous Skills", async () => {
-    const ambiguousPlanPath = await writePlan(planFor("ambiguous"));
+    const ambiguousPlan = planFor("ambiguous");
+    ambiguousPlan.skillSources = [
+      {
+        name: "ambiguous",
+        location: path.join(".agents", "skills", "ambiguous"),
+      },
+      {
+        name: "ambiguous",
+        location: path.join(".codex", "skills", "ambiguous"),
+      },
+    ];
+    const ambiguousPlanPath = await writePlan(ambiguousPlan);
     await writeSkill(
       "ambiguous",
       path.join(project, ".agents", "skills", "ambiguous"),
@@ -139,7 +149,6 @@ describe("workflow-kernel foundation", () => {
     const missingPlanPath = await writePlan(planFor("missing"));
     const kernel = createStandaloneWorkflowKernel({
       projectRoot: project,
-      homeDir: home,
     });
 
     const ambiguous = await kernel.buildProposal(ambiguousPlanPath);
@@ -163,12 +172,74 @@ describe("workflow-kernel foundation", () => {
     );
   });
 
+  it("does not resolve an ambient Skill that is not declared by the plan", async () => {
+    await writeSkill(
+      "ambient-only",
+      path.join(project, ".agents", "skills", "ambient-only"),
+    );
+    const plan = planFor("ambient-only");
+    plan.skillSources = [];
+    const planPath = await writePlan(plan);
+
+    const proposal = await createStandaloneWorkflowKernel({
+      projectRoot: project,
+    }).buildProposal(planPath);
+
+    expect(proposal.canInitialize).toBe(false);
+    expect(proposal.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "ambient-only",
+          status: "missing",
+          sources: [],
+        }),
+      ]),
+    );
+    expect(proposal.blockers).toContain(
+      "Workflow binding ambient-only has no explicitly declared Skill source",
+    );
+  });
+
+  it("rejects initialization when declared source evidence changes", async () => {
+    const planPath = await writePlan(planFor("primer-design"));
+    await writeSkill("primer-design");
+    const kernel = createStandaloneWorkflowKernel({ projectRoot: project });
+    const plan = await kernel.readPlan(planPath);
+    const proposal = await kernel.buildProposal(planPath);
+    await fs.appendFile(
+      path.join(project, ".agents", "skills", "primer-design", "SKILL.md"),
+      "\nChanged after proposal.\n",
+    );
+
+    await expect(
+      kernel.initializeState({
+        planPath,
+        plan,
+        proposal,
+        confirmed: true,
+      }),
+    ).rejects.toThrow(/source evidence is stale/iu);
+  });
+
+  it("rejects legacy preference-based plan fields", async () => {
+    const plan = {
+      ...planFor("legacy"),
+      preferredSkills: ["legacy"],
+    } as unknown as FactoryPlan;
+    const planPath = await writePlan(plan);
+
+    await expect(
+      createStandaloneWorkflowKernel({ projectRoot: project }).readPlan(
+        planPath,
+      ),
+    ).rejects.toThrow(/removed preference-based Skill fields/u);
+  });
+
   it("keeps the standalone state namespace behind the shared foundation", async () => {
     await writeSkill("primer-design");
     const planPath = await writePlan(planFor("primer-design"));
     const standalone = createStandaloneWorkflowKernel({
       projectRoot: project,
-      homeDir: home,
     });
     const proposal = await standalone.buildProposal(planPath);
     const state = await standalone.initializeState({
@@ -196,12 +267,10 @@ describe("workflow-kernel foundation", () => {
     const planPath = await writePlan(planFor("primer-design"));
     const kernelProposal = await createWorkflowKernel({
       projectRoot: project,
-      homeDir: home,
       stateNamespace: ".badger",
     }).buildProposal(planPath);
     const adapterProposal = await buildProposal({
       projectRoot: project,
-      homeDir: home,
       planPath,
     });
 

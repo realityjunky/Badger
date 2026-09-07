@@ -413,7 +413,6 @@ export async function observeStandaloneAuthoring(options: {
   const proposal = await buildProposal({
     projectRoot: options.projectRoot,
     planPath,
-    homeDir: options.homeDir,
   });
   const fallbackInventoryRoot = path.join(
     options.projectRoot,

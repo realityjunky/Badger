@@ -1195,7 +1195,7 @@ describe("WorkflowRuntime finalization preview", () => {
           schemaVersion: 1,
           goal: protocol().goal,
           skillCreatorIntent: "new-skill",
-          preferredSkills: [],
+          skillSources: [],
           workflow: protocol() as unknown as WorkflowInput,
           defaultLocale: "en",
         },

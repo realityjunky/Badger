@@ -7,7 +7,7 @@ This repository contains the Badger Creator and Engine seams, originally extract
 The package includes:
 
 - a shared workflow-kernel foundation behind the standalone Creator adapters;
-- real local Skill discovery with stable source hashes, strict preferences, and ambiguity reporting;
+- explicit local Skill source inspection with stable hashes and ambiguity reporting;
 - deterministic Workflow Contract normalization and validation;
 - confirmed plan/state lifecycle in the standalone `.badger` namespace;
 - generated authoring-pending scaffolds with resumable six-lane authoring
@@ -81,9 +81,12 @@ npm run build
 npm run format:check
 ```
 
-The CLI is `badger` after `npm run build`:
+The user-facing entrypoint is the Badger Skill in an Agent. The Agent supplies each source Skill by
+name and location; Badger inspects only those declarations. The CLI is `badger` after `npm run build`:
 
 ```bash
+# Candidate inspection is read-only and closed-world.
+node bin/badger.js candidates --skill primer-design=./skills/primer-design --json
 node bin/badger.js guide --project . --json
 node bin/badger.js authoring-plan prepared-workflow --project . --depth quick --json
 node bin/badger.js generate prepared-workflow --project . --depth full --json

@@ -31,7 +31,6 @@ export async function observeStandalone(options: {
   const proposal = await buildProposal({
     projectRoot,
     planPath,
-    homeDir: options.homeDir,
   });
   let generatedRoot = path.join(
     projectRoot,

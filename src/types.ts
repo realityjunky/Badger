@@ -1077,12 +1077,22 @@ export interface NormalizedWorkflow {
 export interface SkillSource {
   name: string;
   root: string;
-  origin: "project" | "global" | "explicit" | "extra";
+  origin: "explicit";
   description: string;
   skillMd: string;
   references: Array<{ path: string; contentHash: string }>;
   scripts: Array<{ path: string; sideEffect: "unknown" }>;
   hash: string;
+}
+
+export interface SkillSourceDeclaration {
+  name: string;
+  location: string;
+}
+
+export interface SkillSourceManifest {
+  schemaVersion: 1;
+  sources: SkillSourceDeclaration[];
 }
 
 export interface UpgradeSourceFileEvidence {
@@ -1121,10 +1131,10 @@ export interface UpgradeMigrationManifest {
 }
 
 export interface SkillCandidate {
-  query: string;
-  preferenceIndex: number | null;
-  status: "available" | "missing" | "ambiguous";
+  name: string;
+  status: "available" | "missing" | "invalid" | "unsafe" | "ambiguous";
   sources: SkillSource[];
+  blockers?: string[];
 }
 
 export type GeneratedPackageFileOwner = "auto" | "authored" | "source";
@@ -1140,10 +1150,9 @@ export interface FactoryPlan {
   schemaVersion: 1;
   goal: string;
   skillCreatorIntent: CreatorIntent;
-  preferredSkills: string[];
+  skillSources: SkillSourceDeclaration[];
   workflow: WorkflowInput;
   sourceRoot?: string;
-  skillRoots?: string[];
   artifactRoot?: string;
   defaultLocale: "en";
 }

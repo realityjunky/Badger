@@ -23,7 +23,9 @@ parity.
 ## Formal Skill package
 
 The installed package-facing Skill is `assets/skills/badger/SKILL.md`. Its
-references are intentionally English and form one contract:
+Agent-first discovery companion is `assets/skills/badger-workflow-questionnaire/SKILL.md`, with
+the source-study reference beside it. All formal Skills and references are intentionally English
+and form one contract:
 
 - `reference/authoring-protocol.json` — lane DAG, claims, review settings,
   deterministic backbone, and authored leaves;

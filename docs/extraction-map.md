@@ -11,10 +11,10 @@
 
 | Standalone module                   | Upstream responsibility retained                                                                                                                      |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/workflow-kernel/discovery.ts`  | Real local Skill roots, frontmatter description, reference/script inventory, content hash, strict preference resolution, and missing/ambiguous status |
+| `src/workflow-kernel/discovery.ts`  | Explicit Skill source locations, frontmatter description, reference/script inventory, content hash, missing/ambiguous status                          |
 | `src/workflow-kernel/hash.ts`       | Stable source-tree fingerprints over sorted regular files and supported symbolic links                                                                |
 | `src/workflow/contract.ts`          | Workflow-kernel Node vocabulary, binding enforcement, Output Schema validation, canonical edges, run-state contract, route eval metadata              |
-| `src/workflow-kernel/foundation.ts` | Shared plan loading, candidate resolution, proposal normalization, blockers, plan hash, confirmed state, and atomic state persistence                 |
+| `src/workflow-kernel/foundation.ts` | Shared explicit-source plan loading, candidate resolution, proposal normalization, blockers, plan hash, confirmed state, and atomic state persistence                 |
 | `src/skill/find.ts`                 | Compatibility adapter to the shared discovery seam                                                                                                    |
 | `src/factory/proposal.ts`           | Standalone compatibility adapter to the shared proposal seam                                                                                          |
 | `src/factory/generate.ts`           | Deterministic entry/Node package generation and protocol/evidence artifacts                                                                           |
@@ -32,7 +32,7 @@ The upstream Creator closure also reaches `domains/comet-classic`, `domains/come
 
 The upstream `comet-five-phase-overlay` and `comet-native` built-in contracts are excluded. Only `workflow-kernel` is accepted by the standalone plan loader. The source checkout remains available for comparison and is protected from edits by the parent repository instructions.
 
-The extracted foundation accepts a project root, optional home directory, and state namespace. The standalone adapter fixes the namespace to `.badger`; it does not change the workflow contract or candidate-resolution semantics. Strict preference resolution is fail-closed: a missing or ambiguous source remains a proposal blocker.
+The extracted foundation accepts a project root and state namespace. The standalone adapter fixes the namespace to `.badger`; source resolution is closed-world and fail-closed: missing, invalid, unsafe, or ambiguous declarations remain proposal blockers.
 
 ## Authoring delivery map
 

@@ -40,7 +40,7 @@ describe("resumable authoring session", () => {
       schemaVersion: 1,
       goal: "Create a prepared workflow.",
       skillCreatorIntent: "new-skill",
-      preferredSkills: ["prepare"],
+      skillSources: [{ name: "prepare", location: skillRoot }],
       defaultLocale: "en",
       workflow: {
         kind: "workflow-kernel",

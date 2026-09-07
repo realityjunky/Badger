@@ -1,12 +1,35 @@
 ---
 name: badger
-description: Create a new workflow Skill or upgrade an existing Skill through the standalone Badger Creator. Not for general Skill cleanup, Classic/Native workflow management, or platform installation.
+description: Create or upgrade a workflow Skill through standalone Badger Creator from inside an Agent. Supply explicit Skill sources before discovery. Not for general Skill cleanup, Classic/Native workflow management, or platform installation.
 disable-model-invocation: true
 ---
 
 # Badger Creator
 
-This Skill is the user-facing coordinator for the standalone Badger factory. It turns a goal plus real Skill evidence into a deterministic `workflow-kernel` package.
+This Skill is the user-facing Agent coordinator for the standalone Badger factory. The user invokes
+it explicitly in an Agent (for example, `/badger`); the Agent turns the user's goal and explicitly
+supplied Skill evidence into a deterministic `workflow-kernel` package. The Agent owns source
+selection, candidate interpretation, plan presentation, and the handoff to the read-only and
+write-gated Badger CLI commands.
+
+## Explicit source workflow
+
+Badger uses a closed-world source set. Every Skill used by a workflow must be supplied as a name and
+location in the FactoryPlan's `skillSources` array. Locations may be project-relative or absolute;
+Badger canonicalizes and hashes the actual package and never scans project or home Skill roots.
+
+1. Establish the project root and intent, then inspect resumable Creator state without changing it.
+2. Inspect each supplied source with `badger candidates --skill <name=location> --json`; repeat
+   `--skill` for every source. Review canonical roots, descriptions, references, scripts, and hashes.
+3. Ask focused questions about the desired outcome, inputs, outputs, Nodes, decisions, evidence,
+   guardrails, recovery, and each Skill's workflow role.
+4. Build a complete FactoryPlan with explicit `skillSources`, implementation bindings, Required Skill
+   Calls, augmentations, schemas, routes, and upgrade source identity where applicable.
+5. Run `badger guide --project <dir> --json`, then `badger propose`, show the complete proposal, and
+   wait for explicit confirmation before `badger init --confirm` or any generation.
+
+Candidate inspection is read-only. It never executes scripts, writes a FactoryPlan or Creator state,
+copies a package, publishes, distributes, or accesses credentials.
 
 ## Supported intents
 
@@ -17,32 +40,31 @@ The standalone package deliberately excludes Classic customization, Native workf
 
 ## Confirmation protocol
 
-1. Run `badger guide --project <dir> --json` to inspect preferences and resumable Creator state.
-2. Run `badger candidates --project <dir> --json` and inspect real Skill roots, descriptions, references, scripts, and hashes.
-3. Write a complete plan JSON and run `badger propose <plan.json> --project <dir> --json`.
-4. Show the user the goal, intent, Nodes, implementations, Required Skill Calls, Output Schemas, blockers, and warnings.
-5. Wait for explicit confirmation. Do not initialize state or generate files before confirmation.
-6. Run `badger init <plan.json> --confirm --project <dir>`.
-7. Run `badger generate <name> --project <dir>` to create the deterministic authoring-pending scaffold. Existing deterministic drafts without an authoring session are `legacy-scaffold-only`: they remain readable compatibility artifacts but are not authoring-complete or publishable. Use `badger migrate <name> --confirm` to preserve the draft as source evidence, derive a fresh AuthoringPlan, and resume all required lanes.
-8. Run `badger authoring-status <name> --project <dir> --json`. For each executable lane, create a bounded file handoff with `badger authoring-dispatch <name> --lane <lane> --output <file>`, have the provider return the upstream lane-output JSON, then submit it with `badger authoring-record <name> --lane <lane> --file <file> --expected-revision <revision>`. Run `badger assemble <name>` only after all six lanes are complete.
-9. Upgrade-existing migration records a source tree hash and explicit `retained`, `replaced`, or `wrapped` decision for every source file. The original source tree remains under `source/`; generated summaries never silently replace source bodies.
-10. Run `badger eval <name> --project <dir>` and show `badger review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
-11. Run `badger approve <name> --reviewer <id> --confirm`, then `badger publish <name> --confirm`.
-12. Start with `badger distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
+1. Complete the explicit source workflow above and run `badger candidates` for every supplied source.
+2. Write a complete plan JSON with `skillSources` and run `badger propose <plan.json> --project <dir> --json`.
+3. Show the user the goal, intent, Nodes, implementations, Required Skill Calls, Output Schemas, blockers, and warnings.
+4. Wait for explicit confirmation. Do not initialize state or generate files before confirmation.
+5. Run `badger init <plan.json> --confirm --project <dir>`.
+6. Run `badger generate <name> --project <dir>` to create the deterministic authoring-pending scaffold. Existing deterministic drafts without an authoring session are `legacy-scaffold-only`: they remain readable compatibility artifacts but are not authoring-complete or publishable. Use `badger migrate <name> --confirm` to preserve the draft as source evidence, derive a fresh AuthoringPlan, and resume all required lanes.
+7. Run `badger authoring-status <name> --project <dir> --json`. For each executable lane, create a bounded file handoff with `badger authoring-dispatch <name> --lane <lane> --output <file>`, have the provider return the upstream lane-output JSON, then submit it with `badger authoring-record <name> --lane <lane> --file <file> --expected-revision <revision>`. Run `badger assemble <name>` only after all six lanes are complete.
+8. Upgrade-existing migration records a source tree hash and explicit `retained`, `replaced`, or `wrapped` decision for every source file. The original source tree remains under `source/`; generated summaries never silently replace source bodies.
+9. Run `badger eval <name> --project <dir>` and show `badger review <name> --project <dir> --json`; publish only after the user names a reviewer and confirms approval.
+10. Run `badger approve <name> --reviewer <id> --confirm`, then `badger publish <name> --confirm`.
+11. Start with `badger distribute <name> --destination <dir>` to preview files. The standalone tool does not install into Agent platform directories.
 
 ## Authoring contract
 
 Badger restores the upstream-compatible six-lane package-construction
 contract and adds durable, hash-bound records around it. The lanes are:
 
-| Lane | Dependency wave | Output boundary |
-| --- | --- | --- |
-| `script` | Wave 1 | Claims for the three WorkflowRuntime adapters and three Badger-named plan/check/hook roles; no authored leaves. |
-| `reference` | Wave 1 | Resolved Skills, normalized `WorkflowProtocol`, composition evidence, and lane metadata; no authored leaves. |
-| `pause-points` | Wave 1 | `reference/decision-points.md` and `reference/recovery.md`. |
-| `workflow-entry` | Wave 2 after `script` | The entry `SKILL.md` Decision Core. |
-| `skill-core` | Wave 2 after `script` | One substantive Guidance section for every active internal Node Skill. |
-| `skill-review` | Barrier | `reference/skill-review.md` and the authoring review verdict. |
+| Lane             | Dependency wave       | Output boundary                                                                                                 |
+| ---------------- | --------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `script`         | Wave 1                | Claims for the three WorkflowRuntime adapters and three Badger-named plan/check/hook roles; no authored leaves. |
+| `reference`      | Wave 1                | Resolved Skills, normalized `WorkflowProtocol`, composition evidence, and lane metadata; no authored leaves.    |
+| `pause-points`   | Wave 1                | `reference/decision-points.md` and `reference/recovery.md`.                                                     |
+| `workflow-entry` | Wave 2 after `script` | The entry `SKILL.md` Decision Core.                                                                             |
+| `skill-core`     | Wave 2 after `script` | One substantive Guidance section for every active internal Node Skill.                                          |
+| `skill-review`   | Barrier               | `reference/skill-review.md` and the authoring review verdict.                                                   |
 
 Wave 1 runs `script`, `reference`, and `pause-points` independently. Wave 2
 runs `workflow-entry` and `skill-core` after the script contract is accepted.

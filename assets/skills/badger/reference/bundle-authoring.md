@@ -1,5 +1,37 @@
 # Badger Authoring Reference
 
+## Agent and backend boundary
+
+The Agent owns the multi-exchange conversation with the workflow owner. It reads the explicitly
+supplied Skill evidence, distinguishes user facts from source facts and Agent design choices, and
+authors a complete `FactoryPlan` with `skillSources`. The CLI/backend owns JSON parsing, source-path
+resolution, frontmatter and package validation, canonical metadata, content hashing, workflow
+normalization, blocker reporting, and hash-bound proposal output. The Agent must show the complete
+plan and obtain confirmation before invoking a state-writing Creator command.
+
+Candidate inspection is closed-world and read-only: no project or home Skill root is scanned, no
+source script is executed, and no Creator state or package is written.
+
+## FactoryPlan shape
+
+The initial plan includes `schemaVersion`, `goal`, `skillCreatorIntent`, `defaultLocale`,
+`skillSources`, and `workflow`. Each `skillSources` entry is `{ "name": "...", "location": "..." }`.
+`upgrade-existing` additionally includes `sourceRoot`, and that source must also be explicitly
+declared. Legacy preference-only fields such as `preferredSkills` and `skillRoots` are not part of
+the contract.
+
+## Relationship semantics
+
+- An implementation binding identifies the Skill that owns a Node.
+- A Required Skill Call requires another supplied Skill inside a Node without replacing the Node.
+- An augmentation assists a Node without replacing its implementation.
+- An Output Schema declares artifacts and evidence produced by a Node.
+- A guardrail controls advancement using declared validation or evidence.
+- A decision Node exposes stable user choices and transition targets.
+- A handoff returns bounded evidence to another Node, reviewer, or user.
+- Routing transitions connect success, failure, pause, and conditional outcomes.
+- A cycle declares bounded repeat behavior and continuation semantics.
+
 This reference describes the package-construction plane inside standalone
 Badger. It turns a confirmed workflow goal and real source Skill evidence into
 an authored, reviewed, deterministic `workflow-kernel` package. It does not
@@ -88,7 +120,8 @@ and its explicit retained/replaced/wrapped decisions.
 
 Use the following boundary sequence:
 
-1. Inspect preferences and source Skills with `guide` and `candidates`.
+1. Run the Badger Skill in an Agent; confirm the workflow goal and explicit `skillSources` with the
+   bundled `badger-workflow-questionnaire`, then inspect those sources with `guide` and `candidates`.
 2. Preview and validate a normalized proposal with `propose`.
 3. Require explicit confirmation before `init` writes Creator state.
 4. Generate a visibly pending scaffold and its `.badger/authoring/<name>`

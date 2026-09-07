@@ -65,6 +65,21 @@ describe("Badger release artifacts", () => {
     }
   });
 
+  it("documents the closed-world explicit source contract", async () => {
+    const creator = await readText("assets/skills/badger/SKILL.md");
+    const questionnaire = await readText(
+      "assets/skills/badger-workflow-questionnaire/SKILL.md",
+    );
+    const manual = await readText("docs/badger-workflow-manual.html");
+    expect(creator).toContain("skillSources");
+    expect(creator).toContain("--skill <name=location>");
+    expect(questionnaire).toContain("explicit Skill source declarations");
+    expect(manual).toContain("skillSources");
+    expect(creator).not.toContain("skill-preferences.yaml");
+    expect(questionnaire).not.toContain("skill-preferences.yaml");
+    expect(manual).not.toContain("skill-preferences.yaml");
+  });
+
   it("documents every assembled backbone path and content owner", async () => {
     const inventory = await readJson(
       "assets/skills/badger/reference/package-inventory.example.json",

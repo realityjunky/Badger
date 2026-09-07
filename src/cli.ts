@@ -1,7 +1,8 @@
 import { Command, Option } from "commander";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { readPreferenceEntries, findSkills } from "./skill/find.js";
+import { findSkills, readSkillSourceManifest } from "./skill/find.js";
+import type { SkillSourceDeclaration } from "./types.js";
 import { buildProposal, readPlan } from "./factory/proposal.js";
 import { generatePackage } from "./factory/generate.js";
 import { initializeState, readState } from "./factory/state.js";
@@ -37,6 +38,23 @@ program.name("badger").description("Standalone Badger workflow Skill factory");
 function projectRoot(value?: string): string {
   return path.resolve(value ?? ".");
 }
+
+function collectRepeated(value: string, previous: string[] = []): string[] {
+  return [...previous, value];
+}
+
+function parseSourceDeclaration(value: string): SkillSourceDeclaration {
+  const separator = value.indexOf("=");
+  if (separator <= 0 || separator === value.length - 1) {
+    throw new Error(
+      `Invalid Skill source declaration: ${value}. Use name=location.`,
+    );
+  }
+  return {
+    name: value.slice(0, separator).trim(),
+    location: value.slice(separator + 1).trim(),
+  };
+}
 function emit(value: unknown, json?: boolean): void {
   console.log(json ? JSON.stringify(value, null, 2) : format(value));
 }
@@ -50,14 +68,11 @@ program
   .option("--json", "JSON output")
   .action(async (options) => {
     const root = projectRoot(options.project);
-    const preferences = await readPreferenceEntries(root);
     const states = await safeStates(root);
     emit(
       {
         schemaVersion: 1,
         intent: ["new-skill", "upgrade-existing"],
-        preferenceFile: path.join(root, ".badger", "skill-preferences.yaml"),
-        preferences,
         resumable: states.map((state) => ({
           name: state.name,
           status: state.status,
@@ -71,11 +86,38 @@ program
 
 program
   .command("candidates")
+  .option(
+    "--skill <name=location>",
+    "Explicit Skill source declaration; repeatable",
+    collectRepeated,
+    [],
+  )
+  .option(
+    "--source-manifest <file>",
+    "JSON source manifest; repeatable",
+    collectRepeated,
+    [],
+  )
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (options) => {
     const root = projectRoot(options.project);
-    emit({ candidates: await findSkills({ projectRoot: root }) }, options.json);
+    const declarations = [...(options.skill ?? [])].map(parseSourceDeclaration);
+    for (const manifestFile of [...(options.sourceManifest ?? [])]) {
+      declarations.push(
+        ...(await readSkillSourceManifest(path.resolve(root, manifestFile)))
+          .sources,
+      );
+    }
+    emit(
+      {
+        candidates: await findSkills({
+          projectRoot: root,
+          sources: declarations,
+        }),
+      },
+      options.json,
+    );
   });
 
 program

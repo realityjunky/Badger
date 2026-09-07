@@ -604,7 +604,7 @@ flowchart TB
       <h3 id="private-user-path">4.1 The user-to-code path</h3>
       <p>The first useful narrative is the safe factory journey. A user begins with a goal and a plan, inspects what the project can resolve, previews a normalized protocol, confirms the write, creates a deterministic scaffold, completes the authoring lanes, assembles the package, evaluates its current hash, obtains separate authoring and publication review evidence, and only then publishes or previews distribution. The same package can subsequently be used by the generated adapters or the public WorkflowRuntime API to create a durable Run.</p>
       <div class="route-list private-route">
-        <div class="route-item"><div><b>Inspect context</b><p><code>guide</code> reads preferences and resumable Creator state; <code>candidates</code> resolves real Skill roots, descriptions, references, scripts, and content hashes.</p></div></div>
+        <div class="route-item"><div><b>Inspect context</b><p><code>guide</code> reports resumable Creator state; <code>candidates</code> resolves only explicitly declared Skill locations and returns descriptions, references, scripts, and content hashes.</p></div></div>
         <div class="route-item"><div><b>Preview meaning</b><p><code>propose</code> loads the plan, normalizes the Workflow Protocol, and reports candidates, blockers, warnings, and the plan hash without creating Creator state.</p></div></div>
         <div class="route-item"><div><b>Confirm the draft</b><p><code>init --confirm</code> is the explicit write gate. It persists a hash-bound <code>CreatorState</code> with status <code>draft</code> and creates the draft directory.</p></div></div>
         <div class="route-item"><div><b>Scaffold and author</b><p><code>generate</code> creates the deterministic control-plane scaffold; the <code>authoring-plan</code>, lane handoffs, and <code>authoring-record</code> flow supply the semantic content and review evidence. A scaffold is not a ready package.</p></div></div>
@@ -648,10 +648,11 @@ flowchart LR
       </tbody></table></div>
 
       <h3 id="private-user-guide">4.2 Use the tool as a user</h3>
-      <p>Run the Creator from <code>badger/</code> after building the package. Keep the project directory disposable while learning: the tool writes Creator records beneath that project, and it never needs the protected upstream checkout to create or evaluate a local package. The authoring commands shown below complete the local authoring seam before evaluation and publication.</p>
-      <pre class="code-block"><span class="comment"># 1. Discover preferences and resumable state</span>
+      <p>Invoke <code>assets/skills/badger/SKILL.md</code> in an Agent after building the package. The Agent supplies each Skill by name and location, and the CLI inspects only those explicit sources. Candidate inspection is read-only: it does not scan ambient roots, execute source scripts, or write Creator state. Keep the project directory disposable while learning: the tool writes Creator records beneath that project, and it never needs the protected upstream checkout to create or evaluate a local package.</p>
+      <pre class="code-block"><span class="comment"># 1. Inspect explicitly supplied Skills</span>
+node bin/badger.js candidates --project ./demo --skill primer-design=./skills/primer-design --json
 node bin/badger.js guide --project ./demo --json
-node bin/badger.js candidates --project ./demo --json
+      node bin/badger.js candidates --project ./demo --skill primer-design=./skills/primer-design --json
 
 <span class="comment"># 2. Preview a complete plan (still read-only)</span>
 node bin/badger.js propose ./plans/example.json --project ./demo --json
@@ -674,8 +675,8 @@ node bin/badger.js publish example-workflow --project ./demo --confirm --json
 node bin/badger.js distribute example-workflow --project ./demo --destination ./install-preview --json</pre>
       <h4 class="private-subheading" id="private-command-effects">What each command reads and writes</h4>
       <div class="private-table-wrap"><table class="data-table private-command-table"><thead><tr><th>Command</th><th>Reads</th><th>Writes or returns</th><th>Safe sequencing note</th></tr></thead><tbody>
-        <tr><td><code>guide</code></td><td>Preference file and existing state records.</td><td>JSON or human-readable context; no mutation.</td><td>Use first when resuming a project.</td></tr>
-        <tr><td><code>candidates</code></td><td>Configured project/global Skill roots.</td><td>Resolved source metadata and hashes; no mutation.</td><td>Repair missing or ambiguous candidates before proposing.</td></tr>
+        <tr><td><code>guide</code></td><td>Existing Creator state records.</td><td>JSON or human-readable context; no mutation.</td><td>Use when resuming a project.</td></tr>
+        <tr><td><code>candidates</code></td><td>Only repeatable <code>--skill name=location</code> declarations.</td><td>Resolved source metadata and hashes; no mutation.</td><td>Inspect every source before proposing; no ambient Skill roots are scanned.</td></tr>
         <tr><td><code>propose</code></td><td>Plan JSON and resolved Skills.</td><td>Normalized protocol, blockers, warnings, and plan hash.</td><td>Read the entire proposal before confirming.</td></tr>
         <tr><td><code>init</code></td><td>Plan and proposal again.</td><td><code>.badger/states/&lt;name&gt;.json</code> and draft directory.</td><td>Requires <code>--confirm</code>; rejects stale proposal hashes.</td></tr>
         <tr><td><code>generate</code></td><td>Persisted Creator state and plan.</td><td>Deterministic scaffold, authoring-pending markers, references, Node Skills, and runtime scripts.</td><td>It does not imply semantic authoring is complete.</td></tr>
@@ -686,7 +687,6 @@ node bin/badger.js distribute example-workflow --project ./demo --destination ./
       </tbody></table></div>
       <h4 class="private-subheading" id="private-storage-layout">Where the records live</h4>
       <pre class="code-block"><span class="key">.badger/</span>
-├── skill-preferences.yaml       <span class="comment"># optional strict preference order</span>
 ├── states/&lt;name&gt;.json            <span class="comment"># CreatorState and lifecycle status</span>
 ├── authoring/&lt;name&gt;/             <span class="comment"># AuthoringPlan, lane records, and authored drafts</span>
 ├── drafts/&lt;name&gt;/                <span class="comment"># generated scaffold or assembled package</span>
@@ -717,7 +717,7 @@ node bin/badger.js distribute example-workflow --project ./demo --destination ./
       <div class="private-table-wrap"><table class="data-table private-plan-table"><thead><tr><th>Parameter</th><th>Choose it when</th><th>Meaning and constraints</th></tr></thead><tbody>
         <tr><td><code>goal</code></td><td>Always.</td><td>Human intent used in the proposal and package metadata; keep it substantive because it becomes the package’s declared purpose.</td></tr>
         <tr><td><code>skillCreatorIntent</code></td><td>You are creating or upgrading.</td><td><code>new-skill</code> starts from a workflow contract; <code>upgrade-existing</code> requires <code>sourceRoot</code> containing <code>SKILL.md</code> and copies that source before adding control files.</td></tr>
-        <tr><td><code>preferredSkills</code></td><td>Source Skills should be resolved in a known order.</td><td>Names or explicit paths queried by strict discovery. Missing or ambiguous matches block initialization instead of being silently substituted.</td></tr>
+        <tr><td><code>skillSources</code></td><td>You supply source Skills to the workflow.</td><td>Each entry is <code>{name, location}</code>; locations are project-relative or absolute, canonicalized, hashed, and resolved exactly once.</td></tr>
         <tr><td><code>workflow.name</code></td><td>Every workflow.</td><td>Stable lowercase identifier (letters, digits, hyphens); it becomes the Creator state name and generated package name.</td></tr>
         <tr><td><code>workflow.kind</code></td><td>Every standalone plan.</td><td>Must be <code>workflow-kernel</code>; the standalone package intentionally excludes Classic, Native, Entry, and platform installer policy.</td></tr>
         <tr><td><code>customNodes</code></td><td>You need domain steps.</td><td>Each Node declares an id, label, kind, responsibility, implementation Skill, operations, output schemas, and guardrails. Add required calls or augmentations instead of hiding dependencies in prose.</td></tr>
@@ -727,7 +727,7 @@ node bin/badger.js distribute example-workflow --project ./demo --destination ./
         <tr><td><code>cycles</code></td><td>A bounded region may repeat.</td><td>Declare a stable cycle key, entry Node, repeat transitions, and positive <code>maxInstances</code>. Exhaustion blocks without allocating another instance.</td></tr>
         <tr><td><code>capabilities</code></td><td>You need revisioned branches, decisions, artifacts, or durability.</td><td>Protocol features include conditional routing, revisioned attempts, decision Nodes, bounded cycles, and versioned artifacts. Durability profiles add locks, fences, journals, checkpoints, and content snapshots with explicit bounds.</td></tr>
         <tr><td><code>authoring depth</code></td><td>The package needs semantic content review.</td><td><code>quick</code> uses one reviewer and one round; <code>full</code> uses three voters, four lenses, and a bounded multi-round review. Authoring depth governs package construction, not WorkflowRuntime execution.</td></tr>
-        <tr><td><code>sourceRoot</code> / <code>skillRoots</code></td><td>You need an upgrade source or extra discovery roots.</td><td>Relative values resolve from the project root; <code>sourceRoot</code> must be a Skill directory, while <code>skillRoots</code> extends discovery without changing strict ambiguity rules.</td></tr>
+        <tr><td><code>sourceRoot</code></td><td>You are upgrading an existing Skill.</td><td>The source directory must contain <code>SKILL.md</code> and also appear in <code>skillSources</code>; no additional discovery roots exist.</td></tr>
         <tr><td><code>artifactRoot</code></td><td>The draft package belongs somewhere other than the default.</td><td>Changes the generated draft location; choose a contained location outside an upgrade source package.</td></tr>
       </tbody></table></div>
       <h4 class="private-subheading" id="private-cli-parameters">CLI and runtime coordinates</h4>
@@ -1876,7 +1876,7 @@ flowchart LR
       planCells: [
         ['<code>goal</code>', '始终。', '提案和软件包元数据使用的人类意图；应写得具体，因为它会成为软件包声明的目的。'],
         ['<code>skillCreatorIntent</code>', '创建或升级时。', '<code>new-skill</code> 从工作流契约开始；<code>upgrade-existing</code> 要求含有 <code>SKILL.md</code> 的 <code>sourceRoot</code>，并在添加控制文件前复制来源。'],
-        ['<code>preferredSkills</code>', '来源 Skill 需要固定解析顺序时。', '由严格发现查询的名称或显式路径。缺失或歧义会阻塞初始化，不会静默替换。'],
+        ['<code>skillSources</code>', '需要明确提供来源 Skill 时。', '每个条目为 <code>{name, location}</code>；路径可相对项目根或绝对，系统会规范化、哈希并且仅解析一次。'],
         ['<code>workflow.name</code>', '每个工作流。', '稳定的小写标识符（字母、数字、连字符）；它会成为 Creator 状态名和生成软件包名。'],
         ['<code>workflow.kind</code>', '每个独立计划。', '必须是 <code>workflow-kernel</code>；独立软件包有意排除 Classic、Native、Entry 和平台安装策略。'],
         ['<code>customNodes</code>', '需要领域步骤时。', '每个 Node 声明 id、label、kind、responsibility、实现 Skill、操作、输出 Schema 和 Guardrail。用必需调用或 augmentation 声明依赖，不要把依赖藏在文字里。'],
@@ -1886,7 +1886,7 @@ flowchart LR
         ['<code>cycles</code>', '有界区域可能重复时。', '声明稳定 Cycle key、入口 Node、重复转换和正数 <code>maxInstances</code>。耗尽预算时阻塞，不会分配新实例。'],
         ['<code>capabilities</code>', '需要 revision 分支、决策、产物或持久化时。', 'Protocol 功能包括条件路由、revisioned Attempt、Decision Node、有界 Cycle 和版本化产物；持久化 Profile 再增加锁、栅栏、日志、检查点和内容快照，并要求明确边界。'],
         ['<code>authoring depth</code>', '软件包需要语义内容审查时。', '<code>quick</code> 使用一名审查者和一轮；<code>full</code> 使用三名投票者、四个审查视角和有界多轮审查。Authoring depth 管理软件包构建，不管理 WorkflowRuntime 执行。'],
-        ['<code>sourceRoot</code> / <code>skillRoots</code>', '需要升级来源或额外发现根目录时。', '相对路径从项目根目录解析；<code>sourceRoot</code> 必须是 Skill 目录，<code>skillRoots</code> 扩展发现范围但不改变严格歧义规则。'],
+        ['<code>sourceRoot</code>', '需要升级现有 Skill 时。', '来源目录必须包含 <code>SKILL.md</code>，并且也必须出现在 <code>skillSources</code> 中；不存在额外发现根目录。'],
         ['<code>artifactRoot</code>', '草稿软件包需要放在默认位置之外时。', '改变生成草稿位置；选择项目内且位于升级来源软件包之外的路径。']
       ],
       cliHeading: 'CLI 与 Runtime 坐标',

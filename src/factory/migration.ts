@@ -1,12 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { parse } from "yaml";
 import type {
   CreatorDraftClassification,
   CreatorState,
   FactoryPlan,
   UpgradeMigrationManifest,
 } from "../types.js";
-import { buildProposal, readPlan } from "./proposal.js";
+import { buildProposal, parsePlan } from "./proposal.js";
 import { generatePackage, type GeneratedPackage } from "./generate.js";
 import {
   assertDestinationWithinProject,
@@ -76,12 +77,88 @@ function defaultDestination(sourceRoot: string): string {
   );
 }
 
-function migrationPlan(plan: FactoryPlan, sourceRoot: string): FactoryPlan {
+async function migrationPlan(
+  plan: FactoryPlan,
+  sourceRoot: string,
+  projectRoot: string,
+): Promise<FactoryPlan> {
+  const canonicalSourceRoot = await fs.realpath(sourceRoot);
+  for (const source of plan.skillSources) {
+    try {
+      if (
+        path.resolve(
+          await fs.realpath(path.resolve(projectRoot, source.location)),
+        ) === canonicalSourceRoot
+      )
+        return { ...plan, skillCreatorIntent: "upgrade-existing", sourceRoot };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+
+  const skillMd = await fs.readFile(
+    path.join(canonicalSourceRoot, "SKILL.md"),
+    "utf8",
+  );
+  const match = skillMd.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u);
+  const metadata = match
+    ? (parse(match[1]) as Record<string, unknown>)
+    : undefined;
+  if (typeof metadata?.name !== "string" || metadata.name.trim().length === 0)
+    throw new Error(`Upgrade source requires a named SKILL.md: ${sourceRoot}`);
+
   return {
     ...plan,
     skillCreatorIntent: "upgrade-existing",
     sourceRoot,
+    skillSources: [
+      ...plan.skillSources,
+      {
+        name: metadata.name.trim(),
+        location: sourceRoot,
+      },
+    ],
   };
+}
+
+async function readMigrationPlan(state: CreatorState): Promise<FactoryPlan> {
+  const file = path.resolve(state.planPath);
+  const value = JSON.parse(await fs.readFile(file, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  if (Object.prototype.hasOwnProperty.call(value, "preferredSkills")) {
+    const declarations = new Map<string, { name: string; location: string }>();
+    for (const candidate of state.candidates as unknown[]) {
+      if (!candidate || typeof candidate !== "object") continue;
+      const candidateValue = candidate as Record<string, unknown>;
+      const sources = Array.isArray(candidateValue.sources)
+        ? candidateValue.sources
+        : [];
+      for (const source of sources) {
+        if (!source || typeof source !== "object") continue;
+        const sourceValue = source as Record<string, unknown>;
+        const name =
+          typeof sourceValue.name === "string"
+            ? sourceValue.name.trim()
+            : typeof candidateValue.query === "string"
+              ? candidateValue.query.trim()
+              : "";
+        const location =
+          typeof sourceValue.root === "string" ? sourceValue.root : "";
+        if (name && location)
+          declarations.set(`${name}\0${location}`, { name, location });
+      }
+    }
+    value.skillSources = [...declarations.values()];
+    delete value.preferredSkills;
+    delete value.skillRoots;
+  } else if (Object.prototype.hasOwnProperty.call(value, "skillRoots")) {
+    throw new Error(
+      `Legacy Factory plan ${file} has no recorded explicit Skill source evidence; cannot migrate safely`,
+    );
+  }
+  return parsePlan(value, file);
 }
 
 async function assertDestinationAvailable(destination: string): Promise<void> {
@@ -158,13 +235,17 @@ export async function migrateLegacyDraft(
   let archivedSession = false;
   let destinationCreated = false;
   try {
-    const originalPlan = await readPlan(options.state.planPath);
+    const originalPlan = await readMigrationPlan(options.state);
     await ensureDirectory(root);
     await atomicWrite(
       path.join(root, "legacy-plan.json"),
       JSON.stringify(originalPlan, null, 2) + "\n",
     );
-    const plan = migrationPlan(originalPlan, sourceRoot);
+    const plan = await migrationPlan(
+      originalPlan,
+      sourceRoot,
+      options.state.projectRoot,
+    );
     await atomicWrite(migrationPlanPath, JSON.stringify(plan, null, 2) + "\n");
     const proposal = await buildProposal({
       projectRoot: options.state.projectRoot,

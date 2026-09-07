@@ -48,7 +48,7 @@ function proposal(): { plan: FactoryPlan; proposal: FactoryProposal } {
       schemaVersion: 1,
       goal: input.goal,
       skillCreatorIntent: "new-skill",
-      preferredSkills: [],
+      skillSources: [],
       workflow: input,
       defaultLocale: "en",
     },

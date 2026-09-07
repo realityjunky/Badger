@@ -7,7 +7,13 @@ The plan file is JSON with this shape:
   "schemaVersion": 1,
   "goal": "Create a primer workflow.",
   "skillCreatorIntent": "new-skill",
-  "preferredSkills": ["primer-design", "genome-download"],
+  "skillSources": [
+    { "name": "primer-design", "location": "skills/primer-design" },
+    {
+      "name": "genome-download",
+      "location": "/workspace/skills/genome-download"
+    }
+  ],
   "defaultLocale": "en",
   "workflow": {
     "kind": "workflow-kernel",

@@ -864,7 +864,7 @@ describe("Workflow Verification Receipt contract", () => {
           schemaVersion: 1,
           goal: value.goal,
           skillCreatorIntent: "new-skill",
-          preferredSkills: [],
+          skillSources: [],
           workflow: value as unknown as WorkflowInput,
           defaultLocale: "en",
         } satisfies FactoryPlan,

@@ -2830,7 +2830,7 @@ function compositionReport(
       const sources = candidate.sources
         .map((source) => `- ${source.name}: ${source.hash}`)
         .join("\n");
-      return `### ${candidate.query}\n${sources || "- No source selected"}`;
+      return `### ${candidate.name}\n${sources || "- No source selected"}`;
     })
     .join("\n\n");
   const laneEvidence = AUTHORING_LANE_IDS.map((laneId) => {

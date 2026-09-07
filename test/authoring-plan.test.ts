@@ -40,7 +40,12 @@ describe("AuthoringPlan preview", () => {
       schemaVersion: 1,
       goal: "Create a prepared workflow.",
       skillCreatorIntent: "new-skill",
-      preferredSkills: ["prepare"],
+      skillSources: [
+        {
+          name: "prepare",
+          location: path.join(".agents", "skills", "prepare"),
+        },
+      ],
       defaultLocale: "en",
       workflow: {
         kind: "workflow-kernel",
@@ -128,7 +133,7 @@ describe("AuthoringPlan preview", () => {
     );
     expect(authoringPlan.sourceEvidence).toEqual([
       expect.objectContaining({
-        query: "prepare",
+        name: "prepare",
         status: "available",
         sources: [expect.objectContaining({ name: "prepare" })],
       }),
@@ -155,7 +160,12 @@ describe("AuthoringPlan preview", () => {
       schemaVersion: 1,
       goal: "Create a prepared workflow.",
       skillCreatorIntent: "new-skill",
-      preferredSkills: ["prepare"],
+      skillSources: [
+        {
+          name: "prepare",
+          location: path.join(".agents", "skills", "prepare"),
+        },
+      ],
       defaultLocale: "en",
       workflow: {
         kind: "workflow-kernel",
@@ -212,7 +222,12 @@ describe("AuthoringPlan preview", () => {
       schemaVersion: 1,
       goal: "Create a prepared workflow.",
       skillCreatorIntent: "new-skill",
-      preferredSkills: ["prepare"],
+      skillSources: [
+        {
+          name: "prepare",
+          location: path.join(".agents", "skills", "prepare"),
+        },
+      ],
       defaultLocale: "en",
       workflow: {
         kind: "workflow-kernel",
@@ -291,7 +306,12 @@ describe("AuthoringPlan preview", () => {
       schemaVersion: 1,
       goal: "Create a prepared workflow.",
       skillCreatorIntent: "new-skill",
-      preferredSkills: ["prepare"],
+      skillSources: [
+        {
+          name: "prepare",
+          location: path.join(".agents", "skills", "prepare"),
+        },
+      ],
       defaultLocale: "en",
       workflow: {
         kind: "workflow-kernel",
@@ -337,7 +357,12 @@ describe("AuthoringPlan preview", () => {
       schemaVersion: 1,
       goal: "Create a prepared workflow.",
       skillCreatorIntent: "new-skill",
-      preferredSkills: ["prepare"],
+      skillSources: [
+        {
+          name: "prepare",
+          location: path.join(".agents", "skills", "prepare"),
+        },
+      ],
       defaultLocale: "en",
       workflow: {
         kind: "workflow-kernel",
@@ -367,7 +392,12 @@ describe("AuthoringPlan preview", () => {
       schemaVersion: 1,
       goal: "Create a prepared workflow.",
       skillCreatorIntent: "new-skill",
-      preferredSkills: ["prepare"],
+      skillSources: [
+        {
+          name: "prepare",
+          location: path.join(".agents", "skills", "prepare"),
+        },
+      ],
       defaultLocale: "en",
       workflow: {
         kind: "workflow-kernel",

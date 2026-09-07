@@ -37,7 +37,7 @@ describe("standalone Creator lifecycle", () => {
       schemaVersion: 1,
       goal: "Create a primer workflow.",
       skillCreatorIntent: "new-skill",
-      preferredSkills: ["primer-design"],
+      skillSources: [{ name: "primer-design", location: skillRoot }],
       defaultLocale: "en",
       workflow: {
         kind: "workflow-kernel",
@@ -350,8 +350,7 @@ describe("standalone Creator lifecycle", () => {
       "---\nname: genome-download\ndescription: Genome download.\n---\n",
     );
     const plan = await readPlan(planPath);
-    plan.preferredSkills = ["genome-download"];
-    plan.skillRoots = ["shared-skills"];
+    plan.skillSources = [{ name: "genome-download", location: sharedSkill }];
     plan.artifactRoot = "generated";
     plan.workflow.customNodes[0].implementation.skill = "genome-download";
     await fs.writeFile(planPath, JSON.stringify(plan, null, 2));

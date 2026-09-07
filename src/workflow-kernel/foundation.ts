@@ -5,19 +5,16 @@ import type {
   FactoryPlan,
   FactoryProposal,
   SkillCandidate,
+  SkillSourceDeclaration,
+  UpgradeSourceEvidence,
 } from "../types.js";
-import {
-  findSkills,
-  type PreferenceEntry,
-  type SearchRoot,
-} from "./discovery.js";
+import { findSkills } from "./discovery.js";
 import { normalizeWorkflow } from "../workflow/contract.js";
 import { atomicWrite, ensureDirectory, sha256 } from "../util.js";
 import { inspectUpgradeSource } from "../factory/source.js";
 
 export interface WorkflowKernelOptions {
   projectRoot: string;
-  homeDir?: string;
   stateNamespace?: string;
 }
 
@@ -30,8 +27,7 @@ export interface InitializeStateOptions {
 
 export interface WorkflowKernel {
   findSkills(options?: {
-    preferences?: PreferenceEntry[];
-    extraRoots?: SearchRoot[];
+    sources?: SkillSourceDeclaration[];
   }): Promise<SkillCandidate[]>;
   readPlan(file: string): Promise<FactoryPlan>;
   buildProposal(planPath: string): Promise<FactoryProposal>;
@@ -62,59 +58,50 @@ function validateStateNamespace(namespace: string): void {
     throw new Error(`Invalid workflow state namespace: ${namespace}`);
 }
 
-export async function readPlan(file: string): Promise<FactoryPlan> {
-  const value = JSON.parse(
-    await fs.readFile(path.resolve(file), "utf8"),
-  ) as FactoryPlan;
+export function parsePlan(value: unknown, file: string): FactoryPlan {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error(`Invalid Factory plan: ${file}`);
+  const plan = value as Partial<FactoryPlan> & Record<string, unknown>;
   if (
-    !value ||
-    value.schemaVersion !== 1 ||
-    !value.goal ||
-    !value.workflow ||
-    !value.skillCreatorIntent ||
-    !Array.isArray(value.preferredSkills)
+    Object.prototype.hasOwnProperty.call(plan, "preferredSkills") ||
+    Object.prototype.hasOwnProperty.call(plan, "skillRoots")
+  )
+    throw new Error(
+      `Invalid Factory plan: ${file} uses removed preference-based Skill fields; use skillSources[{name,location}]`,
+    );
+  if (
+    plan.schemaVersion !== 1 ||
+    !plan.goal ||
+    !plan.workflow ||
+    !plan.skillCreatorIntent ||
+    !Array.isArray(plan.skillSources)
   )
     throw new Error(`Invalid Factory plan: ${file}`);
-  if (value.skillCreatorIntent === "upgrade-existing" && !value.sourceRoot)
+  if (plan.skillCreatorIntent === "upgrade-existing" && !plan.sourceRoot)
     throw new Error("upgrade-existing plans require sourceRoot");
-  if (value.workflow.kind !== "workflow-kernel")
+  if (plan.workflow.kind !== "workflow-kernel")
     throw new Error("Standalone Badger supports workflow-kernel plans only");
-  return value;
+  return plan as FactoryPlan;
 }
 
-function queryEntries(
-  plan: FactoryPlan,
-  requiredSkills: string[],
-): PreferenceEntry[] {
-  const entries: PreferenceEntry[] = [];
-  const seen = new Set<string>();
-  for (const [preferenceIndex, query] of plan.preferredSkills.entries()) {
-    if (seen.has(query)) continue;
-    seen.add(query);
-    entries.push({ query, preferenceIndex });
-  }
-  for (const query of requiredSkills) {
-    if (seen.has(query)) continue;
-    seen.add(query);
-    entries.push({ query, preferenceIndex: null });
-  }
-  return entries;
+export async function readPlan(file: string): Promise<FactoryPlan> {
+  const value = JSON.parse(await fs.readFile(path.resolve(file), "utf8"));
+  return parsePlan(value, file);
 }
 
 function blockedCandidateMessages(candidates: SkillCandidate[]): string[] {
   return candidates
     .filter((candidate) => candidate.status !== "available")
-    .map(
-      (candidate) =>
-        `Unresolved Skill candidate: ${candidate.query} (${candidate.status})`,
-    );
+    .flatMap((candidate) => [
+      `Unresolved Skill candidate: ${candidate.name} (${candidate.status})`,
+      ...(candidate.blockers ?? []),
+    ]);
 }
 
 export function createWorkflowKernel(
   options: WorkflowKernelOptions,
 ): WorkflowKernel {
   const projectRoot = path.resolve(options.projectRoot);
-  const homeDir = options.homeDir ? path.resolve(options.homeDir) : undefined;
   const stateNamespace = options.stateNamespace ?? ".badger";
   validateStateNamespace(stateNamespace);
   const stateRoot = path.resolve(projectRoot, stateNamespace);
@@ -125,39 +112,59 @@ export function createWorkflowKernel(
   }
 
   async function discover(
-    optionsForDiscovery: {
-      preferences?: PreferenceEntry[];
-      extraRoots?: SearchRoot[];
-    } = {},
+    optionsForDiscovery: { sources?: SkillSourceDeclaration[] } = {},
   ): Promise<SkillCandidate[]> {
     return findSkills({
       projectRoot,
-      homeDir,
-      stateNamespace,
-      preferencePolicy: "strict",
       ...optionsForDiscovery,
     });
+  }
+
+  async function resolveCandidates(
+    plan: FactoryPlan,
+    requiredSkills: string[],
+  ): Promise<SkillCandidate[]> {
+    const candidates = await discover({ sources: plan.skillSources });
+    const candidateNames = new Set(
+      candidates.map((candidate) => candidate.name),
+    );
+    for (const requiredSkill of requiredSkills) {
+      if (candidateNames.has(requiredSkill)) continue;
+      candidates.push({
+        name: requiredSkill,
+        status: "missing",
+        sources: [],
+        blockers: [
+          `Workflow binding ${requiredSkill} has no explicitly declared Skill source`,
+        ],
+      });
+    }
+    return candidates;
   }
 
   async function buildProposal(planPath: string): Promise<FactoryProposal> {
     const plan = await readPlan(planPath);
     const normalized = normalizeWorkflow(plan.workflow);
-    const extraRoots = (plan.skillRoots ?? []).map((root) => ({
-      root: path.resolve(projectRoot, root),
-      origin: "extra" as const,
-    }));
-    const candidates = await discover({
-      preferences: queryEntries(plan, normalized.requiredSkills),
-      extraRoots,
-    });
+    const candidates = await resolveCandidates(plan, normalized.requiredSkills);
     const blockers = blockedCandidateMessages(candidates);
     const sourceRoot = plan.sourceRoot
       ? path.resolve(projectRoot, plan.sourceRoot)
       : undefined;
-    let upgradeSource;
+    let upgradeSource: UpgradeSourceEvidence | undefined;
     if (plan.skillCreatorIntent === "upgrade-existing" && sourceRoot) {
       try {
         upgradeSource = await inspectUpgradeSource(sourceRoot);
+        if (
+          !candidates.some((candidate) =>
+            candidate.sources.some(
+              (source) => source.root === upgradeSource?.root,
+            ),
+          )
+        ) {
+          blockers.push(
+            `Upgrade source ${sourceRoot} must be included in skillSources as an explicit declaration`,
+          );
+        }
       } catch (error) {
         blockers.push(error instanceof Error ? error.message : String(error));
       }
@@ -223,6 +230,18 @@ export function createWorkflowKernel(
       stateOptions.proposal.name !== stateOptions.plan.workflow.name
     )
       throw new Error("Confirmed proposal does not match the Factory plan");
+    const normalized = normalizeWorkflow(stateOptions.plan.workflow);
+    const currentCandidates = await resolveCandidates(
+      stateOptions.plan,
+      normalized.requiredSkills,
+    );
+    if (
+      JSON.stringify(currentCandidates) !==
+      JSON.stringify(stateOptions.proposal.candidates)
+    )
+      throw new Error(
+        "Declared Skill source evidence is stale; rerun propose before initialization",
+      );
     const draftPath = path.resolve(
       projectRoot,
       stateOptions.plan.artifactRoot ?? path.join(stateNamespace, "drafts"),
@@ -263,7 +282,6 @@ export function createWorkflowKernel(
 
 export function createStandaloneWorkflowKernel(options: {
   projectRoot: string;
-  homeDir?: string;
 }): WorkflowKernel {
   return createWorkflowKernel({
     ...options,

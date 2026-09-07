@@ -1025,7 +1025,7 @@ describe("WorkflowRuntime decision evidence scope", () => {
         schemaVersion: 1,
         goal: protocol.goal,
         skillCreatorIntent: "new-skill",
-        preferredSkills: [],
+        skillSources: [],
         workflow: protocol as unknown as WorkflowInput,
         defaultLocale: "en",
       },

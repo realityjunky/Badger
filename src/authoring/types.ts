@@ -86,13 +86,12 @@ export interface AuthoringLane {
 }
 
 export interface AuthoringSourceEvidence {
-  query: string;
-  preferenceIndex: number | null;
+  name: string;
   status: SkillCandidate["status"];
   sources: Array<{
     name: string;
     root: string;
-    origin: "project" | "global" | "explicit" | "extra";
+    origin: "explicit";
     description: string;
     references: Array<{ path: string; contentHash: string }>;
     scripts: Array<{ path: string; sideEffect: "unknown" }>;

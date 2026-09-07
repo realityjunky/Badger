@@ -46,7 +46,7 @@ describe("Badger authoring lifecycle", () => {
       schemaVersion: 1,
       goal: "Create a prepared workflow.",
       skillCreatorIntent: "new-skill",
-      preferredSkills: ["prepare"],
+      skillSources: [{ name: "prepare", location: skillRoot }],
       defaultLocale: "en",
       workflow: {
         kind: "workflow-kernel",
@@ -520,11 +520,18 @@ describe("Badger authoring lifecycle", () => {
   it("preserves upgrade sources and rejects destinations inside them", async () => {
     const source = path.join(project, "legacy-skill");
     await fs.mkdir(source, { recursive: true });
-    await fs.writeFile(path.join(source, "SKILL.md"), "legacy skill\n");
+    await fs.writeFile(
+      path.join(source, "SKILL.md"),
+      "---\nname: legacy\ndescription: Legacy skill.\n---\n\n# Legacy\n",
+    );
     await fs.writeFile(path.join(source, "legacy-notes.md"), "retain me\n");
     const plan = await readPlan(planPath);
     plan.skillCreatorIntent = "upgrade-existing";
     plan.sourceRoot = source;
+    plan.skillSources = [
+      ...plan.skillSources,
+      { name: "legacy", location: source },
+    ];
     await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
     const proposal = await buildProposal({ projectRoot: project, planPath });
 
@@ -538,7 +545,7 @@ describe("Badger authoring lifecycle", () => {
         path.join(generated.packageRoot, "source", "SKILL.md"),
         "utf8",
       ),
-    ).resolves.toBe("legacy skill\n");
+    ).resolves.toContain("name: legacy");
     await expect(
       fs.readFile(
         path.join(generated.packageRoot, "source", "legacy-notes.md"),

@@ -114,7 +114,10 @@ describe("differential fixture snapshots", () => {
             schemaVersion: 1,
             goal: "Compose a synthetic three-Skill workflow.",
             skillCreatorIntent: "new-skill",
-            preferredSkills: skillNames,
+            skillSources: skillNames.map((name) => ({
+              name,
+              location: path.join(".agents", "skills", name),
+            })),
             defaultLocale: "en",
             workflow: {
               kind: "workflow-kernel",
@@ -151,12 +154,10 @@ describe("differential fixture snapshots", () => {
           return {
             candidates: await findSkills({
               projectRoot: options.cwd,
-              homeDir: options.homeDir,
-              preferences: [
-                { query: "genome-download", preferenceIndex: 0 },
-                { query: "primer-design", preferenceIndex: 1 },
-                { query: "primer-pool-add", preferenceIndex: 2 },
-              ],
+              sources: skillNames.map((name) => ({
+                name,
+                location: path.join(".agents", "skills", name),
+              })),
             }),
           };
         }
