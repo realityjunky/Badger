@@ -105,7 +105,7 @@ proposal, and reports separate
 WorkflowProtocol) identities. It does not create Creator state, authoring
 records, or package files.
 
-See `assets/skills/badger-create/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
+See `assets/skills/badger-create/SKILL.md` for the user-facing confirmation protocol and `docs/release-artifacts.md` for release status and upstream provenance.
 
 `generate` creates a deterministic scaffold and an authoring session under
 `.badger/authoring/<name>`. The scaffold remains visibly pending until all
@@ -146,7 +146,7 @@ internal. The Engine closure is pinned to the upstream reference
 `0.4.0-beta.19` at revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a` and
 contains no runtime import from the upstream checkout.
 
-The pinned three-Skill differential harness is documented in `docs/differential-harness.md`. The Engine parity matrix and certification gate are documented in `docs/engine-phase-1-certification.md`. Both harnesses run only in disposable temporary projects and reject protected raw-data paths.
+The pinned Creator and Engine differential harnesses are documented in `docs/differential-harness.md`. Both harnesses run only in disposable temporary projects and reject protected raw-data paths.
 
 ## Authoring references
 

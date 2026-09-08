@@ -3,6 +3,10 @@
 The certification package is validated against one Engine-backed
 WorkflowRuntime authority.
 
+This document covers standalone runtime certification only. Domain workflow
+definitions, source Skills, and domain fixtures belong to Badger-workflows and
+are supplied through explicit package sources.
+
 ## Supported contract
 
 The package supports deterministic routes, including explicitly declared

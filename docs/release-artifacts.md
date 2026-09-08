@@ -1,126 +1,101 @@
 # Badger Release Artifact Ledger
 
-This document is the release-facing index for the standalone Badger package.
-It keeps the formal Skill, generated package, compatibility fixture, workflow
-manual, and verification gate aligned with the implementation.
+This is the current documentation index for standalone Badger. It records the
+package boundary, release-facing artifacts, upstream provenance, and checks
+that must stay aligned with the implementation. The standalone package is the
+workflow-kernel core; domain workflows live in the separate Badger-workflows
+repository.
 
-## Status boundary
+## Current boundary
 
-| Surface                                              | Status                | Evidence                                                                                                                        |
-| ---------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Badger Creator and WorkflowRuntime                   | Delivered             | `src/authoring/`, `src/factory/`, `src/eval/`, `src/publish/`, and `src/workflow-runtime/`.                                     |
-| Six-lane authoring contract                          | Restored              | `assets/skills/badger-create/reference/authoring-protocol.json`, role briefs, and `src/differential/authoring/`.                       |
-| Badger hardening                                     | Delivered extension   | Durable lane records, fresh-process recovery, revision fencing, bounded handoffs, cross-validation, and current-hash readiness. |
-| Platform, dashboard, and external-provider adapters  | Future / out of scope | No installer, dashboard policy, provider authentication, or competing authoring/runtime state machine is shipped here.          |
-| Biological execution and protected raw-data fixtures | Out of scope          | Release checks use disposable synthetic projects only.                                                                          |
+| Surface | Status | Authority |
+| --- | --- | --- |
+| Creator and WorkflowRuntime | Delivered | `src/authoring/`, `src/factory/`, `src/eval/`, `src/publish/`, `src/workflow-runtime/` |
+| Six-lane authoring | Delivered | `assets/skills/badger-create/reference/authoring-protocol.json`, role briefs, `src/differential/authoring/` |
+| Hash-bound durability and readiness | Delivered | `src/workflow-runtime/`, `src/eval/`, `src/publish/` |
+| Domain workflow definitions and source Skills | External | Badger-workflows; supplied to Badger through explicit `skillSources` |
+| Platform adapters, installers, automatic distribution, biological execution | Out of scope | Not shipped in this package |
 
-The upstream comparison baseline is Comet `0.4.0-beta.19` at revision
-`99fd7495f8b9217efbaae3a46d885f6fa7f4102a`. The differential report classifies
-Badger naming, namespace, storage, recovery, concurrency, and hash behavior as
-expected extensions rather than silently calling those differences upstream
-parity.
+The pinned upstream comparison baseline is Comet `0.4.0-beta.19` at commit
+`99fd7495f8b9217efbaae3a46d885f6fa7f4102a`. Differential reports keep Badger's
+namespace, storage, recovery, concurrency, naming, and hash extensions
+separate from semantic parity.
 
-## Formal Skill package
+## Package-facing artifacts
 
-The installed package-facing Skill is `assets/skills/badger-create/SKILL.md`. Its
-Agent-first discovery companion is `assets/skills/badger-workflow-questionnaire/SKILL.md`, with
-the source-study reference beside it. All formal Skills and references are intentionally English
-and form one contract:
+The installed Agent entrypoints are `assets/skills/badger-create/SKILL.md` and
+`assets/skills/badger-workflow-questionnaire/SKILL.md`. The latter's source
+study is beside it. `badger guide` is read-only and reports first-use,
+`FactoryPlan`, and resumable Creator state; explicit confirmation remains
+required before proposal, initialization, publication, or distribution.
 
-The read-only `badger guide` command reports `firstUse`, existing `FactoryPlan`
-paths, and resumable Creator state. An empty project enters the questionnaire's
-automatic first-use path; existing plans and sessions require explicit
-questionnaire refinement and are never silently replaced.
+The `badger-create` reference set is:
 
-- `reference/authoring-protocol.json` — lane DAG, claims, review settings,
-  deterministic backbone, and authored leaves;
-- `reference/authoring-subagents.md` — role briefs, file handoff, statuses, and
-  provider capabilities;
-- `reference/bundle-authoring.md` — proposal, authoring, assembly, migration,
-  and package boundaries;
-- `reference/authored-zone-example.md` — substantive Decision Core and Node
-  Guidance quality bar;
-- `reference/eval-provider.md` — authoring review, deterministic evaluation,
-  WorkflowRuntime certification, and publication approval evidence;
-- `reference/package-inventory.example.json` — safe assembled-package example.
+- `reference/authoring-protocol.json` — lane DAG, claims, review settings, deterministic backbone, and authored leaves;
+- `reference/authoring-subagents.md` — bounded role handoffs and dependency waves;
+- `reference/bundle-authoring.md` — scaffold, assembly, content leaves, and upgrades;
+- `reference/authored-zone-example.md` — substantive Decision Core and Node Guidance;
+- `reference/eval-provider.md` — authoring review, runtime evaluation, certification, and publication approval;
+- `reference/package-inventory.example.json` — safe relative-path ownership example.
 
-The package references do not contain provider credentials, conversation
-transcripts, `.badger` session records, source roots, raw source bodies, or
-protected raw-data-derived content.
+## Generated package
 
-## Generated package inventory
+The checked-in inventory example omits session state, provider metadata,
+internal reports, and byte hashes. Generated
+`reference/package-inventory.json` files contain the complete hash-bound
+inventory and readiness evidence.
 
-An assembled package has one relative-path inventory at
-`reference/package-inventory.json`. Each entry has an ownership class:
+| Owner | Meaning | Examples |
+| --- | --- | --- |
+| `auto` | Deterministic assembler output | Protocol, manifests, scripts, guardrails, checks, evaluation |
+| `authored` | Validated lane content at a declared leaf | Entry and Node guidance, decision points, recovery, skill review |
+| `source` | Existing material preserved by `upgrade-existing` | `source/` files and migration evidence |
 
-| Owner      | Meaning                                                                             | Examples                                                                                       |
-| ---------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `auto`     | Deterministic projection controlled by the normalized protocol or Badger assembler. | Protocol, manifests, generated scripts, guardrails, checks, evaluation, and package inventory. |
-| `authored` | Content accepted from a validated lane at a declared content leaf.                  | Entry Decision Core, Node Guidance, decision points, recovery, and skill review.               |
-| `source`   | Existing material preserved by `upgrade-existing`.                                  | Files under `source/` and the migration source-evidence record.                                |
+Assembly requires the authored `SKILL.md`, active Node guidance,
+`reference/decision-points.md`, `reference/recovery.md`, and
+`reference/skill-review.md`. Missing, duplicated, placeholder, stale, or
+unexpected executable content blocks readiness.
 
-The checked-in `reference/package-inventory.example.json` shows a one-node
-assembled package. It includes every deterministic backbone path and all six
-role briefs, while keeping the example free of byte hashes, provider metadata,
-session state, and internal review reports. Generated `GeneratedPackage.inventory`
-records carry byte counts and hashes for programmatic readiness checks; those
-details are not copied into the user-facing example.
+## Provenance and ownership
 
-The required Authored zone is exactly:
+Badger was extracted from the audited upstream Comet closure, but it is not a
+runtime import of that checkout. The reusable responsibilities are now owned
+locally:
 
-- `SKILL.md`;
-- one internal Node `SKILL.md` for every active Node;
-- `reference/decision-points.md`;
-- `reference/recovery.md`;
-- `reference/skill-review.md`.
+| Responsibility | Current authority |
+| --- | --- |
+| Explicit Skill source inspection and stable hashes | `src/workflow-kernel/discovery.ts`, `src/workflow-kernel/hash.ts` |
+| Workflow contract normalization and validation | `src/workflow/contract.ts` |
+| Plan, proposal, confirmation, and `.badger` state | `src/workflow-kernel/foundation.ts`, `src/factory/` |
+| Six-lane authoring and deterministic assembly | `src/authoring/`, `src/factory/generate.ts` |
+| Evaluation, publication readiness, and distribution preview | `src/eval/`, `src/publish/` |
+| Skill loading, snapshots, Engine, and durable Run storage | `src/skill-runtime/`, `src/engine/` |
+| Public WorkflowRuntime seam | `src/workflow-runtime/public.ts` |
 
-Assembly blocks when a leaf is missing, duplicated, placeholder content remains,
-or an Auto-zone file has drifted. A generated package must contain no
-unexpected executable file outside the declared inventory and source-owned
-upgrade tree.
+Classic, Native, Entry, platform-installation, host-dashboard, and domain
+execution policy remain outside this repository. Badger-workflows owns domain
+workflow definitions, source Skills, and domain fixtures; Badger consumes only
+the explicit sources supplied by a caller.
 
-## Compatibility fixture
+## Compatibility evidence
 
 `test/fixtures/authoring/authoring-compatibility.json` records the pinned
-upstream revision, known upstream contract inconsistencies, Badger extensions,
-the package-facing reference set, and the explicit excluded scopes. The
-authoring differential tests use a synthetic six-lane fixture and snapshot all
-declared official and Badger authoring sources before and after the run.
+revision, known upstream inconsistencies, Badger extensions, package-facing
+references, and excluded scopes. The authoring differential command and the
+Engine differential command are documented in
+[`differential-harness.md`](differential-harness.md). Both use disposable
+projects, synthetic inputs, source-integrity checks, and read-only protected
+upstream checkouts.
 
-The fixture compares these shared dimensions:
-
-- lane DAG and dependency waves;
-- lane claims and output envelope;
-- quick/full review depth and four review lenses;
-- Authored-zone content leaves;
-- deterministic backbone and generated artifact inventory;
-- authoring, runtime, and publication readiness;
-- source integrity and fresh-process lifecycle completion.
-
-The report keeps expected Badger extensions separate from semantic mismatches
-and missing functionality. It never certifies Classic, Native, Entry, platform,
-dashboard, biological-execution, credential, or protected-raw-data behavior.
-
-## Workflow manual
-
-`docs/badger-workflow-manual.html` is a bilingual educational view of the same
-boundary. Its English and Chinese views must both:
-
-- label delivered foundation and integrated authoring as current evidence;
-- label platform and dashboard adapters as future or excluded;
-- preserve the four-plane authority model and separate AuthoringProtocol from
-  WorkflowProtocol;
-- render every architecture diagram through the inline Mermaid source;
-- resolve every repository-local link from the `docs/` directory; and
-- keep the pinned upstream source links and protected raw-data reminder.
-
-The manual is explanatory, not a source of runtime policy. When it conflicts
-with the generated package or current TypeScript, the implementation and the
-artifact checks are authoritative.
+[`badger-workflow-manual.html`](badger-workflow-manual.html) is explanatory
+material, not runtime policy. Generated package checks and current TypeScript
+are authoritative when prose conflicts with code. The detailed
+WorkflowRuntime contract and certification evidence are in
+[`workflow-runtime-certification.md`](workflow-runtime-certification.md).
 
 ## Release gate
 
-Run the gate from a clean disposable checkout or worktree:
+Run from a clean disposable checkout or worktree:
 
 ```bash
 npm ci
@@ -130,18 +105,13 @@ npm run format:check
 npm pack --dry-run
 ```
 
-The authoring-specific checks are:
+Focused authoring and artifact checks:
 
 ```bash
 npm test -- test/authoring-plan.test.ts test/authoring-lifecycle.test.ts test/authoring-differential.test.ts test/release-artifacts.test.ts
 ```
 
-The differential commands documented in `docs/differential-harness.md` remain
-offline evidence commands. They use a pinned disposable upstream copy and a
-synthetic fixture; they do not build in or mutate the protected upstream
-checkout.
-
 If a release changes the protocol, generator, generated control-plane names,
-authored leaves, or documentation references, update the protocol fixture,
-inventory example, release ledger, workflow manual, and focused artifact test
-in the same change.
+authored leaves, source boundary, or documentation references, update the
+compatibility fixture, inventory example, this ledger, the manual, and the
+focused artifact tests in the same change.
