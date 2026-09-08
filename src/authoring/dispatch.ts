@@ -75,10 +75,14 @@ function capabilities(): AuthoringProviderCapabilities {
 async function resolvePackageAsset(relativePath: string): Promise<string> {
   const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    path.resolve(moduleDirectory, "../../assets/skills/badger", relativePath),
     path.resolve(
       moduleDirectory,
-      "../../../assets/skills/badger",
+      "../../assets/skills/badger-create",
+      relativePath,
+    ),
+    path.resolve(
+      moduleDirectory,
+      "../../../assets/skills/badger-create",
       relativePath,
     ),
   ];

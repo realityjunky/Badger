@@ -601,7 +601,45 @@ flowchart TB
       <p class="lede">This section changes viewpoint: stop reading the package as a roadmap and read it as a small TypeScript product you could have designed. Start with the user-visible command path, then inspect the data contracts, module seams, durable files, and evidence gates that make each step trustworthy.</p>
       <div class="callout"><strong>Scope and reading rule.</strong> Treat <code>@rpamis/badger</code> as a standalone design. It is an ESM Node&nbsp;&gt;=22 library and CLI; its source of truth is under <code>src/</code>, its generated runtime assets are projections under <code>assets/runtime/</code>, Creator state lives under <code>.badger/</code>, authoring sessions live under <code>.badger/authoring/</code>, and a WorkflowRuntime Run stores its own records under <code>.badger/runs/</code>. Follow exports and persisted identities rather than inferring authority from a filename.</div>
 
-      <h3 id="private-user-path">4.1 The user-to-code path</h3>
+ <h3 id="factory-plan-authoring">Agent-first FactoryPlan authoring</h3>
+ <p>The Agent starts with <code>badger guide</code>. On a project with no existing FactoryPlan or resumable Creator flow, `/badger-create` automatically starts the multi-exchange questionnaire. Existing plans and authoring sessions are preserved; refinement requires an explicit questionnaire invocation.</p>
+ <h4 class="private-subheading" id="factory-plan-boundary">Agent and backend authoring boundary</h4>
+ <div class="private-table-wrap"><table class="data-table private-boundary-table"><thead><tr><th>Owner</th><th>Responsibilities</th><th>Boundary</th></tr></thead><tbody>
+ <tr><td>Agent/LLM</td><td>Read the manual and explicit Skill evidence, ask and summarize exchanges, separate facts from inferences, choose Node semantics, and write the complete FactoryPlan.</td><td>Must show the plan and obtain confirmation before calling <code>badger propose</code>.</td></tr>
+ <tr><td>CLI/backend</td><td>Parse JSON, resolve only declared source paths, validate packages and workflow contracts, canonicalize paths, hash content, normalize the Workflow Protocol, and report blockers or warnings.</td><td>Does not ask questions, invoke an LLM, scan ambient roots, execute source scripts, or write Creator state before confirmation.</td></tr>
+ </tbody></table></div>
+ <h4 class="private-subheading" id="factory-plan-shape">Accepted initial FactoryPlan shape</h4>
+ <pre class="code-block">{
+  "schemaVersion": 1,
+  "goal": "&lt;confirmed workflow outcome&gt;",
+  "skillCreatorIntent": "new-skill",
+  "defaultLocale": "en",
+  "skillSources": [{ "name": "&lt;skill&gt;", "location": "&lt;explicit path&gt;" }],
+  "workflow": {
+    "kind": "workflow-kernel",
+    "name": "&lt;stable workflow name&gt;",
+    "goal": "&lt;workflow goal&gt;",
+    "customNodes": [],
+    "outputSchemas": []
+  }
+}</pre>
+ <p>An upgrade plan additionally supplies <code>sourceRoot</code>, and that directory must also appear in <code>skillSources</code>. Node implementations, Required Skill Calls, augmentations, schemas, guardrails, decisions, routes, and recovery behavior are completed from the conversation; the CLI validates and normalizes them without inventing missing semantics.</p>
+ <h4 class="private-subheading" id="factory-plan-relationships">FactoryPlan relationships</h4>
+ <ul class="checklist">
+ <li>Implementation binding identifies the supplied Skill that owns a Node.</li>
+ <li>Required Skill Call requires another supplied Skill inside a Node without replacing its implementation.</li>
+ <li>Augmentation assists a Node without replacing its implementation.</li>
+ <li>Output Schema declares the artifacts and evidence produced by a concrete Node.</li>
+ <li>Guardrail controls advancement using declared validation or evidence.</li>
+ <li>Decision Node exposes stable user choices and declared transition targets.</li>
+ <li>Handoff returns bounded evidence to another Node, reviewer, or user.</li>
+ <li>Routing transitions connect success, failure, pause, conditional outcomes, and completion.</li>
+ <li>Cycle declares bounded repeat transitions and continuation semantics.</li>
+ </ul>
+ <h4 class="private-subheading" id="factory-plan-checklist">FactoryPlan completeness checklist</h4>
+ <p>Before proposal handoff, the questionnaire confirms goal and intent, explicit source paths and roles, inputs, Node responsibilities, Required Skill Calls, augmentations, decisions, Output Schemas, artifacts, evidence, guardrails, routes, optionality, failure, pause and recovery, handoffs, executable disclosures, upgrade-source behavior, locale, capabilities, finalization, and all unresolved assumptions. It continues exchanges until this checklist passes or the user explicitly stops with the remaining gaps recorded.</p>
+ <p>The questionnaire handoff labels confirmed user facts, source-derived facts, Agent inferences, unresolved assumptions, and remaining questions. A complete plan is shown and confirmed before read-only proposal generation; proposal confirmation remains separate from <code>badger init --confirm</code>.</p>
+ <h3 id="private-user-path">4.1 The user-to-code path</h3>
       <p>The first useful narrative is the safe factory journey. A user begins with a goal and a plan, inspects what the project can resolve, previews a normalized protocol, confirms the write, creates a deterministic scaffold, completes the authoring lanes, assembles the package, evaluates its current hash, obtains separate authoring and publication review evidence, and only then publishes or previews distribution. The same package can subsequently be used by the generated adapters or the public WorkflowRuntime API to create a durable Run.</p>
       <div class="route-list private-route">
         <div class="route-item"><div><b>Inspect context</b><p><code>guide</code> reports resumable Creator state; <code>candidates</code> resolves only explicitly declared Skill locations and returns descriptions, references, scripts, and content hashes.</p></div></div>
@@ -648,7 +686,7 @@ flowchart LR
       </tbody></table></div>
 
       <h3 id="private-user-guide">4.2 Use the tool as a user</h3>
-      <p>Invoke <code>assets/skills/badger/SKILL.md</code> in an Agent after building the package. The Agent supplies each Skill by name and location, and the CLI inspects only those explicit sources. Candidate inspection is read-only: it does not scan ambient roots, execute source scripts, or write Creator state. Keep the project directory disposable while learning: the tool writes Creator records beneath that project, and it never needs the protected upstream checkout to create or evaluate a local package.</p>
+      <p>Invoke <code>assets/skills/badger-create/SKILL.md</code> in an Agent after building the package. The Agent supplies each Skill by name and location, and the CLI inspects only those explicit sources. Candidate inspection is read-only: it does not scan ambient roots, execute source scripts, or write Creator state. Keep the project directory disposable while learning: the tool writes Creator records beneath that project, and it never needs the protected upstream checkout to create or evaluate a local package.</p>
       <pre class="code-block"><span class="comment"># 1. Inspect explicitly supplied Skills</span>
 node bin/badger.js candidates --project ./demo --skill primer-design=./skills/primer-design --json
 node bin/badger.js guide --project ./demo --json
@@ -963,7 +1001,7 @@ flowchart LR
       <p class="lede">This manual is an educational synthesis. The authoring integration delivery record, current Badger package, official Comet-any authoring references, and the Primer Designer contract provide the implementation vocabulary.</p>
       <div class="private-table-wrap"><table class="data-table"><thead><tr><th>Source</th><th>What to learn from it</th><th>How this manual uses it</th></tr></thead><tbody>
         <tr><td><a href="authoring-integration-upgrade-plan.md"><code>docs/authoring-integration-upgrade-plan.md</code></a></td><td>The integrated six-lane authoring delivery record, upstream compatibility baseline, Badger hardening, state/hash boundaries, assembly rules, and acceptance criteria.</td><td>Primary source for the restored authoring contract and its distinction from Runtime behavior.</td></tr>
-        <tr><td><a href="../assets/skills/badger/SKILL.md"><code>assets/skills/badger/SKILL.md</code></a></td><td>The current Badger Creator entrypoint, supported workflow-kernel scope, confirmation protocol, and runtime boundary.</td><td>User-facing vocabulary and the boundary between package construction and Run execution.</td></tr>
+        <tr><td><a href="../assets/skills/badger-create/SKILL.md"><code>assets/skills/badger-create/SKILL.md</code></a></td><td>The current Badger Creator entrypoint, supported workflow-kernel scope, confirmation protocol, and runtime boundary.</td><td>User-facing vocabulary and the boundary between package construction and Run execution.</td></tr>
         <tr><td><a href="../docs/extraction-map.md"><code>docs/extraction-map.md</code></a></td><td>Badger provenance, retained workflow-kernel responsibilities, Engine and WorkflowRuntime closure, and explicit exclusions.</td><td>Evidence for what the standalone package currently owns.</td></tr>
         <tr><td><a href="release-artifacts.md"><code>docs/release-artifacts.md</code></a></td><td>The current/restored/future status boundary, generated inventory example, compatibility fixture, and release gate.</td><td>Release-facing index for keeping documentation and generated artifacts aligned.</td></tr>
         <tr><td><a href="https://github.com/rpamis/comet/blob/99fd7495f8b9217efbaae3a46d885f6fa7f4102a/assets/skills/comet-any/reference/authoring-protocol.json"><code>upstream comet/assets/skills/comet-any/reference/authoring-protocol.json</code></a></td><td>The original lane DAG, claims, review depth, deterministic backbone, and authored content leaves.</td><td>Compatibility baseline for restoring authoring without Classic or Native policy.</td></tr>
@@ -2025,7 +2063,7 @@ flowchart LR
       sourceHeaders: ['来源', '从中学习什么', '本手册如何使用'],
       sourceCells: [
         ['<a href="authoring-integration-upgrade-plan.md"><code>docs/authoring-integration-upgrade-plan.md</code></a>', '集成式六 lane authoring 的交付记录、上游兼容基线、Badger 加固、状态/哈希边界、组装规则和验收标准。', '已交付创作生命周期以及它与 Runtime 行为之间边界的主要来源。'],
-        ['<a href="../assets/skills/badger/SKILL.md"><code>assets/skills/badger/SKILL.md</code></a>', '当前 Badger Creator 入口、workflow-kernel 范围、确认协议和 Runtime 边界。', '用户可见词汇以及软件包构建与 Run 执行之间的边界。'],
+        ['<a href="../assets/skills/badger-create/SKILL.md"><code>assets/skills/badger-create/SKILL.md</code></a>', '当前 Badger Creator 入口、workflow-kernel 范围、确认协议和 Runtime 边界。', '用户可见词汇以及软件包构建与 Run 执行之间的边界。'],
         ['<a href="../docs/extraction-map.md"><code>docs/extraction-map.md</code></a>', 'Badger 来源、保留的 workflow-kernel 职责、Engine 与 WorkflowRuntime 闭包以及明确排除项。', '当前 standalone 软件包实际拥有的职责证据。'],
         ['<a href="release-artifacts.md"><code>docs/release-artifacts.md</code></a>', '当前、恢复和未来的状态边界、生成 inventory 示例、兼容性 fixture 以及 release gate。', '保持文档与生成产物一致的交付索引。'],
         ['<a href="https://github.com/rpamis/comet/blob/99fd7495f8b9217efbaae3a46d885f6fa7f4102a/assets/skills/comet-any/reference/authoring-protocol.json"><code>upstream comet/assets/skills/comet-any/reference/authoring-protocol.json</code></a>', '原始 lane DAG、claims、审查深度、确定性 backbone 和 Authored content leaf。', '在不引入 Classic 或 Native 策略的前提下恢复 authoring 的兼容基线。'],

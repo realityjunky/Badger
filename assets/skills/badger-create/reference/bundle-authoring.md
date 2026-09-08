@@ -17,7 +17,7 @@ source script is executed, and no Creator state or package is written.
 The initial plan includes `schemaVersion`, `goal`, `skillCreatorIntent`, `defaultLocale`,
 `skillSources`, and `workflow`. Each `skillSources` entry is `{ "name": "...", "location": "..." }`.
 `upgrade-existing` additionally includes `sourceRoot`, and that source must also be explicitly
-declared. Legacy preference-only fields such as `preferredSkills` and `skillRoots` are not part of
+declared. Legacy source-selection fields such as `preferredSkills` and `skillRoots` are rejected and are not part of
 the contract.
 
 ## Relationship semantics

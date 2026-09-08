@@ -5,7 +5,7 @@
 - Upstream checkout: `/home/hugo/AI/repos/comet`
 - Upstream remote: `git@github.com:rpamis/comet.git`
 - Audited upstream commit: `99fd749` (`0.4.0-beta.19`)
-- Source scenario: `assets/skills/badger/SKILL.md`, `domains/workflow-contract/`, `domains/bundle/`, `domains/factory/`, the Creator CLI facade, and the audited Engine closure in `domains/engine/`.
+- Source scenario: `assets/skills/badger-create/SKILL.md`, `domains/workflow-contract/`, `domains/bundle/`, `domains/factory/`, the Creator CLI facade, and the audited Engine closure in `domains/engine/`.
 
 ## Standalone seam
 
@@ -44,10 +44,10 @@ extensions.
 
 | Delivery surface | Current authority |
 | --- | --- |
-| Lane DAG, claims, review depth, and content leaves | `src/authoring/protocol.ts` and `assets/skills/badger/reference/authoring-protocol.json` |
+| Lane DAG, claims, review depth, and content leaves | `src/authoring/protocol.ts` and `assets/skills/badger-create/reference/authoring-protocol.json` |
 | Plan, handoff, records, assembly, and readiness | `src/authoring/plan.ts`, `dispatch.ts`, `lifecycle.ts`, `review.ts`, and `cross-validation.ts` |
 | Generated package inventory and control plane | `src/factory/generate.ts` and `reference/package-inventory.json` in each assembled package |
-| User-facing role and quality guidance | `assets/skills/badger/reference/authoring-subagents.md`, `bundle-authoring.md`, `authored-zone-example.md`, and `eval-provider.md` |
+| User-facing role and quality guidance | `assets/skills/badger-create/reference/authoring-subagents.md`, `bundle-authoring.md`, `authored-zone-example.md`, and `eval-provider.md` |
 | Compatibility and release evidence | `test/fixtures/authoring/authoring-compatibility.json`, `src/differential/authoring/`, and `docs/release-artifacts.md` |
 
 The generated `workflow-state`, `workflow-guard`, and `workflow-handoff` files

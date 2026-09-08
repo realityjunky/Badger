@@ -60,15 +60,15 @@ const DEFAULT_OFFICIAL_PROTOCOL_PATH =
   "assets/skills/comet-any/reference/authoring-protocol.json";
 const DEFAULT_OFFICIAL_AUTHORING_SOURCE_PATH = "domains/bundle/authoring.ts";
 const BADGER_PROTOCOL_PATH =
-  "assets/skills/badger/reference/authoring-protocol.json";
+  "assets/skills/badger-create/reference/authoring-protocol.json";
 const BADGER_SOURCE_PATHS = [
-  "assets/skills/badger/SKILL.md",
-  "assets/skills/badger/reference/authoring-protocol.json",
-  "assets/skills/badger/reference/authoring-subagents.md",
-  "assets/skills/badger/reference/bundle-authoring.md",
-  "assets/skills/badger/reference/authored-zone-example.md",
-  "assets/skills/badger/reference/eval-provider.md",
-  "assets/skills/badger/reference/package-inventory.example.json",
+  "assets/skills/badger-create/SKILL.md",
+  "assets/skills/badger-create/reference/authoring-protocol.json",
+  "assets/skills/badger-create/reference/authoring-subagents.md",
+  "assets/skills/badger-create/reference/bundle-authoring.md",
+  "assets/skills/badger-create/reference/authored-zone-example.md",
+  "assets/skills/badger-create/reference/eval-provider.md",
+  "assets/skills/badger-create/reference/package-inventory.example.json",
   "src/authoring/protocol.ts",
   "src/authoring/types.ts",
   "src/authoring/plan.ts",

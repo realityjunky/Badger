@@ -81,7 +81,7 @@ npm run build
 npm run format:check
 ```
 
-The user-facing entrypoint is the Badger Skill in an Agent. The Agent supplies each source Skill by
+The user-facing entrypoint is `/badger-create` in an Agent. The Agent supplies each source Skill by
 name and location; Badger inspects only those declarations. The CLI is `badger` after `npm run build`:
 
 ```bash
@@ -105,7 +105,7 @@ proposal, and reports separate
 WorkflowProtocol) identities. It does not create Creator state, authoring
 records, or package files.
 
-See `assets/skills/badger/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
+See `assets/skills/badger-create/SKILL.md` for the user-facing confirmation protocol and `docs/extraction-map.md` for upstream provenance.
 
 `generate` creates a deterministic scaffold and an authoring session under
 `.badger/authoring/<name>`. The scaffold remains visibly pending until all
@@ -153,18 +153,18 @@ The pinned three-Skill differential harness is documented in `docs/differential-
 The installed Badger Skill keeps the package-construction contract close to its
 entrypoint:
 
-- `assets/skills/badger/reference/authoring-protocol.json` defines the
+- `assets/skills/badger-create/reference/authoring-protocol.json` defines the
   machine-readable lane DAG and deterministic backbone.
-- `assets/skills/badger/reference/authoring-subagents.md` defines bounded file
+- `assets/skills/badger-create/reference/authoring-subagents.md` defines bounded file
   handoffs and the six role briefs.
-- `assets/skills/badger/reference/bundle-authoring.md` describes scaffold,
+- `assets/skills/badger-create/reference/bundle-authoring.md` describes scaffold,
   assembly, content leaves, and upgrade-existing behavior.
-- `assets/skills/badger/reference/authored-zone-example.md` shows the required
+- `assets/skills/badger-create/reference/authored-zone-example.md` shows the required
   level of substantive Decision Core and Node Guidance content.
-- `assets/skills/badger/reference/eval-provider.md` separates authoring review,
+- `assets/skills/badger-create/reference/eval-provider.md` separates authoring review,
   deterministic evaluation, WorkflowRuntime certification, and publication
   approval.
-- `assets/skills/badger/reference/package-inventory.example.json` shows the
+- `assets/skills/badger-create/reference/package-inventory.example.json` shows the
   safe relative-path and ownership view of an assembled package.
 
 ## WorkflowRuntime

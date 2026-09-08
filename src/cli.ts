@@ -23,10 +23,8 @@ import {
   initializeAuthoringSession,
   recordAuthoringFile,
 } from "./authoring/index.js";
-import {
-  classifyCreatorDraft,
-  migrateLegacyDraft,
-} from "./factory/migration.js";
+import { migrateLegacyDraft } from "./factory/migration.js";
+import { readCreatorGuide } from "./factory/guide.js";
 import {
   runEngineDifferential,
   runOfficialEngineBaseline,
@@ -64,22 +62,21 @@ function format(value: unknown): string {
 
 program
   .command("guide")
+  .option(
+    "--plan <file>",
+    "Existing FactoryPlan to inspect; repeatable",
+    collectRepeated,
+    [],
+  )
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (options) => {
     const root = projectRoot(options.project);
-    const states = await safeStates(root);
     emit(
-      {
-        schemaVersion: 1,
-        intent: ["new-skill", "upgrade-existing"],
-        resumable: states.map((state) => ({
-          name: state.name,
-          status: state.status,
-          classification: classifyCreatorDraft(state),
-          authoring: state.authoring?.status ?? "legacy-scaffold",
-        })),
-      },
+      await readCreatorGuide({
+        projectRoot: root,
+        planPaths: options.plan ?? [],
+      }),
       options.json,
     );
   });
@@ -531,23 +528,5 @@ program
       process.exitCode = 1;
     }
   });
-
-async function safeStates(root: string) {
-  try {
-    const { readdir } = await import("node:fs/promises");
-    const directory = path.join(root, ".badger", "states");
-    const entries = await readdir(directory, { withFileTypes: true });
-    const states = [];
-    for (const entry of entries.filter(
-      (item) => item.isFile() && item.name.endsWith(".json"),
-    )) {
-      states.push(await readState(root, entry.name.slice(0, -5)));
-    }
-    return states;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
-}
 
 await program.parseAsync();

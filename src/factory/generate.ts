@@ -356,10 +356,14 @@ async function runtimeAsset(name: string): Promise<string> {
 async function authoringReference(relativePath: string): Promise<string> {
   const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    path.resolve(moduleDirectory, "../../assets/skills/badger", relativePath),
     path.resolve(
       moduleDirectory,
-      "../../../assets/skills/badger",
+      "../../assets/skills/badger-create",
+      relativePath,
+    ),
+    path.resolve(
+      moduleDirectory,
+      "../../../assets/skills/badger-create",
       relativePath,
     ),
   ];

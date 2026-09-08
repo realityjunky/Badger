@@ -23,6 +23,6 @@ useful handoff. Its useful properties are:
 Badger keeps the conversational elicitation pattern but makes source identity explicit. The Agent
 asks the workflow owner for Skill names and locations, then the CLI reads only those locations and
 returns evidence-backed metadata. The questionnaire fills semantic workflow gaps that cannot be
-derived from source files; it does not search default roots or persist an intermediate preference
+derived from source files; it does not search default roots or persist an intermediate questionnaire
 document. Proposal construction remains a separate read-only validation step followed by explicit
 Creator confirmation.

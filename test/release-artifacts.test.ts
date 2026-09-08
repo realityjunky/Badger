@@ -35,12 +35,12 @@ describe("Badger release artifacts", () => {
 
     expect(references).toEqual(
       expect.arrayContaining([
-        "assets/skills/badger/reference/authoring-protocol.json",
-        "assets/skills/badger/reference/authoring-subagents.md",
-        "assets/skills/badger/reference/bundle-authoring.md",
-        "assets/skills/badger/reference/authored-zone-example.md",
-        "assets/skills/badger/reference/eval-provider.md",
-        "assets/skills/badger/reference/package-inventory.example.json",
+        "assets/skills/badger-create/reference/authoring-protocol.json",
+        "assets/skills/badger-create/reference/authoring-subagents.md",
+        "assets/skills/badger-create/reference/bundle-authoring.md",
+        "assets/skills/badger-create/reference/authored-zone-example.md",
+        "assets/skills/badger-create/reference/eval-provider.md",
+        "assets/skills/badger-create/reference/package-inventory.example.json",
       ]),
     );
 
@@ -50,11 +50,11 @@ describe("Badger release artifacts", () => {
     );
 
     for (const relativePath of [
-      "assets/skills/badger/SKILL.md",
+      "assets/skills/badger-create/SKILL.md",
       ...references,
       ...AUTHORING_LANE_IDS.map(
         (lane) =>
-          `assets/skills/badger/${AUTHORING_PROTOCOL.lanes[lane].brief}`,
+          `assets/skills/badger-create/${AUTHORING_PROTOCOL.lanes[lane].brief}`,
       ),
     ]) {
       await expect(
@@ -66,15 +66,31 @@ describe("Badger release artifacts", () => {
   });
 
   it("documents the closed-world explicit source contract", async () => {
-    const creator = await readText("assets/skills/badger/SKILL.md");
+    const creator = await readText("assets/skills/badger-create/SKILL.md");
     const questionnaire = await readText(
       "assets/skills/badger-workflow-questionnaire/SKILL.md",
     );
     const manual = await readText("docs/badger-workflow-manual.html");
+    expect(creator).toMatch(/^---\nname: badger-create\n/u);
+    expect(creator).toContain("/badger-create");
+    expect(creator).toContain("automatic-first-use");
+    expect(creator).toContain("manual-refinement");
     expect(creator).toContain("skillSources");
     expect(creator).toContain("--skill <name=location>");
     expect(questionnaire).toContain("explicit Skill source declarations");
+    expect(questionnaire).toContain("Confirmed user facts");
+    expect(questionnaire).toContain("Source-derived facts");
+    expect(questionnaire).toContain("Agent inferences");
+    expect(questionnaire).toContain("Unresolved assumptions");
+    expect(questionnaire).toContain("Remaining questions");
+    expect(questionnaire).toContain("docs/badger-workflow-manual.html");
+    expect(questionnaire).toContain("automatic-first-use");
+    expect(questionnaire).toContain("manual-refinement");
+    expect(questionnaire).toContain("badger-questionnaire-handoff");
     expect(manual).toContain("skillSources");
+    expect(manual).toContain("Agent and backend authoring boundary");
+    expect(manual).toContain("FactoryPlan completeness checklist");
+    expect(manual).toContain("Required Skill Call");
     expect(creator).not.toContain("skill-preferences.yaml");
     expect(questionnaire).not.toContain("skill-preferences.yaml");
     expect(manual).not.toContain("skill-preferences.yaml");
@@ -82,7 +98,7 @@ describe("Badger release artifacts", () => {
 
   it("documents every assembled backbone path and content owner", async () => {
     const inventory = await readJson(
-      "assets/skills/badger/reference/package-inventory.example.json",
+      "assets/skills/badger-create/reference/package-inventory.example.json",
     );
     const files = inventory.files as Array<Record<string, unknown>>;
     const entries = new Map(

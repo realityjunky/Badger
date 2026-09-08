@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Agent-first FactoryPlan authoring**: Renamed the package-facing creation Skill to `/badger-create`, added multi-exchange questionnaire handoffs with distinct fact ledgers, and exposed read-only first-use and Creator resume context through `badger guide`.
+
 - **Documentation and release alignment**: Added the complete package-facing
   authoring reference set, a substantive Authored-zone example, a safe assembled
   package-inventory example, and a release artifact ledger. Updated the

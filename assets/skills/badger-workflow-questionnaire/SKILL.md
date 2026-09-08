@@ -1,60 +1,140 @@
 ---
 name: badger-workflow-questionnaire
-description: Elicit the confirmed workflow information needed to author a complete Badger FactoryPlan from explicitly supplied Skills.
+description: Conduct a progressive multi-exchange discovery conversation for a complete, user-confirmed Badger FactoryPlan from explicitly supplied Skills.
 disable-model-invocation: true
 ---
 
 # Badger Workflow Questionnaire
 
-This Skill is the discovery companion for Badger Creator. It helps an Agent turn an informal
-workflow idea and explicitly supplied Skill evidence into a complete, user-confirmed
-`FactoryPlan`. It does not discover ambient Skills, write project configuration, or execute source
-Skills.
+This is the read-only discovery companion for `/badger-create`. It turns a
+workflow idea and explicitly supplied Skill evidence into a structured,
+user-confirmed FactoryPlan handoff. It does not discover ambient Skills,
+write a plan or project configuration, execute source Skills, or initialize
+Creator state.
 
-## Outcome
+## Start and resume
 
-The handoff contains:
+1. Establish the project root and the `new-skill` or `upgrade-existing` intent.
+2. Run `badger guide --project <dir> --json`, adding `--plan <file>` for an
+   existing plan file that is not yet in Creator state.
+3. If the guide reports `firstUse: true` and
+   `questionnaire.mode: automatic-first-use`, start discovery immediately.
+   This automatic path applies only when no FactoryPlan or resumable Creator
+   flow exists for the project.
+4. If the guide reports `factoryPlans` or `resumable` context,
+   `questionnaire.mode` is `manual-refinement`; preserve the existing plan and
+   authoring state. Never silently overwrite or restart it.
+   Continue only when the user explicitly asks for questionnaire refinement or
+   repair, and tie the handoff to the existing plan and state context.
 
-- the project root and `new-skill` or `upgrade-existing` intent;
-- explicit Skill source declarations with each Skill name and location;
-- source facts read from `SKILL.md`, references, scripts, and hashes;
-- a workflow brief covering outcome, inputs, outputs, decisions, evidence, guardrails, and recovery;
-- Node responsibilities, implementation bindings, Required Skill Calls, augmentations, schemas,
-  routes, bounded cycles, and upgrade-source identity where applicable; and
-- unresolved questions and assumptions clearly separated from confirmed user answers.
+## Evidence before questions
 
-## Agent protocol
+Before asking the first question, read the workflow manual supplied with the
+Badger package, including `docs/badger-workflow-manual.html` when working from
+the repository. Read the manual in full enough to apply its Agent/backend
+boundary, FactoryPlan shape, relationship semantics, and completeness
+checklist.
 
-1. Establish the project root and determine whether the request creates or upgrades a workflow
-   Skill. Inspect existing Creator state and FactoryPlan context without changing it.
-2. Ask the user to provide each source Skill as a name and project-relative or absolute location.
-   Inspect only those declarations with `badger candidates --skill <name=location> --json`.
-3. Read the returned descriptions, reference inventory, script inventory, canonical roots, and
-   hashes. Never execute a source Skill or infer a source from an ambient directory.
-4. Ask grouped questions about the outcome, inputs, meaningful Nodes, genuine decisions, required
-   artifacts and evidence, guardrails, handoffs, optional routes, failure, pause, retry, and recovery.
-5. After every exchange, summarize confirmed facts, source evidence, assumptions, and remaining gaps.
-6. Stop only when the FactoryPlan completeness checklist passes or the user explicitly chooses to
-   stop with unresolved gaps. Do not call `badger propose` while required fields remain unresolved.
-7. Show the complete FactoryPlan, including `skillSources`, and obtain confirmation before proposal
-   construction. Proposal confirmation remains separate from Creator initialization confirmation.
+Ask the workflow owner to provide every source Skill as a name and a
+project-relative or absolute location as explicit Skill source declarations.
+Inspect only those declarations:
+
+```bash
+badger candidates --project <dir> --skill <name=location> --json
+```
+
+Repeat `--skill` for every source or use an explicit source manifest. Read the
+candidate descriptions, canonical paths, reference inventory, script
+inventory, and content hashes. Then read each supplied `SKILL.md`, every file
+under its `reference/` or `references/` directory, and every inventoried file
+under `scripts/` as source evidence. Do not execute scripts or treat an
+inventory entry as permission to run it.
+
+Do not ask semantic questions until all supplied source evidence has been
+read. Source metadata may establish facts such as a Skill's purpose or
+available references; it cannot establish the workflow owner's desired
+outcome, decisions, safety rules, or recovery policy.
+
+## Exchange loop
+
+Ask grouped, high-value questions one exchange at a time. Cover:
+
+- workflow outcome, intent, inputs, prerequisites, and completion meaning;
+- meaningful Node stages, responsibilities, ordering, and optional stages;
+- each supplied Skill's implementation, Required Skill Call, or augmentation
+  role;
+- artifacts, evidence, Output Schemas, validation, and guardrails per Node;
+- genuine user decisions, stable choices, reviewer or recipient handoffs, and
+  routing outcomes;
+- failure, pause, retry, recovery, bounded cycles, and finalization behavior;
+- executable disclosures, capabilities, locale, and upgrade-source identity.
+
+After every exchange, show the same five-part ledger:
+
+1. **Confirmed user facts** — statements or decisions explicitly confirmed by
+   the workflow owner.
+2. **Source-derived facts** — facts read from the manual or supplied Skill
+   files, references, scripts, and hashes.
+3. **Agent inferences** — design choices proposed to connect facts; each must
+   be labeled and confirmed before it becomes part of the plan.
+4. **Unresolved assumptions** — unknown or contradictory points that must not
+   be presented as facts.
+5. **Remaining questions** — the next high-value questions and the field each
+   question will resolve.
+
+Continue the loop until the completeness checklist passes. A user may
+explicitly stop with unresolved gaps; in that case preserve the gaps in a
+`stopped` handoff and do not construct a proposal.
 
 ## Completeness checklist
 
-Before handoff, verify goal and intent; explicit source locations; source roles; workflow name and
-goal; Node IDs, kinds, responsibilities, and implementation bindings; Required Skill Calls;
-augmentations; inputs; Output Schemas; artifacts; evidence; guardrails; decisions; transitions and
-routes; optional Nodes; bounded cycles; capabilities; finalization; locale; upgrade source identity;
-executable disclosures; pause and recovery behavior; and unresolved assumptions.
+Before handoff, verify all of the following:
 
-## Read-only boundary
+- goal, intent, workflow name, workflow goal, and default locale;
+- every explicit Skill source path, canonical identity, hash, and workflow
+  role;
+- workflow inputs and prerequisites;
+- Node IDs, kinds, labels, responsibilities, ordering, and optionality;
+- implementation bindings, Required Skill Calls, and augmentations;
+- Output Schemas attached to concrete Nodes, including artifacts and evidence;
+- decisions, stable choice IDs, input and reviewer requirements;
+- guardrails and their validation or evidence requirements;
+- success, failure, pause, conditional, completion, and handoff routes;
+- bounded cycle entries, repeat transitions, and maximum instances;
+- capabilities, finalization, executable disclosures, and recovery behavior;
+- `sourceRoot` and upgrade-source identity when upgrading an existing Skill;
+- unresolved assumptions and remaining questions are either resolved or
+  explicitly accepted as a user-requested stopped handoff.
 
-This Skill may inspect supplied source files and ask questions. It must not write configuration,
-FactoryPlan, Creator state, generated package, publication record, or distribution output. It must
-not execute scripts, publish, distribute, or access credentials.
+Do not call `badger propose` if a required field is unresolved, contradictory,
+or bound to a missing, invalid, unsafe, ambiguous, or undeclared source.
 
-## Handoff
+## Read-only handoff
 
-Return a compact handoff containing the confirmed goal, intent, explicit source declarations,
-candidate evidence, workflow decisions, unresolved questions, and the next read-only Badger command.
-Clearly label facts supplied by the user, facts read from source files, and Agent design choices.
+Return a compact handoff and clearly label every fact category. A complete
+handoff has this shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "badger-questionnaire-handoff",
+  "status": "complete",
+  "projectRoot": "<dir>",
+  "existingContext": null,
+  "confirmedUserFacts": [],
+  "sourceDerivedFacts": [],
+  "agentInferences": [],
+  "unresolvedAssumptions": [],
+  "remainingQuestions": [],
+  "factoryPlan": {},
+  "nextReadOnlyCommand": "badger propose <plan.json> --project <dir> --json"
+}
+```
+
+For a user-requested stop, use `"status": "stopped"`, keep the incomplete
+plan or existing-context reference visible, and set the next action to
+questionnaire refinement. This Skill does not write that handoff, the
+FactoryPlan, Creator state, generated package, publication record, or
+distribution output. `/badger-create` may write and show the complete plan
+after this handoff; plan confirmation, read-only proposal review, and Creator
+initialization confirmation remain separate gates.

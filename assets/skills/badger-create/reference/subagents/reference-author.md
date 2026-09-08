@@ -2,7 +2,7 @@
 
 Explain how the normalized workflow, resolved source Skills, and composition
 choices relate to the requested goal. Record source roots, descriptions,
-references, hashes, preferences, deviations, and executable disclosures from
+references, hashes, user decisions, deviations, and executable disclosures from
 the supplied files. Do not copy complete source Skill bodies or alter the
 deterministic reference files.
 

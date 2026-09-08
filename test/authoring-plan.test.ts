@@ -263,7 +263,7 @@ describe("AuthoringPlan preview", () => {
       await fs.readFile(
         path.join(
           process.cwd(),
-          "assets/skills/badger/reference/authoring-protocol.json",
+          "assets/skills/badger-create/reference/authoring-protocol.json",
         ),
         "utf8",
       ),

@@ -9,7 +9,7 @@ file remains the design and provenance record; its historical `target`,
 `recommended`, and `Add` language records decisions made before implementation.
 For the current shipped surface, artifact inventory, and release commands, see
 `docs/release-artifacts.md`. The package-facing contract is kept in
-`assets/skills/badger/SKILL.md` and its references.
+`assets/skills/badger-create/SKILL.md` and its references.
 
 ## 1. Executive decision
 
@@ -1569,24 +1569,24 @@ excluded Classic, Native, Entry, or platform behavior.
 
 Update:
 
-- assets/skills/badger/SKILL.md
+- assets/skills/badger-create/SKILL.md
   Add the integrated authoring lifecycle, lane semantics, confirmation rules,
   and distinction between authoring review and runtime evaluation.
-- assets/skills/badger/reference/workflow-contract.md
+- assets/skills/badger-create/reference/workflow-contract.md
   Keep it as the executable WorkflowProtocol reference and cross-link the
   separate AuthoringProtocol.
-- assets/skills/badger/reference/authoring-protocol.json
+- assets/skills/badger-create/reference/authoring-protocol.json
   Add the canonical authoring DAG and merge contract.
-- assets/skills/badger/reference/authored-zone-example.md
+- assets/skills/badger-create/reference/authored-zone-example.md
   Document the quality bar for entry Decision Core and Node Guidance.
-- assets/skills/badger/reference/authoring-subagents.md
+- assets/skills/badger-create/reference/authoring-subagents.md
   Document provider-neutral role briefs and file handoff.
-- assets/skills/badger/reference/subagents/*.md
+- assets/skills/badger-create/reference/subagents/*.md
   Add the six generic workflow-kernel briefs, without Classic or Native
   instructions.
-- assets/skills/badger/reference/bundle-authoring.md
+- assets/skills/badger-create/reference/bundle-authoring.md
   Describe Badger scaffold, assembly, generated artifacts, and lifecycle.
-- assets/skills/badger/reference/eval-provider.md
+- assets/skills/badger-create/reference/eval-provider.md
   Separate authoring review, deterministic runtime evaluation, and publication
   approval.
 - docs/extraction-map.md
@@ -1599,7 +1599,7 @@ All formal Skill and package-facing documentation remains in English.
 
 The completed Phase 7 release artifacts are indexed in
 `docs/release-artifacts.md`. The checked-in
-`assets/skills/badger/reference/package-inventory.example.json` covers every
+`assets/skills/badger-create/reference/package-inventory.example.json` covers every
 deterministic backbone path and all six role briefs without session or audit
 material. The compatibility fixture and differential source snapshots include
 the reference set and explicit excluded scopes.

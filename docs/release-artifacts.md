@@ -9,7 +9,7 @@ manual, and verification gate aligned with the implementation.
 | Surface                                              | Status                | Evidence                                                                                                                        |
 | ---------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | Badger Creator and WorkflowRuntime                   | Delivered             | `src/authoring/`, `src/factory/`, `src/eval/`, `src/publish/`, and `src/workflow-runtime/`.                                     |
-| Six-lane authoring contract                          | Restored              | `assets/skills/badger/reference/authoring-protocol.json`, role briefs, and `src/differential/authoring/`.                       |
+| Six-lane authoring contract                          | Restored              | `assets/skills/badger-create/reference/authoring-protocol.json`, role briefs, and `src/differential/authoring/`.                       |
 | Badger hardening                                     | Delivered extension   | Durable lane records, fresh-process recovery, revision fencing, bounded handoffs, cross-validation, and current-hash readiness. |
 | Platform, dashboard, and external-provider adapters  | Future / out of scope | No installer, dashboard policy, provider authentication, or competing authoring/runtime state machine is shipped here.          |
 | Biological execution and protected raw-data fixtures | Out of scope          | Release checks use disposable synthetic projects only.                                                                          |
@@ -22,10 +22,15 @@ parity.
 
 ## Formal Skill package
 
-The installed package-facing Skill is `assets/skills/badger/SKILL.md`. Its
+The installed package-facing Skill is `assets/skills/badger-create/SKILL.md`. Its
 Agent-first discovery companion is `assets/skills/badger-workflow-questionnaire/SKILL.md`, with
 the source-study reference beside it. All formal Skills and references are intentionally English
 and form one contract:
+
+The read-only `badger guide` command reports `firstUse`, existing `FactoryPlan`
+paths, and resumable Creator state. An empty project enters the questionnaire's
+automatic first-use path; existing plans and sessions require explicit
+questionnaire refinement and are never silently replaced.
 
 - `reference/authoring-protocol.json` — lane DAG, claims, review settings,
   deterministic backbone, and authored leaves;
