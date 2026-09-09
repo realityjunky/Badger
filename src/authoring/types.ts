@@ -303,6 +303,12 @@ export interface AuthoringLaneReviewOutput {
   reviewedAt: string;
 }
 
+export interface AuthoringLaneAction {
+  kind: "question" | "repair";
+  prompt: string;
+  requirement: string;
+}
+
 export interface AuthoringLaneOutput {
   lane: string;
   status: AuthoringLaneOutputStatus;
@@ -314,11 +320,13 @@ export interface AuthoringLaneOutput {
   workflowProtocolHash?: string;
   sourceEvidenceHash?: string;
   authoringInputHash?: string;
+  semanticDossierHash?: string;
   expectedRevision?: number;
   artifacts?: AuthoringLaneArtifactOutput[];
   claims?: AuthoringLaneClaimOutput[];
   findings?: AuthoringLaneFinding[];
   review?: AuthoringLaneReviewOutput;
+  action?: AuthoringLaneAction;
 }
 
 export type AuthoringClaimStatus =
@@ -409,6 +417,8 @@ export interface AuthoringRecord {
   workflowProtocolHash: string;
   sourceEvidenceHash: string;
   authoringInputHash: string;
+  semanticDossierHash?: string;
+  action?: AuthoringLaneAction;
   authoredMaterialHash: string;
   claims: AuthoringClaimEvidence[];
   artifacts: AuthoringArtifactEvidence[];
@@ -436,6 +446,8 @@ export interface AuthoringRecordInput {
   workflowProtocolHash?: string;
   sourceEvidenceHash?: string;
   authoringInputHash?: string;
+  semanticDossierHash?: string;
+  action?: AuthoringLaneAction;
 }
 
 export type AuthoringSessionStatus =
@@ -493,6 +505,7 @@ export interface AuthoringLaneReadiness {
   artifacts: AuthoringArtifactEvidence[];
   findings: AuthoringLaneFinding[];
   summary?: string;
+  action?: AuthoringLaneAction;
 }
 
 export interface AuthoringWaveReadiness {
