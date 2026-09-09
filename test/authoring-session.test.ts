@@ -120,6 +120,47 @@ describe("resumable authoring session", () => {
     await fs.writeFile(planPath, JSON.stringify(factoryPlan));
     const { state, plan } = await createSession();
     const originalHash = state.authoring!.authoringInputHash;
+    const output = {
+      lane: "script",
+      status: "DONE",
+      claims: claims(plan, "script"),
+      artifacts: [],
+      findings: [],
+      protocolHash: plan.protocolHash,
+      authoringPlanHash: plan.authoringPlanHash,
+      workflowProtocolHash: plan.workflowProtocolHash,
+      sourceEvidenceHash: plan.sourceEvidenceHash,
+      authoringInputHash: originalHash,
+      semanticDossierHash: plan.semanticDossierHash,
+    };
+    expect(validateAuthoringLaneOutput(output, plan, "script")).toEqual([]);
+    for (const semanticDossierHash of [undefined, "0".repeat(64)]) {
+      expect(
+        validateAuthoringLaneOutput(
+          { ...output, semanticDossierHash },
+          plan,
+          "script",
+        ).join(" "),
+      ).toMatch(/semanticDossierHash/);
+      await expect(
+        recordAuthoring({
+          state,
+          lane: "script",
+          record: { ...output, semanticDossierHash },
+        }),
+      ).rejects.toThrow(/semanticDossierHash/);
+    }
+    expect(
+      validateAuthoringLaneOutput(
+        {
+          ...output,
+          status: "NEEDS_CONTEXT",
+          summary: "Need recovery details",
+        },
+        plan,
+        "script",
+      ).join(" "),
+    ).toMatch(/action/);
     expect(plan.semanticDossierHash).toMatch(/^[a-f0-9]{64}$/u);
     for (const lane of ["script", "reference", "pause-points"] as const) {
       const handoff = await buildAuthoringHandoff({
@@ -136,23 +177,113 @@ describe("resumable authoring session", () => {
         await fs.readFile(handoff.commonInputPath, "utf8"),
       );
       expect(commonInput.semanticDossier).toEqual(handoff.semanticDossier);
+      expect(commonInput.hashes).toEqual(handoff.hashes);
+      expect(handoff.capabilities.modifyGeneratedPackage).toBe(false);
       const persistedPlan = JSON.parse(
         await fs.readFile(handoff.semanticDossier!.path, "utf8"),
       );
       expect(persistedPlan.semanticDossier).toEqual(dossier);
     }
-    await recordAuthoring({
-      state,
-      lane: "script",
-      expectedRevision: state.authoring!.revision,
-      record: {
+    const question = {
+      kind: "question",
+      requirement: "/topics/recoveryPolicy",
+      prompt: "Who confirms recovery after an interrupted prepare step?",
+    };
+    await expect(
+      buildAuthoringHandoff({
+        state,
         lane: "script",
-        status: "DONE",
-        claims: claims(plan, "script"),
-        artifacts: [],
-        findings: [],
-      },
+        outputPath: path.join(state.generated!.packageRoot, "SKILL.md"),
+      }),
+    ).rejects.toThrow(/generated package|\.badger state/);
+    const repair = {
+      kind: "repair",
+      requirement: "Reconcile conflicting source composition evidence",
+      prompt: "Repair the source composition evidence before review.",
+    };
+    const packageBefore = await fs.readFile(
+      path.join(state.generated!.packageRoot, "reference", "recovery.md"),
+      "utf8",
+    );
+    await Promise.all([
+      recordAuthoring({
+        state,
+        lane: "script",
+        record: {
+          ...output,
+          status: "NEEDS_CONTEXT",
+          summary: question.prompt,
+          action: question,
+        },
+      }),
+      recordAuthoring({
+        state,
+        lane: "reference",
+        record: {
+          ...output,
+          lane: "reference",
+          status: "BLOCKED",
+          summary: repair.prompt,
+          claims: [],
+          action: repair,
+        },
+      }),
+      recordAuthoring({
+        state,
+        lane: "pause-points",
+        record: {
+          ...output,
+          lane: "pause-points",
+          status: "DONE_WITH_CONCERNS",
+          summary: "Recovery classification awaits the script answer.",
+          claims: claims(plan, "pause-points"),
+          artifacts: [],
+        },
+      }),
+    ]);
+    const stopped = await authoringReadiness(
+      await readState(project, state.name),
+    );
+    expect(stopped.lanes.script).toMatchObject({
+      status: "NEEDS_CONTEXT",
+      action: question,
     });
+    expect(stopped.lanes.reference).toMatchObject({
+      status: "BLOCKED",
+      action: repair,
+    });
+    expect(stopped.lanes["pause-points"].status).toBe("DONE_WITH_CONCERNS");
+    expect(stopped.nextLanes).not.toContain("workflow-entry");
+    await expect(
+      buildAuthoringHandoff({
+        state,
+        lane: "workflow-entry",
+        outputPath: path.join(root, "entry.json"),
+      }),
+    ).rejects.toThrow(/script/);
+    expect(
+      await fs.readFile(
+        path.join(state.generated!.packageRoot, "reference", "recovery.md"),
+        "utf8",
+      ),
+    ).toBe(packageBefore);
+    expect(
+      validateAuthoringLaneOutput(
+        {
+          ...output,
+          status: "NEEDS_CONTEXT",
+          summary: question.prompt,
+          action: { ...question, requirement: "/unknown" },
+        },
+        plan,
+        "script",
+      ).join(" "),
+    ).toMatch(/dossier field/);
+    await recordAuthoring({ state, lane: "script", record: output });
+    await runManualAuthoringFixture({ state });
+    expect(
+      (await authoringReadiness(await readState(project, state.name))).state,
+    ).toBe("ready");
     const reordered = {
       ...factoryPlan,
       semanticDossier: Object.fromEntries(Object.entries(dossier).reverse()),
@@ -335,6 +466,7 @@ describe("resumable authoring session", () => {
     expect(handoff).not.toHaveProperty("statePath");
     expect(handoff.capabilities).toEqual({
       writeCreatorState: false,
+      modifyGeneratedPackage: false,
       executeCandidateSkills: false,
       publish: false,
       distribute: false,

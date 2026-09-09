@@ -24,7 +24,17 @@ publish or distribute packages, access credentials, or invent WorkflowProtocol
 routes. A `BLOCKED` or `NEEDS_CONTEXT` report stops dependent lanes while its
 evidence remains available for repair.
 
-## Lane order
+## Common dossier and coordinator actions
+
+For dossier-backed sessions, use the handoff's `semanticDossier.path` and `/semanticDossier` pointer to read the confirmed dossier. All three Wave 1 lenses consume the same dossier, confirmed proposal, normalized protocol, resolved source evidence, and input hashes. Use supplied evidence instead of repeating source discovery or interviewing the user. Return `semanticDossierHash` from the handoff with each lane output; missing or stale identity is rejected before recording. Legacy sessions without a dossier retain their existing envelope.
+
+Keep claims, artifacts, and status in separate lane envelopes, whether workers run concurrently or one main Agent applies all three lenses. Workers write only their designated output files. They cannot execute supplied Skills, write Creator or authoring state, or modify generated package files. The coordinator validates and records output, then the assembler applies declared content leaves. The file handoff describes these permissions; the host must enforce worker tool access.
+
+Wave 1 `NEEDS_CONTEXT` outputs require an `action` with `kind: "question"`, a targeted `prompt`, and `requirement` identifying an existing dossier field with a JSON pointer such as `/topics/recoveryPolicy`. Explain the missing or ambiguous detail in the summary. The main session asks that question, obtains confirmation of the repaired dossier, regenerates the session, and reauthors invalidated lanes. Resolved facts remain authoritative.
+
+Wave 1 `BLOCKED` outputs require an `action` with `kind: "repair"`, a concrete `requirement` naming the missing dependency or repair, and a `prompt` explaining the next main-session action. Both statuses persist their actions in lane readiness and prevent dependent lanes from dispatching. Independent lanes may continue. Retry against the current input identity and revision after repair.
+
+## Lane responsibilities
 
 The six lanes preserve the upstream-compatible identities and dependency
 waves:

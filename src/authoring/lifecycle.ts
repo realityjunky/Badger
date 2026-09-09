@@ -240,6 +240,10 @@ function canonicalRecord(record: AuthoringRecord): unknown {
     workflowProtocolHash: record.workflowProtocolHash,
     sourceEvidenceHash: record.sourceEvidenceHash,
     authoringInputHash: record.authoringInputHash,
+    ...(record.semanticDossierHash
+      ? { semanticDossierHash: record.semanticDossierHash }
+      : {}),
+    ...(record.action ? { action: record.action } : {}),
     claims: [...record.claims]
       .sort((left, right) => left.id.localeCompare(right.id))
       .map((claim) => ({
@@ -1195,6 +1199,13 @@ export function validateAuthoringRecord(
     if (record[field] !== expected)
       findings.push(`authoring record ${field} is stale`);
   }
+  if (
+    plan.semanticDossierHash &&
+    record.semanticDossierHash !== plan.semanticDossierHash
+  )
+    findings.push(
+      "Authoring lane output semanticDossierHash is stale or missing",
+    );
   for (const field of [
     "protocolHash",
     "authoringPlanHash",
@@ -1210,6 +1221,11 @@ export function validateAuthoringRecord(
   if (record.summary !== undefined && !summaryWithinBounds(record.summary))
     findings.push("authoring record summary is missing or too large");
   const status = record.status as AuthoringStatus;
+  try {
+    normalizeLaneAction(record.action, status, plan, laneValue);
+  } catch (error) {
+    findings.push(error instanceof Error ? error.message : String(error));
+  }
   if (!validRecordStatuses().includes(status))
     findings.push(`invalid authoring status: ${String(record.status)}`);
   if (status === "PENDING" || status === "IN_PROGRESS")
@@ -1702,6 +1718,56 @@ function normalizedReview(
   return value as unknown as AuthoringReviewOutput;
 }
 
+function normalizeLaneAction(
+  value: unknown,
+  status: unknown,
+  plan: AuthoringPlan,
+  lane: AuthoringLaneId,
+): AuthoringRecordInput["action"] {
+  const required = Boolean(
+    plan.semanticDossierHash &&
+    plan.dag.wave1.includes(lane) &&
+    (status === "NEEDS_CONTEXT" || status === "BLOCKED"),
+  );
+  if (value === undefined && !required) return undefined;
+  if (
+    !isRecord(value) ||
+    !boundedText(value.prompt) ||
+    !boundedText(value.requirement)
+  )
+    throw new Error(
+      "Authoring lane action requires a bounded prompt and requirement",
+    );
+  const kind =
+    status === "NEEDS_CONTEXT"
+      ? "question"
+      : status === "BLOCKED"
+        ? "repair"
+        : undefined;
+  if (!kind || value.kind !== kind)
+    throw new Error("Authoring lane action does not match status");
+  if (kind === "question" && plan.semanticDossier) {
+    const pointer = value.requirement as string;
+    if (!pointer.startsWith("/") || pointer.includes("~"))
+      throw new Error(
+        "Authoring question action requires a dossier field pointer",
+      );
+    let field: unknown = plan.semanticDossier;
+    for (const key of pointer.slice(1).split("/")) {
+      if (!field || typeof field !== "object" || !Object.hasOwn(field, key))
+        throw new Error(
+          "Authoring question action identifies an unknown dossier field",
+        );
+      field = (field as Record<string, unknown>)[key];
+    }
+  }
+  return {
+    kind,
+    prompt: value.prompt as string,
+    requirement: value.requirement as string,
+  };
+}
+
 function normalizeLaneOutput(
   value: unknown,
   plan: AuthoringPlan,
@@ -1780,6 +1846,17 @@ function normalizeLaneOutput(
   )
     throw new Error("Authoring lane output expectedRevision is invalid");
   const review = normalizedReview(value.review, value.model);
+  const semanticDossierHash = value.semanticDossierHash;
+  if (semanticDossierHash !== plan.semanticDossierHash)
+    throw new Error(
+      "Authoring lane output semanticDossierHash is stale or missing",
+    );
+  if (
+    semanticDossierHash !== undefined &&
+    !HASH_PATTERN.test(String(semanticDossierHash))
+  )
+    throw new Error("Authoring lane output semanticDossierHash is invalid");
+  const action = normalizeLaneAction(value.action, status, plan, expectedLane);
   return {
     status: status as AuthoringStatus,
     claims,
@@ -1808,6 +1885,10 @@ function normalizeLaneOutput(
     ...(value.authoringInputHash !== undefined
       ? { authoringInputHash: value.authoringInputHash as string }
       : {}),
+    ...(semanticDossierHash !== undefined
+      ? { semanticDossierHash: semanticDossierHash as string }
+      : {}),
+    ...(action ? { action } : {}),
     ...(review ? { review } : {}),
   };
 }
@@ -2580,6 +2661,9 @@ export async function recordAuthoring(options: {
       workflowProtocolHash: currentPlan.workflowProtocolHash,
       sourceEvidenceHash: currentPlan.sourceEvidenceHash,
       authoringInputHash: currentInputHash,
+      ...(input.semanticDossierHash
+        ? { semanticDossierHash: input.semanticDossierHash }
+        : {}),
       authoredMaterialHash: "0".repeat(64),
       claims: claims as AuthoringClaimEvidence[],
       artifacts: normalizedArtifacts,
@@ -2587,6 +2671,7 @@ export async function recordAuthoring(options: {
       ...(input.dispatchMode ? { dispatchMode: input.dispatchMode } : {}),
       ...(input.model ? { model: input.model } : {}),
       ...(input.review ? { review: input.review } : {}),
+      ...(input.action ? { action: input.action } : {}),
       ...(summary !== undefined ? { summary } : {}),
       at: new Date().toISOString(),
     };
@@ -2945,6 +3030,7 @@ function readinessLanes(
           artifacts: record?.artifacts ?? [],
           findings: record?.findings ?? [],
           ...(record?.summary ? { summary: record.summary } : {}),
+          ...(record?.action ? { action: record.action } : {}),
         } satisfies AuthoringLaneReadiness,
       ];
     }),

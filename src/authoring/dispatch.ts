@@ -22,6 +22,7 @@ export const AUTHORING_OUTPUT_LIMIT_BYTES = 256 * 1024;
 
 export interface AuthoringProviderCapabilities {
   writeCreatorState: false;
+  modifyGeneratedPackage: false;
   executeCandidateSkills: false;
   publish: false;
   distribute: false;
@@ -46,6 +47,7 @@ export interface AuthoringHandoff {
     workflowProtocolHash: string;
     sourceEvidenceHash: string;
     authoringInputHash: string;
+    semanticDossierHash?: string;
   };
   capabilities: AuthoringProviderCapabilities;
 }
@@ -63,6 +65,7 @@ export interface ManualAuthoringFixtureOptions {
 
 const CAPABILITIES: AuthoringProviderCapabilities = {
   writeCreatorState: false,
+  modifyGeneratedPackage: false,
   executeCandidateSkills: false,
   publish: false,
   distribute: false,
@@ -117,6 +120,13 @@ function outputPathFor(options: BuildAuthoringHandoffOptions): string {
   const protectedRoot = path.join(options.state.projectRoot, ".badger");
   if (isWithin(protectedRoot, outputPath))
     throw new Error("Authoring provider output cannot be inside .badger state");
+  if (
+    options.state.generated &&
+    isWithin(options.state.generated.packageRoot, outputPath)
+  )
+    throw new Error(
+      "Authoring provider output cannot modify the generated package",
+    );
   if (outputPath.includes("\0"))
     throw new Error("Authoring provider output path is invalid");
   return outputPath;
@@ -390,6 +400,9 @@ function fixtureOutput(
     lane,
     status: "DONE",
     dispatchMode: "manual-file",
+    ...(plan.semanticDossierHash
+      ? { semanticDossierHash: plan.semanticDossierHash }
+      : {}),
     claims: definition.claims.concat(definition.derivedClaims).map((id) => ({
       id,
       summary: `Manual fixture supports ${id}.`,
@@ -529,6 +542,9 @@ export async function buildAuthoringHandoff(
       workflowProtocolHash: plan.workflowProtocolHash,
       sourceEvidenceHash: plan.sourceEvidenceHash,
       authoringInputHash: options.state.authoring.authoringInputHash,
+      ...(plan.semanticDossierHash
+        ? { semanticDossierHash: plan.semanticDossierHash }
+        : {}),
     },
     capabilities: capabilities(),
   };
