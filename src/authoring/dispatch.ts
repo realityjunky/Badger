@@ -45,6 +45,14 @@ export interface AuthoringHandoff {
   outputPath: string;
   outputLimitBytes: number;
   dependencies: AuthoringLaneId[];
+  upstreamRecords: Array<{
+    lane: AuthoringLaneId;
+    path: string;
+    status: string;
+    authoringInputHash: string;
+    semanticDossierHash?: string;
+  }>;
+  nodeContext?: Array<{ id: string; responsibility: unknown }>;
   hashes: {
     protocolHash: string;
     authoringPlanHash: string;
@@ -535,6 +543,36 @@ export async function buildAuthoringHandoff(
         hash: plan.semanticDossierHash,
       }
     : undefined;
+  const upstreamRecords = await Promise.all(
+    lane.dependencies.map(async (dependency) => {
+      const recordPath = path.join(
+        authoringSessionPath(options.state),
+        "records",
+        `${dependency}.json`,
+      );
+      const record = JSON.parse(await fs.readFile(recordPath, "utf8")) as {
+        status: string;
+        authoringInputHash: string;
+        semanticDossierHash?: string;
+      };
+      return {
+        lane: dependency,
+        path: recordPath,
+        status: record.status,
+        authoringInputHash: record.authoringInputHash,
+        ...(record.semanticDossierHash
+          ? { semanticDossierHash: record.semanticDossierHash }
+          : {}),
+      };
+    }),
+  );
+  const nodeContext =
+    options.lane === "skill-core" && plan.semanticDossier
+      ? plan.semanticDossier.nodes.map((node) => ({
+          id: node.id,
+          responsibility: node.responsibility,
+        }))
+      : undefined;
   const handoffInputPaths = [commonPath, proposalPath, ...inputPaths];
   const commonContent =
     JSON.stringify(
@@ -547,6 +585,8 @@ export async function buildAuthoringHandoff(
         inputPaths: handoffInputPaths,
         goal: options.state.confirmedProposal?.goal ?? "",
         confirmedProposal,
+        upstreamRecords,
+        ...(nodeContext ? { nodeContext } : {}),
         hashes: {
           protocolHash: plan.protocolHash,
           authoringPlanHash: plan.authoringPlanHash,
@@ -587,6 +627,8 @@ export async function buildAuthoringHandoff(
     outputPath,
     outputLimitBytes: AUTHORING_OUTPUT_LIMIT_BYTES,
     dependencies: [...lane.dependencies],
+    upstreamRecords,
+    ...(nodeContext ? { nodeContext } : {}),
     hashes: {
       protocolHash: plan.protocolHash,
       authoringPlanHash: plan.authoringPlanHash,
