@@ -104,13 +104,12 @@ The questionnaire returns a read-only handoff in this shape:
 {
   "kind": "badger-questionnaire-handoff",
   "status": "complete",
-  "confirmedUserFacts": [],
-  "sourceDerivedFacts": [],
-  "agentInferences": [],
-  "unresolvedAssumptions": [],
-  "remainingQuestions": [],
+  "schemaVersion": 1,
+  "dossier": "<semantic dossier containing the five-part fact ledger>",
+  "dossierHash": "<deterministic SHA-256 identity>",
   "factoryPlan": {},
-  "nextCommand": "badger propose <plan.json> --project <dir> --json"
+  "nextAction": "factory-plan-confirmation",
+  "nextReadOnlyCommand": null
 }
 ```
 
@@ -119,6 +118,15 @@ Agent may write the complete FactoryPlan after discovery is complete, but must
 show it and obtain explicit plan confirmation before invoking `badger propose`.
 Proposal confirmation is separate from the later Creator initialization
 confirmation.
+
+Preserve the questionnaire's validated `factoryPlan.semanticDossier` when
+writing the plan. Incomplete or stopped handoffs require questionnaire
+refinement. Proposal construction verifies the dossier's explicit source
+identities against current candidates; source drift requires reinspection and
+owner confirmation. Authoring plans retain the dossier and its content hash.
+Each lane's common input points to `/semanticDossier` in that persisted plan;
+semantic repairs invalidate previous authoring evidence through the existing
+input hash and revision checks.
 
 ## Authoring boundary
 

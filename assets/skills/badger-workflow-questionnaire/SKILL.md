@@ -111,6 +111,15 @@ or bound to a missing, invalid, unsafe, ambiguous, or undeclared source.
 
 ## Read-only handoff
 
+Before producing any complete, incomplete, or stopped handoff, read
+`reference/semantic-dossier.md` and construct its version 1 semantic dossier.
+Keep the five ledger categories inside that dossier. Every semantic topic and
+Node responsibility must cite ledger fact IDs; record contradictions as
+unresolved assumptions and attach remaining questions to the fields they repair.
+Ask only about unresolved or contradictory fields on subsequent exchanges.
+The dossier describes workflow meaning; WorkflowProtocol and WorkflowRuntime
+remain the authorities for execution encoding and transitions.
+
 Return a compact handoff and clearly label every fact category. A complete
 handoff has this shape:
 
@@ -121,13 +130,12 @@ handoff has this shape:
   "status": "complete",
   "projectRoot": "<dir>",
   "existingContext": null,
-  "confirmedUserFacts": [],
-  "sourceDerivedFacts": [],
-  "agentInferences": [],
-  "unresolvedAssumptions": [],
-  "remainingQuestions": [],
+  "dossier": "<version 1 semantic dossier with the five-part ledger>",
+  "dossierHash": "<deterministic SHA-256 identity>",
   "factoryPlan": {},
-  "nextReadOnlyCommand": "badger propose <plan.json> --project <dir> --json"
+  "diagnostics": [],
+  "nextAction": "factory-plan-confirmation",
+  "nextReadOnlyCommand": null
 }
 ```
 
@@ -138,3 +146,15 @@ FactoryPlan, Creator state, generated package, publication record, or
 distribution output. `/badger-create` may write and show the complete plan
 after this handoff; plan confirmation, read-only proposal review, and Creator
 initialization confirmation remain separate gates.
+
+Use the exported read-only `createQuestionnaireHandoff` helper to validate the
+envelope and compute its identity. For already supplied files, the equivalent
+command is `badger questionnaire-handoff <dossier.json> --plan <plan.json>
+--project <dir> --json`; add `--stopped` only when the user requested a stop,
+and `--existing-context <path>` when refining an existing plan or state.
+This command prints the result without writing files or inspecting ambient
+Skills. Incomplete handoffs return diagnostics and exit code 1. A stopped
+handoff retains its dossier, candidate plan, context, questions, and hash.
+Resume from that envelope, repair the identified fields, and reconfirm changed
+meaning. Completion embeds the dossier as `factoryPlan.semanticDossier` and
+returns the next action `factory-plan-confirmation`, without invoking propose.

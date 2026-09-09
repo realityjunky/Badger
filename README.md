@@ -10,6 +10,8 @@ The package includes:
 - explicit local Skill source inspection with stable hashes and ambiguity reporting;
 - deterministic Workflow Contract normalization and validation;
 - confirmed plan/state lifecycle in the standalone `.badger` namespace;
+- versioned semantic questionnaire dossiers with traceable fact ledgers,
+  resumable gaps, and deterministic authoring input identities;
 - generated authoring-pending scaffolds with resumable six-lane authoring
   sessions and protocol/evidence references;
 - hash-bound quick/full authoring review with deterministic self-consistency findings and composite authoring/runtime/publication readiness;
@@ -88,6 +90,7 @@ name and location; Badger inspects only those declarations. The CLI is `badger` 
 # Candidate inspection is read-only and closed-world.
 node bin/badger.js candidates --skill primer-design=./skills/primer-design --json
 node bin/badger.js guide --project . --json
+node bin/badger.js questionnaire-handoff dossier.json --plan plan.json --project . --json
 node bin/badger.js authoring-plan prepared-workflow --project . --depth quick --json
 node bin/badger.js generate prepared-workflow --project . --depth full --json
 node bin/badger.js authoring-status prepared-workflow --project . --json

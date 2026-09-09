@@ -223,6 +223,7 @@ function authoringInputHash(plan: AuthoringPlan): string {
         protocolHash: plan.protocolHash,
         sourceEvidenceHash: plan.sourceEvidenceHash,
         workflowProtocolHash: plan.workflowProtocolHash,
+        semanticDossierHash: plan.semanticDossierHash,
       }),
     ),
   );

@@ -19,6 +19,8 @@ import {
 } from "../src/authoring/index.js";
 import { deriveAuthoringPlan } from "../src/authoring/plan.js";
 import type { CreatorState, FactoryPlan } from "../src/types.js";
+import { questionnaireFixture } from "./fixtures/semantic-dossier.js";
+import { findSkills } from "../src/skill/find.js";
 
 describe("resumable authoring session", () => {
   let root: string;
@@ -98,6 +100,80 @@ describe("resumable authoring session", () => {
     });
     return { state, plan: authoringPlan };
   }
+
+  it("carries confirmed dossier evidence into every Wave 1 handoff and invalidates records after semantic repair", async () => {
+    const factoryPlan = await readPlan(planPath);
+    const candidates = await findSkills({
+      projectRoot: project,
+      sources: factoryPlan.skillSources,
+    });
+    const source = candidates[0].sources[0];
+    const { dossier } = questionnaireFixture();
+    dossier.workflow.goal = factoryPlan.goal;
+    dossier.sources[0] = {
+      ...dossier.sources[0],
+      location: factoryPlan.skillSources[0].location,
+      canonicalPath: source.root,
+      contentHash: source.hash,
+    };
+    factoryPlan.semanticDossier = dossier;
+    await fs.writeFile(planPath, JSON.stringify(factoryPlan));
+    const { state, plan } = await createSession();
+    const originalHash = state.authoring!.authoringInputHash;
+    expect(plan.semanticDossierHash).toMatch(/^[a-f0-9]{64}$/u);
+    for (const lane of ["script", "reference", "pause-points"] as const) {
+      const handoff = await buildAuthoringHandoff({
+        state,
+        lane,
+        outputPath: path.join(root, `${lane}.json`),
+      });
+      expect(handoff.semanticDossier).toEqual({
+        path: state.authoring!.planPath,
+        pointer: "/semanticDossier",
+        hash: plan.semanticDossierHash,
+      });
+      const commonInput = JSON.parse(
+        await fs.readFile(handoff.commonInputPath, "utf8"),
+      );
+      expect(commonInput.semanticDossier).toEqual(handoff.semanticDossier);
+      const persistedPlan = JSON.parse(
+        await fs.readFile(handoff.semanticDossier!.path, "utf8"),
+      );
+      expect(persistedPlan.semanticDossier).toEqual(dossier);
+    }
+    await recordAuthoring({
+      state,
+      lane: "script",
+      expectedRevision: state.authoring!.revision,
+      record: {
+        lane: "script",
+        status: "DONE",
+        claims: claims(plan, "script"),
+        artifacts: [],
+        findings: [],
+      },
+    });
+    const reordered = {
+      ...factoryPlan,
+      semanticDossier: Object.fromEntries(Object.entries(dossier).reverse()),
+    };
+    await fs.writeFile(planPath, JSON.stringify(reordered));
+    const stable = await createSession();
+    expect(stable.state.authoring!.authoringInputHash).toBe(originalHash);
+    dossier.topics.recoveryPolicy.summary =
+      "Resume prepare only after owner-confirmed repair.";
+    await fs.writeFile(planPath, JSON.stringify(factoryPlan));
+    const repaired = await createSession();
+    expect(repaired.state.authoring!.authoringInputHash).not.toBe(originalHash);
+    expect(repaired.state.authoring!.invalidatedLanes).toContain("script");
+    const readiness = await authoringReadiness(repaired.state);
+    expect(readiness.state).toBe("blocked");
+    dossier.sources[0].contentHash = "0".repeat(64);
+    await fs.writeFile(planPath, JSON.stringify(factoryPlan));
+    expect(
+      (await buildProposal({ projectRoot: project, planPath })).blockers,
+    ).toContain("Semantic dossier source identity is stale: prepare");
+  });
 
   function claims(
     plan: ReturnType<typeof deriveAuthoringPlan>,

@@ -1,4 +1,8 @@
 import type { FactoryProposal } from "../types.js";
+import {
+  semanticDossierHash,
+  validateSemanticDossier,
+} from "../factory/questionnaire.js";
 import { sha256, slug, stableValue } from "../util.js";
 import { createStandaloneWorkflowKernel } from "../workflow-kernel/foundation.js";
 import {
@@ -225,6 +229,12 @@ function planForProposal(
       ? { upgradeSource: structuredClone(options.proposal.upgradeSource) }
       : {}),
     compatibility: structuredClone(AUTHORING_COMPATIBILITY),
+    ...(options.proposal.semanticDossier
+      ? {
+          semanticDossier: structuredClone(options.proposal.semanticDossier),
+          semanticDossierHash: options.proposal.semanticDossierHash,
+        }
+      : {}),
   };
 }
 
@@ -240,6 +250,18 @@ export function deriveAuthoringPlan(
       ),
     ]);
   const proposalFindings = proposalDiagnostics(options.proposal);
+  if (
+    options.proposal.semanticDossierHash !== undefined &&
+    options.proposal.semanticDossier === undefined
+  ) {
+    proposalFindings.push(
+      diagnostic(
+        "invalid-plan",
+        "Semantic dossier identity requires its content",
+        "proposal.semanticDossier",
+      ),
+    );
+  }
   if (proposalFindings.length)
     throw new AuthoringPlanValidationError(proposalFindings);
   const source = sourceEvidence(options.proposal);
@@ -696,6 +718,32 @@ export function validateAuthoringPlan(
           "compatibility",
         ),
       );
+  }
+  if (
+    value.semanticDossier !== undefined ||
+    value.semanticDossierHash !== undefined
+  ) {
+    for (const finding of validateSemanticDossier(value.semanticDossier)) {
+      diagnostics.push(
+        diagnostic(
+          "invalid-plan",
+          finding.message,
+          `semanticDossier.${finding.path}`,
+        ),
+      );
+    }
+    if (
+      !validHash(value.semanticDossierHash) ||
+      value.semanticDossierHash !== semanticDossierHash(value.semanticDossier)
+    ) {
+      diagnostics.push(
+        diagnostic(
+          "invalid-hash",
+          "Semantic dossier hash does not match its content",
+          "semanticDossierHash",
+        ),
+      );
+    }
   }
   return diagnostics;
 }

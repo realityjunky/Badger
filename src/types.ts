@@ -1,4 +1,5 @@
 import type { RuntimeIdentity } from "./engine/types.js";
+import type { SemanticDossier } from "./factory/questionnaire.js";
 import type {
   AuthoringCrossValidationResult,
   AuthoringReviewResult,
@@ -1155,6 +1156,7 @@ export interface FactoryPlan {
   sourceRoot?: string;
   artifactRoot?: string;
   defaultLocale: "en";
+  semanticDossier?: SemanticDossier;
 }
 
 export interface FactoryProposal {
@@ -1170,6 +1172,8 @@ export interface FactoryProposal {
   canInitialize: boolean;
   sourceRoot?: string;
   upgradeSource?: UpgradeSourceEvidence;
+  semanticDossierHash?: string;
+  semanticDossier?: SemanticDossier;
 }
 
 export type CreatorStatus =

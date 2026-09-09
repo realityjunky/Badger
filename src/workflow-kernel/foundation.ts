@@ -10,8 +10,13 @@ import type {
 } from "../types.js";
 import { findSkills } from "./discovery.js";
 import { normalizeWorkflow } from "../workflow/contract.js";
-import { atomicWrite, ensureDirectory, sha256 } from "../util.js";
+import { atomicWrite, ensureDirectory, sha256, stableValue } from "../util.js";
 import { inspectUpgradeSource } from "../factory/source.js";
+import {
+  assertValidSemanticDossier,
+  semanticDossierHash,
+  validateDossierPlan,
+} from "../factory/questionnaire.js";
 
 export interface WorkflowKernelOptions {
   projectRoot: string;
@@ -81,6 +86,22 @@ export function parsePlan(value: unknown, file: string): FactoryPlan {
     throw new Error("upgrade-existing plans require sourceRoot");
   if (plan.workflow.kind !== "workflow-kernel")
     throw new Error("Standalone Badger supports workflow-kernel plans only");
+  if (plan.semanticDossier !== undefined) {
+    assertValidSemanticDossier(plan.semanticDossier);
+    const diagnostics = validateDossierPlan(
+      plan.semanticDossier,
+      plan as FactoryPlan,
+    );
+    if (diagnostics.length)
+      throw new Error(
+        diagnostics
+          .map(({ path, message }) => `${path}: ${message}`)
+          .join("\n"),
+      );
+    plan.semanticDossier = stableValue(
+      plan.semanticDossier,
+    ) as typeof plan.semanticDossier;
+  }
   return plan as FactoryPlan;
 }
 
@@ -147,6 +168,24 @@ export function createWorkflowKernel(
     const normalized = normalizeWorkflow(plan.workflow);
     const candidates = await resolveCandidates(plan, normalized.requiredSkills);
     const blockers = blockedCandidateMessages(candidates);
+    if (plan.semanticDossier) {
+      for (const source of plan.semanticDossier.sources) {
+        const candidate = candidates.find(
+          (entry) => entry.name === source.name,
+        );
+        if (
+          !candidate?.sources.some(
+            (entry) =>
+              entry.root === source.canonicalPath &&
+              entry.hash === source.contentHash,
+          )
+        ) {
+          blockers.push(
+            `Semantic dossier source identity is stale: ${source.name}`,
+          );
+        }
+      }
+    }
     const sourceRoot = plan.sourceRoot
       ? path.resolve(projectRoot, plan.sourceRoot)
       : undefined;
@@ -185,6 +224,12 @@ export function createWorkflowKernel(
       canInitialize: blockers.length === 0,
       ...(sourceRoot ? { sourceRoot } : {}),
       ...(upgradeSource ? { upgradeSource } : {}),
+      ...(plan.semanticDossier
+        ? {
+            semanticDossier: structuredClone(plan.semanticDossier),
+            semanticDossierHash: semanticDossierHash(plan.semanticDossier),
+          }
+        : {}),
     };
   }
 

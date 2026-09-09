@@ -25,6 +25,7 @@ import {
 } from "./authoring/index.js";
 import { migrateLegacyDraft } from "./factory/migration.js";
 import { readCreatorGuide } from "./factory/guide.js";
+import { createQuestionnaireHandoff } from "./factory/questionnaire.js";
 import {
   runEngineDifferential,
   runOfficialEngineBaseline,
@@ -527,6 +528,36 @@ program
     if (options.private && report.certification.status !== "certified") {
       process.exitCode = 1;
     }
+  });
+
+program
+  .command("questionnaire-handoff <dossier>")
+  .description("Validate a read-only semantic questionnaire handoff")
+  .option("--plan <file>", "Candidate FactoryPlan to include for confirmation")
+  .option("--project <dir>", "Target project root")
+  .option(
+    "--existing-context <path>",
+    "Existing plan or Creator state reference",
+  )
+  .option("--stopped", "Record a user-requested stop with unresolved gaps")
+  .option("--json", "JSON output")
+  .action(async (dossier, options) => {
+    const root = projectRoot(options.project);
+    const handoff = createQuestionnaireHandoff({
+      projectRoot: root,
+      dossier: JSON.parse(
+        await fs.readFile(path.resolve(root, dossier), "utf8"),
+      ),
+      factoryPlan: options.plan
+        ? JSON.parse(
+            await fs.readFile(path.resolve(root, options.plan), "utf8"),
+          )
+        : undefined,
+      existingContext: options.existingContext,
+      stopped: options.stopped === true,
+    });
+    emit(handoff, options.json);
+    if (handoff.status === "incomplete") process.exitCode = 1;
   });
 
 await program.parseAsync();

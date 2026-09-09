@@ -1,0 +1,88 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { promises as fs } from "node:fs";
+import { execFile } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { questionnaireFixture } from "./fixtures/semantic-dossier.js";
+
+const execFileAsync = promisify(execFile);
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(
+    roots
+      .splice(0)
+      .map((root) => fs.rm(root, { recursive: true, force: true })),
+  );
+});
+
+describe("questionnaire handoff CLI", () => {
+  it("returns incomplete, stopped, and resolved handoffs without writing project state", async () => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "badger-questionnaire-cli-"),
+    );
+    roots.push(root);
+    const { dossier, factoryPlan } = questionnaireFixture();
+    dossier.remainingQuestions.push({
+      id: "recovery",
+      field: "topics.recoveryPolicy",
+      question: "Where should repair resume?",
+    });
+    const dossierPath = path.join(root, "dossier.json");
+    const planPath = path.join(root, "plan.json");
+    await fs.writeFile(dossierPath, JSON.stringify(dossier));
+    await fs.writeFile(planPath, JSON.stringify(factoryPlan));
+    const args = [
+      "bin/badger.js",
+      "questionnaire-handoff",
+      "dossier.json",
+      "--plan",
+      "plan.json",
+      "--project",
+      root,
+      "--json",
+    ];
+    const failure = await execFileAsync(process.execPath, args).catch(
+      (error: { code: number; stdout: string }) => error,
+    );
+    expect(failure).toHaveProperty("code", 1);
+    const incomplete = JSON.parse(failure.stdout);
+    expect(incomplete.status).toBe("incomplete");
+    const stopped = JSON.parse(
+      (
+        await execFileAsync(process.execPath, [
+          ...args,
+          "--stopped",
+          "--existing-context",
+          "plan.json",
+        ])
+      ).stdout,
+    );
+    expect(stopped).toMatchObject({
+      status: "stopped",
+      existingContext: "plan.json",
+      dossierHash: incomplete.dossierHash,
+    });
+    expect(await fs.readFile(dossierPath, "utf8")).toBe(
+      JSON.stringify(dossier),
+    );
+    dossier.remainingQuestions = [];
+    await fs.writeFile(dossierPath, JSON.stringify(dossier));
+    const complete = JSON.parse(
+      (await execFileAsync(process.execPath, args)).stdout,
+    );
+    expect(complete).toMatchObject({
+      status: "complete",
+      nextAction: "factory-plan-confirmation",
+      nextReadOnlyCommand: null,
+    });
+    expect(complete.factoryPlan.semanticDossier).toEqual(dossier);
+    expect((await fs.readdir(root)).sort()).toEqual([
+      "dossier.json",
+      "plan.json",
+    ]);
+    expect(await fs.readFile(planPath, "utf8")).toBe(
+      JSON.stringify(factoryPlan),
+    );
+  });
+});

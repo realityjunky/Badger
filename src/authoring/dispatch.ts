@@ -36,6 +36,7 @@ export interface AuthoringHandoff {
   roleBriefPath: string;
   inputPaths: string[];
   commonInputPath: string;
+  semanticDossier?: { path: string; pointer: "/semanticDossier"; hash: string };
   outputPath: string;
   outputLimitBytes: number;
   dependencies: AuthoringLaneId[];
@@ -471,6 +472,13 @@ export async function buildAuthoringHandoff(
   ];
   const inputPaths = [...new Set([...baseInputPaths, ...packageInputPaths])];
   const commonPath = commonInputPath(outputPath);
+  const semanticDossier = plan.semanticDossierHash
+    ? {
+        path: authoringPlanPath(options.state),
+        pointer: "/semanticDossier" as const,
+        hash: plan.semanticDossierHash,
+      }
+    : undefined;
   const handoffInputPaths = [commonPath, ...inputPaths];
   await atomicWrite(
     commonPath,
@@ -478,6 +486,7 @@ export async function buildAuthoringHandoff(
       {
         schemaVersion: 1,
         kind: "authoring-common-input",
+        ...(semanticDossier ? { semanticDossier } : {}),
         workflow: plan.name,
         lane: options.lane,
         inputPaths: handoffInputPaths,
@@ -488,6 +497,9 @@ export async function buildAuthoringHandoff(
           workflowProtocolHash: plan.workflowProtocolHash,
           sourceEvidenceHash: plan.sourceEvidenceHash,
           authoringInputHash: options.state.authoring.authoringInputHash,
+          ...(plan.semanticDossierHash
+            ? { semanticDossierHash: plan.semanticDossierHash }
+            : {}),
         },
         output: {
           path: outputPath,
@@ -507,6 +519,7 @@ export async function buildAuthoringHandoff(
     roleBriefPath,
     inputPaths: handoffInputPaths,
     commonInputPath: commonPath,
+    ...(semanticDossier ? { semanticDossier } : {}),
     outputPath,
     outputLimitBytes: AUTHORING_OUTPUT_LIMIT_BYTES,
     dependencies: [...lane.dependencies],

@@ -13,6 +13,7 @@ export * from "./factory/proposal.js";
 export * from "./factory/generate.js";
 export * from "./factory/state.js";
 export * from "./factory/guide.js";
+export * from "./factory/questionnaire.js";
 export * from "./factory/migration.js";
 export * from "./factory/source.js";
 export * from "./eval/run.js";

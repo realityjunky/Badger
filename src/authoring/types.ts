@@ -3,6 +3,7 @@ import type {
   SkillCandidate,
   UpgradeSourceEvidence,
 } from "../types.js";
+import type { SemanticDossier } from "../factory/questionnaire.js";
 
 export type AuthoringDepth = "quick" | "full";
 
@@ -133,6 +134,8 @@ export interface AuthoringPlan {
   sourceEvidence: AuthoringSourceEvidence[];
   upgradeSource?: UpgradeSourceEvidence;
   compatibility: AuthoringCompatibility;
+  semanticDossierHash?: string;
+  semanticDossier?: SemanticDossier;
 }
 
 export type AuthoringPlanDiagnosticCode =
