@@ -3,7 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CreatorState, NodeProtocol } from "../types.js";
-import { atomicWrite, isWithin, slug } from "../util.js";
+import { atomicWrite, isWithin, sha256, slug, stableValue } from "../util.js";
+import { inspectProtectedProjectPath } from "../engine/protected-project-path.js";
+import { atomicWriteContainedText } from "../engine/contained-atomic-write.js";
+import { deriveAuthoringPlan } from "./plan.js";
 import { readState } from "../factory/state.js";
 import {
   authoringPlanPath,
@@ -37,6 +40,7 @@ export interface AuthoringHandoff {
   roleBriefPath: string;
   inputPaths: string[];
   commonInputPath: string;
+  confirmedProposal: { path: string; hash: string; limitBytes: number };
   semanticDossier?: { path: string; pointer: "/semanticDossier"; hash: string };
   outputPath: string;
   outputLimitBytes: number;
@@ -115,21 +119,36 @@ async function resolveRoleBrief(
   return resolvePackageAsset(relativePath);
 }
 
-function outputPathFor(options: BuildAuthoringHandoffOptions): string {
+async function outputPathFor(
+  options: BuildAuthoringHandoffOptions,
+): Promise<string> {
   const outputPath = path.resolve(options.outputPath);
   const protectedRoot = path.join(options.state.projectRoot, ".badger");
   if (isWithin(protectedRoot, outputPath))
     throw new Error("Authoring provider output cannot be inside .badger state");
   if (
     options.state.generated &&
-    isWithin(options.state.generated.packageRoot, outputPath)
+    (isWithin(options.state.generated.packageRoot, outputPath) ||
+      isWithin(
+        await fs.realpath(options.state.generated.packageRoot),
+        outputPath,
+      ))
   )
     throw new Error(
       "Authoring provider output cannot modify the generated package",
     );
   if (outputPath.includes("\0"))
     throw new Error("Authoring provider output path is invalid");
+  await assertHandoffPath(outputPath);
   return outputPath;
+}
+
+async function assertHandoffPath(file: string): Promise<void> {
+  const root = path.parse(file).root;
+  await inspectProtectedProjectPath(root, path.relative(root, file), {
+    label: "Authoring handoff path",
+    expected: "file",
+  });
 }
 
 function commonInputPath(outputPath: string): string {
@@ -443,7 +462,7 @@ export async function buildAuthoringHandoff(
         `Authoring lane ${options.lane} is blocked by ${dependency}`,
       );
   }
-  const outputPath = outputPathFor(options);
+  const outputPath = await outputPathFor(options);
   if (outputPath.length > 4096)
     throw new Error("Authoring provider output path is too long");
   const packageRoot = options.state.generated.packageRoot;
@@ -485,6 +504,30 @@ export async function buildAuthoringHandoff(
   ];
   const inputPaths = [...new Set([...baseInputPaths, ...packageInputPaths])];
   const commonPath = commonInputPath(outputPath);
+  const proposal = options.state.confirmedProposal;
+  if (
+    !proposal ||
+    deriveAuthoringPlan({ proposal, depth: plan.depth }).authoringPlanHash !==
+      plan.authoringPlanHash
+  )
+    throw new Error(
+      "Confirmed proposal is missing or stale for authoring handoff",
+    );
+  const proposalContent = JSON.stringify(stableValue(proposal), null, 2) + "\n";
+  if (Buffer.byteLength(proposalContent, "utf8") > AUTHORING_OUTPUT_LIMIT_BYTES)
+    throw new Error("Confirmed proposal exceeds the authoring input limit");
+  const proposalHash = sha256(proposalContent);
+  const proposalPath = path.join(
+    path.dirname(outputPath),
+    `.${path.basename(outputPath)}.proposal-${proposalHash}.json`,
+  );
+  const confirmedProposal = {
+    path: proposalPath,
+    hash: proposalHash,
+    limitBytes: AUTHORING_OUTPUT_LIMIT_BYTES,
+  };
+  await assertHandoffPath(commonPath);
+  await assertHandoffPath(proposalPath);
   const semanticDossier = plan.semanticDossierHash
     ? {
         path: authoringPlanPath(options.state),
@@ -492,9 +535,8 @@ export async function buildAuthoringHandoff(
         hash: plan.semanticDossierHash,
       }
     : undefined;
-  const handoffInputPaths = [commonPath, ...inputPaths];
-  await atomicWrite(
-    commonPath,
+  const handoffInputPaths = [commonPath, proposalPath, ...inputPaths];
+  const commonContent =
     JSON.stringify(
       {
         schemaVersion: 1,
@@ -504,6 +546,7 @@ export async function buildAuthoringHandoff(
         lane: options.lane,
         inputPaths: handoffInputPaths,
         goal: options.state.confirmedProposal?.goal ?? "",
+        confirmedProposal,
         hashes: {
           protocolHash: plan.protocolHash,
           authoringPlanHash: plan.authoringPlanHash,
@@ -522,8 +565,15 @@ export async function buildAuthoringHandoff(
       },
       null,
       2,
-    ) + "\n",
-  );
+    ) + "\n";
+  if (Buffer.byteLength(commonContent, "utf8") > AUTHORING_OUTPUT_LIMIT_BYTES)
+    throw new Error("Authoring common input exceeds its limit");
+  await atomicWriteContainedText(proposalPath, proposalContent, {
+    containedRoot: path.parse(proposalPath).root,
+  });
+  await atomicWriteContainedText(commonPath, commonContent, {
+    containedRoot: path.parse(commonPath).root,
+  });
   return {
     schemaVersion: 1,
     kind: "authoring-handoff",
@@ -532,6 +582,7 @@ export async function buildAuthoringHandoff(
     roleBriefPath,
     inputPaths: handoffInputPaths,
     commonInputPath: commonPath,
+    confirmedProposal,
     ...(semanticDossier ? { semanticDossier } : {}),
     outputPath,
     outputLimitBytes: AUTHORING_OUTPUT_LIMIT_BYTES,

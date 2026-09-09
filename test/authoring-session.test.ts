@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { buildProposal, readPlan } from "../src/factory/proposal.js";
@@ -304,6 +305,106 @@ describe("resumable authoring session", () => {
     expect(
       (await buildProposal({ projectRoot: project, planPath })).blockers,
     ).toContain("Semantic dossier source identity is stale: prepare");
+  });
+
+  it("rejects symlink ancestors and leaves before writing handoff inputs", async () => {
+    const { state } = await createSession();
+    const linkedRoot = path.join(root, "linked-package");
+    await fs.symlink(state.generated!.packageRoot, linkedRoot, "dir");
+    for (const suffix of ["script.json", "missing/nested/script.json"]) {
+      await expect(
+        buildAuthoringHandoff({
+          state,
+          lane: "script",
+          outputPath: path.join(linkedRoot, suffix),
+        }),
+      ).rejects.toThrow(/symbolic link/);
+    }
+    const safeRoot = path.join(root, "worker");
+    await fs.mkdir(safeRoot);
+    const target = path.join(state.generated!.packageRoot, "SKILL.md");
+    const original = await fs.readFile(target, "utf8");
+    const outputPath = path.join(safeRoot, "script.json");
+    await fs.symlink(target, outputPath);
+    await expect(
+      buildAuthoringHandoff({ state, lane: "script", outputPath }),
+    ).rejects.toThrow(/symbolic link/);
+    await fs.unlink(outputPath);
+    const commonPath = path.join(safeRoot, ".script.json.common-input.json");
+    await fs.symlink(target, commonPath);
+    await expect(
+      buildAuthoringHandoff({ state, lane: "script", outputPath }),
+    ).rejects.toThrow(/symbolic link/);
+    expect(await fs.readdir(safeRoot)).toEqual([
+      ".script.json.common-input.json",
+    ]);
+    expect(await fs.readFile(target, "utf8")).toBe(original);
+    await expect(
+      fs.stat(path.join(state.generated!.packageRoot, "missing")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("shares a bounded hash-bound confirmed proposal across concurrent Wave 1 handoffs", async () => {
+    const { state } = await createSession();
+    const handoffs = await Promise.all(
+      (["script", "reference", "pause-points"] as const).map((lane) =>
+        buildAuthoringHandoff({
+          state,
+          lane,
+          outputPath: path.join(root, "inputs", `${lane}.json`),
+        }),
+      ),
+    );
+    const identities = new Set<string>();
+    for (const handoff of handoffs) {
+      const descriptor = handoff.confirmedProposal;
+      const bytes = await fs.readFile(descriptor.path);
+      expect(bytes.length).toBeLessThanOrEqual(descriptor.limitBytes);
+      expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+        descriptor.hash,
+      );
+      expect(JSON.parse(bytes.toString())).toEqual(state.confirmedProposal);
+      const common = JSON.parse(
+        await fs.readFile(handoff.commonInputPath, "utf8"),
+      );
+      expect(common.confirmedProposal).toEqual(descriptor);
+      expect(handoff.inputPaths).toContain(descriptor.path);
+      identities.add(descriptor.hash);
+    }
+    expect(identities.size).toBe(1);
+    const descriptor = handoffs[0].confirmedProposal;
+    const target = path.join(state.generated!.packageRoot, "SKILL.md");
+    await fs.unlink(descriptor.path);
+    await fs.symlink(target, descriptor.path);
+    await expect(
+      buildAuthoringHandoff({
+        state,
+        lane: "script",
+        outputPath: handoffs[0].outputPath,
+      }),
+    ).rejects.toThrow(/symbolic link/);
+    state.confirmedProposal!.planHash = "0".repeat(64);
+    await expect(
+      buildAuthoringHandoff({
+        state,
+        lane: "script",
+        outputPath: path.join(root, "stale.json"),
+      }),
+    ).rejects.toThrow(/stale/);
+  });
+
+  it("rejects oversized confirmed proposals before creating handoff files", async () => {
+    const { state } = await createSession();
+    state.confirmedProposal!.warnings = ["Detailed evidence ".repeat(20000)];
+    const outputRoot = path.join(root, "oversized");
+    await expect(
+      buildAuthoringHandoff({
+        state,
+        lane: "script",
+        outputPath: path.join(outputRoot, "script.json"),
+      }),
+    ).rejects.toThrow(/proposal exceeds/);
+    await expect(fs.stat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   function claims(
