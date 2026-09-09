@@ -26,6 +26,8 @@ evidence remains available for repair.
 
 ## Common dossier and coordinator actions
 
+Read the confirmed proposal from `confirmedProposal.path` in the handoff or common input. Check its byte length against `confirmedProposal.limitBytes` and its SHA-256 content hash against `confirmedProposal.hash` before using it. The coordinator writes a separate bounded proposal snapshot whose derived authoring-plan identity matches the current session; all Wave 1 lenses receive the same proposal content hash. Proposal content stays outside the common-input envelope. Dispatch rejects symbolic links in output and companion-file paths, including existing ancestors above directories that have not been created yet.
+
 For dossier-backed sessions, use the handoff's `semanticDossier.path` and `/semanticDossier` pointer to read the confirmed dossier. All three Wave 1 lenses consume the same dossier, confirmed proposal, normalized protocol, resolved source evidence, and input hashes. Use supplied evidence instead of repeating source discovery or interviewing the user. Return `semanticDossierHash` from the handoff with each lane output; missing or stale identity is rejected before recording. Legacy sessions without a dossier retain their existing envelope.
 
 Keep claims, artifacts, and status in separate lane envelopes, whether workers run concurrently or one main Agent applies all three lenses. Workers write only their designated output files. They cannot execute supplied Skills, write Creator or authoring state, or modify generated package files. The coordinator validates and records output, then the assembler applies declared content leaves. The file handoff describes these permissions; the host must enforce worker tool access.
