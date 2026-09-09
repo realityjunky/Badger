@@ -2870,6 +2870,33 @@ function authoringLanesDocument(
         workflowProtocolHash: plan.workflowProtocolHash,
         sourceEvidenceHash: plan.sourceEvidenceHash,
         authoringInputHash: state.authoring?.authoringInputHash,
+        semanticDossier: plan.semanticDossier
+          ? {
+              hash: plan.semanticDossierHash,
+              schemaVersion: plan.semanticDossier.schemaVersion,
+              kind: plan.semanticDossier.kind,
+              confirmed: plan.semanticDossier.confirmed,
+              workflow: { ...plan.semanticDossier.workflow },
+              sources: plan.semanticDossier.sources.map((source) => ({
+                id: source.id,
+                name: source.name,
+                canonicalPath: source.canonicalPath,
+                contentHash: source.contentHash,
+                roles: [...source.roles],
+              })),
+              ledger: {
+                confirmedUserFacts:
+                  plan.semanticDossier.confirmedUserFacts.length,
+                sourceDerivedFacts:
+                  plan.semanticDossier.sourceDerivedFacts.length,
+                agentInferences: plan.semanticDossier.agentInferences.length,
+                unresolvedAssumptions:
+                  plan.semanticDossier.unresolvedAssumptions.length,
+                remainingQuestions:
+                  plan.semanticDossier.remainingQuestions.length,
+              },
+            }
+          : null,
         status: "assembled",
         dag: plan.dag,
         deterministicBackbone: [...AUTHORING_DETERMINISTIC_BACKBONE],
