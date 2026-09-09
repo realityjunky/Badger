@@ -142,7 +142,7 @@ p{max-width:79ch;margin:0 0 15px}
     <div class="hero-bar"><p class="eyebrow">Skill Harness / Badger</p><div class="language-toggle" role="group" aria-label="Language"><button type="button" data-language="en" aria-pressed="true">English</button><button type="button" data-language="zh" aria-pressed="false">中文</button></div></div>
     <h1>From Markdown Skills to durable workflow systems</h1>
     <p class="hero-lede">An educational, interview-ready manual for understanding Badger, the Skill Harness, and the Primer Designer workflow as a generated instance.</p>
-    <div class="hero-meta"><span class="pill">Sections 1–4 are the study path</span><span class="pill">Mermaid architecture views</span><span class="pill">Integrated authoring delivered</span><span class="pill">Updated 2026-09-04</span></div>
+    <div class="hero-meta"><span class="pill">Sections 1–4 are the study path</span><span class="pill">Mermaid architecture views</span><span class="pill">Integrated authoring delivered · #16</span><span class="pill">Updated 2026-09-09</span></div>
     <div class="language-status" id="language-status" role="status" aria-live="polite"></div>
   </div>
 </header>
@@ -269,7 +269,8 @@ p{max-width:79ch;margin:0 0 15px}
         <tr><td>Explicitly outside this manual’s claim</td><td>Classic or Native policy, biological execution, platform and dashboard adapters, automatic external-provider authentication, or any protected raw-data-derived fixture.</td><td><span class="tag boundary">Excluded</span></td></tr>
       </tbody></table>
 
-      <h3 id="architecture-target">2.1 The top-level target</h3>
+  <div class="callout" id="architecture-dossier"><strong>Delivered in #16: shared semantic input.</strong> The questionnaire produces a confirmed <code>semantic-dossier</code> with source identities and five distinct fact ledgers. Creator carries it into the Authoring Plan; its hash participates in authoring input identity. All three Wave 1 lenses consume this same evidence. Wave 2 consumes the dossier and its accepted dependency records, while assembly preserves a dossier summary and identity in <code>reference/authoring-lanes.json</code>. This is package-construction evidence: the dossier does not encode a second runtime or authorize Run transitions.</div>
+  <h3 id="architecture-target">2.1 The top-level target</h3>
       <p>The target has one portable instruction-and-contract input, an integrated authoring plane, one reusable runtime authority, multiple future host adapters, and a separate evidence path. The critical handoff is an assembled package and Skill snapshot plus execution identity: Authoring constructs the package, WorkflowRuntime executes a Run, and neither reinterprets the other’s state.</p>
       <h4 class="architecture-subheading target-subheading" id="target-boundaries">Three boundaries to keep visible</h4>
       <div class="three-col target-boundaries">
@@ -283,8 +284,18 @@ flowchart TB
   U[User or operator goal] --> C[Badger Creator]
   S[Source Skills<br/>Markdown, references, scripts] --> C
   C --> P[Normalized Workflow Protocol]
+  C --> SD[Confirmed semantic dossier<br/>source identities + fact ledgers]
+  SD --> CI[Hash-bound authoring common input]
+  P --> CI
+  CI --> W1[Wave 1 lenses<br/>script / reference / pause-points]
+  W1 --> SR[Accepted script record]
+  SR --> W2[Wave 2<br/>workflow-entry / skill-core]
+  CI --> W2
+  W1 --> RV[skill-review<br/>all five prior lanes required]
+  W2 --> RV
   P --> AP[Authoring Protocol<br/>lane DAG + claims]
   AP --> L[Authored drafts + review]
+  RV --> L
   L --> A[Deterministic assembly]
   P --> A
   A --> G[Generated workflow package]
@@ -548,7 +559,8 @@ flowchart LR
         <div class="route-item"><div><b>Assemble, evaluate, and gate delivery</b><p>Merge validated content leaves onto the deterministic Auto zone, render reference evidence, run current-hash runtime evaluation, inspect authoring review findings, and require publication approval before copying or previewing delivery.</p></div></div>
       </div>
 
-      <h3 id="lifecycle-run">3.2 Execute one Run</h3>
+  <div class="callout" id="lifecycle-dossier"><strong>#16 authoring lifecycle and recovery.</strong><ol><li><strong>Confirm meaning.</strong> Resolve only declared source Skills, preserve the five fact ledgers, and validate the confirmed dossier against the FactoryPlan with <code>questionnaire-handoff</code>. Resolve diagnostics before proceeding through proposal review and initialization confirmation.</li><li><strong>Dispatch and record.</strong> Supply dossier paths and hashes with the confirmed proposal, normalized protocol, and source evidence. The independent <code>script</code>, <code>reference</code>, and <code>pause-points</code> lanes organize evidence; they do not execute the supplied Skills or ask the user directly.</li><li><strong>Resolve targeted gaps.</strong> A <code>NEEDS_CONTEXT</code> question identifies a dossier field for the main session to clarify. <code>BLOCKED</code> identifies a dependency, contradiction, or repair requirement. Neither status satisfies a dependency. A dossier change invalidates prior authoring input identities and records; resume from persisted status, repair the input, and record fresh evidence.</li><li><strong>Respect exact dependencies.</strong> Each Wave 2 lane, <code>workflow-entry</code> and <code>skill-core</code>, requires the accepted <code>script</code> record. Neither waits independently for <code>reference</code> or <code>pause-points</code>. <code>skill-review</code> requires all five preceding lanes.</li><li><strong>Assemble and gate delivery.</strong> Assemble only current, complete records into declared authored leaves. Preserve dossier identity and summary in generated authoring evidence, then satisfy authoring review, evaluation, certification, and human publication approval for the current package hash.</li></ol><strong>Two different question paths.</strong> Authoring <code>NEEDS_CONTEXT</code> repairs package meaning through the main session. A Run decision uses persisted <code>ask_user</code> and a typed <code>submit</code> response. The Run lifecycle, its four public operations, and its decision/recovery semantics below are unchanged by #16.</div>
+  <h3 id="lifecycle-run">3.2 Execute one Run</h3>
       <div class="route-list lifecycle-run">
         <div class="route-item"><div><b>Start a Run</b><p><code>start</code> validates the protocol and location, compiles or loads Engine state, snapshots the package and Skill, binds execution identity, and persists revision 0 with the first pending action.</p></div></div>
         <div class="route-item"><div><b>Perform the pending action</b><p>The host reads the continuation; a human, Agent, script, or external executor performs the proposed work and returns artifacts and evidence. The external actor does not advance Run state directly.</p></div></div>
@@ -639,6 +651,31 @@ flowchart TB
  <h4 class="private-subheading" id="factory-plan-checklist">FactoryPlan completeness checklist</h4>
  <p>Before proposal handoff, the questionnaire confirms goal and intent, explicit source paths and roles, inputs, Node responsibilities, Required Skill Calls, augmentations, decisions, Output Schemas, artifacts, evidence, guardrails, routes, optionality, failure, pause and recovery, handoffs, executable disclosures, upgrade-source behavior, locale, capabilities, finalization, and all unresolved assumptions. It continues exchanges until this checklist passes or the user explicitly stops with the remaining gaps recorded.</p>
  <p>The questionnaire handoff labels confirmed user facts, source-derived facts, Agent inferences, unresolved assumptions, and remaining questions. A complete plan is shown and confirmed before read-only proposal generation; proposal confirmation remains separate from <code>badger init --confirm</code>.</p>
+ <div id="semantic-dossier-authoring" lang="en">
+   <h3>Badger #16: from confirmed meaning to authored evidence</h3>
+   <p>The semantic dossier connects the questionnaire to the existing six-lane authoring lifecycle. Delivered through #17–#20, it gives workers a shared, persisted account of the workflow instead of requiring them to reconstruct confirmed answers from conversation history. The dossier describes meaning; <code>WorkflowProtocol</code> encodes execution, and <code>WorkflowRuntime</code> remains the authority for Run transitions.</p>
+   <h4>1. Confirm and validate the questionnaire handoff</h4>
+   <p><code>FactoryPlan.semanticDossier</code> carries a version-1 <code>semantic-dossier</code>: confirmation, workflow identity and intent, declared source identities and roles, ordered Node responsibilities, and semantic topics covering inputs, calls, outputs, decisions, routes, guards, cycles, recovery, capabilities, finalization, and executable disclosures. It preserves five distinct ledgers: confirmed user facts, source-derived facts, Agent inferences, unresolved assumptions, and remaining questions. Source facts retain evidence pointers; incomplete or contradictory fields remain visible for targeted follow-up.</p>
+   <pre class="code-block">node bin/badger.js questionnaire-handoff dossier.json --plan plan.json --project . --json</pre>
+   <p>This read-only command validates the supplied dossier and its alignment with the plan; it does not conduct an interview or initialize Creator state. Review diagnostics and the handoff before the existing proposal and initialization confirmations. Dossier-free legacy plans remain supported; dossier-backed plans require matching dossier identity throughout authoring.</p>
+   <h4>2. Dispatch three independent Wave 1 lenses</h4>
+   <p><code>authoring-dispatch</code> supplies bounded common-input and confirmed-proposal files, a dossier path with JSON pointer <code>/semanticDossier</code> and hash, resolved source evidence, and current authoring/protocol identities. Large evidence stays in referenced files. Each lane sees the same semantic basis while keeping its own claims, artifacts, and record.</p>
+   <ul>
+     <li><code>script</code> describes required adapter behavior and calls aligned with the normalized protocol. Deterministic generation owns runtime scripts.</li>
+     <li><code>reference</code> organizes source composition, identities, roles, and traceable evidence without copying complete source Skill bodies.</li>
+     <li><code>pause-points</code> distinguishes genuine decisions, automatic handling, stop conditions, and manual handoffs without inventing runtime choices or transitions.</li>
+   </ul>
+   <p>These lanes have no lane dependencies and may run concurrently, or the main Agent may perform the three lenses in one process. Separate providers are not required. Workers do not interview the user directly, execute supplied Skills, or modify Creator state or generated runtime files. They return bounded evidence for validation and recording by the coordinator.</p>
+   <h4>3. Resolve gaps and respect dependency barriers</h4>
+   <p><code>NEEDS_CONTEXT</code> returns a targeted question action identifying an existing dossier field; the main session resolves that gap. <code>BLOCKED</code> reports a missing dependency, contradiction, or repair requirement. Neither status satisfies a downstream dependency. A <code>DONE</code> record still needs valid claims, declared artifacts, current input identities, and revision checks.</p>
+   <p><code>workflow-entry</code> and <code>skill-core</code> each depend on the accepted <code>script</code> record. Their common input includes dependency record paths, statuses, and input identities, alongside the dossier; <code>skill-core</code> also receives per-Node responsibility context. This is not an all-Wave-1 barrier: <code>reference</code> and <code>pause-points</code> do not independently gate Wave 2. <code>skill-review</code> depends on all five preceding lanes and receives their accepted records.</p>
+   <p>A semantic change changes the dossier and authoring input identities, making prior records stale. Missing or mismatched <code>semanticDossierHash</code>, stale source evidence, unsafe paths, oversized outputs, undeclared artifacts, and stale revisions are rejected. Resume from persisted authoring status and repair current inputs before recording replacement evidence.</p>
+   <h4>4. Assemble an auditable package</h4>
+   <p><code>assemble</code> consumes current, complete lane records and merges declared authored leaves into the deterministic backbone. Generated <code>reference/authoring-lanes.json</code> includes dossier identity, workflow/source summaries, and fact-ledger counts alongside lane evidence and dependencies. It summarizes the dossier rather than embedding complete source Skill bodies. <code>skill-review.md</code> retains structured verdicts and findings; completed lane records alone do not imply passing review.</p>
+   <p>Authoring readiness, deterministic evaluation, WorkflowRuntime certification, and human publication approval remain separate current-hash gates. A dossier does not authorize publication, distribution, or execution.</p>
+   <h4>Implementation and verification trail</h4>
+   <p>Start with <a href="https://github.com/realityjunky/Badger/issues/16">the #16 specification</a>, then follow <a href="../src/factory/questionnaire.ts"><code>factory/questionnaire.ts</code></a> for validation and handoff, <a href="../src/authoring/plan.ts"><code>authoring/plan.ts</code></a> for plan identity, <a href="../src/authoring/dispatch.ts"><code>authoring/dispatch.ts</code></a> for common input and upstream records, and <a href="../src/authoring/lifecycle.ts"><code>authoring/lifecycle.ts</code></a> for persistence, readiness, and assembly. <a href="../src/authoring/protocol.ts"><code>authoring/protocol.ts</code></a> remains the lane dependency authority. <a href="../test/authoring-session.test.ts"><code>authoring-session.test.ts</code></a> covers dossier propagation, stale identities, targeted questions, and dependent handoffs; <a href="../test/authoring-lifecycle.test.ts"><code>authoring-lifecycle.test.ts</code></a> covers assembly and package evidence.</p>
+ </div>
  <h3 id="private-user-path">4.1 The user-to-code path</h3>
       <p>The first useful narrative is the safe factory journey. A user begins with a goal and a plan, inspects what the project can resolve, previews a normalized protocol, confirms the write, creates a deterministic scaffold, completes the authoring lanes, assembles the package, evaluates its current hash, obtains separate authoring and publication review evidence, and only then publishes or previews distribution. The same package can subsequently be used by the generated adapters or the public WorkflowRuntime API to create a durable Run.</p>
       <div class="route-list private-route">
@@ -1035,8 +1072,18 @@ flowchart LR
         '  U[User or operator goal] --> C[Badger Creator]',
         '  S[Source Skills<br/>Markdown, references, scripts] --> C',
         '  C --> P[Normalized Workflow Protocol]',
+        '  C --> SD[Confirmed semantic dossier<br/>source identities + fact ledgers]',
+        '  SD --> CI[Hash-bound authoring common input]',
+        '  P --> CI',
+        '  CI --> W1[Wave 1 lenses<br/>script / reference / pause-points]',
+        '  W1 --> SR[Accepted script record]',
+        '  SR --> W2[Wave 2<br/>workflow-entry / skill-core]',
+        '  CI --> W2',
+        '  W1 --> RV[skill-review<br/>all five prior lanes required]',
+        '  W2 --> RV',
         '  P --> AP[Authoring Protocol<br/>lane DAG + claims]',
         '  AP --> L[Authored drafts + review]',
+        '  RV --> L',
         '  L --> A[Deterministic assembly]',
         '  P --> A',
         '  A --> G[Generated workflow package]',
@@ -1306,8 +1353,18 @@ flowchart LR
         '  U[用户或操作者目标] --> C[Badger Creator]',
         '  S[源 Skill<br/>Markdown、参考资料、脚本] --> C',
         '  C --> P[规范化 Workflow Protocol]',
+        '  C --> SD[已确认的语义档案<br/>来源身份 + 事实分类账]',
+        '  SD --> CI[哈希绑定的创作公共输入]',
+        '  P --> CI',
+        '  CI --> W1[Wave 1 三个视角<br/>script / reference / pause-points]',
+        '  W1 --> SR[已接受的 script 记录]',
+        '  SR --> W2[Wave 2<br/>workflow-entry / skill-core]',
+        '  CI --> W2',
+        '  W1 --> RV[skill-review<br/>要求前五个 lane 全部完成]',
+        '  W2 --> RV',
         '  P --> AP[Authoring Protocol<br/>lane DAG + claims]',
         '  AP --> L[创作草稿 + 审查]',
+        '  RV --> L',
         '  L --> A[确定性组装]',
         '  P --> A',
         '  A --> G[生成的工作流软件包]',
@@ -1668,7 +1725,7 @@ flowchart LR
       eyebrow: 'Skill Harness / Badger',
       heading: '从 Markdown Skill 到持久化工作流系统',
       lede: '面向学习与面试表达的教育手册：理解 Badger、Skill Harness，以及作为生成实例的 Primer Designer 工作流。',
-      pills: ['第 1–4 节为学习路径', 'Mermaid 架构视图', '集成式创作已交付', '更新于 2026-09-04']
+      pills: ['第 1–4 节为学习路径', 'Mermaid 架构视图', '集成式创作已交付 · #16', '更新于 2026-09-09']
     },
     nav: ['本页导航', '1 · 术语', '说明与组合', '契约词汇', '运行时词汇', '证据词汇', '2 · 架构', '2.1 目标架构', '2.2 抽象层级', '2.3 运行时内部', '2.4 Primer 实例', '2.5 适配性定位', '3 · 生命周期', '3.1 软件包生命周期', '3.2 Run 生命周期', '3.3 公共操作', '3.4 决策与恢复', '4 · 代码库指南', '4.1 用户到代码路径', '4.2 使用工具', '4.3 参数与枚举', '4.4 软件包模块与接口', '4.5 证据、测试与维护', '5 · 面试练习', '6 · 来源账本'],
     sectionNumbers: ['第 01 节', '第 02 节', '第 03 节', '第 04 节', '第 05 节', '第 06 节'],
@@ -1874,7 +1931,7 @@ flowchart LR
       heading: '代码库指南：把 Badger 当作独立系统来学习',
       lede: '本节换一个视角：不再把软件包当作路线图，而把它当作一个你自己设计的 TypeScript 产品。先沿着用户可见的命令路径阅读，再检查数据契约、模块接口、持久化文件和证据门槛，理解每一步为什么可信。',
       callout: '<strong>范围与阅读规则。</strong> 把 <code>@rpamis/badger</code> 当作独立设计。它是 ESM Node&nbsp;&gt;=22 库和 CLI；源码真相位于 <code>src/</code>，生成的 Runtime 资产是 <code>assets/runtime/</code> 下的投影，Creator 状态位于 <code>.badger/</code>，计划中的 authoring session 位于 <code>.badger/authoring/</code>，WorkflowRuntime Run 则把记录存于 <code>.badger/runs/</code>。跟随导出关系和持久化身份，不要仅凭文件名推断权威。',
-      phaseHeads: ['4.1 用户到代码路径', '4.2 以用户身份使用工具', '4.3 选择参数并理解枚举', '4.4 软件包架构：模块与接口', '4.5 证据、测试与维护'],
+      phaseHeads: ['Agent 优先的 FactoryPlan 创作', '4.1 用户到代码路径', '4.2 以用户身份使用工具', '4.3 选择参数并理解枚举', '4.4 软件包架构：模块与接口', '4.5 证据、测试与维护'],
       userPathIntro: '最有用的第一个叙事是安全的软件包工厂旅程。用户从目标和计划开始，检查项目能够解析什么，预览规范化协议，确认写入，生成确定性 scaffold，完成 authoring lane，组装软件包，评估当前哈希，取得独立的创作与发布审查证据，然后才发布或预览分发。同一个软件包随后可以由生成适配器或公共 WorkflowRuntime API 用来创建持久化 Run。',
       routeSteps: [
         ['检查上下文', '<code>guide</code> 读取偏好与可恢复的 Creator 状态；<code>candidates</code> 解析真实 Skill 根目录、描述、参考资料、脚本和内容哈希。'],
@@ -2199,6 +2256,8 @@ flowchart LR
   };
   const setStaticChinese = () => {
     const text = zh;
+    setOne('#architecture-dossier', '<strong>#16 已交付：共享语义输入。</strong> 问卷产生已确认的 <code>semantic-dossier</code>，保留来源身份和五类独立事实分类账。Creator 将其传入 Authoring Plan，档案哈希参与创作输入身份。Wave 1 的三个视角消费同一份证据；Wave 2 接收档案及已接受的依赖记录；组装在 <code>reference/authoring-lanes.json</code> 中保留档案摘要与身份。这些是软件包构建证据：档案不定义第二套 Runtime，也不授权 Run 状态转换。', true);
+    setOne('#lifecycle-dossier', '<strong>#16 创作生命周期与恢复。</strong><ol><li><strong>确认含义。</strong> 只解析声明的源 Skill，保留五类事实分类账，通过 <code>questionnaire-handoff</code> 校验已确认档案与 FactoryPlan 的一致性。解决诊断问题后，继续提案审查和初始化确认。</li><li><strong>分派并记录。</strong> 提供档案路径与哈希、已确认提案、规范化协议及来源证据。独立的 <code>script</code>、<code>reference</code> 和 <code>pause-points</code> lane 整理证据，不执行源 Skill，也不直接向用户提问。</li><li><strong>定向补充上下文。</strong> <code>NEEDS_CONTEXT</code> 问题指向需要主会话澄清的档案字段；<code>BLOCKED</code> 指明缺失依赖、矛盾或修复要求。两者均不能满足下游依赖。档案变更使旧创作输入身份和记录失效；从持久化状态恢复、修复输入，再记录新证据。</li><li><strong>遵守精确依赖。</strong> Wave 2 的 <code>workflow-entry</code> 与 <code>skill-core</code> 分别要求已接受的 <code>script</code> 记录，不各自等待 <code>reference</code> 或 <code>pause-points</code>。<code>skill-review</code> 要求前五个 lane 全部完成。</li><li><strong>组装与交付门槛。</strong> 只把当前且完整的记录组装到声明的 authored leaves；在生成证据中保留档案身份与摘要，再为当前软件包哈希满足创作审查、评估、认证及人工发布批准。</li></ol><strong>两种不同的提问路径。</strong> 创作阶段的 <code>NEEDS_CONTEXT</code> 通过主会话修复软件包含义；Run 决策使用持久化 <code>ask_user</code> 和类型化 <code>submit</code> 响应。下文的 Run 生命周期、四个公共操作及决策/恢复语义没有因 #16 改变。', true);
     document.documentElement.lang = 'zh-CN';
     document.title = text.title;
     document.querySelector('.language-toggle').setAttribute('aria-label', '语言');
@@ -2270,7 +2329,7 @@ flowchart LR
       '图 2.4 — Primer Designer 通过四类领域阶段组合准备、设计、可选获取与 USEARCH、池添加、Handoff 和重复 Cycle。',
       '图 2.5 — 定位图：根据边界压力和自主性需求做选择；这些位置不是成熟度阶梯。'
     ]);
-    setMany([...document.querySelectorAll('#section-2 > .callout:not(.warning)')], text.section2.callouts, true);
+    setMany([...document.querySelectorAll('#section-2 > .callout:not(.warning):not(#architecture-dossier)')], text.section2.callouts, true);
     const section2Interviews = [...document.querySelectorAll('#section-2 .interview p')];
     setMany(section2Interviews, text.section2.interview);
     const spectrum = [...document.querySelectorAll('#section-2 .axis')][1];
