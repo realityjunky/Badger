@@ -7,8 +7,9 @@ import {
   stableValue,
 } from "../util.js";
 import {
-  AUTHORING_DETERMINISTIC_BACKBONE,
-  AUTHORING_LANE_IDS,
+  authoringLaneClaimIds,
+  authoringLaneIds,
+  authoringProtocolProjection,
 } from "./protocol.js";
 import {
   crossValidateAuthoringPackage,
@@ -733,7 +734,7 @@ function recordFindings(
   records: Partial<Record<AuthoringLaneId, AuthoringRecord>>,
 ): AuthoringReviewFinding[] {
   const findings: AuthoringReviewFinding[] = [];
-  for (const laneId of AUTHORING_LANE_IDS) {
+  for (const laneId of authoringLaneIds()) {
     const lane = plan.lanes.find((candidate) => candidate.id === laneId);
     const record = records[laneId];
     if (!lane) continue;
@@ -749,7 +750,11 @@ function recordFindings(
       });
       continue;
     }
-    const expectedClaims = [...lane.claims, ...lane.derivedClaims];
+    const expectedClaims = [
+      ...authoringLaneClaimIds(laneId, {
+        derivedClaims: lane.derivedClaims,
+      }),
+    ];
     const claims = new Map(record.claims.map((claim) => [claim.id, claim]));
     for (const claimId of expectedClaims) {
       const claim = claims.get(claimId);
@@ -851,7 +856,7 @@ async function packageFindings(
     });
   }
   const fileSet = new Set(files);
-  for (const required of AUTHORING_DETERMINISTIC_BACKBONE) {
+  for (const required of authoringProtocolProjection().deterministicBackbone) {
     if (!fileSet.has(required)) {
       findings.push({
         severity: "important",
@@ -893,7 +898,8 @@ async function packageFindings(
         fix: "Regenerate the package inventory from the assembled tree.",
       });
     }
-    for (const required of AUTHORING_DETERMINISTIC_BACKBONE) {
+    for (const required of authoringProtocolProjection()
+      .deterministicBackbone) {
       const entry = (inventory.files ?? []).find(
         (file) => file.path === required,
       );

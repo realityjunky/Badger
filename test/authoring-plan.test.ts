@@ -281,7 +281,7 @@ describe("AuthoringPlan preview", () => {
     expect(AUTHORING_PROTOCOL).toEqual(protocolFixture);
     expect(validateAuthoringProtocol(protocolFixture)).toEqual([]);
     expect(AUTHORING_PROTOCOL_HASH).toBe(
-      "12691c8b24d040df77dc7648e2a07795d8385b3e4efb4f657e5dc033fe707afe",
+      "d7e5d2f97828336e6d7b1237d786c3dd02229370f7698a5162f52942938b8303",
     );
     expect(compatibilityFixture).toMatchObject({
       official: {

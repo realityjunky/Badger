@@ -15,6 +15,8 @@ export type AuthoringLaneId =
   | "skill-core"
   | "skill-review";
 
+export type AuthoringWaveId = "wave1" | "wave2" | "barrier";
+
 export type AuthoringControlPlaneScriptKind =
   "runtime-adapter" | "plan" | "check" | "hook-guard";
 
@@ -65,6 +67,54 @@ export interface AuthoringProtocol {
     deterministicBackbone: string[];
     contentLeaves: string[];
   };
+}
+
+export interface AuthoringLaneProjection {
+  id: AuthoringLaneId;
+  wave: AuthoringWaveId;
+  dependencies: readonly AuthoringLaneId[];
+  brief: string;
+  claims: readonly string[];
+  derivedClaims: readonly string[];
+  contentLeaves: readonly string[];
+  producesContentLeaves: boolean;
+}
+
+export interface AuthoringLaneProjectionOptions {
+  activeNodeIds?: readonly string[];
+  contentLeaves?: readonly string[];
+  derivedClaims?: readonly string[];
+  laneContentLeaves?: Partial<
+    Readonly<Record<AuthoringLaneId, readonly string[]>>
+  >;
+  workflowName?: string;
+}
+
+export interface AuthoringProtocolProjection {
+  schemaVersion: 1;
+  description: string;
+  hash: string;
+  depth: {
+    quick: AuthoringProtocolDepth;
+    full: AuthoringProtocolDepth;
+    dryThreshold: number;
+  };
+  dag: {
+    wave1: readonly AuthoringLaneId[];
+    wave2: readonly AuthoringLaneId[];
+    barrier: readonly AuthoringLaneId[];
+  };
+  lanes: Readonly<Record<AuthoringLaneId, AuthoringLaneProjection>>;
+  verify: {
+    lenses: readonly string[];
+    loopUntilDry: boolean;
+  };
+  merge: {
+    deterministicBackbone: readonly string[];
+    contentLeaves: readonly string[];
+  };
+  controlPlaneScripts: readonly AuthoringControlPlaneScript[];
+  deterministicBackbone: readonly string[];
 }
 
 export interface AuthoringVerificationSettings {

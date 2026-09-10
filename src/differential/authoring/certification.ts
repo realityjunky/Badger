@@ -1,5 +1,8 @@
 import path from "node:path";
-import { AUTHORING_DETERMINISTIC_BACKBONE } from "../../authoring/protocol.js";
+import {
+  authoringLaneIds,
+  authoringProtocolProjection,
+} from "../../authoring/protocol.js";
 import { sha256, stableValue } from "../../util.js";
 import type {
   ArtifactInventory,
@@ -375,15 +378,6 @@ export interface AuthoringDifferentialHarnessOptions {
   officialRunner?: OfficialCommandRunner;
 }
 
-const AUTHORING_LANE_IDS = [
-  "script",
-  "reference",
-  "pause-points",
-  "workflow-entry",
-  "skill-core",
-  "skill-review",
-] as const;
-
 const OFFICIAL_AUTHORING_BACKBONE = [
   "reference/workflow-protocol.json",
   "scripts/workflow-state.mjs",
@@ -522,7 +516,7 @@ export function canonicalizeAuthoringProtocol(
     ),
   };
   const lanes: Record<string, AuthoringProtocolLaneProjection> = {};
-  for (const laneId of AUTHORING_LANE_IDS) {
+  for (const laneId of authoringLaneIds()) {
     const lane = record(
       lanesValue[laneId],
       `authoring protocol lane ${laneId}`,
@@ -590,12 +584,12 @@ export function compareAuthoringProtocols(
   const claimsEqual =
     stableJson(
       Object.fromEntries(
-        AUTHORING_LANE_IDS.map((lane) => [lane, official.lanes[lane].claims]),
+        authoringLaneIds().map((lane) => [lane, official.lanes[lane].claims]),
       ),
     ) ===
     stableJson(
       Object.fromEntries(
-        AUTHORING_LANE_IDS.map((lane) => [lane, badger.lanes[lane].claims]),
+        authoringLaneIds().map((lane) => [lane, badger.lanes[lane].claims]),
       ),
     );
   const reviewDepthEqual =
@@ -604,7 +598,7 @@ export function compareAuthoringProtocols(
   const contentLeavesEqual =
     stableJson({
       lanes: Object.fromEntries(
-        AUTHORING_LANE_IDS.map((lane) => [
+        authoringLaneIds().map((lane) => [
           lane,
           official.lanes[lane].contentLeaves,
         ]),
@@ -613,7 +607,7 @@ export function compareAuthoringProtocols(
     }) ===
     stableJson({
       lanes: Object.fromEntries(
-        AUTHORING_LANE_IDS.map((lane) => [
+        authoringLaneIds().map((lane) => [
           lane,
           badger.lanes[lane].contentLeaves,
         ]),
@@ -675,7 +669,10 @@ export function compareAuthoringProtocols(
   if (deterministicBackboneEqual) exactMatches.push("deterministic-backbone");
   else if (
     sameMembers(official.deterministicBackbone, OFFICIAL_AUTHORING_BACKBONE) &&
-    sameMembers(badger.deterministicBackbone, AUTHORING_DETERMINISTIC_BACKBONE)
+    sameMembers(
+      badger.deterministicBackbone,
+      authoringProtocolProjection().deterministicBackbone,
+    )
   ) {
     expectedExtensions.push(
       protocolDifference(

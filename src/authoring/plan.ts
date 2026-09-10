@@ -3,23 +3,25 @@ import {
   semanticDossierHash,
   validateSemanticDossier,
 } from "../factory/questionnaire.js";
-import { sha256, slug, stableValue } from "../util.js";
+import { sha256, stableValue } from "../util.js";
 import { createStandaloneWorkflowKernel } from "../workflow-kernel/foundation.js";
 import {
   AUTHORING_COMPATIBILITY,
-  AUTHORING_DAG,
-  AUTHORING_LANE_CLAIMS,
-  AUTHORING_LANE_DEPENDENCIES,
-  AUTHORING_LANE_IDS,
-  AUTHORING_PROTOCOL,
   AUTHORING_PROTOCOL_HASH,
+  authoringContentLeaves,
+  authoringDag,
   authoringLaneClaims,
+  authoringLaneIds,
+  authoringLaneProjection,
+  authoringLanesForWave,
   authoringLaneDependencies,
   matchesAuthoringSequence,
+  authoringProtocolProjection,
   validateAuthoringProtocol,
 } from "./protocol.js";
 import type {
   AuthoringDepth,
+  AuthoringLaneId,
   AuthoringLane,
   AuthoringPlan,
   AuthoringPlanDiagnostic,
@@ -54,12 +56,6 @@ function diagnostic(
   path?: string,
 ): AuthoringPlanDiagnostic {
   return { code, message, ...(path ? { path } : {}) };
-}
-
-function concreteNodeSkillPath(workflowName: string, nodeId: string): string {
-  const workflowSlug = slug(workflowName) || "workflow";
-  const nodeSlug = slug(nodeId) || "node";
-  return `../${workflowSlug}-${nodeSlug}/SKILL.md`;
 }
 
 function sourceEvidence(proposal: FactoryProposal): AuthoringSourceEvidence[] {
@@ -145,31 +141,24 @@ function proposalDiagnostics(
 }
 
 function laneDefinitions(proposal: FactoryProposal): AuthoringLane[] {
-  const contentLeavesByLane: Record<string, string[]> = {
-    script: [],
-    reference: [],
-    "pause-points": ["reference/decision-points.md", "reference/recovery.md"],
-    "workflow-entry": ["SKILL.md"],
-    "skill-core": proposal.workflow.nodes
-      .filter((node) => !node.disabled)
-      .map((node) => concreteNodeSkillPath(proposal.name, node.id)),
-    "skill-review": ["reference/skill-review.md"],
-  };
-  return AUTHORING_LANE_IDS.map((id) => ({
-    id,
-    dependencies: [...authoringLaneDependencies(id)],
-    brief: AUTHORING_PROTOCOL.lanes[id].brief,
-    claims: [...authoringLaneClaims(id)],
-    derivedClaims:
-      id === "skill-core"
-        ? proposal.workflow.nodes
-            .filter((node) => !node.disabled)
-            .map((node) => `skill-core:node-skill:${node.id}`)
-        : [],
-    contentLeaves: [...contentLeavesByLane[id]],
-    producesContentLeaves:
-      AUTHORING_PROTOCOL.lanes[id].producesContentLeaves.length > 0,
-  }));
+  const activeNodeIds = proposal.workflow.nodes
+    .filter((node) => !node.disabled)
+    .map((node) => node.id);
+  return authoringLaneIds().map((id) => {
+    const projection = authoringLaneProjection(id, {
+      activeNodeIds,
+      workflowName: proposal.name,
+    });
+    return {
+      id: projection.id,
+      dependencies: [...projection.dependencies],
+      brief: projection.brief,
+      claims: [...projection.claims],
+      derivedClaims: [...projection.derivedClaims],
+      contentLeaves: [...projection.contentLeaves],
+      producesContentLeaves: projection.producesContentLeaves,
+    };
+  });
 }
 
 function planForProposal(
@@ -177,14 +166,16 @@ function planForProposal(
   source: AuthoringSourceEvidence[],
 ): Omit<AuthoringPlan, "authoringPlanHash"> {
   const depth: AuthoringDepth = options.depth ?? "quick";
-  const settings = AUTHORING_PROTOCOL.depth[depth];
+  const protocol = authoringProtocolProjection();
+  const settings = protocol.depth[depth];
   const lanes = laneDefinitions(options.proposal);
   const contentLeaves = [
-    "SKILL.md",
-    ...lanes.find((lane) => lane.id === "skill-core")!.contentLeaves,
-    "reference/decision-points.md",
-    "reference/recovery.md",
-    "reference/skill-review.md",
+    ...authoringContentLeaves({
+      activeNodeIds: options.proposal.workflow.nodes
+        .filter((node) => !node.disabled)
+        .map((node) => node.id),
+      workflowName: options.proposal.name,
+    }),
   ];
   const workflowProtocolHash = sha256(
     JSON.stringify(options.proposal.workflow),
@@ -206,24 +197,18 @@ function planForProposal(
     sourceEvidenceHash: sha256(
       JSON.stringify(stableValue(sourceEvidenceValue)),
     ),
-    dag: {
-      wave1: [...AUTHORING_DAG.wave1],
-      wave2: [...AUTHORING_DAG.wave2],
-      barrier: [...AUTHORING_DAG.barrier],
-    },
+    dag: authoringDag(),
     lanes,
     verify: {
       voters: settings.voters,
-      lenses: [...AUTHORING_PROTOCOL.verify.lenses],
+      lenses: [...protocol.verify.lenses],
       maxRounds: settings.maxRounds,
-      dryThreshold: AUTHORING_PROTOCOL.depth.dryThreshold,
+      dryThreshold: protocol.depth.dryThreshold,
       evidenceSource: settings.evidenceSource,
-      loopUntilDry: AUTHORING_PROTOCOL.verify.loopUntilDry,
+      loopUntilDry: protocol.verify.loopUntilDry,
     },
     merge: {
-      deterministicBackbone: [
-        ...AUTHORING_PROTOCOL.merge.deterministicBackbone,
-      ],
+      deterministicBackbone: [...protocol.merge.deterministicBackbone],
       contentLeaves,
     },
     sourceEvidence: source,
@@ -331,7 +316,7 @@ function validateLaneArray(
     return false;
   }
   const laneIds: string[] = [];
-  const knownLaneIds = new Set<string>(AUTHORING_LANE_IDS);
+  const knownLaneIds = new Set<string>(authoringLaneIds());
   for (const [index, laneValue] of value.entries()) {
     const lanePath = `lanes[${index}]`;
     if (!isRecord(laneValue) || typeof laneValue.id !== "string") {
@@ -364,8 +349,12 @@ function validateLaneArray(
         ),
       );
     }
-    const expectedClaims =
-      AUTHORING_LANE_CLAIMS[laneId as keyof typeof AUTHORING_LANE_CLAIMS];
+    const canonicalLane = knownLaneIds.has(laneId)
+      ? (laneId as AuthoringLaneId)
+      : undefined;
+    const expectedClaims = canonicalLane
+      ? authoringLaneClaims(canonicalLane)
+      : undefined;
     if (!arrayOfStrings(laneValue.claims)) {
       diagnostics.push(
         diagnostic(
@@ -395,10 +384,9 @@ function validateLaneArray(
         ),
       );
     }
-    const expectedDependencies =
-      AUTHORING_LANE_DEPENDENCIES[
-        laneId as keyof typeof AUTHORING_LANE_DEPENDENCIES
-      ];
+    const expectedDependencies = canonicalLane
+      ? authoringLaneDependencies(canonicalLane)
+      : undefined;
     if (
       (requireExtensions && laneValue.dependencies === undefined) ||
       (laneValue.dependencies !== undefined &&
@@ -448,7 +436,7 @@ function validateLaneArray(
       );
     }
   }
-  const expectedLaneIds = [...AUTHORING_LANE_IDS];
+  const expectedLaneIds = [...authoringLaneIds()];
   if (
     laneIds.length !== expectedLaneIds.length ||
     laneIds.some((laneId, index) => laneId !== expectedLaneIds[index])
@@ -475,7 +463,7 @@ function validateDag(
     return;
   }
   for (const key of ["wave1", "wave2", "barrier"] as const) {
-    const expected = AUTHORING_DAG[key];
+    const expected = authoringLanesForWave(key);
     if (
       !Array.isArray(value[key]) ||
       value[key].some((laneId) => typeof laneId !== "string")
@@ -507,6 +495,7 @@ export function validateAuthoringPlan(
   options: { requireExtensions?: boolean } = {},
 ): AuthoringPlanDiagnostic[] {
   const diagnostics: AuthoringPlanDiagnostic[] = [];
+  const protocol = authoringProtocolProjection();
   if (!isRecord(value)) {
     return [diagnostic("invalid-plan", "AuthoringPlan must be an object")];
   }
@@ -544,7 +533,7 @@ export function validateAuthoringPlan(
     );
   if (
     typeof value.protocolHash !== "string" ||
-    value.protocolHash !== AUTHORING_PROTOCOL_HASH
+    value.protocolHash !== protocol.hash
   )
     diagnostics.push(
       diagnostic(
@@ -566,7 +555,7 @@ export function validateAuthoringPlan(
       ),
     );
   else {
-    const expectedLenses = AUTHORING_PROTOCOL.verify.lenses;
+    const expectedLenses = protocol.verify.lenses;
     if (
       !arrayOfStrings(value.verify.lenses) ||
       value.verify.lenses.length !== expectedLenses.length ||
@@ -583,17 +572,16 @@ export function validateAuthoringPlan(
       );
     const depthSettings =
       value.depth === "quick" || value.depth === "full"
-        ? AUTHORING_PROTOCOL.depth[value.depth]
+        ? protocol.depth[value.depth]
         : undefined;
     if (
       depthSettings &&
       (value.verify.voters !== depthSettings.voters ||
         value.verify.maxRounds !== depthSettings.maxRounds ||
-        value.verify.dryThreshold !== AUTHORING_PROTOCOL.depth.dryThreshold ||
+        value.verify.dryThreshold !== protocol.depth.dryThreshold ||
         (requireExtensions &&
           (value.verify.evidenceSource !== depthSettings.evidenceSource ||
-            value.verify.loopUntilDry !==
-              AUTHORING_PROTOCOL.verify.loopUntilDry)))
+            value.verify.loopUntilDry !== protocol.verify.loopUntilDry)))
     )
       diagnostics.push(
         diagnostic(
@@ -616,10 +604,10 @@ export function validateAuthoringPlan(
     if (
       !arrayOfStrings(value.merge.deterministicBackbone) ||
       value.merge.deterministicBackbone.length !==
-        AUTHORING_PROTOCOL.merge.deterministicBackbone.length ||
+        protocol.merge.deterministicBackbone.length ||
       value.merge.deterministicBackbone.some(
         (item, itemIndex) =>
-          item !== AUTHORING_PROTOCOL.merge.deterministicBackbone[itemIndex],
+          item !== protocol.merge.deterministicBackbone[itemIndex],
       )
     )
       diagnostics.push(

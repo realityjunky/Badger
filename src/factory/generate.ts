@@ -23,13 +23,13 @@ import {
   atomicWrite,
 } from "../util.js";
 import {
-  AUTHORING_DAG,
-  AUTHORING_CONTROL_PLANE_SCRIPTS,
-  AUTHORING_DETERMINISTIC_BACKBONE,
-  AUTHORING_LANE_DEPENDENCIES,
-  AUTHORING_LANE_IDS,
-  AUTHORING_PROTOCOL,
   AUTHORING_PROTOCOL_HASH,
+  authoringContentLeaves,
+  authoringDag,
+  authoringLaneBrief,
+  authoringLaneDependencies,
+  authoringLaneIds,
+  authoringProtocolProjection,
 } from "../authoring/protocol.js";
 import { normalizeWorkflowRepairPolicy } from "../workflow-runtime/repair.js";
 import { deriveAuthoringPlan } from "../authoring/plan.js";
@@ -388,22 +388,22 @@ function generatedPackagePaths(
   hasAuthoringPlan: boolean,
   hasSourceEvidence: boolean,
 ): string[] {
+  const authoredLeaves = authoringContentLeaves({
+    activeNodeIds: activeNodes(proposal).map((node) => node.id),
+    workflowName: proposal.name,
+  }).map(packageRelativePath);
   return [
-    "SKILL.md",
-    ...activeNodes(proposal).map(
-      (node) => `${nodeSkillName(proposal.name, node.id)}/SKILL.md`,
-    ),
+    ...authoredLeaves,
     "reference/workflow-protocol.json",
     "reference/resolved-skills.json",
     ...(hasAuthoringPlan ? ["reference/authoring-plan.json"] : []),
     "reference/authoring-lanes.json",
     "reference/composition-report.md",
-    "reference/decision-points.md",
-    "reference/recovery.md",
-    "reference/skill-review.md",
     "reference/eval-manifest.json",
-    ...AUTHORING_LANE_IDS.map((lane) => AUTHORING_PROTOCOL.lanes[lane].brief),
-    ...AUTHORING_CONTROL_PLANE_SCRIPTS.map((script) => script.path),
+    ...authoringLaneIds().map((lane) => authoringLaneBrief(lane)),
+    ...authoringProtocolProjection().controlPlaneScripts.map(
+      (script) => script.path,
+    ),
     "scripts/workflow-runtime.mjs",
     "reference/package-inventory.json",
     ...(hasSourceEvidence ? ["reference/source-evidence.json"] : []),
@@ -425,9 +425,9 @@ function authoringLanesScaffold(
         contentLeaves: lane.contentLeaves,
         status: "PENDING",
       }))
-    : AUTHORING_LANE_IDS.map((id) => ({
+    : authoringLaneIds().map((id) => ({
         id,
-        dependencies: [...AUTHORING_LANE_DEPENDENCIES[id]],
+        dependencies: [...authoringLaneDependencies(id)],
         claims: [],
         contentLeaves: [],
         status: "LEGACY",
@@ -442,14 +442,18 @@ function authoringLanesScaffold(
     sourceEvidenceHash: authoringPlan?.sourceEvidenceHash ?? null,
     status: authoringPlan ? "pending" : "legacy",
     dag: {
-      wave1: [...AUTHORING_DAG.wave1],
-      wave2: [...AUTHORING_DAG.wave2],
-      barrier: [...AUTHORING_DAG.barrier],
+      wave1: [...authoringDag().wave1],
+      wave2: [...authoringDag().wave2],
+      barrier: [...authoringDag().barrier],
     },
     controlPlane: {
       authority: "Badger assembler",
-      scripts: AUTHORING_CONTROL_PLANE_SCRIPTS.map((script) => ({ ...script })),
-      deterministicBackbone: [...AUTHORING_DETERMINISTIC_BACKBONE],
+      scripts: authoringProtocolProjection().controlPlaneScripts.map(
+        (script) => ({ ...script }),
+      ),
+      deterministicBackbone: [
+        ...authoringProtocolProjection().deterministicBackbone,
+      ],
       distinction: {
         plan: "badger-plan.mjs inspects the normalized WorkflowProtocol without mutating state.",
         check:
@@ -534,12 +538,13 @@ function evalManifest(proposal: FactoryProposal): Record<string, unknown> {
         "workflow-route-conformance",
         WORKFLOW_RUNTIME_CERTIFICATION_TASK,
       ],
-      controlPlaneScripts: AUTHORING_CONTROL_PLANE_SCRIPTS.map((script) => ({
-        id: script.id,
-        path: script.path,
-        claim: script.claim,
-        kind: script.kind,
-      })),
+      controlPlaneScripts:
+        authoringProtocolProjection().controlPlaneScripts.map((script) => ({
+          id: script.id,
+          path: script.path,
+          claim: script.claim,
+          kind: script.kind,
+        })),
     },
   };
 }
@@ -640,9 +645,11 @@ function badgerCheckScript(
     hasAuthoringPlan,
     hasSourceEvidence,
   );
-  const expectedScripts = AUTHORING_CONTROL_PLANE_SCRIPTS.map((script) => ({
-    ...script,
-  }));
+  const expectedScripts = authoringProtocolProjection().controlPlaneScripts.map(
+    (script) => ({
+      ...script,
+    }),
+  );
   return `#!/usr/bin/env node
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -817,10 +824,10 @@ async function writeScaffold(options: {
       JSON.stringify(authoringPlan, null, 2) + "\n",
     );
   }
-  for (const lane of AUTHORING_LANE_IDS) {
+  for (const lane of authoringLaneIds()) {
     const brief =
       authoringPlan?.lanes.find((item) => item.id === lane)?.brief ??
-      AUTHORING_PROTOCOL.lanes[lane].brief;
+      authoringLaneBrief(lane);
     await atomicWrite(path.join(root, brief), await authoringReference(brief));
   }
   await atomicWrite(

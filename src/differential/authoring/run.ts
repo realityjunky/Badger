@@ -13,7 +13,11 @@ import {
 } from "../../authoring/index.js";
 import { deriveAuthoringPlan } from "../../authoring/plan.js";
 import { BADGER_AUTHORING_OUTPUT_ENVELOPE } from "./certification.js";
-import { AUTHORING_LANE_IDS } from "../../authoring/protocol.js";
+import {
+  authoringContentLeaves,
+  authoringLaneContentLeaves,
+  authoringLaneIds,
+} from "../../authoring/protocol.js";
 import {
   canonicalizeAuthoringProtocol,
   certifyAuthoringDifferential,
@@ -54,7 +58,8 @@ import type {
   OfficialCommandRunner,
   ReadinessObservation,
 } from "../types.js";
-import { hashDirectory, isWithin, sha256, slug } from "../../util.js";
+import { hashDirectory, isWithin, sha256 } from "../../util.js";
+import type { AuthoringLaneId } from "../../authoring/types.js";
 
 const DEFAULT_OFFICIAL_PROTOCOL_PATH =
   "assets/skills/comet-any/reference/authoring-protocol.json";
@@ -198,18 +203,14 @@ function sourceSnapshotsEqual(
 
 function contentLeavesForFixture(fixture: DifferentialFixture): string[] {
   const workflow = fixture.plan.workflow;
-  const nodeLeaves = workflow.customNodes
+  const activeNodeIds = workflow.customNodes
     .filter((node) => !node.disabled)
-    .map(
-      (node) =>
-        `../${slug(workflow.name) || "workflow"}-${slug(node.id) || "node"}/SKILL.md`,
-    );
+    .map((node) => node.id);
   return [
-    "SKILL.md",
-    ...nodeLeaves,
-    "reference/decision-points.md",
-    "reference/recovery.md",
-    "reference/skill-review.md",
+    ...authoringContentLeaves({
+      activeNodeIds,
+      workflowName: workflow.name,
+    }),
   ];
 }
 
@@ -234,16 +235,16 @@ function authoringLaneLeaves(
   fixture: DifferentialFixture,
   lane: string,
 ): string[] {
-  const leaves = contentLeavesForFixture(fixture);
-  if (lane === "pause-points") {
-    return ["reference/decision-points.md", "reference/recovery.md"];
-  }
-  if (lane === "workflow-entry") return ["SKILL.md"];
-  if (lane === "skill-core") {
-    return leaves.filter((leaf) => leaf.startsWith("../"));
-  }
-  if (lane === "skill-review") return ["reference/skill-review.md"];
-  return [];
+  const workflow = fixture.plan.workflow;
+  const activeNodeIds = workflow.customNodes
+    .filter((node) => !node.disabled)
+    .map((node) => node.id);
+  return [
+    ...authoringLaneContentLeaves(lane as AuthoringLaneId, {
+      activeNodeIds,
+      workflowName: workflow.name,
+    }),
+  ];
 }
 
 function fixtureContent(pathValue: string, workflowName: string): string {
@@ -379,7 +380,7 @@ function localLaneStatuses(
   readiness: Awaited<ReturnType<typeof authoringReadiness>>,
 ): Record<string, string> {
   return Object.fromEntries(
-    AUTHORING_LANE_IDS.map((lane) => [
+    authoringLaneIds().map((lane) => [
       lane,
       readiness.records[lane]?.status ?? readiness.lanes[lane].status,
     ]),
@@ -438,7 +439,7 @@ export async function observeStandaloneAuthoring(options: {
       lifecycleComplete: false,
       completedLanes: [],
       laneStatuses: Object.fromEntries(
-        AUTHORING_LANE_IDS.map((lane) => [lane, "PENDING"]),
+        authoringLaneIds().map((lane) => [lane, "PENDING"]),
       ),
       contentLeaves: contentLeavesForFixture(options.fixture),
       generatedArtifacts,
@@ -506,7 +507,7 @@ export async function observeStandaloneAuthoring(options: {
   const lifecycleComplete =
     readinessAfterAssembly.state === "ready" &&
     readinessAfterAssembly.status === "assembled" &&
-    AUTHORING_LANE_IDS.every(
+    authoringLaneIds().every(
       (lane) => readinessAfterAssembly.records[lane]?.status === "DONE",
     );
   return {
@@ -704,7 +705,7 @@ export async function observeOfficialAuthoring(options: {
       lifecycleComplete: false,
       completedLanes: [],
       laneStatuses: Object.fromEntries(
-        AUTHORING_LANE_IDS.map((lane) => [lane, "PENDING"]),
+        authoringLaneIds().map((lane) => [lane, "PENDING"]),
       ),
       contentLeaves: contentLeavesForFixture(options.fixture),
       generatedArtifacts,
@@ -772,7 +773,7 @@ export async function observeOfficialAuthoring(options: {
   await fs.mkdir(recordRoot, { recursive: true });
   const recordedLanes: string[] = [];
   for (const lane of [
-    ...AUTHORING_LANE_IDS.filter((item) => item !== "skill-review"),
+    ...authoringLaneIds().filter((item) => item !== "skill-review"),
     "skill-review",
   ]) {
     const outputPath = path.join(recordRoot, `${lane}.json`);
@@ -865,7 +866,7 @@ export async function observeOfficialAuthoring(options: {
     ),
   );
   const completed =
-    recordedLanes.length === AUTHORING_LANE_IDS.length &&
+    recordedLanes.length === authoringLaneIds().length &&
     !pending &&
     allContentLeavesPresent &&
     !publicationReviewFailed;
@@ -895,7 +896,7 @@ export async function observeOfficialAuthoring(options: {
     publicationApprovalHash: null,
   };
   const laneStatuses = Object.fromEntries(
-    AUTHORING_LANE_IDS.map((lane) => [
+    authoringLaneIds().map((lane) => [
       lane,
       recordedLanes.includes(lane) ? "DONE" : "PENDING",
     ]),

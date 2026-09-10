@@ -19,13 +19,14 @@ import {
   writePackageInventory,
 } from "../factory/generate.js";
 import {
-  AUTHORING_CONTROL_PLANE_SCRIPTS,
-  AUTHORING_DETERMINISTIC_BACKBONE,
-  AUTHORING_LANE_IDS,
-  AUTHORING_LANE_DEPENDENCIES,
   AUTHORING_PROTOCOL_HASH,
-  authoringLaneClaims,
+  authoringContentLeafOwners,
+  authoringDependentLanes,
+  authoringLaneClaimIds,
   authoringLaneDependencies,
+  authoringLaneIds,
+  authoringLanesForWave,
+  authoringProtocolProjection,
 } from "./protocol.js";
 import { deriveAuthoringPlan, validateAuthoringPlan } from "./plan.js";
 import {
@@ -115,7 +116,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isAuthoringLane(value: unknown): value is AuthoringLaneId {
   return (
     typeof value === "string" &&
-    (AUTHORING_LANE_IDS as readonly string[]).includes(value)
+    (authoringLaneIds() as readonly string[]).includes(value)
   );
 }
 
@@ -180,7 +181,11 @@ function packageLeafPath(root: string, leaf: string): string {
 }
 
 function expectedClaims(lane: AuthoringLane): string[] {
-  return [...lane.claims, ...lane.derivedClaims];
+  return [
+    ...authoringLaneClaimIds(lane.id, {
+      derivedClaims: lane.derivedClaims,
+    }),
+  ];
 }
 
 function laneDefinition(
@@ -190,29 +195,6 @@ function laneDefinition(
   const definition = plan.lanes.find((item) => item.id === lane);
   if (!definition) throw new Error(`Unknown authoring lane: ${lane}`);
   return definition;
-}
-
-function dependentLanes(
-  plan: AuthoringPlan,
-  lane: AuthoringLaneId,
-): AuthoringLaneId[] {
-  const affected = new Set<AuthoringLaneId>([lane]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const definition of plan.lanes) {
-      if (
-        !affected.has(definition.id) &&
-        definition.dependencies.some((dependency) => affected.has(dependency))
-      ) {
-        affected.add(definition.id);
-        changed = true;
-      }
-    }
-  }
-  return AUTHORING_LANE_IDS.filter(
-    (laneId) => laneId !== lane && affected.has(laneId),
-  );
 }
 
 function authoringInputHash(plan: AuthoringPlan): string {
@@ -335,7 +317,7 @@ function recordsMaterialHash(
   return sha256(
     JSON.stringify(
       stableValue(
-        AUTHORING_LANE_IDS.map((lane) => {
+        authoringLaneIds().map((lane) => {
           const record = records[lane];
           return record ? canonicalRecord(record) : { lane, missing: true };
         }),
@@ -1246,10 +1228,9 @@ export function validateAuthoringRecord(
     findings.push("authoring record claims must be an array");
   if (claims.length > MAX_ARRAY_LENGTH)
     findings.push("authoring record claims exceeds its maximum length");
-  const requiredClaimIds = [
-    ...authoringLaneClaims(lane.id),
-    ...lane.derivedClaims,
-  ];
+  const requiredClaimIds = authoringLaneClaimIds(lane.id, {
+    derivedClaims: lane.derivedClaims,
+  });
   const claimIds = new Set<string>();
   for (const [index, claimValue] of claims.entries()) {
     if (!isRecord(claimValue)) {
@@ -2096,7 +2077,7 @@ async function readStoredRecords(
 }> {
   const records: Partial<Record<AuthoringLaneId, AuthoringRecord>> = {};
   const errors: string[] = [];
-  for (const lane of AUTHORING_LANE_IDS) {
+  for (const lane of authoringLaneIds()) {
     const file = recordFile(state, lane);
     try {
       const stats = await fs.lstat(file);
@@ -2235,7 +2216,7 @@ function summaryStatus(
   records: Partial<Record<AuthoringLaneId, AuthoringRecord>>,
 ): AuthoringSessionStatus {
   if (
-    AUTHORING_LANE_IDS.every((lane) => isCompleteStatus(records[lane]?.status))
+    authoringLaneIds().every((lane) => isCompleteStatus(records[lane]?.status))
   )
     return "authored";
   return Object.keys(records).length ? "in-progress" : "pending";
@@ -2291,7 +2272,7 @@ export async function initializeAuthoringSession(options: {
       JSON.stringify(options.plan, null, 2) + "\n",
     );
     const retainedRecords = previous?.records ?? {};
-    const retainedLanes = AUTHORING_LANE_IDS.filter(
+    const retainedLanes = authoringLaneIds().filter(
       (lane) => retainedRecords[lane] !== undefined,
     );
     const invalidatedLanes = sameInput
@@ -2695,11 +2676,11 @@ export async function recordAuthoring(options: {
       (laneId) => laneId !== options.lane,
     );
     const invalidatedLanes = new Set(remainingInvalidated ?? []);
-    for (const dependent of dependentLanes(currentPlan, options.lane)) {
+    for (const dependent of authoringDependentLanes(options.lane)) {
       if (stored.records[dependent] || prior.records[dependent])
         invalidatedLanes.add(dependent);
     }
-    const orderedInvalidated = AUTHORING_LANE_IDS.filter((laneId) =>
+    const orderedInvalidated = authoringLaneIds().filter((laneId) =>
       invalidatedLanes.has(laneId),
     );
     current.authoring = {
@@ -2904,12 +2885,16 @@ function authoringLanesDocument(
           : null,
         status: "assembled",
         dag: plan.dag,
-        deterministicBackbone: [...AUTHORING_DETERMINISTIC_BACKBONE],
+        deterministicBackbone: [
+          ...authoringProtocolProjection().deterministicBackbone,
+        ],
         controlPlane: {
           authority: "Badger assembler",
-          scripts: AUTHORING_CONTROL_PLANE_SCRIPTS.map((script) => ({
-            ...script,
-          })),
+          scripts: authoringProtocolProjection().controlPlaneScripts.map(
+            (script) => ({
+              ...script,
+            }),
+          ),
           distinction: {
             plan: "badger-plan.mjs inspects the normalized WorkflowProtocol without mutating state.",
             check:
@@ -2917,7 +2902,7 @@ function authoringLanesDocument(
             hook: "badger-hook-guard.mjs enforces the active WorkflowRuntime hook boundary.",
           },
         },
-        lanes: AUTHORING_LANE_IDS.map((lane) => ({
+        lanes: authoringLaneIds().map((lane) => ({
           id: lane,
           dependencies: laneDefinition(plan, lane).dependencies,
           claims: expectedClaims(laneDefinition(plan, lane)),
@@ -2951,14 +2936,17 @@ function compositionReport(
       return `### ${candidate.name}\n${sources || "- No source selected"}`;
     })
     .join("\n\n");
-  const laneEvidence = AUTHORING_LANE_IDS.map((laneId) => {
-    const lane = laneDefinition(plan, laneId);
-    const record = records[laneId];
-    const claims = record?.claims.map((claim) => claim.id).join(", ") || "none";
-    const artifacts =
-      record?.artifacts.map((artifact) => artifact.path).join(", ") || "none";
-    return `- ${laneId}: ${record?.status ?? "PENDING"}; claims=${claims}; artifacts=${artifacts}; required=${expectedClaims(lane).join(", ") || "none"}`;
-  }).join("\n");
+  const laneEvidence = authoringLaneIds()
+    .map((laneId) => {
+      const lane = laneDefinition(plan, laneId);
+      const record = records[laneId];
+      const claims =
+        record?.claims.map((claim) => claim.id).join(", ") || "none";
+      const artifacts =
+        record?.artifacts.map((artifact) => artifact.path).join(", ") || "none";
+      return `- ${laneId}: ${record?.status ?? "PENDING"}; claims=${claims}; artifacts=${artifacts}; required=${expectedClaims(lane).join(", ") || "none"}`;
+    })
+    .join("\n");
   return `# Composition Report
 
 This deterministic report records the source and protocol identities used to assemble the package. It is audit evidence, not user guidance.
@@ -2994,7 +2982,7 @@ function waveReadiness(
   for (const lane of lanes) {
     const definition = plan?.lanes.find((item) => item.id === lane);
     const dependencies =
-      definition?.dependencies ?? AUTHORING_LANE_DEPENDENCIES[lane];
+      definition?.dependencies ?? authoringLaneDependencies(lane);
     const reasons = dependencies
       .filter(
         (dependency) =>
@@ -3031,7 +3019,7 @@ function readinessLanes(
   invalidated = new Set<AuthoringLaneId>(),
 ): Record<AuthoringLaneId, AuthoringLaneReadiness> {
   return Object.fromEntries(
-    AUTHORING_LANE_IDS.map((lane) => {
+    authoringLaneIds().map((lane) => {
       const record = records[lane];
       const definition = plan?.lanes.find((item) => item.id === lane);
       const laneBlockers = [
@@ -3053,7 +3041,7 @@ function readinessLanes(
         {
           id: lane,
           dependencies: [
-            ...(definition?.dependencies ?? AUTHORING_LANE_DEPENDENCIES[lane]),
+            ...(definition?.dependencies ?? authoringLaneDependencies(lane)),
           ],
           status: record?.status ?? "PENDING",
           executable: nextLanes.includes(lane),
@@ -3117,17 +3105,22 @@ export async function authoringReadiness(
       waves: [
         waveReadiness(
           "wave1",
-          ["script", "reference", "pause-points"],
+          authoringLanesForWave("wave1"),
           emptyRecords,
           [],
         ),
         waveReadiness(
           "wave2",
-          ["workflow-entry", "skill-core"],
+          authoringLanesForWave("wave2"),
           emptyRecords,
           [],
         ),
-        waveReadiness("barrier", ["skill-review"], emptyRecords, []),
+        waveReadiness(
+          "barrier",
+          authoringLanesForWave("barrier"),
+          emptyRecords,
+          [],
+        ),
       ],
       recovery: recoveryInfo(state),
     };
@@ -3150,17 +3143,22 @@ export async function authoringReadiness(
       waves: [
         waveReadiness(
           "wave1",
-          ["script", "reference", "pause-points"],
+          authoringLanesForWave("wave1"),
           emptyRecords,
           [],
         ),
         waveReadiness(
           "wave2",
-          ["workflow-entry", "skill-core"],
+          authoringLanesForWave("wave2"),
           emptyRecords,
           [],
         ),
-        waveReadiness("barrier", ["skill-review"], emptyRecords, []),
+        waveReadiness(
+          "barrier",
+          authoringLanesForWave("barrier"),
+          emptyRecords,
+          [],
+        ),
       ],
       recovery: recoveryInfo(state, authoring),
     };
@@ -3182,17 +3180,22 @@ export async function authoringReadiness(
       waves: [
         waveReadiness(
           "wave1",
-          ["script", "reference", "pause-points"],
+          authoringLanesForWave("wave1"),
           emptyRecords,
           [],
         ),
         waveReadiness(
           "wave2",
-          ["workflow-entry", "skill-core"],
+          authoringLanesForWave("wave2"),
           emptyRecords,
           [],
         ),
-        waveReadiness("barrier", ["skill-review"], emptyRecords, []),
+        waveReadiness(
+          "barrier",
+          authoringLanesForWave("barrier"),
+          emptyRecords,
+          [],
+        ),
       ],
       recovery: recoveryInfo(state, authoring),
     };
@@ -3205,11 +3208,11 @@ export async function authoringReadiness(
   const invalidated = new Set(authoring.invalidatedLanes ?? []);
   const sourceDrift = await sourceEvidenceDrift(state, plan);
   if (sourceDrift.length) {
-    for (const lane of AUTHORING_LANE_IDS) invalidated.add(lane);
+    for (const lane of authoringLaneIds()) invalidated.add(lane);
     authoring = {
       ...authoring,
       status: "stale",
-      invalidatedLanes: AUTHORING_LANE_IDS.filter((lane) =>
+      invalidatedLanes: authoringLaneIds().filter((lane) =>
         invalidated.has(lane),
       ),
     };
@@ -3233,7 +3236,7 @@ export async function authoringReadiness(
       `Authoring revision conflict for ${authoring.conflict.lane}: expected ${authoring.conflict.expectedRevision}, actual ${authoring.conflict.actualRevision}`,
     );
   let hasContext = false;
-  for (const laneId of AUTHORING_LANE_IDS) {
+  for (const laneId of authoringLaneIds()) {
     const lane = laneDefinition(plan, laneId);
     const record = stored.records[laneId];
     if (!record) {
@@ -3303,7 +3306,7 @@ export async function authoringReadiness(
       blockers.push(`Unable to hash assembled package: ${String(error)}`);
     }
   }
-  const allRecordsComplete = AUTHORING_LANE_IDS.every(
+  const allRecordsComplete = authoringLaneIds().every(
     (lane) =>
       !invalidated.has(lane) && isCompleteStatus(stored.records[lane]?.status),
   );
@@ -3346,7 +3349,7 @@ export async function authoringReadiness(
     ? []
     : ["Generated scaffold contains authoring-pending content"];
   blockers.push(...pendingMarkers);
-  const nextLanes = AUTHORING_LANE_IDS.filter((lane) => {
+  const nextLanes = authoringLaneIds().filter((lane) => {
     if (
       stored.records[lane] &&
       !invalidated.has(lane) &&
@@ -3360,7 +3363,7 @@ export async function authoringReadiness(
     );
   });
   const ready = blockers.length === 0 && allRecordsComplete;
-  const completedLanes = AUTHORING_LANE_IDS.filter(
+  const completedLanes = authoringLaneIds().filter(
     (lane) =>
       !invalidated.has(lane) && isCompleteStatus(stored.records[lane]?.status),
   );
@@ -3420,7 +3423,7 @@ export async function authoringReadiness(
     waves: [
       waveReadiness(
         "wave1",
-        ["script", "reference", "pause-points"],
+        authoringLanesForWave("wave1"),
         stored.records,
         nextLanes,
         plan,
@@ -3428,7 +3431,7 @@ export async function authoringReadiness(
       ),
       waveReadiness(
         "wave2",
-        ["workflow-entry", "skill-core"],
+        authoringLanesForWave("wave2"),
         stored.records,
         nextLanes,
         plan,
@@ -3436,7 +3439,7 @@ export async function authoringReadiness(
       ),
       waveReadiness(
         "barrier",
-        ["skill-review"],
+        authoringLanesForWave("barrier"),
         stored.records,
         nextLanes,
         plan,
@@ -3453,9 +3456,10 @@ export async function authoringReadiness(
 export const readAuthoringStatus = authoringReadiness;
 
 function authoredLeafPaths(plan: AuthoringPlan): string[] {
-  return plan.lanes.flatMap((lane) =>
-    lane.contentLeaves.map(packageRelativePath),
+  const laneContentLeaves = Object.fromEntries(
+    plan.lanes.map((lane) => [lane.id, lane.contentLeaves]),
   );
+  return Object.keys(authoringContentLeafOwners({ laneContentLeaves }));
 }
 
 async function assertAuthoringPlanCurrent(
@@ -3659,7 +3663,8 @@ async function assertAssembledPackage(
 ): Promise<void> {
   const paths = await listFiles(root);
   const pathSet = new Set(paths.map((value) => value.replaceAll("\\", "/")));
-  for (const relativePath of AUTHORING_DETERMINISTIC_BACKBONE) {
+  for (const relativePath of authoringProtocolProjection()
+    .deterministicBackbone) {
     if (!pathSet.has(relativePath))
       throw new Error(
         `Assembled package is missing deterministic file: ${relativePath}`,
@@ -3677,12 +3682,12 @@ async function assertAssembledPackage(
     );
   if (
     JSON.stringify(lanes.deterministicBackbone) !==
-    JSON.stringify(AUTHORING_DETERMINISTIC_BACKBONE)
+    JSON.stringify(authoringProtocolProjection().deterministicBackbone)
   )
     throw new Error("Assembled deterministic backbone metadata is invalid");
   if (
     JSON.stringify(lanes.controlPlane?.scripts ?? []) !==
-    JSON.stringify(AUTHORING_CONTROL_PLANE_SCRIPTS)
+    JSON.stringify(authoringProtocolProjection().controlPlaneScripts)
   )
     throw new Error("Assembled Badger control-plane mapping is invalid");
   const inventory = JSON.parse(
@@ -3867,7 +3872,7 @@ export async function assemblePackage(
       }
       const authoredPaths = authoredLeafPaths(plan);
       const artifactTargets = new Set<string>();
-      for (const laneId of AUTHORING_LANE_IDS) {
+      for (const laneId of authoringLaneIds()) {
         const record = stored.records[laneId]!;
         for (const artifact of record.artifacts) {
           const content = await readArtifactContent(current, artifact);
