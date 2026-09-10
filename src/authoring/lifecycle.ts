@@ -4023,3 +4023,16 @@ export async function assemblePackage(
     }
   });
 }
+export interface AuthoringSessionGateway {
+  initialize(options: Parameters<typeof initializeAuthoringSession>[0]): ReturnType<typeof initializeAuthoringSession>;
+  read(projectRoot: string, name: string): ReturnType<typeof readAuthoringSession>;
+  readiness(state: CreatorState): ReturnType<typeof authoringReadiness>;
+}
+
+export function authoringSessionGateway(): AuthoringSessionGateway {
+  return {
+    initialize: initializeAuthoringSession,
+    read: readAuthoringSession,
+    readiness: authoringReadiness,
+  };
+}
