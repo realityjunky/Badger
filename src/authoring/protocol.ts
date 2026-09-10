@@ -218,6 +218,19 @@ export function hashAuthoringProtocol(): string {
 
 export const AUTHORING_PROTOCOL_HASH = hashAuthoringProtocol();
 
+/** Canonical lane-contract projections for all authoring consumers. */
+export function authoringLaneClaims(lane: AuthoringLaneId): readonly string[] {
+  return AUTHORING_LANE_CLAIMS[lane];
+}
+
+export function authoringLaneDependencies(lane: AuthoringLaneId): readonly AuthoringLaneId[] {
+  return AUTHORING_LANE_DEPENDENCIES[lane];
+}
+
+export function authoringLaneContentLeaves(lane: AuthoringLaneId): readonly string[] {
+  return AUTHORING_PROTOCOL.lanes[lane].producesContentLeaves;
+}
+
 export const AUTHORING_COMPATIBILITY: AuthoringCompatibility = {
   officialRevision: "99fd7495f8b9217efbaae3a46d885f6fa7f4102a",
   officialVersion: "0.4.0-beta.19",

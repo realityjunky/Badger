@@ -13,6 +13,8 @@ import {
   AUTHORING_LANE_IDS,
   AUTHORING_PROTOCOL,
   AUTHORING_PROTOCOL_HASH,
+  authoringLaneClaims,
+  authoringLaneDependencies,
   matchesAuthoringSequence,
   validateAuthoringProtocol,
 } from "./protocol.js";
@@ -155,9 +157,9 @@ function laneDefinitions(proposal: FactoryProposal): AuthoringLane[] {
   };
   return AUTHORING_LANE_IDS.map((id) => ({
     id,
-    dependencies: [...AUTHORING_LANE_DEPENDENCIES[id]],
+      dependencies: [...authoringLaneDependencies(id)],
     brief: AUTHORING_PROTOCOL.lanes[id].brief,
-    claims: [...AUTHORING_LANE_CLAIMS[id]],
+      claims: [...authoringLaneClaims(id)],
     derivedClaims:
       id === "skill-core"
         ? proposal.workflow.nodes
