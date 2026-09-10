@@ -223,11 +223,15 @@ export function authoringLaneClaims(lane: AuthoringLaneId): readonly string[] {
   return AUTHORING_LANE_CLAIMS[lane];
 }
 
-export function authoringLaneDependencies(lane: AuthoringLaneId): readonly AuthoringLaneId[] {
+export function authoringLaneDependencies(
+  lane: AuthoringLaneId,
+): readonly AuthoringLaneId[] {
   return AUTHORING_LANE_DEPENDENCIES[lane];
 }
 
-export function authoringLaneContentLeaves(lane: AuthoringLaneId): readonly string[] {
+export function authoringLaneContentLeaves(
+  lane: AuthoringLaneId,
+): readonly string[] {
   return AUTHORING_PROTOCOL.lanes[lane].producesContentLeaves;
 }
 

@@ -157,9 +157,9 @@ function laneDefinitions(proposal: FactoryProposal): AuthoringLane[] {
   };
   return AUTHORING_LANE_IDS.map((id) => ({
     id,
-      dependencies: [...authoringLaneDependencies(id)],
+    dependencies: [...authoringLaneDependencies(id)],
     brief: AUTHORING_PROTOCOL.lanes[id].brief,
-      claims: [...authoringLaneClaims(id)],
+    claims: [...authoringLaneClaims(id)],
     derivedClaims:
       id === "skill-core"
         ? proposal.workflow.nodes

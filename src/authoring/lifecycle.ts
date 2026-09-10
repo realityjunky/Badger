@@ -21,9 +21,10 @@ import {
 import {
   AUTHORING_CONTROL_PLANE_SCRIPTS,
   AUTHORING_DETERMINISTIC_BACKBONE,
-  AUTHORING_LANE_DEPENDENCIES,
   AUTHORING_LANE_IDS,
   AUTHORING_PROTOCOL_HASH,
+  authoringLaneClaims,
+  authoringLaneDependencies,
 } from "./protocol.js";
 import { deriveAuthoringPlan, validateAuthoringPlan } from "./plan.js";
 import {
@@ -1244,7 +1245,10 @@ export function validateAuthoringRecord(
     findings.push("authoring record claims must be an array");
   if (claims.length > MAX_ARRAY_LENGTH)
     findings.push("authoring record claims exceeds its maximum length");
-  const requiredClaimIds = expectedClaims(lane);
+  const requiredClaimIds = [
+    ...authoringLaneClaims(lane.id),
+    ...lane.derivedClaims,
+  ];
   const claimIds = new Set<string>();
   for (const [index, claimValue] of claims.entries()) {
     if (!isRecord(claimValue)) {
@@ -4024,8 +4028,13 @@ export async function assemblePackage(
   });
 }
 export interface AuthoringSessionGateway {
-  initialize(options: Parameters<typeof initializeAuthoringSession>[0]): ReturnType<typeof initializeAuthoringSession>;
-  read(projectRoot: string, name: string): ReturnType<typeof readAuthoringSession>;
+  initialize(
+    options: Parameters<typeof initializeAuthoringSession>[0],
+  ): ReturnType<typeof initializeAuthoringSession>;
+  read(
+    projectRoot: string,
+    name: string,
+  ): ReturnType<typeof readAuthoringSession>;
   readiness(state: CreatorState): ReturnType<typeof authoringReadiness>;
 }
 
