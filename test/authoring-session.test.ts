@@ -8,11 +8,12 @@ import { generatePackage } from "../src/factory/generate.js";
 import { initializeState, readState } from "../src/factory/state.js";
 import {
   AuthoringRevisionConflictError,
-  assemblePackage,
+  assemblePackage as assemblePackageImplementation,
   authoringReadiness,
+  authoringSessionGateway,
   buildAuthoringHandoff,
   initializeAuthoringSession,
-  recordAuthoring,
+  recordAuthoring as persistAuthoring,
   recordAuthoringFile,
   readAuthoringSession,
   runManualAuthoringFixture,
@@ -22,6 +23,12 @@ import { deriveAuthoringPlan } from "../src/authoring/plan.js";
 import type { CreatorState, FactoryPlan } from "../src/types.js";
 import { questionnaireFixture } from "./fixtures/semantic-dossier.js";
 import { findSkills } from "../src/skill/find.js";
+
+const recordAuthoring = (options: Parameters<typeof persistAuthoring>[0]) =>
+  persistAuthoring({ ...options, confirmed: true });
+const assemblePackage = (
+  state: Parameters<typeof assemblePackageImplementation>[0],
+) => assemblePackageImplementation(state, true);
 
 describe("resumable authoring session", () => {
   let root: string;
@@ -707,7 +714,12 @@ describe("resumable authoring session", () => {
       JSON.stringify({ data: "x".repeat(300_000) }),
     );
     await expect(
-      recordAuthoringFile({ state, lane: "reference", file: outputPath }),
+      recordAuthoringFile({
+        state,
+        lane: "reference",
+        file: outputPath,
+        confirmed: true,
+      }),
     ).rejects.toThrow(/size limit/iu);
 
     await fs.writeFile(
@@ -719,6 +731,8 @@ describe("resumable authoring session", () => {
     );
     expect(recovered.completedLanes).toEqual(["script"]);
     expect(recovered.recovery.revision).toBe(state.authoring!.revision);
+    expect(recovered.recovery.recoveryRequired).toBe(true);
+    expect(recovered.recoveryError).toMatch(/JSON|summary/i);
   });
 
   it("reconciles a lane record that committed before the process exited", async () => {
@@ -839,5 +853,181 @@ describe("resumable authoring session", () => {
     ]);
     expect(readiness.nextLanes).toEqual(["workflow-entry", "skill-core"]);
     expect(readiness.state).toBe("blocked");
+  });
+
+  it("exposes persisted session decisions and confirmation gates through one gateway", async () => {
+    const { state, plan } = await createSession();
+    const gateway = authoringSessionGateway();
+    const missingSession = {
+      ...structuredClone(state),
+      projectRoot: path.join(root, "missing-project"),
+      authoring: undefined,
+      generated: undefined,
+    };
+    const missingDecision = await gateway.decide({
+      state: missingSession,
+      operation: "dispatch",
+      lane: "script",
+    });
+    expect(missingDecision.allowed).toBe(false);
+    expect(missingDecision.blockers).toContain(
+      "Authoring session is missing; generate a confirmed scaffold",
+    );
+    const initial = await gateway.read(project, state.name);
+
+    expect(initial.sessionId).toMatch(/^[a-f0-9]{64}$/u);
+    expect(initial.workflow).toBe(state.name);
+    expect(initial.semanticDossierHash).toBeUndefined();
+    await expect(
+      persistAuthoring({
+        state,
+        lane: "script",
+        record: {
+          status: "DONE",
+          claims: claims(plan, "script"),
+          artifacts: [],
+        },
+      }),
+    ).rejects.toThrow(/confirmation/iu);
+    await expect(assemblePackageImplementation(state)).rejects.toThrow(
+      /confirmation/iu,
+    );
+
+    const dispatch = await gateway.decide({
+      state,
+      operation: "dispatch",
+      lane: "script",
+    });
+    expect(dispatch.allowed).toBe(true);
+    expect(dispatch.identity?.sessionId).toBe(initial.sessionId);
+    expect(dispatch.revision).toBe(initial.revision);
+
+    const gate = await gateway.writeGate({
+      state,
+      operation: "assemble",
+      confirmed: false,
+    });
+    expect(gate.allowed).toBe(false);
+    expect(gate.confirmed).toBe(false);
+    expect(gate.blockers).toContain(
+      "Authoring assembly requires explicit confirmation",
+    );
+
+    const staleState = structuredClone(state);
+    const record = await gateway.record({
+      state,
+      lane: "script",
+      confirmed: true,
+      record: {
+        status: "DONE",
+        claims: claims(plan, "script"),
+        artifacts: [],
+      },
+    });
+    const refreshed = await gateway.decide({
+      state: staleState,
+      operation: "dispatch",
+      lane: "reference",
+    });
+
+    expect(record.revision).toBe(initial.revision + 1);
+    expect(refreshed.revision).toBe(record.revision);
+    expect(refreshed.identity?.authoringInputHash).toBe(
+      initial.authoringInputHash,
+    );
+  });
+
+  it("reports revision conflicts and stale lock ownership through the gateway", async () => {
+    const { state, plan } = await createSession();
+    const gateway = authoringSessionGateway();
+    const initial = await gateway.read(project, state.name);
+    const staleState = structuredClone(state);
+
+    const first = await gateway.record({
+      state,
+      lane: "script",
+      confirmed: true,
+      record: {
+        status: "DONE",
+        claims: claims(plan, "script"),
+        artifacts: [],
+      },
+    });
+    const conflict = await gateway.decide({
+      state: staleState,
+      operation: "dispatch",
+      lane: "reference",
+      expectedRevision: initial.revision,
+    });
+
+    expect(conflict.allowed).toBe(false);
+    expect(conflict.state).toBe("stale");
+    expect(conflict.conflict).toMatchObject({
+      lane: "reference",
+      expectedRevision: initial.revision,
+      actualRevision: first.revision,
+    });
+    expect(conflict.recovery.conflict).toEqual(conflict.conflict);
+
+    await fs.writeFile(
+      path.join(state.authoring!.sessionPath, ".lock"),
+      JSON.stringify({ pid: 99999999, at: "1970-01-01T00:00:00.000Z" }),
+    );
+    await expect(gateway.lock(state)).resolves.toMatchObject({
+      status: "stale",
+      owner: { pid: 99999999 },
+    });
+  });
+
+  it("invalidates a lane and its dependent records as one persisted transition", async () => {
+    const { state } = await createSession();
+    const completed = await runManualAuthoringFixture({ state });
+    const gateway = authoringSessionGateway();
+
+    const invalidation = await gateway.invalidate({
+      state: completed,
+      lanes: ["script"],
+      expectedRevision: completed.authoring!.revision,
+      reason: "The confirmed protocol changed.",
+      confirmed: true,
+    });
+
+    expect(invalidation.lanes).toEqual([
+      "script",
+      "workflow-entry",
+      "skill-core",
+      "skill-review",
+    ]);
+    expect(invalidation.reason).toBe("The confirmed protocol changed.");
+    expect(invalidation.revision).toBe(completed.authoring!.revision);
+    expect(invalidation.identity?.sessionId).toBe(
+      completed.authoring!.sessionId,
+    );
+
+    const readiness = await gateway.readiness(
+      await readState(project, completed.name),
+    );
+    expect(readiness.recovery.invalidatedLanes).toEqual(invalidation.lanes);
+    expect(readiness.nextLanes).toEqual(["script"]);
+    expect(readiness.state).toBe("blocked");
+  });
+
+  it("reads generator contract v1 session summaries through the current gateway", async () => {
+    const { state } = await createSession();
+    const summaryPath = path.join(state.authoring!.sessionPath, "state.json");
+    const summary = JSON.parse(
+      await fs.readFile(summaryPath, "utf8"),
+    ) as Record<string, unknown>;
+    summary.generatorContractVersion = 1;
+    delete summary.sessionId;
+    await fs.writeFile(summaryPath, JSON.stringify(summary, null, 2) + "\n");
+
+    const gateway = authoringSessionGateway();
+    const recovered = await gateway.readiness(
+      await readState(project, state.name),
+    );
+
+    expect(recovered.recovery.recoveryRequired).toBeUndefined();
+    expect(recovered.identity?.sessionId).toMatch(/^[a-f0-9]{64}$/u);
   });
 });

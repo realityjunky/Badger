@@ -6,7 +6,7 @@ import { buildProposal, readPlan } from "../src/factory/proposal.js";
 import { generatePackage } from "../src/factory/generate.js";
 import { initializeState, readState } from "../src/factory/state.js";
 import {
-  assemblePackage,
+  assemblePackage as assemblePackageImplementation,
   authoringReadiness,
   initializeAuthoringSession,
   runManualAuthoringFixture,
@@ -18,6 +18,10 @@ import {
 } from "../src/factory/migration.js";
 import { reviewState } from "../src/publish/lifecycle.js";
 import type { CreatorState, FactoryPlan } from "../src/types.js";
+
+const assemblePackage = (
+  state: Parameters<typeof assemblePackageImplementation>[0],
+) => assemblePackageImplementation(state, true);
 
 describe("Badger upgrade and legacy migration", () => {
   let root: string;

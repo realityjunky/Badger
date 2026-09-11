@@ -20,7 +20,8 @@ import { writeState } from "../factory/state.js";
 import { WORKFLOW_FINALIZATION_BOUNDARY_PHASES } from "../workflow-runtime/finalization.js";
 import { WORKFLOW_TRANSITION_BOUNDARY_PHASES } from "../workflow-runtime/transition-journal.js";
 import { validateAuthoringReviewResult } from "../authoring/review.js";
-import { authoringReadiness } from "../authoring/lifecycle.js";
+import { authoringSessionGateway } from "../authoring/lifecycle.js";
+import type { AuthoringReadiness } from "../authoring/types.js";
 import { hashDirectorySync } from "../workflow-kernel/hash.js";
 
 function sameStrings(left: unknown, right: unknown): boolean {
@@ -308,13 +309,20 @@ function publicationApprovalBlockers(
   return [];
 }
 
-async function publicationGate(state: CreatorState) {
-  const authoring = await authoringReadiness(state);
-  const readiness = reviewState(state);
+async function publicationGate(state: CreatorState, confirmed: boolean) {
+  const authoringDecision = await authoringSessionGateway().writeGate({
+    state,
+    operation: "publish",
+    confirmed,
+  });
+  const authoring = authoringDecision.readiness;
+  const readiness = reviewState(state, authoring);
   return {
     authoring,
     readiness,
-    blockers: [...new Set([...authoring.blockers, ...readiness.blockers])],
+    blockers: [
+      ...new Set([...authoringDecision.blockers, ...readiness.blockers]),
+    ],
   };
 }
 
@@ -880,7 +888,36 @@ function phase4EvidenceBlockers(state: CreatorState): string[] {
 
 function authoringReadinessSection(
   state: CreatorState,
+  sessionReadiness?: AuthoringReadiness,
 ): CompositeReadiness["authoring"] {
+  if (sessionReadiness) {
+    const review = sessionReadiness.review;
+    const hashes = {
+      authoringInput:
+        sessionReadiness.evidence.authoringInputHash ??
+        sessionReadiness.evidence.authoringInput ??
+        null,
+      scaffold: sessionReadiness.evidence.scaffold ?? null,
+      authoredMaterial: sessionReadiness.evidence.authoredMaterial ?? null,
+      assembledPackage: sessionReadiness.evidence.assembledPackage ?? null,
+      review: sessionReadiness.review?.reviewHash ?? null,
+    };
+    return {
+      state: sessionReadiness.state === "ready" ? "ready" : "blocked",
+      blockers: [...sessionReadiness.blockers],
+      warnings: [...sessionReadiness.warnings],
+      evidence: {
+        session:
+          sessionReadiness.identity?.sessionPath ??
+          sessionReadiness.evidence.session ??
+          state.authoring?.sessionPath ??
+          "",
+        ...(review?.reviewHash ? { authoringReview: review.reviewHash } : {}),
+      },
+      hashes,
+      ...(review ? { review } : {}),
+    };
+  }
   const blockers: string[] = [];
   const warnings: string[] = [];
   const authoring = state.authoring;
@@ -979,8 +1016,11 @@ function authoringReadinessSection(
   };
 }
 
-export function reviewState(state: CreatorState): CompositeReadiness {
-  const authoring = authoringReadinessSection(state);
+export function reviewState(
+  state: CreatorState,
+  sessionReadiness?: AuthoringReadiness,
+): CompositeReadiness {
+  const authoring = authoringReadinessSection(state, sessionReadiness);
   const blockers: string[] = [...authoring.blockers];
   const runtimeBlockers: string[] = [];
   const packageHash = currentPackageHashCheck(state);
@@ -1117,25 +1157,45 @@ export async function approveReview(options: {
   if (!options.reviewer.trim())
     throw new Error("A reviewer identity is required");
   const publicationReviewer = options.reviewer.trim();
-  const authoringReviewer =
+  const stateAuthoringReviewer =
     typeof options.state.authoring?.review?.reviewer === "string"
       ? options.state.authoring.review.reviewer.trim()
+      : undefined;
+  if (
+    stateAuthoringReviewer &&
+    stateAuthoringReviewer === publicationReviewer
+  ) {
+    throw new Error(
+      "Publication reviewer must differ from the authoring reviewer",
+    );
+  }
+  const authoringDecision = await authoringSessionGateway().writeGate({
+    state: options.state,
+    operation: "publish",
+    confirmed: options.approve,
+  });
+  const authoring = authoringDecision.readiness;
+  if (!authoringDecision.allowed) {
+    throw new Error(
+      `Cannot approve blocked authoring session:\n${authoringDecision.blockers.join("\n")}`,
+    );
+  }
+  const authoringReviewer =
+    typeof authoring.review?.reviewer === "string"
+      ? authoring.review.reviewer.trim()
       : undefined;
   if (authoringReviewer && authoringReviewer === publicationReviewer) {
     throw new Error(
       "Publication reviewer must differ from the authoring reviewer",
     );
   }
-  const authoring = await authoringReadiness(options.state);
-  if (authoring.state !== "ready") {
-    throw new Error(
-      `Cannot approve blocked authoring session:\n${authoring.blockers.join("\n")}`,
-    );
-  }
-  const readiness = reviewState({
-    ...options.state,
-    review: undefined,
-  });
+  const readiness = reviewState(
+    {
+      ...options.state,
+      review: undefined,
+    },
+    authoring,
+  );
   if (readiness.state !== "reviewable" || readiness.blockers.length)
     throw new Error(
       `Cannot approve blocked workflow:\n${readiness.blockers.join("\n")}`,
@@ -1170,8 +1230,12 @@ export async function approveReview(options: {
   return options.state;
 }
 
-export async function publishState(state: CreatorState): Promise<CreatorState> {
-  const gate = await publicationGate(state);
+export async function publishState(
+  state: CreatorState,
+  confirmed = false,
+): Promise<CreatorState> {
+  if (!confirmed) throw new Error("Publication requires explicit confirmation");
+  const gate = await publicationGate(state, confirmed);
   if (
     gate.authoring.state !== "ready" ||
     gate.readiness.state !== "publishable"
@@ -1216,8 +1280,11 @@ export async function publishState(state: CreatorState): Promise<CreatorState> {
 export async function distributePreview(
   state: CreatorState,
   destination: string,
+  confirmed = false,
 ): Promise<{ destination: string; files: string[]; preview: true }> {
-  const gate = await publicationGate(state);
+  if (!confirmed)
+    throw new Error("Distribution requires explicit confirmation");
+  const gate = await publicationGate(state, confirmed);
   if (
     gate.authoring.state !== "ready" ||
     gate.readiness.state !== "publishable"

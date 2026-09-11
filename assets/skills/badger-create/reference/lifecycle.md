@@ -36,3 +36,5 @@ before assembly.
 Publication approval is a distinct human decision. A passing authoring review cannot replace package evaluation, WorkflowRuntime certification, or explicit publication confirmation. Missing, stale, mismatched, unresolved, or fabricated review evidence blocks the relevant readiness section.
 
 The lifecycle is intentionally filesystem-only. Platform-specific Skill installation and external Agent runners are adapters that belong outside this standalone package.
+
+The public `authoringSessionGateway()` exposes the persisted session identity, revision-aware decisions, readiness, recovery, lock state, and write gates. Record and assembly writes require explicit confirmation through that gateway; the CLI equivalent is `badger assemble <name> --confirm`.

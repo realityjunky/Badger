@@ -7,18 +7,29 @@ import { generatePackage } from "../src/factory/generate.js";
 import { initializeState, readState } from "../src/factory/state.js";
 import { evaluatePackage } from "../src/eval/run.js";
 import {
-  assemblePackage,
+  assemblePackage as assemblePackageImplementation,
   initializeAuthoringSession,
   runManualAuthoringFixture,
 } from "../src/authoring/index.js";
 import { deriveAuthoringPlan } from "../src/authoring/plan.js";
 import {
   approveReview,
-  distributePreview,
-  publishState,
+  distributePreview as distributePreviewImplementation,
+  publishState as publishStateImplementation,
   reviewState,
 } from "../src/publish/lifecycle.js";
 import type { FactoryPlan } from "../src/types.js";
+
+const assemblePackage = (
+  state: Parameters<typeof assemblePackageImplementation>[0],
+) => assemblePackageImplementation(state, true);
+const publishState = (
+  state: Parameters<typeof publishStateImplementation>[0],
+) => publishStateImplementation(state, true);
+const distributePreview = (
+  state: Parameters<typeof distributePreviewImplementation>[0],
+  destination: Parameters<typeof distributePreviewImplementation>[1],
+) => distributePreviewImplementation(state, destination, true);
 
 describe("standalone Creator lifecycle", () => {
   let project: string;

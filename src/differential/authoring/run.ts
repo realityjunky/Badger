@@ -495,7 +495,7 @@ export async function observeStandaloneAuthoring(options: {
     state,
     outputRoot: options.outputRoot,
   });
-  const assembled = await assemblePackage(completed);
+  const assembled = await assemblePackage(completed, true);
   const readinessAfterAssembly = await authoringReadiness(assembled);
   const composite = reviewState(assembled);
   const packageRoot = assembled.generated!.packageRoot;

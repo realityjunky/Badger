@@ -12,10 +12,10 @@ import {
 import { initializeState, readState } from "../src/factory/state.js";
 import { evaluatePackage } from "../src/eval/run.js";
 import {
-  assemblePackage,
+  assemblePackage as assemblePackageImplementation,
   authoringReadiness,
   initializeAuthoringSession,
-  recordAuthoring,
+  recordAuthoring as persistAuthoring,
   runManualAuthoringFixture,
 } from "../src/authoring/index.js";
 import { deriveAuthoringPlan } from "../src/authoring/plan.js";
@@ -23,6 +23,12 @@ import { loadSkillPackage } from "../src/skill-runtime/load.js";
 import { hashDirectory } from "../src/util.js";
 import type { AuthoringPlan } from "../src/authoring/types.js";
 import type { CreatorState, FactoryPlan } from "../src/types.js";
+
+const recordAuthoring = (options: Parameters<typeof persistAuthoring>[0]) =>
+  persistAuthoring({ ...options, confirmed: true });
+const assemblePackage = (
+  state: Parameters<typeof assemblePackageImplementation>[0],
+) => assemblePackageImplementation(state, true);
 
 const execFileAsync = promisify(execFile);
 

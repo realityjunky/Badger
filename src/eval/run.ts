@@ -5,7 +5,7 @@ import { hashDirectory, atomicWrite } from "../util.js";
 import { writeState } from "../factory/state.js";
 import { certifyWorkflowRuntime } from "./workflow-runtime-certification.js";
 import {
-  authoringReadiness,
+  authoringSessionGateway,
   readAuthoringPlan,
 } from "../authoring/lifecycle.js";
 import { crossValidateAuthoringPackage } from "../authoring/cross-validation.js";
@@ -87,11 +87,15 @@ export async function evaluatePackage(
     detail: state.generated.evalPath,
   });
   if (state.authoring) {
-    const authoring = await authoringReadiness(state);
+    const authoringDecision = await authoringSessionGateway().decide({
+      state,
+      operation: "evaluate",
+    });
+    const authoring = authoringDecision.readiness;
     const assembled =
-      authoring.state === "ready" &&
+      authoringDecision.allowed &&
       authoring.status === "assembled" &&
-      state.authoring.assembledPackageHash === hash;
+      authoring.evidence.assembledPackage === hash;
     checks.push({
       id: "authoring-assembly",
       passed: assembled,
@@ -99,7 +103,7 @@ export async function evaluatePackage(
         ? "Authoring evidence and assembled package match the current hash"
         : authoring.blockers.join("; ") || "Current package is not assembled",
     });
-    if (state.authoring.status !== "assembled") {
+    if (authoring.status !== "assembled") {
       checks.push({
         id: "authoring-runtime-cross-validation",
         passed: false,

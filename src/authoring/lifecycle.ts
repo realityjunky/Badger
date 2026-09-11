@@ -20,6 +20,7 @@ import {
 } from "../factory/generate.js";
 import {
   AUTHORING_PROTOCOL_HASH,
+  authoringAffectedLanes,
   authoringContentLeafOwners,
   authoringDependentLanes,
   authoringLaneClaimIds,
@@ -54,10 +55,20 @@ import type {
   AuthoringReviewResult,
   AuthoringReviewVoterEvidence,
   AuthoringRevisionConflict,
+  AuthoringInvalidation,
+  AuthoringInvalidationOptions,
+  AuthoringSessionDecision,
+  AuthoringSessionDecisionOptions,
+  AuthoringSessionIdentity,
+  AuthoringSessionLock,
+  AuthoringSessionOperation,
+  AuthoringSessionRecordOptions,
   AuthoringSessionStatus,
   AuthoringStateSummary,
   AuthoringStatus,
   AuthoringWaveReadiness,
+  AuthoringWriteGate,
+  AuthoringWriteGateOptions,
 } from "./types.js";
 import type { GeneratedPackage } from "../factory/generate.js";
 
@@ -154,6 +165,85 @@ export function authoringRecordsPath(state: CreatorState): string {
   return recordsRoot(state);
 }
 
+function sessionIdentityHash(value: {
+  sessionPath: string;
+  workflow: string;
+  planHash: string;
+  protocolHash: string;
+  workflowProtocolHash: string;
+  sourceEvidenceHash: string;
+  authoringPlanHash: string;
+  authoringInputHash: string;
+  semanticDossierHash?: string;
+  scaffoldHash: string;
+}): string {
+  return sha256(
+    JSON.stringify(
+      stableValue({
+        ...value,
+      }),
+    ),
+  );
+}
+
+export function authoringSessionIdentity(
+  value: CreatorState | AuthoringStateSummary,
+): AuthoringSessionIdentity | undefined {
+  const summary: AuthoringStateSummary | undefined =
+    "sessionPath" in value ? value : value.authoring;
+  if (!summary) return undefined;
+  const workflow = summary.workflow ?? path.basename(summary.sessionPath);
+  return {
+    schemaVersion: 1,
+    sessionId: sessionIdentityHash({
+      sessionPath: summary.sessionPath,
+      workflow,
+      planHash: summary.planHash,
+      protocolHash: summary.protocolHash,
+      workflowProtocolHash: summary.workflowProtocolHash,
+      sourceEvidenceHash: summary.sourceEvidenceHash,
+      authoringPlanHash: summary.authoringPlanHash,
+      authoringInputHash: summary.authoringInputHash,
+      ...(summary.semanticDossierHash
+        ? { semanticDossierHash: summary.semanticDossierHash }
+        : {}),
+      scaffoldHash: summary.scaffoldHash,
+    }),
+    workflow,
+    sessionPath: summary.sessionPath,
+    revision: summary.revision,
+    planHash: summary.planHash,
+    protocolHash: summary.protocolHash,
+    workflowProtocolHash: summary.workflowProtocolHash,
+    sourceEvidenceHash: summary.sourceEvidenceHash,
+    authoringPlanHash: summary.authoringPlanHash,
+    authoringInputHash: summary.authoringInputHash,
+    ...(summary.semanticDossierHash
+      ? { semanticDossierHash: summary.semanticDossierHash }
+      : {}),
+    scaffoldHash: summary.scaffoldHash,
+  };
+}
+
+function normalizeAuthoringSummary(
+  summary: AuthoringStateSummary,
+): AuthoringStateSummary {
+  const workflow = summary.workflow ?? path.basename(summary.sessionPath);
+  const normalized = {
+    ...summary,
+    workflow,
+  };
+  const identity = authoringSessionIdentity(normalized);
+  if (!identity) throw new Error("Authoring session identity is missing");
+  if (summary.sessionId && summary.sessionId !== identity.sessionId) {
+    throw new Error("Authoring session identity is stale");
+  }
+  return {
+    ...normalized,
+    sessionId: identity.sessionId,
+  };
+}
+
 function recordFile(state: CreatorState, lane: AuthoringLaneId): string {
   return path.join(recordsRoot(state), `${lane}.json`);
 }
@@ -212,6 +302,8 @@ function authoringInputHash(plan: AuthoringPlan): string {
     ),
   );
 }
+
+export const hashAuthoringSessionInput = authoringInputHash;
 
 function canonicalRecord(record: AuthoringRecord): unknown {
   return {
@@ -2025,7 +2117,24 @@ async function acquireSessionLock(root: string): Promise<() => Promise<void>> {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       let stale = false;
+      let invalid = false;
       try {
+        const lockStats = await fs.lstat(lock);
+        if (lockStats.isSymbolicLink()) {
+          await fs.rm(lock, { force: true });
+          continue;
+        }
+        if (!lockStats.isFile()) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          continue;
+        }
+        if (lockStats.size > MAX_TEXT_BYTES) {
+          invalid = true;
+        }
+        if (invalid) {
+          await fs.rm(lock, { force: true });
+          continue;
+        }
         const value = await fs.readFile(lock, "utf8");
         let pid: number | undefined;
         try {
@@ -2034,7 +2143,9 @@ async function acquireSessionLock(root: string): Promise<() => Promise<void>> {
         } catch {
           const parsed = Number(value.trim());
           if (Number.isInteger(parsed)) pid = parsed;
+          else invalid = true;
         }
+        if (pid === undefined) invalid = true;
         if (pid !== undefined) {
           try {
             process.kill(pid, 0);
@@ -2046,7 +2157,7 @@ async function acquireSessionLock(root: string): Promise<() => Promise<void>> {
         if ((readError as NodeJS.ErrnoException).code !== "ENOENT")
           throw readError;
       }
-      if (stale) {
+      if (stale || invalid) {
         await fs.rm(lock, { force: true });
         continue;
       }
@@ -2054,6 +2165,53 @@ async function acquireSessionLock(root: string): Promise<() => Promise<void>> {
     }
   }
   throw new Error("Authoring session is busy; retry the same operation");
+}
+
+export async function inspectAuthoringSessionLock(
+  state: CreatorState,
+): Promise<AuthoringSessionLock> {
+  const lockPath = path.join(sessionRoot(state), ".lock");
+  let stats;
+  try {
+    stats = await fs.lstat(lockPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { path: lockPath, status: "available" };
+    }
+    throw error;
+  }
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    return { path: lockPath, status: "invalid" };
+  }
+  if (stats.size > MAX_TEXT_BYTES) {
+    return { path: lockPath, status: "invalid" };
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(await fs.readFile(lockPath, "utf8"));
+  } catch {
+    return { path: lockPath, status: "invalid" };
+  }
+  if (!isRecord(value)) {
+    return { path: lockPath, status: "invalid" };
+  }
+  const pid = value.pid;
+  if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) {
+    return { path: lockPath, status: "invalid" };
+  }
+  const owner = {
+    pid,
+    ...(typeof value.at === "string" ? { at: value.at } : {}),
+  };
+  try {
+    process.kill(owner.pid, 0);
+    return { path: lockPath, status: "held", owner };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+      return { path: lockPath, status: "stale", owner };
+    }
+    return { path: lockPath, status: "held", owner };
+  }
 }
 
 async function withSessionLock<T>(
@@ -2108,6 +2266,15 @@ function sessionSummaryPath(state: CreatorState): string {
   return path.join(sessionRoot(state), "state.json");
 }
 
+function creatorStatePath(state: CreatorState): string {
+  return path.join(
+    state.projectRoot,
+    ".badger",
+    "states",
+    `${state.name}.json`,
+  );
+}
+
 function validAuthoringSummary(value: unknown): value is AuthoringStateSummary {
   if (!isRecord(value)) return false;
   return (
@@ -2118,7 +2285,9 @@ function validAuthoringSummary(value: unknown): value is AuthoringStateSummary {
     typeof value.recordsPath === "string" &&
     Number.isInteger(value.revision) &&
     Number(value.revision) >= 0 &&
-    value.generatorContractVersion === AUTHORING_GENERATOR_CONTRACT_VERSION &&
+    (value.generatorContractVersion === 1 ||
+      value.generatorContractVersion ===
+        AUTHORING_GENERATOR_CONTRACT_VERSION) &&
     typeof value.planHash === "string" &&
     typeof value.protocolHash === "string" &&
     typeof value.workflowProtocolHash === "string" &&
@@ -2158,7 +2327,11 @@ async function readSessionSummary(
       value.recordsPath !== recordsRoot(state)
     )
       throw new Error("Authoring session summary paths are invalid");
-    return { ...value, statePath };
+    return normalizeAuthoringSummary({
+      ...value,
+      statePath,
+      generatorContractVersion: AUTHORING_GENERATOR_CONTRACT_VERSION,
+    });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
@@ -2168,18 +2341,15 @@ async function readSessionSummary(
 async function currentAuthoringSummary(
   state: CreatorState,
 ): Promise<AuthoringStateSummary | undefined> {
-  let session: AuthoringStateSummary | undefined;
   try {
-    session = await readSessionSummary(state);
-  } catch {
+    const session = await readSessionSummary(state);
+    if (session) return session;
     return state.authoring;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return state.authoring;
+    throw error;
   }
-  if (
-    session &&
-    (!state.authoring || session.revision >= state.authoring.revision)
-  )
-    return session;
-  return state.authoring;
 }
 
 function reconcileRecordRevision(
@@ -2234,6 +2404,34 @@ async function writeSessionSummary(state: CreatorState): Promise<void> {
   );
 }
 
+async function withAtomicSessionPersistence<T>(
+  files: readonly string[],
+  operation: () => Promise<T>,
+): Promise<T> {
+  const snapshots = new Map<string, string | undefined>();
+  for (const file of [...new Set(files)]) {
+    snapshots.set(file, await readOptionalText(file));
+  }
+  try {
+    return await operation();
+  } catch (error) {
+    let rollbackError: unknown;
+    for (const [file, content] of snapshots) {
+      try {
+        await restoreOptionalText(file, content);
+      } catch (restoreError) {
+        rollbackError ??= restoreError;
+      }
+    }
+    if (rollbackError) {
+      throw new Error(
+        `Authoring session rollback failed after persistence error: ${String(rollbackError)}; original error: ${String(error)}`,
+      );
+    }
+    throw error;
+  }
+}
+
 export async function initializeAuthoringSession(options: {
   state: CreatorState;
   plan: AuthoringPlan;
@@ -2261,16 +2459,11 @@ export async function initializeAuthoringSession(options: {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       persisted = state;
     }
-    const sessionPrevious = await readSessionSummary(persisted).catch(
-      () => undefined,
-    );
+    const sessionPrevious = await readSessionSummary(persisted);
     const previous = sessionPrevious ?? persisted.authoring;
     const sameInput = previous?.authoringInputHash === inputHash;
     await fs.mkdir(recordsRoot(persisted), { recursive: true });
-    await atomicWrite(
-      path.join(root, "plan.json"),
-      JSON.stringify(options.plan, null, 2) + "\n",
-    );
+    const planFile = path.join(root, "plan.json");
     const retainedRecords = previous?.records ?? {};
     const retainedLanes = authoringLaneIds().filter(
       (lane) => retainedRecords[lane] !== undefined,
@@ -2300,6 +2493,7 @@ export async function initializeAuthoringSession(options: {
         : previous
           ? "stale"
           : "pending",
+      workflow: options.plan.name,
       sessionPath: root,
       statePath: sessionSummaryPath(persisted),
       planPath: path.join(root, "plan.json"),
@@ -2312,6 +2506,9 @@ export async function initializeAuthoringSession(options: {
       sourceEvidenceHash: options.plan.sourceEvidenceHash,
       authoringPlanHash: options.plan.authoringPlanHash,
       authoringInputHash: inputHash,
+      ...(options.plan.semanticDossierHash
+        ? { semanticDossierHash: options.plan.semanticDossierHash }
+        : {}),
       scaffoldHash:
         options.generated.scaffoldHash ?? previous?.scaffoldHash ?? "",
       authoredMaterialHash: sameInput
@@ -2325,14 +2522,26 @@ export async function initializeAuthoringSession(options: {
       records: retainedRecords,
       ...(invalidatedLanes?.length ? { invalidatedLanes } : {}),
     };
+    persisted.authoring.sessionId = authoringSessionIdentity(
+      persisted.authoring,
+    )!.sessionId;
     persisted.currentHash = null;
     persisted.eval = undefined;
     persisted.review = undefined;
     persisted.status = "generated";
-    await writeSessionSummary(persisted);
-    await writeState(persisted);
-    Object.assign(state, persisted);
-    return persisted;
+    return withAtomicSessionPersistence(
+      [planFile, sessionSummaryPath(persisted), creatorStatePath(persisted)],
+      async () => {
+        await atomicWrite(
+          planFile,
+          JSON.stringify(options.plan, null, 2) + "\n",
+        );
+        await writeSessionSummary(persisted);
+        await writeState(persisted);
+        Object.assign(state, persisted);
+        return persisted;
+      },
+    );
   });
 }
 
@@ -2498,7 +2707,13 @@ export async function recordAuthoring(options: {
   lane: AuthoringLaneId;
   record: unknown;
   expectedRevision?: number;
+  confirmed?: boolean;
 }): Promise<AuthoringRecord> {
+  if (options.confirmed !== true) {
+    throw new Error(
+      "Authoring record persistence requires explicit confirmation",
+    );
+  }
   if (!isAuthoringLane(options.lane))
     throw new Error(`Unknown authoring lane: ${String(options.lane)}`);
   if (!options.state.generated)
@@ -2665,58 +2880,85 @@ export async function recordAuthoring(options: {
     const findings = validateAuthoringRecord(record, currentPlan, options.lane);
     if (findings.length)
       throw new Error(`Invalid authoring record:\n${findings.join("\n")}`);
-    for (const artifact of pendingArtifacts)
-      await atomicWrite(artifact.path, artifact.content);
-    await atomicWrite(
+    const transactionPaths = [
+      ...pendingArtifacts.map((artifact) => artifact.path),
       recordFile(current, options.lane),
-      JSON.stringify(record, null, 2) + "\n",
-    );
-    stored.records[options.lane] = record;
-    const remainingInvalidated = prior.invalidatedLanes?.filter(
-      (laneId) => laneId !== options.lane,
-    );
-    const invalidatedLanes = new Set(remainingInvalidated ?? []);
-    for (const dependent of authoringDependentLanes(options.lane)) {
-      if (stored.records[dependent] || prior.records[dependent])
-        invalidatedLanes.add(dependent);
+      sessionSummaryPath(current),
+      creatorStatePath(current),
+    ];
+    const previousFiles = new Map<string, string | undefined>();
+    for (const file of transactionPaths) {
+      previousFiles.set(file, await readOptionalText(file));
     }
-    const orderedInvalidated = authoringLaneIds().filter((laneId) =>
-      invalidatedLanes.has(laneId),
-    );
-    current.authoring = {
-      ...prior,
-      statePath: sessionSummaryPath(current),
-      conflict: undefined,
-      review: undefined,
-      status: orderedInvalidated.length
-        ? "stale"
-        : summaryStatus(stored.records),
-      revision: prior.revision + 1,
-      authoredMaterialHash: recordsMaterialHash(stored.records),
-      assembledPackageHash: null,
-      records: {
-        ...prior.records,
-        [options.lane]: recordSummary(
-          record,
-          recordFile(current, options.lane),
-        ),
-      },
-      ...(orderedInvalidated.length
-        ? {
-            invalidatedLanes: orderedInvalidated,
-          }
-        : { invalidatedLanes: undefined }),
-    };
-    current.generated = {
-      ...current.generated,
-      assembledPackageHash: undefined,
-    };
-    current.currentHash = null;
-    current.eval = undefined;
-    current.review = undefined;
-    current.status = "generated";
-    await writeSessionSummary(current);
-    await writeState(current);
+    try {
+      for (const artifact of pendingArtifacts)
+        await atomicWrite(artifact.path, artifact.content);
+      await atomicWrite(
+        recordFile(current, options.lane),
+        JSON.stringify(record, null, 2) + "\n",
+      );
+      stored.records[options.lane] = record;
+      const remainingInvalidated = prior.invalidatedLanes?.filter(
+        (laneId) => laneId !== options.lane,
+      );
+      const invalidatedLanes = new Set(remainingInvalidated ?? []);
+      for (const dependent of authoringDependentLanes(options.lane)) {
+        if (stored.records[dependent] || prior.records[dependent])
+          invalidatedLanes.add(dependent);
+      }
+      const orderedInvalidated = authoringLaneIds().filter((laneId) =>
+        invalidatedLanes.has(laneId),
+      );
+      current.authoring = {
+        ...prior,
+        statePath: sessionSummaryPath(current),
+        conflict: undefined,
+        review: undefined,
+        status: orderedInvalidated.length
+          ? "stale"
+          : summaryStatus(stored.records),
+        revision: prior.revision + 1,
+        authoredMaterialHash: recordsMaterialHash(stored.records),
+        assembledPackageHash: null,
+        records: {
+          ...prior.records,
+          [options.lane]: recordSummary(
+            record,
+            recordFile(current, options.lane),
+          ),
+        },
+        ...(orderedInvalidated.length
+          ? {
+              invalidatedLanes: orderedInvalidated,
+            }
+          : { invalidatedLanes: undefined }),
+      };
+      current.generated = {
+        ...current.generated,
+        assembledPackageHash: undefined,
+      };
+      current.currentHash = null;
+      current.eval = undefined;
+      current.review = undefined;
+      current.status = "generated";
+      await writeSessionSummary(current);
+      await writeState(current);
+    } catch (error) {
+      let rollbackError: unknown;
+      for (const [file, content] of previousFiles) {
+        try {
+          await restoreOptionalText(file, content);
+        } catch (restoreError) {
+          rollbackError ??= restoreError;
+        }
+      }
+      if (rollbackError) {
+        throw new Error(
+          `Authoring record rollback failed after persistence error: ${String(rollbackError)}; original error: ${String(error)}`,
+        );
+      }
+      throw error;
+    }
     Object.assign(options.state, current);
     return record;
   });
@@ -2727,7 +2969,13 @@ export async function recordAuthoringFile(options: {
   lane: AuthoringLaneId;
   file: string;
   expectedRevision?: number;
+  confirmed?: boolean;
 }): Promise<AuthoringRecord> {
+  if (options.confirmed !== true) {
+    throw new Error(
+      "Authoring record persistence requires explicit confirmation",
+    );
+  }
   const file = path.resolve(options.file);
   if (isWithin(path.join(options.state.projectRoot, ".badger"), file))
     throw new Error("Authoring lane output cannot be read from .badger state");
@@ -2750,6 +2998,7 @@ export async function recordAuthoringFile(options: {
     lane: options.lane,
     record: value,
     expectedRevision: options.expectedRevision,
+    confirmed: options.confirmed,
   });
 }
 
@@ -3060,11 +3309,15 @@ function readinessLanes(
 function recoveryInfo(
   state: CreatorState,
   authoring?: AuthoringStateSummary,
+  recoveryRequired?: string,
 ): AuthoringRecoveryInfo {
   const session = authoring?.sessionPath ?? sessionRoot(state);
   return {
     resumable: Boolean(authoring),
     freshProcess: true,
+    ...(recoveryRequired
+      ? { recoveryRequired: true, reason: recoveryRequired }
+      : {}),
     revision: authoring?.revision ?? 0,
     sessionPath: session,
     statePath: authoring?.statePath ?? path.join(session, "state.json"),
@@ -3080,14 +3333,61 @@ export async function authoringReadiness(
 ): Promise<AuthoringReadiness> {
   const emptyRecords: Partial<Record<AuthoringLaneId, AuthoringRecord>> = {};
   const emptyLanes = readinessLanes(undefined, emptyRecords, [], []);
-  const recoveredSummary = state.authoring
-    ? state.authoring
-    : await currentAuthoringSummary(state);
+  const sessionLock = await inspectAuthoringSessionLock(state);
+  let recoveredSummary: AuthoringStateSummary | undefined;
+  let recoveryError: string | undefined;
+  try {
+    recoveredSummary =
+      (await currentAuthoringSummary(state)) ?? state.authoring;
+  } catch (error) {
+    recoveryError = String(error);
+    recoveredSummary = state.authoring;
+  }
+  if (recoveryError && !recoveredSummary) {
+    return {
+      state: "blocked",
+      status: "stale",
+      recoveryError,
+      lock: sessionLock,
+      blockers: [`Authoring session recovery required: ${recoveryError}`],
+      warnings: [],
+      evidence: {
+        session: sessionRoot(state),
+        plan: sessionPlanPath(state),
+      },
+      records: emptyRecords,
+      nextLanes: [],
+      completedLanes: [],
+      lanes: emptyLanes,
+      waves: [
+        waveReadiness(
+          "wave1",
+          authoringLanesForWave("wave1"),
+          emptyRecords,
+          [],
+        ),
+        waveReadiness(
+          "wave2",
+          authoringLanesForWave("wave2"),
+          emptyRecords,
+          [],
+        ),
+        waveReadiness(
+          "barrier",
+          authoringLanesForWave("barrier"),
+          emptyRecords,
+          [],
+        ),
+      ],
+      recovery: recoveryInfo(state, state.authoring, recoveryError),
+    };
+  }
   if (!state.generated || !recoveredSummary) {
     const legacyDraft = Boolean(state.generated);
     return {
       state: "blocked",
       status: legacyDraft ? "legacy" : "pending",
+      lock: sessionLock,
       blockers: [
         legacyDraft
           ? "Legacy deterministic scaffold is scaffold-only; migrate before authoring or publication"
@@ -3127,42 +3427,6 @@ export async function authoringReadiness(
   }
   if (!state.authoring) state.authoring = recoveredSummary;
   let authoring: AuthoringStateSummary = recoveredSummary;
-  try {
-    authoring = (await currentAuthoringSummary(state)) ?? state.authoring;
-  } catch (error) {
-    return {
-      state: "blocked",
-      status: "stale",
-      blockers: [String(error)],
-      warnings: [],
-      evidence: { session: sessionRoot(state), plan: sessionPlanPath(state) },
-      records: emptyRecords,
-      nextLanes: [],
-      completedLanes: [],
-      lanes: emptyLanes,
-      waves: [
-        waveReadiness(
-          "wave1",
-          authoringLanesForWave("wave1"),
-          emptyRecords,
-          [],
-        ),
-        waveReadiness(
-          "wave2",
-          authoringLanesForWave("wave2"),
-          emptyRecords,
-          [],
-        ),
-        waveReadiness(
-          "barrier",
-          authoringLanesForWave("barrier"),
-          emptyRecords,
-          [],
-        ),
-      ],
-      recovery: recoveryInfo(state, authoring),
-    };
-  }
   let plan: AuthoringPlan;
   try {
     plan = await readAuthoringPlan(state);
@@ -3200,8 +3464,21 @@ export async function authoringReadiness(
       recovery: recoveryInfo(state, authoring),
     };
   }
+  authoring = {
+    ...authoring,
+    workflow: authoring.workflow ?? plan.name,
+    ...(plan.semanticDossierHash
+      ? { semanticDossierHash: plan.semanticDossierHash }
+      : {}),
+  };
+  authoring.sessionId = authoringSessionIdentity(authoring)!.sessionId;
+  state.authoring = authoring;
   const blockers: string[] = [];
   const warnings: string[] = [];
+  if (recoveryError) {
+    blockers.push(`Authoring session recovery required: ${recoveryError}`);
+    authoring = { ...authoring, status: "stale" };
+  }
   const stored = await readStoredRecords(state, plan);
   blockers.push(...stored.errors);
   authoring = reconcileRecordRevision(state, authoring, stored.records);
@@ -3374,8 +3651,11 @@ export async function authoringReadiness(
     blockers,
     invalidated,
   );
-  const status: AuthoringSessionStatus =
-    authoring.status === "assembled" && authoring.assembledPackageHash && ready
+  const status: AuthoringSessionStatus = recoveryError
+    ? "stale"
+    : authoring.status === "assembled" &&
+        authoring.assembledPackageHash &&
+        ready
       ? "assembled"
       : authoring.status === "stale" ||
           blockers.some(
@@ -3388,9 +3668,13 @@ export async function authoringReadiness(
           : Object.keys(stored.records).length
             ? "in-progress"
             : "pending";
+  const identity = authoringSessionIdentity(authoring);
   return {
     state: ready ? "ready" : hasContext ? "needs-context" : "blocked",
     status,
+    ...(identity ? { identity } : {}),
+    lock: sessionLock,
+    ...(recoveryError ? { recoveryError } : {}),
     blockers,
     warnings,
     evidence: {
@@ -3446,7 +3730,7 @@ export async function authoringReadiness(
         invalidated,
       ),
     ],
-    recovery: recoveryInfo(state, authoring),
+    recovery: recoveryInfo(state, authoring, recoveryError),
     ...((review ?? authoring.review)
       ? { review: review ?? authoring.review }
       : {}),
@@ -3793,7 +4077,11 @@ async function restoreOptionalText(
 
 export async function assemblePackage(
   state: CreatorState,
+  confirmed = false,
 ): Promise<CreatorState> {
+  if (!confirmed) {
+    throw new Error("Authoring assembly requires explicit confirmation");
+  }
   if (!state.generated)
     throw new Error("Generate the workflow scaffold before assembly");
   state.authoring ??= await currentAuthoringSummary(state);
@@ -3812,10 +4100,14 @@ export async function assemblePackage(
     if (sessionSummary) current.authoring = sessionSummary;
     if (!current.generated || !current.authoring)
       throw new Error("Generate the workflow scaffold before assembly");
-    const readiness = await authoringReadiness(current);
-    if (readiness.state !== "ready")
+    const readinessDecision = await authoringSessionDecision({
+      state: current,
+      operation: "assemble",
+    });
+    const readiness = readinessDecision.readiness;
+    if (!readinessDecision.allowed)
       throw new Error(
-        `Cannot assemble blocked authoring session:\n${readiness.blockers.join("\n")}`,
+        `Cannot assemble blocked authoring session:\n${readinessDecision.blockers.join("\n")}`,
       );
     const plan = await readAuthoringPlan(current);
     const stored = await readStoredRecords(current, plan);
@@ -4033,6 +4325,293 @@ export async function assemblePackage(
     }
   });
 }
+async function authoritativeAuthoringState(
+  state: CreatorState,
+): Promise<CreatorState> {
+  try {
+    const persisted = await readState(state.projectRoot, state.name);
+    return persisted;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return state;
+    throw error;
+  }
+}
+
+export async function invalidateAuthoringSession(
+  options: AuthoringInvalidationOptions,
+): Promise<AuthoringInvalidation> {
+  if (options.confirmed !== true) {
+    throw new Error("Authoring invalidation requires explicit confirmation");
+  }
+  const requested = [...new Set(options.lanes)];
+  if (!requested.length) {
+    throw new Error("Authoring invalidation requires at least one lane");
+  }
+  for (const lane of requested) {
+    if (!authoringLaneIds().includes(lane)) {
+      throw new Error(`Unknown authoring lane: ${lane}`);
+    }
+  }
+  const state = await authoritativeAuthoringState(options.state);
+  if (!state.authoring) {
+    throw new Error("Authoring session is missing; cannot invalidate lanes");
+  }
+  const root = sessionRoot(state);
+  return withSessionLock(root, async () => {
+    const current = await authoritativeAuthoringState(state);
+    const currentReadiness = await authoringReadiness(current);
+    if (currentReadiness.recoveryError) {
+      throw new Error(
+        `Authoring session recovery required: ${currentReadiness.recoveryError}`,
+      );
+    }
+    const authoring = current.authoring;
+    if (!authoring) {
+      throw new Error("Authoring session is missing; cannot invalidate lanes");
+    }
+    const currentRevision = authoring.revision;
+    const conflict =
+      options.expectedRevision !== undefined &&
+      options.expectedRevision !== currentRevision
+        ? {
+            lane: requested[0]!,
+            expectedRevision: options.expectedRevision,
+            actualRevision: currentRevision,
+            at: new Date().toISOString(),
+          }
+        : undefined;
+    if (conflict) {
+      current.authoring = {
+        ...authoring,
+        conflict,
+        statePath: sessionSummaryPath(current),
+      };
+      await writeSessionSummary(current);
+      await writeState(current);
+      Object.assign(options.state, current);
+      return {
+        schemaVersion: 1,
+        lanes: [],
+        revision: currentRevision,
+        reason: options.reason ?? "Authoring invalidation revision conflict",
+        identity: authoringSessionIdentity(current.authoring),
+        recovery: recoveryInfo(current, current.authoring),
+        conflict,
+      };
+    }
+    const retained = new Set<AuthoringLaneId>([
+      ...(authoring.invalidatedLanes ?? []),
+      ...Object.keys(authoring.records).filter(
+        (lane): lane is AuthoringLaneId =>
+          authoringLaneIds().includes(lane as AuthoringLaneId),
+      ),
+    ]);
+    const invalidated = new Set<AuthoringLaneId>();
+    for (const lane of requested) {
+      for (const affected of authoringAffectedLanes(lane)) {
+        if (retained.has(affected)) invalidated.add(affected);
+      }
+    }
+    const ordered = authoringLaneIds().filter((lane) => invalidated.has(lane));
+    const reason =
+      options.reason ?? "Authoring inputs changed; re-record affected lanes";
+    const nextAuthoring: AuthoringStateSummary = {
+      ...authoring,
+      statePath: sessionSummaryPath(current),
+      status: "stale",
+      revision: currentRevision + 1,
+      assembledPackageHash: null,
+      review: undefined,
+      conflict: undefined,
+      ...(ordered.length ? { invalidatedLanes: ordered } : {}),
+    };
+    nextAuthoring.sessionId =
+      authoringSessionIdentity(nextAuthoring)?.sessionId;
+    current.authoring = nextAuthoring;
+    current.generated = current.generated
+      ? { ...current.generated, assembledPackageHash: undefined }
+      : current.generated;
+    current.currentHash = null;
+    current.eval = undefined;
+    current.review = undefined;
+    current.status = "generated";
+    await withAtomicSessionPersistence(
+      [sessionSummaryPath(current), creatorStatePath(current)],
+      async () => {
+        await writeSessionSummary(current);
+        await writeState(current);
+      },
+    );
+    Object.assign(options.state, current);
+    return {
+      schemaVersion: 1,
+      lanes: ordered,
+      revision: nextAuthoring.revision,
+      reason,
+      identity: authoringSessionIdentity(nextAuthoring),
+      recovery: recoveryInfo(current, nextAuthoring),
+    };
+  });
+}
+
+function decisionState(
+  readiness: AuthoringReadiness,
+  blockers: readonly string[],
+  conflict?: AuthoringRevisionConflict,
+): AuthoringSessionDecision["state"] {
+  if (
+    conflict ||
+    blockers.some((blocker) => /stale|invalidated/iu.test(blocker))
+  ) {
+    return "stale";
+  }
+  if (readiness.state === "needs-context") return "needs-context";
+  return blockers.length === 0 ? "allowed" : "blocked";
+}
+
+function decisionFindings(
+  readiness: AuthoringReadiness,
+  lane?: AuthoringLaneId,
+): AuthoringLaneFinding[] {
+  if (lane) return [...(readiness.lanes[lane]?.findings ?? [])];
+  return authoringLaneIds().flatMap((laneId) => [
+    ...(readiness.lanes[laneId]?.findings ?? []),
+  ]);
+}
+
+function operationBlockers(
+  operation: AuthoringSessionOperation,
+  readiness: AuthoringReadiness,
+  lane?: AuthoringLaneId,
+): string[] {
+  if (operation === "invalidate") return [];
+  if (operation === "dispatch" || operation === "record") {
+    if (readiness.recoveryError || !readiness.recovery.resumable) {
+      return readiness.blockers.length
+        ? [...readiness.blockers]
+        : ["Authoring session is missing; generate a confirmed scaffold"];
+    }
+    if (!lane) return [`Authoring ${operation} requires a lane`];
+    const laneReadiness = readiness.lanes[lane];
+    if (!laneReadiness) return [`Unknown authoring lane: ${lane}`];
+    const invalidated = readiness.recovery.invalidatedLanes.includes(lane);
+    const dependencyBlockers = laneReadiness.dependencies
+      .filter((dependency) => !readiness.completedLanes.includes(dependency))
+      .map(
+        (dependency) =>
+          `Authoring lane ${lane} blocked by${
+            readiness.recovery.invalidatedLanes.includes(dependency)
+              ? " stale"
+              : ""
+          } ${dependency}`,
+      );
+    const dependenciesReady = dependencyBlockers.length === 0;
+    if (!invalidated && dependenciesReady) return [];
+    const blockers = [
+      ...new Set([...dependencyBlockers, ...laneReadiness.blockers]),
+    ];
+    return blockers.length
+      ? blockers
+      : [`Authoring lane ${lane} is not executable`];
+  }
+  if (operation === "assemble") {
+    return readiness.state === "ready" ? [] : [...readiness.blockers];
+  }
+  if (readiness.status === "assembled" && readiness.state === "ready") {
+    return [];
+  }
+  return [
+    ...(readiness.blockers.length
+      ? readiness.blockers
+      : ["Authoring session is not assembled"]),
+  ];
+}
+
+export async function authoringSessionDecision(
+  options: AuthoringSessionDecisionOptions,
+): Promise<AuthoringSessionDecision> {
+  const state = await authoritativeAuthoringState(options.state);
+  const readiness = await authoringReadiness(state);
+  const blockers = operationBlockers(
+    options.operation,
+    readiness,
+    options.lane,
+  );
+  let conflict: AuthoringRevisionConflict | undefined;
+  if (
+    options.expectedRevision !== undefined &&
+    options.lane !== undefined &&
+    options.expectedRevision !== readiness.recovery.revision
+  ) {
+    conflict = {
+      lane: options.lane,
+      expectedRevision: options.expectedRevision,
+      actualRevision: readiness.recovery.revision,
+      at: new Date().toISOString(),
+    };
+    blockers.push(
+      `Authoring revision conflict ${options.lane}: expected ${options.expectedRevision}, actual ${readiness.recovery.revision}`,
+    );
+  }
+  const identity = readiness.identity ?? authoringSessionIdentity(state);
+  const lock = readiness.lock ?? (await inspectAuthoringSessionLock(state));
+  if (lock.status === "invalid") {
+    blockers.push("Authoring session lock is invalid");
+  }
+  if (
+    lock.status === "held" &&
+    lock.owner?.pid !== process.pid &&
+    (options.operation === "record" ||
+      options.operation === "assemble" ||
+      options.operation === "publish" ||
+      options.operation === "distribute")
+  ) {
+    blockers.push("Authoring session is locked by another process");
+  }
+  const status = decisionState(readiness, blockers, conflict);
+  return {
+    schemaVersion: 1,
+    operation: options.operation,
+    ...(options.lane ? { lane: options.lane } : {}),
+    allowed: status === "allowed",
+    state: status,
+    blockers,
+    warnings: [...readiness.warnings],
+    findings: decisionFindings(readiness, options.lane),
+    revision: readiness.recovery.revision,
+    ...(identity ? { identity } : {}),
+    readiness,
+    recovery: {
+      ...readiness.recovery,
+      ...(conflict ? { conflict } : {}),
+    },
+    lock,
+    ...(conflict ? { conflict } : {}),
+  };
+}
+
+export async function authoringWriteGate(
+  options: AuthoringWriteGateOptions,
+): Promise<AuthoringWriteGate> {
+  const decision = await authoringSessionDecision(options);
+  const confirmed = options.confirmed === true;
+  const blockers = [...decision.blockers];
+  if (!confirmed) {
+    const operationLabel =
+      options.operation === "assemble" ? "assembly" : options.operation;
+    blockers.push(`Authoring ${operationLabel} requires explicit confirmation`);
+  }
+  const status = decisionState(decision.readiness, blockers, decision.conflict);
+  return {
+    ...decision,
+    operation: options.operation,
+    confirmed,
+    allowed: status === "allowed",
+    state: status,
+    blockers,
+  };
+}
+
 export interface AuthoringSessionGateway {
   initialize(
     options: Parameters<typeof initializeAuthoringSession>[0],
@@ -4042,6 +4621,22 @@ export interface AuthoringSessionGateway {
     name: string,
   ): ReturnType<typeof readAuthoringSession>;
   readiness(state: CreatorState): ReturnType<typeof authoringReadiness>;
+  decide(
+    options: AuthoringSessionDecisionOptions,
+  ): Promise<AuthoringSessionDecision>;
+  decision(
+    options: AuthoringSessionDecisionOptions,
+  ): Promise<AuthoringSessionDecision>;
+  writeGate(options: AuthoringWriteGateOptions): Promise<AuthoringWriteGate>;
+  lock(state: CreatorState): Promise<AuthoringSessionLock>;
+  invalidate(
+    options: AuthoringInvalidationOptions,
+  ): Promise<AuthoringInvalidation>;
+  record(options: AuthoringSessionRecordOptions): Promise<AuthoringRecord>;
+  assemble(
+    state: CreatorState,
+    confirmed?: boolean,
+  ): ReturnType<typeof assemblePackage>;
 }
 
 export function authoringSessionGateway(): AuthoringSessionGateway {
@@ -4049,5 +4644,44 @@ export function authoringSessionGateway(): AuthoringSessionGateway {
     initialize: initializeAuthoringSession,
     read: readAuthoringSession,
     readiness: authoringReadiness,
+    decide: authoringSessionDecision,
+    decision: authoringSessionDecision,
+    writeGate: authoringWriteGate,
+    lock: inspectAuthoringSessionLock,
+    invalidate: invalidateAuthoringSession,
+    record: async (options) => {
+      const gate = await authoringWriteGate({
+        state: options.state,
+        operation: "record",
+        lane: options.lane,
+        expectedRevision: options.expectedRevision,
+        confirmed: options.confirmed,
+      });
+      if (!gate.allowed) {
+        throw new Error(
+          `Cannot record authoring session:\n${gate.blockers.join("\n")}`,
+        );
+      }
+      return recordAuthoring({
+        state: options.state,
+        lane: options.lane,
+        record: options.record,
+        expectedRevision: options.expectedRevision ?? gate.revision,
+        confirmed: true,
+      });
+    },
+    assemble: async (state, confirmed = false) => {
+      const gate = await authoringWriteGate({
+        state,
+        operation: "assemble",
+        confirmed,
+      });
+      if (!gate.allowed) {
+        throw new Error(
+          `Cannot assemble authoring session:\n${gate.blockers.join("\n")}`,
+        );
+      }
+      return assemblePackage(state, true);
+    },
   };
 }

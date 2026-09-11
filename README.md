@@ -42,11 +42,11 @@ It intentionally excludes Classic and Native policy, Entry routing, host platfor
 
 The current standalone package has three clearly separated surfaces:
 
-| Surface | Status | Contract |
-| --- | --- | --- |
-| Badger Creator and WorkflowRuntime | Delivered | Local workflow-kernel package creation, six-lane authoring, deterministic assembly, durable Run execution, current-hash evaluation, publication approval, and distribution preview. |
+| Surface                               | Status                | Contract                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Badger Creator and WorkflowRuntime    | Delivered             | Local workflow-kernel package creation, six-lane authoring, deterministic assembly, durable Run execution, current-hash evaluation, publication approval, and distribution preview.                                                                                                                          |
 | Upstream Comet-any authoring contract | Restored and extended | The six lane identities, dependency waves, claim/output envelope, review depths, authored leaves, and deterministic backbone are preserved from pinned revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a`. Badger-only storage, recovery, concurrency, hash, and naming extensions are reported separately. |
-| Platform and dashboard integration | Future / out of scope | Host installers, web or visual authoring, external provider authentication, automatic distribution, biological execution, scheduler submission, and protected raw-data-derived fixtures are not part of this package. |
+| Platform and dashboard integration    | Future / out of scope | Host installers, web or visual authoring, external provider authentication, automatic distribution, biological execution, scheduler submission, and protected raw-data-derived fixtures are not part of this package.                                                                                        |
 
 The release-facing artifact map and verification commands are in
 `docs/release-artifacts.md`. It is the authoritative checklist for keeping
@@ -95,11 +95,13 @@ node bin/badger.js authoring-plan prepared-workflow --project . --depth quick --
 node bin/badger.js generate prepared-workflow --project . --depth full --json
 node bin/badger.js authoring-status prepared-workflow --project . --json
 node bin/badger.js authoring-dispatch prepared-workflow --lane script --output /tmp/script.json --project . --json
-node bin/badger.js assemble prepared-workflow --project . --json
+node bin/badger.js assemble prepared-workflow --confirm --project . --json
 node bin/badger.js migrate prepared-workflow --confirm --project . --json
 ```
 
 `badger review <name> --json` reports distinct authoring, runtime, and publication readiness. The `skill-review` lane records quick or full authoring evidence; full review requires three independent voter records and all four review lenses. Deterministic self-consistency and WorkflowProtocol cross-validation findings never replace provider findings or WorkflowRuntime certification. `badger approve` records only human publication approval after authoring, evaluation, and WorkflowRuntime evidence are current.
+
+Library callers that coordinate authoring across processes should use `authoringSessionGateway()`. Its persisted session identity, revision-aware lane decisions, readiness, recovery, lock inspection, and `writeGate()` results are the authoritative surface; recording requires `confirmed: true`, and assembly requires `--confirm` at the CLI or `confirmed: true` through the gateway.
 
 `authoring-plan` is read-only. It accepts a confirmed workflow name after
 initialization, derives the six-lane AuthoringPlan from the persisted normalized

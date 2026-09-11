@@ -11,7 +11,7 @@ import { readState } from "../factory/state.js";
 import {
   authoringPlanPath,
   authoringSessionPath,
-  authoringReadiness,
+  authoringSessionGateway,
   recordAuthoringFile,
   readAuthoringPlan,
 } from "./lifecycle.js";
@@ -463,12 +463,15 @@ export async function buildAuthoringHandoff(
   const plan = await readAuthoringPlan(options.state);
   const lane = plan.lanes.find((item) => item.id === options.lane);
   if (!lane) throw new Error(`Unknown authoring lane: ${options.lane}`);
-  const readiness = await authoringReadiness(options.state);
-  for (const dependency of lane.dependencies) {
-    if (!readiness.completedLanes.includes(dependency))
-      throw new Error(
-        `Authoring lane ${options.lane} is blocked by ${dependency}`,
-      );
+  const decision = await authoringSessionGateway().decide({
+    state: options.state,
+    operation: "dispatch",
+    lane: options.lane,
+  });
+  if (!decision.allowed) {
+    throw new Error(
+      `Authoring lane ${options.lane} is not dispatchable:\n${decision.blockers.join("\n")}`,
+    );
   }
   const outputPath = await outputPathFor(options);
   if (outputPath.length > 4096)
@@ -655,7 +658,12 @@ async function dispatchFixtureLane(
     outputPath,
     JSON.stringify(fixtureOutput(state, plan, lane), null, 2) + "\n",
   );
-  await recordAuthoringFile({ state, lane, file: outputPath });
+  await recordAuthoringFile({
+    state,
+    lane,
+    file: outputPath,
+    confirmed: true,
+  });
 }
 
 export async function runManualAuthoringFixture(

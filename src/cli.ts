@@ -16,12 +16,11 @@ import {
 import { runDifferentialHarness } from "./differential/run.js";
 import { runAuthoringDifferentialHarness } from "./differential/authoring/run.js";
 import {
-  assemblePackage,
   authoringReadiness,
+  authoringSessionGateway,
   buildAuthoringHandoff,
   buildAuthoringPlan,
   initializeAuthoringSession,
-  recordAuthoringFile,
 } from "./authoring/index.js";
 import { migrateLegacyDraft } from "./factory/migration.js";
 import { readCreatorGuide } from "./factory/guide.js";
@@ -210,6 +209,7 @@ program
   .command("authoring-record <name>")
   .requiredOption("--lane <lane>", "Authoring lane")
   .requiredOption("--file <file>", "Authoring record JSON")
+  .option("--confirm", "Confirm authoring record persistence")
   .option(
     "--expected-revision <revision>",
     "Expected authoring session revision",
@@ -217,12 +217,21 @@ program
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (name, options) => {
+    if (!options.confirm)
+      throw new Error(
+        "Authoring record persistence requires explicit confirmation",
+      );
     const root = projectRoot(options.project);
+    const state = await readState(root, name);
+    const record = JSON.parse(
+      await fs.readFile(path.resolve(options.file), "utf8"),
+    );
     emit(
-      await recordAuthoringFile({
-        state: await readState(root, name),
+      await authoringSessionGateway().record({
+        state,
         lane: options.lane,
-        file: options.file,
+        record,
+        confirmed: options.confirm,
         expectedRevision:
           options.expectedRevision === undefined
             ? undefined
@@ -253,11 +262,15 @@ program
 program
   .command("assemble <name>")
   .description("Assemble a current authored workflow package")
+  .option("--confirm", "Confirm authoring assembly")
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (name, options) => {
-    const state = await assemblePackage(
+    if (!options.confirm)
+      throw new Error("Authoring assembly requires explicit confirmation");
+    const state = await authoringSessionGateway().assemble(
       await readState(projectRoot(options.project), name),
+      options.confirm,
     );
     emit(
       {
@@ -393,7 +406,10 @@ program
     if (!options.confirm)
       throw new Error("Publication requires explicit confirmation");
     emit(
-      await publishState(await readState(projectRoot(options.project), name)),
+      await publishState(
+        await readState(projectRoot(options.project), name),
+        options.confirm,
+      ),
       options.json,
     );
   });
@@ -401,13 +417,17 @@ program
 program
   .command("distribute <name>")
   .requiredOption("--destination <dir>", "Preview destination")
+  .option("--confirm", "Confirm distribution preview")
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (name, options) => {
+    if (!options.confirm)
+      throw new Error("Distribution requires explicit confirmation");
     emit(
       await distributePreview(
         await readState(projectRoot(options.project), name),
         options.destination,
+        options.confirm,
       ),
       options.json,
     );

@@ -1,4 +1,5 @@
 import type {
+  CreatorState,
   FactoryProposal,
   SkillCandidate,
   UpgradeSourceEvidence,
@@ -517,18 +518,21 @@ export interface AuthoringRecordSummary {
 export interface AuthoringStateSummary {
   schemaVersion: 1;
   status: AuthoringSessionStatus;
+  workflow?: string;
+  sessionId?: string;
   sessionPath: string;
   statePath?: string;
   planPath: string;
   recordsPath: string;
   revision: number;
-  generatorContractVersion: 2;
+  generatorContractVersion: 1 | 2;
   planHash: string;
   protocolHash: string;
   workflowProtocolHash: string;
   sourceEvidenceHash: string;
   authoringPlanHash: string;
   authoringInputHash: string;
+  semanticDossierHash?: string;
   scaffoldHash: string;
   authoredMaterialHash: string | null;
   assembledPackageHash: string | null;
@@ -569,6 +573,8 @@ export interface AuthoringWaveReadiness {
 export interface AuthoringRecoveryInfo {
   resumable: boolean;
   freshProcess: boolean;
+  recoveryRequired?: boolean;
+  reason?: string;
   revision: number;
   sessionPath: string;
   statePath: string;
@@ -581,6 +587,9 @@ export interface AuthoringRecoveryInfo {
 export interface AuthoringReadiness {
   state: "blocked" | "needs-context" | "ready";
   status: AuthoringSessionStatus;
+  identity?: AuthoringSessionIdentity;
+  lock?: AuthoringSessionLock;
+  recoveryError?: string;
   blockers: string[];
   warnings: string[];
   evidence: Record<string, string>;
@@ -591,4 +600,109 @@ export interface AuthoringReadiness {
   waves: AuthoringWaveReadiness[];
   recovery: AuthoringRecoveryInfo;
   review?: AuthoringReviewResult;
+}
+
+export type AuthoringSessionOperation =
+  | "dispatch"
+  | "record"
+  | "invalidate"
+  | "assemble"
+  | "evaluate"
+  | "publish"
+  | "distribute";
+
+export type AuthoringSessionDecisionState =
+  "allowed" | "blocked" | "needs-context" | "stale";
+
+export type AuthoringWriteOperation =
+  "record" | "assemble" | "publish" | "distribute";
+
+export interface AuthoringSessionIdentity {
+  schemaVersion: 1;
+  sessionId: string;
+  workflow: string;
+  sessionPath: string;
+  revision: number;
+  planHash: string;
+  protocolHash: string;
+  workflowProtocolHash: string;
+  sourceEvidenceHash: string;
+  authoringPlanHash: string;
+  authoringInputHash: string;
+  semanticDossierHash?: string;
+  scaffoldHash: string;
+}
+
+export interface AuthoringSessionDecisionOptions {
+  state: CreatorState;
+  operation: AuthoringSessionOperation;
+  lane?: AuthoringLaneId;
+  expectedRevision?: number;
+  confirmed?: boolean;
+}
+
+export interface AuthoringSessionDecision {
+  schemaVersion: 1;
+  operation: AuthoringSessionOperation;
+  lane?: AuthoringLaneId;
+  allowed: boolean;
+  state: AuthoringSessionDecisionState;
+  blockers: string[];
+  warnings: string[];
+  findings: AuthoringLaneFinding[];
+  revision: number;
+  identity?: AuthoringSessionIdentity;
+  lock?: AuthoringSessionLock;
+  authoring?: AuthoringStateSummary;
+  readiness: AuthoringReadiness;
+  recovery: AuthoringRecoveryInfo;
+  conflict?: AuthoringRevisionConflict;
+}
+
+export interface AuthoringWriteGateOptions {
+  state: CreatorState;
+  operation: AuthoringWriteOperation;
+  lane?: AuthoringLaneId;
+  expectedRevision?: number;
+  confirmed?: boolean;
+}
+
+export interface AuthoringWriteGate extends AuthoringSessionDecision {
+  operation: AuthoringWriteOperation;
+  confirmed: boolean;
+}
+
+export interface AuthoringInvalidationOptions {
+  state: CreatorState;
+  lanes: readonly AuthoringLaneId[];
+  reason?: string;
+  expectedRevision?: number;
+  confirmed: boolean;
+}
+
+export interface AuthoringInvalidation {
+  schemaVersion: 1;
+  lanes: AuthoringLaneId[];
+  revision: number;
+  reason: string;
+  identity?: AuthoringSessionIdentity;
+  recovery: AuthoringRecoveryInfo;
+  conflict?: AuthoringRevisionConflict;
+}
+
+export interface AuthoringSessionRecordOptions {
+  state: CreatorState;
+  lane: AuthoringLaneId;
+  record: unknown;
+  expectedRevision?: number;
+  confirmed: boolean;
+}
+
+export type AuthoringSessionLockStatus =
+  "available" | "held" | "stale" | "invalid";
+
+export interface AuthoringSessionLock {
+  path: string;
+  status: AuthoringSessionLockStatus;
+  owner?: { pid: number; at?: string };
 }

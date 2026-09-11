@@ -172,9 +172,9 @@ The relationships in the plan are semantic rather than source metadata:
    resume the required lanes.
 7. Run `badger authoring-status <name> --project <dir> --json`, dispatch each
    executable lane with `badger authoring-dispatch`, and submit its bounded
-   provider-neutral result with `badger authoring-record`. Use expected
+   provider-neutral result with `badger authoring-record --confirm`. Use expected
    revisions for concurrent submissions. Assemble only after all six lanes
-   complete.
+   complete, using `badger assemble <name> --confirm --project <dir>`.
 8. For an upgrade, preserve the original source tree and record explicit
    `retained`, `replaced`, or `wrapped` decisions. Generated summaries never
    silently replace source-owned files.
@@ -196,14 +196,14 @@ authority.
 
 Badger preserves the six-lane package-construction contract:
 
-| Lane | Dependency wave | Output boundary |
-| --- | --- | --- |
-| `script` | Wave 1 | Claims for WorkflowRuntime and Badger-named plan, check, and hook roles. |
-| `reference` | Wave 1 | Resolved Skills, normalized Workflow Protocol, composition evidence, and lane metadata. |
-| `pause-points` | Wave 1 | `reference/decision-points.md` and `reference/recovery.md`. |
-| `workflow-entry` | Wave 2 after `script` | Entry `SKILL.md` Decision Core. |
-| `skill-core` | Wave 2 after `script` | One substantive Guidance section per active internal Node Skill. |
-| `skill-review` | Barrier | `reference/skill-review.md` and the authoring review verdict. |
+| Lane             | Dependency wave       | Output boundary                                                                         |
+| ---------------- | --------------------- | --------------------------------------------------------------------------------------- |
+| `script`         | Wave 1                | Claims for WorkflowRuntime and Badger-named plan, check, and hook roles.                |
+| `reference`      | Wave 1                | Resolved Skills, normalized Workflow Protocol, composition evidence, and lane metadata. |
+| `pause-points`   | Wave 1                | `reference/decision-points.md` and `reference/recovery.md`.                             |
+| `workflow-entry` | Wave 2 after `script` | Entry `SKILL.md` Decision Core.                                                         |
+| `skill-core`     | Wave 2 after `script` | One substantive Guidance section per active internal Node Skill.                        |
+| `skill-review`   | Barrier               | `reference/skill-review.md` and the authoring review verdict.                           |
 
 Providers receive only bounded file handoffs and capability metadata. They
 cannot write Creator or authoring state, execute candidate Skills, publish,
