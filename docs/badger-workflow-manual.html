@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="An interview-ready educational manual for Badger, integrated Skill authoring, WorkflowRuntime, and the Primer Designer workflow instance.">
+<meta name="description" content="An educational manual for Badger, integrated Skill authoring, WorkflowRuntime, and the Primer Designer workflow instance.">
 <title>Badger Workflow Manual</title>
 <style>
 :root{
@@ -25,6 +25,7 @@
   --danger:#9b3c37;
   --hero:#19364b;
   --shadow:0 12px 34px rgba(28,42,51,.07);
+  --scroll-shadow:rgba(28,42,51,.18);
   --mono:"JetBrains Mono","SFMono-Regular",Consolas,monospace;
   --sans:"IBM Plex Sans",Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
 }
@@ -52,11 +53,25 @@ h1{font-size:clamp(38px,6vw,76px);font-weight:600;margin:0 0 22px;max-width:800p
 .hero-meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:28px}
 .pill{border:1px solid rgba(255,255,255,.24);border-radius:999px;padding:6px 11px;color:#dbe8eb;font:12px/1.2 var(--mono)}
 .layout{max-width:1240px;margin:auto;padding:26px 22px 80px;display:grid;grid-template-columns:245px minmax(0,1fr);gap:38px}
+.layout.toc-animate{transition:grid-template-columns .2s ease,gap .2s ease}
 .sidebar{position:sticky;top:18px;align-self:start;max-height:calc(100vh - 36px);overflow:auto;padding:15px 0}
-.sidebar-title{font:600 11px/1.4 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--faint);margin:0 0 11px}
+.sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 9px}
+.sidebar-title{font:600 11px/1.4 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--faint);margin:0}
+.toc-toggle,.toc-group-toggle{display:inline-grid;place-items:center;flex:0 0 auto;padding:0;border:0;border-radius:4px;background:transparent;color:var(--faint);cursor:pointer}
+.toc-toggle{width:32px;height:32px;border:1px solid var(--line);background:var(--paper)}
+.toc-group-toggle{width:22px;height:30px}
+.toc-toggle:hover,.toc-group-toggle:hover{color:var(--navy);background:var(--paper)}
+.toc-toggle:focus-visible,.toc-group-toggle:focus-visible{outline:2px solid var(--orange);outline-offset:1px}
+.toc-toggle svg,.toc-group-toggle svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:transform .2s ease}
+.toc-toggle[aria-expanded="false"] svg{transform:rotate(180deg)}
+.toc-group-toggle[aria-expanded="true"] svg{transform:rotate(90deg)}
+.toc-group-head{display:flex;align-items:center}
+.toc-group-head a{flex:1 1 auto;min-width:0}
+.toc-group-head > a:first-child,.toc-group-items{margin-left:22px}
 .sidebar a{display:block;text-decoration:none;color:var(--muted);padding:6px 11px;border-left:2px solid transparent;font-size:14px;line-height:1.35}
 .sidebar a:hover,.sidebar a:focus{color:var(--navy);background:var(--paper);border-left-color:var(--orange);outline:none}
-.sidebar .sub{padding-left:25px;font-size:13px}
+.sidebar .sub{padding-left:22px;font-size:13px}
+@media(min-width:901px){.layout.toc-collapsed{grid-template-columns:32px minmax(0,1fr);gap:26px}.toc-collapsed .sidebar-title,.toc-collapsed .toc-list{display:none}}
 main{min-width:0}
 .section{scroll-margin-top:22px;padding:26px 0 42px;border-bottom:1px solid var(--line)}
 .section:last-child{border-bottom:0}
@@ -69,29 +84,21 @@ p{max-width:79ch;margin:0 0 15px}
 .callout{border-left:4px solid var(--teal);background:var(--teal-soft);padding:16px 18px;margin:21px 0 24px;max-width:86ch}
 .callout.warning{border-left-color:var(--orange);background:var(--orange-soft)}
 .callout strong{color:var(--navy)}
-.interview{border:1px solid #cfc8be;background:var(--paper);padding:18px 20px;margin:18px 0 27px;box-shadow:var(--shadow);position:relative;max-width:92ch}
-.interview:before{content:"INTERVIEW SCRIPT";display:block;color:var(--orange);font:600 11px/1.2 var(--mono);letter-spacing:.12em;margin-bottom:9px}
-.interview p{margin:0;color:#293844}
 .diagram-card{background:var(--paper-strong);border:1px solid var(--line);border-radius:7px;padding:18px 18px 12px;margin:22px 0 8px;box-shadow:var(--shadow);overflow:hidden}
 .diagram-card figcaption{color:var(--faint);font:12px/1.45 var(--mono);margin-top:13px}
 .diagram-prose{border-left:3px solid var(--purple);background:var(--purple-soft);padding:15px 18px;margin:13px 0 25px;max-width:92ch}
 .diagram-prose p{color:var(--muted);margin:0 0 10px}
 .diagram-prose p:last-child{margin-bottom:0}.diagram-prose strong{color:var(--navy)}
-.mermaid{overflow-x:auto;overflow-y:hidden;padding:12px 0;min-height:40px;width:100%;max-width:100%;min-width:0}
-.mermaid svg{display:block;max-width:none;width:max-content;min-width:100%;height:auto}
-.mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .messageText,.mermaid .loopText,.mermaid .labelText{font-size:20px!important;line-height:1.35!important}
-.mermaid .actor,.mermaid .labelBox,.mermaid .noteText{font-size:19px!important}
-.mermaid .cluster-label .nodeLabel{font-size:19px!important;font-weight:600}
-.dense-diagram .mermaid{width:100%;max-width:100%;min-width:0}
-.wide-diagram .mermaid svg{width:140%;min-width:1200px}
-.dense-diagram .mermaid .nodeLabel,.dense-diagram .mermaid .edgeLabel,.dense-diagram .mermaid .messageText,.dense-diagram .mermaid .loopText,.dense-diagram .mermaid .labelText{font-size:22px!important}
-.dense-diagram .mermaid .actor,.dense-diagram .mermaid .labelBox,.dense-diagram .mermaid .noteText{font-size:21px!important}
-.compact-diagram .mermaid svg{width:100%;min-width:0;max-width:100%;margin:0 auto}
+.mermaid{overflow-x:auto;overflow-y:hidden;padding:12px 0;min-height:40px;width:100%;max-width:100%;min-width:0;scrollbar-width:thin}
+.mermaid svg{display:block;max-width:none;height:auto;margin:0 auto}
+.mermaid.is-scrollable{cursor:grab;background:linear-gradient(to right,var(--paper-strong) 30%,transparent) left/40px 100% no-repeat local,linear-gradient(to left,var(--paper-strong) 30%,transparent) right/40px 100% no-repeat local,radial-gradient(farthest-side at 0 50%,var(--scroll-shadow),transparent) left/12px 100% no-repeat scroll,radial-gradient(farthest-side at 100% 50%,var(--scroll-shadow),transparent) right/12px 100% no-repeat scroll}
+.mermaid.is-dragging{cursor:grabbing;user-select:none}
+.mermaid:focus-visible{outline:2px solid var(--teal);outline-offset:3px}
+.diagram-fallback{margin:0;white-space:pre-wrap;font:12px/1.5 var(--mono);color:var(--muted)}
 .abstraction-lanes{display:grid;gap:12px}
 .abstraction-lane{display:grid;grid-template-columns:150px minmax(0,1fr);gap:14px;align-items:center;border:1px solid var(--line);background:var(--paper);padding:12px;min-width:0}
 .abstraction-lane-title{font:600 13px/1.35 var(--mono);color:var(--navy)}
-.layer-mermaid{overflow-x:auto;overflow-y:hidden;padding:4px 0;width:100%;max-width:100%;min-width:0}
-.layer-mermaid svg{display:block;width:max-content!important;min-width:0;max-width:none!important;height:auto;margin:0 auto}
+.abstraction-lane .mermaid{padding:4px 0}
 .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0 17px;color:var(--muted);font-size:13px}
 .legend span{display:inline-flex;align-items:center;gap:6px}.legend i{width:12px;height:12px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.15)}
 .legend .instruction{background:var(--orange-soft)}.legend .contract{background:var(--purple-soft)}.legend .runtime{background:var(--teal-soft)}.legend .evidence{background:var(--navy-soft)}
@@ -124,14 +131,13 @@ p{max-width:79ch;margin:0 0 15px}
 .footer{color:var(--faint);font-size:13px;padding:25px 0 5px}
 .small{font-size:14px;color:var(--faint)}
 .tag{display:inline-block;border-radius:4px;padding:3px 7px;font:600 11px/1.2 var(--mono);letter-spacing:.04em;text-transform:uppercase}.tag.target{background:var(--teal-soft);color:var(--teal)}.tag.current{background:var(--navy-soft);color:var(--navy)}.tag.boundary{background:var(--orange-soft);color:var(--orange)}
-@media(max-width:900px){.layout{grid-template-columns:1fr;gap:0}.sidebar{position:relative;top:auto;max-height:none;border-bottom:1px solid var(--line);padding:9px 0 14px;display:flex;gap:3px;overflow-x:auto}.sidebar-title{display:none}.sidebar a{white-space:nowrap;border-left:0;border-bottom:2px solid transparent;padding:8px 10px}.sidebar a:hover,.sidebar a:focus{border-left:0;border-bottom-color:var(--orange)}.sidebar .sub{display:none}.axis{grid-template-columns:1fr}.axis article{border-right:0;border-bottom:1px solid var(--line)}.axis article:last-child{border-bottom:0}.two-col,.three-col,.term-grid{grid-template-columns:1fr}.ladder-row{grid-template-columns:1fr;gap:3px}}
-@media(max-width:560px){body{font-size:16px}.hero{padding:40px 18px 42px}.hero-bar{align-items:center}.hero-lede{font-size:18px}.layout{padding:12px 16px 55px}.section{padding-top:22px}.diagram-card{padding:11px 10px}.mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .messageText,.mermaid .loopText,.mermaid .labelText{font-size:18px!important}.mermaid .actor,.mermaid .labelBox,.mermaid .noteText{font-size:17px!important}.dense-diagram .mermaid{width:100%;max-width:100%;min-width:0}.wide-diagram .mermaid svg{width:140%;min-width:1050px}.compact-diagram .mermaid svg{width:100%;min-width:700px;max-width:none;margin:0 auto}.dense-diagram .mermaid .nodeLabel,.dense-diagram .mermaid .edgeLabel,.dense-diagram .mermaid .messageText,.dense-diagram .mermaid .loopText,.dense-diagram .mermaid .labelText{font-size:20px!important}.dense-diagram .mermaid .actor,.dense-diagram .mermaid .labelBox,.dense-diagram .mermaid .noteText{font-size:19px!important}.data-table{display:block;overflow-x:auto;min-width:720px}#section-2 > .data-table{min-width:0}.comparison-table-wrap .comparison-table{display:table;width:960px;min-width:960px}.code-block{font-size:12px}.interview{padding:15px 16px}.language-toggle button{min-width:68px;padding-left:9px;padding-right:9px}}
+@media(max-width:900px){.layout{grid-template-columns:1fr;gap:0}.sidebar{position:relative;top:auto;max-height:none;border-bottom:1px solid var(--line);padding:9px 0 14px;overflow-x:auto}.sidebar-head,.toc-group-toggle,.toc-group-items{display:none}.toc-list{display:flex;gap:3px}.toc-group,.toc-group-head{display:contents}.toc-group-head a{flex:none}.toc-group-head > a:first-child{margin-left:0}.sidebar a{white-space:nowrap;border-left:0;border-bottom:2px solid transparent;padding:8px 10px}.sidebar a:hover,.sidebar a:focus{border-left:0;border-bottom-color:var(--orange)}.axis{grid-template-columns:1fr}.axis article{border-right:0;border-bottom:1px solid var(--line)}.axis article:last-child{border-bottom:0}.two-col,.three-col,.term-grid{grid-template-columns:1fr}.ladder-row{grid-template-columns:1fr;gap:3px}}
+@media(max-width:560px){body{font-size:16px}.hero{padding:40px 18px 42px}.hero-bar{align-items:center}.hero-lede{font-size:18px}.layout{padding:12px 16px 55px}.section{padding-top:22px}.diagram-card{padding:11px 10px}.data-table{display:block;overflow-x:auto;min-width:720px}#section-2 > .data-table{min-width:0}.comparison-table-wrap .comparison-table{display:table;width:960px;min-width:960px}.code-block{font-size:12px}.language-toggle button{min-width:68px;padding-left:9px;padding-right:9px}}
 @media(max-width:900px){.abstraction-lane{grid-template-columns:1fr;gap:7px}.abstraction-lane-title{padding-bottom:4px;border-bottom:1px solid var(--line)}}
-@media(max-width:560px){.layer-horizontal svg{min-width:640px}.layer-vertical svg{min-width:0}}
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.layout.toc-animate,.toc-toggle svg,.toc-group-toggle svg{transition:none}}
 @media(prefers-color-scheme:dark){
-  :root{--ink:#e8eef0;--muted:#b2bec2;--faint:#91a0a5;--bg:#121a1f;--paper:#1a242a;--paper-strong:#1d2930;--line:#35434a;--navy:#8cc1d0;--navy-soft:#263a42;--teal:#72c1b1;--teal-soft:#1e3838;--orange:#ef9861;--orange-soft:#3d2c24;--purple-soft:#312c45;--shadow:none}
-  code{background:#29363d;border-color:#3a4a52}.callout{color:#e5eeee}.interview p{color:#dce7e9}.data-table th{background:#254858}.data-table td{color:#bdc9cd}.code-block{background:#0d1418}.sidebar a{color:var(--muted)}
+  :root{--ink:#e8eef0;--muted:#b2bec2;--faint:#91a0a5;--bg:#121a1f;--paper:#1a242a;--paper-strong:#1d2930;--line:#35434a;--navy:#8cc1d0;--navy-soft:#263a42;--teal:#72c1b1;--teal-soft:#1e3838;--orange:#ef9861;--orange-soft:#3d2c24;--purple-soft:#312c45;--shadow:none;--scroll-shadow:rgba(0,0,0,.55)}
+  code{background:#29363d;border-color:#3a4a52}.callout{color:#e5eeee}.data-table th{background:#254858}.data-table td{color:#bdc9cd}.code-block{background:#0d1418}.sidebar a{color:var(--muted)}
 }
 </style>
 </head>
@@ -141,45 +147,121 @@ p{max-width:79ch;margin:0 0 15px}
   <div class="hero-inner">
     <div class="hero-bar"><p class="eyebrow">Skill Harness / Badger</p><div class="language-toggle" role="group" aria-label="Language"><button type="button" data-language="en" aria-pressed="true">English</button><button type="button" data-language="zh" aria-pressed="false">中文</button></div></div>
     <h1>From Markdown Skills to durable workflow systems</h1>
-    <p class="hero-lede">An educational, interview-ready manual for understanding Badger, the Skill Harness, and the Primer Designer workflow as a generated instance.</p>
-    <div class="hero-meta"><span class="pill">Sections 1–4 are the study path</span><span class="pill">Mermaid architecture views</span><span class="pill">Integrated authoring delivered · #16</span><span class="pill">Updated 2026-09-09</span></div>
+    <p class="hero-lede">An educational manual for understanding Badger, the Skill Harness, and the Primer Designer workflow as a generated instance.</p>
+    <div class="hero-meta"><span class="pill">Sections 1–4 are the study path</span><span class="pill">Mermaid architecture views</span><span class="pill">Integrated authoring delivered · #16</span><span class="pill">Updated 2026-10-26</span></div>
     <div class="language-status" id="language-status" role="status" aria-live="polite"></div>
   </div>
 </header>
 <div class="layout">
-  <nav class="sidebar" aria-label="Manual sections">
-    <p class="sidebar-title">On this page</p>
-    <a href="#section-1">1 · Terminology</a>
-    <a class="sub" href="#terms-core">Instruction &amp; composition</a>
-    <a class="sub" href="#terms-contract">Contract vocabulary</a>
-    <a class="sub" href="#terms-runtime">Runtime vocabulary</a>
-    <a class="sub" href="#terms-evidence">Evidence vocabulary</a>
-    <a href="#section-2">2 · Architecture</a>
-    <a class="sub" href="#architecture-target">2.1 Target architecture</a>
-    <a class="sub" href="#architecture-layers">2.2 Abstraction layers</a>
-    <a class="sub" href="#architecture-runtime">2.3 Runtime internals</a>
-    <a class="sub" href="#architecture-primer">2.4 Primer instance</a>
-    <a class="sub" href="#architecture-position">2.5 Why it fits</a>
-    <a href="#section-3">3 · Lifecycle</a>
-    <a class="sub" href="#lifecycle-package">3.1 Package lifecycle</a>
-    <a class="sub" href="#lifecycle-run">3.2 Run lifecycle</a>
-    <a class="sub" href="#lifecycle-operations">3.3 Public operations</a>
-    <a class="sub" href="#lifecycle-branches">3.4 Decisions and recovery</a>
-    <a href="#section-4">4 · Codebase guide</a>
-    <a class="sub" href="#private-user-path">4.1 User-to-code path</a>
-    <a class="sub" href="#private-user-guide">4.2 Use the tool</a>
-    <a class="sub" href="#private-parameters">4.3 Parameters and enums</a>
-    <a class="sub" href="#private-modules">4.4 Package modules and seams</a>
-    <a class="sub" href="#private-evidence">4.5 Evidence, tests, maintenance</a>
-    <a href="#section-5">5 · Interview practice</a>
-    <a href="#section-6">6 · Source ledger</a>
+  <nav class="sidebar" aria-labelledby="toc-title">
+    <div class="sidebar-head">
+      <p class="sidebar-title" id="toc-title">On this page</p>
+      <button type="button" class="toc-toggle" aria-expanded="true" aria-controls="toc-list" aria-labelledby="toc-title"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8.5 3.5 4 8l4.5 4.5M12.5 3.5 8 8l4.5 4.5"/></svg></button>
+    </div>
+    <div class="toc-list" id="toc-list">
+      <div class="toc-group">
+        <div class="toc-group-head"><button type="button" class="toc-group-toggle" aria-expanded="true" aria-controls="toc-group-1" aria-labelledby="toc-link-1"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button><a id="toc-link-1" href="#section-1">1 · Terminology</a></div>
+        <div class="toc-group-items" id="toc-group-1">
+          <a class="sub" href="#terms-core">Instruction &amp; composition</a>
+          <a class="sub" href="#terms-contract">Contract vocabulary</a>
+          <a class="sub" href="#terms-runtime">Runtime vocabulary</a>
+          <a class="sub" href="#terms-evidence">Evidence vocabulary</a>
+        </div>
+      </div>
+      <div class="toc-group">
+        <div class="toc-group-head"><button type="button" class="toc-group-toggle" aria-expanded="true" aria-controls="toc-group-2" aria-labelledby="toc-link-2"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button><a id="toc-link-2" href="#section-2">2 · Architecture</a></div>
+        <div class="toc-group-items" id="toc-group-2">
+          <a class="sub" href="#architecture-target">2.1 Target architecture</a>
+          <a class="sub" href="#architecture-layers">2.2 Abstraction layers</a>
+          <a class="sub" href="#architecture-runtime">2.3 Runtime internals</a>
+          <a class="sub" href="#architecture-primer">2.4 Primer instance</a>
+          <a class="sub" href="#architecture-position">2.5 Why it fits</a>
+        </div>
+      </div>
+      <div class="toc-group">
+        <div class="toc-group-head"><button type="button" class="toc-group-toggle" aria-expanded="true" aria-controls="toc-group-3" aria-labelledby="toc-link-3"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button><a id="toc-link-3" href="#section-3">3 · Lifecycle</a></div>
+        <div class="toc-group-items" id="toc-group-3">
+          <a class="sub" href="#lifecycle-package">3.1 Package lifecycle</a>
+          <a class="sub" href="#lifecycle-run">3.2 Run lifecycle</a>
+          <a class="sub" href="#lifecycle-operations">3.3 Public operations</a>
+          <a class="sub" href="#lifecycle-branches">3.4 Decisions and recovery</a>
+        </div>
+      </div>
+      <div class="toc-group">
+        <div class="toc-group-head"><button type="button" class="toc-group-toggle" aria-expanded="true" aria-controls="toc-group-4" aria-labelledby="toc-link-4"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button><a id="toc-link-4" href="#section-4">4 · Codebase guide</a></div>
+        <div class="toc-group-items" id="toc-group-4">
+          <a class="sub" href="#private-user-path">4.1 User-to-code path</a>
+          <a class="sub" href="#private-user-guide">4.2 Use the tool</a>
+          <a class="sub" href="#private-parameters">4.3 Parameters and enums</a>
+          <a class="sub" href="#private-modules">4.4 Package modules and seams</a>
+          <a class="sub" href="#private-evidence">4.5 Evidence, tests, maintenance</a>
+        </div>
+      </div>
+      <div class="toc-group">
+        <div class="toc-group-head"><a href="#section-5">5 · Source ledger</a></div>
+      </div>
+    </div>
   </nav>
+  <script>
+    (() => {
+      const layout = document.querySelector('.layout');
+      const panelToggle = document.querySelector('.toc-toggle');
+      const groupToggles = [...document.querySelectorAll('.toc-group-toggle')];
+      const storageKey = 'badger-workflow-manual-toc';
+      const titles = {en: ['Collapse contents', 'Expand contents'], zh: ['收起目录', '展开目录']};
+      let state = {};
+      try {
+        state = JSON.parse(localStorage.getItem(storageKey)) || {};
+      } catch {
+        state = {};
+      }
+      const collapsedGroups = new Set(Array.isArray(state.groups) ? state.groups : []);
+      const save = () => {
+        try {
+          localStorage.setItem(storageKey, JSON.stringify({panel: state.panel, groups: [...collapsedGroups]}));
+        } catch {
+          void 0;
+        }
+      };
+      const updatePanelTitle = () => {
+        const language = document.documentElement.lang.startsWith('zh') ? 'zh' : 'en';
+        panelToggle.title = titles[language][panelToggle.getAttribute('aria-expanded') === 'true' ? 0 : 1];
+      };
+      const setPanel = expanded => {
+        layout.classList.toggle('toc-collapsed', !expanded);
+        panelToggle.setAttribute('aria-expanded', String(expanded));
+        updatePanelTitle();
+      };
+      const setGroup = (button, expanded) => {
+        button.setAttribute('aria-expanded', String(expanded));
+        document.getElementById(button.getAttribute('aria-controls')).hidden = !expanded;
+      };
+      setPanel(state.panel !== 'collapsed');
+      groupToggles.forEach(button => setGroup(button, !collapsedGroups.has(button.getAttribute('aria-controls'))));
+      requestAnimationFrame(() => requestAnimationFrame(() => layout.classList.add('toc-animate')));
+      panelToggle.addEventListener('click', () => {
+        const expanded = panelToggle.getAttribute('aria-expanded') !== 'true';
+        setPanel(expanded);
+        state.panel = expanded ? 'expanded' : 'collapsed';
+        save();
+      });
+      groupToggles.forEach(button => button.addEventListener('click', () => {
+        const expanded = button.getAttribute('aria-expanded') !== 'true';
+        const groupId = button.getAttribute('aria-controls');
+        setGroup(button, expanded);
+        if (expanded) collapsedGroups.delete(groupId);
+        else collapsedGroups.add(groupId);
+        save();
+      }));
+      new MutationObserver(updatePanelTitle).observe(document.documentElement, {attributes: true, attributeFilter: ['lang']});
+    })();
+  </script>
   <main id="manual">
     <section class="section" id="section-1">
       <p class="section-number">SECTION 01</p>
       <h2>Terminology: four planes and the system vocabulary</h2>
       <p class="lede">Start with four planes, then learn the terms that connect them: human-readable instructions, a declarative contract, a durable runtime/control plane, and evidence that proves what happened. This order turns a long glossary into a map for every architecture diagram that follows.</p>
-      <div class="callout"><strong>How to use this section.</strong> Read left to right: capability → contract → execution → proof. For each term, ask what it describes, who owns it, what identity or artifact crosses the boundary, and whether the behavior is current or still a roadmap target. Then reuse the interview sentence at the end.</div>
+      <div class="callout"><strong>How to use this section.</strong> Read left to right: capability → contract → execution → proof. For each term, ask what it describes, who owns it, what identity or artifact crosses the boundary, and whether the behavior is current or still a roadmap target.</div>
       <div class="axis plane-map" aria-label="Four-plane model">
         <article><b>1. Instruction plane</b><span>Skills, references, scripts, Creator, and Factory describe capability.</span></article>
         <article><b>2. Contract plane</b><span>Protocol, Nodes, schemas, guards, and routes declare meaning.</span></article>
@@ -255,7 +337,6 @@ p{max-width:79ch;margin:0 0 15px}
         <div class="term"><dt>Transactional finalization</dt><dd>A preview–confirm–mutate–reconcile sequence for high-consequence completion or publication. Preview is evidence about a proposed change, not proof that the change was applied.</dd></div>
       </dl>
 
-      <div class="interview"><p>“I explain the system as four cooperating planes. Skills and Creator form the instruction plane; Workflow Protocol forms the semantic contract plane; WorkflowRuntime plus Engine form the runtime/control plane; and identities, artifacts, trajectories, receipts, evaluations, and readiness form the evidence plane. The planes have different owners, so an Agent can contribute work without becoming the authority for routing or durable state.”</p></div>
     </section>
 
     <section class="section" id="section-2">
@@ -279,50 +360,13 @@ p{max-width:79ch;margin:0 0 15px}
         <article class="card"><h4>Evidence boundary</h4><p>The evidence ledger ties package, Run, artifacts, decisions, trajectories, evaluations, and readiness together. Delivery gates inspect that record rather than a final message.</p></article>
       </div>
       <figure class="diagram-card">
-        <div class="mermaid diagram-source" data-diagram-index="0">
-flowchart TB
-  U[User or operator goal] --> C[Badger Creator]
-  S[Source Skills<br/>Markdown, references, scripts] --> C
-  C --> P[Normalized Workflow Protocol]
-  C --> SD[Confirmed semantic dossier<br/>source identities + fact ledgers]
-  SD --> CI[Hash-bound authoring common input]
-  P --> CI
-  CI --> W1[Wave 1 lenses<br/>script / reference / pause-points]
-  W1 --> SR[Accepted script record]
-  SR --> W2[Wave 2<br/>workflow-entry / skill-core]
-  CI --> W2
-  W1 --> RV[skill-review<br/>all five prior lanes required]
-  W2 --> RV
-  P --> AP[Authoring Protocol<br/>lane DAG + claims]
-  AP --> L[Authored drafts + review]
-  RV --> L
-  L --> A[Deterministic assembly]
-  P --> A
-  A --> G[Generated workflow package]
-  G --> I[Immutable package and Skill snapshot]
-  I --> R[WorkflowRuntime]
-  R --> E[Engine]
-  E --> L1[Manual Run location]
-  E --> L2[Standalone Run location]
-  R --> K[Continuation]
-  K --> H[Human, Agent, script, or external executor]
-  H -->|outcome or decision response| R
-  R --> X[Evidence ledger]
-  X --> V[Eval, certification, readiness]
-  V --> D[Preview, approval, publication, distribution]
-  classDef source fill:#f8e9dc,stroke:#b85f2d,color:#17202a;
-  classDef contract fill:#eeeaf7,stroke:#67528d,color:#17202a;
-  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;
-  class S,U source; class P,AP,L,A,G contract; class I,R,E,L1,L2,K,H runtime; class X,V,D evidence;
-        </div>
+        <div class="mermaid" data-diagram-id="2.1" data-drag-scroll></div>
         <figcaption>Diagram 2.1 — Creator and the Authoring Protocol produce a reviewed package; the WorkflowRuntime path governs each Run location; evidence supports promotion and delivery.</figcaption>
       </figure>
       <div class="legend"><span><i class="instruction"></i>instruction/source</span><span><i class="contract"></i>contract and package</span><span><i class="runtime"></i>execution</span><span><i class="evidence"></i>evidence and delivery</span></div>
       <h4 class="architecture-subheading target-subheading" id="target-reading">How to read the flow</h4>
       <p>Follow the solid path from the goal and source Skills to a normalized Workflow Protocol, an Authoring Plan and lane outputs, an assembled package, an immutable snapshot, and WorkflowRuntime/Engine. The host receives a continuation, performs one proposed action, and submits an outcome; it does not choose an arbitrary next Node.</p>
       <p>Follow the parallel evidence path separately. It records identity, artifacts, receipts, trajectory, evaluations, and readiness, then supports preview, approval, publication, and distribution. “The Run completed” and “the package is ready” therefore remain separate claims with separate evidence.</p>
-      <div class="interview"><p>“At the highest level, Badger is a governed package factory plus a durable execution product. Creator/Factory owns meaning and delivery evidence; WorkflowRuntime owns each Run; the host performs external work. The immutable package snapshot and execution identity are the handoff. Only the runtime can accept an outcome and move the Run, while evidence connects that execution to evaluation, readiness, approval, and delivery.”</p></div>
 
       <h3 id="architecture-layers">2.2 The abstraction ladder</h3>
       <p>The same architecture becomes easier to remember when viewed at progressively lower levels. This is a zoom model, not a second lifecycle: each level answers a different question while preserving the same package identity, runtime authority, and evidence boundary.</p>
@@ -335,75 +379,25 @@ flowchart TB
         <article><b>Level 5 · Files and modules</b><span>Where boundaries live in code.</span></article>
       </div>
 
-      <figure class="diagram-card dense-diagram compact-diagram" data-diagram="2-2">
+      <figure class="diagram-card">
         <div class="abstraction-lanes">
-          <div class="abstraction-lane"><div class="abstraction-lane-title">1. Ecosystem</div><div class="mermaid layer-mermaid layer-vertical">flowchart TB
-  Skills[Source Skills] --> Factory[Creator / Factory] --> Package[Generated package] --> Runtime[WorkflowRuntime + Engine]
-  Runtime --> Host[Host / executor]
-  Runtime --> Evidence[Evidence + delivery]
-  classDef source fill:#f8e9dc,stroke:#b85f2d,color:#17202a;
-  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;
-  class Skills,Factory,Package,Host source; class Runtime runtime; class Evidence evidence;</div></div>
-          <div class="abstraction-lane"><div class="abstraction-lane-title">2. Package</div><div class="mermaid layer-mermaid layer-horizontal">flowchart LR
-  Protocol[Workflow Protocol] --> Nodes[Nodes + bindings] --> Schemas[Output Schemas]
-  Nodes --> Routes[Transitions + routes]
-  Nodes --> Guards[Guardrails + handoffs]
-  classDef contract fill:#eeeaf7,stroke:#67528d,color:#17202a;
-  class Protocol,Nodes,Schemas,Routes,Guards contract;</div></div>
-          <div class="abstraction-lane"><div class="abstraction-lane-title">3. Run</div><div class="mermaid layer-mermaid layer-horizontal">flowchart LR
-  Identity[Execution identity] --> State[Run state + revision] --> Pending[Pending action]
-  State --> Cycles[Cycles + Attempts + visits]
-  State --> Artifacts[Artifact versions + selections]
-  State --> History[Trajectory + checkpoints]
-  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  class Identity,State,Pending,Cycles,Artifacts,History runtime;</div></div>
-          <div class="abstraction-lane"><div class="abstraction-lane-title">4. Transition</div><div class="mermaid layer-mermaid layer-vertical">flowchart TB
-  Prepare[Prepare action] --> External[External work] --> Submit[Submit outcome / decision] --> Validate[Validate] --> Resolve[Resolve next transition]
-  classDef transition fill:#e7eef2,stroke:#19364b,color:#17202a;
-  class Prepare,External,Submit,Validate,Resolve transition;</div></div>
-          <div class="abstraction-lane"><div class="abstraction-lane-title">5. Files and modules</div><div class="mermaid layer-mermaid layer-vertical">flowchart TB
-  Compiler[compiler.ts] --> Resolver[resolver.ts + routing.ts] --> Completion[completion.ts + decision scope]
-  Completion --> Storage[Protected storage + locations] --> Adapters[Generated adapters + projections]
-  classDef module fill:#e7eef2,stroke:#19364b,color:#17202a;
-  class Compiler,Resolver,Completion,Storage,Adapters module;</div></div>
+          <div class="abstraction-lane"><div class="abstraction-lane-title">1. Ecosystem</div><div class="mermaid" data-diagram-id="2.2-ecosystem" data-drag-scroll></div></div>
+          <div class="abstraction-lane"><div class="abstraction-lane-title">2. Package</div><div class="mermaid" data-diagram-id="2.2-package" data-drag-scroll></div></div>
+          <div class="abstraction-lane"><div class="abstraction-lane-title">3. Run</div><div class="mermaid" data-diagram-id="2.2-run" data-drag-scroll></div></div>
+          <div class="abstraction-lane"><div class="abstraction-lane-title">4. Transition</div><div class="mermaid" data-diagram-id="2.2-transition" data-drag-scroll></div></div>
+          <div class="abstraction-lane"><div class="abstraction-lane-title">5. Files and modules</div><div class="mermaid" data-diagram-id="2.2-modules" data-drag-scroll></div></div>
         </div>
         <figcaption>Diagram 2.2 — Five Mermaid lanes zoom from ecosystem to package, Run, transition, and concrete modules; each lane restores detail without compressing the whole architecture.</figcaption>
       </figure>
       <h4 class="architecture-subheading layers-subheading" id="layers-invariant">The invariant to remember</h4>
       <p>At Level 1, the story is a governed workflow ecosystem; at Level 2, a declarative package; at Level 3, a durable Run; at Level 4, a guarded prepare–execute–submit–validate–resolve turn; and at Level 5, the concrete module seams that implement those meanings.</p>
       <p>The zoom changes vocabulary, not authority. Every view points back to the same package identity, pending action, validation boundary, and continuation. A generated Markdown file is an instruction surface; the module that owns state, transitions, validation, and recovery is the runtime.</p>
-      <div class="interview"><p>“I explain the five levels as zoom, not as five different systems. Ecosystem asks who participates; package asks what is declared; Run asks what is persisted; transition asks how one turn is guarded; and module asks where the boundary lives in code. The vocabulary changes at each zoom, but package identity, pending action, validation, continuation, and one runtime authority remain invariant.”</p></div>
 
       <h3 id="architecture-runtime">2.3 WorkflowRuntime inside the codebase</h3>
       <p><span class="tag current">Current seam</span> The private package exposes one public constructor and four operations—<code>start</code>, <code>resume</code>, <code>submit</code>, and <code>recover</code>. That small surface is the stable contract; Engine state, validation, routing, artifacts, storage, and durability evolve behind it.</p>
       <h4 class="architecture-subheading runtime-subheading" id="runtime-boundary">Public contract, private machinery</h4>
       <figure class="diagram-card">
-        <div class="mermaid diagram-source" data-diagram-index="2">
-flowchart TB
-  Caller[Caller or generated adapter] --> Public[workflow-runtime/public.ts<br/>createWorkflowRuntime]
-  Public --> Ops[start / resume / submit / recover]
-  Ops --> Compile[compiler.ts]
-  Compile --> Package[Engine-compatible SkillPackage]
-  Ops --> Location[location.ts<br/>manual or standalone]
-  Location --> Store[Engine Run storage]
-  Ops --> Completion[completion.ts<br/>Output Schema and evidence checks]
-  Ops --> Route[routing.ts + resolver.ts<br/>edges, fallback, cycles]
-  Ops --> Decision[decision-scope.ts<br/>decision inputs and evidence scope]
-  Ops --> Artifact[artifacts.ts<br/>immutable versions and selections]
-  Store --> Durable[protected files, atomic writes,<br/>trajectory, checkpoints, journal, locks]
-  Ops --> Projection[generated state / guard / handoff adapters]
-  Durable --> Continuation[WorkflowContinuation]
-  Completion --> Continuation
-  Route --> Continuation
-  Decision --> Continuation
-  Artifact --> Continuation
-  classDef api fill:#eeeaf7,stroke:#67528d,color:#17202a;
-  classDef logic fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  classDef storage fill:#e7eef2,stroke:#19364b,color:#17202a;
-  classDef adapter fill:#f8e9dc,stroke:#b85f2d,color:#17202a;
-  class Caller,Projection adapter; class Public,Ops,Continuation api; class Compile,Package,Completion,Route,Decision,Artifact logic; class Location,Store,Durable storage;
-        </div>
+        <div class="mermaid" data-diagram-id="2.3" data-drag-scroll></div>
         <figcaption>Diagram 2.3 — The public WorkflowRuntime contract coordinates compiler, route, completion, decision, artifact, location, and durability capabilities.</figcaption>
       </figure>
       <h4 class="architecture-subheading runtime-subheading" id="runtime-guarantees">How the seam divides responsibility</h4>
@@ -414,7 +408,6 @@ flowchart TB
       <p>The compiler turns the protocol into Engine actions and binds execution identity. Location adapters normalize manual and standalone persistence. Completion validates Output Schemas, required Skill calls, augmentations, guardrails, and artifacts; routing selects declared transitions and allocates Cycle/Attempt state; decision and artifact modules reject stale scope before mutation.</p>
       <p>The current Badger implementation already provides protected state, revision fences, transition journals, mutation locks, verified checkpoints, structured findings, verification receipts, content snapshots, repair policy, and transactional finalization. The authoring upgrade adds package-construction evidence around that runtime; it does not import Classic or Native phase policy.</p>
       <div class="callout"><strong>Authority rule.</strong> Generated <code>workflow-state.mjs</code>, <code>workflow-guard.mjs</code>, and <code>workflow-handoff.mjs</code> are adapters and projections. They may read or request a runtime operation, but they must not create a second next-Node algorithm or become the source of recovery truth.</div>
-      <div class="interview"><p>“The key module decision is one runtime authority. Callers see start, resume, submit, and recover; private capabilities compile, route, validate, persist, and project behind that seam. Generated scripts preserve compatibility but delegate to WorkflowRuntime, so no second state machine can drift from the Engine-backed Run.”</p></div>
 
       <h3 id="architecture-primer">2.4 Primer Designer as a workflow instance</h3>
       <p><span class="tag target">Future domain project</span> Primer Designer is a planned generic workflow instance, not the definition of the runtime. Its three source Skills remain independent—<code>genome-download</code>, <code>primer-design</code>, and <code>primer-pool-add</code>—and migration follows runtime and authoring proof. This section describes contract shape; it does not claim biological execution or a publishable package.</p>
@@ -425,33 +418,8 @@ flowchart TB
         <div class="route-item"><div><b>Build and filter the pool</b><p>Enter the pool path at <code>p0</code> and apply compatibility and filtering Nodes through <code>p10</code>, preserving output schemas and artifact versions.</p></div></div>
         <div class="route-item"><div><b>Handoff and decide whether to repeat</b><p>Reconcile warnings, provenance, and species status, then use a declared choice for finish, pool-add, or another bounded Cycle.</p></div></div>
       </div>
-      <figure class="diagram-card dense-diagram wide-diagram" data-diagram="2-4">
-        <div class="mermaid diagram-source" data-diagram-index="3">
-flowchart LR
-  Input[input-preparation] --> Route{scenario-route}
-  Route -->|pool-only| Pool0[p0 position]
-  Route -->|design + existing genomes| D1[d1 reference]
-  Route -->|design + download genomes| Genome[genome-source]
-  Genome --> D1
-  D1 --> D2[d2 outgroup] --> D3[d3 intra] --> Entropy[d3-2 entropy]
-  Entropy --> D4[d4 extract] --> D5[d5 select] --> D6[d6 Primer3]
-  D6 --> D7[d7 basic QC] --> D8[d8 SNP QC] --> D9[d9 NT QC]
-  D9 -->|finish| Handoff[workflow-handoff]
-  D9 -->|pool-add| Pool0
-  D9 -->|USEARCH enabled| U[d10 USEARCH]
-  U -->|finish| Handoff
-  U -->|pool-add| Pool0
-  Pool0 --> P1[p1 extract] --> P2[p2 dimer] --> P3[p3 basic]
-  P3 --> P4[p4 window] --> P5[p5 iterative] --> P6[p6 deep]
-  P6 --> P7[p7 whole -g] --> P8[p8 pool add] --> P9[p9 pool -g] --> P10[p10 final] --> Handoff
-  Handoff -->|another cycle| Route
-  Handoff -->|finish| Done((done))
-  classDef control fill:#eeeaf7,stroke:#67528d,color:#17202a;
-  classDef design fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  classDef pool fill:#f8e9dc,stroke:#b85f2d,color:#17202a;
-  classDef terminal fill:#e7eef2,stroke:#19364b,color:#17202a;
-  class Input,Route,Genome control; class D1,D2,D3,Entropy,D4,D5,D6,D7,D8,D9,U design; class Pool0,P1,P2,P3,P4,P5,P6,P7,P8,P9,P10 pool; class Handoff,Done terminal;
-        </div>
+      <figure class="diagram-card">
+        <div class="mermaid" data-diagram-id="2.4" data-drag-scroll></div>
         <figcaption>Diagram 2.4 — A Primer Designer instance binds four domain phases: preparation, design, pool addition, and handoff/repeat.</figcaption>
       </figure>
       <p>The contract describes 26 Nodes and several explicit route variants, but the architecture is the separation of concerns. Input preparation establishes identity before side effects; scenario routing selects pool-only or design paths; design Nodes produce progressively stronger sequence and primer evidence; pool Nodes apply compatibility and filtering; the handoff reconciles artifacts, warnings, provenance, and the exact next-cycle choice.</p>
@@ -461,7 +429,6 @@ flowchart LR
         <article class="card"><h4>Generic runtime responsibility</h4><p>Persist pending actions, validate revision and action identity, enforce schemas and guardrails, select legal transitions, allocate Cycle/Attempt state, bind artifact provenance, and expose recovery. It does not define biological validity.</p></article>
         <article class="card"><h4>Primer Designer responsibility</h4><p>Define valid genome, design, and pool outputs; species status and unresolved species; review choices; parameter overrides; and the scientific acceptance policy for finish or repeat.</p></article>
       </div>
-      <div class="interview"><p>“Primer Designer is a domain contract over the generic runtime. It keeps genome-download, primer-design, and primer-pool-add independent, then declares the Nodes, schemas, routes, review choices, and Cycle policy that compose them. WorkflowRuntime supplies identity, persistence, validation, routing, and recovery; the domain contract supplies the biological meaning and acceptance criteria.”</p></div>
 
       <h3 id="architecture-position">2.5 Why this design fits Skill Harness</h3>
       <p>The design occupies a deliberate middle layer. A Markdown Skill is excellent at expressing a portable method, but its guarantees depend on the current Agent, context, and operator. A full Agent runtime is excellent at open-ended planning and delegation, but its wider autonomy brings a larger policy, security, and observability surface. Skill Harness is for the case between them: the route, acceptance boundaries, and evidence obligations are knowable in advance, while the work inside a Node may remain probabilistic, tool-driven, or human-led.</p>
@@ -491,21 +458,8 @@ flowchart LR
         <article><b>Durable agent runtime</b><span>Adds broader planning under persistent control; expands the policy surface.</span></article>
         <article><b>Full agent platform</b><span>Maximum autonomy and integration; highest governance and operating cost.</span></article>
       </div>
-      <figure class="diagram-card" data-diagram="2-5">
-        <div class="mermaid diagram-source" data-diagram-index="4">
-flowchart LR
-  Portable[Portable + human-readable<br/>method] --> Skill[Markdown or packaged Skill]
-  Boundary[Known route + acceptance<br/>boundary] --> Harness[Skill Harness workflow<br/>contract + durable control]
-  Open[Open-ended planning +<br/>broad tool use] --> Agent[Full Agent runtime<br/>dynamic orchestration]
-  Harness --> Worker[Human, Agent, script, or tool<br/>inside a declared Node]
-  Governance[Reproducibility, recovery,<br/>and audit pressure] -. favors .-> Harness
-  Autonomy[Open-ended autonomy<br/>pressure] -. favors .-> Agent
-  classDef left fill:#f8e9dc,stroke:#b85f2d,color:#17202a;
-  classDef middle fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  classDef right fill:#eeeaf7,stroke:#67528d,color:#17202a;
-  classDef annotation fill:#e7eef2,stroke:#19364b,color:#17202a;
-  class Skill left; class Harness middle; class Agent right; class Portable,Boundary,Open,Governance,Autonomy annotation; class Worker middle;
-        </div>
+      <figure class="diagram-card">
+        <div class="mermaid" data-diagram-id="2.5" data-drag-scroll></div>
         <figcaption>Diagram 2.5 — An orientation map: choose by boundary pressure and autonomy need; the positions are not a maturity ladder.</figcaption>
       </figure>
 
@@ -542,7 +496,6 @@ flowchart LR
       <p><strong>Research context.</strong> Adjacent systems increasingly study durable graph execution, checkpoints, interrupts, event histories, tool guardrails, sessions, structured handoffs, and evaluation harnesses. Skill Harness borrows that problem decomposition, not an implementation identity: an Agent is an external probabilistic worker inside a deterministic protocol, and interruption, evidence, and replay are explicit design objects.</p>
       <p><strong>Industrial implication.</strong> The same boundary supports bounded side effects, idempotency, authorization, stale-command rejection, audit trails, package provenance, observability, and recovery after process failure. The authoring target adds provenance for semantic content and lane review, while the delivered Runtime remains responsible for execution durability and does not import Native-specific phase policy.</p>
       <p><strong>Trade-off.</strong> The Harness gives up some open-ended autonomy and raw Markdown minimalism to gain explainability, testability, and controlled recovery. It is the right fit when steps and acceptance boundaries are knowable, but the reasoning and execution inside each step may still be agentic or tool-driven. It is the wrong fit when either a simple instruction is enough or the route must be discovered without a declared contract.</p>
-      <div class="interview"><p>“I position Skill Harness by the control boundary, not by a maturity ladder. Use it when the legal route, acceptance evidence, and recovery identity can be declared, while the work inside a Node may remain agentic. The protocol names the allowed graph; WorkflowRuntime proposes and accepts actions; an external worker performs them. That buys explicit decisions, immutable provenance, and fresh-process recovery at the cost of some autonomy and authoring simplicity. Primer Designer is a good fit because its cycles and review boundaries are knowable even though its scientific work remains external.”</p></div>
     </section>
 
     <section class="section" id="section-3">
@@ -568,30 +521,7 @@ flowchart LR
         <div class="route-item"><div><b>Resolve the disposition</b><p>An accepted outcome appends evidence, advances revision once, and lets the resolver choose the next Node, Cycle, or Attempt. The caller receives <code>continue</code>, <code>await-user</code>, <code>blocked</code>, or <code>done</code>.</p></div></div>
       </div>
       <figure class="diagram-card">
-        <div class="mermaid diagram-source" data-diagram-index="5">
-flowchart TB
-  Package[Immutable package snapshot<br/>protocol + execution identity] --> Start[start or resume]
-  Start --> Pending[Read or persist pending action]
-  Pending -->|machine action| Work[Host / Agent / executor<br/>performs external work]
-  Pending -->|ask_user| Await[await-user<br/>stable question + choices]
-  Work --> Submit[submit outcome]
-  Await --> Decision[submit typed decision]
-  Submit --> Check{Validate identity,<br/>schema, guards, scope}
-  Decision --> Check
-  Check -->|accepted| Commit[Journal + atomic state update<br/>advance revision once]
-  Commit --> Resolve[Resolve Node / Cycle / Attempt]
-  Resolve --> Continue[continue / await-user / blocked / done]
-  Check -->|stale, invalid, incomplete| Reject[Finding + unchanged Run]
-  Pending -. process or write interruption .-> Recover[recover]
-  Recover --> Reconcile[Reconcile journal / lock / checkpoint]
-  Reconcile --> Continue
-  classDef boundary fill:#eeeaf7,stroke:#67528d,color:#17202a;
-  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  classDef external fill:#f8e9dc,stroke:#b85f2d,color:#17202a;
-  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;
-  class Package,Start boundary; class Pending,Await,Check,Commit,Resolve,Continue,Recover,Reconcile runtime;
-  class Work,Submit,Decision external; class Reject evidence;
-        </div>
+        <div class="mermaid" data-diagram-id="3.1" data-drag-scroll></div>
         <figcaption>Diagram 3.1 — A Run moves from an immutable snapshot to one pending action, validation, and a disposition; recovery reconciles durable records without replaying external work.</figcaption>
       </figure>
       <h3 id="lifecycle-operations">3.3 The four public operations</h3>
@@ -604,7 +534,6 @@ flowchart TB
       <h3 id="lifecycle-branches">3.4 Decision and recovery branches</h3>
       <p>Decision Nodes use the same turn but replace a machine action with a persisted <code>ask_user</code> action and an <code>await-user</code> continuation. The host presents the stable question and choices; only <code>submit</code> can accept the response. The response must match revision, action, Node, Cycle, Attempt, package identity, choice, reviewer policy, input schema, rationale policy, and required evidence scope. An accepted choice creates one identity-bound receipt and follows only its declared transition; invalid, stale, replayed, or cross-kind responses do not mutate the Run.</p>
       <p>Recovery is an explicit branch, not a conversational restart. <code>recover</code> reads protected Run state, pending action, Skill snapshot, execution identity, ledgers, artifacts, and any journal, lock, or checkpoint record. Known interrupted writes can roll forward deterministically; unknown identity remains blocked. Recovery returns a continuation after reconciliation, and never silently repeats the external action.</p>
-      <div class="interview"><p>“A Run is an exchange between a deterministic runtime and an external executor. The runtime proposes one pending action, the executor performs it, and the host submits a result. Completion validation and identity checks happen before the Run mutates. If the process stops, a new process reads the persisted state and reconstructs the same continuation. For a decision Node, the pending action becomes an authorized waiting state rather than an informal instruction.”</p></div>
     </section>
 
     <section class="section" id="section-4">
@@ -687,39 +616,15 @@ flowchart TB
         <div class="route-item"><div><b>Review and approve</b><p><code>review</code> reports authoring, runtime, and publication readiness. A publication reviewer must explicitly approve the same current hash with <code>approve --reviewer &lt;id&gt; --confirm</code>.</p></div></div>
         <div class="route-item"><div><b>Publish or preview</b><p><code>publish --confirm</code> copies only an approved current-hash package into <code>.badger/published/</code>; <code>distribute</code> reports destination files and remains preview-only.</p></div></div>
       </div>
-      <figure class="diagram-card dense-diagram wide-diagram">
-        <div class="mermaid diagram-source" data-diagram-index="6">
-flowchart LR
-  User[Goal + plan.json] --> Inspect[guide / candidates]
-  Inspect --> Propose[propose<br/>read-only]
-  Propose -->|explicit confirmation| Init[init]
-  Init --> CreatorState[.badger<br/>Creator state]
-  CreatorState --> Generate[generate<br/>scaffold]
-  Generate --> AuthorPlan[authoring-plan]
-  AuthorPlan --> Lanes[authoring lanes<br/>records + review]
-  Lanes --> Assemble[assemble]
-  Assemble --> Eval[eval<br/>current hash]
-  Eval --> Review[review]
-  Review --> Approve[approve<br/>reviewer + confirm]
-  Approve --> Publish[publish<br/>confirm]
-  Publish --> Published[.badger/published]
-  Published --> Use[generated adapters<br/>or public API]
-  Use --> Run[durable WorkflowRuntime Run]
-  Publish -. preview only .-> Distribute[distribute<br/>destination]
-  Propose -. blockers .-> Stop[stop and repair plan]
-  classDef read fill:#e7eef2,stroke:#19364b,color:#17202a;
-  classDef write fill:#f8e9dc,stroke:#b85f2d,color:#17202a;
-  classDef evidence fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  classDef runtime fill:#eeeaf7,stroke:#67528d,color:#17202a;
-  class User,Inspect,Propose,Stop read; class Init,Generate,AuthorPlan,Lanes,Assemble,Approve,Publish write; class CreatorState,Eval,Review,Distribute evidence; class Published,Use,Run runtime;
-        </div>
+      <figure class="diagram-card">
+        <div class="mermaid" data-diagram-id="4.1" data-drag-scroll></div>
         <figcaption>Diagram 4.1 — The CLI moves from read-only discovery to authoring evidence, explicit writes, current-hash evaluation, approval, and a package that can start a durable Run.</figcaption>
       </figure>
-      <div class="private-table-wrap"><table class="data-table private-gates"><thead><tr><th>Gate</th><th>What it protects</th><th>What to say in an interview</th></tr></thead><tbody>
-        <tr><td>Read-only discovery</td><td>Candidate resolution and proposal inspection do not create a workflow or copy a package.</td><td>“The system lets me inspect meaning before it mutates state.”</td></tr>
-        <tr><td>Explicit confirmation</td><td>Initialization, approval, publication, and report output require an intentional flag at the boundary that writes.</td><td>“Confirmation is attached to the consequential operation, not hidden in a previous prompt.”</td></tr>
-        <tr><td>Current-hash evidence</td><td>Authoring material, deterministic evaluation, runtime certification, and publication review are tied to the exact generated tree; changing it makes earlier evidence stale.</td><td>“Readiness is a claim about a hash, not about a directory name.”</td></tr>
-        <tr><td>Preview-only distribution</td><td>Distribution lists destination files but does not install into an Agent platform directory.</td><td>“The standalone package stops at a reversible local preview.”</td></tr>
+      <div class="private-table-wrap"><table class="data-table private-gates"><thead><tr><th>Gate</th><th>What it protects</th></tr></thead><tbody>
+        <tr><td>Read-only discovery</td><td>Candidate resolution and proposal inspection do not create a workflow or copy a package.</td></tr>
+        <tr><td>Explicit confirmation</td><td>Initialization, approval, publication, and report output require an intentional flag at the boundary that writes.</td></tr>
+        <tr><td>Current-hash evidence</td><td>Authoring material, deterministic evaluation, runtime certification, and publication review are tied to the exact generated tree; changing it makes earlier evidence stale.</td></tr>
+        <tr><td>Preview-only distribution</td><td>Distribution lists destination files but does not install into an Agent platform directory.</td></tr>
       </tbody></table></div>
 
       <h3 id="private-user-guide">4.2 Use the tool as a user</h3>
@@ -808,7 +713,7 @@ node bin/badger.js distribute example-workflow --project ./demo --destination ./
       <h4 class="private-subheading" id="private-cli-parameters">CLI and runtime coordinates</h4>
       <div class="private-table-wrap"><table class="data-table private-cli-table"><thead><tr><th>Parameter</th><th>Use it for</th><th>Decision guidance</th></tr></thead><tbody>
         <tr><td><code>--project &lt;dir&gt;</code></td><td>All Creator commands and standalone Runs.</td><td>Choose the project root whose <code>.badger/states/</code>, <code>.badger/authoring/</code>, and <code>.badger/runs/</code> records should be owned by this workflow.</td></tr>
-        <tr><td><code>--json</code></td><td>Automation, inspection, and evidence capture.</td><td>Prefer it for scripts and interviews about data shape; human-readable output is fine for a quick manual pass.</td></tr>
+        <tr><td><code>--json</code></td><td>Automation, inspection, and evidence capture.</td><td>Prefer it for scripts and for inspecting data shape; human-readable output is fine for a quick manual pass.</td></tr>
         <tr><td><code>--confirm</code></td><td>Initialization, approval, publication, and explicitly confirmed report writes.</td><td>Place confirmation on the exact operation that mutates or writes; never treat a prior preview as implicit consent.</td></tr>
         <tr><td><code>--reviewer &lt;id&gt;</code></td><td>Review approval.</td><td>Use a stable actor identity; it becomes part of review evidence and is required even when all automated checks pass.</td></tr>
         <tr><td><code>--destination &lt;dir&gt;</code></td><td>Distribution preview.</td><td>Use a disposable target to inspect the file list; the command returns paths but does not copy them.</td></tr>
@@ -836,37 +741,11 @@ node bin/badger.js distribute example-workflow --project ./demo --destination ./
         <tr><td>Continuation disposition</td><td><code>continue</code> · <code>await-user</code> · <code>blocked</code> · <code>done</code></td><td>The host-facing answer: machine work, a persisted decision, an unresolved stop/repair condition, or terminal state.</td></tr>
         <tr><td><code>WorkflowArtifactLifetime</code></td><td><code>attempt</code> · <code>cycle</code> · <code>run</code></td><td>How long an accepted artifact version remains the selected scope; omitted lifetime defaults to <code>attempt</code>.</td></tr>
       </tbody></table></div>
-      <div class="interview"><p>“I choose a parameter by asking which boundary it controls. Plan fields define meaning and dependencies; CLI flags define confirmation, identity, and destination; runtime fields bind one submission to one pending action and revision. The enums are not decoration: Node kind explains responsibility, enforcement explains whether evidence blocks progress, and the continuation disposition tells the host exactly what it may do next.”</p></div>
 
       <h3 id="private-modules">4.4 Package architecture: modules and seams</h3>
       <p>Read the source from the outside inward. The CLI is intentionally thin. The workflow-kernel foundation coordinates discovery, normalization, proposal, and Creator state. The integrated authoring subsystem coordinates lane plans, worker evidence, authored content, and authoring review. The factory emits a package through one deterministic assembly boundary. Skill Runtime turns package files into a validated in-memory <code>SkillPackage</code> and an immutable snapshot. Engine supplies generic Run mechanics. WorkflowRuntime is the deep module that joins the protocol to Engine behavior and hides protected persistence. The package root and the <code>/engine</code>, <code>/workflow-runtime</code>, <code>/skill-runtime</code>, and <code>/cli</code> subpaths are public; protected storage helpers remain private. Evaluation, publication, differential harnesses, and tests consume those seams rather than creating a second authority.</p>
-      <figure class="diagram-card dense-diagram">
-        <div class="mermaid diagram-source" data-diagram-index="7">
-flowchart TB
-  CLI[src/cli.ts<br/>thin command facade] --> Kernel[src/workflow-kernel<br/>discovery + foundation + hash]
-  Kernel --> Contract[src/workflow/contract.ts<br/>normalize + validate]
-  Kernel --> Authoring[src/authoring<br/>lane DAG + records + review]
-  Kernel --> Factory[src/factory<br/>proposal + scaffold + assembly]
-  Authoring --> Factory
-  Factory --> Package[generated Skill package]
-  Package --> SkillRuntime[src/skill-runtime<br/>load + validate + snapshot]
-  SkillRuntime --> Engine[src/engine<br/>loop + Run adapters + storage]
-  Package --> Public[src/workflow-runtime/public.ts<br/>stable export]
-  Public --> Core[src/workflow-runtime/index.ts<br/>single runtime authority]
-  Core --> Engine
-  Core --> Durable[protected .badger records]
-  Factory --> Eval[src/eval<br/>hash + certification]
-  Eval --> Publish[src/publish<br/>readiness + approval + publish]
-  Differential[src/differential<br/>Creator + Engine parity] --> Eval
-  Tests[test/*] -. verifies .-> Kernel
-  Tests -. verifies .-> Engine
-  Tests -. verifies .-> Core
-  classDef entry fill:#f8e9dc,stroke:#b85f2d,color:#17202a;
-  classDef contract fill:#eeeaf7,stroke:#67528d,color:#17202a;
-  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;
-  class CLI,Tests entry; class Kernel,Contract,Authoring,Factory,Package,Public,Core contract; class SkillRuntime,Engine,Durable runtime; class Eval,Publish,Differential evidence;
-        </div>
+      <figure class="diagram-card">
+        <div class="mermaid" data-diagram-id="4.2" data-drag-scroll></div>
         <figcaption>Diagram 4.2 — The package has a thin entry layer, an integrated authoring/contract/factory layer, a Skill Runtime and Engine substrate, one WorkflowRuntime authority, and separate evidence consumers.</figcaption>
       </figure>
       <div class="diagram-prose" id="private-architecture-prose">
@@ -876,26 +755,7 @@ flowchart TB
 
       <h4 class="private-subheading" id="private-factory">Factory and contract modules</h4>
       <figure class="diagram-card">
-        <div class="mermaid diagram-source" data-diagram-index="8">
-flowchart LR
-  Plan[FactoryPlan JSON] --> Read[readPlan]
-  Read --> Normalize[normalizeWorkflow]
-  Discover[discovery.ts<br/>roots + hashes] --> Proposal[buildProposal]
-  Normalize --> Proposal
-  Proposal --> Confirm[init --confirm]
-  Confirm --> State[CreatorState<br/>.badger/states]
-  State --> Generate[generate<br/>deterministic scaffold]
-  Generate --> AuthorPlan[authoring-plan]
-  AuthorPlan --> Lanes[authoring lanes<br/>records + review]
-  Lanes --> Assemble[assemble<br/>Auto + Authored]
-  Assemble --> Files[SKILL.md + protocol<br/>Node Skills + scripts]
-  Proposal -. unresolved candidate .-> Block[blocked proposal]
-  classDef input fill:#f8e9dc,stroke:#b85f2d,color:#17202a;
-  classDef contract fill:#eeeaf7,stroke:#67528d,color:#17202a;
-  classDef state fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  classDef output fill:#e7eef2,stroke:#19364b,color:#17202a;
-  class Plan,Discover input; class Read,Normalize,Proposal,Block,AuthorPlan,Lanes contract; class Confirm,State state; class Generate,Assemble,Files output;
-        </div>
+        <div class="mermaid" data-diagram-id="4.3" data-drag-scroll></div>
         <figcaption>Diagram 4.3 — Discovery and normalization meet in a proposal; confirmation creates Creator state; authoring supplies reviewed content; assembly projects one authoritative protocol into package files.</figcaption>
       </figure>
       <div class="diagram-prose" id="private-factory-prose">
@@ -913,31 +773,7 @@ flowchart LR
 
       <h4 class="private-subheading" id="private-runtime">Skill Runtime, WorkflowRuntime, Engine, and storage</h4>
       <figure class="diagram-card">
-        <div class="mermaid diagram-source" data-diagram-index="9">
-flowchart TB
-  Public[public.ts<br/>start / resume / submit / recover] --> Core[index.ts<br/>runtime authority]
-  Core --> Compile[compiler.ts<br/>Protocol -> SkillPackage]
-  Compile --> Identity[protocol/package/snapshot identity]
-  Core --> Route[routing.ts + resolver.ts]
-  Core --> Complete[completion.ts]
-  Core --> Decision[decision-scope.ts]
-  Core --> Artifact[artifacts.ts]
-  Core --> Durability[revision claim + journal<br/>lock + checkpoint + snapshot]
-  Core --> Location[location.ts<br/>manual / standalone]
-  Location --> Engine[engine/manual-run.ts + loop.ts]
-  Engine --> Store[state + pending + trajectory<br/>artifacts + protected writes]
-  Store --> Continuation[WorkflowContinuation]
-  Identity --> Continuation
-  Route --> Continuation
-  Complete --> Continuation
-  Decision --> Continuation
-  Artifact --> Continuation
-  classDef api fill:#eeeaf7,stroke:#67528d,color:#17202a;
-  classDef logic fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  classDef storage fill:#e7eef2,stroke:#19364b,color:#17202a;
-  classDef identity fill:#f8e9dc,stroke:#b85f2d,color:#17202a;
-  class Public,Core,Continuation api; class Compile,Route,Complete,Decision,Artifact,Durability,Location,Engine logic; class Store storage; class Identity identity;
-        </div>
+        <div class="mermaid" data-diagram-id="4.4" data-drag-scroll></div>
         <figcaption>Diagram 4.4 — WorkflowRuntime coordinates compilation, validation, routing, decisions, artifacts, durability, and locations, then returns one bounded continuation from Engine-backed records.</figcaption>
       </figure>
       <div class="diagram-prose" id="private-runtime-prose">
@@ -955,24 +791,7 @@ flowchart TB
 
       <h4 class="private-subheading" id="private-delivery">Evidence, evaluation, publication, and differential modules</h4>
       <figure class="diagram-card">
-        <div class="mermaid diagram-source" data-diagram-index="10">
-flowchart LR
-  Package[generated package] --> Authoring[authoring readiness<br/>content + review]
-  Authoring --> Eval[eval/run.ts<br/>current tree hash]
-  Eval --> RuntimeCert[workflow-runtime-certification.ts]
-  RuntimeCert --> Ready[reviewState<br/>readiness]
-  Ready -->|reviewer + confirm| Approve[approve]
-  Approve -->|confirm| Publish[publish]
-  Publish --> Preview[distribute<br/>preview-only]
-  EngineObs[differential/engine/*] --> Parity[official/private parity]
-  CreatorObs[differential/*] --> Parity
-  Parity --> Ready
-  Tests[test/*] -. negative cases + invariants .-> RuntimeCert
-  classDef package fill:#f8e9dc,stroke:#b85f2d,color:#17202a;
-  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;
-  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;
-  class Package package; class Authoring,Eval,RuntimeCert,Ready,Parity,Tests evidence; class Approve,Publish,Preview runtime;
-        </div>
+        <div class="mermaid" data-diagram-id="4.5" data-drag-scroll></div>
         <figcaption>Diagram 4.5 — Authoring readiness and runtime evaluation bind the assembled package to evidence; certification and differential observations feed readiness, which gates approval, publication, and preview.</figcaption>
       </figure>
       <div class="diagram-prose" id="private-evidence-prose">
@@ -1006,34 +825,10 @@ flowchart LR
         <tr><td>Differential certification</td><td><code>engine-differential.test.ts</code>, <code>differential-harness.test.ts</code>, <code>engine-certification.test.ts</code>, <code>workflow-runtime-certification.test.ts</code></td><td>Does the private implementation match its declared baseline and cover its negative cases?</td></tr>
       </tbody></table></div>
       <div class="callout warning"><strong>Maintenance loop.</strong> When a behavior is unclear, start at the public export or CLI command, trace one call into its owning module, inspect the persisted record it changes, find the nearest focused test, and then run the package build, tests, and format check. If the change affects generated runtime assets, rebuild them from source before trusting a certification result.</div>
-      <div class="interview"><p>“I understand Badger as a layered standalone product. The CLI enters the workflow-kernel foundation, which discovers Skills and normalizes a workflow contract. The factory generates a package; Skill Runtime validates and snapshots it; Engine supplies generic durable Run mechanics; and WorkflowRuntime is the single authority that compiles, routes, validates, persists, and recovers. Evaluation and differential harnesses bind behavior to hashes and baselines, while publication is gated by current evidence and reviewer approval. When I debug it, I follow that dependency direction and verify the corresponding persisted record and focused test.”</p></div>
     </section>
 
     <section class="section" id="section-5">
       <p class="section-number">SECTION 05</p>
-      <h2>Interview practice: the short explanations</h2>
-      <p class="lede">These are compact answers to common architecture questions. Expand them with the architecture diagrams in Sections 2 and 4 when the interviewer asks for detail.</p>
-      <div class="two-col">
-        <article class="card"><h4>What problem does it solve?</h4><p>It turns loosely interpreted Skills into governed, authorable, resumable workflow packages and instances. The system keeps human-readable instructions while adding explicit authoring evidence, runtime state, contracts, and safe transitions.</p></article>
-        <article class="card"><h4>Why not just use Markdown?</h4><p>Markdown is excellent for method and progressive disclosure, but it does not by itself provide durable pending actions, stale-response rejection, route determinism, artifact provenance, or recovery after a process exits.</p></article>
-        <article class="card"><h4>Why not build a full Agent?</h4><p>The project does not need open-ended autonomy everywhere. It needs bounded, explainable domain workflows. Limiting the runtime’s authority makes certification, review, recovery, and distribution practical.</p></article>
-        <article class="card"><h4>What is the most important design decision?</h4><p>Two explicit authorities with different jobs: Authoring owns package content and lane evidence; WorkflowRuntime and Engine own generated-workflow routing, recovery, and committed Run state. Generated adapters remain projections.</p></article>
-        <article class="card"><h4>What makes it durable?</h4><p>Run state and pending actions are persisted, identity-bound, and recoverable outside the original process. Badger also certifies journals, locks, checkpoints, receipts, snapshots, repair policy, and transactional finalization; authoring evidence remains a separate package-construction concern.</p></article>
-        <article class="card"><h4>What makes Primer Designer a good example?</h4><p>It has independent Skills, conditional route choices, optional stages, expensive evidence-producing steps, human review boundaries, and repeated design/pool cycles—exactly where a contract and durable runtime add value.</p></article>
-      </div>
-      <h3>Remember this ownership table</h3>
-      <div class="private-table-wrap"><table class="data-table"><thead><tr><th>Question</th><th>Owner</th><th>Reason</th></tr></thead><tbody>
-        <tr><td>What should the package and workflow mean?</td><td>Authoring content plus Workflow Protocol</td><td>Authoring supplies domain judgment; the executable protocol makes the accepted meaning declarative, reviewable, and versioned.</td></tr>
-        <tr><td>Which action is legal next?</td><td>WorkflowRuntime resolver over Engine state</td><td>Routing needs one deterministic authority and persisted identity.</td></tr>
-        <tr><td>What counts as complete?</td><td>Output Schema, required evidence, and guardrails</td><td>Completion is a contract, not a claim in prose.</td></tr>
-        <tr><td>Who performs the work?</td><td>Human, Agent, script, or external executor</td><td>The runtime governs admissibility; it need not own every domain operation.</td></tr>
-        <tr><td>Can the package or result be trusted or delivered?</td><td>Authoring evidence, runtime evidence, eval, certification, readiness, approval</td><td>Content quality, execution success, and release readiness are separate claims.</td></tr>
-      </tbody></table></div>
-      <div class="interview"><p>“The project is not trying to eliminate probabilistic behavior. It is trying to put probabilistic behavior in the right place. An Agent can reason within a Node and use the allowed Skill or tools, but the workflow contract and runtime decide the boundaries: current action, required evidence, legal transition, durable identity, and recovery state.”</p></div>
-    </section>
-
-    <section class="section" id="section-6">
-      <p class="section-number">SECTION 06</p>
       <h2>Source ledger and study notes</h2>
       <p class="lede">This manual is an educational synthesis. The current Badger package, release ledger, official Comet-any authoring references, and the Primer Designer contract provide the implementation vocabulary.</p>
       <div class="private-table-wrap"><table class="data-table"><thead><tr><th>Source</th><th>What to learn from it</th><th>How this manual uses it</th></tr></thead><tbody>
@@ -1057,17 +852,18 @@ flowchart LR
   </main>
 </div>
 <script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  const mermaidURL = 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs';
+  // Diagrams never shrink below 70% of their natural size (about 11px text); wider ones scroll inside the card.
+  const minDiagramScale = 0.7;
   const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const diagramNodes = [...document.querySelectorAll('.diagram-source')];
-  const layerDiagramNodes = [...document.querySelectorAll('.layer-mermaid')];
+  const diagramNodes = [...document.querySelectorAll('[data-diagram-id]')];
   const languageButtons = [...document.querySelectorAll('[data-language]')];
   const languageStatus = document.getElementById('language-status');
   const originalHTML = new Map();
   const diagramLines = lines => lines.join('\n');
   const diagrams = {
-    en: [
-      diagramLines([
+    en: {
+      '2.1': diagramLines([
         'flowchart TB',
         '  U[User or operator goal] --> C[Badger Creator]',
         '  S[Source Skills<br/>Markdown, references, scripts] --> C',
@@ -1104,45 +900,49 @@ flowchart LR
         '  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  class S,U source; class P,AP,L,A,G contract; class I,R,E,L1,L2,K,H runtime; class X,V,D evidence;'
       ]),
-      diagramLines([
-        '%%{init: {"themeVariables": {"fontSize": "22px"}}}%%',
+      '2.2-ecosystem': diagramLines([
         'flowchart TB',
-        '  subgraph E[1. Ecosystem]',
-        '    direction TB',
-        '    S1[Source Skills] --> C1[Creator / Factory] --> A1[Authoring Plan + lanes] --> P1[Assembled package] --> R1[WorkflowRuntime + Engine]',
-        '    R1 --> H1[Host / executor]',
-        '    R1 --> X1[Evidence + delivery]',
-        '  end',
-        '  subgraph P[2. Package]',
-        '    direction TB',
-        '    P2[Workflow Protocol] --> N2[Nodes + bindings] --> C2[Output Schemas + Guardrails] --> T2[Transitions + Handoffs]',
-        '  end',
-        '  subgraph R[3. Run]',
-        '    direction TB',
-        '    I3[Execution identity] --> S3[Run state + revision] --> A3[Pending action]',
-        '    S3 --> L3[Cycles + Attempts + visits]',
-        '    S3 --> V3[Artifact versions + selections]',
-        '    S3 --> H3[Trajectory + checkpoints]',
-        '  end',
-        '  subgraph T[4. Transition]',
-        '    direction TB',
-        '    Q4[Prepare action] --> X4[External work] --> U4[Submit outcome / decision] --> V4[Validate] --> R4[Resolve next]',
-        '  end',
-        '  subgraph M[5. Files and modules]',
-        '    direction TB',
-        '    K5[compiler.ts] --> D5[resolver.ts + routing.ts] --> M5[completion.ts + decision-scope.ts] --> Z5[Protected storage + locations] --> G5[Generated adapters + projections]',
-        '  end',
-        '  P1 --> P2',
-        '  T2 --> I3',
-        '  A3 --> Q4',
-        '  R4 --> K5',
-        '  classDef a fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
-        '  classDef b fill:#eeeaf7,stroke:#67528d,color:#17202a;',
-        '  classDef c fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
-        '  classDef d fill:#e7eef2,stroke:#19364b,color:#17202a;',
-        '  class S1,C1,P1,H1 a; class P2,N2,C2,T2 b; class R1,I3,S3,A3,L3,V3,H3 c; class X1,Q4,X4,U4,V4,R4,K5,D5,M5,Z5,G5 d;'
+        '  Skills[Source Skills] --> Factory[Creator / Factory] --> Authoring[Authoring Plan + lanes] --> Package[Assembled package] --> Runtime[WorkflowRuntime + Engine]',
+        '  Runtime --> Host[Host / executor]',
+        '  Runtime --> Evidence[Evidence + delivery]',
+        '  classDef source fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
+        '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
+        '  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;',
+        '  class Skills,Factory,Host source; class Authoring,Package runtime; class Runtime runtime; class Evidence evidence;'
       ]),
-      diagramLines([
+      '2.2-package': diagramLines([
+        'flowchart TB',
+        '  AuthoringProtocol[Authoring Protocol] --> LanePlan[Lane DAG + claims] --> Authored[Authored content + review]',
+        '  Protocol[Workflow Protocol] --> Nodes[Nodes + bindings] --> Schemas[Output Schemas]',
+        '  Authored --> Protocol',
+        '  Nodes --> Routes[Transitions + routes]',
+        '  Nodes --> Guards[Guardrails + handoffs]',
+        '  classDef contract fill:#eeeaf7,stroke:#67528d,color:#17202a;',
+        '  class AuthoringProtocol,LanePlan,Authored,Protocol,Nodes,Schemas,Routes,Guards contract;'
+      ]),
+      '2.2-run': diagramLines([
+        'flowchart LR',
+        '  Identity[Execution identity] --> State[Run state + revision] --> Pending[Pending action]',
+        '  State --> Cycles[Cycles + Attempts + visits]',
+        '  State --> Artifacts[Artifact versions + selections]',
+        '  State --> History[Trajectory + checkpoints]',
+        '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
+        '  class Identity,State,Pending,Cycles,Artifacts,History runtime;'
+      ]),
+      '2.2-transition': diagramLines([
+        'flowchart TB',
+        '  Prepare[Prepare action] --> External[External work] --> Submit[Submit outcome / decision] --> Validate[Validate] --> Resolve[Resolve next transition]',
+        '  classDef transition fill:#e7eef2,stroke:#19364b,color:#17202a;',
+        '  class Prepare,External,Submit,Validate,Resolve transition;'
+      ]),
+      '2.2-modules': diagramLines([
+        'flowchart TB',
+        '  Compiler[compiler.ts] --> Resolver[resolver.ts + routing.ts] --> Completion[completion.ts + decision scope]',
+        '  Completion --> Storage[Protected storage + locations] --> Adapters[Generated adapters + projections]',
+        '  classDef module fill:#e7eef2,stroke:#19364b,color:#17202a;',
+        '  class Compiler,Resolver,Completion,Storage,Adapters module;'
+      ]),
+      '2.3': diagramLines([
         'flowchart TB',
         '  Caller[Caller or generated adapter] --> Public[workflow-runtime/public.ts<br/>createWorkflowRuntime]',
         '  Public --> Ops[start / resume / submit / recover]',
@@ -1150,51 +950,58 @@ flowchart LR
         '  Compile --> Package[Engine-compatible SkillPackage]',
         '  Ops --> Location[location.ts<br/>manual or standalone]',
         '  Location --> Store[Engine Run storage]',
-        '  Ops --> Completion[completion.ts<br/>Output Schema and evidence checks]',
-        '  Ops --> Route[routing.ts + resolver.ts<br/>edges, fallback, cycles]',
-        '  Ops --> Decision[decision-scope.ts<br/>decision inputs and evidence scope]',
-        '  Ops --> Artifact[artifacts.ts<br/>immutable versions and selections]',
         '  Store --> Durable[protected files, atomic writes,<br/>trajectory, checkpoints, journal, locks]',
         '  Ops --> Projection[generated state / guard / handoff adapters]',
-        '  Durable --> Continuation[WorkflowContinuation]',
-        '  Completion --> Continuation',
-        '  Route --> Continuation',
-        '  Decision --> Continuation',
-        '  Artifact --> Continuation',
+        '  subgraph Policies[Validation and routing policies]',
+        '    direction TB',
+        '    Completion[completion.ts<br/>Output Schema and evidence checks] ~~~ Route[routing.ts + resolver.ts<br/>edges, fallback, cycles] ~~~ Decision[decision-scope.ts<br/>decision inputs and evidence scope] ~~~ Artifact[artifacts.ts<br/>immutable versions and selections]',
+        '  end',
+        '  Ops --> Policies',
+        '  Policies --> Continuation[WorkflowContinuation]',
+        '  Durable --> Continuation',
         '  classDef api fill:#eeeaf7,stroke:#67528d,color:#17202a;',
         '  classDef logic fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  classDef storage fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  classDef adapter fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
         '  class Caller,Projection adapter; class Public,Ops,Continuation api; class Compile,Package,Completion,Route,Decision,Artifact logic; class Location,Store,Durable storage;'
       ]),
-      diagramLines([
-        '%%{init: {"themeVariables": {"fontSize": "22px"}}}%%',
+      // Phases are declared last-first: Mermaid passes subgraphs to Dagre in reverse order,
+      // so Preparation is visited first and the "another cycle" edge becomes the back edge.
+      '2.4': diagramLines([
         'flowchart LR',
-        '  Input[input-preparation] --> Route{scenario-route}',
-        '  Route -->|pool-only| Pool0[p0 position]',
-        '  Route -->|design + existing genomes| D1[d1 reference]',
-        '  Route -->|design + download genomes| Genome[genome-source]',
-        '  Genome --> D1',
-        '  D1 --> D2[d2 outgroup] --> D3[d3 intra] --> Entropy[d3-2 entropy]',
-        '  Entropy --> D4[d4 extract] --> D5[d5 select] --> D6[d6 Primer3]',
-        '  D6 --> D7[d7 basic QC] --> D8[d8 SNP QC] --> D9[d9 NT QC]',
-        '  D9 -->|finish| Handoff[workflow-handoff]',
-        '  D9 -->|pool-add| Pool0',
-        '  D9 -->|USEARCH enabled| U[d10 USEARCH]',
-        '  U -->|finish| Handoff',
-        '  U -->|pool-add| Pool0',
-        '  Pool0 --> P1[p1 extract] --> P2[p2 dimer] --> P3[p3 basic]',
-        '  P3 --> P4[p4 window] --> P5[p5 iterative] --> P6[p6 deep]',
-        '  P6 --> P7[p7 whole -g] --> P8[p8 pool add] --> P9[p9 pool -g] --> P10[p10 final] --> Handoff',
-        '  Handoff -->|another cycle| Route',
-        '  Handoff -->|finish| Done((done))',
+        '  subgraph Close[4 · Handoff and repeat]',
+        '    direction TB',
+        '    Handoff[workflow-handoff] -->|finish| Done((done))',
+        '  end',
+        '  subgraph Pool[3 · Pool addition]',
+        '    direction TB',
+        '    Pool0[p0 position] --> P1[p1 extract] --> P2[p2 dimer] --> P3[p3 basic] --> P4[p4 window] --> P5[p5 iterative]',
+        '    P5 --> P6[p6 deep] --> P7[p7 whole -g] --> P8[p8 pool add] --> P9[p9 pool -g] --> P10[p10 final]',
+        '  end',
+        '  subgraph Design[2 · Design]',
+        '    direction TB',
+        '    D1[d1 reference] --> D2[d2 outgroup] --> D3[d3 intra] --> Entropy[d3-2 entropy] --> D4[d4 extract]',
+        '    D4 --> D5[d5 select] --> D6[d6 Primer3] --> D7[d7 basic QC] --> D8[d8 SNP QC] --> D9[d9 NT QC]',
+        '    D9 -->|USEARCH enabled| U[d10 USEARCH]',
+        '  end',
+        '  subgraph Prepare[1 · Preparation]',
+        '    direction TB',
+        '    Input[input-preparation] --> Route{scenario-route}',
+        '    Route -->|design + download genomes| Genome[genome-source]',
+        '  end',
+        '  Prepare -->|design| Design',
+        '  Prepare -->|pool-only| Pool',
+        '  Design -->|pool-add| Pool',
+        '  Design -->|finish| Close',
+        '  Pool --> Close',
+        '  Close -->|another cycle| Prepare',
         '  classDef control fill:#eeeaf7,stroke:#67528d,color:#17202a;',
         '  classDef design fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  classDef pool fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
         '  classDef terminal fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  class Input,Route,Genome control; class D1,D2,D3,Entropy,D4,D5,D6,D7,D8,D9,U design; class Pool0,P1,P2,P3,P4,P5,P6,P7,P8,P9,P10 pool; class Handoff,Done terminal;'
       ]),
-      diagramLines([
+      '2.5': diagramLines([
         'flowchart LR',
         '  Portable[Portable + human-readable<br/>method] --> Skill[Markdown or packaged Skill]',
         '  Boundary[Known route + acceptance<br/>boundary] --> Harness[Skill Harness workflow<br/>contract + durable control]',
@@ -1208,7 +1015,7 @@ flowchart LR
         '  classDef annotation fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  class Skill left; class Harness,Worker middle; class Agent right; class Portable,Boundary,Open,Governance,Autonomy annotation;'
       ]),
-      diagramLines([
+      '3.1': diagramLines([
         'flowchart TB',
         '  Package[Immutable package snapshot<br/>protocol + execution identity] --> Start[start or resume]',
         '  Start --> Pending[Read or persist pending action]',
@@ -1232,32 +1039,41 @@ flowchart LR
         '  class Package,Start boundary; class Pending,Await,Check,Commit,Resolve,Continue,Recover,Reconcile runtime;',
         '  class Work,Submit,Decision external; class Reject evidence;'
       ]),
-      diagramLines([
-        'flowchart LR',
-        '  User[Goal + plan.json] --> Inspect[guide / candidates]',
-        '  Inspect --> Propose[propose<br/>read-only]',
-        '  Propose -->|explicit confirmation| Init[init]',
-        '  Init --> CreatorState[.badger<br/>Creator state]',
-        '  CreatorState --> Generate[generate<br/>scaffold]',
-        '  Generate --> AuthorPlan[authoring-plan]',
-        '  AuthorPlan --> Lanes[authoring lanes<br/>records + review]',
-        '  Lanes --> Assemble[assemble]',
-        '  Assemble --> Eval[eval<br/>current hash]',
-        '  Eval --> Review[review]',
-        '  Review --> Approve[approve<br/>reviewer + confirm]',
-        '  Approve --> Publish[publish<br/>confirm]',
-        '  Publish --> Published[.badger/published]',
-        '  Published --> Use[generated adapters<br/>or public API]',
-        '  Use --> Run[durable WorkflowRuntime Run]',
-        '  Publish -. preview only .-> Distribute[distribute<br/>destination]',
-        '  Propose -. blockers .-> Stop[stop and repair plan]',
+      '4.1': diagramLines([
+        'flowchart TB',
+        '  subgraph Discover[1 · Read-only discovery]',
+        '    direction LR',
+        '    User[Goal + plan.json] --> Inspect[guide / candidates] --> Propose[propose<br/>read-only]',
+        '    Propose -. blockers .-> Stop[stop and repair plan]',
+        '  end',
+        '  subgraph Write[2 · Confirmed write]',
+        '    direction LR',
+        '    Init[init] --> CreatorState[.badger<br/>Creator state] --> Generate[generate<br/>scaffold]',
+        '  end',
+        '  subgraph Author[3 · Authoring]',
+        '    direction LR',
+        '    AuthorPlan[authoring-plan] --> Lanes[authoring lanes<br/>records + review] --> Assemble[assemble]',
+        '  end',
+        '  subgraph Gate[4 · Evaluation and approval]',
+        '    direction LR',
+        '    Eval[eval<br/>current hash] --> Review[review] --> Approve[approve<br/>reviewer + confirm]',
+        '  end',
+        '  subgraph Deliver[5 · Publication and use]',
+        '    direction LR',
+        '    Publish[publish<br/>confirm] --> Published[.badger/published] --> Use[generated adapters<br/>or public API] --> Run[durable WorkflowRuntime Run]',
+        '    Publish -. preview only .-> Distribute[distribute<br/>destination]',
+        '  end',
+        '  Discover -->|explicit confirmation| Write',
+        '  Write --> Author',
+        '  Author --> Gate',
+        '  Gate --> Deliver',
         '  classDef read fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  classDef write fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
         '  classDef evidence fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  classDef runtime fill:#eeeaf7,stroke:#67528d,color:#17202a;',
         '  class User,Inspect,Propose,Stop read; class Init,Generate,AuthorPlan,Lanes,Assemble,Approve,Publish write; class CreatorState,Eval,Review,Distribute evidence; class Published,Use,Run runtime;'
       ]),
-      diagramLines([
+      '4.2': diagramLines([
         'flowchart TB',
         '  CLI[src/cli.ts<br/>thin command facade] --> Kernel[src/workflow-kernel<br/>discovery + foundation + hash]',
         '  Kernel --> Contract[src/workflow/contract.ts<br/>normalize + validate]',
@@ -1283,8 +1099,8 @@ flowchart LR
         '  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  class CLI,Tests entry; class Kernel,Contract,Authoring,Factory,Package,Public,Core contract; class SkillRuntime,Engine,Durable runtime; class Eval,Publish,Differential evidence;'
       ]),
-      diagramLines([
-        'flowchart LR',
+      '4.3': diagramLines([
+        'flowchart TB',
         '  Plan[FactoryPlan JSON] --> Read[readPlan]',
         '  Read --> Normalize[normalizeWorkflow]',
         '  Discover[discovery.ts<br/>roots + hashes] --> Proposal[buildProposal]',
@@ -1303,36 +1119,34 @@ flowchart LR
         '  classDef output fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  class Plan,Discover input; class Read,Normalize,Proposal,Block,AuthorPlan,Lanes contract; class Confirm,State state; class Generate,Assemble,Files output;'
       ]),
-      diagramLines([
+      '4.4': diagramLines([
         'flowchart TB',
         '  Public[public.ts<br/>start / resume / submit / recover] --> Core[index.ts<br/>runtime authority]',
         '  Core --> Compile[compiler.ts<br/>Protocol -> SkillPackage]',
         '  Compile --> Identity[protocol/package/snapshot identity]',
-        '  Core --> Route[routing.ts + resolver.ts]',
-        '  Core --> Complete[completion.ts]',
-        '  Core --> Decision[decision-scope.ts]',
-        '  Core --> Artifact[artifacts.ts]',
         '  Core --> Durability[revision claim + journal<br/>lock + checkpoint + snapshot]',
         '  Core --> Location[location.ts<br/>manual / standalone]',
         '  Location --> Engine[engine/manual-run.ts + loop.ts]',
         '  Engine --> Store[state + pending + trajectory<br/>artifacts + protected writes]',
+        '  subgraph Policies[Validation and routing policies]',
+        '    direction TB',
+        '    Route[routing.ts + resolver.ts] ~~~ Complete[completion.ts] ~~~ Decision[decision-scope.ts] ~~~ Artifact[artifacts.ts]',
+        '  end',
+        '  Core --> Policies',
         '  Store --> Continuation[WorkflowContinuation]',
         '  Identity --> Continuation',
-        '  Route --> Continuation',
-        '  Complete --> Continuation',
-        '  Decision --> Continuation',
-        '  Artifact --> Continuation',
+        '  Policies --> Continuation',
         '  classDef api fill:#eeeaf7,stroke:#67528d,color:#17202a;',
         '  classDef logic fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  classDef storage fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  classDef identity fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
         '  class Public,Core,Continuation api; class Compile,Route,Complete,Decision,Artifact,Durability,Location,Engine logic; class Store storage; class Identity identity;'
       ]),
-      diagramLines([
-        'flowchart LR',
+      '4.5': diagramLines([
+        'flowchart TB',
         '  Package[assembled package] --> Authoring[authoring readiness<br/>content + review]',
         '  Authoring --> Eval[eval/run.ts<br/>current tree hash]',
-        '  Eval --> RuntimeCert[workflow-runtime-certification.ts]',
+        '  Eval --> RuntimeCert[workflow-runtime-<br/>certification.ts]',
         '  RuntimeCert --> Ready[reviewState<br/>readiness]',
         '  Ready -->|reviewer + confirm| Approve[approve]',
         '  Approve -->|confirm| Publish[publish]',
@@ -1346,9 +1160,9 @@ flowchart LR
         '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  class Package package; class Authoring,Eval,RuntimeCert,Ready,Parity,Tests evidence; class Approve,Publish,Preview runtime;'
       ])
-    ],
-    zh: [
-      diagramLines([
+    },
+    zh: {
+      '2.1': diagramLines([
         'flowchart TB',
         '  U[用户或操作者目标] --> C[Badger Creator]',
         '  S[源 Skill<br/>Markdown、参考资料、脚本] --> C',
@@ -1385,45 +1199,49 @@ flowchart LR
         '  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  class S,U source; class P,AP,L,A,G contract; class I,R,E,L1,L2,K,H runtime; class X,V,D evidence;'
       ]),
-      diagramLines([
-        '%%{init: {"themeVariables": {"fontSize": "22px"}}}%%',
+      '2.2-ecosystem': diagramLines([
         'flowchart TB',
-        '  subgraph E[1. 生态系统]',
-        '    direction TB',
-        '    S1[源 Skill] --> C1[Creator / Factory] --> A1[Authoring Plan + lane] --> P1[组装后的软件包] --> R1[WorkflowRuntime + Engine]',
-        '    R1 --> H1[宿主 / 执行器]',
-        '    R1 --> X1[证据 + 交付]',
-        '  end',
-        '  subgraph P[2. 软件包]',
-        '    direction TB',
-        '    P2[Workflow Protocol] --> N2[Node + Binding] --> C2[Output Schema + Guardrail] --> T2[Transition + Handoff]',
-        '  end',
-        '  subgraph R[3. Run]',
-        '    direction TB',
-        '    I3[执行身份] --> S3[Run 状态 + revision] --> A3[Pending action]',
-        '    S3 --> L3[Cycle + Attempt + 访问记录]',
-        '    S3 --> V3[产物版本 + 选择]',
-        '    S3 --> H3[轨迹 + 检查点]',
-        '  end',
-        '  subgraph T[4. 转换]',
-        '    direction TB',
-        '    Q4[准备动作] --> X4[外部工作] --> U4[提交结果 / 决策] --> V4[校验] --> R4[解析下一项]',
-        '  end',
-        '  subgraph M[5. 文件与模块]',
-        '    direction TB',
-        '    K5[compiler.ts] --> D5[resolver.ts + routing.ts] --> M5[completion.ts + decision-scope.ts] --> Z5[受保护存储] --> G5[生成适配器 + 投影]',
-        '  end',
-        '  P1 --> P2',
-        '  T2 --> I3',
-        '  A3 --> Q4',
-        '  R4 --> K5',
-        '  classDef a fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
-        '  classDef b fill:#eeeaf7,stroke:#67528d,color:#17202a;',
-        '  classDef c fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
-        '  classDef d fill:#e7eef2,stroke:#19364b,color:#17202a;',
-        '  class S1,C1,P1,H1 a; class P2,N2,C2,T2 b; class R1,I3,S3,A3,L3,V3,H3 c; class X1,Q4,X4,U4,V4,R4,K5,D5,M5,Z5,G5 d;'
+        '  Skills[源 Skill] --> Factory[Creator / Factory] --> Authoring[Authoring Plan + lane] --> Package[组装后的软件包] --> Runtime[WorkflowRuntime + Engine]',
+        '  Runtime --> Host[宿主 / 执行器]',
+        '  Runtime --> Evidence[证据 + 交付]',
+        '  classDef source fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
+        '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
+        '  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;',
+        '  class Skills,Factory,Host source; class Authoring,Package runtime; class Runtime runtime; class Evidence evidence;'
       ]),
-      diagramLines([
+      '2.2-package': diagramLines([
+        'flowchart TB',
+        '  AuthoringProtocol[Authoring Protocol] --> LanePlan[Lane DAG + claims] --> Authored[创作内容 + 审查]',
+        '  Protocol[Workflow Protocol] --> Nodes[Node + Binding] --> Schemas[Output Schema]',
+        '  Authored --> Protocol',
+        '  Nodes --> Routes[Transition + 路由]',
+        '  Nodes --> Guards[Guardrail + Handoff]',
+        '  classDef contract fill:#eeeaf7,stroke:#67528d,color:#17202a;',
+        '  class AuthoringProtocol,LanePlan,Authored,Protocol,Nodes,Schemas,Routes,Guards contract;'
+      ]),
+      '2.2-run': diagramLines([
+        'flowchart LR',
+        '  Identity[执行身份] --> State[Run 状态 + revision] --> Pending[Pending action]',
+        '  State --> Cycles[Cycle + Attempt + 访问记录]',
+        '  State --> Artifacts[产物版本 + 选择]',
+        '  State --> History[轨迹 + 检查点]',
+        '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
+        '  class Identity,State,Pending,Cycles,Artifacts,History runtime;'
+      ]),
+      '2.2-transition': diagramLines([
+        'flowchart TB',
+        '  Prepare[准备动作] --> External[外部工作] --> Submit[提交结果 / 决策] --> Validate[校验] --> Resolve[解析下一项转换]',
+        '  classDef transition fill:#e7eef2,stroke:#19364b,color:#17202a;',
+        '  class Prepare,External,Submit,Validate,Resolve transition;'
+      ]),
+      '2.2-modules': diagramLines([
+        'flowchart TB',
+        '  Compiler[compiler.ts] --> Resolver[resolver.ts + routing.ts] --> Completion[completion.ts + decision scope]',
+        '  Completion --> Storage[受保护存储 + 位置] --> Adapters[生成适配器 + 投影]',
+        '  classDef module fill:#e7eef2,stroke:#19364b,color:#17202a;',
+        '  class Compiler,Resolver,Completion,Storage,Adapters module;'
+      ]),
+      '2.3': diagramLines([
         'flowchart TB',
         '  Caller[调用方或生成适配器] --> Public[workflow-runtime/public.ts<br/>createWorkflowRuntime]',
         '  Public --> Ops[start / resume / submit / recover]',
@@ -1431,51 +1249,56 @@ flowchart LR
         '  Compile --> Package[Engine 兼容 SkillPackage]',
         '  Ops --> Location[location.ts<br/>手动或 standalone]',
         '  Location --> Store[Engine Run 存储]',
-        '  Ops --> Completion[completion.ts<br/>Output Schema 与证据校验]',
-        '  Ops --> Route[routing.ts + resolver.ts<br/>边、回退、Cycle]',
-        '  Ops --> Decision[decision-scope.ts<br/>决策输入与证据范围]',
-        '  Ops --> Artifact[artifacts.ts<br/>不可变版本与选择]',
         '  Store --> Durable[受保护文件、原子写入、<br/>轨迹、检查点、日志、锁]',
         '  Ops --> Projection[生成的 state / guard / handoff 适配器]',
-        '  Durable --> Continuation[WorkflowContinuation]',
-        '  Completion --> Continuation',
-        '  Route --> Continuation',
-        '  Decision --> Continuation',
-        '  Artifact --> Continuation',
+        '  subgraph Policies[校验与路由策略]',
+        '    direction TB',
+        '    Completion[completion.ts<br/>Output Schema 与证据校验] ~~~ Route[routing.ts + resolver.ts<br/>边、回退、Cycle] ~~~ Decision[decision-scope.ts<br/>决策输入与证据范围] ~~~ Artifact[artifacts.ts<br/>不可变版本与选择]',
+        '  end',
+        '  Ops --> Policies',
+        '  Policies --> Continuation[WorkflowContinuation]',
+        '  Durable --> Continuation',
         '  classDef api fill:#eeeaf7,stroke:#67528d,color:#17202a;',
         '  classDef logic fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  classDef storage fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  classDef adapter fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
         '  class Caller,Projection adapter; class Public,Ops,Continuation api; class Compile,Package,Completion,Route,Decision,Artifact logic; class Location,Store,Durable storage;'
       ]),
-      diagramLines([
-        '%%{init: {"themeVariables": {"fontSize": "22px"}}}%%',
+      '2.4': diagramLines([
         'flowchart LR',
-        '  Input[input-preparation] --> Route{scenario-route}',
-        '  Route -->|仅池流程| Pool0[p0 位置增强]',
-        '  Route -->|设计 + 现有基因组| D1[d1 参考基因组]',
-        '  Route -->|设计 + 下载基因组| Genome[genome-source]',
-        '  Genome --> D1',
-        '  D1 --> D2[d2 外群特异性] --> D3[d3 种内覆盖] --> Entropy[d3-2 熵检查点]',
-        '  Entropy --> D4[d4 提取片段] --> D5[d5 选择片段] --> D6[d6 Primer3]',
-        '  D6 --> D7[d7 基础 QC] --> D8[d8 SNP QC] --> D9[d9 NT 特异性 QC]',
-        '  D9 -->|结束| Handoff[workflow-handoff]',
-        '  D9 -->|继续加池| Pool0',
-        '  D9 -->|启用 USEARCH| U[d10 USEARCH]',
-        '  U -->|结束| Handoff',
-        '  U -->|继续加池| Pool0',
-        '  Pool0 --> P1[p1 提取] --> P2[p2 二聚体] --> P3[p3 基础筛选]',
-        '  P3 --> P4[p4 窗口去重] --> P5[p5 迭代筛选] --> P6[p6 深度筛选]',
-        '  P6 --> P7[p7 whole -g] --> P8[p8 加池兼容性] --> P9[p9 pool -g] --> P10[p10 最终选择] --> Handoff',
-        '  Handoff -->|另一个 Cycle| Route',
-        '  Handoff -->|结束| Done((完成))',
+        '  subgraph Close[4 · Handoff 与重复]',
+        '    direction TB',
+        '    Handoff[workflow-handoff] -->|结束| Done((完成))',
+        '  end',
+        '  subgraph Pool[3 · 池添加]',
+        '    direction TB',
+        '    Pool0[p0 位置增强] --> P1[p1 提取] --> P2[p2 二聚体] --> P3[p3 基础筛选] --> P4[p4 窗口去重] --> P5[p5 迭代筛选]',
+        '    P5 --> P6[p6 深度筛选] --> P7[p7 whole -g] --> P8[p8 加池兼容性] --> P9[p9 pool -g] --> P10[p10 最终选择]',
+        '  end',
+        '  subgraph Design[2 · 设计]',
+        '    direction TB',
+        '    D1[d1 参考基因组] --> D2[d2 外群特异性] --> D3[d3 种内覆盖] --> Entropy[d3-2 熵检查点] --> D4[d4 提取片段]',
+        '    D4 --> D5[d5 选择片段] --> D6[d6 Primer3] --> D7[d7 基础 QC] --> D8[d8 SNP QC] --> D9[d9 NT 特异性 QC]',
+        '    D9 -->|启用 USEARCH| U[d10 USEARCH]',
+        '  end',
+        '  subgraph Prepare[1 · 准备]',
+        '    direction TB',
+        '    Input[input-preparation] --> Route{scenario-route}',
+        '    Route -->|设计 + 下载基因组| Genome[genome-source]',
+        '  end',
+        '  Prepare -->|设计| Design',
+        '  Prepare -->|仅池流程| Pool',
+        '  Design -->|继续加池| Pool',
+        '  Design -->|结束| Close',
+        '  Pool --> Close',
+        '  Close -->|另一个 Cycle| Prepare',
         '  classDef control fill:#eeeaf7,stroke:#67528d,color:#17202a;',
         '  classDef design fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  classDef pool fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
         '  classDef terminal fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  class Input,Route,Genome control; class D1,D2,D3,Entropy,D4,D5,D6,D7,D8,D9,U design; class Pool0,P1,P2,P3,P4,P5,P6,P7,P8,P9,P10 pool; class Handoff,Done terminal;'
       ]),
-      diagramLines([
+      '2.5': diagramLines([
         'flowchart LR',
         '  Portable[可移植且人类可读的<br/>方法] --> Skill[Markdown 或打包后的 Skill]',
         '  Boundary[已知的路由与<br/>接受边界] --> Harness[Skill Harness 工作流<br/>契约 + 持久控制]',
@@ -1489,7 +1312,7 @@ flowchart LR
         '  classDef annotation fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  class Skill left; class Harness,Worker middle; class Agent right; class Portable,Boundary,Open,Governance,Autonomy annotation;'
       ]),
-      diagramLines([
+      '3.1': diagramLines([
         'flowchart TB',
         '  Package[不可变软件包快照<br/>Protocol + 执行身份] --> Start[start 或 resume]',
         '  Start --> Pending[读取或持久化待处理动作]',
@@ -1513,32 +1336,41 @@ flowchart LR
         '  class Package,Start boundary; class Pending,Await,Check,Commit,Resolve,Continue,Recover,Reconcile runtime;',
         '  class Work,Submit,Decision external; class Reject evidence;'
       ]),
-      diagramLines([
-        'flowchart LR',
-        '  User[目标 + plan.json] --> Inspect[guide / candidates]',
-        '  Inspect --> Propose[propose<br/>只读]',
-        '  Propose -->|明确确认| Init[init]',
-        '  Init --> CreatorState[.badger<br/>Creator 状态]',
-        '  CreatorState --> Generate[generate<br/>scaffold]',
-        '  Generate --> AuthorPlan[authoring-plan]',
-        '  AuthorPlan --> Lanes[authoring lanes<br/>records + review]',
-        '  Lanes --> Assemble[assemble]',
-        '  Assemble --> Eval[eval<br/>当前哈希]',
-        '  Eval --> Review[review]',
-        '  Review --> Approve[approve<br/>reviewer + confirm]',
-        '  Approve --> Publish[publish<br/>confirm]',
-        '  Publish --> Published[.badger/published]',
-        '  Published --> Use[生成适配器<br/>或公共 API]',
-        '  Use --> Run[持久化 WorkflowRuntime Run]',
-        '  Publish -. 仅预览 .-> Distribute[distribute<br/>destination]',
-        '  Propose -. 阻塞项 .-> Stop[停止并修复计划]',
+      '4.1': diagramLines([
+        'flowchart TB',
+        '  subgraph Discover[1 · 只读发现]',
+        '    direction LR',
+        '    User[目标 + plan.json] --> Inspect[guide / candidates] --> Propose[propose<br/>只读]',
+        '    Propose -. 阻塞项 .-> Stop[停止并修复计划]',
+        '  end',
+        '  subgraph Write[2 · 确认写入]',
+        '    direction LR',
+        '    Init[init] --> CreatorState[.badger<br/>Creator 状态] --> Generate[generate<br/>scaffold]',
+        '  end',
+        '  subgraph Author[3 · 创作]',
+        '    direction LR',
+        '    AuthorPlan[authoring-plan] --> Lanes[authoring lanes<br/>records + review] --> Assemble[assemble]',
+        '  end',
+        '  subgraph Gate[4 · 评估与批准]',
+        '    direction LR',
+        '    Eval[eval<br/>当前哈希] --> Review[review] --> Approve[approve<br/>reviewer + confirm]',
+        '  end',
+        '  subgraph Deliver[5 · 发布与使用]',
+        '    direction LR',
+        '    Publish[publish<br/>confirm] --> Published[.badger/published] --> Use[生成适配器<br/>或公共 API] --> Run[持久化 WorkflowRuntime Run]',
+        '    Publish -. 仅预览 .-> Distribute[distribute<br/>destination]',
+        '  end',
+        '  Discover -->|明确确认| Write',
+        '  Write --> Author',
+        '  Author --> Gate',
+        '  Gate --> Deliver',
         '  classDef read fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  classDef write fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
         '  classDef evidence fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  classDef runtime fill:#eeeaf7,stroke:#67528d,color:#17202a;',
         '  class User,Inspect,Propose,Stop read; class Init,Generate,AuthorPlan,Lanes,Assemble,Approve,Publish write; class CreatorState,Eval,Review,Distribute evidence; class Published,Use,Run runtime;'
       ]),
-      diagramLines([
+      '4.2': diagramLines([
         'flowchart TB',
         '  CLI[src/cli.ts<br/>薄命令外观] --> Kernel[src/workflow-kernel<br/>discovery + foundation + hash]',
         '  Kernel --> Contract[src/workflow/contract.ts<br/>规范化 + 校验]',
@@ -1564,8 +1396,8 @@ flowchart LR
         '  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  class CLI,Tests entry; class Kernel,Contract,Authoring,Factory,Package,Public,Core contract; class SkillRuntime,Engine,Durable runtime; class Eval,Publish,Differential evidence;'
       ]),
-      diagramLines([
-        'flowchart LR',
+      '4.3': diagramLines([
+        'flowchart TB',
         '  Plan[FactoryPlan JSON] --> Read[readPlan]',
         '  Read --> Normalize[normalizeWorkflow]',
         '  Discover[discovery.ts<br/>根目录 + 哈希] --> Proposal[buildProposal]',
@@ -1584,36 +1416,34 @@ flowchart LR
         '  classDef output fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  class Plan,Discover input; class Read,Normalize,Proposal,Block,AuthorPlan,Lanes contract; class Confirm,State state; class Generate,Assemble,Files output;'
       ]),
-      diagramLines([
+      '4.4': diagramLines([
         'flowchart TB',
         '  Public[public.ts<br/>start / resume / submit / recover] --> Core[index.ts<br/>Runtime 权威]',
         '  Core --> Compile[compiler.ts<br/>Protocol -> SkillPackage]',
         '  Compile --> Identity[protocol/package/snapshot 身份]',
-        '  Core --> Route[routing.ts + resolver.ts]',
-        '  Core --> Complete[completion.ts]',
-        '  Core --> Decision[decision-scope.ts]',
-        '  Core --> Artifact[artifacts.ts]',
         '  Core --> Durability[revision claim + journal<br/>lock + checkpoint + snapshot]',
         '  Core --> Location[location.ts<br/>manual / standalone]',
         '  Location --> Engine[engine/manual-run.ts + loop.ts]',
         '  Engine --> Store[state + pending + trajectory<br/>artifacts + protected writes]',
+        '  subgraph Policies[校验与路由策略]',
+        '    direction TB',
+        '    Route[routing.ts + resolver.ts] ~~~ Complete[completion.ts] ~~~ Decision[decision-scope.ts] ~~~ Artifact[artifacts.ts]',
+        '  end',
+        '  Core --> Policies',
         '  Store --> Continuation[WorkflowContinuation]',
         '  Identity --> Continuation',
-        '  Route --> Continuation',
-        '  Complete --> Continuation',
-        '  Decision --> Continuation',
-        '  Artifact --> Continuation',
+        '  Policies --> Continuation',
         '  classDef api fill:#eeeaf7,stroke:#67528d,color:#17202a;',
         '  classDef logic fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  classDef storage fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  classDef identity fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
         '  class Public,Core,Continuation api; class Compile,Route,Complete,Decision,Artifact,Durability,Location,Engine logic; class Store storage; class Identity identity;'
       ]),
-      diagramLines([
-        'flowchart LR',
+      '4.5': diagramLines([
+        'flowchart TB',
         '  Package[组装后的软件包] --> Authoring[authoring readiness<br/>内容 + 审查]',
         '  Authoring --> Eval[eval/run.ts<br/>当前树哈希]',
-        '  Eval --> RuntimeCert[workflow-runtime-certification.ts]',
+        '  Eval --> RuntimeCert[workflow-runtime-<br/>certification.ts]',
         '  RuntimeCert --> Ready[reviewState<br/>readiness]',
         '  Ready -->|reviewer + confirm| Approve[approve]',
         '  Approve -->|confirm| Publish[publish]',
@@ -1627,112 +1457,22 @@ flowchart LR
         '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  class Package package; class Authoring,Eval,RuntimeCert,Ready,Parity,Tests evidence; class Approve,Publish,Preview runtime;'
       ])
-    ]
-  };
-  const layerDiagrams = {
-    en: [
-      diagramLines([
-        'flowchart TB',
-        '  Skills[Source Skills] --> Factory[Creator / Factory] --> Authoring[Authoring Plan + lanes] --> Package[Assembled package] --> Runtime[WorkflowRuntime + Engine]',
-        '  Runtime --> Host[Host / executor]',
-        '  Runtime --> Evidence[Evidence + delivery]',
-        '  classDef source fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
-        '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
-        '  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;',
-        '  class Skills,Factory,Host source; class Authoring,Package runtime; class Runtime runtime; class Evidence evidence;'
-      ]),
-      diagramLines([
-        'flowchart LR',
-        '  AuthoringProtocol[Authoring Protocol] --> LanePlan[Lane DAG + claims] --> Authored[Authored content + review]',
-        '  Protocol[Workflow Protocol] --> Nodes[Nodes + bindings] --> Schemas[Output Schemas]',
-        '  Authored --> Protocol',
-        '  Nodes --> Routes[Transitions + routes]',
-        '  Nodes --> Guards[Guardrails + handoffs]',
-        '  classDef contract fill:#eeeaf7,stroke:#67528d,color:#17202a;',
-        '  class AuthoringProtocol,LanePlan,Authored,Protocol,Nodes,Schemas,Routes,Guards contract;'
-      ]),
-      diagramLines([
-        'flowchart LR',
-        '  Identity[Execution identity] --> State[Run state + revision] --> Pending[Pending action]',
-        '  State --> Cycles[Cycles + Attempts + visits]',
-        '  State --> Artifacts[Artifact versions + selections]',
-        '  State --> History[Trajectory + checkpoints]',
-        '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
-        '  class Identity,State,Pending,Cycles,Artifacts,History runtime;'
-      ]),
-      diagramLines([
-        'flowchart TB',
-        '  Prepare[Prepare action] --> External[External work] --> Submit[Submit outcome / decision] --> Validate[Validate] --> Resolve[Resolve next transition]',
-        '  classDef transition fill:#e7eef2,stroke:#19364b,color:#17202a;',
-        '  class Prepare,External,Submit,Validate,Resolve transition;'
-      ]),
-      diagramLines([
-        'flowchart TB',
-        '  Compiler[compiler.ts] --> Resolver[resolver.ts + routing.ts] --> Completion[completion.ts + decision scope]',
-        '  Completion --> Storage[Protected storage + locations] --> Adapters[Generated adapters + projections]',
-        '  classDef module fill:#e7eef2,stroke:#19364b,color:#17202a;',
-        '  class Compiler,Resolver,Completion,Storage,Adapters module;'
-      ])
-    ],
-    zh: [
-      diagramLines([
-        'flowchart TB',
-        '  Skills[源 Skill] --> Factory[Creator / Factory] --> Authoring[Authoring Plan + lane] --> Package[组装后的软件包] --> Runtime[WorkflowRuntime + Engine]',
-        '  Runtime --> Host[宿主 / 执行器]',
-        '  Runtime --> Evidence[证据 + 交付]',
-        '  classDef source fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
-        '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
-        '  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;',
-        '  class Skills,Factory,Host source; class Authoring,Package runtime; class Runtime runtime; class Evidence evidence;'
-      ]),
-      diagramLines([
-        'flowchart LR',
-        '  AuthoringProtocol[Authoring Protocol] --> LanePlan[Lane DAG + claims] --> Authored[创作内容 + 审查]',
-        '  Protocol[Workflow Protocol] --> Nodes[Node + Binding] --> Schemas[Output Schema]',
-        '  Authored --> Protocol',
-        '  Nodes --> Routes[Transition + 路由]',
-        '  Nodes --> Guards[Guardrail + Handoff]',
-        '  classDef contract fill:#eeeaf7,stroke:#67528d,color:#17202a;',
-        '  class AuthoringProtocol,LanePlan,Authored,Protocol,Nodes,Schemas,Routes,Guards contract;'
-      ]),
-      diagramLines([
-        'flowchart LR',
-        '  Identity[执行身份] --> State[Run 状态 + revision] --> Pending[Pending action]',
-        '  State --> Cycles[Cycle + Attempt + 访问记录]',
-        '  State --> Artifacts[产物版本 + 选择]',
-        '  State --> History[轨迹 + 检查点]',
-        '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
-        '  class Identity,State,Pending,Cycles,Artifacts,History runtime;'
-      ]),
-      diagramLines([
-        'flowchart TB',
-        '  Prepare[准备动作] --> External[外部工作] --> Submit[提交结果 / 决策] --> Validate[校验] --> Resolve[解析下一项转换]',
-        '  classDef transition fill:#e7eef2,stroke:#19364b,color:#17202a;',
-        '  class Prepare,External,Submit,Validate,Resolve transition;'
-      ]),
-      diagramLines([
-        'flowchart TB',
-        '  Compiler[compiler.ts] --> Resolver[resolver.ts + routing.ts] --> Completion[completion.ts + decision scope]',
-        '  Completion --> Storage[受保护存储 + 位置] --> Adapters[生成适配器 + 投影]',
-        '  classDef module fill:#e7eef2,stroke:#19364b,color:#17202a;',
-        '  class Compiler,Resolver,Completion,Storage,Adapters module;'
-      ])
-    ]
+    }
   };
   const zh = {
     title: 'Badger 工作流手册',
     hero: {
       eyebrow: 'Skill Harness / Badger',
       heading: '从 Markdown Skill 到持久化工作流系统',
-      lede: '面向学习与面试表达的教育手册：理解 Badger、Skill Harness，以及作为生成实例的 Primer Designer 工作流。',
-      pills: ['第 1–4 节为学习路径', 'Mermaid 架构视图', '集成式创作已交付 · #16', '更新于 2026-09-09']
+      lede: '一份教育手册：理解 Badger、Skill Harness，以及作为生成实例的 Primer Designer 工作流。',
+      pills: ['第 1–4 节为学习路径', 'Mermaid 架构视图', '集成式创作已交付 · #16', '更新于 2026-10-26']
     },
-    nav: ['本页导航', '1 · 术语', '说明与组合', '契约词汇', '运行时词汇', '证据词汇', '2 · 架构', '2.1 目标架构', '2.2 抽象层级', '2.3 运行时内部', '2.4 Primer 实例', '2.5 适配性定位', '3 · 生命周期', '3.1 软件包生命周期', '3.2 Run 生命周期', '3.3 公共操作', '3.4 决策与恢复', '4 · 代码库指南', '4.1 用户到代码路径', '4.2 使用工具', '4.3 参数与枚举', '4.4 软件包模块与接口', '4.5 证据、测试与维护', '5 · 面试练习', '6 · 来源账本'],
-    sectionNumbers: ['第 01 节', '第 02 节', '第 03 节', '第 04 节', '第 05 节', '第 06 节'],
+    nav: ['本页导航', '1 · 术语', '说明与组合', '契约词汇', '运行时词汇', '证据词汇', '2 · 架构', '2.1 目标架构', '2.2 抽象层级', '2.3 运行时内部', '2.4 Primer 实例', '2.5 适配性定位', '3 · 生命周期', '3.1 软件包生命周期', '3.2 Run 生命周期', '3.3 公共操作', '3.4 决策与恢复', '4 · 代码库指南', '4.1 用户到代码路径', '4.2 使用工具', '4.3 参数与枚举', '4.4 软件包模块与接口', '4.5 证据、测试与维护', '5 · 来源账本'],
+    sectionNumbers: ['第 01 节', '第 02 节', '第 03 节', '第 04 节', '第 05 节'],
     section1: {
       heading: '术语：四个平面与系统语言',
       lede: '先记住四个平面，再学习连接它们的术语：人类可读的说明、声明式契约、持久化运行时/控制面，以及证明实际发生了什么的证据。这个顺序把长词汇表变成后续每张架构图的地图。',
-      callout: '<strong>如何使用本节。</strong> 按“能力 → 契约 → 执行 → 证明”阅读。对每个术语都问：它描述什么、谁拥有它、什么身份或产物跨越边界，以及这是当前行为还是路线图目标。最后复述结尾的面试句子。',
+      callout: '<strong>如何使用本节。</strong> 按“能力 → 契约 → 执行 → 证明”阅读。对每个术语都问：它描述什么、谁拥有它、什么身份或产物跨越边界，以及这是当前行为还是路线图目标。',
       planeMap: [
         ['1. 说明平面', 'Skill、参考资料、脚本、Creator 和 Factory 描述能力。'],
         ['2. 契约平面', 'Protocol、Node、Schema、Guardrail 和路由声明含义。'],
@@ -1793,8 +1533,7 @@ flowchart LR
         ['Observability（可观测性）', '通过结构化状态、事件、哈希、发现、回执和诊断来解释和检查执行，而不是只从最终消息推断行为。'],
         ['Repair policy（修复策略）', '对失败或阻塞 Run 判断应当重试、修复、等待决策还是停止的有界规则。它防止重复失败变成无止境的静默循环。'],
         ['Transactional finalization（事务式终结）', '针对高后果完成或发布的预览–确认–变更–对账序列。预览是关于拟议变化的证据，不是变化已经应用的证明。']
-      ],
-      interview: '“我把系统解释成四个协作平面。Skill 和 Creator 形成说明平面；Workflow Protocol 形成语义契约平面；WorkflowRuntime 加 Engine 形成 Runtime/控制平面；身份、产物、轨迹、回执、评估和 readiness 形成证据平面。每个平面有不同的拥有者，所以 Agent 可以贡献工作，却不会成为路由或持久化状态的权威。”'
+      ]
     },
     section2: {
       heading: '架构：当前 Badger 与集成式创作',
@@ -1893,13 +1632,6 @@ flowchart LR
         ['证据', '证据就是执行者留下的内容。', 'Output Schema、产物版本、来源追踪、Trajectory、当前哈希评估和 readiness 让接受作用域保持明确。', '轨迹和日志可以捕获交互；完整性与领域接受标准仍取决于具体 Runtime。'],
         ['适应性', '灵活，但不同 Run 之间的路由可能漂移。', '推理可以在声明的 Node 内变化；路由、Cycle、预算和产物传递保持有界且可检查。', '动态规划和委派最强；可复现性与审计需要额外控制。'],
         ['运行成本', '设置与治理成本最低。', '增加编译、持久存储、校验、认证、审查和维护，以换取受控恢复。', '自主性和集成潜力最高；策略、安全、成本和可观测性面最广。']
-      ],
-      interview: [
-        '“在最高层，我把 Badger 解释成一个受治理的软件包工厂和持久化执行产品。Creator/Factory 拥有工作流含义与交付证据；WorkflowRuntime 拥有每个 Run；宿主执行外部工作。不可变软件包快照和执行身份是两者之间的交接，证据则把执行连接到评估、readiness、批准和交付。”',
-        '“我把五个层次当作缩放，而不是五个不同的系统。生态层问谁参与；软件包层问执行前声明了什么；Run 层问什么被持久化；转换层问一次回合如何受保护；模块层问边界在代码中的什么位置。词汇会变，但软件包身份、Pending action、校验边界、continuation 和单一 Runtime 权威保持不变。”',
-        '“最重要的模块决策是只有一个 Runtime 权威。调用方只看到 start、resume、submit 和 recover；Compiler、Resolver、完成校验、决策作用域、产物版本、Run 位置、受保护存储和投影都留在内部。生成脚本保留兼容性但委托给 WorkflowRuntime，因此不会出现两套漂移的状态机。”',
-        '“Primer Designer 是通用 Runtime 之上的领域契约。它保持 genome-download、primer-design 和 primer-pool-add 独立，并声明 Node、Schema、路由、审查选择和 Cycle 策略。Runtime 提供身份、持久化、校验、路由和恢复；契约提供生物学含义与接受标准。”',
-        '“我根据控制边界来定位 Skill Harness，而不是把它当作成熟度阶梯。只要合法路由、接受证据和恢复身份可以声明，Node 内部就仍可以使用 Agent。Protocol 声明允许的图；WorkflowRuntime 提出并接受动作；外部工作者执行动作。这样以部分自主性和创作简洁性为代价，换来显式决策、不可变来源追踪和新进程恢复。Primer Designer 很适合这个位置，因为它的 Cycle 和审查边界可知，而科学工作仍然在 Runtime 外部。”'
       ]
     },
     section3: {
@@ -1924,8 +1656,7 @@ flowchart LR
         ['<code>recover</code>', '<span class="tag current">当前接口</span> 当持久化日志、锁或检查点待处理时，显式对账受保护记录，并返回同一个 continuation 或结构化 blocker。外部工作不会被隐式重放。']
       ],
       continuation: 'Decision Node 使用相同生命周期，但有一个关键差异：Runtime 持久化一个 <code>ask_user</code> 动作并返回 <code>await-user</code>。宿主收集响应，但只有 <code>submit</code> 能接受它。响应必须匹配当前 revision、action id、Node、Cycle、Attempt、软件包身份、选项、reviewer 策略、输入 Schema、理由策略和必需证据作用域。这样，“请询问用户”才真正变成持久化协议行为。',
-      recovery: '恢复是显式分支，而不是从对话重新开始。<code>recover</code> 读取受保护的 Run 状态、Pending action、Skill 快照、执行身份、账本、产物以及可能存在的日志、锁或检查点记录。已知的中断写入可以确定性地向前对账；未知身份保持 blocked。恢复在对账后返回 continuation，并且不会静默重复外部动作。',
-      interview: '“我把生命周期分成创作、软件包和 Run 三个阶段。Authoring 先把来源和意图变成经过审查的语义内容；Factory 再组装软件包并用当前哈希证据决定它是否 ready；Runtime 最后从不可变快照创建 Run。每个 Run 回合都是提出 Pending action、在外部执行、提交并校验、再解析 continuation。创作状态与 Run 状态分别恢复，任何一方都不依赖聊天记忆。”'
+      recovery: '恢复是显式分支，而不是从对话重新开始。<code>recover</code> 读取受保护的 Run 状态、Pending action、Skill 快照、执行身份、账本、产物以及可能存在的日志、锁或检查点记录。已知的中断写入可以确定性地向前对账；未知身份保持 blocked。恢复在对账后返回 continuation，并且不会静默重复外部动作。'
     },
     section4: {
       heading: '代码库指南：把 Badger 当作独立系统来学习',
@@ -1942,12 +1673,12 @@ flowchart LR
         ['审查并批准', '<code>review</code> 报告创作、Runtime 和发布 readiness。发布审查者必须使用 <code>approve --reviewer &lt;id&gt; --confirm</code> 明确批准同一个当前哈希。'],
         ['发布或预览', '<code>publish --confirm</code> 只把已批准的当前哈希软件包复制到 <code>.badger/published/</code>；<code>distribute</code> 报告目标文件并保持仅预览。']
       ],
-      gateHeaders: ['门槛', '保护什么', '面试时怎么说'],
+      gateHeaders: ['门槛', '保护什么'],
       gateCells: [
-        ['只读发现', '候选解析与提案检查不会创建工作流，也不会复制软件包。', '“系统允许我在改变状态前先检查含义。”'],
-        ['明确确认', '初始化、批准、发布和报告输出都在实际写入的边界要求主动传入标志。', '“确认附着在有后果的操作上，而不是隐藏在上一次提示里。”'],
-        ['当前哈希证据', '创作材料、确定性评估、Runtime 认证和发布审查都绑定确切的生成树；树发生变化后，之前的证据就会过期。', '“Readiness 是关于哈希的主张，而不是关于目录名称的主张。”'],
-        ['仅预览分发', '分发只列出目标文件，不会安装到 Agent 平台目录。', '“独立软件包在可逆的本地预览处停止。”']
+        ['只读发现', '候选解析与提案检查不会创建工作流，也不会复制软件包。'],
+        ['明确确认', '初始化、批准、发布和报告输出都在实际写入的边界要求主动传入标志。'],
+        ['当前哈希证据', '创作材料、确定性评估、Runtime 认证和发布审查都绑定确切的生成树；树发生变化后，之前的证据就会过期。'],
+        ['仅预览分发', '分发只列出目标文件，不会安装到 Agent 平台目录。']
       ],
       commandHeading: '每条命令读取和写入什么',
       userGuideIntro: '构建软件包后，从 <code>badger/</code> 运行 Creator。学习时使用一次性的项目目录：工具会在该项目下写入 Creator 记录，但创建或评估本地软件包不需要访问受保护的上游 checkout。下面的 authoring 命令属于计划中的集成接口；在升级完成前，当前 CLI 会在确定性生成之后停止。',
@@ -1988,7 +1719,7 @@ flowchart LR
       cliHeaders: ['参数', '用途', '选择建议'],
       cliCells: [
         ['<code>--project &lt;dir&gt;</code>', '所有 Creator 命令和 standalone Run。', '选择由该工作流拥有 <code>.badger/states/</code>、<code>.badger/authoring/</code> 和 <code>.badger/runs/</code> 记录的项目根目录。'],
-        ['<code>--json</code>', '自动化、检查和证据收集。', '脚本和面试中讨论数据形状时优先使用；快速手动检查可用人类可读输出。'],
+        ['<code>--json</code>', '自动化、检查和证据收集。', '脚本和检查数据形状时优先使用；快速手动检查可用人类可读输出。'],
         ['<code>--confirm</code>', '初始化、批准、发布和明确确认的报告写入。', '把确认放在确切的变更/写入操作上；不要把之前的预览当成默认同意。'],
         ['<code>--reviewer &lt;id&gt;</code>', '审查批准。', '使用稳定的参与者身份；它会成为审查证据的一部分，即使自动检查全部通过也仍然需要。'],
         ['<code>--destination &lt;dir&gt;</code>', '分发预览。', '使用一次性目标检查文件清单；命令只返回路径，不会复制文件。'],
@@ -2017,7 +1748,6 @@ flowchart LR
         ['Continuation disposition', '<code>continue</code> · <code>await-user</code> · <code>blocked</code> · <code>done</code>', '面向宿主的答案：机器工作、持久化决策、未解决的停止/修复条件，或终态。'],
         ['<code>WorkflowArtifactLifetime</code>', '<code>attempt</code> · <code>cycle</code> · <code>run</code>', '已接受产物版本保持在选定作用域中的时间；省略时默认为 <code>attempt</code>。']
       ],
-      parameterInterview: '“我通过它控制的边界来选择参数。计划字段定义含义和依赖；CLI 标志定义确认、身份和目标；Runtime 字段把一次提交绑定到一个 Pending action 和 revision。枚举不是装饰：Node kind 解释职责，enforcement 解释证据是否会阻塞，continuation disposition 则准确告诉宿主下一步可以做什么。”',
       moduleIntro: '从外向内阅读源码。CLI 有意保持薄；workflow-kernel foundation 协调发现、规范化、提案和 Creator 状态；计划中的 authoring subsystem 协调 lane 计划、工作者证据、创作内容和 authoring review；factory 通过一个确定性组装边界产出软件包；Skill Runtime 把软件包文件变成经过校验的内存 <code>SkillPackage</code> 和不可变快照；Engine 提供通用 Run 机制；WorkflowRuntime 是把协议接到 Engine 行为并隐藏受保护持久化的深模块。软件包根导出以及 <code>/engine</code>、<code>/workflow-runtime</code>、<code>/skill-runtime</code> 和 <code>/cli</code> 子路径是公共接口；受保护存储辅助模块仍是私有的。评估、发布、差分 Harness 和测试消费这些接口，而不是创建第二套权威。',
       moduleCaptions: [
         '图 4.1 — CLI 从只读发现走向 authoring 证据、明确写入、当前哈希评估和批准，最后得到可以启动持久化 Run 的软件包。',
@@ -2090,31 +1820,9 @@ flowchart LR
         ['持久化与安全', '<code>workflow-runtime-durability.test.ts</code>、<code>workflow-runtime-lock.test.ts</code>、<code>workflow-runtime-checkpoint.test.ts</code>、<code>contained-atomic-write.test.ts</code>、<code>race-safe-read.test.ts</code>', '崩溃、竞争、路径逃逸、竞态和畸形记录是否 fail closed？'],
         ['差分认证', '<code>engine-differential.test.ts</code>、<code>differential-harness.test.ts</code>、<code>engine-certification.test.ts</code>、<code>workflow-runtime-certification.test.ts</code>', '私有实现是否匹配声明的基线，并覆盖负面案例？']
       ],
-      maintenanceCallout: '<strong>维护循环。</strong> 行为不清楚时，从公共导出或 CLI 命令开始，跟进一个调用到它所属的模块，检查它改变的持久化记录，找到最近的聚焦测试，然后运行软件包构建、测试和格式检查。如果变更影响生成的 Runtime 资产，先从源码重新构建，再相信认证结果。',
-      interview: '“我把 Badger 理解成分层的独立产品。CLI 进入 workflow-kernel foundation，它发现 Skill 并规范化工作流契约。Factory 生成软件包；Skill Runtime 校验并制作快照；Engine 提供通用持久化 Run 机制；WorkflowRuntime 是唯一负责编译、路由、校验、持久化和恢复的权威。评估和差分 Harness 把行为绑定到哈希和基线，发布则由当前证据与审查者批准门控。调试时，我沿这条依赖方向走，并核对相应的持久化记录和聚焦测试。”'
+      maintenanceCallout: '<strong>维护循环。</strong> 行为不清楚时，从公共导出或 CLI 命令开始，跟进一个调用到它所属的模块，检查它改变的持久化记录，找到最近的聚焦测试，然后运行软件包构建、测试和格式检查。如果变更影响生成的 Runtime 资产，先从源码重新构建，再相信认证结果。'
     },
     section5: {
-      heading: '面试练习：简短解释',
-      lede: '下面是常见架构问题的简短回答。面试官要求展开时，可以用第 2、4 节的架构图来补充。',
-      cards: [
-        ['它解决什么问题？', '它把松散解释的 Skill 变成可创作、受治理、可恢复的工作流软件包与实例。系统保留人类可读说明，同时增加显式创作证据、Runtime 状态、契约和安全转换。'],
-        ['为什么不只用 Markdown？', 'Markdown 很适合表达方法和渐进式披露，但单靠它无法提供持久 Pending action、过期响应拒绝、确定性路由、产物来源追踪或进程退出后的恢复。'],
-        ['为什么不直接构建完整 Agent？', '项目不需要处处开放式自主，而需要有边界且可解释的领域工作流。限制 Runtime 权威范围，使认证、审查、恢复和分发变得可行。'],
-        ['最重要的设计决策是什么？', '两个职责明确的权威：Authoring 拥有软件包内容与 lane 证据；WorkflowRuntime 和 Engine 拥有生成工作流的路由、恢复与已提交 Run 状态。生成适配器仍然只是投影。'],
-        ['什么让它具有持久性？', 'Run 状态和 Pending action 被持久化、绑定身份，并可在原始进程之外恢复。Badger 还认证日志、锁、检查点、回执、快照、修复策略和事务式终结；authoring 证据则单独支持软件包构建。'],
-        ['为什么 Primer Designer 是好例子？', '它有独立 Skill、条件路由、可选阶段、昂贵的证据产出步骤、人工审查边界和重复的 design/pool Cycle，正好体现契约与持久 Runtime 的价值。']
-      ],
-      ownershipHeaders: ['问题', '职责归属', '原因'],
-      ownershipCells: [
-        ['软件包和工作流应该表达什么含义？', 'Authoring content 与 Workflow Protocol', 'Authoring 提供领域判断；可执行 Protocol 把接受的含义变成声明式、可审查、可版本化的契约。'],
-        ['下一项合法动作是什么？', '基于 Engine 状态的 WorkflowRuntime Resolver', '路由需要一个确定性权威和持久化身份。'],
-        ['什么算完成？', 'Output Schema、必需证据和 Guardrail', '完成度是契约，不是文字主张。'],
-        ['谁来执行工作？', '人员、Agent、脚本或外部执行器', 'Runtime 管理可接受性，但不必拥有每一项领域操作。'],
-        ['软件包或结果能否被信任或交付？', 'Authoring 证据、Runtime 证据、评估、认证、readiness、批准', '内容质量、执行成功和发布就绪是不同的主张。']
-      ],
-      interview: '“这个项目并不是要消除概率性行为，而是要把它放在正确的位置。Agent 可以在 Node 内推理并使用允许的 Skill 或工具，但工作流契约和 Runtime 决定边界：当前动作、必需证据、合法转换、持久身份和恢复状态。”'
-    },
-    section6: {
       heading: '来源账本与学习笔记',
       lede: '这份手册是教育性综合材料。Authoring integration plan、当前 Badger 软件包、官方 Comet-any authoring 参考资料和 Primer Designer 契约提供当前实现词汇。',
       sourceHeaders: ['来源', '从中学习什么', '本手册如何使用'],
@@ -2143,21 +1851,32 @@ flowchart LR
       footer: '作为持续维护的教育手册准备。后续章节引入新概念前，先把它加入术语表；未来架构必须与当前认证证据分开标注。'
     }
   };
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: 'strict',
-    theme: dark ? 'dark' : 'base',
-    themeVariables: {
-      fontFamily: 'IBM Plex Sans, sans-serif',
-      primaryColor: dark ? '#1e3838' : '#e6f2ef',
-      primaryTextColor: dark ? '#e8eef0' : '#17202a',
-      primaryBorderColor: dark ? '#72c1b1' : '#1e6b68',
-      lineColor: dark ? '#91a0a5' : '#52606d',
-      secondaryColor: dark ? '#312c45' : '#eeeaf7',
-      tertiaryColor: dark ? '#3d2c24' : '#f8e9dc',
-      fontSize: '20px'
-    }
-  });
+  const mermaidReady = import(mermaidURL).then(({default: mermaid}) => {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: dark ? 'dark' : 'base',
+      // SVG text labels: Mermaid sizes HTML labels with an exact-width test that fails at
+      // non-100% browser zoom, which clips the text inside each box.
+      htmlLabels: false,
+      flowchart: {htmlLabels: false, useMaxWidth: false, nodeSpacing: 32, rankSpacing: 42, padding: 12, wrappingWidth: 260},
+      themeVariables: {
+        fontFamily: '"IBM Plex Sans", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+        fontSize: '16px',
+        primaryColor: dark ? '#1e3838' : '#e6f2ef',
+        primaryTextColor: dark ? '#e8eef0' : '#17202a',
+        primaryBorderColor: dark ? '#72c1b1' : '#1e6b68',
+        lineColor: dark ? '#91a0a5' : '#52606d',
+        secondaryColor: dark ? '#312c45' : '#eeeaf7',
+        tertiaryColor: dark ? '#3d2c24' : '#f8e9dc',
+        clusterBkg: dark ? '#1a242a' : '#fbf8f3',
+        clusterBorder: dark ? '#35434a' : '#d9d2c8',
+        titleColor: dark ? '#e8eef0' : '#19364b',
+        edgeLabelBackground: dark ? '#1d2930' : '#ffffff'
+      }
+    });
+    return mermaid;
+  }).catch(() => null);
   const remember = node => {
     if (!originalHTML.has(node)) originalHTML.set(node, node.innerHTML);
   };
@@ -2201,7 +1920,7 @@ flowchart LR
       hasMoved = false;
     };
     container.addEventListener('pointerdown', event => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 || container.scrollWidth <= container.clientWidth) return;
       isDragging = true;
       hasMoved = false;
       activePointerId = event.pointerId;
@@ -2231,28 +1950,62 @@ flowchart LR
       container.scrollBy({left: event.key === 'ArrowLeft' ? -240 : 240, behavior: 'smooth'});
     });
   });
-  const normalizeLayerDiagram = node => {
-    if (!node.classList.contains('layer-vertical')) return;
+  const fitDiagram = node => {
     const svg = node.querySelector('svg');
-    const viewBox = svg?.getAttribute('viewBox')?.trim().split(/\s+/u).map(Number);
-    const width = viewBox?.[2];
-    if (!svg || !width || !Number.isFinite(width)) return;
-    svg.style.setProperty('width', `${width}px`, 'important');
-    svg.style.setProperty('min-width', '0', 'important');
-    svg.style.setProperty('max-width', 'none', 'important');
+    const natural = svg?.viewBox?.baseVal;
+    const available = node.clientWidth;
+    if (!natural?.width || !available) return;
+    const minScale = Number(node.dataset.minScale) || minDiagramScale;
+    const scale = Math.min(1, Math.max(minScale, available / natural.width));
+    svg.style.width = `${Math.round(natural.width * scale)}px`;
+    const scrollable = natural.width * scale > available + 1;
+    node.classList.toggle('is-scrollable', scrollable);
+    if (scrollable) {
+      node.tabIndex = 0;
+      node.setAttribute('role', 'region');
+      const captionId = node.closest('figure')?.querySelector('figcaption')?.id;
+      if (captionId) node.setAttribute('aria-labelledby', captionId);
+    } else {
+      node.removeAttribute('tabindex');
+      node.removeAttribute('role');
+      node.removeAttribute('aria-labelledby');
+    }
   };
+  document.querySelectorAll('.diagram-card figcaption').forEach((caption, index) => {
+    caption.id ||= `diagram-caption-${index + 1}`;
+  });
+  const diagramWidths = new WeakMap();
+  const diagramResizeObserver = new ResizeObserver(entries => {
+    entries.forEach(({target}) => {
+      if (diagramWidths.get(target) === target.clientWidth) return;
+      diagramWidths.set(target, target.clientWidth);
+      fitDiagram(target);
+    });
+  });
+  diagramNodes.forEach(node => diagramResizeObserver.observe(node));
   const renderDiagrams = async language => {
+    const mermaid = await mermaidReady;
     diagramNodes.forEach(node => {
-      const index = Number(node.dataset.diagramIndex);
       node.removeAttribute('data-processed');
-      node.textContent = diagrams[language][index];
+      node.textContent = diagrams[language][node.dataset.diagramId];
     });
-    layerDiagramNodes.forEach((node, index) => {
-      node.removeAttribute('data-processed');
-      node.textContent = layerDiagrams[language][index];
-    });
-    await mermaid.run({nodes: [...diagramNodes, ...layerDiagramNodes]});
-    layerDiagramNodes.forEach(normalizeLayerDiagram);
+    if (!mermaid) {
+      diagramNodes.forEach(node => {
+        const fallback = document.createElement('pre');
+        fallback.className = 'diagram-fallback';
+        fallback.textContent = node.textContent;
+        node.replaceChildren(fallback);
+      });
+      return;
+    }
+    await document.fonts?.ready;
+    await mermaid.run({nodes: diagramNodes});
+    diagramNodes.forEach(fitDiagram);
+  };
+  let renderQueue = Promise.resolve();
+  const queueRender = language => {
+    renderQueue = renderQueue.then(() => renderDiagrams(language), () => renderDiagrams(language));
+    return renderQueue;
   };
   const setStaticChinese = () => {
     const text = zh;
@@ -2283,7 +2036,6 @@ flowchart LR
       setNode(term.querySelector('dt'), text.section1.terms[index][0]);
       setNode(term.querySelector('dd'), text.section1.terms[index][1], true);
     });
-    setOne('#section-1 .interview p', text.section1.interview);
 
     setOne('#section-2 h2', text.section2.heading);
     setOne('#section-2 > .lede', text.section2.lede);
@@ -2330,8 +2082,6 @@ flowchart LR
       '图 2.5 — 定位图：根据边界压力和自主性需求做选择；这些位置不是成熟度阶梯。'
     ]);
     setMany([...document.querySelectorAll('#section-2 > .callout:not(.warning):not(#architecture-dossier)')], text.section2.callouts, true);
-    const section2Interviews = [...document.querySelectorAll('#section-2 .interview p')];
-    setMany(section2Interviews, text.section2.interview);
     const spectrum = [...document.querySelectorAll('#section-2 .axis')][1];
     setMany([...spectrum.querySelectorAll('b')], text.section2.axisSpectrum.map(row => row[0]));
     setMany([...spectrum.querySelectorAll('span')], text.section2.axisSpectrum.map(row => row[1]));
@@ -2351,7 +2101,6 @@ flowchart LR
     setMany([...document.querySelectorAll('#section-3 figcaption')], ['图 3.1 — 软件包创建止于不可变快照；每个 Run 回合只穿过一次外部工作边界，恢复则对账持久记录而不重放外部工作。']);
     const section3Paragraphs = [...document.querySelectorAll('#section-3 > p:not(.lede):not(.section-number)')];
     setMany(section3Paragraphs, [text.section3.continuation, text.section3.recovery], true);
-    setOne('#section-3 .interview p', text.section3.interview);
 
     setOne('#section-4 h2', text.section4.heading);
     setOne('#section-4 > .lede', text.section4.lede);
@@ -2374,8 +2123,6 @@ flowchart LR
     setTable(document.querySelector('#section-4 .private-cli-table'), text.section4.cliHeaders, text.section4.cliCells.flat());
     setOne('#private-enumerations', text.section4.enumHeading);
     setTable(document.querySelector('#section-4 .private-enum-table'), text.section4.enumHeaders, text.section4.enumCells.flat());
-    const privateInterviews = [...document.querySelectorAll('#section-4 .interview p')];
-    setMany(privateInterviews, [text.section4.parameterInterview, text.section4.interview]);
     setOne('#section-4 #private-modules + p', text.section4.moduleIntro, true);
     const privateCaptions = [...document.querySelectorAll('#section-4 figcaption')];
     setMany(privateCaptions, text.section4.moduleCaptions);
@@ -2399,24 +2146,14 @@ flowchart LR
 
     setOne('#section-5 h2', text.section5.heading);
     setOne('#section-5 > .lede', text.section5.lede);
-    const interviewCards = [...document.querySelectorAll('#section-5 .card')];
-    setMany(interviewCards.map(card => card.querySelector('h4')), text.section5.cards.map(row => row[0]));
-    setMany(interviewCards.map(card => card.querySelector('p')), text.section5.cards.map(row => row[1]));
-    setOne('#section-5 > h3', '记住这张职责归属表');
     const section5Table = document.querySelector('#section-5 .data-table');
-    setTable(section5Table, text.section5.ownershipHeaders, text.section5.ownershipCells.flat());
-    setOne('#section-5 .interview p', text.section5.interview);
-
-    setOne('#section-6 h2', text.section6.heading);
-    setOne('#section-6 > .lede', text.section6.lede);
-    const section6Table = document.querySelector('#section-6 .data-table');
-    setTable(section6Table, text.section6.sourceHeaders, text.section6.sourceCells.flat());
-    setOne('#section-6 > h3', text.section6.externalHeading);
-    setMany([...document.querySelectorAll('#section-6 .checklist li')].slice(0, 5), text.section6.external, true);
-    setOne('#section-6 .callout.warning', text.section6.boundary, true);
-    setOne('#section-6 > h3:nth-of-type(2)', text.section6.studyHeading);
-    setMany([...document.querySelectorAll('#section-6 .checklist li')].slice(5), text.section6.study, true);
-    setOne('#section-6 .footer', text.section6.footer);
+    setTable(section5Table, text.section5.sourceHeaders, text.section5.sourceCells.flat());
+    setOne('#section-5 > h3', text.section5.externalHeading);
+    setMany([...document.querySelectorAll('#section-5 .checklist li')].slice(0, 5), text.section5.external, true);
+    setOne('#section-5 .callout.warning', text.section5.boundary, true);
+    setOne('#section-5 > h3:nth-of-type(2)', text.section5.studyHeading);
+    setMany([...document.querySelectorAll('#section-5 .checklist li')].slice(5), text.section5.study, true);
+    setOne('#section-5 .footer', text.section5.footer);
   };
   const applyLanguage = async language => {
     const chinese = language === 'zh';
@@ -2435,7 +2172,7 @@ flowchart LR
       button.setAttribute('aria-pressed', String(active));
     });
     if (languageStatus) languageStatus.textContent = chinese ? '中文已选中' : 'English selected';
-    await renderDiagrams(language);
+    await queueRender(language);
     try {
       localStorage.setItem('badger-workflow-manual-language', language);
     } catch {

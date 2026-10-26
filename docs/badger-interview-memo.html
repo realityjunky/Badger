@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Interview scripts and short answers for explaining Badger, extracted from the Badger Workflow Manual.">
+<title>Badger Interview Memo</title>
+<script>
+  try {
+    if (localStorage.getItem('badger-workflow-manual-language') === 'zh') document.documentElement.lang = 'zh-CN';
+  } catch {
+    void 0;
+  }
+</script>
+<style>
+:root{
+  --ink:#17202a;
+  --muted:#52606d;
+  --faint:#74808b;
+  --bg:#f4f0e9;
+  --paper:#fffdf9;
+  --line:#d9d2c8;
+  --navy:#19364b;
+  --teal:#1e6b68;
+  --teal-soft:#e6f2ef;
+  --orange:#b85f2d;
+  --hero:#19364b;
+  --shadow:0 12px 34px rgba(28,42,51,.07);
+  --mono:"JetBrains Mono","SFMono-Regular",Consolas,monospace;
+  --sans:"IBM Plex Sans",Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.68 var(--sans)}
+a{color:var(--teal);text-underline-offset:3px}
+button{font:inherit}
+html[lang="en"] [data-lang="zh"],html[lang="zh-CN"] [data-lang="en"]{display:none!important}
+.skip{position:absolute;left:12px;top:-60px;padding:10px 14px;background:var(--orange);color:#fff;border-radius:4px;z-index:30}.skip:focus{top:12px}
+.hero{background:var(--hero);color:#f5f8f9;padding:50px max(22px,calc((100% - 920px)/2)) 46px}
+.hero-inner{max-width:920px}
+.hero-bar{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}
+.eyebrow{font:600 12px/1.3 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#9ed1cb;margin:0 0 18px}
+.language-toggle{display:inline-flex;gap:3px;padding:3px;border:1px solid rgba(255,255,255,.28);border-radius:6px;background:rgba(0,0,0,.12);flex:0 0 auto}
+.language-toggle button{min-width:78px;min-height:44px;border:0;border-radius:4px;background:transparent;color:#dbe8eb;padding:8px 12px;cursor:pointer;font:600 12px/1.2 var(--mono);transition:background .18s ease,color .18s ease}
+.language-toggle button:hover{background:rgba(255,255,255,.12);color:#fff}
+.language-toggle button:focus-visible{outline:3px solid #f0bd87;outline-offset:2px}
+.language-toggle button[aria-pressed="true"]{background:#fff;color:var(--hero)}
+h1,h2,h3{font-family:var(--sans);line-height:1.18;letter-spacing:-.02em}
+h1{font-size:clamp(34px,5.4vw,60px);font-weight:600;margin:0 0 18px}
+.hero-lede{max-width:720px;color:#d7e4e8;font-size:19px;line-height:1.55;margin:0}
+.hero-meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:24px}
+.pill{border:1px solid rgba(255,255,255,.24);border-radius:999px;padding:6px 11px;color:#dbe8eb;font:12px/1.2 var(--mono);text-decoration:none}
+a.pill:hover,a.pill:focus-visible{background:rgba(255,255,255,.12);color:#fff}
+.memo{max-width:964px;margin:auto;padding:22px 22px 70px}
+.memo-nav{display:flex;flex-wrap:wrap;gap:4px 18px;padding:4px 0 16px;border-bottom:1px solid var(--line)}
+.memo-nav a{color:var(--muted);text-decoration:none;font-size:14px;padding:6px 0;border-bottom:2px solid transparent}
+.memo-nav a:hover,.memo-nav a:focus-visible{color:var(--navy);border-bottom-color:var(--orange);outline:none}
+section{scroll-margin-top:18px;padding:28px 0 34px;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:0}
+h2{font-size:clamp(26px,3.6vw,36px);font-weight:600;color:var(--navy);margin:0 0 12px}
+h3{font-size:17px;font-weight:600;color:var(--navy);margin:0 0 8px}
+p{max-width:79ch;margin:0 0 14px}
+.lede{font-size:17px;color:var(--muted)}
+.script-list{list-style:none;padding:0;margin:20px 0 0;display:grid;gap:16px}
+.script{border:1px solid #cfc8be;background:var(--paper);padding:17px 20px;box-shadow:var(--shadow);max-width:92ch}
+.script h3 a{color:var(--navy);text-decoration:none}
+.script h3 a:hover,.script h3 a:focus-visible{text-decoration:underline}
+.script-ref{display:inline-block;min-width:44px;margin-right:8px;color:var(--orange);font:600 12px/1.2 var(--mono);letter-spacing:.06em}
+.script p{margin:0;color:#293844}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);background:var(--paper);margin:18px 0 6px}
+.data-table{width:100%;min-width:640px;border-collapse:collapse;font-size:14px}
+.data-table th,.data-table td{text-align:left;vertical-align:top;padding:12px 13px;border-bottom:1px solid var(--line)}
+.data-table th{background:var(--navy);color:#fff;font-weight:500}
+.data-table td{color:var(--muted)}
+.data-table td:first-child{font-weight:600;color:var(--navy);width:24%}
+.card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0 6px}
+.card{background:var(--paper);border:1px solid var(--line);padding:17px 18px}
+.card p{margin:0;color:var(--muted)}
+.footer{color:var(--faint);font-size:13px;padding:22px 0 0;margin:0}
+@media(max-width:700px){.card-grid{grid-template-columns:1fr}}
+@media(max-width:560px){.hero{padding:38px 16px 40px}.hero-bar{align-items:center}.hero-lede{font-size:17px}.memo{padding:14px 16px 50px}.script{padding:15px 16px}.language-toggle button{min-width:68px;padding-left:9px;padding-right:9px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@media(prefers-color-scheme:dark){
+  :root{--ink:#e8eef0;--muted:#b2bec2;--faint:#91a0a5;--bg:#121a1f;--paper:#1a242a;--line:#35434a;--navy:#8cc1d0;--teal:#72c1b1;--teal-soft:#1e3838;--orange:#ef9861;--shadow:none}
+  .script{border-color:var(--line)}.script p{color:#dce7e9}.data-table th{background:#254858}.data-table td{color:#bdc9cd}
+}
+@media print{.language-toggle,.skip,.memo-nav{display:none}.hero{background:none;color:var(--ink)}.hero-lede,.pill{color:var(--muted)}}
+</style>
+</head>
+<body>
+<a class="skip" href="#memo"><span data-lang="en">Skip to memo</span><span data-lang="zh" lang="zh-CN">跳到正文</span></a>
+<header class="hero">
+  <div class="hero-inner">
+    <div class="hero-bar"><p class="eyebrow">Skill Harness / Badger</p><div class="language-toggle" role="group" aria-label="Language" data-aria-en="Language" data-aria-zh="语言"><button type="button" data-language="en" aria-pressed="true">English</button><button type="button" data-language="zh" aria-pressed="false">中文</button></div></div>
+    <h1><span data-lang="en">Badger interview memo</span><span data-lang="zh" lang="zh-CN">Badger 面试备忘录</span></h1>
+    <p data-lang="en" class="hero-lede">Interview scripts and short answers for explaining Badger, extracted from the Badger Workflow Manual. Each script links to the manual section that supplies its detail and diagrams.</p><p data-lang="zh" lang="zh-CN" class="hero-lede">用于讲解 Badger 的面试脚本与简短回答，摘自《Badger 工作流手册》。每段脚本都链接到提供细节与架构图的手册章节。</p>
+    <div class="hero-meta"><a class="pill" href="badger-workflow-manual.html"><span data-lang="en">Companion to the Badger Workflow Manual</span><span data-lang="zh" lang="zh-CN">《Badger 工作流手册》配套材料</span></a><span class="pill"><span data-lang="en">Updated 2026-10-26</span><span data-lang="zh" lang="zh-CN">更新于 2026-10-26</span></span></div>
+  </div>
+</header>
+<main class="memo" id="memo">
+  <nav class="memo-nav" aria-label="Memo sections" data-aria-en="Memo sections" data-aria-zh="备忘录章节">
+    <a href="#scripts"><span data-lang="en">Scripts</span><span data-lang="zh" lang="zh-CN">脚本</span></a>
+    <a href="#gates"><span data-lang="en">Gate lines</span><span data-lang="zh" lang="zh-CN">门槛说法</span></a>
+    <a href="#short-answers"><span data-lang="en">Short answers</span><span data-lang="zh" lang="zh-CN">简短回答</span></a>
+    <a href="#ownership"><span data-lang="en">Ownership</span><span data-lang="zh" lang="zh-CN">职责归属</span></a>
+    <a href="#closing"><span data-lang="en">Closing line</span><span data-lang="zh" lang="zh-CN">结束语</span></a>
+  </nav>
+
+  <section id="scripts">
+    <h2><span data-lang="en">Scripts by manual section</span><span data-lang="zh" lang="zh-CN">按手册章节排列的脚本</span></h2>
+    <p data-lang="en" class="lede">Read the linked manual section first, then rehearse the script aloud. Each script compresses that section’s argument; the manual remains the source for detail, diagrams, and current-versus-future boundaries.</p><p data-lang="zh" lang="zh-CN" class="lede">先读链接的手册章节，再大声练习脚本。每段脚本压缩了该章节的论证；细节、架构图以及当前与未来的边界仍以手册为准。</p>
+    <ol class="script-list">
+        <li class="script">
+          <h3><a href="badger-workflow-manual.html#section-1"><span class="script-ref">§1</span><span data-lang="en">Terminology: four planes</span><span data-lang="zh" lang="zh-CN">术语：四个平面</span></a></h3>
+          <p data-lang="en">“I explain the system as four cooperating planes. Skills and Creator form the instruction plane; Workflow Protocol forms the semantic contract plane; WorkflowRuntime plus Engine form the runtime/control plane; and identities, artifacts, trajectories, receipts, evaluations, and readiness form the evidence plane. The planes have different owners, so an Agent can contribute work without becoming the authority for routing or durable state.”</p><p data-lang="zh" lang="zh-CN">“我把系统解释成四个协作平面。Skill 和 Creator 形成说明平面；Workflow Protocol 形成语义契约平面；WorkflowRuntime 加 Engine 形成 Runtime/控制平面；身份、产物、轨迹、回执、评估和 readiness 形成证据平面。每个平面有不同的拥有者，所以 Agent 可以贡献工作，却不会成为路由或持久化状态的权威。”</p>
+        </li>
+        <li class="script">
+          <h3><a href="badger-workflow-manual.html#architecture-target"><span class="script-ref">§2.1</span><span data-lang="en">Target architecture</span><span data-lang="zh" lang="zh-CN">目标架构</span></a></h3>
+          <p data-lang="en">“At the highest level, Badger is a governed package factory plus a durable execution product. Creator/Factory owns meaning and delivery evidence; WorkflowRuntime owns each Run; the host performs external work. The immutable package snapshot and execution identity are the handoff. Only the runtime can accept an outcome and move the Run, while evidence connects that execution to evaluation, readiness, approval, and delivery.”</p><p data-lang="zh" lang="zh-CN">“在最高层，我把 Badger 解释成一个受治理的软件包工厂和持久化执行产品。Creator/Factory 拥有工作流含义与交付证据；WorkflowRuntime 拥有每个 Run；宿主执行外部工作。不可变软件包快照和执行身份是两者之间的交接，证据则把执行连接到评估、readiness、批准和交付。”</p>
+        </li>
+        <li class="script">
+          <h3><a href="badger-workflow-manual.html#architecture-layers"><span class="script-ref">§2.2</span><span data-lang="en">Abstraction layers</span><span data-lang="zh" lang="zh-CN">抽象层级</span></a></h3>
+          <p data-lang="en">“I explain the five levels as zoom, not as five different systems. Ecosystem asks who participates; package asks what is declared; Run asks what is persisted; transition asks how one turn is guarded; and module asks where the boundary lives in code. The vocabulary changes at each zoom, but package identity, pending action, validation, continuation, and one runtime authority remain invariant.”</p><p data-lang="zh" lang="zh-CN">“我把五个层次当作缩放，而不是五个不同的系统。生态层问谁参与；软件包层问执行前声明了什么；Run 层问什么被持久化；转换层问一次回合如何受保护；模块层问边界在代码中的什么位置。词汇会变，但软件包身份、Pending action、校验边界、continuation 和单一 Runtime 权威保持不变。”</p>
+        </li>
+        <li class="script">
+          <h3><a href="badger-workflow-manual.html#architecture-runtime"><span class="script-ref">§2.3</span><span data-lang="en">Runtime internals</span><span data-lang="zh" lang="zh-CN">运行时内部</span></a></h3>
+          <p data-lang="en">“The key module decision is one runtime authority. Callers see start, resume, submit, and recover; private capabilities compile, route, validate, persist, and project behind that seam. Generated scripts preserve compatibility but delegate to WorkflowRuntime, so no second state machine can drift from the Engine-backed Run.”</p><p data-lang="zh" lang="zh-CN">“最重要的模块决策是只有一个 Runtime 权威。调用方只看到 start、resume、submit 和 recover；Compiler、Resolver、完成校验、决策作用域、产物版本、Run 位置、受保护存储和投影都留在内部。生成脚本保留兼容性但委托给 WorkflowRuntime，因此不会出现两套漂移的状态机。”</p>
+        </li>
+        <li class="script">
+          <h3><a href="badger-workflow-manual.html#architecture-primer"><span class="script-ref">§2.4</span><span data-lang="en">Primer Designer instance</span><span data-lang="zh" lang="zh-CN">Primer Designer 实例</span></a></h3>
+          <p data-lang="en">“Primer Designer is a domain contract over the generic runtime. It keeps genome-download, primer-design, and primer-pool-add independent, then declares the Nodes, schemas, routes, review choices, and Cycle policy that compose them. WorkflowRuntime supplies identity, persistence, validation, routing, and recovery; the domain contract supplies the biological meaning and acceptance criteria.”</p><p data-lang="zh" lang="zh-CN">“Primer Designer 是通用 Runtime 之上的领域契约。它保持 genome-download、primer-design 和 primer-pool-add 独立，并声明 Node、Schema、路由、审查选择和 Cycle 策略。Runtime 提供身份、持久化、校验、路由和恢复；契约提供生物学含义与接受标准。”</p>
+        </li>
+        <li class="script">
+          <h3><a href="badger-workflow-manual.html#architecture-position"><span class="script-ref">§2.5</span><span data-lang="en">Why the design fits</span><span data-lang="zh" lang="zh-CN">适配性定位</span></a></h3>
+          <p data-lang="en">“I position Skill Harness by the control boundary, not by a maturity ladder. Use it when the legal route, acceptance evidence, and recovery identity can be declared, while the work inside a Node may remain agentic. The protocol names the allowed graph; WorkflowRuntime proposes and accepts actions; an external worker performs them. That buys explicit decisions, immutable provenance, and fresh-process recovery at the cost of some autonomy and authoring simplicity. Primer Designer is a good fit because its cycles and review boundaries are knowable even though its scientific work remains external.”</p><p data-lang="zh" lang="zh-CN">“我根据控制边界来定位 Skill Harness，而不是把它当作成熟度阶梯。只要合法路由、接受证据和恢复身份可以声明，Node 内部就仍可以使用 Agent。Protocol 声明允许的图；WorkflowRuntime 提出并接受动作；外部工作者执行动作。这样以部分自主性和创作简洁性为代价，换来显式决策、不可变来源追踪和新进程恢复。Primer Designer 很适合这个位置，因为它的 Cycle 和审查边界可知，而科学工作仍然在 Runtime 外部。”</p>
+        </li>
+        <li class="script">
+          <h3><a href="badger-workflow-manual.html#section-3"><span class="script-ref">§3</span><span data-lang="en">Lifecycle</span><span data-lang="zh" lang="zh-CN">生命周期</span></a></h3>
+          <p data-lang="en">“A Run is an exchange between a deterministic runtime and an external executor. The runtime proposes one pending action, the executor performs it, and the host submits a result. Completion validation and identity checks happen before the Run mutates. If the process stops, a new process reads the persisted state and reconstructs the same continuation. For a decision Node, the pending action becomes an authorized waiting state rather than an informal instruction.”</p><p data-lang="zh" lang="zh-CN">“我把生命周期分成创作、软件包和 Run 三个阶段。Authoring 先把来源和意图变成经过审查的语义内容；Factory 再组装软件包并用当前哈希证据决定它是否 ready；Runtime 最后从不可变快照创建 Run。每个 Run 回合都是提出 Pending action、在外部执行、提交并校验、再解析 continuation。创作状态与 Run 状态分别恢复，任何一方都不依赖聊天记忆。”</p>
+        </li>
+        <li class="script">
+          <h3><a href="badger-workflow-manual.html#private-parameters"><span class="script-ref">§4.3</span><span data-lang="en">Parameters and enums</span><span data-lang="zh" lang="zh-CN">参数与枚举</span></a></h3>
+          <p data-lang="en">“I choose a parameter by asking which boundary it controls. Plan fields define meaning and dependencies; CLI flags define confirmation, identity, and destination; runtime fields bind one submission to one pending action and revision. The enums are not decoration: Node kind explains responsibility, enforcement explains whether evidence blocks progress, and the continuation disposition tells the host exactly what it may do next.”</p><p data-lang="zh" lang="zh-CN">“我通过它控制的边界来选择参数。计划字段定义含义和依赖；CLI 标志定义确认、身份和目标；Runtime 字段把一次提交绑定到一个 Pending action 和 revision。枚举不是装饰：Node kind 解释职责，enforcement 解释证据是否会阻塞，continuation disposition 则准确告诉宿主下一步可以做什么。”</p>
+        </li>
+        <li class="script">
+          <h3><a href="badger-workflow-manual.html#section-4"><span class="script-ref">§4</span><span data-lang="en">Codebase guide</span><span data-lang="zh" lang="zh-CN">代码库指南</span></a></h3>
+          <p data-lang="en">“I understand Badger as a layered standalone product. The CLI enters the workflow-kernel foundation, which discovers Skills and normalizes a workflow contract. The factory generates a package; Skill Runtime validates and snapshots it; Engine supplies generic durable Run mechanics; and WorkflowRuntime is the single authority that compiles, routes, validates, persists, and recovers. Evaluation and differential harnesses bind behavior to hashes and baselines, while publication is gated by current evidence and reviewer approval. When I debug it, I follow that dependency direction and verify the corresponding persisted record and focused test.”</p><p data-lang="zh" lang="zh-CN">“我把 Badger 理解成分层的独立产品。CLI 进入 workflow-kernel foundation，它发现 Skill 并规范化工作流契约。Factory 生成软件包；Skill Runtime 校验并制作快照；Engine 提供通用持久化 Run 机制；WorkflowRuntime 是唯一负责编译、路由、校验、持久化和恢复的权威。评估和差分 Harness 把行为绑定到哈希和基线，发布则由当前证据与审查者批准门控。调试时，我沿这条依赖方向走，并核对相应的持久化记录和聚焦测试。”</p>
+        </li>
+    </ol>
+  </section>
+
+  <section id="gates">
+    <h2><span data-lang="en">What to say at each gate</span><span data-lang="zh" lang="zh-CN">每道门槛怎么说</span></h2>
+    <p data-lang="en" class="lede">Use these lines with Diagram 4.1 and the <a href="badger-workflow-manual.html#private-user-path">user-to-code path</a> in manual §4.1.</p><p data-lang="zh" lang="zh-CN" class="lede">配合手册 §4.1 的<a href="badger-workflow-manual.html#private-user-path">用户到代码路径</a>和图 4.1 使用这些句子。</p>
+    <div class="table-wrap"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Gate</span><span data-lang="zh" lang="zh-CN">门槛</span></th><th><span data-lang="en">What it protects</span><span data-lang="zh" lang="zh-CN">保护什么</span></th><th><span data-lang="en">What to say in an interview</span><span data-lang="zh" lang="zh-CN">面试时怎么说</span></th></tr></thead>
+        <tbody>
+          <tr><td><span data-lang="en">Read-only discovery</span><span data-lang="zh" lang="zh-CN">只读发现</span></td><td><span data-lang="en">Candidate resolution and proposal inspection do not create a workflow or copy a package.</span><span data-lang="zh" lang="zh-CN">候选解析与提案检查不会创建工作流，也不会复制软件包。</span></td><td><span data-lang="en">“The system lets me inspect meaning before it mutates state.”</span><span data-lang="zh" lang="zh-CN">“系统允许我在改变状态前先检查含义。”</span></td></tr>
+          <tr><td><span data-lang="en">Explicit confirmation</span><span data-lang="zh" lang="zh-CN">明确确认</span></td><td><span data-lang="en">Initialization, approval, publication, and report output require an intentional flag at the boundary that writes.</span><span data-lang="zh" lang="zh-CN">初始化、批准、发布和报告输出都在实际写入的边界要求主动传入标志。</span></td><td><span data-lang="en">“Confirmation is attached to the consequential operation, not hidden in a previous prompt.”</span><span data-lang="zh" lang="zh-CN">“确认附着在有后果的操作上，而不是隐藏在上一次提示里。”</span></td></tr>
+          <tr><td><span data-lang="en">Current-hash evidence</span><span data-lang="zh" lang="zh-CN">当前哈希证据</span></td><td><span data-lang="en">Authoring material, deterministic evaluation, runtime certification, and publication review are tied to the exact generated tree; changing it makes earlier evidence stale.</span><span data-lang="zh" lang="zh-CN">创作材料、确定性评估、Runtime 认证和发布审查都绑定确切的生成树；树发生变化后，之前的证据就会过期。</span></td><td><span data-lang="en">“Readiness is a claim about a hash, not about a directory name.”</span><span data-lang="zh" lang="zh-CN">“Readiness 是关于哈希的主张，而不是关于目录名称的主张。”</span></td></tr>
+          <tr><td><span data-lang="en">Preview-only distribution</span><span data-lang="zh" lang="zh-CN">仅预览分发</span></td><td><span data-lang="en">Distribution lists destination files but does not install into an Agent platform directory.</span><span data-lang="zh" lang="zh-CN">分发只列出目标文件，不会安装到 Agent 平台目录。</span></td><td><span data-lang="en">“The standalone package stops at a reversible local preview.”</span><span data-lang="zh" lang="zh-CN">“独立软件包在可逆的本地预览处停止。”</span></td></tr>
+        </tbody>
+      </table></div>
+  </section>
+
+  <section id="short-answers">
+    <h2><span data-lang="en">Interview practice: the short explanations</span><span data-lang="zh" lang="zh-CN">面试练习：简短解释</span></h2>
+    <p data-lang="en" class="lede">These are compact answers to common architecture questions. Expand them with the architecture diagrams in <a href="badger-workflow-manual.html#section-2">Section 2</a> and <a href="badger-workflow-manual.html#section-4">Section 4</a> of the manual when the interviewer asks for detail.</p><p data-lang="zh" lang="zh-CN" class="lede">下面是常见架构问题的简短回答。面试官要求展开时，可以用手册<a href="badger-workflow-manual.html#section-2">第 2 节</a>和<a href="badger-workflow-manual.html#section-4">第 4 节</a>的架构图来补充。</p>
+    <div class="card-grid">
+        <article class="card"><h3><span data-lang="en">What problem does it solve?</span><span data-lang="zh" lang="zh-CN">它解决什么问题？</span></h3><p data-lang="en">It turns loosely interpreted Skills into governed, authorable, resumable workflow packages and instances. The system keeps human-readable instructions while adding explicit authoring evidence, runtime state, contracts, and safe transitions.</p><p data-lang="zh" lang="zh-CN">它把松散解释的 Skill 变成可创作、受治理、可恢复的工作流软件包与实例。系统保留人类可读说明，同时增加显式创作证据、Runtime 状态、契约和安全转换。</p></article>
+        <article class="card"><h3><span data-lang="en">Why not just use Markdown?</span><span data-lang="zh" lang="zh-CN">为什么不只用 Markdown？</span></h3><p data-lang="en">Markdown is excellent for method and progressive disclosure, but it does not by itself provide durable pending actions, stale-response rejection, route determinism, artifact provenance, or recovery after a process exits.</p><p data-lang="zh" lang="zh-CN">Markdown 很适合表达方法和渐进式披露，但单靠它无法提供持久 Pending action、过期响应拒绝、确定性路由、产物来源追踪或进程退出后的恢复。</p></article>
+        <article class="card"><h3><span data-lang="en">Why not build a full Agent?</span><span data-lang="zh" lang="zh-CN">为什么不直接构建完整 Agent？</span></h3><p data-lang="en">The project does not need open-ended autonomy everywhere. It needs bounded, explainable domain workflows. Limiting the runtime’s authority makes certification, review, recovery, and distribution practical.</p><p data-lang="zh" lang="zh-CN">项目不需要处处开放式自主，而需要有边界且可解释的领域工作流。限制 Runtime 权威范围，使认证、审查、恢复和分发变得可行。</p></article>
+        <article class="card"><h3><span data-lang="en">What is the most important design decision?</span><span data-lang="zh" lang="zh-CN">最重要的设计决策是什么？</span></h3><p data-lang="en">Two explicit authorities with different jobs: Authoring owns package content and lane evidence; WorkflowRuntime and Engine own generated-workflow routing, recovery, and committed Run state. Generated adapters remain projections.</p><p data-lang="zh" lang="zh-CN">两个职责明确的权威：Authoring 拥有软件包内容与 lane 证据；WorkflowRuntime 和 Engine 拥有生成工作流的路由、恢复与已提交 Run 状态。生成适配器仍然只是投影。</p></article>
+        <article class="card"><h3><span data-lang="en">What makes it durable?</span><span data-lang="zh" lang="zh-CN">什么让它具有持久性？</span></h3><p data-lang="en">Run state and pending actions are persisted, identity-bound, and recoverable outside the original process. Badger also certifies journals, locks, checkpoints, receipts, snapshots, repair policy, and transactional finalization; authoring evidence remains a separate package-construction concern.</p><p data-lang="zh" lang="zh-CN">Run 状态和 Pending action 被持久化、绑定身份，并可在原始进程之外恢复。Badger 还认证日志、锁、检查点、回执、快照、修复策略和事务式终结；authoring 证据则单独支持软件包构建。</p></article>
+        <article class="card"><h3><span data-lang="en">What makes Primer Designer a good example?</span><span data-lang="zh" lang="zh-CN">为什么 Primer Designer 是好例子？</span></h3><p data-lang="en">It has independent Skills, conditional route choices, optional stages, expensive evidence-producing steps, human review boundaries, and repeated design/pool cycles—exactly where a contract and durable runtime add value.</p><p data-lang="zh" lang="zh-CN">它有独立 Skill、条件路由、可选阶段、昂贵的证据产出步骤、人工审查边界和重复的 design/pool Cycle，正好体现契约与持久 Runtime 的价值。</p></article>
+    </div>
+  </section>
+
+  <section id="ownership">
+    <h2><span data-lang="en">Remember this ownership table</span><span data-lang="zh" lang="zh-CN">记住这张职责归属表</span></h2>
+    <div class="table-wrap"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Question</span><span data-lang="zh" lang="zh-CN">问题</span></th><th><span data-lang="en">Owner</span><span data-lang="zh" lang="zh-CN">职责归属</span></th><th><span data-lang="en">Reason</span><span data-lang="zh" lang="zh-CN">原因</span></th></tr></thead>
+        <tbody>
+          <tr><td><span data-lang="en">What should the package and workflow mean?</span><span data-lang="zh" lang="zh-CN">软件包和工作流应该表达什么含义？</span></td><td><span data-lang="en">Authoring content plus Workflow Protocol</span><span data-lang="zh" lang="zh-CN">Authoring content 与 Workflow Protocol</span></td><td><span data-lang="en">Authoring supplies domain judgment; the executable protocol makes the accepted meaning declarative, reviewable, and versioned.</span><span data-lang="zh" lang="zh-CN">Authoring 提供领域判断；可执行 Protocol 把接受的含义变成声明式、可审查、可版本化的契约。</span></td></tr>
+          <tr><td><span data-lang="en">Which action is legal next?</span><span data-lang="zh" lang="zh-CN">下一项合法动作是什么？</span></td><td><span data-lang="en">WorkflowRuntime resolver over Engine state</span><span data-lang="zh" lang="zh-CN">基于 Engine 状态的 WorkflowRuntime Resolver</span></td><td><span data-lang="en">Routing needs one deterministic authority and persisted identity.</span><span data-lang="zh" lang="zh-CN">路由需要一个确定性权威和持久化身份。</span></td></tr>
+          <tr><td><span data-lang="en">What counts as complete?</span><span data-lang="zh" lang="zh-CN">什么算完成？</span></td><td><span data-lang="en">Output Schema, required evidence, and guardrails</span><span data-lang="zh" lang="zh-CN">Output Schema、必需证据和 Guardrail</span></td><td><span data-lang="en">Completion is a contract, not a claim in prose.</span><span data-lang="zh" lang="zh-CN">完成度是契约，不是文字主张。</span></td></tr>
+          <tr><td><span data-lang="en">Who performs the work?</span><span data-lang="zh" lang="zh-CN">谁来执行工作？</span></td><td><span data-lang="en">Human, Agent, script, or external executor</span><span data-lang="zh" lang="zh-CN">人员、Agent、脚本或外部执行器</span></td><td><span data-lang="en">The runtime governs admissibility; it need not own every domain operation.</span><span data-lang="zh" lang="zh-CN">Runtime 管理可接受性，但不必拥有每一项领域操作。</span></td></tr>
+          <tr><td><span data-lang="en">Can the package or result be trusted or delivered?</span><span data-lang="zh" lang="zh-CN">软件包或结果能否被信任或交付？</span></td><td><span data-lang="en">Authoring evidence, runtime evidence, eval, certification, readiness, approval</span><span data-lang="zh" lang="zh-CN">Authoring 证据、Runtime 证据、评估、认证、readiness、批准</span></td><td><span data-lang="en">Content quality, execution success, and release readiness are separate claims.</span><span data-lang="zh" lang="zh-CN">内容质量、执行成功和发布就绪是不同的主张。</span></td></tr>
+        </tbody>
+      </table></div>
+  </section>
+
+  <section id="closing">
+    <h2><span data-lang="en">Closing line</span><span data-lang="zh" lang="zh-CN">结束语</span></h2>
+    <div class="script"><p data-lang="en">“The project is not trying to eliminate probabilistic behavior. It is trying to put probabilistic behavior in the right place. An Agent can reason within a Node and use the allowed Skill or tools, but the workflow contract and runtime decide the boundaries: current action, required evidence, legal transition, durable identity, and recovery state.”</p><p data-lang="zh" lang="zh-CN">“这个项目并不是要消除概率性行为，而是要把它放在正确的位置。Agent 可以在 Node 内推理并使用允许的 Skill 或工具，但工作流契约和 Runtime 决定边界：当前动作、必需证据、合法转换、持久身份和恢复状态。”</p></div>
+  </section>
+
+  <p data-lang="en" class="footer">Extracted from the <a href="badger-workflow-manual.html">Badger Workflow Manual</a>. When an explanation changes, update the manual section first, then the matching script here.</p><p data-lang="zh" lang="zh-CN" class="footer">摘自<a href="badger-workflow-manual.html">《Badger 工作流手册》</a>。解释有变化时，先更新手册对应章节，再同步这里的脚本。</p>
+</main>
+<script>
+  (() => {
+    const root = document.documentElement;
+    const buttons = [...document.querySelectorAll('.language-toggle button')];
+    const titles = {en: 'Badger Interview Memo', zh: 'Badger 面试备忘录'};
+    const apply = language => {
+      root.lang = language === 'zh' ? 'zh-CN' : 'en';
+      document.title = titles[language];
+      buttons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.language === language)));
+      document.querySelectorAll('[data-aria-en]').forEach(node => node.setAttribute('aria-label', node.dataset[language === 'zh' ? 'ariaZh' : 'ariaEn']));
+    };
+    buttons.forEach(button => button.addEventListener('click', () => {
+      apply(button.dataset.language);
+      try {
+        localStorage.setItem('badger-workflow-manual-language', button.dataset.language);
+      } catch {
+        void 0;
+      }
+    }));
+    apply(root.lang === 'zh-CN' ? 'zh' : 'en');
+  })();
+</script>
+</body>
+</html>
