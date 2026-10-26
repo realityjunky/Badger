@@ -1,6 +1,6 @@
 # Standalone Badger
 
-This repository contains the Badger Creator and Engine seams, originally extracted from an upstream reference checkout. It provides a focused, filesystem-based factory for creating and upgrading Skill packages, plus a private Engine foundation for loading, snapshotting, and running Badger-compatible Skills.
+This repository contains the Badger Creator and Engine seams. It provides a focused, filesystem-based factory for creating and upgrading Skill packages, plus a private Engine foundation for loading, snapshotting, and running Badger-compatible Skills.
 
 ## Scope
 
@@ -33,20 +33,18 @@ The package includes:
 - immutable, content-addressed Verification Receipts for automated checks, static inspections, and manual evidence, with bounded redacted summaries and freshness enforcement;
 - evidence-bound repair episodes with finite budgets, stagnation decisions, bounded overrides, and restart-safe history;
 - bounded transactional finalization for protected local writes, removes, and moves with preview, confirmation, recovery, and final receipts;
-- versioned structured findings with bounded redaction, deterministic ordering, continuation dispositions, and derived legacy blockers;
-- official/private differential observations for the pinned Engine behavior.
+- versioned structured findings with bounded redaction, deterministic ordering, continuation dispositions, and derived legacy blockers.
 
-It intentionally excludes Classic and Native policy, Entry routing, host platform installers, ambient resume routing, and external platform adapters.
+It intentionally excludes host platform installers, ambient resume routing, and external platform adapters.
 
 ## Delivery status
 
-The current standalone package has three clearly separated surfaces:
+The current standalone package has two clearly separated surfaces:
 
-| Surface                               | Status                | Contract                                                                                                                                                                                                                                                                                                     |
-| ------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Badger Creator and WorkflowRuntime    | Delivered             | Local workflow-kernel package creation, six-lane authoring, deterministic assembly, durable Run execution, current-hash evaluation, publication approval, and distribution preview.                                                                                                                          |
-| Upstream Comet-any authoring contract | Restored and extended | The six lane identities, dependency waves, claim/output envelope, review depths, authored leaves, and deterministic backbone are preserved from pinned revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a`. Badger-only storage, recovery, concurrency, hash, and naming extensions are reported separately. |
-| Platform and dashboard integration    | Future / out of scope | Host installers, web or visual authoring, external provider authentication, automatic distribution, biological execution, scheduler submission, and protected raw-data-derived fixtures are not part of this package.                                                                                        |
+| Surface                            | Status                | Contract                                                                                                                                                                                         |
+| ---------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Badger Creator and WorkflowRuntime | Delivered             | Local workflow-kernel package creation, six-lane authoring, deterministic assembly, durable Run execution, current-hash evaluation, publication approval, and distribution preview.              |
+| Platform and dashboard integration | Future / out of scope | Host installers, web or visual authoring, external provider authentication, automatic distribution, domain execution, and fixtures derived from protected raw data are not part of this package. |
 
 The release-facing artifact map and verification commands are in
 `docs/release-artifacts.md`. It is the authoritative checklist for keeping
@@ -110,7 +108,7 @@ proposal, and reports separate
 WorkflowProtocol) identities. It does not create Creator state, authoring
 records, or package files.
 
-See `assets/skills/badger-create/SKILL.md` for the user-facing confirmation protocol and `docs/release-artifacts.md` for release status and upstream provenance.
+See `assets/skills/badger-create/SKILL.md` for the user-facing confirmation protocol and `docs/release-artifacts.md` for release status.
 
 `generate` creates a deterministic scaffold and an authoring session under
 `.badger/authoring/<name>`. The scaffold remains visibly pending until all
@@ -142,16 +140,12 @@ inventory and control-plane checks. The generated
 (`auto`, `authored`, or `source`); the typed `GeneratedPackage.inventory`
 additionally carries byte counts and hashes.
 
-The public package façade plus the `@rpamis/badger/engine` and
-`@rpamis/badger/workflow-runtime` subpaths export the runtime
+The public package façade plus the `@realityjunky/badger/engine` and
+`@realityjunky/badger/workflow-runtime` subpaths export the runtime
 operations needed by callers. The WorkflowRuntime subpath exposes only one
 constructor and its four core operations; compiler, location, projection,
 Run-file storage, and protected filesystem implementation modules remain
-internal. The Engine closure is pinned to the upstream reference
-`0.4.0-beta.19` at revision `99fd7495f8b9217efbaae3a46d885f6fa7f4102a` and
-contains no runtime import from the upstream checkout.
-
-The pinned Creator and Engine differential harnesses are documented in `docs/differential-harness.md`. Both harnesses run only in disposable temporary projects and reject protected raw-data paths.
+internal.
 
 ## Authoring references
 
@@ -358,8 +352,7 @@ receipt, checkpoint, repair, transaction, final-receipt, projection,
 fresh-process, concurrency, and source-integrity evidence. Evaluated-package
 and synthetic-fixture tree hashes remain distinct. Review readiness fails closed
 on missing, stale, mismatched, truncated, or incomplete Phase 4 evidence.
-The fixtures use only disposable synthetic files and do not authorize
-biological execution, package installation, Native-derived durability, or
-Primer Designer migration.
+The fixtures use only disposable synthetic files and do not authorize domain
+execution or package installation.
 
 See `docs/workflow-runtime-certification.md` for the certification contract.

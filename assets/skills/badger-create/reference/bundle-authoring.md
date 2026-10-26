@@ -56,20 +56,18 @@ authority.
 The canonical contract is in
 `reference/authoring-protocol.json`. Its lanes are:
 
-| Lane             | Required claims                                                                                                                                   | Content produced                                                                      |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `script`         | `script:workflow-state`, `script:workflow-guard`, `script:workflow-handoff`, `script:comet-plan`, `script:comet-check`, `script:comet-hook-guard` | No worker-owned content; the assembler produces the Badger-named control-plane files. |
-| `reference`      | `reference:workflow-protocol`, `reference:resolved-skills`, `reference:composition-report`, `reference:authoring-lanes`                           | No worker-owned content.                                                              |
-| `pause-points`   | `pause:decision-points`, `pause:recovery`                                                                                                         | `reference/decision-points.md`, `reference/recovery.md`.                              |
-| `workflow-entry` | `workflow-entry`                                                                                                                                  | The entry `SKILL.md` Decision Core.                                                   |
-| `skill-core`     | One derived `skill-core:node-skill:<id>` claim per active internal Node.                                                                          | One Guidance section in each active Node Skill.                                       |
-| `skill-review`   | `review:skill-review`                                                                                                                             | `reference/skill-review.md`.                                                          |
+| Lane             | Required claims                                                                                                                                      | Content produced                                                                      |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `script`         | `script:workflow-state`, `script:workflow-guard`, `script:workflow-handoff`, `script:badger-plan`, `script:badger-check`, `script:badger-hook-guard` | No worker-owned content; the assembler produces the Badger-named control-plane files. |
+| `reference`      | `reference:workflow-protocol`, `reference:resolved-skills`, `reference:composition-report`, `reference:authoring-lanes`                              | No worker-owned content.                                                              |
+| `pause-points`   | `pause:decision-points`, `pause:recovery`                                                                                                            | `reference/decision-points.md`, `reference/recovery.md`.                              |
+| `workflow-entry` | `workflow-entry`                                                                                                                                     | The entry `SKILL.md` Decision Core.                                                   |
+| `skill-core`     | One derived `skill-core:node-skill:<id>` claim per active internal Node.                                                                             | One Guidance section in each active Node Skill.                                       |
+| `skill-review`   | `review:skill-review`                                                                                                                                | `reference/skill-review.md`.                                                          |
 
 The first three lanes form wave one. `workflow-entry` and `skill-core` form wave
 two after the script contract. `skill-review` is a barrier after all preceding
-lanes. The Badger-derived `skill-core` claims and the Badger names for the
-three plan/check/hook files are deliberate compatibility extensions; they do
-not change the shared six-lane contract.
+lanes.
 
 ## File handoff
 
@@ -140,9 +138,8 @@ stale record, an unresolved concern, or a missing claim remains blocked.
 ## Boundary of this package
 
 Badger includes local filesystem authoring, deterministic package assembly,
-WorkflowRuntime execution, and publication preview. Classic and Native policy,
-Entry routing, host platform installers, platform or dashboard interfaces,
-provider authentication, biological execution, scheduler submission, and
-protected raw-data-derived fixtures remain outside this package. Future
+WorkflowRuntime execution, and publication preview. Host platform installers,
+platform or dashboard interfaces, provider authentication, domain execution,
+and fixtures derived from protected raw data remain outside this package. Future
 platform adapters may consume the stable local readiness and publication
 contracts, but they must not add a competing authoring or runtime authority.

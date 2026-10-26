@@ -281,9 +281,8 @@ The state document at \`${proposal.workflow.state.statePath}\` is a derived comp
 
 \`badger eval\` runs current-hash WorkflowRuntime checks, including a
 synthetic Phase 3 decision-and-cycle lifecycle. Passing evaluation proves only
-deterministic runtime and adapter behavior; it does not authorize biological
-execution, package installation, Native-derived durability, or Primer Designer
-migration.
+deterministic runtime and adapter behavior; it does not authorize domain
+execution or package installation.
 
 ## Runtime Contract
 

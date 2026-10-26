@@ -38,8 +38,7 @@ Wave 1 `BLOCKED` outputs require an `action` with `kind: "repair"`, a concrete `
 
 ## Lane responsibilities
 
-The six lanes preserve the upstream-compatible identities and dependency
-waves:
+The six lanes and their dependency waves are:
 
 | Lane             | Wave              | Responsibility                                                                        | Authored leaves                                         |
 | ---------------- | ----------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------- |

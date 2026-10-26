@@ -186,9 +186,8 @@ The relationships in the plan are semantic rather than source metadata:
     `badger publish <name> --confirm`. Use `badger distribute` only for a
     local preview of files.
 
-The standalone package excludes Classic or Native policy, Entry routing,
-platform installers, host adapters, automatic distribution, credentials, and
-domain or biological execution. Generated control-plane adapters remain thin
+The standalone package excludes platform installers, host adapters, automatic
+distribution, credentials, and domain execution. Generated control-plane adapters remain thin
 projections over Badger WorkflowRuntime; they are not a second execution
 authority.
 

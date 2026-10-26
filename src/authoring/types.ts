@@ -24,7 +24,6 @@ export type AuthoringControlPlaneScriptKind =
 export interface AuthoringControlPlaneScript {
   id: string;
   role: string;
-  upstreamRole: string;
   kind: AuthoringControlPlaneScriptKind;
   path: string;
   claim: string;
@@ -156,18 +155,6 @@ export interface AuthoringMergeContract {
   contentLeaves: string[];
 }
 
-export interface AuthoringCompatibilityNote {
-  id: string;
-  detail: string;
-}
-
-export interface AuthoringCompatibility {
-  officialRevision: string;
-  officialVersion: string;
-  knownUpstreamInconsistencies: AuthoringCompatibilityNote[];
-  badgerExtensions: AuthoringCompatibilityNote[];
-}
-
 export interface AuthoringPlan {
   schemaVersion: 1;
   kind: "authoring-plan";
@@ -184,7 +171,6 @@ export interface AuthoringPlan {
   merge: AuthoringMergeContract;
   sourceEvidence: AuthoringSourceEvidence[];
   upgradeSource?: UpgradeSourceEvidence;
-  compatibility: AuthoringCompatibility;
   semanticDossierHash?: string;
   semanticDossier?: SemanticDossier;
 }
@@ -201,7 +187,7 @@ export type AuthoringPlanDiagnosticCode =
   | "invalid-verification"
   | "invalid-hash"
   | "identical-protocol-hashes"
-  | "missing-extension"
+  | "missing-field"
   | "blocked-proposal";
 
 export interface AuthoringPlanDiagnostic {

@@ -16,9 +16,6 @@ describe("public Engine package boundary", () => {
     expect(api.submitWorkflowRun).toBeTypeOf("function");
     expect(api.recoverWorkflowRun).toBeTypeOf("function");
     expect(api.previewWorkflowFinalization).toBeTypeOf("function");
-    expect(api.runEngineDifferential).toBeTypeOf("function");
-    expect(api.getEngineParityCoverage).toBeTypeOf("function");
-    expect(api.certifyEngineDifferential).toBeTypeOf("function");
 
     const publicApi = api as Record<string, unknown>;
     for (const operation of [

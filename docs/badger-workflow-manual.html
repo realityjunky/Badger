@@ -140,7 +140,7 @@ p{max-width:79ch;margin:0 0 15px}
     <h1><span data-lang="en">From Markdown Skills to durable workflow systems</span><span data-lang="zh" lang="zh-CN">从 Markdown Skill 到持久化工作流系统</span></h1>
     <p class="hero-lede" data-lang="en">How Badger builds a workflow package from your Skills, runs it one checked step at a time, and proves what happened.</p>
     <p class="hero-lede" data-lang="zh" lang="zh-CN">Badger 如何用你的 Skill 构建工作流软件包，一步一校验地运行它，并证明每一步发生了什么。</p>
-    <div class="hero-meta"><span class="pill"><span data-lang="en">Integrated authoring delivered · #16</span><span data-lang="zh" lang="zh-CN">集成式创作已交付 · #16</span></span><span class="pill"><span data-lang="en">Updated 2026-10-26</span><span data-lang="zh" lang="zh-CN">更新于 2026-10-26</span></span></div>
+    <div class="hero-meta"><span class="pill"><span data-lang="en">Integrated authoring delivered</span><span data-lang="zh" lang="zh-CN">集成式创作已交付</span></span><span class="pill"><span data-lang="en">Updated 2026-10-26</span><span data-lang="zh" lang="zh-CN">更新于 2026-10-26</span></span></div>
     <div class="language-status" id="language-status" role="status" aria-live="polite"></div>
   </div>
 </header>
@@ -157,7 +157,6 @@ p{max-width:79ch;margin:0 0 15px}
           <a class="sub" href="#how-it-works"><span data-lang="en">1.1 How Badger works</span><span data-lang="zh" lang="zh-CN">1.1 工作方式</span></a>
           <a class="sub" href="#three-rules"><span data-lang="en">1.2 Three rules</span><span data-lang="zh" lang="zh-CN">1.2 三条规则</span></a>
           <a class="sub" href="#when-it-fits"><span data-lang="en">1.3 When it fits</span><span data-lang="zh" lang="zh-CN">1.3 适用场景</span></a>
-          <a class="sub" href="#scope"><span data-lang="en">1.4 Scope</span><span data-lang="zh" lang="zh-CN">1.4 范围</span></a>
         </div>
       </div>
       <div class="toc-group">
@@ -307,18 +306,6 @@ p{max-width:79ch;margin:0 0 15px}
       </table></div>
       <p data-lang="en">In short, Badger gives up open-ended autonomy in exchange for routes, acceptance, and recovery that you can audit.</p>
       <p data-lang="zh" lang="zh-CN">一句话：Badger 用开放式自主换来可审计的路线、验收和恢复。</p>
-
-      <h3 id="scope"><span data-lang="en">1.4 Scope</span><span data-lang="zh" lang="zh-CN">1.4 范围</span></h3>
-      <ul class="plain-list" data-lang="en">
-        <li><b>Delivered.</b> Creator, including six-lane authoring, assembly, current-hash evaluation, approval, publication, and distribution preview. WorkflowRuntime, including durable Runs with branches, decisions, Cycles, versioned artifacts, and optional durability features.</li>
-        <li><b>Out of scope.</b> Classic and Native policy, host installers, platform and dashboard adapters, external-provider authentication, automatic distribution, biological execution, and fixtures derived from protected raw data.</li>
-      </ul>
-      <ul class="plain-list" data-lang="zh" lang="zh-CN">
-        <li><b>已交付。</b>Creator（六 lane 创作、组装、当前哈希评估、批准、发布和分发预览）与 WorkflowRuntime（支持分支、决策、Cycle、产物版本和可选持久化能力的持久化 Run）。</li>
-        <li><b>不在范围内。</b>Classic 与 Native 策略、宿主安装器、平台与 Dashboard 适配器、外部服务认证、自动分发、生物学执行，以及来自受保护原始数据的样例。</li>
-      </ul>
-      <p class="note" data-lang="en">This manual explains; it does not set policy. Where it disagrees with the code or the generated package checks, the code wins. Release status lives in <a href="release-artifacts.md"><code>docs/release-artifacts.md</code></a>.</p>
-      <p class="note" data-lang="zh" lang="zh-CN">本手册只做解释，不定义策略；与代码或生成软件包的检查不一致时，以代码为准。发布状态见 <a href="release-artifacts.md"><code>docs/release-artifacts.md</code></a>。</p>
     </section>
 
     <section class="section" id="contract">
@@ -655,8 +642,8 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
     <section class="section" id="codebase">
       <p class="section-number"><span data-lang="en">SECTION 05</span><span data-lang="zh" lang="zh-CN">第 05 节</span></p>
       <h2><span data-lang="en">Codebase map</span><span data-lang="zh" lang="zh-CN">代码地图</span></h2>
-      <p class="lede" data-lang="en"><code>@rpamis/badger</code> is an ESM library and CLI for Node&nbsp;≥&nbsp;22. The source of truth is <code>src/</code>. <code>assets/runtime/workflow-runtime.mjs</code> is bundled from it by <code>npm run build</code>, so never edit it by hand. Dependencies point one way: the CLI calls the Creator modules, Creator produces packages, and packages run on Skill Runtime, Engine, and WorkflowRuntime. Evaluation reads from all of them.</p>
-      <p class="lede" data-lang="zh" lang="zh-CN"><code>@rpamis/badger</code> 是面向 Node&nbsp;≥&nbsp;22 的 ESM 库和 CLI。事实来源是 <code>src/</code>；<code>assets/runtime/workflow-runtime.mjs</code> 由 <code>npm run build</code> 从源码打包生成，不要手改。依赖方向是单向的：CLI 调用 Creator 模块，Creator 产出软件包，软件包运行在 Skill Runtime、Engine 和 WorkflowRuntime 之上；评估则读取所有这些部分。</p>
+      <p class="lede" data-lang="en"><code>@realityjunky/badger</code> is an ESM library and CLI for Node&nbsp;≥&nbsp;22. The source of truth is <code>src/</code>. <code>assets/runtime/workflow-runtime.mjs</code> is bundled from it by <code>npm run build</code>, so never edit it by hand. Dependencies point one way: the CLI calls the Creator modules, Creator produces packages, and packages run on Skill Runtime, Engine, and WorkflowRuntime. Evaluation reads from all of them.</p>
+      <p class="lede" data-lang="zh" lang="zh-CN"><code>@realityjunky/badger</code> 是面向 Node&nbsp;≥&nbsp;22 的 ESM 库和 CLI。事实来源是 <code>src/</code>；<code>assets/runtime/workflow-runtime.mjs</code> 由 <code>npm run build</code> 从源码打包生成，不要手改。依赖方向是单向的：CLI 调用 Creator 模块，Creator 产出软件包，软件包运行在 Skill Runtime、Engine 和 WorkflowRuntime 之上；评估则读取所有这些部分。</p>
 
       <h3 id="code-modules"><span data-lang="en">5.1 Modules</span><span data-lang="zh" lang="zh-CN">5.1 模块</span></h3>
       <figure class="diagram-card">
@@ -672,11 +659,10 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
           <tr><td><code>src/factory/</code></td><td><span data-lang="en">Questionnaire validation, proposals, Creator state, scaffolds, and legacy migration.</span><span data-lang="zh" lang="zh-CN">问卷校验、提案、Creator 状态、脚手架和旧草稿迁移。</span></td><td><a href="../src/factory/questionnaire.ts"><code>questionnaire.ts</code></a>, <a href="../src/factory/proposal.ts"><code>proposal.ts</code></a>, <a href="../src/factory/generate.ts"><code>generate.ts</code></a></td></tr>
           <tr><td><code>src/authoring/</code></td><td><span data-lang="en">The lane DAG, authoring plans, dispatch, records, review, and assembly.</span><span data-lang="zh" lang="zh-CN">lane DAG、创作计划、分派、记录、审查和组装。</span></td><td><a href="../src/authoring/protocol.ts"><code>protocol.ts</code></a> <span data-lang="en">(lane rules)</span><span data-lang="zh" lang="zh-CN">（lane 规则）</span>, <a href="../src/authoring/plan.ts"><code>plan.ts</code></a>, <a href="../src/authoring/dispatch.ts"><code>dispatch.ts</code></a>, <a href="../src/authoring/lifecycle.ts"><code>lifecycle.ts</code></a></td></tr>
           <tr><td><code>src/skill-runtime/</code></td><td><span data-lang="en">Loading and validating Skill packages, and immutable snapshots.</span><span data-lang="zh" lang="zh-CN">加载和校验 Skill 软件包，以及不可变快照。</span></td><td><a href="../src/skill-runtime/load.ts"><code>load.ts</code></a>, <a href="../src/skill-runtime/validate.ts"><code>validate.ts</code></a>, <a href="../src/skill-runtime/snapshot.ts"><code>snapshot.ts</code></a></td></tr>
-          <tr><td><code>src/engine/</code></td><td><span data-lang="en">The generic Run loop from the pinned upstream, manual and standalone Runs, and protected storage.</span><span data-lang="zh" lang="zh-CN">来自固定上游版本的通用 Run 循环、手动与独立 Run，以及受保护的存储。</span></td><td><a href="../src/engine/loop.ts"><code>loop.ts</code></a>, <a href="../src/engine/manual-run.ts"><code>manual-run.ts</code></a>, <a href="../src/engine/standalone-run.ts"><code>standalone-run.ts</code></a>, <a href="../src/engine/run-store.ts"><code>run-store.ts</code></a></td></tr>
+          <tr><td><code>src/engine/</code></td><td><span data-lang="en">The generic Run loop, manual and standalone Runs, and protected storage.</span><span data-lang="zh" lang="zh-CN">通用 Run 循环、手动与独立 Run，以及受保护的存储。</span></td><td><a href="../src/engine/loop.ts"><code>loop.ts</code></a>, <a href="../src/engine/manual-run.ts"><code>manual-run.ts</code></a>, <a href="../src/engine/standalone-run.ts"><code>standalone-run.ts</code></a>, <a href="../src/engine/run-store.ts"><code>run-store.ts</code></a></td></tr>
           <tr><td><code>src/workflow-runtime/</code></td><td><span data-lang="en">The runtime authority: compile, check, route, decide, version artifacts, and persist durably.</span><span data-lang="zh" lang="zh-CN">运行时权威：编译、检查、路由、决策、产物版本和持久化。</span></td><td><a href="../src/workflow-runtime/public.ts"><code>public.ts</code></a>, <a href="../src/workflow-runtime/index.ts"><code>index.ts</code></a></td></tr>
           <tr><td><code>src/eval/</code></td><td><span data-lang="en">Current-hash evaluation and WorkflowRuntime certification.</span><span data-lang="zh" lang="zh-CN">当前哈希评估与 WorkflowRuntime 认证。</span></td><td><a href="../src/eval/run.ts"><code>run.ts</code></a>, <a href="../src/eval/workflow-runtime-certification.ts"><code>workflow-runtime-certification.ts</code></a></td></tr>
           <tr><td><code>src/publish/</code></td><td><span data-lang="en">Readiness, approval, publication, and distribution preview.</span><span data-lang="zh" lang="zh-CN">就绪判断、批准、发布和分发预览。</span></td><td><a href="../src/publish/lifecycle.ts"><code>lifecycle.ts</code></a></td></tr>
-          <tr><td><code>src/differential/</code></td><td><span data-lang="en">Parity checks against the pinned upstream Creator, authoring, and Engine.</span><span data-lang="zh" lang="zh-CN">与固定上游版本的 Creator、创作和 Engine 做一致性比对。</span></td><td><a href="../src/differential/run.ts"><code>run.ts</code></a>, <code>engine/</code></td></tr>
         </tbody>
       </table></div>
       <p data-lang="en">The public entry points are the package root, <code>/engine</code>, <code>/workflow-runtime</code> (one constructor and its four operations), <code>/skill-runtime</code>, and <code>/cli</code>. Everything else, including the storage helpers, is internal.</p>
@@ -699,7 +685,7 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
           <tr><td>Engine</td><td><code>engine-loop.test.ts</code>, <code>engine-runtime.test.ts</code>, <code>engine-run-store.test.ts</code></td><td><span data-lang="en">Do actions, retries, persistence, and recovery behave consistently?</span><span data-lang="zh" lang="zh-CN">动作、重试、持久化和恢复的行为是否一致？</span></td></tr>
           <tr><td>WorkflowRuntime</td><td><code>workflow-runtime.test.ts</code>, <code>workflow-runtime-branch-attempt.test.ts</code>, <code>workflow-runtime-cycle.test.ts</code>, <code>workflow-runtime-decision.test.ts</code></td><td><span data-lang="en">Are routes, decisions, Cycles, Attempts, and artifacts coherent?</span><span data-lang="zh" lang="zh-CN">路由、决策、Cycle、Attempt 和产物是否自洽？</span></td></tr>
           <tr><td><span data-lang="en">Durability</span><span data-lang="zh" lang="zh-CN">持久化</span></td><td><code>workflow-runtime-durability.test.ts</code>, <code>workflow-runtime-lock.test.ts</code>, <code>workflow-runtime-checkpoint.test.ts</code>, <code>contained-atomic-write.test.ts</code></td><td><span data-lang="en">Do crashes, contention, path escapes, and malformed records fail closed?</span><span data-lang="zh" lang="zh-CN">崩溃、争用、路径逃逸和损坏的记录是否都按“失败即关闭”处理？</span></td></tr>
-          <tr><td><span data-lang="en">Certification</span><span data-lang="zh" lang="zh-CN">认证</span></td><td><code>engine-differential.test.ts</code>, <code>engine-certification.test.ts</code>, <code>workflow-runtime-certification.test.ts</code></td><td><span data-lang="en">Does Badger match its pinned baseline and cover the negative cases?</span><span data-lang="zh" lang="zh-CN">Badger 是否与固定基线一致，并覆盖了负面用例？</span></td></tr>
+          <tr><td><span data-lang="en">Certification</span><span data-lang="zh" lang="zh-CN">认证</span></td><td><code>workflow-runtime-certification.test.ts</code></td><td><span data-lang="en">Does a generated package pass its synthetic Runs and reject the negative cases?</span><span data-lang="zh" lang="zh-CN">生成的软件包能否通过合成 Run，并拒绝负面用例？</span></td></tr>
           <tr><td><span data-lang="en">Release documents</span><span data-lang="zh" lang="zh-CN">发布文档</span></td><td><code>release-artifacts.test.ts</code></td><td><span data-lang="en">Do the Skill references, the inventory example, and this manual stay truthful?</span><span data-lang="zh" lang="zh-CN">Skill 参考资料、清单示例和本手册是否保持准确？</span></td></tr>
         </tbody>
       </table></div>
@@ -747,7 +733,6 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
           <tr><td><code>--depth quick|full</code></td><td><span data-lang="en">Authoring review depth for <code>generate</code>, <code>authoring-plan</code>, and <code>migrate</code>. <code>quick</code> means one reviewer and one round; <code>full</code> means three voters, four lenses, and bounded rounds.</span><span data-lang="zh" lang="zh-CN"><code>generate</code>、<code>authoring-plan</code> 和 <code>migrate</code> 的创作审查深度。<code>quick</code> 是一名审查者、一轮；<code>full</code> 是三名投票者、四个视角、有限轮次。</span></td></tr>
           <tr><td><code>--expected-revision &lt;n&gt;</code></td><td><span data-lang="en">Optimistic concurrency for <code>authoring-record</code> when lanes run in parallel.</span><span data-lang="zh" lang="zh-CN">lane 并行时，<code>authoring-record</code> 的乐观并发控制。</span></td></tr>
           <tr><td><code>--destination &lt;dir&gt;</code></td><td><span data-lang="en">The target of the distribution preview. Nothing is copied there.</span><span data-lang="zh" lang="zh-CN">分发预览的目标目录，不会向其中复制任何文件。</span></td></tr>
-          <tr><td><code>--official-root</code>, <code>--official-revision</code>, <code>--private</code>, <code>--output</code> + <code>--confirm-output</code></td><td><span data-lang="en">Differential harnesses against the pinned upstream. See <a href="differential-harness.md"><code>docs/differential-harness.md</code></a>.</span><span data-lang="zh" lang="zh-CN">与固定上游版本对比的差分工具，见 <a href="differential-harness.md"><code>docs/differential-harness.md</code></a>。</span></td></tr>
         </tbody>
       </table></div>
 
@@ -796,11 +781,9 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
           <tr><td><a href="../README.md"><code>README.md</code></a></td><td><span data-lang="en">Package scope, public exports, and the full WorkflowRuntime contract.</span><span data-lang="zh" lang="zh-CN">软件包范围、公开导出和完整的 WorkflowRuntime 契约。</span></td></tr>
           <tr><td><a href="../GLOSSARY.md"><code>GLOSSARY.md</code></a></td><td><span data-lang="en">The authoring vocabulary used by the questionnaire and the lanes.</span><span data-lang="zh" lang="zh-CN">问卷和创作 lane 使用的术语。</span></td></tr>
           <tr><td><a href="../assets/skills/badger-create/SKILL.md"><code>assets/skills/badger-create/SKILL.md</code></a></td><td><span data-lang="en">The <code>/badger-create</code> entry point: closed-world sources, confirmations, and the lane contract.</span><span data-lang="zh" lang="zh-CN"><code>/badger-create</code> 入口：封闭来源、确认流程和 lane 契约。</span></td></tr>
-          <tr><td><a href="release-artifacts.md"><code>docs/release-artifacts.md</code></a></td><td><span data-lang="en">Release status, the generated inventory, upstream provenance, and the release gate.</span><span data-lang="zh" lang="zh-CN">发布状态、生成清单、上游来源和发布门槛。</span></td></tr>
+          <tr><td><a href="release-artifacts.md"><code>docs/release-artifacts.md</code></a></td><td><span data-lang="en">Release status, the generated inventory, and the release gate.</span><span data-lang="zh" lang="zh-CN">发布状态、生成清单和发布门槛。</span></td></tr>
           <tr><td><a href="workflow-runtime-certification.md"><code>docs/workflow-runtime-certification.md</code></a></td><td><span data-lang="en">What WorkflowRuntime certification proves.</span><span data-lang="zh" lang="zh-CN">WorkflowRuntime 认证证明了什么。</span></td></tr>
-          <tr><td><a href="https://github.com/realityjunky/Badger/issues/16">Badger #16</a></td><td><span data-lang="en">The semantic-dossier specification.</span><span data-lang="zh" lang="zh-CN">语义档案的规格说明。</span></td></tr>
-          <tr><td><a href="https://github.com/rpamis/comet/blob/99fd7495f8b9217efbaae3a46d885f6fa7f4102a/assets/skills/comet-any/reference/authoring-protocol.json"><code>authoring-protocol.json</code></a>, <a href="https://github.com/rpamis/comet/blob/99fd7495f8b9217efbaae3a46d885f6fa7f4102a/domains/bundle/authoring.ts"><code>authoring.ts</code></a></td><td><span data-lang="en">The pinned upstream lane DAG and authoring code that Badger preserves.</span><span data-lang="zh" lang="zh-CN">Badger 所保留的固定上游版本 lane DAG 与创作代码。</span></td></tr>
-          <tr><td><a href="https://github.com/realityjunky/Badger-workflows/blob/main/primer_designer_harness/workflows/primer-designer-v1/plan.json"><code>primer-designer-v1/plan.json</code></a></td><td><span data-lang="en">The Primer Designer contract shown in §2.4.</span><span data-lang="zh" lang="zh-CN">§2.4 展示的 Primer Designer 契约。</span></td></tr>
+          <tr><td><a href="https://github.com/realityjunky/Badger-workflows/blob/af773444e66ae4d223883bccf9f0097b8177cddf/workflows/primer-designer-v1/plan.json"><code>primer-designer-v1/plan.json</code></a></td><td><span data-lang="en">The v1 Primer Designer contract shown in §2.4, at its last revision.</span><span data-lang="zh" lang="zh-CN">§2.4 展示的 v1 Primer Designer 契约（最后一个版本）。</span></td></tr>
         </tbody>
       </table></div>
       <p data-lang="en"><b>Related designs.</b> The <a href="https://agentskills.io/specification">Agent Skills specification</a> (portable packages); <a href="https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents">harnesses for long-running agents</a> (externalized progress and recovery); <a href="https://docs.langchain.com/oss/javascript/langgraph/persistence">LangGraph persistence</a> and <a href="https://docs.temporal.io/workflows">Temporal Workflows</a> (checkpoints and durable execution); agent <a href="https://openai.github.io/openai-agents-js/guides/guardrails">guardrails</a>, <a href="https://openai.github.io/openai-agents-js/guides/handoffs">handoffs</a>, and <a href="https://openai.github.io/openai-agents-js/guides/sessions">sessions</a>; and <a href="https://www.openpolicyagent.org/docs">Open Policy Agent</a> and <a href="https://backstage.io/docs/features/software-templates/">Backstage Software Templates</a> (policy separation and controlled generation).</p>
@@ -966,7 +949,6 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
         '  Core --> Engine',
         '  Package --> Eval[src/eval<br/>current hash + certification]',
         '  Eval --> Publish[src/publish<br/>readiness, approval, publication]',
-        '  Differential[src/differential<br/>upstream parity] --> Eval',
         '  Tests[test/*] -. verifies .-> Kernel',
         '  Tests -. verifies .-> Engine',
         '  Tests -. verifies .-> Core',
@@ -974,7 +956,7 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
         '  classDef contract fill:#eeeaf7,stroke:#67528d,color:#17202a;',
         '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;',
-        '  class CLI,Tests entry; class Kernel,Contract,Factory,Authoring,Package contract; class SkillRuntime,Engine,Public,Core runtime; class Eval,Publish,Differential evidence;'
+        '  class CLI,Tests entry; class Kernel,Contract,Factory,Authoring,Package contract; class SkillRuntime,Engine,Public,Core runtime; class Eval,Publish evidence;'
       ]),
       runtime: diagramLines([
         '---',
@@ -1142,7 +1124,6 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
         '  Core --> Engine',
         '  Package --> Eval[src/eval<br/>当前哈希 + 认证]',
         '  Eval --> Publish[src/publish<br/>就绪、批准、发布]',
-        '  Differential[src/differential<br/>上游一致性] --> Eval',
         '  Tests[test/*] -. 校验 .-> Kernel',
         '  Tests -. 校验 .-> Engine',
         '  Tests -. 校验 .-> Core',
@@ -1150,7 +1131,7 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
         '  classDef contract fill:#eeeaf7,stroke:#67528d,color:#17202a;',
         '  classDef runtime fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
         '  classDef evidence fill:#e7eef2,stroke:#19364b,color:#17202a;',
-        '  class CLI,Tests entry; class Kernel,Contract,Factory,Authoring,Package contract; class SkillRuntime,Engine,Public,Core runtime; class Eval,Publish,Differential evidence;'
+        '  class CLI,Tests entry; class Kernel,Contract,Factory,Authoring,Package contract; class SkillRuntime,Engine,Public,Core runtime; class Eval,Publish evidence;'
       ]),
       runtime: diagramLines([
         '---',

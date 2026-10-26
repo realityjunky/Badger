@@ -6,7 +6,6 @@ import {
 import { sha256, stableValue } from "../util.js";
 import { createStandaloneWorkflowKernel } from "../workflow-kernel/foundation.js";
 import {
-  AUTHORING_COMPATIBILITY,
   AUTHORING_PROTOCOL_HASH,
   authoringContentLeaves,
   authoringDag,
@@ -215,7 +214,6 @@ function planForProposal(
     ...(options.proposal.upgradeSource
       ? { upgradeSource: structuredClone(options.proposal.upgradeSource) }
       : {}),
-    compatibility: structuredClone(AUTHORING_COMPATIBILITY),
     ...(options.proposal.semanticDossier
       ? {
           semanticDossier: structuredClone(options.proposal.semanticDossier),
@@ -257,7 +255,7 @@ export function deriveAuthoringPlan(
     ...withoutHash,
     authoringPlanHash: sha256(JSON.stringify(stableValue(withoutHash))),
   };
-  const diagnostics = validateAuthoringPlan(plan, { requireExtensions: true });
+  const diagnostics = validateAuthoringPlan(plan);
   if (diagnostics.length) throw new AuthoringPlanValidationError(diagnostics);
   return plan;
 }
@@ -303,7 +301,6 @@ function arrayOfStrings(value: unknown): value is string[] {
 function validateLaneArray(
   value: unknown,
   diagnostics: AuthoringPlanDiagnostic[],
-  requireExtensions: boolean,
 ): value is AuthoringLane[] {
   if (!Array.isArray(value)) {
     diagnostics.push(
@@ -375,7 +372,7 @@ function validateLaneArray(
         ),
       );
     }
-    if (requireExtensions && !arrayOfStrings(laneValue.contentLeaves)) {
+    if (!arrayOfStrings(laneValue.contentLeaves)) {
       diagnostics.push(
         diagnostic(
           "invalid-content-leaves",
@@ -388,14 +385,12 @@ function validateLaneArray(
       ? authoringLaneDependencies(canonicalLane)
       : undefined;
     if (
-      (requireExtensions && laneValue.dependencies === undefined) ||
-      (laneValue.dependencies !== undefined &&
-        (!arrayOfStrings(laneValue.dependencies) ||
-          laneValue.dependencies.length !== expectedDependencies?.length ||
-          laneValue.dependencies?.some(
-            (dependency, dependencyIndex) =>
-              dependency !== expectedDependencies?.[dependencyIndex],
-          )))
+      !arrayOfStrings(laneValue.dependencies) ||
+      laneValue.dependencies.length !== expectedDependencies?.length ||
+      laneValue.dependencies.some(
+        (dependency, dependencyIndex) =>
+          dependency !== expectedDependencies?.[dependencyIndex],
+      )
     ) {
       diagnostics.push(
         diagnostic(
@@ -405,10 +400,7 @@ function validateLaneArray(
         ),
       );
     }
-    if (
-      (requireExtensions || laneValue.brief !== undefined) &&
-      (typeof laneValue.brief !== "string" || laneValue.brief.length === 0)
-    ) {
+    if (typeof laneValue.brief !== "string" || laneValue.brief.length === 0) {
       diagnostics.push(
         diagnostic(
           "invalid-lane",
@@ -417,7 +409,7 @@ function validateLaneArray(
         ),
       );
     }
-    if (requireExtensions && !arrayOfStrings(laneValue.derivedClaims)) {
+    if (!arrayOfStrings(laneValue.derivedClaims)) {
       diagnostics.push(
         diagnostic(
           "invalid-claims",
@@ -492,7 +484,6 @@ function validateDag(
 
 export function validateAuthoringPlan(
   value: unknown,
-  options: { requireExtensions?: boolean } = {},
 ): AuthoringPlanDiagnostic[] {
   const diagnostics: AuthoringPlanDiagnostic[] = [];
   const protocol = authoringProtocolProjection();
@@ -544,8 +535,7 @@ export function validateAuthoringPlan(
     );
   validateDag(value.dag, diagnostics);
   validateUpgradeSource(value.upgradeSource, diagnostics);
-  const requireExtensions = options.requireExtensions === true;
-  validateLaneArray(value.lanes, diagnostics, requireExtensions);
+  validateLaneArray(value.lanes, diagnostics);
   if (!isRecord(value.verify))
     diagnostics.push(
       diagnostic(
@@ -579,9 +569,8 @@ export function validateAuthoringPlan(
       (value.verify.voters !== depthSettings.voters ||
         value.verify.maxRounds !== depthSettings.maxRounds ||
         value.verify.dryThreshold !== protocol.depth.dryThreshold ||
-        (requireExtensions &&
-          (value.verify.evidenceSource !== depthSettings.evidenceSource ||
-            value.verify.loopUntilDry !== protocol.verify.loopUntilDry)))
+        value.verify.evidenceSource !== depthSettings.evidenceSource ||
+        value.verify.loopUntilDry !== protocol.verify.loopUntilDry)
     )
       diagnostics.push(
         diagnostic(
@@ -591,7 +580,6 @@ export function validateAuthoringPlan(
         ),
       );
   }
-  if (value.merge === undefined && !requireExtensions) return diagnostics;
   if (!isRecord(value.merge))
     diagnostics.push(
       diagnostic(
@@ -639,76 +627,61 @@ export function validateAuthoringPlan(
         ),
       );
   }
-  if (requireExtensions) {
-    for (const field of [
-      "workflowProtocolHash",
-      "planHash",
-      "sourceEvidenceHash",
-      "authoringPlanHash",
-      "sourceEvidence",
-      "compatibility",
-    ]) {
-      if (value[field] === undefined)
-        diagnostics.push(
-          diagnostic(
-            "missing-extension",
-            `AuthoringPlan.${field} is required for Badger previews`,
-            field,
-          ),
-        );
-    }
-    if (value.workflowProtocolHash !== undefined) {
-      if (!validHash(value.workflowProtocolHash))
-        diagnostics.push(
-          diagnostic(
-            "invalid-hash",
-            "AuthoringPlan.workflowProtocolHash must be a SHA-256 hash",
-            "workflowProtocolHash",
-          ),
-        );
-      else if (value.workflowProtocolHash === value.protocolHash)
-        diagnostics.push(
-          diagnostic(
-            "identical-protocol-hashes",
-            "AuthoringPlan protocolHash and workflowProtocolHash must identify different protocols",
-            "workflowProtocolHash",
-          ),
-        );
-    }
-    for (const field of [
-      "planHash",
-      "sourceEvidenceHash",
-      "authoringPlanHash",
-    ]) {
-      if (value[field] !== undefined && !validHash(value[field]))
-        diagnostics.push(
-          diagnostic(
-            "invalid-hash",
-            `AuthoringPlan.${field} must be a SHA-256 hash`,
-            field,
-          ),
-        );
-    }
-    if (
-      value.sourceEvidence !== undefined &&
-      !Array.isArray(value.sourceEvidence)
-    )
+  for (const field of [
+    "workflowProtocolHash",
+    "planHash",
+    "sourceEvidenceHash",
+    "authoringPlanHash",
+    "sourceEvidence",
+  ]) {
+    if (value[field] === undefined)
       diagnostics.push(
         diagnostic(
-          "invalid-plan",
-          "AuthoringPlan.sourceEvidence must be an array",
-          "sourceEvidence",
-        ),
-      );
-    if (!isRecord(value.compatibility))
-      diagnostics.push(
-        diagnostic(
-          "invalid-plan",
-          "AuthoringPlan.compatibility must be an object",
-          "compatibility",
+          "missing-field",
+          `AuthoringPlan.${field} is required for Badger previews`,
+          field,
         ),
       );
   }
+  if (value.workflowProtocolHash !== undefined) {
+    if (!validHash(value.workflowProtocolHash))
+      diagnostics.push(
+        diagnostic(
+          "invalid-hash",
+          "AuthoringPlan.workflowProtocolHash must be a SHA-256 hash",
+          "workflowProtocolHash",
+        ),
+      );
+    else if (value.workflowProtocolHash === value.protocolHash)
+      diagnostics.push(
+        diagnostic(
+          "identical-protocol-hashes",
+          "AuthoringPlan protocolHash and workflowProtocolHash must identify different protocols",
+          "workflowProtocolHash",
+        ),
+      );
+  }
+  for (const field of ["planHash", "sourceEvidenceHash", "authoringPlanHash"]) {
+    if (value[field] !== undefined && !validHash(value[field]))
+      diagnostics.push(
+        diagnostic(
+          "invalid-hash",
+          `AuthoringPlan.${field} must be a SHA-256 hash`,
+          field,
+        ),
+      );
+  }
+  if (
+    value.sourceEvidence !== undefined &&
+    !Array.isArray(value.sourceEvidence)
+  )
+    diagnostics.push(
+      diagnostic(
+        "invalid-plan",
+        "AuthoringPlan.sourceEvidence must be an array",
+        "sourceEvidence",
+      ),
+    );
   if (
     value.semanticDossier !== undefined ||
     value.semanticDossierHash !== undefined
@@ -740,9 +713,8 @@ export function validateAuthoringPlan(
 
 export function assertValidAuthoringPlan(
   value: unknown,
-  options: { requireExtensions?: boolean } = {},
 ): asserts value is AuthoringPlan {
-  const diagnostics = validateAuthoringPlan(value, options);
+  const diagnostics = validateAuthoringPlan(value);
   if (diagnostics.length) throw new AuthoringPlanValidationError(diagnostics);
 }
 

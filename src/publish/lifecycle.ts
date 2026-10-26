@@ -544,14 +544,7 @@ function requiredTrueFields(
 
 function isProtectedPath(candidate: string): boolean {
   const segments = path.resolve(candidate).split(path.sep);
-  return (
-    segments.includes("raw_data") ||
-    segments.includes("raw_skills") ||
-    segments.some(
-      (segment, index) =>
-        segment === "repos" && segments[index + 1] === "comet",
-    )
-  );
+  return segments.includes("raw_data") || segments.includes("raw_skills");
 }
 
 function phase4DeclaredByPackage(state: CreatorState): boolean {

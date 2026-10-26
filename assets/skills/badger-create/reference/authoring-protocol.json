@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Deterministic authoring contract for /comet-any. The main session interprets this protocol, symmetric to how runtime scripts interpret workflow-protocol.json. The backend (domains/bundle/authoring.ts) mirrors these constants.",
+  "description": "Deterministic authoring contract for /badger-create. The main session interprets this protocol, symmetric to how runtime scripts interpret workflow-protocol.json.",
   "depth": {
     "quick": { "voters": 1, "maxRounds": 1, "evidenceSource": "llm-single" },
     "full": { "voters": 3, "maxRounds": 4, "evidenceSource": "llm-multivote" },
@@ -18,9 +18,9 @@
         "script:workflow-state",
         "script:workflow-guard",
         "script:workflow-handoff",
-        "script:comet-plan",
-        "script:comet-check",
-        "script:comet-hook-guard"
+        "script:badger-plan",
+        "script:badger-check",
+        "script:badger-hook-guard"
       ],
       "producesContentLeaves": []
     },

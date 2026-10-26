@@ -4,8 +4,8 @@ The certification package is validated against one Engine-backed
 WorkflowRuntime authority.
 
 This document covers standalone runtime certification only. Domain workflow
-definitions, source Skills, and domain fixtures belong to Badger-workflows and
-are supplied through explicit package sources.
+definitions, source Skills, and domain fixtures belong to separate domain
+workflow repositories and are supplied through explicit package sources.
 
 ## Supported contract
 
@@ -211,8 +211,7 @@ generated in a disposable
 temporary directory and contains a machine-derived conditional branch, a
 scoped authorized decision, a terminal choice, a declared bounded Cycle, a
 repeated review Node, a rework Attempt, and Attempt- and Run-lifetime artifacts.
-It has no biological inputs, host services, network access, or dependency on
-the protected upstream checkout.
+It has no domain inputs, host services, or network access.
 
 The Phase 3 run starts through a generated state adapter and completes through
 the public WorkflowRuntime at a manual location. A second Run starts through
@@ -251,8 +250,8 @@ durability profile, Phase 4 certification adds one synthetic current-hash
 stop/go scenario covering every declared durability capability, both Run
 locations, both adapter directions, fresh-process crash boundaries, child-
 process contention, negative cases, and source-integrity boundaries. Phase 4
-certification does not publish or install generated Skills, authorize
-biological execution, or migrate Primer Designer.
+certification does not publish or install generated Skills or authorize
+domain execution.
 
 ## Compatibility
 
@@ -263,7 +262,7 @@ identity, eval truth, or readiness. A Run started through a generated adapter
 can be resumed and completed through the public runtime, and a public-runtime
 Run can be resumed and completed through the generated adapter.
 
-The public `@rpamis/badger/workflow-runtime` package seam exposes
+The public `@realityjunky/badger/workflow-runtime` package seam exposes
 only runtime construction and the four operations `start`, `resume`, `submit`,
 and `recover`. Revisioned continuations add `revision`, `attemptId`,
 `visitOrdinal`, `retryOrdinal`, `cycleId`, Cycle and visit ledgers, and

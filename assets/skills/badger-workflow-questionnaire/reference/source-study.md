@@ -3,8 +3,6 @@
 ## Sources reviewed
 
 - [`to-questionnaire` at commit `dadd0c00d6a350acaa15bb9ca1b96b20ead684ca`](https://github.com/mattpocock/skills/blob/dadd0c00d6a350acaa15bb9ca1b96b20ead684ca/skills/productivity/to-questionnaire/SKILL.md)
-- [Official Comet `/comet-any` Skill](https://github.com/rpamis/comet/blob/eeb2a685dab0ca492f8ccc266e21657c828bdf38/assets/skills/comet-any/SKILL.md)
-- [Official Comet Skill-creation guide](https://github.com/rpamis/comet/blob/eeb2a685dab0ca492f8ccc266e21657c828bdf38/docs/operations/SKILL-CREATION.md)
 - Badger's explicit source resolver in `src/workflow-kernel/discovery.ts` and FactoryPlan contract in `src/types.ts`.
 
 ## Reusable questionnaire pattern

@@ -6,7 +6,6 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { buildProposal } from "../src/factory/proposal.js";
 import {
-  AUTHORING_COMPATIBILITY,
   AUTHORING_PROTOCOL,
   AUTHORING_PROTOCOL_HASH,
   AuthoringPlanValidationError,
@@ -258,7 +257,7 @@ describe("AuthoringPlan preview", () => {
     expect(second.sourceEvidenceHash).not.toBe(first.sourceEvidenceHash);
   });
 
-  it("matches the pinned upstream protocol while recording Badger extensions separately", async () => {
+  it("keeps the package-facing authoring protocol in step with the code", async () => {
     const protocolFixture = JSON.parse(
       await fs.readFile(
         path.join(
@@ -268,88 +267,12 @@ describe("AuthoringPlan preview", () => {
         "utf8",
       ),
     );
-    const compatibilityFixture = JSON.parse(
-      await fs.readFile(
-        path.join(
-          process.cwd(),
-          "test/fixtures/authoring/authoring-compatibility.json",
-        ),
-        "utf8",
-      ),
-    );
 
     expect(AUTHORING_PROTOCOL).toEqual(protocolFixture);
     expect(validateAuthoringProtocol(protocolFixture)).toEqual([]);
     expect(AUTHORING_PROTOCOL_HASH).toBe(
-      "d7e5d2f97828336e6d7b1237d786c3dd02229370f7698a5162f52942938b8303",
+      "ae9055c760ddf8c4d812b5bf83262e9eb77b3d03277066e903c1ab3d0ab09731",
     );
-    expect(compatibilityFixture).toMatchObject({
-      official: {
-        revision: "99fd7495f8b9217efbaae3a46d885f6fa7f4102a",
-        version: "0.4.0-beta.19",
-      },
-      knownUpstreamInconsistencies: expect.any(Array),
-      badgerExtensions: expect.any(Array),
-    });
-    expect(
-      AUTHORING_COMPATIBILITY.knownUpstreamInconsistencies.map(
-        (note) => note.id,
-      ),
-    ).toEqual(compatibilityFixture.knownUpstreamInconsistencies);
-    expect(
-      AUTHORING_COMPATIBILITY.badgerExtensions.map((note) => note.id),
-    ).toEqual(compatibilityFixture.badgerExtensions);
-  });
-
-  it("accepts the upstream AuthoringPlan core without Badger extensions", async () => {
-    const plan: FactoryPlan = {
-      schemaVersion: 1,
-      goal: "Create a prepared workflow.",
-      skillCreatorIntent: "new-skill",
-      skillSources: [
-        {
-          name: "prepare",
-          location: path.join(".agents", "skills", "prepare"),
-        },
-      ],
-      defaultLocale: "en",
-      workflow: {
-        kind: "workflow-kernel",
-        name: "prepared-workflow",
-        goal: "Prepare a workflow.",
-        customNodes: [],
-        outputSchemas: [],
-      },
-    };
-    const planPath = path.join(project, "plan.json");
-    await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
-    const derived = deriveAuthoringPlan({
-      proposal: await buildProposal({ projectRoot: project, planPath }),
-    });
-    expect(
-      derived.lanes.find((lane) => lane.id === "skill-core")
-        ?.producesContentLeaves,
-    ).toBe(true);
-    const upstreamPlan = {
-      schemaVersion: 1,
-      name: derived.name,
-      depth: derived.depth,
-      protocolHash: derived.protocolHash,
-      dag: derived.dag,
-      lanes: derived.lanes.map(({ id, claims, producesContentLeaves }) => ({
-        id,
-        claims,
-        producesContentLeaves,
-      })),
-      verify: {
-        voters: derived.verify.voters,
-        lenses: derived.verify.lenses,
-        maxRounds: derived.verify.maxRounds,
-        dryThreshold: derived.verify.dryThreshold,
-      },
-    };
-
-    expect(validateAuthoringPlan(upstreamPlan)).toEqual([]);
   });
 
   it("rejects an unsupported authoring depth with a structured diagnostic", async () => {

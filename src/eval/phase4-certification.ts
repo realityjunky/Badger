@@ -172,14 +172,7 @@ function isWithin(root: string, candidate: string): boolean {
 
 function isProtectedPath(candidate: string): boolean {
   const segments = path.resolve(candidate).split(path.sep);
-  return (
-    segments.includes("raw_data") ||
-    segments.includes("raw_skills") ||
-    segments.some(
-      (segment, index) =>
-        segment === "repos" && segments[index + 1] === "comet",
-    )
-  );
+  return segments.includes("raw_data") || segments.includes("raw_skills");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -2460,8 +2453,7 @@ export async function certifyPhase4Workflow(options: {
       isWithin(temporaryRoot, fixture.packageRoot) &&
       !isProtectedPath(fixture.packageRoot) &&
       !JSON.stringify(fixture.protocol).includes("raw_data") &&
-      !JSON.stringify(fixture.protocol).includes("raw_skills") &&
-      !JSON.stringify(fixture.protocol).includes("repos/comet");
+      !JSON.stringify(fixture.protocol).includes("raw_skills");
     const expectedIdentity = await verifyWorkflowProtocol(fixture.protocol);
     const terminal = await runMainLifecycle(fixture, temporaryRoot, evidence);
     const reverse = await runReverseAdapterLifecycle(

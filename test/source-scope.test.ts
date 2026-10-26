@@ -11,11 +11,11 @@ function files(root: string, result: string[] = []): string[] {
   return result;
 }
 
-describe("standalone extraction scope", () => {
+describe("standalone package scope", () => {
   it("contains no host workflow or installer imports", () => {
     const root = path.resolve("src");
     const forbidden =
-      /comet-classic|comet-native|comet-entry|platform-install|platforms\.js|domains\/engine|@earendil-works\/pi-coding-agent/u;
+      /platform-install|platforms\.js|@earendil-works\/pi-coding-agent/u;
     for (const file of files(root))
       expect(readFileSync(file, "utf8"), file).not.toMatch(forbidden);
   });

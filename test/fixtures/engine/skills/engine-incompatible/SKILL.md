@@ -1,1 +1,0 @@
-# Synthetic incompatible Engine fixture

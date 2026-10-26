@@ -20,29 +20,16 @@ async function readJson(
   return JSON.parse(await readText(relativePath)) as Record<string, unknown>;
 }
 
-function objectRecord(value: unknown): Record<string, unknown> {
-  expect(value).toEqual(expect.any(Object));
-  return value as Record<string, unknown>;
-}
-
 describe("Badger release artifacts", () => {
   it("ships the complete package-facing authoring reference set", async () => {
-    const compatibility = await readJson(
-      "test/fixtures/authoring/authoring-compatibility.json",
-    );
-    const documentation = objectRecord(compatibility.documentation);
-    const references = documentation.references as string[];
-
-    expect(references).toEqual(
-      expect.arrayContaining([
-        "assets/skills/badger-create/reference/authoring-protocol.json",
-        "assets/skills/badger-create/reference/authoring-subagents.md",
-        "assets/skills/badger-create/reference/bundle-authoring.md",
-        "assets/skills/badger-create/reference/authored-zone-example.md",
-        "assets/skills/badger-create/reference/eval-provider.md",
-        "assets/skills/badger-create/reference/package-inventory.example.json",
-      ]),
-    );
+    const references = [
+      "assets/skills/badger-create/reference/authoring-protocol.json",
+      "assets/skills/badger-create/reference/authoring-subagents.md",
+      "assets/skills/badger-create/reference/bundle-authoring.md",
+      "assets/skills/badger-create/reference/authored-zone-example.md",
+      "assets/skills/badger-create/reference/eval-provider.md",
+      "assets/skills/badger-create/reference/package-inventory.example.json",
+    ];
 
     const packageManifest = await readJson("package.json");
     expect(packageManifest.files).toEqual(
@@ -161,30 +148,9 @@ describe("Badger release artifacts", () => {
     );
   });
 
-  it("keeps the compatibility fixture and workflow manual truthful", async () => {
-    const compatibility = await readJson(
-      "test/fixtures/authoring/authoring-compatibility.json",
-    );
-    const official = objectRecord(compatibility.official);
+  it("keeps the workflow manual truthful", async () => {
     const manual = await readText("docs/badger-workflow-manual.html");
 
-    expect(official.revision).toBe("99fd7495f8b9217efbaae3a46d885f6fa7f4102a");
-    expect(compatibility.knownUpstreamInconsistencies).toEqual(
-      expect.arrayContaining([
-        "skill-core-claims",
-        "script-claim-scope",
-        "content-leaf-shape",
-      ]),
-    );
-    expect(compatibility.badgerExtensions).toEqual(
-      expect.arrayContaining([
-        "workflow-protocol-hash",
-        "source-evidence-hash",
-        "concrete-node-content-leaves",
-        "authoring-plan-hash",
-        "control-plane-naming",
-      ]),
-    );
     expect(manual).toContain("Integrated authoring delivered");
     expect(manual).toContain("集成式创作已交付");
     expect(manual).toContain("docs/release-artifacts.md");

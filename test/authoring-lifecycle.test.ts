@@ -583,13 +583,6 @@ describe("Badger authoring lifecycle", () => {
         "badger-hook-guard.mjs",
       ]),
     );
-    expect(scripts).not.toEqual(
-      expect.arrayContaining([
-        "comet-plan.mjs",
-        "comet-check.mjs",
-        "comet-hook-guard.mjs",
-      ]),
-    );
     const hook = await fs.readFile(
       path.join(generated.packageRoot, "scripts", "badger-hook-guard.mjs"),
       "utf8",
@@ -607,19 +600,19 @@ describe("Badger authoring lifecycle", () => {
           id: "badger-plan",
           kind: "plan",
           path: "scripts/badger-plan.mjs",
-          claim: "script:comet-plan",
+          claim: "script:badger-plan",
         }),
         expect.objectContaining({
           id: "badger-check",
           kind: "check",
           path: "scripts/badger-check.mjs",
-          claim: "script:comet-check",
+          claim: "script:badger-check",
         }),
         expect.objectContaining({
           id: "badger-hook-guard",
           kind: "hook-guard",
           path: "scripts/badger-hook-guard.mjs",
-          claim: "script:comet-hook-guard",
+          claim: "script:badger-hook-guard",
         }),
       ]),
     );

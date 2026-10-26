@@ -1,6 +1,5 @@
 import { sha256, slug, stableValue } from "../util.js";
 import type {
-  AuthoringCompatibility,
   AuthoringControlPlaneScript,
   AuthoringDag,
   AuthoringLaneId,
@@ -32,9 +31,9 @@ export const AUTHORING_LANE_CLAIMS = {
     "script:workflow-state",
     "script:workflow-guard",
     "script:workflow-handoff",
-    "script:comet-plan",
-    "script:comet-check",
-    "script:comet-hook-guard",
+    "script:badger-plan",
+    "script:badger-check",
+    "script:badger-hook-guard",
   ],
   reference: [
     "reference:workflow-protocol",
@@ -91,7 +90,6 @@ export const AUTHORING_CONTROL_PLANE_SCRIPTS = [
   {
     id: "workflow-state",
     role: "workflow-state",
-    upstreamRole: "workflow-state",
     kind: "runtime-adapter",
     path: "scripts/workflow-state.mjs",
     claim: "script:workflow-state",
@@ -100,7 +98,6 @@ export const AUTHORING_CONTROL_PLANE_SCRIPTS = [
   {
     id: "workflow-guard",
     role: "workflow-guard",
-    upstreamRole: "workflow-guard",
     kind: "runtime-adapter",
     path: "scripts/workflow-guard.mjs",
     claim: "script:workflow-guard",
@@ -109,7 +106,6 @@ export const AUTHORING_CONTROL_PLANE_SCRIPTS = [
   {
     id: "workflow-handoff",
     role: "workflow-handoff",
-    upstreamRole: "workflow-handoff",
     kind: "runtime-adapter",
     path: "scripts/workflow-handoff.mjs",
     claim: "script:workflow-handoff",
@@ -118,28 +114,25 @@ export const AUTHORING_CONTROL_PLANE_SCRIPTS = [
   {
     id: "badger-plan",
     role: "badger-plan",
-    upstreamRole: "comet-plan",
     kind: "plan",
     path: "scripts/badger-plan.mjs",
-    claim: "script:comet-plan",
+    claim: "script:badger-plan",
     authority: "Badger assembler",
   },
   {
     id: "badger-check",
     role: "badger-check",
-    upstreamRole: "comet-check",
     kind: "check",
     path: "scripts/badger-check.mjs",
-    claim: "script:comet-check",
+    claim: "script:badger-check",
     authority: "Badger assembler",
   },
   {
     id: "badger-hook-guard",
     role: "badger-hook-guard",
-    upstreamRole: "comet-hook-guard",
     kind: "hook-guard",
     path: "scripts/badger-hook-guard.mjs",
-    claim: "script:comet-hook-guard",
+    claim: "script:badger-hook-guard",
     authority: "Badger assembler",
   },
 ] as const satisfies readonly AuthoringControlPlaneScript[];
@@ -168,7 +161,7 @@ export const AUTHORING_DETERMINISTIC_BACKBONE = [
 export const AUTHORING_PROTOCOL = {
   schemaVersion: 1,
   description:
-    "Deterministic authoring contract for /comet-any. The main session interprets this protocol, symmetric to how runtime scripts interpret workflow-protocol.json. The backend (domains/bundle/authoring.ts) mirrors these constants.",
+    "Deterministic authoring contract for /badger-create. The main session interprets this protocol, symmetric to how runtime scripts interpret workflow-protocol.json.",
   depth: {
     quick: { voters: 1, maxRounds: 1, evidenceSource: "llm-single" },
     full: { voters: 3, maxRounds: 4, evidenceSource: "llm-multivote" },
@@ -489,55 +482,6 @@ export function authoringProtocolProjection(
   const projection = { ...base, lanes };
   return { ...projection, hash: hashAuthoringProtocol(projection) };
 }
-
-export const AUTHORING_COMPATIBILITY: AuthoringCompatibility = {
-  officialRevision: "99fd7495f8b9217efbaae3a46d885f6fa7f4102a",
-  officialVersion: "0.4.0-beta.19",
-  knownUpstreamInconsistencies: [
-    {
-      id: "skill-core-claims",
-      detail:
-        "The upstream protocol declares no skill-core claims while the skill-core brief requires one node-skill claim for every active Node.",
-    },
-    {
-      id: "script-claim-scope",
-      detail:
-        "The upstream protocol declares six script claims while the script brief explicitly requires only the three workflow adapter claims.",
-    },
-    {
-      id: "content-leaf-shape",
-      detail:
-        "The upstream protocol lists content-leaf paths while the upstream TypeScript AuthoringPlan summarizes them as a boolean producesContentLeaves field.",
-    },
-  ],
-  badgerExtensions: [
-    {
-      id: "workflow-protocol-hash",
-      detail:
-        "Badger records the normalized executable WorkflowProtocol hash separately from the AuthoringProtocol hash.",
-    },
-    {
-      id: "source-evidence-hash",
-      detail:
-        "Badger records a hash of resolved Skill source and reference evidence for later freshness checks.",
-    },
-    {
-      id: "concrete-node-content-leaves",
-      detail:
-        "Badger expands the upstream node-skill content-leaf placeholder using active normalized Node identities.",
-    },
-    {
-      id: "authoring-plan-hash",
-      detail:
-        "Badger records a canonical hash of the derived AuthoringPlan for future authoring-input binding.",
-    },
-    {
-      id: "control-plane-naming",
-      detail:
-        "Badger preserves the upstream plan, check, and hook roles while emitting them as badger-plan, badger-check, and badger-hook-guard scripts.",
-    },
-  ],
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);

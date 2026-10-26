@@ -13,8 +13,6 @@ import {
   publishState,
   reviewState,
 } from "./publish/lifecycle.js";
-import { runDifferentialHarness } from "./differential/run.js";
-import { runAuthoringDifferentialHarness } from "./differential/authoring/run.js";
 import {
   authoringReadiness,
   authoringSessionGateway,
@@ -25,10 +23,6 @@ import {
 import { migrateLegacyDraft } from "./factory/migration.js";
 import { readCreatorGuide } from "./factory/guide.js";
 import { createQuestionnaireHandoff } from "./factory/questionnaire.js";
-import {
-  runEngineDifferential,
-  runOfficialEngineBaseline,
-} from "./differential/engine/run.js";
 
 const program = new Command();
 program.name("badger").description("Standalone Badger workflow Skill factory");
@@ -431,123 +425,6 @@ program
       ),
       options.json,
     );
-  });
-
-program
-  .command("differential <fixture>")
-  .requiredOption("--official-root <dir>", "Pinned upstream reference checkout")
-  .option("--official-cli <file>", "Upstream reference CLI entrypoint")
-  .option("--official-revision <sha>", "Expected official revision")
-  .option("--fixture-skills-root <dir>", "Reorganized Skill fixture root")
-  .option("--repo <dir>", "Badger repository root", ".")
-  .option("--json", "JSON output")
-  .action(async (fixture, options) => {
-    const root = projectRoot(options.repo);
-    emit(
-      await runDifferentialHarness({
-        repositoryRoot: root,
-        fixturePath: path.resolve(root, fixture),
-        fixtureSkillsRoot: options.fixtureSkillsRoot
-          ? path.resolve(root, options.fixtureSkillsRoot)
-          : undefined,
-        officialRoot: path.resolve(root, options.officialRoot),
-        officialCli: options.officialCli
-          ? path.resolve(root, options.officialCli)
-          : undefined,
-        officialRevision: options.officialRevision,
-      }),
-      options.json,
-    );
-  });
-
-program
-  .command("authoring-differential <fixture>")
-  .description("Certify pinned upstream and Badger authoring parity")
-  .requiredOption("--official-root <dir>", "Pinned upstream reference checkout")
-  .option("--official-cli <file>", "Upstream reference CLI entrypoint")
-  .option("--official-revision <sha>", "Expected official revision")
-  .option(
-    "--official-protocol-path <path>",
-    "Upstream authoring protocol path relative to the checkout",
-  )
-  .option(
-    "--official-authoring-source-path <path>",
-    "Upstream authoring implementation path relative to the checkout",
-  )
-  .option("--fixture-skills-root <dir>", "Reorganized Skill fixture root")
-  .addOption(
-    new Option("--depth <depth>", "Authoring review depth")
-      .choices(["quick", "full"])
-      .default("quick"),
-  )
-  .option("--repo <dir>", "Badger repository root", ".")
-  .option("--output <file>", "Write certification report JSON")
-  .option("--json", "JSON output")
-  .action(async (fixture, options) => {
-    const root = projectRoot(options.repo);
-    const report = await runAuthoringDifferentialHarness({
-      repositoryRoot: root,
-      fixturePath: path.resolve(root, fixture),
-      fixtureSkillsRoot: options.fixtureSkillsRoot
-        ? path.resolve(root, options.fixtureSkillsRoot)
-        : undefined,
-      officialRoot: path.resolve(root, options.officialRoot),
-      officialCli: options.officialCli
-        ? path.resolve(root, options.officialCli)
-        : undefined,
-      officialRevision: options.officialRevision,
-      officialProtocolPath: options.officialProtocolPath,
-      officialAuthoringSourcePath: options.officialAuthoringSourcePath,
-      depth: options.depth,
-    });
-    if (options.output) {
-      await fs.writeFile(
-        path.resolve(root, options.output),
-        JSON.stringify(report, null, 2) + "\n",
-        "utf8",
-      );
-    }
-    emit(report, options.json);
-    if (report.certification.status !== "certified") process.exitCode = 1;
-  });
-
-program
-  .command("engine-differential <fixture>")
-  .description("Characterize the pinned official Engine in disposable Runs")
-  .requiredOption("--official-root <dir>", "Pinned upstream reference checkout")
-  .option("--official-cli <file>", "Upstream reference CLI entrypoint")
-  .option("--private", "Run the same fixture through the private Engine")
-  .option("--repo <dir>", "Badger repository root", ".")
-  .option("--confirm-output", "Confirm writing the baseline report")
-  .option("--output <file>", "Write the baseline report to a JSON file")
-  .option("--json", "JSON output")
-  .action(async (fixture, options) => {
-    const root = projectRoot(options.repo);
-    if (options.output && !options.confirmOutput) {
-      throw new Error("Writing a baseline report requires --confirm-output");
-    }
-    const baselineOptions = {
-      repositoryRoot: root,
-      fixturePath: path.resolve(root, fixture),
-      officialRoot: path.resolve(root, options.officialRoot),
-      officialCli: options.officialCli
-        ? path.resolve(root, options.officialCli)
-        : undefined,
-    };
-    const report = options.private
-      ? await runEngineDifferential(baselineOptions)
-      : await runOfficialEngineBaseline(baselineOptions);
-    if (options.output) {
-      await fs.writeFile(
-        path.resolve(root, options.output),
-        JSON.stringify(report, null, 2) + "\n",
-        "utf8",
-      );
-    }
-    emit(report, options.json);
-    if (options.private && report.certification.status !== "certified") {
-      process.exitCode = 1;
-    }
   });
 
 program

@@ -2091,7 +2091,7 @@ export async function readAuthoringPlan(
   if (!stats.isFile() || stats.size > MAX_RECORD_BYTES)
     throw new Error("Authoring plan is not a bounded regular file");
   const value = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
-  const findings = validateAuthoringPlan(value, { requireExtensions: true });
+  const findings = validateAuthoringPlan(value);
   if (findings.length)
     throw new Error(
       `Invalid authoring plan:\n${findings.map((finding) => finding.message).join("\n")}`,
@@ -2437,9 +2437,7 @@ export async function initializeAuthoringSession(options: {
   plan: AuthoringPlan;
   generated: GeneratedPackage;
 }): Promise<CreatorState> {
-  const planFindings = validateAuthoringPlan(options.plan, {
-    requireExtensions: true,
-  });
+  const planFindings = validateAuthoringPlan(options.plan);
   if (planFindings.length)
     throw new Error(
       `Invalid authoring plan:\n${planFindings.map((finding) => finding.message).join("\n")}`,

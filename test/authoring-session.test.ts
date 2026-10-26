@@ -425,7 +425,7 @@ describe("resumable authoring session", () => {
     }));
   }
 
-  it("accepts the upstream lane envelope and reports bounded evidence", async () => {
+  it("accepts the lane output envelope and reports bounded evidence", async () => {
     const { state, plan } = await createSession();
     const initialRevision = state.authoring!.revision;
 

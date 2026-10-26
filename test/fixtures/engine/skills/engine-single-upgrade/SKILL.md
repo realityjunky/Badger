@@ -1,1 +1,0 @@
-# Synthetic upgraded Engine fixture
