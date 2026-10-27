@@ -265,7 +265,7 @@ Against Badger `5166b67`. Dispositions:
 
 | ID | Finding | Disposition |
 | --- | --- | --- |
-| F1 | `init` does not bind to the reviewed proposal. `cli.ts` rebuilds the proposal and `initializeState` compares it with itself, so a plan edited after `propose` initializes anyway. Manual §3.2 says a stale proposal is rejected, which is not true through the CLI. | Core: bind init to the confirmed proposal record |
+| F1 | `init` does not bind to the reviewed proposal. `cli.ts` rebuilds the proposal and `initializeState` compares it with itself, so a plan edited after `propose` initializes anyway. Manual §3.2 said a stale proposal is rejected, which is not true through the CLI; since 2026-10-27 it records this as a known gap. | Core: bind init to the confirmed proposal record |
 | F2 | `init --confirm` silently overwrites an existing `.badger/states/<name>.json`. It resets status to draft and drops generated, eval, and review records. | Core |
 | F3 | Path bases differ by command. `questionnaire-handoff` resolves files against `--project`; `propose`, `init`, `authoring-record --file`, and `distribute --destination` resolve against the cwd. Manual §3.5 mixes the two. | Core (CLI); moot in the UI |
 | F4 | CreatorState stores absolute `projectRoot`, `planPath`, `draftPath`, and package paths, and `readState` rejects a moved project. A committed `.badger/` is not portable, and host and container paths will differ. | Core; decides the harness `.badger/` policy |
@@ -278,7 +278,7 @@ Against Badger `5166b67`. Dispositions:
 | F11 | "Candidate" is undefined in the glossary and manual, and collides with the domain's "candidate primers". | Docs; UI naming |
 | F12 | No durable home for an in-progress questionnaire. After a session ends, `guide` reports first use again. | Dashboard |
 | F13 | `/badger-create` and the questionnaire both own intent, guide, and candidates. Neither defines an exchange, ledger accumulation, or ledger display. | Dashboard; rewrite both Skills |
-| F14 | Manual §7 lists `primer-designer-v1/plan.json`, which does not exist. §2.4 still shows the v1 contract (26 Nodes). | Docs |
+| F14 | Manual §2.4 still shows the v1 contract (26 Nodes), which has since been retired. The manual's Sources section links `primer-designer-v1/plan.json` at its last revision in the private Badger-workflows repository; the file is gone from that repository's `main`, but the pinned link works for anyone with access. | Docs: §2.4 now notes that v1 is retired; refresh it once the new contract exists |
 | F15 | The FactoryPlan has both `goal` and `workflow.goal`, but the dossier binds only the top-level `goal`. | Core |
 | F16 | "Read every inventoried script before any semantic question" means about 315 KB across 21 files here, with no guidance on depth or delegation. | Dashboard: a source-study stage with its own records |
 | F17 | Badger's uncommitted `.gitignore` edit turns `.npmrc` into `.npmr`. That un-ignores `.npmrc`, which can hold npm tokens. | Now |
