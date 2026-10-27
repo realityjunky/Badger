@@ -90,6 +90,9 @@ p{max-width:79ch;margin:0 0 15px}
 .callout{border-left:4px solid var(--teal);background:var(--teal-soft);padding:16px 18px;margin:21px 0 24px;max-width:86ch}
 .callout p{margin:0}
 .callout strong{color:var(--navy)}
+.planned{border-left:4px solid var(--orange);background:var(--orange-soft);color:var(--ink);padding:13px 17px;margin:18px 0 22px;max-width:86ch;font-size:15px}
+.planned p{margin:0}
+.planned strong{color:var(--navy)}
 .diagram-card{background:var(--paper-strong);border:1px solid var(--line);border-radius:7px;padding:18px 18px 12px;margin:22px 0 18px;box-shadow:var(--shadow);overflow:hidden}
 .diagram-card figcaption{color:var(--faint);font:12px/1.45 var(--mono);margin-top:13px}
 .mermaid{overflow-x:auto;overflow-y:hidden;padding:12px 0;min-height:40px;width:100%;max-width:100%;min-width:0;scrollbar-width:thin}
@@ -140,7 +143,7 @@ p{max-width:79ch;margin:0 0 15px}
     <h1><span data-lang="en">From Markdown Skills to durable workflow systems</span><span data-lang="zh" lang="zh-CN">从 Markdown Skill 到持久化工作流系统</span></h1>
     <p class="hero-lede" data-lang="en">How Badger builds a workflow package from your Skills, runs it one checked step at a time, and proves what happened.</p>
     <p class="hero-lede" data-lang="zh" lang="zh-CN">Badger 如何用你的 Skill 构建工作流软件包，一步一校验地运行它，并证明每一步发生了什么。</p>
-    <div class="hero-meta"><span class="pill"><span data-lang="en">Integrated authoring delivered</span><span data-lang="zh" lang="zh-CN">集成式创作已交付</span></span><span class="pill"><span data-lang="en">Updated 2026-10-26</span><span data-lang="zh" lang="zh-CN">更新于 2026-10-26</span></span></div>
+    <div class="hero-meta"><span class="pill"><span data-lang="en">Integrated authoring delivered</span><span data-lang="zh" lang="zh-CN">集成式创作已交付</span></span><span class="pill"><span data-lang="en">Collaborative service planned · #24</span><span data-lang="zh" lang="zh-CN">协作服务规划中 · #24</span></span><span class="pill"><span data-lang="en">Updated 2026-10-27</span><span data-lang="zh" lang="zh-CN">更新于 2026-10-27</span></span></div>
     <div class="language-status" id="language-status" role="status" aria-live="polite"></div>
   </div>
 </header>
@@ -207,7 +210,19 @@ p{max-width:79ch;margin:0 0 15px}
         </div>
       </div>
       <div class="toc-group">
-        <div class="toc-group-head"><a href="#sources"><span data-lang="en">7 · Sources</span><span data-lang="zh" lang="zh-CN">7 · 资料来源</span></a></div>
+        <div class="toc-group-head"><button type="button" class="toc-group-toggle" aria-expanded="true" aria-controls="toc-group-7" aria-labelledby="toc-link-7"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button><a id="toc-link-7" href="#service"><span data-lang="en">7 · Planned service</span><span data-lang="zh" lang="zh-CN">7 · 规划中的服务</span></a></div>
+        <div class="toc-group-items" id="toc-group-7">
+          <a class="sub" href="#service-why"><span data-lang="en">7.1 Why a service</span><span data-lang="zh" lang="zh-CN">7.1 为什么需要服务</span></a>
+          <a class="sub" href="#service-roles"><span data-lang="en">7.2 People and roles</span><span data-lang="zh" lang="zh-CN">7.2 人员与角色</span></a>
+          <a class="sub" href="#service-stages"><span data-lang="en">7.3 Stages and gates</span><span data-lang="zh" lang="zh-CN">7.3 阶段与门槛</span></a>
+          <a class="sub" href="#service-questionnaire"><span data-lang="en">7.4 Questionnaire records</span><span data-lang="zh" lang="zh-CN">7.4 问卷记录</span></a>
+          <a class="sub" href="#service-mcp"><span data-lang="en">7.5 Badger MCP and Runs</span><span data-lang="zh" lang="zh-CN">7.5 Badger MCP 与 Run</span></a>
+          <a class="sub" href="#service-notify"><span data-lang="en">7.6 Notifications</span><span data-lang="zh" lang="zh-CN">7.6 通知</span></a>
+          <a class="sub" href="#service-kernel"><span data-lang="en">7.7 Kernel changes first</span><span data-lang="zh" lang="zh-CN">7.7 先行的内核改动</span></a>
+        </div>
+      </div>
+      <div class="toc-group">
+        <div class="toc-group-head"><a href="#sources"><span data-lang="en">8 · Sources</span><span data-lang="zh" lang="zh-CN">8 · 资料来源</span></a></div>
       </div>
     </div>
   </nav>
@@ -283,6 +298,7 @@ p{max-width:79ch;margin:0 0 15px}
         <div class="mermaid" data-diagram-id="overview" data-drag-scroll></div>
         <figcaption><span data-lang="en">Diagram 1.1 — Creator builds and releases a package; WorkflowRuntime runs it one checked action at a time.</span><span data-lang="zh" lang="zh-CN">图 1.1 — Creator 构建并发布软件包；WorkflowRuntime 一次一个动作地运行它，每个动作都经过检查。</span></figcaption>
       </figure>
+      <div class="planned"><p data-lang="en"><strong>Planned (#24).</strong> A collaborative service around this same kernel: a web dashboard where field experts and engineers build workflows together, organization roles, a questionnaire stored as records, and a Badger MCP for Agents. None of it is built yet; §7 summarizes the design.</p><p data-lang="zh" lang="zh-CN"><strong>规划中（#24）。</strong>围绕同一内核构建协作服务：领域专家和工程师一起构建工作流的 Web 仪表盘、组织角色、以记录形式保存的问卷，以及供 Agent 使用的 Badger MCP。这些都尚未实现，§7 概述了设计。</p></div>
 
       <h3 id="three-rules"><span data-lang="en">1.2 Three rules behind most of the design</span><span data-lang="zh" lang="zh-CN">1.2 贯穿设计的三条规则</span></h3>
       <div class="three-col">
@@ -372,6 +388,7 @@ p{max-width:79ch;margin:0 0 15px}
       </figure>
       <p data-lang="en">Read it left to right. Preparation fixes the scenario and inputs before any side effect. Design Nodes <code>d1</code>–<code>d10</code> and pool Nodes <code>p0</code>–<code>p10</code> add evidence step by step, and genome download and USEARCH are optional branches. The handoff reconciles warnings and provenance, then offers a declared choice. The division of labor is the point. Badger supplies the generic machinery: persisted actions, schema checks, legal transitions, Cycle and Attempt identity, artifact versions, and recovery. The Primer Designer contract supplies the biology: what a valid design or pool is, and when another Cycle is worth running.</p>
       <p data-lang="zh" lang="zh-CN">从左往右读：准备阶段在产生任何副作用之前确定场景和输入；设计 Node <code>d1</code>–<code>d10</code> 与加池 Node <code>p0</code>–<code>p10</code> 逐步积累证据，基因组下载和 USEARCH 是可选分支；交接阶段核对警告与来源，再给出声明好的选项。重点在分工：Badger 提供通用机制——持久化动作、Schema 检查、合法转换、Cycle 与 Attempt 身份、产物版本和恢复；Primer Designer 契约提供生物学含义——什么样的设计或引物池是合格的，什么时候值得再跑一轮 Cycle。</p>
+      <div class="planned"><p data-lang="en"><strong>Planned (#24).</strong> This is the v1 contract, since retired. The rebuild over the expert's three Skills paused at the questionnaire, and resuming it in the dashboard is the acceptance case for §7. This section will show the new contract once it exists.</p><p data-lang="zh" lang="zh-CN"><strong>规划中（#24）。</strong>这里展示的是 v1 契约，现已退役。基于专家三个 Skill 的重建在问卷阶段暂停；在仪表盘中恢复这项测试，就是 §7 的验收用例。新契约产生后，本节将改为展示它。</p></div>
     </section>
 
     <section class="section" id="build">
@@ -402,6 +419,7 @@ p{max-width:79ch;margin:0 0 15px}
       <p data-lang="zh" lang="zh-CN"><b>问卷。</b><code>badger guide</code> 报告项目里是否已有计划或可恢复的 Creator 流程。首次使用时，<code>/badger-create</code> 会自动启动 <code>/badger-workflow-questionnaire</code>；已有的计划和创作会话会被保留，要修改必须明确提出。问卷需要几轮就问几轮，每轮之后都分开列出五类账目：用户确认的事实、来自源文件的事实、Agent 的推断、未解决的假设和剩余问题。</p>
       <p data-lang="en">The result is a <b>semantic dossier</b>: a versioned, hashed account of what the workflow means, stored as <code>FactoryPlan.semanticDossier</code>. <code>badger questionnaire-handoff</code> checks that the dossier matches the plan, and it writes nothing. Every later authoring step is bound to the dossier's hash, so a change in meaning makes old authoring evidence stale.</p>
       <p data-lang="zh" lang="zh-CN">问卷的产物是 <b>semantic dossier（语义档案）</b>：一份带版本和哈希、描述工作流含义的记录，存放在 <code>FactoryPlan.semanticDossier</code>。<code>badger questionnaire-handoff</code> 校验档案与计划是否一致，不写任何东西。之后的每个创作步骤都绑定档案哈希，因此含义一变，旧的创作证据就会过期。</p>
+      <div class="planned"><p data-lang="en"><strong>Planned (#24).</strong> The questionnaire moves into the dashboard as records: questions, rounds, answers, resolutions, facts, and acknowledgements. Work in progress survives the session, the ledgers are computed instead of retyped, and the dossier gains schema version 2 (§7.4).</p><p data-lang="zh" lang="zh-CN"><strong>规划中（#24）。</strong>问卷将搬进仪表盘，以记录的形式保存：问题、轮次、回答、处置、事实和认可。进行中的工作不会随会话结束而丢失，账目由系统计算而不必重新录入，档案也将升级到 Schema 第 2 版（§7.4）。</p></div>
 
       <h4><span data-lang="en">The FactoryPlan</span><span data-lang="zh" lang="zh-CN">FactoryPlan</span></h4>
       <p data-lang="en">The Agent writes the plan from the dossier. A minimal plan looks like this:</p>
@@ -444,8 +462,9 @@ p{max-width:79ch;margin:0 0 15px}
         <li><b>交付：</b>capability 与终结（finalization）。</li>
         <li><b>缺口：</b>每一个尚未解决的假设，逐条列出。</li>
       </ul>
-      <p data-lang="en"><b>Two confirmations, then the first write.</b> The Agent shows the complete plan and waits for confirmation before it runs <code>badger propose</code>. That command is read-only: it returns the normalized Protocol, candidates, blockers, warnings, and the plan hash. After a separate confirmation of the proposal, <code>badger init --confirm</code> makes the first write, a <code>CreatorState</code> with status <code>draft</code> that is bound to the plan hash. A stale proposal is rejected.</p>
-      <p data-lang="zh" lang="zh-CN"><b>两次确认，然后第一次写入。</b>Agent 先展示完整计划，得到确认后才运行 <code>badger propose</code>。这个命令只读，返回规范化的 Protocol、候选项、阻塞项、警告和计划哈希。对提案再单独确认后，<code>badger init --confirm</code> 才完成第一次写入：创建状态为 <code>draft</code>、绑定计划哈希的 <code>CreatorState</code>。过期的提案会被拒绝。</p>
+      <p data-lang="en"><b>Two confirmations, then the first write.</b> The Agent shows the complete plan and waits for confirmation before it runs <code>badger propose</code>. That command is read-only: it returns the normalized Protocol, candidates, blockers, warnings, and the plan hash. After a separate confirmation of the proposal, <code>badger init --confirm</code> makes the first write, a <code>CreatorState</code> with status <code>draft</code> that is bound to the plan hash.</p>
+      <p data-lang="zh" lang="zh-CN"><b>两次确认，然后第一次写入。</b>Agent 先展示完整计划，得到确认后才运行 <code>badger propose</code>。这个命令只读，返回规范化的 Protocol、候选项、阻塞项、警告和计划哈希。对提案再单独确认后，<code>badger init --confirm</code> 才完成第一次写入：创建状态为 <code>draft</code>、绑定计划哈希的 <code>CreatorState</code>。</p>
+      <div class="callout"><p data-lang="en"><strong>Known gap.</strong> Through the CLI, <code>init</code> rebuilds the proposal from the plan file as it is now, so a plan edited after <code>propose</code> still initializes, and it replaces any existing Creator state for the workflow. <code>generate</code> re-reads the plan file the same way. The planned kernel change binds both to the approved proposal (§7.7).</p><p data-lang="zh" lang="zh-CN"><strong>已知缺口。</strong>通过 CLI 执行时，<code>init</code> 按计划文件的当前内容重新生成提案，所以在 <code>propose</code> 之后改过的计划照样能初始化，而且它会直接替换该工作流已有的 Creator 状态。<code>generate</code> 也同样重新读取计划文件。规划中的内核改动会把两者都绑定到已批准的提案（§7.7）。</p></div>
 
       <h3 id="build-authoring"><span data-lang="en">3.3 Phase 2: author the content</span><span data-lang="zh" lang="zh-CN">3.3 第 2 阶段：创作内容</span></h3>
       <p data-lang="en"><code>badger generate</code> writes the scaffold, which is the full Auto zone with <code>AUTHORING PENDING</code> placeholders in the Authored zone, and opens an authoring session in <code>.badger/authoring/&lt;name&gt;/</code>. A scaffold cannot be used as a package. Six <b>authoring lanes</b> must first fill the Authored zone, in this dependency order:</p>
@@ -497,6 +516,7 @@ p{max-width:79ch;margin:0 0 15px}
       <p data-lang="en"><code>publish --confirm</code> copies only an approved, current-hash package to <code>.badger/published/&lt;name&gt;/</code>. <code>distribute --confirm</code> is a preview: it lists where each file would go and copies nothing.</p>
       <p data-lang="zh" lang="zh-CN"><code>publish --confirm</code> 只会把已批准、且哈希为当前值的软件包复制到 <code>.badger/published/&lt;name&gt;/</code>。<code>distribute --confirm</code> 只是预览：列出每个文件将去往何处，不复制任何文件。</p>
       <div class="callout"><p data-lang="en"><strong>Example.</strong> Package <code>H1</code> passes eval and is approved. You then edit one Node's Guidance, so the package becomes <code>H2</code>. The eval, review, and approval of <code>H1</code> no longer count, and publication stays blocked until they are rerun for <code>H2</code>. A successful Run never makes a package publishable either, because Run evidence and release evidence are separate.</p><p data-lang="zh" lang="zh-CN"><strong>例子：</strong>软件包 <code>H1</code> 通过评估并获批准；之后你修改了某个 Node 的 Guidance，软件包变成 <code>H2</code>。<code>H1</code> 的评估、审查和批准都不再有效，在为 <code>H2</code> 重新执行之前，发布一直被阻止。一次成功的 Run 也不会让软件包变成可发布——Run 证据与发布证据是分开的。</p></div>
+      <div class="planned"><p data-lang="en"><strong>Planned (#24).</strong> In the service, the signed-in Reviewer approves instead of a typed <code>--reviewer</code> name, and is refused if they accepted any authoring-lane result for that version. Each evaluation report is kept with its package hash rather than overwriting the last one (§7.2, §7.3).</p><p data-lang="zh" lang="zh-CN"><strong>规划中（#24）。</strong>在服务中，由已登录的审查者批准，而不是输入一个 <code>--reviewer</code> 名字；如果此人接受过该版本任何创作 lane 的结果，批准会被拒绝。每份评估报告都连同其软件包哈希保留，不再覆盖上一份（§7.2、§7.3）。</p></div>
 
       <h3 id="build-commands"><span data-lang="en">3.5 Command walkthrough</span><span data-lang="zh" lang="zh-CN">3.5 命令演练</span></h3>
       <p data-lang="en">Practice in a disposable project, because Badger writes only inside it. In a repository checkout, run <code>npm run build</code> first and replace <code>badger</code> with <code>node bin/badger.js</code>.</p>
@@ -637,6 +657,7 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
       </table></div>
       <p data-lang="en">Choose the Run location with <code>BADGER_RUN_ROOT</code> or <code>--run-root</code> for a manual location, where the host owns the directory, or with <code>--project &lt;dir&gt; --run-id &lt;id&gt;</code> for a standalone location at <code>&lt;project&gt;/.badger/runs/&lt;runId&gt;</code>. Library callers pass <code>{kind: "manual", runRoot}</code> or <code>{kind: "standalone", projectRoot, runId}</code>. Both locations behave identically. Inside, the Run's <code>.badger/</code> directory holds <code>run-state.json</code>, <code>pending-action.json</code>, the append-only <code>trajectory.jsonl</code>, <code>artifacts.json</code>, and <code>skill-snapshots/</code>, plus journal, lock, and checkpoint files when those are enabled. The scripts also keep a legacy state document, but it is only a rebuildable projection (<code>status --rebuild --confirm legacy-state</code>) and is never used for routing or recovery.</p>
       <p data-lang="zh" lang="zh-CN">Run 的位置有两种：用 <code>BADGER_RUN_ROOT</code> 或 <code>--run-root</code> 指定手动位置（目录由宿主管理），或用 <code>--project &lt;dir&gt; --run-id &lt;id&gt;</code> 指定独立位置 <code>&lt;project&gt;/.badger/runs/&lt;runId&gt;</code>。库调用方传入 <code>{kind: "manual", runRoot}</code> 或 <code>{kind: "standalone", projectRoot, runId}</code>。两种位置的行为完全相同。Run 的 <code>.badger/</code> 目录包含 <code>run-state.json</code>、<code>pending-action.json</code>、只追加的 <code>trajectory.jsonl</code>、<code>artifacts.json</code> 和 <code>skill-snapshots/</code>；启用相应能力时还有日志、锁和检查点文件。脚本还会维护一份旧版状态文档，但它只是可重建的投影（<code>status --rebuild --confirm legacy-state</code>），从不用于路由或恢复。</p>
+      <div class="planned"><p data-lang="en"><strong>Planned (#24).</strong> Packages gain an MCP mode: the local Badger MCP drives the Run with the same runtime, reports each committed step to the service, and delivers Run gate answers given in the dashboard with the signed-in person's attestation. These scripts stay for hosts without MCP (§7.5).</p><p data-lang="zh" lang="zh-CN"><strong>规划中（#24）。</strong>软件包将增加 MCP 模式：本地 Badger MCP 用同一个运行时驱动 Run，把每个已提交的步骤上报给服务，并把在仪表盘中给出的 Run 门槛回答连同已登录者的身份证明交给运行时。这些脚本继续服务于不支持 MCP 的宿主（§7.5）。</p></div>
     </section>
 
     <section class="section" id="codebase">
@@ -667,6 +688,7 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
       </table></div>
       <p data-lang="en">The public entry points are the package root, <code>/engine</code>, <code>/workflow-runtime</code> (one constructor and its four operations), <code>/skill-runtime</code>, and <code>/cli</code>. Everything else, including the storage helpers, is internal.</p>
       <p data-lang="zh" lang="zh-CN">公开入口：包根路径、<code>/engine</code>、<code>/workflow-runtime</code>（一个构造函数及其四个操作）、<code>/skill-runtime</code> 和 <code>/cli</code>。其余部分（包括存储辅助模块）都是内部实现。</p>
+      <div class="planned"><p data-lang="en"><strong>Planned (#24).</strong> The repository becomes npm workspaces: <code>kernel</code> holds everything in this section, beside <code>server</code>, <code>web</code>, <code>mcp</code>, and <code>hosts</code> (§7.1). The kernel keeps its published name, CLI, and exports.</p><p data-lang="zh" lang="zh-CN"><strong>规划中（#24）。</strong>仓库将拆成 npm workspaces：本节的全部内容归入 <code>kernel</code>，与 <code>server</code>、<code>web</code>、<code>mcp</code> 和 <code>hosts</code> 并列（§7.1）。内核保留现有的发布名称、CLI 和导出。</p></div>
 
       <h3 id="code-runtime"><span data-lang="en">5.2 Inside WorkflowRuntime</span><span data-lang="zh" lang="zh-CN">5.2 WorkflowRuntime 内部</span></h3>
       <figure class="diagram-card">
@@ -772,8 +794,152 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
       </table></div>
     </section>
 
+    <section class="section" id="service">
+      <p class="section-number"><span data-lang="en">SECTION 07 · PLANNED</span><span data-lang="zh" lang="zh-CN">第 07 节 · 规划中</span></p>
+      <h2><span data-lang="en">Planned: Badger as a collaborative service</span><span data-lang="zh" lang="zh-CN">规划中：作为协作服务的 Badger</span></h2>
+      <p class="lede" data-lang="en">Everything in this section is specified in <a href="https://github.com/realityjunky/Badger/issues/24">issue #24</a> and is not built yet. Badger is to become a service with a web dashboard and its own MCP server, so that the field experts, engineers, and reviewers of one organization can build and run workflows together. The kernel described in §1–§6 stays deterministic and hash-bound, and the CLI keeps working on local files.</p>
+      <p class="lede" data-lang="zh" lang="zh-CN">本节内容均来自 <a href="https://github.com/realityjunky/Badger/issues/24">issue #24</a> 的规格，尚未实现。Badger 将成为一个带 Web 仪表盘和自有 MCP 服务器的服务，让同一组织里的领域专家、工程师和审查者一起构建并运行工作流。§1–§6 描述的内核仍然是确定性的、绑定哈希的，CLI 也继续基于本地文件工作。</p>
+
+      <h3 id="service-why"><span data-lang="en">7.1 Why a service, and what it adds</span><span data-lang="zh" lang="zh-CN">7.1 为什么需要服务，它带来什么</span></h3>
+      <p data-lang="en">The first real workflow, Primer Designer over a field expert's three Skills, paused at the questionnaire because the command-line flow assumes one person working with one Agent:</p>
+      <p data-lang="zh" lang="zh-CN">第一个真实工作流——基于一位领域专家三个 Skill 的 Primer Designer——在问卷阶段暂停了，因为命令行流程默认只有一个人和一个 Agent：</p>
+      <ul class="plain-list" data-lang="en">
+        <li><b>Experts can't take part.</b> The questionnaire is a chat between one Agent and one person, who relays the questions and retypes the answers.</li>
+        <li><b>Work in progress is lost.</b> Answers and the five ledgers live only in the conversation until <code>init</code>.</li>
+        <li><b>Nothing records who did what.</b> Confirmations are typed commands, the reviewer is a free-text name, and when two people write the same Creator state, the second silently overwrites the first.</li>
+        <li><b>Approvals don't hold.</b> <code>init</code> and <code>generate</code> re-read the plan file (§3.2).</li>
+        <li><b>Runs are invisible.</b> They run on users' own machines, and decision gates accept whatever reviewer the caller claims to be.</li>
+        <li><b>No history and no organizational sign-in.</b> Each evaluation report overwrites the last, and Badger cannot use the organization's existing sign-in.</li>
+      </ul>
+      <ul class="plain-list" data-lang="zh" lang="zh-CN">
+        <li><b>专家无法直接参与。</b>问卷是一个 Agent 与一个人之间的对话，由这个人转述问题，再重新录入回答。</li>
+        <li><b>进行中的工作会丢失。</b>在 <code>init</code> 之前，回答和五类账目只存在于对话中。</li>
+        <li><b>没有“谁做了什么”的记录。</b>确认只是有人输入的命令，审查者只是随意填写的名字；两个人写同一份 Creator 状态时，后写的会悄悄覆盖先写的。</li>
+        <li><b>批准不牢靠。</b><code>init</code> 和 <code>generate</code> 会重新读取计划文件（§3.2）。</li>
+        <li><b>Run 不可见。</b>Run 在用户自己的机器上执行，决策门槛接受调用方自称的任何审查者。</li>
+        <li><b>没有历史，也不能用组织登录。</b>每份评估报告都覆盖上一份；Badger 也无法使用组织现有的登录体系。</li>
+      </ul>
+      <figure class="diagram-card">
+        <div class="mermaid" data-diagram-id="service" data-drag-scroll></div>
+        <figcaption><span data-lang="en">Diagram 7.1 — People work in the dashboard. Agents connect through a local Badger MCP, so Runs execute where the tools are. The service keeps every record and posts reminders to team chats.</span><span data-lang="zh" lang="zh-CN">图 7.1 — 人在仪表盘中工作；Agent 通过本地 Badger MCP 接入，Run 在工具所在的机器上执行。服务保存所有记录，并向团队群发送提醒。</span></figcaption>
+      </figure>
+      <p data-lang="en">One container image runs in two roles. The <b>server</b> serves the dashboard, the API, and a live event stream. The <b>worker</b> takes jobs from a queue: kernel transitions, evaluations, and notification delivery. Postgres&nbsp;17 holds the records in its own container, and stored files are content-addressed by SHA-256. Each workflow version gets its own kernel workspace, built from its pinned Skill versions. A local single-user mode runs on loopback with an embedded database. The repository becomes npm workspaces: <code>kernel</code> (today's code), <code>server</code>, <code>web</code>, <code>mcp</code>, and <code>hosts</code>, an installer for Agent hosts.</p>
+      <p data-lang="zh" lang="zh-CN">同一个容器镜像以两种角色运行：<b>server</b> 提供仪表盘、API 和实时事件流；<b>worker</b> 从队列中领取作业，执行内核转换、评估和通知投递。Postgres&nbsp;17 在独立容器中保存所有记录，存储的文件按 SHA-256 内容寻址。每个工作流版本都有自己的内核工作区，由其固定的 Skill 版本构建。本地单用户模式只监听回环地址，使用内嵌数据库。仓库将拆成 npm workspaces：<code>kernel</code>（现有代码）、<code>server</code>、<code>web</code>、<code>mcp</code>，以及为 Agent 宿主安装软件包的 <code>hosts</code>。</p>
+      <p data-lang="en"><b>Delivery.</b> #24 is split into 48 sub-issues, #25–#72, implemented in <a href="https://github.com/realityjunky/Badger/issues/24#issuecomment-6437175471">the order posted on #24</a>, with the kernel changes first (§7.7). The first deployment is an app on the organization's AI platform, using its sign-in; other companies deploy the same images with their own identity provider. Resuming the Primer Designer test in the dashboard is the acceptance case (<a href="handoffs/primer-designer-phase1-2026-10-27.md">handoff</a>).</p>
+      <p data-lang="zh" lang="zh-CN"><b>交付。</b>#24 已拆成 48 个子 issue（#25–#72），按<a href="https://github.com/realityjunky/Badger/issues/24#issuecomment-6437175471"> #24 上发布的顺序</a>实施，内核改动排在最前（§7.7）。首次部署是组织 AI 平台上的一个应用，使用平台的登录；其他公司用同样的镜像，接入自己的身份提供方。在仪表盘中恢复 Primer Designer 测试是验收用例（<a href="handoffs/primer-designer-phase1-2026-10-27.md">交接文档</a>）。</p>
+      <p data-lang="en"><b>Not in the first version.</b> Several organizations in one deployment, a remote MCP endpoint, a server-side drafting runner, Badger-managed executors and offline Runs, scenario evaluations with judges, channels beyond the in-app inbox and WeCom group robots, and importing existing local projects.</p>
+      <p data-lang="zh" lang="zh-CN"><b>第一版不包括。</b>一个部署承载多个组织、远程 MCP 端点、服务端起草执行器、由 Badger 管理的执行器与离线 Run、带评审模型的场景评估、应用内收件箱和企业微信群机器人之外的通知渠道，以及导入现有的本地项目。</p>
+
+      <h3 id="service-roles"><span data-lang="en">7.2 People, roles, and sign-in</span><span data-lang="zh" lang="zh-CN">7.2 人员、角色与登录</span></h3>
+      <p data-lang="en">Badger authenticates outside and authorizes inside. An identity adapter proves who someone is: the AI platform's session, OpenID Connect, headers from a trusted proxy, or loopback in local mode. Only Badger decides what they may do, so a signed-in person has no permissions until someone binds them to a role. Administrators and Group leads bind people by email; a binding takes effect at the person's first sign-in and from then on follows the provider's issuer and subject. When the identity provider is unreachable, Badger refuses instead of guessing.</p>
+      <p data-lang="zh" lang="zh-CN">Badger 的原则是“身份在外部认证，权限在内部授权”。身份适配器负责证明一个人是谁：AI 平台的会话、OpenID Connect、可信代理传来的请求头，或本地模式下的回环地址。能做什么只由 Badger 决定，所以登录后的人在被绑定到角色之前没有任何权限。管理员和组长按邮箱绑定人员；绑定在此人首次登录时生效，此后跟随身份提供方的 issuer 和 subject。身份提供方不可达时，Badger 拒绝访问，而不是猜测。</p>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Scope</span><span data-lang="zh" lang="zh-CN">范围</span></th><th><span data-lang="en">Role</span><span data-lang="zh" lang="zh-CN">角色</span></th><th><span data-lang="en">Responsibility</span><span data-lang="zh" lang="zh-CN">职责</span></th></tr></thead>
+        <tbody>
+          <tr><td><span data-lang="en">Organization</span><span data-lang="zh" lang="zh-CN">组织</span></td><td><span data-lang="en">Administrator</span><span data-lang="zh" lang="zh-CN">Administrator（管理员）</span></td><td><span data-lang="en">Everything; overrides need a recorded reason.</span><span data-lang="zh" lang="zh-CN">全部权限；越权操作必须记录理由。</span></td></tr>
+          <tr><td><span data-lang="en">Organization</span><span data-lang="zh" lang="zh-CN">组织</span></td><td><span data-lang="en">Auditor</span><span data-lang="zh" lang="zh-CN">Auditor（审计员）</span></td><td><span data-lang="en">Reads everything, including the audit log.</span><span data-lang="zh" lang="zh-CN">可读取一切，包括审计日志。</span></td></tr>
+          <tr><td><span data-lang="en">Group</span><span data-lang="zh" lang="zh-CN">组</span></td><td><span data-lang="en">Group lead</span><span data-lang="zh" lang="zh-CN">Group lead（组长）</span></td><td><span data-lang="en">Manages the group's members, bindings, workflows, and Skills.</span><span data-lang="zh" lang="zh-CN">管理组内的成员、绑定、工作流和 Skill。</span></td></tr>
+          <tr><td><span data-lang="en">Group</span><span data-lang="zh" lang="zh-CN">组</span></td><td><span data-lang="en">Member</span><span data-lang="zh" lang="zh-CN">Member（成员）</span></td><td><span data-lang="en">Reads the group's Skills and workflows.</span><span data-lang="zh" lang="zh-CN">读取组内的 Skill 和工作流。</span></td></tr>
+          <tr><td><span data-lang="en">Workflow</span><span data-lang="zh" lang="zh-CN">工作流</span></td><td><span data-lang="en">Workflow owner</span><span data-lang="zh" lang="zh-CN">Workflow owner（工作流负责人）</span></td><td><span data-lang="en">Assigns workflow roles; answers the questions assigned to the owner; approves the dossier, plan, and proposal; publishes.</span><span data-lang="zh" lang="zh-CN">分配工作流角色；回答指派给负责人的问题；批准档案、计划和提案；发布。</span></td></tr>
+          <tr><td><span data-lang="en">Workflow</span><span data-lang="zh" lang="zh-CN">工作流</span></td><td><span data-lang="en">Engineer</span><span data-lang="zh" lang="zh-CN">Engineer（工程师）</span></td><td><span data-lang="en">Source study, questions, resolutions, fact confirmation, drafts, initialization, generation, authoring, and evaluation.</span><span data-lang="zh" lang="zh-CN">源文件研读、提问、处置、事实确认、草稿、初始化、生成、创作和评估。</span></td></tr>
+          <tr><td><span data-lang="en">Workflow</span><span data-lang="zh" lang="zh-CN">工作流</span></td><td><span data-lang="en">Field expert</span><span data-lang="zh" lang="zh-CN">Field expert（领域专家）</span></td><td><span data-lang="en">Uploads Skill versions; answers; comments; raises concerns; acknowledges or disputes restatements of their answers.</span><span data-lang="zh" lang="zh-CN">上传 Skill 版本；回答；评论；提出关切；认可或质疑对自己回答的重述。</span></td></tr>
+          <tr><td><span data-lang="en">Workflow</span><span data-lang="zh" lang="zh-CN">工作流</span></td><td><span data-lang="en">Reviewer</span><span data-lang="zh" lang="zh-CN">Reviewer（审查者）</span></td><td><span data-lang="en">Approves a package version they did not author.</span><span data-lang="zh" lang="zh-CN">批准不是自己创作的软件包版本。</span></td></tr>
+          <tr><td><span data-lang="en">Workflow</span><span data-lang="zh" lang="zh-CN">工作流</span></td><td><span data-lang="en">Operator</span><span data-lang="zh" lang="zh-CN">Operator（运行操作员）</span></td><td><span data-lang="en">Runs published versions, answers the Run gates assigned to Operators, and recovers Runs.</span><span data-lang="zh" lang="zh-CN">运行已发布的版本，回答指派给 Operator 的 Run 门槛，并恢复 Run。</span></td></tr>
+          <tr><td><span data-lang="en">Workflow</span><span data-lang="zh" lang="zh-CN">工作流</span></td><td><span data-lang="en">Observer</span><span data-lang="zh" lang="zh-CN">Observer（观察者）</span></td><td><span data-lang="en">Read-only.</span><span data-lang="zh" lang="zh-CN">只读。</span></td></tr>
+        </tbody>
+      </table></div>
+      <p data-lang="en">Bindings are additive, and a group's bindings are inherited by its nested groups. Three rules separate duties: a package version's Reviewer must not have accepted any authoring-lane result for that version; only the expert who answered may acknowledge a restatement; and personal access tokens, which Agents and the CLI use, never perform an action reserved for people. Every request is checked on the server, and every write is audited with its actor, its channel, and the hashes before and after.</p>
+      <p data-lang="zh" lang="zh-CN">绑定是叠加的，组的绑定会向下继承到子组。职责分离有三条规则：某个软件包版本的审查者，不能接受过该版本任何创作 lane 的结果；只有作答的专家才能认可对其回答的重述；Agent 和 CLI 使用的个人访问令牌，永远不能执行留给人的操作。每个请求都在服务端校验，每次写入都连同执行者、渠道以及前后的哈希一起记入审计日志。</p>
+
+      <h3 id="service-stages"><span data-lang="en">7.3 Stages and gates</span><span data-lang="zh" lang="zh-CN">7.3 阶段与门槛</span></h3>
+      <p data-lang="en">In the dashboard, the three Creator phases of §3 become eight stages on each workflow version's stage track. A gate is previewed first. A signed-in person then confirms it against the exact hashes shown, and the commit, which quotes the preview's confirmation hash, takes effect only once. When a record that a later stage bound to changes, that stage is invalidated and its people are told: a new Skill version flags the facts whose evidence changed, a changed fact supersedes the approved dossier, and a changed plan invalidates the proposal. Published versions stay published.</p>
+      <p data-lang="zh" lang="zh-CN">在仪表盘中，§3 的三个 Creator 阶段变成每个工作流版本阶段轨道上的八个阶段。门槛先预览，再由已登录的人对照显示的确切哈希进行确认；提交时引用预览给出的确认哈希，并且只生效一次。后续阶段所绑定的记录一旦变化，该阶段就会失效，相关人员会收到通知：新的 Skill 版本会标记证据有变的事实，事实变更会取代已批准的档案，计划变更会使提案失效。已发布的版本保持发布状态。</p>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Stage</span><span data-lang="zh" lang="zh-CN">阶段</span></th><th><span data-lang="en">Who acts</span><span data-lang="zh" lang="zh-CN">谁来做</span></th><th><span data-lang="en">Gate</span><span data-lang="zh" lang="zh-CN">门槛</span></th></tr></thead>
+        <tbody>
+          <tr><td><span data-lang="en">Sources</span><span data-lang="zh" lang="zh-CN">来源</span></td><td><span data-lang="en">Engineer; experts upload Skill versions</span><span data-lang="zh" lang="zh-CN">工程师；专家上传 Skill 版本</span></td><td><span data-lang="en">The Engineer confirms the pinned Skill versions, and the source check passes.</span><span data-lang="zh" lang="zh-CN">工程师确认固定的 Skill 版本，且来源检查通过。</span></td></tr>
+          <tr><td><span data-lang="en">Source study</span><span data-lang="zh" lang="zh-CN">源文件研读</span></td><td><span data-lang="en">Engineer, with Agent jobs</span><span data-lang="zh" lang="zh-CN">工程师，借助 Agent 作业</span></td><td><span data-lang="en">Each pinned version is marked studied.</span><span data-lang="zh" lang="zh-CN">每个固定版本都标记为已研读。</span></td></tr>
+          <tr><td><span data-lang="en">Questionnaire</span><span data-lang="zh" lang="zh-CN">问卷</span></td><td><span data-lang="en">Engineer, Field experts, Workflow owner</span><span data-lang="zh" lang="zh-CN">工程师、领域专家、工作流负责人</span></td><td><span data-lang="en">Readiness has no blockers (§7.4).</span><span data-lang="zh" lang="zh-CN">就绪检查没有阻塞项（§7.4）。</span></td></tr>
+          <tr><td><span data-lang="en">Dossier</span><span data-lang="zh" lang="zh-CN">档案</span></td><td><span data-lang="en">The Engineer composes it</span><span data-lang="zh" lang="zh-CN">工程师编制</span></td><td><span data-lang="en">The Workflow owner approves.</span><span data-lang="zh" lang="zh-CN">工作流负责人批准。</span></td></tr>
+          <tr><td><span data-lang="en">Plan and proposal</span><span data-lang="zh" lang="zh-CN">计划与提案</span></td><td><span data-lang="en">Engineer</span><span data-lang="zh" lang="zh-CN">工程师</span></td><td><span data-lang="en">The Workflow owner approves the plan, then the proposal.</span><span data-lang="zh" lang="zh-CN">工作流负责人先批准计划，再批准提案。</span></td></tr>
+          <tr><td><span data-lang="en">Package</span><span data-lang="zh" lang="zh-CN">软件包</span></td><td><span data-lang="en">Engineer, with Agent jobs</span><span data-lang="zh" lang="zh-CN">工程师，借助 Agent 作业</span></td><td><span data-lang="en">Each lane result is accepted; assembly needs every lane current.</span><span data-lang="zh" lang="zh-CN">每个 lane 的结果都已被接受；组装要求所有 lane 都是当前的。</span></td></tr>
+          <tr><td><span data-lang="en">Evaluation</span><span data-lang="zh" lang="zh-CN">评估</span></td><td><span data-lang="en">The Engineer starts it</span><span data-lang="zh" lang="zh-CN">工程师发起</span></td><td><span data-lang="en">A passing report for the current package hash.</span><span data-lang="zh" lang="zh-CN">当前软件包哈希有一份通过的报告。</span></td></tr>
+          <tr><td><span data-lang="en">Review and publication</span><span data-lang="zh" lang="zh-CN">审查与发布</span></td><td><span data-lang="en">Reviewer, then Workflow owner</span><span data-lang="zh" lang="zh-CN">审查者，然后是工作流负责人</span></td><td><span data-lang="en">Independent approval, then publication.</span><span data-lang="zh" lang="zh-CN">独立批准，然后发布。</span></td></tr>
+        </tbody>
+      </table></div>
+      <p data-lang="en"><b>Agents draft; people sign off.</b> Connected Agents do the drafting through jobs: source study, questions and follow-ups, restatements and translations, drafts of the dossier and plan, authoring lanes in Wave order, and review votes. Each job carries a context bundle bound to hashes, an output schema, and a lease; an expired lease returns it to the queue, and changed inputs cancel it. A job's result is only a draft, and a person's acceptance is the only way it enters the records, the dossier, the plan, or the package. Evaluation runs as a sandboxed worker job, and every report is kept with its package hash.</p>
+      <p data-lang="zh" lang="zh-CN"><b>Agent 起草，人来签字。</b>接入的 Agent 通过作业完成起草：源文件研读、问题与追问、重述与翻译、档案和计划的草稿、按 Wave 顺序进行的创作 lane，以及审查投票。每个作业都带有绑定哈希的上下文包、输出 Schema 和租约；租约过期后作业回到队列，输入变化则作业取消。作业结果只是草稿，只有经人接受，才能进入记录、档案、计划或软件包。评估作为沙箱中的 worker 作业运行，每份报告都连同其软件包哈希保留下来。</p>
+
+      <h3 id="service-questionnaire"><span data-lang="en">7.4 The questionnaire as records</span><span data-lang="zh" lang="zh-CN">7.4 以记录形式保存的问卷</span></h3>
+      <p data-lang="en">The questionnaire of §3.2 moves out of the chat and into records, one questionnaire per workflow version. The Engineer drafts questions, each with a topic, targets, a rationale, evidence links into a Skill version, assignees, and a priority, and publishes them in rounds. A round has no size limit unless the workflow sets one. Experts answer from My work in any language, with drafts saved as they type and every revision kept, and may raise concerns that nobody asked about.</p>
+      <p data-lang="zh" lang="zh-CN">§3.2 的问卷将从对话中移出，变成记录，每个工作流版本一份。工程师起草问题——每个问题有主题、对象、理由、指向某个 Skill 版本的证据链接、指派人和优先级——并按轮次发布。除非工作流另行设定，一轮问题没有数量上限。专家在“我的工作”页面作答，可以使用任何语言，草稿随输入自动保存，每个修订都会保留；专家也可以主动提出没人问到的关切。</p>
+      <figure class="diagram-card">
+        <div class="mermaid" data-diagram-id="question" data-drag-scroll></div>
+        <figcaption><span data-lang="en">Diagram 7.2 — The life of one question. Only people publish, confirm, acknowledge, or dispute; a dispute or a changed answer sends the question back.</span><span data-lang="zh" lang="zh-CN">图 7.2 — 一个问题的生命周期。发布、确认、认可和质疑都只能由人完成；质疑或回答变动会让问题退回。</span></figcaption>
+      </figure>
+      <p data-lang="en">Confirming an answer restates it as one or more facts in the workflow's locale, linked to the answer revisions it came from. The expert who answered acknowledges or disputes each restatement, and a dispute reopens the question. A deferral needs a reason: a question internal to one Skill moves to that Skill's backlog, and deferred questions never block the dossier. Agent inferences stay drafts until a confirming question settles them.</p>
+      <p data-lang="zh" lang="zh-CN">确认一个回答，就是把它重述为工作流语言区域下的一条或多条事实，并链接到其来源的回答修订。作答的专家认可或质疑每条重述，质疑会让问题重新打开。延后必须给出理由：只涉及某个 Skill 内部的问题转入该 Skill 的待办，延后的问题从不阻塞档案。Agent 的推断在被某个确认性问题解决之前，一直只是草稿。</p>
+      <p data-lang="en">The five ledgers of §3.2 become read models over these records, so they survive sessions and can show what changed since any round. Readiness is computed per dossier topic, plus interfaces, and names its blockers: unresolved questions, unconfirmed inferences, unresolved assumptions, pending acknowledgements, and disputes. Composing a dossier snapshots the ledger as canonical JSON with its hash. Schema version 2 adds an <code>interfaces</code> topic for the data contracts between Nodes, dispositions for deferred questions, provenance for each fact, and a single goal shared with the plan; version 1 is retired. A new workflow version copies the facts and resolutions and reopens only those whose evidence changed.</p>
+      <p data-lang="zh" lang="zh-CN">§3.2 的五类账目变成基于这些记录的读模型，因此不会随会话结束而丢失，并且可以显示自任意一轮以来的变化。就绪检查按档案主题（另加接口）计算，并列出阻塞项：未解决的问题、未确认的推断、未解决的假设、待认可的重述，以及质疑。编制档案会把账目快照为规范化 JSON 及其哈希。Schema 第 2 版新增描述 Node 之间数据契约的 <code>interfaces</code> 主题、延后问题的处置、每条事实的来源记录，以及与计划共用的唯一目标；第 1 版停用。新的工作流版本会复制已有的事实和处置，只重新打开证据有变的那些。</p>
+
+      <h3 id="service-mcp"><span data-lang="en">7.5 Agents and Runs through the Badger MCP</span><span data-lang="zh" lang="zh-CN">7.5 通过 Badger MCP 接入 Agent 与 Run</span></h3>
+      <p data-lang="en">The Badger MCP runs locally over stdio. The Agent host launches it with the deployment's URL and a personal access token from the environment, and it offers only the tools that the person's roles and the token's scopes allow, in three profiles:</p>
+      <p data-lang="zh" lang="zh-CN">Badger MCP 在本地通过 stdio 运行：Agent 宿主启动它，并通过环境变量提供部署地址和个人访问令牌。它只提供此人的角色和令牌范围所允许的工具，分为三个 profile：</p>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Profile</th><th><span data-lang="en">For</span><span data-lang="zh" lang="zh-CN">使用者</span></th><th><span data-lang="en">Tools</span><span data-lang="zh" lang="zh-CN">工具</span></th></tr></thead>
+        <tbody>
+          <tr><td><code>engineer</code></td><td><span data-lang="en">An Engineer's Agent</span><span data-lang="zh" lang="zh-CN">工程师的 Agent</span></td><td><span data-lang="en">Inbox; claim, submit, and release drafting jobs; the questionnaire, ledger, and readiness; dossier and proposal previews; test Runs; evaluation status.</span><span data-lang="zh" lang="zh-CN">收件箱；领取、提交和释放起草作业；问卷、账目与就绪检查；档案与提案预览；测试 Run；评估状态。</span></td></tr>
+          <tr><td><code>expert</code></td><td><span data-lang="en">A Field expert in WorkBuddy or a CLI Agent</span><span data-lang="zh" lang="zh-CN">在 WorkBuddy 或 CLI Agent 中的领域专家</span></td><td><span data-lang="en">Inbox; my questions; save and submit answers; comment; raise a concern; upload a Skill version from a local folder.</span><span data-lang="zh" lang="zh-CN">收件箱；我的问题；保存并提交回答；评论；提出关切；从本地文件夹上传 Skill 版本。</span></td></tr>
+          <tr><td><code>operator</code></td><td><span data-lang="en">Whoever runs published workflows</span><span data-lang="zh" lang="zh-CN">运行已发布工作流的人</span></td><td><span data-lang="en">Inbox; list and install workflows; start, next, submit, status, and recover a Run; my Runs.</span><span data-lang="zh" lang="zh-CN">收件箱；列出并安装工作流；对 Run 执行 start、next、submit、status 和 recover；我的 Run。</span></td></tr>
+        </tbody>
+      </table></div>
+      <p data-lang="en">Actions reserved for people are not tools: confirming a fact, acknowledging or disputing a restatement, approving, publishing, and answering a Run gate. When one comes up, the tool returns a link to the dashboard.</p>
+      <p data-lang="zh" lang="zh-CN">留给人的操作不提供为工具：确认事实、认可或质疑重述、批准、发布，以及回答 Run 门槛。遇到这些操作时，工具返回一个仪表盘链接。</p>
+      <p data-lang="en">Runs execute where the tools are: a CLI Agent on a server, or WorkBuddy on a laptop. The local MCP embeds the same WorkflowRuntime that the package's script adapter bundles, owns the Run root, and enforces every check of §4.2. After each committed transition it mirrors the events, the pending action, the findings, and artifact receipts to the service, retrying from a queue in the Run root. Reporting never blocks the Run, and the Run root stays authoritative. When the runtime waits for a person, the service opens a gate and notifies the people the Node's policy names. They answer in the dashboard, the service attaches the signed-in person's attestation, and the MCP delivers the answer on the Agent's next call; the Agent never supplies a reviewer. The service flags a decision with no matching gate answer, a gap in the event sequence, and a package hash that differs from the published one.</p>
+      <p data-lang="zh" lang="zh-CN">Run 在工具所在的地方执行：服务器上的 CLI Agent，或笔记本上的 WorkBuddy。本地 MCP 内嵌与软件包脚本适配器相同的 WorkflowRuntime，管理 Run 根目录，并执行 §4.2 的全部检查。每次转换提交后，它把事件、待处理动作、findings 和产物回执同步到服务；没发出去的内容留在 Run 根目录的队列里，下次调用时重试。上报从不阻塞 Run，Run 根目录始终是权威记录。运行时需要人来决定时，服务开启一道门槛，并通知 Node 策略指定的人。他们在仪表盘中作答，服务附上已登录者的身份证明，MCP 在 Agent 下一次调用时把回答交给运行时；审查者从不由 Agent 提供。若出现没有对应门槛回答的决策、事件序列有缺口，或软件包哈希与已发布版本不同，服务都会标记出来。</p>
+      <p data-lang="en">Generated packages gain an MCP mode that points the Agent to these Run tools; the scripts of §4.6 stay for hosts without MCP. A host installer writes published packages and the MCP configuration into Claude Code, Codex, or WorkBuddy, previewing every write with a digest before committing it.</p>
+      <p data-lang="zh" lang="zh-CN">生成的软件包将增加 MCP 模式，引导 Agent 使用这些 Run 工具；§4.6 的脚本继续服务于不支持 MCP 的宿主。宿主安装器把已发布的软件包和 MCP 配置写入 Claude Code、Codex 或 WorkBuddy，每次写入前都先用摘要预览。</p>
+
+      <h3 id="service-notify"><span data-lang="en">7.6 Notifications</span><span data-lang="zh" lang="zh-CN">7.6 通知</span></h3>
+      <p data-lang="en">Everyone gets an in-app inbox, whose items close by themselves when the thing they announce is done, such as a question answered or a gate closed. In the first version the worker also posts in each workflow team's WeCom group chat through a group robot, whether the action happened in the dashboard, through the Badger MCP, or in a Run.</p>
+      <p data-lang="zh" lang="zh-CN">每个人都有应用内收件箱；条目所通知的事项完成后（例如问题已回答、门槛已关闭），条目会自动关闭。第一版中，worker 还会通过群机器人在每个工作流团队的企业微信群里发消息，无论操作发生在仪表盘、Badger MCP 还是 Run 中。</p>
+      <ul class="plain-list" data-lang="en">
+        <li><b>Setup.</b> A Workflow owner pastes the robot's webhook URL and picks the chat's language; a Group lead may set a default robot for the group's workflows. Saving sends a test post. Anyone holding the URL can post to the chat, so it is stored encrypted, shown masked, and never logged.</li>
+        <li><b>Posts.</b> One post per action per chat, @mentioning each recipient by WeCom userid or mobile number. A post carries only the workflow's name, what is waiting, the counts, and a link. It never carries answers, Skill content, or Run artifacts, because every member of the chat sees it.</li>
+        <li><b>Delivery.</b> Posts are paced to the robot's rate limit, retried with backoff, and recorded in a delivery log. A failed channel never blocks a gate, because the in-app item stands.</li>
+        <li><b>Remind.</b> The person who requested an item, the Workflow owner, or an Administrator can nudge whoever it waits on, at most once per item per hour. Without a robot, Remind offers ready-to-paste text instead.</li>
+      </ul>
+      <ul class="plain-list" data-lang="zh" lang="zh-CN">
+        <li><b>设置。</b>工作流负责人粘贴群机器人的 webhook URL，并选择该群的语言；组长可以为组内工作流设置默认机器人。保存时会发送一条测试消息。拿到这个 URL 的人都能往群里发消息，所以它加密存储、遮蔽显示，且从不写入日志。</li>
+        <li><b>消息。</b>每个操作在每个群只发一条消息，按企业微信 userid 或手机号 @ 每位接收人。消息只包含工作流名称、等待处理的事项、数量和链接，从不包含回答、Skill 内容或 Run 产物，因为群里每个成员都能看到。</li>
+        <li><b>投递。</b>消息按机器人的频率限制排队发送，失败时退避重试，并记入投递日志。渠道失败从不阻塞门槛，因为应用内条目依然有效。</li>
+        <li><b>提醒。</b>事项的发起人、工作流负责人或管理员可以提醒被等待的人，每个事项每小时最多一次。没有机器人时，“提醒”改为提供可直接粘贴的文字。</li>
+      </ul>
+      <p data-lang="en">WeCom app messages to individuals, email, and the webhook bots of other chat tools come later, through the same notification port.</p>
+      <p data-lang="zh" lang="zh-CN">发给个人的企业微信应用消息、电子邮件，以及其他聊天工具的 webhook 机器人，将来都通过同一个通知端口接入。</p>
+
+      <h3 id="service-kernel"><span data-lang="en">7.7 Kernel changes that come first</span><span data-lang="zh" lang="zh-CN">7.7 先行的内核改动</span></h3>
+      <p data-lang="en">The service depends on these changes to the kernel of §1–§6, so they come first in the delivery order. The finding IDs refer to the <a href="handoffs/primer-designer-phase1-2026-10-27.md">Primer Designer handoff</a>.</p>
+      <p data-lang="zh" lang="zh-CN">服务依赖下列对 §1–§6 所述内核的改动，所以它们在交付顺序中排在最前。发现编号指 <a href="handoffs/primer-designer-phase1-2026-10-27.md">Primer Designer 交接文档</a>中的条目。</p>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Ticket</span><span data-lang="zh" lang="zh-CN">工单</span></th><th><span data-lang="en">Change</span><span data-lang="zh" lang="zh-CN">改动</span></th><th><span data-lang="en">Today</span><span data-lang="zh" lang="zh-CN">现状</span></th></tr></thead>
+        <tbody>
+          <tr><td><a href="https://github.com/realityjunky/Badger/issues/25">#25</a></td><td><span data-lang="en">Scope documents, ADRs, and glossary terms for the service (F23, F24).</span><span data-lang="zh" lang="zh-CN">服务的范围文档、ADR 和术语（F23、F24）。</span></td><td><span data-lang="en">The README and the release ledger list dashboards and platform integration as out of scope.</span><span data-lang="zh" lang="zh-CN">README 和发布清单把仪表盘与平台集成列为范围之外。</span></td></tr>
+          <tr><td><a href="https://github.com/realityjunky/Badger/issues/26">#26</a></td><td><span data-lang="en">npm workspaces; the kernel keeps its published name, CLI, and exports.</span><span data-lang="zh" lang="zh-CN">npm workspaces；内核保留现有的发布名称、CLI 和导出。</span></td><td><span data-lang="en">A single package (§5).</span><span data-lang="zh" lang="zh-CN">单一软件包（§5）。</span></td></tr>
+          <tr><td><a href="https://github.com/realityjunky/Badger/issues/27">#27</a></td><td><span data-lang="en"><code>init</code> binds to the approved proposal and replaces existing state only when the caller quotes its hash; <code>generate</code> needs confirmation and refuses plan drift; plans and proposals hash as canonical JSON (F1, F2, F7, F18).</span><span data-lang="zh" lang="zh-CN"><code>init</code> 绑定到已批准的提案，只有调用方给出现有状态的哈希时才替换它；<code>generate</code> 需要确认，并拒绝计划漂移；计划和提案按规范化 JSON 计算哈希（F1、F2、F7、F18）。</span></td><td><span data-lang="en">Both re-read the plan file, <code>init</code> replaces existing state, and the plan hash depends on key order (§3.2).</span><span data-lang="zh" lang="zh-CN">两者都会重新读取计划文件，<code>init</code> 会替换已有状态，计划哈希还取决于键的顺序（§3.2）。</span></td></tr>
+          <tr><td><a href="https://github.com/realityjunky/Badger/issues/28">#28</a></td><td><span data-lang="en">Source identity ignores a fixed list of operating-system and editor files; the inventory lists every file; scripts declare their side effects; source locations are confined; <code>candidates</code> becomes the source check (F5, F6, F11, F22).</span><span data-lang="zh" lang="zh-CN">来源身份忽略一份固定的操作系统与编辑器文件清单；清单列出每个文件；脚本声明副作用；来源位置受限；<code>candidates</code> 改称来源检查（F5、F6、F11、F22）。</span></td><td><span data-lang="en">The hash covers every file, stray ones included; the inventory lists only <code>SKILL.md</code>, references, and scripts; every script's side effect is <code>unknown</code>.</span><span data-lang="zh" lang="zh-CN">哈希覆盖所有文件，包括无关文件；清单只列 <code>SKILL.md</code>、参考资料和脚本；每个脚本的副作用都是 <code>unknown</code>。</span></td></tr>
+          <tr><td><a href="https://github.com/realityjunky/Badger/issues/29">#29</a></td><td><span data-lang="en">Semantic dossier version 2, and the questionnaire handoff as a read model shared by the service and the CLI (G1, G2, F15).</span><span data-lang="zh" lang="zh-CN">语义档案第 2 版，以及由服务和 CLI 共用读模型的问卷交接（G1、G2、F15）。</span></td><td><span data-lang="en">Version 1 has no interfaces topic and no way to defer a question, and the dossier binds only the plan's top-level goal.</span><span data-lang="zh" lang="zh-CN">第 1 版没有接口主题，也无法延后问题；档案只绑定计划顶层的 goal。</span></td></tr>
+          <tr><td><a href="https://github.com/realityjunky/Badger/issues/30">#30</a></td><td><span data-lang="en">Project-relative paths in Creator records (F4).</span><span data-lang="zh" lang="zh-CN">Creator 记录使用项目相对路径（F4）。</span></td><td><span data-lang="en">Records store absolute paths, so a moved project is refused.</span><span data-lang="zh" lang="zh-CN">记录保存绝对路径，项目一移动就会被拒绝。</span></td></tr>
+          <tr><td><a href="https://github.com/realityjunky/Badger/issues/31">#31</a></td><td><span data-lang="en">Artifacts outside the Run root, or above the 2&nbsp;MiB read cap, verified by receipt; an artifact can be required to come from the current Attempt (F9).</span><span data-lang="zh" lang="zh-CN">Run 根目录之外或超过 2&nbsp;MiB 读取上限的产物，通过回执校验；可要求产物必须来自当前 Attempt（F9）。</span></td><td><span data-lang="en">Artifacts must sit inside the Run root and are read whole, and nothing proves which Attempt wrote one.</span><span data-lang="zh" lang="zh-CN">产物必须位于 Run 根目录内并被整体读取，也无法证明产物由哪个 Attempt 写出。</span></td></tr>
+          <tr><td><a href="https://github.com/realityjunky/Badger/issues/32">#32</a></td><td><span data-lang="en">A Run registry and exported Run read models; lock ownership that survives host renames (F20, F21).</span><span data-lang="zh" lang="zh-CN">Run 注册表和导出的 Run 读模型；主机改名后锁的归属依然可识别（F20、F21）。</span></td><td><span data-lang="en">The public seam cannot list Runs, and a lock records its hostname.</span><span data-lang="zh" lang="zh-CN">公开接口无法列出 Run，锁记录的是主机名。</span></td></tr>
+          <tr><td><a href="https://github.com/realityjunky/Badger/issues/33">#33</a>, <a href="https://github.com/realityjunky/Badger/issues/34">#34</a></td><td><span data-lang="en">Packages bundle their source Skills, and generated instructions gain an MCP mode (F10).</span><span data-lang="zh" lang="zh-CN">软件包内置其源 Skill，生成的指令增加 MCP 模式（F10）。</span></td><td><span data-lang="en"><code>resolved-skills.json</code> records the build host's absolute Skill roots.</span><span data-lang="zh" lang="zh-CN"><code>resolved-skills.json</code> 记录构建主机上的 Skill 绝对路径。</span></td></tr>
+          <tr><td><a href="https://github.com/realityjunky/Badger/issues/35">#35</a></td><td><span data-lang="en">Run storage that works on Linux, macOS, and Windows.</span><span data-lang="zh" lang="zh-CN">Run 存储在 Linux、macOS 和 Windows 上都能工作。</span></td><td><span data-lang="en">It relies on POSIX rename and file-identity semantics.</span><span data-lang="zh" lang="zh-CN">依赖 POSIX 的 rename 与文件身份语义。</span></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
     <section class="section" id="sources">
-      <p class="section-number"><span data-lang="en">SECTION 07</span><span data-lang="zh" lang="zh-CN">第 07 节</span></p>
+      <p class="section-number"><span data-lang="en">SECTION 08</span><span data-lang="zh" lang="zh-CN">第 08 节</span></p>
       <h2><span data-lang="en">Sources</span><span data-lang="zh" lang="zh-CN">资料来源</span></h2>
       <div class="table-wrap fit"><table class="data-table">
         <thead><tr><th><span data-lang="en">Source</span><span data-lang="zh" lang="zh-CN">来源</span></th><th><span data-lang="en">Read it for</span><span data-lang="zh" lang="zh-CN">阅读目的</span></th></tr></thead>
@@ -784,6 +950,8 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
           <tr><td><a href="release-artifacts.md"><code>docs/release-artifacts.md</code></a></td><td><span data-lang="en">Release status, the generated inventory, and the release gate.</span><span data-lang="zh" lang="zh-CN">发布状态、生成清单和发布门槛。</span></td></tr>
           <tr><td><a href="workflow-runtime-certification.md"><code>docs/workflow-runtime-certification.md</code></a></td><td><span data-lang="en">What WorkflowRuntime certification proves.</span><span data-lang="zh" lang="zh-CN">WorkflowRuntime 认证证明了什么。</span></td></tr>
           <tr><td><a href="https://github.com/realityjunky/Badger-workflows/blob/af773444e66ae4d223883bccf9f0097b8177cddf/workflows/primer-designer-v1/plan.json"><code>primer-designer-v1/plan.json</code></a></td><td><span data-lang="en">The v1 Primer Designer contract shown in §2.4, at its last revision.</span><span data-lang="zh" lang="zh-CN">§2.4 展示的 v1 Primer Designer 契约（最后一个版本）。</span></td></tr>
+          <tr><td><a href="https://github.com/realityjunky/Badger/issues/24"><span data-lang="en">Issue #24</span><span data-lang="zh" lang="zh-CN">Issue #24</span></a></td><td><span data-lang="en">The specification summarized in §7: user stories, decisions, and the testing plan. Its comments give the implementation order.</span><span data-lang="zh" lang="zh-CN">§7 所概述的规格：用户故事、设计决定和测试方案；其评论给出了实施顺序。</span></td></tr>
+          <tr><td><a href="handoffs/primer-designer-phase1-2026-10-27.md"><code>docs/handoffs/primer-designer-phase1-2026-10-27.md</code></a></td><td><span data-lang="en">Where the Primer Designer test paused, and the findings F1–F25 and G1–G2 cited in §7.7.</span><span data-lang="zh" lang="zh-CN">Primer Designer 测试暂停在哪里，以及 §7.7 引用的发现 F1–F25 和 G1–G2。</span></td></tr>
         </tbody>
       </table></div>
       <p data-lang="en"><b>Related designs.</b> The <a href="https://agentskills.io/specification">Agent Skills specification</a> (portable packages); <a href="https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents">harnesses for long-running agents</a> (externalized progress and recovery); <a href="https://docs.langchain.com/oss/javascript/langgraph/persistence">LangGraph persistence</a> and <a href="https://docs.temporal.io/workflows">Temporal Workflows</a> (checkpoints and durable execution); agent <a href="https://openai.github.io/openai-agents-js/guides/guardrails">guardrails</a>, <a href="https://openai.github.io/openai-agents-js/guides/handoffs">handoffs</a>, and <a href="https://openai.github.io/openai-agents-js/guides/sessions">sessions</a>; and <a href="https://www.openpolicyagent.org/docs">Open Policy Agent</a> and <a href="https://backstage.io/docs/features/software-templates/">Backstage Software Templates</a> (policy separation and controlled generation).</p>
@@ -981,6 +1149,51 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
         '  classDef storage fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  classDef adapter fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
         '  class Caller adapter; class Public,Core,Continuation api; class Compile,Completion,Route,Decision,Artifact logic; class Commit,Store storage;'
+      ]),
+      service: diagramLines([
+        'flowchart LR',
+        '  subgraph Browser[People in the dashboard]',
+        '    direction TB',
+        '    Experts[Field experts] ~~~ Engineers[Engineers] ~~~ Owners[Workflow owners,<br/>Reviewers, Operators]',
+        '  end',
+        '  subgraph Hosts[Agents where the tools are]',
+        '    direction TB',
+        '    Agent[Agent host<br/>Claude Code, Codex, WorkBuddy] --> MCP[local Badger MCP<br/>embeds WorkflowRuntime] --> RunRoot[Run root<br/>stays authoritative]',
+        '  end',
+        '  Identity[Identity provider<br/>platform session, OIDC,<br/>or trusted proxy]',
+        '  subgraph Service[Badger service]',
+        '    direction TB',
+        '    Server[server<br/>dashboard, API, live events] --> Worker[worker · job queue<br/>kernel transitions, evaluations,<br/>inbox and WeCom notifications]',
+        '    Server --> Records[Postgres 17<br/>records + audit log]',
+        '    Worker --> Records',
+        '    Worker --> Files[stored files<br/>+ kernel workspaces]',
+        '  end',
+        '  Browser -->|answers, approvals,<br/>gate answers| Service',
+        '  Hosts -->|token: jobs, answers,<br/>Run events| Service',
+        '  Identity -->|proves who| Service',
+        '  classDef people fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
+        '  classDef svc fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
+        '  classDef store fill:#e7eef2,stroke:#19364b,color:#17202a;',
+        '  classDef outside fill:#eeeaf7,stroke:#67528d,color:#17202a;',
+        '  class Experts,Engineers,Owners,Agent people; class Server,Worker,MCP svc; class Records,Files,RunRoot store; class Identity outside;'
+      ]),
+      question: diagramLines([
+        'flowchart TB',
+        '  Draft[draft<br/>written by the Engineer] -->|published in a round| Open[open]',
+        '  Open -->|expert answers| Answered[answered]',
+        '  Answered -->|confirm| Confirmed[confirmed<br/>restated as facts]',
+        '  Answered -->|follow up| Child[followed up<br/>a child question opens]',
+        '  Answered -->|defer, with a reason| Deferred[deferred<br/>Skill backlog or out of scope]',
+        '  Answered -->|withdraw| Withdrawn[withdrawn]',
+        '  Confirmed -->|expert acknowledges| Fact[confirmed user fact]',
+        '  Confirmed -->|expert disputes| Open',
+        '  Confirmed -. answer or evidence changes .-> Recheck[needs re-confirmation]',
+        '  Recheck -->|resolve again| Answered',
+        '  classDef active fill:#eeeaf7,stroke:#67528d,color:#17202a;',
+        '  classDef settled fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
+        '  classDef closed fill:#e7eef2,stroke:#19364b,color:#17202a;',
+        '  classDef attention fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
+        '  class Draft,Open,Answered active; class Confirmed,Fact settled; class Child,Deferred,Withdrawn closed; class Recheck attention;'
       ])
     },
     zh: {
@@ -1156,6 +1369,51 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
         '  classDef storage fill:#e7eef2,stroke:#19364b,color:#17202a;',
         '  classDef adapter fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
         '  class Caller adapter; class Public,Core,Continuation api; class Compile,Completion,Route,Decision,Artifact logic; class Commit,Store storage;'
+      ]),
+      service: diagramLines([
+        'flowchart LR',
+        '  subgraph Browser[在仪表盘中工作的人]',
+        '    direction TB',
+        '    Experts[领域专家] ~~~ Engineers[工程师] ~~~ Owners[工作流负责人、<br/>审查者、运行操作员]',
+        '  end',
+        '  subgraph Hosts[工具所在机器上的 Agent]',
+        '    direction TB',
+        '    Agent[Agent 宿主<br/>Claude Code、Codex、WorkBuddy] --> MCP[本地 Badger MCP<br/>内嵌 WorkflowRuntime] --> RunRoot[Run 根目录<br/>始终是权威记录]',
+        '  end',
+        '  Identity[身份提供方<br/>平台会话、OIDC<br/>或可信代理]',
+        '  subgraph Service[Badger 服务]',
+        '    direction TB',
+        '    Server[server<br/>仪表盘、API、实时事件] --> Worker[worker · 作业队列<br/>内核转换、评估、<br/>收件箱与企业微信通知]',
+        '    Server --> Records[Postgres 17<br/>记录 + 审计日志]',
+        '    Worker --> Records',
+        '    Worker --> Files[存储的文件<br/>+ 内核工作区]',
+        '  end',
+        '  Browser -->|回答、批准、<br/>门槛回答| Service',
+        '  Hosts -->|令牌：作业、回答、<br/>Run 事件| Service',
+        '  Identity -->|证明身份| Service',
+        '  classDef people fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
+        '  classDef svc fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
+        '  classDef store fill:#e7eef2,stroke:#19364b,color:#17202a;',
+        '  classDef outside fill:#eeeaf7,stroke:#67528d,color:#17202a;',
+        '  class Experts,Engineers,Owners,Agent people; class Server,Worker,MCP svc; class Records,Files,RunRoot store; class Identity outside;'
+      ]),
+      question: diagramLines([
+        'flowchart TB',
+        '  Draft[草稿<br/>由工程师撰写] -->|按轮次发布| Open[已发布]',
+        '  Open -->|专家作答| Answered[已回答]',
+        '  Answered -->|确认| Confirmed[已确认<br/>重述为事实]',
+        '  Answered -->|追问| Child[已追问<br/>开启子问题]',
+        '  Answered -->|延后，需写明理由| Deferred[已延后<br/>转入 Skill 待办或范围之外]',
+        '  Answered -->|撤回| Withdrawn[已撤回]',
+        '  Confirmed -->|专家认可| Fact[用户确认的事实]',
+        '  Confirmed -->|专家质疑| Open',
+        '  Confirmed -. 回答或证据变化 .-> Recheck[需重新确认]',
+        '  Recheck -->|重新处置| Answered',
+        '  classDef active fill:#eeeaf7,stroke:#67528d,color:#17202a;',
+        '  classDef settled fill:#e6f2ef,stroke:#1e6b68,color:#17202a;',
+        '  classDef closed fill:#e7eef2,stroke:#19364b,color:#17202a;',
+        '  classDef attention fill:#f8e9dc,stroke:#b85f2d,color:#17202a;',
+        '  class Draft,Open,Answered active; class Confirmed,Fact settled; class Child,Deferred,Withdrawn closed; class Recheck attention;'
       ])
     }
   };
