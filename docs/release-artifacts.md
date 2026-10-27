@@ -2,18 +2,22 @@
 
 This is the current documentation index for standalone Badger. It records the
 package boundary, release-facing artifacts, and checks that must stay aligned
-with the implementation. The standalone package is the workflow-kernel core;
-domain workflows live in separate repositories.
+with the implementation. The kernel package is the delivered workflow-kernel
+core. The repository's scope also includes the collaborative service around
+it, as [ADR 0002](adr/0002-collaborative-service-in-scope.md) records. Domain
+workflows live in separate repositories.
 
 ## Current boundary
 
-| Surface                                                                 | Status       | Authority                                                                                      |
-| ----------------------------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------- |
-| Creator and WorkflowRuntime                                             | Delivered    | `src/authoring/`, `src/factory/`, `src/eval/`, `src/publish/`, `src/workflow-runtime/`         |
-| Six-lane authoring                                                      | Delivered    | `assets/skills/badger-create/reference/authoring-protocol.json`, role briefs, `src/authoring/` |
-| Hash-bound durability and readiness                                     | Delivered    | `src/workflow-runtime/`, `src/eval/`, `src/publish/`                                           |
-| Domain workflow definitions and source Skills                           | External     | Domain workflow repositories, supplied to Badger through explicit `skillSources`               |
-| Platform adapters, installers, automatic distribution, domain execution | Out of scope | Not shipped in this package                                                                    |
+| Surface                                                                     | Status        | Authority                                                                                      |
+| --------------------------------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------- |
+| Creator and WorkflowRuntime                                                 | Delivered     | `src/authoring/`, `src/factory/`, `src/eval/`, `src/publish/`, `src/workflow-runtime/`         |
+| Six-lane authoring                                                          | Delivered     | `assets/skills/badger-create/reference/authoring-protocol.json`, role briefs, `src/authoring/` |
+| Hash-bound durability and readiness                                         | Delivered     | `src/workflow-runtime/`, `src/eval/`, `src/publish/`                                           |
+| Collaborative service: server, web dashboard, Badger MCP, host installer    | Planned (#24) | ADRs 0002–0006 in `docs/adr/`; not built yet                                                   |
+| Domain workflow definitions and source Skills                               | External      | Domain workflow repositories, supplied to Badger through explicit `skillSources`               |
+| Deployment glue: launcher entries, reverse-proxy routes, and deploy scripts | External      | Each deployment's own repository                                                               |
+| Automatic distribution, domain execution                                    | Out of scope  | Not shipped in this repository                                                                 |
 
 ## Package-facing artifacts
 
@@ -62,10 +66,9 @@ unexpected executable content blocks readiness.
 | Skill loading, snapshots, Engine, and durable Run storage   | `src/skill-runtime/`, `src/engine/`                               |
 | Public WorkflowRuntime seam                                 | `src/workflow-runtime/public.ts`                                  |
 
-Platform installation, host dashboards, and domain execution remain outside
-this repository. Domain workflow repositories own workflow definitions, source
-Skills, and domain fixtures; Badger consumes only the explicit sources supplied
-by a caller.
+Deployment glue and domain execution remain outside this repository. Domain
+workflow repositories own workflow definitions, source Skills, and domain
+fixtures; Badger consumes only the explicit sources supplied by a caller.
 
 ## Documentation
 
@@ -74,6 +77,9 @@ material, not runtime policy. Generated package checks and current TypeScript
 are authoritative when prose conflicts with code. The detailed
 WorkflowRuntime contract and certification evidence are in
 [`workflow-runtime-certification.md`](workflow-runtime-certification.md).
+[`GLOSSARY.md`](../GLOSSARY.md) defines the domain language, and
+[`adr/`](adr/) records the architecture decisions behind the kernel and the
+collaborative service.
 
 ## Release gate
 

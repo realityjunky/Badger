@@ -10,7 +10,13 @@
   authoring reference set, a substantive Authored-zone example, a safe assembled
   package-inventory example, and a release artifact ledger. Updated the README
   and bilingual workflow manual to distinguish delivered Badger behavior from
-  future platform or dashboard adapters.
+  planned work.
+
+- **Collaborative service decisions**: Added architecture decision records for
+  the collaborative service's scope, identity boundary, Postgres-owned state,
+  drafting and sign-off rules, and questionnaire records with semantic dossier
+  version 2. The glossary gains the service's people, records, notifications,
+  and Run terms.
 
 - **Legacy draft migration**: Added source-identity manifests, explicit
   retained/replaced/wrapped upgrade decisions, legacy scaffold classification,
@@ -36,6 +42,10 @@
 
 ### Changed
 
+- **Scope**: Badger's scope now includes the collaborative service around the
+  kernel: a server, a web dashboard, the Badger MCP, and a host installer.
+  Everything shipped stays generic; each deployment keeps its launcher
+  entries, reverse-proxy routes, and deploy scripts outside the repository.
 - **Package name**: Renamed the package to `@realityjunky/badger`.
 - **Script-lane claims**: The plan, check, and hook-guard claims are now
   `script:badger-plan`, `script:badger-check`, and `script:badger-hook-guard`.

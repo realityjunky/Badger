@@ -2,9 +2,11 @@
 
 This repository contains the Badger Creator and Engine seams. It provides a focused, filesystem-based factory for creating and upgrading Skill packages, plus a private Engine foundation for loading, snapshotting, and running Badger-compatible Skills.
 
+Badger's scope also includes a collaborative service around this kernel, so that an organization's field experts, engineers, and reviewers can build and run workflows together. The service is planned in [#24](https://github.com/realityjunky/Badger/issues/24); [Delivery status](#delivery-status) records what is built.
+
 ## Scope
 
-The package includes:
+The kernel package includes:
 
 - a shared workflow-kernel foundation behind the standalone Creator adapters;
 - explicit local Skill source inspection with stable hashes and ambiguity reporting;
@@ -35,21 +37,25 @@ The package includes:
 - bounded transactional finalization for protected local writes, removes, and moves with preview, confirmation, recovery, and final receipts;
 - versioned structured findings with bounded redaction, deterministic ordering, continuation dispositions, and derived legacy blockers.
 
-It intentionally excludes host platform installers, ambient resume routing, and external platform adapters.
+The planned collaborative service adds a server, a web dashboard, the Badger MCP, and a host installer beside the kernel. They call into the kernel and never reimplement it, so WorkflowRuntime stays the only runtime authority. Everything shipped is generic: each deployment keeps its own launcher entries, reverse-proxy routes, and deploy scripts outside the repository. The kernel still excludes ambient resume routing.
 
 ## Delivery status
 
-The current standalone package has two clearly separated surfaces:
+Delivered behavior and planned work are kept apart:
 
-| Surface                            | Status                | Contract                                                                                                                                                                                         |
-| ---------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Badger Creator and WorkflowRuntime | Delivered             | Local workflow-kernel package creation, six-lane authoring, deterministic assembly, durable Run execution, current-hash evaluation, publication approval, and distribution preview.              |
-| Platform and dashboard integration | Future / out of scope | Host installers, web or visual authoring, external provider authentication, automatic distribution, domain execution, and fixtures derived from protected raw data are not part of this package. |
+| Surface                                     | Status                  | Contract                                                                                                                                                                                 |
+| ------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Badger Creator and WorkflowRuntime          | Delivered               | Local workflow-kernel package creation, six-lane authoring, deterministic assembly, durable Run execution, current-hash evaluation, publication approval, and distribution preview.      |
+| Collaborative service                       | Planned (#24)           | A server, a web dashboard, the Badger MCP, and a host installer around the same kernel, with organization sign-in, workflow roles, and a durable questionnaire. None of it is built yet. |
+| Deployment glue                             | Outside this repository | Each deployment's launcher entries, reverse-proxy routes, and deploy scripts live with that deployment.                                                                                  |
+| Automatic distribution and domain execution | Out of scope            | Distribution always needs explicit confirmation, Badger never executes domain scripts itself, and fixtures derived from protected raw data are never used.                               |
 
 The release-facing artifact map and verification commands are in
 `docs/release-artifacts.md`. It is the authoritative checklist for keeping
 the formal Skill references, generated package inventory, compatibility
-fixture, workflow manual, and release gate aligned.
+fixture, workflow manual, and release gate aligned. Architecture decisions,
+including the service's scope, identity boundary, storage, and sign-off
+rules, are recorded in `docs/adr/`; the domain language is in `GLOSSARY.md`.
 
 ## Run persistence
 

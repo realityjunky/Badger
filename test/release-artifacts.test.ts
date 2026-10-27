@@ -9,9 +9,32 @@ import {
 } from "../src/authoring/index.js";
 
 const repositoryRoot = process.cwd();
+const semanticDossierDecision = "0001-semantic-dossier-and-wave-one-lenses.md";
+const serviceDecisions = [
+  "0002-collaborative-service-in-scope.md",
+  "0003-identity-boundary.md",
+  "0004-service-state-in-postgres.md",
+  "0005-agents-draft-people-sign-off.md",
+  "0006-questionnaire-records-and-dossier-version-2.md",
+];
 
 async function readText(relativePath: string): Promise<string> {
   return fs.readFile(path.join(repositoryRoot, relativePath), "utf8");
+}
+
+async function expectLocalLinksToResolve(
+  directory: string,
+  hrefs: string[],
+): Promise<void> {
+  const localPaths = hrefs
+    .filter((href) => href && !href.startsWith("#") && !/^[a-z]+:/iu.test(href))
+    .map((href) => href.split("#", 1)[0]);
+  for (const relativePath of new Set(localPaths)) {
+    const target = await fs.stat(
+      path.resolve(repositoryRoot, directory, relativePath),
+    );
+    expect(target.isFile(), `${directory}: ${relativePath}`).toBe(true);
+  }
 }
 
 async function readJson(
@@ -148,6 +171,109 @@ describe("Badger release artifacts", () => {
     );
   });
 
+  it("keeps the collaborative service in scope", async () => {
+    for (const relativePath of [
+      "AGENTS.md",
+      "README.md",
+      "docs/release-artifacts.md",
+      "CHANGELOG.md",
+    ]) {
+      const prose = (await readText(relativePath)).replace(/\s+/gu, " ");
+      for (const surface of [
+        "collaborative service",
+        "web dashboard",
+        "Badger MCP",
+        "host installer",
+      ]) {
+        expect(prose, `${relativePath}: ${surface}`).toContain(surface);
+      }
+      expect(prose, relativePath).toMatch(
+        /launcher entries, reverse-proxy routes, and deploy scripts/u,
+      );
+    }
+
+    const agents = await readText("AGENTS.md");
+    const readme = await readText("README.md");
+    const ledger = await readText("docs/release-artifacts.md");
+    const changelog = await readText("CHANGELOG.md");
+    expect(agents).not.toContain("platform installers");
+    expect(readme).not.toContain("Platform and dashboard integration");
+    expect(readme).not.toContain("intentionally excludes host platform");
+    expect(ledger).not.toContain("host dashboards");
+    expect(ledger).not.toMatch(/installers[^\n]*\| Out of scope/u);
+    expect(changelog).not.toContain("dashboard adapters");
+  });
+
+  it("records the collaborative service decisions as ADRs", async () => {
+    await expect(
+      fs.readdir(path.join(repositoryRoot, "docs/adr")),
+    ).resolves.toEqual(
+      expect.arrayContaining([semanticDossierDecision, ...serviceDecisions]),
+    );
+
+    for (const decision of serviceDecisions) {
+      const record = await readText(`docs/adr/${decision}`);
+      expect(record, decision).toMatch(/^# .+\n\nStatus: accepted\./u);
+      await expectLocalLinksToResolve(
+        "docs/adr",
+        [...record.matchAll(/\]\(([^)]+)\)/gu)].map((match) => match[1]),
+      );
+    }
+    expect(
+      await readText(
+        "docs/adr/0006-questionnaire-records-and-dossier-version-2.md",
+      ),
+    ).toContain(`(${semanticDossierDecision})`);
+  });
+
+  it("defines the collaborative service vocabulary once", async () => {
+    const glossary = await readText("GLOSSARY.md");
+    const terms = [...glossary.matchAll(/^\*\*(.+)\*\*:$/gmu)].map(
+      (match) => match[1],
+    );
+
+    expect(new Set(terms).size).toBe(terms.length);
+    expect(terms).toEqual(
+      expect.arrayContaining([
+        "Collaborative service",
+        "Organization",
+        "Group",
+        "Field expert",
+        "Engineer",
+        "Reviewer",
+        "Operator",
+        "Skill version",
+        "Workflow version",
+        "Source check",
+        "Source study",
+        "Question",
+        "Round",
+        "Answer",
+        "Resolution",
+        "Fact",
+        "Acknowledgement",
+        "Drafting job",
+        "Personal access token",
+        "MCP profile",
+        "Notification channel",
+        "Group robot",
+        "Reminder",
+        "Delivery",
+        "Gate",
+        "Artifact receipt",
+        "Run registry",
+        "Run",
+        "Attempt",
+        "Cycle",
+        "Evaluation",
+        "Project",
+      ]),
+    );
+    expect(glossary).toMatch(
+      /^\*\*Source check\*\*:\n.+\n_Avoid_: candidates$/mu,
+    );
+  });
+
   it("keeps the workflow manual truthful", async () => {
     const manual = await readText("docs/badger-workflow-manual.html");
 
@@ -157,18 +283,17 @@ describe("Badger release artifacts", () => {
     expect(manual).not.toContain("Integrated authoring target");
     expect(manual).not.toContain("计划中的创作恢复");
     expect(manual).not.toContain("authoring integration will expose");
-
-    const localLinks = [...manual.matchAll(/href="([^"]+)"/gu)]
-      .map((match) => match[1])
-      .filter(
-        (href) => href && !href.startsWith("#") && !/^[a-z]+:/iu.test(href),
-      )
-      .map((href) => href.split("#", 1)[0]);
-    for (const relativePath of new Set(localLinks)) {
-      await expect(
-        fs.stat(path.resolve(repositoryRoot, "docs", relativePath)),
-        relativePath,
-      ).resolves.toMatchObject({ isFile: expect.any(Function) });
+    expect(manual).not.toContain(
+      "list dashboards and platform integration as out of scope",
+    );
+    expect(manual).not.toContain("把仪表盘与平台集成列为范围之外");
+    for (const decision of [semanticDossierDecision, ...serviceDecisions]) {
+      expect(manual).toContain(`href="adr/${decision}"`);
     }
+
+    await expectLocalLinksToResolve(
+      "docs",
+      [...manual.matchAll(/href="([^"]+)"/gu)].map((match) => match[1]),
+    );
   });
 });
