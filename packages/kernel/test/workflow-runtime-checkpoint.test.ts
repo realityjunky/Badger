@@ -19,6 +19,7 @@ import {
   clearWorkflowTransitionFaultForTests,
   setWorkflowTransitionFaultForTests,
 } from "../src/workflow-runtime/transition-journal.js";
+import { vitestCli } from "./fixtures/vitest-cli.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -519,13 +520,7 @@ it("recovers the checkpoint in a new process", async () => {
       );
       await execFileAsync(
         process.execPath,
-        [
-          path.resolve("node_modules/vitest/vitest.mjs"),
-          "run",
-          "--config",
-          configPath,
-          childTest,
-        ],
+        [vitestCli, "run", "--config", configPath, childTest],
         {
           cwd: process.cwd(),
           env: {

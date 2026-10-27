@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   AUTHORING_CONTROL_PLANE_SCRIPTS,
@@ -8,7 +9,8 @@ import {
   AUTHORING_PROTOCOL,
 } from "../src/authoring/index.js";
 
-const repositoryRoot = process.cwd();
+const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
+const kernelRoot = path.join(repositoryRoot, "packages/kernel");
 const semanticDossierDecision = "0001-semantic-dossier-and-wave-one-lenses.md";
 const serviceDecisions = [
   "0002-collaborative-service-in-scope.md",
@@ -54,7 +56,7 @@ describe("Badger release artifacts", () => {
       "assets/skills/badger-create/reference/package-inventory.example.json",
     ];
 
-    const packageManifest = await readJson("package.json");
+    const packageManifest = await readJson("packages/kernel/package.json");
     expect(packageManifest.files).toEqual(
       expect.arrayContaining(["assets", "README.md", "CHANGELOG.md"]),
     );
@@ -68,7 +70,7 @@ describe("Badger release artifacts", () => {
       ),
     ]) {
       await expect(
-        fs.stat(path.join(repositoryRoot, relativePath)),
+        fs.stat(path.join(kernelRoot, relativePath)),
       ).resolves.toMatchObject({
         isFile: expect.any(Function),
       });
@@ -76,9 +78,11 @@ describe("Badger release artifacts", () => {
   });
 
   it("documents the closed-world explicit source contract", async () => {
-    const creator = await readText("assets/skills/badger-create/SKILL.md");
+    const creator = await readText(
+      "packages/kernel/assets/skills/badger-create/SKILL.md",
+    );
     const questionnaire = await readText(
-      "assets/skills/badger-workflow-questionnaire/SKILL.md",
+      "packages/kernel/assets/skills/badger-workflow-questionnaire/SKILL.md",
     );
     const manual = await readText("docs/badger-workflow-manual.html");
     expect(creator).toMatch(/^---\nname: badger-create\n/u);
@@ -108,7 +112,7 @@ describe("Badger release artifacts", () => {
 
   it("documents every assembled backbone path and content owner", async () => {
     const inventory = await readJson(
-      "assets/skills/badger-create/reference/package-inventory.example.json",
+      "packages/kernel/assets/skills/badger-create/reference/package-inventory.example.json",
     );
     const files = inventory.files as Array<Record<string, unknown>>;
     const entries = new Map(
@@ -175,8 +179,9 @@ describe("Badger release artifacts", () => {
     for (const relativePath of [
       "AGENTS.md",
       "README.md",
+      "packages/kernel/README.md",
       "docs/release-artifacts.md",
-      "CHANGELOG.md",
+      "packages/kernel/CHANGELOG.md",
     ]) {
       const prose = (await readText(relativePath)).replace(/\s+/gu, " ");
       for (const surface of [
@@ -193,9 +198,9 @@ describe("Badger release artifacts", () => {
     }
 
     const agents = await readText("AGENTS.md");
-    const readme = await readText("README.md");
+    const readme = await readText("packages/kernel/README.md");
     const ledger = await readText("docs/release-artifacts.md");
-    const changelog = await readText("CHANGELOG.md");
+    const changelog = await readText("packages/kernel/CHANGELOG.md");
     expect(agents).not.toContain("platform installers");
     expect(readme).not.toContain("Platform and dashboard integration");
     expect(readme).not.toContain("intentionally excludes host platform");

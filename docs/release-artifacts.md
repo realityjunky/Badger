@@ -7,6 +7,10 @@ core. The repository's scope also includes the collaborative service around
 it, as [ADR 0002](adr/0002-collaborative-service-in-scope.md) records. Domain
 workflows live in separate repositories.
 
+The repository is an npm workspace. The kernel package, `@realityjunky/badger`,
+is in `packages/kernel/`, and the kernel paths below (`src/`, `assets/`) are
+relative to it. New workspace packages go in `packages/<name>/`.
+
 ## Current boundary
 
 | Surface                                                                     | Status        | Authority                                                                                      |
@@ -83,20 +87,20 @@ collaborative service.
 
 ## Release gate
 
-Run from a clean disposable checkout or worktree:
+Run at the root of a clean disposable checkout or worktree:
 
 ```bash
 npm ci
 npm run build
 npm test
 npm run format:check
-npm pack --dry-run
+npm pack --dry-run -w packages/kernel
 ```
 
 Focused authoring and artifact checks:
 
 ```bash
-npm test -- test/authoring-plan.test.ts test/authoring-lifecycle.test.ts test/release-artifacts.test.ts
+npm test -w packages/kernel -- test/authoring-plan.test.ts test/authoring-lifecycle.test.ts test/release-artifacts.test.ts test/workspace-layout.test.ts
 ```
 
 If a release changes the protocol, generator, generated control-plane names,

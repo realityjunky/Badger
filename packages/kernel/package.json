@@ -1,0 +1,59 @@
+{
+  "name": "@realityjunky/badger",
+  "version": "0.1.2",
+  "description": "Standalone Badger workflow Skill factory",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist",
+    "bin",
+    "assets",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "badger": "bin/badger.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./engine": {
+      "types": "./dist/src/engine/index.d.ts",
+      "import": "./dist/src/engine/index.js"
+    },
+    "./workflow-runtime": {
+      "types": "./dist/src/workflow-runtime/public.d.ts",
+      "import": "./dist/src/workflow-runtime/public.js"
+    },
+    "./skill-runtime": {
+      "types": "./dist/src/skill-runtime/index.d.ts",
+      "import": "./dist/src/skill-runtime/index.js"
+    },
+    "./cli": "./dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "npm run build:runtime && tsc",
+    "build:runtime": "esbuild src/workflow-runtime/index.ts --bundle --external:yaml --platform=node --format=esm --target=node22 --outfile=assets/runtime/workflow-runtime.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format:check": "prettier --check src test package.json tsconfig.json vitest.config.ts",
+    "lint": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "commander": "^14.0.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.2.0",
+    "esbuild": "^0.28.0",
+    "prettier": "^3.8.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
+  }
+}

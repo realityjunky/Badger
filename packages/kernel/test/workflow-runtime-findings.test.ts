@@ -11,6 +11,7 @@ import { appendTrajectory, readTrajectory } from "../src/engine/run-store.js";
 import { createWorkflowRuntime } from "../src/workflow-runtime/public.js";
 import { projectWorkflowHandoff } from "../src/workflow-runtime/index.js";
 import type { WorkflowInput, WorkflowProtocol } from "../src/types.js";
+import { vitestCli } from "./fixtures/vitest-cli.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -126,13 +127,7 @@ it("recovers structured findings in a fresh process", async () => {
     );
     await execFileAsync(
       process.execPath,
-      [
-        path.resolve("node_modules/vitest/vitest.mjs"),
-        "run",
-        "--config",
-        configPath,
-        childTest,
-      ],
+      [vitestCli, "run", "--config", configPath, childTest],
       {
         cwd: process.cwd(),
         env: {

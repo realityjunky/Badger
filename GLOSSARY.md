@@ -1,6 +1,6 @@
 # Badger
 
-This context defines the language for turning a user's workflow idea and supplied Skills into a confirmed workflow package, for running that package, and for the collaborative service in which an organization's people do both together. Some terms name parts of that service, or kernel changes it needs, ahead of the code; the README's delivery status says what is built.
+This context defines the language for turning a user's workflow idea and supplied Skills into a confirmed workflow package, for running that package, and for the collaborative service in which an organization's people do both together. Some terms name parts of that service, or kernel changes it needs, ahead of the code; the delivery status in `packages/kernel/README.md` says what is built.
 
 ## The service and its people
 

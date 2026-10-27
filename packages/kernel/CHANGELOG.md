@@ -46,6 +46,10 @@
   kernel: a server, a web dashboard, the Badger MCP, and a host installer.
   Everything shipped stays generic; each deployment keeps its launcher
   entries, reverse-proxy routes, and deploy scripts outside the repository.
+- **Repository layout**: The repository is now an npm workspace. The kernel
+  package moved to `packages/kernel/` with the same published name, `badger`
+  CLI, and exports. Build, test, and format checks run from the repository
+  root, and new workspace packages go in `packages/<name>/`.
 - **Package name**: Renamed the package to `@realityjunky/badger`.
 - **Script-lane claims**: The plan, check, and hook-guard claims are now
   `script:badger-plan`, `script:badger-check`, and `script:badger-hook-guard`.

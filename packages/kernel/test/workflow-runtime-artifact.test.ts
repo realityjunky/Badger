@@ -15,6 +15,7 @@ import type {
   WorkflowRunLocation,
 } from "../src/workflow-runtime/types.js";
 import type { WorkflowInput } from "../src/types.js";
+import { vitestCli } from "./fixtures/vitest-cli.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -270,7 +271,7 @@ it("recovers the artifact ledger", async () => {
     await execFileAsync(
       process.execPath,
       [
-        path.resolve("node_modules/vitest/vitest.mjs"),
+        vitestCli,
         "run",
         "--config",
         path.resolve("vitest.config.ts"),

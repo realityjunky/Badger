@@ -12,6 +12,7 @@ import type {
   StartWorkflowRunOptions,
   WorkflowRunLocation,
 } from "../src/workflow-runtime/types.js";
+import { vitestCli } from "./fixtures/vitest-cli.js";
 
 function protocol(
   outputSchemas: WorkflowInput["outputSchemas"] = [],
@@ -151,13 +152,7 @@ it("recovers the persisted WorkflowRuntime continuation", async () => {
     );
     await execFileAsync(
       process.execPath,
-      [
-        path.resolve("node_modules/vitest/vitest.mjs"),
-        "run",
-        "--config",
-        configPath,
-        childTest,
-      ],
+      [vitestCli, "run", "--config", configPath, childTest],
       {
         cwd: path.resolve("."),
         env: {
