@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run format:check
+
+  service-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: badger
+          POSTGRES_PASSWORD: badger
+          POSTGRES_DB: badger
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U badger -d badger"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w packages/server
+      - run: npm test -w packages/server
+        env:
+          BADGER_TEST_DATABASE_URL: postgres://badger:badger@127.0.0.1:5432/badger

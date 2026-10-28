@@ -1,0 +1,53 @@
+# A local Badger deployment: the server role against Postgres 17.
+#
+# This build ships no people-facing service identity adapter, so the service
+# runs with none: /health proves the image, Postgres, and the migrations, and
+# every person route answers 401. For local single-user mode with the implicit
+# Administrator, run the server directly (`npm start -w packages/server`).
+#
+# The database credentials below are development values, not secrets.
+#
+#   docker compose up --build
+#   curl http://localhost:8787/health
+
+name: badger
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: badger
+      POSTGRES_PASSWORD: badger
+      POSTGRES_DB: badger
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U badger -d badger"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: packages/server/Dockerfile
+      args:
+        BADGER_REVISION: ${BADGER_REVISION:-unknown}
+        BADGER_CLEAN_TREE: ${BADGER_CLEAN_TREE:-}
+    environment:
+      BADGER_MODE: service
+      BADGER_IDENTITY: none
+      BADGER_HOST: 0.0.0.0
+      BADGER_PORT: "8787"
+      BADGER_DATABASE_URL: postgres://badger:badger@postgres:5432/badger
+      BADGER_ALLOWED_HOSTNAMES: localhost,127.0.0.1
+      BADGER_ALLOWED_ORIGINS: http://localhost:8787
+    ports:
+      - "127.0.0.1:8787:8787"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

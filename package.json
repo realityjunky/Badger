@@ -3,7 +3,8 @@
   "private": true,
   "license": "MIT",
   "workspaces": [
-    "packages/kernel"
+    "packages/kernel",
+    "packages/server"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

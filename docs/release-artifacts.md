@@ -13,15 +13,15 @@ relative to it. New workspace packages go in `packages/<name>/`.
 
 ## Current boundary
 
-| Surface                                                                     | Status        | Authority                                                                                      |
-| --------------------------------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------- |
-| Creator and WorkflowRuntime                                                 | Delivered     | `src/authoring/`, `src/factory/`, `src/eval/`, `src/publish/`, `src/workflow-runtime/`         |
-| Six-lane authoring                                                          | Delivered     | `assets/skills/badger-create/reference/authoring-protocol.json`, role briefs, `src/authoring/` |
-| Hash-bound durability and readiness                                         | Delivered     | `src/workflow-runtime/`, `src/eval/`, `src/publish/`                                           |
-| Collaborative service: server, web dashboard, Badger MCP, host installer    | Planned (#24) | ADRs 0002–0006 in `docs/adr/`; not built yet                                                   |
-| Domain workflow definitions and source Skills                               | External      | Domain workflow repositories, supplied to Badger through explicit `skillSources`               |
-| Deployment glue: launcher entries, reverse-proxy routes, and deploy scripts | External      | Each deployment's own repository                                                               |
-| Automatic distribution, domain execution                                    | Out of scope  | Not shipped in this repository                                                                 |
+| Surface                                                                     | Status                 | Authority                                                                                                                                        |
+| --------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Creator and WorkflowRuntime                                                 | Delivered              | `src/authoring/`, `src/factory/`, `src/eval/`, `src/publish/`, `src/workflow-runtime/`                                                           |
+| Six-lane authoring                                                          | Delivered              | `assets/skills/badger-create/reference/authoring-protocol.json`, role briefs, `src/authoring/`                                                   |
+| Hash-bound durability and readiness                                         | Delivered              | `src/workflow-runtime/`, `src/eval/`, `src/publish/`                                                                                             |
+| Collaborative service: server walking skeleton                              | Walking skeleton (#36) | `packages/server/src/`, reviewed SQL in `packages/server/migrations/`; the web dashboard, Badger MCP, and host installer are still planned (#24) |
+| Domain workflow definitions and source Skills                               | External               | Domain workflow repositories, supplied to Badger through explicit `skillSources`                                                                 |
+| Deployment glue: launcher entries, reverse-proxy routes, and deploy scripts | External               | Each deployment's own repository                                                                                                                 |
+| Automatic distribution, domain execution                                    | Out of scope           | Not shipped in this repository                                                                                                                   |
 
 ## Package-facing artifacts
 

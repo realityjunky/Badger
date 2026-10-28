@@ -1,0 +1,10 @@
+.git
+.gitignore
+.claude
+.idea
+node_modules
+**/node_modules
+**/dist
+.badger
+docs
+*.log
