@@ -15,6 +15,10 @@ skeleton in `packages/server/` and its dashboard shell in `packages/web/`.
 Everything shipped is generic: each deployment keeps its own launcher entries,
 reverse-proxy routes, and deploy scripts outside this repository.
 
+Deployments follow the [backup and restore procedure](docs/backup-and-restore.md)
+and rehearse recovery before the first real workflow. Nightly scheduling belongs
+to the deployment.
+
 ## Development
 
 Run these commands from the repository root:
