@@ -3,6 +3,10 @@ import {
   semanticDossierHash,
   validateSemanticDossier,
 } from "../factory/questionnaire.js";
+import {
+  locationFreeSourceEvidence,
+  withoutKey,
+} from "../factory/project-paths.js";
 import { sha256, stableValue } from "../util.js";
 import { createStandaloneWorkflowKernel } from "../workflow-kernel/foundation.js";
 import {
@@ -59,27 +63,6 @@ function diagnostic(
 
 function identityHash(value: unknown): string {
   return sha256(JSON.stringify(stableValue(value)));
-}
-
-function withoutKey(value: unknown, key: string): unknown {
-  return isRecord(value)
-    ? Object.fromEntries(Object.entries(value).filter(([name]) => name !== key))
-    : value;
-}
-
-function locationFreeSourceEvidence(value: unknown): unknown {
-  return Array.isArray(value)
-    ? value.map((candidate) =>
-        isRecord(candidate) && Array.isArray(candidate.sources)
-          ? {
-              ...candidate,
-              sources: candidate.sources.map((source) =>
-                withoutKey(source, "root"),
-              ),
-            }
-          : candidate,
-      )
-    : value;
 }
 
 function sourceEvidenceIdentity(

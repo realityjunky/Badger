@@ -113,6 +113,7 @@ function proposal(): { plan: FactoryPlan; proposal: FactoryProposal } {
       goal: normalized.protocol.goal,
       intent: "new-skill",
       planHash: "plan-hash",
+      proposalHash: "proposal-hash",
       workflow: normalized.protocol,
       candidates: [],
       blockers: [],

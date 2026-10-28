@@ -104,8 +104,7 @@ describe("Badger upgrade and legacy migration", () => {
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
     });
     const generated = await generatePackage({
@@ -249,6 +248,28 @@ describe("Badger upgrade and legacy migration", () => {
     });
   });
 
+  it("refuses to migrate a draft whose plan was edited after initialization", async () => {
+    const { state } = await createScaffold();
+    const legacy = structuredClone(state);
+    delete legacy.authoring;
+    await fs.writeFile(
+      path.join(project, ".badger", "states", `${state.name}.json`),
+      JSON.stringify(legacy, null, 2) + "\n",
+    );
+    const plan = JSON.parse(await fs.readFile(planPath, "utf8")) as object;
+    await fs.writeFile(
+      planPath,
+      JSON.stringify({ ...plan, goal: "Edited after initialization." }),
+    );
+
+    await expect(
+      migrateLegacyDraft({ state: legacy, confirmed: true, depth: "quick" }),
+    ).rejects.toThrow(/changed since .* was initialized/u);
+    await expect(
+      fs.stat(path.join(project, ".badger", "migrations", state.name)),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("migrates a legacy draft to a new authoring-pending package without replacing it", async () => {
     const { state } = await createScaffold();
     const legacyPath = state.draftPath;
@@ -362,8 +383,7 @@ describe("Badger upgrade and legacy migration", () => {
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
       sourceRoots,
     });
@@ -402,8 +422,7 @@ describe("Badger upgrade and legacy migration", () => {
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
     });
     const generated = await generatePackage({

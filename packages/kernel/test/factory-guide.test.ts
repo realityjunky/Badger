@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { readCreatorGuide } from "../src/factory/guide.js";
 import type { FactoryPlan } from "../src/types.js";
-import { sha256 } from "../src/util.js";
+import { canonicalHash } from "../src/util.js";
 
 describe("Creator guide context", () => {
   let root: string;
@@ -67,7 +67,7 @@ describe("Creator guide context", () => {
           status: "draft",
           projectRoot: project,
           planPath,
-          planHash: sha256(JSON.stringify(planValue)),
+          planHash: canonicalHash(planValue),
           draftPath: path.join(
             project,
             ".badger",

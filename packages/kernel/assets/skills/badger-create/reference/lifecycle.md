@@ -17,6 +17,18 @@ The state machine is hash-bound:
 draft → generated → evaluated → review-approved → published
 ```
 
+Initialization accepts only the approved proposal hash that `badger propose`
+printed. It rebuilds the proposal from the current plan and Skill sources and
+refuses to initialize when either no longer produces that hash. It also
+refuses to replace an existing `.badger/states/<name>.json` unless the caller
+quotes the current state's hash. Generation requires explicit confirmation and
+refuses a plan or Skill source set that drifted from the approved proposal.
+Plan and proposal hashes are computed over canonical JSON, so key order and
+formatting do not change them. A state recorded before that change still
+matches an unchanged plan, but carries no proposal hash: approve its proposal
+again with `badger propose` and `badger init --replace-state` before
+generating.
+
 Deterministic drafts created before authoring are classified
 `legacy-scaffold-only`. They remain readable compatibility artifacts, but they
 are not authoring-complete or publishable. `badger migrate <name> --confirm`

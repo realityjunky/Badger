@@ -19,6 +19,39 @@ export function stableValue(value: unknown): unknown {
   return value;
 }
 
+// canonicalize repeats stableValue's walk with a code-unit comparator instead
+// of sharing it: stableValue is bundled into the WorkflowRuntime asset that
+// every generated scaffold copies, so touching it would change scaffold
+// hashes that in-progress authoring sessions recorded.
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, item]) => [key, canonicalize(item)]),
+    );
+  }
+  return value;
+}
+
+/**
+ * The canonical JSON behind plan and proposal identities. Keys sort by
+ * UTF-16 code unit, so the result does not depend on locale or ICU;
+ * JavaScript still writes integer-like keys first, in numeric order, which is
+ * just as deterministic. stableValue keeps its locale-aware order because
+ * dossier, protocol, and WorkflowRuntime identities already depend on it, and
+ * the runtime's private `canonicalHash` helpers in `checkpoints.ts` and
+ * `snapshots.ts` are stableValue-based: never swap one form for the other.
+ */
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(canonicalize(value));
+}
+
+export function canonicalHash(value: unknown): string {
+  return sha256(canonicalJson(value));
+}
+
 export function slug(value: string): string {
   return value
     .toLowerCase()
@@ -59,6 +92,42 @@ export async function atomicWrite(
     await fs.rm(temporary, { force: true });
     throw error;
   });
+}
+
+/** Errors meaning the file system cannot make hard links at all. */
+const NO_HARD_LINKS = new Set([
+  "EPERM",
+  "ENOTSUP",
+  "EOPNOTSUPP",
+  "ENOSYS",
+  "EXDEV",
+]);
+
+/**
+ * Writes a new file whole, or fails with EEXIST when the file already exists,
+ * so two writers cannot both create it. Where the file system has no hard
+ * links, the file is created exclusively in place instead; a crash then can
+ * leave it partly written, which a reader reports as unparseable.
+ */
+export async function atomicCreate(
+  file: string,
+  content: string,
+): Promise<void> {
+  await ensureDirectory(path.dirname(file));
+  const temporary = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  await fs.writeFile(temporary, content, { encoding: "utf8", flag: "wx" });
+  try {
+    await fs.link(temporary, file);
+  } catch (error) {
+    if (!NO_HARD_LINKS.has((error as NodeJS.ErrnoException).code ?? ""))
+      throw error;
+    await fs.writeFile(file, content, { encoding: "utf8", flag: "wx" });
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
 }
 
 export async function copyDirectory(

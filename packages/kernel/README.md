@@ -15,7 +15,7 @@ The kernel package includes:
 - a shared workflow-kernel foundation behind the standalone Creator adapters;
 - explicit local Skill source inspection with stable hashes and ambiguity reporting;
 - deterministic Workflow Contract normalization and validation;
-- confirmed plan/state lifecycle in the standalone `.badger` namespace;
+- approved-proposal-bound plan/state lifecycle in the standalone `.badger` namespace;
 - version 2 semantic questionnaire dossiers with traceable fact ledgers,
   interfaces between Nodes, deferral resolutions, fact provenance, resumable
   gaps, and deterministic authoring input identities;
@@ -108,7 +108,7 @@ BADGER_SOURCE_ROOTS=/srv/skills node packages/kernel/bin/badger.js source-check 
 node packages/kernel/bin/badger.js guide --project . --json
 node packages/kernel/bin/badger.js questionnaire-handoff dossier.json --plan plan.json --project . --json
 node packages/kernel/bin/badger.js authoring-plan prepared-workflow --project . --depth quick --json
-node packages/kernel/bin/badger.js generate prepared-workflow --project . --depth full --json
+node packages/kernel/bin/badger.js generate prepared-workflow --confirm --project . --depth full --json
 node packages/kernel/bin/badger.js authoring-status prepared-workflow --project . --json
 node packages/kernel/bin/badger.js authoring-dispatch prepared-workflow --lane script --output /tmp/script.json --project . --json
 node packages/kernel/bin/badger.js assemble prepared-workflow --confirm --project . --json

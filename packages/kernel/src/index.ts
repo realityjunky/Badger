@@ -4,14 +4,17 @@ export * from "./workflow/contract.js";
 export {
   createStandaloneWorkflowKernel,
   createWorkflowKernel,
+  type ApprovedProposal,
   type InitializeStateOptions,
   type WorkflowKernel,
   type WorkflowKernelOptions,
 } from "./workflow-kernel/foundation.js";
+export { canonicalHash } from "./util.js";
 export { hashDirectory, hashDirectorySync } from "./workflow-kernel/hash.js";
 export * from "./factory/proposal.js";
 export * from "./factory/generate.js";
 export * from "./factory/state.js";
+export * from "./factory/approved-generation.js";
 export * from "./factory/guide.js";
 export * from "./factory/questionnaire.js";
 export * from "./factory/migration.js";

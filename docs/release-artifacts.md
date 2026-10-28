@@ -30,7 +30,8 @@ The installed Agent entrypoints are `assets/skills/badger-create/SKILL.md` and
 `assets/skills/badger-workflow-questionnaire/SKILL.md`. The latter's source
 study is beside it. `badger guide` is read-only and reports first-use,
 `FactoryPlan`, and resumable Creator state; explicit confirmation remains
-required before proposal, initialization, publication, or distribution.
+required before proposal, initialization, generation, publication, or
+distribution.
 
 The `badger-create` reference set is:
 

@@ -62,6 +62,28 @@
 
 ### Changed
 
+- **Proposal-bound initialization and generation**: `init` requires the
+  approved proposal's hash, `--proposal <proposalHash>` as `propose` printed
+  it, and refuses a plan or Skill source set that no longer produces it. It
+  replaces an existing Creator state only when the caller quotes that state's
+  hash with `--replace-state <hash>`; the hash covers the state file exactly as
+  stored, so a refused `init` reports it even for a file that no longer
+  parses, and a value that is not a hash is refused as such. `generate`
+  requires `--confirm`, refuses drift from the approved proposal, and refuses a
+  state whose recorded proposal no longer matches its hash; the kernel API is
+  `generateFromApprovedProposal`. `migrate` refuses a plan edited since
+  initialization. `initializeState` takes `proposalHash` and
+  `replaceStateHash` in place of `plan` and `proposal`, and
+  `verifyApprovedProposal` returns the rebuilt proposal with the plan it read.
+- **Canonical plan and proposal hashes**: Plan and proposal hashes are computed
+  over canonical JSON, so reordering keys or reformatting a plan leaves them
+  unchanged. Creator states recorded before this change keep matching an
+  unchanged plan through the hash form they recorded, so `guide` and
+  in-progress authoring continue. They carry no proposal hash, so `generate`
+  refuses them until the proposal is approved again with `propose` and
+  `init --replace-state`.
+- **Command output**: The commands print human-readable output by default;
+  pass `--json` for machine-readable output.
 - **Scope**: Badger's scope now includes the collaborative service around the
   kernel: a server, a web dashboard, the Badger MCP, and a host installer.
   Everything shipped stays generic; each deployment keeps its launcher

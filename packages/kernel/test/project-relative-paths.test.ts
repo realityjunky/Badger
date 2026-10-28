@@ -108,8 +108,7 @@ describe("project-relative Creator records", () => {
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
     });
     const generated = await generatePackage({
@@ -284,8 +283,7 @@ describe("project-relative Creator records", () => {
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan: await readPlan(planPath),
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
       sourceRoots,
     });

@@ -1,6 +1,9 @@
-import { createStandaloneWorkflowKernel } from "../workflow-kernel/foundation.js";
+import {
+  createStandaloneWorkflowKernel,
+  type ApprovedProposal,
+  type InitializeStateOptions,
+} from "../workflow-kernel/foundation.js";
 import type { CreatorState, SkillCandidate } from "../types.js";
-import type { InitializeStateOptions } from "../workflow-kernel/foundation.js";
 
 export async function readState(
   projectRoot: string,
@@ -25,6 +28,27 @@ export async function initializeState(
     projectRoot: options.projectRoot,
     sourceRoots: options.sourceRoots,
   }).initializeState(options);
+}
+
+export async function verifyApprovedProposal(
+  state: CreatorState,
+  options: { sourceRoots?: readonly string[] } = {},
+): Promise<ApprovedProposal> {
+  return createStandaloneWorkflowKernel({
+    projectRoot: state.projectRoot,
+    sourceRoots: options.sourceRoots,
+  }).verifyApprovedProposal(state);
+}
+
+/**
+ * The hash `init` quotes to replace a Creator state: the state file exactly as
+ * stored. Null when the workflow has no Creator state.
+ */
+export async function creatorStateHash(
+  projectRoot: string,
+  name: string,
+): Promise<string | null> {
+  return createStandaloneWorkflowKernel({ projectRoot }).stateHash(name);
 }
 
 export async function updateCandidates(

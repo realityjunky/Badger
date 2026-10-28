@@ -5,7 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { buildProposal, readPlan } from "../src/factory/proposal.js";
 import { generatePackage } from "../src/factory/generate.js";
-import { initializeState, readState } from "../src/factory/state.js";
+import {
+  creatorStateHash,
+  initializeState,
+  readState,
+} from "../src/factory/state.js";
 import {
   AuthoringRevisionConflictError,
   assemblePackage as assemblePackageImplementation,
@@ -87,11 +91,12 @@ describe("resumable authoring session", () => {
   }> {
     const proposal = await buildProposal({ projectRoot: project, planPath });
     const plan = await readPlan(planPath);
+    const existingHash = await creatorStateHash(project, proposal.name);
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
+      ...(existingHash ? { replaceStateHash: existingHash } : {}),
       confirmed: true,
     });
     const generated = await generatePackage({

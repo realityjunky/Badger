@@ -3,9 +3,13 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { checkSkillSources, readSkillSourceManifest } from "./skill/find.js";
 import type { SkillSourceDeclaration } from "./types.js";
-import { buildProposal, readPlan } from "./factory/proposal.js";
-import { generatePackage } from "./factory/generate.js";
-import { initializeState, readState } from "./factory/state.js";
+import { buildProposal } from "./factory/proposal.js";
+import { generateFromApprovedProposal } from "./factory/approved-generation.js";
+import {
+  creatorStateHash,
+  initializeState,
+  readState,
+} from "./factory/state.js";
 import { evaluatePackage } from "./eval/run.js";
 import {
   approveReview,
@@ -18,7 +22,6 @@ import {
   authoringSessionGateway,
   buildAuthoringHandoff,
   buildAuthoringPlan,
-  initializeAuthoringSession,
 } from "./authoring/index.js";
 import { migrateLegacyDraft } from "./factory/migration.js";
 import { readCreatorGuide } from "./factory/guide.js";
@@ -68,7 +71,34 @@ function emit(value: unknown, json?: boolean): void {
   console.log(json ? JSON.stringify(value, null, 2) : format(value));
 }
 function format(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  if (typeof value === "string") return value;
+  if (value === null || typeof value !== "object") return String(value);
+  return renderValue(value, 0);
+}
+function renderValue(value: unknown, indent: number): string {
+  const padding = " ".repeat(indent);
+  if (Array.isArray(value)) {
+    if (!value.length) return `${padding}[]`;
+    return value
+      .map((item) => {
+        if (!item || typeof item !== "object")
+          return `${padding}- ${String(item)}`;
+        const lines = renderValue(item, indent + 2).split("\n");
+        return `${padding}- ${lines[0]!.trimStart()}${
+          lines.length > 1 ? `\n${lines.slice(1).join("\n")}` : ""
+        }`;
+      })
+      .join("\n");
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (!entries.length) return `${padding}{}`;
+  return entries
+    .map(([key, item]) =>
+      item && typeof item === "object"
+        ? `${padding}${key}:\n${renderValue(item, indent + 2)}`
+        : `${padding}${key}: ${String(item)}`,
+    )
+    .join("\n");
 }
 
 program
@@ -220,6 +250,7 @@ program
         sourceRoot: result.sourceRoot,
         destination: result.destination,
         migrationPath: result.migrationPath,
+        proposalHash: result.state.confirmedProposal?.proposalHash,
         authoring: result.state.authoring,
         generated: result.state.generated,
       },
@@ -310,32 +341,30 @@ program
 
 program
   .command("init <plan>")
-  .option("--confirm", "Confirm the displayed proposal")
+  .requiredOption(
+    "--proposal <hash>",
+    "The approved proposal's hash, as `badger propose` printed it",
+  )
+  .option(
+    "--replace-state <hash>",
+    "Current Creator state hash; required to replace existing state",
+  )
+  .option("--confirm", "Confirm initialization from the approved proposal")
   .addOption(sourceRootOption())
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (planPath, options) => {
     const root = projectRoot(options.project);
-    const sourceRoots = registeredSourceRoots(root, options.sourceRoot);
-    const proposal = await buildProposal({
+    const state = await initializeState({
       projectRoot: root,
       planPath,
-      sourceRoots,
+      proposalHash: options.proposal,
+      replaceStateHash: options.replaceState,
+      confirmed: options.confirm,
+      sourceRoots: registeredSourceRoots(root, options.sourceRoot),
     });
-    const plan = await readPlan(planPath);
-    if (!proposal.canInitialize)
-      throw new Error(
-        `Cannot initialize blocked proposal:\n${proposal.blockers.join("\n")}`,
-      );
     emit(
-      await initializeState({
-        projectRoot: root,
-        planPath,
-        plan,
-        proposal,
-        confirmed: options.confirm,
-        sourceRoots,
-      }),
+      { ...state, stateHash: await creatorStateHash(root, state.name) },
       options.json,
     );
   });
@@ -343,6 +372,7 @@ program
 program
   .command("generate <name>")
   .addOption(sourceRootOption())
+  .option("--confirm", "Confirm generation from the approved proposal")
   .option("--project <dir>", "Project root", ".")
   .addOption(
     new Option("--depth <depth>", "Authoring review depth")
@@ -352,44 +382,21 @@ program
   .option("--json", "JSON output")
   .action(async (name, options) => {
     const root = projectRoot(options.project);
-    const state = await readState(root, name);
-    const sourceRoots = registeredSourceRoots(root, options.sourceRoot);
-    const proposal = await buildProposal({
+    const { state, proposal, generated } = await generateFromApprovedProposal({
       projectRoot: root,
-      planPath: state.planPath,
-      sourceRoots,
-    });
-    if (proposal.name !== state.name)
-      throw new Error("Plan workflow name does not match Creator state");
-    if (!proposal.canInitialize)
-      throw new Error(
-        `Cannot generate blocked proposal:\n${proposal.blockers.join("\n")}`,
-      );
-    const plan = await readPlan(state.planPath);
-    if (plan.sourceRoot) plan.sourceRoot = path.resolve(root, plan.sourceRoot);
-    const generated = await generatePackage({
-      proposal,
-      plan,
-      destination: state.draftPath,
-      projectRoot: root,
-      sourceRoots,
-      authoringDepth: options.depth,
-    });
-    state.generated = generated;
-    state.planHash = proposal.planHash;
-    state.confirmedProposal = structuredClone(proposal);
-    state.candidates = proposal.candidates;
-    state.status = "generated";
-    state.currentHash = null;
-    state.eval = undefined;
-    state.review = undefined;
-    await initializeAuthoringSession({
-      state,
-      plan: await buildAuthoringPlan({ proposal, depth: options.depth }),
-      generated,
+      name,
+      confirmed: Boolean(options.confirm),
+      sourceRoots: registeredSourceRoots(root, options.sourceRoot),
+      depth: options.depth,
     });
     emit(
-      { name, status: state.status, authoring: state.authoring, generated },
+      {
+        name,
+        status: state.status,
+        proposalHash: proposal.proposalHash,
+        authoring: state.authoring,
+        generated,
+      },
       options.json,
     );
   });

@@ -1181,6 +1181,7 @@ export interface FactoryProposal {
   goal: string;
   intent: CreatorIntent;
   planHash: string;
+  proposalHash: string;
   workflow: WorkflowProtocol;
   candidates: SkillCandidate[];
   blockers: string[];

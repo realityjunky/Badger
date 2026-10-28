@@ -1,6 +1,10 @@
 import { createStandaloneWorkflowKernel } from "../workflow-kernel/foundation.js";
 
-export { parsePlan, readPlan } from "../workflow-kernel/foundation.js";
+export {
+  parsePlan,
+  planHashMatches,
+  readPlan,
+} from "../workflow-kernel/foundation.js";
 
 export async function buildProposal(options: {
   projectRoot: string;

@@ -7,7 +7,7 @@ import type {
   FactoryPlan,
   UpgradeMigrationManifest,
 } from "../types.js";
-import { buildProposal, parsePlan } from "./proposal.js";
+import { buildProposal, parsePlan, planHashMatches } from "./proposal.js";
 import { generatePackage, type GeneratedPackage } from "./generate.js";
 import {
   assertDestinationWithinProject,
@@ -128,6 +128,12 @@ async function readMigrationPlan(state: CreatorState): Promise<FactoryPlan> {
     string,
     unknown
   >;
+  // The migration adopts only the plan the state recorded, so an edit made
+  // after initialization is refused rather than approved in passing.
+  if (!planHashMatches(value, state.planHash))
+    throw new Error(
+      `The plan at ${file} changed since ${state.name} was initialized; restore it, or propose and initialize the edited plan`,
+    );
   if (Object.prototype.hasOwnProperty.call(value, "preferredSkills")) {
     const declarations = new Map<string, { name: string; location: string }>();
     for (const candidate of state.candidates as unknown[]) {
