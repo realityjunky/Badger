@@ -8,6 +8,35 @@ import type {
 import type { CreatorState, UpgradeMigrationManifest } from "../types.js";
 import { isWithin } from "../util.js";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function withoutKey(value: unknown, key: string): unknown {
+  return isRecord(value)
+    ? Object.fromEntries(Object.entries(value).filter(([name]) => name !== key))
+    : value;
+}
+
+/**
+ * Source evidence without each source's resolved root. Identities that bind
+ * what sources contain use it, so a moved project keeps the same hashes.
+ */
+export function locationFreeSourceEvidence(value: unknown): unknown {
+  return Array.isArray(value)
+    ? value.map((candidate) =>
+        isRecord(candidate) && Array.isArray(candidate.sources)
+          ? {
+              ...candidate,
+              sources: candidate.sources.map((source) =>
+                withoutKey(source, "root"),
+              ),
+            }
+          : candidate,
+      )
+    : value;
+}
+
 export interface ProjectPathMappers {
   project: ProjectPathMapper;
   source: ProjectPathMapper;

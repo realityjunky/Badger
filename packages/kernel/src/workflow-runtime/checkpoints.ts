@@ -287,6 +287,8 @@ function canonical(value: unknown): string {
   return `${JSON.stringify(stableValue(value), null, 2)}\n`;
 }
 
+// stableValue-based on purpose: recorded checkpoint hashes depend on it, so it
+// is not util.ts's code-unit canonicalHash.
 function canonicalHash(value: unknown): string {
   return sha256(JSON.stringify(stableValue(value)));
 }

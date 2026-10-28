@@ -19,9 +19,10 @@ export function stableValue(value: unknown): unknown {
   return value;
 }
 
-// Canonical ordering uses code-unit comparison so a hash does not depend on
-// locale or ICU. stableValue keeps its existing locale-aware ordering because
-// dossier and protocol identities already depend on it.
+// canonicalize repeats stableValue's walk with a code-unit comparator instead
+// of sharing it: stableValue is bundled into the WorkflowRuntime asset that
+// every generated scaffold copies, so touching it would change scaffold
+// hashes that in-progress authoring sessions recorded.
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === "object") {
@@ -34,6 +35,15 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
+/**
+ * The canonical JSON behind plan and proposal identities. Keys sort by
+ * UTF-16 code unit, so the result does not depend on locale or ICU;
+ * JavaScript still writes integer-like keys first, in numeric order, which is
+ * just as deterministic. stableValue keeps its locale-aware order because
+ * dossier, protocol, and WorkflowRuntime identities already depend on it, and
+ * the runtime's private `canonicalHash` helpers in `checkpoints.ts` and
+ * `snapshots.ts` are stableValue-based: never swap one form for the other.
+ */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(canonicalize(value));
 }
@@ -82,6 +92,27 @@ export async function atomicWrite(
     await fs.rm(temporary, { force: true });
     throw error;
   });
+}
+
+/**
+ * Writes a new file whole, or fails with EEXIST when the file already exists,
+ * so two writers cannot both create it.
+ */
+export async function atomicCreate(
+  file: string,
+  content: string,
+): Promise<void> {
+  await ensureDirectory(path.dirname(file));
+  const temporary = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  await fs.writeFile(temporary, content, { encoding: "utf8", flag: "wx" });
+  try {
+    await fs.link(temporary, file);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
 }
 
 export async function copyDirectory(

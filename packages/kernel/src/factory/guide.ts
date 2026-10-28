@@ -3,7 +3,7 @@ import path from "node:path";
 import type { CreatorIntent, CreatorState, CreatorStatus } from "../types.js";
 import { canonicalHash } from "../util.js";
 import { classifyCreatorDraft } from "./migration.js";
-import { readPlan } from "./proposal.js";
+import { planHashMatches, readPlan } from "./proposal.js";
 import { readState } from "./state.js";
 
 export type CreatorGuidePlanStatus = "available" | "missing" | "invalid";
@@ -94,7 +94,7 @@ async function inspectPlan(
       status: "available",
       hash,
       ...(stateHash !== undefined
-        ? { hashMatchesState: hash === stateHash }
+        ? { hashMatchesState: planHashMatches(plan, stateHash) }
         : {}),
       intent: plan.skillCreatorIntent,
       goal: plan.goal,

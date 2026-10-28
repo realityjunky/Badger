@@ -3,7 +3,6 @@ import path from "node:path";
 import type { CreatorState, WorkflowProtocol } from "../types.js";
 import {
   atomicWrite,
-  canonicalHash,
   hashDirectory,
   isWithin,
   listFiles,
@@ -22,7 +21,7 @@ import {
   toStoredPaths,
 } from "../factory/project-paths.js";
 import { hashSkillSource } from "../skill/identity.js";
-import { readPlan } from "../factory/proposal.js";
+import { planHashMatches, readPlan } from "../factory/proposal.js";
 import {
   generatePackage,
   inventoryPackage,
@@ -3805,7 +3804,7 @@ async function assertAuthoringPlanCurrent(
       "Authoring plan is not the canonical plan for this proposal",
     );
   const factoryPlan = await readPlan(state.planPath);
-  if (canonicalHash(factoryPlan) !== proposal.planHash)
+  if (!planHashMatches(factoryPlan, proposal.planHash))
     throw new Error("Factory plan input is stale for the confirmed proposal");
 }
 

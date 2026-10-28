@@ -3,14 +3,13 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { checkSkillSources, readSkillSourceManifest } from "./skill/find.js";
 import type { SkillSourceDeclaration } from "./types.js";
-import { buildProposal, readPlan } from "./factory/proposal.js";
-import { generatePackage } from "./factory/generate.js";
+import { buildProposal } from "./factory/proposal.js";
+import { generateFromApprovedProposal } from "./factory/approved-generation.js";
 import {
+  creatorStateHash,
   initializeState,
   readState,
-  verifyApprovedProposal,
 } from "./factory/state.js";
-import { creatorStateHash } from "./workflow-kernel/foundation.js";
 import { evaluatePackage } from "./eval/run.js";
 import {
   approveReview,
@@ -23,7 +22,6 @@ import {
   authoringSessionGateway,
   buildAuthoringHandoff,
   buildAuthoringPlan,
-  initializeAuthoringSession,
 } from "./authoring/index.js";
 import { migrateLegacyDraft } from "./factory/migration.js";
 import { readCreatorGuide } from "./factory/guide.js";
@@ -252,6 +250,7 @@ program
         sourceRoot: result.sourceRoot,
         destination: result.destination,
         migrationPath: result.migrationPath,
+        proposalHash: result.state.confirmedProposal?.proposalHash,
         authoring: result.state.authoring,
         generated: result.state.generated,
       },
@@ -344,13 +343,13 @@ program
   .command("init <plan>")
   .requiredOption(
     "--proposal <hash>",
-    "Approved proposal hash returned by `badger propose`",
+    "The approved proposal's hash, as `badger propose` printed it",
   )
   .option(
     "--replace-state <hash>",
     "Current Creator state hash; required to replace existing state",
   )
-  .option("--confirm", "Confirm the approved proposal")
+  .option("--confirm", "Confirm initialization from the approved proposal")
   .addOption(sourceRootOption())
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
@@ -364,7 +363,10 @@ program
       confirmed: options.confirm,
       sourceRoots: registeredSourceRoots(root, options.sourceRoot),
     });
-    emit({ ...state, stateHash: creatorStateHash(state) }, options.json);
+    emit(
+      { ...state, stateHash: await creatorStateHash(root, state.name) },
+      options.json,
+    );
   });
 
 program
@@ -379,35 +381,19 @@ program
   )
   .option("--json", "JSON output")
   .action(async (name, options) => {
-    if (!options.confirm)
-      throw new Error("Generation requires explicit confirmation");
     const root = projectRoot(options.project);
-    const state = await readState(root, name);
-    const sourceRoots = registeredSourceRoots(root, options.sourceRoot);
-    const approved = await verifyApprovedProposal(state, { sourceRoots });
-    const plan = await readPlan(state.planPath);
-    if (plan.sourceRoot) plan.sourceRoot = path.resolve(root, plan.sourceRoot);
-    const generated = await generatePackage({
-      proposal: approved,
-      plan,
-      destination: state.draftPath,
+    const { state, proposal, generated } = await generateFromApprovedProposal({
       projectRoot: root,
-      sourceRoots,
-      authoringDepth: options.depth,
-    });
-    await initializeAuthoringSession({
-      state,
-      plan: await buildAuthoringPlan({
-        proposal: approved,
-        depth: options.depth,
-      }),
-      generated,
+      name,
+      confirmed: Boolean(options.confirm),
+      sourceRoots: registeredSourceRoots(root, options.sourceRoot),
+      depth: options.depth,
     });
     emit(
       {
         name,
         status: state.status,
-        proposalHash: approved.proposalHash,
+        proposalHash: proposal.proposalHash,
         authoring: state.authoring,
         generated,
       },

@@ -463,6 +463,8 @@ function canonicalJson(value: unknown): string {
   return `${JSON.stringify(stableValue(value), null, 2)}\n`;
 }
 
+// stableValue-based on purpose: recorded snapshot policy hashes depend on it,
+// so it is not util.ts's code-unit canonicalHash.
 function canonicalHash(value: unknown, tag: string): string {
   return sha256(`${tag}\n${JSON.stringify(stableValue(value))}`);
 }

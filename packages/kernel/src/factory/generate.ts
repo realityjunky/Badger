@@ -990,6 +990,15 @@ export async function generatePackage(options: {
         roots: options.sourceRoots ?? [],
       })
     : undefined;
+  if (
+    sourceEvidence &&
+    options.proposal.upgradeSource &&
+    sourceEvidence.hash !== options.proposal.upgradeSource.hash
+  ) {
+    throw new Error(
+      "The upgrade source changed since the proposal was built; rerun propose and init",
+    );
+  }
   if (sourceRoot) {
     await assertUpgradeDestinationOutsideSource(sourceRoot, root);
   }

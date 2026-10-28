@@ -1,10 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildProposal } from "../src/factory/proposal.js";
-import { initializeState, readState } from "../src/factory/state.js";
-import { creatorStateHash } from "../src/workflow-kernel/foundation.js";
+import { generateFromApprovedProposal } from "../src/factory/approved-generation.js";
+import {
+  buildProposal,
+  planHashMatches,
+  readPlan,
+} from "../src/factory/proposal.js";
+import {
+  creatorStateHash,
+  initializeState,
+  readState,
+  verifyApprovedProposal,
+} from "../src/factory/state.js";
 import type { FactoryPlan } from "../src/types.js";
 
 describe("Creator proposal binding", () => {
@@ -190,21 +200,22 @@ describe("Creator proposal binding", () => {
 
     expect(state.planHash).toBe(approved.planHash);
     expect(state.confirmedProposal).toEqual(approved);
-    expect(creatorStateHash(state)).toMatch(/^[a-f0-9]{64}$/u);
-    expect(creatorStateHash(await readState(project, "primer-workflow"))).toBe(
-      creatorStateHash(state),
-    );
+    const stateHash = await creatorStateHash(project, "primer-workflow");
+    expect(stateHash).toMatch(/^[a-f0-9]{64}$/u);
+    await readState(project, "primer-workflow");
+    expect(await creatorStateHash(project, "primer-workflow")).toBe(stateHash);
+    expect(await creatorStateHash(project, "other-workflow")).toBeNull();
   });
 
   it("refuses to replace existing Creator state without the current state hash", async () => {
     const approved = await buildProposal({ projectRoot: project, planPath });
-    const first = await initializeState({
+    await initializeState({
       projectRoot: project,
       planPath,
       proposalHash: approved.proposalHash,
       confirmed: true,
     });
-    const currentHash = creatorStateHash(first);
+    const currentHash = (await creatorStateHash(project, "primer-workflow"))!;
 
     await expect(
       initializeState({
@@ -224,13 +235,191 @@ describe("Creator proposal binding", () => {
       }),
     ).rejects.toThrow(/state hash/iu);
 
-    const replaced = await initializeState({
+    await initializeState({
       projectRoot: project,
       planPath,
       proposalHash: approved.proposalHash,
       replaceStateHash: currentHash,
       confirmed: true,
     });
-    expect(creatorStateHash(replaced)).toBe(currentHash);
+    expect(await creatorStateHash(project, "primer-workflow")).toBe(
+      currentHash,
+    );
+  });
+
+  it("refuses a pasted value that is not a hash", async () => {
+    const approved = await buildProposal({ projectRoot: project, planPath });
+    await expect(
+      initializeState({
+        projectRoot: project,
+        planPath,
+        proposalHash: "proposalHash: abc",
+        confirmed: true,
+      }),
+    ).rejects.toThrow(/Not a proposal hash/u);
+    await expect(
+      initializeState({
+        projectRoot: project,
+        planPath,
+        proposalHash: approved.proposalHash,
+        replaceStateHash: "abc",
+        confirmed: true,
+      }),
+    ).rejects.toThrow(/Not a Creator state hash/u);
+    await expect(
+      fs.stat(path.join(project, ".badger", "states", "primer-workflow.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("lets exactly one of two concurrent initializations create the state", async () => {
+    const approved = await buildProposal({ projectRoot: project, planPath });
+    const attempts = await Promise.allSettled(
+      [0, 1].map(() =>
+        initializeState({
+          projectRoot: project,
+          planPath,
+          proposalHash: approved.proposalHash,
+          confirmed: true,
+        }),
+      ),
+    );
+    expect(attempts.filter((item) => item.status === "fulfilled")).toHaveLength(
+      1,
+    );
+    const refused = attempts.find((item) => item.status === "rejected");
+    expect(String((refused as PromiseRejectedResult).reason)).toMatch(
+      /Existing Creator state/u,
+    );
+  });
+
+  it("replaces a state file that no longer parses only by quoting its hash", async () => {
+    const approved = await buildProposal({ projectRoot: project, planPath });
+    const statePath = path.join(
+      project,
+      ".badger",
+      "states",
+      "primer-workflow.json",
+    );
+    await fs.mkdir(path.dirname(statePath), { recursive: true });
+    await fs.writeFile(statePath, "{ not json");
+
+    await expect(readState(project, "primer-workflow")).rejects.toThrow(
+      /not valid JSON/u,
+    );
+    const refusal = await initializeState({
+      projectRoot: project,
+      planPath,
+      proposalHash: approved.proposalHash,
+      confirmed: true,
+    }).catch((error: Error) => error);
+    expect(String(refusal)).toMatch(/is not valid JSON and has hash/u);
+    const garbledHash = (await creatorStateHash(project, "primer-workflow"))!;
+    expect(String(refusal)).toContain(garbledHash);
+
+    await initializeState({
+      projectRoot: project,
+      planPath,
+      proposalHash: approved.proposalHash,
+      replaceStateHash: garbledHash,
+      confirmed: true,
+    });
+    await expect(readState(project, "primer-workflow")).resolves.toMatchObject({
+      planHash: approved.planHash,
+    });
+  });
+
+  it("verifies the approved proposal and returns the rebuilt proposal with the plan it read", async () => {
+    const approved = await buildProposal({ projectRoot: project, planPath });
+    const state = await initializeState({
+      projectRoot: project,
+      planPath,
+      proposalHash: approved.proposalHash,
+      confirmed: true,
+    });
+
+    const verified = await verifyApprovedProposal(state);
+    expect(verified.proposal.proposalHash).toBe(approved.proposalHash);
+    expect(verified.plan).toEqual(await readPlan(planPath));
+  });
+
+  it("generates through the kernel only after confirmation and from an untampered approved proposal", async () => {
+    const approved = await buildProposal({ projectRoot: project, planPath });
+    const state = await initializeState({
+      projectRoot: project,
+      planPath,
+      proposalHash: approved.proposalHash,
+      confirmed: true,
+    });
+    const statePath = path.join(
+      project,
+      ".badger",
+      "states",
+      "primer-workflow.json",
+    );
+    const stored = await fs.readFile(statePath, "utf8");
+
+    await expect(
+      generateFromApprovedProposal({
+        projectRoot: project,
+        name: "primer-workflow",
+        confirmed: false,
+      }),
+    ).rejects.toThrow(/explicit confirmation/u);
+
+    const tampered = JSON.parse(stored) as {
+      confirmedProposal: { goal: string };
+    };
+    tampered.confirmedProposal.goal = "TAMPERED";
+    await fs.writeFile(statePath, JSON.stringify(tampered, null, 2) + "\n");
+    await expect(
+      generateFromApprovedProposal({
+        projectRoot: project,
+        name: "primer-workflow",
+        confirmed: true,
+      }),
+    ).rejects.toThrow(/does not match its proposal hash/u);
+    await expect(
+      fs.stat(path.join(state.draftPath, "SKILL.md")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+
+    await fs.writeFile(statePath, stored);
+    await fs.writeFile(
+      planPath,
+      JSON.stringify({ ...planFixture(), goal: "Edited after init." }, null, 2),
+    );
+    await expect(
+      generateFromApprovedProposal({
+        projectRoot: project,
+        name: "primer-workflow",
+        confirmed: true,
+      }),
+    ).rejects.toThrow(/plan changed/u);
+
+    await fs.writeFile(planPath, JSON.stringify(planFixture(), null, 2));
+    const generated = await generateFromApprovedProposal({
+      projectRoot: project,
+      name: "primer-workflow",
+      confirmed: true,
+    });
+    expect(generated.proposal.proposalHash).toBe(approved.proposalHash);
+    expect(generated.state.status).toBe("generated");
+    await expect(
+      fs.readFile(path.join(state.draftPath, "SKILL.md"), "utf8"),
+    ).resolves.not.toContain("TAMPERED");
+  });
+
+  it("honors plan hashes recorded before they became canonical", async () => {
+    const plan = await readPlan(planPath);
+    const legacy = createHash("sha256")
+      .update(JSON.stringify(plan))
+      .digest("hex");
+    const proposal = await buildProposal({ projectRoot: project, planPath });
+
+    expect(planHashMatches(plan, legacy)).toBe(true);
+    expect(planHashMatches(plan, proposal.planHash)).toBe(true);
+    expect(planHashMatches({ ...plan, goal: "Changed." }, legacy)).toBe(false);
+    const reordered = Object.fromEntries(Object.entries(plan).reverse());
+    expect(planHashMatches(reordered, proposal.planHash)).toBe(true);
+    expect(planHashMatches(reordered, legacy)).toBe(false);
   });
 });
