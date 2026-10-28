@@ -101,6 +101,14 @@ describe("the design tokens", () => {
           ).toBeGreaterThanOrEqual(4.5);
         }
       }
+      expect(
+        contrast(scheme.onAccent, scheme.accent),
+        `${theme} text on accent`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrast(scheme.accent, scheme.accentSoft),
+        `${theme} accent on the active stage`,
+      ).toBeGreaterThanOrEqual(4.5);
       for (const tone of ["success", "warning", "danger", "info"] as const) {
         expect(
           contrast(scheme.status[tone].text, scheme.status[tone].soft),
@@ -118,6 +126,9 @@ describe("the design tokens", () => {
     expect(dark["--badger-color-background"]).toBe("#151923");
     expect(light["--badger-color-accent"]).toBe(colorSchemes.light.accent);
     expect(dark["--badger-color-accent"]).toBe("#6e9fff");
+    expect(light["--badger-color-on-accent"]).toBe("#ffffff");
+    expect(light["--badger-color-scrim"]).toContain("rgb(16 24 39");
+    expect(light["--badger-layout-scope-select-width"]).toBe("150px");
     expect(light["--badger-layout-rail-width"]).toBe("228px");
     expect(light["--badger-layout-top-bar-height"]).toBe("68px");
     expect(light["--badger-font-size-base"]).toBe("14px");
@@ -145,6 +156,7 @@ describe("the design tokens", () => {
     expect(dark.token?.colorText).toBe("#e4e8ef");
     expect(dark.token?.colorBgLayout).toBe("#151923");
     expect(dark.token?.colorBorder).toBe("#303846");
+    expect(dark.token?.colorTextLightSolid).toBe("#0d1424");
   });
 
   it("clamps the font scale to the offered range", () => {

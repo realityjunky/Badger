@@ -7,18 +7,18 @@ prefix.
 
 ## Layout
 
-| Path                    | Holds                                                                                       |
-| ----------------------- | ------------------------------------------------------------------------------------------- |
-| `src/theme/tokens.ts`   | The one token source: colors, layout sizes, type scale, radii, and the Ant Design theme.    |
-| `src/styles/global.css` | Layout only; every color and size comes from the CSS variables `tokens.ts` writes.          |
-| `src/i18n/catalog.ts`   | zh and en message catalogs, keyed by the same message IDs.                                  |
-| `src/app/navigation.ts` | The URL routes, the rail's sections, and the page-title lookup.                             |
-| `src/app/paths.ts`      | Base-path normalisation and API/page URLs.                                                  |
-| `src/preferences/`      | The person's choices: model, API client, and the provider that saves them and applies them. |
-| `src/shell/`            | The rail, top bar, and application frame.                                                   |
-| `src/pages/`            | The pages. My work is the landing page at `/my-work`.                                       |
-| `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, and base paths.         |
-| `e2e/`                  | Playwright journeys and visual checks against the real service in local single-user mode.   |
+| Path                    | Holds                                                                                                |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| `src/theme/tokens.ts`   | The one token source: colors, layout sizes, type scale, radii, and the Ant Design theme.             |
+| `src/styles/global.css` | Layout only; every color and the shared layout sizes come from the CSS variables `tokens.ts` writes. |
+| `src/i18n/catalog.ts`   | zh and en message catalogs, keyed by the same message IDs.                                           |
+| `src/app/navigation.ts` | The URL routes, the rail's sections, and the page-title lookup.                                      |
+| `src/app/paths.ts`      | Base-path normalisation, API URLs, and reading the injected base path.                               |
+| `src/preferences/`      | The person's choices: model, API client, and the provider that saves them and applies them.          |
+| `src/shell/`            | The rail, top bar, and application frame.                                                            |
+| `src/pages/`            | The pages. My work is the landing page at `/my-work`.                                                |
+| `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, and base paths.                  |
+| `e2e/`                  | Playwright journeys and visual checks against the real service in local single-user mode.            |
 
 ## Behavior
 

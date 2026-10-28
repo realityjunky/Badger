@@ -32,12 +32,12 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
   const languageItems: MenuProps["items"] = [
     {
       key: "en",
-      label: "English",
+      label: t("language.en"),
       onClick: () => update({ language: "en" }),
     },
     {
       key: "zh",
-      label: "中文",
+      label: t("language.zh"),
       onClick: () => update({ language: "zh" }),
     },
   ];
@@ -146,7 +146,7 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
             aria-label={t("topBar.language")}
             data-testid="language-switch"
           >
-            {preferences.language === "zh" ? "中文" : "English"}
+            {t(preferences.language === "zh" ? "language.zh" : "language.en")}
           </Button>
         </Dropdown>
 

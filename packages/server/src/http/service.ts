@@ -168,6 +168,57 @@ export function createService(options: ServiceOptions, port: number): Service {
     reply.json(200, await listAuditEvents(database, { limit, after }));
   }
 
+  async function handlePreferences(
+    request: IncomingMessage,
+    reply: Reply,
+    person: Person,
+    principal: Principal,
+    method: string,
+  ): Promise<void> {
+    if (method === "GET" || method === "HEAD") {
+      return reply.json(200, {
+        preferences: await readPreferences(database, person.id),
+      });
+    }
+    if (method !== "PUT") {
+      return reply.error(405, "invalid", "Method not allowed", {
+        allow: "GET, HEAD, PUT",
+      });
+    }
+
+    const body = await readJsonBody(request);
+    if (!body.ok) {
+      return reply.error(400, "invalid", body.message);
+    }
+    const input = parsePreferencesInput(body.value);
+    if (!input.ok) {
+      return reply.error(400, "invalid", input.message);
+    }
+
+    const saved = await savePreferences(
+      database,
+      serviceDependencies,
+      {
+        personId: person.id,
+        credential: principal.credential,
+        channel: channelOf(principal.credential),
+        requestId: reply.requestId,
+      },
+      input.value,
+    );
+    if (saved.kind === "conflict") {
+      return reply.json(409, {
+        error: {
+          code: "conflict",
+          message: "The preferences changed since you read them",
+        },
+        requestId: reply.requestId,
+        preferences: saved.preferences,
+      });
+    }
+    return reply.json(200, { preferences: saved.preferences });
+  }
+
   async function handle(
     request: IncomingMessage,
     reply: Reply,
@@ -190,6 +241,8 @@ export function createService(options: ServiceOptions, port: number): Service {
       return reply.error(404, "invalid", "Not found");
     }
     const reads = method === "GET" || method === "HEAD";
+    const isApi = path === "/api" || path.startsWith("/api/");
+    const preferencesPath = path === `${API}/me/preferences`;
 
     if (path === "/health") {
       if (!reads) {
@@ -207,7 +260,12 @@ export function createService(options: ServiceOptions, port: number): Service {
 
     // The dashboard's assets are public: the sign-in page and the app both
     // need them before anyone is identified.
-    if (isFileRequest(path) && !path.startsWith("/api")) {
+    if (!isApi && isFileRequest(path)) {
+      if (!reads) {
+        return reply.error(405, "invalid", "Method not allowed", {
+          allow: "GET, HEAD",
+        });
+      }
       const asset = await readWebAsset(config.webDirectory, path);
       if (asset === null) {
         return reply.error(404, "invalid", "Not found");
@@ -217,6 +275,15 @@ export function createService(options: ServiceOptions, port: number): Service {
         contentType: asset.contentType,
         body: asset.body,
         headers: { "cache-control": asset.cacheControl },
+      });
+    }
+
+    // Only the preferences endpoint writes; every other route is read-only.
+    // Refuse other methods before identifying anyone, so no sign-in or audit
+    // record is written for a request the service will not serve.
+    if (!reads && !preferencesPath) {
+      return reply.error(405, "invalid", "Method not allowed", {
+        allow: "GET, HEAD",
       });
     }
 
@@ -241,54 +308,10 @@ export function createService(options: ServiceOptions, port: number): Service {
     const person = await signIn(principal, reply.requestId);
     const roles = organizationRoles(person, config);
 
-    if (path === `${API}/me/preferences`) {
-      if (reads) {
-        return reply.json(200, {
-          preferences: await readPreferences(database, person.id),
-        });
-      }
-      if (method !== "PUT") {
-        return reply.error(405, "invalid", "Method not allowed", {
-          allow: "GET, HEAD, PUT",
-        });
-      }
-      const body = await readJsonBody(request);
-      if (!body.ok) {
-        return reply.error(400, "invalid", body.message);
-      }
-      const input = parsePreferencesInput(body.value);
-      if (!input.ok) {
-        return reply.error(400, "invalid", input.message);
-      }
-      const saved = await savePreferences(
-        database,
-        serviceDependencies,
-        {
-          personId: person.id,
-          credential: principal.credential,
-          channel: channelOf(principal.credential),
-          requestId: reply.requestId,
-        },
-        input.value,
-      );
-      if (saved.kind === "conflict") {
-        return reply.json(409, {
-          error: {
-            code: "conflict",
-            message: "The preferences changed since you read them",
-          },
-          requestId: reply.requestId,
-          preferences: saved.preferences,
-        });
-      }
-      return reply.json(200, { preferences: saved.preferences });
+    if (preferencesPath) {
+      return handlePreferences(request, reply, person, principal, method);
     }
-    if (!reads) {
-      return reply.error(405, "invalid", "Method not allowed", {
-        allow: "GET, HEAD",
-      });
-    }
-    if (path !== "/api" && !path.startsWith(`${API}/`)) {
+    if (!isApi) {
       const document = await readWebDocument(
         config.webDirectory,
         config.basePath,
@@ -332,7 +355,7 @@ export function createService(options: ServiceOptions, port: number): Service {
     if (path === `${API}/audit-events`) {
       return listAudit(reply, url, roles);
     }
-    if (path.startsWith("/api/")) {
+    if (isApi) {
       return reply.error(404, "invalid", "Not found");
     }
     reply.send({

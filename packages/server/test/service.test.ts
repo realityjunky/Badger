@@ -102,6 +102,23 @@ describe("the service's web page", () => {
     expect(await response.json()).toMatchObject({ person: { roles: [] } });
   });
 
+  it("refuses a write to a read-only route before signing anyone in", async () => {
+    service = await startTestService({
+      environment: { BADGER_ALLOWED_ORIGINS: "http://localhost" },
+    });
+
+    const response = await service.request("/api/v1/me", {
+      method: "PUT",
+      as: alice,
+      headers: { origin: "http://localhost" },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET, HEAD");
+    expect(await response.json()).toMatchObject({ error: { code: "invalid" } });
+  });
+
   it("serves the API under its version only", async () => {
     service = await startTestService();
 

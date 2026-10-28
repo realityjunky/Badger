@@ -11,7 +11,7 @@
 }
 
 html {
-  font-size: calc(14px * var(--badger-font-scale, 1));
+  font-size: calc(var(--badger-font-size-base) * var(--badger-font-scale, 1));
   scroll-behavior: smooth;
 }
 
@@ -21,7 +21,7 @@ body {
   background: var(--badger-color-background);
   color: var(--badger-color-text);
   font-family: var(--badger-font-family);
-  font-size: 1rem;
+  font-size: calc(var(--badger-font-size-base) * var(--badger-font-scale, 1));
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
@@ -39,7 +39,7 @@ body {
   padding: 8px 12px;
   border-radius: var(--badger-radius-control);
   background: var(--badger-color-accent);
-  color: #ffffff;
+  color: var(--badger-color-on-accent);
   text-decoration: none;
   font-weight: 600;
 }
@@ -92,13 +92,13 @@ body {
   flex: none;
   border-radius: var(--badger-radius-control);
   background: var(--badger-color-accent);
-  color: #ffffff;
+  color: var(--badger-color-on-accent);
   font-size: 16px;
 }
 
 .rail-name {
   font-weight: 700;
-  font-size: 1.0625rem;
+  font-size: calc(var(--badger-font-size-md) * var(--badger-font-scale, 1));
   letter-spacing: -0.01em;
 }
 
@@ -110,7 +110,10 @@ body {
 
 .rail-section-title {
   margin: 12px 10px 4px;
-  font-size: max(12px, 0.8125rem);
+  font-size: max(
+    12px,
+    calc(var(--badger-font-size-xs) * var(--badger-font-scale, 1))
+  );
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -210,15 +213,15 @@ body {
 }
 
 .scope-select {
-  width: 150px;
+  width: var(--badger-layout-scope-select-width);
 }
 
 .scope-select-workflow {
-  width: 165px;
+  width: var(--badger-layout-scope-select-workflow-width);
 }
 
 .scope-select-version {
-  width: 120px;
+  width: var(--badger-layout-scope-select-version-width);
 }
 
 .scope-arrow {
@@ -228,7 +231,7 @@ body {
 .top-bar-search {
   flex: 1;
   max-width: 420px;
-  min-width: 120px;
+  min-width: var(--badger-layout-scope-select-version-width);
 }
 
 .top-bar-actions {
@@ -269,7 +272,7 @@ body {
 
 .page-header h1 {
   margin: 0 0 4px;
-  font-size: clamp(24px, 1.625rem, 26px);
+  font-size: calc(var(--badger-font-size-title) * var(--badger-font-scale, 1));
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -327,14 +330,17 @@ body {
 }
 
 .summary-value {
-  font-size: 1.5rem;
+  font-size: calc(var(--badger-font-size-xl) * var(--badger-font-scale, 1));
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
 .summary-label {
   color: var(--badger-color-text-secondary);
-  font-size: max(12px, 0.875rem);
+  font-size: max(
+    12px,
+    calc(var(--badger-font-size-sm) * var(--badger-font-scale, 1))
+  );
 }
 
 /* The three-pane registry layout */
@@ -369,7 +375,7 @@ body {
 
 .pane-title {
   margin: 16px 0 8px;
-  font-size: 1rem;
+  font-size: calc(var(--badger-font-size-md) * var(--badger-font-scale, 1));
   font-weight: 600;
 }
 
@@ -440,18 +446,21 @@ body {
 
 .stage[data-state="active"] .stage-number {
   border-color: var(--badger-color-accent);
-  background: var(--badger-color-accent);
-  color: #ffffff;
+  background: var(--badger-color-accent-soft);
+  color: var(--badger-color-accent);
 }
 
 .stage[data-state="done"] .stage-number {
   border-color: var(--badger-color-success);
-  background: var(--badger-color-success);
-  color: #ffffff;
+  background: var(--badger-color-success-soft);
+  color: var(--badger-color-success-text);
 }
 
 .stage-name {
-  font-size: max(12px, 0.875rem);
+  font-size: max(
+    12px,
+    calc(var(--badger-font-size-sm) * var(--badger-font-scale, 1))
+  );
   font-weight: 600;
 }
 
@@ -487,7 +496,10 @@ body {
   width: fit-content;
   padding: 2px 8px;
   border-radius: var(--badger-radius-pill);
-  font-size: max(12px, 0.8125rem);
+  font-size: max(
+    12px,
+    calc(var(--badger-font-size-xs) * var(--badger-font-scale, 1))
+  );
   font-weight: 500;
 }
 
@@ -553,7 +565,10 @@ body {
 
 .save-state {
   margin: 0 0 12px;
-  font-size: max(12px, 0.875rem);
+  font-size: max(
+    12px,
+    calc(var(--badger-font-size-sm) * var(--badger-font-scale, 1))
+  );
 }
 
 .save-state-saved {
@@ -575,7 +590,7 @@ body {
   inset: 0;
   z-index: 30;
   border: 0;
-  background: rgb(16 24 39 / 45%);
+  background: var(--badger-color-scrim);
 }
 
 @media (max-width: 1023px) {

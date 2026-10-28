@@ -2,6 +2,21 @@ import { useI18n } from "../i18n/I18nContext.js";
 import type { MessageId } from "../i18n/catalog.js";
 import { StatusPill } from "./StatusPill.js";
 
+type StageState = "done" | "active" | "todo";
+
+const PILL_TONE: Readonly<Record<StageState, "info" | "success" | "neutral">> =
+  {
+    done: "success",
+    active: "info",
+    todo: "neutral",
+  };
+
+const PILL_MESSAGE: Readonly<Record<StageState, MessageId>> = {
+  done: "status.done",
+  active: "status.inProgress",
+  todo: "status.notStarted",
+};
+
 const STAGES: readonly MessageId[] = [
   "stage.sources",
   "stage.sourceStudy",
@@ -23,7 +38,7 @@ export function StageTrack({ active = 0 }: { active?: number }) {
       data-testid="stage-track"
     >
       {STAGES.map((stage, index) => {
-        const state =
+        const state: StageState =
           index < active ? "done" : index === active ? "active" : "todo";
         return (
           <li className="stage" key={stage} data-state={state}>
@@ -31,20 +46,8 @@ export function StageTrack({ active = 0 }: { active?: number }) {
               {index + 1}
             </span>
             <span className="stage-name">{t(stage)}</span>
-            <StatusPill
-              tone={
-                state === "active"
-                  ? "info"
-                  : state === "done"
-                    ? "success"
-                    : "neutral"
-              }
-            >
-              {state === "active"
-                ? t("status.inProgress")
-                : state === "done"
-                  ? t("status.done")
-                  : t("status.notStarted")}
+            <StatusPill tone={PILL_TONE[state]}>
+              {t(PILL_MESSAGE[state])}
             </StatusPill>
             {state === "active" && (
               <span className="stage-marker" aria-hidden="true" />

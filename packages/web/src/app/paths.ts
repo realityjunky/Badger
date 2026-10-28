@@ -24,13 +24,6 @@ export function apiUrl(basePath: string, path: string): string {
   return `${base === "/" ? "" : base}/api/v1${suffix}`;
 }
 
-/** A dashboard URL under the base path, for links the app builds itself. */
-export function pageUrl(basePath: string, path: string): string {
-  const base = normalizeBasePath(basePath);
-  const suffix = path.startsWith("/") ? path : `/${path}`;
-  return `${base === "/" ? "" : base}${suffix}`;
-}
-
 /** Reads the base path the server injected into the document. */
 export function readBasePath(document: Document): string {
   const meta = document.querySelector('meta[name="badger-base-path"]');

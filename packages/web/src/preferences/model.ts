@@ -1,3 +1,6 @@
+import { fontScaleFactor } from "../theme/tokens.js";
+import { isRecord } from "../util/records.js";
+
 export type Language = "en" | "zh";
 export type ThemeChoice = "system" | "light" | "dark";
 
@@ -25,13 +28,7 @@ export const DEFAULT_PREFERENCES: StoredPreferences = {
 
 export const LANGUAGES: readonly Language[] = ["en", "zh"];
 export const THEMES: readonly ThemeChoice[] = ["system", "light", "dark"];
-export const MIN_FONT_SCALE = 90;
-export const MAX_FONT_SCALE = 150;
 export const FONT_SCALE_STEP = 10;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /**
  * Reads the service's preferences payload defensively: a value this build
@@ -73,10 +70,7 @@ export function parseStoredPreferences(
 }
 
 export function clampFontScale(scale: number): number {
-  return Math.min(
-    MAX_FONT_SCALE,
-    Math.max(MIN_FONT_SCALE, Number.isFinite(scale) ? scale : 100),
-  );
+  return Math.round(fontScaleFactor(scale) * 100);
 }
 
 /** The body a save sends: the choices plus the revision they were read at. */

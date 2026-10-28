@@ -9,7 +9,7 @@ skeleton in `packages/server/`.
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | `packages/kernel/` | The workflow kernel, published as `@realityjunky/badger`: the Creator, WorkflowRuntime, and the `badger` CLI. See its [README](packages/kernel/README.md).                          | Delivered              |
 | `packages/server/` | The collaborative service's server role: reviewed SQL migrations, Postgres or PGlite, local single-user mode, audited writes, the health endpoint, and the in-process test harness. | Walking skeleton (#36) |
-| `packages/web/`    | The dashboard shell: navigation rail, top bar, three-pane registry layout, design tokens, URL routing, zh/en catalogs, light and dark themes, and personal appearance settings.       | Dashboard shell (#37)  |
+| `packages/web/`    | The web dashboard shell: navigation rail, top bar, three-pane registry layout, design tokens, URL routing, zh/en catalogs, light and dark themes, and personal appearance settings.   | Dashboard shell (#37)  |
 | `packages/<name>/` | One package each for the collaborative service's remaining surfaces: the Badger MCP and the host installer.                                                                           | Planned (#24)          |
 
 Everything shipped is generic: each deployment keeps its own launcher entries,

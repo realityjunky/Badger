@@ -164,9 +164,18 @@ test("theme and text size persist for the person", async ({ page }) => {
   await page.getByText("Dark", { exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
+  const heading = page.getByRole("heading", { name: "Personal settings" });
+  const before = await heading.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize),
+  );
+
   await page.getByRole("button", { name: "Larger text" }).click();
   await expect(page.getByTestId("font-scale-value")).toHaveText("110%");
   await expect(page.getByTestId("save-state")).toHaveText("Saved");
+  const after = await heading.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize),
+  );
+  expect(after).toBeGreaterThan(before);
 
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

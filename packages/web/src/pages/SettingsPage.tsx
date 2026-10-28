@@ -20,6 +20,17 @@ const TAB_KEYS = [
 
 type TabKey = (typeof TAB_KEYS)[number];
 
+const SAVE_MESSAGE: Readonly<
+  Record<
+    "saving" | "saved" | "failed",
+    "settings.saving" | "settings.saved" | "settings.failed"
+  >
+> = {
+  saving: "settings.saving",
+  saved: "settings.saved",
+  failed: "settings.failed",
+};
+
 function isTabKey(value: string | undefined): value is TabKey {
   return TAB_KEYS.includes(value as TabKey);
 }
@@ -47,11 +58,7 @@ export function SettingsPage() {
           role="status"
           data-testid="save-state"
         >
-          {saveState === "saved"
-            ? t("settings.saved")
-            : saveState === "saving"
-              ? t("settings.saving")
-              : t("settings.failed")}
+          {t(SAVE_MESSAGE[saveState])}
         </p>
       )}
       <Tabs

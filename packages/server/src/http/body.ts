@@ -3,6 +3,13 @@ import { firstHeader } from "../identity/identity.js";
 
 export const MAX_JSON_BODY_BYTES = 16 * 1024;
 
+function tooLarge(limit: number): { ok: false; message: string } {
+  return {
+    ok: false,
+    message: `The request body is limited to ${limit} bytes`,
+  };
+}
+
 export type JsonBodyResult =
   { ok: true; value: unknown } | { ok: false; message: string };
 
@@ -28,10 +35,7 @@ export async function readJsonBody(
       return { ok: false, message: "Content-Length is not valid" };
     }
     if (length > limit) {
-      return {
-        ok: false,
-        message: `The request body is limited to ${limit} bytes`,
-      };
+      return tooLarge(limit);
     }
   }
 
@@ -43,10 +47,7 @@ export async function readJsonBody(
       : Buffer.from(chunk as string);
     size += buffer.length;
     if (size > limit) {
-      return {
-        ok: false,
-        message: `The request body is limited to ${limit} bytes`,
-      };
+      return tooLarge(limit);
     }
     chunks.push(buffer);
   }

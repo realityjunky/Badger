@@ -20,6 +20,8 @@ afterEach(async () => {
   }
 });
 
+const WRITE_ORIGIN = "http://localhost";
+
 const alice: TestPerson = {
   subject: "alice",
   email: "alice@example.com",
@@ -149,6 +151,23 @@ describe("the dashboard the server serves", () => {
     expect(api.headers.get("content-security-policy")).toContain(
       "default-src 'none'",
     );
+  });
+
+  it("serves assets as files, not as writable resources", async () => {
+    service = await startTestService({
+      environment: {
+        BADGER_WEB_DIR: await builtWebDirectory(),
+        BADGER_ALLOWED_ORIGINS: WRITE_ORIGIN,
+      },
+    });
+
+    const response = await service.request("/assets/app.js", {
+      method: "POST",
+      headers: { origin: WRITE_ORIGIN },
+    });
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET, HEAD");
   });
 
   it("serves assets without requiring a signed-in person", async () => {

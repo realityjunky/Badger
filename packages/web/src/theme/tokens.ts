@@ -21,6 +21,10 @@ export interface ColorScheme {
   border: string;
   accent: string;
   accentSoft: string;
+  /** Text and icons on an accent-colored fill. */
+  onAccent: string;
+  /** The dimming layer behind a drawer. */
+  scrim: string;
   status: Record<"success" | "warning" | "danger" | "info", StatusColors>;
 }
 
@@ -38,6 +42,8 @@ export const colorSchemes: Readonly<Record<ColorTheme, ColorScheme>> = {
     border: "#e2e7ee",
     accent: "#255ed8",
     accentSoft: "#e9effb",
+    onAccent: "#ffffff",
+    scrim: "rgb(16 24 39 / 45%)",
     status: {
       success: { fill: "#16a34a", soft: "#e8f6ed", text: "#116b36" },
       warning: { fill: "#c47a06", soft: "#f9f2e6", text: "#8a5300" },
@@ -54,6 +60,9 @@ export const colorSchemes: Readonly<Record<ColorTheme, ColorScheme>> = {
     border: "#303846",
     accent: "#6e9fff",
     accentSoft: "#1c2942",
+    // The dark accent is light, so text on it must be dark to reach AA.
+    onAccent: "#0d1424",
+    scrim: "rgb(16 24 39 / 55%)",
     status: {
       success: { fill: "#73bf69", soft: "#1f2a2a", text: "#73bf69" },
       warning: { fill: "#ff9830", soft: "#2d2624", text: "#ff9830" },
@@ -76,6 +85,9 @@ export const layout = {
   paneStackBreakpoint: 1180,
   railDrawerBreakpoint: 1024,
   gutter: 16,
+  scopeSelectWidth: 150,
+  scopeSelectWorkflowWidth: 165,
+  scopeSelectVersionWidth: 120,
 } as const;
 
 /** Base 14px on the 13/14/16/20/24 scale; page titles at 26px. */
@@ -131,6 +143,8 @@ export function cssVariables(theme: ColorTheme): Record<string, string> {
     "--badger-color-border": scheme.border,
     "--badger-color-accent": scheme.accent,
     "--badger-color-accent-soft": scheme.accentSoft,
+    "--badger-color-on-accent": scheme.onAccent,
+    "--badger-color-scrim": scheme.scrim,
     ...statusVariables("success", scheme.status.success),
     ...statusVariables("warning", scheme.status.warning),
     ...statusVariables("danger", scheme.status.danger),
@@ -146,6 +160,9 @@ export function cssVariables(theme: ColorTheme): Record<string, string> {
     "--badger-layout-pane-stack-breakpoint": `${layout.paneStackBreakpoint}px`,
     "--badger-layout-rail-drawer-breakpoint": `${layout.railDrawerBreakpoint}px`,
     "--badger-layout-gutter": `${layout.gutter}px`,
+    "--badger-layout-scope-select-width": `${layout.scopeSelectWidth}px`,
+    "--badger-layout-scope-select-workflow-width": `${layout.scopeSelectWorkflowWidth}px`,
+    "--badger-layout-scope-select-version-width": `${layout.scopeSelectVersionWidth}px`,
     "--badger-font-family": FONT_FAMILY,
     "--badger-font-size-xs": `${typeScale.xs}px`,
     "--badger-font-size-sm": `${typeScale.sm}px`,
@@ -180,6 +197,7 @@ export function antdTheme(theme: ColorTheme, fontScale = 1): ThemeConfig {
       colorTextSecondary: scheme.secondaryText,
       colorTextTertiary: scheme.mutedText,
       colorTextPlaceholder: scheme.secondaryText,
+      colorTextLightSolid: scheme.onAccent,
       colorTextDisabled: scheme.mutedText,
       colorIcon: scheme.secondaryText,
       colorIconHover: scheme.text,

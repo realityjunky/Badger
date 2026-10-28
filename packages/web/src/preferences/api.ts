@@ -1,4 +1,5 @@
 import { apiUrl } from "../app/paths.js";
+import { isRecord } from "../util/records.js";
 import {
   DEFAULT_PREFERENCES,
   parseStoredPreferences,
@@ -16,10 +17,6 @@ export type SaveOutcome =
   | { kind: "saved"; preferences: StoredPreferences }
   | { kind: "conflict"; preferences: StoredPreferences }
   | { kind: "failed" };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 async function preferencesFrom(
   response: Response,

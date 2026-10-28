@@ -12,10 +12,7 @@ export function PlaceholderPage({
 }) {
   const { t } = useI18n();
   return (
-    <div
-      className="page"
-      data-testid={`page-${title.split(".")[1] ?? "other"}`}
-    >
+    <div className="page" data-testid="page-placeholder">
       <PageHeader title={t(title)} description={t(description)} />
       <p className="empty-state">{t("page.placeholder")}</p>
     </div>

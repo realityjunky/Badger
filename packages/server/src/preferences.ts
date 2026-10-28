@@ -192,14 +192,7 @@ export async function savePreferences(
 
     const revision = current.revision + 1;
     const now = dependencies.clock.now();
-    const values = [
-      input.preferences.language,
-      input.preferences.theme,
-      input.preferences.fontScale,
-      input.preferences.railCollapsed,
-      revision,
-      now,
-    ];
+    const { language, theme, fontScale, railCollapsed } = input.preferences;
 
     const written =
       current.revision === 0
@@ -210,7 +203,15 @@ export async function savePreferences(
              ) values ($1, $2, $3, $4, $5, $6, $7, $7)
              on conflict (person_id) do nothing
              returning ${PREFERENCE_COLUMNS}`,
-            [context.personId, ...values.slice(0, 4), revision, now],
+            [
+              context.personId,
+              language,
+              theme,
+              fontScale,
+              railCollapsed,
+              revision,
+              now,
+            ],
           )
         : await tx.query<PreferencesRow>(
             `update person_preferences
@@ -220,7 +221,10 @@ export async function savePreferences(
               returning ${PREFERENCE_COLUMNS}`,
             [
               context.personId,
-              ...values.slice(0, 4),
+              language,
+              theme,
+              fontScale,
+              railCollapsed,
               revision,
               now,
               current.revision,
