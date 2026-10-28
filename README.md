@@ -22,6 +22,10 @@ workflow uploads to that workflow's Group. See
 [the server package](packages/server/README.md) for the API, permissions,
 storage, and configurable upload limits.
 
+Deployments follow the [backup and restore procedure](docs/backup-and-restore.md)
+and rehearse recovery before the first real workflow. Nightly scheduling belongs
+to the deployment.
+
 ## Development
 
 Run these commands from the repository root:
