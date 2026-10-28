@@ -22,6 +22,8 @@ const serviceDecisions = [
   "0006-questionnaire-records-and-dossier-version-2.md",
   "0009-reviewed-sql-migrations.md",
   "0010-nested-groups-and-email-bindings.md",
+  "0012-workflow-frames-and-workflow-bindings.md",
+  "0013-uploaded-skill-versions.md",
 ];
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
@@ -455,9 +457,27 @@ describe("Badger release artifacts", () => {
     expect(delivered).toContain("bindings.ts");
     expect(delivered).toContain("BADGER_PLATFORM_ADMIN_MAPPING");
     expect(delivered).toContain("presents that address as verified");
-    expect(planned).toContain("(ADRs) 0002–0006, 0009, and 0010");
+    expect(planned).toContain("(ADRs) 0002–0006, 0009, 0010, 0012, and 0013");
     expect(planned).not.toContain("bind people by email; a binding takes");
     expect(planned).not.toContain("inherited by its nested groups");
     expect(planned).not.toContain("every write is audited with its actor");
+  });
+
+  it("describes the delivered workflows and Skill versions outside the plans", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const ledger = await readText("docs/release-artifacts.md");
+    const delivered = manual.slice(0, manual.indexOf('id="service"'));
+    const planned = manual.slice(manual.indexOf('id="service"'));
+
+    expect(delivered).toContain("workflow-access.ts");
+    expect(delivered).toContain("src/skills/");
+    expect(delivered).toContain("The Workflows page lists the catalog");
+    expect(delivered).toContain("工作流页面列出工作流目录");
+    expect(planned).not.toContain("the table adds the workflow roles");
+    expect(planned).not.toContain("下表补充工作流角色");
+    expect(ledger).toContain(
+      "workflows and versions (#41), Skill versions (#42)",
+    );
+    expect(ledger).toContain("docs/backup-and-restore.md");
   });
 });
