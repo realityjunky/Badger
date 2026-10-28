@@ -14,6 +14,11 @@ export interface StubPlatformOptions {
   users?: Readonly<Record<string, StubPlatformUser>>;
   cookieName?: string;
   currentUserPath?: string;
+  /**
+   * Where the current-user endpoint reads the token: the session cookie (the
+   * default), or only an `Authorization: Bearer` header.
+   */
+  currentUserAuth?: "cookie" | "bearer";
 }
 
 /**
@@ -24,6 +29,7 @@ export interface StubPlatform {
   readonly url: string;
   readonly cookieName: string;
   readonly currentUserPath: string;
+  readonly currentUserAuth: "cookie" | "bearer";
   /** How many requests reached the current-user endpoint. */
   readonly currentUserRequests: number;
   /** Answers every request with this status, or restores normal answers. */
@@ -50,6 +56,11 @@ function readCookie(header: string | undefined, name: string): string | null {
   return null;
 }
 
+function readBearer(header: string | undefined): string | null {
+  const match = /^Bearer (.+)$/u.exec(header ?? "");
+  return match?.[1] ?? null;
+}
+
 function userBody(user: StubPlatformUser): unknown {
   return {
     id: user.id,
@@ -68,6 +79,7 @@ export async function startStubPlatform(
 ): Promise<StubPlatform> {
   const cookieName = options.cookieName ?? DEFAULT_COOKIE_NAME;
   const currentUserPath = options.currentUserPath ?? DEFAULT_CURRENT_USER_PATH;
+  const currentUserAuth = options.currentUserAuth ?? "cookie";
   const sessions = new Map(Object.entries(options.users ?? {}));
   let failure: number | null = null;
   let requests = 0;
@@ -87,7 +99,10 @@ export async function startStubPlatform(
       return;
     }
 
-    const token = readCookie(request.headers.cookie, cookieName);
+    const token =
+      currentUserAuth === "bearer"
+        ? readBearer(request.headers.authorization)
+        : readCookie(request.headers.cookie, cookieName);
     const user = token === null ? undefined : sessions.get(token);
     if (user === undefined) {
       response
@@ -118,6 +133,7 @@ export async function startStubPlatform(
     url: `http://127.0.0.1:${port}`,
     cookieName,
     currentUserPath,
+    currentUserAuth,
     get currentUserRequests() {
       return requests;
     },

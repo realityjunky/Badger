@@ -130,7 +130,9 @@ async function introspect(
       method: "GET",
       headers: {
         accept: "application/json",
-        cookie: `${settings.sessionCookie}=${token}`,
+        ...(settings.currentUserAuth === "bearer"
+          ? { authorization: `Bearer ${token}` }
+          : { cookie: `${settings.sessionCookie}=${token}` }),
       },
       redirect: "error",
       signal: AbortSignal.timeout(settings.timeoutMs),

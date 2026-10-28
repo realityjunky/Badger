@@ -26,7 +26,15 @@ export interface PlatformSessionSettings {
   currentUserPath: string;
   /** The name of the cookie that carries the platform session token. */
   sessionCookie: string;
-  /** The issuer every principal from this platform carries. */
+  /**
+   * How the token reaches the current-user endpoint: in a cookie of the same
+   * name, or as an `Authorization: Bearer` header.
+   */
+  currentUserAuth: "cookie" | "bearer";
+  /**
+   * The issuer every principal from this platform carries. Sign-in matches
+   * people on issuer and subject, so it must outlive any change of address.
+   */
   issuer: string;
   /** When set, the platform must grant the person this app. */
   requiredAppGrant: string | null;
@@ -272,12 +280,29 @@ function readPlatformSession(
     );
   }
 
-  const base = `${url.origin}${url.pathname.replace(/\/+$/u, "")}`;
+  const currentUserAuth =
+    readString(environment, "BADGER_PLATFORM_CURRENT_USER_AUTH") ?? "cookie";
+  if (currentUserAuth !== "cookie" && currentUserAuth !== "bearer") {
+    throw new ConfigurationError(
+      "BADGER_PLATFORM_CURRENT_USER_AUTH must be cookie or bearer",
+    );
+  }
+
+  // No default: an issuer derived from the internal address would change with
+  // it, and every person would then sign in as someone new.
+  const issuer = readString(environment, "BADGER_PLATFORM_ISSUER");
+  if (issuer === undefined) {
+    throw new ConfigurationError(
+      "BADGER_IDENTITY=platform-session requires BADGER_PLATFORM_ISSUER",
+    );
+  }
+
   return {
-    url: base,
+    url: `${url.origin}${url.pathname.replace(/\/+$/u, "")}`,
     currentUserPath,
     sessionCookie,
-    issuer: readString(environment, "BADGER_PLATFORM_ISSUER") ?? base,
+    currentUserAuth,
+    issuer,
     requiredAppGrant:
       readString(environment, "BADGER_PLATFORM_APP_GRANT") ?? null,
     cacheSeconds: readInteger(

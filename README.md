@@ -58,15 +58,16 @@ against the platform's current-user endpoint over the internal network, and
 maps the platform user ID to the person's external subject. Nothing about the
 platform lives in code; every value below is configuration.
 
-| Setting                             | Meaning                                                                                                                        |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `BADGER_PLATFORM_URL`               | The platform's internal base URL, such as `https://platform.internal`.                                                         |
-| `BADGER_PLATFORM_CURRENT_USER_PATH` | The current-user endpoint, such as `/current-user`; it answers with `id`, `email`, `display_name`, `status`, and `app_access`. |
-| `BADGER_PLATFORM_SESSION_COOKIE`    | The cookie that carries the platform session token.                                                                            |
-| `BADGER_PLATFORM_ISSUER`            | The issuer Badger records for this platform; defaults to the platform URL.                                                     |
-| `BADGER_PLATFORM_APP_GRANT`         | Optional app name the platform must grant the person, such as `workflow-app`.                                                  |
-| `BADGER_PLATFORM_CACHE_SECONDS`     | How long a checked session is remembered; defaults to 30, and 0 disables the cache.                                            |
-| `BADGER_PLATFORM_TIMEOUT_MS`        | How long to wait for the platform; defaults to 3000.                                                                           |
+| Setting                             | Meaning                                                                                                                                                                  |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BADGER_PLATFORM_URL`               | The platform's internal base URL, such as `https://platform.internal`.                                                                                                   |
+| `BADGER_PLATFORM_CURRENT_USER_PATH` | The current-user endpoint, such as `/current-user`; it answers with `id`, `email`, `display_name`, `status`, and `app_access`.                                           |
+| `BADGER_PLATFORM_SESSION_COOKIE`    | The cookie that carries the platform session token.                                                                                                                      |
+| `BADGER_PLATFORM_CURRENT_USER_AUTH` | How Badger presents the token to the current-user endpoint: `cookie` (the default), in a cookie of the same name, or `bearer`, as an `Authorization: Bearer` header.     |
+| `BADGER_PLATFORM_ISSUER`            | Required. A stable name for this platform, such as `https://platform.example`. People are matched on issuer and subject, so keep it when the platform's address changes. |
+| `BADGER_PLATFORM_APP_GRANT`         | Optional app name the platform must grant the person, such as `workflow-app`.                                                                                            |
+| `BADGER_PLATFORM_CACHE_SECONDS`     | How long a checked session is remembered; defaults to 30, and 0 disables the cache.                                                                                      |
+| `BADGER_PLATFORM_TIMEOUT_MS`        | How long to wait for the platform; defaults to 3000.                                                                                                                     |
 
 Set `BADGER_ALLOWED_ORIGINS` to the public origin, so a write authenticated by
 a cookie is accepted only from Badger's own origin. Non-active platform users

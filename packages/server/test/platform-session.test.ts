@@ -26,12 +26,14 @@ const alice: StubPlatformUser = {
 async function startWithPlatform(
   options: {
     users?: Readonly<Record<string, StubPlatformUser>>;
+    currentUserAuth?: "cookie" | "bearer";
     environment?: Readonly<Record<string, string | undefined>>;
   } = {},
 ): Promise<void> {
   platform = await startStubPlatform({
     users: options.users ?? { "token-alice": alice },
     cookieName: "platform_session",
+    currentUserAuth: options.currentUserAuth,
   });
   service = await startTestService({
     mode: "service",
@@ -78,18 +80,32 @@ describe("signing in through the platform session", () => {
     });
   });
 
-  it("records the platform's origin as the issuer by default", async () => {
+  it("presents the session as a bearer token to a platform that reads one", async () => {
     await startWithPlatform({
-      environment: { BADGER_PLATFORM_ISSUER: undefined },
+      currentUserAuth: "bearer",
+      environment: { BADGER_PLATFORM_CURRENT_USER_AUTH: "bearer" },
     });
 
     const response = await service?.request("/api/v1/me", {
       headers: { cookie: cookieFor("token-alice") },
     });
 
+    expect(response?.status).toBe(200);
     expect(await response?.json()).toMatchObject({
-      person: { issuer: platform?.url },
+      person: { subject: "platform-alice" },
     });
+  });
+
+  it("presents the session as a cookie unless configured otherwise", async () => {
+    // A platform that reads only a bearer token does not see the cookie.
+    await startWithPlatform({ currentUserAuth: "bearer" });
+
+    const response = await service?.request("/api/v1/me", {
+      headers: { cookie: cookieFor("token-alice") },
+    });
+
+    expect(response?.status).toBe(401);
+    expect(platform?.currentUserRequests).toBe(1);
   });
 
   it("asks the platform about nothing when the request carries no session", async () => {
@@ -290,36 +306,43 @@ async function configurationError(
   return outcome as Error;
 }
 
+const platformSettings = {
+  BADGER_IDENTITY: "platform-session",
+  BADGER_PLATFORM_URL: "http://platform.internal:8080",
+  BADGER_PLATFORM_SESSION_COOKIE: "portal_session",
+  BADGER_PLATFORM_CURRENT_USER_PATH: "/current-user",
+  BADGER_PLATFORM_ISSUER: "https://platform.example",
+};
+
 describe("the platform session settings", () => {
-  it("requires the platform's address, session cookie, and current-user path", async () => {
+  it("requires the platform's address, issuer, session cookie, and current-user path", async () => {
     for (const missing of [
       "BADGER_PLATFORM_URL",
+      "BADGER_PLATFORM_ISSUER",
       "BADGER_PLATFORM_SESSION_COOKIE",
       "BADGER_PLATFORM_CURRENT_USER_PATH",
     ]) {
-      const environment = {
-        BADGER_IDENTITY: "platform-session",
-        BADGER_PLATFORM_URL: "http://platform.internal:8080",
-        BADGER_PLATFORM_SESSION_COOKIE: "portal_session",
-        BADGER_PLATFORM_CURRENT_USER_PATH: "/current-user",
+      const error = await configurationError({
+        ...platformSettings,
         [missing]: "",
-      };
-      const error = await configurationError(environment);
+      });
       expect(error.name).toBe("ConfigurationError");
       expect(error.message).toContain(missing);
     }
   });
 
+  it("presents the token only as a cookie or a bearer token", async () => {
+    const error = await configurationError({
+      ...platformSettings,
+      BADGER_PLATFORM_CURRENT_USER_AUTH: "basic",
+    });
+
+    expect(error.name).toBe("ConfigurationError");
+    expect(error.message).toContain("BADGER_PLATFORM_CURRENT_USER_AUTH");
+  });
+
   it("is available to service deployments only", async () => {
-    const error = await configurationError(
-      {
-        BADGER_IDENTITY: "platform-session",
-        BADGER_PLATFORM_URL: "http://platform.internal:8080",
-        BADGER_PLATFORM_SESSION_COOKIE: "portal_session",
-        BADGER_PLATFORM_CURRENT_USER_PATH: "/current-user",
-      },
-      "local",
-    );
+    const error = await configurationError(platformSettings, "local");
 
     expect(error.name).toBe("ConfigurationError");
     expect(error.message).toMatch(/local single-user mode/u);
