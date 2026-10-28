@@ -8,9 +8,12 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 COPY package.json package-lock.json ./
 COPY packages/kernel/package.json packages/kernel/package.json
 COPY packages/server/package.json packages/server/package.json
+COPY packages/web/package.json packages/web/package.json
 RUN npm ci
 COPY packages/server packages/server
+COPY packages/web packages/web
 RUN npm run build -w packages/server
+RUN npm run build -w packages/web
 RUN npm prune --omit=dev
 
 FROM node:22-bookworm-slim AS runtime
@@ -21,6 +24,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages/server/package.json ./packages/server/package.json
 COPY --from=build /app/packages/server/dist ./packages/server/dist
 COPY --from=build /app/packages/server/migrations ./packages/server/migrations
+COPY --from=build /app/packages/web/dist ./packages/web/dist
 
 # The deploy passes the revision it built; the health endpoint reports both.
 ARG BADGER_REVISION=unknown

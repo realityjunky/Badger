@@ -18,7 +18,8 @@ relative to it. New workspace packages go in `packages/<name>/`.
 | Creator and WorkflowRuntime                                                 | Delivered              | `src/authoring/`, `src/factory/`, `src/eval/`, `src/publish/`, `src/workflow-runtime/`                                                           |
 | Six-lane authoring                                                          | Delivered              | `assets/skills/badger-create/reference/authoring-protocol.json`, role briefs, `src/authoring/`                                                   |
 | Hash-bound durability and readiness                                         | Delivered              | `src/workflow-runtime/`, `src/eval/`, `src/publish/`                                                                                             |
-| Collaborative service: server walking skeleton                              | Walking skeleton (#36) | `packages/server/src/`, reviewed SQL in `packages/server/migrations/`; the web dashboard, Badger MCP, and host installer are still planned (#24) |
+| Collaborative service: server walking skeleton                              | Walking skeleton (#36) | `packages/server/src/`, reviewed SQL in `packages/server/migrations/`; the Badger MCP and host installer are still planned (#24)                |
+| Collaborative service: dashboard shell                                      | Dashboard shell (#37)  | `packages/web/src/`: the rail, top bar, three-pane registry layout, the token source, URL routes, zh/en catalogs, and the Playwright journeys   |
 | Domain workflow definitions and source Skills                               | External               | Domain workflow repositories, supplied to Badger through explicit `skillSources`                                                                 |
 | Deployment glue: launcher entries, reverse-proxy routes, and deploy scripts | External               | Each deployment's own repository                                                                                                                 |
 | Automatic distribution, domain execution                                    | Out of scope           | Not shipped in this repository                                                                                                                   |
@@ -95,6 +96,8 @@ npm run build
 npm test
 npm run format:check
 npm pack --dry-run -w packages/kernel
+# The dashboard's browser journeys and visual checks. Build first.
+npm run test:e2e -w packages/web
 ```
 
 Focused authoring and artifact checks:

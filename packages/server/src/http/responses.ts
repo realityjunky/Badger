@@ -16,7 +16,7 @@ export type ErrorCode =
 export interface ResponseBody {
   status: number;
   contentType: string;
-  body: string;
+  body: string | Uint8Array;
   headers?: Record<string, string>;
 }
 

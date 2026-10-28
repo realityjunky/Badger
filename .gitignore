@@ -4,3 +4,5 @@ dist/
 .npmrc
 .idea/
 *.log
+playwright-report/
+test-results/

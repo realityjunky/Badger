@@ -57,13 +57,16 @@ describe("reviewed SQL migrations", () => {
   it("applies the bundled reviewed SQL and reports what ran", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
-    expect(migrations.map((migration) => migration.version)).toEqual(["0001"]);
+    expect(migrations.map((migration) => migration.version)).toEqual([
+      "0001",
+      "0002",
+    ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
 
     expect(state).toEqual({
       state: "applied",
-      applied: ["0001"],
+      applied: ["0001", "0002"],
       pending: [],
       drifted: [],
     });
@@ -76,6 +79,7 @@ describe("reviewed SQL migrations", () => {
     expect(tables.rows.map((row) => row.table_name)).toEqual([
       "audit_events",
       "people",
+      "person_preferences",
       "schema_migrations",
     ]);
   });
@@ -89,14 +93,14 @@ describe("reviewed SQL migrations", () => {
 
     expect(secondRun).toEqual({
       state: "applied",
-      applied: ["0001"],
+      applied: ["0001", "0002"],
       pending: [],
       drifted: [],
     });
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(1);
+    expect(rows.rows[0]?.count).toBe(2);
   });
 
   it("refuses a reviewed migration whose SQL changed after it was applied", async () => {
