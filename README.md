@@ -54,7 +54,10 @@ docker compose up --build
 
 The image also carries the built dashboard. The compose file runs the server
 role with `BADGER_IDENTITY=none`, so it reports health and serves the
-signed-out page, and person routes answer 401. For local single-user mode,
+signed-out page, and person routes answer 401. The image creates the storage
+root, `/app/.badger`, with its `blob`, `workspaces`, and `runs` directories,
+all owned by the server's user, so a deployment can mount one volume on the
+root or give stored files and workspaces volumes of their own. For local single-user mode,
 with the implicit Administrator, the dashboard, and PGlite on disk:
 
 ```bash

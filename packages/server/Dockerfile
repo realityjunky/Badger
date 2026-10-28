@@ -33,8 +33,12 @@ ARG BADGER_CLEAN_TREE=
 ENV BADGER_REVISION=${BADGER_REVISION} \
     BADGER_CLEAN_TREE=${BADGER_CLEAN_TREE}
 
-# The default storage root; deployments mount their own volume here.
-RUN mkdir -p /app/.badger && chown node:node /app/.badger
+# The default storage root and its directories, owned by the server's user. A
+# deployment mounts a volume on the root or on each directory: Docker gives a
+# new volume the owner of the directory it covers, and a directory missing from
+# the image would leave its volume owned by root.
+RUN mkdir -p /app/.badger/blob /app/.badger/workspaces /app/.badger/runs \
+    && chown -R node:node /app/.badger
 
 USER node
 EXPOSE 8787
