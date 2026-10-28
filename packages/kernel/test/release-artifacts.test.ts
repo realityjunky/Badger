@@ -29,6 +29,7 @@ const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
   "0008-skill-identity-and-registered-roots.md",
   "0011-creator-state-bound-to-approved-proposal.md",
+  "0014-bundle-source-skills.md",
 ];
 
 async function readText(relativePath: string): Promise<string> {
@@ -479,5 +480,20 @@ describe("Badger release artifacts", () => {
       "workflows and versions (#41), Skill versions (#42)",
     );
     expect(ledger).toContain("docs/backup-and-restore.md");
+  });
+
+  it("describes bundled source Skills and personal access tokens as delivered", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const ledger = await readText("docs/release-artifacts.md");
+    const delivered = manual.slice(0, manual.indexOf('id="service"'));
+    const planned = manual.slice(manual.indexOf('id="service"'));
+
+    expect(delivered).toContain("sources/&lt;hash&gt;/");
+    expect(delivered).toContain("src/tokens.ts");
+    expect(delivered).toContain("/api/v1/me/tokens");
+    expect(delivered).toContain("供 Agent 和 CLI 使用的个人访问令牌（#53）");
+    expect(planned).not.toContain("Packages do not bundle their source Skills");
+    expect(planned).not.toContain("软件包不内置其源 Skill");
+    expect(ledger).toContain("personal access tokens (#53)");
   });
 });

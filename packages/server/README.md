@@ -11,11 +11,11 @@ People create and revoke their Agents' and CLI credentials at
 and `/api/v1`. Management requires a signed-in person, including in local
 single-user mode; another person cannot read or revoke their tokens.
 
-| Method and path | Behavior |
-| --- | --- |
-| `POST /me/tokens` | Create `{name, scopes, expiresAt?}` and return `{token, secret}` once. |
-| `GET /me/tokens` | List the person's token metadata, including prefix, scopes, expiration, revocation, last-use time and channel, and revision. |
-| `DELETE /me/tokens/:id` | Revoke with `{revision}`; a stale revision returns 409 with the current token. |
+| Method and path         | Behavior                                                                                                                     |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `POST /me/tokens`       | Create `{name, scopes, expiresAt?}` and return `{token, secret}` once.                                                       |
+| `GET /me/tokens`        | List the person's token metadata, including prefix, scopes, expiration, revocation, last-use time and channel, and revision. |
+| `DELETE /me/tokens/:id` | Revoke with `{revision}`; a stale revision returns 409 with the current token.                                               |
 
 For example, `{"name":"My Agent","scopes":["engineer"]}` creates a token
 expiring in 90 days. An optional `expiresAt` must be a future timestamp.
@@ -36,12 +36,12 @@ Scopes only narrow the owner's current Badger permissions; they never grant
 a role. Role removal applies to the next request. The currently delivered
 API permits these token operations:
 
-| Scopes | API operations, subject to the person's roles |
-| --- | --- |
-| All three | Read `/me`, `/groups`, the workflow catalog and versions, and Skill entries, versions, files, and diffs. |
-| `engineer` | Start workflow versions as an Engineer; create Skill entries, preview, and upload as an Engineer. |
-| `expert` | Create Skill entries, preview, and upload as a Field expert. |
-| `operator` | Read the available workflow and Skill APIs; Run operations arrive with the Run service. |
+| Scopes     | API operations, subject to the person's roles                                                            |
+| ---------- | -------------------------------------------------------------------------------------------------------- |
+| All three  | Read `/me`, `/groups`, the workflow catalog and versions, and Skill entries, versions, files, and diffs. |
+| `engineer` | Start workflow versions as an Engineer; create Skill entries, preview, and upload as an Engineer.        |
+| `expert`   | Create Skill entries, preview, and upload as a Field expert.                                             |
+| `operator` | Read the available workflow and Skill APIs; Run operations arrive with the Run service.                  |
 
 Administrators can perform a profile's permitted operations within its
 scopes. Tokens never manage tokens, groups, role bindings, or personal
