@@ -13,6 +13,11 @@ import { normalizeWorkflow } from "../workflow/contract.js";
 import { atomicWrite, ensureDirectory, sha256, stableValue } from "../util.js";
 import { inspectUpgradeSource } from "../factory/source.js";
 import {
+  mapCreatorStatePaths,
+  toResolvedPaths,
+  toStoredPaths,
+} from "../factory/project-paths.js";
+import {
   assertValidSemanticDossier,
   semanticDossierHash,
   validateDossierPlan,
@@ -234,15 +239,29 @@ export function createWorkflowKernel(
   }
 
   async function readState(name: string): Promise<CreatorState> {
-    const state = JSON.parse(
+    const stored = JSON.parse(
       await fs.readFile(stateFile(name), "utf8"),
     ) as CreatorState;
     if (
-      !state ||
-      state.schemaVersion !== 1 ||
-      state.name !== name ||
-      path.resolve(state.projectRoot) !== projectRoot
+      !stored ||
+      stored.schemaVersion !== 1 ||
+      stored.name !== name ||
+      typeof stored.projectRoot !== "string" ||
+      typeof stored.planPath !== "string" ||
+      typeof stored.draftPath !== "string"
     )
+      throw new Error(`Invalid Creator state: ${name}`);
+    let state: CreatorState;
+    try {
+      state = mapCreatorStatePaths(stored, toResolvedPaths(projectRoot));
+    } catch (error) {
+      throw new Error(
+        `Invalid Creator state: ${name}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    if (path.resolve(state.projectRoot) !== projectRoot)
       throw new Error(`Invalid Creator state: ${name}`);
     return state;
   }
@@ -251,9 +270,10 @@ export function createWorkflowKernel(
     validateName(state.name);
     if (path.resolve(state.projectRoot) !== projectRoot)
       throw new Error("Creator state belongs to a different project root");
+    const stored = mapCreatorStatePaths(state, toStoredPaths(projectRoot));
     await atomicWrite(
       stateFile(state.name),
-      JSON.stringify(state, null, 2) + "\n",
+      JSON.stringify(stored, null, 2) + "\n",
     );
   }
 

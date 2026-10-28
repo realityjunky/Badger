@@ -3,6 +3,7 @@ import path from "node:path";
 import type { CreatorState, EvalReport, WorkflowProtocol } from "../types.js";
 import { hashDirectory, atomicWrite } from "../util.js";
 import { writeState } from "../factory/state.js";
+import { toProjectRelativePath } from "../factory/project-paths.js";
 import { certifyWorkflowRuntime } from "./workflow-runtime-certification.js";
 import {
   authoringSessionGateway,
@@ -28,7 +29,7 @@ export async function evaluatePackage(
   checks.push({
     id: "entry-skill",
     passed: await exists(entry),
-    detail: entry,
+    detail: toProjectRelativePath(state.projectRoot, entry),
   });
   checks.push({
     id: "workflow-kernel",
@@ -84,7 +85,7 @@ export async function evaluatePackage(
   checks.push({
     id: "runtime-manifest",
     passed: await exists(state.generated.evalPath),
-    detail: state.generated.evalPath,
+    detail: toProjectRelativePath(state.projectRoot, state.generated.evalPath),
   });
   if (state.authoring) {
     const authoringDecision = await authoringSessionGateway().decide({

@@ -12,6 +12,13 @@ import {
   stableValue,
 } from "../util.js";
 import { readState, writeState } from "../factory/state.js";
+import {
+  mapAuthoringPlanPaths,
+  mapAuthoringRecordPaths,
+  mapAuthoringSummaryPaths,
+  toResolvedPaths,
+  toStoredPaths,
+} from "../factory/project-paths.js";
 import { readPlan } from "../factory/proposal.js";
 import {
   generatePackage,
@@ -186,32 +193,29 @@ function sessionIdentityHash(value: {
   );
 }
 
-export function authoringSessionIdentity(
-  value: CreatorState | AuthoringStateSummary,
-): AuthoringSessionIdentity | undefined {
-  const summary: AuthoringStateSummary | undefined =
-    "sessionPath" in value ? value : value.authoring;
-  if (!summary) return undefined;
-  const workflow = summary.workflow ?? path.basename(summary.sessionPath);
+// The session identity must survive moving the project, so it hashes the
+// project-relative session location rather than the absolute path it resolves
+// to on this host.
+function portableSessionPath(workflow: string): string {
+  return [".badger", "authoring", workflow].join("/");
+}
+
+function sessionIdentityFields(
+  summary: AuthoringStateSummary,
+  workflow: string,
+): {
+  workflow: string;
+  planHash: string;
+  protocolHash: string;
+  workflowProtocolHash: string;
+  sourceEvidenceHash: string;
+  authoringPlanHash: string;
+  authoringInputHash: string;
+  semanticDossierHash?: string;
+  scaffoldHash: string;
+} {
   return {
-    schemaVersion: 1,
-    sessionId: sessionIdentityHash({
-      sessionPath: summary.sessionPath,
-      workflow,
-      planHash: summary.planHash,
-      protocolHash: summary.protocolHash,
-      workflowProtocolHash: summary.workflowProtocolHash,
-      sourceEvidenceHash: summary.sourceEvidenceHash,
-      authoringPlanHash: summary.authoringPlanHash,
-      authoringInputHash: summary.authoringInputHash,
-      ...(summary.semanticDossierHash
-        ? { semanticDossierHash: summary.semanticDossierHash }
-        : {}),
-      scaffoldHash: summary.scaffoldHash,
-    }),
     workflow,
-    sessionPath: summary.sessionPath,
-    revision: summary.revision,
     planHash: summary.planHash,
     protocolHash: summary.protocolHash,
     workflowProtocolHash: summary.workflowProtocolHash,
@@ -225,6 +229,36 @@ export function authoringSessionIdentity(
   };
 }
 
+export function authoringSessionIdentity(
+  value: CreatorState | AuthoringStateSummary,
+): AuthoringSessionIdentity | undefined {
+  const summary: AuthoringStateSummary | undefined =
+    "sessionPath" in value ? value : value.authoring;
+  if (!summary) return undefined;
+  const workflow = summary.workflow ?? path.basename(summary.sessionPath);
+  const fields = sessionIdentityFields(summary, workflow);
+  return {
+    schemaVersion: 1,
+    sessionId: sessionIdentityHash({
+      sessionPath: portableSessionPath(workflow),
+      ...fields,
+    }),
+    sessionPath: summary.sessionPath,
+    revision: summary.revision,
+    ...fields,
+  };
+}
+
+// Sessions written before project-relative storage hashed the absolute session
+// path. Accept their identity once so an existing checkout upgrades in place.
+function legacyAuthoringSessionId(summary: AuthoringStateSummary): string {
+  const workflow = summary.workflow ?? path.basename(summary.sessionPath);
+  return sessionIdentityHash({
+    sessionPath: summary.sessionPath,
+    ...sessionIdentityFields(summary, workflow),
+  });
+}
+
 function normalizeAuthoringSummary(
   summary: AuthoringStateSummary,
 ): AuthoringStateSummary {
@@ -235,7 +269,11 @@ function normalizeAuthoringSummary(
   };
   const identity = authoringSessionIdentity(normalized);
   if (!identity) throw new Error("Authoring session identity is missing");
-  if (summary.sessionId && summary.sessionId !== identity.sessionId) {
+  if (
+    summary.sessionId &&
+    summary.sessionId !== identity.sessionId &&
+    summary.sessionId !== legacyAuthoringSessionId(normalized)
+  ) {
     throw new Error("Authoring session identity is stale");
   }
   return {
@@ -2096,7 +2134,10 @@ export async function readAuthoringPlan(
     throw new Error(
       `Invalid authoring plan:\n${findings.map((finding) => finding.message).join("\n")}`,
     );
-  return value as AuthoringPlan;
+  return mapAuthoringPlanPaths(
+    value as AuthoringPlan,
+    toResolvedPaths(state.projectRoot),
+  );
 }
 
 async function acquireSessionLock(root: string): Promise<() => Promise<void>> {
@@ -2252,7 +2293,10 @@ async function readStoredRecords(
       if (findings.length) {
         errors.push(`invalid authoring record ${lane}: ${findings.join("; ")}`);
       } else {
-        records[lane] = value as AuthoringRecord;
+        records[lane] = mapAuthoringRecordPaths(
+          value as AuthoringRecord,
+          toResolvedPaths(state.projectRoot),
+        );
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT")
@@ -2315,20 +2359,24 @@ async function readSessionSummary(
     ) as unknown;
     if (!validAuthoringSummary(value))
       throw new Error("Authoring session summary is invalid");
+    const summary = mapAuthoringSummaryPaths(
+      value,
+      toResolvedPaths(state.projectRoot),
+    );
     const root = sessionRoot(state);
     const statePath =
-      typeof value.statePath === "string"
-        ? value.statePath
+      typeof summary.statePath === "string"
+        ? summary.statePath
         : sessionSummaryPath(state);
     if (
-      value.sessionPath !== root ||
+      summary.sessionPath !== root ||
       statePath !== sessionSummaryPath(state) ||
-      value.planPath !== path.join(root, "plan.json") ||
-      value.recordsPath !== recordsRoot(state)
+      summary.planPath !== path.join(root, "plan.json") ||
+      summary.recordsPath !== recordsRoot(state)
     )
       throw new Error("Authoring session summary paths are invalid");
     return normalizeAuthoringSummary({
-      ...value,
+      ...summary,
       statePath,
       generatorContractVersion: AUTHORING_GENERATOR_CONTRACT_VERSION,
     });
@@ -2394,10 +2442,13 @@ function summaryStatus(
 
 async function writeSessionSummary(state: CreatorState): Promise<void> {
   if (!state.authoring) return;
-  const summary = {
-    ...state.authoring,
-    statePath: sessionSummaryPath(state),
-  } satisfies AuthoringStateSummary;
+  const summary = mapAuthoringSummaryPaths(
+    {
+      ...state.authoring,
+      statePath: sessionSummaryPath(state),
+    } satisfies AuthoringStateSummary,
+    toStoredPaths(state.projectRoot),
+  );
   await atomicWrite(
     sessionSummaryPath(state),
     JSON.stringify(summary, null, 2) + "\n",
@@ -2532,7 +2583,14 @@ export async function initializeAuthoringSession(options: {
       async () => {
         await atomicWrite(
           planFile,
-          JSON.stringify(options.plan, null, 2) + "\n",
+          JSON.stringify(
+            mapAuthoringPlanPaths(
+              options.plan,
+              toStoredPaths(persisted.projectRoot),
+            ),
+            null,
+            2,
+          ) + "\n",
         );
         await writeSessionSummary(persisted);
         await writeState(persisted);
@@ -2893,7 +2951,11 @@ export async function recordAuthoring(options: {
         await atomicWrite(artifact.path, artifact.content);
       await atomicWrite(
         recordFile(current, options.lane),
-        JSON.stringify(record, null, 2) + "\n",
+        JSON.stringify(
+          mapAuthoringRecordPaths(record, toStoredPaths(current.projectRoot)),
+          null,
+          2,
+        ) + "\n",
       );
       stored.records[options.lane] = record;
       const remainingInvalidated = prior.invalidatedLanes?.filter(
@@ -3023,7 +3085,7 @@ async function readArtifactContent(
 ): Promise<string> {
   if (!artifact.contentPath)
     throw new Error(`Authoring artifact content is missing: ${artifact.path}`);
-  const target = path.resolve(artifact.contentPath);
+  const target = path.resolve(state.projectRoot, artifact.contentPath);
   if (!isWithin(sessionRoot(state), target))
     throw new Error(
       `Authoring artifact content path escapes the session: ${artifact.path}`,

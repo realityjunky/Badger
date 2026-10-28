@@ -469,7 +469,7 @@ describe("Badger authoring lifecycle", () => {
       artifacts: Array<{ contentPath: string }>;
     };
     const authoredContent = await fs.readFile(
-      record.artifacts[0]!.contentPath,
+      path.resolve(project, record.artifacts[0]!.contentPath),
       "utf8",
     );
     const sourceBody = state
@@ -727,7 +727,10 @@ describe("Badger authoring lifecycle", () => {
         "utf8",
       ),
     ) as { artifacts: Array<{ contentPath: string }> };
-    const artifactPath = record.artifacts[0]!.contentPath;
+    const artifactPath = path.resolve(
+      project,
+      record.artifacts[0]!.contentPath,
+    );
     const beforeSession = await fs.readFile(
       state.authoring!.statePath!,
       "utf8",

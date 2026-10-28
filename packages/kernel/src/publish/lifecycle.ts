@@ -17,6 +17,7 @@ import {
   stableValue,
 } from "../util.js";
 import { writeState } from "../factory/state.js";
+import { toProjectRelativePath } from "../factory/project-paths.js";
 import { WORKFLOW_FINALIZATION_BOUNDARY_PHASES } from "../workflow-runtime/finalization.js";
 import { WORKFLOW_TRANSITION_BOUNDARY_PHASES } from "../workflow-runtime/transition-journal.js";
 import { validateAuthoringReviewResult } from "../authoring/review.js";
@@ -30,6 +31,33 @@ function sameStrings(left: unknown, right: unknown): boolean {
     Array.isArray(right) &&
     JSON.stringify(left) === JSON.stringify(right)
   );
+}
+
+// Readiness evidence feeds the publication approval hash, so paths in it must
+// not change when the project moves.
+function evidencePath(projectRoot: string, value: string): string {
+  if (!value) return value;
+  try {
+    return toProjectRelativePath(projectRoot, value);
+  } catch {
+    return value;
+  }
+}
+
+function runtimeEvidencePaths(state: CreatorState): Record<string, string> {
+  return {
+    ...(state.generated
+      ? {
+          generated: evidencePath(
+            state.projectRoot,
+            state.generated.packageRoot,
+          ),
+        }
+      : {}),
+    ...(state.eval
+      ? { eval: evidencePath(state.projectRoot, state.eval.resultPath) }
+      : {}),
+  };
 }
 
 interface PackageHashCheck {
@@ -117,22 +145,23 @@ function sourceEvidenceCheck(state: CreatorState): SourceEvidenceCheck {
     (root) => `Source evidence hashes conflict for root: ${root}`,
   );
   for (const [root, expectedHash] of expected) {
+    const label = evidencePath(state.projectRoot, root);
     let currentHash: string | null = null;
     if (!/^[a-f0-9]{64}$/u.test(expectedHash)) {
-      blockers.push(`Source evidence hash is invalid: ${root}`);
+      blockers.push(`Source evidence hash is invalid: ${label}`);
     } else {
       try {
         currentHash = hashDirectorySync(root);
       } catch (error) {
         blockers.push(
-          `Source evidence hash is unavailable: ${root}: ${String(error)}`,
+          `Source evidence hash is unavailable: ${label}: ${String(error)}`,
         );
       }
       if (currentHash !== null && currentHash !== expectedHash) {
-        blockers.push(`Source evidence is stale for current package: ${root}`);
+        blockers.push(`Source evidence is stale for current package: ${label}`);
       }
     }
-    entries.push({ root, expectedHash, currentHash });
+    entries.push({ root: label, expectedHash, currentHash });
   }
   entries.sort((left, right) => left.root.localeCompare(right.root));
   return {
@@ -900,11 +929,13 @@ function authoringReadinessSection(
       blockers: [...sessionReadiness.blockers],
       warnings: [...sessionReadiness.warnings],
       evidence: {
-        session:
+        session: evidencePath(
+          state.projectRoot,
           sessionReadiness.identity?.sessionPath ??
-          sessionReadiness.evidence.session ??
-          state.authoring?.sessionPath ??
-          "",
+            sessionReadiness.evidence.session ??
+            state.authoring?.sessionPath ??
+            "",
+        ),
         ...(review?.reviewHash ? { authoringReview: review.reviewHash } : {}),
       },
       hashes,
@@ -931,7 +962,12 @@ function authoringReadinessSection(
       ],
       warnings,
       evidence: state.generated
-        ? { generated: state.generated.packageRoot }
+        ? {
+            generated: evidencePath(
+              state.projectRoot,
+              state.generated.packageRoot,
+            ),
+          }
         : {},
       hashes,
     };
@@ -999,7 +1035,7 @@ function authoringReadinessSection(
     blockers,
     warnings,
     evidence: {
-      session: authoring.sessionPath,
+      session: evidencePath(state.projectRoot, authoring.sessionPath),
       ...(authoring.review
         ? { authoringReview: authoring.review.reviewHash }
         : {}),
@@ -1042,10 +1078,7 @@ export function reviewState(
     state: runtimeBlockers.length === 0 ? "ready" : "blocked",
     blockers: [...new Set(runtimeBlockers)],
     warnings: [],
-    evidence: {
-      ...(state.generated ? { generated: state.generated.packageRoot } : {}),
-      ...(state.eval ? { eval: state.eval.resultPath } : {}),
-    },
+    evidence: runtimeEvidencePaths(state),
     hashes: {
       package: packageHash.currentHash ?? state.currentHash,
       evaluation: state.eval?.hash ?? null,
@@ -1090,7 +1123,9 @@ export function reviewState(
       ...(state.review?.readinessHash
         ? { approvalReadiness: state.review.readinessHash }
         : {}),
-      ...(state.published ? { published: state.published.path } : {}),
+      ...(state.published
+        ? { published: evidencePath(state.projectRoot, state.published.path) }
+        : {}),
     },
     hashes: {
       package: packageHash.currentHash ?? state.currentHash,
@@ -1114,10 +1149,16 @@ export function reviewState(
         : "blocked",
     blockers,
     evidence: {
-      draft: state.draftPath,
-      ...(state.generated ? { generated: state.generated.packageRoot } : {}),
-      ...(state.authoring ? { authoring: state.authoring.sessionPath } : {}),
-      ...(state.eval ? { eval: state.eval.resultPath } : {}),
+      draft: evidencePath(state.projectRoot, state.draftPath),
+      ...runtimeEvidencePaths(state),
+      ...(state.authoring
+        ? {
+            authoring: evidencePath(
+              state.projectRoot,
+              state.authoring.sessionPath,
+            ),
+          }
+        : {}),
     },
     warnings: [
       ...authoring.warnings,
