@@ -5,11 +5,13 @@ import {
   createWorkflow,
   editWorkflow,
   loadWorkflow,
+  loadWorkflowVersion,
   loadWorkflows,
   startVersion,
   type Workflow,
   type WorkflowCatalog,
   type WorkflowDetail,
+  type WorkflowVersionDetail,
 } from "../api/workflows.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
@@ -21,6 +23,7 @@ import {
   type WriteFailure,
 } from "./workflows/WorkflowDialog.js";
 import { WorkflowTeam } from "./workflows/WorkflowTeam.js";
+import { WorkflowSources } from "./workflows/WorkflowSources.js";
 
 type State =
   | { kind: "loading" | "failed" | "denied" | "missing" }
@@ -40,6 +43,14 @@ export function WorkflowsPage() {
   >(null);
   const [failure, setFailure] = useState<WriteFailure | null>(null);
   const [busy, setBusy] = useState(false);
+  const [versionResources, setVersionResources] =
+    useState<WorkflowVersionDetail | null>(null);
+  const detail = state.kind === "detail" ? state.value : null;
+  const workflow = detail?.workflow;
+  const selectedVersion =
+    versionId === undefined
+      ? detail?.versions[0]
+      : detail?.versions.find((entry) => entry.id === versionId);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -70,13 +81,26 @@ export function WorkflowsPage() {
     return () => controller.abort();
   }, [basePath, workflowId, refresh]);
 
+  useEffect(() => {
+    if (workflowId === undefined || selectedVersion === undefined) {
+      setVersionResources(null);
+      return;
+    }
+    const controller = new AbortController();
+    setVersionResources(null);
+    void loadWorkflowVersion(
+      basePath,
+      workflowId,
+      selectedVersion.id,
+      controller.signal,
+    ).then((result) => {
+      if (!controller.signal.aborted && result.kind === "ok")
+        setVersionResources(result.value);
+    });
+    return () => controller.abort();
+  }, [basePath, workflowId, selectedVersion?.id, refresh]);
+
   const reload = () => setRefresh((value) => value + 1);
-  const detail = state.kind === "detail" ? state.value : null;
-  const workflow = detail?.workflow;
-  const selectedVersion =
-    versionId === undefined
-      ? detail?.versions[0]
-      : detail?.versions.find((entry) => entry.id === versionId);
 
   const newVersion = async () => {
     if (workflow === undefined || busy) return;
@@ -244,6 +268,18 @@ export function WorkflowsPage() {
               <StageTrack stages={selectedVersion.stages} />
             </section>
           )}
+          {versionResources !== null &&
+            selectedVersion !== undefined &&
+            workflow !== undefined && (
+              <WorkflowSources
+                basePath={basePath}
+                workflow={workflow}
+                version={selectedVersion}
+                detail={versionResources}
+                canManage={versionResources.capabilities.managePins}
+                onChanged={reload}
+              />
+            )}
           <WorkflowTeam
             basePath={basePath}
             workflowId={detail.workflow.id}

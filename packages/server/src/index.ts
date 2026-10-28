@@ -14,6 +14,11 @@ export type { ServiceConfig } from "./config.js";
 export { openDatabase } from "./database/open.js";
 export { createService } from "./http/service.js";
 export { startHttpServer } from "./start.js";
+export {
+  createSourceCheckWorker,
+  runSourceCheckWorker,
+  type WorkerOptions,
+} from "./worker.js";
 
 /** The server role's entry point: configure, migrate, serve, shut down clean. */
 export async function main(

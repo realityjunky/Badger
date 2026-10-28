@@ -12,12 +12,21 @@ import {
   readWorkflow,
   updateWorkflow,
 } from "../workflows.js";
+import {
+  listWorkflowJobs,
+  listWorkflowPins,
+  parsePinInput,
+  parseUnpinInput,
+  pinSkillVersion,
+  readSourceCheck,
+  unpinSkillVersion,
+} from "../workflow-source.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 
 const ROOT = "/api/v1/workflows";
 const WORKFLOW_PATH =
-  /^\/api\/v1\/workflows\/([^/]+)(?:\/(versions)(?:\/([^/]+))?)?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)(?:\/(versions)(?:\/([^/]+)(?:\/(pins|source-check|jobs)(?:\/([^/]+))?)?)?)?$/u;
 
 async function groupName(database: Database, id: string): Promise<string> {
   const result = await database.query<{ name: string }>(
@@ -35,6 +44,8 @@ function workflowPath(path: string) {
       id: decodeURIComponent(match[1]),
       versions: match[2] !== undefined,
       versionId: match[3] === undefined ? null : decodeURIComponent(match[3]),
+      resource: match[4] ?? null,
+      resourceId: match[5] === undefined ? null : decodeURIComponent(match[5]),
     };
   } catch {
     return null;
@@ -47,7 +58,11 @@ export function workflowMethods(path: string): string | null {
   const route = workflowPath(path);
   if (route === null) return null;
   if (!route.versions) return "GET, HEAD, PATCH";
-  return route.versionId === null ? "GET, HEAD, POST" : "GET, HEAD";
+  if (route.versionId === null) return "GET, HEAD, POST";
+  if (route.resource === "pins") {
+    return route.resourceId === null ? "GET, HEAD, POST" : "DELETE";
+  }
+  return "GET, HEAD";
 }
 
 /** The HTTP seam for the catalog and versions; the service handles identity. */
@@ -155,6 +170,110 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
   );
   if (!capabilities.read)
     return reply.error(403, "denied", "This workflow is outside your roles");
+
+  if (route.versions && route.versionId !== null && route.resource !== null) {
+    const versions = await listWorkflowVersions(database, workflow.id);
+    const version = versions.find((entry) => entry.id === route.versionId);
+    if (version === undefined)
+      return reply.error(404, "invalid", "No such workflow version");
+    if (route.resource === "pins") {
+      if (route.resourceId !== null && method === "DELETE") {
+        if (!capabilities.managePins)
+          return reply.error(
+            403,
+            "denied",
+            "Only an Administrator or Engineer manages Skill pins",
+          );
+        const body = await readJsonBody(request);
+        if (!body.ok) return reply.error(400, "invalid", body.message);
+        const parsed = parseUnpinInput(body.value);
+        if (!parsed.ok) return reply.error(400, "invalid", parsed.message);
+        const removed = await unpinSkillVersion(
+          database,
+          dependencies,
+          context,
+          version.id,
+          route.resourceId,
+          parsed.revision,
+        );
+        if (
+          removed.kind === "missing-version" ||
+          removed.kind === "missing-pin"
+        )
+          return reply.error(404, "invalid", "No such Skill pin");
+        if (removed.kind === "stale")
+          return reply.json(409, {
+            error: {
+              code: "conflict",
+              message: "The Skill pin changed since you read it",
+            },
+            requestId: reply.requestId,
+            pin: removed.pin,
+          });
+        if (removed.kind !== "removed")
+          return reply.error(
+            409,
+            "conflict",
+            "The Skill pin changed since you read it",
+          );
+        return reply.json(200, {
+          removed: true,
+          job: removed.job,
+          pinsHash: removed.pinsHash,
+        });
+      }
+      if (method === "POST") {
+        if (!capabilities.managePins)
+          return reply.error(
+            403,
+            "denied",
+            "Only an Administrator or Engineer manages Skill pins",
+          );
+        const body = await readJsonBody(request);
+        if (!body.ok) return reply.error(400, "invalid", body.message);
+        const parsed = parsePinInput(body.value);
+        if (!parsed.ok) return reply.error(400, "invalid", parsed.message);
+        const pinned = await pinSkillVersion(
+          database,
+          dependencies,
+          context,
+          version.id,
+          parsed.value,
+        );
+        if (pinned.kind === "missing-version")
+          return reply.error(404, "invalid", "No such workflow version");
+        if (pinned.kind === "missing-skill-version")
+          return reply.error(
+            404,
+            "invalid",
+            "No such Skill version in this group",
+          );
+        if (pinned.kind === "invalid")
+          return reply.error(400, "invalid", pinned.message);
+        if (pinned.kind === "conflict")
+          return reply.error(
+            409,
+            "conflict",
+            "That Skill is already pinned to this version",
+          );
+        return reply.json(pinned.kind === "updated" ? 200 : 201, {
+          pin: pinned.pin,
+          job: pinned.job,
+          pinsHash: pinned.pinsHash,
+        });
+      }
+      return reply.json(200, {
+        pins: await listWorkflowPins(database, version.id),
+      });
+    }
+    if (route.resource === "source-check")
+      return reply.json(200, {
+        sourceCheck: await readSourceCheck(database, version.id),
+      });
+    return reply.json(200, {
+      jobs: await listWorkflowJobs(database, version.id),
+    });
+  }
   if (method === "PATCH" || method === "POST") {
     if (
       !(method === "PATCH"
@@ -242,7 +361,14 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
     const version = versions.find((entry) => entry.id === route.versionId);
     return version === undefined
       ? reply.error(404, "invalid", "No such workflow version")
-      : reply.json(200, { workflow, version, capabilities });
+      : reply.json(200, {
+          workflow,
+          version,
+          capabilities,
+          pins: await listWorkflowPins(database, version.id),
+          sourceCheck: await readSourceCheck(database, version.id),
+          jobs: await listWorkflowJobs(database, version.id),
+        });
   }
   return reply.json(200, {
     workflow,

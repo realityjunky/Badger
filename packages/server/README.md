@@ -183,6 +183,33 @@ Group bindings keep their inherited reads, and Group leads create entries.
 Administrators create entries and upload everywhere; Auditors only read.
 Removing a binding withdraws the right at the person's next request.
 
+## Workflow Skill pins and source checks
+
+An Engineer or Administrator pins an immutable Skill version to a workflow
+version with `POST /api/v1/workflows/:workflowId/versions/:versionId/pins`:
+
+```json
+{
+  "skillId": "skill-id",
+  "hash": "64-lowercase-hex-digits",
+  "purpose": "source"
+}
+```
+
+`purpose` is `source` by default; an upgrade workflow may also have one
+`upgrade-source` pin. Posting a different hash for the same Skill replaces the
+pin with the next revision. `DELETE` on the pin path quotes that revision.
+Every change invalidates later stages and queues a new source-check job. The
+version response includes `pins`, the latest `sourceCheck`, and `jobs`.
+
+The worker claims jobs with row locks and a lease, materializes the pinned
+content under `BADGER_STORAGE_DIR/workspaces/workflow-versions/<version-id>`,
+and calls the kernel source check. The stored workspace path is project
+relative. The source-check record exposes status, source identities, complete
+inventories, ignored files, script effects, and blockers; no uploaded file is
+executed. A passed check marks Sources done, while a blocked check keeps it
+blocked. The worker entry point is `npm run start:worker -w packages/server`.
+
 ## Validation
 
 Service tests import `src/testing/index.ts` and use the real HTTP seam with

@@ -36,12 +36,49 @@ export async function openPostgresDatabase(
   options: PostgresOptions = {},
 ): Promise<Database> {
   const pool = new pg.Pool({ connectionString, max: 10 });
+  let listener: pg.Client | null = null;
+  let listenerReady: Promise<pg.Client> | null = null;
   // The pool reports a connection the server ended while it sat idle, and
   // replaces it on the next query. Unheard, that report would end the
   // process: a database restart would take the service down instead of
   // degrading /health until the database is back.
   pool.on("error", (error) => options.onConnectionLost?.(error));
   const queryable = wrapQueryable(pool);
+
+  const waitForNotification = async (
+    channel: string,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    if (listener === null) {
+      listenerReady ??= (async () => {
+        const client = new pg.Client({ connectionString });
+        await client.connect();
+        await client.query(`listen ${channel}`);
+        listener = client;
+        return client;
+      })();
+      await listenerReady;
+    }
+    const client = listener;
+    if (client === null) return;
+    await new Promise<void>((resolve) => {
+      const onNotification = () => {
+        cleanup();
+        resolve();
+      };
+      const onAbort = () => {
+        cleanup();
+        resolve();
+      };
+      const cleanup = () => {
+        client.off("notification", onNotification);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      client.on("notification", onNotification);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
+    });
+  };
 
   return {
     query: queryable.query,
@@ -60,6 +97,10 @@ export async function openPostgresDatabase(
         client.release();
       }
     },
-    close: () => pool.end(),
+    waitForNotification,
+    close: async () => {
+      await listener?.end().catch(() => undefined);
+      await pool.end();
+    },
   };
 }

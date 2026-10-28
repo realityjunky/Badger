@@ -430,6 +430,49 @@ body {
   }
 }
 
+.workflow-pins,
+.workflow-source-inventory {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 12px 0 16px;
+  padding: 0;
+}
+
+.workflow-pins li,
+.workflow-source-inventory article {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.workflow-pins li > div {
+  display: grid;
+  gap: 4px;
+}
+
+.workflow-pin-form {
+  margin-bottom: 16px;
+}
+
+.workflow-source-inventory {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.workflow-source-inventory article {
+  align-items: stretch;
+  display: grid;
+}
+
+.workflow-source-inventory ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 /* The summary strip */
 
 .summary-strip {

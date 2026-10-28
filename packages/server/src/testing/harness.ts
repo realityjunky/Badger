@@ -12,6 +12,8 @@ import type { IdSource } from "../ids.js";
 import { silentLogger } from "../log.js";
 import { startHttpServer, type StartedServer } from "../start.js";
 import { prepareStorage } from "../storage.js";
+import { filesystemBlobStore } from "../skills/blobs.js";
+import { SourceCheckWorker } from "../workflow-source.js";
 import { createFixedClock, type TestClock } from "./clock.js";
 import { openTestDatabase } from "./database.js";
 import { createSequentialIds } from "./ids.js";
@@ -73,6 +75,8 @@ export interface TestService {
    * Postgres restart does. Only on Postgres, with a fresh test database.
    */
   interruptDatabase(): Promise<void>;
+  /** Runs all currently queued source checks through the worker seam. */
+  runSourceCheckJobs(): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -254,6 +258,21 @@ export async function startTestService(
     rawRequest,
     closeDatabase: () => connection.database.close().catch(() => undefined),
     interruptDatabase: connection.interrupt,
+    runSourceCheckJobs: async () => {
+      const worker = new SourceCheckWorker({
+        database: connection.database,
+        dependencies: { clock, ids },
+        config,
+        blobs: filesystemBlobStore(config.storage.blobDirectory),
+        workerId: "test-worker",
+      });
+      let processed = 0;
+      for (;;) {
+        const job = await worker.runOnce();
+        if (job === null) return processed;
+        processed += 1;
+      }
+    },
     close: async () => {
       if (closed) {
         return;
