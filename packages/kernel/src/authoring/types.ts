@@ -2,6 +2,7 @@ import type {
   CreatorState,
   FactoryProposal,
   SkillCandidate,
+  SkillScriptEffect,
   UpgradeSourceEvidence,
 } from "../types.js";
 import type { SemanticDossier } from "../factory/questionnaire.js";
@@ -145,7 +146,7 @@ export interface AuthoringSourceEvidence {
     origin: "explicit";
     description: string;
     references: Array<{ path: string; contentHash: string }>;
-    scripts: Array<{ path: string; sideEffect: "unknown" }>;
+    scripts: Array<{ path: string; sideEffect: SkillScriptEffect }>;
     hash: string;
   }>;
 }

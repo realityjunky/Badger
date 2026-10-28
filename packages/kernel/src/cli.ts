@@ -76,7 +76,11 @@ program
   });
 
 program
-  .command("candidates")
+  .command("source-check")
+  .alias("candidates")
+  .description(
+    "Check the declared Skill sources: identity, inventory, scripts, and blockers",
+  )
   .option(
     "--skill <name=location>",
     "Explicit Skill source declaration; repeatable",
@@ -89,22 +93,31 @@ program
     collectRepeated,
     [],
   )
+  .option(
+    "--source-root <dir>",
+    "Registered root allowed for absolute Skill sources; repeatable",
+    collectRepeated,
+    [],
+  )
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (options) => {
     const root = projectRoot(options.project);
     const declarations = [...(options.skill ?? [])].map(parseSourceDeclaration);
+    const roots = [...(options.sourceRoot ?? [])];
     for (const manifestFile of [...(options.sourceManifest ?? [])]) {
-      declarations.push(
-        ...(await readSkillSourceManifest(path.resolve(root, manifestFile)))
-          .sources,
+      const manifest = await readSkillSourceManifest(
+        path.resolve(root, manifestFile),
       );
+      declarations.push(...manifest.sources);
+      roots.push(...(manifest.roots ?? []));
     }
     emit(
       {
         candidates: await findSkills({
           projectRoot: root,
           sources: declarations,
+          roots,
         }),
       },
       options.json,

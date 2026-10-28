@@ -12,6 +12,7 @@ import {
   stableValue,
 } from "../util.js";
 import { readState, writeState } from "../factory/state.js";
+import { hashSkillSource } from "../skill/identity.js";
 import { readPlan } from "../factory/proposal.js";
 import {
   generatePackage,
@@ -3803,7 +3804,7 @@ async function sourceEvidenceDrift(
   for (const [root, source] of sources) {
     let currentHash: string;
     try {
-      currentHash = await hashDirectory(root);
+      currentHash = await hashSkillSource(root);
     } catch (error) {
       findings.push(
         `Authoring source evidence is unavailable for ${source.label}: ${String(error)}`,

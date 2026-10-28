@@ -6,23 +6,11 @@ import type {
   UpgradeSourceEvidence,
   UpgradeSourceFileEvidence,
 } from "../types.js";
-import { hashDirectory, isWithin, listFiles, sha256 } from "../util.js";
+import { hashSkillInventory, inventorySkill } from "../skill/identity.js";
+import { isWithin } from "../util.js";
 
 function portablePath(value: string): string {
   return value.replaceAll("\\", "/");
-}
-
-function assertSafeSourcePath(relativePath: string): void {
-  const normalized = portablePath(relativePath);
-  if (
-    path.isAbsolute(relativePath) ||
-    normalized === ".." ||
-    normalized.startsWith("../") ||
-    normalized.includes("/../") ||
-    normalized.includes("\0")
-  ) {
-    throw new Error(`Upgrade source contains unsafe path: ${relativePath}`);
-  }
 }
 
 async function physicalTarget(target: string): Promise<string> {
@@ -99,23 +87,17 @@ export async function inspectUpgradeSource(
   if (!skillStats?.isFile() || skillStats.isSymbolicLink()) {
     throw new Error(`Upgrade source is not a Skill directory: ${sourceRoot}`);
   }
-  const files: UpgradeSourceFileEvidence[] = [];
-  for (const relativePath of (await listFiles(root)).sort((left, right) =>
-    left.localeCompare(right),
-  )) {
-    assertSafeSourcePath(relativePath);
-    const content = await fs.readFile(path.join(root, relativePath));
-    files.push({
-      path: portablePath(relativePath),
-      bytes: content.byteLength,
-      hash: sha256(content),
-    });
-  }
+  const inventory = await inventorySkill(root);
+  const files: UpgradeSourceFileEvidence[] = inventory.map((file) => ({
+    path: file.path,
+    bytes: file.bytes,
+    hash: file.hash,
+  }));
   return {
     schemaVersion: 1,
     kind: "badger-upgrade-source",
     root,
-    hash: await hashDirectory(root),
+    hash: hashSkillInventory(inventory),
     files,
   };
 }

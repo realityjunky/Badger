@@ -36,19 +36,22 @@ boundary, FactoryPlan shape, relationship semantics, and completeness
 checklist.
 
 Ask the workflow owner to provide every source Skill as a name and a
-project-relative or absolute location as explicit Skill source declarations.
-Inspect only those declarations:
+project-relative location, or an absolute location inside the project or a
+registered source root, as explicit Skill source declarations. Inspect only
+those declarations with the source check:
 
 ```bash
-badger candidates --project <dir> --skill <name=location> --json
+badger source-check --project <dir> --skill <name=location> --json
 ```
 
-Repeat `--skill` for every source or use an explicit source manifest. Read the
-candidate descriptions, canonical paths, reference inventory, script
-inventory, and content hashes. Then read each supplied `SKILL.md`, every file
-under its `reference/` or `references/` directory, and every inventoried file
-under `scripts/` as source evidence. Do not execute scripts or treat an
-inventory entry as permission to run it.
+Repeat `--skill` for every source or use an explicit source manifest, and pass
+`--source-root` or the manifest's `roots` for absolute locations outside the
+project. Read each source's description, canonical path, full file inventory
+with hashes, script side effects, and identity hash. Then read each supplied
+`SKILL.md` and every other inventoried file, configuration included, as source
+evidence. Do not execute scripts or treat an inventory entry as permission to
+run it; a script's declared side effect (`none`, `local-writes`, `network`,
+`scheduler-submission`, `installs`, or `undeclared`) only describes it.
 
 Do not ask semantic questions until all supplied source evidence has been
 read. Source metadata may establish facts such as a Skill's purpose or

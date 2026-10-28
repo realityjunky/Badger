@@ -46,25 +46,33 @@ and `resumable` Creator state without mutating the project.
 
 Every Skill used by the workflow must be supplied as exactly one declaration in
 the FactoryPlan `skillSources` array. A declaration is a Skill name and a
-project-relative or absolute location. Never infer a Skill from a default,
-ambient, home-directory, or platform directory.
+project-relative location, or an absolute location inside the project or a
+registered source root. Never infer a Skill from a default, ambient,
+home-directory, or platform directory.
 
 1. Establish the project root and the `new-skill` or `upgrade-existing` intent.
-2. Ask for each source Skill's name and location. Inspect every declaration
-   with `badger candidates --skill <name=location> --json`, repeating
-   `--skill` for every source or using an explicit source manifest.
-3. Review each candidate's canonical path, frontmatter description, reference
-   inventory, script inventory, and content hash. Read the workflow manual and
-   every explicitly supplied Skill file before asking semantic questions.
+2. Ask for each source Skill's name and location. Run the source check with
+   `badger source-check --skill <name=location> --json` (`candidates` is kept
+   as an alias), repeating `--skill` for every source or using an explicit
+   source manifest. Pass `--source-root` or the manifest's `roots` for any
+   absolute location outside the project.
+3. Review each source's canonical path, frontmatter description, full file
+   inventory with hashes, script side effects, and identity hash. Read the
+   workflow manual and every explicitly supplied Skill file before asking
+   semantic questions.
 4. Start or continue `/badger-workflow-questionnaire` according to the
    first-use and resume result. Let it conduct as many exchanges as needed.
 5. Author a complete FactoryPlan with explicit sources, workflow semantics,
    and upgrade-source identity where applicable.
 
-Candidate inspection is read-only. It may read `SKILL.md`, `reference/` or
-`references/`, and `scripts/` for inventory and evidence, but it never executes
-scripts, writes Creator state, writes the questionnaire handoff, copies a
-source package, publishes, distributes, or accesses credentials.
+The source check is read-only. Its identity ignores a fixed list of
+operating-system metadata, editor state, and interpreter cache files, and it
+reports every other file, configuration included. A script's side effect comes
+from the source manifest (`none`, `local-writes`, `network`,
+`scheduler-submission`, `installs`); an undeclared script is reported as
+undeclared. It never executes scripts, writes Creator state, writes the
+questionnaire handoff, copies a source package, publishes, distributes, or
+accesses credentials.
 
 ## Multi-exchange authoring
 
@@ -122,7 +130,7 @@ confirmation.
 Preserve the questionnaire's validated `factoryPlan.semanticDossier` when
 writing the plan. Incomplete or stopped handoffs require questionnaire
 refinement. Proposal construction verifies the dossier's explicit source
-identities against current candidates; source drift requires reinspection and
+identities against the current source check; source drift requires reinspection and
 owner confirmation. Authoring plans retain the dossier and its content hash.
 Each lane's common input points to `/semanticDossier` in that persisted plan;
 semantic repairs invalidate previous authoring evidence through the existing
@@ -155,8 +163,8 @@ The relationships in the plan are semantic rather than source metadata:
 
 ## Confirmation and lifecycle
 
-1. Inspect context with `badger guide`; inspect every explicit source with
-   `badger candidates`.
+1. Inspect context with `badger guide`; run the source check with
+   `badger source-check`.
 2. Complete `/badger-workflow-questionnaire` and show its confirmed handoff.
 3. Write and show the complete FactoryPlan. After explicit plan confirmation,
    run `badger propose <plan.json> --project <dir> --json`.

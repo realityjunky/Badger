@@ -1075,6 +1075,24 @@ export interface NormalizedWorkflow {
   sourceSkills: string[];
 }
 
+export const SKILL_SCRIPT_SIDE_EFFECTS = [
+  "none",
+  "local-writes",
+  "network",
+  "scheduler-submission",
+  "installs",
+] as const;
+
+export type SkillScriptSideEffect = (typeof SKILL_SCRIPT_SIDE_EFFECTS)[number];
+
+export type SkillScriptEffect = SkillScriptSideEffect | "undeclared";
+
+export interface SkillSourceFile {
+  path: string;
+  bytes: number;
+  hash: string;
+}
+
 export interface SkillSource {
   name: string;
   root: string;
@@ -1082,18 +1100,21 @@ export interface SkillSource {
   description: string;
   skillMd: string;
   references: Array<{ path: string; contentHash: string }>;
-  scripts: Array<{ path: string; sideEffect: "unknown" }>;
+  scripts: Array<{ path: string; sideEffect: SkillScriptEffect }>;
+  inventory: SkillSourceFile[];
   hash: string;
 }
 
 export interface SkillSourceDeclaration {
   name: string;
   location: string;
+  scripts?: Record<string, SkillScriptSideEffect>;
 }
 
 export interface SkillSourceManifest {
   schemaVersion: 1;
   sources: SkillSourceDeclaration[];
+  roots?: string[];
 }
 
 export interface UpgradeSourceFileEvidence {
