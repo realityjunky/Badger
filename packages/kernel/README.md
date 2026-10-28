@@ -21,6 +21,8 @@ The kernel package includes:
   gaps, and deterministic authoring input identities;
 - generated authoring-pending scaffolds with resumable six-lane authoring
   sessions and protocol/evidence references;
+- bundled source Skills with package-relative locations, complete identity
+  files, and the fixed source identity ignore rules;
 - hash-bound quick/full authoring review with deterministic self-consistency findings and composite authoring/runtime/publication readiness;
 - WorkflowProtocol-bound cross-validation of authored decisions, routes, Skill Calls, Output Schemas, guardrails, recovery, and artifact selection;
 - protected deterministic assembly with separate Auto-zone, Authored-zone, and
@@ -68,6 +70,18 @@ script side-effect declarations, bounded file previews, and version diffs.
 An Engineer or Field expert on a workflow uploads to that workflow's Group.
 See `packages/server/README.md`
 from the repository root for its API and limits.
+
+Generated packages carry their source Skills in `sources/<Skill identity hash>/`.
+The roots in `reference/resolved-skills.json` and the packaged
+`reference/authoring-plan.json` resolve from the package root. Configuration,
+references, scripts, and binary assets are included; operating-system, editor,
+and interpreter noise is excluded using the source check's identity rules.
+Identical inputs generated in different directories yield the same package
+hash. After assembly, a copied package and its Creator records can pass
+evaluation and runtime certification without the original source directories;
+the bundled identities are checked when those originals are absent. An
+available original still detects source drift, and publication approval keeps
+its original-source checks. See `docs/adr/0014-bundle-source-skills.md`.
 
 ## Run persistence
 

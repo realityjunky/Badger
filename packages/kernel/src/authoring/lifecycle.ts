@@ -20,8 +20,8 @@ import {
   toResolvedPaths,
   toStoredPaths,
 } from "../factory/project-paths.js";
-import { hashSkillSource } from "../skill/identity.js";
 import { planHashMatches, readPlan } from "../factory/proposal.js";
+import { hashSourceEvidence } from "../factory/bundle-sources.js";
 import {
   generatePackage,
   inventoryPackage,
@@ -3834,7 +3834,13 @@ async function sourceEvidenceDrift(
   for (const [root, source] of sources) {
     let currentHash: string;
     try {
-      currentHash = await hashSkillSource(root);
+      currentHash = await hashSourceEvidence(
+        root,
+        source.hash,
+        state.authoring?.status === "assembled"
+          ? state.generated?.packageRoot
+          : undefined,
+      );
     } catch (error) {
       findings.push(
         `Authoring source evidence is unavailable for ${source.label}: ${String(error)}`,
@@ -3876,11 +3882,12 @@ async function readPackageInventoryProjection(
         status,
         files: value.files.map((file) => ({
           ...file,
-          owner: file.path.startsWith("source/")
-            ? "source"
-            : authored.has(file.path)
-              ? "authored"
-              : "auto",
+          owner:
+            file.path.startsWith("source/") || file.path.startsWith("sources/")
+              ? "source"
+              : authored.has(file.path)
+                ? "authored"
+                : "auto",
         })),
       },
       null,
@@ -3925,29 +3932,30 @@ async function assertCurrentPackageMatchesScaffold(options: {
   const authored = new Set(authoredLeafPaths(options.plan));
   const assembled = options.state.authoring?.status === "assembled";
   for (const relativePath of [...expectedSet].sort()) {
-    if (authored.has(relativePath) && !authoredHeading(relativePath)) continue;
+    const heading = authored.has(relativePath)
+      ? authoredHeading(relativePath)
+      : undefined;
+    if (authored.has(relativePath) && !heading) continue;
     const currentPath = path.join(options.currentRoot, relativePath);
     const scaffoldPath = path.join(options.scaffoldRoot, relativePath);
-    let expected = await fs.readFile(scaffoldPath, "utf8");
+    let expected = await fs.readFile(scaffoldPath);
     if (assembled && relativePath === "reference/authoring-lanes.json")
-      expected = authoringLanesDocument(
-        options.plan,
-        options.state,
-        options.records,
+      expected = Buffer.from(
+        authoringLanesDocument(options.plan, options.state, options.records),
       );
     if (assembled && relativePath === "reference/composition-report.md")
-      expected = compositionReport(
-        options.plan,
-        options.state,
-        options.records,
+      expected = Buffer.from(
+        compositionReport(options.plan, options.state, options.records),
       );
     if (assembled && relativePath === "reference/package-inventory.json")
-      expected = await readPackageInventoryProjection(
-        options.scaffoldRoot,
-        [...authored],
-        "assembled",
+      expected = Buffer.from(
+        await readPackageInventoryProjection(
+          options.scaffoldRoot,
+          [...authored],
+          "assembled",
+        ),
       );
-    let current = await fs.readFile(currentPath, "utf8");
+    let current = await fs.readFile(currentPath);
     if (relativePath === "reference/source-evidence.json") {
       const normalizeSourceEvidence = (content: string): string => {
         const value = JSON.parse(content) as Record<string, unknown>;
@@ -3955,17 +3963,30 @@ async function assertCurrentPackageMatchesScaffold(options: {
           JSON.stringify({ ...value, preservedAt: "scaffold" }, null, 2) + "\n"
         );
       };
-      current = normalizeSourceEvidence(current);
-      expected = normalizeSourceEvidence(expected);
+      current = Buffer.from(normalizeSourceEvidence(current.toString("utf8")));
+      expected = Buffer.from(
+        normalizeSourceEvidence(expected.toString("utf8")),
+      );
     }
-    const heading = authoredHeading(relativePath);
     const comparable = heading
-      ? replaceSection(current, heading, "__AUTHORED_SECTION_IGNORED__")
+      ? Buffer.from(
+          replaceSection(
+            current.toString("utf8"),
+            heading,
+            "__AUTHORED_SECTION_IGNORED__",
+          ),
+        )
       : current;
     const expectedComparable = heading
-      ? replaceSection(expected, heading, "__AUTHORED_SECTION_IGNORED__")
+      ? Buffer.from(
+          replaceSection(
+            expected.toString("utf8"),
+            heading,
+            "__AUTHORED_SECTION_IGNORED__",
+          ),
+        )
       : expected;
-    if (comparable !== expectedComparable)
+    if (!comparable.equals(expectedComparable))
       throw new Error(`Generated Auto-zone file changed: ${relativePath}`);
   }
 }
