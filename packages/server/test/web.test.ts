@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   startTestService,
@@ -21,6 +22,16 @@ afterEach(async () => {
 });
 
 const WRITE_ORIGIN = "http://localhost";
+
+/** The dashboard's own document template, as its formatter writes it. */
+const DASHBOARD_TEMPLATE = fileURLToPath(
+  new URL("../../web/index.html", import.meta.url),
+);
+
+/** Every <base> tag in a document; a browser resolves URLs against the first. */
+function baseTags(html: string): string[] {
+  return html.match(/<base\b[^>]*>/gu) ?? [];
+}
 
 const alice: TestPerson = {
   subject: "alice",
@@ -91,8 +102,27 @@ describe("the dashboard the server serves", () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('<base href="/badger/">');
+    expect(baseTags(html)).toEqual(['<base href="/badger/">']);
     expect(html).toContain('name="badger-base-path" content="/badger"');
+  });
+
+  it("points the dashboard's own template at the deployment's base path", async () => {
+    // The template self-closes its <base> and base-path <meta>. A second <base>
+    // added beside its own would lose to it, and the app would load from "/".
+    const directory = await builtWebDirectory();
+    await fs.copyFile(DASHBOARD_TEMPLATE, path.join(directory, "index.html"));
+    service = await startTestService({
+      environment: { BADGER_WEB_DIR: directory, BADGER_BASE_PATH: "/badger" },
+    });
+
+    const response = await service.request("/badger/workflows/w-1", {
+      as: alice,
+    });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(baseTags(html)).toEqual(['<base href="/badger/">']);
+    expect(html).toMatch(/<meta name="badger-base-path" content="\/badger"/u);
   });
 
   it("serves the build's assets with their type and a long cache", async () => {

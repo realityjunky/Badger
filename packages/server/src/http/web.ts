@@ -125,8 +125,11 @@ export async function readWebDocument(
   return injectBasePath(html, basePath);
 }
 
-const BASE_TAG = /<base href="[^"]*">/u;
-const BASE_META = /(<meta name="badger-base-path" content=")[^"]*(">)/u;
+// The dashboard's template self-closes both tags (`<base href="/" />`), as its
+// formatter writes them. A pattern that misses the tag adds a second <base>,
+// which loses to the first, so the app would load from "/".
+const BASE_TAG = /<base href="[^"]*"\s*\/?>/u;
+const BASE_META = /(<meta name="badger-base-path" content=")[^"]*("\s*\/?>)/u;
 
 /** Points the document's relative URLs and app router at `basePath`. */
 export function injectBasePath(html: string, basePath: string): string {
