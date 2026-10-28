@@ -37,6 +37,8 @@ export interface AuditEvent {
   action: string;
   targetType: string;
   targetId: string | null;
+  /** What the target was at the time, for a reader once it has changed. */
+  targetLabel: string | null;
   before: RevisionOrHash | null;
   after: RevisionOrHash | null;
   reason: string | null;
@@ -47,7 +49,7 @@ export interface AuditInput {
   actor: AuditActor;
   channel: AuditChannel;
   action: string;
-  target: { type: string; id: string | null };
+  target: { type: string; id: string | null; label?: string };
   before: RevisionOrHash | null;
   after: RevisionOrHash | null;
   reason: string | null;
@@ -80,6 +82,7 @@ interface AuditRow {
   action: string;
   target_type: string;
   target_id: string | null;
+  target_label: string | null;
   revision_before: number | null;
   hash_before: string | null;
   revision_after: number | null;
@@ -89,11 +92,12 @@ interface AuditRow {
 }
 
 const AUDIT_INSERT_COLUMNS = `id, occurred_at, actor_person_id, credential_kind,
-       credential_id, channel, action, target_type, target_id, revision_before,
-       hash_before, revision_after, hash_after, reason, request_id`;
+       credential_id, channel, action, target_type, target_id, target_label,
+       revision_before, hash_before, revision_after, hash_after, reason,
+       request_id`;
 const AUDIT_SELECT_COLUMNS = `a.id, a.occurred_at, a.actor_person_id,
        a.credential_kind, a.credential_id, a.channel, a.action, a.target_type,
-       a.target_id, a.revision_before, a.hash_before, a.revision_after,
+       a.target_id, a.target_label, a.revision_before, a.hash_before, a.revision_after,
        a.hash_after, a.reason, a.request_id, p.display_name as actor_display_name,
        p.email as actor_email`;
 const AUDIT_FROM =
@@ -119,6 +123,7 @@ function toAuditEvent(row: AuditRow): AuditEvent {
     action: row.action,
     targetType: row.target_type,
     targetId: row.target_id,
+    targetLabel: row.target_label,
     before: revisionOrHash(row.revision_before, row.hash_before),
     after: revisionOrHash(row.revision_after, row.hash_after),
     reason: row.reason,
@@ -147,6 +152,7 @@ export async function recordAudit(
     action: input.action,
     targetType: input.target.type,
     targetId: input.target.id,
+    targetLabel: input.target.label ?? null,
     before: input.before,
     after: input.after,
     reason: input.reason,
@@ -155,7 +161,8 @@ export async function recordAudit(
 
   await database.query(
     `insert into audit_events (${AUDIT_INSERT_COLUMNS})
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+             $16)`,
     [
       event.id,
       event.occurredAt,
@@ -166,6 +173,7 @@ export async function recordAudit(
       event.action,
       event.targetType,
       event.targetId,
+      event.targetLabel,
       event.before?.revision ?? null,
       event.before?.hash ?? null,
       event.after?.revision ?? null,

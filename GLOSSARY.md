@@ -14,10 +14,10 @@ The company or institution that one Badger deployment serves, together with its 
 A department or team within the Organization that owns workflows and Skills. Groups nest, and a role held on a Group applies to the Groups inside it.
 
 **Role binding**:
-A role attached to a scope, either the Organization or a Group, for a person. Bindings are additive, and a binding on a Group applies to the Groups inside it. A binding made by email before its person has signed in is an invitation.
+A role attached to a scope, either the Organization or a Group, for a person. Bindings are additive, and a binding on a Group applies to the Groups inside it. A binding made by email for an address no signed-in person has verified is an invitation.
 
 **Invitation**:
-A role binding recorded by email before that address has ever signed in. The first sign-in with an address the identity provider has verified records the person and applies it; later sign-ins match on issuer and subject, so an address change at the provider moves no binding.
+A role binding recorded by email for an address no signed-in person has verified. It applies at the first sign-in that presents that address as verified, usually the person's first; from then on it follows the person's issuer and subject, so an address change at the provider moves no binding.
 
 **Administrator**:
 The Organization role that may do everything. An Administrator may override a blocked action only by recording a reason, and the override appears in the Activity log.

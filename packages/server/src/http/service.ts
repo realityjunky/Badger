@@ -5,14 +5,14 @@ import {
   listAuditEvents,
   type AuditChannel,
   type AuditFilters,
+  type WriteContext,
 } from "../audit.js";
 import {
   accessFor,
   isAdministrator,
+  managementVisibility,
   mayManageGroup,
-  mayReadAudit,
-  managedGroupIds,
-  withAncestorGroups,
+  readsEverything,
   type Access,
 } from "../authorization.js";
 import {
@@ -21,7 +21,6 @@ import {
   parseBindingInput,
   readBindingById,
   removeBinding,
-  type BindingContext,
 } from "../bindings.js";
 import type { Clock } from "../clock.js";
 import type { ServiceConfig } from "../config.js";
@@ -43,7 +42,6 @@ import {
   parseCreateGroupInput,
   parseUpdateGroupInput,
   updateGroup,
-  type GroupWriteContext,
 } from "../groups.js";
 import type { Logger } from "../log.js";
 import { loopbackOrigins } from "../network.js";
@@ -201,10 +199,22 @@ export function createService(options: ServiceOptions, port: number): Service {
       signInPerson(tx, serviceDependencies, principal, {
         channel: channelOf(principal.credential),
         requestId,
-        credential: principal.credential,
-        emailVerified: principal.emailVerified,
       }),
     );
+  }
+
+  /** Who is writing, through which credential and channel, for the audit. */
+  function writeContextFor(
+    person: Person,
+    principal: Principal,
+    reply: Reply,
+  ): WriteContext {
+    return {
+      personId: person.id,
+      credential: principal.credential,
+      channel: channelOf(principal.credential),
+      requestId: reply.requestId,
+    };
   }
 
   /** The audit filters a request names, or the reason one is not valid. */
@@ -270,7 +280,7 @@ export function createService(options: ServiceOptions, port: number): Service {
     url: URL,
     access: Access,
   ): Promise<void> {
-    if (!mayReadAudit(access)) {
+    if (!readsEverything(access)) {
       return reply.error(
         403,
         "denied",
@@ -306,45 +316,6 @@ export function createService(options: ServiceOptions, port: number): Service {
         filters: parsed.filters,
       }),
     );
-  }
-
-  /** The visibility a person has over bindings and members. */
-  async function bindingVisibility(
-    access: Access,
-    person: Person,
-  ): Promise<{
-    organization: boolean;
-    groupIds: Set<string> | null;
-  }> {
-    if (mayReadAudit(access)) {
-      return { organization: true, groupIds: null };
-    }
-    const managed = await managedGroupIds(database, access, person);
-    return {
-      organization: false,
-      // A binding above a managed group reaches into it, so its scope is in
-      // view too.
-      groupIds:
-        managed === null ? null : await withAncestorGroups(database, managed),
-    };
-  }
-
-  /**
-   * The same visibility, or null for a person who manages nothing: a Member
-   * reads neither the member list nor the pending invitations.
-   */
-  async function managementVisibility(
-    access: Access,
-    person: Person,
-  ): Promise<{ organization: boolean; groupIds: Set<string> | null } | null> {
-    const visibility = await bindingVisibility(access, person);
-    if (
-      !visibility.organization &&
-      (visibility.groupIds === null || visibility.groupIds.size === 0)
-    ) {
-      return null;
-    }
-    return visibility;
   }
 
   async function handleCreateBinding(
@@ -395,23 +366,26 @@ export function createService(options: ServiceOptions, port: number): Service {
         "Badger does not grant an organization role to the person granting it; an Administrator may override with a reason",
       );
     }
+    if (!selfBinding && input.overrideReason !== null) {
+      return reply.error(
+        400,
+        "invalid",
+        "overrideReason is only for overriding a refused self-grant",
+      );
+    }
 
-    const context: BindingContext = {
-      personId: person.id,
-      credential: principal.credential,
-      channel: channelOf(principal.credential),
-      requestId: reply.requestId,
-    };
-    const overrideReason = selfBinding ? input.overrideReason : null;
     const created = await createBinding(
       database,
       serviceDependencies,
-      context,
+      writeContextFor(person, principal, reply),
       input,
-      overrideReason === null
+      input.overrideReason === null
         ? "Role binding recorded"
-        : `Override: ${overrideReason}`,
+        : `Override: ${input.overrideReason}`,
     );
+    if (created.kind === "missing-group") {
+      return reply.error(400, "invalid", "The group does not exist");
+    }
     if (created.kind === "conflict") {
       return reply.error(
         409,
@@ -472,16 +446,10 @@ export function createService(options: ServiceOptions, port: number): Service {
       );
     }
 
-    const context: BindingContext = {
-      personId: person.id,
-      credential: principal.credential,
-      channel: channelOf(principal.credential),
-      requestId: reply.requestId,
-    };
     const removed = await removeBinding(
       database,
       serviceDependencies,
-      context,
+      writeContextFor(person, principal, reply),
       bindingId,
       (input as { revision: number }).revision,
       "Role binding removed",
@@ -524,16 +492,10 @@ export function createService(options: ServiceOptions, port: number): Service {
     if (!input.ok) {
       return reply.error(400, "invalid", input.message);
     }
-    const context: GroupWriteContext = {
-      personId: person.id,
-      credential: principal.credential,
-      channel: channelOf(principal.credential),
-      requestId: reply.requestId,
-    };
     const created = await createGroup(
       database,
       serviceDependencies,
-      context,
+      writeContextFor(person, principal, reply),
       input.value,
     );
     if (created.kind === "missing-parent") {
@@ -572,16 +534,10 @@ export function createService(options: ServiceOptions, port: number): Service {
     if (!input.ok) {
       return reply.error(400, "invalid", input.message);
     }
-    const context: GroupWriteContext = {
-      personId: person.id,
-      credential: principal.credential,
-      channel: channelOf(principal.credential),
-      requestId: reply.requestId,
-    };
     const updated = await updateGroup(
       database,
       serviceDependencies,
-      context,
+      writeContextFor(person, principal, reply),
       groupId,
       input.value,
     );
@@ -644,12 +600,7 @@ export function createService(options: ServiceOptions, port: number): Service {
     const saved = await savePreferences(
       database,
       serviceDependencies,
-      {
-        personId: person.id,
-        credential: principal.credential,
-        channel: channelOf(principal.credential),
-        requestId: reply.requestId,
-      },
+      writeContextFor(person, principal, reply),
       input.value,
     );
     if (saved.kind === "conflict") {
@@ -839,7 +790,7 @@ export function createService(options: ServiceOptions, port: number): Service {
       );
     }
     if (path === `${API}/members` || path === `${API}/invitations`) {
-      const visibility = await managementVisibility(access, person);
+      const visibility = await managementVisibility(database, access, person);
       if (visibility === null) {
         return reply.error(
           403,

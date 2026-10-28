@@ -99,10 +99,20 @@ export function ActivityPage() {
     {
       title: t("activity.target"),
       key: "target",
-      render: (_, event) =>
-        event.targetId === null
-          ? event.targetType
-          : `${event.targetType} · ${event.targetId}`,
+      render: (_, event) => {
+        const reference =
+          event.targetId === null
+            ? event.targetType
+            : `${event.targetType} · ${event.targetId}`;
+        return event.targetLabel === null ? (
+          reference
+        ) : (
+          <>
+            <div>{event.targetLabel}</div>
+            <div className="muted">{reference}</div>
+          </>
+        );
+      },
     },
     {
       title: t("activity.channel"),

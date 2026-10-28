@@ -40,6 +40,12 @@ export interface PlatformSessionSettings {
   issuer: string;
   /** When set, the platform must grant the person this app. */
   requiredAppGrant: string | null;
+  /**
+   * Whether the platform verifies every address it returns. An answer that
+   * carries `email_verified` decides for itself; without that field, an
+   * address counts as verified only when this is true.
+   */
+  emailsVerified: boolean;
   /** How long a validated session is remembered. 0 disables the cache. */
   cacheSeconds: number;
   timeoutMs: number;
@@ -318,6 +324,8 @@ function readPlatformSession(
     issuer,
     requiredAppGrant:
       readString(environment, "BADGER_PLATFORM_APP_GRANT") ?? null,
+    emailsVerified:
+      readBoolean(environment, "BADGER_PLATFORM_EMAILS_VERIFIED") ?? false,
     cacheSeconds: readInteger(
       environment,
       "BADGER_PLATFORM_CACHE_SECONDS",

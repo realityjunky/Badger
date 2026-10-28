@@ -11,8 +11,6 @@ export interface TestPerson {
   displayName?: string;
   /** Whether the test provider has verified this address; true by default. */
   emailVerified?: boolean;
-  /** Whether the test provider calls this person a platform administrator. */
-  platformAdministrator?: boolean;
 }
 
 function principalFor(person: TestPerson): Principal {
@@ -24,7 +22,7 @@ function principalFor(person: TestPerson): Principal {
     status: "active",
     credential: { kind: "session", id: "test-session" },
     emailVerified: person.emailVerified ?? true,
-    platformAdministrator: person.platformAdministrator ?? false,
+    platformAdministrator: false,
   };
 }
 

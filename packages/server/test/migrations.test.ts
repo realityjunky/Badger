@@ -61,13 +61,14 @@ describe("reviewed SQL migrations", () => {
       "0001",
       "0002",
       "0003",
+      "0004",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
 
     expect(state).toEqual({
       state: "applied",
-      applied: ["0001", "0002", "0003"],
+      applied: ["0001", "0002", "0003", "0004"],
       pending: [],
       drifted: [],
     });
@@ -96,14 +97,14 @@ describe("reviewed SQL migrations", () => {
 
     expect(secondRun).toEqual({
       state: "applied",
-      applied: ["0001", "0002", "0003"],
+      applied: ["0001", "0002", "0003", "0004"],
       pending: [],
       drifted: [],
     });
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(3);
+    expect(rows.rows[0]?.count).toBe(4);
   });
 
   it("refuses a reviewed migration whose SQL changed after it was applied", async () => {

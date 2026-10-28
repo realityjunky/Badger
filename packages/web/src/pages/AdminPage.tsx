@@ -15,7 +15,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   createGroup,
   inviteByEmail,
+  ledGroupIds,
   loadOrganization,
+  mayChangeBinding,
   removeBinding,
   type Group,
   type Invitation,
@@ -92,6 +94,16 @@ export function AdminPage() {
     return () => controller.abort();
   }, [reload]);
 
+  const groups = state.kind === "ready" ? state.records.groups : null;
+  const led = useMemo(
+    () => ledGroupIds(person?.groups ?? [], groups ?? []),
+    [person, groups],
+  );
+  const mayChange = (binding: {
+    scopeType: "organization" | "group";
+    scopeId: string | null;
+  }): boolean => mayChangeBinding(binding, administrator, led);
+
   const groupNames = useMemo(() => {
     const names = new Map<string, string>();
     if (state.kind === "ready") {
@@ -102,16 +114,21 @@ export function AdminPage() {
     return names;
   }, [state]);
 
+  // A "rejected" write is left to the form that made it: only an invitation
+  // can be refused that way, and its panel asks for an override reason.
   const reportWrite = useCallback(
-    async (written: WriteOutcome | Promise<WriteOutcome>) => {
+    async (
+      written: WriteOutcome | Promise<WriteOutcome>,
+    ): Promise<WriteOutcome> => {
       const result = await written;
       if (result.kind === "ok") {
         await reload();
-        return;
+      } else if (result.kind !== "rejected") {
+        setNotice(
+          result.kind === "denied" ? t("admin.denied") : t("admin.writeFailed"),
+        );
       }
-      setNotice(
-        result.kind === "denied" ? t("admin.denied") : t("admin.writeFailed"),
-      );
+      return result;
     },
     [reload, t],
   );
@@ -148,10 +165,10 @@ export function AdminPage() {
             key: "actions",
             render: (_: unknown, member: Member) => (
               <Space size={4} wrap>
-                {member.bindings.map((binding) => (
+                {member.bindings.filter(mayChange).map((binding) => (
                   <Popconfirm
                     key={binding.id}
-                    title={t("admin.removeConfirm")}
+                    title={t("admin.removeBindingConfirm")}
                     onConfirm={() =>
                       void reportWrite(
                         removeBinding(basePath, binding.id, binding.revision),
@@ -207,20 +224,25 @@ export function AdminPage() {
           {
             title: "",
             key: "actions",
-            render: (_: unknown, invitation: Invitation) => (
-              <Popconfirm
-                title={t("admin.removeConfirm")}
-                onConfirm={() =>
-                  void reportWrite(
-                    removeBinding(basePath, invitation.id, invitation.revision),
-                  )
-                }
-              >
-                <Button size="small" danger>
-                  {t("admin.remove")}
-                </Button>
-              </Popconfirm>
-            ),
+            render: (_: unknown, invitation: Invitation) =>
+              mayChange(invitation) ? (
+                <Popconfirm
+                  title={t("admin.removeConfirm")}
+                  onConfirm={() =>
+                    void reportWrite(
+                      removeBinding(
+                        basePath,
+                        invitation.id,
+                        invitation.revision,
+                      ),
+                    )
+                  }
+                >
+                  <Button size="small" danger>
+                    {t("admin.remove")}
+                  </Button>
+                </Popconfirm>
+              ) : null,
           },
         ]
       : []),
@@ -300,11 +322,17 @@ export function AdminPage() {
                 >
                   {mayManage && (
                     <InvitePanel
-                      groups={state.records.groups}
+                      groups={
+                        administrator
+                          ? state.records.groups
+                          : state.records.groups.filter((group) =>
+                              led.has(group.id),
+                            )
+                      }
                       administrator={administrator}
-                      onInvite={async (input) => {
-                        await reportWrite(inviteByEmail(basePath, input));
-                      }}
+                      onInvite={(input) =>
+                        reportWrite(inviteByEmail(basePath, input))
+                      }
                     />
                   )}
                   {state.records.invitations.length === 0 ? (
@@ -425,7 +453,8 @@ function InvitePanel({
     role: string;
     scopeType: "organization" | "group";
     scopeId: string | null;
-  }): Promise<void>;
+    overrideReason?: string;
+  }): Promise<WriteOutcome>;
 }) {
   const { t } = useI18n();
   const [email, setEmail] = useState("");
@@ -439,6 +468,10 @@ function InvitePanel({
       : (GROUP_ROLES[1] ?? "Member"),
   );
   const [busy, setBusy] = useState(false);
+  // Set once the server refuses a self-grant: the same invitation may then be
+  // sent again with a recorded reason.
+  const [overriding, setOverriding] = useState(false);
+  const [reason, setReason] = useState("");
 
   const roles = scopeType === "organization" ? ORGANIZATION_ROLES : GROUP_ROLES;
   const ready =
@@ -446,77 +479,135 @@ function InvitePanel({
     (scopeType === "organization" || scopeId !== null) &&
     roles.includes(role);
 
-  const submit = async (): Promise<void> => {
+  const submit = async (overrideReason?: string): Promise<void> => {
     if (!ready || busy) {
       return;
     }
     setBusy(true);
     try {
-      await onInvite({
+      const outcome = await onInvite({
         email: email.trim(),
         role,
         scopeType,
         scopeId: scopeType === "organization" ? null : scopeId,
+        ...(overrideReason === undefined ? {} : { overrideReason }),
       });
-      setEmail("");
+      if (outcome.kind === "rejected") {
+        setOverriding(true);
+        return;
+      }
+      if (outcome.kind === "ok") {
+        setEmail("");
+        setOverriding(false);
+        setReason("");
+      }
     } finally {
       setBusy(false);
     }
   };
 
+  // Any change to the invitation makes it a new request, with no override.
+  const edited = (): void => {
+    setOverriding(false);
+    setReason("");
+  };
+
   return (
-    <Space wrap align="start">
-      <Input
-        aria-label={t("admin.invite.email")}
-        placeholder={t("admin.invite.emailPlaceholder")}
-        value={email}
-        onChange={(event) => setEmail(event.target.value)}
-        onPressEnter={() => void submit()}
-      />
-      {administrator && (
-        <Select
-          aria-label={t("admin.invite.scope")}
-          value={scopeType}
-          style={{ minWidth: 150 }}
-          onChange={(value: "organization" | "group") => {
-            setScopeType(value);
-            setScopeId(null);
-            setRole(
-              value === "organization" ? ORGANIZATION_ROLES[0] : GROUP_ROLES[1],
-            );
+    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+      <Space wrap align="start">
+        <Input
+          aria-label={t("admin.invite.email")}
+          placeholder={t("admin.invite.emailPlaceholder")}
+          value={email}
+          onChange={(event) => {
+            setEmail(event.target.value);
+            edited();
           }}
-          options={[
-            {
-              value: "organization",
-              label: t("admin.invite.scopeOrganization"),
-            },
-            { value: "group", label: t("admin.invite.scopeGroup") },
-          ]}
+          onPressEnter={() => void submit()}
         />
-      )}
-      {scopeType === "group" && (
+        {administrator && (
+          <Select
+            aria-label={t("admin.invite.scope")}
+            value={scopeType}
+            style={{ minWidth: 150 }}
+            onChange={(value: "organization" | "group") => {
+              edited();
+              setScopeType(value);
+              setScopeId(null);
+              setRole(
+                value === "organization"
+                  ? ORGANIZATION_ROLES[0]
+                  : GROUP_ROLES[1],
+              );
+            }}
+            options={[
+              {
+                value: "organization",
+                label: t("admin.invite.scopeOrganization"),
+              },
+              { value: "group", label: t("admin.invite.scopeGroup") },
+            ]}
+          />
+        )}
+        {scopeType === "group" && (
+          <Select
+            aria-label={t("admin.invite.group")}
+            style={{ minWidth: 180 }}
+            value={scopeId}
+            placeholder={t("admin.invite.groupPlaceholder")}
+            onChange={(value: string) => {
+              edited();
+              setScopeId(value);
+            }}
+            options={groups.map((group) => ({
+              value: group.id,
+              label: group.name,
+            }))}
+          />
+        )}
         <Select
-          aria-label={t("admin.invite.group")}
-          style={{ minWidth: 180 }}
-          value={scopeId}
-          placeholder={t("admin.invite.groupPlaceholder")}
-          onChange={setScopeId}
-          options={groups.map((group) => ({
-            value: group.id,
-            label: group.name,
-          }))}
+          aria-label={t("admin.invite.role")}
+          value={role}
+          style={{ minWidth: 150 }}
+          onChange={(value: string) => {
+            edited();
+            setRole(value);
+          }}
+          options={roles.map((name) => ({ value: name, label: name }))}
+        />
+        <Button type="primary" onClick={() => void submit()} loading={busy}>
+          {t("admin.invite.submit")}
+        </Button>
+      </Space>
+      {overriding && (
+        <Alert
+          type="warning"
+          showIcon
+          data-testid="admin-override"
+          message={t("admin.invite.overrideNeeded")}
+          description={
+            administrator ? (
+              <Space direction="vertical" style={{ width: "100%" }}>
+                <Input.TextArea
+                  aria-label={t("admin.invite.overrideReason")}
+                  value={reason}
+                  maxLength={1000}
+                  autoSize={{ minRows: 2, maxRows: 6 }}
+                  onChange={(event) => setReason(event.target.value)}
+                />
+                <Button
+                  danger
+                  disabled={reason.trim() === ""}
+                  loading={busy}
+                  onClick={() => void submit(reason.trim())}
+                >
+                  {t("admin.invite.overrideSubmit")}
+                </Button>
+              </Space>
+            ) : null
+          }
         />
       )}
-      <Select
-        aria-label={t("admin.invite.role")}
-        value={role}
-        style={{ minWidth: 150 }}
-        onChange={setRole}
-        options={roles.map((name) => ({ value: name, label: name }))}
-      />
-      <Button type="primary" onClick={() => void submit()} loading={busy}>
-        {t("admin.invite.submit")}
-      </Button>
     </Space>
   );
 }

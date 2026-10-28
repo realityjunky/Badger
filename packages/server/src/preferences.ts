@@ -148,8 +148,6 @@ export function parsePreferencesInput(body: unknown): PreferencesParseResult {
   };
 }
 
-export type PreferencesWriteContext = WriteContext;
-
 export type SavePreferencesResult =
   | { kind: "saved"; preferences: StoredPreferences }
   | { kind: "conflict"; preferences: StoredPreferences };
@@ -172,7 +170,7 @@ function samePreferences(left: Preferences, right: Preferences): boolean {
 export async function savePreferences(
   database: Database,
   dependencies: ServiceDependencies,
-  context: PreferencesWriteContext,
+  context: WriteContext,
   input: PreferencesInput,
 ): Promise<SavePreferencesResult> {
   return database.transaction(async (tx) => {

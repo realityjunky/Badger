@@ -160,7 +160,7 @@ describe("bindings by email", () => {
     expect(resolved[0]).toMatchObject({
       action: "role_binding.resolved",
       targetType: "role_binding",
-      reason: "Email binding applied at first sign-in",
+      reason: "Email binding applied at sign-in with a verified address",
     });
   });
 
@@ -180,25 +180,33 @@ describe("bindings by email", () => {
     expect((await me(alice)).person.roles).toEqual(["Auditor"]);
   });
 
-  it("does not apply an invitation to a later address of an existing person", async () => {
+  it("applies a waiting invitation to the person who moves to its address", async () => {
     service = await startTestService(robinAdministers);
     const first = await me(alice);
 
     await invite(robin, { email: "alice.new@example.com", role: "Auditor" });
 
-    // The person matches on issuer and subject, so the new address acquires
-    // no new binding; the invitation stays waiting for its own first sign-in.
+    // The person still matches on issuer and subject; the invitation was for
+    // whoever verifiably holds the address, as a binding made after the move
+    // would have been.
     const changed = await me(alice, "alice.new@example.com");
     expect(changed.person.id).toBe(first.person.id);
-    expect(changed.person.roles).toEqual([]);
+    expect(changed.person.roles).toEqual(["Auditor"]);
+  });
 
-    const events = await service.request(
-      "/api/v1/audit-events?action=role_binding.resolved",
-      { as: robin },
-    );
-    expect(
-      ((await events.json()) as { events: unknown[] }).events,
-    ).toHaveLength(0);
+  it("keeps a person's bindings when their address changes", async () => {
+    service = await startTestService(robinAdministers);
+    await invite(robin, { email: "alice@example.com", role: "Auditor" });
+    expect((await me(alice)).person.roles).toEqual(["Auditor"]);
+
+    const moved = await me(alice, "alice.moved@example.com");
+    expect(moved.person.roles).toEqual(["Auditor"]);
+
+    // Someone new who signs in with the old address inherits nothing.
+    const newcomer = await service.request("/api/v1/me", {
+      as: { subject: "someone-else", email: "alice@example.com" },
+    });
+    expect(await newcomer.json()).toMatchObject({ person: { roles: [] } });
   });
 
   it("does not apply an invitation to an address the provider has not verified", async () => {
@@ -676,5 +684,260 @@ describe("recorded overrides", () => {
     });
 
     expect(denied.status).toBe(403);
+  });
+});
+
+describe("addresses the provider has verified", () => {
+  it("never binds a person whose copy of the address is unverified", async () => {
+    service = await startTestService(robinAdministers);
+    // Carol signs in claiming Bob's address, which her provider has not
+    // verified.
+    const claimant = {
+      ...carol,
+      email: "bob@example.com",
+      emailVerified: false,
+    };
+    await me(claimant);
+
+    const invited = await invite(robin, {
+      email: "bob@example.com",
+      role: "Auditor",
+    });
+    expect(invited.status).toBe(201);
+    expect(
+      ((await invited.json()) as { binding: Binding }).binding,
+    ).toMatchObject({ pending: true, personId: null });
+    expect((await me(claimant)).person.roles).toEqual([]);
+
+    // The person who verifiably holds the address receives it.
+    expect((await me(bob)).person.roles).toEqual(["Auditor"]);
+  });
+
+  it("grants a bootstrap Administrator address only once it is verified", async () => {
+    service = await startTestService(robinAdministers);
+
+    const unverified = { ...robin, emailVerified: false };
+    expect((await me(unverified)).person.roles).toEqual([]);
+    expect((await createGroup(unverified, { name: "Research" })).status).toBe(
+      403,
+    );
+
+    expect((await me(robin)).person.roles).toEqual(["Administrator"]);
+  });
+});
+
+describe("binding requests the service refuses", () => {
+  it("refuses a binding to a group that does not exist", async () => {
+    service = await startTestService(robinAdministers);
+
+    const response = await invite(robin, {
+      email: "bob@example.com",
+      role: "Member",
+      scopeType: "group",
+      scopeId: "no-such-group",
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("refuses an override reason where nothing is overridden", async () => {
+    service = await startTestService(robinAdministers);
+
+    const response = await invite(robin, {
+      email: "bob@example.com",
+      role: "Auditor",
+      overrideReason: "Just because",
+    });
+
+    expect(response.status).toBe(400);
+    const events = await service.request(
+      "/api/v1/audit-events?targetType=role_binding",
+      { as: robin },
+    );
+    expect(
+      ((await events.json()) as { events: unknown[] }).events,
+    ).toHaveLength(0);
+  });
+});
+
+async function createdGroup(body: {
+  name: string;
+  parentId?: string | null;
+}): Promise<Group> {
+  const response = await createGroup(robin, body);
+  expect(response.status).toBe(201);
+  return ((await response.json()) as { group: Group }).group;
+}
+
+async function bound(
+  person: TestPerson,
+  body: Parameters<typeof invite>[1],
+): Promise<Binding> {
+  const response = await invite(person, body);
+  expect(response.status).toBe(201);
+  return ((await response.json()) as { binding: Binding }).binding;
+}
+
+function remove(
+  person: TestPerson,
+  binding: Pick<Binding, "id" | "revision">,
+): Promise<Response> {
+  return write("DELETE", `/api/v1/bindings/${binding.id}`, person, {
+    revision: binding.revision,
+  });
+}
+
+describe("removing role bindings", () => {
+  it("lets a Group lead remove bindings in and below their group, and records it", async () => {
+    service = await startTestService(robinAdministers);
+    const research = await createdGroup({ name: "Research" });
+    const assays = await createdGroup({
+      name: "Assays",
+      parentId: research.id,
+    });
+    await bound(robin, {
+      email: "alice@example.com",
+      role: "Group lead",
+      scopeType: "group",
+      scopeId: research.id,
+    });
+    await me(alice);
+    await me(bob);
+    const member = await bound(alice, {
+      email: "bob@example.com",
+      role: "Member",
+      scopeType: "group",
+      scopeId: assays.id,
+    });
+
+    const removed = await remove(alice, member);
+
+    expect(removed.status).toBe(200);
+    expect((await me(bob)).person.groups).toEqual([]);
+    const events = await service.request(
+      `/api/v1/audit-events?action=role_binding.removed&targetId=${member.id}`,
+      { as: robin },
+    );
+    expect(
+      ((await events.json()) as { events: unknown[] }).events,
+    ).toMatchObject([
+      {
+        action: "role_binding.removed",
+        actorEmail: "alice@example.com",
+        targetType: "role_binding",
+        targetId: member.id,
+        // The binding is gone, but the entry still says what it was.
+        targetLabel: "Member · Assays · bob@example.com",
+        channel: "web",
+      },
+    ]);
+  });
+
+  it("refuses removal outside the Group lead's groups and to Members", async () => {
+    service = await startTestService(robinAdministers);
+    const research = await createdGroup({ name: "Research" });
+    const assays = await createdGroup({
+      name: "Assays",
+      parentId: research.id,
+    });
+    await bound(robin, {
+      email: "alice@example.com",
+      role: "Group lead",
+      scopeType: "group",
+      scopeId: assays.id,
+    });
+    await me(alice);
+    const above = await bound(robin, {
+      email: "bob@example.com",
+      role: "Member",
+      scopeType: "group",
+      scopeId: research.id,
+    });
+    const organization = await bound(robin, {
+      email: "carol@example.com",
+      role: "Auditor",
+    });
+    const beside = await bound(alice, {
+      email: "carol@example.com",
+      role: "Member",
+      scopeType: "group",
+      scopeId: assays.id,
+    });
+    await me(bob);
+
+    // A lead of the child group manages nothing above it.
+    expect((await remove(alice, above)).status).toBe(403);
+    expect((await remove(alice, organization)).status).toBe(403);
+    // A Member of the parent manages nothing at all.
+    expect((await remove(bob, beside)).status).toBe(403);
+  });
+
+  it("refuses a stale revision and an unknown binding", async () => {
+    service = await startTestService(robinAdministers);
+    const binding = await bound(robin, {
+      email: "bob@example.com",
+      role: "Auditor",
+    });
+    // Bob's first sign-in resolves the invitation, which moves its revision.
+    await me(bob);
+
+    const stale = await remove(robin, binding);
+    expect(stale.status).toBe(409);
+    expect(
+      ((await stale.json()) as { binding: Binding }).binding,
+    ).toMatchObject({ id: binding.id, revision: binding.revision + 1 });
+
+    const current = await remove(robin, {
+      id: binding.id,
+      revision: binding.revision + 1,
+    });
+    expect(current.status).toBe(200);
+    expect((await remove(robin, binding)).status).toBe(404);
+  });
+});
+
+describe("an Auditor", () => {
+  it("reads everything and changes nothing", async () => {
+    service = await startTestService(robinAdministers);
+    const research = await createdGroup({ name: "Research" });
+    await bound(robin, { email: "alice@example.com", role: "Auditor" });
+    const binding = await bound(robin, {
+      email: "bob@example.com",
+      role: "Member",
+      scopeType: "group",
+      scopeId: research.id,
+    });
+    expect((await me(alice)).person.roles).toEqual(["Auditor"]);
+
+    for (const path of [
+      "/api/v1/groups",
+      "/api/v1/members",
+      "/api/v1/invitations",
+      "/api/v1/audit-events",
+    ]) {
+      const read = await service.request(path, { as: alice });
+      expect(read.status, path).toBe(200);
+    }
+
+    expect((await createGroup(alice, { name: "Audit" })).status).toBe(403);
+    expect(
+      (
+        await write("PATCH", `/api/v1/groups/${research.id}`, alice, {
+          revision: research.revision,
+          name: "Renamed",
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await invite(alice, {
+          email: "carol@example.com",
+          role: "Member",
+          scopeType: "group",
+          scopeId: research.id,
+        })
+      ).status,
+    ).toBe(403);
+    expect((await remove(alice, binding)).status).toBe(403);
   });
 });

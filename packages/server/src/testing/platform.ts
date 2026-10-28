@@ -7,7 +7,10 @@ export interface StubPlatformUser {
   status?: string;
   /** App names the platform has granted this person. */
   appGrants?: readonly string[];
-  /** Whether the platform has verified this user's address; true by default. */
+  /**
+   * The platform's `email_verified` answer. Left unset, the answer omits the
+   * field, as a platform that does not report verification would.
+   */
   emailVerified?: boolean;
   /** Whether the platform calls this user an administrator. */
   isAdmin?: boolean;
@@ -71,7 +74,9 @@ function userBody(user: StubPlatformUser): unknown {
     email: user.email,
     display_name: user.displayName ?? user.email,
     status: user.status ?? "active",
-    email_verified: user.emailVerified ?? true,
+    ...(user.emailVerified === undefined
+      ? {}
+      : { email_verified: user.emailVerified }),
     is_admin: user.isAdmin ?? false,
     app_access: (user.appGrants ?? []).map((appName) => ({
       app_name: appName,

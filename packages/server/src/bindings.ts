@@ -1,4 +1,4 @@
-import { recordAudit, type AuditChannel, type WriteContext } from "./audit.js";
+import { recordAudit, type WriteContext } from "./audit.js";
 import {
   GROUP_ROLES,
   isGroupRole,
@@ -7,6 +7,7 @@ import {
   type GroupRole,
   type OrganizationRole,
   type ScopeType,
+  type Visibility,
 } from "./authorization.js";
 import type { Database, Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
@@ -64,8 +65,6 @@ function toBinding(row: BindingRow): RoleBinding {
     updatedAt: toIsoString(row.updated_at),
   };
 }
-
-export type BindingContext = WriteContext;
 
 export interface BindingInput {
   scopeType: ScopeType;
@@ -168,15 +167,42 @@ export function parseBindingInput(body: unknown): BindingParseResult {
   };
 }
 
-async function personByEmail(
+/**
+ * The person whose verified address this is. An unverified address names
+ * nobody. If the provider has reassigned an address, more than one record may
+ * still carry it; the one that took it last is its holder.
+ */
+async function personByVerifiedEmail(
   database: Queryable,
   email: string,
 ): Promise<string | null> {
   const rows = await database.query<{ id: string }>(
-    `select id from people where lower(email) = lower($1) order by created_at limit 1`,
+    `select id
+       from people
+      where lower(email) = lower($1) and email_verified
+      order by updated_at desc, id desc
+      limit 1`,
     [email],
   );
   return rows.rows[0]?.id ?? null;
+}
+
+/**
+ * How the Activity log names a binding: its role, its scope, and its address,
+ * so the entry still reads once the binding is removed.
+ */
+async function bindingLabel(
+  database: Queryable,
+  row: Pick<BindingRow, "role" | "scope_id" | "email">,
+): Promise<string> {
+  if (row.scope_id === null) {
+    return `${row.role} · Organization · ${row.email}`;
+  }
+  const group = await database.query<{ name: string }>(
+    `select name from groups where id = $1`,
+    [row.scope_id],
+  );
+  return `${row.role} · ${group.rows[0]?.name ?? row.scope_id} · ${row.email}`;
 }
 
 async function readBinding(
@@ -191,24 +217,35 @@ async function readBinding(
 }
 
 export type CreateBindingResult =
-  { kind: "created"; binding: RoleBinding } | { kind: "conflict" };
+  | { kind: "created"; binding: RoleBinding }
+  | { kind: "conflict" }
+  | { kind: "missing-group" };
 
 /**
- * Records a role binding. A binding for an address Badger has never seen is
- * an invitation: it waits, person-less, until that address signs in. A binding
- * for a person already known applies at once, and a waiting invitation for the
- * same address is resolved rather than duplicated.
+ * Records a role binding. A binding for an address no signed-in person has
+ * verified is an invitation: it waits, person-less, until a sign-in presents
+ * that address as verified. A binding for a person already known by that
+ * verified address applies at once, and a waiting invitation for the same
+ * address is resolved rather than duplicated.
  */
 export async function createBinding(
   database: Database,
   dependencies: ServiceDependencies,
-  context: BindingContext,
+  context: WriteContext,
   input: BindingInput,
   reason: string,
 ): Promise<CreateBindingResult> {
   return database.transaction(async (tx) => {
+    if (input.scopeId !== null) {
+      const group = await tx.query(`select 1 from groups where id = $1`, [
+        input.scopeId,
+      ]);
+      if (group.rows.length === 0) {
+        return { kind: "missing-group" };
+      }
+    }
     const now = dependencies.clock.now();
-    const personId = await personByEmail(tx, input.email);
+    const personId = await personByVerifiedEmail(tx, input.email);
 
     if (personId !== null) {
       const resolved = await tx.query<BindingRow>(
@@ -238,7 +275,11 @@ export async function createBinding(
           },
           channel: context.channel,
           action: "role_binding.resolved",
-          target: { type: "role_binding", id: row.id },
+          target: {
+            type: "role_binding",
+            id: row.id,
+            label: await bindingLabel(tx, row),
+          },
           before: { revision: row.revision - 1, hash: null },
           after: { revision: row.revision, hash: null },
           reason,
@@ -280,7 +321,11 @@ export async function createBinding(
       channel: context.channel,
       action:
         personId === null ? "role_binding.invited" : "role_binding.granted",
-      target: { type: "role_binding", id: row.id },
+      target: {
+        type: "role_binding",
+        id: row.id,
+        label: await bindingLabel(tx, row),
+      },
       before: null,
       after: { revision: 1, hash: null },
       reason,
@@ -292,17 +337,18 @@ export async function createBinding(
 }
 
 /**
- * Applies every waiting invitation for the person's verified address. A
- * binding with the role already held for that person is superseded instead of
- * duplicated. Each resolution is audited in the sign-in's transaction.
+ * Applies every waiting invitation for the person's address, if the provider
+ * verified it. A binding with the role already held for that person is
+ * superseded instead of duplicated. Each resolution is audited in the
+ * sign-in's transaction.
  */
 export async function resolvePendingBindings(
   database: Queryable,
   dependencies: ServiceDependencies,
   person: Person,
-  context: Omit<WriteContext, "personId"> & { emailVerified: boolean },
+  context: Omit<WriteContext, "personId">,
 ): Promise<void> {
-  if (!context.emailVerified) {
+  if (!person.emailVerified) {
     return;
   }
   const pending = await database.query<BindingRow>(
@@ -331,7 +377,11 @@ export async function resolvePendingBindings(
         actor: { personId: person.id, credential: context.credential },
         channel: context.channel,
         action: "role_binding.superseded",
-        target: { type: "role_binding", id: row.id },
+        target: {
+          type: "role_binding",
+          id: row.id,
+          label: await bindingLabel(database, row),
+        },
         before: { revision: row.revision, hash: null },
         after: null,
         reason: "A binding for the same role already exists",
@@ -360,20 +410,17 @@ export async function resolvePendingBindings(
       },
       channel: context.channel,
       action: "role_binding.resolved",
-      target: { type: "role_binding", id: resolved.id },
+      target: {
+        type: "role_binding",
+        id: resolved.id,
+        label: await bindingLabel(database, resolved),
+      },
       before: { revision: resolved.revision - 1, hash: null },
       after: { revision: resolved.revision, hash: null },
-      reason: "Email binding applied at first sign-in",
+      reason: "Email binding applied at sign-in with a verified address",
       requestId: context.requestId,
     });
   }
-}
-
-export interface BindingVisibility {
-  /** Null means every group; otherwise only these groups are visible. */
-  groupIds: Set<string> | null;
-  /** Whether organization bindings are in view. */
-  organization: boolean;
 }
 
 interface InvitationRow extends BindingRow {
@@ -387,13 +434,12 @@ export interface Invitation extends RoleBinding {
 }
 
 /**
- * Lists every binding still waiting for its person to sign in. An
- * Administrator or Auditor sees all of them; a Group lead sees the ones inside
- * the groups they lead.
+ * Lists every binding still waiting for its person to sign in, within what
+ * the reader may see (managementVisibility).
  */
 export async function listInvitations(
   database: Queryable,
-  visibility: BindingVisibility,
+  visibility: Visibility,
 ): Promise<Invitation[]> {
   const rows = await database.query<InvitationRow>(
     `select ${QUALIFIED_BINDING_COLUMNS},
@@ -409,7 +455,10 @@ export async function listInvitations(
           )
         )
       order by b.created_at, b.id`,
-    [visibility.organization, [...(visibility.groupIds ?? [])]],
+    [
+      visibility.everything,
+      visibility.everything ? [] : [...visibility.groupIds],
+    ],
   );
   return rows.rows.map((row) => ({
     ...toBinding(row),
@@ -430,7 +479,7 @@ export type RemoveBindingResult =
 export async function removeBinding(
   database: Database,
   dependencies: ServiceDependencies,
-  context: BindingContext,
+  context: WriteContext,
   id: string,
   revision: number,
   reason: string,
@@ -458,7 +507,11 @@ export async function removeBinding(
       },
       channel: context.channel,
       action: "role_binding.removed",
-      target: { type: "role_binding", id },
+      target: {
+        type: "role_binding",
+        id,
+        label: await bindingLabel(tx, current),
+      },
       before: { revision: current.revision, hash: null },
       after: null,
       reason,

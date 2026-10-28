@@ -4,14 +4,12 @@ import type {
   GroupRole,
   OrganizationRole,
   ScopeType,
+  Visibility,
 } from "./authorization.js";
-import {
-  configuredAdministratorFor,
-  visibleGroupIds,
-} from "./authorization.js";
+import { configuredAdministratorFor, visibleGroups } from "./authorization.js";
 import type { ServiceConfig } from "./config.js";
 import type { Database, Queryable } from "./database/database.js";
-import { isInside } from "./group-tree.js";
+import { isInside, lockGroupTree } from "./group-tree.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import type { Person } from "./people.js";
 import { toIsoString } from "./util.js";
@@ -46,8 +44,6 @@ function toGroup(row: GroupRow): Group {
     updatedAt: toIsoString(row.updated_at),
   };
 }
-
-export type GroupWriteContext = WriteContext;
 
 export interface CreateGroupInput {
   name: string;
@@ -169,19 +165,18 @@ export async function listGroups(
   access: Access,
   person: Person,
 ): Promise<Group[]> {
-  const visible = await visibleGroupIds(database, access, person);
-  const rows =
-    visible === null
-      ? await database.query<GroupRow>(
-          `select ${GROUP_COLUMNS} from groups order by name, id`,
-        )
-      : await database.query<GroupRow>(
-          `select ${GROUP_COLUMNS}
-             from groups
-            where id = any($1::text[])
-            order by name, id`,
-          [[...visible]],
-        );
+  const visible = await visibleGroups(database, access, person);
+  const rows = visible.everything
+    ? await database.query<GroupRow>(
+        `select ${GROUP_COLUMNS} from groups order by name, id`,
+      )
+    : await database.query<GroupRow>(
+        `select ${GROUP_COLUMNS}
+           from groups
+          where id = any($1::text[])
+          order by name, id`,
+        [[...visible.groupIds]],
+      );
   return rows.rows.map(toGroup);
 }
 
@@ -194,7 +189,7 @@ export type CreateGroupResult =
 export async function createGroup(
   database: Database,
   dependencies: ServiceDependencies,
-  context: GroupWriteContext,
+  context: WriteContext,
   input: CreateGroupInput,
 ): Promise<CreateGroupResult> {
   return database.transaction(async (tx) => {
@@ -224,7 +219,7 @@ export async function createGroup(
       },
       channel: context.channel,
       action: "group.created",
-      target: { type: "group", id: row.id },
+      target: { type: "group", id: row.id, label: row.name },
       before: null,
       after: { revision: row.revision, hash: null },
       reason: "Group created",
@@ -245,11 +240,14 @@ export type UpdateGroupResult =
 export async function updateGroup(
   database: Database,
   dependencies: ServiceDependencies,
-  context: GroupWriteContext,
+  context: WriteContext,
   id: string,
   input: UpdateGroupInput,
 ): Promise<UpdateGroupResult> {
   return database.transaction(async (tx) => {
+    if (input.parentId !== undefined) {
+      await lockGroupTree(tx);
+    }
     const current = await readGroupRow(tx, id);
     if (current === null) {
       return { kind: "missing" };
@@ -303,7 +301,14 @@ export async function updateGroup(
       },
       channel: context.channel,
       action: "group.updated",
-      target: { type: "group", id },
+      target: {
+        type: "group",
+        id,
+        label:
+          row.name === current.name
+            ? row.name
+            : `${current.name} → ${row.name}`,
+      },
       before: { revision: current.revision, hash: null },
       after: { revision: row.revision, hash: null },
       reason: "Group changed",
@@ -317,6 +322,7 @@ export interface MemberBinding {
   id: string;
   revision: number;
   scopeType: ScopeType;
+  scopeId: string | null;
   scopeName: string | null;
   role: GroupRole | OrganizationRole;
 }
@@ -334,6 +340,7 @@ interface MemberRow {
   issuer: string;
   subject: string;
   email: string;
+  email_verified: boolean;
   display_name: string;
 }
 
@@ -347,24 +354,20 @@ interface MemberBindingRow {
   group_name: string | null;
 }
 
-export interface MemberVisibility {
-  organization: boolean;
-  groupIds: Set<string> | null;
-}
-
 /**
- * Lists people with the roles Badger records for them. An organization-wide
- * reader sees everyone; a Group lead sees the people bound inside the groups
- * they manage.
+ * Lists people with the roles Badger records for them, within what the reader
+ * may see (managementVisibility): everyone for an organization-wide reader,
+ * otherwise the people bound in the visible groups.
  */
 export async function listMembers(
   database: Queryable,
   config: ServiceConfig,
-  visibility: MemberVisibility,
+  visibility: Visibility,
 ): Promise<MemberSummary[]> {
-  const everyone = visibility.organization && visibility.groupIds === null;
+  const groupIds = visibility.everything ? [] : [...visibility.groupIds];
   const rows = await database.query<MemberRow>(
-    `select p.id, p.issuer, p.subject, p.email, p.display_name
+    `select p.id, p.issuer, p.subject, p.email, p.email_verified,
+            p.display_name
        from people p
       where $1::boolean
          or exists (
@@ -375,7 +378,7 @@ export async function listMembers(
               and b.scope_id = any($2::text[])
          )
       order by p.display_name, p.id`,
-    [everyone, [...(visibility.groupIds ?? [])]],
+    [visibility.everything, groupIds],
   );
   if (rows.rows.length === 0) {
     return [];
@@ -392,14 +395,19 @@ export async function listMembers(
           $2::boolean
           or (b.scope_type = 'group' and b.scope_id = any($3::text[]))
         )`,
-    [ids, visibility.organization, [...(visibility.groupIds ?? [])]],
+    [ids, visibility.everything, groupIds],
   );
 
   return rows.rows.map((row) => {
     const organizationRoles = new Set<OrganizationRole>();
     if (
       configuredAdministratorFor(
-        { issuer: row.issuer, subject: row.subject, email: row.email },
+        {
+          issuer: row.issuer,
+          subject: row.subject,
+          email: row.email,
+          emailVerified: row.email_verified,
+        },
         config,
       )
     ) {
@@ -424,6 +432,7 @@ export async function listMembers(
         id: binding.id,
         revision: binding.revision,
         scopeType: binding.scope_type,
+        scopeId: binding.group_id,
         scopeName: binding.group_name,
         role: binding.role,
       });

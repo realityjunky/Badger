@@ -258,6 +258,57 @@ test("the Admin page lists members and creates a group", async ({ page }) => {
   await expect(page.getByRole("cell", { name })).toBeVisible();
 });
 
+test("an Administrator overrides a refused self-grant with a recorded reason", async ({
+  page,
+}) => {
+  // Each project runs against the same service, so start from no binding.
+  await page.evaluate(async () => {
+    const members = (await (await fetch("/api/v1/members")).json()) as {
+      members: {
+        person: { email: string };
+        bindings: { id: string; revision: number; scopeType: string }[];
+      }[];
+    };
+    for (const member of members.members) {
+      if (member.person.email !== "alex@example.com") {
+        continue;
+      }
+      for (const binding of member.bindings) {
+        if (binding.scopeType !== "organization") {
+          continue;
+        }
+        const response = await fetch(`/api/v1/bindings/${binding.id}`, {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ revision: binding.revision }),
+        });
+        if (!response.ok) {
+          throw new Error(`Removing a binding answered ${response.status}`);
+        }
+      }
+    }
+  });
+
+  await page.goto("/admin/invitations");
+  await page.getByRole("textbox", { name: "Email" }).fill("alex@example.com");
+  await page.getByRole("button", { name: "Invite by email" }).click();
+  await expect(page.getByTestId("admin-override")).toBeVisible();
+
+  const reason = `Recorded the local Administrator ${Date.now()}`;
+  await page
+    .getByRole("textbox", { name: "Reason for the override" })
+    .fill(reason);
+  await page.getByRole("button", { name: "Override with this reason" }).click();
+  await expect(page.getByTestId("admin-override")).toBeHidden();
+
+  await page.goto("/activity");
+  await page
+    .getByRole("textbox", { name: "Action" })
+    .fill("role_binding.granted");
+  await page.getByRole("button", { name: "Apply filters" }).click();
+  await expect(page.getByText(`Override: ${reason}`)).toBeVisible();
+});
+
 test("the Activity page filters recorded actions", async ({ page }) => {
   await page.evaluate(async () => {
     const response = await fetch("/api/v1/groups", {

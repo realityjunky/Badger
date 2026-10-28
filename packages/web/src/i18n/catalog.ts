@@ -102,6 +102,11 @@ const en = {
   "admin.invite.submit": "Invite by email",
   "admin.remove": "Remove",
   "admin.removeConfirm": "Remove this invitation?",
+  "admin.removeBindingConfirm": "Remove this role binding?",
+  "admin.invite.overrideNeeded":
+    "Badger does not grant an organization role to the person granting it. An Administrator may override this by recording a reason, which the Activity log keeps.",
+  "admin.invite.overrideReason": "Reason for the override",
+  "admin.invite.overrideSubmit": "Override with this reason",
   "admin.denied":
     "Only Administrators, Auditors, and Group leads can open this page.",
   "admin.failed": "The admin records could not be loaded.",
@@ -297,6 +302,11 @@ const zh: Record<MessageId, string> = {
   "admin.invite.submit": "按邮箱邀请",
   "admin.remove": "移除",
   "admin.removeConfirm": "移除此邀请？",
+  "admin.removeBindingConfirm": "移除此角色绑定？",
+  "admin.invite.overrideNeeded":
+    "Badger 不会把组织角色授予发起授予的本人。管理员可以填写理由越权授予，理由会记入活动日志。",
+  "admin.invite.overrideReason": "越权理由",
+  "admin.invite.overrideSubmit": "附理由越权授予",
   "admin.denied": "只有管理员、审计员和组长可以打开此页面。",
   "admin.failed": "无法加载管理记录。",
   "admin.writeFailed": "更改未能保存。",

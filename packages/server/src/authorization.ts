@@ -1,6 +1,6 @@
 import type { ServiceConfig } from "./config.js";
 import type { Queryable } from "./database/database.js";
-import { ancestorIds } from "./group-tree.js";
+import { withAncestors, withDescendants } from "./group-tree.js";
 import { LOCAL_IDENTITY_ISSUER } from "./identity/local.js";
 import type { Principal } from "./identity/identity.js";
 import type { Person } from "./people.js";
@@ -45,12 +45,20 @@ export function isAdministrator(access: Access): boolean {
   return access.organization.includes("Administrator");
 }
 
-export function mayReadAudit(access: Access): boolean {
+/** Administrators and Auditors read everything, the Activity log included. */
+export function readsEverything(access: Access): boolean {
   return (
     access.organization.includes("Administrator") ||
     access.organization.includes("Auditor")
   );
 }
+
+/**
+ * The records a person may read: everything, or only those of the listed
+ * groups. The Organization's own bindings are in view only with everything.
+ */
+export type Visibility =
+  { everything: true } | { everything: false; groupIds: ReadonlySet<string> };
 
 interface OrganizationBindingRow {
   role: OrganizationRole;
@@ -64,10 +72,11 @@ interface GroupBindingRow {
 
 /**
  * Whether configuration alone makes this person an Administrator: local
- * mode's implicit one, or an address the deployment lists.
+ * mode's implicit one, or an address the deployment lists. A listed address
+ * counts only when the provider verified it, as for any binding by email.
  */
 export function configuredAdministratorFor(
-  person: Pick<Person, "email" | "issuer" | "subject">,
+  person: Pick<Person, "email" | "emailVerified" | "issuer" | "subject">,
   config: ServiceConfig,
 ): boolean {
   if (
@@ -77,7 +86,10 @@ export function configuredAdministratorFor(
   ) {
     return true;
   }
-  return config.bootstrapAdministrators.includes(person.email.toLowerCase());
+  return (
+    person.emailVerified &&
+    config.bootstrapAdministrators.includes(person.email.toLowerCase())
+  );
 }
 
 /**
@@ -148,8 +160,8 @@ async function holdsGroupRole(
   groupId: string,
   roles: readonly GroupRole[],
 ): Promise<boolean> {
-  const ids = await ancestorIds(database, groupId);
-  if (ids.length === 0) {
+  const ids = await withAncestors(database, [groupId]);
+  if (ids.size === 0) {
     return false;
   }
   const rows = await database.query(
@@ -160,7 +172,7 @@ async function holdsGroupRole(
         and scope_id = any($2::text[])
         and role = any($3::text[])
       limit 1`,
-    [person.id, ids, roles],
+    [person.id, [...ids], roles],
   );
   return rows.rows.length > 0;
 }
@@ -184,81 +196,55 @@ async function groupIdsFromBindings(
   personId: string,
   role: GroupRole | null,
 ): Promise<Set<string>> {
-  const rows = await database.query<{ id: string }>(
-    `with recursive reached as (
-       select g.id
-         from groups g
-        where exists (
-          select 1 from role_bindings b
-           where b.scope_type = 'group'
-             and b.person_id = $1
-             and b.scope_id = g.id
-             and ($2::text is null or b.role = $2)
-        )
-       union
-       select g.id
-         from groups g
-         join reached r on g.parent_id = r.id
-     )
-     select id from reached`,
+  const rows = await database.query<{ scope_id: string }>(
+    `select scope_id
+       from role_bindings
+      where scope_type = 'group'
+        and person_id = $1
+        and ($2::text is null or role = $2)`,
     [personId, role],
   );
-  return new Set(rows.rows.map((row) => row.id));
-}
-
-/**
- * The groups themselves plus every ancestor, so a binding recorded above a
- * managed group is visible in its member and invitation lists.
- */
-export async function withAncestorGroups(
-  database: Queryable,
-  groupIds: Set<string>,
-): Promise<Set<string>> {
-  if (groupIds.size === 0) {
-    return new Set();
-  }
-  const rows = await database.query<{ id: string }>(
-    `with recursive chain as (
-       select id, parent_id from groups where id = any($1::text[])
-       union
-       select g.id, g.parent_id
-         from groups g
-         join chain c on g.id = c.parent_id
-     )
-     select id from chain`,
-    [[...groupIds]],
+  return withDescendants(
+    database,
+    rows.rows.map((row) => row.scope_id),
   );
-  return new Set(rows.rows.map((row) => row.id));
 }
 
 /**
  * The groups a person may see: all of them for an Administrator or Auditor;
- * otherwise the groups they are bound to and everything inside them. Null
- * means every group.
+ * otherwise the groups they are bound to and everything inside them.
  */
-export async function visibleGroupIds(
+export async function visibleGroups(
   database: Queryable,
   access: Access,
   person: Person,
-): Promise<Set<string> | null> {
-  if (mayReadAudit(access)) {
-    return null;
+): Promise<Visibility> {
+  if (readsEverything(access)) {
+    return { everything: true };
   }
-  return groupIdsFromBindings(database, person.id, null);
+  return {
+    everything: false,
+    groupIds: await groupIdsFromBindings(database, person.id, null),
+  };
 }
 
 /**
- * The groups whose members and bindings a person may manage: all of them for
- * an Administrator; otherwise the groups they lead and everything inside them.
- * Null means every group.
+ * What a person may read of members and pending invitations: everything for
+ * an Administrator or Auditor; for a Group lead, the groups they lead, those
+ * inside them, and those above them, since a binding above a led group
+ * reaches into it. Null for a person who leads no group.
  */
-export async function managedGroupIds(
+export async function managementVisibility(
   database: Queryable,
   access: Access,
   person: Person,
-): Promise<Set<string> | null> {
-  if (isAdministrator(access)) {
+): Promise<Visibility | null> {
+  if (readsEverything(access)) {
+    return { everything: true };
+  }
+  const led = await groupIdsFromBindings(database, person.id, "Group lead");
+  if (led.size === 0) {
     return null;
   }
-  return groupIdsFromBindings(database, person.id, "Group lead");
+  return { everything: false, groupIds: await withAncestors(database, led) };
 }

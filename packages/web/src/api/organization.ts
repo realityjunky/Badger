@@ -13,6 +13,7 @@ export interface MemberBinding {
   revision: number;
   role: string;
   scopeType: "organization" | "group";
+  scopeId: string | null;
   scopeName: string | null;
 }
 
@@ -51,6 +52,8 @@ export interface AuditEvent {
   action: string;
   targetType: string;
   targetId: string | null;
+  /** What the target was when the action happened. */
+  targetLabel: string | null;
   reason: string | null;
 }
 
@@ -86,8 +89,16 @@ function isoTime(value: string): string | null {
 export type LoadOutcome<T> =
   { kind: "ok"; value: T } | { kind: "denied" } | { kind: "failed" };
 
+/**
+ * How a write ended. "rejected" is a rule the server enforces even for a
+ * capable person, such as granting oneself an organization role, which an
+ * Administrator may override with a recorded reason.
+ */
 export type WriteOutcome =
-  { kind: "ok" } | { kind: "denied" } | { kind: "failed" };
+  | { kind: "ok" }
+  | { kind: "denied" }
+  | { kind: "rejected" }
+  | { kind: "failed" };
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
@@ -148,6 +159,8 @@ function parseMember(value: unknown): Member | null {
               entry["scopeType"] === "group"
                 ? ("group" as const)
                 : ("organization" as const),
+            scopeId:
+              typeof entry["scopeId"] === "string" ? entry["scopeId"] : null,
             scopeName:
               typeof entry["scopeName"] === "string"
                 ? entry["scopeName"]
@@ -277,7 +290,20 @@ async function send(
   if (response.ok) {
     return { kind: "ok" };
   }
-  return { kind: response.status === 403 ? "denied" : "failed" };
+  if (response.status === 403) {
+    return { kind: "denied" };
+  }
+  if (response.status === 409) {
+    const answer = await readJson(response);
+    if (
+      isRecord(answer) &&
+      isRecord(answer["error"]) &&
+      answer["error"]["code"] === "rejected"
+    ) {
+      return { kind: "rejected" };
+    }
+  }
+  return { kind: "failed" };
 }
 
 export async function createGroup(
@@ -295,9 +321,58 @@ export async function inviteByEmail(
     role: string;
     scopeType: "organization" | "group";
     scopeId: string | null;
+    /** Recorded with the binding when it overrides a refused self-grant. */
+    overrideReason?: string;
   },
 ): Promise<WriteOutcome> {
   return send("POST", basePath, "/bindings", input);
+}
+
+/** The groups a person leads and every group inside them. */
+export function ledGroupIds(
+  personGroups: readonly { id: string; role: string }[],
+  groups: readonly Group[],
+): Set<string> {
+  const led = new Set(
+    personGroups
+      .filter((grant) => grant.role === "Group lead")
+      .map((grant) => grant.id),
+  );
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const group of groups) {
+      if (
+        group.parentId !== null &&
+        led.has(group.parentId) &&
+        !led.has(group.id)
+      ) {
+        led.add(group.id);
+        grew = true;
+      }
+    }
+  }
+  return led;
+}
+
+/**
+ * Whether to offer a change to a binding or invitation: an Administrator may
+ * change any; a Group lead only those on the groups they lead or inside them.
+ * The server still decides; this only keeps refused controls out of the way.
+ */
+export function mayChangeBinding(
+  binding: { scopeType: "organization" | "group"; scopeId: string | null },
+  administrator: boolean,
+  led: ReadonlySet<string>,
+): boolean {
+  if (administrator) {
+    return true;
+  }
+  return (
+    binding.scopeType === "group" &&
+    binding.scopeId !== null &&
+    led.has(binding.scopeId)
+  );
 }
 
 export async function removeBinding(
@@ -389,6 +464,8 @@ export async function loadActivity(
     targetType:
       typeof event["targetType"] === "string" ? event["targetType"] : "",
     targetId: typeof event["targetId"] === "string" ? event["targetId"] : null,
+    targetLabel:
+      typeof event["targetLabel"] === "string" ? event["targetLabel"] : null,
     reason: typeof event["reason"] === "string" ? event["reason"] : null,
   }));
   return {

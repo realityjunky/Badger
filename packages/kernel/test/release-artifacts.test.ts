@@ -330,6 +330,13 @@ describe("Badger release artifacts", () => {
         "Collaborative service",
         "Organization",
         "Group",
+        "Role binding",
+        "Invitation",
+        "Administrator",
+        "Auditor",
+        "Group lead",
+        "Member",
+        "Activity log",
         "Field expert",
         "Engineer",
         "Reviewer",
@@ -406,5 +413,19 @@ describe("Badger release artifacts", () => {
     );
     expect(planned).not.toContain("<code>web</code>, <code>mcp</code>");
     expect(planned).not.toContain("the AI platform's session, OpenID Connect");
+  });
+
+  it("describes the delivered groups, roles, and bindings outside the plans", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const delivered = manual.slice(0, manual.indexOf('id="service"'));
+    const planned = manual.slice(manual.indexOf('id="service"'));
+
+    expect(delivered).toContain("bindings.ts");
+    expect(delivered).toContain("BADGER_PLATFORM_ADMIN_MAPPING");
+    expect(delivered).toContain("presents that address as verified");
+    expect(planned).toContain("(ADRs) 0002–0006, 0009, and 0010");
+    expect(planned).not.toContain("bind people by email; a binding takes");
+    expect(planned).not.toContain("inherited by its nested groups");
+    expect(planned).not.toContain("every write is audited with its actor");
   });
 });

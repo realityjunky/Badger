@@ -17,9 +17,12 @@ interface PlatformUser {
   displayName: string;
   status: string;
   appGrants: readonly string[];
-  /** Whether the platform has verified the user's address. */
-  emailVerified: boolean;
-  /** Whether the platform calls this user an administrator. */
+  /**
+   * Whether the platform says it verified the user's address, or null when
+   * its answer does not say.
+   */
+  emailVerified: boolean | null;
+  /** Whether the platform calls this user an administrator (`is_admin`). */
   administrator: boolean;
 }
 
@@ -83,23 +86,6 @@ function readGrants(value: unknown): string[] {
   return grants;
 }
 
-function readAdministrator(record: {
-  is_admin?: unknown;
-  roles?: unknown;
-}): boolean {
-  if (record.is_admin === true) {
-    return true;
-  }
-  if (!Array.isArray(record.roles)) {
-    return false;
-  }
-  return record.roles.some(
-    (role) =>
-      typeof role === "string" &&
-      ["admin", "administrator", "owner"].includes(role.trim().toLowerCase()),
-  );
-}
-
 function parseUser(body: unknown): PlatformUser | null {
   if (typeof body !== "object" || body === null) {
     return null;
@@ -112,7 +98,6 @@ function parseUser(body: unknown): PlatformUser | null {
     app_access?: unknown;
     email_verified?: unknown;
     is_admin?: unknown;
-    roles?: unknown;
   };
   const id =
     typeof record.id === "string"
@@ -137,8 +122,9 @@ function parseUser(body: unknown): PlatformUser | null {
     displayName,
     status,
     appGrants: readGrants(record.app_access),
-    emailVerified: record.email_verified === true,
-    administrator: readAdministrator(record),
+    emailVerified:
+      typeof record.email_verified === "boolean" ? record.email_verified : null,
+    administrator: record.is_admin === true,
   };
 }
 
@@ -281,7 +267,10 @@ export function createPlatformSessionIdentityAdapter(
             displayName: user.displayName,
             status: "active",
             credential: { kind: "session", id: key },
-            emailVerified: user.emailVerified,
+            // The platform's own answer decides; without one, the address
+            // counts as verified only if the deployment says the platform
+            // verifies every address it returns.
+            emailVerified: user.emailVerified ?? settings.emailsVerified,
             platformAdministrator: user.administrator,
           },
         };

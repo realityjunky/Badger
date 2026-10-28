@@ -350,36 +350,31 @@ describe("the platform session settings", () => {
   });
 });
 
-describe("a platform address the platform has not verified", () => {
-  it("applies no pending invitation at sign-in", async () => {
-    platform = await startStubPlatform({
-      users: {
-        "token-robin": {
-          id: "platform-robin",
-          email: "robin@example.com",
-        },
-        "token-alice": {
-          id: "platform-alice",
-          email: "alice@example.com",
-          emailVerified: false,
-        },
-      },
-      cookieName: "platform_session",
-    });
-    service = await startTestService({
-      mode: "service",
+describe("addresses the platform has verified", () => {
+  const robin: StubPlatformUser = {
+    id: "platform-robin",
+    email: "robin@example.com",
+  };
+
+  async function startWithAddresses(
+    users: Readonly<Record<string, StubPlatformUser>>,
+    environment: Readonly<Record<string, string>> = {},
+  ): Promise<void> {
+    await startWithPlatform({
+      users,
       environment: {
-        BADGER_IDENTITY: "platform-session",
-        BADGER_PLATFORM_URL: platform.url,
-        BADGER_PLATFORM_SESSION_COOKIE: platform.cookieName,
-        BADGER_PLATFORM_CURRENT_USER_PATH: platform.currentUserPath,
-        BADGER_PLATFORM_ISSUER: "https://platform.example",
         BADGER_BOOTSTRAP_ADMINISTRATORS: "robin@example.com",
         BADGER_ALLOWED_ORIGINS: "http://localhost",
+        ...environment,
       },
     });
+  }
 
-    const invited = await service.request("/api/v1/bindings", {
+  async function inviteAliceAsAuditor(): Promise<Response> {
+    if (service === undefined) {
+      throw new Error("The service is not started");
+    }
+    return service.request("/api/v1/bindings", {
       method: "POST",
       headers: {
         cookie: cookieFor("token-robin"),
@@ -392,12 +387,71 @@ describe("a platform address the platform has not verified", () => {
         role: "Auditor",
       }),
     });
-    expect(invited.status).toBe(201);
+  }
 
-    const signedIn = await service.request("/api/v1/me", {
-      headers: { cookie: cookieFor("token-alice") },
+  async function aliceRoles(token = "token-alice"): Promise<string[]> {
+    const response = await service?.request("/api/v1/me", {
+      headers: { cookie: cookieFor(token) },
     });
-    expect(await signedIn.json()).toMatchObject({ person: { roles: [] } });
+    expect(response?.status).toBe(200);
+    return ((await response?.json()) as { person: { roles: string[] } }).person
+      .roles;
+  }
+
+  it("applies no pending invitation to an address the platform calls unverified", async () => {
+    await startWithAddresses({
+      "token-robin": { ...robin, emailVerified: true },
+      "token-alice": { ...alice, emailVerified: false },
+    });
+
+    expect((await inviteAliceAsAuditor()).status).toBe(201);
+    expect(await aliceRoles()).toEqual([]);
+  });
+
+  it("treats an address as unverified when the platform's answer does not say", async () => {
+    await startWithAddresses({ "token-robin": robin, "token-alice": alice });
+
+    // Robin's address is listed as a bootstrap Administrator, but nothing
+    // vouches for it, so Robin may not bind anyone.
+    expect((await inviteAliceAsAuditor()).status).toBe(403);
+  });
+
+  it("trusts every address once the deployment says the platform verifies them", async () => {
+    await startWithAddresses(
+      { "token-robin": robin, "token-alice": alice },
+      { BADGER_PLATFORM_EMAILS_VERIFIED: "true" },
+    );
+
+    expect((await inviteAliceAsAuditor()).status).toBe(201);
+    expect(await aliceRoles()).toEqual(["Auditor"]);
+  });
+
+  it("lets the platform's own answer outweigh that declaration", async () => {
+    await startWithAddresses(
+      {
+        "token-robin": robin,
+        "token-alice": { ...alice, emailVerified: false },
+      },
+      { BADGER_PLATFORM_EMAILS_VERIFIED: "true" },
+    );
+
+    expect((await inviteAliceAsAuditor()).status).toBe(201);
+    expect(await aliceRoles()).toEqual([]);
+  });
+
+  it("applies a waiting invitation once the platform verifies the address", async () => {
+    await startWithAddresses({
+      "token-robin": { ...robin, emailVerified: true },
+      "token-alice": { ...alice, emailVerified: false },
+      // A later session of the same platform user, after verification.
+      "token-alice-verified": { ...alice, emailVerified: true },
+    });
+
+    expect(await aliceRoles()).toEqual([]);
+    expect((await inviteAliceAsAuditor()).status).toBe(201);
+    expect(await aliceRoles()).toEqual([]);
+
+    expect(await aliceRoles("token-alice-verified")).toEqual(["Auditor"]);
   });
 });
 
