@@ -26,10 +26,21 @@ function wrapQueryable(queryable: PgQueryable): Queryable {
   };
 }
 
+export interface PostgresOptions {
+  /** Told when Postgres ends an idle connection, as a restart does. */
+  onConnectionLost?: (error: Error) => void;
+}
+
 export async function openPostgresDatabase(
   connectionString: string,
+  options: PostgresOptions = {},
 ): Promise<Database> {
   const pool = new pg.Pool({ connectionString, max: 10 });
+  // The pool reports a connection the server ended while it sat idle, and
+  // replaces it on the next query. Unheard, that report would end the
+  // process: a database restart would take the service down instead of
+  // degrading /health until the database is back.
+  pool.on("error", (error) => options.onConnectionLost?.(error));
   const queryable = wrapQueryable(pool);
 
   return {

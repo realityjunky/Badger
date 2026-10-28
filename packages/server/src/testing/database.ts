@@ -11,6 +11,11 @@ export interface TestDatabase {
   configuration: DatabaseConfiguration;
   /** Opens another connection pool to the same database; Postgres only. */
   connect(): Promise<Database>;
+  /**
+   * Ends every connection to the database from the server's side, as a
+   * Postgres restart does; Postgres only.
+   */
+  interrupt(): Promise<void>;
   /** Closes every connection and, on Postgres, drops the database. */
   drop(): Promise<void>;
 }
@@ -30,6 +35,9 @@ export async function openTestDatabase(): Promise<TestDatabase> {
       configuration: { kind: "pglite", dataDir: null },
       connect: async () => {
         throw new Error("In-memory PGlite serves one connection");
+      },
+      interrupt: async () => {
+        throw new Error("In-memory PGlite has no server to restart");
       },
       drop: () => database.close().catch(() => undefined),
     };
@@ -58,6 +66,19 @@ export async function openTestDatabase(): Promise<TestDatabase> {
       const connection = await openPostgresDatabase(url.toString());
       connections.push(connection);
       return connection;
+    },
+    interrupt: async () => {
+      const admin = new pg.Client({ connectionString: serverUrl });
+      await admin.connect();
+      try {
+        await admin.query(
+          `select pg_terminate_backend(pid) from pg_stat_activity
+           where datname = $1 and pid <> pg_backend_pid()`,
+          [name],
+        );
+      } finally {
+        await admin.end();
+      }
     },
     drop: async () => {
       if (dropped) {
