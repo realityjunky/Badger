@@ -1085,7 +1085,7 @@ export const SKILL_SCRIPT_SIDE_EFFECTS = [
 
 export type SkillScriptSideEffect = (typeof SKILL_SCRIPT_SIDE_EFFECTS)[number];
 
-export type SkillScriptEffectStatus = SkillScriptSideEffect | "undeclared";
+export type SkillScriptSideEffects = SkillScriptSideEffect[] | "undeclared";
 
 export interface SkillSourceFile {
   path: string;
@@ -1100,7 +1100,7 @@ export interface SkillSource {
   description: string;
   skillMd: string;
   references: Array<{ path: string; contentHash: string }>;
-  scripts: Array<{ path: string; sideEffect: SkillScriptEffectStatus }>;
+  scripts: Array<{ path: string; sideEffects: SkillScriptSideEffects }>;
   inventory: SkillSourceFile[];
   hash: string;
 }
@@ -1108,13 +1108,12 @@ export interface SkillSource {
 export interface SkillSourceDeclaration {
   name: string;
   location: string;
-  scripts?: Record<string, SkillScriptSideEffect>;
+  scripts?: Record<string, SkillScriptSideEffect | SkillScriptSideEffect[]>;
 }
 
 export interface SkillSourceManifest {
   schemaVersion: 1;
   sources: SkillSourceDeclaration[];
-  roots?: string[];
 }
 
 export type UpgradeSourceFileEvidence = SkillSourceFile;
@@ -1169,8 +1168,6 @@ export interface FactoryPlan {
   goal: string;
   skillCreatorIntent: CreatorIntent;
   skillSources: SkillSourceDeclaration[];
-  /** Registered roots, relative to the project, for sources outside it. */
-  sourceRoots?: string[];
   workflow: WorkflowInput;
   sourceRoot?: string;
   artifactRoot?: string;

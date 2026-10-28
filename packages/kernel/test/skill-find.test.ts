@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { findSkills, readSkillSourceManifest } from "../src/skill/find.js";
+import {
+  checkSkillSources,
+  findSkills,
+  readSkillSourceManifest,
+} from "../src/skill/find.js";
 
 describe("closed-world Skill discovery", () => {
   let root: string;
@@ -87,7 +91,7 @@ describe("closed-world Skill discovery", () => {
     expect(first[0]?.sources[0]).toMatchObject({
       description: "Review supplied evidence.",
       references: [{ path: "references/notes.md" }],
-      scripts: [{ path: "scripts/danger.sh", sideEffect: "undeclared" }],
+      scripts: [{ path: "scripts/danger.sh", sideEffects: "undeclared" }],
       hash: second[0]?.sources[0]?.hash,
     });
     await expect(fs.access(marker)).rejects.toMatchObject({ code: "ENOENT" });
@@ -123,16 +127,11 @@ describe("closed-world Skill discovery", () => {
     });
 
     expect(after[0]?.sources[0]?.hash).toBe(before[0]?.sources[0]?.hash);
+    expect(after[0]?.sources[0]?.inventory).toEqual(
+      before[0]?.sources[0]?.inventory,
+    );
     expect(after[0]?.sources[0]?.inventory.map((file) => file.path)).toEqual([
-      ".#SKILL.md",
-      ".DS_Store",
-      ".idea/workspace.xml",
-      ".vscode/settings.json",
       "SKILL.md",
-      "Thumbs.db",
-      "__pycache__/review.cpython-312.pyc",
-      "notes.md.swp",
-      "notes.md~",
     ]);
 
     await fs.rm(path.join(explicit, ".DS_Store"));
@@ -141,6 +140,30 @@ describe("closed-world Skill discovery", () => {
       sources: declaration,
     });
     expect(removed[0]?.sources[0]?.hash).toBe(before[0]?.sources[0]?.hash);
+  });
+
+  it("lists the ignored files in the source check, apart from the inventory", async () => {
+    const explicit = path.join(project, "supplied", "review");
+    await writeSkill(explicit, "review");
+    await fs.writeFile(path.join(explicit, ".DS_Store"), "stray\n");
+    await fs.mkdir(path.join(explicit, "__pycache__"), { recursive: true });
+    await fs.writeFile(
+      path.join(explicit, "__pycache__", "review.cpython-312.pyc"),
+      "stray\n",
+    );
+
+    const [candidate] = await checkSkillSources({
+      projectRoot: project,
+      sources: [{ name: "review", location: "supplied/review" }],
+    });
+
+    expect(candidate?.sources[0]?.inventory.map((file) => file.path)).toEqual([
+      "SKILL.md",
+    ]);
+    expect(candidate?.sources[0]?.ignored).toEqual([
+      ".DS_Store",
+      "__pycache__/review.cpython-312.pyc",
+    ]);
   });
 
   it("rejects a symbolic link inside a Skill tree", async () => {
@@ -195,11 +218,17 @@ describe("closed-world Skill discovery", () => {
     ]);
   });
 
-  it("reports each script's declared side effect and marks undeclared ones", async () => {
+  it("reports each script's declared side effects and marks undeclared ones", async () => {
     const explicit = path.join(project, "supplied", "review");
     await writeSkill(explicit, "review");
     await fs.mkdir(path.join(explicit, "scripts"), { recursive: true });
-    for (const script of ["add.py", "download.py", "local.sh"])
+    for (const script of [
+      "add.py",
+      "download.py",
+      "install.sh",
+      "local.sh",
+      "summarize.py",
+    ])
       await fs.writeFile(path.join(explicit, "scripts", script), "# script\n");
 
     const result = await findSkills({
@@ -210,17 +239,86 @@ describe("closed-world Skill discovery", () => {
           location: "supplied/review",
           scripts: {
             "scripts/add.py": "scheduler-submission",
-            "scripts/download.py": "network",
+            "scripts/download.py": ["network", "local-writes", "network"],
+            "scripts/install.sh": ["installs"],
+            "scripts/summarize.py": "none",
           },
         },
       ],
     });
 
     expect(result[0]?.sources[0]?.scripts).toEqual([
-      { path: "scripts/add.py", sideEffect: "scheduler-submission" },
-      { path: "scripts/download.py", sideEffect: "network" },
-      { path: "scripts/local.sh", sideEffect: "undeclared" },
+      { path: "scripts/add.py", sideEffects: ["scheduler-submission"] },
+      { path: "scripts/download.py", sideEffects: ["local-writes", "network"] },
+      { path: "scripts/install.sh", sideEffects: ["installs"] },
+      { path: "scripts/local.sh", sideEffects: "undeclared" },
+      { path: "scripts/summarize.py", sideEffects: ["none"] },
     ]);
+  });
+
+  it("reads a manifest that declares several side effects for one script", async () => {
+    const manifest = path.join(project, "sources.json");
+    await fs.writeFile(
+      manifest,
+      JSON.stringify({
+        schemaVersion: 1,
+        sources: [
+          {
+            name: "review",
+            location: "supplied/review",
+            scripts: { "scripts/add.py": ["network", "scheduler-submission"] },
+          },
+        ],
+      }),
+    );
+
+    await expect(readSkillSourceManifest(manifest)).resolves.toMatchObject({
+      sources: [
+        { scripts: { "scripts/add.py": ["network", "scheduler-submission"] } },
+      ],
+    });
+  });
+
+  it.each([
+    [["none", "network"], /none together with other side effects/iu],
+    [[], /side effect/iu],
+    [["network", "reads-only"], /side effect/iu],
+  ])(
+    "rejects a manifest script that declares %j",
+    async (sideEffects, message) => {
+      const manifest = path.join(project, "sources.json");
+      await fs.writeFile(
+        manifest,
+        JSON.stringify({
+          schemaVersion: 1,
+          sources: [
+            {
+              name: "review",
+              location: "supplied/review",
+              scripts: { "scripts/add.py": sideEffects },
+            },
+          ],
+        }),
+      );
+
+      await expect(readSkillSourceManifest(manifest)).rejects.toThrow(message);
+    },
+  );
+
+  it("refuses a manifest that registers its own roots", async () => {
+    const manifest = path.join(project, "sources.json");
+    await fs.writeFile(
+      manifest,
+      JSON.stringify({
+        schemaVersion: 1,
+        roots: ["/"],
+        sources: [{ name: "review", location: "/etc/review" }],
+      }),
+    );
+
+    await expect(readSkillSourceManifest(manifest)).rejects.toThrow(
+      /registered by the host/iu,
+    );
   });
 
   it("rejects a manifest that declares an unknown side effect", async () => {
@@ -414,6 +512,27 @@ describe("closed-world Skill discovery", () => {
 
     expect(result[0]).toMatchObject({ name: "review", status: "available" });
     expect(result[0]?.sources[0]?.root).toBe(await fs.realpath(explicit));
+  });
+
+  it("refuses a source in a registered root that resolves outside every root", async () => {
+    const outside = path.join(root, "elsewhere", "review");
+    await writeSkill(outside, "review");
+    await fs.mkdir(path.join(root, "external"), { recursive: true });
+    await fs.symlink(outside, path.join(root, "external", "review"));
+
+    const result = await findSkills({
+      projectRoot: project,
+      roots: [path.join(root, "external")],
+      sources: [
+        { name: "review", location: path.join(root, "external", "review") },
+      ],
+    });
+
+    expect(result[0]?.status).toBe("unsafe");
+    expect(result[0]?.sources).toEqual([]);
+    expect(result[0]?.blockers?.join(" ")).toMatch(
+      /resolves outside the project and its registered roots/iu,
+    );
   });
 
   it("resolves a registered root through a symbolic link", async () => {

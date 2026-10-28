@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { buildProposal } from "../src/factory/proposal.js";
+import { generatePackage } from "../src/factory/generate.js";
 import {
   createStandaloneWorkflowKernel,
   createWorkflowKernel,
@@ -262,7 +263,7 @@ describe("workflow-kernel foundation", () => {
     );
   });
 
-  it("confines plan sources and the upgrade source to the project or its roots", async () => {
+  it("confines plan sources and the upgrade source to the project or the host's roots", async () => {
     const external = await writeSkill(
       "shared",
       path.join(root, "external", "shared"),
@@ -272,19 +273,147 @@ describe("workflow-kernel foundation", () => {
     plan.skillSources = [{ name: "shared", location: external }];
     plan.sourceRoot = external;
     const planPath = await writePlan(plan);
-    const kernel = createStandaloneWorkflowKernel({ projectRoot: project });
 
-    const refused = await kernel.buildProposal(planPath);
+    const refused = await createStandaloneWorkflowKernel({
+      projectRoot: project,
+    }).buildProposal(planPath);
     expect(refused.canInitialize).toBe(false);
-    expect(refused.blockers.join(" ")).toMatch(
-      /outside the project and its registered roots/iu,
+    expect(refused.blockers).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /^Skill shared source is outside the project and its registered roots/u,
+        ),
+        expect.stringMatching(
+          /^Upgrade source is outside the project and its registered roots/u,
+        ),
+      ]),
     );
 
-    plan.sourceRoots = ["../external"];
-    await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
-    const accepted = await kernel.buildProposal(planPath);
+    const accepted = await createStandaloneWorkflowKernel({
+      projectRoot: project,
+      sourceRoots: ["../external"],
+    }).buildProposal(planPath);
     expect(accepted.blockers).toEqual([]);
     expect(accepted.canInitialize).toBe(true);
+  });
+
+  it("refuses an upgrade source that resolves outside the project and the host's roots", async () => {
+    const outside = await writeSkill(
+      "shared",
+      path.join(root, "elsewhere", "shared"),
+    );
+    await fs.symlink(path.dirname(outside), path.join(project, "linked"));
+    const plan = planFor("shared");
+    plan.skillCreatorIntent = "upgrade-existing";
+    plan.skillSources = [{ name: "shared", location: "linked/shared" }];
+    plan.sourceRoot = "linked/shared";
+    const planPath = await writePlan(plan);
+
+    const proposal = await createStandaloneWorkflowKernel({
+      projectRoot: project,
+    }).buildProposal(planPath);
+
+    expect(proposal.canInitialize).toBe(false);
+    expect(proposal.blockers).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /^Upgrade source resolves outside the project and its registered roots/u,
+        ),
+      ]),
+    );
+  });
+
+  it("refuses a plan that registers its own source roots", async () => {
+    await writeSkill("primer-design");
+    const planPath = await writePlan({
+      ...planFor("primer-design"),
+      sourceRoots: ["/"],
+    } as FactoryPlan);
+
+    await expect(
+      createStandaloneWorkflowKernel({ projectRoot: project }).readPlan(
+        planPath,
+      ),
+    ).rejects.toThrow(/sourceRoots are registered by the host/u);
+  });
+
+  it("refuses a plan whose source scripts declare unknown or conflicting side effects", async () => {
+    await writeSkill("primer-design");
+    const kernel = createStandaloneWorkflowKernel({ projectRoot: project });
+    const withScripts = (scripts: Record<string, unknown>): FactoryPlan => {
+      const plan = planFor("primer-design");
+      plan.skillSources = [
+        {
+          ...plan.skillSources[0]!,
+          scripts,
+        } as FactoryPlan["skillSources"][number],
+      ];
+      return plan;
+    };
+
+    await expect(
+      kernel.readPlan(
+        await writePlan(withScripts({ "scripts/run.py": ["none", "network"] })),
+      ),
+    ).rejects.toThrow(/none together with other side effects/u);
+    await expect(
+      kernel.readPlan(
+        await writePlan(withScripts({ "scripts/run.py": "reads-only" })),
+      ),
+    ).rejects.toThrow(/unknown side effect/u);
+    await expect(
+      kernel.readPlan(await writePlan(withScripts({ "run.py": "none" }))),
+    ).rejects.toThrow(/scripts\/ path/u);
+    await expect(
+      kernel.readPlan(
+        await writePlan(
+          withScripts({ "scripts/run.py": ["network", "local-writes"] }),
+        ),
+      ),
+    ).resolves.toMatchObject({
+      skillSources: [
+        { scripts: { "scripts/run.py": ["network", "local-writes"] } },
+      ],
+    });
+  });
+
+  it("keeps a proposal and its package unchanged when environment noise appears in a source", async () => {
+    const source = await writeSkill("primer-design");
+    const plan = planFor("primer-design");
+    const planPath = await writePlan(plan);
+    const kernel = createStandaloneWorkflowKernel({ projectRoot: project });
+    const proposal = await kernel.buildProposal(planPath);
+    const before = await generatePackage({
+      proposal,
+      plan,
+      destination: path.join(root, "packages", "before"),
+      projectRoot: project,
+    });
+
+    await fs.writeFile(path.join(source, ".DS_Store"), "stray\n");
+    await fs.mkdir(path.join(source, "__pycache__"), { recursive: true });
+    await fs.writeFile(
+      path.join(source, "__pycache__", "run.cpython-312.pyc"),
+      "stray\n",
+    );
+
+    const again = await kernel.buildProposal(planPath);
+    expect(again).toEqual(proposal);
+    const after = await generatePackage({
+      proposal: again,
+      plan,
+      destination: path.join(root, "packages", "after"),
+      projectRoot: project,
+    });
+    expect(after.scaffoldHash).toBe(before.scaffoldHash);
+    await expect(
+      kernel.initializeState({
+        planPath,
+        plan: await kernel.readPlan(planPath),
+        proposal,
+        confirmed: true,
+      }),
+    ).resolves.toMatchObject({ status: "draft" });
   });
 
   it("routes existing proposal callers through the same foundation", async () => {

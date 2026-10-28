@@ -54,23 +54,26 @@ home-directory, or platform directory.
 2. Ask for each source Skill's name and location. Run the source check with
    `badger source-check --skill <name=location> --json` (`candidates` is kept
    as an alias), repeating `--skill` for every source or using an explicit
-   source manifest. Pass `--source-root` or the manifest's `roots` for any
-   absolute location outside the project.
+   source manifest. An absolute location outside the project needs a root
+   the host registers with `--source-root` or `BADGER_SOURCE_ROOTS`. A plan or
+   manifest cannot register roots, so use only the roots the user names, and
+   pass the same roots to every later command.
 3. Review each source's canonical path, frontmatter description, full file
-   inventory with hashes, script side effects, and identity hash. Read the
-   workflow manual and every explicitly supplied Skill file before asking
-   semantic questions.
+   inventory with hashes, ignored files, script side effects, and identity
+   hash. Read the workflow manual and every explicitly supplied Skill file
+   before asking semantic questions.
 4. Start or continue `/badger-workflow-questionnaire` according to the
    first-use and resume result. Let it conduct as many exchanges as needed.
 5. Author a complete FactoryPlan with explicit sources, workflow semantics,
    and upgrade-source identity where applicable.
 
-The source check is read-only. Its inventory lists every file with its hash,
-configuration included; its identity hash covers those files except a fixed
-list of operating-system metadata, editor state, and interpreter cache files.
-A script's side effect comes from the source manifest (`none`,
-`local-writes`, `network`, `scheduler-submission`, `installs`); an undeclared
-script is reported as undeclared. It never executes scripts, writes Creator
+The source check is read-only. Its identity hash and inventory cover every
+file, configuration included, except a fixed list of operating-system
+metadata, editor state, and interpreter cache files, which it lists by path
+under `ignored`. A script's side effects come from the source manifest or the
+plan's `skillSources` (`none`, `local-writes`, `network`,
+`scheduler-submission`, `installs`, or a list of them); an undeclared script
+is reported as undeclared. It never executes scripts, writes Creator
 state, writes the questionnaire handoff, copies a source package, publishes,
 distributes, or accesses credentials.
 

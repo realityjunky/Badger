@@ -8,7 +8,7 @@ import type { SkillSourceFile } from "../types.js";
  * host. Operating-system metadata, editor state, and interpreter caches are
  * environment noise: adding or removing one must not change the hash.
  *
- * This list is fixed and documented in the workflow manual and ADR 0007.
+ * This list is fixed and documented in the workflow manual and ADR 0008.
  * Extend it only for a file class that is environment noise on every host,
  * never for content.
  */

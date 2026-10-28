@@ -972,6 +972,7 @@ export async function generatePackage(options: {
   plan: FactoryPlan;
   destination: string;
   projectRoot: string;
+  sourceRoots?: readonly string[];
   authoringDepth?: AuthoringDepth;
 }): Promise<GeneratedPackage> {
   const root = path.resolve(options.destination);
@@ -986,7 +987,7 @@ export async function generatePackage(options: {
   const sourceEvidence = sourceRoot
     ? await inspectUpgradeSource(sourceRoot, {
         projectRoot: options.projectRoot,
-        roots: options.plan.sourceRoots,
+        roots: options.sourceRoots ?? [],
       })
     : undefined;
   if (sourceRoot) {
