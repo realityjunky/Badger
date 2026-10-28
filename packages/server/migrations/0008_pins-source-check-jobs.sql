@@ -25,15 +25,17 @@ create index workflow_skill_pins_version_idx
   on workflow_skill_pins (workflow_version_id, purpose, skill_id);
 
 -- A worker job is durable even when the worker exits between claiming and
--- completing it. A lease allows a later worker to return an abandoned row to
--- the queue. `outcome` is JSON so a blocked source check can retain all of its
--- inventory and finding details without a second history table.
+-- completing it. The claiming worker renews its lease while it works; once a
+-- lease lapses, another worker may take the job over, and only the current
+-- claimant may record the outcome. A pin change cancels a queued job of the
+-- previous pin set. `outcome` is JSON so a blocked source check can retain all
+-- of its inventory and finding details without a second history table.
 create table workflow_jobs (
   id text primary key,
   kind text not null check (kind in ('source-check')),
   workflow_version_id text not null references workflow_versions (id),
   requester_id text not null references people (id),
-  status text not null check (status in ('queued', 'running', 'succeeded', 'failed')),
+  status text not null check (status in ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
   requested_at timestamptz not null,
   started_at timestamptz,
   finished_at timestamptz,
@@ -50,10 +52,9 @@ create index workflow_jobs_queue_idx
 create index workflow_jobs_version_idx
   on workflow_jobs (workflow_version_id, status, requested_at desc);
 
--- One worker must not run two kernel transitions for the same workflow version.
--- The worker claims the job row, then locks the workflow-version row before it
--- marks the lease running. The partial index makes overlapping claims visible
--- to both Postgres and review tooling.
+-- One workflow version's kernel transitions run one at a time. A claim skips a
+-- job whose version already has a running job, and this index refuses the
+-- second of two claims that race for one version.
 create unique index workflow_jobs_running_version_idx
   on workflow_jobs (workflow_version_id)
   where status = 'running';

@@ -13,11 +13,18 @@ import type { ServiceDependencies } from "./dependencies.js";
 import type { ServiceConfig } from "./config.js";
 import type { BlobStore } from "./skills/blobs.js";
 import { toIsoString } from "./util.js";
+import type { StageState } from "./workflows.js";
 
 export type SkillPinPurpose = "source" | "upgrade-source";
 export type SourceCheckStatus =
   "queued" | "running" | "passed" | "blocked" | "failed";
-export type JobStatus = "queued" | "running" | "succeeded" | "failed";
+export type JobStatus =
+  "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+/** The notification channel a new job is announced on. */
+export const WORKFLOW_JOB_CHANNEL = "badger_workflow_jobs";
+
+const SUPERSEDED = "A later pin change superseded this check";
 
 export interface WorkflowSkillPin {
   workflowVersionId: string;
@@ -33,6 +40,7 @@ export interface WorkflowSkillPin {
 
 export interface PublicSource {
   name: string;
+  purpose: SkillPinPurpose;
   status: "available" | "missing" | "invalid" | "unsafe" | "ambiguous";
   hash: string | null;
   inventory: SkillSourceFile[];
@@ -56,6 +64,16 @@ export interface SourceCheck {
   finishedAt: string | null;
 }
 
+/**
+ * What a finished check found. A job keeps its full outcome; a job list shows
+ * its status and blockers, and the latest check's sources are in its read
+ * model, so a version's history stays small.
+ */
+export interface JobOutcome {
+  status: SourceCheckStatus;
+  blockers: string[];
+}
+
 export interface WorkflowJob {
   id: string;
   kind: "source-check";
@@ -68,11 +86,7 @@ export interface WorkflowJob {
   leaseUntil: string | null;
   workerId: string | null;
   pinsHash: string;
-  outcome: {
-    status: SourceCheckStatus;
-    sources: PublicSource[];
-    blockers: string[];
-  } | null;
+  outcome: JobOutcome | null;
   error: string | null;
   revision: number;
 }
@@ -124,7 +138,7 @@ interface JobRow {
   lease_until: Date | string | null;
   worker_id: string | null;
   pins_hash: string;
-  outcome: WorkflowJob["outcome"];
+  outcome: JobOutcome | null;
   error: string | null;
   revision: number;
 }
@@ -134,10 +148,11 @@ const PIN_COLUMNS = `p.workflow_version_id, p.skill_id, s.name as skill_name,
   p.created_at, p.updated_at`;
 const JOB_COLUMNS = `id, kind, workflow_version_id, requester_id, status,
   requested_at, started_at, finished_at, lease_until, worker_id, pins_hash,
-  outcome, error, revision`;
+  outcome - 'sources' as outcome, error, revision`;
 const JOB_CLAIM_COLUMNS = `j.id, j.kind, j.workflow_version_id, j.requester_id,
   j.status, j.requested_at, j.started_at, j.finished_at, j.lease_until,
-  j.worker_id, j.pins_hash, j.outcome, j.error, j.revision`;
+  j.worker_id, j.pins_hash, j.outcome - 'sources' as outcome, j.error,
+  j.revision`;
 
 function toPin(row: PinRow): WorkflowSkillPin {
   return {
@@ -189,6 +204,15 @@ function toJob(row: JobRow): WorkflowJob {
   };
 }
 
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "23505"
+  );
+}
+
 export async function listWorkflowPins(
   database: Queryable,
   workflowVersionId: string,
@@ -229,10 +253,21 @@ export async function listWorkflowJobs(
   return result.rows.map(toJob);
 }
 
+/** The pin set's identity; rows must be ordered by purpose, then Skill. */
+function pinSetHash(rows: readonly PinRow[]): string {
+  return canonicalHash(
+    rows.map((row) => ({
+      skillId: row.skill_id,
+      hash: row.skill_version_hash,
+      purpose: row.purpose,
+    })),
+  );
+}
+
 async function pinsForHash(
   database: Queryable,
   workflowVersionId: string,
-): Promise<{ rows: PinRow[]; hash: string }> {
+): Promise<string> {
   const result = await database.query<PinRow>(
     `select ${PIN_COLUMNS}
        from workflow_skill_pins p join skills s on s.id = p.skill_id
@@ -240,12 +275,7 @@ async function pinsForHash(
       order by p.purpose, p.skill_id`,
     [workflowVersionId],
   );
-  const pins = result.rows.map((row) => ({
-    skillId: row.skill_id,
-    hash: row.skill_version_hash,
-    purpose: row.purpose,
-  }));
-  return { rows: result.rows, hash: canonicalHash(pins) };
+  return pinSetHash(result.rows);
 }
 
 async function versionGroup(
@@ -273,34 +303,40 @@ async function versionGroup(
       };
 }
 
+function workspaceLocation(
+  config: ServiceConfig,
+  versionId: string,
+): { root: string; relative: string } {
+  const relative = path.posix.join("workflow-versions", versionId);
+  return {
+    relative,
+    root: path.join(config.storage.workspaceDirectory, ...relative.split("/")),
+  };
+}
+
+/**
+ * A pin change reopens Sources. A later stage that had progressed is
+ * invalidated; one that never started stays to do.
+ */
 async function invalidateSourcesStage(
   database: Queryable,
   workflowVersionId: string,
   now: Date,
 ): Promise<void> {
   const current = await database.query<{
-    stages: Record<string, string>;
+    stages: Record<string, StageState>;
   }>("select stages from workflow_versions where id = $1", [workflowVersionId]);
-  const hasProgress = Object.entries(current.rows[0]?.stages ?? {}).some(
-    ([id, state]) => id !== "sources" && state !== "todo",
+  const stages = Object.fromEntries(
+    Object.entries(current.rows[0]?.stages ?? {}).map(([id, state]) => [
+      id,
+      id === "sources" ? "active" : state === "todo" ? "todo" : "invalidated",
+    ]),
   );
-  const downstream = hasProgress ? "invalidated" : "todo";
   await database.query(
     `update workflow_versions
-        set revision = revision + 1,
-            stages = jsonb_build_object(
-              'sources', 'active',
-              'source-study', $3::text,
-              'questionnaire', $3::text,
-              'dossier', $3::text,
-              'plan-proposal', $3::text,
-              'package', $3::text,
-              'evaluation', $3::text,
-              'review-publication', $3::text
-            ),
-            updated_at = $2
+        set revision = revision + 1, stages = $2::jsonb, updated_at = $3
       where id = $1`,
-    [workflowVersionId, now, downstream],
+    [workflowVersionId, JSON.stringify(stages), now],
   );
 }
 
@@ -312,6 +348,15 @@ async function enqueueSourceCheck(
   pinsHash: string,
 ): Promise<WorkflowJob> {
   const now = dependencies.clock.now();
+  // A queued check of the previous pin set could only be discarded; the new
+  // job replaces it. A running one finishes, and its result is not shown.
+  await database.query(
+    `update workflow_jobs
+        set status = 'cancelled', finished_at = $2, error = $3,
+            revision = revision + 1
+      where workflow_version_id = $1 and status = 'queued'`,
+    [workflowVersionId, now, SUPERSEDED],
+  );
   const job = await database.query<JobRow>(
     `insert into workflow_jobs
        (id, kind, workflow_version_id, requester_id, status, requested_at,
@@ -348,21 +393,26 @@ async function enqueueSourceCheck(
   return toJob(row);
 }
 
+export interface PinInput {
+  skillId: string;
+  hash: string;
+  purpose: SkillPinPurpose;
+  /** The revision of the pin being replaced; omitted for a new pin. */
+  revision?: number;
+}
+
 export type PinResult =
   | {
-      kind: "created";
-      pin: WorkflowSkillPin;
-      job: WorkflowJob;
-      pinsHash: string;
-    }
-  | {
-      kind: "updated";
+      kind: "created" | "updated";
       pin: WorkflowSkillPin;
       job: WorkflowJob;
       pinsHash: string;
     }
   | { kind: "missing-version" }
   | { kind: "missing-skill-version" }
+  | { kind: "unchanged"; pin: WorkflowSkillPin }
+  | { kind: "stale"; pin: WorkflowSkillPin | null }
+  | { kind: "upgrade-source-taken"; pin: WorkflowSkillPin }
   | { kind: "conflict" }
   | { kind: "invalid"; message: string };
 
@@ -371,7 +421,7 @@ export async function pinSkillVersion(
   dependencies: ServiceDependencies,
   context: WriteContext,
   versionId: string,
-  value: { skillId: string; hash: string; purpose: SkillPinPurpose },
+  value: PinInput,
 ): Promise<PinResult> {
   return database
     .transaction<PinResult>(async (tx) => {
@@ -386,70 +436,85 @@ export async function pinSkillVersion(
           message: "An upgrade source is only valid for an upgrade workflow",
         };
       }
-      const skill = await tx.query<{ id: string }>(
-        `select s.id from skills s join skill_versions v on v.skill_id = s.id
-        where s.id = $1 and s.group_id = $2 and v.hash = $3`,
+      const skill = await tx.query<{ name: string }>(
+        `select s.name from skills s join skill_versions v on v.skill_id = s.id
+          where s.id = $1 and s.group_id = $2 and v.hash = $3`,
         [value.skillId, version.groupId, value.hash],
       );
-      if (skill.rows[0] === undefined) return { kind: "missing-skill-version" };
+      const skillName = skill.rows[0]?.name;
+      if (skillName === undefined) return { kind: "missing-skill-version" };
       const existing = await tx.query<PinRow>(
         `select ${PIN_COLUMNS} from workflow_skill_pins p join skills s on s.id = p.skill_id
-       where p.workflow_version_id = $1 and p.skill_id = $2 for update`,
+          where p.workflow_version_id = $1 and p.skill_id = $2 for update of p`,
         [versionId, value.skillId],
       );
       const previous =
         existing.rows[0] === undefined ? null : toPin(existing.rows[0]);
-      if (previous?.hash === value.hash && previous.purpose === value.purpose)
-        return { kind: "conflict" };
-      const now = dependencies.clock.now();
-      const inserted =
+      // Replacing a pin quotes the revision that was read, like every other
+      // write; a new pin quotes none.
+      if (
         previous === null
-          ? await tx.query<PinRow>(
-              `insert into workflow_skill_pins
-        (workflow_version_id, skill_id, skill_version_hash, purpose,
-         revision, pinned_by, created_at, updated_at)
-       values ($1, $2, $3, $4, 1, $5, $6, $6)
-       returning workflow_version_id, skill_id, skill_version_hash, purpose,
-                 revision, pinned_by, created_at, updated_at`,
-              [
-                versionId,
-                value.skillId,
-                value.hash,
-                value.purpose,
-                context.personId,
-                now,
-              ],
-            )
-          : await tx.query<PinRow>(
-              `update workflow_skill_pins
+          ? value.revision !== undefined
+          : value.revision !== previous.revision
+      )
+        return { kind: "stale", pin: previous };
+      if (previous?.hash === value.hash && previous.purpose === value.purpose)
+        return { kind: "unchanged", pin: previous };
+      if (value.purpose === "upgrade-source") {
+        const upgrade = await tx.query<PinRow>(
+          `select ${PIN_COLUMNS} from workflow_skill_pins p join skills s on s.id = p.skill_id
+            where p.workflow_version_id = $1 and p.purpose = 'upgrade-source'
+              and p.skill_id <> $2`,
+          [versionId, value.skillId],
+        );
+        if (upgrade.rows[0] !== undefined)
+          return { kind: "upgrade-source-taken", pin: toPin(upgrade.rows[0]) };
+      }
+      const now = dependencies.clock.now();
+      if (previous === null)
+        await tx.query(
+          `insert into workflow_skill_pins
+             (workflow_version_id, skill_id, skill_version_hash, purpose,
+              revision, pinned_by, created_at, updated_at)
+           values ($1, $2, $3, $4, 1, $5, $6, $6)`,
+          [
+            versionId,
+            value.skillId,
+            value.hash,
+            value.purpose,
+            context.personId,
+            now,
+          ],
+        );
+      else
+        await tx.query(
+          `update workflow_skill_pins
               set skill_version_hash = $3, purpose = $4, revision = revision + 1,
                   pinned_by = $5, updated_at = $6
-            where workflow_version_id = $1 and skill_id = $2
-            returning workflow_version_id, skill_id, skill_version_hash, purpose,
-                      revision, pinned_by, created_at, updated_at`,
-              [
-                versionId,
-                value.skillId,
-                value.hash,
-                value.purpose,
-                context.personId,
-                now,
-              ],
-            );
-      if (inserted.rows[0] === undefined) return { kind: "conflict" };
+            where workflow_version_id = $1 and skill_id = $2`,
+          [
+            versionId,
+            value.skillId,
+            value.hash,
+            value.purpose,
+            context.personId,
+            now,
+          ],
+        );
       const pinRow = await tx.query<PinRow>(
         `select ${PIN_COLUMNS} from workflow_skill_pins p join skills s on s.id = p.skill_id
-       where p.workflow_version_id = $1 and p.skill_id = $2`,
+          where p.workflow_version_id = $1 and p.skill_id = $2`,
         [versionId, value.skillId],
       );
+      const pin = toPin(pinRow.rows[0]!);
       await invalidateSourcesStage(tx, versionId, now);
-      const current = await pinsForHash(tx, versionId);
+      const pinsHash = await pinsForHash(tx, versionId);
       const job = await enqueueSourceCheck(
         tx,
         dependencies,
         context,
         versionId,
-        current.hash,
+        pinsHash,
       );
       await recordAudit(tx, dependencies, {
         actor: { personId: context.personId, credential: context.credential },
@@ -461,13 +526,13 @@ export async function pinSkillVersion(
         target: {
           type: "workflow_skill_pin",
           id: `${versionId}:${value.skillId}`,
-          label: `${value.skillId}:${value.hash}`,
+          label: `${skillName} · ${value.hash}`,
         },
         before:
           previous === null
             ? null
             : { revision: previous.revision, hash: previous.hash },
-        after: { revision: toPin(pinRow.rows[0]!).revision, hash: value.hash },
+        after: { revision: pin.revision, hash: pin.hash },
         reason:
           previous === null
             ? "Skill version pinned; source check queued"
@@ -476,20 +541,14 @@ export async function pinSkillVersion(
       });
       return {
         kind: previous === null ? "created" : "updated",
-        pin: toPin(pinRow.rows[0]!),
+        pin,
         job,
-        pinsHash: current.hash,
+        pinsHash,
       };
     })
     .catch((error: unknown): PinResult => {
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "23505"
-      ) {
-        return { kind: "conflict" as const };
-      }
+      // Two people pinned the same Skill, or two upgrade sources, at once.
+      if (isUniqueViolation(error)) return { kind: "conflict" };
       throw error;
     });
 }
@@ -512,7 +571,7 @@ export async function unpinSkillVersion(
       return { kind: "missing-version" };
     const current = await tx.query<PinRow>(
       `select ${PIN_COLUMNS} from workflow_skill_pins p join skills s on s.id = p.skill_id
-       where p.workflow_version_id = $1 and p.skill_id = $2 for update`,
+       where p.workflow_version_id = $1 and p.skill_id = $2 for update of p`,
       [versionId, skillId],
     );
     if (current.rows[0] === undefined) return { kind: "missing-pin" };
@@ -523,13 +582,13 @@ export async function unpinSkillVersion(
       [versionId, skillId],
     );
     await invalidateSourcesStage(tx, versionId, dependencies.clock.now());
-    const pins = await pinsForHash(tx, versionId);
+    const pinsHash = await pinsForHash(tx, versionId);
     const job = await enqueueSourceCheck(
       tx,
       dependencies,
       context,
       versionId,
-      pins.hash,
+      pinsHash,
     );
     await recordAudit(tx, dependencies, {
       actor: { personId: context.personId, credential: context.credential },
@@ -538,29 +597,31 @@ export async function unpinSkillVersion(
       target: {
         type: "workflow_skill_pin",
         id: `${versionId}:${skillId}`,
-        label: `${pin.skillName}:${pin.hash}`,
+        label: `${pin.skillName} · ${pin.hash}`,
       },
       before: { revision: pin.revision, hash: pin.hash },
       after: null,
       reason: "Skill version unpinned; source check queued",
       requestId: context.requestId,
     });
-    return { kind: "removed", job, pinsHash: pins.hash };
+    return { kind: "removed", job, pinsHash };
   });
 }
 
 function publicSource(
   candidate: Awaited<ReturnType<typeof checkSkillSources>>[number],
+  purpose: SkillPinPurpose,
 ): PublicSource {
   const source = candidate.sources[0];
   return {
     name: candidate.name,
+    purpose,
     status: candidate.status,
     hash: source?.hash ?? null,
     inventory: source?.inventory ?? [],
     scripts: source?.scripts ?? [],
     ignored: source?.ignored ?? [],
-    blockers: candidate.blockers ?? [],
+    blockers: [...(candidate.blockers ?? [])],
   };
 }
 
@@ -574,26 +635,22 @@ async function materializeWorkspace(
   relative: string;
   declarations: SourceDeclaration[];
 }> {
-  const relative = path.posix.join("workflow-versions", versionId);
-  const root = path.join(
-    config.storage.workspaceDirectory,
-    ...relative.split("/"),
-  );
+  const { root, relative } = workspaceLocation(config, versionId);
   await fs.rm(root, { recursive: true, force: true });
   await fs.mkdir(root, { recursive: true });
   const declarations: SourceDeclaration[] = [];
+  let upgradeSource: string | undefined;
   for (const pin of pins) {
     const location = path.posix.join("skills", pin.skill_name);
     const destination = path.join(root, ...location.split("/"));
     await fs.mkdir(destination, { recursive: true });
-    const rows = await blobsForPin(blobs, pin);
-    for (const file of rows) {
+    for (const file of pin.inventory ?? []) {
       const target = path.join(destination, ...file.path.split("/"));
       await fs.mkdir(path.dirname(target), { recursive: true });
       await fs.writeFile(target, await blobs.get(file.hash), { flag: "wx" });
     }
     const scripts = Object.fromEntries(
-      rows.scripts
+      (pin.scripts ?? [])
         .filter((script) => script.sideEffects !== "undeclared")
         .map((script) => [script.path, script.sideEffects]),
     );
@@ -609,28 +666,23 @@ async function materializeWorkspace(
           }
         : {}),
     });
+    if (pin.purpose === "upgrade-source") upgradeSource = location;
   }
+  // The kernel needs the upgrade source declared like any other source; the
+  // manifest also names it, for the plan's source root.
   await fs.writeFile(
     path.join(root, "source-manifest.json"),
-    JSON.stringify({ schemaVersion: 1, sources: declarations }, null, 2),
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        sources: declarations,
+        ...(upgradeSource === undefined ? {} : { upgradeSource }),
+      },
+      null,
+      2,
+    ) + "\n",
   );
   return { root, relative, declarations };
-}
-
-async function blobsForPin(
-  blobs: BlobStore,
-  pin: PinRow,
-): Promise<
-  SkillSourceFile[] & {
-    scripts: Array<{ path: string; sideEffects: SkillScriptSideEffects }>;
-  }
-> {
-  const files = pin.inventory ?? [];
-  const result = files.map((file) => ({ ...file })) as SkillSourceFile[] & {
-    scripts: Array<{ path: string; sideEffects: SkillScriptSideEffects }>;
-  };
-  result.scripts = pin.scripts ?? [];
-  return result;
 }
 
 export interface SourceCheckWorkerOptions {
@@ -639,177 +691,266 @@ export interface SourceCheckWorkerOptions {
   config: ServiceConfig;
   blobs: BlobStore;
   workerId: string;
+  /** How long a claim lasts unless renewed; another worker may then take it. */
   leaseMilliseconds?: number;
+  /** The longest wait between two looks at the queue. */
+  pollMilliseconds?: number;
 }
+
+type FinalStatus = Exclude<JobStatus, "queued" | "running">;
+type FullOutcome = JobOutcome & { sources: PublicSource[] };
 
 export class SourceCheckWorker {
   private readonly options: Required<SourceCheckWorkerOptions>;
 
   constructor(options: SourceCheckWorkerOptions) {
-    this.options = { leaseMilliseconds: 60_000, ...options };
+    this.options = {
+      ...options,
+      leaseMilliseconds: options.leaseMilliseconds ?? 60_000,
+      // A notification wakes a listening worker at once. The poll also
+      // reclaims an abandoned lease and covers a notification sent while the
+      // worker was busy, so it runs even with LISTEN.
+      pollMilliseconds:
+        options.pollMilliseconds ??
+        (options.database.waitForNotification === undefined ? 1_000 : 15_000),
+    };
   }
 
+  /** Claims the next runnable job and runs it; null when none can start. */
   async runOnce(): Promise<WorkflowJob | null> {
+    const job = await this.claim();
+    return job === null ? null : this.process(job);
+  }
+
+  /**
+   * Claims the oldest queued job, or one whose lease lapsed, unless its
+   * workflow version already has a running job: one version's kernel
+   * transitions run one at a time.
+   */
+  async claim(): Promise<WorkflowJob | null> {
     const { database, dependencies, workerId, leaseMilliseconds } =
       this.options;
-    const claimed = await database.transaction(async (tx) => {
-      const now = dependencies.clock.now();
-      const lease = new Date(now.getTime() + leaseMilliseconds);
-      const result = await tx.query<JobRow>(
-        `with candidate as (
-           select j.id from workflow_jobs j
-            join workflow_versions v on v.id = j.workflow_version_id
-            where (j.status = 'queued' or (j.status = 'running' and j.lease_until <= $1))
-              and not exists (
-                select 1 from workflow_jobs active
-                 where active.workflow_version_id = j.workflow_version_id
-                   and active.status = 'running' and active.id <> j.id
-              )
-            order by j.requested_at, j.id
-            for update of j, v skip locked limit 1
-         )
-         update workflow_jobs j
-            set status = 'running', started_at = coalesce(j.started_at, $1),
-                lease_until = $2, worker_id = $3, revision = j.revision + 1
-           from candidate where j.id = candidate.id
-         returning ${JOB_CLAIM_COLUMNS}`,
-        [now, lease, workerId],
-      );
-      const row = result.rows[0];
-      if (row === undefined) return null;
-      await tx.query(
-        `update workflow_source_checks set status = 'running', started_at = $2,
-            revision = revision + 1 where job_id = $1`,
-        [row.id, now],
-      );
-      return row;
-    });
-    if (claimed === null) return null;
-    const job = toJob(claimed);
     try {
-      const pins = await database.query<PinRow>(
-        `select ${PIN_COLUMNS}, sv.inventory, sv.scripts
-           from workflow_skill_pins p join skills s on s.id = p.skill_id
-           join skill_versions sv on sv.skill_id = p.skill_id and sv.hash = p.skill_version_hash
-          where p.workflow_version_id = $1 order by p.purpose, p.skill_id`,
-        [job.workflowVersionId],
-      );
-      const current = await pinsForHash(database, job.workflowVersionId);
-      if (current.hash !== job.pinsHash)
-        return this.finish(
-          job,
-          {
-            status: "failed",
-            sources: [],
-            blockers: [
-              "The pinned source set changed while this check was running",
-            ],
-          },
-          "superseded",
+      const claimed = await database.transaction(async (tx) => {
+        const now = dependencies.clock.now();
+        const lease = new Date(now.getTime() + leaseMilliseconds);
+        const result = await tx.query<JobRow>(
+          `with candidate as (
+             select j.id from workflow_jobs j
+              where (j.status = 'queued' or (j.status = 'running' and j.lease_until <= $1))
+                and not exists (
+                  select 1 from workflow_jobs active
+                   where active.workflow_version_id = j.workflow_version_id
+                     and active.status = 'running' and active.id <> j.id
+                )
+              order by j.requested_at, j.id
+              for update skip locked limit 1
+           )
+           update workflow_jobs j
+              set status = 'running', started_at = coalesce(j.started_at, $1),
+                  lease_until = $2, worker_id = $3, revision = j.revision + 1
+             from candidate where j.id = candidate.id
+           returning ${JOB_CLAIM_COLUMNS}`,
+          [now, lease, workerId],
         );
-      if (pins.rows.length === 0)
-        await fs.rm(
-          path.join(
-            this.options.config.storage.workspaceDirectory,
-            "workflow-versions",
-            job.workflowVersionId,
-          ),
-          { recursive: true, force: true },
+        const row = result.rows[0];
+        if (row === undefined) return null;
+        await tx.query(
+          `update workflow_source_checks set status = 'running', started_at = $2,
+              revision = revision + 1 where job_id = $1`,
+          [row.id, now],
         );
-      if (pins.rows.length === 0)
-        return this.finish(job, {
-          status: "blocked",
-          sources: [],
-          blockers: ["Pin at least one Skill version before continuing"],
-        });
-      const materialized = await materializeWorkspace(
-        this.options.config,
-        this.options.blobs,
-        job.workflowVersionId,
-        pins.rows,
-      );
-      const candidates = await checkSkillSources({
-        projectRoot: materialized.root,
-        sources: materialized.declarations,
+        return row;
       });
-      const sources = candidates.map(publicSource);
-      const blockers = candidates.flatMap(
-        (candidate) => candidate.blockers ?? [],
-      );
-      const status: SourceCheckStatus =
-        blockers.length === 0 &&
-        candidates.every((candidate) => candidate.status === "available")
-          ? "passed"
-          : "blocked";
-      return this.finish(
-        job,
-        { status, sources, blockers },
-        undefined,
-        materialized.relative,
-      );
+      return claimed === null ? null : toJob(claimed);
     } catch (error) {
-      return this.finish(
-        job,
-        { status: "failed", sources: [], blockers: [] },
-        error instanceof Error ? error.message : String(error),
-      );
+      // Another worker started a job of the same version in the meantime; the
+      // running-job index refused this claim.
+      if (isUniqueViolation(error)) return null;
+      throw error;
     }
   }
 
-  async waitForWork(signal?: AbortSignal): Promise<void> {
-    if (this.options.database.waitForNotification !== undefined) {
-      await this.options.database.waitForNotification(
-        "badger_workflow_jobs",
-        signal,
+  /** Runs a claimed job, renewing its lease while it works. */
+  async process(job: WorkflowJob): Promise<WorkflowJob> {
+    const heartbeat = setInterval(
+      () => void this.renew(job).catch(() => undefined),
+      Math.max(1_000, Math.floor(this.options.leaseMilliseconds / 3)),
+    );
+    heartbeat.unref();
+    try {
+      return await this.check(job);
+    } catch (error) {
+      return await this.finish(
+        job,
+        "failed",
+        { status: "failed", sources: [], blockers: [] },
+        this.publicError(error),
       );
-      return;
+    } finally {
+      clearInterval(heartbeat);
     }
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, 250);
-      signal?.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        { once: true },
-      );
+  }
+
+  /** Waits for a new job's notification, or one poll interval at most. */
+  async waitForWork(signal?: AbortSignal): Promise<void> {
+    const { database, pollMilliseconds } = this.options;
+    const wait = new AbortController();
+    const timer = setTimeout(() => wait.abort(), pollMilliseconds);
+    const stop = () => wait.abort();
+    signal?.addEventListener("abort", stop, { once: true });
+    if (signal?.aborted) stop();
+    try {
+      if (database.waitForNotification !== undefined) {
+        try {
+          // Ends on a notification, a dropped listener, or the interval.
+          await database.waitForNotification(WORKFLOW_JOB_CHANNEL, wait.signal);
+          return;
+        } catch {
+          // No listener could be opened; the interval still bounds the wait.
+        }
+      }
+      await new Promise<void>((resolve) => {
+        if (wait.signal.aborted) resolve();
+        else
+          wait.signal.addEventListener("abort", () => resolve(), {
+            once: true,
+          });
+      });
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
+    }
+  }
+
+  private async check(job: WorkflowJob): Promise<WorkflowJob> {
+    const { database, config, blobs } = this.options;
+    const version = await versionGroup(database, job.workflowVersionId);
+    if (version === null) throw new Error("The workflow version is missing");
+    const pins = await database.query<PinRow>(
+      `select ${PIN_COLUMNS}, sv.inventory, sv.scripts
+         from workflow_skill_pins p join skills s on s.id = p.skill_id
+         join skill_versions sv on sv.skill_id = p.skill_id and sv.hash = p.skill_version_hash
+        where p.workflow_version_id = $1 order by p.purpose, p.skill_id`,
+      [job.workflowVersionId],
+    );
+    if (pinSetHash(pins.rows) !== job.pinsHash)
+      return this.finish(job, "cancelled", null, SUPERSEDED);
+    if (pins.rows.length === 0) {
+      await fs.rm(workspaceLocation(config, job.workflowVersionId).root, {
+        recursive: true,
+        force: true,
+      });
+      return this.finish(job, "succeeded", {
+        status: "blocked",
+        sources: [],
+        blockers: ["Pin at least one Skill version before continuing"],
+      });
+    }
+    const materialized = await materializeWorkspace(
+      config,
+      blobs,
+      job.workflowVersionId,
+      pins.rows,
+    );
+    const candidates = await checkSkillSources({
+      projectRoot: materialized.root,
+      sources: materialized.declarations,
     });
+    const pinned = new Map(pins.rows.map((row) => [row.skill_name, row]));
+    const sources = candidates.map((candidate) => {
+      const pin = pinned.get(candidate.name);
+      const source = publicSource(candidate, pin?.purpose ?? "source");
+      // The check hashes the files it was given. Any hash but the pinned one
+      // means the stored files are not the pinned version's.
+      if (source.hash !== null && source.hash !== pin?.skill_version_hash)
+        source.blockers.push(
+          `The files checked for ${candidate.name} differ from its pinned version`,
+        );
+      return source;
+    });
+    const blockers = sources.flatMap((source) => source.blockers);
+    if (
+      version.intent === "upgrade-existing" &&
+      !pins.rows.some((row) => row.purpose === "upgrade-source")
+    )
+      blockers.push("Pin the upgrade source before continuing");
+    const status: SourceCheckStatus =
+      blockers.length === 0 &&
+      sources.every((source) => source.status === "available")
+        ? "passed"
+        : "blocked";
+    return this.finish(
+      job,
+      "succeeded",
+      { status, sources, blockers },
+      undefined,
+      materialized.relative,
+    );
+  }
+
+  private async renew(job: WorkflowJob): Promise<void> {
+    const { database, dependencies, workerId, leaseMilliseconds } =
+      this.options;
+    await database.query(
+      `update workflow_jobs set lease_until = $4
+        where id = $1 and worker_id = $2 and revision = $3
+          and status = 'running'`,
+      [
+        job.id,
+        workerId,
+        job.revision,
+        new Date(dependencies.clock.now().getTime() + leaseMilliseconds),
+      ],
+    );
   }
 
   private async finish(
     job: WorkflowJob,
-    outcome: {
-      status: SourceCheckStatus;
-      sources: PublicSource[];
-      blockers: string[];
-    },
+    status: FinalStatus,
+    outcome: FullOutcome | null,
     error?: string,
     workspacePath?: string,
   ): Promise<WorkflowJob> {
     const { database, dependencies, workerId } = this.options;
     const now = dependencies.clock.now();
-    const result = await database.transaction(async (tx) => {
+    return database.transaction(async (tx) => {
       const current = await tx.query<JobRow>(
         `select ${JOB_COLUMNS} from workflow_jobs where id = $1 for update`,
         [job.id],
       );
-      if (current.rows[0] === undefined) return job;
+      const row = current.rows[0];
+      if (row === undefined) return job;
+      // A worker whose lease lapsed must not overwrite the result of the
+      // worker that took its job over.
+      if (
+        row.status !== "running" ||
+        row.worker_id !== workerId ||
+        row.revision !== job.revision
+      )
+        return toJob(row);
+      // Pin changes lock the version first. Locking it here too keeps the pin
+      // set read below from changing before the stage is written.
+      await tx.query(
+        "select id from workflow_versions where id = $1 for update",
+        [job.workflowVersionId],
+      );
       const updated = await tx.query<JobRow>(
         `update workflow_jobs set status = $2, finished_at = $3, lease_until = null,
-            worker_id = $4, outcome = $5::jsonb, error = $6, revision = revision + 1
+            outcome = $4::jsonb, error = $5, revision = revision + 1
           where id = $1 returning ${JOB_COLUMNS}`,
         [
           job.id,
-          error === undefined ? "succeeded" : "failed",
+          status,
           now,
-          workerId,
-          JSON.stringify(outcome),
+          outcome === null ? null : JSON.stringify(outcome),
           error ?? null,
         ],
       );
-      const pins = await pinsForHash(tx, job.workflowVersionId);
-      if (pins.hash === job.pinsHash) {
+      if (
+        outcome !== null &&
+        (await pinsForHash(tx, job.workflowVersionId)) === job.pinsHash
+      ) {
         await tx.query(
           `update workflow_source_checks set status = $2, sources = $3::jsonb,
               blockers = $4::jsonb, workspace_path = $5, finished_at = $6,
@@ -825,21 +966,19 @@ export class SourceCheckWorker {
             job.pinsHash,
           ],
         );
-        await tx.query(
-          `update workflow_versions set revision = revision + 1,
-              stages = jsonb_set(stages, '{sources}', to_jsonb($2::text)), updated_at = $3
-            where id = $1 and $4 = true`,
-          [
-            job.workflowVersionId,
-            outcome.status === "passed"
-              ? "done"
-              : outcome.status === "blocked"
-                ? "blocked"
-                : "active",
-            now,
-            error === undefined,
-          ],
-        );
+        // A failed check leaves Sources active: nothing was decided.
+        if (status === "succeeded")
+          await tx.query(
+            `update workflow_versions set revision = revision + 1,
+                stages = jsonb_set(stages, '{sources}', to_jsonb($2::text)),
+                updated_at = $3
+              where id = $1`,
+            [
+              job.workflowVersionId,
+              outcome.status === "passed" ? "done" : "blocked",
+              now,
+            ],
+          );
         await recordAudit(tx, dependencies, {
           actor: {
             personId: null,
@@ -858,23 +997,35 @@ export class SourceCheckWorker {
           requestId: job.id,
         });
       }
-      return updated.rows[0] === undefined ? job : toJob(updated.rows[0]);
+      return toJob(updated.rows[0]!);
     });
-    return result;
+  }
+
+  /** An error as workflow readers see it: storage paths are named, not shown. */
+  private publicError(error: unknown): string {
+    const { storage } = this.options.config;
+    let message = error instanceof Error ? error.message : String(error);
+    for (const [directory, name] of [
+      [storage.workspaceDirectory, "<workspaces>"],
+      [storage.blobDirectory, "<blobs>"],
+      [storage.root, "<storage>"],
+    ] as const) {
+      message = message
+        .replaceAll(path.resolve(directory), name)
+        .replaceAll(directory, name);
+    }
+    return message;
   }
 }
 
-export function parsePinInput(value: unknown):
-  | {
-      ok: true;
-      value: { skillId: string; hash: string; purpose: SkillPinPurpose };
-    }
-  | { ok: false; message: string } {
+export function parsePinInput(
+  value: unknown,
+): { ok: true; value: PinInput } | { ok: false; message: string } {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return { ok: false, message: "The request body must be a JSON object" };
   const input = value as Record<string, unknown>;
   const unknown = Object.keys(input).find(
-    (key) => !["skillId", "hash", "purpose"].includes(key),
+    (key) => !["skillId", "hash", "purpose", "revision"].includes(key),
   );
   if (unknown !== undefined)
     return { ok: false, message: `Unknown field ${unknown}` };
@@ -888,9 +1039,20 @@ export function parsePinInput(value: unknown):
   const purpose = input.purpose ?? "source";
   if (purpose !== "source" && purpose !== "upgrade-source")
     return { ok: false, message: "purpose must be source or upgrade-source" };
+  const revision = input.revision;
+  if (
+    revision !== undefined &&
+    (!Number.isInteger(revision) || (revision as number) < 1)
+  )
+    return { ok: false, message: "revision must be a whole number from 1" };
   return {
     ok: true,
-    value: { skillId: input.skillId, hash: input.hash, purpose },
+    value: {
+      skillId: input.skillId,
+      hash: input.hash,
+      purpose,
+      ...(revision === undefined ? {} : { revision: revision as number }),
+    },
   };
 }
 

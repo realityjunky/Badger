@@ -37,7 +37,7 @@ export function WorkflowSources({
   canManage: boolean;
   onChanged(): void;
 }) {
-  const { t, format } = useI18n();
+  const { t, format, locale } = useI18n();
   const [options, setOptions] = useState<SkillOption[]>([]);
   const [skillId, setSkillId] = useState<string>();
   const [hash, setHash] = useState<string>();
@@ -94,6 +94,8 @@ export function WorkflowSources({
         skillId,
         hash,
         workflow.intent === "upgrade-existing" ? purpose : "source",
+        // Replacing a pin quotes the revision this page read.
+        detail.pins.find((entry) => entry.skillId === skillId),
       );
       if (result.kind === "ok") {
         setHash(undefined);
@@ -123,6 +125,8 @@ export function WorkflowSources({
   };
 
   const check = detail.sourceCheck;
+  const job = detail.jobs.find((entry) => entry.id === check?.jobId);
+  const when = (value: string) => new Date(value).toLocaleString(locale);
   return (
     <section
       className="workflow-panel workflow-sources"
@@ -145,6 +149,25 @@ export function WorkflowSources({
         )}
       </div>
       <p className="muted">{t("workflow.sourcesDescription")}</p>
+      {check !== null && (
+        <p className="muted">
+          {check.finishedAt === null
+            ? format("workflow.checkRequested", {
+                time: when(check.requestedAt),
+              })
+            : format("workflow.checkFinished", {
+                time: when(check.finishedAt),
+              })}
+        </p>
+      )}
+      {check?.status === "failed" && (
+        <Alert
+          type="error"
+          showIcon
+          message={t("workflow.checkFailed")}
+          description={job?.error ?? undefined}
+        />
+      )}
       {failure !== null && <Alert type="error" showIcon message={failure} />}
       {detail.pins.length === 0 ? (
         <p className="empty-state">{t("workflow.noPins")}</p>
@@ -251,10 +274,13 @@ export function WorkflowSources({
               <div className="workflow-card-heading">
                 <strong>{source.name}</strong>
                 <Space wrap>
+                  {source.purpose === "upgrade-source" && (
+                    <Tag>{t("workflow.pinPurpose.upgrade-source")}</Tag>
+                  )}
                   <StatusPill
                     tone={source.status === "available" ? "success" : "danger"}
                   >
-                    {source.status}
+                    {t(`workflow.sourceState.${source.status}`)}
                   </StatusPill>
                   <Tag>
                     {source.inventory.length} {t("workflow.files")}
@@ -274,9 +300,21 @@ export function WorkflowSources({
                 </p>
               )}
               {source.scripts.length > 0 && (
-                <p className="muted">
-                  {t("workflow.scripts")}: {source.scripts.length}
-                </p>
+                <>
+                  <p className="muted">{t("workflow.scripts")}</p>
+                  <ul className="workflow-source-scripts">
+                    {source.scripts.map((script) => (
+                      <li key={script.path}>
+                        <code>{script.path}</code>{" "}
+                        {script.sideEffects === "undeclared"
+                          ? t("skills.undeclared")
+                          : script.sideEffects
+                              .map((effect) => t(`skills.effect.${effect}`))
+                              .join(", ")}
+                      </li>
+                    ))}
+                  </ul>
+                </>
               )}
               {source.blockers.length > 0 && (
                 <ul className="workflow-source-blockers">

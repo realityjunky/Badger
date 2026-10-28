@@ -36,8 +36,6 @@ export async function openPostgresDatabase(
   options: PostgresOptions = {},
 ): Promise<Database> {
   const pool = new pg.Pool({ connectionString, max: 10 });
-  let listener: pg.Client | null = null;
-  let listenerReady: Promise<pg.Client> | null = null;
   // The pool reports a connection the server ended while it sat idle, and
   // replaces it on the next query. Unheard, that report would end the
   // process: a database restart would take the service down instead of
@@ -45,38 +43,60 @@ export async function openPostgresDatabase(
   pool.on("error", (error) => options.onConnectionLost?.(error));
   const queryable = wrapQueryable(pool);
 
+  // LISTEN holds a connection of its own, outside the pool, opened by the
+  // first wait. When Postgres ends it, its waiters wake and the next wait
+  // opens another, so a restart never leaves a worker asleep or crashes it.
+  let listener: { client: pg.Client; ready: Promise<void> } | null = null;
+  const listening = new Set<string>();
+  let closed = false;
+  const openListener = () => {
+    const client = new pg.Client({ connectionString });
+    const entry = { client, ready: client.connect().then(() => undefined) };
+    const drop = () => {
+      if (listener !== entry) return;
+      listener = null;
+      listening.clear();
+    };
+    client.on("error", (error) => {
+      drop();
+      options.onConnectionLost?.(error);
+      void client.end().catch(() => undefined);
+    });
+    client.on("end", drop);
+    entry.ready.catch(drop);
+    return entry;
+  };
+
   const waitForNotification = async (
     channel: string,
     signal?: AbortSignal,
   ): Promise<void> => {
-    if (listener === null) {
-      listenerReady ??= (async () => {
-        const client = new pg.Client({ connectionString });
-        await client.connect();
-        await client.query(`listen ${channel}`);
-        listener = client;
-        return client;
-      })();
-      await listenerReady;
+    if (!/^[a-z_][a-z0-9_]*$/u.test(channel))
+      throw new Error(`Invalid notification channel: ${channel}`);
+    if (closed || signal?.aborted) return;
+    listener ??= openListener();
+    const { client, ready } = listener;
+    await ready;
+    if (!listening.has(channel)) {
+      await client.query(`listen ${channel}`);
+      listening.add(channel);
     }
-    const client = listener;
-    if (client === null) return;
     await new Promise<void>((resolve) => {
-      const onNotification = () => {
-        cleanup();
-        resolve();
-      };
-      const onAbort = () => {
-        cleanup();
-        resolve();
-      };
-      const cleanup = () => {
+      const wake = () => {
         client.off("notification", onNotification);
-        signal?.removeEventListener("abort", onAbort);
+        client.off("error", wake);
+        client.off("end", wake);
+        signal?.removeEventListener("abort", wake);
+        resolve();
+      };
+      const onNotification = (message: pg.Notification) => {
+        if (message.channel === channel) wake();
       };
       client.on("notification", onNotification);
-      signal?.addEventListener("abort", onAbort, { once: true });
-      if (signal?.aborted) onAbort();
+      client.on("error", wake);
+      client.on("end", wake);
+      signal?.addEventListener("abort", wake, { once: true });
+      if (signal?.aborted || listener?.client !== client) wake();
     });
   };
 
@@ -99,7 +119,10 @@ export async function openPostgresDatabase(
     },
     waitForNotification,
     close: async () => {
-      await listener?.end().catch(() => undefined);
+      closed = true;
+      const open = listener;
+      listener = null;
+      await open?.client.end().catch(() => undefined);
       await pool.end();
     },
   };

@@ -25,8 +25,9 @@ import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 
 const ROOT = "/api/v1/workflows";
+// A version's pins, one pin by its Skill, its latest source check, its jobs.
 const WORKFLOW_PATH =
-  /^\/api\/v1\/workflows\/([^/]+)(?:\/(versions)(?:\/([^/]+)(?:\/(pins|source-check|jobs)(?:\/([^/]+))?)?)?)?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)(?:\/(versions)(?:\/([^/]+)(?:\/(?:(pins)(?:\/([^/]+))?|(source-check|jobs)))?)?)?$/u;
 
 async function groupName(database: Database, id: string): Promise<string> {
   const result = await database.query<{ name: string }>(
@@ -44,7 +45,7 @@ function workflowPath(path: string) {
       id: decodeURIComponent(match[1]),
       versions: match[2] !== undefined,
       versionId: match[3] === undefined ? null : decodeURIComponent(match[3]),
-      resource: match[4] ?? null,
+      resource: match[4] ?? match[6] ?? null,
       resourceId: match[5] === undefined ? null : decodeURIComponent(match[5]),
     };
   } catch {
@@ -172,6 +173,13 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
     return reply.error(403, "denied", "This workflow is outside your roles");
 
   if (route.versions && route.versionId !== null && route.resource !== null) {
+    // The service refuses unlisted writes before sign-in; this also refuses a
+    // read of the write-only pin path.
+    const methods = workflowMethods(path) ?? "GET, HEAD";
+    if (!methods.split(", ").includes(method))
+      return reply.error(405, "invalid", "Method not allowed", {
+        allow: methods,
+      });
     const versions = await listWorkflowVersions(database, workflow.id);
     const version = versions.find((entry) => entry.id === route.versionId);
     if (version === undefined)
@@ -254,8 +262,24 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
           return reply.error(
             409,
             "conflict",
-            "That Skill is already pinned to this version",
+            "The Skill pins changed at the same time; reload and try again",
           );
+        if (pinned.kind !== "created" && pinned.kind !== "updated")
+          return reply.json(409, {
+            error: {
+              code: "conflict",
+              message:
+                pinned.kind === "unchanged"
+                  ? "That Skill version is already pinned with this purpose"
+                  : pinned.kind === "upgrade-source-taken"
+                    ? "This version already has an upgrade source; unpin it first"
+                    : parsed.value.revision === undefined
+                      ? "That Skill is already pinned; quote its pin's revision to replace it"
+                      : "The Skill pin changed since you read it",
+            },
+            requestId: reply.requestId,
+            pin: pinned.pin,
+          });
         return reply.json(pinned.kind === "updated" ? 200 : 201, {
           pin: pinned.pin,
           job: pinned.job,

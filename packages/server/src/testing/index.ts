@@ -7,14 +7,11 @@ export {
   type TestServiceOptions,
 } from "./harness.js";
 export type { TestPerson } from "./identity.js";
-export {
+export type {
+  SourceCheck,
   SourceCheckWorker,
-  listWorkflowJobs,
-  listWorkflowPins,
-  readSourceCheck,
-  type SourceCheck,
-  type WorkflowJob,
-  type WorkflowSkillPin,
+  WorkflowJob,
+  WorkflowSkillPin,
 } from "../workflow-source.js";
 export {
   startStubPlatform,

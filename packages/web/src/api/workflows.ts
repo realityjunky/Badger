@@ -1,5 +1,6 @@
 import { apiUrl } from "../app/paths.js";
 import type { Group } from "./organization.js";
+import type { ScriptEffects } from "./skills.js";
 
 export interface WorkflowFrame {
   name: string;
@@ -46,10 +47,11 @@ export interface WorkflowSkillPin {
 }
 export interface SourceCheckSource {
   name: string;
+  purpose: SkillPinPurpose;
   status: "available" | "missing" | "invalid" | "unsafe" | "ambiguous";
   hash: string | null;
   inventory: { path: string; bytes: number; hash: string }[];
-  scripts: { path: string; sideEffects: string[] | "undeclared" }[];
+  scripts: { path: string; sideEffects: ScriptEffects }[];
   ignored: string[];
   blockers: string[];
 }
@@ -72,16 +74,16 @@ export interface WorkflowJob {
   kind: "source-check";
   workflowVersionId: string;
   requesterId: string;
-  status: "queued" | "running" | "succeeded" | "failed";
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   requestedAt: string;
   startedAt: string | null;
   finishedAt: string | null;
   leaseUntil: string | null;
   workerId: string | null;
   pinsHash: string;
+  /** The latest check's sources are in its read model, not in the job. */
   outcome: {
     status: WorkflowSourceCheck["status"];
-    sources: SourceCheckSource[];
     blockers: string[];
   } | null;
   error: string | null;
@@ -261,12 +263,18 @@ export function pinSkillVersion(
   skillId: string,
   hash: string,
   purpose: SkillPinPurpose = "source",
+  replacing?: WorkflowSkillPin,
 ) {
   return write<{ pin: WorkflowSkillPin; job: WorkflowJob; pinsHash: string }>(
     basePath,
     "POST",
     `/workflows/${encodeURIComponent(workflowId)}/versions/${encodeURIComponent(versionId)}/pins`,
-    { skillId, hash, purpose },
+    {
+      skillId,
+      hash,
+      purpose,
+      ...(replacing === undefined ? {} : { revision: replacing.revision }),
+    },
   );
 }
 export function unpinSkillVersion(

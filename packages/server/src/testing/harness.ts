@@ -75,7 +75,16 @@ export interface TestService {
    * Postgres restart does. Only on Postgres, with a fresh test database.
    */
   interruptDatabase(): Promise<void>;
-  /** Runs all currently queued source checks through the worker seam. */
+  /**
+   * A worker role on the service's database, clock, IDs, and storage. Each
+   * ID is a separate worker, so a test can claim a job with one and leave it,
+   * as a worker that stopped would.
+   */
+  worker(
+    workerId?: string,
+    options?: { leaseMilliseconds?: number; pollMilliseconds?: number },
+  ): SourceCheckWorker;
+  /** Runs the queued source checks with one worker; returns how many ran. */
   runSourceCheckJobs(): Promise<number>;
   close(): Promise<void>;
 }
@@ -246,6 +255,19 @@ export async function startTestService(
       outgoing.end();
     });
 
+  const worker = (
+    workerId = "test-worker",
+    options: { leaseMilliseconds?: number; pollMilliseconds?: number } = {},
+  ) =>
+    new SourceCheckWorker({
+      database: connection.database,
+      dependencies: { clock, ids },
+      config,
+      blobs: filesystemBlobStore(config.storage.blobDirectory),
+      workerId,
+      ...options,
+    });
+
   let closed = false;
   return {
     baseUrl,
@@ -258,20 +280,12 @@ export async function startTestService(
     rawRequest,
     closeDatabase: () => connection.database.close().catch(() => undefined),
     interruptDatabase: connection.interrupt,
+    worker,
     runSourceCheckJobs: async () => {
-      const worker = new SourceCheckWorker({
-        database: connection.database,
-        dependencies: { clock, ids },
-        config,
-        blobs: filesystemBlobStore(config.storage.blobDirectory),
-        workerId: "test-worker",
-      });
+      const running = worker();
       let processed = 0;
-      for (;;) {
-        const job = await worker.runOnce();
-        if (job === null) return processed;
-        processed += 1;
-      }
+      while ((await running.runOnce()) !== null) processed += 1;
+      return processed;
     },
     close: async () => {
       if (closed) {

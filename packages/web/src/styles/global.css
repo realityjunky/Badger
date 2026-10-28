@@ -473,6 +473,10 @@ body {
   padding-left: 18px;
 }
 
+.workflow-source-inventory code {
+  overflow-wrap: anywhere;
+}
+
 /* The summary strip */
 
 .summary-strip {

@@ -100,6 +100,30 @@ export function WorkflowsPage() {
     return () => controller.abort();
   }, [basePath, workflowId, selectedVersion?.id, refresh]);
 
+  // The worker runs a queued check; look again until it settles, keeping the
+  // page as it is in between.
+  const checkStatus = versionResources?.sourceCheck?.status;
+  useEffect(() => {
+    if (workflowId === undefined || versionResources === null) return;
+    if (checkStatus !== "queued" && checkStatus !== "running") return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void loadWorkflowVersion(
+        basePath,
+        workflowId,
+        versionResources.version.id,
+        controller.signal,
+      ).then((result) => {
+        if (!controller.signal.aborted && result.kind === "ok")
+          setVersionResources(result.value);
+      });
+    }, 3000);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [basePath, workflowId, versionResources, checkStatus]);
+
   const reload = () => setRefresh((value) => value + 1);
 
   const newVersion = async () => {
@@ -265,7 +289,13 @@ export function WorkflowsPage() {
                 </Tag>
                 <Tag>{selectedVersion.locale}</Tag>
               </Space>
-              <StageTrack stages={selectedVersion.stages} />
+              <StageTrack
+                stages={
+                  versionResources?.version.id === selectedVersion.id
+                    ? versionResources.version.stages
+                    : selectedVersion.stages
+                }
+              />
             </section>
           )}
           {versionResources !== null &&

@@ -1,4 +1,6 @@
-# A local Badger deployment: the server role against Postgres 17.
+# A local Badger deployment: the server and worker roles against Postgres 17.
+# Both roles run the same image and share its storage volume; the worker runs
+# source checks and other queued jobs.
 #
 # This stack runs with no people-facing identity: /health proves the image,
 # Postgres, and the migrations, and every person route answers 401. A
@@ -30,13 +32,13 @@ services:
       retries: 10
 
   server:
-    build:
+    build: &badger-build
       context: .
       dockerfile: packages/server/Dockerfile
       args:
         BADGER_REVISION: ${BADGER_REVISION:-unknown}
         BADGER_CLEAN_TREE: ${BADGER_CLEAN_TREE:-}
-    environment:
+    environment: &badger-environment
       BADGER_MODE: service
       BADGER_IDENTITY: none
       BADGER_HOST: 0.0.0.0
@@ -44,6 +46,8 @@ services:
       BADGER_DATABASE_URL: postgres://badger:badger@postgres:5432/badger
       BADGER_ALLOWED_HOSTNAMES: localhost,127.0.0.1
       BADGER_ALLOWED_ORIGINS: http://localhost:8787
+    volumes:
+      - badger-files:/app/.badger
     ports:
       - "127.0.0.1:8787:8787"
     depends_on:
@@ -51,5 +55,17 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  worker:
+    build: *badger-build
+    command: ["node", "packages/server/dist/src/worker.js"]
+    environment: *badger-environment
+    volumes:
+      - badger-files:/app/.badger
+    depends_on:
+      server:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   postgres-data:
+  badger-files:
