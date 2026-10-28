@@ -17,7 +17,10 @@ import {
   stableValue,
 } from "../util.js";
 import { writeState } from "../factory/state.js";
-import { toProjectRelativePath } from "../factory/project-paths.js";
+import {
+  physicalProjectRoot,
+  toStoredPaths,
+} from "../factory/project-paths.js";
 import { WORKFLOW_FINALIZATION_BOUNDARY_PHASES } from "../workflow-runtime/finalization.js";
 import { WORKFLOW_TRANSITION_BOUNDARY_PHASES } from "../workflow-runtime/transition-journal.js";
 import { validateAuthoringReviewResult } from "../authoring/review.js";
@@ -34,30 +37,18 @@ function sameStrings(left: unknown, right: unknown): boolean {
   );
 }
 
-// Readiness evidence feeds the publication approval hash, so paths in it must
-// not change when the project moves.
-function evidencePath(projectRoot: string, value: string): string {
-  if (!value) return value;
-  try {
-    return toProjectRelativePath(projectRoot, value);
-  } catch {
-    return value;
-  }
+function evidencePath(state: CreatorState, value: string): string {
+  return value ? toStoredPaths(state.projectRoot).project(value) : value;
 }
 
 function runtimeEvidencePaths(state: CreatorState): Record<string, string> {
   return {
     ...(state.generated
       ? {
-          generated: evidencePath(
-            state.projectRoot,
-            state.generated.packageRoot,
-          ),
+          generated: evidencePath(state, state.generated.packageRoot),
         }
       : {}),
-    ...(state.eval
-      ? { eval: evidencePath(state.projectRoot, state.eval.resultPath) }
-      : {}),
+    ...(state.eval ? { eval: evidencePath(state, state.eval.resultPath) } : {}),
   };
 }
 
@@ -110,6 +101,7 @@ interface SourceEvidenceCheck {
 }
 
 function sourceEvidenceCheck(state: CreatorState): SourceEvidenceCheck {
+  const storedPaths = toStoredPaths(state.projectRoot);
   const expected = new Map<string, string>();
   const conflictingRoots = new Set<string>();
   const rememberSource = (root: string, hash: string) => {
@@ -146,7 +138,7 @@ function sourceEvidenceCheck(state: CreatorState): SourceEvidenceCheck {
     (root) => `Source evidence hashes conflict for root: ${root}`,
   );
   for (const [root, expectedHash] of expected) {
-    const label = evidencePath(state.projectRoot, root);
+    const label = storedPaths.source(root);
     let currentHash: string | null = null;
     if (!/^[a-f0-9]{64}$/u.test(expectedHash)) {
       blockers.push(`Source evidence hash is invalid: ${label}`);
@@ -187,7 +179,7 @@ function evaluationEvidenceCheck(state: CreatorState): EvaluationEvidenceCheck {
   }
   try {
     const stats = realpathSync(evaluation.resultPath);
-    if (!isWithin(state.projectRoot, stats)) {
+    if (!isWithin(physicalProjectRoot(state.projectRoot), stats)) {
       return {
         reportHash: null,
         blockers: [
@@ -931,7 +923,7 @@ function authoringReadinessSection(
       warnings: [...sessionReadiness.warnings],
       evidence: {
         session: evidencePath(
-          state.projectRoot,
+          state,
           sessionReadiness.identity?.sessionPath ??
             sessionReadiness.evidence.session ??
             state.authoring?.sessionPath ??
@@ -964,10 +956,7 @@ function authoringReadinessSection(
       warnings,
       evidence: state.generated
         ? {
-            generated: evidencePath(
-              state.projectRoot,
-              state.generated.packageRoot,
-            ),
+            generated: evidencePath(state, state.generated.packageRoot),
           }
         : {},
       hashes,
@@ -1036,7 +1025,7 @@ function authoringReadinessSection(
     blockers,
     warnings,
     evidence: {
-      session: evidencePath(state.projectRoot, authoring.sessionPath),
+      session: evidencePath(state, authoring.sessionPath),
       ...(authoring.review
         ? { authoringReview: authoring.review.reviewHash }
         : {}),
@@ -1125,7 +1114,7 @@ export function reviewState(
         ? { approvalReadiness: state.review.readinessHash }
         : {}),
       ...(state.published
-        ? { published: evidencePath(state.projectRoot, state.published.path) }
+        ? { published: evidencePath(state, state.published.path) }
         : {}),
     },
     hashes: {
@@ -1150,14 +1139,11 @@ export function reviewState(
         : "blocked",
     blockers,
     evidence: {
-      draft: evidencePath(state.projectRoot, state.draftPath),
+      draft: evidencePath(state, state.draftPath),
       ...runtimeEvidencePaths(state),
       ...(state.authoring
         ? {
-            authoring: evidencePath(
-              state.projectRoot,
-              state.authoring.sessionPath,
-            ),
+            authoring: evidencePath(state, state.authoring.sessionPath),
           }
         : {}),
     },

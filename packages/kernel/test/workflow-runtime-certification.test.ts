@@ -131,6 +131,7 @@ describe("WorkflowRuntime Phase 3 certification", () => {
         defaultLocale: "en",
       },
       destination: path.join(root, "generated"),
+      projectRoot: root,
     });
 
     const result = await certifyWorkflowRuntime({
@@ -243,6 +244,7 @@ describe("WorkflowRuntime Phase 3 certification", () => {
         defaultLocale: "en",
       },
       destination: path.join(root, "revisioned-generated"),
+      projectRoot: root,
     });
 
     const result = await certifyWorkflowRuntime({
@@ -284,6 +286,7 @@ describe("WorkflowRuntime Phase 3 certification", () => {
         defaultLocale: "en",
       },
       destination: path.join(root, "phase4-generated"),
+      projectRoot: root,
     });
 
     const generatedPackageHash = await hashDirectory(generated.packageRoot);

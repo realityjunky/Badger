@@ -6,6 +6,7 @@ import {
   sha256,
   stableValue,
 } from "../util.js";
+import { authoringPlanIdentity } from "./plan.js";
 import {
   authoringLaneClaimIds,
   authoringLaneIds,
@@ -935,18 +936,12 @@ async function packageFindings(
       const parsed = JSON.parse(
         await fs.readFile(path.join(options.packageRoot, relativePath), "utf8"),
       );
-      const canonical =
-        relativePath === "reference/authoring-plan.json" && isRecord(parsed)
-          ? Object.fromEntries(
-              Object.entries(parsed).filter(
-                ([key]) => key !== "authoringPlanHash",
-              ),
-            )
-          : parsed;
       const actualIdentity =
         relativePath === "reference/authoring-plan.json"
-          ? sha256(JSON.stringify(stableValue(canonical)))
-          : sha256(JSON.stringify(canonical));
+          ? isRecord(parsed)
+            ? authoringPlanIdentity(parsed)
+            : sha256(JSON.stringify(stableValue(parsed)))
+          : sha256(JSON.stringify(parsed));
       if (actualIdentity !== expectedHash) {
         findings.push({
           severity: "critical",

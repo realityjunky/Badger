@@ -16,6 +16,7 @@ import {
   mapAuthoringPlanPaths,
   mapAuthoringRecordPaths,
   mapAuthoringSummaryPaths,
+  mapUpgradeManifestPaths,
   toResolvedPaths,
   toStoredPaths,
 } from "../factory/project-paths.js";
@@ -143,8 +144,12 @@ function isCompleteStatus(value: unknown): boolean {
   return COMPLETE_STATUSES.includes(value as AuthoringStatus);
 }
 
+function portableSessionPath(workflow: string): string {
+  return path.posix.join(".badger", "authoring", workflow);
+}
+
 function sessionRoot(state: CreatorState): string {
-  return path.join(state.projectRoot, ".badger", "authoring", state.name);
+  return path.resolve(state.projectRoot, portableSessionPath(state.name));
 }
 
 export function authoringSessionPath(state: CreatorState): string {
@@ -173,50 +178,26 @@ export function authoringRecordsPath(state: CreatorState): string {
   return recordsRoot(state);
 }
 
-function sessionIdentityHash(value: {
-  sessionPath: string;
-  workflow: string;
-  planHash: string;
-  protocolHash: string;
-  workflowProtocolHash: string;
-  sourceEvidenceHash: string;
-  authoringPlanHash: string;
-  authoringInputHash: string;
-  semanticDossierHash?: string;
-  scaffoldHash: string;
-}): string {
-  return sha256(
-    JSON.stringify(
-      stableValue({
-        ...value,
-      }),
-    ),
-  );
+type AuthoringSessionIdentityFields = Omit<
+  AuthoringSessionIdentity,
+  "schemaVersion" | "sessionId" | "sessionPath" | "revision"
+>;
+
+function sessionIdentityHash(
+  value: AuthoringSessionIdentityFields & { sessionPath: string },
+): string {
+  return sha256(JSON.stringify(stableValue(value)));
 }
 
-// The session identity must survive moving the project, so it hashes the
-// project-relative session location rather than the absolute path it resolves
-// to on this host.
-function portableSessionPath(workflow: string): string {
-  return [".badger", "authoring", workflow].join("/");
+function summaryWorkflow(summary: AuthoringStateSummary): string {
+  return summary.workflow ?? path.basename(summary.sessionPath);
 }
 
 function sessionIdentityFields(
   summary: AuthoringStateSummary,
-  workflow: string,
-): {
-  workflow: string;
-  planHash: string;
-  protocolHash: string;
-  workflowProtocolHash: string;
-  sourceEvidenceHash: string;
-  authoringPlanHash: string;
-  authoringInputHash: string;
-  semanticDossierHash?: string;
-  scaffoldHash: string;
-} {
+): AuthoringSessionIdentityFields {
   return {
-    workflow,
+    workflow: summaryWorkflow(summary),
     planHash: summary.planHash,
     protocolHash: summary.protocolHash,
     workflowProtocolHash: summary.workflowProtocolHash,
@@ -236,12 +217,11 @@ export function authoringSessionIdentity(
   const summary: AuthoringStateSummary | undefined =
     "sessionPath" in value ? value : value.authoring;
   if (!summary) return undefined;
-  const workflow = summary.workflow ?? path.basename(summary.sessionPath);
-  const fields = sessionIdentityFields(summary, workflow);
+  const fields = sessionIdentityFields(summary);
   return {
     schemaVersion: 1,
     sessionId: sessionIdentityHash({
-      sessionPath: portableSessionPath(workflow),
+      sessionPath: portableSessionPath(fields.workflow),
       ...fields,
     }),
     sessionPath: summary.sessionPath,
@@ -250,31 +230,16 @@ export function authoringSessionIdentity(
   };
 }
 
-// Sessions written before project-relative storage hashed the absolute session
-// path. Accept their identity once so an existing checkout upgrades in place.
-function legacyAuthoringSessionId(summary: AuthoringStateSummary): string {
-  const workflow = summary.workflow ?? path.basename(summary.sessionPath);
-  return sessionIdentityHash({
-    sessionPath: summary.sessionPath,
-    ...sessionIdentityFields(summary, workflow),
-  });
-}
-
 function normalizeAuthoringSummary(
   summary: AuthoringStateSummary,
 ): AuthoringStateSummary {
-  const workflow = summary.workflow ?? path.basename(summary.sessionPath);
   const normalized = {
     ...summary,
-    workflow,
+    workflow: summaryWorkflow(summary),
   };
   const identity = authoringSessionIdentity(normalized);
   if (!identity) throw new Error("Authoring session identity is missing");
-  if (
-    summary.sessionId &&
-    summary.sessionId !== identity.sessionId &&
-    summary.sessionId !== legacyAuthoringSessionId(normalized)
-  ) {
+  if (summary.sessionId && summary.sessionId !== identity.sessionId) {
     throw new Error("Authoring session identity is stale");
   }
   return {
@@ -2687,11 +2652,12 @@ async function materializeArtifact(
         `Authoring artifact content path escapes the project: ${input.path}`,
       );
     const realSuppliedPath = await fs.realpath(suppliedPath);
-    if (!isWithin(state.projectRoot, realSuppliedPath))
+    const realProjectRoot = await fs.realpath(state.projectRoot);
+    if (!isWithin(realProjectRoot, realSuppliedPath))
       throw new Error(
         `Authoring artifact content path escapes the project: ${input.path}`,
       );
-    if (isWithin(path.join(state.projectRoot, ".badger"), realSuppliedPath))
+    if (isWithin(path.join(realProjectRoot, ".badger"), realSuppliedPath))
       throw new Error(
         `Authoring artifact content path is protected: ${input.path}`,
       );
@@ -3092,7 +3058,7 @@ async function readArtifactContent(
       `Authoring artifact content path escapes the session: ${artifact.path}`,
     );
   const realTarget = await fs.realpath(target);
-  if (!isWithin(sessionRoot(state), realTarget))
+  if (!isWithin(await fs.realpath(sessionRoot(state)), realTarget))
     throw new Error(
       `Authoring artifact content path escapes the session: ${artifact.path}`,
     );
@@ -4139,6 +4105,7 @@ async function restoreOptionalText(
 export async function assemblePackage(
   state: CreatorState,
   confirmed = false,
+  options: { sourceRoots?: readonly string[] } = {},
 ): Promise<CreatorState> {
   if (!confirmed) {
     throw new Error("Authoring assembly requires explicit confirmation");
@@ -4202,6 +4169,8 @@ export async function assemblePackage(
         proposal: current.confirmedProposal!,
         plan: factoryPlan,
         destination: stagingRoot,
+        projectRoot: current.projectRoot,
+        sourceRoots: options.sourceRoots,
       });
       if (current.authoring.scaffoldHash !== scaffold.scaffoldHash)
         throw new Error(
@@ -4220,7 +4189,14 @@ export async function assemblePackage(
       if (assembledSourceEvidence) {
         await atomicWrite(
           path.join(scaffold.packageRoot, "reference", "source-evidence.json"),
-          JSON.stringify(assembledSourceEvidence, null, 2) + "\n",
+          JSON.stringify(
+            mapUpgradeManifestPaths(
+              assembledSourceEvidence,
+              toStoredPaths(current.projectRoot),
+            ),
+            null,
+            2,
+          ) + "\n",
         );
       }
       const authoredPaths = authoredLeafPaths(plan);
@@ -4697,6 +4673,7 @@ export interface AuthoringSessionGateway {
   assemble(
     state: CreatorState,
     confirmed?: boolean,
+    options?: { sourceRoots?: readonly string[] },
   ): ReturnType<typeof assemblePackage>;
 }
 
@@ -4731,7 +4708,7 @@ export function authoringSessionGateway(): AuthoringSessionGateway {
         confirmed: true,
       });
     },
-    assemble: async (state, confirmed = false) => {
+    assemble: async (state, confirmed = false, options = {}) => {
       const gate = await authoringWriteGate({
         state,
         operation: "assemble",
@@ -4742,7 +4719,7 @@ export function authoringSessionGateway(): AuthoringSessionGateway {
           `Cannot assemble authoring session:\n${gate.blockers.join("\n")}`,
         );
       }
-      return assemblePackage(state, true);
+      return assemblePackage(state, true, options);
     },
   };
 }

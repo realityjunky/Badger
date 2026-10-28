@@ -1030,6 +1030,7 @@ describe("WorkflowRuntime decision evidence scope", () => {
         defaultLocale: "en",
       },
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const stateScript = path.join(
       generated.packageRoot,

@@ -57,6 +57,55 @@ function diagnostic(
   return { code, message, ...(path ? { path } : {}) };
 }
 
+function identityHash(value: unknown): string {
+  return sha256(JSON.stringify(stableValue(value)));
+}
+
+function withoutKey(value: unknown, key: string): unknown {
+  return isRecord(value)
+    ? Object.fromEntries(Object.entries(value).filter(([name]) => name !== key))
+    : value;
+}
+
+function locationFreeSourceEvidence(value: unknown): unknown {
+  return Array.isArray(value)
+    ? value.map((candidate) =>
+        isRecord(candidate) && Array.isArray(candidate.sources)
+          ? {
+              ...candidate,
+              sources: candidate.sources.map((source) =>
+                withoutKey(source, "root"),
+              ),
+            }
+          : candidate,
+      )
+    : value;
+}
+
+function sourceEvidenceIdentity(
+  source: AuthoringSourceEvidence[],
+  upgradeSource: FactoryProposal["upgradeSource"],
+): string {
+  const candidates = locationFreeSourceEvidence(source);
+  return identityHash(
+    upgradeSource
+      ? { candidates, upgradeSource: withoutKey(upgradeSource, "root") }
+      : candidates,
+  );
+}
+
+export function authoringPlanIdentity(plan: object): string {
+  const value = withoutKey(plan, "authoringPlanHash") as Record<
+    string,
+    unknown
+  >;
+  return identityHash({
+    ...value,
+    sourceEvidence: locationFreeSourceEvidence(value.sourceEvidence),
+    upgradeSource: withoutKey(value.upgradeSource, "root"),
+  });
+}
+
 function sourceEvidence(proposal: FactoryProposal): AuthoringSourceEvidence[] {
   return proposal.candidates.map((candidate) => ({
     name: candidate.name,
@@ -179,12 +228,6 @@ function planForProposal(
   const workflowProtocolHash = sha256(
     JSON.stringify(options.proposal.workflow),
   );
-  const sourceEvidenceValue = options.proposal.upgradeSource
-    ? {
-        candidates: source,
-        upgradeSource: options.proposal.upgradeSource,
-      }
-    : source;
   return {
     schemaVersion: 1,
     kind: "authoring-plan",
@@ -193,8 +236,9 @@ function planForProposal(
     protocolHash: AUTHORING_PROTOCOL_HASH,
     workflowProtocolHash,
     planHash: options.proposal.planHash,
-    sourceEvidenceHash: sha256(
-      JSON.stringify(stableValue(sourceEvidenceValue)),
+    sourceEvidenceHash: sourceEvidenceIdentity(
+      source,
+      options.proposal.upgradeSource,
     ),
     dag: authoringDag(),
     lanes,
@@ -253,7 +297,7 @@ export function deriveAuthoringPlan(
   const withoutHash = planForProposal(options, source);
   const plan: AuthoringPlan = {
     ...withoutHash,
-    authoringPlanHash: sha256(JSON.stringify(stableValue(withoutHash))),
+    authoringPlanHash: authoringPlanIdentity(withoutHash),
   };
   const diagnostics = validateAuthoringPlan(plan);
   if (diagnostics.length) throw new AuthoringPlanValidationError(diagnostics);

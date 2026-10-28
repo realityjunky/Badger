@@ -1,7 +1,7 @@
 import { Command, Option } from "commander";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { findSkills, readSkillSourceManifest } from "./skill/find.js";
+import { checkSkillSources, readSkillSourceManifest } from "./skill/find.js";
 import type { SkillSourceDeclaration } from "./types.js";
 import { buildProposal, readPlan } from "./factory/proposal.js";
 import { generatePackage } from "./factory/generate.js";
@@ -33,6 +33,23 @@ function projectRoot(value?: string): string {
 
 function collectRepeated(value: string, previous: string[] = []): string[] {
   return [...previous, value];
+}
+
+function sourceRootOption(): Option {
+  return new Option(
+    "--source-root <dir>",
+    "Registered root outside the project where Skill and upgrade sources may live; repeatable, added to BADGER_SOURCE_ROOTS",
+  )
+    .argParser(collectRepeated)
+    .default([]);
+}
+
+function registeredSourceRoots(root: string, flags: string[] = []): string[] {
+  const environment = (process.env.BADGER_SOURCE_ROOTS ?? "")
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return [...environment, ...flags].map((entry) => path.resolve(root, entry));
 }
 
 function parseSourceDeclaration(value: string): SkillSourceDeclaration {
@@ -93,31 +110,24 @@ program
     collectRepeated,
     [],
   )
-  .option(
-    "--source-root <dir>",
-    "Registered root allowed for absolute Skill sources; repeatable",
-    collectRepeated,
-    [],
-  )
+  .addOption(sourceRootOption())
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (options) => {
     const root = projectRoot(options.project);
     const declarations = [...(options.skill ?? [])].map(parseSourceDeclaration);
-    const roots = [...(options.sourceRoot ?? [])];
     for (const manifestFile of [...(options.sourceManifest ?? [])]) {
       const manifest = await readSkillSourceManifest(
         path.resolve(root, manifestFile),
       );
       declarations.push(...manifest.sources);
-      roots.push(...(manifest.roots ?? []));
     }
     emit(
       {
-        candidates: await findSkills({
+        candidates: await checkSkillSources({
           projectRoot: root,
           sources: declarations,
-          roots,
+          roots: registeredSourceRoots(root, options.sourceRoot),
         }),
       },
       options.json,
@@ -126,13 +136,16 @@ program
 
 program
   .command("propose <plan>")
+  .addOption(sourceRootOption())
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (plan, options) => {
+    const root = projectRoot(options.project);
     emit(
       await buildProposal({
-        projectRoot: projectRoot(options.project),
+        projectRoot: root,
         planPath: plan,
+        sourceRoots: registeredSourceRoots(root, options.sourceRoot),
       }),
       options.json,
     );
@@ -185,6 +198,7 @@ program
       .default("quick"),
   )
   .option("--destination <dir>", "Destination for the migrated package")
+  .addOption(sourceRootOption())
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (name, options) => {
@@ -193,6 +207,7 @@ program
       state: await readState(root, name),
       confirmed: options.confirm,
       depth: options.depth,
+      sourceRoots: registeredSourceRoots(root, options.sourceRoot),
       ...(options.destination
         ? { destination: path.resolve(root, options.destination) }
         : {}),
@@ -270,14 +285,17 @@ program
   .command("assemble <name>")
   .description("Assemble a current authored workflow package")
   .option("--confirm", "Confirm authoring assembly")
+  .addOption(sourceRootOption())
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (name, options) => {
     if (!options.confirm)
       throw new Error("Authoring assembly requires explicit confirmation");
+    const root = projectRoot(options.project);
     const state = await authoringSessionGateway().assemble(
-      await readState(projectRoot(options.project), name),
+      await readState(root, name),
       options.confirm,
+      { sourceRoots: registeredSourceRoots(root, options.sourceRoot) },
     );
     emit(
       {
@@ -293,11 +311,17 @@ program
 program
   .command("init <plan>")
   .option("--confirm", "Confirm the displayed proposal")
+  .addOption(sourceRootOption())
   .option("--project <dir>", "Project root", ".")
   .option("--json", "JSON output")
   .action(async (planPath, options) => {
     const root = projectRoot(options.project);
-    const proposal = await buildProposal({ projectRoot: root, planPath });
+    const sourceRoots = registeredSourceRoots(root, options.sourceRoot);
+    const proposal = await buildProposal({
+      projectRoot: root,
+      planPath,
+      sourceRoots,
+    });
     const plan = await readPlan(planPath);
     if (!proposal.canInitialize)
       throw new Error(
@@ -310,6 +334,7 @@ program
         plan,
         proposal,
         confirmed: options.confirm,
+        sourceRoots,
       }),
       options.json,
     );
@@ -317,6 +342,7 @@ program
 
 program
   .command("generate <name>")
+  .addOption(sourceRootOption())
   .option("--project <dir>", "Project root", ".")
   .addOption(
     new Option("--depth <depth>", "Authoring review depth")
@@ -327,9 +353,11 @@ program
   .action(async (name, options) => {
     const root = projectRoot(options.project);
     const state = await readState(root, name);
+    const sourceRoots = registeredSourceRoots(root, options.sourceRoot);
     const proposal = await buildProposal({
       projectRoot: root,
       planPath: state.planPath,
+      sourceRoots,
     });
     if (proposal.name !== state.name)
       throw new Error("Plan workflow name does not match Creator state");
@@ -344,6 +372,7 @@ program
       plan,
       destination: state.draftPath,
       projectRoot: root,
+      sourceRoots,
       authoringDepth: options.depth,
     });
     state.generated = generated;

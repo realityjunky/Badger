@@ -3,6 +3,7 @@ import path from "node:path";
 import { isWithin } from "../util.js";
 
 export interface SourceScope {
+  project: string;
   lexical: string[];
   physical: string[];
 }
@@ -22,7 +23,7 @@ export async function sourceScope(
   const physical: string[] = [];
   for (const root of lexical)
     physical.push(await fs.realpath(root).catch(() => root));
-  return { lexical, physical };
+  return { project: physical[0]!, lexical, physical };
 }
 
 export function withinAny(

@@ -8,6 +8,8 @@ import {
   AUTHORING_LANE_IDS,
   AUTHORING_PROTOCOL,
 } from "../src/authoring/index.js";
+import { SKILL_IDENTITY_IGNORE } from "../src/skill/identity.js";
+import { SKILL_SCRIPT_SIDE_EFFECTS } from "../src/types.js";
 
 const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const kernelRoot = path.join(repositoryRoot, "packages/kernel");
@@ -19,6 +21,10 @@ const serviceDecisions = [
   "0005-agents-draft-people-sign-off.md",
   "0006-questionnaire-records-and-dossier-version-2.md",
   "0009-reviewed-sql-migrations.md",
+];
+const kernelDecisions = [
+  "0007-project-relative-creator-paths.md",
+  "0008-skill-identity-and-registered-roots.md",
 ];
 
 async function readText(relativePath: string): Promise<string> {
@@ -210,14 +216,18 @@ describe("Badger release artifacts", () => {
     expect(changelog).not.toContain("dashboard adapters");
   });
 
-  it("records the collaborative service decisions as ADRs", async () => {
+  it("records the collaborative service and kernel decisions as ADRs", async () => {
     await expect(
       fs.readdir(path.join(repositoryRoot, "docs/adr")),
     ).resolves.toEqual(
-      expect.arrayContaining([semanticDossierDecision, ...serviceDecisions]),
+      expect.arrayContaining([
+        semanticDossierDecision,
+        ...serviceDecisions,
+        ...kernelDecisions,
+      ]),
     );
 
-    for (const decision of serviceDecisions) {
+    for (const decision of [...serviceDecisions, ...kernelDecisions]) {
       const record = await readText(`docs/adr/${decision}`);
       expect(record, decision).toMatch(/^# .+\n\nStatus: accepted\./u);
       await expectLocalLinksToResolve(
@@ -230,6 +240,49 @@ describe("Badger release artifacts", () => {
         "docs/adr/0006-questionnaire-records-and-dossier-version-2.md",
       ),
     ).toContain(`(${semanticDossierDecision})`);
+  });
+
+  it("documents the identity ignore list and the script side effects the kernel enforces", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const decision = await readText(
+      "docs/adr/0008-skill-identity-and-registered-roots.md",
+    );
+    const codes = (text: string | undefined, pattern: RegExp) =>
+      [...(text ?? "").matchAll(pattern)].map((match) => match[1]);
+    const htmlCode = /<code>([^<]+)<\/code>/gu;
+    const markdownCode = /`([^`]+)`/gu;
+
+    for (const heading of [
+      '<p data-lang="en"><b>The ignored entries, in full.</b>',
+      '<p data-lang="zh" lang="zh-CN"><b>被忽略条目的完整清单。</b>',
+    ]) {
+      const paragraph = manual.slice(manual.indexOf(heading));
+      expect(
+        codes(paragraph.slice(0, paragraph.indexOf("</p>")), htmlCode),
+        heading,
+      ).toEqual([...SKILL_IDENTITY_IGNORE]);
+    }
+    expect(
+      codes(
+        decision.match(/stays out of it: (.+?)\. The list is fixed/u)?.[1],
+        markdownCode,
+      ),
+    ).toEqual([...SKILL_IDENTITY_IGNORE]);
+
+    expect(
+      codes(
+        manual.match(/A script's side effects \(([^)]+)\)/u)?.[1],
+        htmlCode,
+      ),
+    ).toEqual([...SKILL_SCRIPT_SIDE_EFFECTS]);
+    expect(
+      codes(
+        decision.match(
+          /`scripts\/` path: one of (.+?), or a list of them/u,
+        )?.[1],
+        markdownCode,
+      ),
+    ).toEqual([...SKILL_SCRIPT_SIDE_EFFECTS]);
   });
 
   it("defines the collaborative service vocabulary once", async () => {
@@ -293,7 +346,11 @@ describe("Badger release artifacts", () => {
       "list dashboards and platform integration as out of scope",
     );
     expect(manual).not.toContain("把仪表盘与平台集成列为范围之外");
-    for (const decision of [semanticDossierDecision, ...serviceDecisions]) {
+    for (const decision of [
+      semanticDossierDecision,
+      ...serviceDecisions,
+      ...kernelDecisions,
+    ]) {
       expect(manual).toContain(`href="adr/${decision}"`);
     }
 

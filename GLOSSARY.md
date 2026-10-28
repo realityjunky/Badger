@@ -37,11 +37,11 @@ The directory in which a workflow is built and run locally. Badger's records of 
 An immutable snapshot of one Skill's files, identified by a hash of their content; changed content makes a new version.
 
 **Source check**:
-The read-only inspection of a workflow's declared Skill sources that reports each source's identity, inventory, and script side effects before any question is asked.
+The read-only inspection of a workflow's declared Skill sources that reports each source's identity, inventory, script side effects, ignored files, and blockers before any question is asked.
 _Avoid_: candidates
 
 **Registered source root**:
-A directory outside the Project that a source declaration may point into, registered with `--source-root`, a source manifest's `roots`, or a FactoryPlan's `sourceRoots`. A source location outside the Project and every registered root is refused, including an upgrade plan's `sourceRoot`.
+A directory outside the Project that the host lets source locations point into, registered with `--source-root`, `BADGER_SOURCE_ROOTS`, or the kernel's `sourceRoots` option; a source manifest or FactoryPlan cannot register one. A source location outside the Project and every registered source root is refused, including an upgrade plan's `sourceRoot`.
 _Avoid_: allowed directory
 
 **Source study**:

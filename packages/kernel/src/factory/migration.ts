@@ -25,6 +25,7 @@ export interface LegacyDraftMigrationOptions {
   confirmed: boolean;
   destination?: string;
   depth?: AuthoringDepth;
+  sourceRoots?: readonly string[];
 }
 
 export interface LegacyDraftMigrationResult {
@@ -221,7 +222,9 @@ export async function migrateLegacyDraft(
   );
   await assertDestinationWithinProject(options.state.projectRoot, destination);
   await assertDestinationAvailable(destination);
-  const sourceEvidence = await inspectUpgradeSource(sourceRoot);
+  const sourceEvidence = await inspectUpgradeSource(sourceRoot, {
+    projectRoot: options.state.projectRoot,
+  });
   const originalState = structuredClone(options.state);
   const root = migrationRoot(options.state, sourceRoot);
   const migrationPlanPath = path.join(root, "plan.json");
@@ -250,6 +253,7 @@ export async function migrateLegacyDraft(
     const proposal = await buildProposal({
       projectRoot: options.state.projectRoot,
       planPath: migrationPlanPath,
+      sourceRoots: options.sourceRoots,
     });
     if (!proposal.canInitialize) {
       throw new Error(
@@ -261,6 +265,7 @@ export async function migrateLegacyDraft(
       plan,
       destination,
       projectRoot: options.state.projectRoot,
+      sourceRoots: options.sourceRoots,
       ...(options.depth ? { authoringDepth: options.depth } : {}),
     });
     destinationCreated = true;

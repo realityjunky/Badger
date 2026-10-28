@@ -16,10 +16,14 @@ export async function writeState(state: CreatorState): Promise<void> {
 }
 
 export async function initializeState(
-  options: InitializeStateOptions & { projectRoot: string },
+  options: InitializeStateOptions & {
+    projectRoot: string;
+    sourceRoots?: readonly string[];
+  },
 ): Promise<CreatorState> {
   return createStandaloneWorkflowKernel({
     projectRoot: options.projectRoot,
+    sourceRoots: options.sourceRoots,
   }).initializeState(options);
 }
 

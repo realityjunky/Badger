@@ -33,6 +33,13 @@ import {
 } from "../authoring/protocol.js";
 import { normalizeWorkflowRepairPolicy } from "../workflow-runtime/repair.js";
 import { deriveAuthoringPlan } from "../authoring/plan.js";
+import {
+  mapAuthoringPlanPaths,
+  mapCandidatePaths,
+  mapUpgradeManifestPaths,
+  toStoredPaths,
+  type ProjectPathMappers,
+} from "./project-paths.js";
 import type { AuthoringDepth } from "../authoring/types.js";
 import {
   assertUpgradeDestinationOutsideSource,
@@ -776,6 +783,7 @@ async function writeScaffold(options: {
   proposal: FactoryProposal;
   plan: FactoryPlan;
   root: string;
+  storedPaths: ProjectPathMappers;
   sourceEvidence?: UpgradeSourceEvidence;
   authoringDepth?: AuthoringDepth;
 }): Promise<{
@@ -815,12 +823,22 @@ async function writeScaffold(options: {
   );
   await atomicWrite(
     path.join(root, "reference", "resolved-skills.json"),
-    JSON.stringify(proposal.candidates, null, 2) + "\n",
+    JSON.stringify(
+      proposal.candidates.map((candidate) =>
+        mapCandidatePaths(candidate, options.storedPaths),
+      ),
+      null,
+      2,
+    ) + "\n",
   );
   if (authoringPlan) {
     await atomicWrite(
       authoringPlanPath,
-      JSON.stringify(authoringPlan, null, 2) + "\n",
+      JSON.stringify(
+        mapAuthoringPlanPaths(authoringPlan, options.storedPaths),
+        null,
+        2,
+      ) + "\n",
     );
   }
   for (const lane of authoringLaneIds()) {
@@ -860,7 +878,11 @@ async function writeScaffold(options: {
   if (sourceMigration) {
     await atomicWrite(
       path.join(root, "reference", "source-evidence.json"),
-      JSON.stringify(sourceMigration, null, 2) + "\n",
+      JSON.stringify(
+        mapUpgradeManifestPaths(sourceMigration, options.storedPaths),
+        null,
+        2,
+      ) + "\n",
     );
   }
   for (const node of activeNodes(proposal)) {
@@ -949,12 +971,13 @@ export async function generatePackage(options: {
   proposal: FactoryProposal;
   plan: FactoryPlan;
   destination: string;
-  projectRoot?: string;
+  projectRoot: string;
+  sourceRoots?: readonly string[];
   authoringDepth?: AuthoringDepth;
 }): Promise<GeneratedPackage> {
   const root = path.resolve(options.destination);
   const sourceRoot = options.plan.sourceRoot
-    ? path.resolve(options.projectRoot ?? ".", options.plan.sourceRoot)
+    ? path.resolve(options.projectRoot, options.plan.sourceRoot)
     : undefined;
   if (sourceRoot && isWithin(sourceRoot, root)) {
     throw new Error(
@@ -962,15 +985,10 @@ export async function generatePackage(options: {
     );
   }
   const sourceEvidence = sourceRoot
-    ? await inspectUpgradeSource(
-        sourceRoot,
-        options.projectRoot
-          ? {
-              projectRoot: options.projectRoot,
-              roots: options.plan.sourceRoots,
-            }
-          : undefined,
-      )
+    ? await inspectUpgradeSource(sourceRoot, {
+        projectRoot: options.projectRoot,
+        roots: options.sourceRoots ?? [],
+      })
     : undefined;
   if (sourceRoot) {
     await assertUpgradeDestinationOutsideSource(sourceRoot, root);
@@ -992,6 +1010,7 @@ export async function generatePackage(options: {
       proposal,
       plan: options.plan,
       root: stagingRoot,
+      storedPaths: toStoredPaths(options.projectRoot),
       ...(sourceEvidence ? { sourceEvidence } : {}),
       ...(options.authoringDepth
         ? { authoringDepth: options.authoringDepth }

@@ -102,6 +102,7 @@ describe("Badger authoring lifecycle", () => {
       proposal,
       plan,
       destination: state.draftPath,
+      projectRoot: state.projectRoot,
       authoringDepth: depth,
     });
     state.generated = generated;
@@ -172,6 +173,7 @@ describe("Badger authoring lifecycle", () => {
       proposal,
       plan: await readPlan(planPath),
       destination: state.draftPath,
+      projectRoot: state.projectRoot,
     });
     state.generated = regenerated;
     await initializeAuthoringSession({
@@ -202,6 +204,7 @@ describe("Badger authoring lifecycle", () => {
       proposal,
       plan,
       destination: state.draftPath,
+      projectRoot: state.projectRoot,
     });
     state.generated = generated;
     await initializeAuthoringSession({
@@ -545,6 +548,7 @@ describe("Badger authoring lifecycle", () => {
       proposal,
       plan,
       destination: path.join(project, "generated"),
+      projectRoot: project,
     });
     await expect(
       fs.readFile(
@@ -563,6 +567,7 @@ describe("Badger authoring lifecycle", () => {
         proposal,
         plan,
         destination: path.join(source, "nested-output"),
+        projectRoot: project,
       }),
     ).rejects.toThrow(/inside the upgrade source package/iu);
   });
