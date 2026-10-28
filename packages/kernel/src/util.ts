@@ -94,9 +94,20 @@ export async function atomicWrite(
   });
 }
 
+/** Errors meaning the file system cannot make hard links at all. */
+const NO_HARD_LINKS = new Set([
+  "EPERM",
+  "ENOTSUP",
+  "EOPNOTSUPP",
+  "ENOSYS",
+  "EXDEV",
+]);
+
 /**
  * Writes a new file whole, or fails with EEXIST when the file already exists,
- * so two writers cannot both create it.
+ * so two writers cannot both create it. Where the file system has no hard
+ * links, the file is created exclusively in place instead; a crash then can
+ * leave it partly written, which a reader reports as unparseable.
  */
 export async function atomicCreate(
   file: string,
@@ -110,6 +121,10 @@ export async function atomicCreate(
   await fs.writeFile(temporary, content, { encoding: "utf8", flag: "wx" });
   try {
     await fs.link(temporary, file);
+  } catch (error) {
+    if (!NO_HARD_LINKS.has((error as NodeJS.ErrnoException).code ?? ""))
+      throw error;
+    await fs.writeFile(file, content, { encoding: "utf8", flag: "wx" });
   } finally {
     await fs.rm(temporary, { force: true });
   }
