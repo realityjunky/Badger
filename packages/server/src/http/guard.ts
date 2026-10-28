@@ -6,6 +6,7 @@ export interface GuardInput {
   originHeader: string | undefined;
   allowedHostnames: readonly string[];
   allowedOrigins: readonly string[];
+  bearer?: boolean;
 }
 
 export type GuardDecision =
@@ -30,7 +31,7 @@ function isAllowedOrigin(
 
 /**
  * Every request passes this before anyone is identified. A foreign Host is
- * refused, and a write must carry an Origin this deployment allows.
+ * refused, and a cookie write must carry an Origin this deployment allows.
  */
 export function guardRequest(input: GuardInput): GuardDecision {
   if (input.hostHeader === undefined) {
@@ -48,7 +49,7 @@ export function guardRequest(input: GuardInput): GuardDecision {
     if (!isAllowedOrigin(input.originHeader, input.allowedOrigins)) {
       return refusal("The Origin header is not allowed");
     }
-  } else if (UNSAFE_METHODS.has(input.method.toUpperCase())) {
+  } else if (UNSAFE_METHODS.has(input.method.toUpperCase()) && !input.bearer) {
     return refusal("An Origin header is required for this request");
   }
 

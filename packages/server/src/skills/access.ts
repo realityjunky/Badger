@@ -27,6 +27,16 @@ export async function skillGroupPermissions(
   person: Person,
 ): Promise<SkillGroupPermission[]> {
   const visible = await visibleGroups(database, access, person);
+  const contributorRoles = [
+    ...(access.tokenScopes === undefined ||
+    access.tokenScopes.includes("engineer")
+      ? ["Engineer"]
+      : []),
+    ...(access.tokenScopes === undefined ||
+    access.tokenScopes.includes("expert")
+      ? ["Field expert"]
+      : []),
+  ];
   const rows = await database.query<{
     id: string;
     name: string;
@@ -37,7 +47,7 @@ export async function skillGroupPermissions(
                       join workflows w on w.id = b.workflow_id
                      where b.scope_type = 'workflow' and w.group_id = g.id
                        and b.person_id = $3
-                       and b.role in ('Engineer', 'Field expert')) as may_upload
+                       and b.role = any($4::text[])) as may_upload
        from groups g
       where $1::boolean or g.id = any($2::text[])
          or exists (select 1 from role_bindings b
@@ -49,18 +59,22 @@ export async function skillGroupPermissions(
       visible.everything,
       visible.everything ? [] : [...visible.groupIds],
       person.id,
+      contributorRoles,
     ],
   );
   const administrator = isAdministrator(access);
   return Promise.all(
     rows.rows.map(async (row) => {
-      const canUpload = administrator || row.may_upload;
+      const canUpload =
+        (administrator && contributorRoles.length > 0) || row.may_upload;
       return {
         id: row.id,
         name: row.name,
         canUpload,
         canCreateSkill:
-          canUpload || (await mayManageGroup(database, access, person, row.id)),
+          canUpload ||
+          (access.tokenScopes === undefined &&
+            (await mayManageGroup(database, access, person, row.id))),
       };
     }),
   );

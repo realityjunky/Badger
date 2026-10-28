@@ -29,6 +29,13 @@ them into `dist/`, so the server image carries the build and none of them.
 - Appearance and language are saved per person through
   `/api/v1/me/preferences`, with the revision the client read. A stale write
   is a conflict, not a silent overwrite.
+- Personal settings at `/settings/tokens` create, list, and revoke personal
+  access tokens for Agents and the CLI. Creation asks for a name, profile
+  scopes, and a lifetime (90 days by default). The secret is displayed once
+  in a copy dialog and is cleared when closed or when leaving the tab; it is
+  never saved to browser storage. Listed records show only the visible
+  prefix, scopes, expiration, last use and channel, and status. Revocation
+  requires confirmation and quotes the record's revision.
 - The Admin page lists members, roles, groups, and pending invitations, and
   lets an Administrator create nested groups and invite people by email. The
   Activity page shows every recorded action with its actor, time, target,

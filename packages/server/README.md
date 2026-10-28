@@ -4,6 +4,61 @@ The collaborative service's HTTP server. It uses reviewed SQL migrations on
 Postgres or PGlite, and the kernel supplies source inspection and identity.
 Build from the repository root so the kernel is built before the server.
 
+## Personal access tokens
+
+People create and revoke their Agents' and CLI credentials at
+`/settings/tokens`. All token API paths below follow the configured base path
+and `/api/v1`. Management requires a signed-in person, including in local
+single-user mode; another person cannot read or revoke their tokens.
+
+| Method and path | Behavior |
+| --- | --- |
+| `POST /me/tokens` | Create `{name, scopes, expiresAt?}` and return `{token, secret}` once. |
+| `GET /me/tokens` | List the person's token metadata, including prefix, scopes, expiration, revocation, last-use time and channel, and revision. |
+| `DELETE /me/tokens/:id` | Revoke with `{revision}`; a stale revision returns 409 with the current token. |
+
+For example, `{"name":"My Agent","scopes":["engineer"]}` creates a token
+expiring in 90 days. An optional `expiresAt` must be a future timestamp.
+Choose one or more distinct scopes: `engineer`, `expert`, or `operator`.
+The secret combines a visible `bdg_` prefix with 256 random secret bits.
+Only its SHA-256 hash is stored, and no list, audit event, or later response
+contains the secret. Losing it requires creating another token and revoking
+the old one. Creation and revocation are audited.
+
+Send the secret as `Authorization: Bearer TOKEN_SECRET`. Bearer authentication
+works beside the configured people-facing identity adapter, including when
+that provider is unavailable. An invalid, expired, or revoked token returns
+401, even when the request also carries a valid session. Cookie writes still
+require an allowed `Origin`; bearer writes can omit it. A supplied foreign
+`Origin` or `Host` is always refused.
+
+Scopes only narrow the owner's current Badger permissions; they never grant
+a role. Role removal applies to the next request. The currently delivered
+API permits these token operations:
+
+| Scopes | API operations, subject to the person's roles |
+| --- | --- |
+| All three | Read `/me`, `/groups`, the workflow catalog and versions, and Skill entries, versions, files, and diffs. |
+| `engineer` | Start workflow versions as an Engineer; create Skill entries, preview, and upload as an Engineer. |
+| `expert` | Create Skill entries, preview, and upload as a Field expert. |
+| `operator` | Read the available workflow and Skill APIs; Run operations arrive with the Run service. |
+
+Administrators can perform a profile's permitted operations within its
+scopes. Tokens never manage tokens, groups, role bindings, or personal
+preferences. Confirming facts, acknowledging or disputing restatements,
+approving dossiers, plans, proposals or packages, publishing, and answering
+Run gates always require a person. Token routes are explicitly allowed;
+new API operations must declare their scope before tokens can call them.
+
+Each valid token use records `token.used`, with actor, token ID, time,
+request ID, and the `mcp` channel used for both MCP and CLI requests. Token
+settings also show the last-use time and channel. This includes uses refused
+by authorization or rate limiting. Every token has its own limit of 60
+requests in a 60-second window beginning at its first request. The database
+serializes and persists the counter, so concurrent requests and service
+restarts share the limit. Excess requests return 429 with `Retry-After` in
+seconds; sessions and other tokens retain their own access.
+
 ## Skill uploads
 
 The Skills dashboard accepts a Skill folder or zip, previews its inventory,

@@ -25,6 +25,12 @@ relative to it. New workspace packages go in `packages/<name>/`.
 | Deployment glue: launcher entries, reverse-proxy routes, and deploy scripts | External                                                                                                                   | Each deployment's own repository                                                                                                                                                                                  |
 | Automatic distribution, domain execution                                    | Out of scope                                                                                                               | Not shipped in this repository                                                                                                                                                                                    |
 
+Personal access tokens (#53) are delivered in the server and personal settings:
+scoped bearer authentication, hashed storage, one-time secret display,
+expiration, revocation, recorded uses, and per-token rate limits. The server
+refuses every action reserved for people. The API and current profile
+operations are documented in `packages/server/README.md`.
+
 ## Package-facing artifacts
 
 The installed Agent entrypoints are `assets/skills/badger-create/SKILL.md` and

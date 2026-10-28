@@ -69,6 +69,13 @@ An Engineer or Field expert on a workflow uploads to that workflow's Group.
 See `packages/server/README.md`
 from the repository root for its API and limits.
 
+Personal access tokens (#53) are also delivered: personal settings create,
+list, and revoke scoped Agent and CLI credentials, showing the secret once.
+The server stores hashes, enforces expiration and current roles, records
+each use, and limits requests per token. Tokens never perform actions
+reserved for people. See `packages/server/README.md` for the API and scope
+rules.
+
 ## Run persistence
 
 Run files are stored through protected, bounded, atomic adapters. Missing Run

@@ -45,6 +45,7 @@ import {
 import type { Logger } from "../log.js";
 import { loopbackOrigins } from "../network.js";
 import { signInPerson, type Person } from "../people.js";
+import { authenticateToken } from "../tokens.js";
 import {
   parsePreferencesInput,
   readPreferences,
@@ -60,6 +61,8 @@ import { buildHealthReport } from "./health.js";
 import { escapeHtml, renderHomePage, renderSignedOutPage } from "./page.js";
 import { replyTo, type Reply } from "./responses.js";
 import { handleWorkflows, workflowMethods } from "./workflows.js";
+import { handleTokens, tokenMethods } from "./tokens.js";
+import { tokenRequestAllowed } from "./token-access.js";
 import { mayManageRoleScope } from "../workflow-access.js";
 import {
   isFileRequest,
@@ -141,7 +144,8 @@ function matchedId(pattern: RegExp, path: string): string | null {
 
 /** The methods a path serves, for the Allow header and the write check. */
 function allowedMethods(path: string): string {
-  const featureMethods = skillMethods(path) ?? workflowMethods(path);
+  const featureMethods =
+    skillMethods(path) ?? workflowMethods(path) ?? tokenMethods(path);
   if (featureMethods !== null) return featureMethods;
   if (path === `${API}/me/preferences`) {
     return "GET, HEAD, PUT";
@@ -611,12 +615,14 @@ export function createService(options: ServiceOptions, port: number): Service {
     url: URL,
   ): Promise<void> {
     const method = (request.method ?? "GET").toUpperCase();
+    const authorization = firstHeader(request.headers, "authorization");
     const guard = guardRequest({
       method,
       hostHeader: firstHeader(request.headers, "host") ?? undefined,
       originHeader: firstHeader(request.headers, "origin") ?? undefined,
       allowedHostnames: config.allowedHostnames,
       allowedOrigins,
+      bearer: authorization !== null,
     });
     if (!guard.ok) {
       return reply.error(403, "denied", guard.message);
@@ -667,13 +673,40 @@ export function createService(options: ServiceOptions, port: number): Service {
     // Reads and the routes that write are allowed. Refuse any other method
     // before identifying anyone, so no sign-in or audit record is written for
     // a request the service will not serve.
-    if (!reads && !isWriteRoute(method, path)) {
+    if (authorization === null && !reads && !isWriteRoute(method, path)) {
       return reply.error(405, "invalid", "Method not allowed", {
         allow: allowedMethods(path),
       });
     }
 
-    const identityResult = await identify(request, guard.hostname);
+    const tokenAuthentication =
+      authorization === null
+        ? null
+        : await authenticateToken(
+            database,
+            serviceDependencies,
+            authorization,
+            reply.requestId,
+          );
+    if (authorization !== null && tokenAuthentication === null)
+      return reply.error(
+        401,
+        "unauthenticated",
+        "The personal access token is invalid, expired, or revoked",
+      );
+    if (tokenAuthentication !== null && tokenAuthentication.retryAfter !== null)
+      return reply.error(
+        429,
+        "rejected",
+        "The personal access token rate limit is 60 requests per minute",
+        {
+          "retry-after": String(tokenAuthentication.retryAfter),
+        },
+      );
+    const identityResult: IdentityResult =
+      tokenAuthentication === null
+        ? await identify(request, guard.hostname)
+        : { kind: "authenticated", principal: tokenAuthentication.principal };
     if (identityResult.kind === "unavailable") {
       return reply.error(
         503,
@@ -693,8 +726,20 @@ export function createService(options: ServiceOptions, port: number): Service {
     }
 
     const principal = identityResult.principal;
-    const person = await signIn(principal, reply.requestId);
+    if (
+      principal.credential.kind === "token" &&
+      !tokenRequestAllowed(principal.credential.scopes ?? [], path, method)
+    )
+      return reply.error(
+        403,
+        "denied",
+        "This action requires a signed-in person or a different token scope",
+      );
+    const person =
+      tokenAuthentication?.person ?? (await signIn(principal, reply.requestId));
     const access = await accessFor(database, person, principal, config);
+    if (principal.credential.kind === "token")
+      access.tokenScopes = principal.credential.scopes ?? [];
     const roles = access.organization;
 
     const authorized: AuthorizedRequest = {
@@ -711,30 +756,30 @@ export function createService(options: ServiceOptions, port: number): Service {
       person,
       blobs,
     };
-    if (workflowMethods(path) !== null) {
-      return handleWorkflows(authorized);
-    }
-    if (path === `${API}/skills` || path.startsWith(`${API}/skills/`)) {
-      try {
+    try {
+      if (tokenMethods(path) !== null) return await handleTokens(authorized);
+      if (workflowMethods(path) !== null)
+        return await handleWorkflows(authorized);
+      if (path === `${API}/skills` || path.startsWith(`${API}/skills/`)) {
         return await handleSkillsRequest(authorized);
-      } catch (error) {
-        if (error instanceof URIError)
-          return reply.error(400, "invalid", "Malformed path encoding");
-        if (!(error instanceof RequestError)) throw error;
-        const code =
-          error.status === 403
-            ? "denied"
-            : error.status === 409
-              ? "conflict"
-              : "invalid";
-        if (error.details === undefined)
-          return reply.error(error.status, code, error.message);
-        return reply.json(error.status, {
-          ...error.details,
-          error: { code, message: error.message },
-          requestId: reply.requestId,
-        });
       }
+    } catch (error) {
+      if (error instanceof URIError)
+        return reply.error(400, "invalid", "Malformed path encoding");
+      if (!(error instanceof RequestError)) throw error;
+      const code =
+        error.status === 403
+          ? "denied"
+          : error.status === 409
+            ? "conflict"
+            : "invalid";
+      if (error.details === undefined)
+        return reply.error(error.status, code, error.message);
+      return reply.json(error.status, {
+        ...error.details,
+        error: { code, message: error.message },
+        requestId: reply.requestId,
+      });
     }
 
     if (preferencesPath) {

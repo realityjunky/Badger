@@ -1,8 +1,11 @@
+import type { TokenScope } from "../tokens.js";
+
 export type CredentialKind = "session" | "token" | "local-implicit";
 
 export interface Credential {
   kind: CredentialKind;
   id: string | null;
+  scopes?: readonly TokenScope[];
 }
 
 /**

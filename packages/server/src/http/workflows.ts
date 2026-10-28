@@ -134,7 +134,10 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
     }
     const createGroups = [];
     for (const group of await listGroups(database, access, person)) {
-      if (await mayManageGroup(database, access, person, group.id))
+      if (
+        access.tokenScopes === undefined &&
+        (await mayManageGroup(database, access, person, group.id))
+      )
         createGroups.push(group);
     }
     return reply.json(200, { workflows: summaries, createGroups });
