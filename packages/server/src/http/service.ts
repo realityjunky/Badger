@@ -1,26 +1,34 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  decodeAuditCursor,
+  listAuditEvents,
+  type AuditChannel,
+} from "../audit.js";
+import { organizationRoles, type OrganizationRole } from "../authorization.js";
 import type { Clock } from "../clock.js";
 import type { ServiceConfig } from "../config.js";
-import { listAuditEvents } from "../audit.js";
 import type { Database } from "../database/database.js";
 import type { Migration } from "../database/migrations.js";
-import type {
-  IdentityAdapter,
-  IdentityRequest,
-  IdentityResult,
-  Principal,
+import {
+  firstHeader,
+  type Credential,
+  type IdentityAdapter,
+  type IdentityRequest,
+  type IdentityResult,
+  type Principal,
 } from "../identity/identity.js";
-import { firstHeader } from "../identity/identity.js";
 import type { IdSource } from "../ids.js";
 import type { Logger } from "../log.js";
+import { loopbackOrigins } from "../network.js";
 import { signInPerson, type Person } from "../people.js";
 import { guardRequest } from "./guard.js";
 import { buildHealthReport } from "./health.js";
 import { escapeHtml, renderHomePage, renderSignedOutPage } from "./page.js";
-import { sendError, sendHtml, sendJson, sendResponse } from "./responses.js";
+import { replyTo, type Reply } from "./responses.js";
 
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,100}$/u;
+const API = "/api/v1";
 const DEFAULT_AUDIT_LIMIT = 50;
 const MAX_AUDIT_LIMIT = 200;
 
@@ -46,8 +54,9 @@ function resolveRequestId(headerValue: string | string[] | undefined): string {
   return `req-${randomUUID()}`;
 }
 
-function rolesOf(principal: Principal): string[] {
-  return principal.isAdministrator ? ["Administrator"] : [];
+/** The Badger MCP calls the API with a personal access token; people use the web. */
+function channelOf(credential: Credential): AuditChannel {
+  return credential.kind === "token" ? "mcp" : "web";
 }
 
 function routePath(pathname: string, basePath: string): string | null {
@@ -63,9 +72,25 @@ function routePath(pathname: string, basePath: string): string | null {
   return null;
 }
 
-export function createService(options: ServiceOptions): Service {
+function readAuditLimit(raw: string | null): number | null {
+  if (raw === null) {
+    return DEFAULT_AUDIT_LIMIT;
+  }
+  const limit = Number(raw);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_AUDIT_LIMIT) {
+    return null;
+  }
+  return limit;
+}
+
+/** Serves on `port`, the one the server actually bound. */
+export function createService(options: ServiceOptions, port: number): Service {
   const { config, database, clock, ids, identity } = options;
   const serviceDependencies = { clock, ids };
+  const allowedOrigins =
+    config.allowedOrigins === "loopback"
+      ? loopbackOrigins(port)
+      : config.allowedOrigins;
 
   async function identify(
     request: IncomingMessage,
@@ -93,68 +118,69 @@ export function createService(options: ServiceOptions): Service {
   ): Promise<Person> {
     return database.transaction((tx) =>
       signInPerson(tx, serviceDependencies, principal, {
-        channel: "web",
+        channel: channelOf(principal.credential),
         requestId,
       }),
     );
   }
 
+  async function listAudit(
+    reply: Reply,
+    url: URL,
+    roles: readonly OrganizationRole[],
+  ): Promise<void> {
+    if (!roles.includes("Administrator")) {
+      return reply.error(
+        403,
+        "denied",
+        "Only an Administrator reads the audit log",
+      );
+    }
+    const limit = readAuditLimit(url.searchParams.get("limit"));
+    if (limit === null) {
+      return reply.error(
+        400,
+        "invalid",
+        `limit must be a whole number from 1 to ${MAX_AUDIT_LIMIT}`,
+      );
+    }
+    const cursor = url.searchParams.get("cursor");
+    const after = cursor === null ? null : decodeAuditCursor(cursor);
+    if (cursor !== null && after === null) {
+      return reply.error(
+        400,
+        "invalid",
+        "cursor is not one this service issued",
+      );
+    }
+    reply.json(200, await listAuditEvents(database, { limit, after }));
+  }
+
   async function handle(
     request: IncomingMessage,
-    response: ServerResponse,
+    reply: Reply,
+    url: URL,
   ): Promise<void> {
-    const started = performance.now();
-    const requestId = resolveRequestId(request.headers["x-request-id"]);
     const method = (request.method ?? "GET").toUpperCase();
-    const url = new URL(request.url ?? "/", "http://placeholder.invalid");
-
-    const logRequest = () => {
-      options.logger?.info({
-        event: "request",
-        requestId,
-        method,
-        path: url.pathname,
-        status: response.statusCode,
-        durationMs: Math.round(performance.now() - started),
-      });
-    };
-
     const guard = guardRequest({
       method,
       hostHeader: firstHeader(request.headers, "host") ?? undefined,
       originHeader: firstHeader(request.headers, "origin") ?? undefined,
       allowedHostnames: config.allowedHostnames,
-      allowedOrigins: config.allowedOrigins,
+      allowedOrigins,
     });
     if (!guard.ok) {
-      sendError(
-        request,
-        response,
-        requestId,
-        guard.status,
-        guard.code,
-        guard.message,
-      );
-      logRequest();
-      return;
+      return reply.error(403, "denied", guard.message);
     }
 
     const path = routePath(url.pathname, config.basePath);
     if (path === null) {
-      sendError(request, response, requestId, 404, "not-found", "Not found");
-      logRequest();
-      return;
+      return reply.error(404, "invalid", "Not found");
     }
-
     if (method !== "GET" && method !== "HEAD") {
-      sendResponse(request, response, requestId, {
-        status: 405,
-        contentType: "text/plain; charset=utf-8",
-        body: "Method not allowed\n",
-        headers: { allow: "GET, HEAD" },
+      return reply.error(405, "invalid", "Method not allowed", {
+        allow: "GET, HEAD",
       });
-      logRequest();
-      return;
     }
 
     if (path === "/health") {
@@ -163,170 +189,99 @@ export function createService(options: ServiceOptions): Service {
         database,
         migrations: options.migrations,
       });
-      sendJson(
-        request,
-        response,
-        requestId,
-        report.status === "ok" ? 200 : 503,
-        report,
-      );
-      logRequest();
-      return;
+      return reply.json(report.status === "ok" ? 200 : 503, report);
     }
 
     const identityResult = await identify(request, guard.hostname);
     if (identityResult.kind === "unavailable") {
-      sendError(
-        request,
-        response,
-        requestId,
+      return reply.error(
         503,
         "unavailable",
         "The identity provider is unavailable",
       );
-      logRequest();
-      return;
     }
     if (identityResult.kind === "denied") {
-      sendError(
-        request,
-        response,
-        requestId,
-        403,
-        "denied",
-        "This account may not use Badger",
-      );
-      logRequest();
-      return;
+      return reply.error(403, "denied", "This account may not use Badger");
     }
     if (identityResult.kind === "anonymous") {
-      if (path === "/") {
-        sendHtml(request, response, requestId, 401, renderSignedOutPage());
-      } else {
-        sendError(
-          request,
-          response,
-          requestId,
-          401,
-          "unauthenticated",
-          "Sign in to use Badger",
-        );
-      }
-      logRequest();
-      return;
+      return path === "/"
+        ? reply.html(401, renderSignedOutPage())
+        : reply.error(401, "unauthenticated", "Sign in to use Badger");
     }
 
     const principal = identityResult.principal;
-    const person = await signIn(principal, requestId);
+    const person = await signIn(principal, reply.requestId);
+    const roles = organizationRoles(person, config);
 
     if (path === "/") {
-      sendHtml(
-        request,
-        response,
-        requestId,
+      return reply.html(
         200,
         renderHomePage({
           displayName: person.displayName,
           email: person.email,
-          roles: rolesOf(principal),
+          roles,
           revision: config.revision,
         }),
       );
-      logRequest();
-      return;
     }
-
-    if (path === "/api/me") {
-      sendJson(request, response, requestId, 200, {
+    if (path === `${API}/me`) {
+      return reply.json(200, {
         person: {
           id: person.id,
           issuer: person.issuer,
           subject: person.subject,
           email: person.email,
           displayName: person.displayName,
-          roles: rolesOf(principal),
+          roles,
         },
         credential: principal.credential,
       });
-      logRequest();
-      return;
     }
-
-    if (path === "/api/audit-events") {
-      if (!principal.isAdministrator) {
-        sendError(
-          request,
-          response,
-          requestId,
-          403,
-          "denied",
-          "Only an Administrator reads the audit log",
-        );
-        logRequest();
-        return;
-      }
-      const limit = readAuditLimit(url.searchParams.get("limit"));
-      if (limit === null) {
-        sendError(
-          request,
-          response,
-          requestId,
-          400,
-          "invalid",
-          `limit must be a whole number from 1 to ${MAX_AUDIT_LIMIT}`,
-        );
-        logRequest();
-        return;
-      }
-      const events = await listAuditEvents(database, { limit });
-      sendJson(request, response, requestId, 200, { events });
-      logRequest();
-      return;
+    if (path === `${API}/audit-events`) {
+      return listAudit(reply, url, roles);
     }
-
     if (path.startsWith("/api/")) {
-      sendError(request, response, requestId, 404, "not-found", "Not found");
-    } else {
-      sendResponse(request, response, requestId, {
-        status: 404,
-        contentType: "text/html; charset=utf-8",
-        body: `<h1>Not found</h1><p>${escapeHtml(path)} is not a page.</p>`,
-      });
+      return reply.error(404, "invalid", "Not found");
     }
-    logRequest();
+    reply.send({
+      status: 404,
+      contentType: "text/html; charset=utf-8",
+      body: `<h1>Not found</h1><p>${escapeHtml(path)} is not a page.</p>`,
+    });
   }
 
   return {
     handler: (request, response) => {
-      void handle(request, response).catch((error: unknown) => {
+      const started = performance.now();
+      const requestId = resolveRequestId(request.headers["x-request-id"]);
+      const url = new URL(request.url ?? "/", "http://placeholder.invalid");
+      const reply = replyTo(request, response, requestId);
+      response.once("close", () => {
+        options.logger?.info({
+          event: "request",
+          requestId,
+          method: request.method,
+          path: url.pathname,
+          status: response.statusCode,
+          durationMs: Math.round(performance.now() - started),
+        });
+      });
+      void handle(request, reply, url).catch((error: unknown) => {
         options.logger?.error({
           event: "request.failed",
+          requestId,
           error: error instanceof Error ? error.message : String(error),
         });
-        if (!response.headersSent) {
-          sendError(
-            request,
-            response,
-            resolveRequestId(request.headers["x-request-id"]),
-            500,
-            "internal",
-            "The service could not complete the request",
-          );
-        } else {
+        if (response.headersSent) {
           response.end();
+          return;
         }
+        reply.error(
+          500,
+          "unavailable",
+          "The service could not complete the request",
+        );
       });
     },
   };
-}
-
-function readAuditLimit(raw: string | null): number | null {
-  if (raw === null) {
-    return DEFAULT_AUDIT_LIMIT;
-  }
-  const limit = Number(raw);
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_AUDIT_LIMIT) {
-    return null;
-  }
-  return limit;
 }

@@ -8,12 +8,13 @@ afterEach(async () => {
   service = undefined;
 });
 
+const built = {
+  environment: { BADGER_REVISION: "abcdef0", BADGER_CLEAN_TREE: "true" },
+};
+
 describe("the health endpoint", () => {
   it("reports status, revision, clean-tree flag, database reachability, and migration state", async () => {
-    service = await startTestService({
-      revision: "abcdef0",
-      cleanTree: true,
-    });
+    service = await startTestService(built);
 
     const response = await service.request("/health");
 
@@ -42,19 +43,19 @@ describe("the health endpoint", () => {
   });
 
   it("reports an unknown revision when the build supplied none", async () => {
-    service = await startTestService({ cleanTree: null });
+    service = await startTestService();
 
     const report = (await (await service.request("/health")).json()) as {
       revision: string;
       cleanTree: boolean | null;
     };
 
-    expect(report.revision).toBe("test-revision");
+    expect(report.revision).toBe("unknown");
     expect(report.cleanTree).toBeNull();
   });
 
   it("reports degraded when the database is unreachable", async () => {
-    service = await startTestService();
+    service = await startTestService(built);
     await service.closeDatabase();
 
     const response = await service.request("/health");
@@ -62,7 +63,7 @@ describe("the health endpoint", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       status: "degraded",
-      revision: "test-revision",
+      revision: "abcdef0",
       cleanTree: true,
       database: { reachable: false },
       migrations: {

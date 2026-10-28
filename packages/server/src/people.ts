@@ -111,11 +111,7 @@ export async function signInPerson(
 
       if (inserted.rows.length > 0) {
         await recordAudit(database, dependencies, {
-          actor: {
-            personId: person.id,
-            credentialKind: principal.credential.kind,
-            credentialId: principal.credential.id,
-          },
+          actor: { personId: person.id, credential: principal.credential },
           channel: context.channel,
           action: "person.created",
           target: { type: "person", id: person.id },
@@ -159,11 +155,7 @@ export async function signInPerson(
 
     if (updated.rowCount > 0) {
       await recordAudit(database, dependencies, {
-        actor: {
-          personId: current.id,
-          credentialKind: principal.credential.kind,
-          credentialId: principal.credential.id,
-        },
+        actor: { personId: current.id, credential: principal.credential },
         channel: context.channel,
         action: "person.updated",
         target: { type: "person", id: current.id },

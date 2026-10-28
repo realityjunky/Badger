@@ -22,13 +22,16 @@ const administrator: TestPerson = {
   subject: "robin",
   email: "robin@example.com",
   displayName: "Robin Alvarez",
-  administrator: true,
+};
+
+const withAdministrator = {
+  environment: { BADGER_BOOTSTRAP_ADMINISTRATORS: "robin@example.com" },
 };
 
 interface AuditEventRecord {
   id: string;
   occurredAt: string;
-  actorPersonId: string;
+  actorPersonId: string | null;
   credentialKind: string;
   credentialId: string | null;
   channel: string;
@@ -41,26 +44,38 @@ interface AuditEventRecord {
   requestId: string;
 }
 
-async function auditEvents(limit = 50): Promise<AuditEventRecord[]> {
-  const response = await service?.request(`/api/audit-events?limit=${limit}`, {
+interface AuditPage {
+  events: AuditEventRecord[];
+  nextCursor: string | null;
+}
+
+async function auditPage(query = ""): Promise<AuditPage> {
+  const response = await service?.request(`/api/v1/audit-events${query}`, {
     as: administrator,
   });
   expect(response?.status).toBe(200);
-  return ((await response?.json()) as { events: AuditEventRecord[] }).events;
+  return (await response?.json()) as AuditPage;
+}
+
+async function auditEvents(): Promise<AuditEventRecord[]> {
+  return (await auditPage()).events;
 }
 
 async function me(
   person: TestPerson,
   headers: Record<string, string> = {},
 ): Promise<{ person: { id: string } }> {
-  const response = await service?.request("/api/me", { as: person, headers });
+  const response = await service?.request("/api/v1/me", {
+    as: person,
+    headers,
+  });
   expect(response?.status).toBe(200);
   return (await response?.json()) as { person: { id: string } };
 }
 
 describe("the audit trail", () => {
-  it("records a first sign-in with the actor, credential, channel, target, boundaries, reason, and request", async () => {
-    service = await startTestService();
+  it("records a first sign-in with the actor, credential, channel, target, revisions, reason, and request", async () => {
+    service = await startTestService(withAdministrator);
     const alicePerson = await me(alice, { "x-request-id": "request-1" });
 
     const events = await auditEvents();
@@ -86,8 +101,8 @@ describe("the audit trail", () => {
   });
 
   it("records the request ID it generated for the caller", async () => {
-    service = await startTestService();
-    const response = await service.request("/api/me", { as: alice });
+    service = await startTestService(withAdministrator);
+    const response = await service.request("/api/v1/me", { as: alice });
     const requestId = response.headers.get("x-request-id");
     expect(requestId).not.toBeNull();
 
@@ -98,7 +113,7 @@ describe("the audit trail", () => {
   });
 
   it("writes nothing when a sign-in changes nothing", async () => {
-    service = await startTestService();
+    service = await startTestService(withAdministrator);
     const first = await me(alice);
     await me(alice);
 
@@ -112,7 +127,7 @@ describe("the audit trail", () => {
   });
 
   it("records a profile change with the revisions before and after", async () => {
-    service = await startTestService();
+    service = await startTestService(withAdministrator);
     const first = await me(alice);
     service.clock.advance(60_000);
 
@@ -141,10 +156,48 @@ describe("the audit trail", () => {
     expect(created?.action).toBe("person.created");
   });
 
-  it("refuses the audit log to a person who is not an Administrator", async () => {
-    service = await startTestService();
+  it("pages through the audit log, newest first, with an opaque cursor", async () => {
+    service = await startTestService(withAdministrator);
+    for (const subject of ["ana", "ben", "cai"]) {
+      await me({ subject });
+      service.clock.advance(1_000);
+    }
 
-    const response = await service.request("/api/audit-events", { as: alice });
+    const first = await auditPage("?limit=2");
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const second = await auditPage(
+      `?limit=2&cursor=${encodeURIComponent(first.nextCursor ?? "")}`,
+    );
+
+    const all = await auditEvents();
+    expect(all).toHaveLength(4);
+    expect([...first.events, ...second.events]).toEqual(all);
+    expect(all.map((event) => event.occurredAt)).toEqual(
+      [...all.map((event) => event.occurredAt)].sort().reverse(),
+    );
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it("refuses a cursor it did not issue", async () => {
+    service = await startTestService(withAdministrator);
+
+    const response = await service.request(
+      "/api/v1/audit-events?cursor=not-a-cursor",
+      { as: administrator },
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "invalid" },
+    });
+  });
+
+  it("refuses the audit log to a person who is not an Administrator", async () => {
+    service = await startTestService(withAdministrator);
+
+    const response = await service.request("/api/v1/audit-events", {
+      as: alice,
+    });
 
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({
@@ -152,10 +205,20 @@ describe("the audit trail", () => {
     });
   });
 
-  it("refuses an audit page size out of range", async () => {
+  it("does not take a principal's word for being an Administrator", async () => {
     service = await startTestService();
 
-    const response = await service.request("/api/audit-events?limit=1000", {
+    const response = await service.request("/api/v1/audit-events", {
+      as: { ...administrator, administrator: true } as TestPerson,
+    });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("refuses an audit page size out of range", async () => {
+    service = await startTestService(withAdministrator);
+
+    const response = await service.request("/api/v1/audit-events?limit=1000", {
       as: administrator,
     });
 

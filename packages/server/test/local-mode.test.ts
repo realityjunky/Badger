@@ -1,6 +1,12 @@
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ConfigurationError, loadConfig } from "../src/config.js";
-import { startTestService, type TestService } from "../src/testing/index.js";
+import {
+  startTestService,
+  type TestService,
+  type TestServiceOptions,
+} from "../src/testing/index.js";
 
 let service: TestService | undefined;
 
@@ -8,6 +14,28 @@ afterEach(async () => {
   await service?.close();
   service = undefined;
 });
+
+/** Starts a service that must fail, and returns why it failed. */
+async function startFailing(options: TestServiceOptions): Promise<Error> {
+  const outcome: unknown = await startTestService(options).then(
+    (started) => {
+      service = started;
+      return undefined;
+    },
+    (error: unknown) => error,
+  );
+  expect(outcome).toBeInstanceOf(Error);
+  return outcome as Error;
+}
+
+async function refusal(
+  options: TestServiceOptions,
+  message: RegExp,
+): Promise<void> {
+  const error = await startFailing(options);
+  expect(error.name).toBe("ConfigurationError");
+  expect(error.message).toMatch(message);
+}
 
 describe("local single-user mode", () => {
   it("recognizes one implicit Administrator over loopback", async () => {
@@ -18,27 +46,39 @@ describe("local single-user mode", () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain("Local Administrator");
-    expect(html).toContain("Administrator");
+    expect(html).toContain("Role: Administrator");
 
-    const me = await service.request("/api/me");
+    const me = await service.request("/api/v1/me");
     expect(await me.json()).toMatchObject({
       person: {
         email: "admin@badger.local",
         displayName: "Local Administrator",
         roles: ["Administrator"],
       },
+      credential: { kind: "local-implicit", id: null },
     });
+  });
+
+  it("binds to loopback by default", async () => {
+    service = await startTestService({
+      mode: "local",
+      environment: { BADGER_HOST: undefined },
+    });
+
+    expect(service.config.host).toBe("127.0.0.1");
+    expect((await service.request("/")).status).toBe(200);
   });
 
   it("refuses a Host header that is not loopback", async () => {
     service = await startTestService({ mode: "local" });
 
-    const response = await service.rawRequest({
-      path: "/",
-      headers: { host: "badger.example" },
-    });
-
-    expect(response.status).toBe(403);
+    for (const host of ["badger.example", "127.lan.example"]) {
+      const response = await service.rawRequest({
+        path: "/",
+        headers: { host },
+      });
+      expect(response.status, host).toBe(403);
+    }
   });
 
   it("refuses a foreign Origin header", async () => {
@@ -52,105 +92,156 @@ describe("local single-user mode", () => {
     expect(response.status).toBe(403);
   });
 
-  it("accepts its own loopback Origin", async () => {
+  it("accepts its own loopback Origin on the port it bound, and no other", async () => {
     service = await startTestService({ mode: "local" });
+    const own = `http://127.0.0.1:${service.port}`;
+    const other = `http://127.0.0.1:${service.port + 1}`;
 
-    const response = await service.rawRequest({
+    const accepted = await service.rawRequest({
       path: "/",
-      headers: { host: "127.0.0.1", origin: "http://127.0.0.1:8787" },
+      headers: { host: `127.0.0.1:${service.port}`, origin: own },
+    });
+    const refused = await service.rawRequest({
+      path: "/",
+      headers: { host: `127.0.0.1:${service.port}`, origin: other },
     });
 
-    expect(response.status).toBe(200);
-  });
-});
-
-describe("local mode configuration", () => {
-  it("binds to loopback by default", () => {
-    const config = loadConfig({ BADGER_MODE: "local" });
-
-    expect(config.host).toBe("127.0.0.1");
-    expect(config.mode).toBe("local");
-    expect(config.identity.kind).toBe("local");
+    expect(accepted.status).toBe(200);
+    expect(refused.status).toBe(403);
   });
 
-  it("refuses to bind beyond loopback", () => {
-    expect(() =>
-      loadConfig({ BADGER_MODE: "local", BADGER_HOST: "0.0.0.0" }),
-    ).toThrow(ConfigurationError);
-    expect(() =>
-      loadConfig({ BADGER_MODE: "local", BADGER_HOST: "0.0.0.0" }),
-    ).toThrow(/loopback/u);
-  });
-
-  it("takes PGlite on disk unless a database URL is given", () => {
-    const local = loadConfig({ BADGER_MODE: "local" });
-    expect(local.database).toEqual({
-      kind: "pglite",
-      dataDir: ".badger/pglite",
+  it("allows the loopback origins it is given instead of its own", async () => {
+    service = await startTestService({
+      mode: "local",
+      environment: { BADGER_ALLOWED_ORIGINS: "http://localhost:5173" },
     });
 
-    const postgres = loadConfig({
-      BADGER_MODE: "local",
-      BADGER_DATABASE_URL: "postgres://badger:secret@127.0.0.1:5432/badger",
+    const given = await service.rawRequest({
+      path: "/",
+      headers: { host: "localhost", origin: "http://localhost:5173" },
     });
-    expect(postgres.database).toEqual({
-      kind: "postgres",
-      url: "postgres://badger:secret@127.0.0.1:5432/badger",
+    const own = await service.rawRequest({
+      path: "/",
+      headers: {
+        host: "localhost",
+        origin: `http://localhost:${service.port}`,
+      },
     });
+
+    expect(given.status).toBe(200);
+    expect(own.status).toBe(403);
   });
 
-  it("never reports secrets in an error message", () => {
+  it("keeps its PGlite state on disk across restarts", async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "badger-local-"));
+    const dataDir = path.join(directory, "pglite");
+    const local: TestServiceOptions = {
+      mode: "local",
+      environment: { BADGER_DATABASE_PATH: dataDir },
+    };
     try {
-      loadConfig({
-        BADGER_MODE: "service",
-        BADGER_DATABASE_URL: "postgres://badger:hunter2@db:5432/badger",
-      });
-      expect.unreachable("service mode without an identity adapter must fail");
-    } catch (error) {
-      expect(String(error)).not.toContain("hunter2");
+      service = await startTestService(local);
+      expect(service.config.database).toEqual({ kind: "pglite", dataDir });
+      const first = (await (await service.request("/api/v1/me")).json()) as {
+        person: { id: string };
+      };
+      await service.close();
+
+      service = await startTestService(local);
+      const again = (await (await service.request("/api/v1/me")).json()) as {
+        person: { id: string };
+      };
+      const health = (await (await service.request("/health")).json()) as {
+        migrations: { state: string };
+      };
+
+      expect(again.person.id).toBe(first.person.id);
+      expect(health.migrations.state).toBe("applied");
+    } finally {
+      await service?.close();
+      service = undefined;
+      await fs.rm(directory, { recursive: true, force: true });
     }
   });
 });
 
-describe("service mode configuration", () => {
-  it("requires an explicit identity adapter and allowed hosts", () => {
-    expect(() => loadConfig({ BADGER_MODE: "service" })).toThrow(
-      ConfigurationError,
+describe("local mode settings", () => {
+  it("refuses to bind beyond loopback", async () => {
+    await refusal(
+      { mode: "local", environment: { BADGER_HOST: "0.0.0.0" } },
+      /binds to loopback only/u,
     );
+    await refusal(
+      { mode: "local", environment: { BADGER_HOST: "127.lan.example" } },
+      /binds to loopback only/u,
+    );
+  });
 
-    const config = loadConfig({
-      BADGER_MODE: "service",
-      BADGER_IDENTITY: "none",
-      BADGER_ALLOWED_HOSTNAMES: "badger.example",
-      BADGER_DATABASE_URL: "postgres://badger:badger@db:5432/badger",
+  it("refuses hostnames and origins beyond loopback", async () => {
+    await refusal(
+      {
+        mode: "local",
+        environment: { BADGER_ALLOWED_HOSTNAMES: "badger.example" },
+      },
+      /loopback hostnames only/u,
+    );
+    await refusal(
+      {
+        mode: "local",
+        environment: { BADGER_ALLOWED_ORIGINS: "https://badger.example" },
+      },
+      /loopback origins only/u,
+    );
+  });
+
+  it("never reports secrets in an error message", async () => {
+    const error = await startFailing({
+      mode: "service",
+      environment: {
+        BADGER_IDENTITY: undefined,
+        BADGER_DATABASE_URL: "postgres://badger:hunter2@db:5432/badger",
+      },
     });
-    expect(config.mode).toBe("service");
-    expect(config.allowedHostnames).toEqual(["badger.example"]);
-    expect(config.identity).toEqual({ kind: "none" });
 
-    expect(() =>
-      loadConfig({
-        BADGER_MODE: "service",
-        BADGER_IDENTITY: "none",
-        BADGER_DATABASE_URL: "postgres://badger:badger@db:5432/badger",
-      }),
-    ).toThrow(/BADGER_ALLOWED_HOSTNAMES/u);
+    expect(error.message).toMatch(/BADGER_IDENTITY/u);
+    expect(String(error)).not.toContain("hunter2");
+  });
+});
+
+describe("service mode settings", () => {
+  it("requires an identity adapter, allowed hostnames, and a database", async () => {
+    await refusal(
+      { mode: "service", environment: { BADGER_IDENTITY: undefined } },
+      /BADGER_IDENTITY/u,
+    );
+    await refusal(
+      { mode: "service", environment: { BADGER_ALLOWED_HOSTNAMES: undefined } },
+      /BADGER_ALLOWED_HOSTNAMES/u,
+    );
+    await refusal(
+      { mode: "service", environment: { BADGER_DATABASE_URL: undefined } },
+      /BADGER_DATABASE_URL/u,
+    );
   });
 
-  it("does not offer loopback identity to a service deployment", () => {
-    expect(() =>
-      loadConfig({
-        BADGER_MODE: "service",
-        BADGER_IDENTITY: "local",
-        BADGER_ALLOWED_HOSTNAMES: "badger.example",
-        BADGER_DATABASE_URL: "postgres://badger:badger@db:5432/badger",
-      }),
-    ).toThrow(/local single-user mode/u);
+  it("does not offer loopback identity to a service deployment", async () => {
+    await refusal(
+      { mode: "service", environment: { BADGER_IDENTITY: "local" } },
+      /local single-user mode/u,
+    );
   });
 
-  it("refuses an identity adapter this build does not provide", () => {
-    expect(() =>
-      loadConfig({ BADGER_MODE: "service", BADGER_IDENTITY: "openid-connect" }),
-    ).toThrow(/openid-connect/u);
+  it("refuses an identity adapter this build does not provide", async () => {
+    await refusal(
+      { mode: "service", environment: { BADGER_IDENTITY: "openid-connect" } },
+      /openid-connect/u,
+    );
+  });
+
+  it("refuses bootstrap Administrators that are not email addresses", async () => {
+    await refusal(
+      { environment: { BADGER_BOOTSTRAP_ADMINISTRATORS: "robin" } },
+      /BADGER_BOOTSTRAP_ADMINISTRATORS/u,
+    );
   });
 });

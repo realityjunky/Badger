@@ -1,4 +1,3 @@
-export { createFixedClock, type TestClock } from "./clock.js";
 export {
   startTestService,
   type RawRequestInput,
@@ -7,11 +6,14 @@ export {
   type TestServiceMode,
   type TestServiceOptions,
 } from "./harness.js";
+export type { TestPerson } from "./identity.js";
+
+// Migration checks run the migration runner on a test database directly.
+export { openTestDatabase, type TestDatabase } from "./database.js";
 export {
-  createTestIdentityAdapter,
-  principalForTestPerson,
-  TEST_IDENTITY_ISSUER,
-  TEST_PERSON_HEADER,
-  type TestPerson,
-} from "./identity.js";
-export { createSequentialIds, type SequentialIdSource } from "./ids.js";
+  applyMigrations,
+  inspectMigrations,
+  loadBundledMigrations,
+  type Migration,
+  type MigrationState,
+} from "../database/migrations.js";

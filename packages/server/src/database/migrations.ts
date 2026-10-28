@@ -6,7 +6,7 @@ import type { Clock } from "../clock.js";
 import type { Database, Queryable } from "./database.js";
 
 /**
- * The lock serialises schema changes across every server and worker process
+ * The lock serializes schema changes across every server and worker process
  * that starts at once. It is a constant so all processes agree on it.
  */
 const MIGRATION_LOCK_KEY = "8231130000000001";
@@ -167,7 +167,7 @@ export async function applyMigrations(
   const ordered = orderMigrations(migrations);
 
   return database.transaction(async (tx) => {
-    // Take the lock before touching any catalogue object, so two first starts
+    // Take the lock before touching any catalog object, so two first starts
     // cannot race on creating schema_migrations itself.
     await tx.query(`select pg_advisory_xact_lock(${MIGRATION_LOCK_KEY})`);
     await tx.exec(`
@@ -230,8 +230,8 @@ export async function applyMigrations(
 }
 
 /**
- * Reports migration state without changing the database. The health endpoint
- * and startup logging both read this.
+ * Reports migration state without changing the database, for the health
+ * endpoint.
  */
 export async function inspectMigrations(
   database: Queryable,

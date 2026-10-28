@@ -20,6 +20,7 @@ const serviceDecisions = [
   "0004-service-state-in-postgres.md",
   "0005-agents-draft-people-sign-off.md",
   "0006-questionnaire-records-and-dossier-version-2.md",
+  "0009-reviewed-sql-migrations.md",
 ];
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",

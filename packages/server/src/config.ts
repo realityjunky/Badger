@@ -18,17 +18,26 @@ export interface StorageConfiguration {
 export type IdentityConfiguration =
   { kind: "local"; administrator: LocalAdministrator } | { kind: "none" };
 
+/**
+ * The origins a write may come from. Local mode without a list allows its
+ * own loopback origins, which are known once the server has a port.
+ */
+export type AllowedOrigins = readonly string[] | "loopback";
+
 export interface ServiceConfig {
   mode: ServiceMode;
   host: string;
+  /** 0 lets the server pick a free port when it starts. */
   port: number;
   basePath: string;
   revision: string;
   cleanTree: boolean | null;
   allowedHostnames: string[];
-  allowedOrigins: string[];
+  allowedOrigins: AllowedOrigins;
   database: DatabaseConfiguration;
   identity: IdentityConfiguration;
+  /** Emails, lowercased, of the people Badger treats as Administrators. */
+  bootstrapAdministrators: string[];
   storage: StorageConfiguration;
 }
 
@@ -72,7 +81,7 @@ function readPort(environment: Environment): number {
     return 8787;
   }
   const port = Number(value);
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
     throw new ConfigurationError("BADGER_PORT must be a port number");
   }
   return port;
@@ -103,30 +112,58 @@ function readList(
 
 function readHostnames(environment: Environment, mode: ServiceMode): string[] {
   const configured = readList(environment, "BADGER_ALLOWED_HOSTNAMES");
-  if (configured !== undefined) {
-    return configured.map(normalizeHostname);
+  if (configured === undefined) {
+    // A service deployment must name its hostnames; local mode is loopback.
+    return mode === "local" ? [...LOOPBACK_HOSTNAMES] : [];
   }
-  // A service deployment must name its hostnames; local mode is loopback.
-  return mode === "local" ? [...LOOPBACK_HOSTNAMES] : [];
+  const hostnames = configured.map(normalizeHostname);
+  if (mode === "local" && !hostnames.every(isLoopbackHostname)) {
+    throw new ConfigurationError(
+      "Local single-user mode allows loopback hostnames only in BADGER_ALLOWED_HOSTNAMES",
+    );
+  }
+  return hostnames;
 }
 
 function readOrigins(
   environment: Environment,
   mode: ServiceMode,
-  port: number,
-): string[] {
+): AllowedOrigins {
   const configured = readList(environment, "BADGER_ALLOWED_ORIGINS");
-  if (configured !== undefined) {
-    return configured.map((origin) => origin.toLowerCase());
+  if (configured === undefined) {
+    return mode === "local" ? "loopback" : [];
   }
-  if (mode === "local") {
-    return [
-      `http://localhost:${port}`,
-      `http://127.0.0.1:${port}`,
-      `http://[::1]:${port}`,
-    ];
+  return configured.map((entry) => {
+    let origin: URL;
+    try {
+      origin = new URL(entry);
+    } catch {
+      throw new ConfigurationError(
+        "BADGER_ALLOWED_ORIGINS must list origins such as https://badger.example",
+      );
+    }
+    if (origin.protocol !== "http:" && origin.protocol !== "https:") {
+      throw new ConfigurationError(
+        "BADGER_ALLOWED_ORIGINS must list http or https origins",
+      );
+    }
+    if (mode === "local" && !isLoopbackHostname(origin.hostname)) {
+      throw new ConfigurationError(
+        "Local single-user mode allows loopback origins only in BADGER_ALLOWED_ORIGINS",
+      );
+    }
+    return origin.origin;
+  });
+}
+
+function readBootstrapAdministrators(environment: Environment): string[] {
+  const emails = readList(environment, "BADGER_BOOTSTRAP_ADMINISTRATORS") ?? [];
+  if (emails.some((email) => !/^[^@\s]+@[^@\s]+$/u.test(email))) {
+    throw new ConfigurationError(
+      "BADGER_BOOTSTRAP_ADMINISTRATORS must list email addresses",
+    );
   }
-  return [];
+  return emails.map((email) => email.toLowerCase());
 }
 
 function readDatabase(
@@ -238,9 +275,10 @@ export function loadConfig(
     revision: readString(environment, "BADGER_REVISION") ?? "unknown",
     cleanTree: readBoolean(environment, "BADGER_CLEAN_TREE") ?? null,
     allowedHostnames,
-    allowedOrigins: readOrigins(environment, mode, port),
+    allowedOrigins: readOrigins(environment, mode),
     database,
     identity,
+    bootstrapAdministrators: readBootstrapAdministrators(environment),
     storage: readStorage(environment),
   };
 }

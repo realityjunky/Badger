@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { anonymousIdentityAdapter } from "../src/identity/anonymous.js";
 import {
   startTestService,
   type TestPerson,
@@ -24,7 +25,10 @@ const robin: TestPerson = {
   subject: "robin",
   email: "robin@example.com",
   displayName: "Robin Alvarez",
-  administrator: true,
+};
+
+const robinAdministers = {
+  environment: { BADGER_BOOTSTRAP_ADMINISTRATORS: "Robin@Example.com" },
 };
 
 describe("the service's web page", () => {
@@ -64,17 +68,17 @@ describe("the service's web page", () => {
     expect(page.status).toBe(401);
     expect(await page.text()).toContain("Not signed in");
 
-    const me = await service.request("/api/me");
+    const me = await service.request("/api/v1/me");
     expect(me.status).toBe(401);
     expect(await me.json()).toMatchObject({
       error: { code: "unauthenticated" },
     });
   });
 
-  it("reports who is signed in to the API", async () => {
-    service = await startTestService();
+  it("reports who is signed in to the API, with the roles Badger grants", async () => {
+    service = await startTestService(robinAdministers);
 
-    const response = await service.request("/api/me", { as: robin });
+    const response = await service.request("/api/v1/me", { as: robin });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
@@ -90,6 +94,25 @@ describe("the service's web page", () => {
     });
   });
 
+  it("grants no role that the deployment has not configured", async () => {
+    service = await startTestService();
+
+    const response = await service.request("/api/v1/me", { as: robin });
+
+    expect(await response.json()).toMatchObject({ person: { roles: [] } });
+  });
+
+  it("serves the API under its version only", async () => {
+    service = await startTestService();
+
+    const response = await service.request("/api/me", { as: alice });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({
+      error: { code: "invalid" },
+    });
+  });
+
   it("answers a foreign Host header with a refusal", async () => {
     service = await startTestService();
 
@@ -99,7 +122,9 @@ describe("the service's web page", () => {
     });
 
     expect(response.status).toBe(403);
-    expect(response.body).not.toContain("Robin");
+    expect(JSON.parse(response.body)).toMatchObject({
+      error: { code: "denied" },
+    });
   });
 
   it("answers a foreign Origin header with a refusal", async () => {
@@ -111,6 +136,9 @@ describe("the service's web page", () => {
     });
 
     expect(response.status).toBe(403);
+    expect(JSON.parse(response.body)).toMatchObject({
+      error: { code: "denied" },
+    });
   });
 
   it("answers an unsafe request without an Origin with a refusal", async () => {
@@ -128,13 +156,13 @@ describe("the service's web page", () => {
   it("echoes the caller's request ID and generates one otherwise", async () => {
     service = await startTestService();
 
-    const echoed = await service.request("/api/me", {
+    const echoed = await service.request("/api/v1/me", {
       as: alice,
       headers: { "x-request-id": "request-42" },
     });
     expect(echoed.headers.get("x-request-id")).toBe("request-42");
 
-    const generated = await service.request("/api/me", { as: alice });
+    const generated = await service.request("/api/v1/me", { as: alice });
     expect(generated.headers.get("x-request-id")).toMatch(
       /^req-[0-9a-f-]{36}$/u,
     );
@@ -153,13 +181,16 @@ describe("the service's web page", () => {
     const response = await service.request("/");
 
     expect(response.status).toBe(503);
-    expect(await response.text()).not.toContain("Alice");
+    expect(await response.json()).toMatchObject({
+      error: { code: "unavailable" },
+    });
   });
 
   it("serves no person page when no people-facing adapter is configured", async () => {
-    service = await startTestService({ identity: anonymousIdentityAdapter });
+    service = await startTestService({ mode: "service" });
 
     expect((await service.request("/")).status).toBe(401);
+    expect((await service.request("/api/v1/me")).status).toBe(401);
     expect((await service.request("/health")).status).toBe(200);
   });
 });
@@ -172,17 +203,18 @@ describe("the in-process test harness", () => {
     expect(service.ids.next()).toBe("id-0001");
     expect(service.ids.next()).toBe("id-0002");
 
+    const { storage } = service.config;
     for (const directory of [
-      service.storage.root,
-      service.storage.blobDirectory,
-      service.storage.workspaceDirectory,
-      service.storage.runDirectory,
+      storage.root,
+      storage.blobDirectory,
+      storage.workspaceDirectory,
+      storage.runDirectory,
     ]) {
-      await expect(fs.stat(directory)).resolves.toMatchObject({
-        isDirectory: expect.any(Function),
-      });
+      expect((await fs.stat(directory)).isDirectory()).toBe(true);
     }
-    expect(service.storage.root.startsWith("/tmp/")).toBe(true);
+    expect(
+      storage.root.startsWith(path.join(os.tmpdir(), "badger-test-")),
+    ).toBe(true);
   });
 
   it("reports the database it runs on", async () => {
