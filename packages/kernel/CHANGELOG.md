@@ -39,6 +39,17 @@
 - **Authoring review readiness**: Added hash-bound quick/full review evidence, independent deterministic self-consistency checks, and structured authoring/runtime/publication readiness.
 - **WorkflowRuntime cross-validation**: Added protocol-bound authored guidance checks for decisions, routes, required calls, schemas, guardrails, recovery ownership, artifact selection, and route-independent Run-state regression coverage.
 - **Current-hash publication gate**: Publication approvals now persist an integrity-checked readiness snapshot and revalidate package, source, authoring, evaluation, certification, and approval evidence before publication or preview distribution.
+- **Source check**: `badger source-check` (alias `candidates`) reports each
+  declared source's identity hash, an inventory of every file with its hash,
+  configuration included, each script's declared side effects, the files it
+  ignored, and any blockers. The identity hash and the inventory leave out a
+  fixed list of operating-system, editor, and cache files, so a new
+  `.DS_Store` stales neither a proposal nor a package. A source manifest or a
+  plan's `skillSources` declares one or more side effects per script, with
+  `none` standing alone; an undeclared script is reported as undeclared. A
+  source outside the project must resolve inside a root the host registers
+  with `--source-root`, `BADGER_SOURCE_ROOTS`, or the kernel's `sourceRoots`
+  option; a manifest's `roots` and a plan's `sourceRoots` are refused.
 
 ### Changed
 
@@ -62,6 +73,10 @@
   so a project can move mid-authoring or after release without regeneration;
   authoring sessions created before this change must be regenerated.
   `generatePackage` now requires `projectRoot`.
+- **Upgrade-source inspection**: `inspectUpgradeSource` takes the project root
+  and the registered source roots, resolves a relative source against the
+  project, and refuses a source outside them; its evidence records the
+  source's real path.
 
 ### Removed
 

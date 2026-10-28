@@ -1,0 +1,22 @@
+# A Skill's Identity Is Its Content, and the Host Registers Source Roots
+
+Status: accepted. A Skill's identity covers the files that make it behave the same on every host, and nothing else ([handoff](../handoffs/primer-designer-phase1-2026-10-27.md), F5). A fixed list of operating-system metadata, editor state, and interpreter cache files is environment noise and stays out of it: `.DS_Store`, `._*`, `.Spotlight-V100`, `.Trashes`, `.fseventsd`, `.TemporaryItems`, `Thumbs.db`, `desktop.ini`, `.idea`, `.vscode`, `.settings`, `.project`, `.classpath`, `*.swp`, `*.swo`, `*~`, `.#*`, `__pycache__`, `*.pyc`, `*.pyo`, `.pytest_cache`, `.mypy_cache`, and `.ruff_cache`. The list is fixed in `packages/kernel/src/skill/identity.ts`; extend it only for a file class that is environment noise on every host, never for content.
+
+A source's inventory lists every identity file, configuration included, with its SHA-256 hash (F6). Noise files are left out of the inventory as well as the hash, because the inventory is recorded: a confirmed proposal is compared with a fresh one before initialization, and the generated package records it in `reference/resolved-skills.json`. The source check lists, by path, the noise files it ignored, so the check still shows everything in the tree. The same identity rule is the one notion of a source hash throughout the kernel: the source check, upgrade-source evidence, authoring readiness, and publication readiness all compute it the same way, so a hash recorded in one place is comparable with one recomputed in another.
+
+A source location must resolve inside the project or a root the host registers (F22). The host registers roots: on the command line with the repeatable `--source-root` flag and the `BADGER_SOURCE_ROOTS` environment variable, whose entries are separated by the platform's path delimiter, and in the kernel API with the `sourceRoots` option. Relative roots resolve against the project root. A source manifest that sets `roots` and a FactoryPlan that sets `sourceRoots` are refused, because whoever writes the declarations would otherwise choose the boundary that confines them. Both the lexical and the resolved path are checked, so a symbolic link cannot widen the boundary, and relative locations stay inside the project. An upgrade plan's `sourceRoot` is checked the same way every time the kernel inspects it: when proposing, generating, assembling, and migrating. A location outside the boundary is refused, not guessed at, and a symbolic link inside a Skill tree is refused outright.
+
+## Consequences
+
+- Adding or removing a noise file leaves a Skill's identity hash and inventory, a pending proposal, and a generated package unchanged; the source check still reports the file. Audit write-backs no longer stale a recorded version, as long as they are not content the Skill reads.
+- A source manifest or a FactoryPlan's `skillSources` declares each script's side effects by its `scripts/` path: one of `none`, `local-writes`, `network`, `scheduler-submission`, or `installs`, or a list of them. `none` stands alone. A script with no declaration is reported as undeclared, never blocked implicitly.
+- Multi-tenant or hosted use cannot point a declaration at an arbitrary host path. Operators who keep Skills outside the project register the roots their deployment trusts, for every command that inspects sources: `source-check`, `propose`, `init`, `generate`, `assemble`, and `migrate`.
+- Identity hashes change once for every existing source, because the hash function changed. Recorded evidence from before this decision is stale, which is correct: it described a different identity.
+
+## Considered Options
+
+- Ignore files by a user-supplied pattern list. Rejected: identity must be comparable across hosts, so the rule has to be the same everywhere.
+- Keep hashing every file and let callers carry a separate "content hash". Rejected: two hashes invite drift between evidence records, which is what F5 was.
+- Keep noise files in the recorded inventory and exclude them only from the hash. Rejected: the recorded inventory is compared and packaged, so a new `.DS_Store` would stale a proposal and change a package whose hash had not moved.
+- Let a source manifest or a FactoryPlan register roots. Rejected: the author of a declaration would then choose the boundary meant to confine it.
+- Allow any absolute location and rely on the operating system's permissions. Rejected: an inspection path that can read any host path is a multi-tenant escape (F22).

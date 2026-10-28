@@ -8,7 +8,7 @@ import type {
   SkillSourceDeclaration,
   UpgradeSourceEvidence,
 } from "../types.js";
-import { findSkills } from "./discovery.js";
+import { findSkills, scriptDeclarationProblems } from "./discovery.js";
 import { normalizeWorkflow } from "../workflow/contract.js";
 import { atomicWrite, ensureDirectory, sha256, stableValue } from "../util.js";
 import { inspectUpgradeSource } from "../factory/source.js";
@@ -26,6 +26,7 @@ import {
 export interface WorkflowKernelOptions {
   projectRoot: string;
   stateNamespace?: string;
+  sourceRoots?: readonly string[];
 }
 
 export interface InitializeStateOptions {
@@ -89,16 +90,17 @@ export function parsePlan(value: unknown, file: string): FactoryPlan {
     throw new Error(`Invalid Factory plan: ${file}`);
   if (plan.skillCreatorIntent === "upgrade-existing" && !plan.sourceRoot)
     throw new Error("upgrade-existing plans require sourceRoot");
-  if (
-    plan.sourceRoots !== undefined &&
-    (!Array.isArray(plan.sourceRoots) ||
-      plan.sourceRoots.some(
-        (root) => typeof root !== "string" || root.trim().length === 0,
-      ))
-  )
+  if (Object.prototype.hasOwnProperty.call(plan, "sourceRoots"))
     throw new Error(
-      `Invalid Factory plan: ${file} sourceRoots must be an array of locations`,
+      `Invalid Factory plan: ${file} sourceRoots are registered by the host, not the plan; pass --source-root or set BADGER_SOURCE_ROOTS`,
     );
+  for (const declaration of plan.skillSources) {
+    const [problem] = scriptDeclarationProblems(
+      declaration?.scripts,
+      `skillSources ${String(declaration?.name)}`,
+    );
+    if (problem) throw new Error(`Invalid Factory plan: ${file} ${problem}`);
+  }
   if (plan.workflow.kind !== "workflow-kernel")
     throw new Error("Standalone Badger supports workflow-kernel plans only");
   if (plan.semanticDossier !== undefined) {
@@ -138,6 +140,7 @@ export function createWorkflowKernel(
   options: WorkflowKernelOptions,
 ): WorkflowKernel {
   const projectRoot = path.resolve(options.projectRoot);
+  const sourceRoots = [...(options.sourceRoots ?? [])];
   const stateNamespace = options.stateNamespace ?? ".badger";
   validateStateNamespace(stateNamespace);
   const stateRoot = path.resolve(projectRoot, stateNamespace);
@@ -150,11 +153,11 @@ export function createWorkflowKernel(
   async function discover(
     optionsForDiscovery: {
       sources?: SkillSourceDeclaration[];
-      roots?: string[];
     } = {},
   ): Promise<SkillCandidate[]> {
     return findSkills({
       projectRoot,
+      roots: sourceRoots,
       ...optionsForDiscovery,
     });
   }
@@ -163,10 +166,7 @@ export function createWorkflowKernel(
     plan: FactoryPlan,
     requiredSkills: string[],
   ): Promise<SkillCandidate[]> {
-    const candidates = await discover({
-      sources: plan.skillSources,
-      ...(plan.sourceRoots ? { roots: plan.sourceRoots } : {}),
-    });
+    const candidates = await discover({ sources: plan.skillSources });
     const candidateNames = new Set(
       candidates.map((candidate) => candidate.name),
     );
@@ -215,7 +215,7 @@ export function createWorkflowKernel(
       try {
         upgradeSource = await inspectUpgradeSource(sourceRoot, {
           projectRoot,
-          roots: plan.sourceRoots ?? [],
+          roots: sourceRoots,
         });
         if (
           !candidates.some((candidate) =>
@@ -366,6 +366,7 @@ export function createWorkflowKernel(
 
 export function createStandaloneWorkflowKernel(options: {
   projectRoot: string;
+  sourceRoots?: readonly string[];
 }): WorkflowKernel {
   return createWorkflowKernel({
     ...options,

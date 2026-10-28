@@ -3,7 +3,8 @@ import path from "node:path";
 import { parse } from "yaml";
 import type {
   SkillCandidate,
-  SkillScriptEffectStatus,
+  SkillScriptSideEffect,
+  SkillScriptSideEffects,
   SkillSource,
   SkillSourceDeclaration,
   SkillSourceManifest,
@@ -13,6 +14,7 @@ import {
   hashSkillIdentity,
   identitySkillFiles,
   inventorySkill,
+  isIgnoredSkillEntry,
 } from "../skill/identity.js";
 import {
   sourceScope,
@@ -163,21 +165,19 @@ async function readSource(
         status: "invalid",
         blocker: `Skill source ${realRoot} declares name ${frontmatter.name}, not ${declaration.name}`,
       };
-    const inventory = await inventorySkill(realRoot);
-    const identity = identitySkillFiles(inventory);
-    const references = identity
+    const inventory = identitySkillFiles(await inventorySkill(realRoot));
+    const references = inventory
       .filter(
         (file) =>
           file.path.startsWith("reference/") ||
           file.path.startsWith("references/"),
       )
       .map((file) => ({ path: file.path, contentHash: file.hash }));
-    const scripts = identity
+    const scripts = inventory
       .filter((file) => file.path.startsWith("scripts/"))
       .map((file) => ({
         path: file.path,
-        sideEffect: (declaration.scripts?.[file.path] ??
-          "undeclared") as SkillScriptEffectStatus,
+        sideEffects: declaredSideEffects(declaration, file.path),
       }));
     return {
       source: {
@@ -293,6 +293,78 @@ export async function findSkills(options: {
   return candidates;
 }
 
+function declaredSideEffects(
+  declaration: SkillSourceDeclaration,
+  scriptPath: string,
+): SkillScriptSideEffects {
+  const declared = declaration.scripts?.[scriptPath];
+  if (declared === undefined) return "undeclared";
+  return [...new Set(Array.isArray(declared) ? declared : [declared])].sort();
+}
+
+export interface SourceCheckSource extends SkillSource {
+  ignored: string[];
+}
+
+export interface SourceCheckCandidate extends Omit<SkillCandidate, "sources"> {
+  sources: SourceCheckSource[];
+}
+
+export async function checkSkillSources(
+  options: Parameters<typeof findSkills>[0],
+): Promise<SourceCheckCandidate[]> {
+  const candidates = await findSkills(options);
+  return Promise.all(
+    candidates.map(async (candidate) => ({
+      ...candidate,
+      sources: await Promise.all(
+        candidate.sources.map(async (source) => ({
+          ...source,
+          ignored: (await inventorySkill(source.root))
+            .map((file) => file.path)
+            .filter(isIgnoredSkillEntry),
+        })),
+      ),
+    })),
+  );
+}
+
+function isSideEffect(value: unknown): value is SkillScriptSideEffect {
+  return (SKILL_SCRIPT_SIDE_EFFECTS as readonly unknown[]).includes(value);
+}
+
+export function scriptDeclarationProblems(
+  scripts: unknown,
+  label: string,
+): string[] {
+  if (scripts === undefined) return [];
+  if (!scripts || typeof scripts !== "object" || Array.isArray(scripts))
+    return [`${label} scripts must map script paths to side effects`];
+  const problems: string[] = [];
+  for (const [scriptPath, value] of Object.entries(
+    scripts as Record<string, unknown>,
+  )) {
+    if (!isSafeManifestScriptPath(scriptPath)) {
+      problems.push(
+        `${label} script path must be a scripts/ path inside the source: ${scriptPath}`,
+      );
+      continue;
+    }
+    const sideEffects = Array.isArray(value) ? value : [value];
+    if (sideEffects.length === 0 || !sideEffects.every(isSideEffect))
+      problems.push(
+        `${label} script ${scriptPath} has an unknown side effect: ${JSON.stringify(
+          value,
+        )}; expected one or more of ${SKILL_SCRIPT_SIDE_EFFECTS.join(", ")}`,
+      );
+    else if (sideEffects.includes("none") && new Set(sideEffects).size > 1)
+      problems.push(
+        `${label} script ${scriptPath} declares none together with other side effects`,
+      );
+  }
+  return problems;
+}
+
 function isSafeManifestScriptPath(value: string): boolean {
   if (
     !value.startsWith("scripts/") ||
@@ -332,17 +404,10 @@ export async function readSkillSourceManifest(
       `Invalid Skill source manifest: ${manifestPath}; expected {schemaVersion: 1, sources: [{name, location}]}`,
     );
   const manifest = value as Record<string, unknown>;
-  const roots = manifest.roots;
-  if (
-    roots !== undefined &&
-    (!Array.isArray(roots) ||
-      roots.some(
-        (root) => typeof root !== "string" || root.trim().length === 0,
-      ))
-  )
+  if (Object.prototype.hasOwnProperty.call(manifest, "roots"))
     throw invalidManifest(
       manifestPath,
-      "roots must be an array of non-empty locations",
+      "roots are registered by the host, not the manifest; pass --source-root or set BADGER_SOURCE_ROOTS",
     );
   for (const source of manifest.sources as unknown[]) {
     if (!source || typeof source !== "object" || Array.isArray(source))
@@ -356,32 +421,11 @@ export async function readSkillSourceManifest(
         manifestPath,
         "each source requires a name and a location",
       );
-    const scripts = entry.scripts;
-    if (scripts === undefined) continue;
-    if (!scripts || typeof scripts !== "object" || Array.isArray(scripts))
-      throw invalidManifest(
-        manifestPath,
-        `source ${entry.name} scripts must map script paths to side effects`,
-      );
-    for (const [scriptPath, sideEffect] of Object.entries(
-      scripts as Record<string, unknown>,
-    )) {
-      if (!isSafeManifestScriptPath(scriptPath))
-        throw invalidManifest(
-          manifestPath,
-          `source ${entry.name} script path must be a scripts/ path inside the source: ${scriptPath}`,
-        );
-      if (
-        typeof sideEffect !== "string" ||
-        !(SKILL_SCRIPT_SIDE_EFFECTS as readonly string[]).includes(sideEffect)
-      )
-        throw invalidManifest(
-          manifestPath,
-          `source ${entry.name} script ${scriptPath} has an unknown side effect: ${String(
-            sideEffect,
-          )}; expected one of ${SKILL_SCRIPT_SIDE_EFFECTS.join(", ")}`,
-        );
-    }
+    const [problem] = scriptDeclarationProblems(
+      entry.scripts,
+      `source ${entry.name}`,
+    );
+    if (problem) throw invalidManifest(manifestPath, problem);
   }
   return value as SkillSourceManifest;
 }

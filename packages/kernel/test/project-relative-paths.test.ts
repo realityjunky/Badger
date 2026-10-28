@@ -272,10 +272,14 @@ describe("project-relative Creator records", () => {
     );
     const plan = { ...planFor(skillRoot) };
     plan.skillSources = [{ name: "primer-design", location: external }];
-    plan.sourceRoots = ["../external-skills"];
     await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
+    const sourceRoots = ["../external-skills"];
 
-    const proposal = await buildProposal({ projectRoot: project, planPath });
+    const proposal = await buildProposal({
+      projectRoot: project,
+      planPath,
+      sourceRoots,
+    });
     expect(proposal.canInitialize).toBe(true);
     const state = await initializeState({
       projectRoot: project,
@@ -283,6 +287,7 @@ describe("project-relative Creator records", () => {
       plan: await readPlan(planPath),
       proposal,
       confirmed: true,
+      sourceRoots,
     });
 
     const stored = JSON.parse(

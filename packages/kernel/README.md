@@ -102,6 +102,8 @@ from the repository root, run it as `node packages/kernel/bin/badger.js`:
 ```bash
 # The source check is read-only and closed-world. `candidates` remains an alias.
 node packages/kernel/bin/badger.js source-check --skill primer-design=./skills/primer-design --json
+# A source outside the project needs a root the host registers; plans and manifests cannot.
+BADGER_SOURCE_ROOTS=/srv/skills node packages/kernel/bin/badger.js source-check --skill primer-design=/srv/skills/primer-design --json
 node packages/kernel/bin/badger.js guide --project . --json
 node packages/kernel/bin/badger.js questionnaire-handoff dossier.json --plan plan.json --project . --json
 node packages/kernel/bin/badger.js authoring-plan prepared-workflow --project . --depth quick --json

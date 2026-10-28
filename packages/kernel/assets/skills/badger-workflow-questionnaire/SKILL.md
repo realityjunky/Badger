@@ -44,14 +44,16 @@ those declarations with the source check:
 badger source-check --project <dir> --skill <name=location> --json
 ```
 
-Repeat `--skill` for every source or use an explicit source manifest, and pass
-`--source-root` or the manifest's `roots` for absolute locations outside the
-project. Read each source's description, canonical path, full file inventory
-with hashes, script side effects, and identity hash. Then read each supplied
-`SKILL.md` and every other inventoried file, configuration included, as source
-evidence. Do not execute scripts or treat an inventory entry as permission to
-run it; a script's declared side effect (`none`, `local-writes`, `network`,
-`scheduler-submission`, `installs`, or `undeclared`) only describes it.
+Repeat `--skill` for every source or use an explicit source manifest. For
+absolute locations outside the project, pass the roots the host registers with
+`--source-root` or `BADGER_SOURCE_ROOTS`; a manifest cannot register roots.
+Read each source's description, canonical path, full file inventory with
+hashes, ignored files, script side effects, and identity hash. Then read each
+supplied `SKILL.md` and every other inventoried file, configuration included,
+as source evidence. Do not execute scripts or treat an inventory entry as
+permission to run it; the side effects reported for a script (`none`,
+`local-writes`, `network`, `scheduler-submission`, `installs`, or `undeclared`)
+only describe it.
 
 Do not ask semantic questions until all supplied source evidence has been
 read. Source metadata may establish facts such as a Skill's purpose or

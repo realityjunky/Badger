@@ -4105,6 +4105,7 @@ async function restoreOptionalText(
 export async function assemblePackage(
   state: CreatorState,
   confirmed = false,
+  options: { sourceRoots?: readonly string[] } = {},
 ): Promise<CreatorState> {
   if (!confirmed) {
     throw new Error("Authoring assembly requires explicit confirmation");
@@ -4169,6 +4170,7 @@ export async function assemblePackage(
         plan: factoryPlan,
         destination: stagingRoot,
         projectRoot: current.projectRoot,
+        sourceRoots: options.sourceRoots,
       });
       if (current.authoring.scaffoldHash !== scaffold.scaffoldHash)
         throw new Error(
@@ -4671,6 +4673,7 @@ export interface AuthoringSessionGateway {
   assemble(
     state: CreatorState,
     confirmed?: boolean,
+    options?: { sourceRoots?: readonly string[] },
   ): ReturnType<typeof assemblePackage>;
 }
 
@@ -4705,7 +4708,7 @@ export function authoringSessionGateway(): AuthoringSessionGateway {
         confirmed: true,
       });
     },
-    assemble: async (state, confirmed = false) => {
+    assemble: async (state, confirmed = false, options = {}) => {
       const gate = await authoringWriteGate({
         state,
         operation: "assemble",
@@ -4716,7 +4719,7 @@ export function authoringSessionGateway(): AuthoringSessionGateway {
           `Cannot assemble authoring session:\n${gate.blockers.join("\n")}`,
         );
       }
-      return assemblePackage(state, true);
+      return assemblePackage(state, true, options);
     },
   };
 }

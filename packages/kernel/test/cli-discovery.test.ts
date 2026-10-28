@@ -28,10 +28,20 @@ describe("Badger discovery CLI", () => {
   }
 
   async function runCli(...args: string[]): Promise<Record<string, unknown>> {
+    return runCliWith({}, ...args);
+  }
+
+  async function runCliWith(
+    env: NodeJS.ProcessEnv,
+    ...args: string[]
+  ): Promise<Record<string, unknown>> {
     const result = await execFileAsync(
       process.execPath,
       ["bin/badger.js", ...args, "--json"],
-      { cwd: path.resolve(process.cwd()) },
+      {
+        cwd: path.resolve(process.cwd()),
+        env: { ...process.env, BADGER_SOURCE_ROOTS: undefined, ...env },
+      },
     );
     return JSON.parse(result.stdout) as Record<string, unknown>;
   }
@@ -135,7 +145,10 @@ describe("Badger discovery CLI", () => {
         name: "review",
         status: "available",
         sources: [
-          { scripts: [{ path: "scripts/fetch.py", sideEffect: "network" }] },
+          {
+            scripts: [{ path: "scripts/fetch.py", sideEffects: ["network"] }],
+            ignored: [],
+          },
         ],
       },
     ]);
@@ -147,56 +160,77 @@ describe("Badger discovery CLI", () => {
     expect(help.stdout).toMatch(/source-check/iu);
   });
 
-  it("confines absolute source locations to registered roots", async () => {
+  it("confines absolute source locations to roots the host registers", async () => {
     const external = path.join(root, "external", "review");
     await writeSkill(external, "review");
     const manifest = path.join(project, "sources.json");
-    const writeManifest = async (roots?: string[]): Promise<void> =>
-      fs.writeFile(
-        manifest,
-        JSON.stringify({
-          schemaVersion: 1,
-          ...(roots ? { roots } : {}),
-          sources: [{ name: "review", location: external }],
-        }),
-      );
-
-    await writeManifest();
-    const refused = await runCli(
-      "source-check",
-      "--project",
-      project,
-      "--source-manifest",
+    await fs.writeFile(
       manifest,
+      JSON.stringify({
+        schemaVersion: 1,
+        sources: [{ name: "review", location: external }],
+      }),
     );
-    expect(refused.candidates).toMatchObject([
+    const check = async (env: NodeJS.ProcessEnv, ...flags: string[]) =>
+      (
+        await runCliWith(
+          env,
+          "source-check",
+          "--project",
+          project,
+          "--source-manifest",
+          manifest,
+          ...flags,
+        )
+      ).candidates;
+
+    expect(await check({})).toMatchObject([
       { name: "review", status: "unsafe" },
     ]);
+    expect(await check({}, "--source-root", "../external")).toMatchObject([
+      { name: "review", status: "available" },
+    ]);
+    expect(
+      await check({
+        BADGER_SOURCE_ROOTS: ["../elsewhere", "../external"].join(
+          path.delimiter,
+        ),
+      }),
+    ).toMatchObject([{ name: "review", status: "available" }]);
+    expect(
+      await check(
+        { BADGER_SOURCE_ROOTS: "../elsewhere" },
+        "--source-root",
+        "../external",
+      ),
+    ).toMatchObject([{ name: "review", status: "available" }]);
+  });
 
-    await writeManifest(["../external"]);
-    const registered = await runCli(
+  it("refuses a source manifest that registers its own roots", async () => {
+    const external = path.join(root, "external", "review");
+    await writeSkill(external, "review");
+    const manifest = path.join(project, "sources.json");
+    await fs.writeFile(
+      manifest,
+      JSON.stringify({
+        schemaVersion: 1,
+        roots: ["../external"],
+        sources: [{ name: "review", location: external }],
+      }),
+    );
+
+    const failure = await runCli(
       "source-check",
       "--project",
       project,
       "--source-manifest",
       manifest,
+    ).then(
+      () => undefined,
+      (error: { code: number; stderr: string }) => error,
     );
-    expect(registered.candidates).toMatchObject([
-      { name: "review", status: "available" },
-    ]);
 
-    await writeManifest();
-    const flagged = await runCli(
-      "source-check",
-      "--project",
-      project,
-      "--source-manifest",
-      manifest,
-      "--source-root",
-      "../external",
-    );
-    expect(flagged.candidates).toMatchObject([
-      { name: "review", status: "available" },
-    ]);
+    expect(failure?.code).not.toBe(0);
+    expect(failure?.stderr).toMatch(/roots are registered by the host/iu);
   });
 });

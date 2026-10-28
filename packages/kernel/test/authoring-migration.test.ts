@@ -322,6 +322,75 @@ describe("Badger upgrade and legacy migration", () => {
     ).rejects.toThrow(/inside.*source/iu);
   });
 
+  it("assembles an upgrade source outside the project only within the host's roots", async () => {
+    const sourceRoot = path.join(root, "external", "legacy-skill");
+    await fs.mkdir(sourceRoot, { recursive: true });
+    await fs.writeFile(
+      path.join(sourceRoot, "SKILL.md"),
+      "---\nname: legacy\ndescription: Legacy implementation.\n---\n\n# Legacy\n",
+    );
+    const sourceRoots = [path.join(root, "external")];
+    const plan = await readPlan(planPath);
+    plan.skillCreatorIntent = "upgrade-existing";
+    plan.sourceRoot = sourceRoot;
+    plan.skillSources = [
+      ...plan.skillSources,
+      { name: "legacy", location: sourceRoot },
+    ];
+    await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
+
+    const unregistered = await buildProposal({
+      projectRoot: project,
+      planPath,
+    });
+    expect(unregistered.canInitialize).toBe(false);
+    const proposal = await buildProposal({
+      projectRoot: project,
+      planPath,
+      sourceRoots,
+    });
+    expect(proposal.canInitialize).toBe(true);
+    await expect(
+      generatePackage({
+        proposal,
+        plan,
+        destination: path.join(project, "unregistered"),
+        projectRoot: project,
+      }),
+    ).rejects.toThrow(/outside the project and its registered roots/iu);
+
+    const state = await initializeState({
+      projectRoot: project,
+      planPath,
+      plan,
+      proposal,
+      confirmed: true,
+      sourceRoots,
+    });
+    const generated = await generatePackage({
+      proposal,
+      plan,
+      destination: state.draftPath,
+      projectRoot: state.projectRoot,
+      sourceRoots,
+    });
+    state.generated = generated;
+    await initializeAuthoringSession({
+      state,
+      plan: await buildAuthoringPlan({ proposal }),
+      generated,
+    });
+    const authored = await runManualAuthoringFixture({ state });
+
+    await expect(assemblePackage(authored)).rejects.toThrow(
+      /outside the project and its registered roots/iu,
+    );
+    const assembled = await assemblePackageImplementation(authored, true, {
+      sourceRoots,
+    });
+    expect(assembled.generated?.sourceEvidence?.preservedAt).toBe("assembled");
+  });
+
   it("reports all authoring lanes stale when an upgrade source drifts after assembly", async () => {
     const sourceRoot = path.join(project, "legacy-skill");
     await fs.mkdir(sourceRoot, { recursive: true });
