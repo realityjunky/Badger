@@ -52,4 +52,6 @@ npm run format:check     # prettier
 
 The journeys start the service themselves through
 `@realityjunky/badger-server/testing`, using PGlite, a temporary storage
-root, and the implicit local Administrator.
+root, and the implicit local Administrator. A second instance serves under
+the base path `/badger`, the way a deployment behind a reverse proxy does,
+and `e2e/base-path.spec.ts` loads the dashboard there.
