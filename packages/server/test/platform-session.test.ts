@@ -72,6 +72,7 @@ describe("signing in through the platform session", () => {
         email: "alice@example.com",
         displayName: "Alice Ng",
         roles: [],
+        groups: [],
       },
       credential: {
         kind: "session",
@@ -346,5 +347,170 @@ describe("the platform session settings", () => {
 
     expect(error.name).toBe("ConfigurationError");
     expect(error.message).toMatch(/local single-user mode/u);
+  });
+});
+
+describe("addresses the platform has verified", () => {
+  const robin: StubPlatformUser = {
+    id: "platform-robin",
+    email: "robin@example.com",
+  };
+
+  async function startWithAddresses(
+    users: Readonly<Record<string, StubPlatformUser>>,
+    environment: Readonly<Record<string, string>> = {},
+  ): Promise<void> {
+    await startWithPlatform({
+      users,
+      environment: {
+        BADGER_BOOTSTRAP_ADMINISTRATORS: "robin@example.com",
+        BADGER_ALLOWED_ORIGINS: "http://localhost",
+        ...environment,
+      },
+    });
+  }
+
+  async function inviteAliceAsAuditor(): Promise<Response> {
+    if (service === undefined) {
+      throw new Error("The service is not started");
+    }
+    return service.request("/api/v1/bindings", {
+      method: "POST",
+      headers: {
+        cookie: cookieFor("token-robin"),
+        origin: "http://localhost",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        scopeType: "organization",
+        email: "alice@example.com",
+        role: "Auditor",
+      }),
+    });
+  }
+
+  async function aliceRoles(token = "token-alice"): Promise<string[]> {
+    const response = await service?.request("/api/v1/me", {
+      headers: { cookie: cookieFor(token) },
+    });
+    expect(response?.status).toBe(200);
+    return ((await response?.json()) as { person: { roles: string[] } }).person
+      .roles;
+  }
+
+  it("applies no pending invitation to an address the platform calls unverified", async () => {
+    await startWithAddresses({
+      "token-robin": { ...robin, emailVerified: true },
+      "token-alice": { ...alice, emailVerified: false },
+    });
+
+    expect((await inviteAliceAsAuditor()).status).toBe(201);
+    expect(await aliceRoles()).toEqual([]);
+  });
+
+  it("treats an address as unverified when the platform's answer does not say", async () => {
+    await startWithAddresses({ "token-robin": robin, "token-alice": alice });
+
+    // Robin's address is listed as a bootstrap Administrator, but nothing
+    // vouches for it, so Robin may not bind anyone.
+    expect((await inviteAliceAsAuditor()).status).toBe(403);
+  });
+
+  it("trusts every address once the deployment says the platform verifies them", async () => {
+    await startWithAddresses(
+      { "token-robin": robin, "token-alice": alice },
+      { BADGER_PLATFORM_EMAILS_VERIFIED: "true" },
+    );
+
+    expect((await inviteAliceAsAuditor()).status).toBe(201);
+    expect(await aliceRoles()).toEqual(["Auditor"]);
+  });
+
+  it("lets the platform's own answer outweigh that declaration", async () => {
+    await startWithAddresses(
+      {
+        "token-robin": robin,
+        "token-alice": { ...alice, emailVerified: false },
+      },
+      { BADGER_PLATFORM_EMAILS_VERIFIED: "true" },
+    );
+
+    expect((await inviteAliceAsAuditor()).status).toBe(201);
+    expect(await aliceRoles()).toEqual([]);
+  });
+
+  it("applies a waiting invitation once the platform verifies the address", async () => {
+    await startWithAddresses({
+      "token-robin": { ...robin, emailVerified: true },
+      "token-alice": { ...alice, emailVerified: false },
+      // A later session of the same platform user, after verification.
+      "token-alice-verified": { ...alice, emailVerified: true },
+    });
+
+    expect(await aliceRoles()).toEqual([]);
+    expect((await inviteAliceAsAuditor()).status).toBe(201);
+    expect(await aliceRoles()).toEqual([]);
+
+    expect(await aliceRoles("token-alice-verified")).toEqual(["Auditor"]);
+  });
+});
+
+describe("the platform-administrator mapping", () => {
+  const platformAdministrator: StubPlatformUser = {
+    ...alice,
+    isAdmin: true,
+  };
+
+  async function roles(): Promise<string[]> {
+    const response = await service?.request("/api/v1/me", {
+      headers: { cookie: cookieFor("token-alice") },
+    });
+    expect(response?.status).toBe(200);
+    return ((await response?.json()) as { person: { roles: string[] } }).person
+      .roles;
+  }
+
+  it("grants nothing by default, so platform rights are not workflow rights", async () => {
+    await startWithPlatform({
+      users: { "token-alice": platformAdministrator },
+    });
+
+    expect(await roles()).toEqual([]);
+  });
+
+  it("grants Administrator when the deployment switches the mapping on", async () => {
+    await startWithPlatform({
+      users: { "token-alice": platformAdministrator },
+      environment: { BADGER_PLATFORM_ADMIN_MAPPING: "true" },
+    });
+
+    expect(await roles()).toEqual(["Administrator"]);
+  });
+
+  it("still grants nothing to a platform user who is not an administrator", async () => {
+    await startWithPlatform({
+      users: { "token-alice": alice },
+      environment: { BADGER_PLATFORM_ADMIN_MAPPING: "true" },
+    });
+
+    expect(await roles()).toEqual([]);
+  });
+
+  it("is refused with an identity adapter that is not the platform", async () => {
+    for (const environment of [
+      { BADGER_PLATFORM_ADMIN_MAPPING: "true" },
+      { BADGER_IDENTITY: "none", BADGER_PLATFORM_ADMIN_MAPPING: "true" },
+    ]) {
+      await expect(
+        startTestService({
+          mode: "service",
+          environment: {
+            ...environment,
+            BADGER_ALLOWED_HOSTNAMES: "localhost",
+            BADGER_DATABASE_URL: "postgres://badger@harness.invalid/badger",
+          },
+        }),
+      ).rejects.toThrow(/BADGER_PLATFORM_ADMIN_MAPPING/u);
+    }
   });
 });

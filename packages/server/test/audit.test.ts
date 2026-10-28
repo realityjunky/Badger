@@ -24,6 +24,12 @@ const administrator: TestPerson = {
   displayName: "Robin Alvarez",
 };
 
+const bob: TestPerson = {
+  subject: "bob",
+  email: "bob@example.com",
+  displayName: "Bob Lin",
+};
+
 const withAdministrator = {
   environment: { BADGER_BOOTSTRAP_ADMINISTRATORS: "robin@example.com" },
 };
@@ -32,6 +38,8 @@ interface AuditEventRecord {
   id: string;
   occurredAt: string;
   actorPersonId: string | null;
+  actorDisplayName: string | null;
+  actorEmail: string | null;
   credentialKind: string;
   credentialId: string | null;
   channel: string;
@@ -64,13 +72,13 @@ async function auditEvents(): Promise<AuditEventRecord[]> {
 async function me(
   person: TestPerson,
   headers: Record<string, string> = {},
-): Promise<{ person: { id: string } }> {
+): Promise<{ person: { id: string; email: string } }> {
   const response = await service?.request("/api/v1/me", {
     as: person,
     headers,
   });
   expect(response?.status).toBe(200);
-  return (await response?.json()) as { person: { id: string } };
+  return (await response?.json()) as { person: { id: string; email: string } };
 }
 
 describe("the audit trail", () => {
@@ -226,5 +234,121 @@ describe("the audit trail", () => {
     expect(await response.json()).toMatchObject({
       error: { code: "invalid" },
     });
+  });
+});
+
+const ORIGIN = "http://localhost";
+
+async function write(
+  method: string,
+  path: string,
+  person: TestPerson,
+  body: unknown,
+): Promise<Response> {
+  if (service === undefined) {
+    throw new Error("The service is not running");
+  }
+  return service.request(path, {
+    method,
+    as: person,
+    headers: { "content-type": "application/json", origin: ORIGIN },
+    body: JSON.stringify(body),
+  });
+}
+
+const withWrites = {
+  environment: {
+    BADGER_BOOTSTRAP_ADMINISTRATORS: "robin@example.com",
+    BADGER_ALLOWED_ORIGINS: ORIGIN,
+  },
+};
+
+describe("the Activity page's data", () => {
+  it("lets an Auditor read every action and refuses them any write", async () => {
+    service = await startTestService(withWrites);
+    await service.request("/api/v1/bindings", {
+      method: "POST",
+      as: administrator,
+      headers: { "content-type": "application/json", origin: ORIGIN },
+      body: JSON.stringify({
+        scopeType: "organization",
+        email: "alice@example.com",
+        role: "Auditor",
+      }),
+    });
+    await me(alice);
+
+    const activity = await service.request("/api/v1/audit-events", {
+      as: alice,
+    });
+    expect(activity.status).toBe(200);
+    const events = ((await activity.json()) as AuditPage).events;
+    expect(events.length).toBeGreaterThan(0);
+
+    const denied = await write("POST", "/api/v1/groups", alice, {
+      name: "Research",
+    });
+    expect(denied.status).toBe(403);
+  });
+
+  it("filters by action, channel, actor, target, and time", async () => {
+    service = await startTestService(withWrites);
+    const alicePerson = await me(alice);
+    service.clock.advance(60_000);
+    const bobPerson = await me(bob);
+    await write("POST", "/api/v1/groups", administrator, { name: "Research" });
+
+    const filtered = async (query: string): Promise<AuditEventRecord[]> =>
+      (await auditPage(query)).events;
+
+    const created = await filtered("?action=group.created");
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({
+      action: "group.created",
+      targetType: "group",
+      actorEmail: "robin@example.com",
+      actorDisplayName: "Robin Alvarez",
+      channel: "web",
+    });
+
+    expect(await filtered("?actor=" + alicePerson.person.id)).toEqual([
+      expect.objectContaining({ action: "person.created" }),
+    ]);
+    expect(
+      (await filtered("?actorEmail=" + bobPerson.person.email)).map(
+        (event) => event.action,
+      ),
+    ).toEqual(["person.created"]);
+    expect(
+      (await filtered("?targetType=group")).map((event) => event.action),
+    ).toEqual(["group.created"]);
+
+    const later = await filtered(
+      "?from=" + encodeURIComponent("2026-10-27T00:01:00.000Z"),
+    );
+    expect(later.map((event) => event.actorPersonId)).not.toContain(
+      alicePerson.person.id,
+    );
+    expect(later.map((event) => event.actorPersonId)).toContain(
+      bobPerson.person.id,
+    );
+  });
+
+  it("refuses a filter it does not understand", async () => {
+    service = await startTestService(withWrites);
+
+    for (const query of [
+      "?channel=email",
+      "?from=not-a-time",
+      "?action=" + encodeURIComponent("drop table"),
+    ]) {
+      const response = await service.request(`/api/v1/audit-events${query}`, {
+        as: administrator,
+      });
+      expect(response.status, query).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "invalid" },
+      });
+    }
   });
 });

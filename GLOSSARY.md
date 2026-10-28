@@ -13,6 +13,27 @@ The company or institution that one Badger deployment serves, together with its 
 **Group**:
 A department or team within the Organization that owns workflows and Skills. Groups nest, and a role held on a Group applies to the Groups inside it.
 
+**Role binding**:
+A role attached to a scope, either the Organization or a Group, for a person. Bindings are additive, and a binding on a Group applies to the Groups inside it. A binding made by email for an address no signed-in person has verified is an invitation.
+
+**Invitation**:
+A role binding recorded by email for an address no signed-in person has verified. It applies at the first sign-in that presents that address as verified, usually the person's first; from then on it follows the person's issuer and subject, so an address change at the provider moves no binding.
+
+**Administrator**:
+The Organization role that may do everything. An Administrator may override a blocked action only by recording a reason, and the override appears in the Activity log.
+
+**Auditor**:
+The Organization role that reads everything, including the Activity log, and changes nothing.
+
+**Group lead**:
+The Group role that manages the Group's members, bindings, workflows, and Skill entries. It applies to the Groups nested inside that Group.
+
+**Member**:
+The Group role that reads the Group's Skills and workflows.
+
+**Activity log**:
+The append-only record of every action with its actor, time, target, channel, and reason. Auditors and Administrators read all of it, and they can filter it.
+
 **Workflow owner**:
 The person who confirms the desired workflow, its acceptable behavior, and its unresolved choices. They also assign the workflow's other roles and decide its publication.
 

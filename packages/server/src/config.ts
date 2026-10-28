@@ -40,6 +40,12 @@ export interface PlatformSessionSettings {
   issuer: string;
   /** When set, the platform must grant the person this app. */
   requiredAppGrant: string | null;
+  /**
+   * Whether the platform verifies every address it returns. An answer that
+   * carries `email_verified` decides for itself; without that field, an
+   * address counts as verified only when this is true.
+   */
+  emailsVerified: boolean;
   /** How long a validated session is remembered. 0 disables the cache. */
   cacheSeconds: number;
   timeoutMs: number;
@@ -70,6 +76,12 @@ export interface ServiceConfig {
   identity: IdentityConfiguration;
   /** Emails, lowercased, of the people Badger treats as Administrators. */
   bootstrapAdministrators: string[];
+  /**
+   * When true, a person the identity provider calls an administrator becomes
+   * a Badger Administrator. Off by default, so platform rights never grant
+   * workflow rights silently.
+   */
+  platformAdministratorMapping: boolean;
   storage: StorageConfiguration;
   /**
    * The built dashboard's directory. It holds index.html and the asset
@@ -312,6 +324,8 @@ function readPlatformSession(
     issuer,
     requiredAppGrant:
       readString(environment, "BADGER_PLATFORM_APP_GRANT") ?? null,
+    emailsVerified:
+      readBoolean(environment, "BADGER_PLATFORM_EMAILS_VERIFIED") ?? false,
     cacheSeconds: readInteger(
       environment,
       "BADGER_PLATFORM_CACHE_SECONDS",
@@ -467,6 +481,13 @@ export function loadConfig(
 
   const port = readPort(environment);
   const database = readDatabase(environment, mode);
+  const platformAdministratorMapping =
+    readBoolean(environment, "BADGER_PLATFORM_ADMIN_MAPPING") ?? false;
+  if (platformAdministratorMapping && identity.kind !== "platform-session") {
+    throw new ConfigurationError(
+      "BADGER_PLATFORM_ADMIN_MAPPING applies only to BADGER_IDENTITY=platform-session",
+    );
+  }
   const allowedHostnames = readHostnames(environment, mode);
   if (mode === "service" && allowedHostnames.length === 0) {
     throw new ConfigurationError(
@@ -486,6 +507,7 @@ export function loadConfig(
     database,
     identity,
     bootstrapAdministrators: readBootstrapAdministrators(environment),
+    platformAdministratorMapping,
     storage: readStorage(environment),
     webDirectory: readWebDirectory(environment),
   };

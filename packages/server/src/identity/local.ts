@@ -22,6 +22,8 @@ function localPrincipal(administrator: LocalAdministrator): Principal {
     displayName: administrator.displayName,
     status: "active",
     credential: { kind: "local-implicit", id: null },
+    emailVerified: true,
+    platformAdministrator: false,
   };
 }
 

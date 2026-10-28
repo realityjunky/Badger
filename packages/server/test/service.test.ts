@@ -89,6 +89,7 @@ describe("the service's web page", () => {
         email: "robin@example.com",
         displayName: "Robin Alvarez",
         roles: ["Administrator"],
+        groups: [],
       },
       credential: { kind: "session", id: "test-session" },
     });
@@ -117,6 +118,26 @@ describe("the service's web page", () => {
     expect(response.status).toBe(405);
     expect(response.headers.get("allow")).toBe("GET, HEAD");
     expect(await response.json()).toMatchObject({ error: { code: "invalid" } });
+  });
+
+  it("names the methods a path serves when it refuses one", async () => {
+    service = await startTestService({
+      environment: { BADGER_ALLOWED_ORIGINS: "http://localhost" },
+    });
+
+    const group = await service.request("/api/v1/groups", {
+      method: "PUT",
+      headers: { origin: "http://localhost" },
+    });
+    expect(group.status).toBe(405);
+    expect(group.headers.get("allow")).toBe("GET, HEAD, POST");
+
+    const one = await service.request("/api/v1/groups/id-0001", {
+      method: "POST",
+      headers: { origin: "http://localhost" },
+    });
+    expect(one.status).toBe(405);
+    expect(one.headers.get("allow")).toBe("PATCH");
   });
 
   it("serves the API under its version only", async () => {

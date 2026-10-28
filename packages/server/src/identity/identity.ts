@@ -16,6 +16,14 @@ export interface Principal {
   displayName: string;
   status: "active";
   credential: Credential;
+  /** Whether the identity provider has verified this address. */
+  emailVerified: boolean;
+  /**
+   * Whether the identity provider calls this person an administrator. Badger
+   * grants nothing for it unless the deployment switches the platform-admin
+   * mapping on; the provider only states a fact.
+   */
+  platformAdministrator: boolean;
 }
 
 export interface IdentityRequest {

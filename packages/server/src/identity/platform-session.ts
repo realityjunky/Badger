@@ -17,6 +17,13 @@ interface PlatformUser {
   displayName: string;
   status: string;
   appGrants: readonly string[];
+  /**
+   * Whether the platform says it verified the user's address, or null when
+   * its answer does not say.
+   */
+  emailVerified: boolean | null;
+  /** Whether the platform calls this user an administrator (`is_admin`). */
+  administrator: boolean;
 }
 
 type Introspection =
@@ -89,6 +96,8 @@ function parseUser(body: unknown): PlatformUser | null {
     display_name?: unknown;
     status?: unknown;
     app_access?: unknown;
+    email_verified?: unknown;
+    is_admin?: unknown;
   };
   const id =
     typeof record.id === "string"
@@ -113,6 +122,9 @@ function parseUser(body: unknown): PlatformUser | null {
     displayName,
     status,
     appGrants: readGrants(record.app_access),
+    emailVerified:
+      typeof record.email_verified === "boolean" ? record.email_verified : null,
+    administrator: record.is_admin === true,
   };
 }
 
@@ -255,6 +267,11 @@ export function createPlatformSessionIdentityAdapter(
             displayName: user.displayName,
             status: "active",
             credential: { kind: "session", id: key },
+            // The platform's own answer decides; without one, the address
+            // counts as verified only if the deployment says the platform
+            // verifies every address it returns.
+            emailVerified: user.emailVerified ?? settings.emailsVerified,
+            platformAdministrator: user.administrator,
           },
         };
       }

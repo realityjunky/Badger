@@ -9,6 +9,8 @@ export interface TestPerson {
   subject: string;
   email?: string;
   displayName?: string;
+  /** Whether the test provider has verified this address; true by default. */
+  emailVerified?: boolean;
 }
 
 function principalFor(person: TestPerson): Principal {
@@ -19,6 +21,8 @@ function principalFor(person: TestPerson): Principal {
     displayName: person.displayName ?? person.subject,
     status: "active",
     credential: { kind: "session", id: "test-session" },
+    emailVerified: person.emailVerified ?? true,
+    platformAdministrator: false,
   };
 }
 

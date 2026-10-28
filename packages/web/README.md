@@ -16,8 +16,9 @@ them into `dist/`, so the server image carries the build and none of them.
 | `src/app/navigation.ts` | The URL routes, the rail's sections, and the page-title lookup.                                      |
 | `src/app/paths.ts`      | Base-path normalisation, API URLs, and reading the injected base path.                               |
 | `src/preferences/`      | The person's choices: model, API client, the saver that stores each change, and the provider.        |
+| `src/api/`              | The Admin and Activity clients: records, writes, and the activity query builder.                     |
 | `src/shell/`            | The rail, top bar, and application frame.                                                            |
-| `src/pages/`            | The pages. My work is the landing page at `/my-work`.                                                |
+| `src/pages/`            | The pages. My work is the landing page; Admin and Activity read live records.                        |
 | `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.          |
 | `e2e/`                  | Playwright journeys and visual checks against the real service in local single-user mode.            |
 
@@ -28,6 +29,11 @@ them into `dist/`, so the server image carries the build and none of them.
 - Appearance and language are saved per person through
   `/api/v1/me/preferences`, with the revision the client read. A stale write
   is a conflict, not a silent overwrite.
+- The Admin page lists members, roles, groups, and pending invitations, and
+  lets an Administrator create nested groups and invite people by email. The
+  Activity page shows every recorded action with its actor, time, target,
+  channel, and reason, filtered by actor, action, target type, and channel.
+  Auditors and Administrators read all of it.
 - The rail is 228 px, or 64 px collapsed, and becomes a drawer below
   1024 px. The three-pane registry layout stacks below 1180 px.
 - One token source feeds both the CSS variables and Ant Design's theme.
