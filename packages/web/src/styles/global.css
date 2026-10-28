@@ -676,6 +676,88 @@ body {
   align-items: center;
 }
 
+.skills-full-width {
+  width: 100%;
+}
+
+.skills-registry > *,
+.skills-compare-files > * {
+  min-width: 0;
+}
+
+.skills-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skills-link {
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border-radius: var(--badger-radius-control);
+  color: var(--badger-color-text);
+  text-decoration: none;
+}
+
+.skills-link:hover,
+.skills-link.selected {
+  background: var(--badger-color-accent-soft);
+  color: var(--badger-color-accent);
+}
+
+.skills-hash,
+.skills-script {
+  overflow-wrap: anywhere;
+}
+
+.skills-file-preview {
+  max-height: 620px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-control);
+  background: var(--badger-color-surface);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+.skills-compare-files,
+.skills-compare-selectors,
+.skills-upload-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.skills-path-button {
+  height: auto;
+  max-width: 100%;
+  padding: 0;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.skills-upload-inputs input {
+  width: 100%;
+  min-width: 0;
+}
+
+.skills-registry .ant-table-wrapper {
+  overflow-x: auto;
+}
+
+@media (max-width: 720px) {
+  .skills-compare-files,
+  .skills-compare-selectors,
+  .skills-upload-inputs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .font-scale-control {
   display: flex;
   align-items: center;

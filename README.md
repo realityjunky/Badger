@@ -2,18 +2,25 @@
 
 This repository holds Badger, a workflow Skill factory, as an npm workspace.
 The workflow kernel is delivered, and the collaborative service planned in
-[#24](https://github.com/realityjunky/Badger/issues/24) has its walking
-skeleton in `packages/server/` and its dashboard shell in `packages/web/`.
+[#24](https://github.com/realityjunky/Badger/issues/24) has its server in
+`packages/server/` and its dashboard in `packages/web/`.
 
-| Path               | Holds                                                                                                                                                                                                                                                                                                       | Status                                                                                               |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `packages/kernel/` | The workflow kernel, published as `@realityjunky/badger`: the Creator, WorkflowRuntime, and the `badger` CLI. See its [README](packages/kernel/README.md).                                                                                                                                                  | Delivered                                                                                            |
-| `packages/server/` | The collaborative service's server role: reviewed SQL migrations, Postgres or PGlite, local single-user mode, platform sign-in, groups and role bindings by email, workflows and version frames, capability checks with recorded overrides, audited writes, the activity log, health, and the test harness. | Walking skeleton (#36), platform sign-in (#38), groups and roles (#40), workflows and versions (#41) |
-| `packages/web/`    | The web dashboard: navigation, design tokens, URL routing, zh/en catalogs, themes, personal settings, Admin and Activity pages, and the Workflows catalog with version stage tracks and workflow role controls.                                                                                             | Shell (#37), admin and activity (#40), workflows (#41)                                               |
-| `packages/<name>/` | One package each for the collaborative service's remaining surfaces: the Badger MCP and the host installer.                                                                                                                                                                                                 | Planned (#24)                                                                                        |
+| Path               | Holds                                                                                                                                                                                                                                                                                                                                                              | Status                                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `packages/kernel/` | The workflow kernel, published as `@realityjunky/badger`: the Creator, WorkflowRuntime, and the `badger` CLI. See its [README](packages/kernel/README.md).                                                                                                                                                                                                         | Delivered                                                                                                                  |
+| `packages/server/` | The collaborative service's server role: reviewed SQL migrations, Postgres or PGlite, local single-user mode, platform sign-in, groups and role bindings by email, workflows and version frames, immutable Skill versions in a content-addressed store, capability checks with recorded overrides, audited writes, the activity log, health, and the test harness. | Walking skeleton (#36), platform sign-in (#38), groups and roles (#40), workflows and versions (#41), Skill versions (#42) |
+| `packages/web/`    | The web dashboard: navigation, design tokens, URL routing, zh/en catalogs, themes, personal settings, Admin and Activity pages, the Workflows catalog with version stage tracks and workflow role controls, and the Skills registry with uploads, previews, and version comparison.                                                                                | Shell (#37), admin and activity (#40), workflows (#41), Skills (#42)                                                       |
+| `packages/<name>/` | One package each for the collaborative service's remaining surfaces: the Badger MCP and the host installer.                                                                                                                                                                                                                                                        | Planned (#24)                                                                                                              |
 
 Everything shipped is generic: each deployment keeps its own launcher entries,
 reverse-proxy routes, and deploy scripts outside this repository.
+
+The Skills library (#42) now supports immutable folder and zip uploads,
+kernel source identities and inventories, script side-effect declarations,
+file previews, and version comparisons. An Engineer or Field expert on a
+workflow uploads to that workflow's Group. See
+[the server package](packages/server/README.md) for the API, permissions,
+storage, and configurable upload limits.
 
 ## Development
 

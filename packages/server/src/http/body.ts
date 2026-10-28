@@ -3,15 +3,16 @@ import { firstHeader } from "../identity/identity.js";
 
 export const MAX_JSON_BODY_BYTES = 16 * 1024;
 
-function tooLarge(limit: number): { ok: false; message: string } {
+function tooLarge(limit: number): { ok: false; message: string; status: 413 } {
   return {
     ok: false,
+    status: 413,
     message: `The request body is limited to ${limit} bytes`,
   };
 }
 
 export type JsonBodyResult =
-  { ok: true; value: unknown } | { ok: false; message: string };
+  { ok: true; value: unknown } | { ok: false; message: string; status?: 413 };
 
 const JSON_CONTENT_TYPE = /^application\/json(?:\s*;|$)/iu;
 

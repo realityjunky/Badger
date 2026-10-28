@@ -8,19 +8,19 @@ them into `dist/`, so the server image carries the build and none of them.
 
 ## Layout
 
-| Path                    | Holds                                                                                                |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- |
-| `src/theme/tokens.ts`   | The one token source: colors, layout sizes, type scale, radii, and the Ant Design theme.             |
-| `src/styles/global.css` | Layout only; every color and the shared layout sizes come from the CSS variables `tokens.ts` writes. |
-| `src/i18n/catalog.ts`   | zh and en message catalogs, keyed by the same message IDs.                                           |
-| `src/app/navigation.ts` | The URL routes, the rail's sections, and the page-title lookup.                                      |
-| `src/app/paths.ts`      | Base-path normalisation, API URLs, and reading the injected base path.                               |
-| `src/preferences/`      | The person's choices: model, API client, the saver that stores each change, and the provider.        |
-| `src/api/`              | The Workflows, Admin, and Activity clients: scoped records, writes, revision conflicts, and filters. |
-| `src/shell/`            | The rail, top bar, and application frame.                                                            |
-| `src/pages/`            | The pages. My work is the landing page; Admin and Activity read live records.                        |
-| `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.          |
-| `e2e/`                  | Playwright journeys and visual checks against the real service in local single-user mode.            |
+| Path                    | Holds                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `src/theme/tokens.ts`   | The one token source: colors, layout sizes, type scale, radii, and the Ant Design theme.                     |
+| `src/styles/global.css` | Layout only; every color and the shared layout sizes come from the CSS variables `tokens.ts` writes.         |
+| `src/i18n/catalog.ts`   | zh and en message catalogs, keyed by the same message IDs.                                                   |
+| `src/app/navigation.ts` | The URL routes, the rail's sections, and the page-title lookup.                                              |
+| `src/app/paths.ts`      | Base-path normalisation, API URLs, and reading the injected base path.                                       |
+| `src/preferences/`      | The person's choices: model, API client, the saver that stores each change, and the provider.                |
+| `src/api/`              | The Workflows, Skills, Admin, and Activity clients: scoped records, writes, revision conflicts, and filters. |
+| `src/shell/`            | The rail, top bar, and application frame.                                                                    |
+| `src/pages/`            | The pages. My work is the landing page; Workflows, Skills, Admin, and Activity read live records.            |
+| `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.                  |
+| `e2e/`                  | Playwright journeys and visual checks against the real service in local single-user mode.                    |
 
 ## Behavior
 
@@ -36,6 +36,13 @@ them into `dist/`, so the server image carries the build and none of them.
   Auditors and Administrators read all of it.
 - The rail is 228 px, or 64 px collapsed, and becomes a drawer below
   1024 px. The three-pane registry layout stacks below 1180 px.
+- The Skills registry reads live group-owned entries, immutable versions,
+  source inventories, and script side-effect declarations. Folder and zip
+  selection starts a preview; a person declares script effects and confirms
+  before the version is stored. Uploads warn against real data. Every version
+  and file selection has a deep link, and any two versions can be compared
+  with source previews. Uploaded markup is rendered as text. The server's
+  capability response controls which create and upload actions are offered.
 - One token source feeds both the CSS variables and Ant Design's theme.
   Contrast is checked at AA in both themes; reduced motion stops the stage
   marker's animation.

@@ -51,6 +51,10 @@ import {
   savePreferences,
 } from "../preferences.js";
 import { readJsonBody } from "./body.js";
+import { filesystemBlobStore } from "../skills/blobs.js";
+import type { AuthorizedRequest } from "./authorized-request.js";
+import { RequestError } from "./errors.js";
+import { handleSkillsRequest, skillMethods } from "./skills.js";
 import { guardRequest } from "./guard.js";
 import { buildHealthReport } from "./health.js";
 import { escapeHtml, renderHomePage, renderSignedOutPage } from "./page.js";
@@ -137,8 +141,8 @@ function matchedId(pattern: RegExp, path: string): string | null {
 
 /** The methods a path serves, for the Allow header and the write check. */
 function allowedMethods(path: string): string {
-  const workflows = workflowMethods(path);
-  if (workflows !== null) return workflows;
+  const featureMethods = skillMethods(path) ?? workflowMethods(path);
+  if (featureMethods !== null) return featureMethods;
   if (path === `${API}/me/preferences`) {
     return "GET, HEAD, PUT";
   }
@@ -169,6 +173,7 @@ function isWriteRoute(method: string, path: string): boolean {
 export function createService(options: ServiceOptions, port: number): Service {
   const { config, database, clock, ids, identity } = options;
   const serviceDependencies = { clock, ids };
+  const blobs = filesystemBlobStore(config.storage.blobDirectory);
   const allowedOrigins =
     config.allowedOrigins === "loopback"
       ? loopbackOrigins(port)
@@ -692,6 +697,42 @@ export function createService(options: ServiceOptions, port: number): Service {
     const access = await accessFor(database, person, principal, config);
     const roles = access.organization;
 
+    const authorized: AuthorizedRequest = {
+      request,
+      reply,
+      url,
+      path,
+      method,
+      database,
+      config,
+      dependencies: serviceDependencies,
+      context: writeContextFor(person, principal, reply),
+      access,
+      person,
+      blobs,
+    };
+    if (workflowMethods(path) !== null) {
+      return handleWorkflows(authorized);
+    }
+    if (path === `${API}/skills` || path.startsWith(`${API}/skills/`)) {
+      try {
+        return await handleSkillsRequest(authorized);
+      } catch (error) {
+        if (error instanceof URIError)
+          return reply.error(400, "invalid", "Malformed path encoding");
+        if (!(error instanceof RequestError)) throw error;
+        return reply.error(
+          error.status,
+          error.status === 403
+            ? "denied"
+            : error.status === 409
+              ? "conflict"
+              : "invalid",
+          error.message,
+        );
+      }
+    }
+
     if (preferencesPath) {
       return handlePreferences(request, reply, person, principal, method);
     }
@@ -739,19 +780,6 @@ export function createService(options: ServiceOptions, port: number): Service {
     }
     if (path === `${API}/audit-events`) {
       return listAudit(reply, url, access);
-    }
-    if (workflowMethods(path) !== null) {
-      return handleWorkflows({
-        request,
-        reply,
-        path,
-        method,
-        database,
-        dependencies: serviceDependencies,
-        person,
-        access,
-        context: writeContextFor(person, principal, reply),
-      });
     }
     if (path === `${API}/bindings` && method === "POST") {
       return handleCreateBinding(request, reply, person, principal, access);

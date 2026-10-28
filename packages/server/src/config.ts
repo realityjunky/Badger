@@ -83,6 +83,11 @@ export interface ServiceConfig {
    */
   platformAdministratorMapping: boolean;
   storage: StorageConfiguration;
+  uploads: {
+    maxBytes: number;
+    maxFileBytes: number;
+    maxFiles: number;
+  };
   /**
    * The built dashboard's directory. It holds index.html and the asset
    * folder; a deployment that ships them elsewhere sets BADGER_WEB_DIR.
@@ -509,6 +514,24 @@ export function loadConfig(
     bootstrapAdministrators: readBootstrapAdministrators(environment),
     platformAdministratorMapping,
     storage: readStorage(environment),
+    uploads: {
+      maxBytes: readInteger(
+        environment,
+        "BADGER_UPLOAD_MAX_BYTES",
+        20 * 1024 * 1024,
+        { min: 1, max: 100 * 1024 * 1024 },
+      ),
+      maxFileBytes: readInteger(
+        environment,
+        "BADGER_UPLOAD_MAX_FILE_BYTES",
+        5 * 1024 * 1024,
+        { min: 1, max: 100 * 1024 * 1024 },
+      ),
+      maxFiles: readInteger(environment, "BADGER_UPLOAD_MAX_FILES", 1000, {
+        min: 1,
+        max: 10000,
+      }),
+    },
     webDirectory: readWebDirectory(environment),
   };
 }
