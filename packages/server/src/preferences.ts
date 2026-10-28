@@ -1,7 +1,6 @@
-import { recordAudit, type AuditChannel } from "./audit.js";
+import { recordAudit, type WriteContext } from "./audit.js";
 import type { Database, Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
-import type { Credential } from "./identity/identity.js";
 import { toIsoString } from "./util.js";
 
 export type Language = "en" | "zh";
@@ -149,12 +148,7 @@ export function parsePreferencesInput(body: unknown): PreferencesParseResult {
   };
 }
 
-export interface PreferencesWriteContext {
-  personId: string;
-  credential: Credential;
-  channel: AuditChannel;
-  requestId: string;
-}
+export type PreferencesWriteContext = WriteContext;
 
 export type SavePreferencesResult =
   | { kind: "saved"; preferences: StoredPreferences }

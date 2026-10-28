@@ -7,6 +7,8 @@ import {
   usePreferences,
 } from "../preferences/PreferencesContext.js";
 import { AppShell } from "../shell/AppShell.js";
+import { ActivityPage } from "../pages/ActivityPage.js";
+import { AdminPage } from "../pages/AdminPage.js";
 import { MyWorkPage } from "../pages/MyWorkPage.js";
 import { NotFoundPage } from "../pages/NotFoundPage.js";
 import { PlaceholderPage } from "../pages/PlaceholderPage.js";
@@ -100,24 +102,8 @@ function ThemedApp({ basePath }: { basePath: string }) {
                   />
                 }
               />
-              <Route
-                path="activity"
-                element={
-                  <PlaceholderPage
-                    title="page.activity.title"
-                    description="page.activity.description"
-                  />
-                }
-              />
-              <Route
-                path="admin/*"
-                element={
-                  <PlaceholderPage
-                    title="page.admin.title"
-                    description="page.admin.description"
-                  />
-                }
-              />
+              <Route path="activity" element={<ActivityPage />} />
+              <Route path="admin/*" element={<AdminPage />} />
               <Route path="settings/*" element={<SettingsPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>

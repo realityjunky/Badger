@@ -245,6 +245,40 @@ test("reduced motion stops the stage animation", async ({ page }) => {
   expect(animation).toBe("none");
 });
 
+test("the Admin page lists members and creates a group", async ({ page }) => {
+  await page.goto("/admin");
+  await expect(page.getByTestId("page-admin")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Alex Chen" })).toBeVisible();
+
+  const name = `Research ${Date.now()}`;
+  await page.getByRole("tab", { name: "Groups" }).click();
+  await page.getByRole("textbox", { name: "Group" }).fill(name);
+  await page.getByRole("button", { name: "Create group" }).click();
+
+  await expect(page.getByRole("cell", { name })).toBeVisible();
+});
+
+test("the Activity page filters recorded actions", async ({ page }) => {
+  await page.evaluate(async () => {
+    const response = await fetch("/api/v1/groups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: `Activity check ${Date.now()}` }),
+    });
+    if (!response.ok) {
+      throw new Error(`Creating a group answered ${response.status}`);
+    }
+  });
+
+  await page.goto("/activity");
+  await expect(page.getByTestId("page-activity")).toBeVisible();
+  await page.getByRole("textbox", { name: "Action" }).fill("group.created");
+  await page.getByRole("button", { name: "Apply filters" }).click();
+
+  await expect(page.getByTestId("activity-table")).toBeVisible();
+  await expect(page.getByText("group.created").first()).toBeVisible();
+});
+
 for (const theme of ["light", "dark"] as const) {
   test(`visual check in ${theme}`, async ({ page }) => {
     await setPreferences(page, { theme, language: "en", fontScale: 100 });

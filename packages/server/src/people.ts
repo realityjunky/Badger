@@ -2,6 +2,8 @@ import type { ServiceDependencies } from "./dependencies.js";
 import type { Queryable } from "./database/database.js";
 import type { Principal } from "./identity/identity.js";
 import { recordAudit, type AuditChannel } from "./audit.js";
+import { resolvePendingBindings } from "./bindings.js";
+import type { Credential } from "./identity/identity.js";
 import { toIsoString } from "./util.js";
 
 const PROFILE_ATTEMPTS = 3;
@@ -69,10 +71,23 @@ export async function signInPerson(
   database: Queryable,
   dependencies: ServiceDependencies,
   principal: Principal,
-  context: { channel: AuditChannel; requestId: string },
+  context: {
+    channel: AuditChannel;
+    requestId: string;
+    credential: Credential;
+    emailVerified: boolean;
+  },
 ): Promise<Person> {
   const now = dependencies.clock.now();
   let current = await findPerson(database, principal.issuer, principal.subject);
+
+  // A waiting email binding applies at the first sign-in that creates the
+  // person, in the same transaction. Later sign-ins match on issuer and
+  // subject, so they resolve no new invitation.
+  const finish = async (person: Person): Promise<Person> => {
+    await resolvePendingBindings(database, dependencies, person, context);
+    return person;
+  };
 
   for (let attempt = 0; attempt < PROFILE_ATTEMPTS; attempt += 1) {
     if (current === null) {
@@ -120,7 +135,7 @@ export async function signInPerson(
           reason: "First sign-in",
           requestId: context.requestId,
         });
-        return person;
+        return finish(person);
       }
 
       // Another process recorded this person first; read what it wrote.

@@ -8,8 +8,8 @@ skeleton in `packages/server/` and its dashboard shell in `packages/web/`.
 | Path               | Holds                                                                                                                                                                                                 | Status                                         |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | `packages/kernel/` | The workflow kernel, published as `@realityjunky/badger`: the Creator, WorkflowRuntime, and the `badger` CLI. See its [README](packages/kernel/README.md).                                            | Delivered                                      |
-| `packages/server/` | The collaborative service's server role: reviewed SQL migrations, Postgres or PGlite, local single-user mode, platform sign-in, audited writes, the health endpoint, and the in-process test harness. | Walking skeleton (#36), platform sign-in (#38) |
-| `packages/web/`    | The web dashboard shell: navigation rail, top bar, three-pane registry layout, design tokens, URL routing, zh/en catalogs, light and dark themes, and personal appearance settings.                   | Dashboard shell (#37)                          |
+| `packages/server/` | The collaborative service's server role: reviewed SQL migrations, Postgres or PGlite, local single-user mode, platform sign-in, groups and role bindings by email, capability checks with recorded overrides, audited writes, the activity log, the health endpoint, and the in-process test harness. | Walking skeleton (#36), platform sign-in (#38), groups and roles (#40) |
+| `packages/web/`    | The web dashboard: navigation rail, top bar, three-pane registry layout, design tokens, URL routing, zh/en catalogs, light and dark themes, personal appearance settings, the Admin pages, and the Activity page.                                                                                                                 | Shell (#37), admin and activity (#40)          |
 | `packages/<name>/` | One package each for the collaborative service's remaining surfaces: the Badger MCP and the host installer.                                                                                           | Planned (#24)                                  |
 
 Everything shipped is generic: each deployment keeps its own launcher entries,
@@ -75,11 +75,12 @@ platform lives in code; every value below is configuration.
 | Setting                             | Meaning                                                                                                                                                                  |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `BADGER_PLATFORM_URL`               | The platform's internal base URL, such as `https://platform.internal`.                                                                                                   |
-| `BADGER_PLATFORM_CURRENT_USER_PATH` | The current-user endpoint, such as `/current-user`; it answers with `id`, `email`, `display_name`, `status`, and `app_access`.                                           |
+| `BADGER_PLATFORM_CURRENT_USER_PATH` | The current-user endpoint, such as `/current-user`; it answers with `id`, `email`, `display_name`, `status`, `app_access`, and optionally `is_admin` or `roles`.                                          |
 | `BADGER_PLATFORM_SESSION_COOKIE`    | The cookie that carries the platform session token.                                                                                                                      |
 | `BADGER_PLATFORM_CURRENT_USER_AUTH` | How Badger presents the token to the current-user endpoint: `cookie` (the default), in a cookie of the same name, or `bearer`, as an `Authorization: Bearer` header.     |
 | `BADGER_PLATFORM_ISSUER`            | Required. A stable name for this platform, such as `https://platform.example`. People are matched on issuer and subject, so keep it when the platform's address changes. |
 | `BADGER_PLATFORM_APP_GRANT`         | Optional app name the platform must grant the person, such as `workflow-app`.                                                                                            |
+| `BADGER_PLATFORM_ADMIN_MAPPING`     | Optional, off by default. When `true`, a person the platform marks with `is_admin` or a `roles` entry of `admin`, `administrator`, or `owner` becomes a Badger Administrator. |
 | `BADGER_PLATFORM_CACHE_SECONDS`     | How long a checked session is remembered; defaults to 30, and 0 disables the cache.                                                                                      |
 | `BADGER_PLATFORM_TIMEOUT_MS`        | How long to wait for the platform; defaults to 3000.                                                                                                                     |
 
@@ -89,6 +90,25 @@ are refused; a platform that cannot be reached yields "unavailable". This
 adapter issues no Badger cookie of its own; Badger's own cookies, when a later
 adapter issues one, are SameSite=Strict, HttpOnly, and Secure, and are named
 apart from the platform's.
+
+Platform administration grants no Badger role unless
+`BADGER_PLATFORM_ADMIN_MAPPING` is on; then it maps to Administrator, and the
+mapping is refused with an identity adapter that is not the platform.
+
+### Groups, roles, and bindings
+
+Badger decides authorization itself (ADR 0003). An Administrator creates
+nested groups and binds people by email; a Group lead manages the members and
+bindings of their group and the groups inside it, and a binding inherits
+downward. A binding for an address that has never signed in waits as an
+invitation: the first sign-in with that verified address records the person and
+applies it, and later sign-ins match on issuer and subject, so an address
+change at the provider moves no binding. Administrators and Auditors read the
+activity log; every request is checked on the server.
+
+Badger refuses a person granting themselves an organization role. An
+Administrator may override that block by quoting a reason, and the reason is
+recorded in the audit event.
 
 ## Adding a workspace package
 

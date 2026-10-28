@@ -7,6 +7,10 @@ export interface StubPlatformUser {
   status?: string;
   /** App names the platform has granted this person. */
   appGrants?: readonly string[];
+  /** Whether the platform has verified this user's address; true by default. */
+  emailVerified?: boolean;
+  /** Whether the platform calls this user an administrator. */
+  isAdmin?: boolean;
 }
 
 export interface StubPlatformOptions {
@@ -67,6 +71,8 @@ function userBody(user: StubPlatformUser): unknown {
     email: user.email,
     display_name: user.displayName ?? user.email,
     status: user.status ?? "active",
+    email_verified: user.emailVerified ?? true,
+    is_admin: user.isAdmin ?? false,
     app_access: (user.appGrants ?? []).map((appName) => ({
       app_name: appName,
       role: "user",

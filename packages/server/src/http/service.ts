@@ -4,8 +4,25 @@ import {
   decodeAuditCursor,
   listAuditEvents,
   type AuditChannel,
+  type AuditFilters,
 } from "../audit.js";
-import { organizationRoles, type OrganizationRole } from "../authorization.js";
+import {
+  accessFor,
+  isAdministrator,
+  mayManageGroup,
+  mayReadAudit,
+  managedGroupIds,
+  withAncestorGroups,
+  type Access,
+} from "../authorization.js";
+import {
+  createBinding,
+  listInvitations,
+  parseBindingInput,
+  readBindingById,
+  removeBinding,
+  type BindingContext,
+} from "../bindings.js";
 import type { Clock } from "../clock.js";
 import type { ServiceConfig } from "../config.js";
 import type { Database } from "../database/database.js";
@@ -19,6 +36,15 @@ import {
   type Principal,
 } from "../identity/identity.js";
 import type { IdSource } from "../ids.js";
+import {
+  createGroup,
+  listGroups,
+  listMembers,
+  parseCreateGroupInput,
+  parseUpdateGroupInput,
+  updateGroup,
+  type GroupWriteContext,
+} from "../groups.js";
 import type { Logger } from "../log.js";
 import { loopbackOrigins } from "../network.js";
 import { signInPerson, type Person } from "../people.js";
@@ -95,6 +121,49 @@ function readAuditLimit(raw: string | null): number | null {
   return limit;
 }
 
+const GROUP_PATH = new RegExp(`^${API}/groups/([^/]+)$`, "u");
+const BINDING_PATH = new RegExp(`^${API}/bindings/([^/]+)$`, "u");
+
+function matchedId(pattern: RegExp, path: string): string | null {
+  const match = pattern.exec(path);
+  if (match?.[1] === undefined) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+/** The methods a path serves, for the Allow header and the write check. */
+function allowedMethods(path: string): string {
+  if (path === `${API}/me/preferences`) {
+    return "GET, HEAD, PUT";
+  }
+  if (path === `${API}/bindings`) {
+    return "POST";
+  }
+  if (matchedId(BINDING_PATH, path) !== null) {
+    return "DELETE";
+  }
+  if (path === `${API}/groups`) {
+    return "GET, HEAD, POST";
+  }
+  if (matchedId(GROUP_PATH, path) !== null) {
+    return "PATCH";
+  }
+  return "GET, HEAD";
+}
+
+/** A request that changes records, rather than reading them. */
+function isWriteRoute(method: string, path: string): boolean {
+  if (method === "GET" || method === "HEAD") {
+    return false;
+  }
+  return allowedMethods(path).split(", ").includes(method);
+}
+
 /** Serves on `port`, the one the server actually bound. */
 export function createService(options: ServiceOptions, port: number): Service {
   const { config, database, clock, ids, identity } = options;
@@ -132,20 +201,80 @@ export function createService(options: ServiceOptions, port: number): Service {
       signInPerson(tx, serviceDependencies, principal, {
         channel: channelOf(principal.credential),
         requestId,
+        credential: principal.credential,
+        emailVerified: principal.emailVerified,
       }),
     );
+  }
+
+  /** The audit filters a request names, or the reason one is not valid. */
+  function readAuditFilters(
+    url: URL,
+  ): { ok: true; filters: AuditFilters } | { ok: false; message: string } {
+    const text = (name: string): string | undefined => {
+      const value = url.searchParams.get(name);
+      return value === null || value.trim() === "" ? undefined : value.trim();
+    };
+    const token = (name: string): string | undefined => {
+      const value = text(name);
+      if (value !== undefined && !/^[A-Za-z0-9_.+@:-]{1,200}$/u.test(value)) {
+        throw new Error(`${name} is not a value this log records`);
+      }
+      return value;
+    };
+
+    try {
+      const channel = text("channel");
+      if (
+        channel !== undefined &&
+        !["web", "mcp", "worker"].includes(channel)
+      ) {
+        return {
+          ok: false,
+          message: "channel must be web, mcp, or worker",
+        };
+      }
+      const from = text("from");
+      const to = text("to");
+      for (const [name, value] of [
+        ["from", from],
+        ["to", to],
+      ] as const) {
+        if (value !== undefined && Number.isNaN(Date.parse(value))) {
+          return { ok: false, message: `${name} must be a timestamp` };
+        }
+      }
+      return {
+        ok: true,
+        filters: {
+          actorPersonId: token("actor"),
+          actorEmail: token("actorEmail"),
+          action: token("action"),
+          channel: channel as AuditChannel | undefined,
+          targetType: token("targetType"),
+          targetId: token("targetId"),
+          from,
+          to,
+        },
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "Invalid filter",
+      };
+    }
   }
 
   async function listAudit(
     reply: Reply,
     url: URL,
-    roles: readonly OrganizationRole[],
+    access: Access,
   ): Promise<void> {
-    if (!roles.includes("Administrator")) {
+    if (!mayReadAudit(access)) {
       return reply.error(
         403,
         "denied",
-        "Only an Administrator reads the audit log",
+        "Only an Auditor or an Administrator reads the activity log",
       );
     }
     const limit = readAuditLimit(url.searchParams.get("limit"));
@@ -165,7 +294,324 @@ export function createService(options: ServiceOptions, port: number): Service {
         "cursor is not one this service issued",
       );
     }
-    reply.json(200, await listAuditEvents(database, { limit, after }));
+    const parsed = readAuditFilters(url);
+    if (!parsed.ok) {
+      return reply.error(400, "invalid", parsed.message);
+    }
+    reply.json(
+      200,
+      await listAuditEvents(database, {
+        limit,
+        after,
+        filters: parsed.filters,
+      }),
+    );
+  }
+
+  /** The visibility a person has over bindings and members. */
+  async function bindingVisibility(
+    access: Access,
+    person: Person,
+  ): Promise<{
+    organization: boolean;
+    groupIds: Set<string> | null;
+  }> {
+    if (mayReadAudit(access)) {
+      return { organization: true, groupIds: null };
+    }
+    const managed = await managedGroupIds(database, access, person);
+    return {
+      organization: false,
+      // A binding above a managed group reaches into it, so its scope is in
+      // view too.
+      groupIds:
+        managed === null ? null : await withAncestorGroups(database, managed),
+    };
+  }
+
+  /**
+   * The same visibility, or null for a person who manages nothing: a Member
+   * reads neither the member list nor the pending invitations.
+   */
+  async function managementVisibility(
+    access: Access,
+    person: Person,
+  ): Promise<{ organization: boolean; groupIds: Set<string> | null } | null> {
+    const visibility = await bindingVisibility(access, person);
+    if (
+      !visibility.organization &&
+      (visibility.groupIds === null || visibility.groupIds.size === 0)
+    ) {
+      return null;
+    }
+    return visibility;
+  }
+
+  async function handleCreateBinding(
+    request: IncomingMessage,
+    reply: Reply,
+    person: Person,
+    principal: Principal,
+    access: Access,
+  ): Promise<void> {
+    const body = await readJsonBody(request);
+    if (!body.ok) {
+      return reply.error(400, "invalid", body.message);
+    }
+    const parsed = parseBindingInput(body.value);
+    if (!parsed.ok) {
+      return reply.error(400, "invalid", parsed.message);
+    }
+    const input = parsed.value;
+
+    if (input.scopeType === "organization") {
+      if (!isAdministrator(access)) {
+        return reply.error(
+          403,
+          "denied",
+          "Only an Administrator binds an organization role",
+        );
+      }
+    } else if (
+      input.scopeId === null ||
+      !(await mayManageGroup(database, access, person, input.scopeId))
+    ) {
+      return reply.error(
+        403,
+        "denied",
+        "Only an Administrator or the group's Group lead binds a group role",
+      );
+    }
+
+    // Badger refuses a person granting themselves an organization role. An
+    // Administrator may override the block, and then the reason is recorded.
+    const selfBinding =
+      input.scopeType === "organization" &&
+      input.email.toLowerCase() === principal.email.toLowerCase();
+    if (selfBinding && input.overrideReason === null) {
+      return reply.error(
+        409,
+        "rejected",
+        "Badger does not grant an organization role to the person granting it; an Administrator may override with a reason",
+      );
+    }
+
+    const context: BindingContext = {
+      personId: person.id,
+      credential: principal.credential,
+      channel: channelOf(principal.credential),
+      requestId: reply.requestId,
+    };
+    const overrideReason = selfBinding ? input.overrideReason : null;
+    const created = await createBinding(
+      database,
+      serviceDependencies,
+      context,
+      input,
+      overrideReason === null
+        ? "Role binding recorded"
+        : `Override: ${overrideReason}`,
+    );
+    if (created.kind === "conflict") {
+      return reply.error(
+        409,
+        "conflict",
+        "That person or address already holds this role here",
+      );
+    }
+    return reply.json(201, { binding: created.binding });
+  }
+
+  async function handleRemoveBinding(
+    request: IncomingMessage,
+    reply: Reply,
+    person: Person,
+    principal: Principal,
+    access: Access,
+    bindingId: string,
+  ): Promise<void> {
+    const binding = await readBindingById(database, bindingId);
+    if (binding === null) {
+      return reply.error(404, "invalid", "No such role binding");
+    }
+    if (binding.scopeType === "organization") {
+      if (!isAdministrator(access)) {
+        return reply.error(
+          403,
+          "denied",
+          "Only an Administrator removes an organization binding",
+        );
+      }
+    } else if (
+      binding.scopeId === null ||
+      !(await mayManageGroup(database, access, person, binding.scopeId))
+    ) {
+      return reply.error(
+        403,
+        "denied",
+        "Only an Administrator or the group's Group lead removes a group binding",
+      );
+    }
+
+    const body = await readJsonBody(request);
+    if (!body.ok) {
+      return reply.error(400, "invalid", body.message);
+    }
+    const input = body.value;
+    if (
+      typeof input !== "object" ||
+      input === null ||
+      Array.isArray(input) ||
+      !Number.isInteger((input as { revision?: unknown }).revision) ||
+      ((input as { revision: number }).revision as number) < 1
+    ) {
+      return reply.error(
+        400,
+        "invalid",
+        "revision must be a whole number from 1",
+      );
+    }
+
+    const context: BindingContext = {
+      personId: person.id,
+      credential: principal.credential,
+      channel: channelOf(principal.credential),
+      requestId: reply.requestId,
+    };
+    const removed = await removeBinding(
+      database,
+      serviceDependencies,
+      context,
+      bindingId,
+      (input as { revision: number }).revision,
+      "Role binding removed",
+    );
+    if (removed.kind === "missing") {
+      return reply.error(404, "invalid", "No such role binding");
+    }
+    if (removed.kind === "stale") {
+      return reply.json(409, {
+        error: {
+          code: "conflict",
+          message: "The binding changed since you read it",
+        },
+        requestId: reply.requestId,
+        binding: removed.binding,
+      });
+    }
+    return reply.json(200, { removed: true });
+  }
+
+  async function handleCreateGroup(
+    request: IncomingMessage,
+    reply: Reply,
+    person: Person,
+    principal: Principal,
+    access: Access,
+  ): Promise<void> {
+    if (!isAdministrator(access)) {
+      return reply.error(
+        403,
+        "denied",
+        "Only an Administrator creates a group",
+      );
+    }
+    const body = await readJsonBody(request);
+    if (!body.ok) {
+      return reply.error(400, "invalid", body.message);
+    }
+    const input = parseCreateGroupInput(body.value);
+    if (!input.ok) {
+      return reply.error(400, "invalid", input.message);
+    }
+    const context: GroupWriteContext = {
+      personId: person.id,
+      credential: principal.credential,
+      channel: channelOf(principal.credential),
+      requestId: reply.requestId,
+    };
+    const created = await createGroup(
+      database,
+      serviceDependencies,
+      context,
+      input.value,
+    );
+    if (created.kind === "missing-parent") {
+      return reply.error(400, "invalid", "The parent group does not exist");
+    }
+    if (created.kind === "conflict") {
+      return reply.error(
+        409,
+        "conflict",
+        "A group with that name already sits there",
+      );
+    }
+    return reply.json(201, { group: created.group });
+  }
+
+  async function handleUpdateGroup(
+    request: IncomingMessage,
+    reply: Reply,
+    person: Person,
+    principal: Principal,
+    access: Access,
+    groupId: string,
+  ): Promise<void> {
+    if (!isAdministrator(access)) {
+      return reply.error(
+        403,
+        "denied",
+        "Only an Administrator changes a group",
+      );
+    }
+    const body = await readJsonBody(request);
+    if (!body.ok) {
+      return reply.error(400, "invalid", body.message);
+    }
+    const input = parseUpdateGroupInput(body.value);
+    if (!input.ok) {
+      return reply.error(400, "invalid", input.message);
+    }
+    const context: GroupWriteContext = {
+      personId: person.id,
+      credential: principal.credential,
+      channel: channelOf(principal.credential),
+      requestId: reply.requestId,
+    };
+    const updated = await updateGroup(
+      database,
+      serviceDependencies,
+      context,
+      groupId,
+      input.value,
+    );
+    if (updated.kind === "missing") {
+      return reply.error(404, "invalid", "No such group");
+    }
+    if (updated.kind === "stale") {
+      return reply.json(409, {
+        error: {
+          code: "conflict",
+          message: "The group changed since you read it",
+        },
+        requestId: reply.requestId,
+        group: updated.group,
+      });
+    }
+    if (updated.kind === "missing-parent") {
+      return reply.error(400, "invalid", "The parent group does not exist");
+    }
+    if (updated.kind === "cycle") {
+      return reply.error(409, "rejected", "A group cannot move inside itself");
+    }
+    if (updated.kind === "conflict") {
+      return reply.error(
+        409,
+        "conflict",
+        "A group with that name already sits there",
+      );
+    }
+    return reply.json(200, { group: updated.group });
   }
 
   async function handlePreferences(
@@ -278,12 +724,12 @@ export function createService(options: ServiceOptions, port: number): Service {
       });
     }
 
-    // Only the preferences endpoint writes; every other route is read-only.
-    // Refuse other methods before identifying anyone, so no sign-in or audit
-    // record is written for a request the service will not serve.
-    if (!reads && !preferencesPath) {
+    // Reads and the routes that write are allowed. Refuse any other method
+    // before identifying anyone, so no sign-in or audit record is written for
+    // a request the service will not serve.
+    if (!reads && !isWriteRoute(method, path)) {
       return reply.error(405, "invalid", "Method not allowed", {
-        allow: "GET, HEAD",
+        allow: allowedMethods(path),
       });
     }
 
@@ -308,7 +754,8 @@ export function createService(options: ServiceOptions, port: number): Service {
 
     const principal = identityResult.principal;
     const person = await signIn(principal, reply.requestId);
-    const roles = organizationRoles(person, config);
+    const access = await accessFor(database, person, principal, config);
+    const roles = access.organization;
 
     if (preferencesPath) {
       return handlePreferences(request, reply, person, principal, method);
@@ -350,12 +797,64 @@ export function createService(options: ServiceOptions, port: number): Service {
           email: person.email,
           displayName: person.displayName,
           roles,
+          groups: access.groups,
         },
         credential: principal.credential,
       });
     }
     if (path === `${API}/audit-events`) {
-      return listAudit(reply, url, roles);
+      return listAudit(reply, url, access);
+    }
+    if (path === `${API}/bindings` && method === "POST") {
+      return handleCreateBinding(request, reply, person, principal, access);
+    }
+    const bindingId = matchedId(BINDING_PATH, path);
+    if (bindingId !== null && method === "DELETE") {
+      return handleRemoveBinding(
+        request,
+        reply,
+        person,
+        principal,
+        access,
+        bindingId,
+      );
+    }
+    if (path === `${API}/groups` && method === "POST") {
+      return handleCreateGroup(request, reply, person, principal, access);
+    }
+    if (path === `${API}/groups`) {
+      return reply.json(200, {
+        groups: await listGroups(database, access, person),
+      });
+    }
+    const groupId = matchedId(GROUP_PATH, path);
+    if (groupId !== null && method === "PATCH") {
+      return handleUpdateGroup(
+        request,
+        reply,
+        person,
+        principal,
+        access,
+        groupId,
+      );
+    }
+    if (path === `${API}/members` || path === `${API}/invitations`) {
+      const visibility = await managementVisibility(access, person);
+      if (visibility === null) {
+        return reply.error(
+          403,
+          "denied",
+          "Only an Administrator, an Auditor, or a Group lead reads members and invitations",
+        );
+      }
+      if (path === `${API}/members`) {
+        return reply.json(200, {
+          members: await listMembers(database, config, visibility),
+        });
+      }
+      return reply.json(200, {
+        invitations: await listInvitations(database, visibility),
+      });
     }
     if (isApi) {
       return reply.error(404, "invalid", "Not found");

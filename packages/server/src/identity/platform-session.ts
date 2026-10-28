@@ -17,6 +17,10 @@ interface PlatformUser {
   displayName: string;
   status: string;
   appGrants: readonly string[];
+  /** Whether the platform has verified the user's address. */
+  emailVerified: boolean;
+  /** Whether the platform calls this user an administrator. */
+  administrator: boolean;
 }
 
 type Introspection =
@@ -79,6 +83,23 @@ function readGrants(value: unknown): string[] {
   return grants;
 }
 
+function readAdministrator(record: {
+  is_admin?: unknown;
+  roles?: unknown;
+}): boolean {
+  if (record.is_admin === true) {
+    return true;
+  }
+  if (!Array.isArray(record.roles)) {
+    return false;
+  }
+  return record.roles.some(
+    (role) =>
+      typeof role === "string" &&
+      ["admin", "administrator", "owner"].includes(role.trim().toLowerCase()),
+  );
+}
+
 function parseUser(body: unknown): PlatformUser | null {
   if (typeof body !== "object" || body === null) {
     return null;
@@ -89,6 +110,9 @@ function parseUser(body: unknown): PlatformUser | null {
     display_name?: unknown;
     status?: unknown;
     app_access?: unknown;
+    email_verified?: unknown;
+    is_admin?: unknown;
+    roles?: unknown;
   };
   const id =
     typeof record.id === "string"
@@ -113,6 +137,8 @@ function parseUser(body: unknown): PlatformUser | null {
     displayName,
     status,
     appGrants: readGrants(record.app_access),
+    emailVerified: record.email_verified === true,
+    administrator: readAdministrator(record),
   };
 }
 
@@ -255,6 +281,8 @@ export function createPlatformSessionIdentityAdapter(
             displayName: user.displayName,
             status: "active",
             credential: { kind: "session", id: key },
+            emailVerified: user.emailVerified,
+            platformAdministrator: user.administrator,
           },
         };
       }

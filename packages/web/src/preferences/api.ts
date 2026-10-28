@@ -11,6 +11,8 @@ export interface Person {
   displayName: string;
   email: string;
   roles: readonly string[];
+  /** The groups the person is bound to directly, with the role held there. */
+  groups: readonly { id: string; name: string; role: string }[];
 }
 
 export type SaveOutcome =
@@ -103,6 +105,13 @@ export async function loadPerson(
       ? person["roles"].filter(
           (role): role is string => typeof role === "string",
         )
+      : [],
+    groups: Array.isArray(person["groups"])
+      ? person["groups"].filter(isRecord).map((group) => ({
+          id: typeof group["id"] === "string" ? group["id"] : "",
+          name: typeof group["name"] === "string" ? group["name"] : "",
+          role: typeof group["role"] === "string" ? group["role"] : "",
+        }))
       : [],
   };
 }
