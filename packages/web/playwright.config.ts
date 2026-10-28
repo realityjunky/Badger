@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 4319;
+/** The same service under a deployment's base path (e2e/base-path.spec.ts). */
+const BASE_PATH_PORT = 4320;
 
 /**
  * The journeys run against the real service seam: local single-user mode,
@@ -42,10 +44,22 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: "node e2e/serve.mjs",
-    url: `http://127.0.0.1:${PORT}/health`,
-    reuseExistingServer: process.env["CI"] === undefined,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      command: "node e2e/serve.mjs",
+      url: `http://127.0.0.1:${PORT}/health`,
+      reuseExistingServer: process.env["CI"] === undefined,
+      timeout: 60_000,
+    },
+    {
+      command: "node e2e/serve.mjs",
+      env: {
+        BADGER_E2E_PORT: String(BASE_PATH_PORT),
+        BADGER_E2E_BASE_PATH: "/badger",
+      },
+      url: `http://127.0.0.1:${BASE_PATH_PORT}/badger/health`,
+      reuseExistingServer: process.env["CI"] === undefined,
+      timeout: 60_000,
+    },
+  ],
 });
