@@ -722,6 +722,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
         defaultLocale: "en",
       },
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const stateScript = path.join(
       generated.packageRoot,
@@ -804,6 +805,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
         defaultLocale: "en",
       },
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const stateScript = path.join(
       generated.packageRoot,
@@ -880,6 +882,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
         defaultLocale: "en",
       },
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const stateScript = path.join(
       generated.packageRoot,
@@ -1005,6 +1008,7 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
         defaultLocale: "en",
       },
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const stateScript = path.join(
       generated.packageRoot,

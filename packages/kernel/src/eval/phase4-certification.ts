@@ -409,6 +409,7 @@ async function createFixture(root: string): Promise<GeneratedFixture> {
   const generated = await generatePackage({
     ...proposalFor(protocol, input),
     destination: path.join(root, "generated"),
+    projectRoot: root,
   });
   return {
     packageRoot: generated.packageRoot,

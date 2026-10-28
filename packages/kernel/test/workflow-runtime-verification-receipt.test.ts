@@ -860,6 +860,7 @@ describe("Workflow Verification Receipt contract", () => {
       const value = protocol();
       const generated = await generatePackage({
         destination: path.join(root, "generated-project", "generated"),
+        projectRoot: root,
         plan: {
           schemaVersion: 1,
           goal: value.goal,

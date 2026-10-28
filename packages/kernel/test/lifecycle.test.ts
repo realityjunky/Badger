@@ -118,6 +118,7 @@ describe("standalone Creator lifecycle", () => {
       proposal,
       plan,
       destination: initial.draftPath,
+      projectRoot: initial.projectRoot,
     });
     initial.generated = generated;
     await initializeAuthoringSession({

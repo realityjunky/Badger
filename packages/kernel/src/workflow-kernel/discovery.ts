@@ -121,7 +121,7 @@ async function readSource(
       )} at ${declaredPath}: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
-  if (relativeLocation && !isWithin(projectRoot, realRoot))
+  if (relativeLocation && !isWithin(scope.project, realRoot))
     return {
       status: "unsafe",
       blocker: `Skill ${declarationLabel(

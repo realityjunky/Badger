@@ -55,6 +55,13 @@
   `script:badger-plan`, `script:badger-check`, and `script:badger-hook-guard`.
 - **AuthoringPlan validation**: Plans are always validated in full; the
   `compatibility` block and the lenient validation mode are gone.
+- **Portable Creator records**: Creator state, authoring sessions, and
+  evaluation and publication records store project-relative paths, and the
+  generated package records its in-project sources the same way. The
+  authoring plan and source evidence hashes no longer include source roots,
+  so a project can move mid-authoring or after release without regeneration;
+  authoring sessions created before this change must be regenerated.
+  `generatePackage` now requires `projectRoot`.
 
 ### Removed
 

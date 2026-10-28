@@ -19,6 +19,7 @@ const serviceDecisions = [
   "0005-agents-draft-people-sign-off.md",
   "0006-questionnaire-records-and-dossier-version-2.md",
 ];
+const kernelDecisions = ["0007-project-relative-creator-paths.md"];
 
 async function readText(relativePath: string): Promise<string> {
   return fs.readFile(path.join(repositoryRoot, relativePath), "utf8");
@@ -209,14 +210,18 @@ describe("Badger release artifacts", () => {
     expect(changelog).not.toContain("dashboard adapters");
   });
 
-  it("records the collaborative service decisions as ADRs", async () => {
+  it("records the collaborative service and kernel decisions as ADRs", async () => {
     await expect(
       fs.readdir(path.join(repositoryRoot, "docs/adr")),
     ).resolves.toEqual(
-      expect.arrayContaining([semanticDossierDecision, ...serviceDecisions]),
+      expect.arrayContaining([
+        semanticDossierDecision,
+        ...serviceDecisions,
+        ...kernelDecisions,
+      ]),
     );
 
-    for (const decision of serviceDecisions) {
+    for (const decision of [...serviceDecisions, ...kernelDecisions]) {
       const record = await readText(`docs/adr/${decision}`);
       expect(record, decision).toMatch(/^# .+\n\nStatus: accepted\./u);
       await expectLocalLinksToResolve(
@@ -292,7 +297,11 @@ describe("Badger release artifacts", () => {
       "list dashboards and platform integration as out of scope",
     );
     expect(manual).not.toContain("把仪表盘与平台集成列为范围之外");
-    for (const decision of [semanticDossierDecision, ...serviceDecisions]) {
+    for (const decision of [
+      semanticDossierDecision,
+      ...serviceDecisions,
+      ...kernelDecisions,
+    ]) {
       expect(manual).toContain(`href="adr/${decision}"`);
     }
 

@@ -131,6 +131,7 @@ async function createGeneratedProject(root: string): Promise<{
   const generated = await generatePackage({
     ...proposal(),
     destination: path.join(projectRoot, "generated"),
+    projectRoot,
   });
   return { projectRoot, packageRoot: generated.packageRoot };
 }

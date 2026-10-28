@@ -1,28 +1,13 @@
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import type {
   AuthoringPlan,
   AuthoringRecord,
   AuthoringStateSummary,
 } from "../authoring/types.js";
-import type {
-  CreatorState,
-  SkillCandidate,
-  UpgradeMigrationManifest,
-  UpgradeSourceEvidence,
-} from "../types.js";
+import type { CreatorState, UpgradeMigrationManifest } from "../types.js";
 import { isWithin } from "../util.js";
 
-/**
- * Rewrites every persisted path in a Creator record.
- *
- * The same pair serves both directions: `toStoredPaths` prepares a record for
- * storage, `toResolvedPaths` resolves a stored record against the project root
- * it is read from.
- *
- * `project` covers paths the project owns, so they stay inside it. `source`
- * covers declared Skill and upgrade sources, which may legally live outside
- * the project as an absolute location.
- */
 export interface ProjectPathMappers {
   project: ProjectPathMapper;
   source: ProjectPathMapper;
@@ -31,17 +16,28 @@ export interface ProjectPathMappers {
 export type ProjectPathMapper = (value: string) => string;
 
 export function toStoredPaths(projectRoot: string): ProjectPathMappers {
+  const sourceRoot = physicalProjectRoot(projectRoot);
   return {
     project: (value) => toProjectRelativePath(projectRoot, value),
-    source: (value) => sourcePathToStored(projectRoot, value),
+    source: (value) => sourcePathToStored(sourceRoot, value),
   };
 }
 
 export function toResolvedPaths(projectRoot: string): ProjectPathMappers {
+  const sourceRoot = physicalProjectRoot(projectRoot);
   return {
     project: (value) => fromProjectRelativePath(projectRoot, value),
-    source: (value) => sourcePathFromStored(projectRoot, value),
+    source: (value) => sourcePathFromStored(sourceRoot, value),
   };
+}
+
+export function physicalProjectRoot(projectRoot: string): string {
+  const root = path.resolve(projectRoot);
+  try {
+    return realpathSync.native(root);
+  } catch {
+    return root;
+  }
 }
 
 export function toProjectRelativePath(
@@ -66,17 +62,16 @@ export function fromProjectRelativePath(
   return absolute;
 }
 
-// A source inside the project moves with it; a declared external source keeps
-// its absolute location.
-function sourcePathToStored(projectRoot: string, value: string): string {
-  const root = path.resolve(projectRoot);
-  const absolute = path.resolve(root, value);
-  return isWithin(root, absolute) ? portableRelative(root, absolute) : absolute;
+function sourcePathToStored(sourceRoot: string, value: string): string {
+  const absolute = path.resolve(sourceRoot, value);
+  return isWithin(sourceRoot, absolute)
+    ? portableRelative(sourceRoot, absolute)
+    : absolute;
 }
 
-function sourcePathFromStored(projectRoot: string, value: string): string {
+function sourcePathFromStored(sourceRoot: string, value: string): string {
   if (path.isAbsolute(value)) return path.resolve(value);
-  return fromProjectRelativePath(projectRoot, value);
+  return fromProjectRelativePath(sourceRoot, value);
 }
 
 function portableRelative(root: string, absolute: string): string {
@@ -91,17 +86,16 @@ function mapRoot<T extends { root: string }>(
   return { ...value, root: map(value.root) };
 }
 
-function mapCandidate(
-  candidate: SkillCandidate,
-  mappers: ProjectPathMappers,
-): SkillCandidate {
+export function mapCandidatePaths<
+  T extends { sources: Array<{ root: string }> },
+>(candidate: T, mappers: ProjectPathMappers): T {
   return {
     ...candidate,
     sources: candidate.sources.map((source) => mapRoot(source, mappers.source)),
   };
 }
 
-function mapSourceEvidence(
+export function mapUpgradeManifestPaths(
   manifest: UpgradeMigrationManifest,
   mappers: ProjectPathMappers,
 ): UpgradeMigrationManifest {
@@ -114,12 +108,9 @@ export function mapAuthoringPlanPaths(
 ): AuthoringPlan {
   return {
     ...plan,
-    sourceEvidence: plan.sourceEvidence.map((candidate) => ({
-      ...candidate,
-      sources: candidate.sources.map((source) =>
-        mapRoot(source, mappers.source),
-      ),
-    })),
+    sourceEvidence: plan.sourceEvidence.map((candidate) =>
+      mapCandidatePaths(candidate, mappers),
+    ),
     ...(plan.upgradeSource
       ? {
           upgradeSource: mapRoot(plan.upgradeSource, mappers.source),
@@ -191,7 +182,7 @@ export function mapCreatorStatePaths(
           : {}),
         ...(state.generated.sourceEvidence
           ? {
-              sourceEvidence: mapSourceEvidence(
+              sourceEvidence: mapUpgradeManifestPaths(
                 state.generated.sourceEvidence,
                 mappers,
               ),
@@ -203,7 +194,7 @@ export function mapCreatorStatePaths(
     ? {
         ...state.confirmedProposal,
         candidates: state.confirmedProposal.candidates.map((candidate) =>
-          mapCandidate(candidate, mappers),
+          mapCandidatePaths(candidate, mappers),
         ),
         ...(state.confirmedProposal.sourceRoot !== undefined
           ? { sourceRoot: mappers.source(state.confirmedProposal.sourceRoot) }
@@ -224,7 +215,7 @@ export function mapCreatorStatePaths(
     planPath: project(state.planPath),
     draftPath: project(state.draftPath),
     candidates: state.candidates.map((candidate) =>
-      mapCandidate(candidate, mappers),
+      mapCandidatePaths(candidate, mappers),
     ),
     ...(generated ? { generated } : {}),
     ...(confirmedProposal ? { confirmedProposal } : {}),
