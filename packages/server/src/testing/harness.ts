@@ -68,6 +68,11 @@ export interface TestService {
   rawRequest(input: RawRequestInput): Promise<RawResponse>;
   /** Stops the database while the server keeps serving, for health tests. */
   closeDatabase(): Promise<void>;
+  /**
+   * Ends the service's database connections from the server's side, as a
+   * Postgres restart does. Only on Postgres, with a fresh test database.
+   */
+  interruptDatabase(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -103,6 +108,7 @@ interface Connection {
   kind: "pglite" | "postgres";
   database: Database;
   config: ServiceConfig;
+  interrupt(): Promise<void>;
   release(): Promise<void>;
 }
 
@@ -119,6 +125,9 @@ async function connect(
       kind: loaded.database.kind,
       database,
       config: loaded,
+      interrupt: async () => {
+        throw new Error("Only a fresh test database can be interrupted");
+      },
       release: () => database.close().catch(() => undefined),
     };
   }
@@ -127,6 +136,7 @@ async function connect(
     kind: fresh.kind,
     database: fresh.database,
     config: { ...loaded, database: fresh.configuration },
+    interrupt: fresh.interrupt,
     release: fresh.drop,
   };
 }
@@ -243,6 +253,7 @@ export async function startTestService(
     request,
     rawRequest,
     closeDatabase: () => connection.database.close().catch(() => undefined),
+    interruptDatabase: connection.interrupt,
     close: async () => {
       if (closed) {
         return;

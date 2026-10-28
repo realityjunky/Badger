@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { startTestService, type TestService } from "../src/testing/index.js";
 
+const onPostgres = process.env["BADGER_TEST_DATABASE_URL"] !== undefined;
+
 let service: TestService | undefined;
 
 afterEach(async () => {
@@ -74,4 +76,23 @@ describe("the health endpoint", () => {
       },
     });
   });
+
+  it.runIf(onPostgres)(
+    "keeps serving when Postgres ends its connections, as on a restart",
+    async () => {
+      service = await startTestService(built);
+      expect((await service.request("/health")).status).toBe(200);
+
+      await service.interruptDatabase();
+      // The pool hears that its idle connections are gone asynchronously.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const response = await service.request("/health");
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        status: "ok",
+        database: { reachable: true },
+      });
+    },
+  );
 });

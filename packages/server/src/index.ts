@@ -24,7 +24,10 @@ export async function main(
 
   await prepareStorage(config.storage);
 
-  const database = await openDatabase(config.database);
+  const database = await openDatabase(config.database, {
+    onConnectionLost: (error) =>
+      logger.error({ event: "database.connection-lost", error: error.message }),
+  });
   try {
     const migrations = await loadBundledMigrations();
     const server = await startHttpServer({
