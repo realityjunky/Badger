@@ -2,7 +2,6 @@ import type { Clock } from "../clock.js";
 
 export interface TestClock extends Clock {
   advance(milliseconds: number): void;
-  set(at: string): void;
 }
 
 /** A clock that only moves when a test moves it. */
@@ -12,9 +11,6 @@ export function createFixedClock(at: string): TestClock {
     now: () => new Date(current),
     advance: (milliseconds) => {
       current = new Date(current.getTime() + milliseconds);
-    },
-    set: (next) => {
-      current = new Date(next);
     },
   };
 }

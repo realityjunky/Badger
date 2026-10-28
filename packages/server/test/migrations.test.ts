@@ -1,186 +1,235 @@
-import { promises as fs } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { describe, expect, it } from "vitest";
-import { systemClock } from "../src/clock.js";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   applyMigrations,
-  inspectMigrations,
   loadBundledMigrations,
+  openTestDatabase,
   type Migration,
-} from "../src/database/migrations.js";
-import { openPgliteDatabase } from "../src/database/pglite.js";
+  type TestDatabase,
+} from "../src/testing/index.js";
 
 const clock = { now: () => new Date("2026-10-27T00:00:00.000Z") };
+const onPostgres = process.env["BADGER_TEST_DATABASE_URL"] !== undefined;
+
+let testDatabase: TestDatabase | undefined;
+
+afterEach(async () => {
+  await testDatabase?.drop();
+  testDatabase = undefined;
+});
+
+async function freshDatabase(): Promise<TestDatabase> {
+  testDatabase = await openTestDatabase();
+  return testDatabase;
+}
+
+async function insertPerson(test: TestDatabase): Promise<void> {
+  await test.database.query(
+    `insert into people (
+       id, issuer, subject, email, display_name, status, revision,
+       created_at, updated_at
+     ) values ('person-1', 'issuer', 'subject', 'a@example.com', 'A',
+               'active', 1, $1, $1)`,
+    [clock.now()],
+  );
+}
+
+async function insertAuditEvent(
+  test: TestDatabase,
+  values: { actor: string | null; credentialKind: string; channel: string },
+): Promise<void> {
+  await test.database.query(
+    `insert into audit_events (
+       id, occurred_at, actor_person_id, credential_kind, channel, action,
+       target_type, target_id, request_id
+     ) values ($1, $2, $3, $4, $5, 'person.created', 'person', 'person-1',
+               'request-1')`,
+    [
+      `event-${values.channel}-${values.credentialKind}`,
+      clock.now(),
+      values.actor,
+      values.credentialKind,
+      values.channel,
+    ],
+  );
+}
 
 describe("reviewed SQL migrations", () => {
   it("applies the bundled reviewed SQL and reports what ran", async () => {
-    const database = await openPgliteDatabase();
-    try {
-      const migrations = await loadBundledMigrations();
-      expect(migrations.map((migration) => migration.version)).toEqual([
-        "0001",
-      ]);
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    expect(migrations.map((migration) => migration.version)).toEqual(["0001"]);
 
-      const state = await applyMigrations(database, migrations, clock);
+    const state = await applyMigrations(test.database, migrations, clock);
 
-      expect(state).toEqual({
-        state: "applied",
-        applied: ["0001"],
-        pending: [],
-        drifted: [],
-      });
-
-      const tables = await database.query<{ table_name: string }>(
-        `select table_name
-           from information_schema.tables
-          where table_schema = 'public'
-          order by table_name`,
-      );
-      expect(tables.rows.map((row) => row.table_name)).toEqual([
-        "audit_events",
-        "people",
-        "schema_migrations",
-      ]);
-    } finally {
-      await database.close();
-    }
+    expect(state).toEqual({
+      state: "applied",
+      applied: ["0001"],
+      pending: [],
+      drifted: [],
+    });
+    const tables = await test.database.query<{ table_name: string }>(
+      `select table_name
+         from information_schema.tables
+        where table_schema = 'public'
+        order by table_name`,
+    );
+    expect(tables.rows.map((row) => row.table_name)).toEqual([
+      "audit_events",
+      "people",
+      "schema_migrations",
+    ]);
   });
 
   it("applies the bundled reviewed SQL only once", async () => {
-    const database = await openPgliteDatabase();
-    try {
-      const migrations = await loadBundledMigrations();
-      await applyMigrations(database, migrations, clock);
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(test.database, migrations, clock);
 
-      const secondRun = await applyMigrations(database, migrations, clock);
+    const secondRun = await applyMigrations(test.database, migrations, clock);
 
-      expect(secondRun).toEqual({
-        state: "applied",
-        applied: ["0001"],
-        pending: [],
-        drifted: [],
-      });
-      const rows = await database.query<{ count: number }>(
-        "select count(*)::int as count from schema_migrations",
-      );
-      expect(rows.rows[0]?.count).toBe(1);
-    } finally {
-      await database.close();
-    }
+    expect(secondRun).toEqual({
+      state: "applied",
+      applied: ["0001"],
+      pending: [],
+      drifted: [],
+    });
+    const rows = await test.database.query<{ count: number }>(
+      "select count(*)::int as count from schema_migrations",
+    );
+    expect(rows.rows[0]?.count).toBe(1);
   });
 
   it("refuses a reviewed migration whose SQL changed after it was applied", async () => {
-    const database = await openPgliteDatabase();
-    try {
-      const migrations = await loadBundledMigrations();
-      await applyMigrations(database, migrations, clock);
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(test.database, migrations, clock);
 
-      const edited = migrations.map((migration): Migration => ({
-        ...migration,
-        sql: `${migration.sql}\n-- edited after review\n`,
-      }));
+    const edited = migrations.map((migration): Migration => ({
+      ...migration,
+      sql: `${migration.sql}\n-- edited after review\n`,
+    }));
 
-      await expect(applyMigrations(database, edited, clock)).rejects.toThrow(
-        /0001/u,
-      );
-    } finally {
-      await database.close();
-    }
+    await expect(applyMigrations(test.database, edited, clock)).rejects.toThrow(
+      /0001/u,
+    );
   });
 
   it("applies pending migrations in version order", async () => {
-    const database = await openPgliteDatabase();
-    try {
-      const migrations: Migration[] = [
-        { version: "0002", name: "second", sql: "select 2;" },
-        { version: "0001", name: "first", sql: "select 1;" },
-      ];
+    const test = await freshDatabase();
+    const migrations: Migration[] = [
+      { version: "0002", name: "second", sql: "select 2;" },
+      { version: "0001", name: "first", sql: "select 1;" },
+    ];
 
-      const state = await applyMigrations(database, migrations, clock);
+    const state = await applyMigrations(test.database, migrations, clock);
 
-      expect(state.applied).toEqual(["0001", "0002"]);
-    } finally {
-      await database.close();
-    }
+    expect(state.applied).toEqual(["0001", "0002"]);
   });
 
   it("refuses a migration that arrives after a later one was applied", async () => {
-    const database = await openPgliteDatabase();
-    try {
-      const first: Migration[] = [
+    const test = await freshDatabase();
+    await applyMigrations(
+      test.database,
+      [
         { version: "0001", name: "first", sql: "select 1;" },
         { version: "0002", name: "second", sql: "select 2;" },
+      ],
+      clock,
+    );
+
+    await expect(
+      applyMigrations(
+        test.database,
+        [{ version: "0001", name: "first", sql: "select 1;" }],
+        clock,
+      ),
+    ).rejects.toThrow(/0002/u);
+  });
+
+  it.skipIf(!onPostgres)(
+    "applies migrations once when several servers start at once",
+    async () => {
+      const test = await freshDatabase();
+      const servers = await Promise.all(
+        Array.from({ length: 4 }, () => test.connect()),
+      );
+      // A slow first migration keeps every start inside it at the same time.
+      const migrations: Migration[] = [
+        {
+          version: "0001",
+          name: "slow",
+          sql: "select pg_sleep(0.3); create table lock_probe (id integer);",
+        },
       ];
-      await applyMigrations(database, first, clock);
 
-      await expect(
-        applyMigrations(
-          database,
-          [{ version: "0001", name: "first", sql: "select 1;" }],
-          clock,
-        ),
-      ).rejects.toThrow(/0002/u);
-    } finally {
-      await database.close();
-    }
-  });
+      const states = await Promise.all(
+        servers.map((server) => applyMigrations(server, migrations, clock)),
+      );
 
-  it("keeps local single-user mode's PGlite state on disk", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-pglite-"));
-    const dataDir = path.join(root, "pglite");
-    try {
-      const first = await openPgliteDatabase(dataDir);
-      await applyMigrations(first, await loadBundledMigrations(), clock);
-      await first.close();
+      expect(states.map((state) => state.state)).toEqual([
+        "applied",
+        "applied",
+        "applied",
+        "applied",
+      ]);
+      const rows = await test.database.query<{ count: number }>(
+        "select count(*)::int as count from schema_migrations",
+      );
+      expect(rows.rows[0]?.count).toBe(1);
+    },
+  );
+});
 
-      const reopened = await openPgliteDatabase(dataDir);
-      try {
-        expect(
-          await inspectMigrations(reopened, await loadBundledMigrations()),
-        ).toEqual({
-          state: "applied",
-          applied: ["0001"],
-          pending: [],
-          drifted: [],
-        });
-      } finally {
-        await reopened.close();
-      }
-    } finally {
-      await fs.rm(root, { recursive: true, force: true });
-    }
-  });
-
+describe("the audit schema", () => {
   it("keeps the audit trail append-only", async () => {
-    const database = await openPgliteDatabase();
-    try {
-      await applyMigrations(database, await loadBundledMigrations(), clock);
-      await database.query(
-        `insert into people (
-           id, issuer, subject, email, display_name, status, revision,
-           created_at, updated_at
-         ) values ('person-1', 'issuer', 'subject', 'a@example.com', 'A',
-                   'active', 1, $1, $1)`,
-        [clock.now()],
-      );
-      await database.query(
-        `insert into audit_events (
-           id, occurred_at, actor_person_id, credential_kind, channel, action,
-           target_type, target_id, request_id
-         ) values ('event-1', $1, 'person-1', 'session', 'web', 'person.created',
-                   'person', 'person-1', 'request-1')`,
-        [clock.now()],
-      );
+    const test = await freshDatabase();
+    await applyMigrations(test.database, await loadBundledMigrations(), clock);
+    await insertPerson(test);
+    await insertAuditEvent(test, {
+      actor: "person-1",
+      credentialKind: "session",
+      channel: "web",
+    });
 
-      await expect(
-        database.query("update audit_events set reason = 'changed'"),
-      ).rejects.toThrow(/append-only/u);
-      await expect(database.query("delete from audit_events")).rejects.toThrow(
+    for (const statement of [
+      "update audit_events set reason = 'changed'",
+      "delete from audit_events",
+      "truncate audit_events",
+    ]) {
+      await expect(test.database.query(statement), statement).rejects.toThrow(
         /append-only/u,
       );
-    } finally {
-      await database.close();
     }
+  });
+
+  it("records the worker acting on its own, and only the worker, without a person", async () => {
+    const test = await freshDatabase();
+    await applyMigrations(test.database, await loadBundledMigrations(), clock);
+    await insertPerson(test);
+
+    await insertAuditEvent(test, {
+      actor: null,
+      credentialKind: "worker",
+      channel: "worker",
+    });
+    await insertAuditEvent(test, {
+      actor: "person-1",
+      credentialKind: "session",
+      channel: "worker",
+    });
+    await expect(
+      insertAuditEvent(test, {
+        actor: null,
+        credentialKind: "session",
+        channel: "web",
+      }),
+    ).rejects.toThrow(/audit_events_actor_check/u);
+    await expect(
+      insertAuditEvent(test, {
+        actor: "person-1",
+        credentialKind: "worker",
+        channel: "web",
+      }),
+    ).rejects.toThrow(/audit_events_worker_credential_check/u);
   });
 });

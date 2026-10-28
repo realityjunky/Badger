@@ -5,14 +5,16 @@ export interface Credential {
   id: string | null;
 }
 
-/** The person a request acts as. A principal alone grants no permission. */
+/**
+ * The person a request acts as. A principal alone grants no permission:
+ * Badger decides what the person may do (`authorization.ts`).
+ */
 export interface Principal {
   issuer: string;
   subject: string;
   email: string;
   displayName: string;
   status: "active";
-  isAdministrator: boolean;
   credential: Credential;
 }
 

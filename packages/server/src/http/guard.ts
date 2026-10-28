@@ -9,13 +9,12 @@ export interface GuardInput {
 }
 
 export type GuardDecision =
-  | { ok: true; hostname: string }
-  | { ok: false; status: number; code: string; message: string };
+  { ok: true; hostname: string } | { ok: false; message: string };
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 function refusal(message: string): GuardDecision {
-  return { ok: false, status: 403, code: "forbidden", message };
+  return { ok: false, message };
 }
 
 function isAllowedOrigin(
@@ -23,7 +22,7 @@ function isAllowedOrigin(
   allowedOrigins: readonly string[],
 ): boolean {
   try {
-    return allowedOrigins.includes(new URL(origin).origin.toLowerCase());
+    return allowedOrigins.includes(new URL(origin).origin);
   } catch {
     return false;
   }

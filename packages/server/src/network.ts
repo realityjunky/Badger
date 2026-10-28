@@ -1,3 +1,5 @@
+import { isIPv4, isIPv6 } from "node:net";
+
 export function normalizeHostname(hostname: string): string {
   return hostname
     .toLowerCase()
@@ -6,14 +8,37 @@ export function normalizeHostname(hostname: string): string {
     .replace(/\.$/u, "");
 }
 
-/** The hostnames that count as the machine the service runs on. */
+function canonicalIPv6(address: string): string | null {
+  try {
+    return normalizeHostname(new URL(`http://[${address}]`).hostname);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The hostnames that count as the machine the service runs on: `localhost`,
+ * an IPv4 address in 127.0.0.0/8, or `::1`. Names are never resolved, so a
+ * DNS name such as `127.example.com` is not loopback.
+ */
 export function isLoopbackHostname(hostname: string): boolean {
   const normalized = normalizeHostname(hostname);
-  return (
-    normalized === "localhost" ||
-    normalized === "::1" ||
-    normalized.startsWith("127.")
-  );
+  if (normalized === "localhost") {
+    return true;
+  }
+  if (isIPv4(normalized)) {
+    return normalized.split(".")[0] === "127";
+  }
+  return isIPv6(normalized) && canonicalIPv6(normalized) === "::1";
+}
+
+/** The browser origins of a service listening on loopback at this port. */
+export function loopbackOrigins(port: number): string[] {
+  return [
+    `http://localhost:${port}`,
+    `http://127.0.0.1:${port}`,
+    `http://[::1]:${port}`,
+  ];
 }
 
 export interface ParsedHost {

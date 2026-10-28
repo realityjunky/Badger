@@ -23,8 +23,7 @@ export async function startHttpServer(
 ): Promise<StartedServer> {
   await applyMigrations(options.database, options.migrations, options.clock);
 
-  const service = createService(options);
-  const server = createServer(service.handler);
+  const server = createServer();
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
       server.off("listening", onListening);
@@ -44,6 +43,9 @@ export async function startHttpServer(
     typeof address === "object" && address !== null
       ? address.port
       : options.config.port;
+  // The handler needs the bound port, which BADGER_PORT=0 leaves to the OS.
+  // No request is read before this line runs.
+  server.on("request", createService(options, port).handler);
 
   return {
     url: `http://${urlHost(options.config.host)}:${port}`,

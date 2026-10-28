@@ -1,5 +1,18 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+/**
+ * #24's five error cases, plus `unauthenticated` for a request nobody is
+ * signed in to. A failure the service cannot attribute to the request is
+ * reported as `unavailable`, so the caller may retry.
+ */
+export type ErrorCode =
+  | "invalid"
+  | "denied"
+  | "rejected"
+  | "conflict"
+  | "unavailable"
+  | "unauthenticated";
+
 export interface ResponseBody {
   status: number;
   contentType: string;
@@ -15,63 +28,55 @@ const BASE_HEADERS: Record<string, string> = {
   "cache-control": "no-store",
 };
 
-export function sendResponse(
-  request: IncomingMessage,
-  response: ServerResponse,
-  requestId: string,
-  body: ResponseBody,
-): void {
-  response.writeHead(body.status, {
-    ...BASE_HEADERS,
-    ...body.headers,
-    "content-type": body.contentType,
-    "x-request-id": requestId,
-  });
-  if (request.method === "HEAD") {
-    response.end();
-    return;
-  }
-  response.end(body.body);
+/** One request's way to answer, carrying its request ID on every response. */
+export interface Reply {
+  readonly requestId: string;
+  send(body: ResponseBody): void;
+  json(status: number, payload: unknown): void;
+  html(status: number, body: string): void;
+  error(
+    status: number,
+    code: ErrorCode,
+    message: string,
+    headers?: Record<string, string>,
+  ): void;
 }
 
-export function sendJson(
+export function replyTo(
   request: IncomingMessage,
   response: ServerResponse,
   requestId: string,
-  status: number,
-  payload: unknown,
-): void {
-  sendResponse(request, response, requestId, {
-    status,
-    contentType: "application/json; charset=utf-8",
-    body: `${JSON.stringify(payload)}\n`,
-  });
-}
-
-export function sendError(
-  request: IncomingMessage,
-  response: ServerResponse,
-  requestId: string,
-  status: number,
-  code: string,
-  message: string,
-): void {
-  sendJson(request, response, requestId, status, {
-    error: { code, message },
+): Reply {
+  const send = (body: ResponseBody): void => {
+    response.writeHead(body.status, {
+      ...BASE_HEADERS,
+      ...body.headers,
+      "content-type": body.contentType,
+      "x-request-id": requestId,
+    });
+    response.end(request.method === "HEAD" ? undefined : body.body);
+  };
+  const json = (status: number, payload: unknown): void => {
+    send({
+      status,
+      contentType: "application/json; charset=utf-8",
+      body: `${JSON.stringify(payload)}\n`,
+    });
+  };
+  return {
     requestId,
-  });
-}
-
-export function sendHtml(
-  request: IncomingMessage,
-  response: ServerResponse,
-  requestId: string,
-  status: number,
-  body: string,
-): void {
-  sendResponse(request, response, requestId, {
-    status,
-    contentType: "text/html; charset=utf-8",
-    body,
-  });
+    send,
+    json,
+    html: (status, body) => {
+      send({ status, contentType: "text/html; charset=utf-8", body });
+    },
+    error: (status, code, message, headers) => {
+      send({
+        status,
+        contentType: "application/json; charset=utf-8",
+        body: `${JSON.stringify({ error: { code, message }, requestId })}\n`,
+        headers,
+      });
+    },
+  };
 }

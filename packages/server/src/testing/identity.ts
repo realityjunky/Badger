@@ -3,24 +3,21 @@ import { firstHeader } from "../identity/identity.js";
 
 export const TEST_PERSON_HEADER = "x-badger-test-person";
 
+/** Who a test request acts as. It carries no role: Badger decides those. */
 export interface TestPerson {
   issuer?: string;
   subject: string;
   email?: string;
   displayName?: string;
-  administrator?: boolean;
 }
 
-export const TEST_IDENTITY_ISSUER = "test-issuer";
-
-export function principalForTestPerson(person: TestPerson): Principal {
+function principalFor(person: TestPerson): Principal {
   return {
-    issuer: person.issuer ?? TEST_IDENTITY_ISSUER,
+    issuer: person.issuer ?? "test-issuer",
     subject: person.subject,
     email: person.email ?? `${person.subject}@test.invalid`,
     displayName: person.displayName ?? person.subject,
     status: "active",
-    isAdministrator: person.administrator === true,
     credential: { kind: "session", id: "test-session" },
   };
 }
@@ -51,7 +48,7 @@ export function createTestIdentityAdapter(): IdentityAdapter {
       }
       return {
         kind: "authenticated",
-        principal: principalForTestPerson(parsed as TestPerson),
+        principal: principalFor(parsed as TestPerson),
       };
     },
   };

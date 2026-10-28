@@ -1,43 +1,44 @@
-import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import pg from "pg";
-import type {
-  DatabaseConfiguration,
-  ServiceConfig,
-  StorageConfiguration,
-} from "../config.js";
+import { loadConfig, type ServiceConfig } from "../config.js";
 import type { Database } from "../database/database.js";
-import {
-  loadBundledMigrations,
-  type Migration,
-} from "../database/migrations.js";
-import { openPgliteDatabase } from "../database/pglite.js";
-import { openPostgresDatabase } from "../database/postgres.js";
+import { loadBundledMigrations } from "../database/migrations.js";
+import { openDatabase } from "../database/open.js";
+import { configuredIdentityAdapter } from "../identity/configured.js";
 import type { IdentityAdapter } from "../identity/identity.js";
-import { createLocalIdentityAdapter } from "../identity/local.js";
+import type { IdSource } from "../ids.js";
 import { silentLogger } from "../log.js";
-import { startHttpServer } from "../start.js";
+import { startHttpServer, type StartedServer } from "../start.js";
+import { prepareStorage } from "../storage.js";
 import { createFixedClock, type TestClock } from "./clock.js";
-import { createSequentialIds, type SequentialIdSource } from "./ids.js";
+import { openTestDatabase } from "./database.js";
+import { createSequentialIds } from "./ids.js";
 import {
   createTestIdentityAdapter,
   TEST_PERSON_HEADER,
   type TestPerson,
 } from "./identity.js";
 
-export type TestServiceMode = "test-identity" | "local";
+/**
+ * - `test-identity` (the default): service mode, with the test identity
+ *   adapter choosing the person per request.
+ * - `local`: local single-user mode and its implicit Administrator.
+ * - `service`: service mode with the identity adapter its settings select.
+ */
+export type TestServiceMode = "test-identity" | "local" | "service";
 
 export interface TestServiceOptions {
   mode?: TestServiceMode;
-  database?: "pglite" | "postgres";
+  /**
+   * Settings layered over the harness's own and read by the real config
+   * loader; `undefined` unsets one. A database named here replaces the
+   * harness's fresh one.
+   */
+  environment?: Readonly<Record<string, string | undefined>>;
+  /** Replaces the identity adapter the mode selects. */
   identity?: IdentityAdapter;
-  migrations?: readonly Migration[];
-  clock?: TestClock;
-  revision?: string;
-  cleanTree?: boolean | null;
 }
 
 export interface RawRequestInput {
@@ -55,10 +56,10 @@ export interface RawResponse {
 export interface TestService {
   baseUrl: string;
   port: number;
+  /** The loaded settings, with the database the service actually uses. */
   config: ServiceConfig;
   clock: TestClock;
-  ids: SequentialIdSource;
-  storage: StorageConfiguration;
+  ids: IdSource;
   database: { kind: "pglite" | "postgres" };
   request(
     requestPath: string,
@@ -70,149 +71,118 @@ export interface TestService {
   close(): Promise<void>;
 }
 
-interface OpenTestDatabase {
-  database: Database;
-  configuration: DatabaseConfiguration;
-  kind: "pglite" | "postgres";
-  drop(): Promise<void>;
+// A service deployment must name its database, so the harness names one that
+// can never resolve, then serves from its own fresh database instead.
+const HARNESS_DATABASE_URL = "postgres://badger@harness.invalid/badger";
+const DATABASE_SETTINGS = ["BADGER_DATABASE_URL", "BADGER_DATABASE_PATH"];
+
+function harnessEnvironment(
+  mode: TestServiceMode,
+  root: string,
+): Record<string, string> {
+  const common = {
+    BADGER_HOST: "127.0.0.1",
+    BADGER_PORT: "0",
+    BADGER_STORAGE_DIR: root,
+  };
+  if (mode === "local") {
+    return { ...common, BADGER_MODE: "local" };
+  }
+  return {
+    ...common,
+    BADGER_MODE: "service",
+    BADGER_IDENTITY: "none",
+    BADGER_ALLOWED_HOSTNAMES: "localhost,127.0.0.1,::1",
+    BADGER_DATABASE_URL: HARNESS_DATABASE_URL,
+  };
 }
 
-async function openTestDatabase(
-  requested: "pglite" | "postgres",
-): Promise<OpenTestDatabase> {
-  if (requested === "pglite") {
-    const database = await openPgliteDatabase();
-    let dropped = false;
+interface Connection {
+  kind: "pglite" | "postgres";
+  database: Database;
+  config: ServiceConfig;
+  release(): Promise<void>;
+}
+
+async function connect(
+  loaded: ServiceConfig,
+  options: TestServiceOptions,
+): Promise<Connection> {
+  const namesDatabase = DATABASE_SETTINGS.some(
+    (name) => options.environment?.[name] !== undefined,
+  );
+  if (namesDatabase) {
+    const database = await openDatabase(loaded.database);
     return {
+      kind: loaded.database.kind,
       database,
-      configuration: { kind: "pglite", dataDir: null },
-      kind: "pglite",
-      drop: async () => {
-        if (dropped) {
-          return;
-        }
-        dropped = true;
-        await database.close().catch(() => undefined);
-      },
+      config: loaded,
+      release: () => database.close().catch(() => undefined),
     };
   }
-
-  const baseUrl = process.env["BADGER_TEST_DATABASE_URL"];
-  if (baseUrl === undefined) {
-    throw new Error(
-      "BADGER_TEST_DATABASE_URL must point at a Postgres 17 server for the Postgres run",
-    );
-  }
-
-  const name = `badger_test_${randomUUID().replaceAll("-", "")}`;
-  const admin = new pg.Client({ connectionString: baseUrl });
-  await admin.connect();
-  try {
-    await admin.query(`create database "${name}"`);
-  } finally {
-    await admin.end();
-  }
-
-  const url = new URL(baseUrl);
-  url.pathname = `/${name}`;
-  const database = await openPostgresDatabase(url.toString());
-
-  let dropped = false;
+  const fresh = await openTestDatabase();
   return {
-    database,
-    configuration: { kind: "postgres", url: url.toString() },
-    kind: "postgres",
-    drop: async () => {
-      if (dropped) {
-        return;
-      }
-      dropped = true;
-      await database.close().catch(() => undefined);
-      const cleanup = new pg.Client({ connectionString: baseUrl });
-      await cleanup.connect();
-      try {
-        await cleanup.query(`drop database if exists "${name}" with (force)`);
-      } finally {
-        await cleanup.end();
-      }
-    },
+    kind: fresh.kind,
+    database: fresh.database,
+    config: { ...loaded, database: fresh.configuration },
+    release: fresh.drop,
   };
 }
 
 /**
- * Starts the service in-process for tests: a test identity adapter, PGlite (or
- * the Postgres named by BADGER_TEST_DATABASE_URL), temporary storage, a fixed
- * clock, and fixed IDs. CI sets BADGER_TEST_DATABASE_URL to run this same
- * suite against Postgres 17; each service gets its own fresh database.
+ * Starts the service in-process the way production does, from settings the
+ * real config loader accepts. Tests swap in a test identity adapter, a fresh
+ * database (PGlite, or Postgres 17 when BADGER_TEST_DATABASE_URL is set),
+ * temporary storage, a fixed clock, and fixed IDs.
  */
 export async function startTestService(
   options: TestServiceOptions = {},
 ): Promise<TestService> {
   const mode = options.mode ?? "test-identity";
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-test-"));
-  const storage: StorageConfiguration = {
-    root,
-    blobDirectory: path.join(root, "blob"),
-    workspaceDirectory: path.join(root, "workspaces"),
-    runDirectory: path.join(root, "runs"),
-  };
-  for (const directory of Object.values(storage)) {
-    await fs.mkdir(directory, { recursive: true });
-  }
+  const removeRoot = () => fs.rm(root, { recursive: true, force: true });
 
-  const clock = options.clock ?? createFixedClock("2026-10-27T00:00:00.000Z");
-  const ids = createSequentialIds();
-  const requestedDatabase =
-    options.database ??
-    (process.env["BADGER_TEST_DATABASE_URL"] ? "postgres" : "pglite");
-  const opened = await openTestDatabase(requestedDatabase);
-
-  const administrator = {
-    subject: "local-administrator",
-    email: "admin@badger.local",
-    displayName: "Local Administrator",
-  };
-  const config: ServiceConfig = {
-    mode: mode === "local" ? "local" : "service",
-    host: "127.0.0.1",
-    port: 0,
-    basePath: "/",
-    revision: options.revision ?? "test-revision",
-    cleanTree: options.cleanTree === undefined ? true : options.cleanTree,
-    allowedHostnames: ["localhost", "127.0.0.1", "::1"],
-    allowedOrigins:
-      mode === "local"
-        ? ["http://localhost:8787", "http://127.0.0.1:8787"]
-        : [],
-    database: opened.configuration,
-    identity: { kind: "local", administrator },
-    storage,
-  };
-
-  const identity: IdentityAdapter =
-    options.identity ??
-    (mode === "local"
-      ? createLocalIdentityAdapter(administrator)
-      : createTestIdentityAdapter());
-
-  let server: Awaited<ReturnType<typeof startHttpServer>> | undefined;
+  let connection: Connection;
   try {
-    server = await startHttpServer({
-      config,
-      database: opened.database,
-      identity,
-      clock,
-      ids,
-      migrations: options.migrations ?? (await loadBundledMigrations()),
-      logger: silentLogger,
+    const loaded = loadConfig({
+      ...harnessEnvironment(mode, root),
+      ...options.environment,
     });
+    await prepareStorage(loaded.storage);
+    connection = await connect(loaded, options);
   } catch (error) {
-    await opened.drop();
-    await fs.rm(root, { recursive: true, force: true });
+    await removeRoot();
     throw error;
   }
 
-  const baseUrl = `http://127.0.0.1:${server.port}`;
+  const { config } = connection;
+  const clock = createFixedClock("2026-10-27T00:00:00.000Z");
+  const ids = createSequentialIds();
+  const identity =
+    options.identity ??
+    (mode === "test-identity"
+      ? createTestIdentityAdapter()
+      : configuredIdentityAdapter(config));
+
+  let server: StartedServer;
+  try {
+    server = await startHttpServer({
+      config,
+      database: connection.database,
+      identity,
+      clock,
+      ids,
+      migrations: await loadBundledMigrations(),
+      logger: silentLogger,
+    });
+  } catch (error) {
+    await connection.release();
+    await removeRoot();
+    throw error;
+  }
+
+  const baseUrl = server.url;
+  const host = new URL(baseUrl).hostname.replace(/^\[|\]$/gu, "");
 
   const request = async (
     requestPath: string,
@@ -221,9 +191,9 @@ export async function startTestService(
     const { as, ...rest } = init;
     const headers = new Headers(rest.headers);
     if (as !== undefined) {
-      if (mode === "local") {
+      if (mode !== "test-identity" || options.identity !== undefined) {
         throw new Error(
-          "Local mode signs in one implicit Administrator; do not pass `as`",
+          "Only the test identity adapter selects a person per request",
         );
       }
       headers.set(TEST_PERSON_HEADER, JSON.stringify(as));
@@ -235,8 +205,8 @@ export async function startTestService(
     new Promise<RawResponse>((resolve, reject) => {
       const outgoing = http.request(
         {
-          host: "127.0.0.1",
-          port: server?.port ?? 0,
+          host,
+          port: server.port,
           method: input.method ?? "GET",
           path: input.path,
           headers: input.headers ?? {},
@@ -260,37 +230,25 @@ export async function startTestService(
       outgoing.end();
     });
 
-  let databaseClosed = false;
-  const closeDatabase = async (): Promise<void> => {
-    if (databaseClosed) {
-      return;
-    }
-    databaseClosed = true;
-    await opened.database.close().catch(() => undefined);
-  };
-
   let closed = false;
-  const close = async (): Promise<void> => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    await server?.close();
-    await opened.drop();
-    await fs.rm(root, { recursive: true, force: true });
-  };
-
   return {
     baseUrl,
     port: server.port,
     config,
     clock,
     ids,
-    storage,
-    database: { kind: opened.kind },
+    database: { kind: connection.kind },
     request,
     rawRequest,
-    closeDatabase,
-    close,
+    closeDatabase: () => connection.database.close().catch(() => undefined),
+    close: async () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      await server.close();
+      await connection.release();
+      await removeRoot();
+    },
   };
 }
