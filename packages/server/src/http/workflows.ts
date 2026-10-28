@@ -1,11 +1,6 @@
-import type { IncomingMessage } from "node:http";
-import type { Access } from "../authorization.js";
 import { mayManageGroup } from "../authorization.js";
-import type { WriteContext } from "../audit.js";
 import type { Database } from "../database/database.js";
-import type { ServiceDependencies } from "../dependencies.js";
 import { listGroups } from "../groups.js";
-import type { Person } from "../people.js";
 import { workflowCapabilities } from "../workflow-access.js";
 import {
   createWorkflow,
@@ -17,8 +12,8 @@ import {
   readWorkflow,
   updateWorkflow,
 } from "../workflows.js";
+import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
-import type { Reply } from "./responses.js";
 
 const ROOT = "/api/v1/workflows";
 const WORKFLOW_PATH =
@@ -55,20 +50,8 @@ export function workflowMethods(path: string): string | null {
   return route.versionId === null ? "GET, HEAD, POST" : "GET, HEAD";
 }
 
-export interface WorkflowRequest {
-  request: IncomingMessage;
-  reply: Reply;
-  path: string;
-  method: string;
-  database: Database;
-  dependencies: ServiceDependencies;
-  person: Person;
-  access: Access;
-  context: WriteContext;
-}
-
 /** The HTTP seam for the catalog and versions; the service handles identity. */
-export async function handleWorkflows(input: WorkflowRequest): Promise<void> {
+export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
   const {
     request,
     reply,

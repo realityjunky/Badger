@@ -14,6 +14,7 @@ import { NotFoundPage } from "../pages/NotFoundPage.js";
 import { PlaceholderPage } from "../pages/PlaceholderPage.js";
 import { QuestionnairePage } from "../pages/QuestionnairePage.js";
 import { SettingsPage } from "../pages/SettingsPage.js";
+import { SkillsPage } from "../pages/SkillsPage.js";
 import { WorkflowsPage } from "../pages/WorkflowsPage.js";
 import { applyTheme } from "../theme/applyTheme.js";
 import { antdTheme, fontScaleFactor, resolveTheme } from "../theme/tokens.js";
@@ -75,14 +76,11 @@ function ThemedApp({ basePath }: { basePath: string }) {
                 path="questionnaire/questions/:questionId"
                 element={<QuestionnairePage />}
               />
+              <Route path="skills" element={<SkillsPage />} />
+              <Route path="skills/:skillId" element={<SkillsPage />} />
               <Route
-                path="skills/*"
-                element={
-                  <PlaceholderPage
-                    title="page.skills.title"
-                    description="page.skills.description"
-                  />
-                }
+                path="skills/:skillId/versions/:versionId"
+                element={<SkillsPage />}
               />
               <Route
                 path="runs/*"
