@@ -46,6 +46,7 @@ test("a person creates a token, saves its secret once, and revokes it under a ba
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
     await page.goto(`${base}/settings/tokens`);
     await expect(token).toContainText("Revoked");
+    await page.waitForLoadState("networkidle");
     expect(
       await page.evaluate(
         () =>

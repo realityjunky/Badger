@@ -702,7 +702,7 @@ body {
 }
 
 .personal-token-details dt {
-  color: var(--badger-color-muted-text);
+  color: var(--badger-color-text-muted);
 }
 
 .personal-token-details dd {
