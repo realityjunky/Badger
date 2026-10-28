@@ -304,6 +304,132 @@ body {
   font-weight: 600;
 }
 
+/* Workflow catalog, version frames, and team roles */
+
+.workflow-page .page-header,
+.workflow-card-heading {
+  flex-wrap: wrap;
+}
+
+.workflow-catalog {
+  display: grid;
+  gap: 20px;
+}
+
+.workflow-card,
+.workflow-panel {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-panel);
+  background: var(--badger-color-surface);
+  overflow-wrap: anywhere;
+}
+
+.workflow-panel {
+  margin-bottom: 20px;
+}
+
+.workflow-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workflow-card h2,
+.workflow-panel h2 {
+  margin: 0 0 12px;
+  font-size: calc(var(--badger-font-size-md) * var(--badger-font-scale, 1));
+}
+
+.workflow-card a,
+.workflow-version-link {
+  color: var(--badger-color-accent);
+}
+
+.workflow-card-heading p {
+  margin: 0;
+}
+
+.workflow-version-link {
+  display: inline-block;
+  margin-bottom: 12px;
+}
+
+.workflow-version-meta {
+  margin-bottom: 16px;
+}
+
+.workflow-card .stage-track,
+.workflow-panel .stage-track {
+  margin-bottom: 0;
+}
+
+.workflow-roles {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-roles li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--badger-color-border);
+}
+
+.workflow-role-person {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: min(220px, 100%);
+}
+
+.workflow-role-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(160px, 1fr) auto;
+  align-items: end;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.workflow-role-form .ant-form-item {
+  margin-bottom: 0;
+}
+
+.workflow-frame-form {
+  margin-top: 20px;
+}
+
+@media (max-width: 720px) {
+  .workflow-role-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workflow-page .stage-track {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .workflow-page .stage {
+    min-width: 0;
+    padding-right: 0;
+  }
+
+  .workflow-page .stage::after {
+    display: none;
+  }
+
+  .workflow-page .stage .status-pill {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+
 /* The summary strip */
 
 .summary-strip {
@@ -638,6 +764,18 @@ body {
   }
 
   .scope-selector {
+    display: none;
+  }
+
+  .top-bar-search {
+    min-width: 0;
+  }
+
+  .top-bar-actions {
+    flex: none;
+  }
+
+  .user-name {
     display: none;
   }
 }

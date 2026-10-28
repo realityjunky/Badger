@@ -11,7 +11,6 @@ import {
   accessFor,
   isAdministrator,
   managementVisibility,
-  mayManageGroup,
   readsEverything,
   type Access,
 } from "../authorization.js";
@@ -56,6 +55,8 @@ import { guardRequest } from "./guard.js";
 import { buildHealthReport } from "./health.js";
 import { escapeHtml, renderHomePage, renderSignedOutPage } from "./page.js";
 import { replyTo, type Reply } from "./responses.js";
+import { handleWorkflows, workflowMethods } from "./workflows.js";
+import { mayManageRoleScope } from "../workflow-access.js";
 import {
   isFileRequest,
   readWebAsset,
@@ -136,6 +137,8 @@ function matchedId(pattern: RegExp, path: string): string | null {
 
 /** The methods a path serves, for the Allow header and the write check. */
 function allowedMethods(path: string): string {
+  const workflows = workflowMethods(path);
+  if (workflows !== null) return workflows;
   if (path === `${API}/me/preferences`) {
     return "GET, HEAD, PUT";
   }
@@ -335,22 +338,11 @@ export function createService(options: ServiceOptions, port: number): Service {
     }
     const input = parsed.value;
 
-    if (input.scopeType === "organization") {
-      if (!isAdministrator(access)) {
-        return reply.error(
-          403,
-          "denied",
-          "Only an Administrator binds an organization role",
-        );
-      }
-    } else if (
-      input.scopeId === null ||
-      !(await mayManageGroup(database, access, person, input.scopeId))
-    ) {
+    if (!(await mayManageRoleScope(database, access, person, input))) {
       return reply.error(
         403,
         "denied",
-        "Only an Administrator or the group's Group lead binds a group role",
+        "Only an Administrator, the Group lead, or a Workflow owner within their workflow assigns these roles",
       );
     }
 
@@ -386,6 +378,9 @@ export function createService(options: ServiceOptions, port: number): Service {
     if (created.kind === "missing-group") {
       return reply.error(400, "invalid", "The group does not exist");
     }
+    if (created.kind === "missing-workflow") {
+      return reply.error(400, "invalid", "The workflow does not exist");
+    }
     if (created.kind === "conflict") {
       return reply.error(
         409,
@@ -408,22 +403,11 @@ export function createService(options: ServiceOptions, port: number): Service {
     if (binding === null) {
       return reply.error(404, "invalid", "No such role binding");
     }
-    if (binding.scopeType === "organization") {
-      if (!isAdministrator(access)) {
-        return reply.error(
-          403,
-          "denied",
-          "Only an Administrator removes an organization binding",
-        );
-      }
-    } else if (
-      binding.scopeId === null ||
-      !(await mayManageGroup(database, access, person, binding.scopeId))
-    ) {
+    if (!(await mayManageRoleScope(database, access, person, binding))) {
       return reply.error(
         403,
         "denied",
-        "Only an Administrator or the group's Group lead removes a group binding",
+        "Only an Administrator, the Group lead, or a Workflow owner within their workflow removes these roles",
       );
     }
 
@@ -755,6 +739,19 @@ export function createService(options: ServiceOptions, port: number): Service {
     }
     if (path === `${API}/audit-events`) {
       return listAudit(reply, url, access);
+    }
+    if (workflowMethods(path) !== null) {
+      return handleWorkflows({
+        request,
+        reply,
+        path,
+        method,
+        database,
+        dependencies: serviceDependencies,
+        person,
+        access,
+        context: writeContextFor(person, principal, reply),
+      });
     }
     if (path === `${API}/bindings` && method === "POST") {
       return handleCreateBinding(request, reply, person, principal, access);

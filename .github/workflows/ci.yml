@@ -65,6 +65,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run build -w packages/kernel
       - run: npm run build -w packages/server
       - run: npm test -w packages/server
         env:

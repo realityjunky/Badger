@@ -10,6 +10,7 @@ import type {
 } from "../types.js";
 import { findSkills, scriptDeclarationProblems } from "./discovery.js";
 import { normalizeWorkflow } from "../workflow/contract.js";
+import { isWorkflowName } from "../workflow/name.js";
 import {
   atomicCreate,
   atomicWrite,
@@ -98,8 +99,7 @@ export function planHashMatches(plan: unknown, recorded: string): boolean {
 }
 
 function validateName(name: string): void {
-  if (!/^[a-z][a-z0-9-]{1,63}$/u.test(name))
-    throw new Error(`Invalid workflow name: ${name}`);
+  if (!isWorkflowName(name)) throw new Error(`Invalid workflow name: ${name}`);
 }
 
 function validateStateNamespace(namespace: string): void {

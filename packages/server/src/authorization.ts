@@ -7,7 +7,7 @@ import type { Person } from "./people.js";
 
 export type OrganizationRole = "Administrator" | "Auditor";
 export type GroupRole = "Group lead" | "Member";
-export type ScopeType = "organization" | "group";
+export type ScopeType = "organization" | "group" | "workflow";
 
 export const ORGANIZATION_ROLES: readonly OrganizationRole[] = [
   "Administrator",
@@ -58,7 +58,12 @@ export function readsEverything(access: Access): boolean {
  * groups. The Organization's own bindings are in view only with everything.
  */
 export type Visibility =
-  { everything: true } | { everything: false; groupIds: ReadonlySet<string> };
+  | { everything: true }
+  | {
+      everything: false;
+      groupIds: ReadonlySet<string>;
+      workflowGroupIds?: ReadonlySet<string>;
+    };
 
 interface OrganizationBindingRow {
   role: OrganizationRole;
@@ -246,5 +251,9 @@ export async function managementVisibility(
   if (led.size === 0) {
     return null;
   }
-  return { everything: false, groupIds: await withAncestors(database, led) };
+  return {
+    everything: false,
+    groupIds: await withAncestors(database, led),
+    workflowGroupIds: led,
+  };
 }

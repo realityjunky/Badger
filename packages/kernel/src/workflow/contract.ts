@@ -1,3 +1,4 @@
+import { isWorkflowName } from "./name.js";
 import type {
   Binding,
   BindingInput,
@@ -581,7 +582,7 @@ function normalizeDecisionScope(
 
 export function validateWorkflow(input: WorkflowInput): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
-  if (!idPattern.test(input.name))
+  if (!isWorkflowName(input.name))
     findings.push({
       code: "invalid-name",
       message: "workflow.name must use lowercase letters, digits, and hyphens",

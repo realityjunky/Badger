@@ -12,6 +12,7 @@ import type { Database, Queryable } from "./database/database.js";
 import { isInside, lockGroupTree } from "./group-tree.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import type { Person } from "./people.js";
+import type { BindingRole } from "./bindings.js";
 import { toIsoString } from "./util.js";
 
 export interface Group {
@@ -324,7 +325,7 @@ export interface MemberBinding {
   scopeType: ScopeType;
   scopeId: string | null;
   scopeName: string | null;
-  role: GroupRole | OrganizationRole;
+  role: BindingRole;
 }
 
 export interface MemberSummary {
@@ -348,10 +349,12 @@ interface MemberBindingRow {
   id: string;
   revision: number;
   person_id: string;
-  scope_type: "organization" | "group";
-  role: GroupRole | OrganizationRole;
+  scope_type: ScopeType;
+  role: BindingRole;
   group_id: string | null;
   group_name: string | null;
+  scope_id: string | null;
+  scope_name: string | null;
 }
 
 /**
@@ -365,6 +368,9 @@ export async function listMembers(
   visibility: Visibility,
 ): Promise<MemberSummary[]> {
   const groupIds = visibility.everything ? [] : [...visibility.groupIds];
+  const workflowGroupIds = visibility.everything
+    ? []
+    : [...(visibility.workflowGroupIds ?? [])];
   const rows = await database.query<MemberRow>(
     `select p.id, p.issuer, p.subject, p.email, p.email_verified,
             p.display_name
@@ -373,12 +379,13 @@ export async function listMembers(
          or exists (
            select 1
              from role_bindings b
+             left join workflows w on w.id = b.workflow_id
             where b.person_id = p.id
-              and b.scope_type = 'group'
-              and b.scope_id = any($2::text[])
+              and ((b.scope_type = 'group' and b.scope_id = any($2::text[]))
+                or (b.scope_type = 'workflow' and w.group_id = any($3::text[])))
          )
       order by p.display_name, p.id`,
-    [visibility.everything, groupIds],
+    [visibility.everything, groupIds, workflowGroupIds],
   );
   if (rows.rows.length === 0) {
     return [];
@@ -387,15 +394,19 @@ export async function listMembers(
   const ids = rows.rows.map((row) => row.id);
   const bindings = await database.query<MemberBindingRow>(
     `select b.id, b.revision, b.person_id, b.scope_type, b.role,
-            g.id as group_id, g.name as group_name
+            g.id as group_id, g.name as group_name,
+            coalesce(b.scope_id, b.workflow_id) as scope_id,
+            coalesce(g.name, w.name) as scope_name
        from role_bindings b
        left join groups g on g.id = b.scope_id
+       left join workflows w on w.id = b.workflow_id
       where b.person_id = any($1::text[])
         and (
           $2::boolean
           or (b.scope_type = 'group' and b.scope_id = any($3::text[]))
+          or (b.scope_type = 'workflow' and w.group_id = any($4::text[]))
         )`,
-    [ids, visibility.everything, groupIds],
+    [ids, visibility.everything, groupIds, workflowGroupIds],
   );
 
   return rows.rows.map((row) => {
@@ -421,7 +432,11 @@ export async function listMembers(
       }
       if (binding.scope_type === "organization") {
         organizationRoles.add(binding.role as OrganizationRole);
-      } else if (binding.group_id !== null && binding.group_name !== null) {
+      } else if (
+        binding.scope_type === "group" &&
+        binding.group_id !== null &&
+        binding.group_name !== null
+      ) {
         groups.push({
           id: binding.group_id,
           name: binding.group_name,
@@ -432,8 +447,8 @@ export async function listMembers(
         id: binding.id,
         revision: binding.revision,
         scopeType: binding.scope_type,
-        scopeId: binding.group_id,
-        scopeName: binding.group_name,
+        scopeId: binding.scope_id,
+        scopeName: binding.scope_name,
         role: binding.role,
       });
     }

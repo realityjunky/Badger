@@ -14,7 +14,7 @@ The company or institution that one Badger deployment serves, together with its 
 A department or team within the Organization that owns workflows and Skills. Groups nest, and a role held on a Group applies to the Groups inside it.
 
 **Role binding**:
-A role attached to a scope, either the Organization or a Group, for a person. Bindings are additive, and a binding on a Group applies to the Groups inside it. A binding made by email for an address no signed-in person has verified is an invitation.
+A role attached to a scope, the Organization, a Group, or a workflow, for a person. Bindings are additive, and a binding on a Group applies to the Groups inside it. A workflow binding applies only to that workflow and its versions. A binding made by email for an address no signed-in person has verified is an invitation.
 
 **Invitation**:
 A role binding recorded by email for an address no signed-in person has verified. It applies at the first sign-in that presents that address as verified, usually the person's first; from then on it follows the person's issuer and subject, so an address change at the provider moves no binding.
@@ -49,6 +49,9 @@ The person who approves a workflow's package for publication. They must not have
 **Operator**:
 A person who runs a workflow's published versions, answers the Run gates its Nodes leave to Operators, and recovers interrupted Runs.
 
+**Observer**:
+A person who reads a workflow and its versions without changing them.
+
 **Principal**:
 The identity a request acts as: issuer, subject, email, display name, and status. A principal alone grants no Badger permission; Badger decides what the person may do.
 
@@ -76,6 +79,12 @@ The Engineer's recorded reading of one pinned Skill version before the questionn
 
 **Workflow version**:
 One iteration of a workflow: the Skill versions it pins, its questionnaire, and the dossier, plan, and package built from them. A new workflow version inherits the previous one's facts and resolutions.
+
+**Workflow frame**:
+The workflow's name, goal, intent (a new Skill or an upgrade of an existing one), and language. Each workflow version keeps the frame it began with.
+
+**Stage track**:
+The states of a workflow version's eight authoring stages: sources, source study, questionnaire, dossier, plan and proposal, package, evaluation, and review and publication.
 
 ## Discovery and meaning
 

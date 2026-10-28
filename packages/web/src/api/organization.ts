@@ -1,6 +1,12 @@
 import { apiUrl } from "../app/paths.js";
 import { isRecord } from "../util/records.js";
 
+export type ScopeType = "organization" | "group" | "workflow";
+
+function scopeType(value: unknown): ScopeType {
+  return value === "group" || value === "workflow" ? value : "organization";
+}
+
 export interface Group {
   id: string;
   name: string;
@@ -12,7 +18,7 @@ export interface MemberBinding {
   id: string;
   revision: number;
   role: string;
-  scopeType: "organization" | "group";
+  scopeType: ScopeType;
   scopeId: string | null;
   scopeName: string | null;
 }
@@ -28,7 +34,7 @@ export interface Invitation {
   id: string;
   email: string;
   role: string;
-  scopeType: "organization" | "group";
+  scopeType: ScopeType;
   scopeId: string | null;
   scopeName: string | null;
   invitedByName: string;
@@ -155,10 +161,7 @@ function parseMember(value: unknown): Member | null {
             id: entry["id"],
             revision: entry["revision"],
             role: entry["role"],
-            scopeType:
-              entry["scopeType"] === "group"
-                ? ("group" as const)
-                : ("organization" as const),
+            scopeType: scopeType(entry["scopeType"]),
             scopeId:
               typeof entry["scopeId"] === "string" ? entry["scopeId"] : null,
             scopeName:
@@ -194,7 +197,7 @@ function parseInvitation(value: unknown): Invitation | null {
     id: value["id"],
     email: value["email"],
     role: value["role"],
-    scopeType: value["scopeType"] === "group" ? "group" : "organization",
+    scopeType: scopeType(value["scopeType"]),
     scopeId: typeof value["scopeId"] === "string" ? value["scopeId"] : null,
     scopeName:
       typeof value["scopeName"] === "string" ? value["scopeName"] : null,
@@ -361,7 +364,7 @@ export function ledGroupIds(
  * The server still decides; this only keeps refused controls out of the way.
  */
 export function mayChangeBinding(
-  binding: { scopeType: "organization" | "group"; scopeId: string | null },
+  binding: { scopeType: ScopeType; scopeId: string | null },
   administrator: boolean,
   led: ReadonlySet<string>,
 ): boolean {

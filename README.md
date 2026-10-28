@@ -5,12 +5,12 @@ The workflow kernel is delivered, and the collaborative service planned in
 [#24](https://github.com/realityjunky/Badger/issues/24) has its walking
 skeleton in `packages/server/` and its dashboard shell in `packages/web/`.
 
-| Path               | Holds                                                                                                                                                                                                                                                                                                 | Status                                                                 |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `packages/kernel/` | The workflow kernel, published as `@realityjunky/badger`: the Creator, WorkflowRuntime, and the `badger` CLI. See its [README](packages/kernel/README.md).                                                                                                                                            | Delivered                                                              |
-| `packages/server/` | The collaborative service's server role: reviewed SQL migrations, Postgres or PGlite, local single-user mode, platform sign-in, groups and role bindings by email, capability checks with recorded overrides, audited writes, the activity log, the health endpoint, and the in-process test harness. | Walking skeleton (#36), platform sign-in (#38), groups and roles (#40) |
-| `packages/web/`    | The web dashboard: navigation rail, top bar, three-pane registry layout, design tokens, URL routing, zh/en catalogs, light and dark themes, personal appearance settings, the Admin pages, and the Activity page.                                                                                     | Shell (#37), admin and activity (#40)                                  |
-| `packages/<name>/` | One package each for the collaborative service's remaining surfaces: the Badger MCP and the host installer.                                                                                                                                                                                           | Planned (#24)                                                          |
+| Path               | Holds                                                                                                                                                                                                                                                                                                       | Status                                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `packages/kernel/` | The workflow kernel, published as `@realityjunky/badger`: the Creator, WorkflowRuntime, and the `badger` CLI. See its [README](packages/kernel/README.md).                                                                                                                                                  | Delivered                                                                                            |
+| `packages/server/` | The collaborative service's server role: reviewed SQL migrations, Postgres or PGlite, local single-user mode, platform sign-in, groups and role bindings by email, workflows and version frames, capability checks with recorded overrides, audited writes, the activity log, health, and the test harness. | Walking skeleton (#36), platform sign-in (#38), groups and roles (#40), workflows and versions (#41) |
+| `packages/web/`    | The web dashboard: navigation, design tokens, URL routing, zh/en catalogs, themes, personal settings, Admin and Activity pages, and the Workflows catalog with version stage tracks and workflow role controls.                                                                                             | Shell (#37), admin and activity (#40), workflows (#41)                                               |
+| `packages/<name>/` | One package each for the collaborative service's remaining surfaces: the Badger MCP and the host installer.                                                                                                                                                                                                 | Planned (#24)                                                                                        |
 
 Everything shipped is generic: each deployment keeps its own launcher entries,
 reverse-proxy routes, and deploy scripts outside this repository.
@@ -121,6 +121,32 @@ Activity log; every request is checked on the server.
 Badger refuses a person granting themselves an organization role. An
 Administrator may override that block by giving a reason, from the Admin page
 or as `overrideReason`, and the reason is recorded in the Activity log.
+
+### Workflows and versions
+
+Group leads create workflows in their Group or a Group inside it, with a
+kernel-valid name, goal, intent (`new-skill` or `upgrade-existing`), and locale
+(a language tag such as `en` or `zh-CN`). Creation records version 1 and makes
+the creator a Workflow owner. Owners, Group leads, and Administrators assign
+the workflow's six roles by email; one person may hold several. All workflow
+roles read the workflow, while a Group's Members read its workflows through
+Group inheritance. Workflow roles apply only to their workflow and its versions.
+
+The Workflows page shows the catalog, links to workflow and version URLs, and
+renders each version's eight stage states from the service. An Engineer or
+Administrator starts another version. Version frames preserve the name, goal,
+intent, and locale they began with; edits to the workflow affect future versions.
+Stale edits, version starts, and binding removals return conflicts with the
+current record and revision. The dashboard asks people to reload and review.
+
+The API serves `/api/v1/workflows`, `/workflows/:id`, and
+`/workflows/:id/versions[/:versionId]`. Create with `POST /workflows`, edit
+the future frame with `PATCH /workflows/:id`, and quote the workflow's
+`revision` in both edits and `POST /workflows/:id/versions`. Workflow roles use
+`POST /api/v1/bindings` with `scopeType: "workflow"` and the workflow ID as
+`scopeId`; removal quotes the binding's revision. Every write is audited.
+Later features add the source, questionnaire, and gate records that advance
+stages; clients cannot set stage states directly.
 
 ## Adding a workspace package
 

@@ -10,8 +10,10 @@ COPY packages/kernel/package.json packages/kernel/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/web/package.json packages/web/package.json
 RUN npm ci
+COPY packages/kernel packages/kernel
 COPY packages/server packages/server
 COPY packages/web packages/web
+RUN npm run build -w packages/kernel
 RUN npm run build -w packages/server
 RUN npm run build -w packages/web
 RUN npm prune --omit=dev
@@ -21,6 +23,9 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages/kernel/package.json ./packages/kernel/package.json
+COPY --from=build /app/packages/kernel/dist ./packages/kernel/dist
+COPY --from=build /app/packages/kernel/assets ./packages/kernel/assets
 COPY --from=build /app/packages/server/package.json ./packages/server/package.json
 COPY --from=build /app/packages/server/dist ./packages/server/dist
 COPY --from=build /app/packages/server/migrations ./packages/server/migrations
