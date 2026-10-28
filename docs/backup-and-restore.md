@@ -12,7 +12,7 @@ and [0009](adr/0009-reviewed-sql-migrations.md) describe its storage and migrati
 | State                                                                  | Location                                                                  | Recovery requirement                                                                                                               |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Service records, people, bindings, audit history, and migration ledger | Postgres 17                                                               | A complete logical dump, including the migration ledger.                                                                           |
-| Stored files and Runs                                                  | `BADGER_STORAGE_DIR`, including `blob/` and `runs/`                       | Preserve names, contents, ownership, modes, and directory structure.                                                               |
+| Stored files and Runs                                                  | `BADGER_STORAGE_DIR`, including `blob/` and `runs/`                       | Preserve names, contents, ownership, modes, and directory structure. Skill version records name their files in `blob/` by SHA-256. |
 | Kernel workspaces                                                      | `BADGER_STORAGE_DIR/workspaces`                                           | Include its own volume or mount when it is separate from the storage root.                                                         |
 | Local single-user database                                             | `BADGER_DATABASE_PATH`, default `.badger/pglite`                          | Stop the process and copy the complete PGlite directory.                                                                           |
 | Standalone Projects and execution-host Runs                            | The Project's `.badger/` and declared workflow inputs                     | Back them up on their owning host; the service's mirror does not replace the authoritative Run files.                              |
@@ -34,7 +34,9 @@ the deployment's secret store; do not put credentials in manifests or logs.
    database, these stored files, or these workspaces. This includes server and
    worker roles and any execution host writing the same storage. Keep Postgres
    running for the logical dump. Stop the local process too when using PGlite.
-   Install an exit handler that restarts the writers even if the backup fails.
+   Install an exit handler that restarts the writers even if the backup fails,
+   including when it is interrupted or loses its terminal. Record the identity
+   of each stopped writer, such as its container ID and start time.
 3. Use a Postgres 17 client to dump the service database in custom format:
 
    ```bash
@@ -65,8 +67,12 @@ the deployment's secret store; do not put credentials in manifests or logs.
    each actual host directory, including dotfiles. A database dump alone cannot
    make a concurrently changing file tree consistent with its records.
 
-5. Restart the writers and verify `/health` again. On failure, report the
-   failed backup or failed restart and retain the previous complete sets.
+5. Before restarting, confirm that every writer is still the stopped one you
+   recorded. A deployment or another operator that started or replaced one
+   during the backup makes the set inconsistent, so discard it. Restart the
+   writers and verify `/health` again. On failure, report the failed backup or
+   failed restart, including the underlying error, and retain the previous
+   complete sets.
 6. Write a manifest with the format version, capture time, recorded image
    identities and health response, and each archive's size and SHA-256. Verify
    every archive, then atomically rename the private staging directory into a
@@ -98,6 +104,11 @@ does not prove that a backup succeeded.
 
    Recreate the deployment's database role through its secret mechanism.
    Restore PGlite by copying the complete stopped directory to a fresh path.
+   Before any server starts, compare each table's row count in the restored
+   database with the dump's own data, for example by counting the rows that
+   `pg_restore --data-only --file=-` emits per table. A server writes records
+   of its own as soon as it starts and someone signs in, so counts taken
+   afterwards cannot tell a restored database from an empty one.
 
 4. Extract each file archive into its corresponding fresh volume, preserving
    numeric ownership and modes. Compare the restored files to the archives
@@ -112,9 +123,9 @@ does not prove that a backup succeeded.
    Check representative restored records through the signed-in HTTP API.
    Health on an empty database is insufficient evidence for restored records.
 6. Verify a sample workflow using the kernel's public WorkflowRuntime. The
-   service's workflow-building API is still planned; a synthetic kernel Run
-   tests the delivered runtime without pretending that API exists. Build the
-   kernel, then in a scratch workspace run:
+   service records workflows and their versions but does not yet run them, so
+   a synthetic kernel Run tests the delivered runtime. Build the kernel, then
+   in a scratch workspace run:
 
    ```bash
    node docs/examples/restore-smoke.mjs start /scratch/workspaces/restore-smoke
