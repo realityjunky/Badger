@@ -98,6 +98,7 @@ describe("resumable authoring session", () => {
       proposal,
       plan,
       destination: state.draftPath,
+      projectRoot: state.projectRoot,
     });
     state.generated = generated;
     const authoringPlan = deriveAuthoringPlan({ proposal });

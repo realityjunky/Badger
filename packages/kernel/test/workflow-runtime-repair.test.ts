@@ -690,6 +690,7 @@ describe("WorkflowRuntime repair policy", () => {
           defaultLocale: "en",
         },
         destination: path.join(root, "generated"),
+        projectRoot: root,
       });
       const stateScript = path.join(
         generated.packageRoot,

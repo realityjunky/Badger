@@ -937,6 +937,7 @@ describe("WorkflowRuntime artifact versions", () => {
         defaultLocale: "en",
       },
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const stateScript = path.join(
       generated.packageRoot,

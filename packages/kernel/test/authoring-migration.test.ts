@@ -112,6 +112,7 @@ describe("Badger upgrade and legacy migration", () => {
       proposal,
       plan,
       destination: state.draftPath,
+      projectRoot: state.projectRoot,
     });
     state.generated = generated;
     await initializeAuthoringSession({
@@ -149,6 +150,7 @@ describe("Badger upgrade and legacy migration", () => {
       proposal,
       plan,
       destination: path.join(project, "generated"),
+      projectRoot: project,
     });
     const manifest = JSON.parse(
       await fs.readFile(
@@ -316,7 +318,7 @@ describe("Badger upgrade and legacy migration", () => {
     await fs.symlink(sourceRoot, path.join(project, "source-link"));
 
     await expect(
-      generatePackage({ proposal, plan, destination }),
+      generatePackage({ proposal, plan, destination, projectRoot: project }),
     ).rejects.toThrow(/inside.*source/iu);
   });
 
@@ -339,6 +341,7 @@ describe("Badger upgrade and legacy migration", () => {
       proposal,
       plan,
       destination: state.draftPath,
+      projectRoot: state.projectRoot,
     });
     state.generated = generated;
     await initializeAuthoringSession({

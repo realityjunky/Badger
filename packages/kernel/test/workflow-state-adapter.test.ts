@@ -80,6 +80,7 @@ describe("generated WorkflowRuntime state adapter", () => {
     const generated = await generatePackage({
       ...proposal(),
       destination,
+      projectRoot: root,
     });
 
     const runtimePath = path.join(
@@ -124,6 +125,7 @@ describe("generated WorkflowRuntime state adapter", () => {
     const generated = await generatePackage({
       ...proposal(),
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const scriptPath = path.join(
       generated.packageRoot,
@@ -245,6 +247,7 @@ describe("generated WorkflowRuntime state adapter", () => {
     const generated = await generatePackage({
       ...proposal(),
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const scriptPath = path.join(
       generated.packageRoot,
@@ -313,6 +316,7 @@ describe("generated WorkflowRuntime state adapter", () => {
     const generated = await generatePackage({
       ...proposal(),
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const scriptPath = path.join(
       generated.packageRoot,
@@ -443,6 +447,7 @@ describe("generated WorkflowRuntime state adapter", () => {
     const generated = await generatePackage({
       ...fixture,
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const scriptPath = path.join(
       generated.packageRoot,
@@ -489,6 +494,7 @@ describe("generated WorkflowRuntime state adapter", () => {
     const generated = await generatePackage({
       ...proposal(),
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const scriptPath = path.join(
       generated.packageRoot,
@@ -526,6 +532,7 @@ describe("generated WorkflowRuntime state adapter", () => {
     const generated = await generatePackage({
       ...proposal(),
       destination: path.join(projectRoot, "generated"),
+      projectRoot,
     });
     const scriptPath = path.join(
       generated.packageRoot,
