@@ -100,8 +100,8 @@ name and location; Badger inspects only those declarations. The CLI is `badger` 
 from the repository root, run it as `node packages/kernel/bin/badger.js`:
 
 ```bash
-# Candidate inspection is read-only and closed-world.
-node packages/kernel/bin/badger.js candidates --skill primer-design=./skills/primer-design --json
+# The source check is read-only and closed-world. `candidates` remains an alias.
+node packages/kernel/bin/badger.js source-check --skill primer-design=./skills/primer-design --json
 node packages/kernel/bin/badger.js guide --project . --json
 node packages/kernel/bin/badger.js questionnaire-handoff dossier.json --plan plan.json --project . --json
 node packages/kernel/bin/badger.js authoring-plan prepared-workflow --project . --depth quick --json

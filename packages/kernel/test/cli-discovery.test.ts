@@ -93,4 +93,110 @@ describe("Badger discovery CLI", () => {
       { name: "review", status: "available" },
     ]);
   });
+
+  it("presents the source check and keeps the candidates name working", async () => {
+    const explicit = path.join(project, "supplied", "review");
+    await writeSkill(explicit, "review");
+    await fs.mkdir(path.join(explicit, "scripts"), { recursive: true });
+    await fs.writeFile(path.join(explicit, "scripts", "fetch.py"), "# fetch\n");
+    const manifest = path.join(project, "sources.json");
+    await fs.writeFile(
+      manifest,
+      JSON.stringify({
+        schemaVersion: 1,
+        sources: [
+          {
+            name: "review",
+            location: "supplied/review",
+            scripts: { "scripts/fetch.py": "network" },
+          },
+        ],
+      }),
+    );
+
+    const primary = await runCli(
+      "source-check",
+      "--project",
+      project,
+      "--source-manifest",
+      manifest,
+    );
+    const legacy = await runCli(
+      "candidates",
+      "--project",
+      project,
+      "--source-manifest",
+      manifest,
+    );
+
+    expect(primary).toEqual(legacy);
+    expect(primary.candidates).toMatchObject([
+      {
+        name: "review",
+        status: "available",
+        sources: [
+          { scripts: [{ path: "scripts/fetch.py", sideEffect: "network" }] },
+        ],
+      },
+    ]);
+
+    const help = await execFileAsync(process.execPath, [
+      "bin/badger.js",
+      "--help",
+    ]);
+    expect(help.stdout).toMatch(/source-check/iu);
+  });
+
+  it("confines absolute source locations to registered roots", async () => {
+    const external = path.join(root, "external", "review");
+    await writeSkill(external, "review");
+    const manifest = path.join(project, "sources.json");
+    const writeManifest = async (roots?: string[]): Promise<void> =>
+      fs.writeFile(
+        manifest,
+        JSON.stringify({
+          schemaVersion: 1,
+          ...(roots ? { roots } : {}),
+          sources: [{ name: "review", location: external }],
+        }),
+      );
+
+    await writeManifest();
+    const refused = await runCli(
+      "source-check",
+      "--project",
+      project,
+      "--source-manifest",
+      manifest,
+    );
+    expect(refused.candidates).toMatchObject([
+      { name: "review", status: "unsafe" },
+    ]);
+
+    await writeManifest(["../external"]);
+    const registered = await runCli(
+      "source-check",
+      "--project",
+      project,
+      "--source-manifest",
+      manifest,
+    );
+    expect(registered.candidates).toMatchObject([
+      { name: "review", status: "available" },
+    ]);
+
+    await writeManifest();
+    const flagged = await runCli(
+      "source-check",
+      "--project",
+      project,
+      "--source-manifest",
+      manifest,
+      "--source-root",
+      "../external",
+    );
+    expect(flagged.candidates).toMatchObject([
+      { name: "review", status: "available" },
+    ]);
+  });
 });

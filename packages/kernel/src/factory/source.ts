@@ -6,23 +6,20 @@ import type {
   UpgradeSourceEvidence,
   UpgradeSourceFileEvidence,
 } from "../types.js";
-import { hashDirectory, isWithin, listFiles, sha256 } from "../util.js";
+import {
+  hashSkillIdentity,
+  identitySkillFiles,
+  inventorySkill,
+} from "../skill/identity.js";
+import {
+  sourceScope,
+  withinPhysicalSourceScope,
+  withinSourceScope,
+} from "../skill/scope.js";
+import { isWithin } from "../util.js";
 
 function portablePath(value: string): string {
   return value.replaceAll("\\", "/");
-}
-
-function assertSafeSourcePath(relativePath: string): void {
-  const normalized = portablePath(relativePath);
-  if (
-    path.isAbsolute(relativePath) ||
-    normalized === ".." ||
-    normalized.startsWith("../") ||
-    normalized.includes("/../") ||
-    normalized.includes("\0")
-  ) {
-    throw new Error(`Upgrade source contains unsafe path: ${relativePath}`);
-  }
 }
 
 async function physicalTarget(target: string): Promise<string> {
@@ -79,8 +76,12 @@ export async function assertDestinationWithinProject(
 
 export async function inspectUpgradeSource(
   sourceRoot: string,
+  scopeOptions?: { projectRoot: string; roots?: readonly string[] },
 ): Promise<UpgradeSourceEvidence> {
-  const root = path.resolve(sourceRoot);
+  const scope = scopeOptions
+    ? await sourceScope(scopeOptions.projectRoot, scopeOptions.roots ?? [])
+    : undefined;
+  const root = path.resolve(scopeOptions?.projectRoot ?? ".", sourceRoot);
   const rootStats = await fs.lstat(root);
   if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
     throw new Error(
@@ -91,6 +92,18 @@ export async function inspectUpgradeSource(
   if (!isWithin(root, realRoot)) {
     throw new Error(`Upgrade source resolves outside its root: ${sourceRoot}`);
   }
+  if (scope) {
+    if (!withinSourceScope(scope, root)) {
+      throw new Error(
+        `Upgrade source is outside the project and its registered roots: ${sourceRoot}`,
+      );
+    }
+    if (!withinPhysicalSourceScope(scope, realRoot)) {
+      throw new Error(
+        `Upgrade source resolves outside the project and its registered roots: ${realRoot}`,
+      );
+    }
+  }
   const skillPath = path.join(root, "SKILL.md");
   const skillStats = await fs.lstat(skillPath).catch((error: unknown) => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -99,23 +112,12 @@ export async function inspectUpgradeSource(
   if (!skillStats?.isFile() || skillStats.isSymbolicLink()) {
     throw new Error(`Upgrade source is not a Skill directory: ${sourceRoot}`);
   }
-  const files: UpgradeSourceFileEvidence[] = [];
-  for (const relativePath of (await listFiles(root)).sort((left, right) =>
-    left.localeCompare(right),
-  )) {
-    assertSafeSourcePath(relativePath);
-    const content = await fs.readFile(path.join(root, relativePath));
-    files.push({
-      path: portablePath(relativePath),
-      bytes: content.byteLength,
-      hash: sha256(content),
-    });
-  }
+  const files = identitySkillFiles(await inventorySkill(root));
   return {
     schemaVersion: 1,
     kind: "badger-upgrade-source",
     root,
-    hash: await hashDirectory(root),
+    hash: hashSkillIdentity(files),
     files,
   };
 }

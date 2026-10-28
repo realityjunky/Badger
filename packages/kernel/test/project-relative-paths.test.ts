@@ -238,6 +238,7 @@ describe("project-relative Creator records", () => {
     );
     const plan = { ...planFor(skillRoot) };
     plan.skillSources = [{ name: "primer-design", location: external }];
+    plan.sourceRoots = ["../external-skills"];
     await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
 
     const proposal = await buildProposal({ projectRoot: project, planPath });

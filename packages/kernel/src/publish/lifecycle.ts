@@ -24,6 +24,7 @@ import { validateAuthoringReviewResult } from "../authoring/review.js";
 import { authoringSessionGateway } from "../authoring/lifecycle.js";
 import type { AuthoringReadiness } from "../authoring/types.js";
 import { hashDirectorySync } from "../workflow-kernel/hash.js";
+import { hashSkillSourceSync } from "../skill/identity.js";
 
 function sameStrings(left: unknown, right: unknown): boolean {
   return (
@@ -151,7 +152,7 @@ function sourceEvidenceCheck(state: CreatorState): SourceEvidenceCheck {
       blockers.push(`Source evidence hash is invalid: ${label}`);
     } else {
       try {
-        currentHash = hashDirectorySync(root);
+        currentHash = hashSkillSourceSync(root);
       } catch (error) {
         blockers.push(
           `Source evidence hash is unavailable: ${label}: ${String(error)}`,

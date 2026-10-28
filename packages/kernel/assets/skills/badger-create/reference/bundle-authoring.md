@@ -119,7 +119,8 @@ and its explicit retained/replaced/wrapped decisions.
 Use the following boundary sequence:
 
 1. Run the Badger Skill in an Agent; confirm the workflow goal and explicit `skillSources` with the
-   bundled `badger-workflow-questionnaire`, then inspect those sources with `guide` and `candidates`.
+   bundled `badger-workflow-questionnaire`, then inspect those sources with `guide` and the source
+   check (`source-check`, with `candidates` kept as an alias).
 2. Preview and validate a normalized proposal with `propose`.
 3. Require explicit confirmation before `init` writes Creator state.
 4. Generate a visibly pending scaffold and its `.badger/authoring/<name>`

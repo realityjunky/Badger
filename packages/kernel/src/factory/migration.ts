@@ -260,6 +260,7 @@ export async function migrateLegacyDraft(
       proposal,
       plan,
       destination,
+      projectRoot: options.state.projectRoot,
       ...(options.depth ? { authoringDepth: options.depth } : {}),
     });
     destinationCreated = true;

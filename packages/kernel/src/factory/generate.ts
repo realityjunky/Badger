@@ -949,11 +949,12 @@ export async function generatePackage(options: {
   proposal: FactoryProposal;
   plan: FactoryPlan;
   destination: string;
+  projectRoot?: string;
   authoringDepth?: AuthoringDepth;
 }): Promise<GeneratedPackage> {
   const root = path.resolve(options.destination);
   const sourceRoot = options.plan.sourceRoot
-    ? path.resolve(options.plan.sourceRoot)
+    ? path.resolve(options.projectRoot ?? ".", options.plan.sourceRoot)
     : undefined;
   if (sourceRoot && isWithin(sourceRoot, root)) {
     throw new Error(
@@ -961,7 +962,15 @@ export async function generatePackage(options: {
     );
   }
   const sourceEvidence = sourceRoot
-    ? await inspectUpgradeSource(sourceRoot)
+    ? await inspectUpgradeSource(
+        sourceRoot,
+        options.projectRoot
+          ? {
+              projectRoot: options.projectRoot,
+              roots: options.plan.sourceRoots,
+            }
+          : undefined,
+      )
     : undefined;
   if (sourceRoot) {
     await assertUpgradeDestinationOutsideSource(sourceRoot, root);

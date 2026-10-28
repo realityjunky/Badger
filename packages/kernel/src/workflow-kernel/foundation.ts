@@ -89,6 +89,16 @@ export function parsePlan(value: unknown, file: string): FactoryPlan {
     throw new Error(`Invalid Factory plan: ${file}`);
   if (plan.skillCreatorIntent === "upgrade-existing" && !plan.sourceRoot)
     throw new Error("upgrade-existing plans require sourceRoot");
+  if (
+    plan.sourceRoots !== undefined &&
+    (!Array.isArray(plan.sourceRoots) ||
+      plan.sourceRoots.some(
+        (root) => typeof root !== "string" || root.trim().length === 0,
+      ))
+  )
+    throw new Error(
+      `Invalid Factory plan: ${file} sourceRoots must be an array of locations`,
+    );
   if (plan.workflow.kind !== "workflow-kernel")
     throw new Error("Standalone Badger supports workflow-kernel plans only");
   if (plan.semanticDossier !== undefined) {
@@ -138,7 +148,10 @@ export function createWorkflowKernel(
   }
 
   async function discover(
-    optionsForDiscovery: { sources?: SkillSourceDeclaration[] } = {},
+    optionsForDiscovery: {
+      sources?: SkillSourceDeclaration[];
+      roots?: string[];
+    } = {},
   ): Promise<SkillCandidate[]> {
     return findSkills({
       projectRoot,
@@ -150,7 +163,10 @@ export function createWorkflowKernel(
     plan: FactoryPlan,
     requiredSkills: string[],
   ): Promise<SkillCandidate[]> {
-    const candidates = await discover({ sources: plan.skillSources });
+    const candidates = await discover({
+      sources: plan.skillSources,
+      ...(plan.sourceRoots ? { roots: plan.sourceRoots } : {}),
+    });
     const candidateNames = new Set(
       candidates.map((candidate) => candidate.name),
     );
@@ -197,7 +213,10 @@ export function createWorkflowKernel(
     let upgradeSource: UpgradeSourceEvidence | undefined;
     if (plan.skillCreatorIntent === "upgrade-existing" && sourceRoot) {
       try {
-        upgradeSource = await inspectUpgradeSource(sourceRoot);
+        upgradeSource = await inspectUpgradeSource(sourceRoot, {
+          projectRoot,
+          roots: plan.sourceRoots ?? [],
+        });
         if (
           !candidates.some((candidate) =>
             candidate.sources.some(
