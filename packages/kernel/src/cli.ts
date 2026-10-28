@@ -343,6 +343,7 @@ program
       proposal,
       plan,
       destination: state.draftPath,
+      projectRoot: root,
       authoringDepth: options.depth,
     });
     state.generated = generated;

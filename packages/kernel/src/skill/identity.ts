@@ -1,11 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  lstatSync,
-  readFileSync,
-  readdirSync,
-  readlinkSync,
-  promises as fs,
-} from "node:fs";
+import { lstatSync, readFileSync, readdirSync, promises as fs } from "node:fs";
 import path from "node:path";
 import type { SkillSourceFile } from "../types.js";
 
@@ -14,8 +8,9 @@ import type { SkillSourceFile } from "../types.js";
  * host. Operating-system metadata, editor state, and interpreter caches are
  * environment noise: adding or removing one must not change the hash.
  *
- * This list is fixed and documented in the workflow manual. Extend it only for
- * a file class that is environment noise on every host, never for content.
+ * This list is fixed and documented in the workflow manual and ADR 0007.
+ * Extend it only for a file class that is environment noise on every host,
+ * never for content.
  */
 export const SKILL_IDENTITY_IGNORE = [
   // Operating-system metadata
@@ -68,10 +63,37 @@ export function isIgnoredSkillEntry(relativePath: string): boolean {
   );
 }
 
+/** The files that contribute to a Skill's identity, in path order. */
+export function identitySkillFiles(
+  files: readonly SkillSourceFile[],
+): SkillSourceFile[] {
+  return files
+    .filter((file) => !isIgnoredSkillEntry(file.path))
+    .sort((left, right) => compareText(left.path, right.path));
+}
+
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function fileEntry(relativePath: string, content: Buffer): SkillSourceFile {
+  return {
+    path: relativePath,
+    bytes: content.byteLength,
+    hash: createHash("sha256").update(content).digest("hex"),
+  };
+}
+
+function unsupportedSymbolicLink(relativePath: string): Error {
+  return new Error(
+    `Skill package contains unsupported symbolic link: ${relativePath}`,
+  );
+}
+
+/**
+ * Every file in the Skill tree, in path order, environment noise included.
+ * Callers that need identity use {@link identitySkillFiles}.
+ */
 export async function inventorySkill(root: string): Promise<SkillSourceFile[]> {
   const files: SkillSourceFile[] = [];
 
@@ -81,31 +103,16 @@ export async function inventorySkill(root: string): Promise<SkillSourceFile[]> {
       compareText(left.name, right.name),
     )) {
       const relativePath = relative ? `${relative}/${entry.name}` : entry.name;
-      if (isIgnoredSkillEntry(relativePath)) continue;
       const target = path.join(directory, entry.name);
       const stats = await fs.lstat(target);
-      if (stats.isSymbolicLink()) {
-        const link = await fs.readlink(target);
-        const content = Buffer.from(link);
-        files.push({
-          path: relativePath,
-          bytes: content.byteLength,
-          hash: createHash("sha256").update(content).digest("hex"),
-        });
-      } else if (stats.isDirectory()) {
-        await walk(target, relativePath);
-      } else if (stats.isFile()) {
-        const content = await fs.readFile(target);
-        files.push({
-          path: relativePath,
-          bytes: content.byteLength,
-          hash: createHash("sha256").update(content).digest("hex"),
-        });
-      } else {
+      if (stats.isSymbolicLink()) throw unsupportedSymbolicLink(relativePath);
+      if (stats.isDirectory()) await walk(target, relativePath);
+      else if (stats.isFile())
+        files.push(fileEntry(relativePath, await fs.readFile(target)));
+      else
         throw new Error(
           `Skill package contains unsupported special file: ${relativePath}`,
         );
-      }
     }
   }
 
@@ -113,9 +120,9 @@ export async function inventorySkill(root: string): Promise<SkillSourceFile[]> {
   return files.sort((left, right) => compareText(left.path, right.path));
 }
 
-export function hashSkillInventory(files: readonly SkillSourceFile[]): string {
+export function hashSkillIdentity(files: readonly SkillSourceFile[]): string {
   const hash = createHash("sha256");
-  for (const file of files) {
+  for (const file of identitySkillFiles(files)) {
     hash.update("file");
     hash.update("\0");
     hash.update(String(Buffer.byteLength(file.path)));
@@ -131,7 +138,7 @@ export function hashSkillInventory(files: readonly SkillSourceFile[]): string {
 }
 
 export async function hashSkillSource(root: string): Promise<string> {
-  return hashSkillInventory(await inventorySkill(root));
+  return hashSkillIdentity(await inventorySkill(root));
 }
 
 export function hashSkillSourceSync(root: string): string {
@@ -143,34 +150,19 @@ export function hashSkillSourceSync(root: string): string {
       compareText(left.name, right.name),
     )) {
       const relativePath = relative ? `${relative}/${entry.name}` : entry.name;
-      if (isIgnoredSkillEntry(relativePath)) continue;
       const target = path.join(directory, entry.name);
       const stats = lstatSync(target);
-      if (stats.isSymbolicLink()) {
-        const content = Buffer.from(readlinkSync(target));
-        files.push({
-          path: relativePath,
-          bytes: content.byteLength,
-          hash: createHash("sha256").update(content).digest("hex"),
-        });
-      } else if (stats.isDirectory()) {
-        walk(target, relativePath);
-      } else if (stats.isFile()) {
-        const content = readFileSync(target);
-        files.push({
-          path: relativePath,
-          bytes: content.byteLength,
-          hash: createHash("sha256").update(content).digest("hex"),
-        });
-      } else {
+      if (stats.isSymbolicLink()) throw unsupportedSymbolicLink(relativePath);
+      if (stats.isDirectory()) walk(target, relativePath);
+      else if (stats.isFile())
+        files.push(fileEntry(relativePath, readFileSync(target)));
+      else
         throw new Error(
           `Skill package contains unsupported special file: ${relativePath}`,
         );
-      }
     }
   }
 
   walk(path.resolve(root), "");
-  files.sort((left, right) => compareText(left.path, right.path));
-  return hashSkillInventory(files);
+  return hashSkillIdentity(files);
 }

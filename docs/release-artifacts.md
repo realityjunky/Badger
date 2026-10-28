@@ -60,9 +60,9 @@ unexpected executable content blocks readiness.
 
 ## Ownership
 
-| Responsibility                                              | Current authority                                                 |
-| ----------------------------------------------------------- | ----------------------------------------------------------------- |
-| Explicit Skill source inspection and stable hashes          | `src/workflow-kernel/discovery.ts`, `src/workflow-kernel/hash.ts` |
+| Responsibility                                              | Current authority                                            |
+| ----------------------------------------------------------- | ------------------------------------------------------------ |
+| Explicit Skill source inspection, identity, and inventory   | `src/skill/identity.ts`, `src/workflow-kernel/discovery.ts`  |
 | Workflow contract normalization and validation              | `src/workflow/contract.ts`                                        |
 | Plan, proposal, confirmation, and `.badger` state           | `src/workflow-kernel/foundation.ts`, `src/factory/`               |
 | Six-lane authoring and deterministic assembly               | `src/authoring/`, `src/factory/generate.ts`                       |

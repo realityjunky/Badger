@@ -3,13 +3,23 @@ import path from "node:path";
 import { parse } from "yaml";
 import type {
   SkillCandidate,
-  SkillScriptEffect,
+  SkillScriptEffectStatus,
   SkillSource,
   SkillSourceDeclaration,
   SkillSourceManifest,
 } from "../types.js";
 import { SKILL_SCRIPT_SIDE_EFFECTS } from "../types.js";
-import { hashSkillInventory, inventorySkill } from "../skill/identity.js";
+import {
+  hashSkillIdentity,
+  identitySkillFiles,
+  inventorySkill,
+} from "../skill/identity.js";
+import {
+  sourceScope,
+  withinPhysicalSourceScope,
+  withinSourceScope,
+} from "../skill/scope.js";
+import type { SourceScope } from "../skill/scope.js";
 import { isWithin } from "../util.js";
 
 interface ReadSourceResult {
@@ -18,36 +28,9 @@ interface ReadSourceResult {
   blocker: string;
 }
 
-interface SourceScope {
-  lexical: string[];
-  physical: string[];
-}
-
-function withinAny(roots: readonly string[], candidate: string): boolean {
-  return roots.some((root) => isWithin(root, candidate));
-}
-
-async function sourceScope(
-  projectRoot: string,
-  roots: readonly string[],
-): Promise<SourceScope> {
-  const lexical = [
-    projectRoot,
-    ...roots.map((root) => path.resolve(projectRoot, root)),
-  ];
-  const physical: string[] = [];
-  for (const root of lexical)
-    physical.push(await fs.realpath(root).catch(() => root));
-  return { lexical, physical };
-}
-
 interface SkillFrontmatter {
   name: string;
   description: string;
-}
-
-function portablePath(value: string): string {
-  return value.split(path.sep).join("/");
 }
 
 function declarationLabel(declaration: SkillSourceDeclaration): string {
@@ -84,26 +67,6 @@ function parseFrontmatter(source: string, location: string): SkillFrontmatter {
   return { name: metadata.name.trim(), description: metadata.description };
 }
 
-async function assertSafeSymlinks(root: string, relative = ""): Promise<void> {
-  const entries = await fs.readdir(path.join(root, relative), {
-    withFileTypes: true,
-  });
-  for (const entry of entries) {
-    const target = path.join(root, relative, entry.name);
-    if (entry.isSymbolicLink()) {
-      const resolved = await fs.realpath(target);
-      if (!isWithin(root, resolved))
-        throw new Error(
-          `Skill package symbolic link escapes its root: ${portablePath(
-            path.relative(root, target),
-          )} -> ${resolved}`,
-        );
-    } else if (entry.isDirectory()) {
-      await assertSafeSymlinks(root, path.join(relative, entry.name));
-    }
-  }
-}
-
 async function readSource(
   declaration: SkillSourceDeclaration,
   projectRoot: string,
@@ -125,11 +88,7 @@ async function readSource(
         declaration,
       )} source escapes project root: ${location}`,
     };
-  if (
-    !relativeLocation &&
-    !withinAny(scope.lexical, declaredPath) &&
-    !withinAny(scope.physical, declaredPath)
-  )
+  if (!relativeLocation && !withinSourceScope(scope, declaredPath))
     return {
       status: "unsafe",
       blocker: `Skill ${declarationLabel(
@@ -169,7 +128,7 @@ async function readSource(
         declaration,
       )} source symlink escapes project root: ${declaredPath} -> ${realRoot}`,
     };
-  if (!relativeLocation && !withinAny(scope.physical, realRoot))
+  if (!relativeLocation && !withinPhysicalSourceScope(scope, realRoot))
     return {
       status: "unsafe",
       blocker: `Skill ${declarationLabel(
@@ -204,21 +163,21 @@ async function readSource(
         status: "invalid",
         blocker: `Skill source ${realRoot} declares name ${frontmatter.name}, not ${declaration.name}`,
       };
-    await assertSafeSymlinks(realRoot);
     const inventory = await inventorySkill(realRoot);
-    const references = inventory
+    const identity = identitySkillFiles(inventory);
+    const references = identity
       .filter(
         (file) =>
           file.path.startsWith("reference/") ||
           file.path.startsWith("references/"),
       )
       .map((file) => ({ path: file.path, contentHash: file.hash }));
-    const scripts = inventory
+    const scripts = identity
       .filter((file) => file.path.startsWith("scripts/"))
       .map((file) => ({
         path: file.path,
         sideEffect: (declaration.scripts?.[file.path] ??
-          "undeclared") as SkillScriptEffect,
+          "undeclared") as SkillScriptEffectStatus,
       }));
     return {
       source: {
@@ -230,7 +189,7 @@ async function readSource(
         references,
         scripts,
         inventory,
-        hash: hashSkillInventory(inventory),
+        hash: hashSkillIdentity(inventory),
       },
       status: "available",
       blocker: "",
@@ -335,9 +294,13 @@ export async function findSkills(options: {
 }
 
 function isSafeManifestScriptPath(value: string): boolean {
-  if (value.length === 0 || value.includes("\0") || path.isAbsolute(value))
+  if (
+    !value.startsWith("scripts/") ||
+    value.includes("\0") ||
+    path.isAbsolute(value)
+  )
     return false;
-  return !value.replaceAll("\\", "/").split("/").includes("..");
+  return !value.split("/").includes("..");
 }
 
 function invalidManifest(file: string, reason: string): Error {
@@ -406,7 +369,7 @@ export async function readSkillSourceManifest(
       if (!isSafeManifestScriptPath(scriptPath))
         throw invalidManifest(
           manifestPath,
-          `source ${entry.name} script path must stay inside the source: ${scriptPath}`,
+          `source ${entry.name} script path must be a scripts/ path inside the source: ${scriptPath}`,
         );
       if (
         typeof sideEffect !== "string" ||

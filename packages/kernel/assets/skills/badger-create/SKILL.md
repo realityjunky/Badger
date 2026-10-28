@@ -65,14 +65,14 @@ home-directory, or platform directory.
 5. Author a complete FactoryPlan with explicit sources, workflow semantics,
    and upgrade-source identity where applicable.
 
-The source check is read-only. Its identity ignores a fixed list of
-operating-system metadata, editor state, and interpreter cache files, and it
-reports every other file, configuration included. A script's side effect comes
-from the source manifest (`none`, `local-writes`, `network`,
-`scheduler-submission`, `installs`); an undeclared script is reported as
-undeclared. It never executes scripts, writes Creator state, writes the
-questionnaire handoff, copies a source package, publishes, distributes, or
-accesses credentials.
+The source check is read-only. Its inventory lists every file with its hash,
+configuration included; its identity hash covers those files except a fixed
+list of operating-system metadata, editor state, and interpreter cache files.
+A script's side effect comes from the source manifest (`none`,
+`local-writes`, `network`, `scheduler-submission`, `installs`); an undeclared
+script is reported as undeclared. It never executes scripts, writes Creator
+state, writes the questionnaire handoff, copies a source package, publishes,
+distributes, or accesses credentials.
 
 ## Multi-exchange authoring
 

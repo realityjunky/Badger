@@ -124,8 +124,40 @@ describe("closed-world Skill discovery", () => {
 
     expect(after[0]?.sources[0]?.hash).toBe(before[0]?.sources[0]?.hash);
     expect(after[0]?.sources[0]?.inventory.map((file) => file.path)).toEqual([
+      ".#SKILL.md",
+      ".DS_Store",
+      ".idea/workspace.xml",
+      ".vscode/settings.json",
       "SKILL.md",
+      "Thumbs.db",
+      "__pycache__/review.cpython-312.pyc",
+      "notes.md.swp",
+      "notes.md~",
     ]);
+
+    await fs.rm(path.join(explicit, ".DS_Store"));
+    const removed = await findSkills({
+      projectRoot: project,
+      sources: declaration,
+    });
+    expect(removed[0]?.sources[0]?.hash).toBe(before[0]?.sources[0]?.hash);
+  });
+
+  it("rejects a symbolic link inside a Skill tree", async () => {
+    const explicit = path.join(project, "supplied", "review");
+    await writeSkill(explicit, "review");
+    await fs.writeFile(path.join(explicit, "notes.md"), "notes\n");
+    await fs.symlink("notes.md", path.join(explicit, "aliased.md"));
+
+    const result = await findSkills({
+      projectRoot: project,
+      sources: [{ name: "review", location: "supplied/review" }],
+    });
+
+    expect(result[0]?.status).toBe("invalid");
+    expect(result[0]?.blockers?.join(" ")).toMatch(
+      /unsupported symbolic link/iu,
+    );
   });
 
   it("inventories every file, configuration included, with its hash", async () => {
@@ -230,6 +262,27 @@ describe("closed-world Skill discovery", () => {
 
     await expect(readSkillSourceManifest(manifest)).rejects.toThrow(
       /script path/iu,
+    );
+  });
+
+  it("rejects a manifest script path outside scripts/", async () => {
+    const manifest = path.join(project, "sources.json");
+    await fs.writeFile(
+      manifest,
+      JSON.stringify({
+        schemaVersion: 1,
+        sources: [
+          {
+            name: "review",
+            location: "supplied/review",
+            scripts: { "bin/tool.sh": "none" },
+          },
+        ],
+      }),
+    );
+
+    await expect(readSkillSourceManifest(manifest)).rejects.toThrow(
+      /scripts\/ path/iu,
     );
   });
 

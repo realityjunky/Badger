@@ -262,6 +262,31 @@ describe("workflow-kernel foundation", () => {
     );
   });
 
+  it("confines plan sources and the upgrade source to the project or its roots", async () => {
+    const external = await writeSkill(
+      "shared",
+      path.join(root, "external", "shared"),
+    );
+    const plan = planFor("shared");
+    plan.skillCreatorIntent = "upgrade-existing";
+    plan.skillSources = [{ name: "shared", location: external }];
+    plan.sourceRoot = external;
+    const planPath = await writePlan(plan);
+    const kernel = createStandaloneWorkflowKernel({ projectRoot: project });
+
+    const refused = await kernel.buildProposal(planPath);
+    expect(refused.canInitialize).toBe(false);
+    expect(refused.blockers.join(" ")).toMatch(
+      /outside the project and its registered roots/iu,
+    );
+
+    plan.sourceRoots = ["../external"];
+    await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
+    const accepted = await kernel.buildProposal(planPath);
+    expect(accepted.blockers).toEqual([]);
+    expect(accepted.canInitialize).toBe(true);
+  });
+
   it("routes existing proposal callers through the same foundation", async () => {
     await writeSkill("primer-design");
     const planPath = await writePlan(planFor("primer-design"));
