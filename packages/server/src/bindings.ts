@@ -13,8 +13,13 @@ import type { Database, Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import type { Person } from "./people.js";
 import { toIsoString } from "./util.js";
+import {
+  isWorkflowRole,
+  WORKFLOW_ROLES,
+  type WorkflowRole,
+} from "./workflow-access.js";
 
-export type BindingRole = OrganizationRole | GroupRole;
+export type BindingRole = OrganizationRole | GroupRole | WorkflowRole;
 
 export interface RoleBinding {
   id: string;
@@ -35,6 +40,7 @@ interface BindingRow {
   id: string;
   scope_type: ScopeType;
   scope_id: string | null;
+  workflow_id: string | null;
   role: BindingRole;
   person_id: string | null;
   email: string;
@@ -44,7 +50,7 @@ interface BindingRow {
   updated_at: Date | string;
 }
 
-const BINDING_COLUMNS = `id, scope_type, scope_id, role, person_id, email,
+const BINDING_COLUMNS = `id, scope_type, scope_id, workflow_id, role, person_id, email,
        invited_by, revision, created_at, updated_at`;
 const QUALIFIED_BINDING_COLUMNS = BINDING_COLUMNS.split(",")
   .map((column) => `b.${column.trim()}`)
@@ -54,7 +60,7 @@ function toBinding(row: BindingRow): RoleBinding {
   return {
     id: row.id,
     scopeType: row.scope_type,
-    scopeId: row.scope_id,
+    scopeId: row.workflow_id ?? row.scope_id,
     role: row.role,
     personId: row.person_id,
     email: row.email,
@@ -71,6 +77,8 @@ export interface BindingInput {
   scopeId: string | null;
   email: string;
   role: BindingRole;
+  /** A known identity for internal writes, never accepted from an HTTP body. */
+  personId?: string;
 }
 
 export type BindingParseResult =
@@ -105,18 +113,28 @@ export function parseBindingInput(body: unknown): BindingParseResult {
   }
 
   const scopeType = input["scopeType"];
-  if (scopeType !== "organization" && scopeType !== "group") {
-    return { ok: false, message: "scopeType must be organization or group" };
+  if (
+    scopeType !== "organization" &&
+    scopeType !== "group" &&
+    scopeType !== "workflow"
+  ) {
+    return {
+      ok: false,
+      message: "scopeType must be organization, group, or workflow",
+    };
   }
   const scopeId = input["scopeId"] ?? null;
   if (scopeType === "organization" && scopeId !== null) {
     return { ok: false, message: "An organization binding names no group" };
   }
   if (
-    scopeType === "group" &&
+    scopeType !== "organization" &&
     (typeof scopeId !== "string" || scopeId.trim() === "")
   ) {
-    return { ok: false, message: "A group binding names its group" };
+    return {
+      ok: false,
+      message: "A group or workflow binding names its scope",
+    };
   }
 
   const email = typeof input["email"] === "string" ? input["email"].trim() : "";
@@ -142,6 +160,12 @@ export function parseBindingInput(body: unknown): BindingParseResult {
   }
 
   const reason = input["overrideReason"];
+  if (scopeType === "workflow" && !isWorkflowRole(role)) {
+    return {
+      ok: false,
+      message: `A workflow role is one of ${WORKFLOW_ROLES.join(", ")}`,
+    };
+  }
   if (
     reason !== undefined &&
     (typeof reason !== "string" || reason.trim().length > 1000)
@@ -156,7 +180,7 @@ export function parseBindingInput(body: unknown): BindingParseResult {
     ok: true,
     value: {
       scopeType,
-      scopeId: scopeType === "group" ? (scopeId as string) : null,
+      scopeId: scopeType === "organization" ? null : (scopeId as string),
       email,
       role: role as BindingRole,
       overrideReason:
@@ -193,8 +217,15 @@ async function personByVerifiedEmail(
  */
 async function bindingLabel(
   database: Queryable,
-  row: Pick<BindingRow, "role" | "scope_id" | "email">,
+  row: Pick<BindingRow, "role" | "scope_id" | "workflow_id" | "email">,
 ): Promise<string> {
+  if (row.workflow_id !== null) {
+    const workflow = await database.query<{ name: string }>(
+      `select name from workflows where id = $1`,
+      [row.workflow_id],
+    );
+    return `${row.role} · ${workflow.rows[0]?.name ?? row.workflow_id} · ${row.email}`;
+  }
   if (row.scope_id === null) {
     return `${row.role} · Organization · ${row.email}`;
   }
@@ -208,9 +239,10 @@ async function bindingLabel(
 async function readBinding(
   database: Queryable,
   id: string,
+  lock = false,
 ): Promise<BindingRow | null> {
   const rows = await database.query<BindingRow>(
-    `select ${BINDING_COLUMNS} from role_bindings where id = $1`,
+    `select ${BINDING_COLUMNS} from role_bindings where id = $1${lock ? " for update" : ""}`,
     [id],
   );
   return rows.rows[0] ?? null;
@@ -219,7 +251,8 @@ async function readBinding(
 export type CreateBindingResult =
   | { kind: "created"; binding: RoleBinding }
   | { kind: "conflict" }
-  | { kind: "missing-group" };
+  | { kind: "missing-group" }
+  | { kind: "missing-workflow" };
 
 /**
  * Records a role binding. A binding for an address no signed-in person has
@@ -235,105 +268,116 @@ export async function createBinding(
   input: BindingInput,
   reason: string,
 ): Promise<CreateBindingResult> {
-  return database.transaction(async (tx) => {
-    if (input.scopeId !== null) {
-      const group = await tx.query(`select 1 from groups where id = $1`, [
-        input.scopeId,
-      ]);
-      if (group.rows.length === 0) {
-        return { kind: "missing-group" };
-      }
-    }
-    const now = dependencies.clock.now();
-    const personId = await personByVerifiedEmail(tx, input.email);
+  return database.transaction((tx) =>
+    recordBinding(tx, dependencies, context, input, reason),
+  );
+}
 
-    if (personId !== null) {
-      const resolved = await tx.query<BindingRow>(
-        `update role_bindings
+/** Also used inside the transaction that creates a workflow and its owner. */
+export async function recordBinding(
+  tx: Queryable,
+  dependencies: ServiceDependencies,
+  context: WriteContext,
+  input: BindingInput,
+  reason: string,
+): Promise<CreateBindingResult> {
+  if (input.scopeId !== null) {
+    const scope = await tx.query(
+      input.scopeType === "workflow"
+        ? `select 1 from workflows where id = $1`
+        : `select 1 from groups where id = $1`,
+      [input.scopeId],
+    );
+    if (scope.rows.length === 0) {
+      return {
+        kind:
+          input.scopeType === "workflow" ? "missing-workflow" : "missing-group",
+      };
+    }
+  }
+  const now = dependencies.clock.now();
+  const personId =
+    input.personId ?? (await personByVerifiedEmail(tx, input.email));
+
+  if (personId !== null) {
+    const resolved = await tx.query<BindingRow>(
+      `update role_bindings
             set person_id = $1, revision = revision + 1, updated_at = $2
           where person_id is null
             and scope_type = $3
-            and coalesce(scope_id, '') = coalesce($4, '')
+            and coalesce(scope_id, workflow_id, '') = coalesce($4, '')
             and role = $5
             and lower(email) = lower($6)
           returning ${BINDING_COLUMNS}`,
-        [
-          personId,
-          now,
-          input.scopeType,
-          input.scopeId,
-          input.role,
-          input.email,
-        ],
-      );
-      const row = resolved.rows[0];
-      if (row !== undefined) {
-        await recordAudit(tx, dependencies, {
-          actor: {
-            personId: context.personId,
-            credential: context.credential,
-          },
-          channel: context.channel,
-          action: "role_binding.resolved",
-          target: {
-            type: "role_binding",
-            id: row.id,
-            label: await bindingLabel(tx, row),
-          },
-          before: { revision: row.revision - 1, hash: null },
-          after: { revision: row.revision, hash: null },
-          reason,
-          requestId: context.requestId,
-        });
-        return { kind: "created", binding: toBinding(row) };
-      }
+      [personId, now, input.scopeType, input.scopeId, input.role, input.email],
+    );
+    const row = resolved.rows[0];
+    if (row !== undefined) {
+      await recordAudit(tx, dependencies, {
+        actor: {
+          personId: context.personId,
+          credential: context.credential,
+        },
+        channel: context.channel,
+        action: "role_binding.resolved",
+        target: {
+          type: "role_binding",
+          id: row.id,
+          label: await bindingLabel(tx, row),
+        },
+        before: { revision: row.revision - 1, hash: null },
+        after: { revision: row.revision, hash: null },
+        reason,
+        requestId: context.requestId,
+      });
+      return { kind: "created", binding: toBinding(row) };
     }
+  }
 
-    const id = dependencies.ids.next();
-    const inserted = await tx.query<BindingRow>(
-      `insert into role_bindings (
+  const id = dependencies.ids.next();
+  const inserted = await tx.query<BindingRow>(
+    `insert into role_bindings (
          id, scope_type, scope_id, role, person_id, email, invited_by,
-         revision, created_at, updated_at
-       ) values ($1, $2, $3, $4, $5, $6, $7, 1, $8, $8)
+         workflow_id, revision, created_at, updated_at
+       ) values ($1, $2, $3, $4, $5, $6, $7, $9, 1, $8, $8)
        on conflict do nothing
        returning ${BINDING_COLUMNS}`,
-      [
-        id,
-        input.scopeType,
-        input.scopeId,
-        input.role,
-        personId,
-        input.email.toLowerCase(),
-        context.personId,
-        now,
-      ],
-    );
-    const row = inserted.rows[0];
-    if (row === undefined) {
-      return { kind: "conflict" };
-    }
+    [
+      id,
+      input.scopeType,
+      input.scopeType === "workflow" ? null : input.scopeId,
+      input.role,
+      personId,
+      input.email.toLowerCase(),
+      context.personId,
+      now,
+      input.scopeType === "workflow" ? input.scopeId : null,
+    ],
+  );
+  const row = inserted.rows[0];
+  if (row === undefined) {
+    return { kind: "conflict" };
+  }
 
-    await recordAudit(tx, dependencies, {
-      actor: {
-        personId: context.personId,
-        credential: context.credential,
-      },
-      channel: context.channel,
-      action:
-        personId === null ? "role_binding.invited" : "role_binding.granted",
-      target: {
-        type: "role_binding",
-        id: row.id,
-        label: await bindingLabel(tx, row),
-      },
-      before: null,
-      after: { revision: 1, hash: null },
-      reason,
-      requestId: context.requestId,
-    });
-
-    return { kind: "created", binding: toBinding(row) };
+  await recordAudit(tx, dependencies, {
+    actor: {
+      personId: context.personId,
+      credential: context.credential,
+    },
+    channel: context.channel,
+    action: personId === null ? "role_binding.invited" : "role_binding.granted",
+    target: {
+      type: "role_binding",
+      id: row.id,
+      label: await bindingLabel(tx, row),
+    },
+    before: null,
+    after: { revision: 1, hash: null },
+    reason,
+    requestId: context.requestId,
   });
+
+  return { kind: "created", binding: toBinding(row) };
 }
 
 /**
@@ -366,10 +410,10 @@ export async function resolvePendingBindings(
          from role_bindings
         where person_id = $1
           and scope_type = $2
-          and coalesce(scope_id, '') = coalesce($3, '')
+          and coalesce(scope_id, workflow_id, '') = coalesce($3, '')
           and role = $4
         limit 1`,
-      [person.id, row.scope_type, row.scope_id, row.role],
+      [person.id, row.scope_type, row.workflow_id ?? row.scope_id, row.role],
     );
 
     if (existing.rows.length > 0) {
@@ -443,21 +487,24 @@ export async function listInvitations(
 ): Promise<Invitation[]> {
   const rows = await database.query<InvitationRow>(
     `select ${QUALIFIED_BINDING_COLUMNS},
-            g.name as scope_name, p.display_name as invited_by_name
+            coalesce(g.name, w.name) as scope_name, p.display_name as invited_by_name
        from role_bindings b
        left join groups g on g.id = b.scope_id
+       left join workflows w on w.id = b.workflow_id
        join people p on p.id = b.invited_by
       where b.person_id is null
         and (
           $1::boolean
           or (
-            b.scope_type = 'group' and b.scope_id = any($2::text[])
+            (b.scope_type = 'group' and b.scope_id = any($2::text[]))
+            or (b.scope_type = 'workflow' and w.group_id = any($3::text[]))
           )
         )
       order by b.created_at, b.id`,
     [
       visibility.everything,
       visibility.everything ? [] : [...visibility.groupIds],
+      visibility.everything ? [] : [...(visibility.workflowGroupIds ?? [])],
     ],
   );
   return rows.rows.map((row) => ({
@@ -485,7 +532,7 @@ export async function removeBinding(
   reason: string,
 ): Promise<RemoveBindingResult> {
   return database.transaction(async (tx) => {
-    const current = await readBinding(tx, id);
+    const current = await readBinding(tx, id, true);
     if (current === null) {
       return { kind: "missing" };
     }

@@ -24,6 +24,7 @@ import {
   type Member,
   type OrganizationRecords,
   type WriteOutcome,
+  type ScopeType,
 } from "../api/organization.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
@@ -100,7 +101,7 @@ export function AdminPage() {
     [person, groups],
   );
   const mayChange = (binding: {
-    scopeType: "organization" | "group";
+    scopeType: ScopeType;
     scopeId: string | null;
   }): boolean => mayChangeBinding(binding, administrator, led);
 
@@ -152,6 +153,12 @@ export function AdminPage() {
           {[
             ...member.organizationRoles,
             ...member.groups.map((group) => `${group.role} · ${group.name}`),
+            ...member.bindings
+              .filter((binding) => binding.scopeType === "workflow")
+              .map(
+                (binding) =>
+                  `${binding.role} · ${binding.scopeName ?? binding.scopeId}`,
+              ),
           ].map((role) => (
             <Tag key={role}>{role}</Tag>
           ))}

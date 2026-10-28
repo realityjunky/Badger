@@ -16,7 +16,7 @@ them into `dist/`, so the server image carries the build and none of them.
 | `src/app/navigation.ts` | The URL routes, the rail's sections, and the page-title lookup.                                      |
 | `src/app/paths.ts`      | Base-path normalisation, API URLs, and reading the injected base path.                               |
 | `src/preferences/`      | The person's choices: model, API client, the saver that stores each change, and the provider.        |
-| `src/api/`              | The Admin and Activity clients: records, writes, and the activity query builder.                     |
+| `src/api/`              | The Workflows, Admin, and Activity clients: scoped records, writes, revision conflicts, and filters. |
 | `src/shell/`            | The rail, top bar, and application frame.                                                            |
 | `src/pages/`            | The pages. My work is the landing page; Admin and Activity read live records.                        |
 | `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.          |
@@ -39,6 +39,12 @@ them into `dist/`, so the server image carries the build and none of them.
 - One token source feeds both the CSS variables and Ant Design's theme.
   Contrast is checked at AA in both themes; reduced motion stops the stage
   marker's animation.
+- The Workflows catalog reads live, scoped workflows. Creation asks for a
+  Group, kernel-valid name, goal, intent, and locale. A workflow's version URL
+  selects its saved frame and eight stage states. Its team panel shows role
+  holders and invitations, and capable people assign or remove roles there.
+  Workflow edits and version starts quote the revision the person reviewed;
+  a conflict keeps the failed write visible until they reload and review.
 
 ## Commands
 

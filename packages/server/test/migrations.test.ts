@@ -62,13 +62,14 @@ describe("reviewed SQL migrations", () => {
       "0002",
       "0003",
       "0004",
+      "0005",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
 
     expect(state).toEqual({
       state: "applied",
-      applied: ["0001", "0002", "0003", "0004"],
+      applied: ["0001", "0002", "0003", "0004", "0005"],
       pending: [],
       drifted: [],
     });
@@ -85,6 +86,8 @@ describe("reviewed SQL migrations", () => {
       "person_preferences",
       "role_bindings",
       "schema_migrations",
+      "workflow_versions",
+      "workflows",
     ]);
   });
 
@@ -97,14 +100,51 @@ describe("reviewed SQL migrations", () => {
 
     expect(secondRun).toEqual({
       state: "applied",
-      applied: ["0001", "0002", "0003", "0004"],
+      applied: ["0001", "0002", "0003", "0004", "0005"],
       pending: [],
       drifted: [],
     });
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(4);
+    expect(rows.rows[0]?.count).toBe(5);
+  });
+
+  it("adds workflow scopes without changing existing Group bindings", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((migration) => migration.version < "0005"),
+      clock,
+    );
+    await insertPerson(test);
+    await test.database.query(
+      `insert into groups (id, name, created_at, updated_at) values ('group-1', 'Research', $1, $1)`,
+      [clock.now()],
+    );
+    await test.database.query(
+      `insert into role_bindings (id, scope_type, scope_id, role, person_id, email, invited_by, created_at, updated_at)
+      values ('binding-1', 'group', 'group-1', 'Group lead', 'person-1', 'a@example.com', 'person-1', $1, $1)`,
+      [clock.now()],
+    );
+
+    await applyMigrations(test.database, migrations, clock);
+
+    const bindings = await test.database.query(
+      `select id, scope_type, scope_id, workflow_id, role, person_id, revision from role_bindings`,
+    );
+    expect(bindings.rows).toEqual([
+      {
+        id: "binding-1",
+        scope_type: "group",
+        scope_id: "group-1",
+        workflow_id: null,
+        role: "Group lead",
+        person_id: "person-1",
+        revision: 1,
+      },
+    ]);
   });
 
   it("refuses a reviewed migration whose SQL changed after it was applied", async () => {

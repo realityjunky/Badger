@@ -236,7 +236,31 @@ test("every control is reachable by keyboard", async ({ page }) => {
 
 test("reduced motion stops the stage animation", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto("/workflows");
+  const workflowId = await page.evaluate(async () => {
+    const created = await fetch("/api/v1/groups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: `Motion ${Date.now()}` }),
+    });
+    if (!created.ok)
+      throw new Error(`Creating a group answered ${created.status}`);
+    const { group } = await created.json();
+    const response = await fetch("/api/v1/workflows", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        groupId: group.id,
+        name: `motion-${Date.now()}`,
+        goal: "Check reduced motion.",
+        intent: "new-skill",
+        locale: "en",
+      }),
+    });
+    if (!response.ok)
+      throw new Error(`Creating a workflow answered ${response.status}`);
+    return (await response.json()).workflow.id as string;
+  });
+  await page.goto(`/workflows/${workflowId}`);
 
   const animation = await page
     .locator(".stage-marker")

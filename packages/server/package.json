@@ -27,6 +27,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@realityjunky/badger": "*",
     "@electric-sql/pglite": "^0.5.12",
     "pg": "^8.23.1"
   },
