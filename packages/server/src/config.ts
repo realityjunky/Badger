@@ -15,8 +15,38 @@ export interface StorageConfiguration {
   runDirectory: string;
 }
 
+/**
+ * Settings for the adapter that proves a person through the platform's own
+ * session. Every platform-specific value comes from configuration.
+ */
+export interface PlatformSessionSettings {
+  /** The platform's internal base URL, without a trailing slash. */
+  url: string;
+  /** The platform's current-user endpoint, such as `/auth/me`. */
+  currentUserPath: string;
+  /** The name of the cookie that carries the platform session token. */
+  sessionCookie: string;
+  /**
+   * How the token reaches the current-user endpoint: in a cookie of the same
+   * name, or as an `Authorization: Bearer` header.
+   */
+  currentUserAuth: "cookie" | "bearer";
+  /**
+   * The issuer every principal from this platform carries. Sign-in matches
+   * people on issuer and subject, so it must outlive any change of address.
+   */
+  issuer: string;
+  /** When set, the platform must grant the person this app. */
+  requiredAppGrant: string | null;
+  /** How long a validated session is remembered. 0 disables the cache. */
+  cacheSeconds: number;
+  timeoutMs: number;
+}
+
 export type IdentityConfiguration =
-  { kind: "local"; administrator: LocalAdministrator } | { kind: "none" };
+  | { kind: "local"; administrator: LocalAdministrator }
+  | { kind: "none" }
+  | { kind: "platform-session"; platform: PlatformSessionSettings };
 
 /**
  * The origins a write may come from. Local mode without a list allows its
@@ -166,6 +196,128 @@ function readBootstrapAdministrators(environment: Environment): string[] {
   return emails.map((email) => email.toLowerCase());
 }
 
+const COOKIE_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
+
+function readInteger(
+  environment: Environment,
+  name: string,
+  fallback: number,
+  range: { min: number; max: number },
+): number {
+  const value = readString(environment, name);
+  if (value === undefined) {
+    return fallback;
+  }
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < range.min || number > range.max) {
+    throw new ConfigurationError(
+      `${name} must be a whole number from ${range.min} to ${range.max}`,
+    );
+  }
+  return number;
+}
+
+function readPlatformSession(
+  environment: Environment,
+): PlatformSessionSettings {
+  const rawUrl = readString(environment, "BADGER_PLATFORM_URL");
+  if (rawUrl === undefined) {
+    throw new ConfigurationError(
+      "BADGER_IDENTITY=platform-session requires BADGER_PLATFORM_URL",
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new ConfigurationError(
+      "BADGER_PLATFORM_URL must be an http or https URL",
+    );
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new ConfigurationError(
+      "BADGER_PLATFORM_URL must be an http or https URL",
+    );
+  }
+  if (
+    url.username !== "" ||
+    url.password !== "" ||
+    url.search !== "" ||
+    url.hash !== ""
+  ) {
+    throw new ConfigurationError(
+      "BADGER_PLATFORM_URL must not carry credentials, a query, or a fragment",
+    );
+  }
+
+  const currentUserPath = readString(
+    environment,
+    "BADGER_PLATFORM_CURRENT_USER_PATH",
+  );
+  if (currentUserPath === undefined) {
+    throw new ConfigurationError(
+      "BADGER_IDENTITY=platform-session requires BADGER_PLATFORM_CURRENT_USER_PATH",
+    );
+  }
+  if (!currentUserPath.startsWith("/") || /[\s?#]/u.test(currentUserPath)) {
+    throw new ConfigurationError(
+      "BADGER_PLATFORM_CURRENT_USER_PATH must start with / and name a path",
+    );
+  }
+
+  const sessionCookie = readString(
+    environment,
+    "BADGER_PLATFORM_SESSION_COOKIE",
+  );
+  if (sessionCookie === undefined) {
+    throw new ConfigurationError(
+      "BADGER_IDENTITY=platform-session requires BADGER_PLATFORM_SESSION_COOKIE",
+    );
+  }
+  if (!COOKIE_NAME_PATTERN.test(sessionCookie)) {
+    throw new ConfigurationError(
+      "BADGER_PLATFORM_SESSION_COOKIE must be a cookie name",
+    );
+  }
+
+  const currentUserAuth =
+    readString(environment, "BADGER_PLATFORM_CURRENT_USER_AUTH") ?? "cookie";
+  if (currentUserAuth !== "cookie" && currentUserAuth !== "bearer") {
+    throw new ConfigurationError(
+      "BADGER_PLATFORM_CURRENT_USER_AUTH must be cookie or bearer",
+    );
+  }
+
+  // No default: an issuer derived from the internal address would change with
+  // it, and every person would then sign in as someone new.
+  const issuer = readString(environment, "BADGER_PLATFORM_ISSUER");
+  if (issuer === undefined) {
+    throw new ConfigurationError(
+      "BADGER_IDENTITY=platform-session requires BADGER_PLATFORM_ISSUER",
+    );
+  }
+
+  return {
+    url: `${url.origin}${url.pathname.replace(/\/+$/u, "")}`,
+    currentUserPath,
+    sessionCookie,
+    currentUserAuth,
+    issuer,
+    requiredAppGrant:
+      readString(environment, "BADGER_PLATFORM_APP_GRANT") ?? null,
+    cacheSeconds: readInteger(
+      environment,
+      "BADGER_PLATFORM_CACHE_SECONDS",
+      30,
+      { min: 0, max: 3600 },
+    ),
+    timeoutMs: readInteger(environment, "BADGER_PLATFORM_TIMEOUT_MS", 3000, {
+      min: 1,
+      max: 60_000,
+    }),
+  };
+}
+
 function readDatabase(
   environment: Environment,
   mode: ServiceMode,
@@ -215,17 +367,21 @@ export function loadConfig(
     (mode === "local" ? "local" : undefined);
   if (identityValue === undefined) {
     throw new ConfigurationError(
-      "Service mode requires BADGER_IDENTITY; this build provides none",
+      "Service mode requires BADGER_IDENTITY; this build provides local, none, and platform-session",
     );
   }
   if (identityValue === "local" && mode !== "local") {
     throw new ConfigurationError(
-      "BADGER_IDENTITY=local trusts loopback callers, so it is available only in local single-user mode; service deployments need a people-facing adapter, which this build does not ship yet",
+      "BADGER_IDENTITY=local trusts loopback callers, so it is available only in local single-user mode; service deployments need a people-facing adapter",
     );
   }
-  if (identityValue !== "local" && identityValue !== "none") {
+  if (
+    identityValue !== "local" &&
+    identityValue !== "none" &&
+    identityValue !== "platform-session"
+  ) {
     throw new ConfigurationError(
-      `Unsupported identity adapter ${identityValue}; this build provides local and none`,
+      `Unsupported identity adapter ${identityValue}; this build provides local, none, and platform-session`,
     );
   }
   if (identityValue === "none" && mode === "local") {
@@ -233,21 +389,34 @@ export function loadConfig(
       "Local single-user mode always signs in the implicit Administrator",
     );
   }
-  const identity: IdentityConfiguration =
-    identityValue === "local"
-      ? {
-          kind: "local",
-          administrator: {
-            subject: LOCAL_ADMINISTRATOR_SUBJECT,
-            email:
-              readString(environment, "BADGER_LOCAL_ADMIN_EMAIL") ??
-              "admin@badger.local",
-            displayName:
-              readString(environment, "BADGER_LOCAL_ADMIN_NAME") ??
-              "Local Administrator",
-          },
-        }
-      : { kind: "none" };
+  if (identityValue === "platform-session" && mode !== "service") {
+    throw new ConfigurationError(
+      "BADGER_IDENTITY=platform-session is available only in service mode; local single-user mode signs in its implicit Administrator",
+    );
+  }
+
+  let identity: IdentityConfiguration;
+  if (identityValue === "local") {
+    identity = {
+      kind: "local",
+      administrator: {
+        subject: LOCAL_ADMINISTRATOR_SUBJECT,
+        email:
+          readString(environment, "BADGER_LOCAL_ADMIN_EMAIL") ??
+          "admin@badger.local",
+        displayName:
+          readString(environment, "BADGER_LOCAL_ADMIN_NAME") ??
+          "Local Administrator",
+      },
+    };
+  } else if (identityValue === "platform-session") {
+    identity = {
+      kind: "platform-session",
+      platform: readPlatformSession(environment),
+    };
+  } else {
+    identity = { kind: "none" };
+  }
 
   const host =
     readString(environment, "BADGER_HOST") ??

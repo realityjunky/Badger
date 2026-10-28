@@ -28,6 +28,12 @@ The person who approves a workflow's package for publication. They must not have
 **Operator**:
 A person who runs a workflow's published versions, answers the Run gates its Nodes leave to Operators, and recovers interrupted Runs.
 
+**Principal**:
+The identity a request acts as: issuer, subject, email, display name, and status. A principal alone grants no Badger permission; Badger decides what the person may do.
+
+**Session introspection**:
+The identity adapter that proves a person by presenting the platform's own session token to the platform's current-user endpoint over the internal network. Badger maps the platform user ID to the person's external subject.
+
 ## Sources and versions
 
 **Project**:
