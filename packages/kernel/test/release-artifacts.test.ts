@@ -391,4 +391,19 @@ describe("Badger release artifacts", () => {
       [...manual.matchAll(/href="([^"]+)"/gu)].map((match) => match[1]),
     );
   });
+
+  it("describes the delivered dashboard shell and platform sign-in outside the plans", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const delivered = manual.slice(0, manual.indexOf('id="service"'));
+    const planned = manual.slice(manual.indexOf('id="service"'));
+
+    expect(delivered).toContain('href="#code-web"');
+    expect(delivered).toContain('id="code-web"');
+    expect(delivered).toContain("platform-session.ts");
+    expect(delivered).not.toContain(
+      "the dashboard, the Badger MCP, and the rest of §7",
+    );
+    expect(planned).not.toContain("<code>web</code>, <code>mcp</code>");
+    expect(planned).not.toContain("the AI platform's session, OpenID Connect");
+  });
 });
