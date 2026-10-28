@@ -672,7 +672,10 @@ export function createService(options: ServiceOptions, port: number): Service {
 
     // Reads and the routes that write are allowed. Refuse any other method
     // before identifying anyone, so no sign-in or audit record is written for
-    // a request the service will not serve.
+    // a request the service will not serve. A bearer request is authenticated
+    // first instead: its use counts toward its rate limit and is recorded, and
+    // anything outside the token's scopes, people-only actions included,
+    // answers 403.
     if (authorization === null && !reads && !isWriteRoute(method, path)) {
       return reply.error(405, "invalid", "Method not allowed", {
         allow: allowedMethods(path),
