@@ -20,7 +20,9 @@ const en = {
   "skills.previewCount": "{count} files in the source inventory",
   "skills.effects": "Script side effects",
   "skills.effectsHint":
-    "Declare every script's effects for this version. An empty selection remains undeclared.",
+    "Declare every script's side effects for this version. Choose None for a script that has none.",
+  "skills.declareRemaining":
+    "Undeclared scripts: {count}. Confirm becomes available once every script is declared.",
   "skills.noScripts": "This version contains no scripts.",
   "skills.undeclared": "Undeclared",
   "skills.effect.none": "None",
@@ -373,7 +375,10 @@ const zh: Record<MessageId, string> = {
   "skills.failed": "无法加载 Skill 记录，请重试。",
   "skills.previewCount": "来源清单共 {count} 个文件",
   "skills.effects": "脚本副作用",
-  "skills.effectsHint": "为此版本中的每个脚本声明副作用。留空表示尚未声明。",
+  "skills.effectsHint":
+    "为此版本中的每个脚本声明副作用。没有副作用的脚本请选择“无”。",
+  "skills.declareRemaining":
+    "尚未声明副作用的脚本：{count} 个。全部声明后才能确认上传。",
   "skills.noScripts": "此版本不包含脚本。",
   "skills.undeclared": "尚未声明",
   "skills.effect.none": "无",

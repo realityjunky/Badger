@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   previewUpload,
   readUploadFile,
+  undeclaredScripts,
   uploadVersion,
   type SideEffect,
   type Skill,
@@ -42,6 +43,8 @@ export function UploadSkillModal({
   const [error, setError] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
   const selection = useRef(0);
+  const undeclared =
+    preview === null ? [] : undeclaredScripts(preview, scripts);
 
   useEffect(
     () => () => {
@@ -98,7 +101,7 @@ export function UploadSkillModal({
   }
 
   async function confirm() {
-    if (content === null || preview === null) return;
+    if (content === null || preview === null || undeclared.length > 0) return;
     setBusy(true);
     setError(null);
     try {
@@ -133,7 +136,7 @@ export function UploadSkillModal({
             type="primary"
             onClick={() => void confirm()}
             loading={busy}
-            disabled={preview === null}
+            disabled={preview === null || undeclared.length > 0}
           >
             {t("skills.confirmUpload")}
           </Button>
@@ -215,6 +218,15 @@ export function UploadSkillModal({
                 />
               </label>
             ))}
+            {undeclared.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                title={format("skills.declareRemaining", {
+                  count: undeclared.length,
+                })}
+              />
+            )}
             <Alert type="info" title={t("skills.immutableHint")} />
           </>
         )}

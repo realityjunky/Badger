@@ -185,14 +185,28 @@ export async function uploadVersion(
       400,
       "Confirm the upload before creating an immutable version",
     );
+  // The confirmation is bound to the previewed source, not to whatever
+  // arrives with it.
+  const expectedHash = confirmation["expectedHash"];
+  if (typeof expectedHash !== "string" || !/^[a-f0-9]{64}$/u.test(expectedHash))
+    throw new RequestError(
+      400,
+      "Confirm the upload with the expectedHash its preview returned",
+    );
   const { source, files } = await inspectUpload(config, skill.name, input);
-  if (
-    confirmation["expectedHash"] !== undefined &&
-    confirmation["expectedHash"] !== source.hash
-  )
+  if (expectedHash !== source.hash)
     throw new RequestError(
       409,
-      "The source differs from the preview you confirmed",
+      "The source differs from the preview you confirmed; preview it again",
+      { hash: source.hash },
+    );
+  const undeclared = source.scripts
+    .filter((script) => script.sideEffects === "undeclared")
+    .map((script) => script.path);
+  if (undeclared.length > 0)
+    throw new RequestError(
+      400,
+      `Declare every script's side effects before upload, using none for a script without any: ${undeclared.join(", ")}`,
     );
   for (const file of source.inventory) {
     const content = files.get(file.path);

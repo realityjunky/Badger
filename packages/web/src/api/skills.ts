@@ -175,6 +175,19 @@ export function previewUpload(
   );
 }
 
+/**
+ * The previewed scripts still without a declaration. The service refuses an
+ * upload until there are none; `none` is itself a declaration.
+ */
+export function undeclaredScripts(
+  preview: VersionPreview,
+  scripts: Record<string, SideEffect[]>,
+): string[] {
+  return preview.scripts
+    .filter((script) => (scripts[script.path] ?? []).length === 0)
+    .map((script) => script.path);
+}
+
 export function uploadVersion(
   basePath: string,
   id: string,

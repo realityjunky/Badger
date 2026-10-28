@@ -1,7 +1,12 @@
 export class RequestError extends Error {
+  /**
+   * `details` are extra top-level fields for the error response, such as the
+   * current state a conflicting write should reconsider.
+   */
   constructor(
     public readonly status: 400 | 403 | 404 | 409 | 413,
     message: string,
+    public readonly details?: Readonly<Record<string, unknown>>,
   ) {
     super(message);
     this.name = "RequestError";

@@ -721,15 +721,19 @@ export function createService(options: ServiceOptions, port: number): Service {
         if (error instanceof URIError)
           return reply.error(400, "invalid", "Malformed path encoding");
         if (!(error instanceof RequestError)) throw error;
-        return reply.error(
-          error.status,
+        const code =
           error.status === 403
             ? "denied"
             : error.status === 409
               ? "conflict"
-              : "invalid",
-          error.message,
-        );
+              : "invalid";
+        if (error.details === undefined)
+          return reply.error(error.status, code, error.message);
+        return reply.json(error.status, {
+          ...error.details,
+          error: { code, message: error.message },
+          requestId: reply.requestId,
+        });
       }
     }
 

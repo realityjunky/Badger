@@ -8,7 +8,7 @@ import {
   readVersion,
   uploadVersion,
 } from "../skills/library.js";
-import { inspectUpload } from "../skills/upload.js";
+import { inspectUpload, uploadEnvelopeBytes } from "../skills/upload.js";
 import { skillGroupPermissions } from "../skills/access.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
@@ -44,8 +44,14 @@ export async function handleSkillsRequest(
     person,
     blobs,
   } = input;
-  if (skillMethods(path) === null)
-    return reply.error(404, "invalid", "Not found");
+  const methods = skillMethods(path);
+  if (methods === null) return reply.error(404, "invalid", "Not found");
+  // The service refuses unlisted writes before sign-in; this also refuses a
+  // read of a write-only route, such as GET on upload-preview.
+  if (!methods.split(", ").includes(method))
+    return reply.error(405, "invalid", "Method not allowed", {
+      allow: methods,
+    });
   const reads = method === "GET" || method === "HEAD";
   const skillGroups = await skillGroupPermissions(database, access, person);
   if (path === `${API}/skills`) {
@@ -66,7 +72,8 @@ export async function handleSkillsRequest(
         limits: config.uploads,
       });
     const body = await readJsonBody(request);
-    if (!body.ok) return reply.error(400, "invalid", body.message);
+    if (!body.ok)
+      return reply.error(body.status ?? 400, "invalid", body.message);
     const input = objectInput(body.value);
     if (
       !skillGroups.some(
@@ -102,7 +109,7 @@ export async function handleSkillsRequest(
       );
     const body = await readJsonBody(
       request,
-      2 * config.uploads.maxBytes + 256 * config.uploads.maxFiles,
+      uploadEnvelopeBytes(config.uploads),
     );
     if (!body.ok)
       return reply.error(body.status ?? 400, "invalid", body.message);

@@ -8,9 +8,24 @@ import {
 } from "@realityjunky/badger";
 import type { ServiceConfig } from "../config.js";
 import { RequestError, objectInput } from "../http/errors.js";
+import {
+  collisionKey,
+  MAX_PATH_BYTES,
+  normalizeUploadPath,
+  type UploadFile,
+} from "./paths.js";
 import { readZipUpload } from "./zip.js";
 
-import { normalizeUploadPath, type UploadFile } from "./paths.js";
+/**
+ * The largest JSON body an upload needs: every file byte as base64, and for
+ * each file its path, written once in `files` and once in `scripts`, with
+ * JSON keys, punctuation, base64 padding, and effect names. A small constant
+ * covers the confirmation fields.
+ */
+export function uploadEnvelopeBytes(limits: ServiceConfig["uploads"]): number {
+  const perFile = 2 * MAX_PATH_BYTES + 128;
+  return Math.ceil(limits.maxBytes / 3) * 4 + limits.maxFiles * perFile + 4096;
+}
 
 export function decodeUploadContent(value: unknown): Buffer {
   if (
@@ -30,18 +45,27 @@ export function normalizeUploadFiles(
   files: UploadFile[],
   limits: ServiceConfig["uploads"],
 ): UploadFile[] {
-  if (files.length === 0 || files.length > limits.maxFiles) {
+  if (files.length === 0)
+    throw new RequestError(400, "An upload must contain at least one file");
+  if (files.length > limits.maxFiles) {
     throw new RequestError(
       413,
-      `An upload must contain 1 to ${limits.maxFiles} files`,
+      `An upload may contain at most ${limits.maxFiles} files`,
     );
   }
   let bytes = 0;
+  // Names are kept byte-exact, so two that a normalization- or
+  // case-insensitive file system would merge are refused instead.
   const paths = new Set<string>();
   const normalized = files.map((file) => {
     const relative = normalizeUploadPath(file.path);
-    const key = relative.toLowerCase();
-    if (paths.has(key)) throw new RequestError(400, "Duplicate upload paths");
+    const key = collisionKey(relative);
+    if (paths.has(key)) {
+      throw new RequestError(
+        400,
+        "Upload paths collide when compared ignoring case and Unicode normalization",
+      );
+    }
     paths.add(key);
     bytes += file.content.length;
     if (file.content.length > limits.maxFileBytes || bytes > limits.maxBytes) {
@@ -60,7 +84,7 @@ export function normalizeUploadFiles(
         throw new RequestError(400, "A file cannot also be a directory");
     }
   }
-  if (!paths.has("skill.md")) {
+  if (!paths.has(collisionKey("SKILL.md"))) {
     const first = normalized[0]?.path.split("/")[0];
     if (
       first !== undefined &&
