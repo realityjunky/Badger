@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { CreatorIntent, CreatorState, CreatorStatus } from "../types.js";
-import { sha256 } from "../util.js";
+import { canonicalHash } from "../util.js";
 import { classifyCreatorDraft } from "./migration.js";
 import { readPlan } from "./proposal.js";
 import { readState } from "./state.js";
@@ -88,7 +88,7 @@ async function inspectPlan(
   const resolvedPath = path.resolve(planPath);
   try {
     const plan = await readPlan(resolvedPath);
-    const hash = sha256(JSON.stringify(plan));
+    const hash = canonicalHash(plan);
     return {
       path: resolvedPath,
       status: "available",

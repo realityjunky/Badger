@@ -173,14 +173,19 @@ The relationships in the plan are semantic rather than source metadata:
    run `badger propose <plan.json> --project <dir> --json`.
 4. Show the proposal's goal, intent, normalized Nodes, implementations,
    Required Skill Calls, augmentations, Output Schemas, candidates, blockers,
-   warnings, source identities, and hashes.
+   warnings, source identities, and both the `planHash` and `proposalHash`.
 5. Wait for separate explicit proposal confirmation before running
-   `badger init <plan.json> --confirm --project <dir>`.
-6. Run `badger generate <name> --project <dir>` to create the deterministic,
-   authoring-pending scaffold. A legacy scaffold without an authoring session
-   remains readable but is not authoring-complete or publishable; use
-   `badger migrate <name> --confirm` to preserve its source evidence and
-   resume the required lanes.
+   `badger init <plan.json> --proposal <approved proposalHash> --confirm --project <dir>`.
+   Initialization refuses a plan or Skill source set that no longer produces
+   the quoted proposal hash. Replacing an existing Creator state requires the
+   current state's hash, reported by the refusal, as
+   `--replace-state <current stateHash>`.
+6. Run `badger generate <name> --confirm --project <dir>` to create the
+   deterministic, authoring-pending scaffold. Generation refuses a plan or
+   Skill source set that drifted from the approved proposal. A legacy scaffold
+   without an authoring session remains readable but is not
+   authoring-complete or publishable; use `badger migrate <name> --confirm` to
+   preserve its source evidence and resume the required lanes.
 7. Run `badger authoring-status <name> --project <dir> --json`, dispatch each
    executable lane with `badger authoring-dispatch`, and submit its bounded
    provider-neutral result with `badger authoring-record --confirm`. Use expected

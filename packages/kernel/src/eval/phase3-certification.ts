@@ -213,6 +213,7 @@ function certificationProposal(
       goal: protocol.goal,
       intent: "new-skill",
       planHash: "phase3-certification-plan",
+      proposalHash: "phase3-certification-proposal",
       workflow: protocol,
       candidates: [],
       blockers: [],

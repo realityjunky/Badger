@@ -160,8 +160,7 @@ describe("workflow-kernel foundation", () => {
     await expect(
       kernel.initializeState({
         planPath: ambiguousPlanPath,
-        plan: await kernel.readPlan(ambiguousPlanPath),
-        proposal: ambiguous,
+        proposalHash: ambiguous.proposalHash,
         confirmed: true,
       }),
     ).rejects.toThrow("blocked proposal");
@@ -215,8 +214,7 @@ describe("workflow-kernel foundation", () => {
     await expect(
       kernel.initializeState({
         planPath,
-        plan,
-        proposal,
+        proposalHash: proposal.proposalHash,
         confirmed: true,
       }),
     ).rejects.toThrow(/source evidence is stale/iu);
@@ -245,8 +243,7 @@ describe("workflow-kernel foundation", () => {
     const proposal = await standalone.buildProposal(planPath);
     const state = await standalone.initializeState({
       planPath,
-      plan: await standalone.readPlan(planPath),
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
     });
 
@@ -409,8 +406,7 @@ describe("workflow-kernel foundation", () => {
     await expect(
       kernel.initializeState({
         planPath,
-        plan: await kernel.readPlan(planPath),
-        proposal,
+        proposalHash: proposal.proposalHash,
         confirmed: true,
       }),
     ).resolves.toMatchObject({ status: "draft" });

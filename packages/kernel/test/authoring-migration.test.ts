@@ -104,8 +104,7 @@ describe("Badger upgrade and legacy migration", () => {
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
     });
     const generated = await generatePackage({
@@ -362,8 +361,7 @@ describe("Badger upgrade and legacy migration", () => {
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
       sourceRoots,
     });
@@ -402,8 +400,7 @@ describe("Badger upgrade and legacy migration", () => {
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
     });
     const generated = await generatePackage({

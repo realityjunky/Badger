@@ -102,16 +102,14 @@ describe("standalone Creator lifecycle", () => {
       initializeState({
         projectRoot: project,
         planPath,
-        plan,
-        proposal,
+        proposalHash: proposal.proposalHash,
         confirmed: false,
       }),
     ).rejects.toThrow("confirmation");
     const initial = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
     });
     const generated = await generatePackage({
@@ -373,8 +371,7 @@ describe("standalone Creator lifecycle", () => {
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
     });
     expect(state.draftPath).toBe(

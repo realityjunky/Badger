@@ -94,8 +94,7 @@ describe("Badger authoring lifecycle", () => {
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
       confirmed: true,
     });
     const generated = await generatePackage({

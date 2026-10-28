@@ -1,5 +1,9 @@
 import { createStandaloneWorkflowKernel } from "../workflow-kernel/foundation.js";
-import type { CreatorState, SkillCandidate } from "../types.js";
+import type {
+  CreatorState,
+  FactoryProposal,
+  SkillCandidate,
+} from "../types.js";
 import type { InitializeStateOptions } from "../workflow-kernel/foundation.js";
 
 export async function readState(
@@ -25,6 +29,16 @@ export async function initializeState(
     projectRoot: options.projectRoot,
     sourceRoots: options.sourceRoots,
   }).initializeState(options);
+}
+
+export async function verifyApprovedProposal(
+  state: CreatorState,
+  options: { sourceRoots?: readonly string[] } = {},
+) {
+  return createStandaloneWorkflowKernel({
+    projectRoot: state.projectRoot,
+    sourceRoots: options.sourceRoots,
+  }).verifyApprovedProposal(state);
 }
 
 export async function updateCandidates(

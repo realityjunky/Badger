@@ -117,6 +117,30 @@ describe("Badger release artifacts", () => {
     expect(manual).not.toContain("skill-preferences.yaml");
   });
 
+  it("documents the approved-proposal binding in the packaged contract", async () => {
+    const creator = await readText(
+      "packages/kernel/assets/skills/badger-create/SKILL.md",
+    );
+    const lifecycle = await readText(
+      "packages/kernel/assets/skills/badger-create/reference/lifecycle.md",
+    );
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const readme = await readText("packages/kernel/README.md");
+
+    for (const prose of [creator, manual]) {
+      expect(prose).toContain("--proposal");
+      expect(prose).toContain("--replace-state");
+    }
+    expect(creator).toMatch(/generate <name> --confirm/u);
+    expect(readme).toMatch(/badger\.js generate \S+ --confirm/u);
+    expect(lifecycle).toContain("proposal hash");
+    // The binding is delivered, so §7, which lists only what is not built,
+    // no longer carries its ticket.
+    const planned = manual.slice(manual.indexOf('id="service"'));
+    expect(planned).not.toContain("issues/27");
+    expect(planned).not.toContain("re-read the plan file");
+  });
+
   it("documents semantic dossier version 2 in the packaged questionnaire contract", async () => {
     const questionnaire = await readText(
       "packages/kernel/assets/skills/badger-workflow-questionnaire/SKILL.md",

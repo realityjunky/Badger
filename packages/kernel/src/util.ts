@@ -19,6 +19,29 @@ export function stableValue(value: unknown): unknown {
   return value;
 }
 
+// Canonical ordering uses code-unit comparison so a hash does not depend on
+// locale or ICU. stableValue keeps its existing locale-aware ordering because
+// dossier and protocol identities already depend on it.
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, item]) => [key, canonicalize(item)]),
+    );
+  }
+  return value;
+}
+
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(canonicalize(value));
+}
+
+export function canonicalHash(value: unknown): string {
+  return sha256(canonicalJson(value));
+}
+
 export function slug(value: string): string {
   return value
     .toLowerCase()

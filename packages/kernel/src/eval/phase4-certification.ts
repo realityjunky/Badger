@@ -386,6 +386,7 @@ function proposalFor(
       goal: protocol.goal,
       intent: "new-skill",
       planHash: "phase4-certification-plan",
+      proposalHash: "phase4-certification-proposal",
       workflow: protocol,
       candidates: [],
       blockers: [],

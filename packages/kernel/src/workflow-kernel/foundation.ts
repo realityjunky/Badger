@@ -10,7 +10,12 @@ import type {
 } from "../types.js";
 import { findSkills, scriptDeclarationProblems } from "./discovery.js";
 import { normalizeWorkflow } from "../workflow/contract.js";
-import { atomicWrite, ensureDirectory, sha256, stableValue } from "../util.js";
+import {
+  atomicWrite,
+  canonicalHash,
+  ensureDirectory,
+  stableValue,
+} from "../util.js";
 import { inspectUpgradeSource } from "../factory/source.js";
 import {
   mapCreatorStatePaths,
@@ -31,9 +36,9 @@ export interface WorkflowKernelOptions {
 
 export interface InitializeStateOptions {
   planPath: string;
-  plan: FactoryPlan;
-  proposal: FactoryProposal;
+  proposalHash: string;
   confirmed: boolean;
+  replaceStateHash?: string;
 }
 
 export interface WorkflowKernel {
@@ -43,6 +48,7 @@ export interface WorkflowKernel {
   readPlan(file: string): Promise<FactoryPlan>;
   buildProposal(planPath: string): Promise<FactoryProposal>;
   initializeState(options: InitializeStateOptions): Promise<CreatorState>;
+  verifyApprovedProposal(state: CreatorState): Promise<FactoryProposal>;
   readState(name: string): Promise<CreatorState>;
   writeState(state: CreatorState): Promise<void>;
   updateCandidates(
@@ -136,6 +142,32 @@ function blockedCandidateMessages(candidates: SkillCandidate[]): string[] {
     ]);
 }
 
+function proposalIdentityBody(
+  proposal: Omit<FactoryProposal, "proposalHash">,
+): unknown {
+  const { sourceRoot: _sourceRoot, upgradeSource, ...rest } = proposal;
+  return {
+    ...rest,
+    candidates: rest.candidates.map((candidate) => ({
+      ...candidate,
+      sources: candidate.sources.map(({ root: _root, ...source }) => source),
+    })),
+    ...(upgradeSource
+      ? {
+          upgradeSource: Object.fromEntries(
+            Object.entries(upgradeSource).filter(([key]) => key !== "root"),
+          ),
+        }
+      : {}),
+  };
+}
+
+export function creatorStateHash(state: CreatorState): string {
+  return canonicalHash(
+    mapCreatorStatePaths(state, toStoredPaths(state.projectRoot)),
+  );
+}
+
 export function createWorkflowKernel(
   options: WorkflowKernelOptions,
 ): WorkflowKernel {
@@ -184,8 +216,7 @@ export function createWorkflowKernel(
     return candidates;
   }
 
-  async function buildProposal(planPath: string): Promise<FactoryProposal> {
-    const plan = await readPlan(planPath);
+  async function proposalForPlan(plan: FactoryPlan): Promise<FactoryProposal> {
     const normalized = normalizeWorkflow(plan.workflow);
     const candidates = await resolveCandidates(plan, normalized.requiredSkills);
     const blockers = blockedCandidateMessages(candidates);
@@ -232,12 +263,12 @@ export function createWorkflowKernel(
         blockers.push(error instanceof Error ? error.message : String(error));
       }
     }
-    return {
+    const body: Omit<FactoryProposal, "proposalHash"> = {
       schemaVersion: 1,
       name: plan.workflow.name,
       goal: plan.goal,
       intent: plan.skillCreatorIntent,
-      planHash: sha256(JSON.stringify(plan)),
+      planHash: canonicalHash(plan),
       workflow: normalized.protocol,
       candidates,
       blockers,
@@ -255,6 +286,13 @@ export function createWorkflowKernel(
           }
         : {}),
     };
+    // Resolved source roots stay out of the identity so a moved project keeps
+    // the same proposal; the plan still binds each declared location.
+    return { ...body, proposalHash: canonicalHash(proposalIdentityBody(body)) };
+  }
+
+  async function buildProposal(planPath: string): Promise<FactoryProposal> {
+    return proposalForPlan(await readPlan(planPath));
   }
 
   async function readState(name: string): Promise<CreatorState> {
@@ -296,56 +334,95 @@ export function createWorkflowKernel(
     );
   }
 
+  async function storedStateHash(name: string): Promise<string | undefined> {
+    try {
+      return canonicalHash(
+        JSON.parse(await fs.readFile(stateFile(name), "utf8")),
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
   async function initializeState(
     stateOptions: InitializeStateOptions,
   ): Promise<CreatorState> {
     if (!stateOptions.confirmed)
       throw new Error("Initialization requires explicit proposal confirmation");
-    if (
-      !stateOptions.proposal.canInitialize ||
-      stateOptions.proposal.blockers.length
-    )
+    const plan = await readPlan(stateOptions.planPath);
+    const proposal = await proposalForPlan(plan);
+    if (!proposal.canInitialize || proposal.blockers.length)
       throw new Error(
-        `Cannot initialize blocked proposal:\n${stateOptions.proposal.blockers.join("\n")}`,
+        `Cannot initialize blocked proposal:\n${proposal.blockers.join("\n")}`,
       );
-    const planHash = sha256(JSON.stringify(stateOptions.plan));
-    if (
-      stateOptions.proposal.planHash !== planHash ||
-      stateOptions.proposal.name !== stateOptions.plan.workflow.name
-    )
-      throw new Error("Confirmed proposal does not match the Factory plan");
-    const normalized = normalizeWorkflow(stateOptions.plan.workflow);
-    const currentCandidates = await resolveCandidates(
-      stateOptions.plan,
-      normalized.requiredSkills,
-    );
-    if (
-      JSON.stringify(currentCandidates) !==
-      JSON.stringify(stateOptions.proposal.candidates)
-    )
+    if (proposal.proposalHash !== stateOptions.proposalHash)
       throw new Error(
-        "Declared Skill source evidence is stale; rerun propose before initialization",
+        "Approved proposal is stale: the plan or declared Skill source evidence is stale for the quoted proposal hash; rerun propose and confirm the new proposal",
       );
+    const existingHash = await storedStateHash(plan.workflow.name);
+    if (existingHash !== undefined) {
+      if (stateOptions.replaceStateHash === undefined)
+        throw new Error(
+          `Existing Creator state for ${plan.workflow.name} has hash ${existingHash}; pass --replace-state ${existingHash} to replace it`,
+        );
+      if (stateOptions.replaceStateHash !== existingHash)
+        throw new Error(
+          `Existing Creator state hash does not match: expected ${existingHash}, received ${stateOptions.replaceStateHash}`,
+        );
+    }
     const draftPath = path.resolve(
       projectRoot,
-      stateOptions.plan.artifactRoot ?? path.join(stateNamespace, "drafts"),
-      stateOptions.plan.workflow.name,
+      plan.artifactRoot ?? path.join(stateNamespace, "drafts"),
+      plan.workflow.name,
     );
     const state: CreatorState = {
       schemaVersion: 1,
-      name: stateOptions.plan.workflow.name,
+      name: plan.workflow.name,
       status: "draft",
       projectRoot,
       planPath: path.resolve(stateOptions.planPath),
-      planHash,
+      planHash: proposal.planHash,
       draftPath,
       currentHash: null,
-      candidates: structuredClone(stateOptions.proposal.candidates),
-      confirmedProposal: structuredClone(stateOptions.proposal),
+      candidates: structuredClone(proposal.candidates),
+      confirmedProposal: structuredClone(proposal),
     };
     await ensureDirectory(draftPath);
     await writeState(state);
     return state;
+  }
+
+  async function verifyApprovedProposal(
+    state: CreatorState,
+  ): Promise<FactoryProposal> {
+    const approved = state.confirmedProposal;
+    if (!approved)
+      throw new Error(
+        "Creator state has no approved proposal; rerun init with the approved proposal hash",
+      );
+    if (typeof approved.proposalHash !== "string")
+      throw new Error(
+        "Creator state predates the approved-proposal binding; rerun propose and init",
+      );
+    const plan = await readPlan(state.planPath);
+    if (
+      canonicalHash(plan) !== state.planHash ||
+      canonicalHash(plan) !== approved.planHash
+    )
+      throw new Error(
+        "The plan changed since the approved proposal; rerun propose and init",
+      );
+    const current = await proposalForPlan(plan);
+    if (!current.canInitialize || current.blockers.length)
+      throw new Error(
+        `The current plan and Skill sources no longer produce a usable proposal:\n${current.blockers.join("\n")}`,
+      );
+    if (current.proposalHash !== approved.proposalHash)
+      throw new Error(
+        "The plan or declared Skill source evidence changed since the approved proposal; rerun propose and init",
+      );
+    return approved;
   }
 
   return {
@@ -353,6 +430,7 @@ export function createWorkflowKernel(
     readPlan,
     buildProposal,
     initializeState,
+    verifyApprovedProposal,
     readState,
     writeState,
     async updateCandidates(name, candidates) {

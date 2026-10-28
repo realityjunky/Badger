@@ -6,6 +6,7 @@ import path from "node:path";
 import { buildProposal, readPlan } from "../src/factory/proposal.js";
 import { generatePackage } from "../src/factory/generate.js";
 import { initializeState, readState } from "../src/factory/state.js";
+import { creatorStateHash } from "../src/workflow-kernel/foundation.js";
 import {
   AuthoringRevisionConflictError,
   assemblePackage as assemblePackageImplementation,
@@ -87,11 +88,14 @@ describe("resumable authoring session", () => {
   }> {
     const proposal = await buildProposal({ projectRoot: project, planPath });
     const plan = await readPlan(planPath);
+    const existing = await readState(project, proposal.name).catch(
+      () => undefined,
+    );
     const state = await initializeState({
       projectRoot: project,
       planPath,
-      plan,
-      proposal,
+      proposalHash: proposal.proposalHash,
+      ...(existing ? { replaceStateHash: creatorStateHash(existing) } : {}),
       confirmed: true,
     });
     const generated = await generatePackage({

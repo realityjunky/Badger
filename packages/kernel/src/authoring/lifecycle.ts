@@ -3,6 +3,7 @@ import path from "node:path";
 import type { CreatorState, WorkflowProtocol } from "../types.js";
 import {
   atomicWrite,
+  canonicalHash,
   hashDirectory,
   isWithin,
   listFiles,
@@ -3804,7 +3805,7 @@ async function assertAuthoringPlanCurrent(
       "Authoring plan is not the canonical plan for this proposal",
     );
   const factoryPlan = await readPlan(state.planPath);
-  if (sha256(JSON.stringify(factoryPlan)) !== proposal.planHash)
+  if (canonicalHash(factoryPlan) !== proposal.planHash)
     throw new Error("Factory plan input is stale for the confirmed proposal");
 }
 

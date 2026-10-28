@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Proposal-bound initialization and generation**: `init` now requires the
+  approved proposal hash (`--proposal`) and refuses a plan or Skill source set
+  that changed since `propose`; it replaces existing Creator state only when
+  the caller quotes that state's hash (`--replace-state`). `generate` requires
+  `--confirm` and refuses drift from the approved proposal. Plan and proposal
+  hashes are computed over canonical JSON. `--json` now selects machine
+  output; the default is human-readable.
+
 - **Semantic dossier version 2**: The questionnaire dossier now carries the
   `interfaces` topic for data contracts between Nodes, a resolution with scope
   and reason for every deferred question, provenance for every confirmed fact

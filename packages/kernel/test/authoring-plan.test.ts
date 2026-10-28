@@ -345,8 +345,7 @@ describe("AuthoringPlan preview", () => {
         initializeState({
           projectRoot: project,
           planPath,
-          plan,
-          proposal,
+          proposalHash: proposal.proposalHash,
           confirmed: true,
         }),
     );

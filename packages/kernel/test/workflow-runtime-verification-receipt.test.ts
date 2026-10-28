@@ -875,6 +875,7 @@ describe("Workflow Verification Receipt contract", () => {
           goal: value.goal,
           intent: "new-skill",
           planHash: hash,
+          proposalHash: `${hash}-proposal`,
           workflow: value,
           candidates: [],
           blockers: [],
