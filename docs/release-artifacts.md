@@ -62,7 +62,7 @@ inventory and readiness evidence.
 | ---------- | ------------------------------------------------- | ---------------------------------------------------------------- |
 | `auto`     | Deterministic assembler output                    | Protocol, manifests, scripts, guardrails, checks, evaluation     |
 | `authored` | Validated lane content at a declared leaf         | Entry and Node guidance, decision points, recovery, skill review |
-| `source`   | Existing material preserved by `upgrade-existing` | `source/` files and migration evidence                           |
+| `source`   | Bundled Skills and preserved upgrade material     | `sources/<hash>/` Skills and `source/` upgrade files               |
 
 Assembly requires the authored `SKILL.md`, active Node guidance,
 `reference/decision-points.md`, `reference/recovery.md`, and

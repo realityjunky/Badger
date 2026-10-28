@@ -46,6 +46,7 @@ import {
   createUpgradeMigrationManifest,
   inspectUpgradeSource,
 } from "./source.js";
+import { bundledSourceRoot, bundleSourceSkills } from "./bundle-sources.js";
 
 function nodeSkillName(workflow: string, node: string): string {
   return `${slug(workflow) || "workflow"}-${slug(node) || "node"}`;
@@ -157,6 +158,14 @@ function entryMarkdown(proposal: FactoryProposal): string {
   const upgradeSourceSection = proposal.upgradeSource
     ? "\n## Upgrade Source\n\nThe original Skill package is preserved unchanged under `source/`. The migration manifest at `reference/source-evidence.json` records the source identity and whether each source path was retained, replaced by Badger control-plane material, or wrapped by authored guidance.\n"
     : "";
+  const sourceSkills = proposal.candidates
+    .flatMap((candidate) =>
+      candidate.sources.map(
+        (source) =>
+          `- **${source.name}**: \`${bundledSourceRoot(source.hash)}/SKILL.md\``,
+      ),
+    )
+    .join("\n");
   return `---
 name: ${proposal.name}
 description: ${JSON.stringify(`Run the ${proposal.name} workflow: ${descriptionGoal}.`)}
@@ -175,6 +184,14 @@ description: ${JSON.stringify(`Run the ${proposal.name} workflow: ${descriptionG
 - Check the assembled package with \`node scripts/badger-check.mjs\`.
 - The \`badger-hook-guard.mjs\` hook protects the active WorkflowRuntime boundary.
 - \`workflow-state.mjs\`, \`workflow-guard.mjs\`, and \`workflow-handoff.mjs\` are thin adapters over WorkflowRuntime; they do not own route or Run state.
+
+## Source Skills
+
+${sourceSkills || "- No source Skills are declared."}
+
+Source locations are relative to this package. Load the bundled Skill for the
+active Node's declared binding. Each copy includes its references, scripts, and
+configuration; copying a Skill does not execute its scripts.
 
 ## Runtime Semantics
 
@@ -731,11 +748,13 @@ export async function inventoryPackage(
         path: portablePath,
         bytes: content.byteLength,
         sha256: sha256(content),
-        owner: portablePath.startsWith("source/")
-          ? "source"
-          : authored.has(portablePath)
-            ? "authored"
-            : "auto",
+        owner:
+          portablePath.startsWith("source/") ||
+          portablePath.startsWith("sources/")
+            ? "source"
+            : authored.has(portablePath)
+              ? "authored"
+              : "auto",
       } satisfies GeneratedPackageFile;
     }),
   ).then((entries) =>
@@ -766,11 +785,13 @@ export async function writePackageInventory(
         status,
         files: files.map((relativePath) => ({
           path: relativePath,
-          owner: relativePath.startsWith("source/")
-            ? "source"
-            : authored.has(relativePath)
-              ? "authored"
-              : "auto",
+          owner:
+            relativePath.startsWith("source/") ||
+            relativePath.startsWith("sources/")
+              ? "source"
+              : authored.has(relativePath)
+                ? "authored"
+                : "auto",
         })),
       },
       null,
@@ -813,6 +834,20 @@ async function writeScaffold(options: {
     await fs.rm(path.join(root, "source"), { recursive: true, force: true });
     await copyDirectory(options.sourceEvidence.root, path.join(root, "source"));
   }
+  sourcePaths.push(...(await bundleSourceSkills(root, proposal.candidates)));
+  const bundledRoots = new Map(
+    proposal.candidates.flatMap((candidate) =>
+      candidate.sources.map((source) => [
+        source.root,
+        bundledSourceRoot(source.hash),
+      ]),
+    ),
+  );
+  const packagePaths: ProjectPathMappers = {
+    ...options.storedPaths,
+    source: (value) =>
+      bundledRoots.get(value) ?? options.storedPaths.source(value),
+  };
   await ensureDirectory(path.join(root, "reference"));
   await ensureDirectory(path.join(root, "badger"));
   await ensureDirectory(path.join(root, "scripts"));
@@ -825,7 +860,7 @@ async function writeScaffold(options: {
     path.join(root, "reference", "resolved-skills.json"),
     JSON.stringify(
       proposal.candidates.map((candidate) =>
-        mapCandidatePaths(candidate, options.storedPaths),
+        mapCandidatePaths(candidate, packagePaths),
       ),
       null,
       2,
@@ -835,7 +870,7 @@ async function writeScaffold(options: {
     await atomicWrite(
       authoringPlanPath,
       JSON.stringify(
-        mapAuthoringPlanPaths(authoringPlan, options.storedPaths),
+        mapAuthoringPlanPaths(authoringPlan, packagePaths),
         null,
         2,
       ) + "\n",
