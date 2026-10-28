@@ -25,6 +25,7 @@ const serviceDecisions = [
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
   "0008-skill-identity-and-registered-roots.md",
+  "0011-creator-state-bound-to-approved-proposal.md",
 ];
 
 async function readText(relativePath: string): Promise<string> {
@@ -134,6 +135,13 @@ describe("Badger release artifacts", () => {
     expect(creator).toMatch(/generate <name> --confirm/u);
     expect(readme).toMatch(/badger\.js generate \S+ --confirm/u);
     expect(lifecycle).toContain("proposal hash");
+    expect(creator).toMatch(
+      /Wait for separate explicit confirmation of generation before running\s+`badger generate <name> --confirm/u,
+    );
+    expect(manual).toContain(
+      "class Generate,Lanes,Assemble,Approve,Publish,Distribute write;",
+    );
+    expect(manual).not.toContain("class Generate,Eval,Review check;");
     // The binding is delivered, so §7, which lists only what is not built,
     // no longer carries its ticket.
     const planned = manual.slice(manual.indexOf('id="service"'));

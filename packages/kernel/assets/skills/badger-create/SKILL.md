@@ -39,8 +39,8 @@ and `resumable` Creator state without mutating the project.
   The user may explicitly invoke `/badger-workflow-questionnaire` to refine or
   repair that context; identify the existing plan and state in the handoff.
 - A questionnaire refinement is discovery, not Creator initialization. Keep
-  FactoryPlan confirmation, proposal review, and `badger init --confirm` as
-  separate gates.
+  FactoryPlan confirmation, proposal review, `badger init --confirm`, and
+  `badger generate --confirm` as separate gates.
 
 ## Closed-world source workflow
 
@@ -180,7 +180,8 @@ The relationships in the plan are semantic rather than source metadata:
    the quoted proposal hash. Replacing an existing Creator state requires the
    current state's hash, reported by the refusal, as
    `--replace-state <current stateHash>`.
-6. Run `badger generate <name> --confirm --project <dir>` to create the
+6. Wait for separate explicit confirmation of generation before running
+   `badger generate <name> --confirm --project <dir>` to create the
    deterministic, authoring-pending scaffold. Generation refuses a plan or
    Skill source set that drifted from the approved proposal. A legacy scaffold
    without an authoring session remains readable but is not
