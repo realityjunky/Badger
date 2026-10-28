@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
+import { TokenSettings } from "./settings/TokenSettings.js";
 import {
   clampFontScale,
   FONT_SCALE_STEP,
@@ -181,12 +182,7 @@ export function SettingsPage() {
           {
             key: "tokens",
             label: t("settings.tokens.title"),
-            children: (
-              <section className="settings-panel">
-                <p className="muted">{t("settings.tokens.description")}</p>
-                {placeholder}
-              </section>
-            ),
+            children: activeTab === "tokens" ? <TokenSettings /> : null,
           },
           {
             key: "channels",

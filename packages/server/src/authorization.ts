@@ -4,6 +4,7 @@ import { withAncestors, withDescendants } from "./group-tree.js";
 import { LOCAL_IDENTITY_ISSUER } from "./identity/local.js";
 import type { Principal } from "./identity/identity.js";
 import type { Person } from "./people.js";
+import type { TokenScope } from "./tokens.js";
 
 export type OrganizationRole = "Administrator" | "Auditor";
 export type GroupRole = "Group lead" | "Member";
@@ -37,6 +38,7 @@ export interface GroupGrant {
  */
 export interface Access {
   organization: OrganizationRole[];
+  tokenScopes?: readonly TokenScope[];
   /** Direct group bindings; inheritance is resolved when a group is checked. */
   groups: GroupGrant[];
 }

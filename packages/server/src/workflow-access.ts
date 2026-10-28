@@ -56,9 +56,12 @@ export async function workflowCapabilities(
       visibility.everything ||
       visibility.groupIds.has(workflow.groupId) ||
       roles.size > 0,
-    editWorkflow: managesGroup || owner,
-    manageRoles: managesGroup || owner,
-    createVersion: isAdministrator(access) || roles.has("Engineer"),
+    editWorkflow: access.tokenScopes === undefined && (managesGroup || owner),
+    manageRoles: access.tokenScopes === undefined && (managesGroup || owner),
+    createVersion:
+      (access.tokenScopes === undefined ||
+        access.tokenScopes.includes("engineer")) &&
+      (isAdministrator(access) || roles.has("Engineer")),
   };
 }
 

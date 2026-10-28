@@ -64,6 +64,18 @@ async function findPerson(
   return rows.rows[0] ?? null;
 }
 
+export async function readPersonById(
+  database: Queryable,
+  id: string,
+): Promise<Person | null> {
+  const rows = await database.query<PersonRow>(
+    `select id, issuer, subject, email, email_verified, display_name, status,
+            revision, created_at, updated_at from people where id = $1`,
+    [id],
+  );
+  return rows.rows[0] === undefined ? null : toPerson(rows.rows[0]);
+}
+
 /**
  * Binds the signed-in principal to a person record and keeps their profile
  * current. Every write it makes is audited in the same transaction. Updates
