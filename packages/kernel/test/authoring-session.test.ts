@@ -55,7 +55,7 @@ describe("resumable authoring session", () => {
       workflow: {
         kind: "workflow-kernel",
         name: "prepared-workflow",
-        goal: "Prepare a workflow.",
+        goal: "Create a prepared workflow.",
         customNodes: [
           {
             id: "prepare",

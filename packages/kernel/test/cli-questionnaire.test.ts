@@ -67,6 +67,16 @@ describe("questionnaire handoff CLI", () => {
       JSON.stringify(dossier),
     );
     dossier.remainingQuestions = [];
+    dossier.deferredQuestions.push({
+      id: "column-contract",
+      field: "interfaces",
+      question: "Which columns does the receiving Skill read?",
+      resolution: {
+        outcome: "deferred",
+        scope: "skill",
+        reason: "Internal to the receiving Skill; fixed in its next revision.",
+      },
+    });
     await fs.writeFile(dossierPath, JSON.stringify(dossier));
     const complete = JSON.parse(
       (await execFileAsync(process.execPath, args)).stdout,
@@ -83,6 +93,37 @@ describe("questionnaire handoff CLI", () => {
     ]);
     expect(await fs.readFile(planPath, "utf8")).toBe(
       JSON.stringify(factoryPlan),
+    );
+  });
+
+  it("refuses a retired version 1 dossier with a migration finding", async () => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "badger-questionnaire-cli-"),
+    );
+    roots.push(root);
+    const { dossier, factoryPlan } = questionnaireFixture();
+    const legacy = { ...dossier, schemaVersion: 1 };
+    await fs.writeFile(path.join(root, "dossier.json"), JSON.stringify(legacy));
+    await fs.writeFile(
+      path.join(root, "plan.json"),
+      JSON.stringify(factoryPlan),
+    );
+    const failure = await execFileAsync(process.execPath, [
+      "bin/badger.js",
+      "questionnaire-handoff",
+      "dossier.json",
+      "--plan",
+      "plan.json",
+      "--project",
+      root,
+      "--json",
+    ]).catch((error: { code: number; stdout: string }) => error);
+    expect(failure.code).toBe(1);
+    expect(JSON.parse(failure.stdout).diagnostics).toContainEqual(
+      expect.objectContaining({
+        path: "schemaVersion",
+        message: expect.stringContaining("version 1 is retired"),
+      }),
     );
   });
 });

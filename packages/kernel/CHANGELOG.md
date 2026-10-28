@@ -4,6 +4,15 @@
 
 ### Added
 
+- **Semantic dossier version 2**: The questionnaire dossier now carries the
+  `interfaces` topic for data contracts between Nodes, a resolution with scope
+  and reason for every deferred question, provenance for every confirmed fact
+  (confirming person, answer revisions, and acknowledgement), and one goal
+  shared with the FactoryPlan. Deferred questions no longer block the handoff;
+  unresolved questions still do. Version 1 is retired, and the validator
+  refuses it with a migration finding. The handoff remains a pure read model
+  shared by `badger questionnaire-handoff` and library callers.
+
 - **Agent-first FactoryPlan authoring**: Renamed the package-facing creation Skill to `/badger-create`, added multi-exchange questionnaire handoffs with distinct fact ledgers, and exposed read-only first-use and Creator resume context through `badger guide`.
 
 - **Documentation and release alignment**: Added the complete package-facing

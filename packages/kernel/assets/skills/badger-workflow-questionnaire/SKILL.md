@@ -69,6 +69,8 @@ Ask grouped, high-value questions one exchange at a time. Cover:
 - each supplied Skill's implementation, Required Skill Call, or augmentation
   role;
 - artifacts, evidence, Output Schemas, validation, and guardrails per Node;
+- data contracts between Nodes: shapes, columns, file naming, and the evidence
+  one Node's output must provide for the next Node's input;
 - genuine user decisions, stable choices, reviewer or recipient handoffs, and
   routing outcomes;
 - failure, pause, retry, recovery, bounded cycles, and finalization behavior;
@@ -77,7 +79,8 @@ Ask grouped, high-value questions one exchange at a time. Cover:
 After every exchange, show the same five-part ledger:
 
 1. **Confirmed user facts** — statements or decisions explicitly confirmed by
-   the workflow owner.
+   the workflow owner, with provenance: who confirmed it, the answer revisions
+   it restates, and the answering Field expert's acknowledgement.
 2. **Source-derived facts** — facts read from the manual or supplied Skill
    files, references, scripts, and hashes.
 3. **Agent inferences** — design choices proposed to connect facts; each must
@@ -86,6 +89,11 @@ After every exchange, show the same five-part ledger:
    be presented as facts.
 5. **Remaining questions** — the next high-value questions and the field each
    question will resolve.
+
+A question internal to one Skill, or outside the workflow's scope, may instead
+be deferred with its resolution: scope plus a reason. A deferral needs no
+further exchange and never blocks handoff; an unresolved question still does.
+Call that recorded outcome the question's resolution, not its disposition.
 
 Continue the loop until the completeness checklist passes. A user may
 explicitly stop with unresolved gaps; in that case preserve the gaps in a
@@ -101,6 +109,8 @@ Before handoff, verify all of the following:
 - workflow inputs and prerequisites;
 - Node IDs, kinds, labels, responsibilities, ordering, and optionality;
 - implementation bindings, Required Skill Calls, and augmentations;
+- data contracts between Nodes, including their columns, file names, and
+  handoff evidence;
 - Output Schemas attached to concrete Nodes, including artifacts and evidence;
 - decisions, stable choice IDs, input and reviewer requirements;
 - guardrails and their validation or evidence requirements;
@@ -108,6 +118,8 @@ Before handoff, verify all of the following:
 - bounded cycle entries, repeat transitions, and maximum instances;
 - capabilities, finalization, executable disclosures, and recovery behavior;
 - `sourceRoot` and upgrade-source identity when upgrading an existing Skill;
+- every confirmed fact carries provenance, and every deferred question carries
+  its resolution with a scope and a reason;
 - unresolved assumptions and remaining questions are either resolved or
   explicitly accepted as a user-requested stopped handoff.
 
@@ -117,8 +129,9 @@ or bound to a missing, invalid, unsafe, ambiguous, or undeclared source.
 ## Read-only handoff
 
 Before producing any complete, incomplete, or stopped handoff, read
-`reference/semantic-dossier.md` and construct its version 1 semantic dossier.
-Keep the five ledger categories inside that dossier. Every semantic topic and
+`reference/semantic-dossier.md` and construct its version 2 semantic dossier.
+Keep the five ledger categories inside that dossier, add the `interfaces`
+topic, and record each deferral with its resolution. Every semantic topic and
 Node responsibility must cite ledger fact IDs; record contradictions as
 unresolved assumptions and attach remaining questions to the fields they repair.
 Ask only about unresolved or contradictory fields on subsequent exchanges.
@@ -135,7 +148,7 @@ handoff has this shape:
   "status": "complete",
   "projectRoot": "<dir>",
   "existingContext": null,
-  "dossier": "<version 1 semantic dossier with the five-part ledger>",
+  "dossier": "<version 2 semantic dossier with the five-part ledger>",
   "dossierHash": "<deterministic SHA-256 identity>",
   "factoryPlan": {},
   "diagnostics": [],

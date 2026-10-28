@@ -3156,6 +3156,8 @@ function authoringLanesDocument(
                   plan.semanticDossier.unresolvedAssumptions.length,
                 remainingQuestions:
                   plan.semanticDossier.remainingQuestions.length,
+                deferredQuestions:
+                  plan.semanticDossier.deferredQuestions.length,
               },
             }
           : null,
