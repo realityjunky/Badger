@@ -78,6 +78,14 @@ each use, and limits requests per token. Tokens never perform actions
 reserved for people. See `packages/server/README.md` for the API and scope
 rules.
 
+Skill pins and source checks (#43) are delivered too: an Engineer pins
+immutable Skill versions to a workflow version, and the worker role, the same
+image started with `packages/server/dist/src/worker.js`, runs this kernel's
+source check on the pinned content as a durable Postgres job. The Sources
+stage shows each source's inventory, script effects, and blockers; after a
+passed check it waits for the Engineer to confirm the source set at its gate
+(#44). See `docs/adr/0015-pinned-skill-versions-and-source-check-jobs.md`.
+
 Generated packages carry their source Skills in `sources/<Skill identity hash>/`.
 The roots in `reference/resolved-skills.json` and the packaged
 `reference/authoring-plan.json` resolve from the package root. Configuration,

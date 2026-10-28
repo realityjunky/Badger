@@ -24,6 +24,7 @@ const serviceDecisions = [
   "0010-nested-groups-and-email-bindings.md",
   "0012-workflow-frames-and-workflow-bindings.md",
   "0013-uploaded-skill-versions.md",
+  "0015-pinned-skill-versions-and-source-check-jobs.md",
 ];
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
@@ -458,7 +459,9 @@ describe("Badger release artifacts", () => {
     expect(delivered).toContain("bindings.ts");
     expect(delivered).toContain("BADGER_PLATFORM_ADMIN_MAPPING");
     expect(delivered).toContain("presents that address as verified");
-    expect(planned).toContain("(ADRs) 0002–0006, 0009, 0010, 0012, and 0013");
+    expect(planned).toContain(
+      "(ADRs) 0002–0006, 0009, 0010, 0012, 0013, and 0015",
+    );
     expect(planned).not.toContain("bind people by email; a binding takes");
     expect(planned).not.toContain("inherited by its nested groups");
     expect(planned).not.toContain("every write is audited with its actor");
@@ -495,5 +498,20 @@ describe("Badger release artifacts", () => {
     expect(planned).not.toContain("Packages do not bundle their source Skills");
     expect(planned).not.toContain("软件包不内置其源 Skill");
     expect(ledger).toContain("personal access tokens (#53)");
+  });
+
+  it("describes Skill pins and source checks as delivered", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const ledger = await readText("docs/release-artifacts.md");
+    const delivered = manual.slice(0, manual.indexOf('id="service"'));
+    const planned = manual.slice(manual.indexOf('id="service"'));
+
+    expect(delivered).toContain("src/workflow-source.ts");
+    expect(delivered).toContain("src/worker.ts");
+    expect(delivered).toContain("pins, latest source check, and jobs");
+    expect(delivered).toContain("Skill 固定与来源检查（#43）");
+    expect(planned).not.toContain("Each workflow version gets its own kernel");
+    expect(planned).not.toContain("每个工作流版本都有自己的内核工作区");
+    expect(ledger).toContain("Skill pins and source checks (#43)");
   });
 });
