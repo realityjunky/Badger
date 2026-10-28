@@ -30,7 +30,7 @@ export async function main(
     const server = await startHttpServer({
       config,
       database,
-      identity: configuredIdentityAdapter(config),
+      identity: configuredIdentityAdapter(config, systemClock),
       clock: systemClock,
       ids: randomIdSource,
       migrations,

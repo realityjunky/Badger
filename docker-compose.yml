@@ -1,8 +1,10 @@
 # A local Badger deployment: the server role against Postgres 17.
 #
-# This build ships no people-facing service identity adapter, so the service
-# runs with none: /health proves the image, Postgres, and the migrations, and
-# every person route answers 401. For local single-user mode with the implicit
+# This stack runs with no people-facing identity: /health proves the image,
+# Postgres, and the migrations, and every person route answers 401. A
+# deployment on an organization's AI platform keeps its own compose file and
+# sets `BADGER_IDENTITY=platform-session` there, with the BADGER_PLATFORM_*
+# settings the README describes. For local single-user mode with the implicit
 # Administrator, run the server directly (`npm start -w packages/server`).
 #
 # The database credentials below are development values, not secrets.

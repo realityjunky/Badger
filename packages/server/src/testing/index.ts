@@ -7,6 +7,12 @@ export {
   type TestServiceOptions,
 } from "./harness.js";
 export type { TestPerson } from "./identity.js";
+export {
+  startStubPlatform,
+  type StubPlatform,
+  type StubPlatformOptions,
+  type StubPlatformUser,
+} from "./platform.js";
 
 // Migration checks run the migration runner on a test database directly.
 export { openTestDatabase, type TestDatabase } from "./database.js";

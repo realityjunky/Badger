@@ -162,7 +162,7 @@ export async function startTestService(
     options.identity ??
     (mode === "test-identity"
       ? createTestIdentityAdapter()
-      : configuredIdentityAdapter(config));
+      : configuredIdentityAdapter(config, clock));
 
   let server: StartedServer;
   try {

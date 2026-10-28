@@ -5,11 +5,11 @@ The workflow kernel is delivered, and the collaborative service planned in
 [#24](https://github.com/realityjunky/Badger/issues/24) has its walking
 skeleton in `packages/server/`.
 
-| Path               | Holds                                                                                                                                                                               | Status                 |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `packages/kernel/` | The workflow kernel, published as `@realityjunky/badger`: the Creator, WorkflowRuntime, and the `badger` CLI. See its [README](packages/kernel/README.md).                          | Delivered              |
-| `packages/server/` | The collaborative service's server role: reviewed SQL migrations, Postgres or PGlite, local single-user mode, audited writes, the health endpoint, and the in-process test harness. | Walking skeleton (#36) |
-| `packages/<name>/` | One package each for the collaborative service's remaining surfaces: the web dashboard, the Badger MCP, and the host installer.                                                     | Planned (#24)          |
+| Path               | Holds                                                                                                                                                                                                 | Status                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `packages/kernel/` | The workflow kernel, published as `@realityjunky/badger`: the Creator, WorkflowRuntime, and the `badger` CLI. See its [README](packages/kernel/README.md).                                            | Delivered                                      |
+| `packages/server/` | The collaborative service's server role: reviewed SQL migrations, Postgres or PGlite, local single-user mode, platform sign-in, audited writes, the health endpoint, and the in-process test harness. | Walking skeleton (#36), platform sign-in (#38) |
+| `packages/<name>/` | One package each for the collaborative service's remaining surfaces: the web dashboard, the Badger MCP, and the host installer.                                                                       | Planned (#24)                                  |
 
 Everything shipped is generic: each deployment keeps its own launcher entries,
 reverse-proxy routes, and deploy scripts outside this repository.
@@ -39,16 +39,41 @@ docker compose up --build
 # health report: http://localhost:8787/health
 ```
 
-The compose file runs the server role without a people-facing identity
-adapter, because this build ships none; it reports health without serving a
-person page. For local single-user mode, with the implicit Administrator and
-PGlite on disk:
+The compose file runs the server role with `BADGER_IDENTITY=none`, so it
+reports health without serving a person page. For local single-user mode, with
+the implicit Administrator and PGlite on disk:
 
 ```bash
 npm run build
 npm start -w packages/server
 # then open http://127.0.0.1:8787
 ```
+
+### Platform sign-in
+
+A service deployment that sits on an organization's AI platform sets
+`BADGER_IDENTITY=platform-session`, and people arrive signed in through the
+platform's own session. Badger reads the platform session cookie, checks it
+against the platform's current-user endpoint over the internal network, and
+maps the platform user ID to the person's external subject. Nothing about the
+platform lives in code; every value below is configuration.
+
+| Setting                             | Meaning                                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `BADGER_PLATFORM_URL`               | The platform's internal base URL, such as `https://platform.internal`.                                                         |
+| `BADGER_PLATFORM_CURRENT_USER_PATH` | The current-user endpoint, such as `/current-user`; it answers with `id`, `email`, `display_name`, `status`, and `app_access`. |
+| `BADGER_PLATFORM_SESSION_COOKIE`    | The cookie that carries the platform session token.                                                                            |
+| `BADGER_PLATFORM_ISSUER`            | The issuer Badger records for this platform; defaults to the platform URL.                                                     |
+| `BADGER_PLATFORM_APP_GRANT`         | Optional app name the platform must grant the person, such as `workflow-app`.                                                  |
+| `BADGER_PLATFORM_CACHE_SECONDS`     | How long a checked session is remembered; defaults to 30, and 0 disables the cache.                                            |
+| `BADGER_PLATFORM_TIMEOUT_MS`        | How long to wait for the platform; defaults to 3000.                                                                           |
+
+Set `BADGER_ALLOWED_ORIGINS` to the public origin, so a write authenticated by
+a cookie is accepted only from Badger's own origin. Non-active platform users
+are refused; a platform that cannot be reached yields "unavailable". This
+adapter issues no Badger cookie of its own; Badger's own cookies, when a later
+adapter issues one, are SameSite=Strict, HttpOnly, and Secure, and are named
+apart from the platform's.
 
 ## Adding a workspace package
 
