@@ -16,8 +16,9 @@ The kernel package includes:
 - explicit local Skill source inspection with stable hashes and ambiguity reporting;
 - deterministic Workflow Contract normalization and validation;
 - confirmed plan/state lifecycle in the standalone `.badger` namespace;
-- versioned semantic questionnaire dossiers with traceable fact ledgers,
-  resumable gaps, and deterministic authoring input identities;
+- version 2 semantic questionnaire dossiers with traceable fact ledgers,
+  interfaces between Nodes, deferral resolutions, fact provenance, resumable
+  gaps, and deterministic authoring input identities;
 - generated authoring-pending scaffolds with resumable six-lane authoring
   sessions and protocol/evidence references;
 - hash-bound quick/full authoring review with deterministic self-consistency findings and composite authoring/runtime/publication readiness;

@@ -1,8 +1,150 @@
 import { describe, expect, it } from "vitest";
 import { createQuestionnaireHandoff } from "../src/index.js";
-import { questionnaireFixture } from "./fixtures/semantic-dossier.js";
+import {
+  questionnaireFixture,
+  deferredQuestionFixture,
+} from "./fixtures/semantic-dossier.js";
 
 describe("semantic questionnaire handoff", () => {
+  it("refuses the retired version 1 dossier with a migration finding", () => {
+    const { dossier, factoryPlan } = questionnaireFixture();
+    const legacy = { ...dossier, schemaVersion: 1 };
+    const handoff = createQuestionnaireHandoff({
+      projectRoot: "/project",
+      dossier: legacy,
+      factoryPlan,
+    });
+    expect(handoff.status).toBe("incomplete");
+    expect(handoff.diagnostics).toContainEqual(
+      expect.objectContaining({
+        path: "schemaVersion",
+        message: expect.stringContaining("version 1 is retired"),
+      }),
+    );
+  });
+
+  it("requires the interfaces topic for data contracts between Nodes", () => {
+    const input = { projectRoot: "/project", ...questionnaireFixture() };
+    Reflect.deleteProperty(input.dossier.topics, "interfaces");
+    expect(createQuestionnaireHandoff(input).diagnostics).toContainEqual(
+      expect.objectContaining({ path: "topics.interfaces" }),
+    );
+  });
+
+  it.each(["confirmedBy", "answerRevisions", "acknowledgedBy"] as const)(
+    "requires %s provenance for each confirmed fact",
+    (field) => {
+      const input = { projectRoot: "/project", ...questionnaireFixture() };
+      Reflect.deleteProperty(
+        input.dossier.confirmedUserFacts[0].provenance,
+        field,
+      );
+      expect(createQuestionnaireHandoff(input).diagnostics).toContainEqual(
+        expect.objectContaining({
+          path: `confirmedUserFacts.owner-scope.provenance.${field}`,
+        }),
+      );
+    },
+  );
+
+  it("requires provenance when an agent inference is confirmed", () => {
+    const input = { projectRoot: "/project", ...questionnaireFixture() };
+    Reflect.deleteProperty(input.dossier.agentInferences[0], "provenance");
+    expect(createQuestionnaireHandoff(input).diagnostics).toContainEqual(
+      expect.objectContaining({
+        path: "agentInferences.single-node.provenance",
+      }),
+    );
+  });
+
+  it("accepts a deferred question with its resolution and does not block", () => {
+    const input = { projectRoot: "/project", ...questionnaireFixture() };
+    input.dossier.deferredQuestions.push(deferredQuestionFixture());
+    const handoff = createQuestionnaireHandoff(input);
+    expect(handoff.status).toBe("complete");
+    expect(handoff.diagnostics).toEqual([]);
+    expect(handoff.dossier).toMatchObject({
+      deferredQuestions: [expect.objectContaining({ id: "column-contract" })],
+    });
+  });
+
+  it("keeps an unresolved question blocking beside a deferred one", () => {
+    const input = { projectRoot: "/project", ...questionnaireFixture() };
+    input.dossier.deferredQuestions.push(deferredQuestionFixture());
+    input.dossier.remainingQuestions.push({
+      id: "recovery",
+      field: "topics.recoveryPolicy",
+      question: "Where should repair resume?",
+    });
+    const handoff = createQuestionnaireHandoff(input);
+    expect(handoff.status).toBe("incomplete");
+    expect(handoff.diagnostics).toContainEqual(
+      expect.objectContaining({ path: "remainingQuestions.recovery" }),
+    );
+  });
+
+  it("requires a declared Skill whose backlog holds a skill-scoped deferral", () => {
+    const input = { projectRoot: "/project", ...questionnaireFixture() };
+    for (const skill of [undefined, "undeclared-skill"]) {
+      input.dossier.deferredQuestions = [deferredQuestionFixture({ skill })];
+      expect(createQuestionnaireHandoff(input).diagnostics).toContainEqual(
+        expect.objectContaining({
+          path: "deferredQuestions.column-contract.resolution",
+        }),
+      );
+    }
+  });
+
+  it.each([
+    ["outcome", { outcome: "withdrawn" }],
+    ["scope", { scope: "elsewhere" }],
+    ["reason", { reason: " " }],
+  ])("requires a deferred resolution %s and reason", (field, change) => {
+    const input = { projectRoot: "/project", ...questionnaireFixture() };
+    input.dossier.deferredQuestions.push(deferredQuestionFixture(change));
+    expect(createQuestionnaireHandoff(input).diagnostics).toContainEqual(
+      expect.objectContaining({
+        path: "deferredQuestions.column-contract.resolution",
+      }),
+    );
+  });
+
+  it.each([
+    [
+      "plan goal",
+      (plan: { goal: string }) => (plan.goal = "Another goal."),
+      "goal",
+    ],
+    [
+      "workflow goal",
+      (plan: { workflow: { goal: string } }) =>
+        (plan.workflow.goal = "Another goal."),
+      "workflow.goal",
+    ],
+  ])(
+    "refuses a %s that differs from the dossier's goal",
+    (_name, change, path) => {
+      const input = { projectRoot: "/project", ...questionnaireFixture() };
+      change(input.factoryPlan);
+      expect(createQuestionnaireHandoff(input).diagnostics).toContainEqual(
+        expect.objectContaining({
+          path,
+          message: "Dossier contradicts FactoryPlan",
+        }),
+      );
+    },
+  );
+
+  it("returns a read model without mutating its input", () => {
+    const input = { projectRoot: "/project", ...questionnaireFixture() };
+    input.dossier.deferredQuestions.push(
+      deferredQuestionFixture({ scope: "out-of-scope" }),
+    );
+    const before = structuredClone(input);
+    createQuestionnaireHandoff(input);
+    expect(input).toEqual(before);
+  });
+
   it.each(["skills/prepare", "/project/../prepare", "/project//prepare"])(
     "rejects ambiguous canonical source path %s",
     (canonicalPath) => {
@@ -127,7 +269,7 @@ describe("semantic questionnaire handoff", () => {
   it("keeps an incomplete first exchange resumable without a proposal command", () => {
     const handoff = createQuestionnaireHandoff({
       projectRoot: "/project",
-      dossier: { schemaVersion: 1, kind: "semantic-dossier" },
+      dossier: { schemaVersion: 2, kind: "semantic-dossier" },
     });
     expect(handoff.status).toBe("incomplete");
     expect(handoff.diagnostics).toEqual(
@@ -136,7 +278,7 @@ describe("semantic questionnaire handoff", () => {
     expect(handoff.nextAction).toBe("questionnaire-refinement");
     expect(handoff.nextReadOnlyCommand).toBeNull();
     expect(handoff.dossier).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       kind: "semantic-dossier",
     });
   });

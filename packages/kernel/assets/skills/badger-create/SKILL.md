@@ -116,7 +116,7 @@ The questionnaire returns a read-only handoff in this shape:
   "kind": "badger-questionnaire-handoff",
   "status": "complete",
   "schemaVersion": 1,
-  "dossier": "<semantic dossier containing the five-part fact ledger>",
+  "dossier": "<version 2 semantic dossier with the five-part fact ledger>",
   "dossierHash": "<deterministic SHA-256 identity>",
   "factoryPlan": {},
   "nextAction": "factory-plan-confirmation",

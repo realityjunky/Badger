@@ -7,6 +7,7 @@ export const SEMANTIC_DOSSIER_TOPICS = [
   "inputs",
   "prerequisites",
   "bindings",
+  "interfaces",
   "requiredSkillCalls",
   "augmentations",
   "outputSchemas",
@@ -26,13 +27,39 @@ export interface SemanticFact {
   statement: string;
 }
 
+export interface AnswerRevision {
+  answerId: string;
+  revision: number;
+}
+
+export interface FactProvenance {
+  confirmedBy: string;
+  answerRevisions: AnswerRevision[];
+  acknowledgedBy: string;
+}
+
+export interface QuestionBase {
+  id: string;
+  field: string;
+  question: string;
+}
+
+export interface DeferredQuestion extends QuestionBase {
+  resolution: {
+    outcome: "deferred";
+    scope: "skill" | "out-of-scope";
+    skill?: string;
+    reason: string;
+  };
+}
+
 export interface SemanticTopic {
   summary: string;
   factIds: string[];
 }
 
 export interface SemanticDossier {
-  schemaVersion: 1;
+  schemaVersion: 2;
   kind: "semantic-dossier";
   confirmed: boolean;
   workflow: {
@@ -55,13 +82,16 @@ export interface SemanticDossier {
     responsibility: SemanticTopic;
   }>;
   topics: Record<(typeof SEMANTIC_DOSSIER_TOPICS)[number], SemanticTopic>;
-  confirmedUserFacts: SemanticFact[];
+  confirmedUserFacts: Array<SemanticFact & { provenance: FactProvenance }>;
   sourceDerivedFacts: Array<
     SemanticFact & { sourceId: string; evidencePath: string }
   >;
-  agentInferences: Array<SemanticFact & { confirmed: boolean }>;
+  agentInferences: Array<
+    SemanticFact & { confirmed: boolean; provenance?: FactProvenance }
+  >;
   unresolvedAssumptions: Array<SemanticFact & { field: string }>;
-  remainingQuestions: Array<{ id: string; field: string; question: string }>;
+  remainingQuestions: QuestionBase[];
+  deferredQuestions: DeferredQuestion[];
   upgradeSource?: { sourceId: string; recovery: string };
 }
 
@@ -86,8 +116,13 @@ export function validateSemanticDossier(
     diagnostics.push({ path, message });
   if (!isRecord(value))
     return [{ path: "dossier", message: "Dossier must be an object" }];
-  if (value.schemaVersion !== 1)
-    report("schemaVersion", "Expected semantic dossier version 1");
+  if (value.schemaVersion !== 2)
+    report(
+      "schemaVersion",
+      value.schemaVersion === 1
+        ? "Semantic dossier version 1 is retired; migrate the dossier to version 2"
+        : "Expected semantic dossier version 2",
+    );
   if (value.kind !== "semantic-dossier")
     report("kind", "Expected semantic-dossier");
   if (value.confirmed !== true)
@@ -160,7 +195,51 @@ export function validateSemanticDossier(
       report(`sources.${source.id}.roles`, "Required source roles");
   }
   const sourceIds = new Set(sources.map((source) => source.id));
+  const sourceNames = new Set(sources.map((source) => source.name));
+  const ledgerIds = new Map<string, string>();
   const factIds = new Set<string>();
+  const registerId = (
+    id: unknown,
+    path: string,
+    category: string,
+    fact: boolean,
+  ) => {
+    if (!isText(id)) return;
+    const previous = ledgerIds.get(id);
+    if (previous !== undefined && previous !== category)
+      report(path, "Ledger IDs must be unique across categories");
+    if (previous === undefined) ledgerIds.set(id, category);
+    if (fact) factIds.add(id);
+  };
+  const validateFactProvenance = (provenance: unknown, path: string) => {
+    if (!isRecord(provenance)) {
+      report(
+        path,
+        "Required provenance: confirming person, answer revisions, and acknowledgement",
+      );
+      return;
+    }
+    if (!isText(provenance.confirmedBy))
+      report(`${path}.confirmedBy`, "Required confirming person");
+    if (
+      !Array.isArray(provenance.answerRevisions) ||
+      !provenance.answerRevisions.length ||
+      !provenance.answerRevisions.every(
+        (revision) =>
+          isRecord(revision) &&
+          isText(revision.answerId) &&
+          typeof revision.revision === "number" &&
+          Number.isInteger(revision.revision) &&
+          revision.revision > 0,
+      )
+    )
+      report(`${path}.answerRevisions`, "Required positive answer revisions");
+    if (!isText(provenance.acknowledgedBy))
+      report(
+        `${path}.acknowledgedBy`,
+        "Required acknowledgement by the answering Field expert",
+      );
+  };
   for (const category of [
     "confirmedUserFacts",
     "sourceDerivedFacts",
@@ -171,14 +250,7 @@ export function validateSemanticDossier(
     const facts = entries(category);
     for (const fact of facts) {
       const prefix = `${category}.${fact.id}`;
-      if (isText(fact.id)) {
-        if (factIds.has(fact.id))
-          report(
-            `${prefix}.id`,
-            "Fact IDs must be unique across ledger categories",
-          );
-        factIds.add(fact.id);
-      }
+      registerId(fact.id, `${prefix}.id`, category, true);
       if (
         !isText(
           fact[category === "remainingQuestions" ? "question" : "statement"],
@@ -195,12 +267,39 @@ export function validateSemanticDossier(
         );
       if (category === "agentInferences" && fact.confirmed !== true)
         report(prefix, "Inference requires explicit user confirmation");
+      if (
+        category === "confirmedUserFacts" ||
+        (category === "agentInferences" && fact.confirmed === true)
+      )
+        validateFactProvenance(fact.provenance, `${prefix}.provenance`);
       if (["unresolvedAssumptions", "remainingQuestions"].includes(category)) {
         if (!isText(fact.field))
           report(`${prefix}.field`, "Required unresolved field");
         report(prefix, "Unresolved or contradictory field prevents completion");
       }
     }
+  }
+  const deferredQuestions = entries("deferredQuestions");
+  for (const question of deferredQuestions) {
+    const prefix = `deferredQuestions.${question.id}`;
+    registerId(question.id, `${prefix}.id`, "deferredQuestions", false);
+    if (!isText(question.field))
+      report(`${prefix}.field`, "Required deferred field");
+    if (!isText(question.question))
+      report(prefix, "Required deferred question");
+    const resolution = question.resolution;
+    if (
+      !isRecord(resolution) ||
+      resolution.outcome !== "deferred" ||
+      !["skill", "out-of-scope"].includes(String(resolution.scope)) ||
+      !isText(resolution.reason) ||
+      (resolution.scope === "skill" &&
+        (!isText(resolution.skill) || !sourceNames.has(resolution.skill)))
+    )
+      report(
+        `${prefix}.resolution`,
+        "A deferred question requires its resolution: deferred, with a reason and, for a Skill backlog, a declared Skill name",
+      );
   }
   const topic = (entry: unknown, field: string) => {
     if (!isRecord(entry) || !isText(entry.summary)) {
@@ -325,7 +424,8 @@ export function validateDossierPlan(
   }
   for (const [field, expected, actual] of [
     ["workflow.name", plan.workflow.name, dossier.workflow.name],
-    ["workflow.goal", plan.goal, dossier.workflow.goal],
+    ["goal", plan.goal, dossier.workflow.goal],
+    ["workflow.goal", plan.workflow.goal, dossier.workflow.goal],
     ["workflow.intent", plan.skillCreatorIntent, dossier.workflow.intent],
     [
       "workflow.defaultLocale",

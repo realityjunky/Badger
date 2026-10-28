@@ -1,4 +1,27 @@
-import type { FactoryPlan, SemanticDossier } from "../../src/index.js";
+import type {
+  DeferredQuestion,
+  FactoryPlan,
+  SemanticDossier,
+} from "../../src/index.js";
+
+export function deferredQuestionFixture(
+  resolution: Partial<DeferredQuestion["resolution"]> = {},
+  overrides: Partial<Omit<DeferredQuestion, "resolution">> = {},
+): DeferredQuestion {
+  return {
+    id: "column-contract",
+    field: "interfaces",
+    question: "Which columns does the receiving Skill read?",
+    ...overrides,
+    resolution: {
+      outcome: "deferred",
+      scope: "skill",
+      skill: "prepare",
+      reason: "Internal to the receiving Skill; fixed in its next revision.",
+      ...resolution,
+    },
+  };
+}
 
 export function questionnaireFixture(): {
   factoryPlan: FactoryPlan;
@@ -36,7 +59,7 @@ export function questionnaireFixture(): {
       },
     },
     dossier: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       kind: "semantic-dossier",
       confirmed: true,
       workflow: {
@@ -62,6 +85,9 @@ export function questionnaireFixture(): {
         inputs: topic("Prepare receives the owner's report topic."),
         prerequisites: topic("Prepare requires an explicitly supplied topic."),
         bindings: topic("The prepare Skill implements prepare."),
+        interfaces: topic(
+          "No inter-Node data contract is needed: the workflow has one Node.",
+        ),
         requiredSkillCalls: topic("None: prepare is self-contained."),
         augmentations: topic("None: the implementation covers the task."),
         outputSchemas: topic(
@@ -92,6 +118,11 @@ export function questionnaireFixture(): {
           id: "owner-scope",
           statement:
             "The owner confirmed the report scope and all topic summaries.",
+          provenance: {
+            confirmedBy: "workflow-owner",
+            answerRevisions: [{ answerId: "answer-scope", revision: 1 }],
+            acknowledgedBy: "field-expert",
+          },
         },
       ],
       sourceDerivedFacts: [
@@ -107,10 +138,16 @@ export function questionnaireFixture(): {
           id: "single-node",
           statement: "One Node is sufficient.",
           confirmed: true,
+          provenance: {
+            confirmedBy: "workflow-owner",
+            answerRevisions: [{ answerId: "answer-node-shape", revision: 2 }],
+            acknowledgedBy: "field-expert",
+          },
         },
       ],
       unresolvedAssumptions: [],
       remainingQuestions: [],
+      deferredQuestions: [],
     },
   };
 }
