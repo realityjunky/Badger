@@ -127,15 +127,6 @@ describe("Badger release artifacts", () => {
     const manual = await readText("docs/badger-workflow-manual.html");
     const ledger = await readText("docs/release-artifacts.md");
 
-    await expect(
-      fs.stat(
-        path.join(
-          kernelRoot,
-          "assets/skills/badger-workflow-questionnaire/reference/semantic-dossier.md",
-        ),
-      ),
-    ).resolves.toMatchObject({ isFile: expect.any(Function) });
-
     for (const prose of [questionnaire, reference]) {
       expect(prose).toContain("version 2");
       expect(prose).toContain("interfaces");
@@ -150,6 +141,11 @@ describe("Badger release artifacts", () => {
     expect(reference).toContain("Version 1 is retired");
     expect(manual).toContain("The dossier is schema version 2");
     expect(manual).toContain("处理结论");
+    // Version 2 is delivered, so §7, which describes only what is not built,
+    // no longer lists it among the kernel changes still to come.
+    const planned = manual.slice(manual.indexOf('id="service"'));
+    expect(planned).not.toContain("issues/29");
+    expect(planned).not.toContain("Schema version 2 adds");
     expect(ledger).toContain("reference/semantic-dossier.md");
   });
 
