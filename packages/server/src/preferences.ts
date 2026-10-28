@@ -244,7 +244,8 @@ export async function savePreferences(
       actor: { personId: context.personId, credential: context.credential },
       channel: context.channel,
       action: "person.preferences_updated",
-      target: { type: "person", id: context.personId },
+      // The revisions are the preferences' own, not the person record's.
+      target: { type: "person_preferences", id: context.personId },
       before:
         current.revision === 0
           ? null

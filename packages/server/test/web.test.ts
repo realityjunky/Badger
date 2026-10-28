@@ -177,4 +177,34 @@ describe("the dashboard the server serves", () => {
 
     expect((await service.request("/assets/app.js")).status).toBe(200);
   });
+
+  it("shows the signed-out page on a dashboard URL opened while signed out", async () => {
+    service = await startTestService({
+      environment: { BADGER_WEB_DIR: await builtWebDirectory() },
+    });
+
+    const page = await service.request("/questionnaire/questions/q-1");
+    expect(page.status).toBe(401);
+    expect(page.headers.get("content-type")).toContain("text/html");
+    expect(await page.text()).toContain("Not signed in");
+
+    const api = await service.request("/api/v1/me/preferences");
+    expect(api.status).toBe(401);
+    expect(await api.json()).toMatchObject({
+      error: { code: "unauthenticated" },
+    });
+  });
+
+  it("serves a page whose last segment has a dot as a page, not a file", async () => {
+    service = await startTestService({
+      environment: { BADGER_WEB_DIR: await builtWebDirectory() },
+    });
+
+    const page = await service.request("/workflows/w-1/versions/1.2", {
+      as: alice,
+    });
+
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('id="root"');
+  });
 });

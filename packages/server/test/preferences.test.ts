@@ -134,7 +134,7 @@ describe("personal preferences", () => {
       (event) => event.action === "person.preferences_updated",
     );
     expect(written).toMatchObject({
-      targetType: "person",
+      targetType: "person_preferences",
       targetId: expect.any(String),
       before: null,
       after: { revision: 1, hash: null },

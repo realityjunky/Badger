@@ -3,7 +3,8 @@
 The collaborative service's dashboard, built with React, Ant Design, and
 Vite. The server role serves the build from `dist/` and injects the
 deployment's base path into the document, so one build works under any
-prefix.
+prefix. Every library the dashboard uses is a devDependency: the build bundles
+them into `dist/`, so the server image carries the build and none of them.
 
 ## Layout
 
@@ -14,10 +15,10 @@ prefix.
 | `src/i18n/catalog.ts`   | zh and en message catalogs, keyed by the same message IDs.                                           |
 | `src/app/navigation.ts` | The URL routes, the rail's sections, and the page-title lookup.                                      |
 | `src/app/paths.ts`      | Base-path normalisation, API URLs, and reading the injected base path.                               |
-| `src/preferences/`      | The person's choices: model, API client, and the provider that saves them and applies them.          |
+| `src/preferences/`      | The person's choices: model, API client, the saver that stores each change, and the provider.        |
 | `src/shell/`            | The rail, top bar, and application frame.                                                            |
 | `src/pages/`            | The pages. My work is the landing page at `/my-work`.                                                |
-| `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, and base paths.                  |
+| `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.          |
 | `e2e/`                  | Playwright journeys and visual checks against the real service in local single-user mode.            |
 
 ## Behavior

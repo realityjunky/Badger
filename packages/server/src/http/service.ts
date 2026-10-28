@@ -299,9 +299,11 @@ export function createService(options: ServiceOptions, port: number): Service {
       return reply.error(403, "denied", "This account may not use Badger");
     }
     if (identityResult.kind === "anonymous") {
-      return path === "/"
-        ? reply.html(401, renderSignedOutPage())
-        : reply.error(401, "unauthenticated", "Sign in to use Badger");
+      // A dashboard URL opened while signed out shows the signed-out page;
+      // only the API answers in JSON.
+      return isApi
+        ? reply.error(401, "unauthenticated", "Sign in to use Badger")
+        : reply.html(401, renderSignedOutPage());
     }
 
     const principal = identityResult.principal;

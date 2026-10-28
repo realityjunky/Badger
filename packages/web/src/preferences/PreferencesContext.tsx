@@ -4,7 +4,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -19,8 +18,13 @@ import {
   type Preferences,
   type StoredPreferences,
 } from "./model.js";
+import {
+  createPreferencesSaver,
+  type PreferencesView,
+  type SaveState,
+} from "./saver.js";
 
-export type SaveState = "idle" | "saving" | "saved" | "failed";
+export type { SaveState } from "./saver.js";
 
 export interface PreferencesContextValue {
   preferences: StoredPreferences;
@@ -35,7 +39,7 @@ const PreferencesContext = createContext<PreferencesContextValue | null>(null);
 /**
  * Holds the signed-in person's choices. Every change applies to the page at
  * once and is saved to the service; a failed save says so instead of
- * pretending the choice is stored.
+ * pretending the choice is stored (`saver.ts`).
  */
 export function PreferencesProvider({
   basePath,
@@ -44,19 +48,22 @@ export function PreferencesProvider({
   basePath: string;
   children: ReactNode;
 }) {
-  const [preferences, setPreferences] =
-    useState<StoredPreferences>(DEFAULT_PREFERENCES);
+  const [view, setView] = useState<PreferencesView>({
+    preferences: DEFAULT_PREFERENCES,
+    saveState: "idle",
+  });
   const [person, setPerson] = useState<Person | null>(null);
   const [status, setStatus] = useState<"loading" | "ready">("loading");
-  const [saveState, setSaveState] = useState<SaveState>("idle");
 
-  const latest = useRef(preferences);
-  const pending = useRef<StoredPreferences | null>(null);
-  const saving = useRef(false);
-
-  useEffect(() => {
-    latest.current = preferences;
-  }, [preferences]);
+  const saver = useMemo(
+    () =>
+      createPreferencesSaver({
+        initial: DEFAULT_PREFERENCES,
+        save: (preferences) => savePreferencesRequest(basePath, preferences),
+        onChange: setView,
+      }),
+    [basePath],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -69,8 +76,7 @@ export function PreferencesProvider({
         if (!active) {
           return;
         }
-        latest.current = loaded;
-        setPreferences(loaded);
+        saver.adopt(loaded);
         setPerson(signedIn);
       })
       .catch(() => {
@@ -85,65 +91,24 @@ export function PreferencesProvider({
       active = false;
       controller.abort();
     };
-  }, [basePath]);
-
-  const flush = useCallback(async () => {
-    if (saving.current) {
-      return;
-    }
-    saving.current = true;
-    setSaveState("saving");
-    let failed = false;
-    let retries = 0;
-    try {
-      while (pending.current !== null) {
-        const next = pending.current;
-        pending.current = null;
-        const outcome = await savePreferencesRequest(basePath, next);
-        if (outcome.kind === "saved") {
-          latest.current = outcome.preferences;
-          setPreferences(outcome.preferences);
-          retries = 0;
-        } else if (outcome.kind === "conflict" && retries < 2) {
-          // Keep the person's choice, adopt the stored revision, and retry.
-          retries += 1;
-          const reconciled: StoredPreferences = {
-            ...latest.current,
-            revision: outcome.preferences.revision,
-            updatedAt: outcome.preferences.updatedAt,
-          };
-          latest.current = reconciled;
-          pending.current = reconciled;
-          setPreferences(reconciled);
-        } else {
-          failed = true;
-          break;
-        }
-      }
-    } finally {
-      saving.current = false;
-      if (failed) {
-        setSaveState("failed");
-      } else {
-        setSaveState("saved");
-      }
-    }
-  }, [basePath]);
+  }, [basePath, saver]);
 
   const update = useCallback(
     (patch: Partial<Preferences>) => {
-      const next: StoredPreferences = { ...latest.current, ...patch };
-      latest.current = next;
-      pending.current = next;
-      setPreferences(next);
-      void flush();
+      void saver.change(patch);
     },
-    [flush],
+    [saver],
   );
 
   const value = useMemo<PreferencesContextValue>(
-    () => ({ preferences, person, status, saveState, update }),
-    [preferences, person, status, saveState, update],
+    () => ({
+      preferences: view.preferences,
+      person,
+      status,
+      saveState: view.saveState,
+      update,
+    }),
+    [view, person, status, update],
   );
 
   return (

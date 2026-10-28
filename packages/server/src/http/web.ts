@@ -41,7 +41,6 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 
 const TEXTUAL =
   /^(?:text\/|application\/(?:json|manifest\+json)$|image\/svg\+xml$)/u;
-const FILE_REQUEST = /\.[A-Za-z0-9]+$/u;
 const IMMUTABLE_PREFIX = "/assets/";
 
 export interface WebAsset {
@@ -52,10 +51,14 @@ export interface WebAsset {
 
 /**
  * A URL that asks for a built file: anything under the asset folder, or a
- * last segment that names a file. Everything else is a dashboard page.
+ * last segment ending in a file type the build serves. Everything else is a
+ * dashboard page, including a record whose ID has a dot in it.
  */
 export function isFileRequest(pathname: string): boolean {
-  return pathname.startsWith(IMMUTABLE_PREFIX) || FILE_REQUEST.test(pathname);
+  return (
+    pathname.startsWith(IMMUTABLE_PREFIX) ||
+    Object.hasOwn(CONTENT_TYPES, path.posix.extname(pathname).toLowerCase())
+  );
 }
 
 /**
