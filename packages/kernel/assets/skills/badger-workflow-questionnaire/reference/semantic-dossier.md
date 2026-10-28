@@ -38,7 +38,9 @@ including deferred questions.
    answering Field expert's acknowledgement (`acknowledgedBy`).
 2. `sourceDerivedFacts`: `{ id, statement, sourceId, evidencePath }` traced to
    an inspected declared source file. Record manual-derived reasoning as an
-   agent inference until the owner confirms its workflow application.
+   agent inference until the owner confirms its workflow application. Its
+   provenance is the declared source and evidence path; answer provenance
+   belongs to facts restated from an answer.
 3. `agentInferences`: `{ id, statement, confirmed, provenance? }`. Keep their
    origin visible after confirmation. A confirmed inference carries the same
    provenance as a confirmed user fact; an unconfirmed inference prevents
@@ -53,12 +55,25 @@ including deferred questions.
 `deferredQuestions` records each question the Engineer deferred as internal to
 one Skill or out of scope: `{ id, field, question, resolution }`. The
 resolution is `{ "outcome": "deferred", "scope": "skill" | "out-of-scope",
-"reason": "<why>" }`, and it is required.
+"skill": "<declared Skill name>", "reason": "<why>" }`, and it is required.
+A skill-scoped deferral names the declared Skill whose backlog holds it; an
+out-of-scope deferral omits `skill`.
 
 A deferred question never blocks readiness; it appears with its resolution. A
 question still in `remainingQuestions` still blocks. Call this recorded outcome
 its resolution, as `GLOSSARY.md` and ADR 0006 do; `disposition` names a field of
-the WorkflowRuntime continuation.
+the WorkflowRuntime continuation. A topic cites the five ledger categories, not
+a deferred question: its resolution is evidence of why the topic is settled,
+not a fact about the workflow.
+
+## Migration from version 1
+
+A persisted plan that embeds a version 1 dossier is refused. `readPlan` and
+`buildProposal` run the same validator, so a caller migrates by rebuilding the
+dossier as version 2 — adding `interfaces`, `deferredQuestions`, and fact
+provenance — and reconfirming it with the workflow owner. Plans without a
+dossier remain supported. A plan that carries a dossier must also give its
+`goal` and `workflow.goal` the dossier's one goal.
 
 ## Required semantic topics
 

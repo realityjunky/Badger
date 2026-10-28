@@ -117,6 +117,42 @@ describe("Badger release artifacts", () => {
     expect(manual).not.toContain("skill-preferences.yaml");
   });
 
+  it("documents semantic dossier version 2 in the packaged questionnaire contract", async () => {
+    const questionnaire = await readText(
+      "packages/kernel/assets/skills/badger-workflow-questionnaire/SKILL.md",
+    );
+    const reference = await readText(
+      "packages/kernel/assets/skills/badger-workflow-questionnaire/reference/semantic-dossier.md",
+    );
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const ledger = await readText("docs/release-artifacts.md");
+
+    await expect(
+      fs.stat(
+        path.join(
+          kernelRoot,
+          "assets/skills/badger-workflow-questionnaire/reference/semantic-dossier.md",
+        ),
+      ),
+    ).resolves.toMatchObject({ isFile: expect.any(Function) });
+
+    for (const prose of [questionnaire, reference]) {
+      expect(prose).toContain("version 2");
+      expect(prose).toContain("interfaces");
+      expect(prose).toContain("resolution");
+    }
+    for (const field of [
+      "deferredQuestions",
+      "answerRevisions",
+      "acknowledgedBy",
+    ])
+      expect(reference).toContain(field);
+    expect(reference).toContain("Version 1 is retired");
+    expect(manual).toContain("The dossier is schema version 2");
+    expect(manual).toContain("处理结论");
+    expect(ledger).toContain("reference/semantic-dossier.md");
+  });
+
   it("documents every assembled backbone path and content owner", async () => {
     const inventory = await readJson(
       "packages/kernel/assets/skills/badger-create/reference/package-inventory.example.json",

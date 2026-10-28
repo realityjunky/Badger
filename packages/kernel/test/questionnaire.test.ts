@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createQuestionnaireHandoff } from "../src/index.js";
-import { questionnaireFixture } from "./fixtures/semantic-dossier.js";
+import {
+  questionnaireFixture,
+  deferredQuestionFixture,
+} from "./fixtures/semantic-dossier.js";
 
 describe("semantic questionnaire handoff", () => {
   it("refuses the retired version 1 dossier with a migration finding", () => {
@@ -56,16 +59,7 @@ describe("semantic questionnaire handoff", () => {
 
   it("accepts a deferred question with its resolution and does not block", () => {
     const input = { projectRoot: "/project", ...questionnaireFixture() };
-    input.dossier.deferredQuestions.push({
-      id: "column-contract",
-      field: "interfaces",
-      question: "Which columns does the receiving Skill read?",
-      resolution: {
-        outcome: "deferred",
-        scope: "skill",
-        reason: "Internal to the receiving Skill; fixed in its next revision.",
-      },
-    });
+    input.dossier.deferredQuestions.push(deferredQuestionFixture());
     const handoff = createQuestionnaireHandoff(input);
     expect(handoff.status).toBe("complete");
     expect(handoff.diagnostics).toEqual([]);
@@ -76,16 +70,7 @@ describe("semantic questionnaire handoff", () => {
 
   it("keeps an unresolved question blocking beside a deferred one", () => {
     const input = { projectRoot: "/project", ...questionnaireFixture() };
-    input.dossier.deferredQuestions.push({
-      id: "column-contract",
-      field: "interfaces",
-      question: "Which columns does the receiving Skill read?",
-      resolution: {
-        outcome: "deferred",
-        scope: "skill",
-        reason: "Internal to the receiving Skill; fixed in its next revision.",
-      },
-    });
+    input.dossier.deferredQuestions.push(deferredQuestionFixture());
     input.dossier.remainingQuestions.push({
       id: "recovery",
       field: "topics.recoveryPolicy",
@@ -98,23 +83,25 @@ describe("semantic questionnaire handoff", () => {
     );
   });
 
+  it("requires a declared Skill whose backlog holds a skill-scoped deferral", () => {
+    const input = { projectRoot: "/project", ...questionnaireFixture() };
+    for (const skill of [undefined, "undeclared-skill"]) {
+      input.dossier.deferredQuestions = [deferredQuestionFixture({ skill })];
+      expect(createQuestionnaireHandoff(input).diagnostics).toContainEqual(
+        expect.objectContaining({
+          path: "deferredQuestions.column-contract.resolution",
+        }),
+      );
+    }
+  });
+
   it.each([
     ["outcome", { outcome: "withdrawn" }],
     ["scope", { scope: "elsewhere" }],
     ["reason", { reason: " " }],
   ])("requires a deferred resolution %s and reason", (field, change) => {
     const input = { projectRoot: "/project", ...questionnaireFixture() };
-    input.dossier.deferredQuestions.push({
-      id: "column-contract",
-      field: "interfaces",
-      question: "Which columns does the receiving Skill read?",
-      resolution: {
-        outcome: "deferred",
-        scope: "skill",
-        reason: "Internal to the receiving Skill.",
-        ...change,
-      },
-    });
+    input.dossier.deferredQuestions.push(deferredQuestionFixture(change));
     expect(createQuestionnaireHandoff(input).diagnostics).toContainEqual(
       expect.objectContaining({
         path: "deferredQuestions.column-contract.resolution",
@@ -150,16 +137,9 @@ describe("semantic questionnaire handoff", () => {
 
   it("returns a read model without mutating its input", () => {
     const input = { projectRoot: "/project", ...questionnaireFixture() };
-    input.dossier.deferredQuestions.push({
-      id: "column-contract",
-      field: "interfaces",
-      question: "Which columns does the receiving Skill read?",
-      resolution: {
-        outcome: "deferred",
-        scope: "out-of-scope",
-        reason: "Settled outside this workflow version.",
-      },
-    });
+    input.dossier.deferredQuestions.push(
+      deferredQuestionFixture({ scope: "out-of-scope" }),
+    );
     const before = structuredClone(input);
     createQuestionnaireHandoff(input);
     expect(input).toEqual(before);

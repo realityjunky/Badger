@@ -40,6 +40,14 @@ The `badger-create` reference set is:
 - `reference/eval-provider.md` — authoring review, runtime evaluation, certification, and publication approval;
 - `reference/package-inventory.example.json` — safe relative-path ownership example.
 
+The `badger-workflow-questionnaire` reference set is:
+
+- `reference/semantic-dossier.md` — the version 2 dossier envelope, five-part
+  fact ledger, `interfaces` topic, deferred-question resolutions, fact
+  provenance, and the one goal shared with the plan;
+- `reference/source-study.md` — the questionnaire's elicitation pattern and
+  Badger's explicit-source adaptation.
+
 ## Generated package
 
 The checked-in inventory example omits session state, provider metadata,
@@ -60,15 +68,15 @@ unexpected executable content blocks readiness.
 
 ## Ownership
 
-| Responsibility                                              | Current authority                                            |
-| ----------------------------------------------------------- | ------------------------------------------------------------ |
-| Explicit Skill source inspection, identity, and inventory   | `src/skill/identity.ts`, `src/workflow-kernel/discovery.ts`  |
-| Workflow contract normalization and validation              | `src/workflow/contract.ts`                                        |
-| Plan, proposal, confirmation, and `.badger` state           | `src/workflow-kernel/foundation.ts`, `src/factory/`               |
-| Six-lane authoring and deterministic assembly               | `src/authoring/`, `src/factory/generate.ts`                       |
-| Evaluation, publication readiness, and distribution preview | `src/eval/`, `src/publish/`                                       |
-| Skill loading, snapshots, Engine, and durable Run storage   | `src/skill-runtime/`, `src/engine/`                               |
-| Public WorkflowRuntime seam                                 | `src/workflow-runtime/public.ts`                                  |
+| Responsibility                                              | Current authority                                           |
+| ----------------------------------------------------------- | ----------------------------------------------------------- |
+| Explicit Skill source inspection, identity, and inventory   | `src/skill/identity.ts`, `src/workflow-kernel/discovery.ts` |
+| Workflow contract normalization and validation              | `src/workflow/contract.ts`                                  |
+| Plan, proposal, confirmation, and `.badger` state           | `src/workflow-kernel/foundation.ts`, `src/factory/`         |
+| Six-lane authoring and deterministic assembly               | `src/authoring/`, `src/factory/generate.ts`                 |
+| Evaluation, publication readiness, and distribution preview | `src/eval/`, `src/publish/`                                 |
+| Skill loading, snapshots, Engine, and durable Run storage   | `src/skill-runtime/`, `src/engine/`                         |
+| Public WorkflowRuntime seam                                 | `src/workflow-runtime/public.ts`                            |
 
 Deployment glue and domain execution remain outside this repository. Domain
 workflow repositories own workflow definitions, source Skills, and domain

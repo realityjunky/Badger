@@ -38,13 +38,17 @@ export interface FactProvenance {
   acknowledgedBy: string;
 }
 
-export interface DeferredQuestion {
+export interface QuestionBase {
   id: string;
   field: string;
   question: string;
+}
+
+export interface DeferredQuestion extends QuestionBase {
   resolution: {
     outcome: "deferred";
     scope: "skill" | "out-of-scope";
+    skill?: string;
     reason: string;
   };
 }
@@ -86,7 +90,7 @@ export interface SemanticDossier {
     SemanticFact & { confirmed: boolean; provenance?: FactProvenance }
   >;
   unresolvedAssumptions: Array<SemanticFact & { field: string }>;
-  remainingQuestions: Array<{ id: string; field: string; question: string }>;
+  remainingQuestions: QuestionBase[];
   deferredQuestions: DeferredQuestion[];
   upgradeSource?: { sourceId: string; recovery: string };
 }
@@ -191,8 +195,23 @@ export function validateSemanticDossier(
       report(`sources.${source.id}.roles`, "Required source roles");
   }
   const sourceIds = new Set(sources.map((source) => source.id));
+  const sourceNames = new Set(sources.map((source) => source.name));
+  const ledgerIds = new Map<string, string>();
   const factIds = new Set<string>();
-  const answerProvenance = (provenance: unknown, path: string) => {
+  const registerId = (
+    id: unknown,
+    path: string,
+    category: string,
+    fact: boolean,
+  ) => {
+    if (!isText(id)) return;
+    const previous = ledgerIds.get(id);
+    if (previous !== undefined && previous !== category)
+      report(path, "Ledger IDs must be unique across categories");
+    if (previous === undefined) ledgerIds.set(id, category);
+    if (fact) factIds.add(id);
+  };
+  const validateFactProvenance = (provenance: unknown, path: string) => {
     if (!isRecord(provenance)) {
       report(
         path,
@@ -231,14 +250,7 @@ export function validateSemanticDossier(
     const facts = entries(category);
     for (const fact of facts) {
       const prefix = `${category}.${fact.id}`;
-      if (isText(fact.id)) {
-        if (factIds.has(fact.id))
-          report(
-            `${prefix}.id`,
-            "Fact IDs must be unique across ledger categories",
-          );
-        factIds.add(fact.id);
-      }
+      registerId(fact.id, `${prefix}.id`, category, true);
       if (
         !isText(
           fact[category === "remainingQuestions" ? "question" : "statement"],
@@ -259,7 +271,7 @@ export function validateSemanticDossier(
         category === "confirmedUserFacts" ||
         (category === "agentInferences" && fact.confirmed === true)
       )
-        answerProvenance(fact.provenance, `${prefix}.provenance`);
+        validateFactProvenance(fact.provenance, `${prefix}.provenance`);
       if (["unresolvedAssumptions", "remainingQuestions"].includes(category)) {
         if (!isText(fact.field))
           report(`${prefix}.field`, "Required unresolved field");
@@ -270,11 +282,7 @@ export function validateSemanticDossier(
   const deferredQuestions = entries("deferredQuestions");
   for (const question of deferredQuestions) {
     const prefix = `deferredQuestions.${question.id}`;
-    if (isText(question.id)) {
-      if (factIds.has(question.id))
-        report(`${prefix}.id`, "Ledger IDs must be unique across categories");
-      factIds.add(question.id);
-    }
+    registerId(question.id, `${prefix}.id`, "deferredQuestions", false);
     if (!isText(question.field))
       report(`${prefix}.field`, "Required deferred field");
     if (!isText(question.question))
@@ -284,11 +292,13 @@ export function validateSemanticDossier(
       !isRecord(resolution) ||
       resolution.outcome !== "deferred" ||
       !["skill", "out-of-scope"].includes(String(resolution.scope)) ||
-      !isText(resolution.reason)
+      !isText(resolution.reason) ||
+      (resolution.scope === "skill" &&
+        (!isText(resolution.skill) || !sourceNames.has(resolution.skill)))
     )
       report(
         `${prefix}.resolution`,
-        "A deferred question requires its resolution: deferred, with scope and reason",
+        "A deferred question requires its resolution: deferred, with a reason and, for a Skill backlog, a declared Skill name",
       );
   }
   const topic = (entry: unknown, field: string) => {

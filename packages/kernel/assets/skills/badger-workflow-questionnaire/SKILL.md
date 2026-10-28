@@ -91,9 +91,10 @@ After every exchange, show the same five-part ledger:
    question will resolve.
 
 A question internal to one Skill, or outside the workflow's scope, may instead
-be deferred with its resolution: scope plus a reason. A deferral needs no
-further exchange and never blocks handoff; an unresolved question still does.
-Call that recorded outcome the question's resolution, not its disposition.
+be deferred with its resolution: its scope, the Skill whose backlog holds it
+when the scope is a Skill, and a reason. A deferral needs no further exchange
+and never blocks handoff; an unresolved question still does. Call that recorded
+outcome the question's resolution, not its disposition.
 
 Continue the loop until the completeness checklist passes. A user may
 explicitly stop with unresolved gaps; in that case preserve the gaps in a
@@ -119,7 +120,8 @@ Before handoff, verify all of the following:
 - capabilities, finalization, executable disclosures, and recovery behavior;
 - `sourceRoot` and upgrade-source identity when upgrading an existing Skill;
 - every confirmed fact carries provenance, and every deferred question carries
-  its resolution with a scope and a reason;
+  its resolution with a scope, a reason, and its Skill when the scope is a
+  Skill backlog;
 - unresolved assumptions and remaining questions are either resolved or
   explicitly accepted as a user-requested stopped handoff.
 

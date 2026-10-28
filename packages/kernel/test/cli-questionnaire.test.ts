@@ -4,7 +4,10 @@ import { execFile } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { questionnaireFixture } from "./fixtures/semantic-dossier.js";
+import {
+  deferredQuestionFixture,
+  questionnaireFixture,
+} from "./fixtures/semantic-dossier.js";
 
 const execFileAsync = promisify(execFile);
 const roots: string[] = [];
@@ -67,16 +70,7 @@ describe("questionnaire handoff CLI", () => {
       JSON.stringify(dossier),
     );
     dossier.remainingQuestions = [];
-    dossier.deferredQuestions.push({
-      id: "column-contract",
-      field: "interfaces",
-      question: "Which columns does the receiving Skill read?",
-      resolution: {
-        outcome: "deferred",
-        scope: "skill",
-        reason: "Internal to the receiving Skill; fixed in its next revision.",
-      },
-    });
+    dossier.deferredQuestions.push(deferredQuestionFixture());
     await fs.writeFile(dossierPath, JSON.stringify(dossier));
     const complete = JSON.parse(
       (await execFileAsync(process.execPath, args)).stdout,

@@ -1,4 +1,27 @@
-import type { FactoryPlan, SemanticDossier } from "../../src/index.js";
+import type {
+  DeferredQuestion,
+  FactoryPlan,
+  SemanticDossier,
+} from "../../src/index.js";
+
+export function deferredQuestionFixture(
+  resolution: Partial<DeferredQuestion["resolution"]> = {},
+  overrides: Partial<Omit<DeferredQuestion, "resolution">> = {},
+): DeferredQuestion {
+  return {
+    id: "column-contract",
+    field: "interfaces",
+    question: "Which columns does the receiving Skill read?",
+    ...overrides,
+    resolution: {
+      outcome: "deferred",
+      scope: "skill",
+      skill: "prepare",
+      reason: "Internal to the receiving Skill; fixed in its next revision.",
+      ...resolution,
+    },
+  };
+}
 
 export function questionnaireFixture(): {
   factoryPlan: FactoryPlan;
