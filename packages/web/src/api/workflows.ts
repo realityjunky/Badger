@@ -1,5 +1,6 @@
 import { apiUrl } from "../app/paths.js";
 import type { Group } from "./organization.js";
+import type { ScriptEffects } from "./skills.js";
 
 export interface WorkflowFrame {
   name: string;
@@ -32,11 +33,68 @@ export interface WorkflowVersion extends WorkflowFrame {
   revision: number;
   stages: WorkflowStage[];
 }
+export type SkillPinPurpose = "source" | "upgrade-source";
+export interface WorkflowSkillPin {
+  workflowVersionId: string;
+  skillId: string;
+  skillName: string;
+  hash: string;
+  purpose: SkillPinPurpose;
+  revision: number;
+  pinnedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface SourceCheckSource {
+  name: string;
+  purpose: SkillPinPurpose;
+  status: "available" | "missing" | "invalid" | "unsafe" | "ambiguous";
+  hash: string | null;
+  inventory: { path: string; bytes: number; hash: string }[];
+  scripts: { path: string; sideEffects: ScriptEffects }[];
+  ignored: string[];
+  blockers: string[];
+}
+export interface WorkflowSourceCheck {
+  id: string;
+  workflowVersionId: string;
+  jobId: string | null;
+  pinsHash: string;
+  status: "queued" | "running" | "passed" | "blocked" | "failed";
+  sources: SourceCheckSource[];
+  blockers: string[];
+  workspacePath: string | null;
+  revision: number;
+  requestedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+export interface WorkflowJob {
+  id: string;
+  kind: "source-check";
+  workflowVersionId: string;
+  requesterId: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  requestedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  leaseUntil: string | null;
+  workerId: string | null;
+  pinsHash: string;
+  /** The latest check's sources are in its read model, not in the job. */
+  outcome: {
+    status: WorkflowSourceCheck["status"];
+    blockers: string[];
+  } | null;
+  error: string | null;
+  revision: number;
+}
 export interface WorkflowCapabilities {
   read: boolean;
   editWorkflow: boolean;
   manageRoles: boolean;
   createVersion: boolean;
+  managePins: boolean;
 }
 export const WORKFLOW_ROLES = [
   "Workflow owner",
@@ -69,6 +127,14 @@ export interface WorkflowDetail {
   versions: WorkflowVersion[];
   bindings: WorkflowBinding[];
   capabilities: WorkflowCapabilities;
+}
+export interface WorkflowVersionDetail {
+  workflow: Workflow;
+  version: WorkflowVersion;
+  capabilities: WorkflowCapabilities;
+  pins: WorkflowSkillPin[];
+  sourceCheck: WorkflowSourceCheck | null;
+  jobs: WorkflowJob[];
 }
 export type ReadResult<T> =
   { kind: "ok"; value: T } | { kind: "denied" | "missing" | "failed" };
@@ -146,6 +212,18 @@ export function loadWorkflow(
     signal,
   );
 }
+export function loadWorkflowVersion(
+  basePath: string,
+  workflowId: string,
+  versionId: string,
+  signal?: AbortSignal,
+) {
+  return read<WorkflowVersionDetail>(
+    basePath,
+    `/workflows/${encodeURIComponent(workflowId)}/versions/${encodeURIComponent(versionId)}`,
+    signal,
+  );
+}
 export function createWorkflow(
   basePath: string,
   input: WorkflowFrame & { groupId: string },
@@ -176,6 +254,40 @@ export function startVersion(basePath: string, workflow: Workflow) {
     "POST",
     `/workflows/${encodeURIComponent(workflow.id)}/versions`,
     { revision: workflow.revision },
+  );
+}
+export function pinSkillVersion(
+  basePath: string,
+  workflowId: string,
+  versionId: string,
+  skillId: string,
+  hash: string,
+  purpose: SkillPinPurpose = "source",
+  replacing?: WorkflowSkillPin,
+) {
+  return write<{ pin: WorkflowSkillPin; job: WorkflowJob; pinsHash: string }>(
+    basePath,
+    "POST",
+    `/workflows/${encodeURIComponent(workflowId)}/versions/${encodeURIComponent(versionId)}/pins`,
+    {
+      skillId,
+      hash,
+      purpose,
+      ...(replacing === undefined ? {} : { revision: replacing.revision }),
+    },
+  );
+}
+export function unpinSkillVersion(
+  basePath: string,
+  workflowId: string,
+  versionId: string,
+  pin: WorkflowSkillPin,
+) {
+  return write<{ removed: true; job: WorkflowJob; pinsHash: string }>(
+    basePath,
+    "DELETE",
+    `/workflows/${encodeURIComponent(workflowId)}/versions/${encodeURIComponent(versionId)}/pins/${encodeURIComponent(pin.skillId)}`,
+    { revision: pin.revision },
   );
 }
 export function assignWorkflowRole(

@@ -21,5 +21,7 @@ export interface Queryable {
  */
 export interface Database extends Queryable {
   transaction<T>(work: (tx: Queryable) => Promise<T>): Promise<T>;
+  /** Waits for a database notification when the adapter supports LISTEN. */
+  waitForNotification?(channel: string, signal?: AbortSignal): Promise<void>;
   close(): Promise<void>;
 }

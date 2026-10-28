@@ -183,6 +183,50 @@ Group bindings keep their inherited reads, and Group leads create entries.
 Administrators create entries and upload everywhere; Auditors only read.
 Removing a binding withdraws the right at the person's next request.
 
+## Workflow Skill pins and source checks
+
+An Engineer or Administrator pins an immutable Skill version to a workflow
+version with `POST /api/v1/workflows/:workflowId/versions/:versionId/pins`:
+
+```json
+{
+  "skillId": "skill-id",
+  "hash": "64-lowercase-hex-digits",
+  "purpose": "source"
+}
+```
+
+`purpose` is `source` by default; an upgrade workflow may also have one
+`upgrade-source` pin, and its Sources stage stays blocked until it has one.
+The Skill version must belong to the workflow's Group. Posting a different
+hash for an already pinned Skill replaces the pin and must quote its
+`revision`; `DELETE .../pins/:skillId` quotes it too. A stale or missing
+revision returns 409 with the current pin. Every change invalidates the
+later stages that had progressed, cancels a queued check of the previous pin
+set, and queues a new source-check job. `GET` on the version, or on its
+`pins`, `source-check`, and `jobs` paths, returns the pins, the latest check,
+and the job history, with each job's requester, timing, status, and outcome.
+Personal access tokens read these paths but cannot pin.
+
+The worker claims jobs with row locks and a lease it renews while it works,
+and runs one job at a time per workflow version. A lapsed lease lets another
+worker take the job over; a late result from the first worker is ignored. The
+worker materializes the pinned content under
+`BADGER_STORAGE_DIR/workspaces/workflow-versions/<version-id>`, writes
+`source-manifest.json` with project-relative locations, and calls the kernel
+source check; each tree must match its pinned hash. The source-check record
+exposes status, each source's purpose, identity, complete inventory, ignored
+files, script effects, and blockers; no uploaded file is executed. A passed
+check marks Sources done and a blocked one keeps it blocked. A failed check
+leaves Sources active, and its job records the error without storage paths.
+
+A service deployment runs the worker role from the same image,
+`node packages/server/dist/src/worker.js` (`npm run start:worker -w
+packages/server`), with the server's settings, Postgres, and storage. It
+wakes on a Postgres notification for each new job and also polls every 15
+seconds, which reclaims a lapsed lease. The worker role needs Postgres: local
+single-user mode runs it inside the server, polling PGlite every second.
+
 ## Validation
 
 Service tests import `src/testing/index.ts` and use the real HTTP seam with

@@ -12,6 +12,8 @@ import type { IdSource } from "../ids.js";
 import { silentLogger } from "../log.js";
 import { startHttpServer, type StartedServer } from "../start.js";
 import { prepareStorage } from "../storage.js";
+import { filesystemBlobStore } from "../skills/blobs.js";
+import { SourceCheckWorker } from "../workflow-source.js";
 import { createFixedClock, type TestClock } from "./clock.js";
 import { openTestDatabase } from "./database.js";
 import { createSequentialIds } from "./ids.js";
@@ -73,6 +75,17 @@ export interface TestService {
    * Postgres restart does. Only on Postgres, with a fresh test database.
    */
   interruptDatabase(): Promise<void>;
+  /**
+   * A worker role on the service's database, clock, IDs, and storage. Each
+   * ID is a separate worker, so a test can claim a job with one and leave it,
+   * as a worker that stopped would.
+   */
+  worker(
+    workerId?: string,
+    options?: { leaseMilliseconds?: number; pollMilliseconds?: number },
+  ): SourceCheckWorker;
+  /** Runs the queued source checks with one worker; returns how many ran. */
+  runSourceCheckJobs(): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -242,6 +255,19 @@ export async function startTestService(
       outgoing.end();
     });
 
+  const worker = (
+    workerId = "test-worker",
+    options: { leaseMilliseconds?: number; pollMilliseconds?: number } = {},
+  ) =>
+    new SourceCheckWorker({
+      database: connection.database,
+      dependencies: { clock, ids },
+      config,
+      blobs: filesystemBlobStore(config.storage.blobDirectory),
+      workerId,
+      ...options,
+    });
+
   let closed = false;
   return {
     baseUrl,
@@ -254,6 +280,13 @@ export async function startTestService(
     rawRequest,
     closeDatabase: () => connection.database.close().catch(() => undefined),
     interruptDatabase: connection.interrupt,
+    worker,
+    runSourceCheckJobs: async () => {
+      const running = worker();
+      let processed = 0;
+      while ((await running.runOnce()) !== null) processed += 1;
+      return processed;
+    },
     close: async () => {
       if (closed) {
         return;

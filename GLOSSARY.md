@@ -66,6 +66,9 @@ The directory in which a workflow is built and run locally. Badger's records of 
 **Skill version**:
 An immutable snapshot of one Skill's files, identified by a hash of their content; changed content makes a new version.
 
+**Skill pin**:
+A revisioned reference from a Workflow version to one immutable Skill version. Pin changes invalidate the Sources stage and queue a source check.
+
 **Source check**:
 The read-only inspection of a workflow's declared Skill sources that reports each source's identity, inventory, script side effects, ignored files, and blockers before any question is asked.
 _Avoid_: candidates

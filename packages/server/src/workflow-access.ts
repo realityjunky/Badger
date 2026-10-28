@@ -28,6 +28,7 @@ export interface WorkflowCapabilities {
   editWorkflow: boolean;
   manageRoles: boolean;
   createVersion: boolean;
+  managePins: boolean;
 }
 
 /** Every workflow role reads; only the responsible roles may write. */
@@ -61,6 +62,9 @@ export async function workflowCapabilities(
     createVersion:
       (access.tokenScopes === undefined ||
         access.tokenScopes.includes("engineer")) &&
+      (isAdministrator(access) || roles.has("Engineer")),
+    managePins:
+      access.tokenScopes === undefined &&
       (isAdministrator(access) || roles.has("Engineer")),
   };
 }

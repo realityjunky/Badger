@@ -29,7 +29,16 @@ describe("the health endpoint", () => {
       database: { reachable: true },
       migrations: {
         state: "applied",
-        applied: ["0001", "0002", "0003", "0004", "0005", "0006", "0007"],
+        applied: [
+          "0001",
+          "0002",
+          "0003",
+          "0004",
+          "0005",
+          "0006",
+          "0007",
+          "0008",
+        ],
         pending: [],
         drifted: [],
       },
