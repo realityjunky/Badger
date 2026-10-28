@@ -216,9 +216,10 @@ worker materializes the pinned content under
 `source-manifest.json` with project-relative locations, and calls the kernel
 source check; each tree must match its pinned hash. The source-check record
 exposes status, each source's purpose, identity, complete inventory, ignored
-files, script effects, and blockers; no uploaded file is executed. A passed
-check marks Sources done and a blocked one keeps it blocked. A failed check
-leaves Sources active, and its job records the error without storage paths.
+files, script effects, and blockers; no uploaded file is executed. A blocked
+check blocks Sources; a passed one leaves it active until the Engineer confirms
+the source set at the Sources gate (#44). A failed check leaves Sources active,
+and its job records the error without storage paths.
 
 A service deployment runs the worker role from the same image,
 `node packages/server/dist/src/worker.js` (`npm run start:worker -w

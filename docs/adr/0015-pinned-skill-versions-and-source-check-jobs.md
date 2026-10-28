@@ -24,10 +24,11 @@ workflow-version workspace, writes a source manifest with project-relative
 locations that also names the upgrade source, and invokes the kernel's source
 check. Each tree's identity must equal its pinned hash. The latest check is a
 read model containing each source's purpose, identity, inventory, ignored
-files, script effects, and blockers. A passed check marks Sources done; a
-blocked check keeps Sources blocked and does not advance later stages; a
-failed check leaves Sources active, and its job records the error without
-storage paths.
+files, script effects, and blockers. A blocked check blocks Sources. A passed
+check leaves Sources active: the Engineer still confirms the source set at the
+Sources gate ([#44](https://github.com/realityjunky/Badger/issues/44)), and
+no check advances a later stage. A failed check leaves Sources active too,
+and its job records the error without storage paths.
 
 The service never executes uploaded files. It reads only the content-addressed
 blobs associated with the pinned hashes, so a check cannot observe a mutable

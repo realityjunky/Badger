@@ -966,7 +966,9 @@ export class SourceCheckWorker {
             job.pinsHash,
           ],
         );
-        // A failed check leaves Sources active: nothing was decided.
+        // Blockers block Sources. A passed check leaves it active: the
+        // Engineer still confirms the source set at the Sources gate (#44).
+        // A failed check decided nothing and leaves it active too.
         if (status === "succeeded")
           await tx.query(
             `update workflow_versions set revision = revision + 1,
@@ -975,7 +977,7 @@ export class SourceCheckWorker {
               where id = $1`,
             [
               job.workflowVersionId,
-              outcome.status === "passed" ? "done" : "blocked",
+              outcome.status === "passed" ? "active" : "blocked",
               now,
             ],
           );

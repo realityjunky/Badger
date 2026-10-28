@@ -230,7 +230,7 @@ describe("workflow Skill pins and source checks", () => {
     });
     expect(
       checkedBody.version.stages.find((stage) => stage.id === "sources"),
-    ).toEqual({ id: "sources", state: "done" });
+    ).toEqual({ id: "sources", state: "active" });
   });
 
   it("requires an Engineer and reruns the check after unpinning", async () => {
@@ -440,7 +440,7 @@ describe("workflow Skill pins and source checks", () => {
         expect.objectContaining({ name: "primer-skill", purpose: "source" }),
       ]),
     );
-    expect(stage(body, "sources")).toBe("done");
+    expect(stage(body, "sources")).toBe("active");
 
     const secondId = await createSkill(groupId, "second-legacy");
     const secondHash = await uploadVersion(secondId, "second-legacy");
@@ -485,7 +485,7 @@ describe("workflow Skill pins and source checks", () => {
       status: "passed",
       sources: [{ hash: next }],
     });
-    expect(stage(body, "sources")).toBe("done");
+    expect(stage(body, "sources")).toBe("active");
   });
 
   it("lets another worker take over a lapsed lease and ignores the late result", async () => {
