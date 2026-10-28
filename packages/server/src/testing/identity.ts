@@ -1,0 +1,58 @@
+import type { IdentityAdapter, Principal } from "../identity/identity.js";
+import { firstHeader } from "../identity/identity.js";
+
+export const TEST_PERSON_HEADER = "x-badger-test-person";
+
+export interface TestPerson {
+  issuer?: string;
+  subject: string;
+  email?: string;
+  displayName?: string;
+  administrator?: boolean;
+}
+
+export const TEST_IDENTITY_ISSUER = "test-issuer";
+
+export function principalForTestPerson(person: TestPerson): Principal {
+  return {
+    issuer: person.issuer ?? TEST_IDENTITY_ISSUER,
+    subject: person.subject,
+    email: person.email ?? `${person.subject}@test.invalid`,
+    displayName: person.displayName ?? person.subject,
+    status: "active",
+    isAdministrator: person.administrator === true,
+    credential: { kind: "session", id: "test-session" },
+  };
+}
+
+/**
+ * Selects the person per request from a test-only header. The harness adds
+ * the header; no production entry point wires this adapter.
+ */
+export function createTestIdentityAdapter(): IdentityAdapter {
+  return {
+    resolve: async (request) => {
+      const raw = firstHeader(request.headers, TEST_PERSON_HEADER);
+      if (raw === null) {
+        return { kind: "anonymous" };
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return { kind: "denied", reason: "Invalid test identity" };
+      }
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        typeof (parsed as { subject?: unknown }).subject !== "string"
+      ) {
+        return { kind: "denied", reason: "Invalid test identity" };
+      }
+      return {
+        kind: "authenticated",
+        principal: principalForTestPerson(parsed as TestPerson),
+      };
+    },
+  };
+}

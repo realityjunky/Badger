@@ -1,0 +1,40 @@
+{
+  "name": "@realityjunky/badger-server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Badger collaborative service: server role",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./testing": {
+      "types": "./dist/src/testing/index.d.ts",
+      "import": "./dist/src/testing/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format:check": "prettier --check src test package.json tsconfig.json tsconfig.test.json vitest.config.ts",
+    "lint": "tsc -p tsconfig.test.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.12",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.2.0",
+    "@types/pg": "^8.23.1",
+    "prettier": "^3.8.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
+  }
+}

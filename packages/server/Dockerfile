@@ -1,0 +1,37 @@
+# syntax=docker/dockerfile:1
+
+# Build from the repository root: docker build -f packages/server/Dockerfile .
+
+FROM node:22-bookworm-slim AS build
+WORKDIR /app
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+COPY package.json package-lock.json ./
+COPY packages/kernel/package.json packages/kernel/package.json
+COPY packages/server/package.json packages/server/package.json
+RUN npm ci
+COPY packages/server packages/server
+RUN npm run build -w packages/server
+RUN npm prune --omit=dev
+
+FROM node:22-bookworm-slim AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /app/package.json /app/package-lock.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages/server/package.json ./packages/server/package.json
+COPY --from=build /app/packages/server/dist ./packages/server/dist
+COPY --from=build /app/packages/server/migrations ./packages/server/migrations
+
+# The deploy passes the revision it built; the health endpoint reports both.
+ARG BADGER_REVISION=unknown
+# Leave empty when the deploy does not know: the health endpoint reports null.
+ARG BADGER_CLEAN_TREE=
+ENV BADGER_REVISION=${BADGER_REVISION} \
+    BADGER_CLEAN_TREE=${BADGER_CLEAN_TREE}
+
+# The default storage root; deployments mount their own volume here.
+RUN mkdir -p /app/.badger && chown node:node /app/.badger
+
+USER node
+EXPOSE 8787
+CMD ["node", "packages/server/dist/src/index.js"]
