@@ -3,13 +3,14 @@
 This repository holds Badger, a workflow Skill factory, as an npm workspace.
 The workflow kernel is delivered, and the collaborative service planned in
 [#24](https://github.com/realityjunky/Badger/issues/24) has its walking
-skeleton in `packages/server/`.
+skeleton in `packages/server/` and its dashboard shell in `packages/web/`.
 
 | Path               | Holds                                                                                                                                                                                                 | Status                                         |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | `packages/kernel/` | The workflow kernel, published as `@realityjunky/badger`: the Creator, WorkflowRuntime, and the `badger` CLI. See its [README](packages/kernel/README.md).                                            | Delivered                                      |
 | `packages/server/` | The collaborative service's server role: reviewed SQL migrations, Postgres or PGlite, local single-user mode, platform sign-in, audited writes, the health endpoint, and the in-process test harness. | Walking skeleton (#36), platform sign-in (#38) |
-| `packages/<name>/` | One package each for the collaborative service's remaining surfaces: the web dashboard, the Badger MCP, and the host installer.                                                                       | Planned (#24)                                  |
+| `packages/web/`    | The web dashboard shell: navigation rail, top bar, three-pane registry layout, design tokens, URL routing, zh/en catalogs, light and dark themes, and personal appearance settings.                   | Dashboard shell (#37)                          |
+| `packages/<name>/` | One package each for the collaborative service's remaining surfaces: the Badger MCP and the host installer.                                                                                           | Planned (#24)                                  |
 
 Everything shipped is generic: each deployment keeps its own launcher entries,
 reverse-proxy routes, and deploy scripts outside this repository.
@@ -26,9 +27,21 @@ npm run format:check
 ```
 
 `npm run build` also rebuilds the bundled WorkflowRuntime in
-`packages/kernel/assets/runtime/`. Run one kernel test file with
+`packages/kernel/assets/runtime/` and the dashboard in `packages/web/dist/`.
+Run one kernel test file with
 `npm test -w packages/kernel -- test/<file>.test.ts`, and the CLI with
 `node packages/kernel/bin/badger.js`.
+
+The dashboard's browser journeys run against the real service in local
+single-user mode, with the built dashboard served by the server. Build first,
+then run them:
+
+```bash
+npm run build
+npm run test:e2e -w packages/web
+```
+
+Playwright's Chromium is a one-time download: `npx playwright install chromium`.
 
 The server package's suite runs on PGlite by default and on Postgres 17 when
 `BADGER_TEST_DATABASE_URL` points at one; CI runs both. To try the container
@@ -39,9 +52,10 @@ docker compose up --build
 # health report: http://localhost:8787/health
 ```
 
-The compose file runs the server role with `BADGER_IDENTITY=none`, so it
-reports health without serving a person page. For local single-user mode, with
-the implicit Administrator and PGlite on disk:
+The image also carries the built dashboard. The compose file runs the server
+role with `BADGER_IDENTITY=none`, so it reports health and serves the
+signed-out page, and person routes answer 401. For local single-user mode,
+with the implicit Administrator, the dashboard, and PGlite on disk:
 
 ```bash
 npm run build

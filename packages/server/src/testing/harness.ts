@@ -84,6 +84,8 @@ function harnessEnvironment(
     BADGER_HOST: "127.0.0.1",
     BADGER_PORT: "0",
     BADGER_STORAGE_DIR: root,
+    // A suite that tests the dashboard points BADGER_WEB_DIR at a fixture.
+    BADGER_WEB_DIR: path.join(root, "web"),
   };
   if (mode === "local") {
     return { ...common, BADGER_MODE: "local" };

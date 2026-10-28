@@ -4,7 +4,8 @@
   "license": "MIT",
   "workspaces": [
     "packages/kernel",
-    "packages/server"
+    "packages/server",
+    "packages/web"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

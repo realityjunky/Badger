@@ -22,10 +22,22 @@ import type { IdSource } from "../ids.js";
 import type { Logger } from "../log.js";
 import { loopbackOrigins } from "../network.js";
 import { signInPerson, type Person } from "../people.js";
+import {
+  parsePreferencesInput,
+  readPreferences,
+  savePreferences,
+} from "../preferences.js";
+import { readJsonBody } from "./body.js";
 import { guardRequest } from "./guard.js";
 import { buildHealthReport } from "./health.js";
 import { escapeHtml, renderHomePage, renderSignedOutPage } from "./page.js";
 import { replyTo, type Reply } from "./responses.js";
+import {
+  isFileRequest,
+  readWebAsset,
+  readWebDocument,
+  WEB_CONTENT_SECURITY_POLICY,
+} from "./web.js";
 
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,100}$/u;
 const API = "/api/v1";
@@ -156,6 +168,57 @@ export function createService(options: ServiceOptions, port: number): Service {
     reply.json(200, await listAuditEvents(database, { limit, after }));
   }
 
+  async function handlePreferences(
+    request: IncomingMessage,
+    reply: Reply,
+    person: Person,
+    principal: Principal,
+    method: string,
+  ): Promise<void> {
+    if (method === "GET" || method === "HEAD") {
+      return reply.json(200, {
+        preferences: await readPreferences(database, person.id),
+      });
+    }
+    if (method !== "PUT") {
+      return reply.error(405, "invalid", "Method not allowed", {
+        allow: "GET, HEAD, PUT",
+      });
+    }
+
+    const body = await readJsonBody(request);
+    if (!body.ok) {
+      return reply.error(400, "invalid", body.message);
+    }
+    const input = parsePreferencesInput(body.value);
+    if (!input.ok) {
+      return reply.error(400, "invalid", input.message);
+    }
+
+    const saved = await savePreferences(
+      database,
+      serviceDependencies,
+      {
+        personId: person.id,
+        credential: principal.credential,
+        channel: channelOf(principal.credential),
+        requestId: reply.requestId,
+      },
+      input.value,
+    );
+    if (saved.kind === "conflict") {
+      return reply.json(409, {
+        error: {
+          code: "conflict",
+          message: "The preferences changed since you read them",
+        },
+        requestId: reply.requestId,
+        preferences: saved.preferences,
+      });
+    }
+    return reply.json(200, { preferences: saved.preferences });
+  }
+
   async function handle(
     request: IncomingMessage,
     reply: Reply,
@@ -177,19 +240,51 @@ export function createService(options: ServiceOptions, port: number): Service {
     if (path === null) {
       return reply.error(404, "invalid", "Not found");
     }
-    if (method !== "GET" && method !== "HEAD") {
-      return reply.error(405, "invalid", "Method not allowed", {
-        allow: "GET, HEAD",
-      });
-    }
+    const reads = method === "GET" || method === "HEAD";
+    const isApi = path === "/api" || path.startsWith("/api/");
+    const preferencesPath = path === `${API}/me/preferences`;
 
     if (path === "/health") {
+      if (!reads) {
+        return reply.error(405, "invalid", "Method not allowed", {
+          allow: "GET, HEAD",
+        });
+      }
       const report = await buildHealthReport({
         config,
         database,
         migrations: options.migrations,
       });
       return reply.json(report.status === "ok" ? 200 : 503, report);
+    }
+
+    // The dashboard's assets are public: the sign-in page and the app both
+    // need them before anyone is identified.
+    if (!isApi && isFileRequest(path)) {
+      if (!reads) {
+        return reply.error(405, "invalid", "Method not allowed", {
+          allow: "GET, HEAD",
+        });
+      }
+      const asset = await readWebAsset(config.webDirectory, path);
+      if (asset === null) {
+        return reply.error(404, "invalid", "Not found");
+      }
+      return reply.send({
+        status: 200,
+        contentType: asset.contentType,
+        body: asset.body,
+        headers: { "cache-control": asset.cacheControl },
+      });
+    }
+
+    // Only the preferences endpoint writes; every other route is read-only.
+    // Refuse other methods before identifying anyone, so no sign-in or audit
+    // record is written for a request the service will not serve.
+    if (!reads && !preferencesPath) {
+      return reply.error(405, "invalid", "Method not allowed", {
+        allow: "GET, HEAD",
+      });
     }
 
     const identityResult = await identify(request, guard.hostname);
@@ -204,16 +299,38 @@ export function createService(options: ServiceOptions, port: number): Service {
       return reply.error(403, "denied", "This account may not use Badger");
     }
     if (identityResult.kind === "anonymous") {
-      return path === "/"
-        ? reply.html(401, renderSignedOutPage())
-        : reply.error(401, "unauthenticated", "Sign in to use Badger");
+      // A dashboard URL opened while signed out shows the signed-out page;
+      // only the API answers in JSON.
+      return isApi
+        ? reply.error(401, "unauthenticated", "Sign in to use Badger")
+        : reply.html(401, renderSignedOutPage());
     }
 
     const principal = identityResult.principal;
     const person = await signIn(principal, reply.requestId);
     const roles = organizationRoles(person, config);
 
+    if (preferencesPath) {
+      return handlePreferences(request, reply, person, principal, method);
+    }
+    if (!isApi) {
+      const document = await readWebDocument(
+        config.webDirectory,
+        config.basePath,
+      );
+      if (document !== null) {
+        return reply.send({
+          status: 200,
+          contentType: "text/html; charset=utf-8",
+          body: document,
+          headers: {
+            "content-security-policy": WEB_CONTENT_SECURITY_POLICY,
+          },
+        });
+      }
+    }
     if (path === "/") {
+      // No dashboard build beside the server: the walking skeleton's page.
       return reply.html(
         200,
         renderHomePage({
@@ -240,7 +357,7 @@ export function createService(options: ServiceOptions, port: number): Service {
     if (path === `${API}/audit-events`) {
       return listAudit(reply, url, roles);
     }
-    if (path.startsWith("/api/")) {
+    if (isApi) {
       return reply.error(404, "invalid", "Not found");
     }
     reply.send({

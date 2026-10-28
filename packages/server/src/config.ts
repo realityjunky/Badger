@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { isLoopbackHostname, normalizeHostname } from "./network.js";
 import type { LocalAdministrator } from "./identity/local.js";
 
@@ -69,6 +71,11 @@ export interface ServiceConfig {
   /** Emails, lowercased, of the people Badger treats as Administrators. */
   bootstrapAdministrators: string[];
   storage: StorageConfiguration;
+  /**
+   * The built dashboard's directory. It holds index.html and the asset
+   * folder; a deployment that ships them elsewhere sets BADGER_WEB_DIR.
+   */
+  webDirectory: string;
 }
 
 export class ConfigurationError extends Error {
@@ -336,6 +343,37 @@ function readDatabase(
   };
 }
 
+/**
+ * The dashboard build beside the server package, whether this file runs from
+ * src/ or from dist/src/. A deployment that lays the image out differently
+ * names the directory itself.
+ */
+function defaultWebDirectory(): string {
+  let directory = path.dirname(fileURLToPath(import.meta.url));
+  for (;;) {
+    if (
+      existsSync(path.join(directory, "package.json")) &&
+      path.basename(directory) === "server" &&
+      path.basename(path.dirname(directory)) === "packages"
+    ) {
+      return path.join(path.dirname(directory), "web", "dist");
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      break;
+    }
+    directory = parent;
+  }
+  return path.resolve("packages/web/dist");
+}
+
+function readWebDirectory(environment: Environment): string {
+  const configured = readString(environment, "BADGER_WEB_DIR");
+  return configured === undefined
+    ? defaultWebDirectory()
+    : path.resolve(configured);
+}
+
 function readStorage(environment: Environment): StorageConfiguration {
   const root = readString(environment, "BADGER_STORAGE_DIR") ?? ".badger";
   return {
@@ -449,5 +487,6 @@ export function loadConfig(
     identity,
     bootstrapAdministrators: readBootstrapAdministrators(environment),
     storage: readStorage(environment),
+    webDirectory: readWebDirectory(environment),
   };
 }
