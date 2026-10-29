@@ -301,6 +301,17 @@ serializes and persists the counter, so concurrent requests and service
 restarts share the limit. Excess requests return 429 with `Retry-After` in
 seconds; sessions and other tokens retain their own access.
 
+## Expert MCP access
+
+The local stdio MCP in [`packages/mcp`](../mcp/README.md) calls this API with
+a personal access token. `GET /api/v1/me/mcp` reports current expert tool
+capabilities using the same questionnaire and Skill permission decisions as
+the dashboard. `GET /api/v1/me/questions` returns current assigned questions,
+own answers, and comments, optionally filtered by both `workflowId` and
+`versionId`. It gathers assignments within the service so many visible versions
+do not consume a token request per version. Reads and writes still check the
+token's validity, scopes, and current roles. Sign-offs remain session-only.
+
 ## Skill uploads
 
 The Skills dashboard accepts a Skill folder or zip, previews its inventory,

@@ -8,6 +8,7 @@ import {
   acknowledgementPreview,
   acknowledgeFact,
 } from "../questionnaire/resolutions.js";
+import { questionnaireCapabilities } from "../questionnaire/access.js";
 import { isAdministrator } from "../authorization.js";
 import { RequestError, objectInput } from "./errors.js";
 import { readJsonBody } from "./body.js";
@@ -200,31 +201,26 @@ export async function handleQuestionnaire(
       const caps = await workflowCapabilities(tx, access, person, workflow);
       if (!caps.read)
         throw new RequestError(403, "This workflow is outside your roles");
-      const grants = await tx.query<{ role: string }>(
-        "select role from role_bindings where workflow_id = $1 and person_id = $2",
-        [workflowId, person.id],
+      const capabilities = await questionnaireCapabilities(
+        tx,
+        access,
+        person,
+        workflowId,
       );
-      const compose =
-        (isAdministrator(access) ||
-          grants.rows.some((g) => g.role === "Engineer")) &&
-        (access.tokenScopes === undefined ||
-          access.tokenScopes.includes("engineer"));
+      const {
+        compose,
+        comment,
+        raiseConcern: canRaiseConcern,
+        resolveConcern: canResolveConcern,
+        acknowledge: canAcknowledge,
+      } = capabilities;
       const answering = action === "answer" || action === "submit";
       const commenting = resource === "comments" || action === "comments";
-      const comment =
-        isAdministrator(access) ||
-        grants.rows.some((g) => g.role !== "Observer");
-      const canRaiseConcern =
-        (isAdministrator(access) ||
-          grants.rows.some((g) => g.role === "Field expert")) &&
-        (access.tokenScopes === undefined ||
-          access.tokenScopes.includes("expert"));
       if (commenting && !comment)
         throw new RequestError(
           403,
           "A workflow role other than Observer is required to comment",
         );
-      const canResolveConcern = compose && access.tokenScopes === undefined;
       if (resource === "concerns" && !id && !canRaiseConcern)
         throw new RequestError(403, "Only a Field expert raises a concern");
       if (resource === "concerns" && id && !canResolveConcern)
@@ -233,11 +229,6 @@ export async function handleQuestionnaire(
           "Only a signed-in Engineer resolves a concern",
         );
       const acknowledging = resource === "facts";
-      const canAcknowledge =
-        access.tokenScopes === undefined &&
-        grants.rows.some(
-          (g) => g.role === "Field expert" || g.role === "Workflow owner",
-        );
       if (acknowledging && !canAcknowledge)
         throw new RequestError(
           403,
@@ -275,14 +266,7 @@ export async function handleQuestionnaire(
             personId: person.id,
             workflow,
             version,
-            capabilities: {
-              compose,
-              comment,
-              raiseConcern: canRaiseConcern,
-              resolveConcern: canResolveConcern,
-              resolve: compose && access.tokenScopes === undefined,
-              acknowledge: canAcknowledge,
-            },
+            capabilities,
             settings: await readSettings(tx, workflowId),
             pins: await listWorkflowPins(tx, versionId),
             assignees: assignees.rows.map((a) => ({

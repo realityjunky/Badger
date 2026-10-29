@@ -1,0 +1,160 @@
+import { constants, promises as fs } from "node:fs";
+import path from "node:path";
+import type { BadgerApi } from "./api.js";
+
+interface UploadLimits {
+  maxBytes: number;
+  maxFileBytes: number;
+  maxFiles: number;
+}
+
+/** Read regular files only; the service owns Skill validation and identity. */
+async function folderFiles(folder: string, limits: UploadLimits) {
+  const selected = path.resolve(folder);
+  const rootInfo = await fs.lstat(selected);
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink())
+    throw new Error(
+      "Select a regular Skill folder; symbolic links are refused",
+    );
+  const root = await fs.realpath(selected);
+  const files: { path: string; content: string }[] = [];
+  let total = 0;
+  let entries = 0;
+  async function contained(target: string) {
+    const real = await fs.realpath(target);
+    const relative = path.relative(root, real);
+    if (
+      relative === ".." ||
+      relative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relative)
+    )
+      throw new Error("A local path escapes the Skill folder");
+  }
+  async function walk(directory: string, prefix: string) {
+    await contained(directory);
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      entries++;
+      const relative = `${prefix}${entry.name}`;
+      if (entries > limits.maxFiles * 10 || Buffer.byteLength(relative) > 1024)
+        throw new Error("Skill folder exceeds the path or entry limit");
+      const target = path.join(directory, entry.name);
+      const info = await fs.lstat(target);
+      if (info.isSymbolicLink())
+        throw new Error("Symbolic links are refused in Skill uploads");
+      if (info.isDirectory()) {
+        await walk(target, `${relative}/`);
+        continue;
+      }
+      if (!info.isFile()) throw new Error("Only regular files may be uploaded");
+      if (files.length >= limits.maxFiles)
+        throw new Error("Skill folder exceeds the file count limit");
+      const handle = await fs.open(
+        target,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const opened = await handle.stat();
+        await contained(target);
+        const current = await fs.lstat(target);
+        if (
+          !opened.isFile() ||
+          current.isSymbolicLink() ||
+          current.dev !== opened.dev ||
+          current.ino !== opened.ino
+        )
+          throw new Error(
+            "A local file changed while the folder was being read",
+          );
+        const maximum = Math.min(limits.maxFileBytes, limits.maxBytes - total);
+        if (opened.size > maximum)
+          throw new Error("Skill folder exceeds the file or total byte limit");
+        const buffer = Buffer.alloc(Math.min(opened.size + 1, maximum + 1));
+        let offset = 0;
+        while (offset < buffer.length) {
+          const { bytesRead } = await handle.read(
+            buffer,
+            offset,
+            buffer.length - offset,
+            null,
+          );
+          if (bytesRead === 0) break;
+          offset += bytesRead;
+        }
+        if (offset > opened.size || offset > maximum)
+          throw new Error(
+            "A local file changed or exceeded the upload byte limit",
+          );
+        total += offset;
+        files.push({
+          path: relative,
+          content: buffer.subarray(0, offset).toString("base64"),
+        });
+      } finally {
+        await handle.close();
+      }
+    }
+  }
+  await walk(root, "");
+  const after = await fs.lstat(root);
+  if (
+    after.isSymbolicLink() ||
+    after.ino !== rootInfo.ino ||
+    after.dev !== rootInfo.dev
+  )
+    throw new Error("The Skill folder changed while it was being read");
+  return files;
+}
+
+export async function uploadSkillVersion(
+  api: BadgerApi,
+  input: {
+    skillId: string;
+    folder: string;
+    scripts: Record<string, string[]>;
+    confirmed?: boolean;
+    expectedHash?: string;
+  },
+) {
+  if (input.confirmed && !input.expectedHash)
+    throw new Error(
+      "Preview the folder and quote its expectedHash after the user confirms",
+    );
+  const { skills, limits } = await api.request<{
+    skills: { id: string; canUpload: boolean }[];
+    limits: UploadLimits;
+  }>("/skills");
+  if (!skills.some((skill) => skill.id === input.skillId && skill.canUpload))
+    throw new Error("This Skill is outside your upload permissions");
+  const files = await folderFiles(input.folder, limits);
+  const result = await api.request<{
+    preview?: unknown;
+    version?: {
+      skillId: string;
+      hash: string;
+      inventory: unknown[];
+      scripts: unknown[];
+    };
+  }>(
+    `/skills/${encodeURIComponent(input.skillId)}/${input.confirmed ? "versions" : "upload-preview"}`,
+    "POST",
+    {
+      files,
+      scripts: input.scripts,
+      ...(input.confirmed
+        ? { confirmed: true, expectedHash: input.expectedHash }
+        : {}),
+    },
+  );
+  if (result.version) {
+    const { skillId, hash, inventory, scripts } = result.version;
+    return {
+      version: {
+        skillId,
+        hash,
+        fileCount: inventory.length,
+        scriptCount: scripts.length,
+      },
+    };
+  }
+  return result;
+}

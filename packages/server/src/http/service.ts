@@ -68,6 +68,9 @@ import { handleSourceStudy, sourceStudyMethods } from "./source-study.js";
 import { handleQuestionnaire, questionnaireMethods } from "./questionnaire.js";
 import { handleEvents } from "./events.js";
 import { tokenRequestAllowed } from "./token-access.js";
+import { questionnaireCapabilities } from "../questionnaire/access.js";
+import { skillGroupPermissions } from "../skills/access.js";
+import { readMyQuestions } from "../questionnaire/my-questions.js";
 import { mayManageRoleScope } from "../workflow-access.js";
 import {
   isFileRequest,
@@ -847,6 +850,33 @@ export function createService(options: ServiceOptions, port: number): Service {
           roles,
           revision: config.revision,
         }),
+      );
+    }
+    if (path === `${API}/me/mcp`) {
+      return reply.json(200, {
+        profile: "expert",
+        capabilities: {
+          ...(await questionnaireCapabilities(database, access, person, null)),
+          uploadSkillVersion: (
+            await skillGroupPermissions(database, access, person)
+          ).some((group) => group.canUpload),
+        },
+      });
+    }
+    if (path === `${API}/me/questions`) {
+      const workflowId = url.searchParams.get("workflowId");
+      const versionId = url.searchParams.get("versionId");
+      if ((workflowId === null) !== (versionId === null))
+        return reply.error(
+          400,
+          "invalid",
+          "Supply workflowId and versionId together",
+        );
+      return reply.json(
+        200,
+        await database.transaction((tx) =>
+          readMyQuestions(tx, person.id, { workflowId, versionId }),
+        ),
       );
     }
     if (path === `${API}/me`) {

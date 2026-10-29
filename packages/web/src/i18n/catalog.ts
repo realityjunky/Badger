@@ -5,6 +5,17 @@ import type { Language } from "../preferences/model.js";
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  "mcp.title": "Connect your Agent",
+  "mcp.instructions":
+    "Install the local Badger MCP and make its command available on your computer. Create a token with the Field expert scope, then replace the token placeholder in the configuration below.",
+  "mcp.host": "Agent host",
+  "mcp.command": "MCP command or absolute executable path",
+  "mcp.configuration": "MCP configuration",
+  "mcp.copy": "Copy configuration",
+  "mcp.copied": "Configuration copied.",
+  "mcp.copyFailed": "Copy failed. Select and copy the configuration above.",
+  "mcp.destination":
+    "Claude Code: .mcp.json. Codex: ~/.codex/config.toml. WorkBuddy: MCP server configuration. This connects the expert profile; you complete sign-offs in the dashboard.",
   "questionnaire.state.confirmed": "Confirmed",
   "questionnaire.state.followed-up": "Followed up",
   "questionnaire.state.deferred": "Deferred",
@@ -641,6 +652,17 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  "mcp.title": "连接你的 Agent",
+  "mcp.instructions":
+    "在电脑上安装本地 Badger MCP，并确保命令可用。创建具有领域专家范围的令牌，再替换下方配置中的令牌占位符。",
+  "mcp.host": "Agent 客户端",
+  "mcp.command": "MCP 命令或可执行文件的绝对路径",
+  "mcp.configuration": "MCP 配置",
+  "mcp.copy": "复制配置",
+  "mcp.copied": "配置已复制。",
+  "mcp.copyFailed": "复制失败，请选择并复制上方配置。",
+  "mcp.destination":
+    "Claude Code：.mcp.json。Codex：~/.codex/config.toml。WorkBuddy：MCP 服务器配置。此配置连接领域专家工具；签署操作需由你在控制台完成。",
   "questionnaire.state.confirmed": "已确认",
   "questionnaire.state.followed-up": "已追问",
   "questionnaire.state.deferred": "已暂缓",
