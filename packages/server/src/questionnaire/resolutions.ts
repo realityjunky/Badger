@@ -1,4 +1,5 @@
 import { canonicalHash } from "@realityjunky/badger";
+import { readDrafts } from "./drafts.js";
 import { recordAudit, type WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
@@ -370,6 +371,9 @@ export async function resolutionPreview(
     locale: version.locale,
     evidence,
     bindings,
+    drafts: (await readDrafts(tx, versionId)).filter(
+      (draft) => draft.status === "active" && draft.questionId === questionId,
+    ),
   };
   return { ...bound, confirmationHash: canonicalHash(bound) };
 }

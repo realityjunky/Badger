@@ -1,11 +1,70 @@
 import { describe, expect, it } from "vitest";
-import { createQuestionnaireHandoff } from "../src/index.js";
+import {
+  createQuestionnaireHandoff,
+  type QuestionnaireRecords,
+} from "../src/index.js";
 import {
   questionnaireFixture,
   deferredQuestionFixture,
 } from "./fixtures/semantic-dossier.js";
 
 describe("semantic questionnaire handoff", () => {
+  it("reads durable records with all blockers and returns a defensive handoff", () => {
+    const records: QuestionnaireRecords = {
+      questions: [
+        {
+          id: "q",
+          revision: 1,
+          topic: "interfaces",
+          text: "Which columns?",
+          state: "deferred",
+          resolution: {
+            id: "r",
+            revision: 1,
+            kind: "deferred",
+            reason: "Owned by a later workflow.",
+            deferredKind: "out-of-scope",
+            skillId: null,
+          },
+        },
+      ],
+      drafts: [
+        {
+          id: "i",
+          revision: 1,
+          kind: "inference",
+          topic: "interfaces",
+          statement: "Use sample_id.",
+          questionId: "q",
+          questionRevision: 1,
+          status: "active",
+        },
+      ],
+      pins: [
+        {
+          skillId: "s",
+          skillName: "Source",
+          revision: 1,
+          hash: "a".repeat(64),
+          studied: false,
+        },
+      ],
+    };
+    const handoff = createQuestionnaireHandoff({ records });
+    expect(handoff.status).toBe("incomplete");
+    expect(
+      handoff.readiness
+        .find((r) => r.topic === "interfaces")
+        ?.blockers.map((b) => b.code),
+    ).toEqual(["unconfirmed-inference", "unstudied-pin"]);
+    expect(handoff.ledger.remainingQuestions).toEqual([]);
+    expect(handoff.ledger.agentInferences[0].state).toBe("draft");
+    handoff.deferredQuestions[0].resolution!.reason = "Changed by a reader";
+    expect(records.questions[0].resolution?.reason).toBe(
+      "Owned by a later workflow.",
+    );
+  });
+
   it("refuses the retired version 1 dossier with a migration finding", () => {
     const { dossier, factoryPlan } = questionnaireFixture();
     const legacy = { ...dossier, schemaVersion: 1 };

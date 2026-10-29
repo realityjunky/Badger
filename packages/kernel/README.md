@@ -84,6 +84,14 @@ published child questions, reasoned deferrals with Skill backlogs, withdrawal,
 and re-confirmation after answer or cited evidence changes. Sign-offs stay in
 the dashboard.
 
+Ledger and readiness (#49) derive the five-part ledger from durable records
+through `createQuestionnaireHandoff({ records })`. The kernel lists blockers
+for scope and every dossier topic, including interfaces, and compares ledger
+items with immutable round-publication baselines. Inferences and assumptions
+remain drafts until their linked question's facts are acknowledged. This
+record-readiness result does not compose, validate, or approve a dossier; the
+existing dossier/FactoryPlan handoff retains those validation requirements.
+
 Question threads and expert concerns (#47) are also delivered: immutable
 comment edits, concerns linked from the
 Engineer's inbox, and reviewed outcomes that create a draft question, accept

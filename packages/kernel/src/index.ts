@@ -18,6 +18,8 @@ export * from "./factory/state.js";
 export * from "./factory/approved-generation.js";
 export * from "./factory/guide.js";
 export * from "./factory/questionnaire.js";
+export type * from "./factory/questionnaire-records.js";
+export { questionnaireLedgerChanges } from "./factory/questionnaire-records.js";
 export * from "./factory/migration.js";
 export * from "./factory/source.js";
 export * from "./eval/run.js";

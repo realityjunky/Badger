@@ -26,6 +26,7 @@ interface Review {
       endLine: number;
       fileHash: string;
     }[];
+    drafts?: { id: string; revision: number; statement: string }[];
   };
   requestId: string;
   facts: string[];
@@ -528,6 +529,19 @@ export function QuestionResolution({
                 {text}
               </p>
             ))}
+            {review.input.kind === "confirmed" &&
+              !!review.preview.drafts?.length && (
+                <>
+                  <h3>{t("ledger.linkedDrafts")}</h3>
+                  <p>{t("ledger.linkedDraftsHelp")}</p>
+                  {review.preview.drafts.map((draft) => (
+                    <p className="questionnaire-text" key={draft.id}>
+                      {draft.statement} · {t("ledger.recordRevision")}{" "}
+                      {draft.revision}
+                    </p>
+                  ))}
+                </>
+              )}
             <p>{review.preview.locale}</p>
             <h3>{t("resolution.answers")}</h3>
             <ul>

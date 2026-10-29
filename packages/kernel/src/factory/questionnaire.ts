@@ -2,6 +2,11 @@ import type { FactoryPlan } from "../types.js";
 import path from "node:path";
 import { sha256, stableValue } from "../util.js";
 import { normalizeWorkflow } from "../workflow/contract.js";
+import {
+  questionnaireRecordHandoff,
+  type QuestionnaireRecords,
+  type QuestionnaireRecordHandoff,
+} from "./questionnaire-records.js";
 
 export const SEMANTIC_DOSSIER_TOPICS = [
   "inputs",
@@ -474,13 +479,23 @@ export interface QuestionnaireHandoff {
   nextReadOnlyCommand: null;
 }
 
-export function createQuestionnaireHandoff(input: {
+interface DossierHandoffInput {
   projectRoot: string;
   dossier: unknown;
   factoryPlan?: FactoryPlan;
   existingContext?: string;
   stopped?: boolean;
-}): QuestionnaireHandoff {
+}
+export function createQuestionnaireHandoff(input: {
+  records: QuestionnaireRecords;
+}): QuestionnaireRecordHandoff;
+export function createQuestionnaireHandoff(
+  input: DossierHandoffInput,
+): QuestionnaireHandoff;
+export function createQuestionnaireHandoff(
+  input: DossierHandoffInput | { records: QuestionnaireRecords },
+): QuestionnaireHandoff | QuestionnaireRecordHandoff {
+  if ("records" in input) return questionnaireRecordHandoff(input.records);
   const diagnostics = validateSemanticDossier(input.dossier);
   if (!isText(input.projectRoot))
     diagnostics.push({

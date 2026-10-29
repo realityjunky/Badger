@@ -35,6 +35,7 @@ import { QuestionResolution } from "./questionnaire/QuestionResolution.js";
 import { QuestionInspector } from "./questionnaire/QuestionInspector.js";
 import { QuestionThread } from "./questionnaire/QuestionThread.js";
 import { ConcernPanel } from "./questionnaire/ConcernPanel.js";
+import { QuestionnaireLedger } from "./questionnaire/QuestionnaireLedger.js";
 
 /** The three panes share the service's records and server-owned capabilities. */
 export function QuestionnairePage() {
@@ -186,6 +187,7 @@ export function QuestionnairePage() {
       : view?.questions.find((q) => q.roundId === roundId);
   const selectedConcern = view?.concerns.find((c) => c.id === concernId);
   const compose = view?.capabilities.compose === true;
+  const ledgerOpen = query.get("panel") === "ledger";
   const ownAnswer = view?.answers.find(
     (a) => a.questionId === selected?.id && a.personId === view.personId,
   );
@@ -297,6 +299,13 @@ export function QuestionnairePage() {
           {t(connected ? "questionnaire.live" : "questionnaire.polling")}
         </span>
         <Button onClick={() => void reload()}>{t("workflow.reload")}</Button>
+        {view && (
+          <Link
+            to={`/questionnaire?${versionQuery}${ledgerOpen ? "" : "&panel=ledger"}`}
+          >
+            {t(ledgerOpen ? "ledger.questions" : "ledger.title")}
+          </Link>
+        )}
         {view?.capabilities.raiseConcern && (
           <Button
             onClick={() => {
@@ -309,7 +318,10 @@ export function QuestionnairePage() {
         )}
       </div>
       {failure && <Alert type="error" showIcon message={failure} />}
-      <div className="three-pane" data-testid="three-pane">
+      <div
+        className={`three-pane${ledgerOpen ? " ledger-open" : ""}`}
+        data-testid="three-pane"
+      >
         <section
           className="pane explorer-pane"
           data-testid="explorer-pane"
@@ -417,7 +429,20 @@ export function QuestionnairePage() {
           data-testid="main-pane"
           aria-label={t("questionnaire.thread")}
         >
-          {view && path && editing ? (
+          {view && path && ledgerOpen ? (
+            <QuestionnaireLedger
+              basePath={basePath}
+              path={path}
+              view={view}
+              sinceRound={query.get("sinceRound")}
+              onSinceRound={(id) =>
+                navigate(
+                  `/questionnaire?${versionQuery}&panel=ledger${id ? `&sinceRound=${encodeURIComponent(id)}` : ""}`,
+                )
+              }
+              onChanged={reload}
+            />
+          ) : view && path && editing ? (
             <QuestionComposer
               key={
                 editing.question?.id ??
@@ -587,11 +612,13 @@ export function QuestionnairePage() {
             </>
           )}
         </section>
-        <QuestionInspector
-          question={selected}
-          concern={selectedConcern}
-          view={view}
-        />
+        {!ledgerOpen && (
+          <QuestionInspector
+            question={selected}
+            concern={selectedConcern}
+            view={view}
+          />
+        )}
       </div>
       <Modal
         open={newConcern}
