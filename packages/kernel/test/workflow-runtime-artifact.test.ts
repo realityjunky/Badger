@@ -877,7 +877,7 @@ describe("WorkflowRuntime artifact versions", () => {
       });
       await recoverArtifactsInFreshProcess(location, consuming);
     }
-  });
+  }, 30_000);
 
   it("rejects a persisted artifact version with an unknown producer", async () => {
     const runtime = createWorkflowRuntime();

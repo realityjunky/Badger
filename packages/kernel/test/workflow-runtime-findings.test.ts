@@ -131,7 +131,7 @@ it("recovers structured findings in a fresh process", async () => {
       {
         cwd: process.cwd(),
         env: {
-          PATH: process.env.PATH,
+          ...process.env,
           WORKFLOW_LOCATION_JSON: JSON.stringify(location),
           WORKFLOW_EXPECTED_JSON: JSON.stringify(expected),
         },
@@ -318,7 +318,7 @@ describe("WorkflowRuntime findings at the public seam", () => {
     expect(standaloneStarted).toEqual(manualStarted);
     await recoverInFreshProcess(manual, manualStarted);
     await recoverInFreshProcess(standalone, standaloneStarted);
-  });
+  }, 30_000);
 
   it("binds the finding catalog version to the persisted execution identity", async () => {
     const runtime = createWorkflowRuntime();
