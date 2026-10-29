@@ -1,5 +1,8 @@
 import { Ajv } from "ajv";
-import { SEMANTIC_DOSSIER_TOPICS } from "@realityjunky/badger";
+import {
+  SEMANTIC_DOSSIER_TOPICS,
+  type FactoryPlan,
+} from "@realityjunky/badger";
 import { objectInput, RequestError } from "../http/errors.js";
 import { parseQuestion, type QuestionContent } from "../questionnaire/model.js";
 
@@ -97,7 +100,7 @@ export const QUESTION_DRAFT_SCHEMA = object({
 export function validateDraftResult(
   schema: object,
   result: unknown,
-): { questions: QuestionContent[] } {
+): { questions: QuestionContent[] } | { plan: FactoryPlan } {
   if (Buffer.byteLength(JSON.stringify(result) ?? "") > 1024 * 1024)
     throw new RequestError(413, "The job result exceeds 1 MiB");
   const ajv = new Ajv({ strict: false });
@@ -108,6 +111,7 @@ export function validateDraftResult(
       `The result does not match the job's output schema: ${ajv.errorsText(valid.errors)}`,
     );
   const input = objectInput(result);
+  if ("plan" in input) return { plan: input.plan as FactoryPlan };
   return {
     questions: (input.questions as unknown[]).map((q) =>
       parseQuestion(objectInput(q)),

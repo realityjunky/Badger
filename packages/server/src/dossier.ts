@@ -143,6 +143,15 @@ export async function storeDossier(
     ["Engineer", "Workflow owner"],
   );
   await updateDossierStages(tx, deps, versionId, true);
+  await invalidateGate(
+    tx,
+    deps,
+    context,
+    versionId,
+    "plan",
+    "A new dossier version superseded the plan's meaning",
+    ["Engineer", "Workflow owner"],
+  );
   await closeGateInbox(
     tx,
     versionId,
@@ -220,6 +229,15 @@ export async function reconcileDossier(
     ["Engineer", "Workflow owner"],
   );
   await updateDossierStages(tx, deps, versionId, false);
+  await invalidateGate(
+    tx,
+    deps,
+    context,
+    versionId,
+    "plan",
+    "The plan's dossier records changed",
+    ["Engineer", "Workflow owner"],
+  );
 }
 
 export async function dossierGateState(

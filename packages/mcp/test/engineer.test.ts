@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
@@ -8,6 +9,7 @@ import {
   type TestService,
 } from "@realityjunky/badger-server/testing";
 import { createEngineerMcp } from "../src/index.js";
+import type { FactoryPlan } from "@realityjunky/badger";
 
 let service: TestService;
 const clients: Client[] = [];
@@ -229,6 +231,87 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
   expect((await call(client, "questionnaire", context)).questions).toEqual([]);
   expect(await call(client, "ledger", context)).toHaveProperty("handoff");
   expect(await call(client, "readiness", context)).toHaveProperty("readiness");
+  await service.runSourceCheckJobs();
+  async function confirm(gate: string) {
+    const { preview } = await request(
+      `${base}/gates/${gate}/preview`,
+      "POST",
+      {},
+    );
+    await request(`${base}/gates/${gate}/commit`, "POST", {
+      confirmationHash: preview.confirmationHash,
+      requestId: crypto.randomUUID(),
+    });
+  }
+  await confirm("sources");
+  const { record } = await request(`${base}/source-study/facts`, "POST", {
+    statement: "Keep samples cold.",
+    evidence: [
+      {
+        skillId: skill.id,
+        hash: preview.hash,
+        path: "SKILL.md",
+        startLine: 7,
+        endLine: 7,
+        fileHash: createHash("sha256").update(skillText).digest("hex"),
+      },
+    ],
+  });
+  await confirm(`source-study/${skill.id}`);
+  const { handoff } = await request(`${base}/questionnaire/ledger`);
+  const topic = {
+    summary: "Keep samples cold; no other behavior is needed.",
+    factIds: [record.id],
+  };
+  const semantics = {
+    nodes: [{ id: "store", order: 0, responsibility: topic }],
+    topics: Object.fromEntries(
+      handoff.readiness
+        .filter((r: { topic: string }) => r.topic !== "scope")
+        .map((r: { topic: string }) => [r.topic, topic]),
+    ),
+  };
+  const { composition } = await request(
+    `${base}/dossier/preview`,
+    "POST",
+    semantics,
+  );
+  await request(`${base}/dossier/compose`, "POST", {
+    ...semantics,
+    confirmationHash: composition.hash,
+  });
+  await confirm("dossier");
+  const { job: planJob } = await request(`${base}/drafting-jobs`, "POST", {
+    kind: "draft-plan",
+    confirmed: true,
+  });
+  const planClaim = await call(client, "claim_job", {
+    ...context,
+    jobId: planJob.id,
+    revision: planJob.revision,
+  });
+  folders.push(planClaim.folder);
+  const planContext = JSON.parse(
+    await fs.readFile(path.join(planClaim.folder, "context.json"), "utf8"),
+  ) as { planning: { skeleton: FactoryPlan; input: { dossierHash: string } } };
+  expect(planContext.planning.input.dossierHash).toBe(composition.hash);
+  const plan = planContext.planning.skeleton;
+  plan.workflow.customNodes[0]!.implementation.skill = "storage";
+  await fs.writeFile(
+    path.join(planClaim.folder, "result.json"),
+    JSON.stringify({ plan }),
+  );
+  const submittedPlan = await call(client, "submit_job", {
+    ...context,
+    jobId: planJob.id,
+    folder: planClaim.folder,
+  });
+  expect(submittedPlan.job.status).toBe("submitted");
+  expect(submittedPlan).toMatchObject({
+    requiresPerson: true,
+    dashboardUrl: `${service.baseUrl}/workflows/${workflow.id}/versions/${version.id}#plan`,
+  });
+  expect((await request(`${base}/plan`)).versions).toEqual([]);
   await request(`${base}/pins/${skill.id}`, "DELETE", { revision: 1 });
   const cancelled = await request(`${base}/drafting-jobs/${job.id}`);
   expect(cancelled.job.status).toBe("cancelled");

@@ -100,6 +100,9 @@ A structured account of the workflow's meaning, including Node responsibilities,
 **Dossier version**:
 An immutable snapshot of a Semantic dossier and the ledger records it relies on. The Engineer composes it, and the Workflow owner approves its exact identity. A change to those records supersedes approval while preserving the original version.
 
+**Plan version**:
+An immutable FactoryPlan bound to one approved Dossier version. The Engineer saves it or accepts an Agent's draft as a version, and the Workflow owner approves its exact identity.
+
 **Node**:
 A meaningful stage of a workflow with its own responsibility, completion evidence, and possible outcomes.
 

@@ -98,6 +98,16 @@ return to the queue on the next job or Engineer questionnaire read; changed
 inputs cancel queued, claimed, and submitted jobs at the same boundaries.
 The old lease cannot submit after expiry, release, or re-claim.
 
+Plan drafting (#58) uses the same tools. The Engineer requests **Plan versions
+→ Request plan draft** after the Workflow owner approves the dossier. A
+`draft-plan` context includes `planning.input` with the approved dossier and
+pins, `planning.skeleton`, and `planning.basePlanVersionId`. Complete the
+skeleton and write `result.json` as `{"plan":{…}}` using the supplied schema.
+Submission returns a dashboard link to the workflow's `#plan` panel. A signed-in
+Engineer reviews and accepts or edits the suggestion before it becomes a Plan
+version; the Workflow owner then approves it separately. Agents cannot save,
+accept, or approve plans. Changed inputs cancel pending drafts.
+
 The claimed `job.json` identifies the job kind, selected draft round, and parent question, if any. Submission returns a dashboard review link and creates suggestions and an inbox item for the requester. Use `open_dashboard` with `action: "review_suggestions"` to offer that link through URL elicitation when the host supports it. It
 creates no Question, Fact, resolution, or publication. The Engineer reviews,
 edits, removes suggestions from the batch, or discards the batch with a

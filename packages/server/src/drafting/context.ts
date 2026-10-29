@@ -1,4 +1,5 @@
-import { canonicalHash } from "@realityjunky/badger";
+import { canonicalHash, deriveFactoryPlan } from "@realityjunky/badger";
+import { planInputs, readPlanVersions } from "../plans.js";
 import type { Queryable } from "../database/database.js";
 import { listWorkflowPins } from "../workflow-source.js";
 import { readVersion } from "../skills/library.js";
@@ -42,7 +43,16 @@ export async function draftingContext(
     "select id, person_id, email, role from role_bindings where workflow_id = $1 and role in ('Field expert', 'Workflow owner') order by id",
     [workflowId],
   );
+  const planningInput = await planInputs(tx, versionId, personId);
+  const currentPlan = (await readPlanVersions(tx, versionId))[0];
   const bundle = {
+    planning: planningInput
+      ? {
+          input: planningInput,
+          skeleton: deriveFactoryPlan(planningInput),
+          basePlanVersionId: currentPlan?.id ?? null,
+        }
+      : null,
     workflow: { id: workflow!.id, name: workflow!.name, goal: workflow!.goal },
     version,
     pins,

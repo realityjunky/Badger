@@ -1259,7 +1259,8 @@ body {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-#dossier {
+#dossier,
+#plan {
   scroll-margin-top: 84px;
 }
 .dossier-content h3,
@@ -1285,6 +1286,14 @@ body {
 .dossier-version-heading,
 .dossier-readiness {
   margin-block: 16px;
+}
+.plan-validation {
+  margin-block: 16px;
+  min-height: 32px;
+}
+#factory-plan-json {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  tab-size: 2;
 }
 .dossier-facts {
   margin: 0;

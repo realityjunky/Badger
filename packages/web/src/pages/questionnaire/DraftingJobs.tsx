@@ -8,6 +8,7 @@ import {
 import type {
   DraftingJob,
   DraftingDecisionPreview,
+  AnyDraftingJob,
 } from "../../api/drafting-jobs.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { QuestionComposer } from "./QuestionComposer.js";
@@ -46,12 +47,16 @@ export function DraftingJobs({
   const refresh = useCallback(async () => {
     const request = ++sequence.current;
     try {
-      const result = await questionnaireRequest<{ jobs: DraftingJob[] }>(
+      const result = await questionnaireRequest<{ jobs: AnyDraftingJob[] }>(
         basePath,
         jobsPath,
       );
       if (request === sequence.current) {
-        setJobs(result.jobs);
+        setJobs(
+          result.jobs.filter(
+            (job): job is DraftingJob => job.kind !== "draft-plan",
+          ),
+        );
         setFailure(null);
       }
     } catch (error) {

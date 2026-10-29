@@ -3,6 +3,7 @@ import { skillMethods } from "./skills.js";
 import { workflowMethods } from "./workflows.js";
 import { gateMethods } from "./gates.js";
 import { dossierMethods } from "./dossier.js";
+import { planMethods } from "./plans.js";
 import { inboxMethods } from "./inbox.js";
 import { sourceStudyMethods } from "./source-study.js";
 import { questionnaireMethods } from "./questionnaire.js";
@@ -32,6 +33,7 @@ export function tokenRequestAllowed(
   if (gateMethods(path) !== null)
     return reads && gateMethods(path) === "GET, HEAD";
   if (dossierMethods(path) !== null) return reads;
+  if (planMethods(path) !== null) return reads;
   if (inboxMethods(path) !== null) return reads;
   if (sourceStudyMethods(path) !== null) return reads;
   const questionnaire = questionnaireMethods(path);

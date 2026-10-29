@@ -1,4 +1,9 @@
-import { canonicalHash } from "@realityjunky/badger";
+import {
+  canonicalHash,
+  composeFactoryPlan,
+  factoryPlanDraftSchema,
+} from "@realityjunky/badger";
+import { storePlan } from "../plans.js";
 import { recordAudit, type WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
@@ -16,8 +21,8 @@ export type DraftingActor = WriteContext & { agentHost: string | null };
 export interface DraftingJobRow {
   id: string;
   workflow_version_id: string;
-  kind: "draft-questions" | "draft-follow-ups";
-  round_id: string;
+  kind: "draft-questions" | "draft-follow-ups" | "draft-plan";
+  round_id: string | null;
   parent_question_id: string | null;
   requester_id: string;
   context_bundle: Awaited<ReturnType<typeof draftingContext>>["bundle"];
@@ -31,9 +36,7 @@ export interface DraftingJobRow {
   lease_token_id: string | null;
   lease_agent_host: string | null;
   lease_until: string | Date | null;
-  result: {
-    questions: import("../questionnaire/model.js").QuestionContent[];
-  } | null;
+  result: ReturnType<typeof validateDraftResult> | null;
   result_hash: string | null;
   decision: unknown;
   created_at: string | Date;
@@ -164,17 +167,25 @@ export async function createDraftingJob(
   versionId: string,
   input: {
     kind: DraftingJobRow["kind"];
-    roundId: string;
+    roundId: string | null;
     parentQuestionId: string | null;
   },
   current: Awaited<ReturnType<typeof draftingContext>>,
 ) {
-  const round = await readRound(tx, versionId, input.roundId);
-  if (round.state !== "draft")
-    throw new RequestError(
-      409,
-      "Choose a draft round for the suggested questions",
-    );
+  if (input.kind === "draft-plan") {
+    if (!current.bundle.planning)
+      throw new RequestError(
+        409,
+        "Approve the current dossier before requesting a plan draft",
+      );
+  } else {
+    const round = await readRound(tx, versionId, input.roundId!);
+    if (round.state !== "draft")
+      throw new RequestError(
+        409,
+        "Choose a draft round for the suggested questions",
+      );
+  }
   if (input.parentQuestionId) {
     const parent = (
       await readQuestions(tx, versionId, actor.personId, true)
@@ -198,7 +209,11 @@ export async function createDraftingJob(
         actor.personId,
         JSON.stringify(current.bundle),
         current.hash,
-        JSON.stringify(QUESTION_DRAFT_SCHEMA),
+        JSON.stringify(
+          input.kind === "draft-plan"
+            ? factoryPlanDraftSchema(current.bundle.planning!.input)
+            : QUESTION_DRAFT_SCHEMA,
+        ),
         deps.clock.now(),
       ],
     )
@@ -274,13 +289,14 @@ export async function submitDraftingJob(
   ).rows[0]!;
   await tx.query(
     `insert into inbox_items (id, person_id, workflow_version_id, gate, kind, event_id, drafting_job_id, created_at, updated_at)
-     values ($1,$2,$3,'questionnaire','job-submitted',$4,$4,$5,$5)`,
+     values ($1,$2,$3,$6,'job-submitted',$4,$4,$5,$5)`,
     [
       deps.ids.next(),
       job.requester_id,
       job.workflow_version_id,
       job.id,
       deps.clock.now(),
+      job.kind === "draft-plan" ? "plan" : "questionnaire",
     ],
   );
   await auditJob(tx, deps, actor, submitted, "submitted", job.revision);
@@ -307,13 +323,25 @@ export async function releaseDraftingJob(
 export function jobDecisionPreview(
   job: DraftingJobRow,
   action: "accept" | "reject",
-  questions?: unknown,
+  suggestion?: unknown,
   reason?: unknown,
 ) {
   const decision =
     action === "accept"
-      ? validateDraftResult(job.output_schema, { questions })
+      ? validateDraftResult(job.output_schema, suggestion)
       : { reason };
+  if ("plan" in decision) {
+    const composition = composeFactoryPlan(
+      job.context_bundle.planning!.input,
+      decision.plan,
+    );
+    if (composition.findings.length)
+      throw new RequestError(
+        409,
+        "Repair the kernel's plan findings before accepting",
+        { findings: composition.findings },
+      );
+  }
   const bound = {
     jobId: job.id,
     revision: job.revision,
@@ -335,6 +363,18 @@ export async function decideDraftingJob(
   inputHash: string,
 ) {
   const questionIds: string[] = [];
+  let planVersionId: string | null = null;
+  if (preview.action === "accept" && "plan" in preview.decision) {
+    const planning = job.context_bundle.planning!;
+    const stored = await storePlan(
+      tx,
+      deps,
+      actor,
+      composeFactoryPlan(planning.input, preview.decision.plan),
+      planning.basePlanVersionId,
+    );
+    planVersionId = stored.version.id;
+  }
   if (preview.action === "accept" && "questions" in preview.decision) {
     for (const content of preview.decision.questions) {
       const question = await saveQuestion(
@@ -342,7 +382,7 @@ export async function decideDraftingJob(
         deps,
         actor,
         job.workflow_version_id,
-        job.round_id,
+        job.round_id!,
         content,
       );
       if (job.parent_question_id)
@@ -359,7 +399,12 @@ export async function decideDraftingJob(
       [
         job.id,
         preview.action === "accept" ? "accepted" : "rejected",
-        JSON.stringify({ ...preview, personId: actor.personId, questionIds }),
+        JSON.stringify({
+          ...preview,
+          personId: actor.personId,
+          questionIds,
+          ...(planVersionId ? { planVersionId } : {}),
+        }),
         deps.clock.now(),
       ],
     )

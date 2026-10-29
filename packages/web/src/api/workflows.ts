@@ -100,6 +100,8 @@ export interface WorkflowCapabilities {
   manageSourceStudy: boolean;
   composeDossier: boolean;
   approveDossier: boolean;
+  editPlan: boolean;
+  approvePlan: boolean;
 }
 export const WORKFLOW_ROLES = [
   "Workflow owner",

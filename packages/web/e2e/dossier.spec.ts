@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import type { FactoryPlan, PlanView } from "../src/api/plans.js";
 import {
   startTestService,
   type TestService,
@@ -63,7 +64,7 @@ async function english(page: Page) {
 }
 
 for (const theme of ["light", "dark"] as const) {
-  test(`the Workflow owner reviews and approves the composed dossier, then sees its supersession (${theme})`, async ({
+  test(`the Engineer accepts a plan draft and the owner approves dossier and plan, then sees supersession (${theme})`, async ({
     browser,
   }, info) => {
     const { group } = await call<{ group: { id: string } }>(
@@ -254,6 +255,120 @@ for (const theme of ["light", "dark"] as const) {
         path: screenshot,
         contentType: "image/png",
       });
+
+      await author.goto(
+        `${base}/workflows/${workflow.id}/versions/${version.id}#plan`,
+      );
+      const planning = author.getByTestId("workflow-plan");
+      await planning
+        .getByRole("button", { name: "Request plan draft", exact: true })
+        .click();
+      await author
+        .getByRole("dialog")
+        .getByRole("button", { name: "Request plan draft", exact: true })
+        .click();
+      await expect(author.getByRole("dialog")).toBeHidden();
+      const { jobs } = await call<{
+        jobs: { id: string; revision: number; kind: string }[];
+      }>("GET", `${root}/drafting-jobs`);
+      const job = jobs.find((job) => job.kind === "draft-plan")!;
+      const { secret } = await call<{ secret: string }>("POST", "/me/tokens", {
+        name: "Planning Agent",
+        scopes: ["engineer"],
+      });
+      async function agentCall<T>(route: string, body: unknown): Promise<T> {
+        const response = await service.request(`/team/api/v1${route}`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${secret}`,
+            "x-badger-agent-host": "Planning Agent",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        const value = await response.json();
+        expect(response.ok, JSON.stringify(value)).toBe(true);
+        return value as T;
+      }
+      const claimed = await agentCall<{
+        job: { contextHash: string; lease: { id: string } };
+        contextBundle: { planning: { skeleton: FactoryPlan } };
+      }>(`${root}/drafting-jobs/${job.id}/claim`, { revision: job.revision });
+      const plan = claimed.contextBundle.planning.skeleton;
+      plan.workflow.customNodes[0]!.implementation.skill = skillName;
+      await agentCall(`${root}/drafting-jobs/${job.id}/submit`, {
+        leaseId: claimed.job.lease.id,
+        contextHash: claimed.job.contextHash,
+        result: { plan },
+      });
+      expect((await call<PlanView>("GET", `${root}/plan`)).versions).toEqual(
+        [],
+      );
+      await author.reload();
+      await planning
+        .getByRole("button", { name: "Review plan suggestion", exact: true })
+        .click();
+      const editor = author.getByRole("dialog");
+      const json = editor.getByLabel("FactoryPlan (JSON)", { exact: true });
+      await json.fill(
+        JSON.stringify({ ...plan, goal: "Unapproved scope" }, null, 2),
+      );
+      await expect(
+        editor.getByText("goal: Dossier contradicts FactoryPlan", {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(
+        editor.getByRole("button", {
+          name: "Review plan version",
+          exact: true,
+        }),
+      ).toBeDisabled();
+      plan.workflow.customNodes[0]!.label = "Prepare the reviewed report";
+      await json.fill(JSON.stringify(plan, null, 2));
+      await expect(
+        editor.getByText("The kernel found no plan blockers.", { exact: true }),
+      ).toBeVisible();
+      await editor
+        .getByRole("button", { name: "Review plan version", exact: true })
+        .click();
+      await author
+        .getByRole("dialog")
+        .getByRole("button", { name: "Accept as a plan version", exact: true })
+        .click();
+      await expect(author.getByRole("dialog")).toBeHidden();
+      const plans = await call<PlanView>("GET", `${root}/plan`);
+      expect(plans.versions).toHaveLength(1);
+      expect(
+        plans.versions[0]!.snapshot.plan.workflow.customNodes[0]!.label,
+      ).toBe("Prepare the reviewed report");
+      await page.goto(
+        `${base}/workflows/${workflow.id}/versions/${version.id}#plan`,
+      );
+      const ownerPlan = page.getByTestId("workflow-plan");
+      await expect(
+        ownerPlan.getByRole("button", { name: "Edit plan", exact: true }),
+      ).toHaveCount(0);
+      await ownerPlan
+        .getByRole("button", { name: "Review plan approval", exact: true })
+        .click();
+      const approvalDialog = page.getByRole("dialog");
+      await expect(
+        approvalDialog.getByText(plans.versions[0]!.hash, { exact: true }),
+      ).toBeVisible();
+      await approvalDialog
+        .getByRole("button", { name: "Approve this plan", exact: true })
+        .click();
+      await expect(approvalDialog).toBeHidden();
+      await expect(
+        ownerPlan.getByText("Plan approved", { exact: true }),
+      ).toBeVisible();
+      const planScreenshot = info.outputPath(`plan-${theme}.png`);
+      await ownerPlan.screenshot({ path: planScreenshot });
+      await info.attach(`plan-${theme}`, {
+        path: planScreenshot,
+        contentType: "image/png",
+      });
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,
@@ -271,6 +386,16 @@ for (const theme of ["light", "dark"] as const) {
           .getByTestId("workflow-dossier")
           .getByText("Superseded", { exact: true }),
       ).toBeVisible();
+      await expect(
+        page
+          .getByTestId("workflow-plan")
+          .getByText("Superseded", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page
+          .getByTestId("workflow-plan")
+          .getByRole("button", { name: "Review plan approval", exact: true }),
+      ).toHaveCount(0);
       await expect(
         page
           .getByTestId("workflow-dossier")
