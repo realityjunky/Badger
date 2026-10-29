@@ -95,21 +95,21 @@ Migration `0011` adds one questionnaire per workflow version. Let `Q` be
 workflow and version locks, checks current roles, and records its actor and
 channel in Activity. Existing shipped migrations are unchanged.
 
-| Method and path | Behavior |
-| --- | --- |
-| `GET /questionnaire` | List visible workflow versions for the questionnaire selector. |
-| `GET /questionnaire/questions/:id` | Resolve an authorized question deep link to its workflow version. |
-| `GET Q` | Read rounds, questions and histories, submitted answers, the caller's private drafts, assignee choices, pinned sources, and capabilities. |
-| `POST Q/rounds` | Create a draft round with `{title}`. |
-| `POST Q/rounds/:id/questions` | Draft a free-text question with `text`, `topic`, `targets`, `rationale`, `evidence`, `assignees`, and `priority` (0–100, higher first). |
-| `PATCH Q/questions/:id` | Quote `revision` and replace the question content, retaining the old revision. |
-| `GET Q/rounds/:id/publish-preview` | Review the ordered questions, recipients, and confirmation hash. |
-| `POST Q/rounds/:id/publish` | A signed-in Engineer sends `{confirmed: true, confirmationHash}`. Publish and notify the whole round together. A retry of the published hash is harmless. |
-| `PUT Q/settings` | Quote `revision` (0 initially) and `roundSizeLimit`: a positive integer, or `null` for no limit. Applies across this workflow's versions. |
-| `PUT Q/questions/:id/answer` | Autosave `{revision, questionRevision, text}`, with revision 0 for a first draft. |
-| `POST Q/questions/:id/submit` | Submit the saved answer with `{revision, questionRevision}`. |
-| `POST Q/rounds/:id/submit` | Submit all outstanding assigned answers as `{answers: [{questionId, revision, questionRevision}, ...]}` atomically. |
-| `GET /me/events` | Receive `ready`, `change`, and heartbeat server-sent events for the signed-in person. |
+| Method and path                    | Behavior                                                                                                                                                  |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /questionnaire`               | List visible workflow versions for the questionnaire selector.                                                                                            |
+| `GET /questionnaire/questions/:id` | Resolve an authorized question deep link to its workflow version.                                                                                         |
+| `GET Q`                            | Read rounds, questions and histories, submitted answers, the caller's private drafts, assignee choices, pinned sources, and capabilities.                 |
+| `POST Q/rounds`                    | Create a draft round with `{title}`.                                                                                                                      |
+| `POST Q/rounds/:id/questions`      | Draft a free-text question with `text`, `topic`, `targets`, `rationale`, `evidence`, `assignees`, and `priority` (0–100, higher first).                   |
+| `PATCH Q/questions/:id`            | Quote `revision` and replace the question content, retaining the old revision.                                                                            |
+| `GET Q/rounds/:id/publish-preview` | Review the ordered questions, recipients, and confirmation hash.                                                                                          |
+| `POST Q/rounds/:id/publish`        | A signed-in Engineer sends `{confirmed: true, confirmationHash}`. Publish and notify the whole round together. A retry of the published hash is harmless. |
+| `PUT Q/settings`                   | Quote `revision` (0 initially) and `roundSizeLimit`: a positive integer, or `null` for no limit. Applies across this workflow's versions.                 |
+| `PUT Q/questions/:id/answer`       | Autosave `{revision, questionRevision, text}`, with revision 0 for a first draft.                                                                         |
+| `POST Q/questions/:id/submit`      | Submit the saved answer with `{revision, questionRevision}`.                                                                                              |
+| `POST Q/rounds/:id/submit`         | Submit all outstanding assigned answers as `{answers: [{questionId, revision, questionRevision}, ...]}` atomically.                                       |
+| `GET /me/events`                   | Receive `ready`, `change`, and heartbeat server-sent events for the signed-in person.                                                                     |
 
 Topics use the kernel's dossier vocabulary plus `scope`. Targets name a
 workflow, Node, Skill, or interface. An evidence link has `skillId`,
@@ -117,7 +117,9 @@ workflow, Node, Skill, or interface. An evidence link has `skillId`,
 file must exist in a pinned version. Assignees are
 `{kind: "person", personId}` or `{kind: "role", role: "Field expert"}` /
 `"Workflow owner"`. Role selectors include pending invitations and resolve
-again when publishing. Rounds have no size limit by default.
+again when publishing. Rounds have no size limit by default. The questionnaire
+does not wait for the stage track: rounds may be drafted and published while
+Sources and Source study are still in progress.
 
 Only Engineers and Administrators compose questions. Draft questions are
 hidden from other roles. Every assignee keeps their own answer revisions in
