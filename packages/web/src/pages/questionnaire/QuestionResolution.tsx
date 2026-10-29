@@ -5,8 +5,12 @@ import {
   questionnaireRequest,
   type Question,
   type QuestionnaireView,
+  type AnswerRevision,
+  type AnswerType,
 } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { AttachmentLinks } from "./AnswerAttachments.js";
+import { AnswerContent } from "./AnswerContent.js";
 
 type Kind = "confirmed" | "followed-up" | "deferred" | "withdrawn";
 interface FactDraft {
@@ -19,7 +23,11 @@ interface Review {
   preview: {
     confirmationHash: string;
     locale: string;
-    answers: { personId: string; revision: number; text?: string }[];
+    answerType?: AnswerType;
+    answers: ({
+      personId: string;
+      revision: number;
+    } & Partial<AnswerRevision>)[];
     evidence?: {
       path: string;
       startLine: number;
@@ -227,6 +235,11 @@ export function QuestionResolution({
                 </li>
               ))}
             </ul>
+            <AttachmentLinks
+              attachments={fact.attachments ?? []}
+              basePath={basePath}
+              path={path}
+            />
             {fact.acknowledgements.map((a) => (
               <p key={a.personId}>
                 {a.personName}: <Tag>{t(`resolution.${a.decision}`)}</Tag>
@@ -554,7 +567,16 @@ export function QuestionResolution({
                     number: answer.revision,
                   })}
                   {answer.text && (
-                    <p className="questionnaire-text">{answer.text}</p>
+                    <AnswerContent
+                      answer={{
+                        text: answer.text,
+                        value: answer.value ?? null,
+                        attachments: answer.attachments ?? [],
+                      }}
+                      type={review.preview.answerType}
+                      basePath={basePath}
+                      path={path}
+                    />
                   )}
                 </li>
               ))}

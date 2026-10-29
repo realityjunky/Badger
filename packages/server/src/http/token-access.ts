@@ -34,6 +34,8 @@ export function tokenRequestAllowed(
     if (method === "POST" && /\/concerns$/u.test(path))
       return scopes.includes("expert");
     if (/\/(answer|submit)$/u.test(path)) return scopes.includes("expert");
+    if (method === "POST" && /\/questions\/[^/]+\/attachments$/u.test(path))
+      return scopes.includes("expert");
     // Agents draft questions, inferences, and assumptions; retiring a draft
     // removes a readiness blocker, so it stays with a signed-in person.
     return (

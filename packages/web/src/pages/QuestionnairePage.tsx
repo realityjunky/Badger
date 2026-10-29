@@ -33,6 +33,8 @@ import {
 import { QuestionComposer } from "./questionnaire/QuestionComposer.js";
 import { QuestionResolution } from "./questionnaire/QuestionResolution.js";
 import { QuestionInspector } from "./questionnaire/QuestionInspector.js";
+import { AnswerContent } from "./questionnaire/AnswerContent.js";
+import { AnswerTypeDetails } from "./questionnaire/AnswerTypeDetails.js";
 import { QuestionThread } from "./questionnaire/QuestionThread.js";
 import { ConcernPanel } from "./questionnaire/ConcernPanel.js";
 import { QuestionnaireLedger } from "./questionnaire/QuestionnaireLedger.js";
@@ -233,7 +235,7 @@ export function QuestionnairePage() {
       const answer = current.answers.find(
         (a) => a.questionId === q.id && a.personId === current.personId,
       );
-      if (!answer?.text.trim() || answer.questionRevision !== q.revision)
+      if (!answer || answer.questionRevision !== q.revision)
         throw new Error(t("questionnaire.saveBeforeSubmit"));
       if (answer.state === "draft")
         inputs.push({
@@ -560,9 +562,16 @@ export function QuestionnairePage() {
                             ? ` (${a.revisions.at(-1)!.agentHost})`
                             : ""}
                         </p>
-                        <p className="questionnaire-text">
-                          {a.revisions.at(-1)!.text}
-                        </p>
+                        <AnswerContent
+                          answer={a.revisions.at(-1)!}
+                          type={
+                            selected.revisions.find(
+                              (r) => r.revision === a.questionRevision,
+                            )?.answerType
+                          }
+                          basePath={basePath}
+                          path={path!}
+                        />
                       </article>
                     ))}
                   </div>
@@ -585,6 +594,7 @@ export function QuestionnairePage() {
                       question={selected}
                       answer={ownAnswer}
                       personId={view.personId}
+                      attachmentLimits={view.attachmentLimits}
                       disabled={busy}
                       onSubmitted={() => void reload()}
                     />
@@ -614,6 +624,8 @@ export function QuestionnairePage() {
         </section>
         {!ledgerOpen && (
           <QuestionInspector
+            basePath={basePath}
+            path={path}
             question={selected}
             concern={selectedConcern}
             view={view}
@@ -720,6 +732,7 @@ export function QuestionnairePage() {
           {publication?.preview.questions.map((q) => (
             <li key={q.id}>
               {q.text} · {q.priority}
+              <AnswerTypeDetails type={q.answerType} />
             </li>
           ))}
         </ol>

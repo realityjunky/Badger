@@ -1,4 +1,5 @@
 import { canonicalHash } from "@realityjunky/badger";
+import type { AnswerAttachment, AnswerValue } from "./answer-types.js";
 import { readDrafts } from "./drafts.js";
 import { recordAudit, type WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
@@ -161,6 +162,7 @@ export async function readResolutions(tx: Queryable, versionId: string) {
   ).rows.map((row) => ({ ...toResolution(row), actorName: row.actor_name }));
 }
 interface FactContent extends FactDraft {
+  attachments: AnswerAttachment[];
   locale: string;
   evidence: (QuestionEvidence & { fileHash: string })[];
 }
@@ -255,6 +257,8 @@ export async function resolutionPreview(
       question_revision: number;
       state: string;
       text: string;
+      value: AnswerValue;
+      attachments: AnswerAttachment[];
     }>(
       `select r.* from question_answers a join answer_revisions r on r.question_id = a.question_id and r.person_id = a.person_id and r.revision = a.revision where a.question_id = $1 and exists (
       select 1 from question_recipients recipient join role_bindings binding on binding.id = recipient.binding_id
@@ -318,7 +322,17 @@ export async function resolutionPreview(
           409,
           "Facts must restate the current submitted answer revisions",
         );
-    return { ...fact, locale: version.locale, evidence };
+    const attachments = [
+      ...new Map(
+        heads
+          .filter((answer) =>
+            fact.answers.some((link) => link.personId === answer.person_id),
+          )
+          .flatMap((answer) => answer.attachments)
+          .map((file) => [file.id, file]),
+      ).values(),
+    ].sort((a, b) => a.id.localeCompare(b.id));
+    return { ...fact, locale: version.locale, evidence, attachments };
   });
   if (
     input.kind === "confirmed" &&
@@ -359,6 +373,7 @@ export async function resolutionPreview(
     versionId,
     questionId,
     questionRevision: question.revision,
+    answerType: question.answerType ?? { kind: "free-text" },
     resolutionRevision: question.resolutionRevision,
     state: question.state,
     input,
@@ -366,6 +381,8 @@ export async function resolutionPreview(
       personId: a.person_id,
       revision: a.revision,
       text: a.text,
+      value: a.value,
+      attachments: a.attachments,
     })),
     facts,
     locale: version.locale,

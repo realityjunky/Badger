@@ -5,6 +5,31 @@ import type { Language } from "../preferences/model.js";
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  "common.actions": "Actions",
+  "common.remove": "Remove",
+  "questionnaire.answerType": "Answer type",
+  "questionnaire.answerType.free-text": "Free text",
+  "questionnaire.answerType.single-choice": "Single choice",
+  "questionnaire.answerType.multiple-choice": "Multiple choice",
+  "questionnaire.answerType.yes-no": "Yes or no",
+  "questionnaire.answerType.number": "Number with unit",
+  "questionnaire.answerType.table": "Table",
+  "questionnaire.answerType.file": "File",
+  "questionnaire.answerOptions": "Options (one per line)",
+  "questionnaire.answerUnit": "Unit",
+  "questionnaire.answerColumns": "Columns (one per line)",
+  "questionnaire.yes": "Yes",
+  "questionnaire.no": "No",
+  "questionnaire.tableCell": "{column}, row {row}",
+  "questionnaire.addRow": "Add row",
+  "questionnaire.removeRow": "Remove row {row}",
+  "questionnaire.fileAnswerHelp":
+    "Upload at least one file to answer this question.",
+  "questionnaire.attachments": "Attachments",
+  "questionnaire.attachmentLimits":
+    "Up to 8 files, 5 MiB each and 20 MiB total. PDF, PNG, JPEG, UTF-8 text, CSV, or JSON.",
+  "questionnaire.noRealData": "Use examples only. Do not upload real data.",
+  "questionnaire.uploading": "Uploading files…",
   "ledger.privateQuestion":
     "An unpublished question is still being drafted by the Engineer.",
   "ledger.linkedDrafts": "Linked inference and assumption drafts",
@@ -715,6 +740,30 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  "common.actions": "操作",
+  "common.remove": "移除",
+  "questionnaire.answerType": "回答类型",
+  "questionnaire.answerType.free-text": "自由文本",
+  "questionnaire.answerType.single-choice": "单选",
+  "questionnaire.answerType.multiple-choice": "多选",
+  "questionnaire.answerType.yes-no": "是或否",
+  "questionnaire.answerType.number": "带单位数值",
+  "questionnaire.answerType.table": "表格",
+  "questionnaire.answerType.file": "文件",
+  "questionnaire.answerOptions": "选项（每行一个）",
+  "questionnaire.answerUnit": "单位",
+  "questionnaire.answerColumns": "列名（每行一个）",
+  "questionnaire.yes": "是",
+  "questionnaire.no": "否",
+  "questionnaire.tableCell": "{column}，第 {row} 行",
+  "questionnaire.addRow": "添加行",
+  "questionnaire.removeRow": "移除第 {row} 行",
+  "questionnaire.fileAnswerHelp": "请上传至少一个文件作为回答。",
+  "questionnaire.attachments": "附件",
+  "questionnaire.attachmentLimits":
+    "最多 8 个文件，单个不超过 5 MiB，总计不超过 20 MiB。支持 PDF、PNG、JPEG、UTF-8 文本、CSV 或 JSON。",
+  "questionnaire.noRealData": "仅使用示例，请勿上传真实数据。",
+  "questionnaire.uploading": "正在上传文件…",
   "ledger.privateQuestion": "工程师仍在起草一项尚未发布的问题。",
   "ledger.linkedDrafts": "关联的推断和假设草稿",
   "ledger.linkedDraftsHelp":

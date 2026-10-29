@@ -7,16 +7,22 @@ import type {
 } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import type { MessageId } from "../../i18n/catalog.js";
+import { AnswerContent } from "./AnswerContent.js";
+import { AnswerTypeDetails } from "./AnswerTypeDetails.js";
 
 /** Evidence and immutable revision history for the open question. */
 export function QuestionInspector({
   question,
   concern,
   view,
+  basePath,
+  path,
 }: {
   question?: Question;
   concern?: Concern;
   view: QuestionnaireView | null;
+  basePath: string;
+  path: string | null;
 }) {
   const { t, format, locale } = useI18n();
   const sourceConcern =
@@ -65,6 +71,7 @@ export function QuestionInspector({
                     <strong>{t("questionnaire.topic")}</strong>{" "}
                     {t(`questionnaire.topic.${question.topic}` as MessageId)}
                   </p>
+                  <AnswerTypeDetails type={question.answerType} />
                   <h3>{t("questionnaire.targets")}</h3>
                   <ul>
                     {question.targets.map((target, index) => (
@@ -114,6 +121,7 @@ export function QuestionInspector({
                         · {new Date(revision.createdAt).toLocaleString(locale)}
                       </summary>
                       <p className="questionnaire-text">{revision.text}</p>
+                      <AnswerTypeDetails type={revision.answerType} />
                       <p>{revision.rationale}</p>
                     </details>
                   ))}
@@ -144,7 +152,19 @@ export function QuestionInspector({
                                   : "questionnaire.channel.agent",
                               )}
                             </summary>
-                            <p className="questionnaire-text">{r.text}</p>
+                            {path && (
+                              <AnswerContent
+                                answer={r}
+                                type={
+                                  question?.revisions.find(
+                                    (revision) =>
+                                      revision.revision === r.questionRevision,
+                                  )?.answerType
+                                }
+                                basePath={basePath}
+                                path={path}
+                              />
+                            )}
                             <p className="muted">
                               {format("questionnaire.questionRevision", {
                                 number: r.questionRevision,

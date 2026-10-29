@@ -7,6 +7,7 @@ import {
   type ConcernResolutionPreview,
   type QuestionContent,
   type QuestionnaireView,
+  type AnswerType,
 } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { ConcernResolutionDialog } from "./ConcernResolutionDialog.js";
@@ -30,7 +31,14 @@ const TOPICS = [
   "executableDisclosures",
   "recoveryPolicy",
 ] as const;
-interface Values extends Omit<QuestionContent, "assignees" | "evidence"> {
+interface Values extends Omit<
+  QuestionContent,
+  "assignees" | "evidence" | "answerType"
+> {
+  answerKind: AnswerType["kind"];
+  answerOptions?: string;
+  answerUnit?: string;
+  answerColumns?: string;
   assignees: string[];
   evidence: {
     version: string;
@@ -61,6 +69,10 @@ export function QuestionComposer({
 }) {
   const { t } = useI18n();
   const [form] = Form.useForm<Values>();
+  const answerKind =
+    Form.useWatch("answerKind", form) ??
+    question?.answerType?.kind ??
+    "free-text";
   const revision = useRef(question?.revision);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -71,6 +83,19 @@ export function QuestionComposer({
   const initial: Values = question
     ? {
         ...question,
+        answerKind: question.answerType?.kind ?? "free-text",
+        answerOptions:
+          question.answerType && "options" in question.answerType
+            ? question.answerType.options.join("\n")
+            : "",
+        answerColumns:
+          question.answerType?.kind === "table"
+            ? question.answerType.columns.join("\n")
+            : "",
+        answerUnit:
+          question.answerType?.kind === "number"
+            ? question.answerType.unit
+            : "",
         assignees: question.assignees.map((a) =>
           a.kind === "person" ? `person:${a.personId}` : `role:${a.role}`,
         ),
@@ -81,6 +106,7 @@ export function QuestionComposer({
       }
     : {
         text: concern?.text ?? "",
+        answerKind: "free-text",
         topic: "scope",
         priority: 10,
         rationale: "",
@@ -96,8 +122,29 @@ export function QuestionComposer({
     setBusy(true);
     setFailure(null);
     try {
+      const {
+        answerKind,
+        answerOptions,
+        answerUnit,
+        answerColumns,
+        ...questionValues
+      } = values;
+      const lines = (value: string | undefined) =>
+        (value ?? "")
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
+      const answerType: AnswerType =
+        answerKind === "single-choice" || answerKind === "multiple-choice"
+          ? { kind: answerKind, options: lines(answerOptions) }
+          : answerKind === "number"
+            ? { kind: answerKind, unit: answerUnit ?? "" }
+            : answerKind === "table"
+              ? { kind: answerKind, columns: lines(answerColumns) }
+              : { kind: answerKind };
       const content: QuestionContent = {
-        ...values,
+        ...questionValues,
+        answerType,
         evidence: (values.evidence ?? []).map((e) => {
           const [skillId, versionHash] = JSON.parse(e.version) as [
             string,
@@ -196,6 +243,61 @@ export function QuestionComposer({
           maxLength={20000}
         />
       </Form.Item>
+      <Form.Item
+        name="answerKind"
+        label={t("questionnaire.answerType")}
+        rules={required}
+      >
+        <Select
+          options={(
+            [
+              "free-text",
+              "single-choice",
+              "multiple-choice",
+              "yes-no",
+              "number",
+              "table",
+              "file",
+            ] as const
+          ).map((kind) => ({
+            value: kind,
+            label: t(`questionnaire.answerType.${kind}`),
+          }))}
+        />
+      </Form.Item>
+      {(answerKind === "single-choice" || answerKind === "multiple-choice") && (
+        <Form.Item
+          name="answerOptions"
+          label={t("questionnaire.answerOptions")}
+          rules={required}
+        >
+          <Input.TextArea
+            autoSize={{ minRows: 2, maxRows: 8 }}
+            maxLength={20000}
+          />
+        </Form.Item>
+      )}
+      {answerKind === "number" && (
+        <Form.Item
+          name="answerUnit"
+          label={t("questionnaire.answerUnit")}
+          rules={required}
+        >
+          <Input maxLength={100} />
+        </Form.Item>
+      )}
+      {answerKind === "table" && (
+        <Form.Item
+          name="answerColumns"
+          label={t("questionnaire.answerColumns")}
+          rules={required}
+        >
+          <Input.TextArea
+            autoSize={{ minRows: 2, maxRows: 8 }}
+            maxLength={4000}
+          />
+        </Form.Item>
+      )}
       <Form.Item name="topic" label={t("questionnaire.topic")} rules={required}>
         <Select
           options={TOPICS.map((value) => ({

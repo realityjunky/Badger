@@ -154,6 +154,53 @@ records rather than rely on event replay. Slow consumers disconnect instead
 of accumulating an unbounded buffer. Dashboard polling and focus refresh
 remain available when streaming fails.
 
+## Structured answers and attachments
+
+Migration `0016` adds typed values and immutable attachment receipts to Answer
+revisions. Each Question revision accepts an `answerType`; omitting it keeps
+free text. The dashboard provides matching composer and answer controls.
+
+| `answerType` | Draft payload in addition to `revision` and `questionRevision` |
+| --- | --- |
+| `{kind: "free-text"}` | `text: "Any language"` |
+| `{kind: "single-choice", options: ["Cold", "Frozen"]}` | `value: "Frozen"` |
+| `{kind: "multiple-choice", options: ["Cold", "Frozen"]}` | `value: ["Cold", "Frozen"]` |
+| `{kind: "yes-no"}` | `value: false` |
+| `{kind: "number", unit: "°C"}` | `value: 0` (always in the Question's unit) |
+| `{kind: "table", columns: ["Sample", "Storage"]}` | `value: [["Example", "Frozen"]]` |
+| `{kind: "file"}` | `attachments: ["attachment-id"]` |
+
+Use the existing answer and submit routes. Incomplete structured drafts may
+use `value: null`, empty choice lists, or incomplete table rows; submission
+validates completeness for the current Question revision. Choices must be
+distinct and declared by the Question. Table drafts have at most 100 rows,
+20 columns, 4,000 characters per cell, and 50,000 serialized characters;
+submission requires nonempty cells. Text is server-derived for structured
+answers so older readers still have a rendering. Answer type changes keep
+their question history and require a new draft against the revised schema.
+
+Any answer type may add `attachments: [id, ...]`. Upload with
+`POST Q/questions/:id/attachments` using
+`{questionRevision, name, mediaType, contentBase64}`. An assigned expert or
+owner, including an `expert` token acting for that person, receives an immutable
+`{attachment: {id, name, mediaType, size, hash}}`. Files are limited to 5 MiB
+each, eight files and 20 MiB per answer. PDF, PNG, JPEG, UTF-8 plain text, CSV,
+and JSON are allowed; the server checks content and rejects paths, malformed
+base64, unsupported types, and files belonging to another answerer or Question.
+The questionnaire response includes these limits for upload controls.
+
+`GET Q/attachments/:id` downloads the file through current workflow
+authorization. Until submission only its uploader can download it; workflow
+readers can download attachments cited by any submitted revision. The route
+always serves a download with `nosniff` and never exposes blob addresses as
+download URLs. Uploaded bytes are stored through the existing blob-store port.
+Upload screens require examples and warn against uploading real data.
+
+Resolution previews bind structured values, units, and attachment receipts.
+Facts retain the immutable Answer revision links and the receipts belonging to
+those answers, so later edits require re-confirmation while historical evidence
+remains readable. See [ADR 0023](../../docs/adr/0023-structured-answer-provenance.md).
+
 ## Ledger and readiness
 
 Migration `0015` adds immutable inference/assumption revisions and round
