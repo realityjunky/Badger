@@ -1,15 +1,4 @@
-import {
-  Alert,
-  Button,
-  Collapse,
-  Drawer,
-  Input,
-  Modal,
-  Select,
-  Space,
-  Spin,
-  Tag,
-} from "antd";
+import { Alert, Button, Collapse, Select, Space, Spin, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -19,11 +8,11 @@ import {
 import type {
   LedgerDraft,
   LedgerItem,
-  LedgerTopic,
   LedgerView,
   RecordReference,
 } from "../../api/ledger.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { LedgerDraftDialog, LedgerDraftHistory } from "./LedgerDrafts.js";
 
 /** Display the kernel read model; the dashboard never decides readiness. */
 export function QuestionnaireLedger({
@@ -41,7 +30,7 @@ export function QuestionnaireLedger({
   onSinceRound(id: string | null): void;
   onChanged(): Promise<unknown>;
 }) {
-  const { t } = useI18n();
+  const { t, format } = useI18n();
   const [ledger, setLedger] = useState<LedgerView | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,14 +38,10 @@ export function QuestionnaireLedger({
     kind: LedgerDraft["kind"];
     record?: LedgerDraft;
   } | null>(null);
-  const [statement, setStatement] = useState("");
-  const [topic, setTopic] = useState<LedgerTopic>("scope");
-  const [questionId, setQuestionId] = useState<string | null>(null);
   const [inspector, setInspector] = useState<{
     record: LedgerDraft;
     revisions: LedgerDraft[];
   } | null>(null);
-  const [draftId, setDraftId] = useState<string | null>(null);
   useEffect(() => {
     setLedger(null);
     setInspector(null);
@@ -112,7 +97,6 @@ export function QuestionnaireLedger({
           disabled={busy}
           onClick={() =>
             void run(async () => {
-              setDraftId(record.id);
               setInspector(
                 await questionnaireRequest(
                   basePath,
@@ -164,6 +148,19 @@ export function QuestionnaireLedger({
           <Tag>{t(`ledger.state.${item.state}`)}</Tag>
           {recordLink(item.record)}
         </Space>
+        {item.relatedRecords
+          .filter((record) => record.type === "answer")
+          .map((record) => (
+            <p key={record.id}>
+              <Link
+                to={`/questionnaire/questions/${encodeURIComponent(item.record.type === "question" ? item.record.id : item.relatedRecords.find((r) => r.type === "question")!.id)}`}
+              >
+                {format("questionnaire.answerRevision", {
+                  number: record.revision,
+                })}
+              </Link>
+            </p>
+          ))}
         {item.resolution?.reason && <p>{item.resolution.reason}</p>}
         {item.relatedRecords
           .filter((r) => r.type === "question")
@@ -180,10 +177,8 @@ export function QuestionnaireLedger({
     );
   }
   function edit(kind: LedgerDraft["kind"], record?: LedgerDraft) {
+    setInspector(null);
     setEditor({ kind, record });
-    setStatement(record?.statement ?? "");
-    setTopic(record?.topic ?? "scope");
-    setQuestionId(record?.questionId ?? null);
   }
   const parts = [
     "confirmedUserFacts",
@@ -234,21 +229,30 @@ export function QuestionnaireLedger({
                 <p>{t("ledger.noBlockers")}</p>
               ) : (
                 <ul>
-                  {readiness.blockers.map((blocker) => (
-                    <li
-                      key={`${blocker.code}:${blocker.record.type}:${blocker.record.id}`}
-                    >
-                      {t(`ledger.blocker.${blocker.code}`)} ·{" "}
-                      {
-                        ledger.handoff.items.find(
-                          (item) =>
-                            item.record.id === blocker.record.id &&
-                            item.record.type === blocker.record.type,
-                        )?.statement
-                      }{" "}
-                      {recordLink(blocker.record)}
-                    </li>
-                  ))}
+                  {readiness.blockers.map((blocker, index) => {
+                    const record = blocker.record;
+                    return (
+                      <li
+                        key={`${blocker.code}:${record?.type ?? "private"}:${record?.id ?? index}`}
+                      >
+                        {t(`ledger.blocker.${blocker.code}`)} ·{" "}
+                        {record ? (
+                          <>
+                            {
+                              ledger.handoff.items.find(
+                                (item) =>
+                                  item.record.id === record.id &&
+                                  item.record.type === record.type,
+                              )?.statement
+                            }{" "}
+                            {recordLink(record)}
+                          </>
+                        ) : (
+                          t("ledger.privateQuestion")
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               ),
             }))}
@@ -316,150 +320,30 @@ export function QuestionnaireLedger({
           )}
         </>
       )}
-      <Modal
-        open={editor !== null}
-        title={t(
-          editor?.kind === "assumption"
-            ? "ledger.addAssumption"
-            : "ledger.addInference",
-        )}
-        okText={t("ledger.save")}
-        cancelText={t("common.cancel")}
-        confirmLoading={busy}
-        okButtonProps={{ disabled: !statement.trim() }}
-        onCancel={() => {
-          if (!busy) setEditor(null);
-        }}
-        onOk={() =>
-          void run(async () => {
-            const resource =
-              editor!.kind === "inference" ? "inferences" : "assumptions";
-            await questionnaireRequest(
-              basePath,
-              `${path}/${resource}${editor!.record ? `/${encodeURIComponent(editor!.record.id)}` : ""}`,
-              editor!.record ? "PATCH" : "POST",
-              {
-                statement,
-                topic,
-                questionId,
-                ...(editor!.record
-                  ? { revision: editor!.record.revision }
-                  : {}),
-              },
-            );
-            setEditor(null);
-            setInspector(null);
-            await onChanged();
-          })
-        }
-      >
-        {failure && <Alert type="error" title={failure} />}
-        <p>{t("ledger.draftHelp")}</p>
-        <label className="field-label" htmlFor="ledger-statement">
-          {t("study.statement")}
-        </label>
-        <Input.TextArea
-          id="ledger-statement"
-          value={statement}
-          onChange={(e) => setStatement(e.target.value)}
-          maxLength={20000}
-          autoSize={{ minRows: 3, maxRows: 10 }}
-          disabled={busy}
+      {editor && (
+        <LedgerDraftDialog
+          key={`${editor.kind}:${editor.record?.id ?? "new"}:${editor.record?.revision ?? 0}`}
+          basePath={basePath}
+          path={path}
+          view={view}
+          editor={editor}
+          topics={ledger?.handoff.readiness ?? []}
+          onClose={() => setEditor(null)}
+          onChanged={onChanged}
         />
-        <label className="field-label" htmlFor="ledger-topic">
-          {t("questionnaire.topic")}
-        </label>
-        <Select
-          id="ledger-topic"
-          className="questionnaire-version"
-          value={topic}
-          disabled={busy}
-          options={ledger?.handoff.readiness.map((r) => ({
-            value: r.topic,
-            label: t(`questionnaire.topic.${r.topic}`),
-          }))}
-          onChange={(next) => {
-            setTopic(next);
-            setQuestionId(null);
-          }}
+      )}
+      {inspector && (
+        <LedgerDraftHistory
+          key={`${inspector.record.id}:${inspector.record.revision}`}
+          basePath={basePath}
+          path={path}
+          view={view}
+          inspector={inspector}
+          onClose={() => setInspector(null)}
+          onChanged={onChanged}
+          onEdit={(record) => edit(record.kind, record)}
         />
-        <label className="field-label" htmlFor="ledger-question">
-          {t("ledger.confirmingQuestion")}
-        </label>
-        <Select
-          id="ledger-question"
-          className="questionnaire-version"
-          allowClear
-          value={questionId ?? undefined}
-          disabled={busy}
-          options={view.questions
-            .filter(
-              (q) =>
-                q.topic === topic &&
-                (!q.resolvedAt || q.id === editor?.record?.questionId),
-            )
-            .map((q) => ({ value: q.id, label: q.text }))}
-          onChange={(id) => setQuestionId(id ?? null)}
-        />
-      </Modal>
-      <Drawer
-        open={inspector !== null}
-        onClose={() => setInspector(null)}
-        title={t("ledger.history")}
-      >
-        {failure && <Alert type="error" title={failure} />}
-        {inspector?.revisions.map((r) => (
-          <article className="questionnaire-record" key={r.revision}>
-            <h3>
-              {t("ledger.recordRevision")} {r.revision}
-            </h3>
-            <p>{r.statement}</p>
-            <Tag>
-              {t(
-                r.status === "retired"
-                  ? "ledger.state.retired"
-                  : "ledger.state.draft",
-              )}
-            </Tag>
-            {r.questionId && (
-              <Link
-                to={`/questionnaire/questions/${encodeURIComponent(r.questionId)}`}
-              >
-                {t("ledger.confirmingQuestion")}
-              </Link>
-            )}
-          </article>
-        ))}
-        {inspector &&
-          view.capabilities.compose &&
-          inspector.record.status === "active" && (
-            <Space wrap>
-              <Button
-                disabled={busy}
-                onClick={() => edit(inspector.record.kind, inspector.record)}
-              >
-                {t("ledger.edit")}
-              </Button>
-              <Button
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    await questionnaireRequest(
-                      basePath,
-                      `${path}/${inspector.record.kind === "inference" ? "inferences" : "assumptions"}/${encodeURIComponent(draftId!)}`,
-                      "DELETE",
-                      { revision: inspector.record.revision },
-                    );
-                    setInspector(null);
-                    await onChanged();
-                  })
-                }
-              >
-                {t("ledger.retire")}
-              </Button>
-            </Space>
-          )}
-      </Drawer>
+      )}
     </section>
   );
 }

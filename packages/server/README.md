@@ -165,7 +165,12 @@ publication baselines. Using the questionnaire prefix `Q` above:
 
 All reads require the Workflow version's read permissions. Draft questions
 remain visible only to composing Engineers and Administrators, including in
-round comparisons. A round from another Workflow version returns 404. A draft
+round comparisons. A draft question still blocks readiness for every reader;
+readers without composing
+rights receive a blocker with a null record reference and no private details.
+Submitted answer revisions appear in question provenance and round changes;
+unsent answer drafts never enter the ledger or its publication baselines.
+A round from another Workflow version returns 404. A draft
 round or a historical round with no publication baseline returns 409 rather
 than inventing history. Publication and automatic follow-up rounds capture
 their baseline atomically; retries keep the original.

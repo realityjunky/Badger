@@ -5,6 +5,8 @@ import type { Language } from "../preferences/model.js";
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  "ledger.privateQuestion":
+    "An unpublished question is still being drafted by the Engineer.",
   "ledger.linkedDrafts": "Linked inference and assumption drafts",
   "ledger.linkedDraftsHelp":
     "These drafts become confirmed when every restatement is acknowledged. Check that the facts resolve each statement.",
@@ -700,6 +702,7 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  "ledger.privateQuestion": "工程师仍在起草一项尚未发布的问题。",
   "ledger.linkedDrafts": "关联的推断和假设草稿",
   "ledger.linkedDraftsHelp":
     "所有事实转述获得认可后，这些草稿将变为已确认。请核对事实是否解决了每项陈述。",

@@ -48,6 +48,7 @@ export interface QuestionnaireQuestionRecord {
   text: string;
   state: QuestionnaireLedgerItem["state"];
   resolution?: QuestionnaireLedgerItem["resolution"];
+  answers?: { personId: string; revision: number }[];
 }
 export interface QuestionnaireRecords {
   questions: QuestionnaireQuestionRecord[];
@@ -55,6 +56,8 @@ export interface QuestionnaireRecords {
     id: string;
     questionId: string;
     resolutionId: string;
+    resolutionRevision: number;
+    questionRevision: number;
     statement: string;
     active: boolean;
     current: boolean;
@@ -101,7 +104,7 @@ export interface QuestionnaireBlocker {
     | "dispute"
     | "stale-source-evidence"
     | "unstudied-pin";
-  record: QuestionnaireRecordReference;
+  record: QuestionnaireRecordReference | null;
 }
 export interface QuestionnaireRecordHandoff {
   schemaVersion: 1;
@@ -136,19 +139,23 @@ export function questionnaireRecordHandoff(
     resolved: ["confirmed", "followed-up", "deferred", "withdrawn"].includes(
       q.state,
     ),
-    relatedRecords: [],
-    ...(q.resolution
-      ? {
-          resolution: q.resolution,
-          relatedRecords: [
+    ...(q.resolution ? { resolution: q.resolution } : {}),
+    relatedRecords: [
+      ...(q.resolution
+        ? [
             {
               type: "resolution",
               id: q.resolution.id,
               revision: q.resolution.revision,
             },
-          ],
-        }
-      : {}),
+          ]
+        : []),
+      ...(q.answers ?? []).map((answer) => ({
+        type: "answer",
+        id: `${q.id}:${answer.personId}`,
+        revision: answer.revision,
+      })),
+    ],
   }));
   const remainingQuestions = items.filter((q) => !q.resolved);
   const acceptedQuestions = new Set<string>();
@@ -180,10 +187,13 @@ export function questionnaireRecordHandoff(
         {
           type: "question",
           id: f.questionId,
-          revision: records.questions.find((q) => q.id === f.questionId)!
-            .revision,
+          revision: f.questionRevision,
         },
-        { type: "resolution", id: f.resolutionId, revision: 1 },
+        {
+          type: "resolution",
+          id: f.resolutionId,
+          revision: f.resolutionRevision,
+        },
         ...f.answers.map((a) => ({
           type: "answer",
           id: `${f.questionId}:${a.personId}`,

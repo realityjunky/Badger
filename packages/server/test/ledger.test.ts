@@ -171,6 +171,73 @@ async function answer(base: string, id: string) {
 }
 
 describe("the questionnaire ledger and readiness", () => {
+  it("reports submitted answer revisions changed since a round while keeping private answer drafts hidden", async () => {
+    const { questionnaire: base, expertId } = await setup();
+    const first = await round(base, expertId);
+    await publish(base, first.round.id);
+    await answer(base, first.question.id);
+    const later = await round(base, expertId, "inputs");
+    await publish(base, later.round.id);
+    await call(
+      `${base}/questions/${first.question.id}/answer`,
+      "PUT",
+      {
+        revision: 2,
+        questionRevision: 1,
+        text: "Private unsubmitted correction",
+      },
+      expert,
+    );
+    const privateView = await call(
+      `${base}/ledger?sinceRound=${later.round.id}`,
+      "GET",
+      undefined,
+      observer,
+    );
+    expect(JSON.stringify(privateView)).not.toContain(
+      "Private unsubmitted correction",
+    );
+    expect(privateView.changes).toEqual({
+      added: [],
+      changed: [],
+      resolved: [],
+    });
+    await call(
+      `${base}/questions/${first.question.id}/submit`,
+      "POST",
+      { revision: 3, questionRevision: 1 },
+      expert,
+    );
+    const changed = await call(
+      `${base}/ledger?sinceRound=${later.round.id}`,
+      "GET",
+      undefined,
+      observer,
+    );
+    expect(changed.changes.changed).toEqual([
+      expect.objectContaining({
+        before: expect.objectContaining({
+          relatedRecords: [
+            {
+              type: "answer",
+              id: `${first.question.id}:${expertId}`,
+              revision: 2,
+            },
+          ],
+        }),
+        after: expect.objectContaining({
+          relatedRecords: [
+            {
+              type: "answer",
+              id: `${first.question.id}:${expertId}`,
+              revision: 4,
+            },
+          ],
+        }),
+      }),
+    ]);
+  });
+
   it("keeps a disputed restatement visible until a new resolution replaces it", async () => {
     const { questionnaire: base, expertId } = await setup();
     const { round: batch, question } = await round(base, expertId);
@@ -247,6 +314,16 @@ describe("the questionnaire ledger and readiness", () => {
       expert,
     );
     ledger = await call(`${base}/ledger`);
+    const currentResolution = (await call(base)).resolutions.find(
+      (r: { revision: number }) => r.revision === 2,
+    );
+    expect(
+      ledger.handoff.ledger.confirmedUserFacts[0].relatedRecords,
+    ).toContainEqual({
+      type: "resolution",
+      id: currentResolution.id,
+      revision: 2,
+    });
     expect(
       ledger.handoff.readiness.find(
         (r: { topic: string }) => r.topic === "interfaces",
@@ -698,6 +775,16 @@ describe("the questionnaire ledger and readiness", () => {
     });
     const hidden = await call(`${base}/ledger`, "GET", undefined, observer);
     expect(hidden.handoff.ledger.remainingQuestions).toEqual([]);
+    expect(hidden.handoff.status).toBe(handoff.status);
+    expect(
+      hidden.handoff.readiness.find(
+        (r: { topic: string }) => r.topic === "interfaces",
+      ),
+    ).toMatchObject({
+      ready: false,
+      blockers: [{ code: "unresolved-question", record: null }],
+    });
+    expect(JSON.stringify(hidden)).not.toContain(question.id);
     await publish(base, batch.id);
     const visible = await call(`${base}/ledger`, "GET", undefined, observer);
     expect(visible.handoff.ledger.remainingQuestions).toHaveLength(1);
