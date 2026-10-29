@@ -24,6 +24,10 @@ export const routes: readonly RouteDefinition[] = [
     pattern: "/questionnaire/questions/:questionId",
     title: "page.questionnaire.title",
   },
+  {
+    pattern: "/questionnaire/concerns/:concernId",
+    title: "page.questionnaire.title",
+  },
   { pattern: "/skills", title: "page.skills.title" },
   { pattern: "/skills/:skillId", title: "page.skills.title" },
   { pattern: "/runs", title: "page.runs.title" },

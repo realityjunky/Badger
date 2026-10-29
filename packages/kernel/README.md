@@ -82,7 +82,12 @@ compose or approve a Semantic dossier. Answer resolutions (#48) add formal
 facts linked to exact answer revisions, expert acknowledgements and disputes,
 published child questions, reasoned deferrals with Skill backlogs, withdrawal,
 and re-confirmation after answer or cited evidence changes. Sign-offs stay in
-the dashboard. Threads follow in #47.
+the dashboard.
+
+Question threads and expert concerns (#47) are also delivered: immutable
+comment edits, concerns linked from the
+Engineer's inbox, and reviewed outcomes that create a draft question, accept
+a Fact source, or decline with a reason.
 
 Personal access tokens (#53) are also delivered: personal settings create,
 list, and revoke scoped Agent and CLI credentials, showing the secret once.

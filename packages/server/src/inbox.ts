@@ -12,7 +12,8 @@ export type InboxKind =
   | "gate-invalidated"
   | "question-assigned"
   | "restatement-ready"
-  | "question-reopened";
+  | "question-reopened"
+  | "concern-raised";
 export interface InboxItem {
   id: string;
   workflowVersionId: string;
@@ -27,6 +28,8 @@ export interface InboxItem {
   updatedAt: string;
   questionId: string | null;
   questionText: string | null;
+  concernId: string | null;
+  concernText: string | null;
 }
 
 interface InboxRow {
@@ -43,13 +46,17 @@ interface InboxRow {
   updated_at: Date | string;
   question_id: string | null;
   question_text: string | null;
+  concern_id: string | null;
+  concern_text: string | null;
 }
 
 const COLUMNS = `i.id, i.workflow_version_id, v.workflow_id, v.name as workflow_name,
-  v.number as version_number, i.gate, i.kind, i.state, i.revision, i.created_at, i.updated_at, i.question_id, qr.content->>'text' as question_text`;
+  v.number as version_number, i.gate, i.kind, i.state, i.revision, i.created_at, i.updated_at, i.question_id, qr.content->>'text' as question_text,
+  i.concern_id, c.text as concern_text`;
 const FROM = `inbox_items i join workflow_versions v on v.id = i.workflow_version_id
   join workflows w on w.id = v.workflow_id left join questions q on q.id = i.question_id
-  left join question_revisions qr on qr.question_id = q.id and qr.revision = q.revision`;
+  left join question_revisions qr on qr.question_id = q.id and qr.revision = q.revision
+  left join questionnaire_concerns c on c.id = i.concern_id`;
 // The item belongs to the person and is still within their current read roles.
 const VISIBLE = `(i.person_id = $1 or exists (select 1 from role_bindings recipient
   where recipient.id = i.binding_id and recipient.person_id = $1))
@@ -84,12 +91,16 @@ function toItem(row: InboxRow): InboxItem {
     kind: row.kind,
     questionId: row.question_id,
     questionText: row.question_text,
+    concernId: row.concern_id,
+    concernText: row.concern_text,
     state: row.state,
     revision: row.revision,
     href:
-      row.question_id === null
-        ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#${encodeURIComponent(row.gate)}`
-        : `/questionnaire/questions/${encodeURIComponent(row.question_id)}`,
+      row.concern_id !== null
+        ? `/questionnaire/concerns/${encodeURIComponent(row.concern_id)}`
+        : row.question_id === null
+          ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#${encodeURIComponent(row.gate)}`
+          : `/questionnaire/questions/${encodeURIComponent(row.question_id)}`,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };
@@ -104,6 +115,7 @@ export async function notifyWorkflowRoles(
   kind: InboxKind,
   eventId: string,
   roles: readonly WorkflowRole[],
+  concernId: string | null = null,
 ): Promise<void> {
   const people = await database.query<{
     person_id: string | null;
@@ -117,8 +129,8 @@ export async function notifyWorkflowRoles(
   );
   for (const { person_id: personId, binding_id: bindingId } of people.rows) {
     await database.query(
-      `insert into inbox_items (id, person_id, workflow_version_id, gate, kind, event_id, created_at, updated_at, binding_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $7, $8) on conflict do nothing`,
+      `insert into inbox_items (id, person_id, workflow_version_id, gate, kind, event_id, created_at, updated_at, binding_id, concern_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9) on conflict do nothing`,
       [
         dependencies.ids.next(),
         personId,
@@ -128,6 +140,7 @@ export async function notifyWorkflowRoles(
         eventId,
         dependencies.clock.now(),
         bindingId,
+        concernId,
       ],
     );
   }
@@ -190,9 +203,9 @@ export async function listInbox(
     gate_count: number;
   }>(
     `select count(*) filter (where i.state = 'unread')::int as unread_count,
-            count(distinct (i.workflow_version_id, i.gate, i.question_id)) filter (where i.state <> 'done')::int as pending_count,
+            count(distinct (i.workflow_version_id, i.gate, i.question_id, i.concern_id)) filter (where i.state <> 'done')::int as pending_count,
             count(distinct i.question_id) filter (where i.state <> 'done')::int as question_count,
-            count(distinct (i.workflow_version_id, i.gate)) filter (where i.state <> 'done' and i.question_id is null)::int as gate_count from ${FROM} where ${VISIBLE}`,
+            count(distinct (i.workflow_version_id, i.gate)) filter (where i.state <> 'done' and i.question_id is null and i.concern_id is null)::int as gate_count from ${FROM} where ${VISIBLE}`,
     params,
   );
   const older =

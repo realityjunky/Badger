@@ -89,7 +89,9 @@ limit per workflow, private autosaved answer drafts, submission per question
 or per round with every revision and its channel kept, inbox items that close
 once answered, and a per-person event stream with polling as the fallback.
 Migration `0011` adds the tables; ADR 0006 already records the questionnaire
-as records; threads follow (#47).
+as records. Migration `0013` adds question threads with immutable comment edits
+and Field expert concerns (#47). Each concern reaches the Engineer's inbox
+and becomes a draft question, an accepted Fact source, or a reasoned decline.
 
 Answer resolutions (#48) are delivered in the server and dashboard. Engineers
 confirm formal facts in the workflow locale against exact submitted answer

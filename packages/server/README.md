@@ -196,6 +196,56 @@ facts. Re-confirmation requires questions to cite currently pinned evidence
 and answers submitted for their current question revision. Old facts and
 acknowledgements remain visible as inactive history.
 
+## Question threads and expert concerns
+
+Migration `0013` adds comments with immutable edit revisions, immutable concerns,
+and their recorded outcomes. `GET Q` includes `comments`, `concerns`, and the
+server-owned `comment`, `raiseConcern`, and `resolveConcern` capabilities.
+
+| Method and path                       | Behavior                                                                                      |
+| ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `POST Q/questions/:id/comments`       | Add `{text}` to the end of a question's thread.                                               |
+| `PATCH Q/comments/:id`                | The author sends `{text, revision}`; every edit is retained and a stale revision returns 409. |
+| `POST Q/concerns`                     | A Field expert raises `{text}`, including before any round exists.                            |
+| `GET /questionnaire/concerns/:id`     | Resolve an authorized concern deep link to its workflow version.                              |
+| `POST Q/concerns/:id/resolve-preview` | A signed-in Engineer reviews a decision and receives its confirmation hash.                   |
+| `POST Q/concerns/:id/resolve`         | Confirm the same decision with `{confirmed: true, confirmationHash, ...decision}`.            |
+
+A decision includes the current concern `revision` and one of:
+
+- `{outcome: "question", roundId, question}`: create a question using the
+  question content schema above, in a draft round in this workflow version.
+  The concern keeps its link to the new question. Publishing still uses the
+  round's separate preview and confirmation.
+- `{outcome: "fact-source"}`: retain the concern as an accepted source for a
+  future Fact. This does not confirm a Fact or compose a dossier.
+- `{outcome: "declined", reason}`: record a nonempty reason.
+
+The confirmation binds the concern, the whole decision, and the draft round's
+revision when creating a question. A changed decision or round returns 409
+without creating an outcome or question. Each concern has one immutable
+outcome, with the Engineer's identity, timestamp, and decline reason in
+Activity. The source text is never replaced by the resolution.
+
+Every workflow role except Observer can comment; only the author can edit
+their comment, and the current role must still allow it. Administrator
+overrides apply. Read access alone (for example, an Auditor or Group member)
+does not grant comment or concern writes. Additive roles still apply. Draft
+question threads are visible only to Engineers and Administrators. Concern
+and comment IDs are checked against the requested workflow version.
+
+All three token profiles may comment within their person's current workflow
+roles. Only an `expert` token may raise a concern, and it still requires a
+Field expert role (or Administrator override). Tokens never preview or commit
+concern resolutions. Every write records the credential and channel in
+Activity; client-supplied actor or channel fields are refused.
+
+Raising a concern creates a `concern-raised` inbox item for every Engineer,
+including pending invitations, with a direct link to the concern. Each concern
+counts separately as pending work. Its items close when it is resolved.
+Comments and concerns advance the existing questionnaire revision, so the
+per-person event stream and polling refresh open records and inboxes.
+
 ## Personal access tokens
 
 People create and revoke their Agents' and CLI credentials at

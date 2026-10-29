@@ -11,9 +11,12 @@ export interface InboxItem {
     | "gate-invalidated"
     | "question-assigned"
     | "restatement-ready"
-    | "question-reopened";
+    | "question-reopened"
+    | "concern-raised";
   questionId: string | null;
   questionText: string | null;
+  concernId: string | null;
+  concernText: string | null;
   state: "unread" | "read" | "done";
   revision: number;
   href: string;
