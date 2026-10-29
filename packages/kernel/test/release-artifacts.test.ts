@@ -26,6 +26,7 @@ const serviceDecisions = [
   "0013-uploaded-skill-versions.md",
   "0015-pinned-skill-versions-and-source-check-jobs.md",
   "0016-gate-confirmations-and-inbox.md",
+  "0019-source-study-records-and-completion.md",
 ];
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
@@ -33,6 +34,7 @@ const kernelDecisions = [
   "0011-creator-state-bound-to-approved-proposal.md",
   "0014-bundle-source-skills.md",
   "0017-artifact-receipts-and-attempt-freshness.md",
+  "0018-run-lock-host-identity.md",
 ];
 
 async function readText(relativePath: string): Promise<string> {
