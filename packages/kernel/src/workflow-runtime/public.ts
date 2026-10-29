@@ -30,6 +30,9 @@ export type {
   WorkflowStateProjection,
   WorkflowStateProjectionStatus,
   WorkflowSubmission,
+  WorkflowReceiptRequirement,
+  WorkflowReceiptOutput,
+  WorkflowStartRequirements,
 } from "./types.js";
 
 export type {

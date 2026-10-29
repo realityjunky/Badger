@@ -106,8 +106,12 @@ For hosts without MCP Run tools, use the bundled script adapter from the package
 }
 
 /** Receipt outputs, and the directories the person binds when a Run starts. */
-function artifactReceiptsMarkdown(workflow: WorkflowProtocol): string {
+function artifactReceiptsMarkdown(
+  workflow: WorkflowProtocol,
+  node?: NodeProtocol,
+): string {
   const artifacts = workflow.outputSchemas
+    .filter((schema) => !node || node.outputSchemas.includes(schema.id))
     .flatMap((schema) =>
       schema.artifacts
         .filter((artifact) => artifact.verification === "receipt")
@@ -118,6 +122,8 @@ function artifactReceiptsMarkdown(workflow: WorkflowProtocol): string {
     )
     .join("\n");
   if (!artifacts) return "";
+  if (node)
+    return `\n\n## Artifact Receipts\n\n${artifacts}\n\nRead the bound directory from \`next\` for each receipt output, including the Run root. Write outputs under that directory and follow each output's current Attempt requirement.\n`;
   const roots = [...externalRootDeclarations(workflow.outputSchemas)]
     .map(([name, root]) => `- **${name}**: ${root.description}`)
     .join("\n");
@@ -129,8 +135,11 @@ function artifactReceiptsMarkdown(workflow: WorkflowProtocol): string {
 ${roots}
 
 Each external root is a name. The person running the workflow chooses its
-directory on this host, and the choice is fixed for the Run. Before starting a
-Run, ask the person for each directory; never guess one. In MCP mode, pass the
+directory on this host, and the choice is fixed for the Run. Run \`status\` before starting
+and read \`startRequirements.externalRoots\` from WorkflowRuntime's reply. For each listed root,
+ask the person for each directory; never guess one. Ask using its description as the question.
+Read the chosen directories back to the person for confirmation, and only then start.
+Never reuse a directory from another Run without asking. In MCP mode, pass the
 directories to \`start\` as \`externalRoots\`. In script adapter mode, add
 \`--external-root <name>=<directory>\` to \`node scripts/workflow-state.mjs init\`
 once per root.`
@@ -402,7 +411,11 @@ execution or package installation.
 `;
 }
 
-function nodeMarkdown(workflow: string, node: NodeProtocol): string {
+function nodeMarkdown(
+  workflow: string,
+  node: NodeProtocol,
+  protocol: WorkflowProtocol,
+): string {
   const required =
     node.requiredSkillCalls
       .map(
@@ -442,7 +455,7 @@ function nodeMarkdown(workflow: string, node: NodeProtocol): string {
           "\n",
         )}\n\n${decisionScope}\n\nIn MCP mode, follow the dashboard gate described under Runtime Access.\n\nIn script adapter mode, after the person confirms the declared choice, submit the typed response through \`scripts/workflow-state.mjs decide\`; WorkflowRuntime validates the choice, inputs, rationale, reviewer attestation, and immutable scope references.\n`
     : "";
-  return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n${runtimeAccessMarkdown()}\n## Guidance\n\n<!-- AUTHORING PENDING -->\n**Not yet authored.** The skill-core lane must add prerequisites, domain steps, completion reasoning, red flags, and recovery guidance before this scaffold can be assembled.\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}\n${verifications ? `\n## Verification\n\n${verifications}\n\nSubmit bounded receipt evidence or exact receipt references through WorkflowRuntime; receipt contents and issue time are runtime-owned.\n` : ""}\n${decision}\nRecord completion evidence before advancing to the next Node.\n`;
+  return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n${runtimeAccessMarkdown()}\n## Guidance\n\n<!-- AUTHORING PENDING -->\n**Not yet authored.** The skill-core lane must add prerequisites, domain steps, completion reasoning, red flags, and recovery guidance before this scaffold can be assembled.\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}${artifactReceiptsMarkdown(protocol, node)}\n${verifications ? `\n## Verification\n\n${verifications}\n\nSubmit bounded receipt evidence or exact receipt references through WorkflowRuntime; receipt contents and issue time are runtime-owned.\n` : ""}\n${decision}\nRecord completion evidence before advancing to the next Node.\n`;
 }
 
 async function runtimeAsset(name: string): Promise<string> {
@@ -1008,7 +1021,7 @@ async function writeScaffold(options: {
   for (const node of activeNodes(proposal)) {
     await atomicWrite(
       path.join(root, nodeSkillName(proposal.name, node.id), "SKILL.md"),
-      nodeMarkdown(proposal.name, node),
+      nodeMarkdown(proposal.name, node, proposal.workflow),
     );
   }
   const evalDocument = evalManifest(proposal);

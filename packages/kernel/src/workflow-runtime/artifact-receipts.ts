@@ -8,7 +8,13 @@ import type {
   OutputSchema,
   WorkflowArtifactProducer,
   WorkflowArtifactReceipt,
+  WorkflowProtocol,
 } from "../types.js";
+import type {
+  WorkflowStartRequirements,
+  WorkflowReceiptOutput,
+} from "./types.js";
+import { createWorkflowFinding } from "./findings.js";
 
 const MAX_EXTERNAL_ROOTS = 32;
 
@@ -132,6 +138,75 @@ export function externalRootDeclarations(
   return declared;
 }
 
+function receiptDeclarationsForNode(
+  protocol: WorkflowProtocol,
+  nodeId: string | null,
+) {
+  const node = protocol.nodes.find((item) => item.id === nodeId);
+  return (node?.outputSchemas ?? []).flatMap((schemaId) => {
+    const schema = protocol.outputSchemas.find((item) => item.id === schemaId)!;
+    return schema.artifacts
+      .filter((artifact) => artifact.verification === "receipt")
+      .map((artifact) => ({
+        schema,
+        artifact,
+        requirement: {
+          artifactId: `${schema.id}.${artifact.id}`,
+          paths: [...artifact.paths],
+          requireCurrentAttempt: artifact.requireCurrentAttempt === true,
+        },
+      }));
+  });
+}
+
+export function workflowStartRequirements(
+  protocol: WorkflowProtocol,
+): WorkflowStartRequirements {
+  return {
+    externalRoots: [...externalRootDeclarations(protocol.outputSchemas)]
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([name, root]) => ({
+        name,
+        description: root.description,
+        artifacts: protocol.nodes.flatMap((node) =>
+          receiptDeclarationsForNode(protocol, node.id)
+            .filter(({ artifact }) => artifact.root === name)
+            .map(({ requirement }) => ({ nodeId: node.id, ...requirement })),
+        ),
+      })),
+  };
+}
+
+export function workflowReceiptOutputs(
+  protocol: WorkflowProtocol,
+  nodeId: string | null,
+  runRoot: string,
+  externalRoots: Readonly<Record<string, string>> | undefined,
+): WorkflowReceiptOutput[] {
+  return receiptDeclarationsForNode(protocol, nodeId).map(
+    ({ schema, artifact, requirement }) => ({
+      ...requirement,
+      root: {
+        name: artifact.root ?? null,
+        path: artifactStorageRoot(runRoot, externalRoots, schema, artifact),
+      },
+    }),
+  );
+}
+
+function externalRootBindingError(message: string): Error {
+  return Object.assign(new Error(message), {
+    finding: createWorkflowFinding({
+      code: "external-root-binding-required",
+      severity: "warning",
+      message,
+      requiredAction: "execute",
+      operation: { id: "workflow.start", args: [] },
+      requiresUserDecision: true,
+    }),
+  });
+}
+
 /**
  * Checks the directories a host binds to the declared external roots when a
  * Run starts. Each must be an existing directory and not itself a link, the
@@ -146,31 +221,44 @@ export async function bindWorkflowExternalRoots(
     supplied !== undefined &&
     (!supplied || typeof supplied !== "object" || Array.isArray(supplied))
   ) {
-    throw new Error("Workflow artifact external roots must be a map");
+    throw externalRootBindingError(
+      "Workflow artifact external roots must be a map",
+    );
   }
   for (const name of Object.keys(supplied ?? {})) {
     if (!declared.has(name)) {
-      throw new Error(
-        `Workflow artifact external root ${name} is not declared by this workflow`,
+      throw externalRootBindingError(
+        `Workflow artifact external root ${name} is not declared by this workflow: ${supplied![name]}`,
       );
     }
   }
   if (declared.size === 0) return undefined;
+  const unbound = [...declared.keys()]
+    .sort()
+    .filter(
+      (name) =>
+        !Object.hasOwn(supplied ?? {}, name) || supplied?.[name] === undefined,
+    );
+  if (unbound.length > 0) {
+    throw externalRootBindingError(
+      unbound
+        .map(
+          (name) =>
+            `Workflow artifact external root ${name} needs a directory when the Run starts: ${declared.get(name)!.description}`,
+        )
+        .join("\n"),
+    );
+  }
   const bound: Record<string, string> = {};
   for (const name of [...declared.keys()].sort()) {
     const value = supplied?.[name];
-    if (value === undefined) {
-      throw new Error(
-        `Workflow artifact external root ${name} needs a directory when the Run starts`,
-      );
-    }
     if (
       typeof value !== "string" ||
       !path.isAbsolute(value) ||
       value.includes("\0")
     ) {
-      throw new Error(
-        `Workflow artifact external root ${name} must be bound to an absolute directory`,
+      throw externalRootBindingError(
+        `Workflow artifact external root ${name} must be bound to an absolute directory: ${value}`,
       );
     }
     const directory = path.resolve(value);
@@ -178,12 +266,12 @@ export async function bindWorkflowExternalRoots(
     try {
       stat = await fs.lstat(directory);
     } catch {
-      throw new Error(
+      throw externalRootBindingError(
         `Workflow artifact external root ${name} directory does not exist: ${directory}`,
       );
     }
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      throw new Error(
+      throw externalRootBindingError(
         `Workflow artifact external root ${name} must be a real directory, not a link: ${directory}`,
       );
     }

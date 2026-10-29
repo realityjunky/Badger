@@ -508,7 +508,10 @@ describe("generated WorkflowRuntime state adapter", () => {
       { cwd: projectRoot, env: process.env },
     );
 
-    expect(JSON.parse(status.stdout)).toEqual({ status: "not-started" });
+    expect(JSON.parse(status.stdout)).toEqual({
+      status: "not-started",
+      startRequirements: { externalRoots: [] },
+    });
     await expect(
       execFileAsync(process.execPath, [scriptPath, "next"], {
         cwd: projectRoot,

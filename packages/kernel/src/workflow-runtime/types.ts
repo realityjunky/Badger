@@ -110,6 +110,28 @@ export type WorkflowRunLocation =
 
 export type WorkflowRunTarget = WorkflowRunLocation | string;
 
+export interface WorkflowReceiptRequirement {
+  nodeId: string;
+  artifactId: WorkflowArtifactId;
+  paths: string[];
+  requireCurrentAttempt: boolean;
+}
+
+export interface WorkflowStartRequirements {
+  externalRoots: Array<{
+    name: string;
+    description: string;
+    artifacts: WorkflowReceiptRequirement[];
+  }>;
+}
+
+export interface WorkflowReceiptOutput {
+  artifactId: WorkflowArtifactId;
+  paths: string[];
+  root: { name: string | null; path: string };
+  requireCurrentAttempt: boolean;
+}
+
 export interface WorkflowContinuation {
   disposition: "continue" | "await-user" | "blocked" | "done";
   runId: string;
@@ -120,6 +142,7 @@ export interface WorkflowContinuation {
   visitOrdinal: number | null;
   retryOrdinal: number | null;
   pendingAction: WorkflowPendingAction | null;
+  receiptOutputs: WorkflowReceiptOutput[];
   execution: WorkflowExecutionIdentity;
   decisionReceipts: WorkflowDecisionReceipt[];
   verificationReceipts: WorkflowVerificationReceiptReference[];
@@ -194,6 +217,7 @@ export interface WorkflowStateProjection {
     at: string;
   }>;
   pendingAction: WorkflowPendingAction | null;
+  receiptOutputs: WorkflowReceiptOutput[];
   execution: WorkflowExecutionIdentity;
   visits: WorkflowVisitState[];
   cycles: WorkflowCycleState[];
@@ -270,6 +294,9 @@ export interface WorkflowRunRegistry {
 }
 
 export interface WorkflowRuntime extends WorkflowRunRegistry {
+  startRequirements(
+    protocol: WorkflowProtocol,
+  ): Promise<WorkflowStartRequirements>;
   inspect(target: WorkflowRunTarget): Promise<WorkflowContinuation | null>;
   projectState(
     target: WorkflowRunTarget,

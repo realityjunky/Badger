@@ -197,6 +197,9 @@ function printPendingAction(value) {
 }
 
 function printNext(value) {
+  for (const output of value.receiptOutputs ?? []) {
+    console.log(`RECEIPT_OUTPUT: ${JSON.stringify(output)}`);
+  }
   for (const finding of value.findings ?? []) {
     console.log(`FINDING: ${JSON.stringify(finding)}`);
   }
@@ -312,11 +315,10 @@ async function main() {
     requireProjectionConfirmation(options);
     const projection = await readProjection(target);
     if (options.rebuild) await syncProjection(target, projection);
-    if (options.json) {
-      printJson(projection ?? { status: "not-started" });
-    } else {
-      printJson(projection ?? { status: "not-started" });
-    }
+    printJson(projection ?? {
+      status: "not-started",
+      startRequirements: await createWorkflowRuntime().startRequirements(protocol),
+    });
     return;
   }
 

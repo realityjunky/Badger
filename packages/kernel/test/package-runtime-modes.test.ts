@@ -132,6 +132,22 @@ describe("generated package runtime modes", () => {
       "ask the person for each directory; never guess one",
     );
     expect(entry).toContain("`--external-root <name>=<directory>`");
+    expect(entry).toContain("Run `status` before starting");
+    expect(entry).toContain("using its description as the question");
+    expect(entry).toContain(
+      "Read the chosen directories back to the person for confirmation",
+    );
+    expect(entry).toContain(
+      "Never reuse a directory from another Run without asking",
+    );
+    const node = await fs.readFile(
+      path.join(generated.packageRoot, "prepared-workflow-prepare/SKILL.md"),
+      "utf8",
+    );
+    expect(node).toContain(
+      "- **report.v1.report**: `report.pdf` under external root `reports`; written during the current Attempt",
+    );
+    expect(node).toContain("Read the bound directory from `next`");
     // The package names the root and leaves its directory to each Run.
     expect(await fs.readFile(generated.protocolPath, "utf8")).not.toContain(
       project,
@@ -168,7 +184,26 @@ describe("generated package runtime modes", () => {
         `reports=${reports}`,
       ),
     ).rejects.toThrow("--external-root reports is given more than once.");
-    expect(await run("status")).toMatchObject({ status: "not-started" });
+    expect(await run("status")).toEqual({
+      status: "not-started",
+      startRequirements: {
+        externalRoots: [
+          {
+            name: "reports",
+            description: "The shared folder that holds reports.",
+            artifacts: [
+              {
+                nodeId: "prepare",
+                artifactId: "report.v1.report",
+                paths: ["report.pdf"],
+                requireCurrentAttempt: true,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    await expect(fs.access(runRoot)).rejects.toThrow();
 
     const started = await run(
       "init",
@@ -181,6 +216,29 @@ describe("generated package runtime modes", () => {
       runId: "bound-reports",
       currentNode: "prepare",
     });
+    const outputs = [
+      {
+        artifactId: "report.v1.report",
+        paths: ["report.pdf"],
+        root: { name: "reports", path: reports },
+        requireCurrentAttempt: true,
+      },
+    ];
+    expect(started.receiptOutputs).toEqual(outputs);
+    expect((await run("next")).receiptOutputs).toEqual(outputs);
+    // Every script invocation above and below loads the runtime in a fresh process.
+    expect((await run("recover")).receiptOutputs).toEqual(outputs);
+    const textNext = await execFileAsync(
+      process.execPath,
+      [script, "next", "--run-root", runRoot],
+      { cwd: project },
+    );
+    expect(
+      textNext.stdout
+        .split("\n")
+        .filter((line) => line.startsWith("RECEIPT_OUTPUT: "))
+        .map((line) => JSON.parse(line.slice("RECEIPT_OUTPUT: ".length))),
+    ).toEqual(outputs);
     expect(
       (await readRunState(runRoot))?.workflowRuntime?.externalRoots,
     ).toEqual({ reports });
