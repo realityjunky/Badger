@@ -234,8 +234,9 @@ does not grant comment or concern writes. Additive roles still apply. Draft
 question threads are visible only to Engineers and Administrators. Concern
 and comment IDs are checked against the requested workflow version.
 
-All three token profiles may comment within their person's current workflow
-roles. Only an `expert` token may raise a concern, and it still requires a
+`expert` and `engineer` tokens may comment within their person's current
+workflow roles; `operator` tokens, which only run workflows, may not. Only an
+`expert` token may raise a concern, and it still requires a
 Field expert role (or Administrator override). Tokens never preview or commit
 concern resolutions. Every write records the credential and channel in
 Activity; client-supplied actor or channel fields are refused.

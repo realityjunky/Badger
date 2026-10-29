@@ -20,7 +20,8 @@ export function tokenRequestAllowed(
   const questionnaire = questionnaireMethods(path);
   if (questionnaire !== null && questionnaire.split(", ").includes(method)) {
     if (reads) return true;
-    if (/\/comments(?:\/[^/]+)?$/u.test(path)) return true;
+    if (/\/comments(?:\/[^/]+)?$/u.test(path))
+      return scopes.includes("expert") || scopes.includes("engineer");
     if (method === "POST" && /\/concerns$/u.test(path))
       return scopes.includes("expert");
     if (/\/(answer|submit)$/u.test(path)) return scopes.includes("expert");

@@ -505,6 +505,24 @@ describe("expert concerns", () => {
       { text: "Wrong scope" },
       403,
     );
+    await operatorAgent(
+      "POST",
+      `${base}/questions/${questionId}/comments`,
+      { text: "Wrong scope" },
+      403,
+    );
+    await operatorAgent(
+      "PATCH",
+      `${base}/comments/${comment.id}`,
+      { revision: 2, text: "Wrong scope" },
+      403,
+    );
+    await engineerAgent(
+      "POST",
+      `${base}/questions/${questionId}/comments`,
+      { text: "The engineer's comment" },
+      201,
+    );
     await observerAgent(
       "POST",
       `${base}/concerns`,
