@@ -10,7 +10,13 @@ export function McpSetup() {
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const base = readBasePath(document);
   const url = `${window.location.origin}${base === "/" ? "" : base}`;
-  const env = { BADGER_URL: url, BADGER_TOKEN: "<YOUR_PERSONAL_ACCESS_TOKEN>" };
+  // Claude Code expands ${VAR} in .mcp.json, a file teams often commit, so
+  // its configuration reads the token from the environment instead.
+  const env = {
+    BADGER_URL: url,
+    BADGER_TOKEN:
+      host === "claude" ? "${BADGER_TOKEN}" : "<YOUR_PERSONAL_ACCESS_TOKEN>",
+  };
   const configuration =
     host === "codex"
       ? `[mcp_servers.badger]\ncommand = ${JSON.stringify(command)}\nargs = []\n\n[mcp_servers.badger.env]\nBADGER_URL = ${JSON.stringify(env.BADGER_URL)}\nBADGER_TOKEN = ${JSON.stringify(env.BADGER_TOKEN)}\n`

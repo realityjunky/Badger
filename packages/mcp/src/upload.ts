@@ -1,6 +1,12 @@
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
-import type { BadgerApi } from "./api.js";
+import { BadgerTimeoutError, type BadgerApi } from "./api.js";
+
+/** Allow for a slow uplink: half a minute, plus a second per 64 KiB sent. */
+function uploadTimeoutSeconds(files: { content: string }[]): number {
+  const bytes = files.reduce((sum, file) => sum + file.content.length, 0);
+  return 30 + Math.ceil(bytes / 65_536);
+}
 
 interface UploadLimits {
   maxBytes: number;
@@ -126,7 +132,7 @@ export async function uploadSkillVersion(
   if (!skills.some((skill) => skill.id === input.skillId && skill.canUpload))
     throw new Error("This Skill is outside your upload permissions");
   const files = await folderFiles(input.folder, limits);
-  const result = await api.request<{
+  let result: {
     preview?: unknown;
     version?: {
       skillId: string;
@@ -134,17 +140,27 @@ export async function uploadSkillVersion(
       inventory: unknown[];
       scripts: unknown[];
     };
-  }>(
-    `/skills/${encodeURIComponent(input.skillId)}/${input.confirmed ? "versions" : "upload-preview"}`,
-    "POST",
-    {
-      files,
-      scripts: input.scripts,
-      ...(input.confirmed
-        ? { confirmed: true, expectedHash: input.expectedHash }
-        : {}),
-    },
-  );
+  };
+  try {
+    result = await api.request(
+      `/skills/${encodeURIComponent(input.skillId)}/${input.confirmed ? "versions" : "upload-preview"}`,
+      "POST",
+      {
+        files,
+        scripts: input.scripts,
+        ...(input.confirmed
+          ? { confirmed: true, expectedHash: input.expectedHash }
+          : {}),
+      },
+      uploadTimeoutSeconds(files),
+    );
+  } catch (error) {
+    if (input.confirmed && error instanceof BadgerTimeoutError)
+      throw new Error(
+        `Badger did not answer within ${error.seconds} s. The version may have been created; repeat the same confirmed upload to check, because an identical upload returns the existing version.`,
+      );
+    throw error;
+  }
   if (result.version) {
     const { skillId, hash, inventory, scripts } = result.version;
     return {

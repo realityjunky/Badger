@@ -1,11 +1,15 @@
 import { afterEach, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ElicitRequestSchema,
+  ToolListChangedNotificationSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import {
   startTestService,
@@ -325,10 +329,15 @@ it("refuses stale answers, unassigned writes, and tools hidden after a role is r
   };
   await call(client, "save_answer", args);
   const stale = await client.callTool({ name: "save_answer", arguments: args });
+  // The Agent learns the error kind and the revision to reload.
   expect(stale).toMatchObject({
     isError: true,
     content: [
-      expect.objectContaining({ text: expect.stringContaining("409") }),
+      expect.objectContaining({
+        text: expect.stringMatching(
+          /^Badger 409 conflict: .+ \(currentRevision: 1\)$/u,
+        ),
+      }),
     ],
   });
   const { client: otherClient } = await connect(observer);
@@ -623,4 +632,102 @@ it("identifies the token owner through an in-memory MCP client", async () => {
     }),
   ]);
   expect(client.getInstructions()).toContain("Submit only what the user said");
+});
+
+it("refuses an Agent host that cannot travel as a header, naming only the setting", () => {
+  for (const agentHost of ["张三的电脑", "", " ", "x".repeat(201), "lab\nhost"])
+    expect(() =>
+      createExpertMcp({
+        url: "https://badger.example",
+        token: "secret",
+        agentHost,
+      }),
+    ).toThrow("BADGER_AGENT_HOST must be 1 to 200 printable ASCII characters");
+  expect(() =>
+    createExpertMcp({
+      url: "https://badger.example",
+      token: "secret",
+      agentHost: "lab-workbuddy",
+    }),
+  ).not.toThrow();
+});
+
+it("reuses a recent capability read for calls and announces a changed tool list", async () => {
+  const { workflowId, versionId, expertBinding } = await setup();
+  const { questionId, questionRevision } = await publishQuestion({
+    workflowId,
+    versionId,
+  });
+  const { client, token } = await connect();
+  const changed: unknown[] = [];
+  client.setNotificationHandler(ToolListChangedNotificationSchema, (note) => {
+    changed.push(note);
+  });
+  await client.listTools();
+  for (let attempt = 0; attempt < 3; attempt += 1)
+    expect(
+      (await client.callTool({ name: "whoami", arguments: {} })).isError,
+    ).not.toBe(true);
+  const activity = await service.request(
+    "/api/v1/audit-events?action=token.used&limit=100",
+    { as: admin },
+  );
+  const { events } = (await activity.json()) as {
+    events: { credentialId: string }[];
+  };
+  // One capability read for the list, then one request per call.
+  expect(
+    events.filter((event) => event.credentialId === token.id),
+  ).toHaveLength(4);
+  await write("DELETE", `/bindings/${expertBinding.id}`, {
+    revision: expertBinding.revision,
+  });
+  // The recent read still lists save_answer; the service refuses the call,
+  // and the fresh read that follows announces the shorter list.
+  const refused = await client.callTool({
+    name: "save_answer",
+    arguments: {
+      workflowId,
+      versionId,
+      questionId,
+      questionRevision,
+      revision: 0,
+      text: "Keep frozen.",
+    },
+  });
+  expect(refused.isError).toBe(true);
+  await expect.poll(() => changed.length).toBe(1);
+  expect(
+    (await client.listTools()).tools.map((tool) => tool.name),
+  ).not.toContain("save_answer");
+});
+
+it("refuses a redirect so the token never follows it to another host", async () => {
+  const redirecting = http.createServer((_request, response) => {
+    response.writeHead(302, { location: "https://elsewhere.example/" });
+    response.end();
+  });
+  await new Promise<void>((resolve) =>
+    redirecting.listen(0, "127.0.0.1", resolve),
+  );
+  try {
+    const { port } = redirecting.address() as { port: number };
+    const server = createExpertMcp({
+      url: `http://127.0.0.1:${port}/team`,
+      token: "secret-token",
+      agentHost: "lab-workbuddy",
+    });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(b);
+    const client = new Client({ name: "Test Agent", version: "1.0.0" });
+    clients.push(client);
+    await client.connect(a);
+    const result = await client.callTool({ name: "whoami", arguments: {} });
+    expect(result.isError).toBe(true);
+    const [content] = result.content as { text: string }[];
+    expect(content.text).toContain("redirect");
+    expect(content.text).not.toContain("secret-token");
+  } finally {
+    redirecting.close();
+  }
 });

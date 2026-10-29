@@ -17,16 +17,20 @@ Alternatively launch `node /absolute/path/to/Badger/packages/mcp/dist/src/cli.js
 The dashboard's **Settings → Personal access tokens → Connect your Agent**
 offers configuration for Claude Code, Codex, and WorkBuddy. Set:
 
-| Environment variable | Meaning                                                                                                                                  |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `BADGER_URL`         | The deployment URL, including its base path, such as `https://badger.example/team`. HTTPS is required except on loopback HTTP addresses. |
-| `BADGER_TOKEN`       | A personal access token created in the dashboard, normally with the `expert` scope.                                                      |
-| `BADGER_AGENT_HOST`  | Optional attribution for answers; defaults to this machine's hostname.                                                                   |
+| Environment variable | Meaning                                                                                                                                      |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BADGER_URL`         | The deployment URL, including its base path, such as `https://badger.example/team`. HTTPS is required except on loopback HTTP addresses.     |
+| `BADGER_TOKEN`       | A personal access token created in the dashboard, normally with the `expert` scope.                                                          |
+| `BADGER_AGENT_HOST`  | Optional attribution for answers, 1 to 200 printable ASCII characters; defaults to this machine's hostname, in IDNA form if it is not ASCII. |
 
 The MCP never prints configuration or credentials. Stdout carries only MCP;
-startup failures go to stderr. Redirects are refused so a credential cannot
-follow a redirect to another deployment. For Codex's stdio environment format,
-see the [official MCP documentation](https://developers.openai.com/codex/mcp).
+startup failures go to stderr and name the setting at fault, never its value.
+Redirects are refused so a credential cannot follow a redirect to another
+deployment. For Codex's stdio environment format, see the
+[official MCP documentation](https://developers.openai.com/codex/mcp). The
+Claude Code configuration goes in `.mcp.json`, which teams often commit, so it
+reads the token as `${BADGER_TOKEN}` from the environment that starts Claude
+Code instead of holding it.
 
 | Tool                   | Behavior                                                                                                                                                                                           |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -40,9 +44,20 @@ see the [official MCP documentation](https://developers.openai.com/codex/mcp).
 | `upload_skill_version` | Preview a local folder; upload only with `confirmed: true` and the preview's `expectedHash`.                                                                                                       |
 | `open_dashboard`       | Return a dashboard link for a person to confirm, acknowledge, dispute, approve, publish, or answer a gate. Offer URL-mode elicitation when the host supports it. Opening the link never signs off. |
 
-Tool discovery and every call check the service's current role and scope
-capabilities. Each HTTP mutation also enforces its target's permissions and
-optimistic revisions. A token never signs off. Server instructions require
+Tool discovery reads the service's current role and scope capabilities, and
+a call reuses a read from the last 30 seconds, because every read is a
+rate-limited token request. Each HTTP request is still checked by the service
+against the person's current roles, the token's scopes, and its target's
+permissions and revisions. A refused call, or a call to a tool missing from
+the recent read, rereads the capabilities, and when the permitted tools change
+the MCP sends `notifications/tools/list_changed`. A token never signs off.
+
+A refused call returns the status, the error kind (`invalid`, `denied`,
+`rejected`, `conflict`, or `unavailable`), and the facts needed to retry, such
+as a conflict's `currentRevision` or the rate limit's `Retry-After`. Requests
+time out after 30 seconds; an upload allows another second for every 64 KiB it
+sends. A write that times out may still have been saved, and the tool says so:
+an identical upload returns the existing version. Server instructions require
 Agents to submit only what the user said, and only when instructed to save or
 send it. A host accepting a URL elicitation does not constitute approval.
 
@@ -69,7 +84,7 @@ and reload current records. Resources, prompts, and elicitation are optional.
 
 | Host        | Configuration                                                                                       | Stdio tools                                               | Resources                              | URL elicitation                                                                            |
 | ----------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Claude Code | `.mcp.json`, generated JSON checked in the browser journey                                          | Real SDK stdio client verified; application check pending | Optional; local file fallback verified | Capability negotiation and link fallback verified with SDK; application support unverified |
+| Claude Code | `.mcp.json` with `${BADGER_TOKEN}`, generated JSON checked in the browser journey                   | Real SDK stdio client verified; application check pending | Optional; local file fallback verified | Capability negotiation and link fallback verified with SDK; application support unverified |
 | Codex       | `~/.codex/config.toml`, generated from the official stdio format and checked in the browser journey | Real SDK stdio client verified; application check pending | Optional; local file fallback verified | Capability negotiation and link fallback verified with SDK; application support unverified |
 | WorkBuddy   | MCP server JSON, generated configuration checked in the browser journey                             | Real SDK stdio client verified; application check pending | Optional; local file fallback verified | Capability negotiation and link fallback verified with SDK; application support unverified |
 
