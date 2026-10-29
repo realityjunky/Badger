@@ -90,6 +90,7 @@ export async function saveDraft(
     throw new RequestError(
       409,
       "The draft changed; quote its current revision",
+      previous ? { currentRevision: previous.revision } : undefined,
     );
   if (previous?.status === "retired")
     throw new RequestError(409, "This draft is retired");

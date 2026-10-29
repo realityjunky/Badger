@@ -18,11 +18,15 @@ stale evidence blocks its topic, and an unstudied pin blocks all topics.
 
 Inferences and assumptions are revisioned drafts, never caller-declared
 facts. A draft may link a same-topic question in its Workflow version and
-binds that question revision. It becomes confirmed only when that question
-has current, acknowledged facts. A deferral does not confirm an inference.
-New or changed meaning cannot reuse a resolved question. Resolution previews
-bind the linked draft revisions, so concurrent draft edits require review
-again. Retirement preserves every revision and is recorded in Activity.
+records the question revision it linked. It becomes confirmed only when that
+question has current, acknowledged facts. The link follows later revisions of
+the question, because the sign-off is the resolution: its preview lists every
+linked draft and binds the draft revisions, so concurrent draft edits require
+review again. A deferral does not confirm an inference. New or changed meaning
+cannot reuse a resolved question. Agents with an engineer token may create and
+revise drafts; retiring one removes a readiness blocker, so it stays with a
+signed-in person. Retirement preserves every revision and is recorded in
+Activity.
 
 Round publication stores an immutable ledger baseline in the same transaction,
 including publication of a follow-up round. Comparisons use record identities,

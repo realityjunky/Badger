@@ -797,3 +797,239 @@ describe("the questionnaire ledger and readiness", () => {
     ).toBe(403);
   });
 });
+
+describe("ledger drafts, links, and baselines after review", () => {
+  it("lets an engineer token create and revise drafts while retirement stays with a signed-in person", async () => {
+    const { questionnaire: base } = await setup();
+    const token = async (as: TestPerson, scopes: string[]) =>
+      (
+        await call(
+          "/me/tokens",
+          "POST",
+          { name: `${as.subject} Agent`, scopes },
+          as,
+          201,
+        )
+      ).secret as string;
+    const engineerToken = await token(engineer, ["engineer"]);
+    const expertToken = await token(expert, ["expert"]);
+    const agent = (
+      secret: string,
+      method: string,
+      route: string,
+      body: unknown,
+    ) =>
+      service.request(`/api/v1${route}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${secret}`,
+          "content-type": "application/json",
+          "x-badger-agent-host": "engineer-laptop",
+        },
+        body: JSON.stringify(body),
+      });
+    const drafted = await agent(engineerToken, "POST", `${base}/assumptions`, {
+      topic: "inputs",
+      statement: "Samples arrive frozen.",
+      questionId: null,
+    });
+    expect(drafted.status).toBe(201);
+    const { record } = await drafted.json();
+    const content = { topic: "inputs", questionId: null };
+    const revised = await agent(
+      engineerToken,
+      "PATCH",
+      `${base}/assumptions/${record.id}`,
+      { ...content, revision: 1, statement: "Samples arrive refrigerated." },
+    );
+    expect(revised.status).toBe(200);
+    const stale = await agent(
+      engineerToken,
+      "PATCH",
+      `${base}/assumptions/${record.id}`,
+      { ...content, revision: 1, statement: "Samples arrive warm." },
+    );
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ currentRevision: 2 });
+    expect(
+      (
+        await agent(
+          engineerToken,
+          "DELETE",
+          `${base}/assumptions/${record.id}`,
+          {
+            revision: 2,
+          },
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await agent(expertToken, "POST", `${base}/inferences`, {
+          ...content,
+          statement: "Samples need cold storage.",
+        })
+      ).status,
+    ).toBe(403);
+    await call(`${base}/assumptions/${record.id}`, "DELETE", { revision: 2 });
+    expect((await call(`${base}/assumptions`)).records).toEqual([
+      expect.objectContaining({
+        id: record.id,
+        revision: 3,
+        status: "retired",
+      }),
+    ]);
+  });
+
+  it("confirms a linked draft after its question is revised, because the signed-off preview lists it", async () => {
+    const { questionnaire: base, expertId } = await setup();
+    const { round: batch, question, content } = await round(base, expertId);
+    const { record } = await call(
+      `${base}/inferences`,
+      "POST",
+      {
+        topic: "interfaces",
+        statement: "The consumer requires sample_id.",
+        questionId: question.id,
+      },
+      engineer,
+      201,
+    );
+    await call(`${base}/questions/${question.id}`, "PATCH", {
+      ...content,
+      text: "Which columns, in order, does the consumer require?",
+      revision: 1,
+    });
+    await publish(base, batch.id);
+    await call(
+      `${base}/questions/${question.id}/answer`,
+      "PUT",
+      { revision: 0, questionRevision: 2, text: "sample_id, then sequence." },
+      expert,
+    );
+    await call(
+      `${base}/questions/${question.id}/submit`,
+      "POST",
+      { revision: 1, questionRevision: 2 },
+      expert,
+    );
+    const resolution = {
+      revision: 2,
+      kind: "confirmed",
+      facts: [
+        {
+          text: "The consumer requires sample_id, then sequence.",
+          answers: [{ personId: expertId, revision: 2 }],
+        },
+      ],
+    };
+    const { preview } = await call(
+      `${base}/questions/${question.id}/resolution-preview`,
+      "POST",
+      resolution,
+    );
+    expect(preview.drafts).toEqual([
+      expect.objectContaining({ id: record.id, questionRevision: 1 }),
+    ]);
+    await sign(
+      base,
+      `questions/${question.id}`,
+      "resolution-preview",
+      "resolve",
+      resolution,
+    );
+    const fact = (await call(base)).facts[0];
+    await sign(
+      base,
+      `facts/${fact.id}`,
+      "acknowledgement-preview",
+      "acknowledge",
+      { decision: "acknowledged" },
+      expert,
+    );
+    const { handoff } = await call(`${base}/ledger`);
+    expect(handoff.ledger.agentInferences).toEqual([
+      expect.objectContaining({
+        record: expect.objectContaining({ id: record.id }),
+        state: "confirmed",
+      }),
+    ]);
+    expect(
+      handoff.readiness.find((r: { topic: string }) => r.topic === "interfaces")
+        .blockers,
+    ).toEqual([]);
+  });
+
+  it("compares a round baseline by its records, not by the current name of whoever resolved them", async () => {
+    const { questionnaire: base, expertId } = await setup();
+    const first = await round(base, expertId);
+    await publish(base, first.round.id);
+    await answer(base, first.question.id);
+    await sign(
+      base,
+      `questions/${first.question.id}`,
+      "resolution-preview",
+      "resolve",
+      {
+        revision: 1,
+        kind: "deferred",
+        deferredKind: "out-of-scope",
+        reason: "A later workflow owns this contract.",
+      },
+    );
+    const second = await round(base, expertId, "inputs");
+    await publish(base, second.round.id);
+    // The provider now reports another display name for the Engineer, and
+    // every later sign-in carries it.
+    const renamed = { ...engineer, displayName: "Sam Renamed" };
+    expect(
+      (await call("/me", "GET", undefined, renamed)).person.displayName,
+    ).toBe("Sam Renamed");
+    const { changes } = await call(
+      `${base}/ledger?sinceRound=${second.round.id}`,
+      "GET",
+      undefined,
+      renamed,
+    );
+    expect(changes).toEqual({ added: [], changed: [], resolved: [] });
+  });
+
+  it("hides a draft question's ID in draft links from readers who cannot compose", async () => {
+    const { questionnaire: base, expertId } = await setup();
+    const { round: batch, question } = await round(base, expertId);
+    const { record } = await call(
+      `${base}/inferences`,
+      "POST",
+      {
+        topic: "interfaces",
+        statement: "The consumer requires sample_id.",
+        questionId: question.id,
+      },
+      engineer,
+      201,
+    );
+    expect((await call(`${base}/inferences`)).records[0].questionId).toBe(
+      question.id,
+    );
+    const listed = await call(`${base}/inferences`, "GET", undefined, observer);
+    expect(listed.records).toEqual([
+      expect.objectContaining({
+        id: record.id,
+        questionId: null,
+        questionRevision: null,
+      }),
+    ]);
+    const single = await call(
+      `${base}/inferences/${record.id}`,
+      "GET",
+      undefined,
+      observer,
+    );
+    expect(JSON.stringify(single)).not.toContain(question.id);
+    await publish(base, batch.id);
+    expect(
+      (await call(`${base}/inferences`, "GET", undefined, observer)).records[0]
+        .questionId,
+    ).toBe(question.id);
+  });
+});

@@ -243,17 +243,45 @@ export async function handleQuestionnaire(
         };
       if (resource === "inferences" || resource === "assumptions") {
         const kind = resource === "inferences" ? "inference" : "assumption";
-        if (reads)
+        if (reads) {
+          // Readers who cannot compose never learn a draft question's ID.
+          const hidden = new Set(
+            compose
+              ? []
+              : (
+                  await tx.query<{ id: string }>(
+                    "select id from questions where workflow_version_id = $1 and state = 'draft'",
+                    [versionId],
+                  )
+                ).rows.map((row) => row.id),
+          );
+          const redact = <
+            T extends { questionId: string | null; questionRevision: unknown },
+          >(
+            record: T,
+          ): T =>
+            record.questionId !== null && hidden.has(record.questionId)
+              ? { ...record, questionId: null, questionRevision: null }
+              : record;
+          if (id) {
+            const draft = await readDraft(tx, versionId, id, kind);
+            return {
+              status: 200,
+              value: {
+                record: redact(draft.record),
+                revisions: draft.revisions.map(redact),
+              },
+            };
+          }
           return {
             status: 200,
-            value: id
-              ? await readDraft(tx, versionId, id, kind)
-              : {
-                  records: (await readDrafts(tx, versionId)).filter(
-                    (r) => r.kind === kind,
-                  ),
-                },
+            value: {
+              records: (await readDrafts(tx, versionId))
+                .filter((r) => r.kind === kind)
+                .map(redact),
+            },
           };
+        }
         if (!compose)
           throw new RequestError(
             403,
@@ -429,6 +457,16 @@ export async function handleQuestionnaire(
           : "";
         if (resource === "questions") {
           const input = parseResolution(body);
+          // A replayed request returns its first response; only a new
+          // follow-up round gets a publication baseline.
+          const replay =
+            commit &&
+            (
+              await tx.query(
+                "select 1 from question_resolutions where actor_id = $1 and request_id = $2",
+                [person.id, requestId],
+              )
+            ).rows.length > 0;
           const value = commit
             ? await resolveQuestion(
                 tx,
@@ -449,7 +487,7 @@ export async function handleQuestionnaire(
                   input,
                 ),
               };
-          if (commit && input.kind === "followed-up") {
+          if (commit && !replay && input.kind === "followed-up") {
             const child = (
               await tx.query<{ round_id: string }>(
                 `select q.round_id from questions q join question_resolutions r on r.child_question_id = q.id
@@ -671,6 +709,15 @@ export async function handleQuestionnaire(
             400,
             "Confirm the reviewed round before publishing",
           );
+        // A repeated publication must not invent a baseline for a round
+        // published before ledger history existed.
+        const wasPublished =
+          (
+            await tx.query<{ state: string }>(
+              "select state from question_rounds where id = $1 and workflow_version_id = $2",
+              [id, versionId],
+            )
+          ).rows[0]?.state === "published";
         const round = await publishRound(
           tx,
           deps,
@@ -679,7 +726,8 @@ export async function handleQuestionnaire(
           id,
           textInput(body.confirmationHash, "confirmationHash", 64),
         );
-        await snapshotRoundLedger(tx, versionId, id, person.id);
+        if (!wasPublished)
+          await snapshotRoundLedger(tx, versionId, id, person.id);
         return { status: 200, value: { round } };
       }
       throw new RequestError(404, "No such questionnaire resource");

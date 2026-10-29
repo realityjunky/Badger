@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createQuestionnaireHandoff,
+  questionnaireLedgerChanges,
   type QuestionnaireRecords,
 } from "../src/index.js";
 import {
@@ -63,6 +64,141 @@ describe("semantic questionnaire handoff", () => {
     expect(records.questions[0].resolution?.reason).toBe(
       "Owned by a later workflow.",
     );
+  });
+
+  it("confirms a linked draft once its question's facts are acknowledged, whichever question revision it was linked at", () => {
+    const records: QuestionnaireRecords = {
+      questions: [
+        {
+          id: "q",
+          revision: 2,
+          topic: "interfaces",
+          text: "Which columns, in order?",
+          state: "confirmed",
+          resolution: {
+            id: "r",
+            revision: 1,
+            kind: "confirmed",
+            reason: null,
+            deferredKind: null,
+            skillId: null,
+          },
+          answers: [{ personId: "p", revision: 2 }],
+        },
+      ],
+      facts: [
+        {
+          id: "f",
+          questionId: "q",
+          resolutionId: "r",
+          resolutionRevision: 1,
+          questionRevision: 2,
+          statement: "The consumer requires sample_id, then sequence.",
+          active: true,
+          current: true,
+          actorId: "e",
+          answers: [{ personId: "p", revision: 2 }],
+          acknowledgements: [
+            { id: "a", personId: "p", decision: "acknowledged" },
+          ],
+        },
+      ],
+      drafts: [
+        {
+          id: "i",
+          revision: 1,
+          kind: "inference",
+          topic: "interfaces",
+          statement: "The consumer requires sample_id.",
+          questionId: "q",
+          questionRevision: 1,
+          status: "active",
+        },
+        {
+          id: "s",
+          revision: 1,
+          kind: "assumption",
+          topic: "interfaces",
+          statement: "Columns are tab-separated.",
+          questionId: null,
+          questionRevision: null,
+          status: "active",
+        },
+      ],
+    };
+    const handoff = createQuestionnaireHandoff({ records });
+    expect(handoff.ledger.agentInferences.map((i) => i.state)).toEqual([
+      "confirmed",
+    ]);
+    expect(
+      handoff.readiness
+        .find((r) => r.topic === "interfaces")
+        ?.blockers.map((b) => [b.code, b.record?.id]),
+    ).toEqual([["unresolved-assumption", "s"]]);
+    records.facts![0].acknowledgements = [];
+    const pending = createQuestionnaireHandoff({ records });
+    expect(pending.ledger.agentInferences[0].state).toBe("draft");
+    expect(
+      pending.readiness
+        .find((r) => r.topic === "interfaces")
+        ?.blockers.map((b) => b.code),
+    ).toEqual([
+      "unconfirmed-inference",
+      "unresolved-assumption",
+      "pending-acknowledgement",
+    ]);
+  });
+
+  it("compares round baselines on a resolution's immutable fields and reports removed and resolved items", () => {
+    const question = (state: "open" | "deferred", actorName: string) => ({
+      id: "q",
+      revision: 1,
+      topic: "inputs" as const,
+      text: "How are samples shipped?",
+      state,
+      ...(state === "deferred"
+        ? {
+            resolution: {
+              id: "r",
+              revision: 1,
+              kind: "deferred",
+              reason: "A later workflow owns shipping.",
+              deferredKind: "out-of-scope",
+              skillId: null,
+              // A service projection may carry mutable display fields.
+              actorName,
+            } as QuestionnaireRecords["questions"][number]["resolution"],
+          }
+        : {}),
+    });
+    const items = (records: QuestionnaireRecords) =>
+      createQuestionnaireHandoff({ records }).items;
+    const open = items({ questions: [question("open", "Sam")] });
+    const deferred = items({ questions: [question("deferred", "Sam")] });
+    const renamed = items({ questions: [question("deferred", "Sam Renamed")] });
+    expect(deferred[0].resolution).toEqual({
+      id: "r",
+      revision: 1,
+      kind: "deferred",
+      reason: "A later workflow owns shipping.",
+      deferredKind: "out-of-scope",
+      skillId: null,
+    });
+    expect(questionnaireLedgerChanges(deferred, renamed)).toEqual({
+      added: [],
+      changed: [],
+      resolved: [],
+    });
+    expect(questionnaireLedgerChanges(open, deferred)).toEqual({
+      added: [],
+      changed: [],
+      resolved: [{ before: open[0], after: deferred[0] }],
+    });
+    expect(questionnaireLedgerChanges(open, [])).toEqual({
+      added: [],
+      changed: [{ before: open[0], after: null }],
+      resolved: [],
+    });
   });
 
   it("refuses the retired version 1 dossier with a migration finding", () => {

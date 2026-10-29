@@ -139,7 +139,20 @@ export function questionnaireRecordHandoff(
     resolved: ["confirmed", "followed-up", "deferred", "withdrawn"].includes(
       q.state,
     ),
-    ...(q.resolution ? { resolution: q.resolution } : {}),
+    // Only the resolution's immutable fields enter the item, so round
+    // baselines compare equal until the resolution itself changes.
+    ...(q.resolution
+      ? {
+          resolution: {
+            id: q.resolution.id,
+            revision: q.resolution.revision,
+            kind: q.resolution.kind,
+            reason: q.resolution.reason ?? null,
+            deferredKind: q.resolution.deferredKind ?? null,
+            skillId: q.resolution.skillId ?? null,
+          },
+        }
+      : {}),
     relatedRecords: [
       ...(q.resolution
         ? [
@@ -226,14 +239,14 @@ export function questionnaireRecordHandoff(
     record: { type: d.kind, id: d.id, revision: d.revision },
     topic: d.topic,
     statement: d.statement,
+    // A linked draft follows its question's revisions: the resolution
+    // preview that a person signs off lists and binds every linked draft,
+    // and a resolved question accepts no new link or changed meaning.
+    // questionRevision records the revision the draft was linked at.
     state:
       d.status === "retired"
         ? "retired"
-        : d.questionId !== null &&
-            acceptedQuestions.has(d.questionId) &&
-            records.questions.some(
-              (q) => q.id === d.questionId && q.revision === d.questionRevision,
-            )
+        : d.questionId !== null && acceptedQuestions.has(d.questionId)
           ? "confirmed"
           : "draft",
     resolved: false,

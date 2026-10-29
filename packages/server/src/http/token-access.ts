@@ -34,10 +34,14 @@ export function tokenRequestAllowed(
     if (method === "POST" && /\/concerns$/u.test(path))
       return scopes.includes("expert");
     if (/\/(answer|submit)$/u.test(path)) return scopes.includes("expert");
+    // Agents draft questions, inferences, and assumptions; retiring a draft
+    // removes a readiness blocker, so it stays with a signed-in person.
     return (
       scopes.includes("engineer") &&
-      ((method === "POST" && /\/(rounds|questions)$/u.test(path)) ||
-        (method === "PATCH" && /\/questions\/[^/]+$/u.test(path)))
+      ((method === "POST" &&
+        /\/(rounds|questions|inferences|assumptions)$/u.test(path)) ||
+        (method === "PATCH" &&
+          /\/(questions|inferences|assumptions)\/[^/]+$/u.test(path)))
     );
   }
   const skills = skillMethods(path);

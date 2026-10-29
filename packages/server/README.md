@@ -137,8 +137,9 @@ Answers refuse stale question or answer revisions and refuse a question
 whose Engineer resolution has locked it, except that a confirmed answer may
 be corrected and immediately requires re-confirmation.
 
-An `engineer` token may draft rounds and unpublished questions, and an
-`expert` token may save and submit its assigned answers. Such answers require
+An `engineer` token may draft rounds, unpublished questions, and inference
+and assumption drafts, and an `expert` token may save and submit its assigned
+answers. Such answers require
 `X-Badger-Agent-Host`, retain the `mcp` channel and host, and never trust a
 client-supplied actor or channel. Tokens cannot publish rounds or revise
 published questions. People and tokens still need the corresponding current
@@ -170,7 +171,8 @@ publication baselines. Using the questionnaire prefix `Q` above:
 
 All reads require the Workflow version's read permissions. Draft questions
 remain visible only to composing Engineers and Administrators, including in
-round comparisons. A draft question still blocks readiness for every reader;
+round comparisons and in the question links of inference and assumption
+drafts. A draft question still blocks readiness for every reader;
 readers without composing
 rights receive a blocker with a null record reference and no private details.
 Submitted answer revisions appear in question provenance and round changes;
@@ -187,12 +189,18 @@ unresolved questions, unconfirmed inferences, unresolved assumptions, pending
 acknowledgements, disputes, stale source evidence, and pinned versions not yet
 studied. Deferred questions retain their resolution and reason and do not block.
 
-Agents may draft inferences/assumptions using an Engineer-scoped token, but
-cannot provide a confirmation flag. Only a linked, same-topic question's
-acknowledged facts resolve a draft. The link binds the question revision, and
-resolution previews bind the draft revisions. New meaning cannot borrow an
-earlier sign-off. See ADR 0022 for the boundary between questionnaire readiness
-and dossier validation and approval.
+Agents may create and revise inference and assumption drafts with an
+`engineer` token, but cannot provide a confirmation flag. Retiring a draft
+removes a readiness blocker, so it needs a signed-in Engineer or
+Administrator. Only a linked, same-topic question's acknowledged facts resolve
+a draft. The link follows the question's revisions; the draft records the
+revision it was linked at. The resolution preview lists every linked draft and
+binds its revision, so the person who signs off sees exactly the drafts it
+will confirm, and a draft edited after the preview needs a new one. A resolved
+question accepts no new link or changed meaning, so new meaning cannot borrow
+an earlier sign-off. A stale draft write returns 409 with `currentRevision`.
+See ADR 0022 for the boundary between questionnaire readiness and dossier
+validation and approval.
 
 ## Answer resolutions and acknowledgements
 
