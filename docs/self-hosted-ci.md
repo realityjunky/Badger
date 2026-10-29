@@ -10,12 +10,12 @@ operator's responsibility. There is no GitHub-hosted runner fallback.
 The default workflow runs on pushes to `main`, pull requests from branches in
 this repository, and manual dispatches:
 
-| Job                | Required labels                     | Checks                                              |
-| ------------------ | ----------------------------------- | --------------------------------------------------- |
-| `run-storage`      | `self-hosted`, `Linux`, `badger-ci` | Kernel build and run-storage suite                  |
-| `build-test`       | `self-hosted`, `Linux`, `badger-ci` | All builds, unit tests, and formatting              |
-| `web-e2e`          | `self-hosted`, `Linux`, `badger-ci` | Browser journeys in the pinned Playwright container |
-| `service-postgres` | `self-hosted`, `Linux`, `badger-ci` | Server suite against Postgres 17                    |
+| Job                | Required labels                     | Checks                                 |
+| ------------------ | ----------------------------------- | -------------------------------------- |
+| `run-storage`      | `self-hosted`, `Linux`, `badger-ci` | Kernel build and run-storage suite     |
+| `build-test`       | `self-hosted`, `Linux`, `badger-ci` | All builds, unit tests, and formatting |
+| `web-e2e`          | `self-hosted`, `Linux`, `badger-ci` | Browser journeys on the runner host    |
+| `service-postgres` | `self-hosted`, `Linux`, `badger-ci` | Server suite against Postgres 17       |
 
 One Linux runner can process these jobs sequentially. Additional runners with
 the same labels allow parallel jobs. Each runner needs its own installation
@@ -25,15 +25,24 @@ branch or pull request; each job also has an explicit timeout.
 The Postgres service publishes a dynamically allocated port on `127.0.0.1`.
 The test connection uses that assigned port, so CI does not claim a fixed
 Postgres port on the host. GitHub manages each job's service containers and
-network. The Playwright job keeps its own container and browser installation.
+network. The browser journeys run on the runner host, not in a container: the
+job installs Chromium's headless shell, about 120 MB, into the runner
+account's Playwright cache once, and later runs reuse it. They serve the
+dashboard on loopback ports 4319–4323, which must be free on the host.
 
 ## Linux runner setup
 
 Use a maintained Linux machine with Git, Bash, curl, tar, the GitHub runner's
-runtime dependencies, and Docker. Node.js 22 is installed by
-`actions/setup-node`; the runner needs network access to GitHub, the npm
-registry, Docker Hub, and Microsoft's container registry. Allow outbound
-HTTPS; the runner does not need an inbound webhook endpoint.
+runtime dependencies, Docker, and the system libraries Chromium needs. On
+Debian or Ubuntu, an administrator installs those libraries once with
+`sudo npx playwright install-deps chromium` from a checkout after `npm ci`.
+Node.js 22 is installed by `actions/setup-node`; the runner needs network
+access to GitHub, the npm registry, Docker Hub, and Playwright's browser
+downloads from `cdn.playwright.dev` and the hosts it redirects to. Allow
+outbound HTTPS; the runner does not need an inbound webhook endpoint. Behind
+a proxy, set `https_proxy`, `http_proxy`, and `no_proxy` in the runner
+installation's `.env`, with `localhost` and `127.0.0.1` in `no_proxy`; the
+runner and its jobs on the host use them.
 
 On a host shared with other services, create a dedicated unprivileged account
 with its own home, runner installation, and rootless Docker daemon. Keep that
@@ -96,15 +105,16 @@ align them with the enabled job names before changing this variable.
 
 Keep the runner application, operating system, and Docker updated. Monitor
 disk space in the runner work directory and the account's rootless Docker
-data. Persistent runners retain files and images between jobs. `npm ci`
-reinstalls project dependencies, and checkout cleans the working tree, but
-neither resets the whole machine. Prune unused Docker images only on the
-runner account's daemon, while the runner is idle.
+data. Persistent runners retain files, images, and the Playwright browser
+cache between jobs. `npm ci` reinstalls project dependencies, and checkout
+cleans the working tree, but neither resets the whole machine. Prune unused
+Docker images only on the runner account's daemon, while the runner is idle.
 
 If jobs queue, check the runner's online state, labels, service logs, and
-outbound network access. If container jobs fail, verify `DOCKER_HOST` and
-the rootless Docker user service. A failed browser run uploads its Playwright
-report for seven days; artifact and cache storage still have GitHub allowances.
+outbound network access. If service containers fail to start, verify
+`DOCKER_HOST` and the rootless Docker user service. A failed browser run
+uploads its Playwright report for seven days; artifact and cache storage
+still have GitHub allowances.
 
 To retire a runner, stop and uninstall its runner service, remove its
 registration in GitHub, and then retire the account's rootless Docker user

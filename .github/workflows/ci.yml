@@ -72,12 +72,8 @@ jobs:
   web-e2e:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, badger-ci]
-    timeout-minutes: 30
-    container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
-      options: --ipc=host
-    env:
-      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    # A new runner downloads Chromium's headless shell once; later runs reuse it.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -87,6 +83,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npx playwright install --only-shell chromium
       - run: npm run build
       - run: npm run test:e2e -w packages/web
       - uses: actions/upload-artifact@v4
