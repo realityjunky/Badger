@@ -105,6 +105,7 @@ async function answerForWrite(
           id: row.id,
           roundId: row.round_id,
           revision: row.revision,
+          state: row.state,
           canAnswer:
             row.assigned &&
             (row.resolved_at === null || row.state === "confirmed"),
@@ -273,6 +274,9 @@ export async function submitAnswers(
         409,
         "Save a nonempty draft for the current question before submitting",
       );
+    // Only a new draft reopens a confirmed answer; resubmitting it changes nothing.
+    if (question.state === "confirmed" && answer.state === "submitted")
+      continue;
     prepared.push({ input, text: answer.text });
   }
   for (const { input, text } of prepared) {

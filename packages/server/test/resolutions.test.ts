@@ -371,6 +371,59 @@ describe("answer resolutions", () => {
     ]);
   });
 
+  it("keeps confirmed facts and their acknowledgements when the unchanged answer is resubmitted", async () => {
+    const { base, questionId, expertId } = await setup();
+    await resolve(base, questionId, {
+      revision: 1,
+      kind: "confirmed",
+      facts: [
+        {
+          text: "Store plasma refrigerated.",
+          answers: [{ personId: expertId, revision: 2 }],
+        },
+      ],
+    });
+    const fact = (await view(base)).facts[0];
+    const path = `${base}/facts/${fact.id}`;
+    const { preview } = await json<{ preview: { confirmationHash: string } }>(
+      write("POST", `${path}/acknowledgement-preview`, expert, {
+        decision: "acknowledged",
+      }),
+    );
+    await json(
+      write("POST", `${path}/acknowledge`, expert, {
+        decision: "acknowledged",
+        confirmed: true,
+        confirmationHash: preview.confirmationHash,
+        requestId: "ack-before-resubmit",
+      }),
+    );
+    const { answers } = await json<{ answers: { revision: number }[] }>(
+      write("POST", `${base}/questions/${questionId}/submit`, expert, {
+        questionRevision: 1,
+        revision: 2,
+      }),
+    );
+    expect(answers).toEqual([expect.objectContaining({ revision: 2 })]);
+    const current = await view(base);
+    expect(current.questions[0].state).toBe("confirmed");
+    expect(current.facts[0]).toMatchObject({
+      active: true,
+      acknowledgements: [
+        expect.objectContaining({
+          personId: expertId,
+          decision: "acknowledged",
+        }),
+      ],
+    });
+    const inbox = await json<{ items: { kind: string }[] }>(
+      service.request("/api/v1/me/inbox", { as: engineer }),
+    );
+    expect(inbox.items.map((item) => item.kind)).not.toContain(
+      "question-reopened",
+    );
+  });
+
   it("follows up in a published child round and records withdrawal and out-of-scope deferral", async () => {
     const { base, questionId, expertId, content } = await setup();
     await resolve(base, questionId, {
