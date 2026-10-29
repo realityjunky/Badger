@@ -84,6 +84,7 @@ jobs:
       - run: npm ci
       - run: npm run build -w packages/kernel
       - run: npm run build -w packages/server
-      - run: npm test -w packages/server
+      - run: npm run build -w packages/mcp
+      - run: npm test -w packages/server -w packages/mcp
         env:
           BADGER_TEST_DATABASE_URL: postgres://badger:badger@127.0.0.1:5432/badger

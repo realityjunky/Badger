@@ -12,7 +12,16 @@ export function tokenRequestAllowed(
   method: string,
 ): boolean {
   const reads = method === "GET" || method === "HEAD";
-  if (reads && ["/api/v1/me", "/api/v1/groups"].includes(path)) return true;
+  if (
+    reads &&
+    [
+      "/api/v1/me",
+      "/api/v1/me/mcp",
+      "/api/v1/me/questions",
+      "/api/v1/groups",
+    ].includes(path)
+  )
+    return true;
   if (gateMethods(path) !== null)
     return reads && gateMethods(path) === "GET, HEAD";
   if (inboxMethods(path) !== null) return reads;

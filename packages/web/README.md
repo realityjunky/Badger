@@ -24,6 +24,12 @@ them into `dist/`, so the server image carries the build and none of them.
 
 ## Behavior
 
+- Personal access token settings include **Connect your Agent**, with copyable
+  stdio configurations for Claude Code, Codex, and WorkBuddy. The deployment's
+  origin and base path are filled in; the person chooses the local executable
+  and replaces the token placeholder. The configuration connects the expert
+  profile and never stores a token secret in dashboard preferences.
+
 - The Questionnaire page has rounds and questions, the answer thread, and an
   evidence/history inspector. Engineers compose questions, retain revisions,
   and review a whole round before publishing it in priority order. Workflow

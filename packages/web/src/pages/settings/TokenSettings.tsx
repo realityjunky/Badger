@@ -20,6 +20,7 @@ import {
 } from "../../api/tokens.js";
 import { readBasePath } from "../../app/paths.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { McpSetup } from "./McpSetup.js";
 
 interface TokenForm {
   name: string;
@@ -124,6 +125,7 @@ export function TokenSettings() {
     <section className="settings-panel">
       <p className="muted">{t("settings.tokens.description")}</p>
       <p className="muted">{t("tokens.permissions")}</p>
+      <McpSetup />
       <div>
         <Button
           type="primary"

@@ -1,0 +1,37 @@
+{
+  "name": "@realityjunky/badger-mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local Badger MCP with the expert profile",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "badger-mcp": "dist/src/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.test.json",
+    "format:check": "prettier --check src test package.json tsconfig*.json vitest.config.ts README.md"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@realityjunky/badger": "*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@realityjunky/badger-server": "*",
+    "@types/node": "^24.2.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
+  }
+}

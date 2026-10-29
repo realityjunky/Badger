@@ -879,6 +879,18 @@ body {
   list-style: none;
 }
 
+.mcp-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.mcp-configuration {
+  font-family: monospace;
+  overflow-wrap: anywhere;
+}
+
 .personal-token {
   display: grid;
   gap: 12px;
