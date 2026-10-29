@@ -3,10 +3,13 @@ import { useRef, useState } from "react";
 import {
   questionnaireRequest,
   type Question,
+  type Concern,
+  type ConcernResolutionPreview,
   type QuestionContent,
   type QuestionnaireView,
 } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { ConcernResolutionDialog } from "./ConcernResolutionDialog.js";
 
 const TOPICS = [
   "scope",
@@ -42,6 +45,7 @@ export function QuestionComposer({
   path,
   roundId,
   question,
+  concern,
   view,
   onSaved,
   onCancel,
@@ -50,6 +54,7 @@ export function QuestionComposer({
   path: string;
   roundId: string;
   question?: Question;
+  concern?: Concern;
   view: QuestionnaireView;
   onSaved(question: Question): void;
   onCancel(): void;
@@ -59,6 +64,9 @@ export function QuestionComposer({
   const revision = useRef(question?.revision);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [resolution, setResolution] = useState<ConcernResolutionPreview | null>(
+    null,
+  );
   const required = [{ required: true, message: t("questionnaire.required") }];
   const initial: Values = question
     ? {
@@ -72,7 +80,7 @@ export function QuestionComposer({
         })),
       }
     : {
-        text: "",
+        text: concern?.text ?? "",
         topic: "scope",
         priority: 10,
         rationale: "",
@@ -112,6 +120,23 @@ export function QuestionComposer({
               },
         ),
       };
+      if (concern) {
+        const result = await questionnaireRequest<{
+          preview: ConcernResolutionPreview;
+        }>(
+          basePath,
+          `${path}/concerns/${encodeURIComponent(concern.id)}/resolve-preview`,
+          "POST",
+          {
+            revision: concern.revision,
+            outcome: "question",
+            roundId,
+            question: content,
+          },
+        );
+        setResolution(result.preview);
+        return;
+      }
       const result = await questionnaireRequest<{ question: Question }>(
         basePath,
         question
@@ -143,6 +168,18 @@ export function QuestionComposer({
       initialValues={initial}
       onFinish={(values) => void save(values)}
     >
+      {resolution && (
+        <ConcernResolutionDialog
+          basePath={basePath}
+          path={path}
+          preview={resolution}
+          onCancel={() => setResolution(null)}
+          onCommitted={(result) => {
+            setResolution(null);
+            if (result.question) onSaved(result.question);
+          }}
+        />
+      )}
       <h2 className="pane-title">
         {t(
           question ? "questionnaire.editQuestion" : "questionnaire.newQuestion",
@@ -330,7 +367,11 @@ export function QuestionComposer({
       </Form.List>
       <Space className="questionnaire-actions" wrap>
         <Button type="primary" htmlType="submit" loading={busy}>
-          {t("questionnaire.saveQuestion")}
+          {t(
+            concern
+              ? "questionnaire.reviewResolution"
+              : "questionnaire.saveQuestion",
+          )}
         </Button>
         <Button onClick={onCancel} disabled={busy}>
           {t("common.cancel")}

@@ -11,6 +11,7 @@ import {
 import {
   fields,
   parseQuestion,
+  parseConcernDecision,
   revisionInput,
   textInput,
 } from "../questionnaire/model.js";
@@ -33,13 +34,21 @@ import {
 } from "../questionnaire/answers.js";
 import { firstHeader } from "../identity/identity.js";
 import { listWorkflowPins } from "../workflow-source.js";
+import { readComments, saveComment } from "../questionnaire/comments.js";
+import {
+  raiseConcern,
+  readConcerns,
+  concernResolutionPreview,
+  resolveConcern,
+} from "../questionnaire/concerns.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/questionnaire(?:\/(rounds|questions|settings)(?:\/([^/]+)(?:\/(questions|publish-preview|publish|answer|submit))?)?)?$/u;
-const QUESTION_CONTEXT = /^\/api\/v1\/questionnaire\/questions\/([^/]+)$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/questionnaire(?:\/(rounds|questions|settings|comments|concerns)(?:\/([^/]+)(?:\/(questions|publish-preview|publish|answer|submit|comments|resolve-preview|resolve))?)?)?$/u;
+const RECORD_CONTEXT =
+  /^\/api\/v1\/questionnaire\/(questions|concerns)\/([^/]+)$/u;
 
 export function questionnaireMethods(path: string): string | null {
-  if (path === "/api/v1/questionnaire" || QUESTION_CONTEXT.test(path))
+  if (path === "/api/v1/questionnaire" || RECORD_CONTEXT.test(path))
     return "GET, HEAD";
   const match = PATH.exec(path);
   if (!match) return null;
@@ -56,6 +65,15 @@ export function questionnaireMethods(path: string): string | null {
     return "POST";
   if (resource === "questions" && action === "answer") return "PUT";
   if (resource === "questions" && action === "submit") return "POST";
+  if (resource === "questions" && action === "comments") return "POST";
+  if (resource === "comments" && id && !action) return "PATCH";
+  if (resource === "concerns" && !id) return "POST";
+  if (
+    resource === "concerns" &&
+    id &&
+    ["resolve-preview", "resolve"].includes(action ?? "")
+  )
+    return "POST";
   return null;
 }
 
@@ -87,7 +105,7 @@ export async function handleQuestionnaire(
     }
     return reply.json(200, { versions });
   }
-  const linked = QUESTION_CONTEXT.exec(path);
+  const linked = RECORD_CONTEXT.exec(path);
   if (linked) {
     const row = (
       await database.query<{
@@ -95,12 +113,15 @@ export async function handleQuestionnaire(
         workflow_version_id: string;
         state: string;
       }>(
-        `select v.workflow_id, q.workflow_version_id, q.state from questions q join workflow_versions v on v.id = q.workflow_version_id where q.id = $1`,
-        [decodeURIComponent(linked[1])],
+        linked[1] === "questions"
+          ? `select v.workflow_id, q.workflow_version_id, q.state from questions q join workflow_versions v on v.id = q.workflow_version_id where q.id = $1`
+          : `select v.workflow_id, c.workflow_version_id, 'open' as state from questionnaire_concerns c join workflow_versions v on v.id = c.workflow_version_id where c.id = $1`,
+        [decodeURIComponent(linked[2])],
       )
     ).rows[0];
     const workflow = row && (await readWorkflow(database, row.workflow_id));
-    if (!row || !workflow) throw new RequestError(404, "No such question");
+    if (!row || !workflow)
+      throw new RequestError(404, "No such questionnaire record");
     const caps = await workflowCapabilities(database, access, person, workflow);
     const roles = await database.query<{ role: string }>(
       "select role from role_bindings where workflow_id = $1 and person_id = $2",
@@ -166,7 +187,34 @@ export async function handleQuestionnaire(
       (access.tokenScopes === undefined ||
         access.tokenScopes.includes("engineer"));
     const answering = action === "answer" || action === "submit";
-    if (resource && !answering && !compose)
+    const commenting = resource === "comments" || action === "comments";
+    const comment =
+      isAdministrator(access) || grants.rows.some((g) => g.role !== "Observer");
+    const canRaiseConcern =
+      (isAdministrator(access) ||
+        grants.rows.some((g) => g.role === "Field expert")) &&
+      (access.tokenScopes === undefined ||
+        access.tokenScopes.includes("expert"));
+    if (commenting && !comment)
+      throw new RequestError(
+        403,
+        "A workflow role other than Observer is required to comment",
+      );
+    const canResolveConcern = compose && access.tokenScopes === undefined;
+    if (resource === "concerns" && !id && !canRaiseConcern)
+      throw new RequestError(403, "Only a Field expert raises a concern");
+    if (resource === "concerns" && id && !canResolveConcern)
+      throw new RequestError(
+        403,
+        "Only a signed-in Engineer resolves a concern",
+      );
+    if (
+      resource &&
+      resource !== "concerns" &&
+      !answering &&
+      !commenting &&
+      !compose
+    )
       throw new RequestError(
         403,
         "Only an Engineer drafts and publishes questions",
@@ -191,7 +239,12 @@ export async function handleQuestionnaire(
           personId: person.id,
           workflow,
           version,
-          capabilities: { compose },
+          capabilities: {
+            compose,
+            comment,
+            raiseConcern: canRaiseConcern,
+            resolveConcern: canResolveConcern,
+          },
           settings: await readSettings(tx, workflowId),
           pins: await listWorkflowPins(tx, versionId),
           assignees: assignees.rows.map((a) => ({
@@ -202,6 +255,74 @@ export async function handleQuestionnaire(
           rounds: rounds.rows.map(toRound),
           questions: await readQuestions(tx, versionId, person.id, compose),
           answers: await readAnswers(tx, versionId, person.id),
+          comments: await readComments(tx, versionId, compose),
+          concerns: await readConcerns(tx, versionId),
+        },
+      };
+    }
+    if (resource === "concerns") {
+      if (id) {
+        const decision = parseConcernDecision(body, action === "resolve");
+        if (action === "resolve-preview")
+          return {
+            status: 200,
+            value: {
+              preview: await concernResolutionPreview(
+                tx,
+                versionId,
+                id,
+                decision,
+              ),
+            },
+          };
+        if (body.confirmed !== true)
+          throw new RequestError(
+            400,
+            "Confirm the reviewed concern resolution",
+          );
+        return {
+          status: 200,
+          value: await resolveConcern(
+            tx,
+            deps,
+            context,
+            versionId,
+            id,
+            decision,
+            textInput(body.confirmationHash, "confirmationHash", 64),
+          ),
+        };
+      }
+      fields(body, ["text"]);
+      return {
+        status: 201,
+        value: {
+          concern: await raiseConcern(
+            tx,
+            deps,
+            context,
+            versionId,
+            textInput(body.text, "text", 20000),
+          ),
+        },
+      };
+    }
+    if (commenting && id) {
+      fields(body, resource === "comments" ? ["text", "revision"] : ["text"]);
+      return {
+        status: resource === "comments" ? 200 : 201,
+        value: {
+          comment: await saveComment(
+            tx,
+            deps,
+            context,
+            versionId,
+            compose,
+            textInput(body.text, "text", 20000),
+            resource === "comments"
+              ? { commentId: id, revision: revisionInput(body.revision) }
+              : { questionId: id },
+          ),
         },
       };
     }

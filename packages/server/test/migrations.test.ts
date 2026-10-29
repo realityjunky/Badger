@@ -69,6 +69,7 @@ describe("reviewed SQL migrations", () => {
       "0009",
       "0010",
       "0011",
+      "0012",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -87,6 +88,7 @@ describe("reviewed SQL migrations", () => {
         "0009",
         "0010",
         "0011",
+        "0012",
       ],
       pending: [],
       drifted: [],
@@ -100,6 +102,8 @@ describe("reviewed SQL migrations", () => {
     expect(tables.rows.map((row) => row.table_name)).toEqual([
       "answer_revisions",
       "audit_events",
+      "comment_revisions",
+      "concern_resolutions",
       "gate_confirmations",
       "groups",
       "inbox_items",
@@ -107,9 +111,11 @@ describe("reviewed SQL migrations", () => {
       "person_preferences",
       "personal_access_tokens",
       "question_answers",
+      "question_comments",
       "question_recipients",
       "question_revisions",
       "question_rounds",
+      "questionnaire_concerns",
       "questionnaire_settings",
       "questionnaires",
       "questions",
@@ -148,6 +154,7 @@ describe("reviewed SQL migrations", () => {
         "0009",
         "0010",
         "0011",
+        "0012",
       ],
       pending: [],
       drifted: [],
@@ -155,7 +162,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(11);
+    expect(rows.rows[0]?.count).toBe(12);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {
@@ -274,6 +281,85 @@ describe("reviewed SQL migrations", () => {
       expect(rows.rows[0]?.count).toBe(1);
     },
   );
+});
+
+describe("the discussion schema", () => {
+  it("upgrades an existing questionnaire and keeps comment edits, concern sources, and outcomes immutable", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((m) => m.version < "0012"),
+      clock,
+    );
+    await insertPerson(test);
+    await test.database.query(
+      "insert into groups (id, name, created_at, updated_at) values ('g', 'Research', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      `insert into workflows (id, group_id, name, goal, intent, locale, created_at, updated_at)
+      values ('w', 'g', 'Workflow', 'Understand storage.', 'new-skill', 'en', $1, $1)`,
+      [clock.now()],
+    );
+    await test.database.query(
+      `insert into workflow_versions (id, workflow_id, number, name, goal, intent, locale, stages, created_at, updated_at)
+      values ('v', 'w', 1, 'Workflow', 'Understand storage.', 'new-skill', 'en', '{}', $1, $1)`,
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into question_rounds (id, workflow_version_id, number, title, created_by, created_at) values ('r', 'v', 1, 'Storage', 'person-1', $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into questions (id, workflow_version_id, round_id, created_at) values ('q', 'v', 'r', $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into question_revisions (question_id, revision, content, actor_id, created_at) values ('q', 1, '{\"text\":\"Original question\"}', 'person-1', $1)",
+      [clock.now()],
+    );
+
+    await applyMigrations(test.database, migrations, clock);
+    expect(
+      (
+        await test.database.query(
+          "select content from question_revisions where question_id = 'q'",
+        )
+      ).rows,
+    ).toEqual([{ content: { text: "Original question" } }]);
+    await test.database.query(
+      "insert into question_comments (id, question_id, person_id, position, created_at) values ('c', 'q', 'person-1', 1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into comment_revisions (comment_id, revision, text, actor_id, created_at) values ('c', 1, 'Original comment', 'person-1', $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into questionnaire_concerns (id, workflow_version_id, person_id, text, created_at) values ('k', 'v', 'person-1', 'Original concern', $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into concern_resolutions (concern_id, outcome, reason, actor_id, confirmation_hash, created_at) values ('k', 'declined', 'Outside scope', 'person-1', $1, $2)",
+      ["a".repeat(64), clock.now()],
+    );
+    for (const [table, column] of [
+      ["comment_revisions", "text"],
+      ["questionnaire_concerns", "text"],
+      ["concern_resolutions", "reason"],
+    ]) {
+      for (const statement of [
+        `update ${table} set ${column} = 'Changed'`,
+        `delete from ${table}`,
+        `truncate ${table} cascade`,
+      ]) {
+        await expect(test.database.query(statement), statement).rejects.toThrow(
+          /immutable/u,
+        );
+      }
+    }
+  });
 });
 
 describe("the audit schema", () => {

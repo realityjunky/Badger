@@ -78,8 +78,10 @@ and dashboard: revisioned questions, priority-ordered publication previews,
 private autosaved answers, per-question or atomic round submission, automatic
 inbox completion, and per-person live updates with polling recovery. The
 service retains the kernel's dossier topic vocabulary; this slice does not
-compose or approve a Semantic dossier. Threads and resolutions follow in
-#47 and #48.
+compose or approve a Semantic dossier. Question threads and expert concerns
+(#47) are also delivered: immutable comment edits, concerns linked from the
+Engineer's inbox, and reviewed outcomes that create a draft question, accept
+a Fact source, or decline with a reason. Question resolutions follow in #48.
 
 Personal access tokens (#53) are also delivered: personal settings create,
 list, and revoke scoped Agent and CLI credentials, showing the secret once.

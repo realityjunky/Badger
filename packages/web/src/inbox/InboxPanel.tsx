@@ -38,14 +38,17 @@ export function InboxPanel() {
                 }}
               >
                 {format(
-                  item.kind === "question-assigned"
-                    ? "inbox.questionAssigned"
-                    : item.kind === "gate-ready"
-                      ? "inbox.gateReady"
-                      : "inbox.gateInvalidated",
+                  item.kind === "concern-raised"
+                    ? "inbox.concernRaised"
+                    : item.kind === "question-assigned"
+                      ? "inbox.questionAssigned"
+                      : item.kind === "gate-ready"
+                        ? "inbox.gateReady"
+                        : "inbox.gateInvalidated",
                   { name: item.workflowName, number: item.versionNumber },
                 )}
                 {item.questionText !== null && ` · ${item.questionText}`}
+                {item.concernText !== null && ` · ${item.concernText}`}
               </Link>
               <p className="muted">
                 {new Date(item.createdAt).toLocaleString(locale)}

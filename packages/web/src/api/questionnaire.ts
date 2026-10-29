@@ -53,17 +53,68 @@ export interface Answer extends AnswerRevision {
   personName: string;
   revisions: AnswerRevision[];
 }
+export interface CommentRevision {
+  revision: number;
+  text: string;
+  actorId: string;
+  createdAt: string;
+}
+export interface QuestionComment extends CommentRevision {
+  id: string;
+  questionId: string;
+  personId: string;
+  personName: string;
+  revisions: CommentRevision[];
+}
+export type ConcernOutcome = "question" | "fact-source" | "declined";
+export interface Concern {
+  id: string;
+  text: string;
+  personId: string;
+  personName: string;
+  createdAt: string;
+  revision: number;
+  state: "open" | ConcernOutcome;
+  resolution: {
+    outcome: ConcernOutcome;
+    reason: string | null;
+    questionId: string | null;
+    actorId: string;
+    createdAt: string;
+  } | null;
+}
+export type ConcernDecision = { revision: number } & (
+  | { outcome: "question"; roundId: string; question: QuestionContent }
+  | { outcome: "fact-source" }
+  | { outcome: "declined"; reason: string }
+);
+export interface ConcernResolutionPreview {
+  concern: Concern;
+  decision: ConcernDecision;
+  confirmationHash: string;
+}
+export interface ConcernResolutionResult {
+  concern: Concern;
+  question: Question | null;
+}
 export interface QuestionnaireView {
   personId: string;
   workflow: { id: string; name: string };
   version: { id: string; number: number };
-  capabilities: { compose: boolean };
+  capabilities: {
+    compose: boolean;
+    comment: boolean;
+    raiseConcern: boolean;
+    resolveConcern: boolean;
+  };
   settings: { revision: number; roundSizeLimit: number | null };
   assignees: { personId: string | null; name: string; role: string }[];
   pins: { skillId: string; skillName: string; hash: string }[];
   rounds: Round[];
   questions: Question[];
   answers: Answer[];
+  comments: QuestionComment[];
+  concerns: Concern[];
 }
 export interface QuestionnaireVersion {
   workflowId: string;

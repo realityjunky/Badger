@@ -83,6 +83,10 @@ function ThemedApp({ basePath }: { basePath: string }) {
                     path="questionnaire/questions/:questionId"
                     element={<QuestionnairePage />}
                   />
+                  <Route
+                    path="questionnaire/concerns/:concernId"
+                    element={<QuestionnairePage />}
+                  />
                   <Route path="skills" element={<SkillsPage />} />
                   <Route path="skills/:skillId" element={<SkillsPage />} />
                   <Route

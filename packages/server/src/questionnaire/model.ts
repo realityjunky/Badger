@@ -64,6 +64,80 @@ export interface Answer extends AnswerRevision {
   revisions: AnswerRevision[];
 }
 
+export interface CommentRevision {
+  revision: number;
+  text: string;
+  actorId: string;
+  createdAt: string;
+}
+export interface QuestionComment extends CommentRevision {
+  id: string;
+  questionId: string;
+  personId: string;
+  personName: string;
+  revisions: CommentRevision[];
+}
+
+export type ConcernOutcome = "question" | "fact-source" | "declined";
+export interface Concern {
+  id: string;
+  personId: string;
+  personName: string;
+  text: string;
+  createdAt: string;
+  revision: number;
+  state: "open" | ConcernOutcome;
+  resolution: {
+    outcome: ConcernOutcome;
+    reason: string | null;
+    questionId: string | null;
+    actorId: string;
+    createdAt: string;
+  } | null;
+}
+
+export type ConcernDecision = { revision: number } & (
+  | { outcome: "question"; roundId: string; question: QuestionContent }
+  | { outcome: "fact-source" }
+  | { outcome: "declined"; reason: string }
+);
+
+export function parseConcernDecision(
+  input: Record<string, unknown>,
+  commit: boolean,
+): ConcernDecision {
+  const extra = commit ? ["confirmed", "confirmationHash"] : [];
+  const revision = revisionInput(input.revision);
+  if (input.outcome === "question") {
+    fields(input, ["outcome", "revision", "roundId", "question", ...extra]);
+    const question = objectInput(input.question);
+    if ("revision" in question)
+      throw new RequestError(400, "A concern creates a new draft question");
+    return {
+      revision,
+      outcome: "question",
+      roundId: textInput(input.roundId, "roundId", 200),
+      question: parseQuestion(question),
+    };
+  }
+  if (input.outcome === "fact-source") {
+    fields(input, ["outcome", "revision", ...extra]);
+    return { revision, outcome: "fact-source" };
+  }
+  if (input.outcome === "declined") {
+    fields(input, ["outcome", "revision", "reason", ...extra]);
+    return {
+      revision,
+      outcome: "declined",
+      reason: textInput(input.reason, "reason"),
+    };
+  }
+  throw new RequestError(
+    400,
+    "Turn the concern into a question, accept it as a fact source, or decline it with a reason",
+  );
+}
+
 export function textInput(value: unknown, name: string, max = 4000): string {
   if (typeof value !== "string" || !value.trim() || value.length > max)
     throw new RequestError(400, `${name} must contain 1 to ${max} characters`);

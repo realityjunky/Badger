@@ -16,6 +16,7 @@ import {
   questionnaireRequest,
   QuestionnaireError,
   type Question,
+  type Concern,
   type QuestionnaireVersion,
   type QuestionnaireView,
   type Round,
@@ -31,13 +32,15 @@ import {
 } from "./questionnaire/AnswerEditor.js";
 import { QuestionComposer } from "./questionnaire/QuestionComposer.js";
 import { QuestionInspector } from "./questionnaire/QuestionInspector.js";
+import { QuestionThread } from "./questionnaire/QuestionThread.js";
+import { ConcernPanel } from "./questionnaire/ConcernPanel.js";
 
 /** The three panes share the service's records and server-owned capabilities. */
 export function QuestionnairePage() {
   const { t, format, locale } = useI18n();
   const { connected, notice } = useLiveUpdates();
   const basePath = readBasePath(document);
-  const { questionId } = useParams();
+  const { questionId, concernId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const query = new URLSearchParams(location.search);
@@ -52,9 +55,12 @@ export function QuestionnairePage() {
   const [busy, setBusy] = useState(false);
   const [newRound, setNewRound] = useState(false);
   const [roundTitle, setRoundTitle] = useState("");
+  const [newConcern, setNewConcern] = useState(false);
+  const [concernText, setConcernText] = useState("");
   const [editing, setEditing] = useState<{
     roundId: string;
     question?: Question;
+    concern?: Concern;
   } | null>(null);
   const [publication, setPublication] = useState<{
     round: Round;
@@ -77,13 +83,14 @@ export function QuestionnairePage() {
         const catalog = await questionnaireRequest<{
           versions: QuestionnaireVersion[];
         }>(basePath, "/questionnaire", "GET", undefined, controller.signal);
-        const linked = questionId
+        const recordId = questionId ?? concernId;
+        const linked = recordId
           ? await questionnaireRequest<{
               workflowId: string;
               versionId: string;
             }>(
               basePath,
-              `/questionnaire/questions/${encodeURIComponent(questionId)}`,
+              `/questionnaire/${questionId ? "questions" : "concerns"}/${encodeURIComponent(recordId)}`,
               "GET",
               undefined,
               controller.signal,
@@ -112,7 +119,7 @@ export function QuestionnairePage() {
       }
     })();
     return () => controller.abort();
-  }, [basePath, questionId, location.search]);
+  }, [basePath, questionId, concernId, location.search]);
 
   const reload = useCallback(async () => {
     if (path === null) return null;
@@ -171,9 +178,12 @@ export function QuestionnairePage() {
     ? view?.questions.find((q) => q.id === questionId)?.roundId
     : (query.get("round") ?? view?.rounds[0]?.id);
   const round = view?.rounds.find((r) => r.id === roundId);
-  const selected = questionId
-    ? view?.questions.find((q) => q.id === questionId)
-    : view?.questions.find((q) => q.roundId === roundId);
+  const selected = concernId
+    ? undefined
+    : questionId
+      ? view?.questions.find((q) => q.id === questionId)
+      : view?.questions.find((q) => q.roundId === roundId);
+  const selectedConcern = view?.concerns.find((c) => c.id === concernId);
   const compose = view?.capabilities.compose === true;
   const ownAnswer = view?.answers.find(
     (a) => a.questionId === selected?.id && a.personId === view.personId,
@@ -286,6 +296,16 @@ export function QuestionnairePage() {
           {t(connected ? "questionnaire.live" : "questionnaire.polling")}
         </span>
         <Button onClick={() => void reload()}>{t("workflow.reload")}</Button>
+        {view?.capabilities.raiseConcern && (
+          <Button
+            onClick={() => {
+              setConcernText("");
+              setNewConcern(true);
+            }}
+          >
+            {t("questionnaire.raiseConcern")}
+          </Button>
+        )}
       </div>
       {failure && <Alert type="error" showIcon message={failure} />}
       <div className="three-pane" data-testid="three-pane">
@@ -370,6 +390,26 @@ export function QuestionnairePage() {
               </li>
             ))}
           </ol>
+          <h2 className="pane-title">{t("questionnaire.concerns")}</h2>
+          {!view?.concerns.length && (
+            <p className="muted">{t("questionnaire.noConcerns")}</p>
+          )}
+          <ul className="questionnaire-concerns">
+            {view?.concerns.map((concern) => (
+              <li key={concern.id}>
+                <Link
+                  to={`/questionnaire/concerns/${encodeURIComponent(concern.id)}`}
+                  aria-current={concern.id === concernId ? "page" : undefined}
+                  onClick={() => setEditing(null)}
+                >
+                  {concern.text}
+                </Link>
+                <span className="questionnaire-question-meta">
+                  {t(`questionnaire.concernState.${concern.state}`)}
+                </span>
+              </li>
+            ))}
+          </ul>
         </section>
         <section
           className="pane main-pane"
@@ -378,14 +418,31 @@ export function QuestionnairePage() {
         >
           {view && path && editing ? (
             <QuestionComposer
-              key={editing.question?.id ?? `new:${editing.roundId}`}
+              key={
+                editing.question?.id ??
+                editing.concern?.id ??
+                `new:${editing.roundId}`
+              }
               basePath={basePath}
               path={path}
               roundId={editing.roundId}
               question={editing.question}
+              concern={editing.concern}
               view={view}
               onSaved={openQuestion}
               onCancel={() => setEditing(null)}
+            />
+          ) : selectedConcern && view && path ? (
+            <ConcernPanel
+              key={selectedConcern.id}
+              basePath={basePath}
+              path={path}
+              concern={selectedConcern}
+              view={view}
+              onChanged={() => void reload()}
+              onQuestion={(roundId) =>
+                setEditing({ roundId, concern: selectedConcern })
+              }
             />
           ) : (
             <>
@@ -483,7 +540,7 @@ export function QuestionnairePage() {
                   </div>
                   {selected.canAnswer && path && view && (
                     <AnswerEditor
-                      key={selected.id}
+                      key={`answer:${selected.id}`}
                       ref={answerEditor}
                       basePath={basePath}
                       path={path}
@@ -492,6 +549,16 @@ export function QuestionnairePage() {
                       personId={view.personId}
                       disabled={busy}
                       onSubmitted={() => void reload()}
+                    />
+                  )}
+                  {path && view && (
+                    <QuestionThread
+                      key={`thread:${selected.id}`}
+                      basePath={basePath}
+                      path={path}
+                      questionId={selected.id}
+                      view={view}
+                      onChanged={() => void reload()}
                     />
                   )}
                 </>
@@ -507,8 +574,49 @@ export function QuestionnairePage() {
             </>
           )}
         </section>
-        <QuestionInspector question={selected} view={view} />
+        <QuestionInspector
+          question={selected}
+          concern={selectedConcern}
+          view={view}
+        />
       </div>
+      <Modal
+        open={newConcern}
+        title={t("questionnaire.raiseConcern")}
+        okText={t("questionnaire.raiseConcern")}
+        cancelText={t("common.cancel")}
+        confirmLoading={busy}
+        okButtonProps={{ disabled: !concernText.trim() || !path }}
+        onCancel={() => {
+          if (!busy) setNewConcern(false);
+        }}
+        onOk={() =>
+          void run(async () => {
+            const { concern } = await questionnaireRequest<{
+              concern: Concern;
+            }>(basePath, `${path}/concerns`, "POST", { text: concernText });
+            setNewConcern(false);
+            navigate(
+              `/questionnaire/concerns/${encodeURIComponent(concern.id)}`,
+            );
+            await reload();
+          })
+        }
+      >
+        <p>{t("questionnaire.concernHelp")}</p>
+        {failure && <Alert type="error" showIcon message={failure} />}
+        <label className="field-label" htmlFor="new-concern">
+          {t("questionnaire.concernText")}
+        </label>
+        <Input.TextArea
+          id="new-concern"
+          value={concernText}
+          maxLength={20000}
+          autoSize={{ minRows: 4, maxRows: 12 }}
+          disabled={busy}
+          onChange={(event) => setConcernText(event.target.value)}
+        />
+      </Modal>
       <Modal
         open={newRound}
         title={t("questionnaire.newRound")}

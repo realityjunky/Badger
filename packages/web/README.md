@@ -20,7 +20,7 @@ them into `dist/`, so the server image carries the build and none of them.
 | `src/shell/`            | The rail, top bar, and application frame.                                                                    |
 | `src/pages/`            | The pages. My work is the landing page; Workflows, Skills, Admin, and Activity read live records.            |
 | `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.                  |
-| `e2e/`                  | Playwright journeys against the real service, including separate Engineer and expert sessions.                    |
+| `e2e/`                  | Playwright journeys against the real service, including separate Engineer and expert sessions.               |
 
 ## Behavior
 
@@ -39,6 +39,13 @@ them into `dist/`, so the server image carries the build and none of them.
 - One per-person event stream refreshes inboxes and open questionnaire and
   workflow records. Reconnects reload a current snapshot; polling every ten
   seconds and focus refresh recover when streaming is unavailable.
+- Every question has an ordered comment thread with the author's edit history.
+  Current workflow roles control posting and editing; Observers read threads.
+  Field experts raise concerns from the questionnaire. Engineers open each
+  concern from their inbox and review a hash-bound resolution: a new draft
+  question, an accepted Fact source, or a decline with a reason. The question
+  composer and round publication flow handle converted concerns. All records
+  keep direct links and refresh through the existing live updates.
 
 - Every page has a URL. The root redirects to `/my-work`; deep links, refresh,
   and history all restore the page.

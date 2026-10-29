@@ -126,6 +126,12 @@ An ordered batch of Questions published together, highest priority first.
 **Answer**:
 An assigned person's response to a Question, in any language, kept with every revision.
 
+**Thread**:
+The ordered Comments under a Question. Anyone holding a workflow role other than Observer may contribute; each Comment keeps its author's edits.
+
+**Concern**:
+Unprompted workflow knowledge or a question raised by a Field expert. The Engineer turns it into a Question, accepts it as a Fact source, or declines it with a reason. Accepting a source preserves the expert's words; it does not confirm a Fact.
+
 **Resolution**:
 The Engineer's recorded outcome for an answered Question: confirmed, followed up, deferred with a reason, or withdrawn.
 _Avoid_: disposition
