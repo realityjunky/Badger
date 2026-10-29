@@ -198,6 +198,15 @@ export function WorkflowSourceStudy({
       {failure !== null && (
         <WorkflowNotice failure={failure} onReload={onChanged} />
       )}
+      {canManage && (
+        <p>
+          <Link
+            to={`/questionnaire?${new URLSearchParams({ workflow: detail.workflow.id, version: detail.version.id, panel: "suggestions" })}`}
+          >
+            {t("drafting.openJobs")}
+          </Link>
+        </p>
+      )}
       {!ready && <Alert type="info" title={t("study.confirmSourcesFirst")} />}
       <p role="status">
         {format("study.progress", {

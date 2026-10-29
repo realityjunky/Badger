@@ -1,4 +1,6 @@
 import { invalidateQuestionFacts } from "./resolutions.js";
+import { readTranslations } from "./translations.js";
+import { readImportedSources } from "./imports.js";
 import { reconcileDossier } from "../dossier.js";
 import { canonicalHash } from "@realityjunky/badger";
 import { recordAudit, type WriteContext } from "../audit.js";
@@ -129,6 +131,8 @@ export async function readQuestions(
     history.set(row.question_id, entries);
   }
   const assignedIds = new Set(assigned.rows.map((row) => row.question_id));
+  const translations = await readTranslations(tx, versionId);
+  const sources = await readImportedSources(tx, versionId);
   return result.rows.map((row) => ({
     ...row.content,
     id: row.id,
@@ -140,6 +144,10 @@ export async function readQuestions(
     resolutionRevision: row.resolution_revision,
     resolvedAt: row.resolved_at === null ? null : toIsoString(row.resolved_at),
     revisions: history.get(row.id) ?? [],
+    translations: translations.filter(
+      (translation) => translation.questionId === row.id,
+    ),
+    source: sources.get(row.id) ?? null,
     canAnswer:
       row.state !== "draft" &&
       (row.resolved_at === null || row.state === "confirmed") &&

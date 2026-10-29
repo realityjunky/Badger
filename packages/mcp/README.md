@@ -79,18 +79,29 @@ and `versionId`; job tools also take `jobId`.
 | `ledger`        | Read the kernel's five-part ledger and optional `sinceRound` changes.                                                                                                                      |
 | `readiness`     | Read the kernel's blockers by dossier topic.                                                                                                                                               |
 
-A signed-in Engineer requests `draft-questions` or `draft-follow-ups` from
-**Questionnaire → Drafting jobs and suggestions** and chooses a draft round.
-Follow-ups also name a published parent question. Claiming verifies the
+A signed-in Engineer requests drafting from
+**Questionnaire → Drafting jobs and suggestions**. Source study also links there
+from the Workflow version. Question drafting and follow-ups choose a draft round;
+follow-ups also name a published parent. The other kinds are `source-study`
+(one pinned Skill), `restate-answer` (an answered question), `translate-question`
+(a question and target locale), and `import-open-questions` (a pinned Skill and
+draft round). The claim response and `job.json` identify those targets. Claiming verifies the
 context hash and every pinned file against its inventory before returning
 the folder. Files never execute. Folders use mode `0700`, files `0600`, and
 the files persist across MCP restarts so the Agent can resume with the same
 deployment, person, token, and host. Delete the folder when finished; it
 contains workflow evidence. General large-result files remain connection-local.
 
-Write `result.json` as `{"questions":[…]}` using `output-schema.json`. Each
-question needs text, topic, targets, rationale, evidence, assignees, and
-priority. A result is limited to 1 MiB and 20 questions. Local reads refuse
+Write `result.json` using the claimed job's `output-schema.json`. Question jobs
+use `{"questions":[…]}`; source study uses `{facts, interfaces}`; restatement uses
+`{facts: [{text, answers: [{personId, revision}]}]}`; translation uses
+`{text, rationale}`; imports use `{questions: [{number, source, question}]}`.
+Source citations bind the pinned Skill hash, file hash, path, and line range.
+Restatements use the Workflow version's locale and exact submitted answer
+revisions; acceptance still leaves expert acknowledgement outstanding.
+Each question needs text, topic, targets, rationale, evidence, assignees, and
+priority. A result is limited to 1 MiB and 20 questions (or 100 source facts,
+100 interfaces, or 100 restatement facts). Local reads refuse
 symbolic links and special files. The service validates the schema again.
 Pinned Skill bundles are limited to 32 MiB. Leases last 30 minutes and are
 bound to the claiming person, token, host, and lease ID. Expired leases

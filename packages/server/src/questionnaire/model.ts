@@ -54,6 +54,8 @@ export interface Question extends QuestionContent {
   position: number | null;
   resolvedAt: string | null;
   revisions: QuestionRevision[];
+  translations: import("./translations.js").QuestionTranslation[];
+  source: import("./imports.js").ImportedSource | null;
   canAnswer: boolean;
 }
 export interface QuestionRound {

@@ -86,6 +86,38 @@ function skillRef(input: unknown): StudySkill {
     hash: hash(value.hash, "hash"),
   };
 }
+export function parseSourceEvidence(input: unknown): SourceEvidence {
+  const citation = objectInput(input);
+  fields(citation, [
+    "skillId",
+    "hash",
+    "path",
+    "startLine",
+    "endLine",
+    "fileHash",
+  ]);
+  const start = citation.startLine;
+  const end = citation.endLine;
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    (start as number) < 1 ||
+    (end as number) < (start as number) ||
+    (end as number) - (start as number) >= 1000
+  )
+    throw new RequestError(
+      400,
+      "Cite a range of 1 to 1000 lines starting at line 1 or later",
+    );
+  return {
+    skillId: text(citation.skillId, "skillId", 200),
+    hash: hash(citation.hash, "hash"),
+    path: text(citation.path, "path", 1000),
+    fileHash: hash(citation.fileHash, "fileHash"),
+    startLine: start as number,
+    endLine: end as number,
+  };
+}
 export function parseStudyContent(
   kind: StudyKind,
   input: unknown,
@@ -111,38 +143,7 @@ export function parseStudyContent(
     value.evidence.length > 50
   )
     throw new RequestError(400, "evidence must contain 1 to 50 citations");
-  const evidence = value.evidence.map((input): SourceEvidence => {
-    const citation = objectInput(input);
-    fields(citation, [
-      "skillId",
-      "hash",
-      "path",
-      "startLine",
-      "endLine",
-      "fileHash",
-    ]);
-    const start = citation.startLine;
-    const end = citation.endLine;
-    if (
-      !Number.isSafeInteger(start) ||
-      !Number.isSafeInteger(end) ||
-      (start as number) < 1 ||
-      (end as number) < (start as number) ||
-      (end as number) - (start as number) >= 1000
-    )
-      throw new RequestError(
-        400,
-        "Cite a range of 1 to 1000 lines starting at line 1 or later",
-      );
-    return {
-      skillId: text(citation.skillId, "skillId", 200),
-      hash: hash(citation.hash, "hash"),
-      path: text(citation.path, "path", 1000),
-      fileHash: hash(citation.fileHash, "fileHash"),
-      startLine: start as number,
-      endLine: end as number,
-    };
-  });
+  const evidence = value.evidence.map(parseSourceEvidence);
   if (kind === "fact")
     return { statement: text(value.statement, "statement", 8000), evidence };
   if (!Array.isArray(value.columns) || value.columns.length > 100)
@@ -290,142 +291,155 @@ export async function saveStudyRecord(
   kind: StudyKind,
   change: { id?: string; revision?: number; content: StudyContent | null },
 ) {
-  return database.transaction(async (tx) => {
-    await tx.query(
-      "select id from workflow_versions where id = $1 for update",
-      [versionId],
-    );
-    const pins = await listWorkflowPins(tx, versionId);
-    const previous =
-      change.id === undefined
-        ? undefined
-        : (await studyRecords(tx, versionId)).find(
-            (r) => r.id === change.id && r.kind === kind,
-          );
-    if (change.id !== undefined && previous === undefined)
-      throw new RequestError(404, "No such source study record");
-    if (
-      previous !== undefined &&
-      (previous.revision !== change.revision || previous.status === "retired")
-    )
-      throw new RequestError(
-        409,
-        "The source study record changed or was retired; read it again",
-        { record: previous },
-      );
-    const content = change.content ?? previous!.content;
-    const status = change.content === null ? "retired" : "active";
-    const revision = (previous?.revision ?? 0) + 1;
-    if (status === "active") {
-      if (studyReferences(content).some((ref) => !pinned(pins, ref)))
-        throw new RequestError(
-          409,
-          "Evidence and interface endpoints must name currently pinned Skill versions",
-        );
-      for (const evidence of content.evidence)
-        await evidenceLines(tx, blobs, evidence);
-    }
-    const now = dependencies.clock.now();
-    const result =
-      previous === undefined
-        ? await tx.query<RecordRow>(
-            `insert into source_study_records
-      (id, workflow_version_id, kind, revision, status, content, created_at, updated_at)
-      values ($1, $2, $3, 1, 'active', $4::jsonb, $5, $5) returning *`,
-            [
-              dependencies.ids.next(),
-              versionId,
-              kind,
-              JSON.stringify(content),
-              now,
-            ],
-          )
-        : await tx.query<RecordRow>(
-            `update source_study_records set revision = $2, status = $3, content = $4::jsonb, updated_at = $5 where id = $1 returning *`,
-            [previous.id, revision, status, JSON.stringify(content), now],
-          );
-    const row = result.rows[0]!;
-    await tx.query(
-      `insert into source_study_revisions (record_id, revision, status, content, actor_id, recorded_at)
-      values ($1, $2, $3, $4::jsonb, $5, $6)`,
-      [
-        row.id,
-        revision,
-        status,
-        JSON.stringify(content),
-        context.personId,
-        now,
-      ],
-    );
-    await invalidateStudyGates(
+  return database.transaction((tx) =>
+    saveStudyRecordInTransaction(
       tx,
       dependencies,
       context,
+      blobs,
       versionId,
-      "Source study records changed",
-      [
-        ...studyReferences(content),
-        ...(previous === undefined ? [] : studyReferences(previous.content)),
-      ].map((ref) => ref.skillId),
+      kind,
+      change,
+    ),
+  );
+}
+
+/** Shares the caller's transaction when a person accepts a whole study draft. */
+export async function saveStudyRecordInTransaction(
+  tx: Queryable,
+  dependencies: ServiceDependencies,
+  context: WriteContext,
+  blobs: BlobStore,
+  versionId: string,
+  kind: StudyKind,
+  change: { id?: string; revision?: number; content: StudyContent | null },
+) {
+  await tx.query("select id from workflow_versions where id = $1 for update", [
+    versionId,
+  ]);
+  const pins = await listWorkflowPins(tx, versionId);
+  const previous =
+    change.id === undefined
+      ? undefined
+      : (await studyRecords(tx, versionId)).find(
+          (r) => r.id === change.id && r.kind === kind,
+        );
+  if (change.id !== undefined && previous === undefined)
+    throw new RequestError(404, "No such source study record");
+  if (
+    previous !== undefined &&
+    (previous.revision !== change.revision || previous.status === "retired")
+  )
+    throw new RequestError(
+      409,
+      "The source study record changed or was retired; read it again",
+      { record: previous },
     );
-    const current = await tx.query<{ stages: Record<string, string> }>(
-      "select stages from workflow_versions where id = $1",
-      [versionId],
-    );
-    const stages = current.rows[0]!.stages;
-    let later = false;
-    for (const id of Object.keys(stages)) {
-      // JSONB object order is not the order of the stage track.
-      if (
-        [
-          "questionnaire",
-          "dossier",
-          "plan-proposal",
-          "package",
-          "evaluation",
-          "review-publication",
-        ].includes(id) &&
-        stages[id] !== "todo"
-      ) {
-        stages[id] = "invalidated";
-        later = true;
-      }
-    }
-    if (stages.sources === "done") stages["source-study"] = "active";
-    else if (stages["source-study"] !== "todo")
-      stages["source-study"] = "invalidated";
-    if (later || stages.sources === "done")
-      await tx.query(
-        "update workflow_versions set stages = $2::jsonb, revision = revision + 1, updated_at = $3 where id = $1",
-        [versionId, JSON.stringify(stages), now],
+  const content = change.content ?? previous!.content;
+  const status = change.content === null ? "retired" : "active";
+  const revision = (previous?.revision ?? 0) + 1;
+  if (status === "active") {
+    if (studyReferences(content).some((ref) => !pinned(pins, ref)))
+      throw new RequestError(
+        409,
+        "Evidence and interface endpoints must name currently pinned Skill versions",
       );
-    await recordAudit(tx, dependencies, {
-      actor: { personId: context.personId, credential: context.credential },
-      channel: context.channel,
-      action: `source_${kind}.${previous === undefined ? "created" : status === "retired" ? "retired" : "updated"}`,
-      target: {
-        type: `source_${kind}`,
-        id: row.id,
-        label: ("statement" in content
-          ? content.statement
-          : content.artifact
-        ).slice(0, 200),
-      },
-      before:
-        previous === undefined
-          ? null
-          : {
-              revision: previous.revision,
-              hash: canonicalHash({
-                status: previous.status,
-                content: previous.content,
-              }),
-            },
-      after: { revision, hash: canonicalHash({ status, content }) },
-      reason: `Source study ${kind} ${status === "retired" ? "retired" : "recorded"}`,
-      requestId: context.requestId,
-    });
-    await reconcileDossier(tx, dependencies, context, versionId);
-    return record(row, pins);
+    for (const evidence of content.evidence)
+      await evidenceLines(tx, blobs, evidence);
+  }
+  const now = dependencies.clock.now();
+  const result =
+    previous === undefined
+      ? await tx.query<RecordRow>(
+          `insert into source_study_records
+      (id, workflow_version_id, kind, revision, status, content, created_at, updated_at)
+      values ($1, $2, $3, 1, 'active', $4::jsonb, $5, $5) returning *`,
+          [
+            dependencies.ids.next(),
+            versionId,
+            kind,
+            JSON.stringify(content),
+            now,
+          ],
+        )
+      : await tx.query<RecordRow>(
+          `update source_study_records set revision = $2, status = $3, content = $4::jsonb, updated_at = $5 where id = $1 returning *`,
+          [previous.id, revision, status, JSON.stringify(content), now],
+        );
+  const row = result.rows[0]!;
+  await tx.query(
+    `insert into source_study_revisions (record_id, revision, status, content, actor_id, recorded_at)
+      values ($1, $2, $3, $4::jsonb, $5, $6)`,
+    [row.id, revision, status, JSON.stringify(content), context.personId, now],
+  );
+  await invalidateStudyGates(
+    tx,
+    dependencies,
+    context,
+    versionId,
+    "Source study records changed",
+    [
+      ...studyReferences(content),
+      ...(previous === undefined ? [] : studyReferences(previous.content)),
+    ].map((ref) => ref.skillId),
+  );
+  const current = await tx.query<{ stages: Record<string, string> }>(
+    "select stages from workflow_versions where id = $1",
+    [versionId],
+  );
+  const stages = current.rows[0]!.stages;
+  let later = false;
+  for (const id of Object.keys(stages)) {
+    // JSONB object order is not the order of the stage track.
+    if (
+      [
+        "questionnaire",
+        "dossier",
+        "plan-proposal",
+        "package",
+        "evaluation",
+        "review-publication",
+      ].includes(id) &&
+      stages[id] !== "todo"
+    ) {
+      stages[id] = "invalidated";
+      later = true;
+    }
+  }
+  if (stages.sources === "done") stages["source-study"] = "active";
+  else if (stages["source-study"] !== "todo")
+    stages["source-study"] = "invalidated";
+  if (later || stages.sources === "done")
+    await tx.query(
+      "update workflow_versions set stages = $2::jsonb, revision = revision + 1, updated_at = $3 where id = $1",
+      [versionId, JSON.stringify(stages), now],
+    );
+  await recordAudit(tx, dependencies, {
+    actor: { personId: context.personId, credential: context.credential },
+    channel: context.channel,
+    action: `source_${kind}.${previous === undefined ? "created" : status === "retired" ? "retired" : "updated"}`,
+    target: {
+      type: `source_${kind}`,
+      id: row.id,
+      label: ("statement" in content
+        ? content.statement
+        : content.artifact
+      ).slice(0, 200),
+    },
+    before:
+      previous === undefined
+        ? null
+        : {
+            revision: previous.revision,
+            hash: canonicalHash({
+              status: previous.status,
+              content: previous.content,
+            }),
+          },
+    after: { revision, hash: canonicalHash({ status, content }) },
+    reason: `Source study ${kind} ${status === "retired" ? "retired" : "recorded"}`,
+    requestId: context.requestId,
   });
+  await reconcileDossier(tx, dependencies, context, versionId);
+  return record(row, pins);
 }
