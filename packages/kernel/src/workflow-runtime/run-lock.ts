@@ -22,6 +22,7 @@ import {
 import { RaceSafeReadError } from "../engine/race-safe-read.js";
 import { stableValue } from "../util.js";
 import { createWorkflowFinding, type WorkflowFinding } from "./findings.js";
+import { workflowRunHostIdentity } from "./host-identity.js";
 
 export const WORKFLOW_RUN_LOCK_PATH = ".badger/run-lock.json";
 export const WORKFLOW_RUN_LOCK_RECOVERY_PATH =
@@ -51,6 +52,7 @@ export interface WorkflowRunLockRecord {
   ownerToken: string;
   pid: number;
   hostname: string;
+  hostId?: string | null;
   createdAt: string;
   operation: WorkflowRunLockOperation;
 }
@@ -77,6 +79,7 @@ export interface WorkflowRunLockTakeoverEvidence {
   ownerToken: string;
   pid: number;
   hostname: string;
+  hostId?: string | null;
   ownerOperation: WorkflowRunLockOperation;
   operation: "workflow.recover";
   quarantinePath: string;
@@ -171,6 +174,14 @@ function timestamp(value: unknown, key: string, label: string): string {
   return result;
 }
 
+function parseHostId(value: unknown, label: string): string | null | undefined {
+  if (value === undefined || value === null) return value;
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) {
+    throw new Error(`${label} hostId is invalid`);
+  }
+  return value;
+}
+
 function parseWorkflowRunLockRecord(value: unknown): WorkflowRunLockRecord {
   const label = "Workflow Run lock";
   if (!isRecord(value)) throw new Error(`${label} must be an object`);
@@ -182,6 +193,7 @@ function parseWorkflowRunLockRecord(value: unknown): WorkflowRunLockRecord {
       "ownerToken",
       "pid",
       "hostname",
+      "hostId",
       "createdAt",
       "operation",
     ]),
@@ -208,12 +220,14 @@ function parseWorkflowRunLockRecord(value: unknown): WorkflowRunLockRecord {
   if (!LOCK_OPERATIONS.includes(operation as WorkflowRunLockOperation)) {
     throw new Error(`${label} operation is invalid`);
   }
+  const hostId = parseHostId(value.hostId, label);
   return {
     schemaVersion: WORKFLOW_RUN_LOCK_SCHEMA_VERSION,
     kind: "workflow-run-lock",
     ownerToken,
     pid: value.pid,
     hostname: boundedText(value.hostname, "hostname", label),
+    ...(hostId === undefined ? {} : { hostId }),
     createdAt: timestamp(value.createdAt, "createdAt", label),
     operation: operation as WorkflowRunLockOperation,
   };
@@ -232,6 +246,7 @@ function parseWorkflowRunLockTakeoverEvidence(
       "ownerToken",
       "pid",
       "hostname",
+      "hostId",
       "ownerOperation",
       "operation",
       "quarantinePath",
@@ -276,12 +291,14 @@ function parseWorkflowRunLockTakeoverEvidence(
   ) {
     throw new Error(`${label} quarantinePath is invalid`);
   }
+  const hostId = parseHostId(value.hostId, label);
   return {
     schemaVersion: WORKFLOW_RUN_LOCK_SCHEMA_VERSION,
     kind: LOCK_TAKEOVER_KIND,
     ownerToken,
     pid: value.pid,
     hostname: boundedText(value.hostname, "hostname", label),
+    ...(hostId === undefined ? {} : { hostId }),
     ownerOperation: ownerOperation as WorkflowRunLockOperation,
     operation: "workflow.recover",
     quarantinePath,
@@ -414,11 +431,16 @@ async function readSnapshot(
   }
 }
 
-function diagnosisFromSnapshot(
+async function diagnosisFromSnapshot(
   snapshot: WorkflowRunLockSnapshot | null,
-): WorkflowRunLockDiagnosis {
+): Promise<WorkflowRunLockDiagnosis> {
   if (!snapshot) return { status: "missing", owner: null, identity: null };
-  if (snapshot.owner.hostname !== os.hostname()) {
+  const sameHost =
+    snapshot.owner.hostId === undefined
+      ? snapshot.owner.hostname === os.hostname()
+      : snapshot.owner.hostId !== null &&
+        snapshot.owner.hostId === (await workflowRunHostIdentity());
+  if (!sameHost) {
     return {
       status: "unknown",
       owner: snapshot.owner,
@@ -517,7 +539,7 @@ export async function diagnoseWorkflowRunLock(
   maxBytes = WORKFLOW_RUN_LOCK_MAX_BYTES,
 ): Promise<WorkflowRunLockDiagnosis> {
   try {
-    return diagnosisFromSnapshot(
+    return await diagnosisFromSnapshot(
       await readSnapshot(runRoot, WORKFLOW_RUN_LOCK_PATH, maxBytes),
     );
   } catch (error) {
@@ -530,15 +552,16 @@ export async function diagnoseWorkflowRunLock(
   }
 }
 
-function newLockRecord(
+async function newLockRecord(
   operation: WorkflowRunLockOperation,
-): WorkflowRunLockRecord {
+): Promise<WorkflowRunLockRecord> {
   return {
     schemaVersion: WORKFLOW_RUN_LOCK_SCHEMA_VERSION,
     kind: "workflow-run-lock",
     ownerToken: randomUUID(),
     pid: process.pid,
     hostname: os.hostname(),
+    hostId: await workflowRunHostIdentity(),
     createdAt: new Date().toISOString(),
     operation,
   };
@@ -597,7 +620,7 @@ async function takeOverStaleLock(
       },
     };
   }
-  const currentDiagnosis = diagnosisFromSnapshot(currentSnapshot);
+  const currentDiagnosis = await diagnosisFromSnapshot(currentSnapshot);
   if (currentDiagnosis.status === "missing") return { status: "missing" };
   if (!sameDiagnosis(expected, currentDiagnosis) || !currentSnapshot) {
     return { status: "changed", diagnosis: currentDiagnosis };
@@ -636,7 +659,7 @@ async function takeOverStaleLock(
   ) {
     return {
       status: "changed",
-      diagnosis: diagnosisFromSnapshot(latest),
+      diagnosis: await diagnosisFromSnapshot(latest),
     };
   }
   await invokeConfiguredFault({
@@ -648,7 +671,7 @@ async function takeOverStaleLock(
     WORKFLOW_RUN_LOCK_PATH,
     maxBytes,
   );
-  const verifiedDiagnosis = diagnosisFromSnapshot(verified);
+  const verifiedDiagnosis = await diagnosisFromSnapshot(verified);
   if (
     !verified ||
     !sameDiagnosis(expected, verifiedDiagnosis) ||
@@ -718,6 +741,9 @@ async function takeOverStaleLock(
       ownerToken: currentSnapshot.owner.ownerToken,
       pid: currentSnapshot.owner.pid,
       hostname: currentSnapshot.owner.hostname,
+      ...(currentSnapshot.owner.hostId === undefined
+        ? {}
+        : { hostId: currentSnapshot.owner.hostId }),
       ownerOperation: currentSnapshot.owner.operation,
       operation: "workflow.recover",
       quarantinePath,
@@ -831,7 +857,7 @@ export async function acquireWorkflowRunLock(
       }
       throw blocked(operation, diagnosis);
     }
-    const owner = newLockRecord(operation);
+    const owner = await newLockRecord(operation);
     try {
       await writeEngineRunText(
         runRoot,
@@ -887,7 +913,7 @@ export async function acquireWorkflowRunLock(
           path: WORKFLOW_RUN_LOCK_PATH,
           requiredAction: "stop",
         }),
-        diagnosisFromSnapshot(snapshot),
+        await diagnosisFromSnapshot(snapshot),
       );
     }
     const handle: WorkflowRunLockHandle = {

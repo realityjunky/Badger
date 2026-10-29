@@ -60,6 +60,16 @@ starts. With
 [ADR 0017](adr/0017-artifact-receipts-and-attempt-freshness.md) records the
 freshness rule.
 
+The Run registry and exported read models (#32) are delivered in the kernel's
+public WorkflowRuntime seam: `listRuns` discovers standalone Runs from their
+authoritative records, and `inspect` and `projectState` read continuations,
+status, current Node, pending action, and history for either Run location.
+Rebuildable projections and stray directories never establish a Run. Locks
+remain attributable after hostname changes using a host identity scoped to
+the boot and process namespace; unknown owners still block recovery.
+[ADR 0018](adr/0018-run-lock-host-identity.md) records the identity sources
+and legacy-record compatibility.
+
 ## Package-facing artifacts
 
 The installed Agent entrypoints are `assets/skills/badger-create/SKILL.md` and

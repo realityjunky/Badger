@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { atomicWriteContainedText } from "../engine/contained-atomic-write.js";
 import {
@@ -316,6 +317,7 @@ import type {
   WorkflowExecutionIdentity,
   WorkflowHandoff,
   WorkflowRuntime,
+  WorkflowRunRegistryEntry,
   WorkflowRunTarget,
   WorkflowStateProjection,
   WorkflowStateProjectionStatus,
@@ -335,6 +337,8 @@ export type {
   WorkflowHandoff,
   WorkflowRunLocation,
   WorkflowRuntime,
+  WorkflowRunRegistry,
+  WorkflowRunRegistryEntry,
   WorkflowRunTarget,
   WorkflowStateProjection,
   WorkflowStateProjectionStatus,
@@ -2093,6 +2097,53 @@ export async function projectWorkflowState(
       ? { finalization: structuredClone(runtimeState.finalization) }
       : {}),
   };
+}
+
+export async function listWorkflowRuns(
+  projectRoot: string,
+): Promise<WorkflowRunRegistryEntry[]> {
+  if (typeof projectRoot !== "string" || projectRoot.length === 0) {
+    throw new Error(
+      "Workflow Run registry project root must be a non-empty string",
+    );
+  }
+  const root = path.resolve(projectRoot);
+  const registry = await inspectProtectedProjectPath(root, ".badger/runs", {
+    label: "Workflow Run registry",
+    expected: "directory",
+  });
+  if (!registry.exists) return [];
+  const entries = await fs.readdir(registry.target, { withFileTypes: true });
+  entries.sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+  );
+  const runs: WorkflowRunRegistryEntry[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const location = {
+      kind: "standalone" as const,
+      projectRoot: root,
+      runId: entry.name,
+    };
+    let resolved: ResolvedWorkflowRunLocation;
+    try {
+      resolved = resolveWorkflowRunLocation(location);
+    } catch {
+      // A directory name that is not a Run id is not a registry entry.
+      continue;
+    }
+    const stored = await resolved.readState();
+    if (!stored?.runtimeIdentity) continue;
+    const state = await projectWorkflowState(location);
+    if (state) {
+      runs.push({
+        ...state,
+        location,
+        runRoot: resolved.runRoot,
+      });
+    }
+  }
+  return runs;
 }
 
 export async function writeWorkflowStateProjection(
@@ -6073,6 +6124,10 @@ async function recoverCheckpointAwareRun(
 
 export function createWorkflowRuntime(): WorkflowRuntime {
   return {
+    listRuns: listWorkflowRuns,
+    inspect: inspectWorkflowRun,
+    projectState: projectWorkflowState,
+
     async start(
       options: StartWorkflowRunOptions,
     ): Promise<WorkflowContinuation> {

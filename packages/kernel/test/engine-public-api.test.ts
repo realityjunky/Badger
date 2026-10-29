@@ -16,6 +16,9 @@ describe("public Engine package boundary", () => {
     expect(api.submitWorkflowRun).toBeTypeOf("function");
     expect(api.recoverWorkflowRun).toBeTypeOf("function");
     expect(api.previewWorkflowFinalization).toBeTypeOf("function");
+    expect(api.listWorkflowRuns).toBeTypeOf("function");
+    expect(api.inspectWorkflowRun).toBeTypeOf("function");
+    expect(api.projectWorkflowState).toBeTypeOf("function");
 
     const publicApi = api as Record<string, unknown>;
     for (const operation of [
@@ -46,9 +49,7 @@ describe("public Engine package boundary", () => {
     expect(publicApi.compileWorkflow).toBeUndefined();
     expect(publicApi.resolveWorkflowRunLocation).toBeUndefined();
     for (const operation of [
-      "inspectWorkflowRun",
       "projectWorkflowHandoff",
-      "projectWorkflowState",
       "validateWorkflowSubmission",
       "verifyWorkflowProtocol",
       "writeWorkflowStateProjection",
@@ -57,7 +58,7 @@ describe("public Engine package boundary", () => {
     }
   });
 
-  it("keeps the WorkflowRuntime package seam limited to core operations", () => {
+  it("exports WorkflowRuntime operations and read models while hiding storage", () => {
     const runtimeApi = workflowRuntime as Record<string, unknown>;
     for (const operation of [
       "createWorkflowRuntime",
@@ -66,13 +67,14 @@ describe("public Engine package boundary", () => {
       "submitWorkflowRun",
       "recoverWorkflowRun",
       "previewWorkflowFinalization",
+      "listWorkflowRuns",
+      "inspectWorkflowRun",
+      "projectWorkflowState",
     ]) {
       expect(runtimeApi[operation], operation).toBeTypeOf("function");
     }
     for (const operation of [
-      "inspectWorkflowRun",
       "projectWorkflowHandoff",
-      "projectWorkflowState",
       "validateWorkflowSubmission",
       "verifyWorkflowProtocol",
       "writeWorkflowStateProjection",

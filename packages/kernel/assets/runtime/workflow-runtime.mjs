@@ -1,5 +1,6 @@
 // src/workflow-runtime/index.ts
-import path18 from "node:path";
+import { promises as fs14 } from "node:fs";
+import path19 from "node:path";
 
 // src/engine/contained-atomic-write.ts
 import { randomUUID } from "crypto";
@@ -992,39 +993,39 @@ function createWorkflowFinding(input) {
     ...input.currentActionId !== void 0 ? { currentActionId: input.currentActionId } : {}
   };
 }
-function snapshotIncompleteFinding(message, path19) {
+function snapshotIncompleteFinding(message, path20) {
   return createWorkflowFinding({
     code: "snapshot-incomplete",
     severity: "error",
     message,
-    ...path19 ? { path: path19 } : {},
+    ...path20 ? { path: path20 } : {},
     requiredAction: "stop"
   });
 }
-function snapshotStorageFailedFinding(message, path19) {
+function snapshotStorageFailedFinding(message, path20) {
   return createWorkflowFinding({
     code: "snapshot-storage-failed",
     severity: "error",
     message,
-    ...path19 ? { path: path19 } : {},
+    ...path20 ? { path: path20 } : {},
     requiredAction: "stop"
   });
 }
-function snapshotUnsafeScopeFinding(message, path19) {
+function snapshotUnsafeScopeFinding(message, path20) {
   return createWorkflowFinding({
     code: "snapshot-unsafe-scope",
     severity: "error",
     message,
-    ...path19 ? { path: path19 } : {},
+    ...path20 ? { path: path20 } : {},
     requiredAction: "stop"
   });
 }
-function snapshotUnstableFinding(message, path19) {
+function snapshotUnstableFinding(message, path20) {
   return createWorkflowFinding({
     code: "snapshot-unstable",
     severity: "error",
     message,
-    ...path19 ? { path: path19 } : {},
+    ...path20 ? { path: path20 } : {},
     requiredAction: "stop"
   });
 }
@@ -1887,21 +1888,21 @@ function recoveryRequiredFinding(currentRevision, currentActionId, recoveryPath 
     ...currentActionId === void 0 ? {} : { currentActionId }
   });
 }
-function checkpointInvalidFinding(message, path19, severity = "error") {
+function checkpointInvalidFinding(message, path20, severity = "error") {
   return createWorkflowFinding({
     code: "checkpoint-invalid",
     severity,
     message,
-    path: path19,
+    path: path20,
     requiredAction: severity === "warning" ? "none" : "stop"
   });
 }
-function checkpointHistoryAmbiguousFinding(message, path19) {
+function checkpointHistoryAmbiguousFinding(message, path20) {
   return createWorkflowFinding({
     code: "checkpoint-history-ambiguous",
     severity: "error",
     message,
-    path: path19,
+    path: path20,
     requiredAction: "stop"
   });
 }
@@ -11324,13 +11325,13 @@ async function readValidatedOperation(baseRoot, operation2, profile) {
   }
   return actual;
 }
-async function appendOperationEvent(runRoot, profile, transaction, operation2, type, phase, path19) {
+async function appendOperationEvent(runRoot, profile, transaction, operation2, type, phase, path20) {
   await appendTransactionEvent(
     runRoot,
     profile,
     transaction,
     type,
-    { phase, operationId: operation2.id, path: path19 },
+    { phase, operationId: operation2.id, path: path20 },
     operation2.id
   );
 }
@@ -13310,9 +13311,9 @@ async function stageWorkflowVerificationReceipt(options) {
     options.receipt,
     options.profile
   );
-  const path19 = receiptPath(receipt.receiptHash);
+  const path20 = receiptPath(receipt.receiptHash);
   const existingRaw = await options.transition.read(
-    path19,
+    path20,
     bounds.receiptBytes,
     RECEIPT_LABEL
   );
@@ -13333,7 +13334,7 @@ async function stageWorkflowVerificationReceipt(options) {
     return workflowVerificationReceiptReference(existing);
   }
   await options.transition.write(
-    path19,
+    path20,
     serializedReceipt(receipt),
     bounds.receiptBytes,
     RECEIPT_LABEL
@@ -18190,9 +18191,9 @@ var WorkflowTransitionJournalPendingError = class extends Error {
   journal;
 };
 var WorkflowTransitionRecordConflictError = class extends Error {
-  constructor(path19) {
-    super(`Workflow transition record changed before journaling: ${path19}`);
-    this.path = path19;
+  constructor(path20) {
+    super(`Workflow transition record changed before journaling: ${path20}`);
+    this.path = path20;
     this.name = "WorkflowTransitionRecordConflictError";
   }
   path;
@@ -19350,9 +19351,71 @@ async function recoverWorkflowTransition(runRoot, profile) {
 
 // src/workflow-runtime/run-lock.ts
 import { randomUUID as randomUUID6 } from "node:crypto";
-import { promises as fs9 } from "node:fs";
+import { promises as fs10 } from "node:fs";
 import os from "node:os";
+import path16 from "node:path";
+
+// src/workflow-runtime/host-identity.ts
+import { execFile } from "node:child_process";
+import { promises as fs9 } from "node:fs";
 import path15 from "node:path";
+import { promisify } from "node:util";
+var execFileAsync = promisify(execFile);
+var cachedHostIdentity;
+async function readHostIdentity() {
+  try {
+    let parts;
+    if (process.platform === "linux") {
+      parts = await Promise.all([
+        fs9.readFile("/proc/sys/kernel/random/boot_id", "utf8"),
+        fs9.readlink("/proc/self/ns/pid")
+      ]);
+    } else if (process.platform === "darwin") {
+      const result = await execFileAsync(
+        "/usr/sbin/sysctl",
+        ["-n", "kern.hostuuid", "kern.boottime"],
+        { timeout: 3e3, maxBuffer: 16 * 1024 }
+      );
+      parts = result.stdout.trim().split("\n");
+    } else if (process.platform === "win32") {
+      const executable = path15.join(
+        process.env.SystemRoot ?? "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe"
+      );
+      const result = await execFileAsync(
+        executable,
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "(Get-CimInstance Win32_ComputerSystemProduct).UUID; (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('O')"
+        ],
+        { timeout: 3e3, maxBuffer: 16 * 1024, windowsHide: true }
+      );
+      parts = result.stdout.trim().split(/\r?\n/u);
+    } else {
+      return null;
+    }
+    if (parts.length !== 2 || parts.some((part) => !part.trim())) return null;
+    return sha256(
+      JSON.stringify([
+        "badger-run-host-v1",
+        process.platform,
+        ...parts.map((part) => part.trim())
+      ])
+    );
+  } catch {
+    return null;
+  }
+}
+function workflowRunHostIdentity() {
+  return cachedHostIdentity ??= readHostIdentity();
+}
+
+// src/workflow-runtime/run-lock.ts
 var WORKFLOW_RUN_LOCK_PATH = ".badger/run-lock.json";
 var WORKFLOW_RUN_LOCK_RECOVERY_PATH = ".badger/run-lock-recovery.jsonl";
 var WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY = ".badger/run-lock-quarantine";
@@ -19402,6 +19465,13 @@ function timestamp4(value, key, label) {
   }
   return result;
 }
+function parseHostId(value, label) {
+  if (value === void 0 || value === null) return value;
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) {
+    throw new Error(`${label} hostId is invalid`);
+  }
+  return value;
+}
 function parseWorkflowRunLockRecord(value) {
   const label = "Workflow Run lock";
   if (!isRecord13(value)) throw new Error(`${label} must be an object`);
@@ -19413,6 +19483,7 @@ function parseWorkflowRunLockRecord(value) {
       "ownerToken",
       "pid",
       "hostname",
+      "hostId",
       "createdAt",
       "operation"
     ]),
@@ -19432,12 +19503,14 @@ function parseWorkflowRunLockRecord(value) {
   if (!LOCK_OPERATIONS.includes(operation2)) {
     throw new Error(`${label} operation is invalid`);
   }
+  const hostId = parseHostId(value.hostId, label);
   return {
     schemaVersion: WORKFLOW_RUN_LOCK_SCHEMA_VERSION,
     kind: "workflow-run-lock",
     ownerToken,
     pid: value.pid,
     hostname: boundedText4(value.hostname, "hostname", label),
+    ...hostId === void 0 ? {} : { hostId },
     createdAt: timestamp4(value.createdAt, "createdAt", label),
     operation: operation2
   };
@@ -19453,6 +19526,7 @@ function parseWorkflowRunLockTakeoverEvidence(value) {
       "ownerToken",
       "pid",
       "hostname",
+      "hostId",
       "ownerOperation",
       "operation",
       "quarantinePath",
@@ -19486,12 +19560,14 @@ function parseWorkflowRunLockTakeoverEvidence(value) {
   if (quarantinePath !== WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY && !quarantinePath.startsWith(`${WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY}/`)) {
     throw new Error(`${label} quarantinePath is invalid`);
   }
+  const hostId = parseHostId(value.hostId, label);
   return {
     schemaVersion: WORKFLOW_RUN_LOCK_SCHEMA_VERSION,
     kind: LOCK_TAKEOVER_KIND,
     ownerToken,
     pid: value.pid,
     hostname: boundedText4(value.hostname, "hostname", label),
+    ...hostId === void 0 ? {} : { hostId },
     ownerOperation,
     operation: "workflow.recover",
     quarantinePath,
@@ -19580,9 +19656,10 @@ async function readSnapshot2(runRoot, relativePath2 = WORKFLOW_RUN_LOCK_PATH, ma
     throw error;
   }
 }
-function diagnosisFromSnapshot(snapshot) {
+async function diagnosisFromSnapshot(snapshot) {
   if (!snapshot) return { status: "missing", owner: null, identity: null };
-  if (snapshot.owner.hostname !== os.hostname()) {
+  const sameHost = snapshot.owner.hostId === void 0 ? snapshot.owner.hostname === os.hostname() : snapshot.owner.hostId !== null && snapshot.owner.hostId === await workflowRunHostIdentity();
+  if (!sameHost) {
     return {
       status: "unknown",
       owner: snapshot.owner,
@@ -19654,7 +19731,7 @@ function isProcessAlive(pid) {
 }
 async function diagnoseWorkflowRunLock(runRoot, maxBytes = WORKFLOW_RUN_LOCK_MAX_BYTES) {
   try {
-    return diagnosisFromSnapshot(
+    return await diagnosisFromSnapshot(
       await readSnapshot2(runRoot, WORKFLOW_RUN_LOCK_PATH, maxBytes)
     );
   } catch (error) {
@@ -19666,13 +19743,14 @@ async function diagnoseWorkflowRunLock(runRoot, maxBytes = WORKFLOW_RUN_LOCK_MAX
     };
   }
 }
-function newLockRecord(operation2) {
+async function newLockRecord(operation2) {
   return {
     schemaVersion: WORKFLOW_RUN_LOCK_SCHEMA_VERSION,
     kind: "workflow-run-lock",
     ownerToken: randomUUID6(),
     pid: process.pid,
     hostname: os.hostname(),
+    hostId: await workflowRunHostIdentity(),
     createdAt: (/* @__PURE__ */ new Date()).toISOString(),
     operation: operation2
   };
@@ -19718,7 +19796,7 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
       }
     };
   }
-  const currentDiagnosis = diagnosisFromSnapshot(currentSnapshot);
+  const currentDiagnosis = await diagnosisFromSnapshot(currentSnapshot);
   if (currentDiagnosis.status === "missing") return { status: "missing" };
   if (!sameDiagnosis(expected, currentDiagnosis) || !currentSnapshot) {
     return { status: "changed", diagnosis: currentDiagnosis };
@@ -19752,7 +19830,7 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
   if (!latest || latest.owner.ownerToken !== currentSnapshot.owner.ownerToken || !sameLockVersion(latest.identity, currentSnapshot.identity)) {
     return {
       status: "changed",
-      diagnosis: diagnosisFromSnapshot(latest)
+      diagnosis: await diagnosisFromSnapshot(latest)
     };
   }
   await invokeConfiguredFault2({
@@ -19764,12 +19842,12 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
     WORKFLOW_RUN_LOCK_PATH,
     maxBytes
   );
-  const verifiedDiagnosis = diagnosisFromSnapshot(verified);
+  const verifiedDiagnosis = await diagnosisFromSnapshot(verified);
   if (!verified || !sameDiagnosis(expected, verifiedDiagnosis) || verifiedDiagnosis.status !== "stale") {
     return { status: "changed", diagnosis: verifiedDiagnosis };
   }
   try {
-    await fs9.rename(verified.file, quarantine.target);
+    await fs10.rename(verified.file, quarantine.target);
   } catch (error) {
     if (error.code === "ENOENT") {
       return { status: "missing" };
@@ -19795,7 +19873,7 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
         { label: "Workflow Run lock quarantine", expected: "file" }
       );
       if (!source.exists && quarantined.exists) {
-        await fs9.rename(quarantined.target, source.target);
+        await fs10.rename(quarantined.target, source.target);
       }
     } catch {
       return {
@@ -19826,6 +19904,7 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
       ownerToken: currentSnapshot.owner.ownerToken,
       pid: currentSnapshot.owner.pid,
       hostname: currentSnapshot.owner.hostname,
+      ...currentSnapshot.owner.hostId === void 0 ? {} : { hostId: currentSnapshot.owner.hostId },
       ownerOperation: currentSnapshot.owner.operation,
       operation: "workflow.recover",
       quarantinePath,
@@ -19856,7 +19935,7 @@ async function releaseLock(runRoot, handle) {
   }
   try {
     await removeContainedFile(current.file, {
-      containedRoot: path15.resolve(runRoot),
+      containedRoot: path16.resolve(runRoot),
       beforeRemove: async () => {
         const latest = await readSnapshot2(runRoot, WORKFLOW_RUN_LOCK_PATH);
         if (!latest || latest.owner.ownerToken !== handle.owner.ownerToken || !sameLockVersion(latest.identity, handle.identity)) {
@@ -19916,7 +19995,7 @@ async function acquireWorkflowRunLock(runRoot, operation2, options = {}) {
       }
       throw blocked(operation2, diagnosis);
     }
-    const owner = newLockRecord(operation2);
+    const owner = await newLockRecord(operation2);
     try {
       await writeEngineRunText(
         runRoot,
@@ -19968,7 +20047,7 @@ async function acquireWorkflowRunLock(runRoot, operation2, options = {}) {
           path: WORKFLOW_RUN_LOCK_PATH,
           requiredAction: "stop"
         }),
-        diagnosisFromSnapshot(snapshot)
+        await diagnosisFromSnapshot(snapshot)
       );
     }
     const handle = {
@@ -20039,8 +20118,8 @@ async function recordWorkflowRunLockTakeover(runRoot, evidence, maxBytes = WORKF
 
 // src/workflow-runtime/checkpoints.ts
 import { randomUUID as randomUUID7 } from "node:crypto";
-import { promises as fs10 } from "node:fs";
-import path16 from "node:path";
+import { promises as fs11 } from "node:fs";
+import path17 from "node:path";
 var WORKFLOW_CHECKPOINT_DIRECTORY = ".badger/checkpoints";
 var WORKFLOW_CHECKPOINT_INDEX_PATH = ".badger/checkpoints/index.json";
 var WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY = ".badger/checkpoints/manifests";
@@ -20834,8 +20913,8 @@ async function physicalArtifactBytes(runRoot, protocol, version, maxBytes) {
       label: `Workflow checkpoint artifact ${version.id}`,
       expected: "directory"
     });
-    for (const entry of (await fs10.readdir(current.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
-      const child = path16.posix.join(relativePath2, entry.name);
+    for (const entry of (await fs11.readdir(current.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
+      const child = path17.posix.join(relativePath2, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error(
           `Workflow checkpoint artifact crosses a symbolic link: ${child}`
@@ -21785,7 +21864,7 @@ async function restoreWorkflowCheckpoint(runRoot, profile, candidate) {
 }
 
 // src/workflow-runtime/location.ts
-import { promises as fs12 } from "node:fs";
+import { promises as fs13 } from "node:fs";
 import { randomUUID as randomUUID9 } from "node:crypto";
 
 // src/engine/manual-run.ts
@@ -22960,8 +23039,8 @@ async function resumeManualWorkflowRun(changeDir, options, artifactMutation) {
 }
 
 // src/engine/standalone-run.ts
-import { promises as fs11 } from "node:fs";
-import path17 from "path";
+import { promises as fs12 } from "node:fs";
+import path18 from "path";
 function validateRunId(runId) {
   if (typeof runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId)) {
     throw new Error(`Invalid standalone Run id: ${String(runId)}`);
@@ -22975,16 +23054,16 @@ function validateProjectRoot(projectRoot) {
 function standaloneRunDir(projectRoot, runId) {
   validateRunId(runId);
   validateProjectRoot(projectRoot);
-  return path17.resolve(projectRoot, ".badger", "runs", runId);
+  return path18.resolve(projectRoot, ".badger", "runs", runId);
 }
 function pathSegments(projectRoot) {
-  const lexicalRoot = path17.resolve(projectRoot);
-  const root = path17.parse(lexicalRoot).root;
-  const relative = path17.relative(root, lexicalRoot);
-  return relative.length === 0 ? [] : relative.split(path17.sep);
+  const lexicalRoot = path18.resolve(projectRoot);
+  const root = path18.parse(lexicalRoot).root;
+  const relative = path18.relative(root, lexicalRoot);
+  return relative.length === 0 ? [] : relative.split(path18.sep);
 }
 function runRootRelativePath(projectRoot, runRoot) {
-  return path17.relative(projectRoot, runRoot).replaceAll("\\", "/");
+  return path18.relative(projectRoot, runRoot).replaceAll("\\", "/");
 }
 function isMissing2(error) {
   const code = error.code;
@@ -22992,24 +23071,24 @@ function isMissing2(error) {
 }
 async function resolveStandaloneProjectRoot(projectRoot, createMissing) {
   validateProjectRoot(projectRoot);
-  const lexicalRoot = path17.resolve(projectRoot);
-  let cursor = path17.parse(lexicalRoot).root;
+  const lexicalRoot = path18.resolve(projectRoot);
+  let cursor = path18.parse(lexicalRoot).root;
   for (const segment of pathSegments(lexicalRoot)) {
-    cursor = path17.join(cursor, segment);
+    cursor = path18.join(cursor, segment);
     let stat;
     try {
-      stat = await fs11.lstat(cursor);
+      stat = await fs12.lstat(cursor);
     } catch (error) {
       if (!isMissing2(error)) throw error;
       if (!createMissing) return lexicalRoot;
       try {
-        await fs11.mkdir(cursor);
+        await fs12.mkdir(cursor);
       } catch (mkdirError) {
         if (mkdirError.code !== "EEXIST") {
           throw mkdirError;
         }
       }
-      stat = await fs11.lstat(cursor);
+      stat = await fs12.lstat(cursor);
     }
     if (stat.isSymbolicLink()) {
       throw new Error("Standalone project root cannot cross a symbolic link");
@@ -23116,8 +23195,8 @@ function manualLocation(runRoot) {
       return readRunState(validatedRoot);
     },
     async prepareStart() {
-      await fs12.mkdir(validatedRoot, { recursive: true });
-      const stat = await fs12.lstat(validatedRoot);
+      await fs13.mkdir(validatedRoot, { recursive: true });
+      const stat = await fs13.lstat(validatedRoot);
       if (stat.isSymbolicLink() || !stat.isDirectory()) {
         throw new Error(
           "WorkflowRuntime manual Run root must be a real directory"
@@ -24578,6 +24657,49 @@ async function projectWorkflowState(target) {
     ...runtimeState?.finalization ? { finalization: structuredClone(runtimeState.finalization) } : {}
   };
 }
+async function listWorkflowRuns(projectRoot) {
+  if (typeof projectRoot !== "string" || projectRoot.length === 0) {
+    throw new Error(
+      "Workflow Run registry project root must be a non-empty string"
+    );
+  }
+  const root = path19.resolve(projectRoot);
+  const registry = await inspectProtectedProjectPath(root, ".badger/runs", {
+    label: "Workflow Run registry",
+    expected: "directory"
+  });
+  if (!registry.exists) return [];
+  const entries = await fs14.readdir(registry.target, { withFileTypes: true });
+  entries.sort(
+    (left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0
+  );
+  const runs = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const location = {
+      kind: "standalone",
+      projectRoot: root,
+      runId: entry.name
+    };
+    let resolved;
+    try {
+      resolved = resolveWorkflowRunLocation(location);
+    } catch {
+      continue;
+    }
+    const stored = await resolved.readState();
+    if (!stored?.runtimeIdentity) continue;
+    const state = await projectWorkflowState(location);
+    if (state) {
+      runs.push({
+        ...state,
+        location,
+        runRoot: resolved.runRoot
+      });
+    }
+  }
+  return runs;
+}
 async function writeWorkflowStateProjection(target, projection) {
   const projectRoot = resolveWorkflowRunLocation(target).runRoot;
   const label = "Workflow state projection";
@@ -24611,7 +24733,7 @@ async function writeWorkflowStateProjection(target, projection) {
         continue;
       }
     }
-    const parent = path18.posix.dirname(relativePath2);
+    const parent = path19.posix.dirname(relativePath2);
     if (parent !== ".") {
       await ensureProtectedProjectDirectory(projectRoot, parent, { label });
       inspection = await inspectProtectedProjectPath(
@@ -27587,6 +27709,9 @@ async function recoverCheckpointAwareRun(location, options, forceCheckpoint) {
 }
 function createWorkflowRuntime() {
   return {
+    listRuns: listWorkflowRuns,
+    inspect: inspectWorkflowRun,
+    projectState: projectWorkflowState,
     async start(options) {
       return withStructuredRuntimeErrors(async () => {
         const resolved = resolveWorkflowStartLocation(options);
@@ -28108,6 +28233,7 @@ var recoverWorkflowRun = defaultRuntime.recover;
 export {
   createWorkflowRuntime,
   inspectWorkflowRun,
+  listWorkflowRuns,
   previewWorkflowFinalization,
   projectWorkflowHandoff,
   projectWorkflowState,

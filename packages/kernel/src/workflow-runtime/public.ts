@@ -1,5 +1,8 @@
 export {
   createWorkflowRuntime,
+  inspectWorkflowRun,
+  listWorkflowRuns,
+  projectWorkflowState,
   recoverWorkflowRun,
   previewWorkflowFinalization,
   resumeWorkflowRun,
@@ -18,9 +21,14 @@ export type {
   Submission,
   WorkflowContinuation,
   WorkflowExecutionIdentity,
+  WorkflowPendingAction,
   WorkflowRunLocation,
   WorkflowRunTarget,
   WorkflowRuntime,
+  WorkflowRunRegistry,
+  WorkflowRunRegistryEntry,
+  WorkflowStateProjection,
+  WorkflowStateProjectionStatus,
   WorkflowSubmission,
 } from "./types.js";
 

@@ -214,10 +214,34 @@ additionally carries byte counts and hashes.
 
 The public package façade plus the `@realityjunky/badger/engine` and
 `@realityjunky/badger/workflow-runtime` subpaths export the runtime
-operations needed by callers. The WorkflowRuntime subpath exposes only one
-constructor and its four core operations; compiler, location, projection,
-Run-file storage, and protected filesystem implementation modules remain
-internal.
+operations needed by callers. The WorkflowRuntime subpath exposes the
+constructor, its four mutation operations, and read-only Run discovery and
+inspection. Compiler, location resolution, Run-file storage, projection
+writes, and protected filesystem implementation modules remain internal.
+
+`createWorkflowRuntime()` implements `WorkflowRunRegistry`: call
+`runtime.listRuns(projectRoot)` (or `listWorkflowRuns(projectRoot)`) to list
+standalone Runs under that project's `.badger/runs/`, sorted by Run id. Each
+`WorkflowRunRegistryEntry` includes its `location`, absolute `runRoot`, and
+the `WorkflowStateProjection` fields: status, current Node, pending action,
+outcome history, and execution identity. Discovery reads authoritative Run
+records, ignores empty directories, invalid Run ids, linked entries, and
+rebuildable projections, and creates no files. Invalid records in an actual
+Run are reported as errors rather than silently hiding it.
+
+For a standalone or manual Run target, `runtime.inspect(target)` (or
+`inspectWorkflowRun(target)`) returns the current continuation, including
+recovery findings. `runtime.projectState(target)` (or
+`projectWorkflowState(target)`) returns its state and history. Both return
+`null` when no Run exists. Manual Runs are inspected by their explicit
+location; the project registry discovers standalone Runs only.
+
+Mutation locks record a hostname-independent, hashed host identity as well
+as the hostname used for display. A hostname change preserves attribution;
+an active owner is still protected, and only explicit recovery may take over
+a proven-stale lock. An unknown host identity never permits takeover. See
+`docs/adr/0018-run-lock-host-identity.md` from the repository root for the
+platform identity sources and compatibility rules.
 
 ## Authoring references
 

@@ -96,7 +96,12 @@ durable.
 
 When `mutation-locks` is enabled, each mutating public operation first
 publishes an exclusive `.badger/run-lock.json` record with a unique owner token,
-operation, process id, host, and creation time. A local lock is stale only when
+operation, process id, host identity, hostname, and creation time. New locks
+use a hashed boot identity (including the Linux PID namespace) independent of
+the hostname. Renaming a host therefore preserves ownership checks, while
+an unknown, unavailable, or different identity blocks takeover even when
+hostnames match. Legacy records without `hostId` retain their hostname
+check. A local lock is stale only when
 the owner process is proven absent; age never establishes staleness, and a
 foreign-host or unverifiable owner remains unknown. Ordinary operations never
 remove stale, malformed, oversized, symlinked, or replaced locks. Explicit
@@ -273,14 +278,20 @@ can be resumed and completed through the public runtime, and a public-runtime
 Run can be resumed and completed through the generated adapter.
 
 The public `@realityjunky/badger/workflow-runtime` package seam exposes
-only runtime construction and the four operations `start`, `resume`, `submit`,
-and `recover`. Revisioned continuations add `revision`, `attemptId`,
+runtime construction and the four mutation operations `start`, `resume`,
+`submit`, and `recover`, plus read-only `listRuns`, `inspect`, and
+`projectState` on the runtime. The named exports `listWorkflowRuns`,
+`inspectWorkflowRun`, and `projectWorkflowState` expose the same reads.
+`WorkflowRunRegistry` lists standalone Runs in a project from authoritative
+records; its entries include location, status, current Node, pending action,
+and outcome history. Projections and stray directories are never registry
+authority. Revisioned continuations add `revision`, `attemptId`,
 `visitOrdinal`, `retryOrdinal`, `cycleId`, Cycle and visit ledgers, and
 decision receipt projections. Versioned continuations also project immutable
 artifact versions, selection evidence, current scope-valid selections, and
 bounded pending decision scope references. Awaiting decisions redact prior
-evidence payloads from continuation and state projections. Compiler, Run-location,
-projection, storage, and protected filesystem modules remain private
+evidence payloads from continuation and state projections. Compiler, Run-location
+resolution, projection writes, storage, and protected filesystem modules remain private
 implementation details.
 
 Continuations, state projections, and handoffs project bounded Verification

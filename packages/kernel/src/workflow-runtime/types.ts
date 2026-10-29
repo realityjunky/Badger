@@ -260,7 +260,20 @@ export type {
   WorkflowFinalizationReceiptReference,
 };
 
-export interface WorkflowRuntime {
+export interface WorkflowRunRegistryEntry extends WorkflowStateProjection {
+  location: StandaloneWorkflowRunLocation;
+  runRoot: string;
+}
+
+export interface WorkflowRunRegistry {
+  listRuns(projectRoot: string): Promise<WorkflowRunRegistryEntry[]>;
+}
+
+export interface WorkflowRuntime extends WorkflowRunRegistry {
+  inspect(target: WorkflowRunTarget): Promise<WorkflowContinuation | null>;
+  projectState(
+    target: WorkflowRunTarget,
+  ): Promise<WorkflowStateProjection | null>;
   start(options: StartWorkflowRunOptions): Promise<WorkflowContinuation>;
   resume(
     target: WorkflowRunTarget,

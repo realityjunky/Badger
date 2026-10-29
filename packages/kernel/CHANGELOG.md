@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Run registry and public read models**: WorkflowRuntime lists a project's
+  standalone Runs, including their location, status, current Node, pending
+  action, and outcome history. `listWorkflowRuns`, `inspectWorkflowRun`, and
+  `projectWorkflowState` are public exports with matching runtime methods.
+  Discovery ignores projections and stray directories. Mutation locks use
+  hostname-independent host identities so recovery can still attribute a
+  lock after a host rename, while refusing unknown owners (#32).
+
 - **Artifacts by receipt**: An Output Schema can declare named external roots,
   each with only a description, and an artifact can opt into
   `verification: "receipt"`. The host binds each root to a directory when a Run

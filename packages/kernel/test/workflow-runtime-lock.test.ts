@@ -484,6 +484,105 @@ describe("WorkflowRuntime mutation locks", () => {
     });
   });
 
+  it("attributes active and stale locks after a hostname change", async () => {
+    const runtime = createWorkflowRuntime();
+    const started = await runtime.start({
+      protocol: protocol(),
+      runRoot,
+      runId: "renamed-host-run",
+    });
+    const previousHold = process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS;
+    process.env.BADGER_WORKFLOW_TEST_LOCK_HOLD_MS = "100";
+    let owner: Record<string, unknown>;
+    try {
+      const resumed = runtime.resume(runRoot);
+      await waitFor(path.join(runRoot, LOCK_PATH));
+      owner = JSON.parse(
+        await fs.readFile(path.join(runRoot, LOCK_PATH), "utf8"),
+      );
+      await resumed;
+    } finally {
+      restoreEnvironment("BADGER_WORKFLOW_TEST_LOCK_HOLD_MS", previousHold);
+    }
+    await writeLock(runRoot, {
+      ...owner!,
+      hostname: "hostname-before-rename",
+    });
+    const active = await runtime.recover(runRoot);
+    expect(active).toMatchObject({
+      disposition: "blocked",
+      findings: [{ code: "run-lock-active", requiredAction: "retry" }],
+    });
+
+    await writeLock(runRoot, {
+      ...owner!,
+      hostname: "hostname-before-rename",
+      pid: 2_147_483_647,
+    });
+
+    const childScript = `
+      import { pathToFileURL } from "node:url";
+      const [assetPath, runRoot] = process.argv.slice(1);
+      const { createWorkflowRuntime } = await import(pathToFileURL(assetPath).href);
+      console.log(JSON.stringify(await createWorkflowRuntime().recover(runRoot)));
+    `;
+    const recovered = await execFileAsync(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      childScript,
+      path.resolve("assets/runtime/workflow-runtime.mjs"),
+      runRoot,
+    ]);
+    expect(JSON.parse(recovered.stdout)).toEqual(started);
+    expect(owner!.hostId).toEqual(expect.stringMatching(/^[a-f0-9]{64}$/u));
+    const events = (
+      await fs.readFile(path.join(runRoot, LOCK_EVENTS_PATH), "utf8")
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(events).toMatchObject([
+      {
+        hostId: owner!.hostId,
+        hostname: "hostname-before-rename",
+        ownerToken: owner!.ownerToken,
+      },
+    ]);
+  });
+
+  it.each([
+    ["foreign host identity", "0".repeat(64)],
+    ["unavailable host identity", null],
+    ["malformed host identity", "not-a-host-id"],
+  ] as const)(
+    "refuses recovery for an %s even when the hostname matches",
+    async (_name, hostId) => {
+      const runtime = createWorkflowRuntime();
+      await runtime.start({
+        protocol: protocol(),
+        runRoot,
+        runId: "unknown-host-run",
+      });
+      const beforeState = await runtime.projectState(runRoot);
+      await writeLock(runRoot, { ...lockRecord(), hostId });
+      const beforeLock = await fs.readFile(
+        path.join(runRoot, LOCK_PATH),
+        "utf8",
+      );
+
+      const recovered = await runtime.recover(runRoot);
+
+      expect(recovered).toMatchObject({
+        disposition: "blocked",
+        findings: [{ code: "run-lock-unknown", requiredAction: "stop" }],
+      });
+      await expect(
+        fs.readFile(path.join(runRoot, LOCK_PATH), "utf8"),
+      ).resolves.toBe(beforeLock);
+      await expect(runtime.projectState(runRoot)).resolves.toEqual(beforeState);
+    },
+  );
+
   it("fails closed when release sees a replacement owner", async () => {
     const runtime = createWorkflowRuntime();
     const started = await runtime.start({
