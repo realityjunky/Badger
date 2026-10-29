@@ -31,6 +31,7 @@ import {
   type AnswerEditorHandle,
 } from "./questionnaire/AnswerEditor.js";
 import { QuestionComposer } from "./questionnaire/QuestionComposer.js";
+import { DraftingJobs } from "./questionnaire/DraftingJobs.js";
 import { QuestionResolution } from "./questionnaire/QuestionResolution.js";
 import { QuestionInspector } from "./questionnaire/QuestionInspector.js";
 import { QuestionThread } from "./questionnaire/QuestionThread.js";
@@ -316,6 +317,11 @@ export function QuestionnairePage() {
             {t("questionnaire.raiseConcern")}
           </Button>
         )}
+        {compose && (
+          <Link to={`/questionnaire?${versionQuery}&panel=suggestions`}>
+            {t("drafting.title")}
+          </Link>
+        )}
       </div>
       {failure && <Alert type="error" showIcon message={failure} />}
       <div
@@ -429,7 +435,15 @@ export function QuestionnairePage() {
           data-testid="main-pane"
           aria-label={t("questionnaire.thread")}
         >
-          {view && path && ledgerOpen ? (
+          {view && path && compose && query.get("panel") === "suggestions" ? (
+            <DraftingJobs
+              key={path}
+              basePath={basePath}
+              path={path}
+              view={view}
+              onChanged={() => void reload()}
+            />
+          ) : view && path && ledgerOpen ? (
             <QuestionnaireLedger
               basePath={basePath}
               path={path}

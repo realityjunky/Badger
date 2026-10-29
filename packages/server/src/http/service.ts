@@ -69,6 +69,7 @@ import { handleInbox, inboxMethods } from "./inbox.js";
 import { handleSourceStudy, sourceStudyMethods } from "./source-study.js";
 import { handleQuestionnaire, questionnaireMethods } from "./questionnaire.js";
 import { handleEvents } from "./events.js";
+import { draftingJobMethods, handleDraftingJobs } from "./drafting-jobs.js";
 import { tokenRequestAllowed } from "./token-access.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
 import { skillGroupPermissions } from "../skills/access.js";
@@ -163,7 +164,8 @@ function allowedMethods(path: string): string {
     dossierMethods(path) ??
     sourceStudyMethods(path) ??
     inboxMethods(path) ??
-    questionnaireMethods(path);
+    questionnaireMethods(path) ??
+    draftingJobMethods(path);
   if (featureMethods !== null) return featureMethods;
   if (path === `${API}/me/preferences`) {
     return "GET, HEAD, PUT";
@@ -824,6 +826,8 @@ export function createService(options: ServiceOptions, port: number): Service {
         return await handleSourceStudy(authorized);
       if (questionnaireMethods(path) !== null)
         return await handleQuestionnaire(authorized);
+      if (draftingJobMethods(path) !== null)
+        return await handleDraftingJobs(authorized);
       if (workflowMethods(path) !== null)
         return await handleWorkflows(authorized);
       if (path === `${API}/skills` || path.startsWith(`${API}/skills/`)) {
@@ -880,13 +884,27 @@ export function createService(options: ServiceOptions, port: number): Service {
       );
     }
     if (path === `${API}/me/mcp`) {
+      const questionnaire = await questionnaireCapabilities(
+        database,
+        access,
+        person,
+        null,
+      );
+      const uploadSkillVersion = (
+        await skillGroupPermissions(database, access, person)
+      ).some((group) => group.canUpload);
       return reply.json(200, {
-        profile: "expert",
+        profiles: [
+          ...(questionnaire.compose ? ["engineer"] : []),
+          ...(questionnaire.answer ||
+          questionnaire.raiseConcern ||
+          uploadSkillVersion
+            ? ["expert"]
+            : []),
+        ],
         capabilities: {
-          ...(await questionnaireCapabilities(database, access, person, null)),
-          uploadSkillVersion: (
-            await skillGroupPermissions(database, access, person)
-          ).some((group) => group.canUpload),
+          ...questionnaire,
+          uploadSkillVersion,
         },
       });
     }

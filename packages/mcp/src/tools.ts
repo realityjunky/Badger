@@ -12,12 +12,12 @@ export interface ExpertTool {
   run(args: unknown): Promise<unknown>;
 }
 
-const id = z
+export const id = z
   .string()
   .min(1)
   .max(200)
   .regex(/^[A-Za-z0-9_-]+$/u);
-const context = { workflowId: id, versionId: id };
+export const context = { workflowId: id, versionId: id };
 const question = { ...context, questionId: id };
 const answer = {
   ...question,
@@ -25,12 +25,13 @@ const answer = {
   questionRevision: z.number().int().min(1),
 };
 
-function tool<S extends z.ZodRawShape>(
+export function tool<S extends z.ZodRawShape>(
   name: string,
   description: string,
   shape: S,
   run: (args: z.infer<z.ZodObject<S>>) => Promise<unknown>,
   permission?: string,
+  readOnly = permission === undefined,
 ): ExpertTool {
   const schema = z.object(shape).strict();
   return {
@@ -39,7 +40,7 @@ function tool<S extends z.ZodRawShape>(
       description,
       inputSchema: z.toJSONSchema(schema) as Tool["inputSchema"],
       annotations: {
-        readOnlyHint: permission === undefined,
+        readOnlyHint: readOnly,
         openWorldHint: true,
       },
     },
@@ -200,6 +201,7 @@ export function expertTools(api: BadgerApi, server: Server): ExpertTool[] {
           "approve",
           "publish",
           "answer_gate",
+          "review_suggestions",
         ]),
       },
       async (args) => {
@@ -216,9 +218,12 @@ export function expertTools(api: BadgerApi, server: Server): ExpertTool[] {
           throw new Error(
             "This question is outside the selected workflow version",
           );
-        const url = args.questionId
-          ? `${api.url}/questionnaire/questions/${args.questionId}`
-          : `${api.url}/workflows/${args.workflowId}/versions/${args.versionId}`;
+        const url =
+          args.action === "review_suggestions"
+            ? `${api.url}/questionnaire?workflow=${encodeURIComponent(args.workflowId)}&version=${encodeURIComponent(args.versionId)}&panel=suggestions`
+            : args.questionId
+              ? `${api.url}/questionnaire/questions/${args.questionId}`
+              : `${api.url}/workflows/${args.workflowId}/versions/${args.versionId}`;
         if (server.getClientCapabilities()?.elicitation?.url !== undefined) {
           // Host dismissal or failure never turns into a sign-off or loses the link.
           await server

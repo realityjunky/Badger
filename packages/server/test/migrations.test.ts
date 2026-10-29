@@ -54,6 +54,48 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("adds drafting jobs after the applied dossier migration without changing existing audit records", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((migration) => migration.version <= "0016"),
+      clock,
+    );
+    await insertPerson(test);
+    await insertAuditEvent(test, {
+      actor: "person-1",
+      credentialKind: "session",
+      channel: "web",
+    });
+    const previous = await test.database.query(
+      "select version, checksum from schema_migrations order by version",
+    );
+
+    const upgraded = await applyMigrations(test.database, migrations, clock);
+
+    expect(upgraded.applied.at(-1)).toBe("0017");
+    expect(
+      (
+        await test.database.query(
+          "select version, checksum from schema_migrations where version <= '0016' order by version",
+        )
+      ).rows,
+    ).toEqual(previous.rows);
+    expect(
+      (
+        await test.database.query(
+          "select action, actor_person_id, agent_host from audit_events",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        action: "person.created",
+        actor_person_id: "person-1",
+        agent_host: null,
+      },
+    ]);
+  });
   it("refuses rewriting or deleting canonical dossier artifacts", async () => {
     const test = await freshDatabase();
     await applyMigrations(test.database, await loadBundledMigrations(), clock);
@@ -86,6 +128,7 @@ describe("reviewed SQL migrations", () => {
       "0014",
       "0015",
       "0016",
+      "0017",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -109,6 +152,7 @@ describe("reviewed SQL migrations", () => {
         "0014",
         "0015",
         "0016",
+        "0017",
       ],
       pending: [],
       drifted: [],
@@ -126,6 +170,8 @@ describe("reviewed SQL migrations", () => {
       "concern_resolutions",
       "confirmed_facts",
       "dossier_versions",
+      "drafting_job_decisions",
+      "drafting_jobs",
       "fact_acknowledgements",
       "fact_answer_revisions",
       "gate_confirmations",
@@ -189,6 +235,7 @@ describe("reviewed SQL migrations", () => {
         "0014",
         "0015",
         "0016",
+        "0017",
       ],
       pending: [],
       drifted: [],
@@ -196,7 +243,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(16);
+    expect(rows.rows[0]?.count).toBe(17);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

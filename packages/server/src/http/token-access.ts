@@ -6,6 +6,7 @@ import { dossierMethods } from "./dossier.js";
 import { inboxMethods } from "./inbox.js";
 import { sourceStudyMethods } from "./source-study.js";
 import { questionnaireMethods } from "./questionnaire.js";
+import { draftingJobMethods } from "./drafting-jobs.js";
 
 export function tokenRequestAllowed(
   scopes: readonly TokenScope[],
@@ -13,6 +14,11 @@ export function tokenRequestAllowed(
   method: string,
 ): boolean {
   const reads = method === "GET" || method === "HEAD";
+  if (draftingJobMethods(path) !== null)
+    return (
+      scopes.includes("engineer") &&
+      (reads || /\/(claim|submit|release)$/u.test(path))
+    );
   if (
     reads &&
     [
@@ -36,14 +42,14 @@ export function tokenRequestAllowed(
     if (method === "POST" && /\/concerns$/u.test(path))
       return scopes.includes("expert");
     if (/\/(answer|submit)$/u.test(path)) return scopes.includes("expert");
-    // Agents draft questions, inferences, and assumptions; retiring a draft
-    // removes a readiness blocker, so it stays with a signed-in person.
+    // Questions enter records only through a person's acceptance of a job.
+    // Inferences and assumptions stay explicitly provisional; retiring one
+    // removes a readiness blocker, so it also stays with a signed-in person.
     return (
       scopes.includes("engineer") &&
-      ((method === "POST" &&
-        /\/(rounds|questions|inferences|assumptions)$/u.test(path)) ||
+      ((method === "POST" && /\/(inferences|assumptions)$/u.test(path)) ||
         (method === "PATCH" &&
-          /\/(questions|inferences|assumptions)\/[^/]+$/u.test(path)))
+          /\/(inferences|assumptions)\/[^/]+$/u.test(path)))
     );
   }
   const skills = skillMethods(path);

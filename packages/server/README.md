@@ -165,7 +165,7 @@ Answers refuse stale question or answer revisions and refuse a question
 whose Engineer resolution has locked it, except that a confirmed answer may
 be corrected and immediately requires re-confirmation.
 
-An `engineer` token may draft rounds, unpublished questions, and inference
+An `engineer` token may claim and submit drafting jobs and create inference
 and assumption drafts, and an `expert` token may save and submit its assigned
 answers. Such answers require
 `X-Badger-Agent-Host`, retain the `mcp` channel and host, and never trust a
@@ -384,16 +384,56 @@ serializes and persists the counter, so concurrent requests and service
 restarts share the limit. Excess requests return 429 with `Retry-After` in
 seconds; sessions and other tokens retain their own access.
 
-## Expert MCP access
+## MCP access
 
 The local stdio MCP in [`packages/mcp`](../mcp/README.md) calls this API with
-a personal access token. `GET /api/v1/me/mcp` reports current expert tool
+a personal access token. `GET /api/v1/me/mcp` reports current expert and engineer tool
 capabilities using the same questionnaire and Skill permission decisions as
 the dashboard. `GET /api/v1/me/questions` returns current assigned questions,
 own answers, and comments, optionally filtered by both `workflowId` and
 `versionId`. It gathers assignments within the service so many visible versions
 do not consume a token request per version. Reads and writes still check the
 token's validity, scopes, and current roles. Sign-offs remain session-only.
+
+## Drafting jobs
+
+Under `/api/v1/workflows/:workflowId/versions/:versionId/drafting-jobs`, the
+workflow's Engineer or an Administrator can request and review questionnaire
+drafting. An `engineer` token may read, claim, submit, and release jobs within
+its person's current workflow roles. Every job action records its person,
+credential, channel, Agent host, request ID, revision, and hashes in the
+append-only Activity log. Reads that discover expiry or changed inputs
+commit the transition even when the attempted write returns a conflict.
+
+| Method and suffix               | Behavior                                                                                                                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /`                         | List jobs, reconciling leases and input hashes.                                                                                                                                 |
+| `POST /`                        | A signed-in person requests `{kind, roundId, parentQuestionId?, confirmed: true}`. The first kinds are `draft-questions` and `draft-follow-ups`; only follow-ups name a parent. |
+| `GET /:id`                      | Read one job within this workflow version.                                                                                                                                      |
+| `POST /:id/claim`               | Claim a queued job with `{revision}`; return its context, schema, lease, and exact pinned Skill bytes.                                                                          |
+| `POST /:id/submit`              | Submit `{leaseId, contextHash, result}` against the stored schema.                                                                                                              |
+| `POST /:id/release`             | Release `{leaseId, contextHash}` from the claiming person, token, and Agent host.                                                                                               |
+| `POST /:id/accept-preview`      | Preview `{revision, questions}` after the person edits or removes suggestions.                                                                                                  |
+| `POST /:id/reject-preview`      | Preview `{revision, reason}`.                                                                                                                                                   |
+| `POST /:id/accept` or `/reject` | Repeat the preview's decision with `confirmed: true`, `confirmationHash`, and a client `requestId`, as a signed-in person.                                                      |
+
+Claim leases last 30 minutes. Job and Engineer questionnaire reads reconcile
+expired leases to queued jobs and cancel changed inputs. Context binds the
+workflow/version frame, pinned Skill versions and file inventories, source
+study, questionnaire records, submitted answers, assignees, and the kernel's
+ledger and readiness. Private answer drafts never enter the context. The
+output schema is stored with the job; results contain up to 20 questions and
+at most 1 MiB. Pinned file transfers are limited to 32 MiB.
+
+Only submitted jobs appear in the Engineer questionnaire's `suggestions`.
+Other roles receive no job output. Submission notifies the requester;
+acceptance, rejection, and cancellation close that inbox item. Acceptance
+validates assignees and pinned evidence through the existing questionnaire
+authority, then creates draft Questions atomically. Follow-ups keep their
+parent link; accepting them never publishes a round or resolves the parent.
+Each decision binds the submitted result, edits, job revision, and context
+hash. Changed evidence cancels the job, and changed edits invalidate the
+preview. An identical decision retried with the same person and client request ID returns its original response, including after later inputs change; changed replay inputs or a reused ID for another job conflict. Agents cannot request, accept, reject, or sign off on behalf of people.
 
 ## Skill uploads
 

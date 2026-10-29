@@ -46,6 +46,8 @@ export function QuestionComposer({
   roundId,
   question,
   concern,
+  suggestion,
+  onDraft,
   view,
   onSaved,
   onCancel,
@@ -55,6 +57,8 @@ export function QuestionComposer({
   roundId: string;
   question?: Question;
   concern?: Concern;
+  suggestion?: QuestionContent;
+  onDraft?(question: QuestionContent): void;
   view: QuestionnaireView;
   onSaved(question: Question): void;
   onCancel(): void;
@@ -68,13 +72,14 @@ export function QuestionComposer({
     null,
   );
   const required = [{ required: true, message: t("questionnaire.required") }];
-  const initial: Values = question
+  const draft = question ?? suggestion;
+  const initial: Values = draft
     ? {
-        ...question,
-        assignees: question.assignees.map((a) =>
+        ...draft,
+        assignees: draft.assignees.map((a) =>
           a.kind === "person" ? `person:${a.personId}` : `role:${a.role}`,
         ),
-        evidence: question.evidence.map((e) => ({
+        evidence: draft.evidence.map((e) => ({
           ...e,
           version: JSON.stringify([e.skillId, e.versionHash]),
         })),
@@ -120,6 +125,10 @@ export function QuestionComposer({
               },
         ),
       };
+      if (onDraft) {
+        onDraft(content);
+        return;
+      }
       if (concern) {
         const result = await questionnaireRequest<{
           preview: ConcernResolutionPreview;
@@ -182,7 +191,11 @@ export function QuestionComposer({
       )}
       <h2 className="pane-title">
         {t(
-          question ? "questionnaire.editQuestion" : "questionnaire.newQuestion",
+          suggestion
+            ? "drafting.edit"
+            : question
+              ? "questionnaire.editQuestion"
+              : "questionnaire.newQuestion",
         )}
       </h2>
       {failure && <Alert type="error" showIcon message={failure} />}
@@ -368,9 +381,11 @@ export function QuestionComposer({
       <Space className="questionnaire-actions" wrap>
         <Button type="primary" htmlType="submit" loading={busy}>
           {t(
-            concern
-              ? "questionnaire.reviewResolution"
-              : "questionnaire.saveQuestion",
+            onDraft
+              ? "drafting.keepEdits"
+              : concern
+                ? "questionnaire.reviewResolution"
+                : "questionnaire.saveQuestion",
           )}
         </Button>
         <Button onClick={onCancel} disabled={busy}>

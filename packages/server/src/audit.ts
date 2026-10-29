@@ -31,6 +31,7 @@ export interface AuditEvent {
   /** The actor's name and address, when the actor is a person. */
   actorDisplayName: string | null;
   actorEmail: string | null;
+  agentHost: string | null;
   credentialKind: AuditCredentialKind;
   credentialId: string | null;
   channel: AuditChannel;
@@ -46,6 +47,7 @@ export interface AuditEvent {
 }
 
 export interface AuditInput {
+  agentHost?: string | null;
   actor: AuditActor;
   channel: AuditChannel;
   action: string;
@@ -71,6 +73,7 @@ export interface AuditPage {
 }
 
 interface AuditRow {
+  agent_host: string | null;
   id: string;
   occurred_at: Date | string;
   actor_person_id: string | null;
@@ -94,11 +97,11 @@ interface AuditRow {
 const AUDIT_INSERT_COLUMNS = `id, occurred_at, actor_person_id, credential_kind,
        credential_id, channel, action, target_type, target_id, target_label,
        revision_before, hash_before, revision_after, hash_after, reason,
-       request_id`;
+       request_id, agent_host`;
 const AUDIT_SELECT_COLUMNS = `a.id, a.occurred_at, a.actor_person_id,
        a.credential_kind, a.credential_id, a.channel, a.action, a.target_type,
        a.target_id, a.target_label, a.revision_before, a.hash_before, a.revision_after,
-       a.hash_after, a.reason, a.request_id, p.display_name as actor_display_name,
+       a.hash_after, a.reason, a.request_id, a.agent_host, p.display_name as actor_display_name,
        p.email as actor_email`;
 const AUDIT_FROM =
   "audit_events a left join people p on p.id = a.actor_person_id";
@@ -117,6 +120,7 @@ function toAuditEvent(row: AuditRow): AuditEvent {
     actorPersonId: row.actor_person_id,
     actorDisplayName: row.actor_display_name,
     actorEmail: row.actor_email,
+    agentHost: row.agent_host,
     credentialKind: row.credential_kind,
     credentialId: row.credential_id,
     channel: row.channel,
@@ -146,6 +150,7 @@ export async function recordAudit(
     actorPersonId: input.actor.personId,
     actorDisplayName: null,
     actorEmail: null,
+    agentHost: input.agentHost ?? null,
     credentialKind: input.actor.credential.kind,
     credentialId: input.actor.credential.id,
     channel: input.channel,
@@ -162,7 +167,7 @@ export async function recordAudit(
   await database.query(
     `insert into audit_events (${AUDIT_INSERT_COLUMNS})
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-             $16)`,
+             $16, $17)`,
     [
       event.id,
       event.occurredAt,
@@ -180,6 +185,7 @@ export async function recordAudit(
       event.after?.hash ?? null,
       event.reason,
       event.requestId,
+      event.agentHost,
     ],
   );
 
