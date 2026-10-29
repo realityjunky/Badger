@@ -27,6 +27,7 @@ const serviceDecisions = [
   "0015-pinned-skill-versions-and-source-check-jobs.md",
   "0016-gate-confirmations-and-inbox.md",
   "0019-source-study-records-and-completion.md",
+  "0020-answer-resolution-reconfirmation.md",
 ];
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
@@ -629,5 +630,21 @@ describe("Badger release artifacts", () => {
     expect(planned).not.toContain("now prefer the Badger MCP Run tools");
     expect(ledger).toContain("Sources gate and inbox (#44)");
     expect(ledger).toContain("Artifacts by receipt (#31)");
+  });
+
+  it("describes answer resolutions, threads, and concerns as delivered", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const ledger = await readText("docs/release-artifacts.md");
+    const delivered = manual.slice(0, manual.indexOf('id="service"'));
+    const planned = manual.slice(manual.indexOf('id="service"'));
+
+    expect(delivered).toContain("Answer resolutions (#48).");
+    expect(delivered).toContain("回答结论（#48）。");
+    expect(delivered).toContain("Question threads and expert concerns (#47).");
+    expect(delivered).toContain("问题讨论串与专家关切（#47）。");
+    expect(planned).not.toContain("threads, concerns, ledger composition");
+    expect(planned).not.toContain("讨论串、关切、账目编制");
+    expect(ledger).toContain("Answer resolutions (#48)");
+    expect(ledger).toContain("Question threads and expert concerns (#47)");
   });
 });

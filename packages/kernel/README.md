@@ -357,6 +357,20 @@ a link. Run state stores the binding, fixed for the Run, so the same package
 runs on any host with a directory of its choosing. Output Schemas that share a
 root name share its directory, so they must give it the same description.
 
+Hosts learn what to ask before any Run exists: `runtime.startRequirements(protocol)`
+is read-only and returns `{ externalRoots }`, sorted by name, each with its
+`description` and the receipt `artifacts` that use it (`nodeId`, `artifactId`,
+`paths`, and `requireCurrentAttempt`). The script adapter's `status` returns it
+as `startRequirements` until `init` runs. A start refused over its binding
+creates no Run and carries an `external-root-binding-required` finding with
+`requiredAction: "execute"` on `workflow.start` and `requiresUserDecision: true`;
+an unbound-root refusal names every unbound root with its description. The
+finding's message is redacted and bounded like every finding, so hosts that
+relay a refusal should also relay the error message. Each continuation and state
+projection lists the current Node's `receiptOutputs`: `artifactId`, `paths`,
+`root: { name, path }` (a `null` name means the Run root), and
+`requireCurrentAttempt`. `recover` in a fresh process returns the same list.
+
 Receipt verification streams file bytes through SHA-256 without the 2 MiB
 content limit. Accepted Completion evidence contains `artifactReceipts`, with
 each artifact's absolute `path`, `size` in bytes, `sha256`, `mtimeMs`, and producer

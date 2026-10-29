@@ -89,9 +89,7 @@ limit per workflow, private autosaved answer drafts, submission per question
 or per round with every revision and its channel kept, inbox items that close
 once answered, and a per-person event stream with polling as the fallback.
 Migration `0011` adds the tables; ADR 0006 already records the questionnaire
-as records. Migration `0013` adds question threads with immutable comment edits
-and Field expert concerns (#47). Each concern reaches the Engineer's inbox
-and becomes a draft question, an accepted Fact source, or a reasoned decline.
+as records.
 
 Answer resolutions (#48) are delivered in the server and dashboard. Engineers
 confirm formal facts in the workflow locale against exact submitted answer
@@ -100,8 +98,16 @@ Each answering person acknowledges or disputes each restatement in a
 hash-bound dashboard sign-off. Disputes reopen the question and notify the
 Engineer; changed answers or cited evidence require re-confirmation. Skills
 show their internal-question backlog. Immutable records, foreign keys, and
-append-only guards are added by migration `0012`; ADR 0020 records the
+append-only guards are added by migration `0012`;
+[ADR 0020](adr/0020-answer-resolution-reconfirmation.md) records the
 re-confirmation contract.
+
+Question threads and expert concerns (#47) are delivered in the server and the
+dashboard: comments thread under each question with every edit kept, open to
+every workflow role except Observer, and a Field expert's unprompted concern
+reaches every Engineer's inbox. A signed-in Engineer turns each concern into a
+draft question, accepts it as a Fact source, or declines it with a reason.
+Migration `0013` adds the tables.
 
 ## Package-facing artifacts
 
