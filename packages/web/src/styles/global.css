@@ -1293,3 +1293,24 @@ body {
 .dossier-facts li + li {
   margin-top: 12px;
 }
+
+.structured-answer-table {
+  overflow-x: auto;
+  margin-block: 12px;
+}
+.structured-answer-table table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.structured-answer-table th,
+.structured-answer-table td {
+  border: 1px solid var(--badger-color-border);
+  padding: 8px;
+  text-align: start;
+}
+.structured-answer-table td input {
+  min-width: 100px;
+}
+.answer-attachments {
+  overflow-wrap: anywhere;
+}

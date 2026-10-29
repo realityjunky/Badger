@@ -1,5 +1,11 @@
 import { SEMANTIC_DOSSIER_TOPICS } from "@realityjunky/badger";
 import { objectInput, RequestError } from "../http/errors.js";
+import {
+  parseAnswerType,
+  type AnswerType,
+  type AnswerValue,
+  type AnswerAttachment,
+} from "./answer-types.js";
 
 export interface QuestionTarget {
   kind: "workflow" | "node" | "skill" | "interface";
@@ -16,6 +22,7 @@ export type QuestionAssignee =
   | { kind: "person"; personId: string }
   | { kind: "role"; role: "Workflow owner" | "Field expert" };
 export interface QuestionContent {
+  answerType?: AnswerType;
   text: string;
   topic: string;
   targets: QuestionTarget[];
@@ -59,6 +66,8 @@ export interface QuestionRound {
 }
 
 export interface AnswerRevision {
+  value: AnswerValue;
+  attachments: AnswerAttachment[];
   revision: number;
   questionRevision: number;
   text: string;
@@ -180,6 +189,7 @@ export function parseQuestion(input: Record<string, unknown>): QuestionContent {
     "assignees",
     "priority",
     "revision",
+    "answerType",
   ]);
   const topic = textInput(input.topic, "topic", 100);
   if (!["scope", ...SEMANTIC_DOSSIER_TOPICS].includes(topic))
@@ -265,6 +275,9 @@ export function parseQuestion(input: Record<string, unknown>): QuestionContent {
     };
   });
   return {
+    ...(input.answerType === undefined
+      ? {}
+      : { answerType: parseAnswerType(input.answerType) }),
     text: textInput(input.text, "text", 20000),
     topic,
     targets,

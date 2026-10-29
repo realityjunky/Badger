@@ -42,6 +42,8 @@ export function tokenRequestAllowed(
     if (method === "POST" && /\/concerns$/u.test(path))
       return scopes.includes("expert");
     if (/\/(answer|submit)$/u.test(path)) return scopes.includes("expert");
+    if (method === "POST" && /\/questions\/[^/]+\/attachments$/u.test(path))
+      return scopes.includes("expert");
     // Questions enter records only through a person's acceptance of a job.
     // Inferences and assumptions stay explicitly provisional; retiring one
     // removes a readiness blocker, so it also stays with a signed-in person.

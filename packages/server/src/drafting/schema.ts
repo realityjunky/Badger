@@ -52,12 +52,45 @@ const questionSchema = object({
   },
   priority: { type: "integer", minimum: 0, maximum: 100 },
 });
+// Optional so existing text-only job results retain their original shape.
+const structuredQuestionSchema = {
+  ...questionSchema,
+  properties: {
+    ...questionSchema.properties,
+    answerType: {
+      oneOf: [
+        object({ kind: { enum: ["free-text", "yes-no", "file"] } }),
+        object({
+          kind: { enum: ["single-choice", "multiple-choice"] },
+          options: {
+            type: "array",
+            minItems: 2,
+            maxItems: 100,
+            uniqueItems: true,
+            items: text(200),
+          },
+        }),
+        object({ kind: { const: "number" }, unit: text(100) }),
+        object({
+          kind: { const: "table" },
+          columns: {
+            type: "array",
+            minItems: 1,
+            maxItems: 20,
+            uniqueItems: true,
+            items: text(200),
+          },
+        }),
+      ],
+    },
+  },
+};
 export const QUESTION_DRAFT_SCHEMA = object({
   questions: {
     type: "array",
     minItems: 1,
     maxItems: 20,
-    items: questionSchema,
+    items: structuredQuestionSchema,
   },
 });
 

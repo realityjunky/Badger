@@ -11,6 +11,7 @@ import type {
 } from "../../api/drafting-jobs.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { QuestionComposer } from "./QuestionComposer.js";
+import { AnswerTypeDetails } from "./AnswerTypeDetails.js";
 import type { MessageId } from "../../i18n/catalog.js";
 
 export function DraftingJobs({
@@ -267,6 +268,7 @@ export function DraftingJobs({
           <section key={index} className="drafting-suggestion">
             <h3>{q.text}</h3>
             <p className="questionnaire-text">{q.rationale}</p>
+            <AnswerTypeDetails type={q.answerType} />
             <p>
               {t(`questionnaire.topic.${q.topic}` as MessageId)} · {q.priority}
             </p>
@@ -370,6 +372,7 @@ export function DraftingJobs({
               <section key={index}>
                 <h3>{q.text}</h3>
                 <p className="questionnaire-text">{q.rationale}</p>
+                <AnswerTypeDetails type={q.answerType} />
                 <dl>
                   <dt>{t("questionnaire.topic")}</dt>
                   <dd>{t(`questionnaire.topic.${q.topic}` as MessageId)}</dd>

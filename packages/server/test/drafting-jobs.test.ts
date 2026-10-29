@@ -137,6 +137,123 @@ const question = (text = "How is the sample stored?") => ({
   priority: 10,
 });
 
+it("keeps a drafted structured question and its submitted evidence through the drafting handoff", async () => {
+  const { base, questionnaire, secret, round } = await setup();
+  const { job } = await request(
+    base,
+    "POST",
+    { kind: "draft-questions", roundId: round.id, confirmed: true },
+    undefined,
+    engineer,
+    201,
+  );
+  const claimed = await request(
+    `${base}/${job.id}/claim`,
+    "POST",
+    { revision: job.revision },
+    secret,
+  );
+  const content = {
+    ...question(),
+    answerType: { kind: "single-choice", options: ["Cold", "Frozen"] },
+  };
+  const { job: submitted } = await request(
+    `${base}/${job.id}/submit`,
+    "POST",
+    {
+      leaseId: claimed.job.lease.id,
+      contextHash: job.contextHash,
+      result: { questions: [content] },
+    },
+    secret,
+  );
+  const decision = { revision: submitted.revision, questions: [content] };
+  const { preview } = await request(
+    `${base}/${job.id}/accept-preview`,
+    "POST",
+    decision,
+  );
+  await request(`${base}/${job.id}/accept`, "POST", {
+    ...decision,
+    confirmed: true,
+    confirmationHash: preview.confirmationHash,
+    requestId: "structured-draft",
+  });
+  const view = await request(questionnaire);
+  expect(view.questions[0].answerType).toEqual(content.answerType);
+  const { preview: publication } = await request(
+    `${questionnaire}/rounds/${round.id}/publish-preview`,
+  );
+  await request(`${questionnaire}/rounds/${round.id}/publish`, "POST", {
+    confirmed: true,
+    confirmationHash: publication.confirmationHash,
+  });
+  const answerPath = `${questionnaire}/questions/${view.questions[0].id}`;
+  const { attachment } = await request(
+    `${answerPath}/attachments`,
+    "POST",
+    {
+      questionRevision: 1,
+      name: "example.txt",
+      mediaType: "text/plain",
+      contentBase64: Buffer.from("Example only").toString("base64"),
+    },
+    undefined,
+    admin,
+    201,
+  );
+  await request(
+    `${answerPath}/answer`,
+    "PUT",
+    {
+      revision: 0,
+      questionRevision: 1,
+      value: "Frozen",
+      attachments: [attachment.id],
+    },
+    undefined,
+    admin,
+  );
+  await request(
+    `${answerPath}/submit`,
+    "POST",
+    { revision: 1, questionRevision: 1 },
+    undefined,
+    admin,
+  );
+  const { round: followUpRound } = await request(
+    `${questionnaire}/rounds`,
+    "POST",
+    { title: "Follow-up examples" },
+    undefined,
+    engineer,
+    201,
+  );
+  const { job: followUp } = await request(
+    base,
+    "POST",
+    {
+      kind: "draft-follow-ups",
+      roundId: followUpRound.id,
+      parentQuestionId: view.questions[0].id,
+      confirmed: true,
+    },
+    undefined,
+    engineer,
+    201,
+  );
+  const followUpClaim = await request(
+    `${base}/${followUp.id}/claim`,
+    "POST",
+    { revision: followUp.revision },
+    secret,
+  );
+  expect(followUpClaim.contextBundle.answers[0]).toMatchObject({
+    value: "Frozen",
+    attachments: [attachment],
+  });
+});
+
 it("keeps validated Agent output as suggestions until a person accepts the reviewed edits", async () => {
   const { base, questionnaire, secret, token, round } = await setup();
   const { job } = await request(

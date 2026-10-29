@@ -45,6 +45,14 @@ them into `dist/`, so the server image carries the build and none of them.
   retry or an explicit reload; another device's revision is never overwritten
   automatically. Submitted answer revisions and their channels remain visible
   in history. A new question revision requires the expert to review it again.
+- Questions support free text, single and multiple choice, yes/no, numbers
+  with a fixed unit, tables, and files. Each type has composer settings and
+  matching answer controls, backed by server validation. Every answer type
+  can carry attachments; selection starts uploading and successful files
+  join the autosaved draft. Limits and the examples-only warning appear next
+  to the upload control. Submitted answers, their revision history, resolution
+  reviews, and facts retain downloadable evidence. Files in private drafts
+  remain visible only to their author.
 - Engineers resolve answers into one or more formal facts, a published child
   question, a reasoned deferral, or withdrawal. Fact text uses the workflow
   locale and links to selected submitted answer revisions. The answering

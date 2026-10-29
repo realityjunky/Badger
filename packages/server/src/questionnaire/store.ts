@@ -378,6 +378,7 @@ export async function publicationPreview(
     id: q.id,
     revision: q.revision,
     text: q.text,
+    answerType: q.answerType ?? { kind: "free-text" as const },
     priority: q.priority,
     hash: canonicalHash(q.revisions.at(-1)!),
   }));

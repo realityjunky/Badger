@@ -29,7 +29,7 @@ export async function draftingContext(
     ({ canAnswer: _canAnswer, ...q }) => q,
   );
   const answers = await tx.query(
-    `select a.question_id, a.person_id, a.revision, a.question_revision, a.text
+    `select a.question_id, a.person_id, a.revision, a.question_revision, a.text, a.value, a.attachments
      from answer_revisions a join questions q on q.id = a.question_id
      where q.workflow_version_id = $1 and a.state = 'submitted' order by a.question_id, a.person_id, a.revision`,
     [versionId],

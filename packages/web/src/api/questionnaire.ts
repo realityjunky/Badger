@@ -1,6 +1,22 @@
 import { apiUrl } from "../app/paths.js";
 
+export type AnswerType =
+  | { kind: "free-text" | "yes-no" | "file" }
+  | { kind: "single-choice" | "multiple-choice"; options: string[] }
+  | { kind: "number"; unit: string }
+  | { kind: "table"; columns: string[] };
+export type AnswerValue =
+  string | string[] | boolean | number | string[][] | null;
+export interface AnswerAttachment {
+  id: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  hash: string;
+}
+
 export interface QuestionContent {
+  answerType?: AnswerType;
   text: string;
   topic: string;
   targets: { kind: "workflow" | "node" | "skill" | "interface"; id: string }[];
@@ -49,6 +65,8 @@ export interface Round {
   state: "draft" | "published";
 }
 export interface AnswerRevision {
+  value: AnswerValue;
+  attachments: AnswerAttachment[];
   revision: number;
   questionRevision: number;
   text: string;
@@ -109,6 +127,12 @@ export interface ConcernResolutionResult {
   question: Question | null;
 }
 export interface QuestionnaireView {
+  attachmentLimits: {
+    maxFileBytes: number;
+    maxAnswerBytes: number;
+    maxFiles: number;
+    mediaTypes: string[];
+  };
   personId: string;
   workflow: { id: string; name: string };
   version: { id: string; number: number; locale: string };
@@ -139,7 +163,12 @@ export interface QuestionnaireVersion {
 }
 export interface RoundPreview {
   confirmationHash: string;
-  questions: { id: string; text: string; priority: number }[];
+  questions: {
+    id: string;
+    text: string;
+    priority: number;
+    answerType?: AnswerType;
+  }[];
 }
 export class QuestionnaireError extends Error {
   constructor(
@@ -192,6 +221,7 @@ export interface Resolution {
   revision: number;
 }
 export interface ConfirmedFact {
+  attachments?: AnswerAttachment[];
   actorName: string;
   id: string;
   questionId: string;

@@ -14,6 +14,12 @@ import { isAdministrator } from "../authorization.js";
 import { readLedger, snapshotRoundLedger } from "../questionnaire/ledger.js";
 import { readDraft, readDrafts, saveDraft } from "../questionnaire/drafts.js";
 import { RequestError, objectInput } from "./errors.js";
+import {
+  uploadAttachment,
+  readAttachment,
+  ATTACHMENT_LIMITS,
+  MAX_ATTACHMENT_BODY_BYTES,
+} from "../questionnaire/attachments.js";
 import { readJsonBody } from "./body.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { workflowCapabilities } from "../workflow-access.js";
@@ -57,7 +63,7 @@ import {
 } from "../questionnaire/concerns.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/questionnaire(?:\/(rounds|questions|settings|facts|comments|concerns|ledger|inferences|assumptions)(?:\/([^/]+)(?:\/(questions|publish-preview|publish|answer|submit|resolution-preview|resolve|acknowledgement-preview|acknowledge|comments|resolve-preview))?)?)?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/questionnaire(?:\/(rounds|questions|settings|facts|comments|concerns|ledger|inferences|assumptions|attachments)(?:\/([^/]+)(?:\/(questions|publish-preview|publish|answer|submit|resolution-preview|resolve|acknowledgement-preview|acknowledge|comments|resolve-preview|attachments))?)?)?$/u;
 const RECORD_CONTEXT =
   /^\/api\/v1\/questionnaire\/(questions|concerns)\/([^/]+)$/u;
 
@@ -69,6 +75,8 @@ export function questionnaireMethods(path: string): string | null {
   const [, , , resource, id, action] = match;
   if (!resource) return "GET, HEAD";
   if (resource === "ledger" && !id) return "GET, HEAD";
+  if (resource === "attachments" && id && !action) return "GET, HEAD";
+  if (resource === "questions" && action === "attachments") return "POST";
   if (["inferences", "assumptions"].includes(resource) && !action)
     return id ? "GET, HEAD, PATCH, DELETE" : "GET, HEAD, POST";
   if (resource === "settings" && !id) return "PUT";
@@ -182,8 +190,16 @@ export async function handleQuestionnaire(
   const reads = method === "GET" || method === "HEAD";
   let body: Record<string, unknown> = {};
   if (!reads) {
-    const parsed = await readJsonBody(request);
-    if (!parsed.ok) return reply.error(400, "invalid", parsed.message);
+    const parsed = await readJsonBody(
+      request,
+      action === "attachments"
+        ? MAX_ATTACHMENT_BODY_BYTES
+        : action === "answer"
+          ? 256 * 1024
+          : undefined,
+    );
+    if (!parsed.ok)
+      return reply.error(parsed.status ?? 400, "invalid", parsed.message);
     body = objectInput(parsed.value);
   }
   const result = await database
@@ -218,6 +234,30 @@ export async function handleQuestionnaire(
         person,
         workflowId,
       );
+      if (resource === "attachments" && id) {
+        const attachment = await readAttachment(tx, versionId, person.id, id);
+        return {
+          status: 200,
+          value: attachment,
+          file: await input.blobs.get(attachment.hash),
+        };
+      }
+      if (resource === "questions" && action === "attachments" && id) {
+        return {
+          status: 201,
+          value: {
+            attachment: await uploadAttachment(
+              tx,
+              deps,
+              input.blobs,
+              context,
+              versionId,
+              id,
+              body,
+            ),
+          },
+        };
+      }
       const {
         compose,
         comment,
@@ -348,6 +388,7 @@ export async function handleQuestionnaire(
           status: 200,
           value: {
             personId: person.id,
+            attachmentLimits: ATTACHMENT_LIMITS,
             workflow,
             version,
             capabilities,
@@ -594,12 +635,13 @@ export async function handleQuestionnaire(
           questionRevision: revisionInput(value.questionRevision),
         });
         if (resource === "questions" && action === "answer") {
-          fields(body, ["revision", "questionRevision", "text"]);
-          if (typeof body.text !== "string" || body.text.length > 50000)
-            throw new RequestError(
-              400,
-              "Answer text must contain at most 50000 characters",
-            );
+          fields(body, [
+            "revision",
+            "questionRevision",
+            "text",
+            "value",
+            "attachments",
+          ]);
           return {
             status: 200,
             value: {
@@ -609,7 +651,7 @@ export async function handleQuestionnaire(
                 context,
                 versionId,
                 answerInput(body, id),
-                body.text,
+                body,
                 agentHost,
               ),
             },
@@ -766,5 +808,16 @@ export async function handleQuestionnaire(
         );
       throw error;
     });
+  if ("file" in result && result.file) {
+    const attachment = result.value;
+    return reply.send({
+      status: 200,
+      contentType: "application/octet-stream",
+      body: result.file,
+      headers: {
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(attachment.name).replace(/['()*]/gu, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}`,
+      },
+    });
+  }
   reply.json(result.status, result.value);
 }

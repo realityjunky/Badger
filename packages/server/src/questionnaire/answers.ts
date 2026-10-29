@@ -6,6 +6,13 @@ import { RequestError } from "../http/errors.js";
 import { toIsoString } from "../util.js";
 import type { Answer, AnswerRevision } from "./model.js";
 import {
+  validateAnswerValue,
+  type AnswerValue,
+  type AnswerAttachment,
+  type AnswerType,
+} from "./answer-types.js";
+import { answerAttachments } from "./attachments.js";
+import {
   recordQuestionnaireAudit,
   advanceQuestionnaireRevision,
   readQuestions,
@@ -19,6 +26,8 @@ interface AnswerRow {
   revision: number;
   question_revision: number;
   text: string;
+  value: AnswerValue;
+  attachments: AnswerAttachment[];
   state: "draft" | "submitted";
   channel: "web" | "mcp";
   agent_host: string | null;
@@ -29,6 +38,8 @@ function toRevision(row: AnswerRow): AnswerRevision {
     revision: row.revision,
     questionRevision: row.question_revision,
     text: row.text,
+    value: row.value,
+    attachments: row.attachments,
     state: row.state,
     channel: row.channel,
     agentHost: row.agent_host,
@@ -90,11 +101,13 @@ async function answerForWrite(
       resolved_at: Date | string | null;
       state: string;
       assigned: boolean;
+      content: { answerType?: AnswerType };
     }>(
-      `select q.id, q.round_id, q.revision, q.resolved_at, q.state,
+      `select q.id, q.round_id, q.revision, q.resolved_at, q.state, qr.content,
     exists (select 1 from question_recipients r join role_bindings b on b.id = r.binding_id
       where r.question_id = q.id and b.person_id = $3) as assigned
-    from questions q where q.workflow_version_id = $1 and q.id = $2 and q.state <> 'draft'`,
+    from questions q join question_revisions qr on qr.question_id = q.id and qr.revision = q.revision
+    where q.workflow_version_id = $1 and q.id = $2 and q.state <> 'draft'`,
       [versionId, input.questionId, personId],
     )
   ).rows[0];
@@ -106,6 +119,7 @@ async function answerForWrite(
           roundId: row.round_id,
           revision: row.revision,
           state: row.state,
+          answerType: row.content.answerType ?? { kind: "free-text" as const },
           canAnswer:
             row.assigned &&
             (row.resolved_at === null || row.state === "confirmed"),
@@ -144,7 +158,11 @@ async function appendAnswer(
   context: WriteContext,
   versionId: string,
   input: AnswerInput,
-  text: string,
+  content: {
+    text: string;
+    value: AnswerValue;
+    attachments: AnswerAttachment[];
+  },
   state: "draft" | "submitted",
   agentHost: string | null,
 ) {
@@ -163,18 +181,20 @@ async function appendAnswer(
     [input.questionId, context.personId, revision],
   );
   await tx.query(
-    `insert into answer_revisions (question_id, person_id, revision, question_revision, text, state, channel, agent_host, created_at)
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    `insert into answer_revisions (question_id, person_id, revision, question_revision, text, state, channel, agent_host, created_at, value, attachments)
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [
       input.questionId,
       context.personId,
       revision,
       input.questionRevision,
-      text,
+      content.text,
       state,
       context.channel,
       agentHost,
       deps.clock.now(),
+      JSON.stringify(content.value),
+      JSON.stringify(content.attachments),
     ],
   );
   await advanceQuestionnaireRevision(tx, versionId, deps, context);
@@ -196,17 +216,35 @@ export async function saveAnswer(
   context: WriteContext,
   versionId: string,
   input: AnswerInput,
-  text: string,
+  payload: { text?: unknown; value?: unknown; attachments?: unknown },
   agentHost: string | null,
 ) {
-  await answerForWrite(tx, versionId, context.personId, input);
+  const { question } = await answerForWrite(
+    tx,
+    versionId,
+    context.personId,
+    input,
+  );
+  const attachments = await answerAttachments(
+    tx,
+    input.questionId,
+    context.personId,
+    payload.attachments,
+  );
+  const content = validateAnswerValue(
+    question.answerType,
+    payload.value,
+    payload.text,
+    attachments,
+    false,
+  );
   await appendAnswer(
     tx,
     deps,
     context,
     versionId,
     input,
-    text,
+    { ...content, attachments },
     "draft",
     agentHost,
   );
@@ -265,11 +303,7 @@ export async function submitAnswers(
     );
     if (roundId !== undefined && question.roundId !== roundId)
       throw new RequestError(400, "Every answer must belong to this round");
-    if (
-      !answer ||
-      !answer.text.trim() ||
-      answer.question_revision !== input.questionRevision
-    )
+    if (!answer || answer.question_revision !== input.questionRevision)
       throw new RequestError(
         409,
         "Save a nonempty draft for the current question before submitting",
@@ -277,16 +311,26 @@ export async function submitAnswers(
     // Only a new draft reopens a confirmed answer; resubmitting it changes nothing.
     if (question.state === "confirmed" && answer.state === "submitted")
       continue;
-    prepared.push({ input, text: answer.text });
+    const content = validateAnswerValue(
+      question.answerType,
+      answer.value,
+      question.answerType.kind === "free-text" ? answer.text : undefined,
+      answer.attachments,
+      true,
+    );
+    prepared.push({
+      input,
+      content: { ...content, attachments: answer.attachments },
+    });
   }
-  for (const { input, text } of prepared) {
+  for (const { input, content } of prepared) {
     await appendAnswer(
       tx,
       deps,
       context,
       versionId,
       input,
-      text,
+      content,
       "submitted",
       agentHost,
     );
