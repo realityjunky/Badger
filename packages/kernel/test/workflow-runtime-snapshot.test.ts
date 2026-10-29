@@ -603,6 +603,19 @@ describe("WorkflowRuntime physical content snapshots", () => {
     ).rejects.toThrow("deterministic workflow transition fault");
     clearWorkflowTransitionFaultForTests();
 
+    const runtime = createWorkflowRuntime();
+    for (const read of [
+      () => runtime.inspect(location),
+      () => runtime.resume(location),
+    ]) {
+      await expect(read()).resolves.toMatchObject({
+        disposition: "blocked",
+        receiptOutputs: [],
+        findings: expect.arrayContaining([
+          expect.objectContaining({ code: "recovery-required" }),
+        ]),
+      });
+    }
     const recovered = await createWorkflowRuntime().recover(location);
     expect(recovered.contentSnapshots).toHaveLength(1);
     expect(recovered.contentSnapshots[0]).toMatchObject({

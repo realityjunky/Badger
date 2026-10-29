@@ -440,6 +440,98 @@ describe("Badger release artifacts", () => {
     );
   });
 
+  it("pins the receipt and external-root reference and start procedure in both languages", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    expect(manual).toContain('href="#ref-receipts"');
+    expect(manual).toContain("6.5 Artifact receipts and external roots");
+    expect(manual).toContain("6.5 产物回执与外部根目录");
+    expect(manual).toContain("Starting a Run with external roots");
+    expect(manual).toContain("使用外部根目录启动 Run");
+    const reference = manual.slice(
+      manual.indexOf('id="ref-receipts"'),
+      manual.indexOf('id="service"'),
+    );
+    const translations = [
+      reference.slice(
+        reference.indexOf('id="receipts-en"'),
+        reference.indexOf('id="receipts-zh"'),
+      ),
+      reference.slice(reference.indexOf('id="receipts-zh"')),
+    ];
+    for (const text of translations) {
+      for (const term of [
+        "32",
+        "128",
+        "1,000",
+        "256",
+        "externalRoots",
+        "verification",
+        "receipt",
+        "requireCurrentAttempt",
+        "--external-root &lt;name&gt;=&lt;directory&gt;",
+        "artifactId",
+        "root",
+        "path",
+        "size",
+        "sha256",
+        "mtimeMs",
+        "producer",
+        "artifact-stale-attempt",
+        "artifact-content-drift",
+        "external-root-binding-required",
+        "workflow.start",
+        "execute",
+        "requiresUserDecision",
+        "is not declared by this workflow",
+        "needs a directory when the Run starts",
+        "must be bound to an absolute directory",
+        "directory does not exist",
+        "must be a real directory, not a link",
+        "with different descriptions",
+        "receipt paths must stay relative to the declared root and support only * wildcards",
+      ])
+        expect(text, term).toContain(term);
+    }
+    expect(translations[0]).toContain(
+      "never copies, writes, or publishes a file",
+    );
+    expect(translations[0]).toContain(
+      "never attests which process wrote a file",
+    );
+    expect(translations[1]).toContain("从不复制、写入或发布文件");
+    expect(translations[1]).toContain("不证明由哪个进程写入了文件");
+    const procedure = manual.slice(
+      manual.indexOf('id="run-external-roots"'),
+      manual.indexOf('id="codebase"'),
+    );
+    for (const term of [
+      "status",
+      "startRequirements.externalRoots",
+      "init",
+      "next",
+      'href="#ref-receipts"',
+      "confirm",
+      "确认",
+    ]) {
+      expect(procedure).toContain(term);
+    }
+    const contract = await fs.readFile(
+      path.join(
+        kernelRoot,
+        "assets/skills/badger-create/reference/workflow-contract.md",
+      ),
+      "utf8",
+    );
+    for (const text of [
+      "what the directory holds",
+      "where it usually lives",
+      "who owns it",
+      "Agent's question",
+      "Never give a path",
+    ])
+      expect(contract).toContain(text);
+  });
+
   it("describes the delivered dashboard shell and platform sign-in outside the plans", async () => {
     const manual = await readText("docs/badger-workflow-manual.html");
     const delivered = manual.slice(0, manual.indexOf('id="service"'));

@@ -77,7 +77,10 @@ Run mutation.
 Output Schemas may declare `externalRoots`, a map of names to
 `{ "description": "..." }`. A declaration never holds a directory: the person
 running the workflow binds each root to a directory when the Run starts, so ask
-what the directory holds, not where it is. An artifact uses
+what the directory holds, where it usually lives (such as shared storage or a
+scheduler's scratch space), and who owns it. Write each description as a question
+a person can answer: it becomes the operating Agent's question when a Run starts.
+Never give a path in the description. An artifact uses
 `verification: "receipt"` and an optional `root` name to verify a declared
 external path, or a large Run-root artifact, by streaming its content through
 SHA-256. Every declared root must be used, and schemas that share a root name

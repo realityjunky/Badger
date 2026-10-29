@@ -756,6 +756,7 @@ var WORKFLOW_FINDING_CODES = [
   "artifact-invalid",
   "artifact-oversized",
   "artifact-stale-attempt",
+  "external-root-binding-required",
   "artifact-unknown-version",
   "completion-invalid-artifact",
   "completion-missing-artifact",
@@ -14743,30 +14744,86 @@ function externalRootDeclarations(schemas) {
   }
   return declared;
 }
+function receiptDeclarationsForNode(protocol, nodeId) {
+  const node = protocol.nodes.find((item) => item.id === nodeId);
+  return (node?.outputSchemas ?? []).flatMap((schemaId) => {
+    const schema = protocol.outputSchemas.find((item) => item.id === schemaId);
+    return schema.artifacts.filter((artifact) => artifact.verification === "receipt").map((artifact) => ({
+      schema,
+      artifact,
+      requirement: {
+        artifactId: `${schema.id}.${artifact.id}`,
+        paths: [...artifact.paths],
+        requireCurrentAttempt: artifact.requireCurrentAttempt === true
+      }
+    }));
+  });
+}
+function workflowStartRequirements(protocol) {
+  return {
+    externalRoots: [...externalRootDeclarations(protocol.outputSchemas)].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([name, root]) => ({
+      name,
+      description: root.description,
+      artifacts: protocol.nodes.flatMap(
+        (node) => receiptDeclarationsForNode(protocol, node.id).filter(({ artifact }) => artifact.root === name).map(({ requirement }) => ({ nodeId: node.id, ...requirement }))
+      )
+    }))
+  };
+}
+function workflowReceiptOutputs(protocol, nodeId, runRoot, externalRoots) {
+  return receiptDeclarationsForNode(protocol, nodeId).map(
+    ({ schema, artifact, requirement }) => ({
+      ...requirement,
+      root: {
+        name: artifact.root ?? null,
+        path: artifactStorageRoot(runRoot, externalRoots, schema, artifact)
+      }
+    })
+  );
+}
+function externalRootBindingError(message) {
+  return Object.assign(new Error(message), {
+    finding: createWorkflowFinding({
+      code: "external-root-binding-required",
+      severity: "warning",
+      message,
+      requiredAction: "execute",
+      operation: { id: "workflow.start", args: [] },
+      requiresUserDecision: true
+    })
+  });
+}
 async function bindWorkflowExternalRoots(schemas, supplied) {
   const declared = externalRootDeclarations(schemas);
   if (supplied !== void 0 && (!supplied || typeof supplied !== "object" || Array.isArray(supplied))) {
-    throw new Error("Workflow artifact external roots must be a map");
+    throw externalRootBindingError(
+      "Workflow artifact external roots must be a map"
+    );
   }
   for (const name of Object.keys(supplied ?? {})) {
     if (!declared.has(name)) {
-      throw new Error(
-        `Workflow artifact external root ${name} is not declared by this workflow`
+      throw externalRootBindingError(
+        `Workflow artifact external root ${name} is not declared by this workflow: ${supplied[name]}`
       );
     }
   }
   if (declared.size === 0) return void 0;
+  const unbound = [...declared.keys()].sort().filter(
+    (name) => !Object.hasOwn(supplied ?? {}, name) || supplied?.[name] === void 0
+  );
+  if (unbound.length > 0) {
+    throw externalRootBindingError(
+      unbound.map(
+        (name) => `Workflow artifact external root ${name} needs a directory when the Run starts: ${declared.get(name).description}`
+      ).join("\n")
+    );
+  }
   const bound = {};
   for (const name of [...declared.keys()].sort()) {
     const value = supplied?.[name];
-    if (value === void 0) {
-      throw new Error(
-        `Workflow artifact external root ${name} needs a directory when the Run starts`
-      );
-    }
     if (typeof value !== "string" || !path12.isAbsolute(value) || value.includes("\0")) {
-      throw new Error(
-        `Workflow artifact external root ${name} must be bound to an absolute directory`
+      throw externalRootBindingError(
+        `Workflow artifact external root ${name} must be bound to an absolute directory: ${value}`
       );
     }
     const directory = path12.resolve(value);
@@ -14774,12 +14831,12 @@ async function bindWorkflowExternalRoots(schemas, supplied) {
     try {
       stat = await fs7.lstat(directory);
     } catch {
-      throw new Error(
+      throw externalRootBindingError(
         `Workflow artifact external root ${name} directory does not exist: ${directory}`
       );
     }
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      throw new Error(
+      throw externalRootBindingError(
         `Workflow artifact external root ${name} must be a real directory, not a link: ${directory}`
       );
     }
@@ -24378,7 +24435,7 @@ function validateDecisionExecution(submission, expected) {
     throw new Error("Decision response execution identity is required");
   }
 }
-function continuation(result, identity) {
+function continuation(result, identity, context) {
   const runtimeState = result.state.workflowRuntime;
   const currentAttempt = runtimeState?.currentAttempt ?? null;
   const disposition = result.action ? result.action.type === "ask_user" ? "await-user" : "continue" : result.state.status === "completed" ? "done" : "blocked";
@@ -24407,6 +24464,12 @@ function continuation(result, identity) {
     visitOrdinal: currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     pendingAction: result.action,
+    receiptOutputs: workflowReceiptOutputs(
+      context.package.runtime.protocol,
+      result.state.status === "completed" ? null : currentNode(result.state, identity, result.action),
+      context.runRoot,
+      runtimeState?.externalRoots
+    ),
     execution: structuredClone(identity),
     decisionReceipts: boundProjectedLedger(
       runtimeState?.decisionReceipts ?? []
@@ -24486,7 +24549,8 @@ async function checkpointRecoveryRequiredContinuation(location, journal) {
     );
     base = continuation(
       { state: candidate.state, action: candidate.pending, evals: [] },
-      candidate.identity
+      candidate.identity,
+      { package: candidate.package, runRoot: location.runRoot }
     );
   }
   return withAdditionalFindings(
@@ -24651,6 +24715,12 @@ async function projectWorkflowState(target) {
     evidence: verified.pending?.type === "ask_user" ? {} : evidence,
     history,
     pendingAction: verified.pending,
+    receiptOutputs: workflowReceiptOutputs(
+      protocol,
+      status === "completed" ? null : currentNode(state, verified.identity, verified.pending),
+      location.runRoot,
+      runtimeState?.externalRoots
+    ),
     execution: structuredClone(verified.identity),
     decisionReceipts: boundProjectedLedger(
       runtimeState?.decisionReceipts ?? []
@@ -25317,7 +25387,7 @@ async function verifyStoredRun(location) {
     }
   }
   await verifyStoredRepairEpisode(location.runRoot, state, verified.identity);
-  return { state, ...verified, pending };
+  return { state, ...verified, pending, runRoot: location.runRoot };
 }
 var WorkflowRevisionConflictError = class extends Error {
   constructor(verified, finding) {
@@ -25403,7 +25473,8 @@ async function continuationFromVerifiedRun(verified, runRoot) {
         reason: verified.state.status === "running" ? "Run has no pending action" : verified.state.status === "failed" ? `Run is ${verified.state.status}` : void 0
       }
     },
-    verified.identity
+    verified.identity,
+    verified
   );
   const snapshotFindings = [];
   const snapshotPolicy = verified.identity.durabilityProfile?.snapshotPolicy;
@@ -26669,6 +26740,12 @@ function blockedContinuation(prepared, blockers) {
     visitOrdinal: prepared.verified.state.workflowRuntime?.currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: prepared.verified.state.workflowRuntime?.currentAttempt?.retryOrdinal ?? null,
     pendingAction: prepared.pending,
+    receiptOutputs: workflowReceiptOutputs(
+      prepared.verified.package.runtime.protocol,
+      prepared.node,
+      prepared.location.runRoot,
+      prepared.verified.state.workflowRuntime?.externalRoots
+    ),
     execution: structuredClone(prepared.verified.identity),
     decisionReceipts: structuredClone(
       prepared.verified.state.workflowRuntime?.decisionReceipts ?? []
@@ -26719,7 +26796,8 @@ function conflictContinuation(verified, finding) {
       action: verified.pending,
       evals: []
     },
-    verified.identity
+    verified.identity,
+    verified
   );
   const projected = boundWorkflowFindings([finding]);
   return {
@@ -26779,7 +26857,14 @@ async function recoveryRequiredContinuation(location, journal) {
       action = parsePendingActionValue(JSON.parse(content));
     }
   }
-  const base = continuation({ state, action, evals: [] }, journal.execution);
+  const pkg = await readSkillSnapshot(
+    location.runRoot,
+    journal.execution.snapshotHash
+  );
+  const base = continuation({ state, action, evals: [] }, journal.execution, {
+    package: pkg,
+    runRoot: location.runRoot
+  });
   const projected = boundWorkflowFindings([
     recoveryRequiredFinding(
       state.workflowRuntime?.revision ?? journal.previous.revision,
@@ -27048,7 +27133,7 @@ async function resumeStoredRun(location, options, forceCheckpoint = false, persi
     );
   }
   if (result.state.status !== "completed") {
-    return continuation(result, verified.identity);
+    return continuation(result, verified.identity, verified);
   }
   const trajectory = await readTrajectory(
     location.runRoot,
@@ -27057,7 +27142,8 @@ async function resumeStoredRun(location, options, forceCheckpoint = false, persi
   );
   return continuation(
     { ...result, evals: terminalEvaluationResults(trajectory) },
-    verified.identity
+    verified.identity,
+    verified
   );
 }
 async function prepareWorkflowAction(runRoot, pkg, state, action, mutationOverlay, snapshotRoot = runRoot, protectedSnapshotRoots = []) {
@@ -27560,7 +27646,8 @@ async function checkpointBlockedContinuation(location, findings, fallback) {
     return withAdditionalFindings(
       continuation(
         { state: fallback.state, action: fallback.pending, evals: [] },
-        fallback.identity
+        fallback.identity,
+        { package: fallback.package, runRoot: location.runRoot }
       ),
       findings,
       "blocked"
@@ -27735,6 +27822,12 @@ async function recoverCheckpointAwareRun(location, options, forceCheckpoint) {
 }
 function createWorkflowRuntime() {
   return {
+    async startRequirements(protocol) {
+      return withStructuredRuntimeErrors(async () => {
+        const compiled = await compileWorkflow(protocol);
+        return workflowStartRequirements(compiled.package.runtime.protocol);
+      });
+    },
     listRuns: listWorkflowRuns,
     inspect: inspectWorkflowRun,
     projectState: projectWorkflowState,
@@ -27831,10 +27924,14 @@ function createWorkflowRuntime() {
                 "WorkflowRuntime snapshot identity was not persisted"
               );
             }
-            const next = continuation(result, {
-              ...compiled.identity,
-              snapshotHash: result.state.skillHash
-            });
+            const next = continuation(
+              result,
+              {
+                ...compiled.identity,
+                snapshotHash: result.state.skillHash
+              },
+              { package: compiled.package, runRoot: resolved.location.runRoot }
+            );
             await persistWorkflowCheckpoint(
               resolved.location,
               result.state,
@@ -28005,7 +28102,11 @@ function createWorkflowRuntime() {
                 mutation
               );
               await clearFinalizationAfterResult(prepared.location, result);
-              return continuation(result, prepared.verified.identity);
+              return continuation(
+                result,
+                prepared.verified.identity,
+                prepared.verified
+              );
             }
             const claimInput = {
               runId: submission.runId,
@@ -28053,7 +28154,11 @@ function createWorkflowRuntime() {
                 result.action,
                 prepared.verified.package
               );
-              return continuation(result, prepared.verified.identity);
+              return continuation(
+                result,
+                prepared.verified.identity,
+                prepared.verified
+              );
             } catch (error) {
               if (error instanceof WorkflowRevisionConflictError) {
                 return conflictContinuation(error.verified, error.finding);

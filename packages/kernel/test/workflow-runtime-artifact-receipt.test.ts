@@ -100,6 +100,56 @@ describe("WorkflowRuntime artifact receipts", () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
+  it("reports every external root and its receipt consumers before any Run exists", async () => {
+    const protocol = receiptWorkflow(true, { requireCurrentAttempt: true });
+    const shared = structuredClone(protocol.outputSchemas[0]);
+    shared.id = "archive.v1";
+    shared.artifacts[0].paths = ["archive/*.bin"];
+    shared.artifacts[0].requireCurrentAttempt = false;
+    protocol.outputSchemas.push(shared);
+    protocol.nodes.push({
+      ...structuredClone(protocol.nodes[0]),
+      id: "archive",
+      outputSchemas: [shared.id],
+    });
+    protocol.edges = [
+      { from: "produce", to: "archive", condition: "success" },
+      { from: "archive", to: null, condition: "success" },
+    ];
+
+    const requirements =
+      await createWorkflowRuntime().startRequirements(protocol);
+
+    expect(requirements).toEqual({
+      externalRoots: [
+        {
+          name: "outputs",
+          description: "Where the producer writes.",
+          artifacts: [
+            {
+              nodeId: "produce",
+              artifactId: "produce.v1.result",
+              paths: ["result.bin"],
+              requireCurrentAttempt: true,
+            },
+            {
+              nodeId: "archive",
+              artifactId: "archive.v1.result",
+              paths: ["archive/*.bin"],
+              requireCurrentAttempt: false,
+            },
+          ],
+        },
+      ],
+    });
+    expect(
+      await createWorkflowRuntime().startRequirements(receiptWorkflow(false)),
+    ).toEqual({
+      externalRoots: [],
+    });
+    await expect(fs.access(runRoot)).rejects.toThrow();
+  });
+
   it("records a large external artifact in accepted Completion evidence and recovers it", async () => {
     const runtime = createWorkflowRuntime();
     const started = await runtime.start({
@@ -135,6 +185,87 @@ describe("WorkflowRuntime artifact receipts", () => {
       },
     ]);
     expect((await runtime.recover(runRoot)).visits).toEqual(completed.visits);
+  });
+
+  it("keeps the current Node's receipt outputs and bound directories in continuations", async () => {
+    const protocol = receiptWorkflow(true, { requireCurrentAttempt: true });
+    protocol.outputSchemas[0].artifacts.push({
+      ...protocol.outputSchemas[0].artifacts[0],
+      id: "local",
+      root: undefined,
+      paths: ["local.bin"],
+      requireCurrentAttempt: false,
+    });
+    protocol.outputSchemas.push({
+      id: "archive.v1",
+      description: "Optional archived output.",
+      artifacts: [
+        {
+          id: "copy",
+          kind: "file",
+          paths: ["archive.bin"],
+          required: false,
+          validations: [],
+          verification: "receipt",
+        },
+      ],
+      evidence: [],
+    });
+    protocol.nodes.push({
+      ...structuredClone(protocol.nodes[0]),
+      id: "archive",
+      outputSchemas: ["archive.v1"],
+    });
+    protocol.edges = [
+      { from: "produce", to: "archive", condition: "success" },
+      { from: "archive", to: null, condition: "success" },
+    ];
+    const runtime = createWorkflowRuntime();
+    const started = await runtime.start({
+      protocol,
+      runRoot,
+      externalRoots: { outputs: externalRoot },
+    });
+    const expected = [
+      {
+        artifactId: "produce.v1.result",
+        paths: ["result.bin"],
+        root: { name: "outputs", path: externalRoot },
+        requireCurrentAttempt: true,
+      },
+      {
+        artifactId: "produce.v1.local",
+        paths: ["local.bin"],
+        root: { name: null, path: runRoot },
+        requireCurrentAttempt: false,
+      },
+    ];
+    expect(started.receiptOutputs).toEqual(expected);
+    expect((await runtime.inspect(runRoot))?.receiptOutputs).toEqual(expected);
+    expect((await runtime.projectState(runRoot))?.receiptOutputs).toEqual(
+      expected,
+    );
+    expect(
+      (await runtime.submit(runRoot, success(started))).receiptOutputs,
+    ).toEqual(expected);
+    expect(
+      (await createWorkflowRuntime().recover(runRoot)).receiptOutputs,
+    ).toEqual(expected);
+    await fs.writeFile(path.join(externalRoot, "result.bin"), "fresh\n");
+    await fs.writeFile(path.join(runRoot, "local.bin"), "local\n");
+    const archived = await runtime.submit(runRoot, success(started));
+    expect(archived.currentNode).toBe("archive");
+    expect(archived.receiptOutputs).toEqual([
+      {
+        artifactId: "archive.v1.copy",
+        paths: ["archive.bin"],
+        root: { name: null, path: runRoot },
+        requireCurrentAttempt: false,
+      },
+    ]);
+    const completed = await runtime.submit(runRoot, success(archived));
+    expect(completed.disposition).toBe("done");
+    expect(completed.receiptOutputs).toEqual([]);
   });
 
   it("refuses a stale output without advancing the Attempt, then accepts a fresh replacement", async () => {
@@ -291,17 +422,45 @@ describe("WorkflowRuntime artifact receipts", () => {
         path.join(externalRoot, "linked"),
         process.platform === "win32" ? "junction" : "dir",
       );
-      await expect(
-        createWorkflowRuntime().start({
-          protocol: receiptWorkflow(true),
-          runRoot,
-          runId: "unbound-root",
-          externalRoots: binding(externalRoot),
-        }),
-      ).rejects.toThrow(message);
+      const refused = createWorkflowRuntime().start({
+        protocol: receiptWorkflow(true),
+        runRoot,
+        runId: "unbound-root",
+        externalRoots: binding(externalRoot),
+      });
+      await expect(refused).rejects.toThrow(message);
+      await expect(refused).rejects.toMatchObject({
+        finding: {
+          code: "external-root-binding-required",
+          requiredAction: "execute",
+          operation: { id: "workflow.start", args: [] },
+          requiresUserDecision: true,
+        },
+      });
       await expect(fs.access(runRoot)).rejects.toThrow();
     },
   );
+
+  it("lists all unbound roots with their descriptions before creating a Run", async () => {
+    const protocol = receiptWorkflow(true);
+    protocol.outputSchemas[0].externalRoots!.archive = {
+      description:
+        "The team's retained reports, usually on shared storage, owned by the archivist.",
+    };
+    protocol.outputSchemas[0].artifacts.push({
+      ...protocol.outputSchemas[0].artifacts[0],
+      id: "archive",
+      root: "archive",
+    });
+    const refused = createWorkflowRuntime().start({ protocol, runRoot });
+    await expect(refused).rejects.toThrow(
+      "external root archive needs a directory when the Run starts: The team's retained reports",
+    );
+    await expect(refused).rejects.toThrow(
+      "external root outputs needs a directory when the Run starts: Where the producer writes.",
+    );
+    await expect(fs.access(runRoot)).rejects.toThrow();
+  });
 
   it("runs one workflow package with a different directory bound in each Run", async () => {
     const protocol = receiptWorkflow(true);

@@ -52,6 +52,7 @@ const WORKFLOW_FINDING_CODES = [
   "artifact-invalid",
   "artifact-oversized",
   "artifact-stale-attempt",
+  "external-root-binding-required",
   "artifact-unknown-version",
   "completion-invalid-artifact",
   "completion-missing-artifact",

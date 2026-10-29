@@ -145,7 +145,9 @@ export async function certifyArtifactReceipts(options: {
       );
     evidence.rootBindingRequired =
       unbound instanceof Error &&
-      /needs a directory when the Run starts/u.test(unbound.message) &&
+      "finding" in unbound &&
+      (unbound.finding as { code?: string }).code ===
+        "external-root-binding-required" &&
       !(await fs.stat(unboundRoot).then(
         () => true,
         () => false,

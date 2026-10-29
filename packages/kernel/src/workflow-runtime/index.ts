@@ -63,7 +63,11 @@ import type {
 } from "../types.js";
 import { sha256, stableValue } from "../util.js";
 import { compileWorkflow } from "./compiler.js";
-import { bindWorkflowExternalRoots } from "./artifact-receipts.js";
+import {
+  bindWorkflowExternalRoots,
+  workflowStartRequirements,
+  workflowReceiptOutputs,
+} from "./artifact-receipts.js";
 import {
   createCompletionPlan,
   validateSuccessfulSubmission,
@@ -344,6 +348,9 @@ export type {
   WorkflowStateProjectionStatus,
   WorkflowDecisionSubmission,
   WorkflowMachineSubmission,
+  WorkflowReceiptOutput,
+  WorkflowReceiptRequirement,
+  WorkflowStartRequirements,
   Submission,
   WorkflowSubmission,
 } from "./types.js";
@@ -1727,6 +1734,10 @@ function validateDecisionExecution(
 function continuation(
   result: ManualRunResult,
   identity: WorkflowExecutionIdentity,
+  context: {
+    package: Awaited<ReturnType<typeof readSkillSnapshot>>;
+    runRoot: string;
+  },
 ): WorkflowContinuation {
   const runtimeState = result.state.workflowRuntime;
   const currentAttempt = runtimeState?.currentAttempt ?? null;
@@ -1766,6 +1777,14 @@ function continuation(
     visitOrdinal: currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     pendingAction: result.action,
+    receiptOutputs: workflowReceiptOutputs(
+      context.package.runtime!.protocol,
+      result.state.status === "completed"
+        ? null
+        : currentNode(result.state, identity, result.action),
+      context.runRoot,
+      runtimeState?.externalRoots,
+    ),
     execution: structuredClone(identity),
     decisionReceipts: boundProjectedLedger(
       runtimeState?.decisionReceipts ?? [],
@@ -1874,6 +1893,7 @@ async function checkpointRecoveryRequiredContinuation(
     base = continuation(
       { state: candidate.state, action: candidate.pending, evals: [] },
       candidate.identity,
+      { package: candidate.package, runRoot: location.runRoot },
     );
   }
   return withAdditionalFindings(
@@ -2099,6 +2119,14 @@ export async function projectWorkflowState(
     evidence: verified.pending?.type === "ask_user" ? {} : evidence,
     history,
     pendingAction: verified.pending,
+    receiptOutputs: workflowReceiptOutputs(
+      protocol,
+      status === "completed"
+        ? null
+        : currentNode(state, verified.identity, verified.pending),
+      location.runRoot,
+      runtimeState?.externalRoots,
+    ),
     execution: structuredClone(verified.identity),
     decisionReceipts: boundProjectedLedger(
       runtimeState?.decisionReceipts ?? [],
@@ -2945,6 +2973,7 @@ async function verifyStoredRepairEpisode(
 }
 
 async function verifyStoredRun(location: ResolvedWorkflowRunLocation): Promise<{
+  runRoot: string;
   state: RunState;
   identity: WorkflowExecutionIdentity;
   package: Awaited<ReturnType<typeof readSkillSnapshot>>;
@@ -3002,7 +3031,7 @@ async function verifyStoredRun(location: ResolvedWorkflowRunLocation): Promise<{
     }
   }
   await verifyStoredRepairEpisode(location.runRoot, state, verified.identity);
-  return { state, ...verified, pending };
+  return { state, ...verified, pending, runRoot: location.runRoot };
 }
 
 type VerifiedWorkflowRun = Awaited<ReturnType<typeof verifyStoredRun>>;
@@ -3138,6 +3167,7 @@ async function continuationFromVerifiedRun(
           }),
     },
     verified.identity,
+    verified,
   );
   const snapshotFindings: WorkflowFinding[] = [];
   const snapshotPolicy = verified.identity.durabilityProfile?.snapshotPolicy;
@@ -4817,6 +4847,12 @@ function blockedContinuation(
       prepared.verified.state.workflowRuntime?.currentAttempt?.retryOrdinal ??
       null,
     pendingAction: prepared.pending,
+    receiptOutputs: workflowReceiptOutputs(
+      prepared.verified.package.runtime!.protocol,
+      prepared.node,
+      prepared.location.runRoot,
+      prepared.verified.state.workflowRuntime?.externalRoots,
+    ),
     execution: structuredClone(prepared.verified.identity),
     decisionReceipts: structuredClone(
       prepared.verified.state.workflowRuntime?.decisionReceipts ?? [],
@@ -4876,6 +4912,7 @@ function conflictContinuation(
       evals: [],
     },
     verified.identity,
+    verified,
   );
   const projected = boundWorkflowFindings([finding]);
   return {
@@ -4961,7 +4998,16 @@ async function recoveryRequiredContinuation(
       action = parsePendingActionValue(JSON.parse(content) as unknown);
     }
   }
-  const base = continuation({ state, action, evals: [] }, journal.execution);
+  // The journal may still be staging Run records. Only the immutable package
+  // is needed to describe receipt outputs before recovery commits those records.
+  const pkg = await readSkillSnapshot(
+    location.runRoot,
+    journal.execution.snapshotHash,
+  );
+  const base = continuation({ state, action, evals: [] }, journal.execution, {
+    package: pkg,
+    runRoot: location.runRoot,
+  });
   const projected = boundWorkflowFindings([
     recoveryRequiredFinding(
       state.workflowRuntime?.revision ?? journal.previous.revision,
@@ -5299,7 +5345,7 @@ async function resumeStoredRun(
     );
   }
   if (result.state.status !== "completed") {
-    return continuation(result, verified.identity);
+    return continuation(result, verified.identity, verified);
   }
   const trajectory = await readTrajectory(
     location.runRoot,
@@ -5309,6 +5355,7 @@ async function resumeStoredRun(
   return continuation(
     { ...result, evals: terminalEvaluationResults(trajectory) },
     verified.identity,
+    verified,
   );
 }
 
@@ -5959,6 +6006,7 @@ async function checkpointBlockedContinuation(
       continuation(
         { state: fallback.state, action: fallback.pending, evals: [] },
         fallback.identity,
+        { package: fallback.package, runRoot: location.runRoot },
       ),
       findings,
       "blocked",
@@ -6178,6 +6226,12 @@ async function recoverCheckpointAwareRun(
 
 export function createWorkflowRuntime(): WorkflowRuntime {
   return {
+    async startRequirements(protocol) {
+      return withStructuredRuntimeErrors(async () => {
+        const compiled = await compileWorkflow(protocol);
+        return workflowStartRequirements(compiled.package.runtime!.protocol);
+      });
+    },
     listRuns: listWorkflowRuns,
     inspect: inspectWorkflowRun,
     projectState: projectWorkflowState,
@@ -6287,10 +6341,14 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 "WorkflowRuntime snapshot identity was not persisted",
               );
             }
-            const next = continuation(result, {
-              ...compiled.identity,
-              snapshotHash: result.state.skillHash,
-            });
+            const next = continuation(
+              result,
+              {
+                ...compiled.identity,
+                snapshotHash: result.state.skillHash,
+              },
+              { package: compiled.package, runRoot: resolved.location.runRoot },
+            );
             await persistWorkflowCheckpoint(
               resolved.location,
               result.state,
@@ -6478,7 +6536,11 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 mutation,
               );
               await clearFinalizationAfterResult(prepared.location, result);
-              return continuation(result, prepared.verified.identity);
+              return continuation(
+                result,
+                prepared.verified.identity,
+                prepared.verified,
+              );
             }
 
             const claimInput: RevisionClaimInput = {
@@ -6531,7 +6593,11 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 result.action,
                 prepared.verified.package,
               );
-              return continuation(result, prepared.verified.identity);
+              return continuation(
+                result,
+                prepared.verified.identity,
+                prepared.verified,
+              );
             } catch (error) {
               if (error instanceof WorkflowRevisionConflictError) {
                 return conflictContinuation(error.verified, error.finding);
