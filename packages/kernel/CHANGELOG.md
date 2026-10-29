@@ -4,6 +4,21 @@
 
 ### Added
 
+- **Artifacts by receipt**: An Output Schema can declare named external roots,
+  and an artifact can opt into `verification: "receipt"`. WorkflowRuntime then
+  verifies the artifact in place, outside the Run root or above the 2 MiB read
+  cap, by streaming SHA-256, and records its path, size, hash, modification
+  time, and producing Attempt in the accepted Completion evidence. With
+  `requireCurrentAttempt`, an output older than the current Attempt is refused
+  as `artifact-stale-attempt`. Other artifacts keep the Run-root boundary and
+  read cap, and runtime certification covers receipts (#31).
+
+- **MCP mode in generated packages**: Generated entry and Node Skills carry a
+  Runtime Access section that prefers the Badger MCP Run tools (`start`,
+  `next`, `submit`, `status`, and `recover`) when a host offers them, sends MCP
+  gate answers to a signed-in person through the dashboard, and keeps the
+  bundled script adapter, unchanged, for hosts without MCP (#34).
+
 - **Semantic dossier version 2**: The questionnaire dossier now carries the
   `interfaces` topic for data contracts between Nodes, a resolution with scope
   and reason for every deferred question, provenance for every confirmed fact

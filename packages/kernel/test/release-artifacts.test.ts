@@ -25,12 +25,14 @@ const serviceDecisions = [
   "0012-workflow-frames-and-workflow-bindings.md",
   "0013-uploaded-skill-versions.md",
   "0015-pinned-skill-versions-and-source-check-jobs.md",
+  "0016-gate-confirmations-and-inbox.md",
 ];
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
   "0008-skill-identity-and-registered-roots.md",
   "0011-creator-state-bound-to-approved-proposal.md",
   "0014-bundle-source-skills.md",
+  "0017-artifact-receipts-and-attempt-freshness.md",
 ];
 
 async function readText(relativePath: string): Promise<string> {
@@ -460,7 +462,7 @@ describe("Badger release artifacts", () => {
     expect(delivered).toContain("BADGER_PLATFORM_ADMIN_MAPPING");
     expect(delivered).toContain("presents that address as verified");
     expect(planned).toContain(
-      "(ADRs) 0002–0006, 0009, 0010, 0012, 0013, and 0015",
+      "(ADRs) 0002–0006, 0009, 0010, 0012, 0013, 0015, and 0016",
     );
     expect(planned).not.toContain("bind people by email; a binding takes");
     expect(planned).not.toContain("inherited by its nested groups");
@@ -513,5 +515,25 @@ describe("Badger release artifacts", () => {
     expect(planned).not.toContain("Each workflow version gets its own kernel");
     expect(planned).not.toContain("每个工作流版本都有自己的内核工作区");
     expect(ledger).toContain("Skill pins and source checks (#43)");
+  });
+
+  it("describes the Sources gate, the inbox, artifact receipts, and MCP mode as delivered", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const ledger = await readText("docs/release-artifacts.md");
+    const delivered = manual.slice(0, manual.indexOf('id="service"'));
+    const planned = manual.slice(manual.indexOf('id="service"'));
+
+    expect(delivered).toContain("src/gates.ts");
+    expect(delivered).toContain("/api/v1/me/inbox");
+    expect(delivered).toContain("“来源”门槛与应用内收件箱（#44）");
+    expect(delivered).toContain("evidence.artifactReceipts");
+    expect(delivered).toContain("artifact-stale-attempt");
+    expect(delivered).toContain("Runtime Access section for two host modes");
+    expect(delivered).toContain("涵盖两种宿主模式（#34）");
+    expect(planned).not.toContain("issues/31");
+    expect(planned).not.toContain("issues/34");
+    expect(planned).not.toContain("now prefer the Badger MCP Run tools");
+    expect(ledger).toContain("Sources gate and inbox (#44)");
+    expect(ledger).toContain("Artifacts by receipt (#31)");
   });
 });

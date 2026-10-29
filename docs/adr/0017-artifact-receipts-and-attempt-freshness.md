@@ -1,6 +1,7 @@
 # Verify External and Large Artifacts by Receipt
 
-Output Schema artifacts may opt into receipt verification and name an external
+Status: accepted. Output Schema artifacts may opt into receipt verification
+([#31](https://github.com/realityjunky/Badger/issues/31)) and name an external
 root declared by that schema. Paths remain relative to the selected root;
 traversal, symbolic links, junctions, and special filesystem objects are refused.
 Artifacts without this opt-in retain the Run-root boundary and existing read
@@ -14,7 +15,10 @@ Attempt's first persisted action. Retrying within the Attempt retains that
 boundary; entering a Node again establishes a new one. A caller's assertion that
 an artifact is fresh cannot replace this check. This detects outputs left by
 skipped work; filesystem timestamps are evidence of freshness, not proof that a
-particular process wrote a file.
+particular process wrote a file. The cost is that a fresh output copied with its
+old modification time kept, or written to a network file system whose clock
+lags the host's, is refused as stale; such a workflow writes its outputs afresh
+within the Attempt.
 
 External roots grant read access only for the declared receipt paths. Verifying
 an artifact never creates, modifies, copies, publishes, or distributes it.

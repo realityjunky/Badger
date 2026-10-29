@@ -301,6 +301,9 @@ of the current Attempt. Empty directories use their own modification time.
 Retries retain that boundary; a later Attempt establishes a new one. An older
 output returns `artifact-stale-attempt` without advancing the Run. This detects
 outputs left by skipped work; it does not attest which process wrote a file.
+Because the check compares modification times, a fresh output copied with its
+old time kept (`cp -p`, `rsync -a`, or an extracted archive), or written to a
+network file system whose clock lags the host's, is refused as stale too.
 Versioned receipt artifacts retain the original producer when carried forward;
 current-Attempt requirements forbid carrying a previous Attempt's receipt.
 Checkpoints verify receipt content without loading the artifact into their
