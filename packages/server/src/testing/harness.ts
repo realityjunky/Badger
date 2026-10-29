@@ -9,7 +9,7 @@ import { openDatabase } from "../database/open.js";
 import { configuredIdentityAdapter } from "../identity/configured.js";
 import type { IdentityAdapter } from "../identity/identity.js";
 import type { IdSource } from "../ids.js";
-import { silentLogger } from "../log.js";
+import type { Logger } from "../log.js";
 import { startHttpServer, type StartedServer } from "../start.js";
 import { prepareStorage } from "../storage.js";
 import { filesystemBlobStore } from "../skills/blobs.js";
@@ -63,6 +63,8 @@ export interface TestService {
   clock: TestClock;
   ids: IdSource;
   database: { kind: "pglite" | "postgres" };
+  /** Every entry the service logged, in order, with its level. */
+  logs: readonly Record<string, unknown>[];
   request(
     requestPath: string,
     init?: RequestInit & { as?: TestPerson },
@@ -189,6 +191,12 @@ export async function startTestService(
       ? createTestIdentityAdapter()
       : configuredIdentityAdapter(config, clock, connection.database));
 
+  const logs: Record<string, unknown>[] = [];
+  const logger: Logger = {
+    info: (fields) => logs.push({ level: "info", ...fields }),
+    error: (fields) => logs.push({ level: "error", ...fields }),
+  };
+
   let server: StartedServer;
   try {
     server = await startHttpServer({
@@ -198,7 +206,7 @@ export async function startTestService(
       clock,
       ids,
       migrations: await loadBundledMigrations(),
-      logger: silentLogger,
+      logger,
     });
   } catch (error) {
     await connection.release();
@@ -271,6 +279,7 @@ export async function startTestService(
   let closed = false;
   return {
     baseUrl,
+    logs,
     port: server.port,
     config,
     clock,

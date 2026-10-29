@@ -12,9 +12,12 @@ import {
   Input,
   Popover,
   Select,
+  Typography,
   type MenuProps,
 } from "antd";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { readBasePath } from "../app/paths.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
 import { useInbox } from "../inbox/InboxContext.js";
@@ -30,6 +33,28 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
   const { preferences, person, update } = usePreferences();
   const navigate = useNavigate();
   const inbox = useInbox();
+  const [signOutFailed, setSignOutFailed] = useState(false);
+
+  // Ends the session Badger issued, then loads the signed-out page. A fetch
+  // carries the page's Origin, which a form would send as null under the
+  // dashboard's no-referrer policy.
+  async function signOut() {
+    const base = readBasePath(document);
+    const prefix = base === "/" ? "" : base;
+    setSignOutFailed(false);
+    try {
+      const response = await fetch(`${prefix}/auth/logout`, {
+        method: "POST",
+        credentials: "same-origin",
+        redirect: "manual",
+      });
+      if (response.type !== "opaqueredirect" && !response.ok)
+        throw new Error(`Sign-out answered ${response.status}`);
+      window.location.assign(`${prefix}/`);
+    } catch {
+      setSignOutFailed(true);
+    }
+  }
 
   const languageItems: MenuProps["items"] = [
     {
@@ -59,6 +84,15 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
       label: t("nav.settings"),
       onClick: () => navigate("/settings"),
     },
+    ...(person?.signOut
+      ? [
+          {
+            key: "sign-out",
+            label: t("user.signOut"),
+            onClick: () => void signOut(),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -173,6 +207,11 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
           </Button>
         </Dropdown>
 
+        {signOutFailed && (
+          <Typography.Text type="danger" role="alert">
+            {t("user.signOutFailed")}
+          </Typography.Text>
+        )}
         <Dropdown menu={{ items: userItems }} trigger={["click"]}>
           <Button
             type="text"

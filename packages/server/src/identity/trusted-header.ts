@@ -3,6 +3,22 @@ import { BlockList, isIP } from "node:net";
 import type { TrustedHeaderSettings } from "../config.js";
 import type { IdentityAdapter, IdentityRequest } from "./identity.js";
 
+const utf8 = new TextDecoder("utf-8", { fatal: true });
+
+/**
+ * Node reads header bytes as Latin-1. Proxies send UTF-8, so a value whose
+ * bytes are valid UTF-8 is read as UTF-8, and any other keeps its Latin-1
+ * reading.
+ */
+function headerText(value: string): string {
+  if (!/[\x80-\xff]/u.test(value)) return value;
+  try {
+    return utf8.decode(Buffer.from(value, "latin1"));
+  } catch {
+    return value;
+  }
+}
+
 /** The proxy must replace client identity headers and verify the account. */
 export function createTrustedHeaderIdentityAdapter(
   settings: TrustedHeaderSettings,
@@ -22,12 +38,13 @@ export function createTrustedHeaderIdentityAdapter(
         return { kind: "anonymous" };
       }
       const read = (name: string): string | null => {
-        const value = request.headers[name];
+        const raw = request.headers[name];
+        if (typeof raw !== "string") return null;
+        const value = headerText(raw);
         // Node joins repeated headers with commas. Identity must be singular.
-        return typeof value === "string" &&
-          value.trim() !== "" &&
+        return value.trim() !== "" &&
           value.length <= 1024 &&
-          !/[,\x00-\x1f\x7f]/u.test(value)
+          !/[,\x00-\x1f\x7f-\x9f]/u.test(value)
           ? value.trim()
           : null;
       };

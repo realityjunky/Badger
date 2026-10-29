@@ -35,6 +35,50 @@ describe("signing in through trusted headers", () => {
     });
   });
 
+  it("reads UTF-8 identity from the proxy and accepts personal access tokens beside it", async () => {
+    service = await startTestService({
+      mode: "service",
+      environment: {
+        ...environment,
+        BADGER_ALLOWED_ORIGINS: "http://localhost",
+      },
+    });
+    // Header bytes arrive as Latin-1; the proxy sent UTF-8.
+    const name = Buffer.from("张三", "utf8").toString("latin1");
+    const me = await service.request("/api/v1/me", {
+      headers: { ...headers, "x-badger-name": name },
+    });
+    expect(await me.json()).toMatchObject({
+      person: { displayName: "张三" },
+      signOut: false,
+    });
+    const created = await service.request("/api/v1/me/tokens", {
+      method: "POST",
+      headers: {
+        ...headers,
+        "x-badger-name": name,
+        origin: "http://localhost",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "Expert Agent", scopes: ["expert"] }),
+    });
+    expect(created.status).toBe(201);
+    const { secret } = await created.json();
+    // The token decides, whatever identity headers come with it.
+    const bearer = await service.request("/api/v1/me", {
+      headers: {
+        authorization: `Bearer ${secret}`,
+        "x-badger-subject": "mallory-id",
+        "x-badger-email": "mallory@example.com",
+      },
+    });
+    expect(bearer.status).toBe(200);
+    expect(await bearer.json()).toMatchObject({
+      person: { subject: "alice-id", displayName: "张三" },
+      credential: { kind: "token" },
+    });
+  });
+
   it("ignores forged identity and forwarded addresses from an untrusted peer", async () => {
     service = await startTestService({
       mode: "service",

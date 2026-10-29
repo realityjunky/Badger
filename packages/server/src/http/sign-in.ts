@@ -6,8 +6,9 @@ import type { ServiceDependencies } from "../dependencies.js";
 import { readCookie, strictCookie } from "../identity/cookies.js";
 import { OIDC_TRANSACTION_SECONDS } from "../identity/oidc.js";
 import { firstHeader, type IdentityAdapter } from "../identity/identity.js";
+import type { Logger } from "../log.js";
 import { issueSession, revokeSession } from "../sessions.js";
-import { escapeHtml } from "./page.js";
+import { escapeHtml, renderSignInFailedPage } from "./page.js";
 import type { Reply } from "./responses.js";
 
 /** OIDC returns cross-site. An HTML navigation starts a same-site request,
@@ -34,6 +35,7 @@ export async function handleBrowserSignIn(input: {
   path: string;
   database: Database;
   dependencies: ServiceDependencies;
+  logger?: Logger;
 }): Promise<boolean> {
   const {
     config,
@@ -44,6 +46,7 @@ export async function handleBrowserSignIn(input: {
     path,
     database,
     dependencies,
+    logger,
   } = input;
   if (config.identity.kind !== "oidc" || identity.browser === undefined)
     return false;
@@ -81,10 +84,34 @@ export async function handleBrowserSignIn(input: {
       body: "",
       headers: { location, "set-cookie": cookies },
     });
+  // A person reads these in the browser; the reason goes to the log only.
+  const failed = (
+    stage: string,
+    result: { kind: "invalid" | "unavailable"; reason: string },
+  ) => {
+    const entry = {
+      event: "oidc.sign-in-failed",
+      stage,
+      outcome: result.kind,
+      reason: result.reason,
+      requestId: reply.requestId,
+    };
+    if (result.kind === "unavailable") logger?.error(entry);
+    else logger?.info(entry);
+    reply.send({
+      status: result.kind === "unavailable" ? 503 : 400,
+      contentType: "text/html; charset=utf-8",
+      body: renderSignInFailedPage(
+        result.kind === "unavailable"
+          ? "The identity provider is unavailable. Try again later."
+          : "Sign-in is invalid or expired.",
+        `${prefix}/auth/oidc/login`,
+      ),
+    });
+  };
   if (path === "/auth/oidc/login") {
     const result = await identity.browser.begin();
-    if ("kind" in result)
-      reply.error(503, "unavailable", "The identity provider is unavailable");
+    if ("kind" in result) failed("login", result);
     else
       redirect(result.authorizationUrl, [
         cookie(
@@ -102,10 +129,7 @@ export async function handleBrowserSignIn(input: {
       readCookie(request.headers, flowCookieName),
       callback,
     );
-    if (result.kind === "unavailable")
-      reply.error(503, "unavailable", "The identity provider is unavailable");
-    else if (result.kind === "invalid")
-      reply.error(400, "invalid", "Sign-in is invalid or expired; start again");
+    if (result.kind !== "authenticated") failed("callback", result);
     else {
       const sessionToken = await issueSession(
         database,

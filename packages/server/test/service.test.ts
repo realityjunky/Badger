@@ -92,6 +92,7 @@ describe("the service's web page", () => {
         groups: [],
       },
       credential: { kind: "session", id: "test-session" },
+      signOut: false,
     });
   });
 

@@ -78,6 +78,8 @@ describe("signing in through the platform session", () => {
         kind: "session",
         id: expect.stringMatching(/^[0-9a-f]{64}$/u),
       },
+      // The platform owns this session, so the dashboard offers no sign-out.
+      signOut: false,
     });
   });
 

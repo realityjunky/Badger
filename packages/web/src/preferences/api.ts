@@ -13,6 +13,8 @@ export interface Person {
   roles: readonly string[];
   /** The groups the person is bound to directly, with the role held there. */
   groups: readonly { id: string; name: string; role: string }[];
+  /** Whether Badger issued this session, so the dashboard can end it. */
+  signOut: boolean;
 }
 
 export type SaveOutcome =
@@ -113,5 +115,6 @@ export async function loadPerson(
           role: typeof group["role"] === "string" ? group["role"] : "",
         }))
       : [],
+    signOut: body["signOut"] === true,
   };
 }

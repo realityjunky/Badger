@@ -14,6 +14,36 @@ interface Transaction {
   code_verifier: string;
 }
 
+/**
+ * What went wrong, for the operator's log: the error's class, its OAuth or
+ * transport code, and the provider's status and description. Library and
+ * provider messages carry no tokens, codes, or secrets.
+ */
+export function oidcFailureReason(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown failure";
+  const detail = error as Error & {
+    code?: unknown;
+    status?: unknown;
+    error?: unknown;
+    error_description?: unknown;
+  };
+  const cause = error.cause as { code?: unknown; message?: unknown } | null;
+  return [
+    error.name,
+    typeof detail.code === "string" ? detail.code : null,
+    typeof detail.status === "number" ? `status ${detail.status}` : null,
+    typeof detail.error === "string" ? detail.error : null,
+    typeof detail.error_description === "string"
+      ? detail.error_description
+      : null,
+    error.message,
+    typeof cause?.code === "string" ? cause.code : null,
+  ]
+    .filter((part): part is string => part !== null && part !== "")
+    .join(": ")
+    .slice(0, 500);
+}
+
 /** A provider validates identity; durable, opaque sessions carry no roles. */
 export function createOidcIdentityAdapter(
   settings: OidcSettings,
@@ -68,8 +98,11 @@ export function createOidcIdentityAdapter(
         let config: client.Configuration;
         try {
           config = await configuration();
-        } catch {
-          return { kind: "unavailable" };
+        } catch (error) {
+          return {
+            kind: "unavailable",
+            reason: `discovery: ${oidcFailureReason(error)}`,
+          };
         }
         const transactionToken = token();
         const state = client.randomState();
@@ -108,7 +141,8 @@ export function createOidcIdentityAdapter(
         return { authorizationUrl: authorizationUrl.href, transactionToken };
       },
       complete: async (transactionToken, callback) => {
-        if (transactionToken === null) return { kind: "invalid" };
+        if (transactionToken === null)
+          return { kind: "invalid", reason: "no sign-in transaction cookie" };
         // Delete and return atomically: callbacks cannot be replayed, even on
         // another server process. The provider also enforces one-use codes.
         const taken = await database.query<Transaction>(
@@ -116,12 +150,19 @@ export function createOidcIdentityAdapter(
           [hashCredential(transactionToken), clock.now()],
         );
         const transaction = taken.rows[0];
-        if (transaction === undefined) return { kind: "invalid" };
+        if (transaction === undefined)
+          return {
+            kind: "invalid",
+            reason: "the sign-in transaction is unknown, used, or expired",
+          };
         let config: client.Configuration;
         try {
           config = await configuration();
-        } catch {
-          return { kind: "unavailable" };
+        } catch (error) {
+          return {
+            kind: "unavailable",
+            reason: `discovery: ${oidcFailureReason(error)}`,
+          };
         }
         let claims: client.IDToken | undefined;
         try {
@@ -133,6 +174,7 @@ export function createOidcIdentityAdapter(
           });
           claims = tokens.claims();
         } catch (error) {
+          const reason = `callback: ${oidcFailureReason(error)}`;
           if (
             (error instanceof client.ResponseBodyError &&
               (error.status >= 500 || error.status === 429)) ||
@@ -147,8 +189,8 @@ export function createOidcIdentityAdapter(
                 (error.cause instanceof Response &&
                   (error.cause.status >= 500 || error.cause.status === 429))))
           )
-            return { kind: "unavailable" };
-          return { kind: "invalid" };
+            return { kind: "unavailable", reason };
+          return { kind: "invalid", reason };
         }
         if (
           claims === undefined ||
@@ -156,7 +198,10 @@ export function createOidcIdentityAdapter(
           !/^[^@\s]+@[^@\s]+$/u.test(claims.email) ||
           claims.sub.trim() === ""
         )
-          return { kind: "invalid" };
+          return {
+            kind: "invalid",
+            reason: "the ID token lacks a subject or a valid email claim",
+          };
         const principal: Principal = {
           issuer: settings.issuer,
           subject: claims.sub,
@@ -165,7 +210,12 @@ export function createOidcIdentityAdapter(
             typeof claims.name === "string" && claims.name.trim() !== ""
               ? claims.name
               : claims.email,
-          emailVerified: claims.email_verified === true,
+          // A provider's own claim decides; the setting covers providers
+          // that never send one.
+          emailVerified:
+            typeof claims.email_verified === "boolean"
+              ? claims.email_verified
+              : settings.emailsVerified,
           status: "active",
           platformAdministrator: false,
           credential: { kind: "session", id: null },

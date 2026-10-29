@@ -27,6 +27,14 @@ export async function issueSession(
       channel: "web",
       requestId,
     });
+    // Each request signs its session's principal in again, so the person's
+    // older sessions take the profile just proved; otherwise two devices
+    // would rewrite the person back and forth. Resolution replaces the
+    // stored credential with each session's own.
+    await tx.query(
+      "update identity_sessions set principal = $1 where person_id = $2 and expires_at > $3",
+      [JSON.stringify(principal), person.id, now],
+    );
     await tx.query(
       "insert into identity_sessions (token_hash, person_id, principal, created_at, expires_at) values ($1, $2, $3, $4, $5)",
       [

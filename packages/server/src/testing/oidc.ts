@@ -9,6 +9,12 @@ export interface StubOidcProvider {
   setFailure(status: number | null): void;
   setEndpointFailure(path: string, status: number, body: string): void;
   setInvalidSignature(invalid: boolean): void;
+  /**
+   * Answer authorization with a page whose Approve link returns to Badger,
+   * so the provider's page, not Badger's, starts the cross-site navigation
+   * back, as a real sign-in or consent page does.
+   */
+  setConsentPage(enabled: boolean): void;
   stop(): Promise<void>;
 }
 
@@ -31,6 +37,7 @@ export async function startStubOidcProvider(): Promise<StubOidcProvider> {
   let endpointFailure:
     { path: string; status: number; body: string } | undefined;
   let invalidSignature = false;
+  let consentPage = false;
   const codes = new Map<
     string,
     { redirectUri: string; challenge: string; nonce: string }
@@ -94,6 +101,17 @@ export async function startStubOidcProvider(): Promise<StubOidcProvider> {
       callback.searchParams.set("code", code);
       callback.searchParams.set("state", params.get("state")!);
       callback.searchParams.set("iss", issuer);
+      if (consentPage) {
+        const href = callback.href
+          .replaceAll("&", "&amp;")
+          .replaceAll('"', "&quot;");
+        response
+          .writeHead(200, { "content-type": "text/html; charset=utf-8" })
+          .end(
+            `<!doctype html><title>Stub provider</title><a href="${href}">Approve</a>`,
+          );
+        return;
+      }
       response.writeHead(302, { location: callback.href }).end();
       return;
     }
@@ -182,6 +200,9 @@ export async function startStubOidcProvider(): Promise<StubOidcProvider> {
     },
     setInvalidSignature: (next) => {
       invalidSignature = next;
+    },
+    setConsentPage: (next) => {
+      consentPage = next;
     },
     stop: async () => {
       if (stopped) return;

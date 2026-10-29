@@ -678,6 +678,7 @@ export function createService(options: ServiceOptions, port: number): Service {
         path,
         database,
         dependencies: serviceDependencies,
+        logger: options.logger,
       })
     )
       return;
@@ -914,6 +915,11 @@ export function createService(options: ServiceOptions, port: number): Service {
           groups: access.groups,
         },
         credential: principal.credential,
+        // Only a session Badger issued can be ended here; a platform or a
+        // proxy owns the others.
+        signOut:
+          config.identity.kind === "oidc" &&
+          principal.credential.kind === "session",
       });
     }
     if (path === `${API}/audit-events`) {

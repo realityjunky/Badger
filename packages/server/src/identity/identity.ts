@@ -48,18 +48,19 @@ export interface IdentityAdapter {
   browser?: BrowserSignIn;
 }
 
+/** `reason` explains a failure for the operator's log; it holds no secret. */
 export interface BrowserSignIn {
   begin(): Promise<
     | { authorizationUrl: string; transactionToken: string }
-    | { kind: "unavailable" }
+    | { kind: "unavailable"; reason: string }
   >;
   complete(
     transactionToken: string | null,
     callback: URL,
   ): Promise<
     | { kind: "authenticated"; principal: Principal }
-    | { kind: "invalid" }
-    | { kind: "unavailable" }
+    | { kind: "invalid"; reason: string }
+    | { kind: "unavailable"; reason: string }
   >;
 }
 

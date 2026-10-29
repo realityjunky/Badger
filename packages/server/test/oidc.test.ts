@@ -242,9 +242,33 @@ describe("OpenID Connect sign-in", () => {
       redirect: "manual",
     });
     expect(exchange.status).toBe(503);
-    expect(await exchange.json()).toMatchObject({
-      error: { code: "unavailable" },
-    });
+    // A person reads the failure in the browser and can start again.
+    expect(exchange.headers.get("content-type")).toBe(
+      "text/html; charset=utf-8",
+    );
+    const page = await exchange.text();
+    expect(page).toContain("The identity provider is unavailable");
+    expect(page).toContain(
+      '<a href="/badger/auth/oidc/login">Sign in again</a>',
+    );
+    // The operator's log says why, at each stage.
+    expect(
+      app.logs.filter((entry) => entry["event"] === "oidc.sign-in-failed"),
+    ).toEqual([
+      expect.objectContaining({
+        level: "error",
+        stage: "login",
+        outcome: "unavailable",
+        reason: expect.stringMatching(/^discovery: .*status code/u),
+      }),
+      expect.objectContaining({
+        level: "error",
+        stage: "callback",
+        outcome: "unavailable",
+        reason: expect.stringMatching(/^callback: /u),
+      }),
+    ]);
+    expect(JSON.stringify(app.logs)).not.toContain(provider!.clientSecret);
   });
 
   it("resolves verified email bindings on first sign-in and keeps them with issuer and subject", async () => {
@@ -303,6 +327,79 @@ describe("OpenID Connect sign-in", () => {
         ).json()
       ).person.roles,
     ).toEqual([]);
+  });
+
+  it("lets a deployment declare emails verified for providers that send no claim, while a sent claim still decides", async () => {
+    const roles = async (cookie: string) =>
+      (
+        await (
+          await service!.request("/badger/api/v1/me", { headers: { cookie } })
+        ).json()
+      ).person.roles;
+    await start({ BADGER_BOOTSTRAP_ADMINISTRATORS: "alice@example.com" });
+    provider!.setClaims({ email_verified: undefined });
+    expect(await roles((await signIn()).cookie)).toEqual([]);
+    await service!.close();
+    await provider!.stop();
+    await start({
+      BADGER_BOOTSTRAP_ADMINISTRATORS: "alice@example.com",
+      BADGER_OIDC_EMAILS_VERIFIED: "true",
+    });
+    provider!.setClaims({
+      sub: "bob-id",
+      email: "alice@example.com",
+      email_verified: false,
+    });
+    expect(await roles((await signIn()).cookie)).toEqual([]);
+    provider!.setClaims({ email_verified: undefined });
+    expect(await roles((await signIn()).cookie)).toEqual(["Administrator"]);
+  });
+
+  it("keeps every live session on the profile the provider proved last", async () => {
+    const app = await start({
+      BADGER_BOOTSTRAP_ADMINISTRATORS: "alice@example.com",
+    });
+    const laptop = await signIn();
+    provider!.setClaims({ name: "Alice Renamed" });
+    const phone = await signIn();
+    for (const cookie of [laptop.cookie, phone.cookie, laptop.cookie]) {
+      const me = await (
+        await app.request("/badger/api/v1/me", { headers: { cookie } })
+      ).json();
+      expect(me.person.displayName).toBe("Alice Renamed");
+      expect(me.signOut).toBe(true);
+    }
+    const updates = await (
+      await app.request("/badger/api/v1/audit-events?action=person.updated", {
+        headers: { cookie: laptop.cookie },
+      })
+    ).json();
+    expect(updates.events).toHaveLength(1);
+  });
+
+  it("accepts a personal access token beside the browser session", async () => {
+    const app = await start();
+    const { cookie } = await signIn();
+    const created = await app.request("/badger/api/v1/me/tokens", {
+      method: "POST",
+      headers: {
+        cookie,
+        origin: "https://badger.example",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "Expert Agent", scopes: ["expert"] }),
+    });
+    expect(created.status).toBe(201);
+    const { secret } = await created.json();
+    const me = await app.request("/badger/api/v1/me", {
+      headers: { authorization: `Bearer ${secret}` },
+    });
+    expect(me.status).toBe(200);
+    expect(await me.json()).toMatchObject({
+      person: { subject: "alice-id" },
+      credential: { kind: "token" },
+      signOut: false,
+    });
   });
 
   it("binds a single-use, expiring authorization transaction to its browser", async () => {

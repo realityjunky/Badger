@@ -399,6 +399,8 @@ const en = {
   "language.en": "English",
   "language.zh": "中文",
   "user.signedInAs": "Signed in as {name}",
+  "user.signOut": "Sign out",
+  "user.signOutFailed": "Sign-out failed; you are still signed in. Try again.",
 
   "page.myWork.title": "My work",
   "page.myWork.description": "What waits for you across your workflows.",
@@ -1159,6 +1161,8 @@ const zh: Record<MessageId, string> = {
   "language.en": "English",
   "language.zh": "中文",
   "user.signedInAs": "当前登录：{name}",
+  "user.signOut": "退出登录",
+  "user.signOutFailed": "退出登录失败，你仍处于登录状态，请重试。",
 
   "page.myWork.title": "我的工作",
   "page.myWork.description": "汇总各工作流中等待你处理的事项。",

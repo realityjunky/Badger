@@ -18,9 +18,16 @@ opening its socket. Back up and restore the database with the existing
 Register Badger as a confidential web client at the provider, supporting the
 authorization-code flow, PKCE S256, and `client_secret_basic` authentication.
 Enable the `openid email profile` scopes. The signed ID token must contain a
-stable `sub` and an `email`; `name` is optional. Only `email_verified: true`
-allows email invitations and bootstrap Administrator bindings to resolve.
-Request the needed claims in your provider's client configuration.
+stable `sub` and an `email`; `name` is optional. Only a verified address lets
+email invitations and bootstrap Administrator bindings resolve: an
+`email_verified` claim decides when the provider sends one. For a provider
+that never sends it, `BADGER_OIDC_EMAILS_VERIFIED=true` declares every address
+it asserts verified. Set it only when the provider lets nobody assert an
+address they do not own, such as a single-organization directory whose
+administrators assign addresses; a multi-tenant or self-service provider that
+accepts unverified addresses would let someone claim another person's
+invitation or bootstrap role. Request the needed claims in your provider's
+client configuration.
 
 Example deployment settings (supply secrets through an env file or secret
 mount; do not commit them):
@@ -56,6 +63,7 @@ they form part of every person's identity.
 | `BADGER_SESSION_COOKIE`       | `badger_session` | Badger's own cookie name; choose a name distinct from platform and other application cookies. `__Host-` names require the root base path. |
 | `BADGER_SESSION_SECONDS`      | `28800`          | Absolute session lifetime (8 hours); accepts 60–604800 seconds.                                                                           |
 | `BADGER_OIDC_TIMEOUT_SECONDS` | `3`              | Timeout for each discovery, token, or signing-key request; accepts 1–60 seconds.                                                          |
+| `BADGER_OIDC_EMAILS_VERIFIED` | `false`          | Treat an ID token without an `email_verified` claim as verified; a claim the provider sends still decides.                                |
 
 Opening the signed-out dashboard offers a sign-in link. `GET
 <base>/auth/oidc/login` redirects to the provider with fresh state, nonce and
@@ -77,6 +85,9 @@ records are removed when a new sign-in begins.
 Issuing or revoking a session records its actor, credential hash, target,
 channel, reason and request ID in Activity, in the same database transaction.
 This includes sign-in by a returning person whose profile has not changed.
+A sign-in also gives the person's other live sessions the profile the provider
+just proved, so an older device cannot restore a name or address the provider
+has since changed.
 
 An OIDC session proves the last successful sign-in until its absolute expiry
 or local logout; Badger does not introspect it at the provider on each request
@@ -84,9 +95,14 @@ and does not implement provider logout or refresh tokens. Badger still checks
 current local roles and bindings on every request. Failed discovery or token
 transport returns `unavailable` (503), and malformed or invalid sign-ins
 return `invalid` (400), without issuing a session. Start sign-in again after a
-failed callback. `POST <base>/auth/logout`, with an allowed `Origin`, deletes
-the current session and clears its cookies. Cookie-authenticated API writes
-likewise require an allowed `Origin`.
+failed callback; the failure page links to a fresh sign-in, and the server
+logs `oidc.sign-in-failed` with the stage, the outcome, and the reason, such as
+the provider's OAuth error or a transport code, never a token or secret.
+`POST <base>/auth/logout`, with an allowed `Origin`, deletes the current
+session and clears its cookies. `GET <base>/api/v1/me` reports
+`signOut: true` only for these sessions, and the dashboard's user menu then
+offers **Sign out**; the other adapters have no Badger session to end.
+Cookie-authenticated API writes likewise require an allowed `Origin`.
 
 Verify a deployment by signing in with a provider-verified bootstrap
 Administrator email, reading `<base>/api/v1/me`, inviting a second email to a
@@ -120,7 +136,16 @@ The proxy must strip every incoming identity header and replace it with its
 own authenticated values, including on unauthenticated and error paths. Use
 the provider's stable ID as the subject. Email addresses are mutable and
 should not serve as subjects. Headers are singular; missing subject/email,
-invalid email, repeated headers or comma-joined identities are refused.
+invalid email, repeated headers or comma-joined identities are refused. Send
+values as UTF-8: a value whose bytes are valid UTF-8 is read as UTF-8, so a
+name such as 张三 arrives intact.
+
+The Badger MCP and the CLI send personal access tokens as
+`Authorization: Bearer` and cannot complete the proxy's interactive login.
+Let requests that carry a bearer token reach Badger without that login, for
+example by exempting `<base>/api/` requests with an `Authorization` header,
+and keep stripping identity headers from them. Badger authenticates the token
+itself, and an invalid token never falls back to identity headers.
 
 Restrict network access so only the authenticating proxy can reach Badger.
 When another proxy or container bridge sits between them, the configured peer

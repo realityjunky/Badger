@@ -50,3 +50,16 @@ export function renderSignedOutPage(signInUrl?: string): string {
 <p>Not signed in.</p>${signInUrl === undefined ? "" : `\n<p><a href="${escapeHtml(signInUrl)}">Sign in with your organization</a></p>`}`,
   );
 }
+
+/** A failed browser sign-in says what happened and offers a fresh start. */
+export function renderSignInFailedPage(
+  message: string,
+  signInUrl: string,
+): string {
+  return document(
+    "Badger — sign-in failed",
+    `<h1>Badger</h1>
+<p>${escapeHtml(message)}</p>
+<p><a href="${escapeHtml(signInUrl)}">Sign in again</a></p>`,
+  );
+}
