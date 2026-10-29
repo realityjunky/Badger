@@ -30,6 +30,7 @@ import {
   type AnswerEditorHandle,
 } from "./questionnaire/AnswerEditor.js";
 import { QuestionComposer } from "./questionnaire/QuestionComposer.js";
+import { QuestionResolution } from "./questionnaire/QuestionResolution.js";
 import { QuestionInspector } from "./questionnaire/QuestionInspector.js";
 
 /** The three panes share the service's records and server-owned capabilities. */
@@ -437,18 +438,20 @@ export function QuestionnairePage() {
                     <h3>{selected.text}</h3>
                     <Tag>{t(`questionnaire.state.${selected.state}`)}</Tag>
                     <p>{selected.rationale}</p>
-                    {compose && !selected.resolvedAt && (
-                      <Button
-                        onClick={() =>
-                          setEditing({
-                            roundId: selected.roundId,
-                            question: selected,
-                          })
-                        }
-                      >
-                        {t("questionnaire.editQuestion")}
-                      </Button>
-                    )}
+                    {compose &&
+                      (!selected.resolvedAt ||
+                        selected.state === "confirmed") && (
+                        <Button
+                          onClick={() =>
+                            setEditing({
+                              roundId: selected.roundId,
+                              question: selected,
+                            })
+                          }
+                        >
+                          {t("questionnaire.editQuestion")}
+                        </Button>
+                      )}
                   </article>
                   <div className="questionnaire-answers">
                     {submitted.map((a) => (
@@ -481,6 +484,16 @@ export function QuestionnairePage() {
                       </article>
                     ))}
                   </div>
+                  {path && view && (
+                    <QuestionResolution
+                      key={`${selected.id}:${selected.revision}:${selected.resolutionRevision}`}
+                      question={selected}
+                      view={view}
+                      path={path}
+                      basePath={basePath}
+                      reload={reload}
+                    />
+                  )}
                   {selected.canAnswer && path && view && (
                     <AnswerEditor
                       key={selected.id}

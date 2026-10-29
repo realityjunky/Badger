@@ -20,7 +20,7 @@ them into `dist/`, so the server image carries the build and none of them.
 | `src/shell/`            | The rail, top bar, and application frame.                                                                    |
 | `src/pages/`            | The pages. My work is the landing page; Workflows, Skills, Admin, and Activity read live records.            |
 | `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.                  |
-| `e2e/`                  | Playwright journeys against the real service, including separate Engineer and expert sessions.                    |
+| `e2e/`                  | Playwright journeys against the real service, including separate Engineer and expert sessions.               |
 
 ## Behavior
 
@@ -36,6 +36,14 @@ them into `dist/`, so the server image carries the build and none of them.
   retry or an explicit reload; another device's revision is never overwritten
   automatically. Submitted answer revisions and their channels remain visible
   in history. A new question revision requires the expert to review it again.
+- Engineers resolve answers into one or more formal facts, a published child
+  question, a reasoned deferral, or withdrawal. Fact text uses the workflow
+  locale and links to selected submitted answer revisions. The answering
+  person acknowledges or disputes each restatement after reviewing it;
+  disputes reopen the question and notify the Engineer. Answer or evidence
+  changes require re-confirmation and preserve the earlier facts as history.
+  Skill-internal deferrals appear on the Skills page with questionnaire links.
+  Sign-offs require dashboard sessions and hash-bound review dialogs.
 - One per-person event stream refreshes inboxes and open questionnaire and
   workflow records. Reconnects reload a current snapshot; polling every ten
   seconds and focus refresh recover when streaming is unavailable.

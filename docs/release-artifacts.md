@@ -89,7 +89,17 @@ limit per workflow, private autosaved answer drafts, submission per question
 or per round with every revision and its channel kept, inbox items that close
 once answered, and a per-person event stream with polling as the fallback.
 Migration `0011` adds the tables; ADR 0006 already records the questionnaire
-as records, and threads and resolutions follow (#47, #48).
+as records; threads follow (#47).
+
+Answer resolutions (#48) are delivered in the server and dashboard. Engineers
+confirm formal facts in the workflow locale against exact submitted answer
+revisions, publish follow-up child questions, defer with reasons, or withdraw.
+Each answering person acknowledges or disputes each restatement in a
+hash-bound dashboard sign-off. Disputes reopen the question and notify the
+Engineer; changed answers or cited evidence require re-confirmation. Skills
+show their internal-question backlog. Immutable records, foreign keys, and
+append-only guards are added by migration `0012`; ADR 0020 records the
+re-confirmation contract.
 
 ## Package-facing artifacts
 

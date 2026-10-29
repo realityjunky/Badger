@@ -275,3 +275,251 @@ test("an expert answers a round and the Engineer sees the submitted revisions ar
     await expertContext.close();
   }
 });
+
+test("the Engineer confirms formal facts and the answering expert acknowledges or disputes each restatement", async ({
+  browser,
+}, testInfo) => {
+  const { group } = await call<{ group: { id: string } }>("POST", "/groups", {
+    name: `Resolutions ${Date.now()}`,
+  });
+  const { workflow, version } = await call<{
+    workflow: { id: string };
+    version: { id: string };
+  }>("POST", "/workflows", {
+    groupId: group.id,
+    name: `facts-${Date.now()}`,
+    goal: "Agree sample handling.",
+    intent: "new-skill",
+    locale: "en",
+  });
+  for (const [person, role] of [
+    [engineer, "Engineer"],
+    [expert, "Field expert"],
+  ] as const)
+    await call("POST", "/bindings", {
+      scopeType: "workflow",
+      scopeId: workflow.id,
+      email: person.email,
+      role,
+    });
+  const { person } = await call<{ person: { id: string } }>(
+    "GET",
+    "/me",
+    undefined,
+    expert,
+  );
+  const root = `/workflows/${workflow.id}/versions/${version.id}/questionnaire`;
+  const { round } = await call<{ round: { id: string } }>(
+    "POST",
+    `${root}/rounds`,
+    { title: "Restatements" },
+    engineer,
+  );
+  const { question } = await call<{ question: { id: string } }>(
+    "POST",
+    `${root}/rounds/${round.id}/questions`,
+    {
+      text: "How should plasma be stored?",
+      topic: "scope",
+      targets: [{ kind: "workflow", id: workflow.id }],
+      rationale: "Agree handling.",
+      evidence: [],
+      assignees: [{ kind: "person", personId: person.id }],
+      priority: 80,
+    },
+    engineer,
+  );
+  const { preview } = await call<{ preview: { confirmationHash: string } }>(
+    "GET",
+    `${root}/rounds/${round.id}/publish-preview`,
+    undefined,
+    engineer,
+  );
+  await call(
+    "POST",
+    `${root}/rounds/${round.id}/publish`,
+    { confirmed: true, confirmationHash: preview.confirmationHash },
+    engineer,
+  );
+  await call(
+    "PUT",
+    `${root}/questions/${question.id}/answer`,
+    {
+      revision: 0,
+      questionRevision: 1,
+      text: "血浆在2–8°C保存，24小时内使用。",
+    },
+    expert,
+  );
+  await call(
+    "POST",
+    `${root}/questions/${question.id}/submit`,
+    { revision: 1, questionRevision: 1 },
+    expert,
+  );
+  const authorContext = await browser.newContext({
+    extraHTTPHeaders: { "x-badger-test-person": JSON.stringify(engineer) },
+  });
+  const expertContext = await browser.newContext({
+    extraHTTPHeaders: { "x-badger-test-person": JSON.stringify(expert) },
+  });
+  try {
+    const author = await authorContext.newPage();
+    const respondent = await expertContext.newPage();
+    const url = `${base}/questionnaire/questions/${question.id}`;
+    await author.goto(url);
+    await english(author);
+    await author
+      .getByLabel("Formal fact 1", { exact: true })
+      .fill("Store plasma at 2–8°C.");
+    await author.getByRole("button", { name: "Add fact", exact: true }).click();
+    await author
+      .getByLabel("Formal fact 2", { exact: true })
+      .fill("Use plasma within 48 hours.");
+    await author
+      .getByRole("button", { name: "Review resolution", exact: true })
+      .click();
+    await expect(author.getByRole("dialog")).toContainText(
+      "Store plasma at 2–8°C.",
+    );
+    await author
+      .getByRole("dialog")
+      .getByRole("button", { name: "Sign off", exact: true })
+      .click();
+    await expect(author.getByTestId("confirmed-fact")).toHaveCount(2);
+    await respondent.goto(`${base}/my-work`);
+    await english(respondent);
+    await respondent
+      .getByRole("link", {
+        name: /restatement to acknowledge.*How should plasma be stored\?/u,
+      })
+      .first()
+      .click();
+    const storage = respondent
+      .getByTestId("confirmed-fact")
+      .filter({ hasText: "Store plasma at 2–8°C." });
+    await storage
+      .getByRole("button", { name: "Acknowledge restatement", exact: true })
+      .click();
+    await respondent
+      .getByRole("dialog")
+      .getByRole("button", { name: "Sign off", exact: true })
+      .click();
+    await expect(
+      storage.getByText("Acknowledged", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      author
+        .getByTestId("confirmed-fact")
+        .filter({ hasText: "Store plasma at 2–8°C." })
+        .getByText("Acknowledged", { exact: true }),
+    ).toBeVisible();
+    await testInfo.attach("acknowledged-facts", {
+      body: await respondent.screenshot({
+        fullPage: true,
+        path: `../../output/playwright/issue-48-acknowledged-${testInfo.project.name}.png`,
+      }),
+      contentType: "image/png",
+    });
+    const duration = respondent
+      .getByTestId("confirmed-fact")
+      .filter({ hasText: "Use plasma within 48 hours." });
+    await duration
+      .getByRole("button", { name: "Dispute restatement", exact: true })
+      .click();
+    await respondent
+      .getByRole("dialog")
+      .getByLabel("Reason", { exact: true })
+      .fill("The answer says 24 hours.");
+    await respondent
+      .getByRole("dialog")
+      .getByRole("button", { name: "Review resolution", exact: true })
+      .click();
+    await respondent
+      .getByRole("dialog")
+      .getByRole("button", { name: "Sign off", exact: true })
+      .click();
+    await expect(duration.getByText("Disputed", { exact: true })).toBeVisible();
+    await expect(respondent.getByTestId("answer-box")).toBeEditable();
+    await author.goto(`${base}/my-work`);
+    await expect(
+      author.getByRole("link", {
+        name: /question needs attention.*How should plasma be stored\?/u,
+      }),
+    ).toBeVisible();
+    await respondent
+      .getByTestId("answer-box")
+      .fill("Use plasma within 24 hours.");
+    await respondent
+      .getByRole("button", { name: "Submit answer", exact: true })
+      .click();
+    const { skill } = await call<{ skill: { id: string } }>("POST", "/skills", {
+      groupId: group.id,
+      name: "storage-backlog",
+    });
+    const files = [
+      {
+        path: "SKILL.md",
+        content: Buffer.from(
+          "---\nname: storage-backlog\ndescription: Storage rules\n---\nKeep cold.\n",
+        ).toString("base64"),
+      },
+    ];
+    const { preview: upload } = await call<{ preview: { hash: string } }>(
+      "POST",
+      `/skills/${skill.id}/upload-preview`,
+      { files },
+      engineer,
+    );
+    await call(
+      "POST",
+      `/skills/${skill.id}/versions`,
+      { files, confirmed: true, expectedHash: upload.hash },
+      engineer,
+    );
+    await call(
+      "POST",
+      `/workflows/${workflow.id}/versions/${version.id}/pins`,
+      { skillId: skill.id, hash: upload.hash, purpose: "source" },
+      engineer,
+    );
+    await author.goto(url);
+    await author.getByLabel("Resolution", { exact: true }).click();
+    await author.getByRole("option", { name: "Deferred", exact: true }).click();
+    await author.getByLabel("Defer as", { exact: true }).click();
+    await author
+      .getByRole("option", { name: "Internal to a Skill", exact: true })
+      .click();
+    await author.getByLabel("Skill", { exact: true }).click();
+    await author
+      .getByRole("option", { name: "storage-backlog", exact: true })
+      .click();
+    await author
+      .getByLabel("Reason", { exact: true })
+      .fill("The Skill needs to document storage duration.");
+    await author
+      .getByRole("button", { name: "Review resolution", exact: true })
+      .click();
+    await author
+      .getByRole("dialog")
+      .getByRole("button", { name: "Sign off", exact: true })
+      .click();
+    await respondent.goto(`${base}/skills/${skill.id}`);
+    const backlog = respondent.getByRole("region", {
+      name: "Skill backlog",
+      exact: true,
+    });
+    await expect(
+      backlog.getByRole("link", {
+        name: "How should plasma be stored?",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(backlog).toContainText(
+      "The Skill needs to document storage duration.",
+    );
+  } finally {
+    await authorContext.close();
+    await expertContext.close();
+  }
+});

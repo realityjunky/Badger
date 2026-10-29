@@ -1,3 +1,4 @@
+import { invalidateSkillFactEvidence } from "./questionnaire/resolutions.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
@@ -510,6 +511,13 @@ export async function pinSkillVersion(
         [versionId, value.skillId],
       );
       const pin = toPin(pinRow.rows[0]!);
+      await invalidateSkillFactEvidence(
+        tx,
+        dependencies,
+        context,
+        versionId,
+        value.skillId,
+      );
       await invalidateSourcesStage(tx, versionId, now);
       await invalidateStudyGates(
         tx,
@@ -599,6 +607,13 @@ export async function unpinSkillVersion(
     await tx.query(
       `delete from workflow_skill_pins where workflow_version_id = $1 and skill_id = $2`,
       [versionId, skillId],
+    );
+    await invalidateSkillFactEvidence(
+      tx,
+      dependencies,
+      context,
+      versionId,
+      skillId,
     );
     await invalidateSourcesStage(tx, versionId, dependencies.clock.now());
     await invalidateStudyGates(

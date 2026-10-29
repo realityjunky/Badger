@@ -1212,3 +1212,14 @@ body {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.questionnaire-resolution-form {
+  display: grid;
+  gap: 16px;
+}
+.questionnaire-resolution-form .field {
+  margin-bottom: 12px;
+}
+.questionnaire-text {
+  overflow-wrap: anywhere;
+}

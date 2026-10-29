@@ -6,7 +6,12 @@ export interface InboxItem {
   workflowName: string;
   versionNumber: number;
   gate: string;
-  kind: "gate-ready" | "gate-invalidated" | "question-assigned";
+  kind:
+    | "gate-ready"
+    | "gate-invalidated"
+    | "question-assigned"
+    | "restatement-ready"
+    | "question-reopened";
   questionId: string | null;
   questionText: string | null;
   state: "unread" | "read" | "done";

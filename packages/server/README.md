@@ -129,7 +129,8 @@ item closes on submission; the question becomes answered once all current
 recipients have submitted for its current revision. Revising a published
 question reopens it, retains earlier answers, and notifies its assignees.
 Answers refuse stale question or answer revisions and refuse a question
-whose Engineer resolution has locked it. Resolution actions belong to #48.
+whose Engineer resolution has locked it, except that a confirmed answer may
+be corrected and immediately requires re-confirmation.
 
 An `engineer` token may draft rounds and unpublished questions, and an
 `expert` token may save and submit its assigned answers. Such answers require
@@ -146,6 +147,54 @@ after 30 seconds. Every reconnect sends `ready` so clients reload current
 records rather than rely on event replay. Slow consumers disconnect instead
 of accumulating an unbounded buffer. Dashboard polling and focus refresh
 remain available when streaming fails.
+
+## Answer resolutions and acknowledgements
+
+Migration `0012` adds immutable resolutions, formal facts, answer-revision
+links, and expert acknowledgements. `GET Q` includes their full history.
+Every sign-off requires a dashboard session, current workflow access, a
+preview, then `{confirmed: true, confirmationHash, requestId}` alongside the
+previewed input. Retries with the same person, request ID, hash and input
+return the original response; changed inputs conflict. Tokens never preview
+or commit sign-offs, even when their person holds the required role.
+
+| Method and path                            | Behavior                                                                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `POST Q/questions/:id/resolution-preview`  | An Engineer reviews a resolution for the current question `revision`.                                               |
+| `POST Q/questions/:id/resolve`             | Commit that exact reviewed resolution.                                                                              |
+| `POST Q/facts/:id/acknowledgement-preview` | The person whose answer the fact restates reviews `{decision: "acknowledged"}` or `{decision: "disputed", reason}`. |
+| `POST Q/facts/:id/acknowledge`             | Commit that response. Each answering person responds to each fact separately.                                       |
+| `GET /skills/:id/backlog`                  | Read current Skill-internal deferrals, filtered by both Skill-library and workflow read permissions.                |
+
+A resolution has one of four `kind` values:
+
+- `confirmed`: `facts: [{text, answers: [{personId, revision}]}]`. Every fact
+  binds current submitted answer revisions and snapshots the version's
+  locale, question evidence and cited file hashes. The Engineer writes the
+  text in that locale; the service does not translate it. Every answering
+  person must be covered by at least one fact. Private drafts cannot be
+  confirmed, nor can older submitted revisions replace current answers.
+- `followed-up`: `followUp` holds ordinary question content. The commit
+  creates and publishes a new child round atomically, preserves the parent
+  link and notifies its assignees.
+- `deferred`: `deferredKind` is `skill-internal` (with a pinned `skillId`) or
+  `out-of-scope`. Both require `reason`; Skill-internal questions appear in
+  that Skill's backlog.
+- `withdrawn`: records the actor and an optional reason.
+
+An acknowledgement is reserved for the answering person, including when an
+Administrator wants to act for them. A dispute requires a reason, makes all
+facts in that resolution inactive, reopens the question, and notifies the
+Engineers. New facts need fresh acknowledgements. History is retained.
+
+Editing a confirmed answer, including its first new private draft, marks the
+question `needs-reconfirmation`; submitting that draft keeps the flag until
+an Engineer confirms again. Revising a confirmed question does the same.
+Replacing or removing a Skill pin flags only confirmed questions whose cited
+file hashes changed or disappeared. An unrelated file change preserves the
+facts. Re-confirmation requires questions to cite currently pinned evidence
+and answers submitted for their current question revision. Old facts and
+acknowledgements remain visible as inactive history.
 
 ## Personal access tokens
 
