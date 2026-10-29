@@ -423,18 +423,28 @@ describe("WorkflowRuntime mutation locks", () => {
       isFile: expect.any(Function),
     });
 
-    if (process.platform === "win32") return;
-    const outside = path.join(root, "outside-lock.json");
-    await fs.writeFile(outside, JSON.stringify(lockRecord()));
-    await fs.unlink(lockPath);
-    await fs.symlink(outside, lockPath);
-    const symlinked = await Promise.allSettled([runtime.resume(runRoot)]);
-    expect(blockedFinding(symlinked[0])).toMatchObject({
-      code: "run-lock-unknown",
-    });
-    await expect(fs.readFile(outside, "utf8")).resolves.toContain(
-      "workflow-run-lock",
-    );
+    const outside = path.join(root, "outside-lock");
+    const outsideRecord = path.join(outside, "record.json");
+    await fs.mkdir(outside);
+    await fs.writeFile(outsideRecord, JSON.stringify(lockRecord()));
+    const targets =
+      process.platform === "win32" ? [outside] : [outsideRecord, outside];
+    for (const target of targets) {
+      await fs.unlink(lockPath);
+      await fs.symlink(
+        target,
+        lockPath,
+        target === outside ? "junction" : "file",
+      );
+      const symlinked = await Promise.allSettled([runtime.resume(runRoot)]);
+      expect(blockedFinding(symlinked[0])).toMatchObject({
+        code: "run-lock-unknown",
+      });
+      expect((await fs.lstat(lockPath)).isSymbolicLink()).toBe(true);
+      await expect(fs.readFile(outsideRecord, "utf8")).resolves.toContain(
+        "workflow-run-lock",
+      );
+    }
   });
 
   it("takes over only a proven-stale lock and records evidence before journal recovery", async () => {

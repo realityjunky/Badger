@@ -524,7 +524,7 @@ it("recovers the checkpoint in a new process", async () => {
         {
           cwd: process.cwd(),
           env: {
-            PATH: process.env.PATH,
+            ...process.env,
             WORKFLOW_RUN_ROOT: JSON.stringify(runRoot),
             WORKFLOW_EXPECTED: JSON.stringify({
               revision: started.revision,

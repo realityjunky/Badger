@@ -262,6 +262,15 @@ a proven-stale lock. An unknown host identity never permits takeover. See
 `docs/adr/0018-run-lock-host-identity.md` from the repository root for the
 platform identity sources and compatibility rules.
 
+CI schedules the Run storage suites on Linux, macOS, and Windows. From the
+repository root, run `npm run build -w packages/kernel` followed by
+`npm run test:runs -w packages/kernel` for the same storage, lock,
+checkpoint, recovery, crash-boundary, and child-process contention suites.
+Standalone Run ids use ASCII letters, digits, dots, underscores, and hyphens,
+start with a letter or digit, and have at most 255 characters. Windows device
+names (including names with extensions) and trailing dots are refused on
+every platform before storage is created.
+
 ## Authoring references
 
 The installed Badger Skill keeps the package-construction contract close to its

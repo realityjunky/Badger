@@ -280,7 +280,7 @@ it("recovers the artifact ledger", async () => {
       {
         cwd: path.resolve("."),
         env: {
-          PATH: process.env.PATH,
+          ...process.env,
           WORKFLOW_ARTIFACT_LOCATION: JSON.stringify(location),
           WORKFLOW_ARTIFACT_EXPECTED: JSON.stringify(expected),
         },

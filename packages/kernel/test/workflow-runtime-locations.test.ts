@@ -156,7 +156,7 @@ it("recovers the persisted WorkflowRuntime continuation", async () => {
       {
         cwd: path.resolve("."),
         env: {
-          PATH: process.env.PATH,
+          ...process.env,
           WORKFLOW_EXPECTED_JSON: JSON.stringify(expected),
           WORKFLOW_LOCATION_JSON: JSON.stringify(location),
         },
@@ -542,6 +542,31 @@ describe("WorkflowRuntime standalone coordinates and Run-id validation", () => {
     },
   );
 
+  it.each([
+    "CON",
+    "nul.json",
+    "Aux",
+    "COM1",
+    "lpt9.log",
+    "run.",
+    "a".repeat(256),
+  ])(
+    "rejects nonportable Run id %j before creating standalone storage",
+    async (runId) => {
+      const projectRoot = path.join(root, "project");
+      const location = { kind: "standalone" as const, projectRoot, runId };
+      const runtime = createWorkflowRuntime();
+
+      await expect(
+        runtime.start({ protocol: protocol(), location }),
+      ).rejects.toThrow(/Run id/u);
+      await expect(runtime.recover(location)).rejects.toThrow(/Run id/u);
+      await expect(fs.access(projectRoot)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+
   it("rejects a non-string standalone project root before resolving storage", async () => {
     const location = {
       kind: "standalone" as const,
@@ -555,11 +580,10 @@ describe("WorkflowRuntime standalone coordinates and Run-id validation", () => {
   });
 
   it("rejects a symlinked standalone project root before writing a Run", async () => {
-    if (process.platform === "win32") return;
     const outsideRoot = path.join(root, "outside");
     const projectRoot = path.join(root, "linked-project");
     await fs.mkdir(outsideRoot);
-    await fs.symlink(outsideRoot, projectRoot, "dir");
+    await fs.symlink(outsideRoot, projectRoot, "junction");
     const location = {
       kind: "standalone" as const,
       projectRoot,
@@ -575,12 +599,15 @@ describe("WorkflowRuntime standalone coordinates and Run-id validation", () => {
   });
 
   it("rejects a symlinked standalone Run directory before recovery", async () => {
-    if (process.platform === "win32") return;
     const outsideRoot = path.join(root, "outside");
     const projectRoot = path.join(root, "project");
     await fs.mkdir(projectRoot, { recursive: true });
     await fs.mkdir(outsideRoot);
-    await fs.symlink(outsideRoot, path.join(projectRoot, ".badger"), "dir");
+    await fs.symlink(
+      outsideRoot,
+      path.join(projectRoot, ".badger"),
+      "junction",
+    );
     const location = {
       kind: "standalone" as const,
       projectRoot,

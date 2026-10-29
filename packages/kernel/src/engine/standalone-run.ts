@@ -37,7 +37,10 @@ export interface StartStandaloneRunOptions {
 function validateRunId(runId: unknown): asserts runId is string {
   if (
     typeof runId !== "string" ||
-    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId)
+    runId.length > 255 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId) ||
+    runId.endsWith(".") ||
+    /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(runId)
   ) {
     throw new Error(`Invalid standalone Run id: ${String(runId)}`);
   }

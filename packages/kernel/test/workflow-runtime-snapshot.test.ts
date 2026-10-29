@@ -428,7 +428,6 @@ describe("WorkflowRuntime physical content snapshots", () => {
   });
 
   it("does not follow a directory replaced by a symlink during enumeration", async () => {
-    if (process.platform === "win32") return;
     const outside = await fs.mkdtemp(
       path.join(os.tmpdir(), "badger-workflow-snapshot-outside-"),
     );
@@ -450,7 +449,7 @@ describe("WorkflowRuntime physical content snapshots", () => {
               if (relative !== "nested" || swapped) return;
               swapped = true;
               await fs.rename(original, moved);
-              await fs.symlink(outside, original, "dir");
+              await fs.symlink(outside, original, "junction");
             },
           },
         }),

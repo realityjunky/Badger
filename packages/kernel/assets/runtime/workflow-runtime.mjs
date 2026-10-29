@@ -23042,7 +23042,7 @@ async function resumeManualWorkflowRun(changeDir, options, artifactMutation) {
 import { promises as fs12 } from "node:fs";
 import path18 from "path";
 function validateRunId(runId) {
-  if (typeof runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId)) {
+  if (typeof runId !== "string" || runId.length > 255 || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId) || runId.endsWith(".") || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(runId)) {
     throw new Error(`Invalid standalone Run id: ${String(runId)}`);
   }
 }

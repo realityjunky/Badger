@@ -38,6 +38,7 @@
     "build": "npm run build:runtime && tsc",
     "build:runtime": "esbuild src/workflow-runtime/index.ts --bundle --external:yaml --platform=node --format=esm --target=node22 --outfile=assets/runtime/workflow-runtime.mjs",
     "test": "vitest run",
+    "test:runs": "vitest run --testTimeout=15000 --hookTimeout=15000 test/workflow-runtime test/engine-runtime.test.ts test/engine-run-store.test.ts test/engine-storage-layout.test.ts test/engine-standalone-run.test.ts test/engine-manual-run.test.ts test/contained-atomic-write.test.ts test/race-safe-read.test.ts",
     "test:watch": "vitest",
     "format:check": "prettier --check src test package.json tsconfig.json vitest.config.ts",
     "lint": "tsc --noEmit"

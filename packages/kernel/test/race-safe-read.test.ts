@@ -11,8 +11,8 @@ import {
 
 // Windows note: the primitive's win32 branch opens with plain O_RDONLY
 // (Node exposes no O_NOFOLLOW there) and relies on the same lstat/realpath
-// identity checks that run on POSIX. That parity conclusion is covered by
-// reasoning over the shared code path, not by an actual Windows test run.
+// identity checks that run on POSIX. The Run-storage CI matrix includes this
+// suite, including replacement of an open file, on all three platforms.
 describe("race-safe bounded file read", () => {
   let root: string;
 
@@ -124,29 +124,26 @@ describe("race-safe bounded file read", () => {
     ).rejects.toThrow("chain violated");
   });
 
-  it.skipIf(process.platform === "win32")(
-    "rejects a same-path replacement made while the file is open",
-    async () => {
-      const file = path.join(root, "data.txt");
-      await fs.writeFile(file, "original");
-      const replacement = path.join(root, "replacement.txt");
-      await fs.writeFile(replacement, "replaced");
+  it("rejects a same-path replacement made while the file is open", async () => {
+    const file = path.join(root, "data.txt");
+    await fs.writeFile(file, "original");
+    const replacement = path.join(root, "replacement.txt");
+    await fs.writeFile(replacement, "replaced");
 
-      await expect(
-        readFileRaceSafe(file, 1024, {
-          label: "test file",
-          hooks: {
-            afterOpen: async () => {
-              await fs.rename(replacement, file);
-            },
+    await expect(
+      readFileRaceSafe(file, 1024, {
+        label: "test file",
+        hooks: {
+          afterOpen: async () => {
+            await fs.rename(replacement, file);
           },
-        }),
-      ).rejects.toMatchObject({
-        reason: "changed",
-        message: "test file changed while reading",
-      });
-    },
-  );
+        },
+      }),
+    ).rejects.toMatchObject({
+      reason: "changed",
+      message: "test file changed while reading",
+    });
+  });
 
   it.skipIf(process.platform === "win32")(
     "does not follow a symlink swapped in after the pre-open check",
