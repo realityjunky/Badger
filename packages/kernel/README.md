@@ -73,6 +73,14 @@ An Engineer or Field expert on a workflow uploads to that workflow's Group.
 See `packages/server/README.md`
 from the repository root for its API and limits.
 
+Questionnaire rounds and free-text answers (#46) are delivered in the server
+and dashboard: revisioned questions, priority-ordered publication previews,
+private autosaved answers, per-question or atomic round submission, automatic
+inbox completion, and per-person live updates with polling recovery. The
+service retains the kernel's dossier topic vocabulary; this slice does not
+compose or approve a Semantic dossier. Threads and resolutions follow in
+#47 and #48.
+
 Personal access tokens (#53) are also delivered: personal settings create,
 list, and revoke scoped Agent and CLI credentials, showing the secret once.
 The server stores hashes, enforces expiration and current roles, records

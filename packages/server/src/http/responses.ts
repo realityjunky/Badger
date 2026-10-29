@@ -34,6 +34,11 @@ export interface Reply {
   send(body: ResponseBody): void;
   json(status: number, payload: unknown): void;
   html(status: number, body: string): void;
+  eventStream(): {
+    signal: AbortSignal;
+    send(event: string, data: unknown): void;
+    close(): void;
+  };
   error(
     status: number,
     code: ErrorCode,
@@ -67,6 +72,38 @@ export function replyTo(
     requestId,
     send,
     json,
+    eventStream: () => {
+      const controller = new AbortController();
+      response.on("close", () => controller.abort());
+      response.writeHead(200, {
+        ...BASE_HEADERS,
+        "content-type": "text/event-stream; charset=utf-8",
+        "x-request-id": requestId,
+        "x-accel-buffering": "no",
+        connection: "keep-alive",
+      });
+      response.flushHeaders();
+      return {
+        signal: controller.signal,
+        send: (event, data) => {
+          if (controller.signal.aborted) return;
+          if (
+            !response.write(
+              `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+            )
+          ) {
+            // A slow client reconnects and reloads a snapshot; never buffer
+            // an unbounded stream of invalidations in the server.
+            response.end();
+            controller.abort();
+          }
+        },
+        close: () => {
+          response.end();
+          controller.abort();
+        },
+      };
+    },
     html: (status, body) => {
       send({ status, contentType: "text/html; charset=utf-8", body });
     },

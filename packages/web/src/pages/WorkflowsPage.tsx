@@ -25,6 +25,7 @@ import {
 import { WorkflowTeam } from "./workflows/WorkflowTeam.js";
 import { WorkflowSources } from "./workflows/WorkflowSources.js";
 import { WorkflowSourceStudy } from "./workflows/WorkflowSourceStudy.js";
+import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 
 type State =
   | { kind: "loading" | "failed" | "denied" | "missing" }
@@ -34,6 +35,7 @@ type State =
 /** Catalog and version deep links share the service's scoped records. */
 export function WorkflowsPage() {
   const { t, format } = useI18n();
+  const { notice } = useLiveUpdates();
   const { workflowId, versionId } = useParams();
   const navigate = useNavigate();
   const basePath = readBasePath(document);
@@ -101,6 +103,29 @@ export function WorkflowsPage() {
     return () => controller.abort();
   }, [basePath, workflowId, selectedVersion?.id, refresh]);
 
+  useEffect(() => {
+    if (!workflowId || !selectedVersion) return;
+    const controller = new AbortController();
+    const update = () =>
+      void loadWorkflowVersion(
+        basePath,
+        workflowId,
+        selectedVersion.id,
+        controller.signal,
+      ).then((result) => {
+        if (!controller.signal.aborted && result.kind === "ok")
+          setVersionResources(result.value);
+      });
+    if (notice.versionIds.includes(selectedVersion.id)) update();
+    const timer = setInterval(() => {
+      if (!document.hidden) update();
+    }, 10000);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [basePath, workflowId, selectedVersion?.id, notice]);
+
   // The worker runs a queued check; look again until it settles, keeping the
   // page as it is in between.
   const checkStatus = versionResources?.sourceCheck?.status;
@@ -150,6 +175,13 @@ export function WorkflowsPage() {
         description={workflow?.goal ?? t("page.workflows.description")}
         actions={
           <Space wrap>
+            {workflow && selectedVersion && (
+              <Link
+                to={`/questionnaire?workflow=${encodeURIComponent(workflow.id)}&version=${encodeURIComponent(selectedVersion.id)}`}
+              >
+                {t("page.questionnaire.title")}
+              </Link>
+            )}
             {workflowId !== undefined && (
               <Link to="/workflows">{t("workflow.back")}</Link>
             )}

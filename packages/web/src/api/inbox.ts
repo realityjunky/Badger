@@ -6,7 +6,9 @@ export interface InboxItem {
   workflowName: string;
   versionNumber: number;
   gate: string;
-  kind: "gate-ready" | "gate-invalidated";
+  kind: "gate-ready" | "gate-invalidated" | "question-assigned";
+  questionId: string | null;
+  questionText: string | null;
   state: "unread" | "read" | "done";
   revision: number;
   href: string;
@@ -16,6 +18,8 @@ export interface InboxPage {
   items: InboxItem[];
   unreadCount: number;
   pendingCount: number;
+  pendingQuestionCount: number;
+  pendingGateCount: number;
   nextCursor: string | null;
 }
 

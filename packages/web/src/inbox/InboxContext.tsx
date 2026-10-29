@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { useLocation } from "react-router-dom";
+import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import {
   loadInbox,
   markInbox,
@@ -30,6 +31,8 @@ const EMPTY: InboxPage = {
   items: [],
   unreadCount: 0,
   pendingCount: 0,
+  pendingQuestionCount: 0,
+  pendingGateCount: 0,
   nextCursor: null,
 };
 
@@ -47,6 +50,7 @@ export function InboxProvider({
   const [cursor, setCursor] = useState<string | null>(null);
   const sequence = useRef(0);
   const location = useLocation();
+  const { notice } = useLiveUpdates();
   const refresh = useCallback(async () => {
     const request = ++sequence.current;
     try {
@@ -59,6 +63,10 @@ export function InboxProvider({
       if (request === sequence.current) setFailed(true);
     }
   }, [basePath, cursor]);
+
+  useEffect(() => {
+    if (notice.inbox) void refresh();
+  }, [notice, refresh]);
 
   useEffect(() => {
     void refresh();

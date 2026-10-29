@@ -21,6 +21,7 @@ import { antdTheme, fontScaleFactor, resolveTheme } from "../theme/tokens.js";
 import { useSystemTheme } from "../theme/useSystemTheme.js";
 import { normalizeBasePath } from "./paths.js";
 import { InboxProvider } from "../inbox/InboxContext.js";
+import { LiveUpdatesProvider } from "../live/LiveUpdatesContext.js";
 
 export function App({ basePath }: { basePath: string }) {
   return (
@@ -62,56 +63,58 @@ function ThemedApp({ basePath }: { basePath: string }) {
     <ConfigProvider theme={theme}>
       <I18nProvider locale={preferences.language}>
         <BrowserRouter basename={normalizeBasePath(basePath)}>
-          <InboxProvider basePath={basePath}>
-            <Routes>
-              <Route element={<AppShell />}>
-                <Route index element={<Navigate to="/my-work" replace />} />
-                <Route path="my-work" element={<MyWorkPage />} />
-                <Route path="workflows" element={<WorkflowsPage />} />
-                <Route
-                  path="workflows/:workflowId"
-                  element={<WorkflowsPage />}
-                />
-                <Route
-                  path="workflows/:workflowId/versions/:versionId"
-                  element={<WorkflowsPage />}
-                />
-                <Route path="questionnaire" element={<QuestionnairePage />} />
-                <Route
-                  path="questionnaire/questions/:questionId"
-                  element={<QuestionnairePage />}
-                />
-                <Route path="skills" element={<SkillsPage />} />
-                <Route path="skills/:skillId" element={<SkillsPage />} />
-                <Route
-                  path="skills/:skillId/versions/:versionId"
-                  element={<SkillsPage />}
-                />
-                <Route
-                  path="runs/*"
-                  element={
-                    <PlaceholderPage
-                      title="page.runs.title"
-                      description="page.runs.description"
-                    />
-                  }
-                />
-                <Route
-                  path="evaluations/*"
-                  element={
-                    <PlaceholderPage
-                      title="page.evaluations.title"
-                      description="page.evaluations.description"
-                    />
-                  }
-                />
-                <Route path="activity" element={<ActivityPage />} />
-                <Route path="admin/*" element={<AdminPage />} />
-                <Route path="settings/*" element={<SettingsPage />} />
-                <Route path="*" element={<NotFoundPage />} />
-              </Route>
-            </Routes>
-          </InboxProvider>
+          <LiveUpdatesProvider basePath={basePath}>
+            <InboxProvider basePath={basePath}>
+              <Routes>
+                <Route element={<AppShell />}>
+                  <Route index element={<Navigate to="/my-work" replace />} />
+                  <Route path="my-work" element={<MyWorkPage />} />
+                  <Route path="workflows" element={<WorkflowsPage />} />
+                  <Route
+                    path="workflows/:workflowId"
+                    element={<WorkflowsPage />}
+                  />
+                  <Route
+                    path="workflows/:workflowId/versions/:versionId"
+                    element={<WorkflowsPage />}
+                  />
+                  <Route path="questionnaire" element={<QuestionnairePage />} />
+                  <Route
+                    path="questionnaire/questions/:questionId"
+                    element={<QuestionnairePage />}
+                  />
+                  <Route path="skills" element={<SkillsPage />} />
+                  <Route path="skills/:skillId" element={<SkillsPage />} />
+                  <Route
+                    path="skills/:skillId/versions/:versionId"
+                    element={<SkillsPage />}
+                  />
+                  <Route
+                    path="runs/*"
+                    element={
+                      <PlaceholderPage
+                        title="page.runs.title"
+                        description="page.runs.description"
+                      />
+                    }
+                  />
+                  <Route
+                    path="evaluations/*"
+                    element={
+                      <PlaceholderPage
+                        title="page.evaluations.title"
+                        description="page.evaluations.description"
+                      />
+                    }
+                  />
+                  <Route path="activity" element={<ActivityPage />} />
+                  <Route path="admin/*" element={<AdminPage />} />
+                  <Route path="settings/*" element={<SettingsPage />} />
+                  <Route path="*" element={<NotFoundPage />} />
+                </Route>
+              </Routes>
+            </InboxProvider>
+          </LiveUpdatesProvider>
         </BrowserRouter>
       </I18nProvider>
     </ConfigProvider>

@@ -20,9 +20,25 @@ them into `dist/`, so the server image carries the build and none of them.
 | `src/shell/`            | The rail, top bar, and application frame.                                                                    |
 | `src/pages/`            | The pages. My work is the landing page; Workflows, Skills, Admin, and Activity read live records.            |
 | `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.                  |
-| `e2e/`                  | Playwright journeys and visual checks against the real service in local single-user mode.                    |
+| `e2e/`                  | Playwright journeys against the real service, including separate Engineer and expert sessions.                    |
 
 ## Behavior
+
+- The Questionnaire page has rounds and questions, the answer thread, and an
+  evidence/history inspector. Engineers compose questions, retain revisions,
+  and review a whole round before publishing it in priority order. Workflow
+  versions have independent questionnaires; an optional workflow round limit
+  defaults to unlimited. Named experts, all Field experts, and Workflow owners
+  can be assigned, including pending invitations.
+- Assigned questions link from My work. Answers accept any language, autosave
+  private drafts one request at a time, and submit per question or per round.
+  Typing during a save is retained. Conflicts retain local text and offer
+  retry or an explicit reload; another device's revision is never overwritten
+  automatically. Submitted answer revisions and their channels remain visible
+  in history. A new question revision requires the expert to review it again.
+- One per-person event stream refreshes inboxes and open questionnaire and
+  workflow records. Reconnects reload a current snapshot; polling every ten
+  seconds and focus refresh recover when streaming is unavailable.
 
 - Every page has a URL. The root redirects to `/my-work`; deep links, refresh,
   and history all restore the page.

@@ -4,6 +4,7 @@ import { workflowMethods } from "./workflows.js";
 import { gateMethods } from "./gates.js";
 import { inboxMethods } from "./inbox.js";
 import { sourceStudyMethods } from "./source-study.js";
+import { questionnaireMethods } from "./questionnaire.js";
 
 export function tokenRequestAllowed(
   scopes: readonly TokenScope[],
@@ -16,6 +17,16 @@ export function tokenRequestAllowed(
     return reads && gateMethods(path) === "GET, HEAD";
   if (inboxMethods(path) !== null) return reads;
   if (sourceStudyMethods(path) !== null) return reads;
+  const questionnaire = questionnaireMethods(path);
+  if (questionnaire !== null && questionnaire.split(", ").includes(method)) {
+    if (reads) return true;
+    if (/\/(answer|submit)$/u.test(path)) return scopes.includes("expert");
+    return (
+      scopes.includes("engineer") &&
+      ((method === "POST" && /\/(rounds|questions)$/u.test(path)) ||
+        (method === "PATCH" && /\/questions\/[^/]+$/u.test(path)))
+    );
+  }
   const skills = skillMethods(path);
   if (skills !== null && skills.split(", ").includes(method))
     return reads || scopes.includes("engineer") || scopes.includes("expert");
