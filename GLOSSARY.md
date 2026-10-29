@@ -55,6 +55,9 @@ A person who reads a workflow and its versions without changing them.
 **Principal**:
 The identity a request acts as: issuer, subject, email, display name, and status. A principal alone grants no Badger permission; Badger decides what the person may do.
 
+**Identity adapter**:
+The configured way Badger proves who a request comes from: local mode's loopback adapter, Session introspection, OpenID Connect, or headers from a trusted proxy. It yields a Principal and never grants a role.
+
 **Session introspection**:
 The identity adapter that proves a person by presenting the platform's own session token to the platform's current-user endpoint over the internal network. Badger maps the platform user ID to the person's external subject.
 
@@ -141,6 +144,18 @@ A formal statement of workflow meaning that the Semantic dossier may rely on, tr
 
 **Acknowledgement**:
 The answering Field expert's confirmation that a Fact restates their Answer faithfully. Disputing the restatement instead reopens the Question.
+
+**Inference**:
+A revisioned draft of workflow meaning that an Agent or Engineer proposes before anyone has confirmed it. It stays a draft until the Facts of the Question it links to are acknowledged.
+
+**Assumption**:
+A revisioned draft that the workflow is taken to rely on until a linked Question settles it, kept visible as an open item instead of being treated as a Fact.
+
+**Ledger**:
+The five-part read model over the questionnaire's records: confirmed user Facts, source-derived Facts, Inferences, unresolved Assumptions, and remaining Questions, each linked to its record. Publishing a Round stores its baseline, so the Ledger shows what changed since that Round.
+
+**Readiness**:
+Whether scope and each dossier topic is free of blockers, with every blocker named. Readiness informs the people who sign off; it neither composes nor approves a Semantic dossier.
 
 ## Authoring organization
 

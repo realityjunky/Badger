@@ -28,6 +28,8 @@ const serviceDecisions = [
   "0016-gate-confirmations-and-inbox.md",
   "0019-source-study-records-and-completion.md",
   "0020-answer-resolution-reconfirmation.md",
+  "0021-oidc-browser-sessions.md",
+  "0022-questionnaire-ledger-and-round-baselines.md",
 ];
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
@@ -646,5 +648,31 @@ describe("Badger release artifacts", () => {
     expect(planned).not.toContain("讨论串、关切、账目编制");
     expect(ledger).toContain("Answer resolutions (#48)");
     expect(ledger).toContain("Question threads and expert concerns (#47)");
+  });
+
+  it("describes the ledger, the identity adapters, and the expert MCP as delivered", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const ledger = await readText("docs/release-artifacts.md");
+    const delivered = manual.slice(0, manual.indexOf('id="service"'));
+    const planned = manual.slice(manual.indexOf('id="service"'));
+
+    expect(delivered).toContain("Ledger and readiness (#49).");
+    expect(delivered).toContain("账目与就绪状态（#49）。");
+    expect(delivered).toContain("With OpenID Connect (#69)");
+    expect(delivered).toContain("使用 OpenID Connect（#69）时");
+    expect(delivered).toContain('href="identity-adapters.md"');
+    expect(delivered).toContain('href="#code-mcp"');
+    expect(delivered).toContain('id="code-mcp"');
+    expect(delivered).toContain("Its expert profile (#54) is delivered");
+    expect(planned).not.toContain("Delivered (#54)");
+    expect(planned).not.toContain("已交付（#54）");
+    expect(planned).not.toContain("become read models over these records");
+    expect(planned).not.toContain("变成基于这些记录的读模型");
+    expect(planned).not.toContain(
+      "OpenID Connect, or headers from a trusted proxy",
+    );
+    expect(ledger).toContain("ledger and readiness (#49)");
+    expect(ledger).toContain("OpenID Connect and trusted-header sign-in (#69)");
+    expect(ledger).toContain("The Badger MCP's expert profile (#54)");
   });
 });
