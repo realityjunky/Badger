@@ -468,9 +468,9 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
-  "study.description": "记录固定来源中的事实、证据与技能间的数据契约。",
+  "study.description": "记录固定来源中的事实、证据与 Skill 之间的数据契约。",
   "study.facts": "来源事实",
-  "study.interfaces": "技能间接口",
+  "study.interfaces": "Skill 之间的接口",
   "study.addFact": "添加事实",
   "study.editFact": "编辑事实",
   "study.addInterface": "添加接口",
@@ -484,7 +484,7 @@ const zh: Record<MessageId, string> = {
   "study.naming": "命名规则",
   "study.validation": "验证规则",
   "study.evidence": "证据",
-  "study.skill": "来源技能",
+  "study.skill": "来源 Skill",
   "study.path": "来源路径",
   "study.startLine": "起始行",
   "study.endLine": "结束行",
@@ -493,7 +493,7 @@ const zh: Record<MessageId, string> = {
   "study.removeEvidence": "移除证据",
   "study.inventoryChanged": "来源清单已更改。请重新加载并选择当前固定的文件。",
   "study.staleHint":
-    "部分证据已不在固定来源中。请选择当前技能版本和文件，或停用此记录。",
+    "部分证据已不在固定来源中。请选择当前的 Skill 版本和文件，或停用此记录。",
   "study.history": "记录历史",
   "study.citedLines": "引用的来源行",
   "study.loadFailed": "无法加载此记录或证据。请检查链接并重新加载。",
@@ -513,7 +513,7 @@ const zh: Record<MessageId, string> = {
   "study.review": "复核研读",
   "study.confirm": "标记版本为已研读",
   "study.confirmHint":
-    "确认您已研读此固定技能版本，并复核了这些事实和接口。记录或固定来源更改后需重新研读。全部版本研读完成后，问卷阶段将开启。",
+    "确认您已研读此固定的 Skill 版本，并复核了这些事实和接口。记录或固定来源更改后需重新研读。全部版本研读完成后，问卷阶段将开启。",
   "workflow.create": "创建工作流",
   "workflow.edit": "编辑工作流",
   "workflow.save": "保存更改",
