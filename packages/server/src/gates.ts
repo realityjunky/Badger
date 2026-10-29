@@ -191,7 +191,7 @@ export async function commitGate(
         before: null,
         after: { revision: 1, hash: input.confirmationHash },
         reason: `Confirmed ${gate}`,
-        requestId: input.requestId,
+        requestId: context.requestId,
       });
       await closeGateInbox(tx, versionId, gate, now);
       return { kind: "confirmed", result };

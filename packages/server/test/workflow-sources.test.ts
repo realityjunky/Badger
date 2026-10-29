@@ -202,6 +202,7 @@ describe("workflow Skill pins and source checks", () => {
         confirmedAt: "2026-10-27T00:00:00.000Z",
         confirmationHash: preview.confirmationHash,
         boundHashes: preview.boundHashes,
+        requestId: "confirm-sources-1",
         invalidatedAt: null,
       },
     });
@@ -212,13 +213,15 @@ describe("workflow Skill pins and source checks", () => {
       "/api/v1/audit-events?action=gate.confirmed",
       { as: admin },
     );
+    // The audit event carries the HTTP request's ID, like every other write;
+    // the confirmation keeps the client's request ID for replay.
     expect(await audit.json()).toMatchObject({
       events: [
         {
           actorEmail: engineer.email,
           occurredAt: "2026-10-27T00:00:00.000Z",
           after: { hash: preview.confirmationHash },
-          requestId: "confirm-sources-1",
+          requestId: response.headers.get("x-request-id"),
         },
       ],
     });
