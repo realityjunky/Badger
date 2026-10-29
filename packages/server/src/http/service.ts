@@ -57,6 +57,7 @@ import type { AuthorizedRequest } from "./authorized-request.js";
 import { RequestError } from "./errors.js";
 import { handleSkillsRequest, skillMethods } from "./skills.js";
 import { guardRequest } from "./guard.js";
+import { handleBrowserSignIn } from "./sign-in.js";
 import { buildHealthReport } from "./health.js";
 import { escapeHtml, renderHomePage, renderSignedOutPage } from "./page.js";
 import { replyTo, type Reply } from "./responses.js";
@@ -204,6 +205,7 @@ export function createService(options: ServiceOptions, port: number): Service {
       method: request.method ?? "GET",
       headers: request.headers,
       hostname,
+      remoteAddress: request.socket.remoteAddress ?? null,
     };
     try {
       return await identity.resolve(identityRequest);
@@ -663,6 +665,20 @@ export function createService(options: ServiceOptions, port: number): Service {
       return reply.json(report.status === "ok" ? 200 : 503, report);
     }
 
+    if (
+      await handleBrowserSignIn({
+        config,
+        identity,
+        request,
+        reply,
+        url,
+        path,
+        database,
+        dependencies: serviceDependencies,
+      })
+    )
+      return;
+
     // The dashboard's assets are public: the sign-in page and the app both
     // need them before anyone is identified.
     if (!isApi && isFileRequest(path)) {
@@ -738,7 +754,14 @@ export function createService(options: ServiceOptions, port: number): Service {
       // only the API answers in JSON.
       return isApi
         ? reply.error(401, "unauthenticated", "Sign in to use Badger")
-        : reply.html(401, renderSignedOutPage());
+        : reply.html(
+            401,
+            renderSignedOutPage(
+              config.identity.kind === "oidc"
+                ? `${config.basePath === "/" ? "" : config.basePath}/auth/oidc/login`
+                : undefined,
+            ),
+          );
     }
 
     const principal = identityResult.principal;

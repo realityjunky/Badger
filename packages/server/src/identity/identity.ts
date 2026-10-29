@@ -33,6 +33,8 @@ export interface IdentityRequest {
   method: string;
   headers: Readonly<Record<string, string | string[] | undefined>>;
   hostname: string | null;
+  /** The TCP peer, supplied by the server, never a forwarded header. */
+  remoteAddress: string | null;
 }
 
 export type IdentityResult =
@@ -43,6 +45,22 @@ export type IdentityResult =
 
 export interface IdentityAdapter {
   resolve(request: IdentityRequest): Promise<IdentityResult>;
+  browser?: BrowserSignIn;
+}
+
+export interface BrowserSignIn {
+  begin(): Promise<
+    | { authorizationUrl: string; transactionToken: string }
+    | { kind: "unavailable" }
+  >;
+  complete(
+    transactionToken: string | null,
+    callback: URL,
+  ): Promise<
+    | { kind: "authenticated"; principal: Principal }
+    | { kind: "invalid" }
+    | { kind: "unavailable" }
+  >;
 }
 
 export function firstHeader(

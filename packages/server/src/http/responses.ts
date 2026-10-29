@@ -17,7 +17,7 @@ export interface ResponseBody {
   status: number;
   contentType: string;
   body: string | Uint8Array;
-  headers?: Record<string, string>;
+  headers?: Record<string, string | string[]>;
 }
 
 const BASE_HEADERS: Record<string, string> = {

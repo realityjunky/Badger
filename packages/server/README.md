@@ -4,6 +4,11 @@ The collaborative service's HTTP server. It uses reviewed SQL migrations on
 Postgres or PGlite, and the kernel supplies source inspection and identity.
 Build from the repository root so the kernel is built before the server.
 
+Service deployments support platform sessions, OpenID Connect and trusted
+identity headers from configured proxy peers. See
+[identity adapter configuration](../../docs/identity-adapters.md) for OIDC
+registration, Strict browser sessions, proxy trust, and email binding checks.
+
 ## Sources gate and inbox
 
 The Sources gate (#44) requires a passed source check. A signed-in Engineer

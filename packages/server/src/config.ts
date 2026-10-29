@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { isIP } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isLoopbackHostname, normalizeHostname } from "./network.js";
@@ -51,9 +52,30 @@ export interface PlatformSessionSettings {
   timeoutMs: number;
 }
 
+export interface TrustedHeaderSettings {
+  issuer: string;
+  proxyAddresses: string[];
+  subjectHeader: string;
+  emailHeader: string;
+  nameHeader: string;
+  emailsVerified: boolean;
+}
+
+export interface OidcSettings {
+  issuer: string;
+  clientId: string;
+  clientSecret: string;
+  publicUrl: string;
+  sessionCookie: string;
+  sessionSeconds: number;
+  timeoutSeconds: number;
+}
+
 export type IdentityConfiguration =
   | { kind: "local"; administrator: LocalAdministrator }
   | { kind: "none" }
+  | { kind: "trusted-header"; headers: TrustedHeaderSettings }
+  | { kind: "oidc"; oidc: OidcSettings }
   | { kind: "platform-session"; platform: PlatformSessionSettings };
 
 /**
@@ -362,6 +384,130 @@ function readDatabase(
   };
 }
 
+function readTrustedHeaders(environment: Environment): TrustedHeaderSettings {
+  const issuer = readString(environment, "BADGER_TRUSTED_HEADER_ISSUER");
+  if (issuer === undefined) {
+    throw new ConfigurationError(
+      "Trusted headers require BADGER_TRUSTED_HEADER_ISSUER",
+    );
+  }
+  const proxyAddresses =
+    readList(environment, "BADGER_TRUSTED_PROXY_ADDRESSES") ?? [];
+  if (
+    proxyAddresses.length === 0 ||
+    proxyAddresses.some((address) => isIP(address) === 0)
+  ) {
+    throw new ConfigurationError(
+      "BADGER_TRUSTED_PROXY_ADDRESSES must list exact IP addresses",
+    );
+  }
+  const header = (name: string, fallback: string): string => {
+    const value = (readString(environment, name) ?? fallback).toLowerCase();
+    if (
+      !COOKIE_NAME_PATTERN.test(value) ||
+      ["cookie", "authorization", "host", "origin"].includes(value)
+    ) {
+      throw new ConfigurationError(`${name} must name an identity header`);
+    }
+    return value;
+  };
+  const subjectHeader = header(
+    "BADGER_TRUSTED_HEADER_SUBJECT",
+    "x-badger-subject",
+  );
+  const emailHeader = header("BADGER_TRUSTED_HEADER_EMAIL", "x-badger-email");
+  const nameHeader = header("BADGER_TRUSTED_HEADER_NAME", "x-badger-name");
+  if (new Set([subjectHeader, emailHeader, nameHeader]).size !== 3) {
+    throw new ConfigurationError(
+      "Trusted identity headers must have distinct names",
+    );
+  }
+  return {
+    issuer,
+    proxyAddresses,
+    subjectHeader,
+    emailHeader,
+    nameHeader,
+    emailsVerified:
+      readBoolean(environment, "BADGER_TRUSTED_HEADER_EMAILS_VERIFIED") ??
+      false,
+  };
+}
+
+function readOidc(environment: Environment): OidcSettings {
+  const required = (name: string): string => {
+    const value = readString(environment, name);
+    if (value === undefined)
+      throw new ConfigurationError(`BADGER_IDENTITY=oidc requires ${name}`);
+    return value;
+  };
+  const url = (name: string): string => {
+    const value = required(name);
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new ConfigurationError(`${name} must be an HTTPS URL`);
+    }
+    if (
+      (parsed.protocol !== "https:" &&
+        !(
+          parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname)
+        )) ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      throw new ConfigurationError(
+        `${name} must be an HTTPS URL without credentials, query, or fragment (HTTP is allowed only on loopback)`,
+      );
+    }
+    return value;
+  };
+  const publicUrl = url("BADGER_PUBLIC_URL").replace(/\/+$/u, "");
+  const basePath = readBasePath(environment);
+  if (/[;\x00-\x20\x7f]/u.test(basePath)) {
+    throw new ConfigurationError(
+      "OIDC requires a BADGER_BASE_PATH safe for cookie paths",
+    );
+  }
+  if (
+    new URL(publicUrl).pathname.replace(/\/+$/u, "") !==
+    (basePath === "/" ? "" : basePath)
+  ) {
+    throw new ConfigurationError(
+      "BADGER_PUBLIC_URL path must match BADGER_BASE_PATH",
+    );
+  }
+  const sessionCookie =
+    readString(environment, "BADGER_SESSION_COOKIE") ?? "badger_session";
+  if (
+    !COOKIE_NAME_PATTERN.test(sessionCookie) ||
+    (sessionCookie.startsWith("__Host-") && basePath !== "/") ||
+    sessionCookie === readString(environment, "BADGER_PLATFORM_SESSION_COOKIE")
+  ) {
+    throw new ConfigurationError(
+      "BADGER_SESSION_COOKIE must be a distinct Badger cookie name; __Host- requires the root base path",
+    );
+  }
+  return {
+    issuer: url("BADGER_OIDC_ISSUER"),
+    clientId: required("BADGER_OIDC_CLIENT_ID"),
+    clientSecret: required("BADGER_OIDC_CLIENT_SECRET"),
+    publicUrl,
+    sessionCookie,
+    sessionSeconds: readInteger(environment, "BADGER_SESSION_SECONDS", 28_800, {
+      min: 60,
+      max: 604_800,
+    }),
+    timeoutSeconds: readInteger(environment, "BADGER_OIDC_TIMEOUT_SECONDS", 3, {
+      min: 1,
+      max: 60,
+    }),
+  };
+}
+
 /**
  * The dashboard build beside the server package, whether this file runs from
  * src/ or from dist/src/. A deployment that lays the image out differently
@@ -424,7 +570,7 @@ export function loadConfig(
     (mode === "local" ? "local" : undefined);
   if (identityValue === undefined) {
     throw new ConfigurationError(
-      "Service mode requires BADGER_IDENTITY; this build provides local, none, and platform-session",
+      "Service mode requires BADGER_IDENTITY; this build provides local, none, platform-session, oidc, and trusted-header",
     );
   }
   if (identityValue === "local" && mode !== "local") {
@@ -435,10 +581,12 @@ export function loadConfig(
   if (
     identityValue !== "local" &&
     identityValue !== "none" &&
-    identityValue !== "platform-session"
+    identityValue !== "platform-session" &&
+    identityValue !== "trusted-header" &&
+    identityValue !== "oidc"
   ) {
     throw new ConfigurationError(
-      `Unsupported identity adapter ${identityValue}; this build provides local, none, and platform-session`,
+      `Unsupported identity adapter ${identityValue}; this build provides local, none, platform-session, oidc, and trusted-header`,
     );
   }
   if (identityValue === "none" && mode === "local") {
@@ -446,9 +594,14 @@ export function loadConfig(
       "Local single-user mode always signs in the implicit Administrator",
     );
   }
-  if (identityValue === "platform-session" && mode !== "service") {
+  if (
+    (identityValue === "platform-session" ||
+      identityValue === "trusted-header" ||
+      identityValue === "oidc") &&
+    mode !== "service"
+  ) {
     throw new ConfigurationError(
-      "BADGER_IDENTITY=platform-session is available only in service mode; local single-user mode signs in its implicit Administrator",
+      `BADGER_IDENTITY=${identityValue} is available only in service mode; local single-user mode signs in its implicit Administrator`,
     );
   }
 
@@ -470,6 +623,13 @@ export function loadConfig(
     identity = {
       kind: "platform-session",
       platform: readPlatformSession(environment),
+    };
+  } else if (identityValue === "oidc") {
+    identity = { kind: "oidc", oidc: readOidc(environment) };
+  } else if (identityValue === "trusted-header") {
+    identity = {
+      kind: "trusted-header",
+      headers: readTrustedHeaders(environment),
     };
   } else {
     identity = { kind: "none" };
