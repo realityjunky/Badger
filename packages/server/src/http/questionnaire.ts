@@ -9,6 +9,8 @@ import {
   acknowledgeFact,
 } from "../questionnaire/resolutions.js";
 import { isAdministrator } from "../authorization.js";
+import { readLedger, snapshotRoundLedger } from "../questionnaire/ledger.js";
+import { readDraft, readDrafts, saveDraft } from "../questionnaire/drafts.js";
 import { RequestError, objectInput } from "./errors.js";
 import { readJsonBody } from "./body.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
@@ -53,7 +55,7 @@ import {
 } from "../questionnaire/concerns.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/questionnaire(?:\/(rounds|questions|settings|facts|comments|concerns)(?:\/([^/]+)(?:\/(questions|publish-preview|publish|answer|submit|resolution-preview|resolve|acknowledgement-preview|acknowledge|comments|resolve-preview))?)?)?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/questionnaire(?:\/(rounds|questions|settings|facts|comments|concerns|ledger|inferences|assumptions)(?:\/([^/]+)(?:\/(questions|publish-preview|publish|answer|submit|resolution-preview|resolve|acknowledgement-preview|acknowledge|comments|resolve-preview))?)?)?$/u;
 const RECORD_CONTEXT =
   /^\/api\/v1\/questionnaire\/(questions|concerns)\/([^/]+)$/u;
 
@@ -64,6 +66,9 @@ export function questionnaireMethods(path: string): string | null {
   if (!match) return null;
   const [, , , resource, id, action] = match;
   if (!resource) return "GET, HEAD";
+  if (resource === "ledger" && !id) return "GET, HEAD";
+  if (["inferences", "assumptions"].includes(resource) && !action)
+    return id ? "GET, HEAD, PATCH, DELETE" : "GET, HEAD, POST";
   if (resource === "settings" && !id) return "PUT";
   if (resource === "rounds" && !id) return "POST";
   if (resource === "questions" && id && !action) return "PATCH";
@@ -113,6 +118,7 @@ export async function handleQuestionnaire(
     person,
     dependencies: deps,
     context,
+    url,
   } = input;
   if (path === "/api/v1/questionnaire") {
     const versions = [];
@@ -180,7 +186,10 @@ export async function handleQuestionnaire(
   }
   const result = await database
     .transaction(async (tx) => {
-      if (!reads) {
+      if (
+        !reads ||
+        ["ledger", "inferences", "assumptions"].includes(resource ?? "")
+      ) {
         await tx.query("select id from workflows where id = $1 for update", [
           workflowId,
         ]);
@@ -225,6 +234,51 @@ export async function handleQuestionnaire(
           "A workflow role other than Observer is required to comment",
         );
       const canResolveConcern = compose && access.tokenScopes === undefined;
+      if (resource === "ledger")
+        return {
+          status: 200,
+          value: await readLedger(
+            tx,
+            versionId,
+            person.id,
+            compose,
+            url.searchParams.get("sinceRound"),
+          ),
+        };
+      if (resource === "inferences" || resource === "assumptions") {
+        const kind = resource === "inferences" ? "inference" : "assumption";
+        if (reads)
+          return {
+            status: 200,
+            value: id
+              ? await readDraft(tx, versionId, id, kind)
+              : {
+                  records: (await readDrafts(tx, versionId)).filter(
+                    (r) => r.kind === kind,
+                  ),
+                },
+          };
+        if (!compose)
+          throw new RequestError(
+            403,
+            "Only an Engineer drafts inferences and assumptions",
+          );
+        return {
+          status: method === "POST" ? 201 : 200,
+          value: {
+            record: await saveDraft(
+              tx,
+              deps,
+              context,
+              versionId,
+              kind,
+              id,
+              body,
+              method === "DELETE",
+            ),
+          },
+        };
+      }
       if (resource === "concerns" && !id && !canRaiseConcern)
         throw new RequestError(403, "Only a Field expert raises a concern");
       if (resource === "concerns" && id && !canResolveConcern)
@@ -391,29 +445,43 @@ export async function handleQuestionnaire(
           : "";
         if (resource === "questions") {
           const input = parseResolution(body);
-          return {
-            status: 200,
-            value: commit
-              ? await resolveQuestion(
+          const value = commit
+            ? await resolveQuestion(
+                tx,
+                deps,
+                context,
+                versionId,
+                id,
+                input,
+                hash,
+                requestId,
+              )
+            : {
+                preview: await resolutionPreview(
                   tx,
-                  deps,
-                  context,
                   versionId,
                   id,
+                  person.id,
                   input,
-                  hash,
-                  requestId,
-                )
-              : {
-                  preview: await resolutionPreview(
-                    tx,
-                    versionId,
-                    id,
-                    person.id,
-                    input,
-                  ),
-                },
-          };
+                ),
+              };
+          if (commit && input.kind === "followed-up") {
+            const child = (
+              await tx.query<{ round_id: string }>(
+                `select q.round_id from questions q join question_resolutions r on r.child_question_id = q.id
+              where r.question_id = $1 and r.request_id = $2 and r.actor_id = $3`,
+                [id, requestId, person.id],
+              )
+            ).rows[0];
+            if (child)
+              await snapshotRoundLedger(
+                tx,
+                versionId,
+                child.round_id,
+                person.id,
+              );
+          }
+          return { status: 200, value };
         }
         const input = parseAcknowledgement(body);
         return {
@@ -619,19 +687,16 @@ export async function handleQuestionnaire(
             400,
             "Confirm the reviewed round before publishing",
           );
-        return {
-          status: 200,
-          value: {
-            round: await publishRound(
-              tx,
-              deps,
-              context,
-              versionId,
-              id,
-              textInput(body.confirmationHash, "confirmationHash", 64),
-            ),
-          },
-        };
+        const round = await publishRound(
+          tx,
+          deps,
+          context,
+          versionId,
+          id,
+          textInput(body.confirmationHash, "confirmationHash", 64),
+        );
+        await snapshotRoundLedger(tx, versionId, id, person.id);
+        return { status: 200, value: { round } };
       }
       throw new RequestError(404, "No such questionnaire resource");
     })

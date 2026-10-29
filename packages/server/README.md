@@ -148,6 +148,42 @@ records rather than rely on event replay. Slow consumers disconnect instead
 of accumulating an unbounded buffer. Dashboard polling and focus refresh
 remain available when streaming fails.
 
+## Ledger and readiness
+
+Migration `0014` adds immutable inference/assumption revisions and round
+publication baselines. Using the questionnaire prefix `Q` above:
+
+| Endpoint | Behavior |
+| --- | --- |
+| `GET Q/ledger` | Kernel handoff with all five ledger parts, record references, per-topic blockers, deferred resolutions, and available publication baselines |
+| `GET Q/ledger?sinceRound=:id` | Also returns added, changed, and resolved ledger items since publication of that round |
+| `GET Q/inferences` or `GET Q/assumptions` | Draft records, including retired records |
+| `POST Q/inferences` or `POST Q/assumptions` | Engineer creates a draft with `statement`, `topic`, and optional `questionId` |
+| `GET Q/inferences/:id` or `GET Q/assumptions/:id` | Current record and immutable revisions |
+| `PATCH Q/inferences/:id` or `PATCH Q/assumptions/:id` | Replace draft content, quoting its current `revision` |
+| `DELETE Q/inferences/:id` or `DELETE Q/assumptions/:id` | Retire a draft, quoting only its current `revision` |
+
+All reads require the Workflow version's read permissions. Draft questions
+remain visible only to composing Engineers and Administrators, including in
+round comparisons. A round from another Workflow version returns 404. A draft
+round or a historical round with no publication baseline returns 409 rather
+than inventing history. Publication and automatic follow-up rounds capture
+their baseline atomically; retries keep the original.
+
+The service delegates ledger membership and readiness to the kernel's
+record-based questionnaire handoff. Confirmed user facts must be active and
+acknowledged by every person whose answer they restate. Blockers identify
+unresolved questions, unconfirmed inferences, unresolved assumptions, pending
+acknowledgements, disputes, stale source evidence, and pinned versions not yet
+studied. Deferred questions retain their resolution and reason and do not block.
+
+Agents may draft inferences/assumptions using an Engineer-scoped token, but
+cannot provide a confirmation flag. Only a linked, same-topic question's
+acknowledged facts resolve a draft. The link binds the question revision, and
+resolution previews bind the draft revisions. New meaning cannot borrow an
+earlier sign-off. See ADR 0021 for the boundary between questionnaire readiness
+and dossier validation and approval.
+
 ## Answer resolutions and acknowledgements
 
 Migration `0012` adds immutable resolutions, formal facts, answer-revision

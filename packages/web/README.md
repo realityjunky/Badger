@@ -47,6 +47,12 @@ them into `dist/`, so the server image carries the build and none of them.
 - One per-person event stream refreshes inboxes and open questionnaire and
   workflow records. Reconnects reload a current snapshot; polling every ten
   seconds and focus refresh recover when streaming is unavailable.
+- Questionnaire's **Ledger and readiness** view shows all five ledger parts,
+  expandable per-topic blockers, linked record histories, deferred resolutions,
+  and changes since a chosen published round. Engineers create, revise, link,
+  and retire inference and assumption drafts. The service's kernel handoff
+  supplies all membership and readiness decisions. The view and comparison
+  round have URLs and retain the deployment base path.
 - Every question has an ordered comment thread with the author's edit history.
   Current workflow roles control posting and editing; Observers read threads.
   Field experts raise concerns from the questionnaire. Engineers open each

@@ -673,6 +673,9 @@ body {
 }
 
 /* The three-pane registry layout */
+.ledger-open .main-pane {
+  grid-column: 2 / -1;
+}
 
 .three-pane {
   display: grid;
@@ -1085,6 +1088,10 @@ body {
 /* The panes stack below 1180px */
 
 @media (max-width: 1179px) {
+  .ledger-open .main-pane {
+    grid-column: auto;
+  }
+
   .three-pane {
     grid-template-columns: minmax(0, 1fr);
   }
