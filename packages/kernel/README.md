@@ -29,6 +29,8 @@ The kernel package includes:
   source inventory ownership;
 - generated Badger plan, check, hook-guard, and WorkflowRuntime control-plane
   scripts;
+- generated entry and Node instructions that prefer Badger MCP Run tools when
+  available and retain the script adapter for hosts without MCP;
 - current-hash evaluation, WorkflowRuntime certification, integrity-checked review approval, publication, and non-mutating distribution preview;
 - private Skill runtime loading, validation, content identity, and immutable snapshots;
 - deterministic and adaptive Engine loop behavior with manual and standalone Run façades;
@@ -99,6 +101,17 @@ available original still detects source drift, and publication approval keeps
 its original-source checks. See `docs/adr/0014-bundle-source-skills.md`.
 
 ## Run persistence
+
+Generated entry and Node Skills include a Runtime Access section for both
+host modes. When Badger MCP Run tools are available, the Agent uses `status`,
+`start`, `next`, `submit`, and `recover` from the operator profile. It follows
+the returned continuation and local Node Skill path. Decision, manual-stop,
+and finalization gates return a dashboard link for a signed-in person; the
+MCP delivers the person's answer and the service's attestation. Hosts without
+MCP use the bundled script commands, with local decisions submitted only
+after the person confirms. An MCP failure follows the Run's findings and
+recovery path. Evaluation certifies the shared runtime and scripts; live MCP
+transport and service integration belong to the Badger MCP delivery.
 
 Run files are stored through protected, bounded, atomic adapters. Missing Run
 state returns `null`; missing trajectory, pending-action, and checkpoint files

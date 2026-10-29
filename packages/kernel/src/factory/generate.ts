@@ -68,6 +68,41 @@ export interface GeneratedPackage {
   sourceEvidence?: UpgradeMigrationManifest;
 }
 
+function runtimeAccessMarkdown(): string {
+  return `## Runtime Access
+
+Prefer the Badger MCP Run tools when they are available in the host's operator profile.
+Both modes call WorkflowRuntime, which remains the only runtime authority.
+
+### MCP mode
+
+- Use \`status\` to inspect the current Run before acting.
+- Use \`start\` to start the published workflow version only when no Run has started.
+- Use \`next\` to read the continuation, current Node, local Skill path, required Completion evidence, outputs, and pending action. Load only that Node's Skill.
+- Use \`submit\` to pass the requested Node's evidence, outputs, and declared routing to WorkflowRuntime.
+- Use \`recover\` when the Run needs recovery, then read \`next\` again.
+
+For decision, manual-stop, and finalization gates, show the returned dashboard link
+and wait for the signed-in person to answer there. The Agent never supplies a reviewer
+or answers a gate. Call \`next\` or \`status\` after the person answers; the service
+provides the attestation and the MCP delivers the answer to WorkflowRuntime.
+
+Use the Run tools exposed by the connected Badger MCP and keep the same Run identity.
+An MCP error or blocked continuation requires following its findings and recovery;
+do not start a separate script Run to bypass it.
+
+### Script adapter mode
+
+For hosts without MCP Run tools, use the bundled script adapter from the package root:
+
+- Inspect the Run with \`node scripts/workflow-state.mjs status\`.
+- Start only when status is \`not-started\` with \`node scripts/workflow-state.mjs init\`.
+- Read the current action with \`node scripts/workflow-state.mjs next\`.
+- Submit Node evidence with \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
+- Resume with \`node scripts/workflow-state.mjs resume\` or recover with \`node scripts/workflow-state.mjs recover\`.
+`;
+}
+
 function entryMarkdown(proposal: FactoryProposal): string {
   const descriptionGoal = proposal.goal.replace(/[.!?]+$/u, "");
   const executableNodeIds =
@@ -178,6 +213,8 @@ description: ${JSON.stringify(`Run the ${proposal.name} workflow: ${descriptionG
 <!-- AUTHORING PENDING -->
 **Not yet authored.** The workflow-entry lane must add the semantic Decision Core before this scaffold can be assembled. Until then, use the persisted WorkflowRuntime continuation for routing and do not treat this package as authored.
 
+${runtimeAccessMarkdown()}
+
 ## Badger Control Plane
 
 - Inspect the normalized workflow contract with \`node scripts/badger-plan.mjs\`.
@@ -253,7 +290,7 @@ the same locked transition journal.
 
 ${finalization}
 
-Use \`node scripts/workflow-state.mjs preview --json\` to inspect the bounded,
+In script adapter mode, use \`node scripts/workflow-state.mjs preview --json\` to inspect the bounded,
 content-addressed plan. Finalization writes, removes, and moves are protected by
 approved roots, exact preconditions, recoverable staging or backups, and the
 existing \`submit\`/\`recover\` runtime seam. Every local effect requires a
@@ -277,6 +314,8 @@ ${nodes}
 
 ## Runtime Commands
 
+The commands in this section apply only to script adapter mode on hosts without MCP Run tools.
+
 - Check the authoritative run: \`node scripts/workflow-state.mjs status\`.
 - Start a run only when status is \`not-started\`: \`node scripts/workflow-state.mjs init\`.
 - Resume a persisted Run: \`node scripts/workflow-state.mjs resume\`.
@@ -288,7 +327,7 @@ ${nodes}
 - Submit characterized Node evidence: \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
 - Supply physical updates under \`artifacts\` and explicit accepted version ids under \`artifactVersions\` in the record JSON.
 - Supply a bounded verification proposal under \`verification\`, or exact receipt ids under \`verificationReceiptIds\`; the runtime owns receipt identity and issue time.
-- Submit a declared human decision: \`node scripts/workflow-state.mjs decide <node> '<json response>'\`.
+- Submit a declared human decision only after the person confirms: \`node scripts/workflow-state.mjs decide <node> '<json response>'\`.
 - For branched workflows, include declared route values in the submission's top-level \`routing\` object; summaries and evidence do not select edges.
 - Verify the generated protocol and runtime: \`node scripts/workflow-guard.mjs verify\`.
 - Verify the current Node before entry: \`node scripts/workflow-guard.mjs entry <node>\`.
@@ -355,9 +394,9 @@ function nodeMarkdown(workflow: string, node: NodeProtocol): string {
         .map((choice) => `- \`${choice.id}\`: ${choice.label}`)
         .join(
           "\n",
-        )}\n\n${decisionScope}\n\nSubmit the typed response through \`scripts/workflow-state.mjs decide\`; WorkflowRuntime validates the choice, inputs, rationale, reviewer attestation, and immutable scope references.\n`
+        )}\n\n${decisionScope}\n\nIn MCP mode, follow the dashboard gate described under Runtime Access.\n\nIn script adapter mode, after the person confirms the declared choice, submit the typed response through \`scripts/workflow-state.mjs decide\`; WorkflowRuntime validates the choice, inputs, rationale, reviewer attestation, and immutable scope references.\n`
     : "";
-  return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n## Guidance\n\n<!-- AUTHORING PENDING -->\n**Not yet authored.** The skill-core lane must add prerequisites, domain steps, completion reasoning, red flags, and recovery guidance before this scaffold can be assembled.\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}\n${verifications ? `\n## Verification\n\n${verifications}\n\nSubmit bounded receipt evidence or exact receipt references through WorkflowRuntime; receipt contents and issue time are runtime-owned.\n` : ""}\n${decision}\nRecord completion evidence before advancing to the next Node.\n`;
+  return `---\nname: ${nodeSkillName(workflow, node.id)}\ndescription: ${JSON.stringify(`Execute the ${node.label} Node of ${workflow}.`)}\n---\n\n# ${node.label}\n\nResponsibility: ${node.responsibility}\n\n${runtimeAccessMarkdown()}\n## Guidance\n\n<!-- AUTHORING PENDING -->\n**Not yet authored.** The skill-core lane must add prerequisites, domain steps, completion reasoning, red flags, and recovery guidance before this scaffold can be assembled.\n\n## Required bindings\n\n${required}\n\n## Evidence\n\n${schemas}\n${verifications ? `\n## Verification\n\n${verifications}\n\nSubmit bounded receipt evidence or exact receipt references through WorkflowRuntime; receipt contents and issue time are runtime-owned.\n` : ""}\n${decision}\nRecord completion evidence before advancing to the next Node.\n`;
 }
 
 async function runtimeAsset(name: string): Promise<string> {

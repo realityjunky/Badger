@@ -36,6 +36,13 @@ The evaluation record must bind the exact package tree and executable
 `WorkflowProtocol`. A later change requires a new evaluation even when the
 directory name is unchanged.
 
+Generated entry and Node Skills describe both runtime modes: Badger MCP Run
+tools are preferred when available, with the bundled script adapter for hosts
+without MCP. Assembly preserves that Runtime Access guidance in each Skill;
+evaluation binds it to the package hash. Certification exercises the shared
+WorkflowRuntime and the generated scripts. It does not connect to a live MCP
+server or prove its transport, authorization, reporting, or dashboard gates.
+
 ## Approval and publication
 
 `badger review <name> --json` reports authoring, runtime, and publication

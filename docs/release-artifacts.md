@@ -83,6 +83,16 @@ Assembly requires the authored `SKILL.md`, active Node guidance,
 `reference/skill-review.md`. Missing, duplicated, placeholder, stale, or
 unexpected executable content blocks readiness.
 
+Entry and Node Skills carry deterministic Runtime Access guidance (#34):
+prefer the Badger MCP Run tools (`start`, `next`, `submit`, `status`, and
+`recover`) when available and use the script adapter on hosts without MCP.
+MCP gate answers stay with signed-in people in the dashboard. The workflow-entry
+and skill-core lanes preserve this section while authoring their content leaves.
+Generation tests cover both modes, and evaluation verifies that assembly
+preserves the guidance and that edits invalidate the assembled package hash.
+Runtime certification covers the shared WorkflowRuntime and generated scripts;
+live MCP transport and service behavior are checked with the MCP implementation.
+
 ## Ownership
 
 | Responsibility                                              | Current authority                                           |
@@ -128,6 +138,7 @@ Focused authoring and artifact checks:
 
 ```bash
 npm test -w packages/kernel -- test/authoring-plan.test.ts test/authoring-lifecycle.test.ts test/release-artifacts.test.ts test/workspace-layout.test.ts
+npm test -w packages/kernel -- test/package-runtime-modes.test.ts
 ```
 
 If a release changes the protocol, generator, generated control-plane names,
