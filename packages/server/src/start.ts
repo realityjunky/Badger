@@ -45,14 +45,17 @@ export async function startHttpServer(
       : options.config.port;
   // The handler needs the bound port, which BADGER_PORT=0 leaves to the OS.
   // No request is read before this line runs.
-  server.on("request", createService(options, port).handler);
+  const service = createService(options, port);
+  server.on("request", service.handler);
 
   return {
     url: `http://${urlHost(options.config.host)}:${port}`,
     port,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
+    close: () => {
+      service.close();
+      return new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
-      }),
+      });
+    },
   };
 }

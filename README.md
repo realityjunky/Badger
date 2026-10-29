@@ -173,9 +173,12 @@ the future frame with `PATCH /workflows/:id`, and quote the workflow's
 `revision` in both edits and `POST /workflows/:id/versions`. Workflow roles use
 `POST /api/v1/bindings` with `scopeType: "workflow"` and the workflow ID as
 `scopeId`; removal quotes the binding's revision. Every write is audited.
-Sources and Source study advance through their records and human gates.
-Later features add questionnaire and subsequent gate records; clients cannot
-set stage states directly.
+Sources and Source study advance through their records and human gates;
+clients cannot set stage states directly. The Questionnaire page stores
+free-text questions, reviewed publication rounds, private answer drafts,
+and submitted revisions (#46). Assigned people answer from My work; inboxes
+and open records update through a per-person event stream with polling as
+the fallback. Resolutions and later authoring gates follow.
 
 ## Adding a workspace package
 

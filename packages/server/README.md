@@ -35,7 +35,8 @@ mark their own items read or unread; confirming the gate sets its items to
 done automatically. Invitations receive items before first sign-in, resolved
 through their role binding. Inbox reads recheck current workflow visibility.
 My work shows the items and deep links; the top bar shows the unread count.
-The dashboard polls every ten seconds and refreshes on focus and navigation.
+The dashboard receives per-person events, polls every ten seconds as a
+fallback, and refreshes on focus and navigation.
 
 Errors use `invalid`, `denied`, `rejected` with stable finding codes and
 required actions, `conflict`, or `unavailable`. A source check that has not
@@ -86,6 +87,63 @@ confirmed Sources and current evidence: rejected previews report
 cite it; the last completion, which opens Questionnaire, checks every active
 record, including one that cites only versions no longer pinned.
 See [ADR 0019](../../docs/adr/0019-source-study-records-and-completion.md).
+
+## Questionnaire rounds and free-text answers
+
+Migration `0011` adds one questionnaire per workflow version. Let `Q` be
+`V/questionnaire`, using the version prefix above. Every mutation runs under
+workflow and version locks, checks current roles, and records its actor and
+channel in Activity. Existing shipped migrations are unchanged.
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /questionnaire` | List visible workflow versions for the questionnaire selector. |
+| `GET /questionnaire/questions/:id` | Resolve an authorized question deep link to its workflow version. |
+| `GET Q` | Read rounds, questions and histories, submitted answers, the caller's private drafts, assignee choices, pinned sources, and capabilities. |
+| `POST Q/rounds` | Create a draft round with `{title}`. |
+| `POST Q/rounds/:id/questions` | Draft a free-text question with `text`, `topic`, `targets`, `rationale`, `evidence`, `assignees`, and `priority` (0–100, higher first). |
+| `PATCH Q/questions/:id` | Quote `revision` and replace the question content, retaining the old revision. |
+| `GET Q/rounds/:id/publish-preview` | Review the ordered questions, recipients, and confirmation hash. |
+| `POST Q/rounds/:id/publish` | A signed-in Engineer sends `{confirmed: true, confirmationHash}`. Publish and notify the whole round together. A retry of the published hash is harmless. |
+| `PUT Q/settings` | Quote `revision` (0 initially) and `roundSizeLimit`: a positive integer, or `null` for no limit. Applies across this workflow's versions. |
+| `PUT Q/questions/:id/answer` | Autosave `{revision, questionRevision, text}`, with revision 0 for a first draft. |
+| `POST Q/questions/:id/submit` | Submit the saved answer with `{revision, questionRevision}`. |
+| `POST Q/rounds/:id/submit` | Submit all outstanding assigned answers as `{answers: [{questionId, revision, questionRevision}, ...]}` atomically. |
+| `GET /me/events` | Receive `ready`, `change`, and heartbeat server-sent events for the signed-in person. |
+
+Topics use the kernel's dossier vocabulary plus `scope`. Targets name a
+workflow, Node, Skill, or interface. An evidence link has `skillId`,
+`versionHash`, a relative `path`, and positive `startLine`/`endLine`; the
+file must exist in a pinned version. Assignees are
+`{kind: "person", personId}` or `{kind: "role", role: "Field expert"}` /
+`"Workflow owner"`. Role selectors include pending invitations and resolve
+again when publishing. Rounds have no size limit by default.
+
+Only Engineers and Administrators compose questions. Draft questions are
+hidden from other roles. Every assignee keeps their own answer revisions in
+any language, and a draft remains private until submitted. Submitted text
+stays visible while a new draft is written. Each person's assigned inbox
+item closes on submission; the question becomes answered once all current
+recipients have submitted for its current revision. Revising a published
+question reopens it, retains earlier answers, and notifies its assignees.
+Answers refuse stale question or answer revisions and refuse a question
+whose Engineer resolution has locked it. Resolution actions belong to #48.
+
+An `engineer` token may draft rounds and unpublished questions, and an
+`expert` token may save and submit its assigned answers. Such answers require
+`X-Badger-Agent-Host`, retain the `mcp` channel and host, and never trust a
+client-supplied actor or channel. Tokens cannot publish rounds or revise
+published questions. People and tokens still need the corresponding current
+workflow role.
+
+The event stream sends content-free invalidations of visible versions and
+the person's inbox. It checks shared database revisions every second, so
+worker and other server processes are observed. Current Badger visibility
+is rechecked each time, identity every 15 seconds, and connections turn over
+after 30 seconds. Every reconnect sends `ready` so clients reload current
+records rather than rely on event replay. Slow consumers disconnect instead
+of accumulating an unbounded buffer. Dashboard polling and focus refresh
+remain available when streaming fails.
 
 ## Personal access tokens
 

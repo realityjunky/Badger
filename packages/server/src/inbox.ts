@@ -7,7 +7,7 @@ import { toIsoString } from "./util.js";
 import type { WorkflowRole } from "./workflow-access.js";
 
 export type InboxState = "unread" | "read" | "done";
-export type InboxKind = "gate-ready" | "gate-invalidated";
+export type InboxKind = "gate-ready" | "gate-invalidated" | "question-assigned";
 export interface InboxItem {
   id: string;
   workflowVersionId: string;
@@ -20,6 +20,8 @@ export interface InboxItem {
   href: string;
   createdAt: string;
   updatedAt: string;
+  questionId: string | null;
+  questionText: string | null;
 }
 
 interface InboxRow {
@@ -34,17 +36,38 @@ interface InboxRow {
   revision: number;
   created_at: Date | string;
   updated_at: Date | string;
+  question_id: string | null;
+  question_text: string | null;
 }
 
 const COLUMNS = `i.id, i.workflow_version_id, v.workflow_id, v.name as workflow_name,
-  v.number as version_number, i.gate, i.kind, i.state, i.revision, i.created_at, i.updated_at`;
+  v.number as version_number, i.gate, i.kind, i.state, i.revision, i.created_at, i.updated_at, i.question_id, qr.content->>'text' as question_text`;
 const FROM = `inbox_items i join workflow_versions v on v.id = i.workflow_version_id
-  join workflows w on w.id = v.workflow_id`;
+  join workflows w on w.id = v.workflow_id left join questions q on q.id = i.question_id
+  left join question_revisions qr on qr.question_id = q.id and qr.revision = q.revision`;
 // The item belongs to the person and is still within their current read roles.
 const VISIBLE = `(i.person_id = $1 or exists (select 1 from role_bindings recipient
   where recipient.id = i.binding_id and recipient.person_id = $1))
   and ($2::boolean or w.group_id = any($3::text[])
   or exists (select 1 from role_bindings b where b.workflow_id = w.id and b.person_id = $1))`;
+
+/** A monotone revision sum also detects changes outside the displayed page. */
+export async function inboxFingerprint(
+  database: Queryable,
+  access: Access,
+  person: Person,
+) {
+  const visibility = await visibleGroups(database, access, person);
+  const result = await database.query<{ count: string; revision: string }>(
+    `select count(*)::text as count, coalesce(sum(i.revision), 0)::text as revision from ${FROM} where ${VISIBLE}`,
+    [
+      person.id,
+      visibility.everything,
+      visibility.everything ? [] : [...visibility.groupIds],
+    ],
+  );
+  return result.rows[0];
+}
 
 function toItem(row: InboxRow): InboxItem {
   return {
@@ -54,9 +77,14 @@ function toItem(row: InboxRow): InboxItem {
     versionNumber: row.version_number,
     gate: row.gate,
     kind: row.kind,
+    questionId: row.question_id,
+    questionText: row.question_text,
     state: row.state,
     revision: row.revision,
-    href: `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#${encodeURIComponent(row.gate)}`,
+    href:
+      row.question_id === null
+        ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#${encodeURIComponent(row.gate)}`
+        : `/questionnaire/questions/${encodeURIComponent(row.question_id)}`,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };
@@ -153,9 +181,13 @@ export async function listInbox(
   const counts = await database.query<{
     unread_count: number;
     pending_count: number;
+    question_count: number;
+    gate_count: number;
   }>(
     `select count(*) filter (where i.state = 'unread')::int as unread_count,
-            count(distinct (i.workflow_version_id, i.gate)) filter (where i.state <> 'done')::int as pending_count from ${FROM} where ${VISIBLE}`,
+            count(distinct (i.workflow_version_id, i.gate, i.question_id)) filter (where i.state <> 'done')::int as pending_count,
+            count(distinct i.question_id) filter (where i.state <> 'done')::int as question_count,
+            count(distinct (i.workflow_version_id, i.gate)) filter (where i.state <> 'done' and i.question_id is null)::int as gate_count from ${FROM} where ${VISIBLE}`,
     params,
   );
   const older =
@@ -175,6 +207,8 @@ export async function listInbox(
     items,
     unreadCount: counts.rows[0]!.unread_count,
     pendingCount: counts.rows[0]!.pending_count,
+    pendingQuestionCount: counts.rows[0]!.question_count,
+    pendingGateCount: counts.rows[0]!.gate_count,
     nextCursor:
       rows.rows.length > limit && last !== undefined
         ? Buffer.from(

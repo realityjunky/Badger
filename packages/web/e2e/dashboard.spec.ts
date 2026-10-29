@@ -138,14 +138,14 @@ test("switching language keeps the page and form state, and survives reload", as
   page,
 }) => {
   await page.goto("/questionnaire/questions/q-1");
-  await page.getByTestId("answer-box").fill("The sample is collected at 4°C.");
+  await page.getByTestId("question-search").fill("sample handling");
 
   await page.getByTestId("language-switch").click();
   await page.getByRole("menuitem", { name: "中文" }).click();
 
   await expect(page).toHaveURL(/\/questionnaire\/questions\/q-1$/u);
-  await expect(page.getByTestId("answer-box")).toHaveValue(
-    "The sample is collected at 4°C.",
+  await expect(page.getByTestId("question-search")).toHaveValue(
+    "sample handling",
   );
   await expect(
     page.getByRole("heading", { name: "问卷", level: 1 }),
@@ -357,9 +357,62 @@ test("the Activity page filters recorded actions", async ({ page }) => {
 for (const theme of ["light", "dark"] as const) {
   test(`visual check in ${theme}`, async ({ page }) => {
     await setPreferences(page, { theme, language: "en", fontScale: 100 });
-    await page.goto("/questionnaire/questions/q-1");
+    const target = await page.evaluate(async () => {
+      const catalog = (await (await fetch("/api/v1/workflows")).json()) as {
+        workflows: {
+          id: string;
+          name: string;
+          latestVersion: { id: string } | null;
+        }[];
+      };
+      const existing = catalog.workflows.find(
+        (workflow) => workflow.name === "visual-questionnaire",
+      );
+      if (existing?.latestVersion)
+        return {
+          workflowId: existing.id,
+          versionId: existing.latestVersion.id,
+        };
+      const grouped = await fetch("/api/v1/groups", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Visual questionnaire checks" }),
+      });
+      if (!grouped.ok)
+        throw new Error(
+          `Creating the visual fixture group answered ${grouped.status}`,
+        );
+      const { group } = await grouped.json();
+      const created = await fetch("/api/v1/workflows", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          groupId: group.id,
+          name: "visual-questionnaire",
+          goal: "Check the questionnaire layout.",
+          intent: "new-skill",
+          locale: "en",
+        }),
+      });
+      if (!created.ok)
+        throw new Error(
+          `Creating the visual fixture workflow answered ${created.status}`,
+        );
+      const { workflow, version } = await created.json();
+      return {
+        workflowId: workflow.id as string,
+        versionId: version.id as string,
+      };
+    });
+    await page.goto(
+      `/questionnaire?workflow=${encodeURIComponent(target.workflowId)}&version=${encodeURIComponent(target.versionId)}`,
+    );
     await expect(page.getByTestId("page-questionnaire")).toBeVisible();
-    await page.waitForLoadState("networkidle");
+    await expect(page.getByText("Composer", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Live updates connected", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
 
     await expect(page).toHaveScreenshot(`dashboard-${theme}.png`, {
       fullPage: true,

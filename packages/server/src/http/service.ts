@@ -65,6 +65,8 @@ import { handleTokens, tokenMethods } from "./tokens.js";
 import { gateMethods, handleGate } from "./gates.js";
 import { handleInbox, inboxMethods } from "./inbox.js";
 import { handleSourceStudy, sourceStudyMethods } from "./source-study.js";
+import { handleQuestionnaire, questionnaireMethods } from "./questionnaire.js";
+import { handleEvents } from "./events.js";
 import { tokenRequestAllowed } from "./token-access.js";
 import { mayManageRoleScope } from "../workflow-access.js";
 import {
@@ -91,6 +93,7 @@ export interface ServiceOptions {
 
 export interface Service {
   handler: (request: IncomingMessage, response: ServerResponse) => void;
+  close(): void;
 }
 
 function resolveRequestId(headerValue: string | string[] | undefined): string {
@@ -153,7 +156,8 @@ function allowedMethods(path: string): string {
     tokenMethods(path) ??
     gateMethods(path) ??
     sourceStudyMethods(path) ??
-    inboxMethods(path);
+    inboxMethods(path) ??
+    questionnaireMethods(path);
   if (featureMethods !== null) return featureMethods;
   if (path === `${API}/me/preferences`) {
     return "GET, HEAD, PUT";
@@ -183,6 +187,7 @@ function isWriteRoute(method: string, path: string): boolean {
 
 /** Serves on `port`, the one the server actually bound. */
 export function createService(options: ServiceOptions, port: number): Service {
+  const stopping = new AbortController();
   const { config, database, clock, ids, identity } = options;
   const serviceDependencies = { clock, ids };
   const blobs = filesystemBlobStore(config.storage.blobDirectory);
@@ -768,11 +773,27 @@ export function createService(options: ServiceOptions, port: number): Service {
       blobs,
     };
     try {
+      if (path === `${API}/me/events`)
+        return await handleEvents(
+          authorized,
+          principal,
+          stopping.signal,
+          async () => {
+            const current = await identify(request, guard.hostname);
+            return (
+              current.kind === "authenticated" &&
+              current.principal.issuer === person.issuer &&
+              current.principal.subject === person.subject
+            );
+          },
+        );
       if (tokenMethods(path) !== null) return await handleTokens(authorized);
       if (gateMethods(path) !== null) return await handleGate(authorized);
       if (inboxMethods(path) !== null) return await handleInbox(authorized);
       if (sourceStudyMethods(path) !== null)
         return await handleSourceStudy(authorized);
+      if (questionnaireMethods(path) !== null)
+        return await handleQuestionnaire(authorized);
       if (workflowMethods(path) !== null)
         return await handleWorkflows(authorized);
       if (path === `${API}/skills` || path.startsWith(`${API}/skills/`)) {
@@ -907,6 +928,7 @@ export function createService(options: ServiceOptions, port: number): Service {
   }
 
   return {
+    close: () => stopping.abort(),
     handler: (request, response) => {
       const started = performance.now();
       const requestId = resolveRequestId(request.headers["x-request-id"]);

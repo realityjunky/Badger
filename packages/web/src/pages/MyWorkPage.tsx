@@ -60,8 +60,10 @@ export function MyWorkPage() {
               {metric.testId === "metric-inbox"
                 ? page.unreadCount
                 : metric.testId === "metric-gates"
-                  ? page.pendingCount
-                  : 0}
+                  ? page.pendingGateCount
+                  : metric.testId === "metric-questions"
+                    ? page.pendingQuestionCount
+                    : 0}
             </span>
             <span className="summary-label">{t(metric.label)}</span>
           </Link>
