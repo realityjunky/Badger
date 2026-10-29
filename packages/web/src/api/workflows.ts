@@ -95,6 +95,7 @@ export interface WorkflowCapabilities {
   manageRoles: boolean;
   createVersion: boolean;
   managePins: boolean;
+  confirmSources: boolean;
 }
 export const WORKFLOW_ROLES = [
   "Workflow owner",
@@ -135,6 +136,23 @@ export interface WorkflowVersionDetail {
   pins: WorkflowSkillPin[];
   sourceCheck: WorkflowSourceCheck | null;
   jobs: WorkflowJob[];
+  sourceGate: GateConfirmation | null;
+}
+export interface GatePreview {
+  gate: string;
+  workflowVersionId: string;
+  boundHashes: Record<string, string>;
+  records: { type: string; id: string; label: string; hash: string }[];
+  effects: WorkflowStage[];
+  confirmationHash: string;
+}
+export interface GateConfirmation {
+  id: string;
+  actorId: string;
+  confirmedAt: string;
+  confirmationHash: string;
+  boundHashes: Record<string, string>;
+  invalidatedAt: string | null;
 }
 export type ReadResult<T> =
   { kind: "ok"; value: T } | { kind: "denied" | "missing" | "failed" };
@@ -288,6 +306,32 @@ export function unpinSkillVersion(
     "DELETE",
     `/workflows/${encodeURIComponent(workflowId)}/versions/${encodeURIComponent(versionId)}/pins/${encodeURIComponent(pin.skillId)}`,
     { revision: pin.revision },
+  );
+}
+export function previewSources(
+  basePath: string,
+  workflowId: string,
+  versionId: string,
+) {
+  return write<{ preview: GatePreview }>(
+    basePath,
+    "POST",
+    `/workflows/${encodeURIComponent(workflowId)}/versions/${encodeURIComponent(versionId)}/gates/sources/preview`,
+    {},
+  );
+}
+export function commitSources(
+  basePath: string,
+  workflowId: string,
+  versionId: string,
+  confirmationHash: string,
+  requestId: string,
+) {
+  return write<{ confirmation: GateConfirmation }>(
+    basePath,
+    "POST",
+    `/workflows/${encodeURIComponent(workflowId)}/versions/${encodeURIComponent(versionId)}/gates/sources/commit`,
+    { confirmationHash, requestId },
   );
 }
 export function assignWorkflowRole(

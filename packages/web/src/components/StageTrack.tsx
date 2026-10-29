@@ -21,7 +21,7 @@ const PILL_MESSAGE: Readonly<Record<StageState, MessageId>> = {
   invalidated: "status.invalidated",
 };
 
-const STAGES: Readonly<Record<StageId, MessageId>> = {
+export const STAGE_LABELS: Readonly<Record<StageId, MessageId>> = {
   sources: "stage.sources",
   "source-study": "stage.sourceStudy",
   questionnaire: "stage.questionnaire",
@@ -52,7 +52,7 @@ export function StageTrack({ stages }: { stages: readonly WorkflowStage[] }) {
             <span className="stage-number" aria-hidden="true">
               {index + 1}
             </span>
-            <span className="stage-name">{t(STAGES[id])}</span>
+            <span className="stage-name">{t(STAGE_LABELS[id])}</span>
             <StatusPill tone={PILL_TONE[state]}>
               {t(PILL_MESSAGE[state])}
             </StatusPill>

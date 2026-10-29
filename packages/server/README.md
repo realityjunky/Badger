@@ -4,6 +4,44 @@ The collaborative service's HTTP server. It uses reviewed SQL migrations on
 Postgres or PGlite, and the kernel supplies source inspection and identity.
 Build from the repository root so the kernel is built before the server.
 
+## Sources gate and inbox
+
+The Sources gate (#44) requires a passed source check. A signed-in Engineer
+or Administrator previews the source set, reviews its records, hashes, and
+effects, then commits the returned confirmation hash. Tokens may read gate
+history and their person's inbox, but cannot preview or commit sign-off.
+
+All paths below follow the configured base path and `/api/v1`. Let `V` be
+`/workflows/:workflowId/versions/:versionId`.
+
+| Method and path                     | Behavior                                                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `POST V/gates/sources/preview`      | Send `{}`; receive `{preview}` containing records, bound hashes, effects, and `confirmationHash`.      |
+| `POST V/gates/sources/commit`       | Send `{confirmationHash, requestId}`; receive the recorded `{confirmation}`.                           |
+| `GET V/gates/sources`               | Read the latest confirmation and its history, including invalidation and supersession.                 |
+| `GET /me/inbox?limit=50&cursor=...` | Read the person's items, aggregate unread and pending counts, and an opaque `nextCursor`.              |
+| `PATCH /me/inbox/:id`               | Send `{revision, state: "read"}` or `"unread"`; stale revisions return the current item as a conflict. |
+
+The client request ID is 1 to 100 letters, digits, dots, underscores, or
+hyphens, unique per person across gate commits. Repeating the same request
+returns its original response, including after invalidation; reusing its ID
+for a different hash or target returns `conflict`. Pin changes invalidate
+confirmation atomically with the pin write and notify Engineers and the
+Workflow owner. A replacement confirmation links the earlier record to its
+successor. Activity records point to the confirmation and its bound hash.
+
+Passed source checks create unread inbox items for Engineers. People may
+mark their own items read or unread; confirming the gate sets its items to
+done automatically. Invitations receive items before first sign-in, resolved
+through their role binding. Inbox reads recheck current workflow visibility.
+My work shows the items and deep links; the top bar shows the unread count.
+The dashboard polls every ten seconds and refreshes on focus and navigation.
+
+Errors use `invalid`, `denied`, `rejected` with stable finding codes and
+required actions, `conflict`, or `unavailable`. A source check that has not
+passed yields `SOURCE_CHECK_NOT_PASSED`; a stale confirmation hash yields a
+conflict. These routes use migration `0009`; earlier shipped SQL is unchanged.
+
 ## Personal access tokens
 
 People create and revoke their Agents' and CLI credentials at

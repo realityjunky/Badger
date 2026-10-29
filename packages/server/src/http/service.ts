@@ -62,6 +62,8 @@ import { escapeHtml, renderHomePage, renderSignedOutPage } from "./page.js";
 import { replyTo, type Reply } from "./responses.js";
 import { handleWorkflows, workflowMethods } from "./workflows.js";
 import { handleTokens, tokenMethods } from "./tokens.js";
+import { gateMethods, handleGate } from "./gates.js";
+import { handleInbox, inboxMethods } from "./inbox.js";
 import { tokenRequestAllowed } from "./token-access.js";
 import { mayManageRoleScope } from "../workflow-access.js";
 import {
@@ -145,7 +147,11 @@ function matchedId(pattern: RegExp, path: string): string | null {
 /** The methods a path serves, for the Allow header and the write check. */
 function allowedMethods(path: string): string {
   const featureMethods =
-    skillMethods(path) ?? workflowMethods(path) ?? tokenMethods(path);
+    skillMethods(path) ??
+    workflowMethods(path) ??
+    tokenMethods(path) ??
+    gateMethods(path) ??
+    inboxMethods(path);
   if (featureMethods !== null) return featureMethods;
   if (path === `${API}/me/preferences`) {
     return "GET, HEAD, PUT";
@@ -761,6 +767,8 @@ export function createService(options: ServiceOptions, port: number): Service {
     };
     try {
       if (tokenMethods(path) !== null) return await handleTokens(authorized);
+      if (gateMethods(path) !== null) return await handleGate(authorized);
+      if (inboxMethods(path) !== null) return await handleInbox(authorized);
       if (workflowMethods(path) !== null)
         return await handleWorkflows(authorized);
       if (path === `${API}/skills` || path.startsWith(`${API}/skills/`)) {

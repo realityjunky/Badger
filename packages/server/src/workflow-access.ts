@@ -29,6 +29,7 @@ export interface WorkflowCapabilities {
   manageRoles: boolean;
   createVersion: boolean;
   managePins: boolean;
+  confirmSources: boolean;
 }
 
 /** Every workflow role reads; only the responsible roles may write. */
@@ -51,6 +52,7 @@ export async function workflowCapabilities(
     workflow.groupId,
   );
   const owner = roles.has("Workflow owner");
+  const engineer = isAdministrator(access) || roles.has("Engineer");
   const visibility = await visibleGroups(database, access, person);
   return {
     read:
@@ -62,10 +64,9 @@ export async function workflowCapabilities(
     createVersion:
       (access.tokenScopes === undefined ||
         access.tokenScopes.includes("engineer")) &&
-      (isAdministrator(access) || roles.has("Engineer")),
-    managePins:
-      access.tokenScopes === undefined &&
-      (isAdministrator(access) || roles.has("Engineer")),
+      engineer,
+    managePins: access.tokenScopes === undefined && engineer,
+    confirmSources: access.tokenScopes === undefined && engineer,
   };
 }
 

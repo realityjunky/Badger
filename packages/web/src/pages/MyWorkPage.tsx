@@ -2,6 +2,8 @@ import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import type { MessageId } from "../i18n/catalog.js";
+import { useInbox } from "../inbox/InboxContext.js";
+import { InboxPanel } from "../inbox/InboxPanel.js";
 
 interface Metric {
   label: MessageId;
@@ -17,7 +19,7 @@ const METRICS: readonly Metric[] = [
   },
   {
     label: "myWork.metrics.gates",
-    path: "/workflows",
+    path: "/my-work#inbox",
     testId: "metric-gates",
   },
   {
@@ -27,7 +29,7 @@ const METRICS: readonly Metric[] = [
   },
   {
     label: "myWork.metrics.inbox",
-    path: "/activity",
+    path: "/my-work#inbox",
     testId: "metric-inbox",
   },
 ];
@@ -35,6 +37,7 @@ const METRICS: readonly Metric[] = [
 /** The landing page: what waits for this person across their workflows. */
 export function MyWorkPage() {
   const { t } = useI18n();
+  const { page } = useInbox();
   return (
     <div className="page" data-testid="page-my-work">
       <PageHeader
@@ -53,14 +56,23 @@ export function MyWorkPage() {
             key={metric.label}
             data-testid={metric.testId}
           >
-            <span className="summary-value">0</span>
+            <span className="summary-value">
+              {metric.testId === "metric-inbox"
+                ? page.unreadCount
+                : metric.testId === "metric-gates"
+                  ? page.pendingCount
+                  : 0}
+            </span>
             <span className="summary-label">{t(metric.label)}</span>
           </Link>
         ))}
       </section>
-      <p className="empty-state" data-testid="my-work-empty">
-        {t("page.myWork.empty")}
-      </p>
+      <InboxPanel />
+      {page.pendingCount === 0 && (
+        <p className="empty-state" data-testid="my-work-empty">
+          {t("page.myWork.empty")}
+        </p>
+      )}
     </div>
   );
 }

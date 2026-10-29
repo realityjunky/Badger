@@ -14,6 +14,8 @@ import type { ServiceConfig } from "./config.js";
 import type { BlobStore } from "./skills/blobs.js";
 import { toIsoString } from "./util.js";
 import type { StageState } from "./workflows.js";
+import { invalidateGate } from "./gates.js";
+import { notifyWorkflowRoles } from "./inbox.js";
 
 export type SkillPinPurpose = "source" | "upgrade-source";
 export type SourceCheckStatus =
@@ -508,6 +510,15 @@ export async function pinSkillVersion(
       );
       const pin = toPin(pinRow.rows[0]!);
       await invalidateSourcesStage(tx, versionId, now);
+      await invalidateGate(
+        tx,
+        dependencies,
+        context,
+        versionId,
+        "sources",
+        "The Skill pins changed",
+        ["Engineer", "Workflow owner"],
+      );
       const pinsHash = await pinsForHash(tx, versionId);
       const job = await enqueueSourceCheck(
         tx,
@@ -582,6 +593,15 @@ export async function unpinSkillVersion(
       [versionId, skillId],
     );
     await invalidateSourcesStage(tx, versionId, dependencies.clock.now());
+    await invalidateGate(
+      tx,
+      dependencies,
+      context,
+      versionId,
+      "sources",
+      "A Skill pin was removed",
+      ["Engineer", "Workflow owner"],
+    );
     const pinsHash = await pinsForHash(tx, versionId);
     const job = await enqueueSourceCheck(
       tx,
@@ -935,6 +955,14 @@ export class SourceCheckWorker {
         "select id from workflow_versions where id = $1 for update",
         [job.workflowVersionId],
       );
+      // The pin content can change away and back while this job runs. Its
+      // hash alone cannot make a superseded check current again.
+      const latestCheck = await readSourceCheck(tx, job.workflowVersionId);
+      if (latestCheck?.jobId !== job.id) {
+        status = "cancelled";
+        outcome = null;
+        error = SUPERSEDED;
+      }
       const updated = await tx.query<JobRow>(
         `update workflow_jobs set status = $2, finished_at = $3, lease_until = null,
             outcome = $4::jsonb, error = $5, revision = revision + 1
@@ -998,6 +1026,16 @@ export class SourceCheckWorker {
           reason: error ?? "Source check completed",
           requestId: job.id,
         });
+        if (outcome.status === "passed")
+          await notifyWorkflowRoles(
+            tx,
+            dependencies,
+            job.workflowVersionId,
+            "sources",
+            "gate-ready",
+            job.id,
+            ["Engineer"],
+          );
       }
       return toJob(updated.rows[0]!);
     });

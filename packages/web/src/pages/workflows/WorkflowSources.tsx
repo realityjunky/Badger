@@ -1,5 +1,6 @@
 import { Alert, Button, Select, Space, Tag } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   loadSkills,
   loadVersions,
@@ -16,6 +17,8 @@ import {
 } from "../../api/workflows.js";
 import { StatusPill } from "../../components/StatusPill.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { SourcesGate } from "./SourcesGate.js";
+import { useInbox } from "../../inbox/InboxContext.js";
 
 interface SkillOption {
   skill: Skill;
@@ -38,6 +41,13 @@ export function WorkflowSources({
   onChanged(): void;
 }) {
   const { t, format, locale } = useI18n();
+  const inbox = useInbox();
+  const location = useLocation();
+  const section = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (location.hash === "#sources")
+      section.current?.scrollIntoView({ block: "start" });
+  }, [location.key, location.hash, workflow.id, version.id]);
   const [options, setOptions] = useState<SkillOption[]>([]);
   const [skillId, setSkillId] = useState<string>();
   const [hash, setHash] = useState<string>();
@@ -100,6 +110,7 @@ export function WorkflowSources({
       if (result.kind === "ok") {
         setHash(undefined);
         onChanged();
+        await inbox.refresh();
       } else setFailure(result.message);
     } finally {
       setBusy(false);
@@ -117,8 +128,10 @@ export function WorkflowSources({
         version.id,
         pinRecord,
       );
-      if (result.kind === "ok") onChanged();
-      else setFailure(result.message);
+      if (result.kind === "ok") {
+        onChanged();
+        await inbox.refresh();
+      } else setFailure(result.message);
     } finally {
       setBusy(false);
     }
@@ -129,6 +142,8 @@ export function WorkflowSources({
   const when = (value: string) => new Date(value).toLocaleString(locale);
   return (
     <section
+      ref={section}
+      id="sources"
       className="workflow-panel workflow-sources"
       aria-labelledby="workflow-sources-title"
     >
@@ -149,6 +164,12 @@ export function WorkflowSources({
         )}
       </div>
       <p className="muted">{t("workflow.sourcesDescription")}</p>
+      <SourcesGate
+        key={detail.version.id}
+        basePath={basePath}
+        detail={detail}
+        onChanged={onChanged}
+      />
       {check !== null && (
         <p className="muted">
           {check.finishedAt === null

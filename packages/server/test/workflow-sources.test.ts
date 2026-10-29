@@ -156,6 +156,74 @@ async function setup(intent = "new-skill") {
 }
 
 describe("workflow Skill pins and source checks", () => {
+  it("previews and confirms the exact source set and records the person's sign-off", async () => {
+    const { skill, hash, base } = await setup();
+    await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });
+    await service.runSourceCheckJobs();
+    const previewResponse = await write(
+      "POST",
+      `${base}/gates/sources/preview`,
+      engineer,
+      {},
+    );
+    expect(previewResponse.status).toBe(200);
+    const { preview } = (await previewResponse.json()) as {
+      preview: {
+        confirmationHash: string;
+        boundHashes: Record<string, string>;
+      };
+    };
+    expect(preview).toMatchObject({
+      gate: "sources",
+      effects: [
+        { id: "sources", state: "done" },
+        { id: "source-study", state: "active" },
+      ],
+      boundHashes: {
+        pins: expect.any(String),
+        sourceCheck: expect.any(String),
+        workflowVersion: expect.any(String),
+      },
+    });
+    const response = await write(
+      "POST",
+      `${base}/gates/sources/commit`,
+      engineer,
+      {
+        confirmationHash: preview.confirmationHash,
+        requestId: "confirm-sources-1",
+      },
+    );
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result).toMatchObject({
+      confirmation: {
+        actorId: expect.any(String),
+        confirmedAt: "2026-10-27T00:00:00.000Z",
+        confirmationHash: preview.confirmationHash,
+        boundHashes: preview.boundHashes,
+        invalidatedAt: null,
+      },
+    });
+    const current = await view(base, { as: engineer });
+    expect(stage(current, "sources")).toBe("done");
+    expect(stage(current, "source-study")).toBe("active");
+    const audit = await service.request(
+      "/api/v1/audit-events?action=gate.confirmed",
+      { as: admin },
+    );
+    expect(await audit.json()).toMatchObject({
+      events: [
+        {
+          actorEmail: engineer.email,
+          occurredAt: "2026-10-27T00:00:00.000Z",
+          after: { hash: preview.confirmationHash },
+          requestId: "confirm-sources-1",
+        },
+      ],
+    });
+  });
+
   it("pins an immutable version, runs the worker check, and exposes inventory and blockers", async () => {
     const setupResult = await setup();
     const pin = await write(
@@ -231,6 +299,95 @@ describe("workflow Skill pins and source checks", () => {
     expect(
       checkedBody.version.stages.find((stage) => stage.id === "sources"),
     ).toEqual({ id: "sources", state: "active" });
+  });
+
+  it("closes ready inbox items on confirmation, then invalidates the gate and tells the Engineer and owner", async () => {
+    const { skill, hash, base } = await setup();
+    await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });
+    await service.runSourceCheckJobs();
+    const inbox = async (as: TestPerson) => {
+      const response = await service.request("/api/v1/me/inbox", { as });
+      expect(response.status).toBe(200);
+      return (await response.json()) as {
+        items: {
+          id: string;
+          state: string;
+          kind: string;
+          revision: number;
+          href: string;
+        }[];
+        unreadCount: number;
+      };
+    };
+    const ready = await inbox(engineer);
+    expect(ready).toMatchObject({
+      unreadCount: 1,
+      items: [{ kind: "gate-ready", state: "unread", href: `${base}#sources` }],
+    });
+    const read = await write(
+      "PATCH",
+      `/me/inbox/${ready.items[0]!.id}`,
+      engineer,
+      { state: "read", revision: ready.items[0]!.revision },
+    );
+    expect(read.status).toBe(200);
+    expect((await inbox(engineer)).unreadCount).toBe(0);
+    const preview = await write(
+      "POST",
+      `${base}/gates/sources/preview`,
+      engineer,
+      {},
+    );
+    const { preview: inspected } = (await preview.json()) as {
+      preview: { confirmationHash: string };
+    };
+    const commit = {
+      confirmationHash: inspected.confirmationHash,
+      requestId: "first-confirmation",
+    };
+    const first = await write(
+      "POST",
+      `${base}/gates/sources/commit`,
+      engineer,
+      commit,
+    );
+    const original = await first.json();
+    expect((await inbox(engineer)).items[0]!.state).toBe("done");
+    service.clock.advance(1000);
+    await write("DELETE", `${base}/pins/${skill.id}`, engineer, {
+      revision: 1,
+    });
+    const gate = await service.request(`/api/v1${base}/gates/sources`, {
+      as: engineer,
+    });
+    expect(await gate.json()).toMatchObject({
+      confirmation: {
+        invalidatedAt: "2026-10-27T00:00:01.000Z",
+        boundHashes: expect.any(Object),
+      },
+    });
+    expect(stage(await view(base, { as: engineer }), "source-study")).toBe(
+      "invalidated",
+    );
+    for (const person of [engineer, lead]) {
+      const notification = await inbox(person);
+      expect(notification.unreadCount).toBe(1);
+      expect(notification.items[0]).toMatchObject({
+        kind: "gate-invalidated",
+        state: "unread",
+        href: `${base}#sources`,
+      });
+    }
+    // A lost response is still replayable after its gate was invalidated.
+    const replayed = await write(
+      "POST",
+      `${base}/gates/sources/commit`,
+      engineer,
+      commit,
+    );
+    expect(replayed.status).toBe(200);
+    expect(await replayed.json()).toEqual(original);
+    expect(stage(await view(base, { as: engineer }), "sources")).toBe("active");
   });
 
   it("requires an Engineer and reruns the check after unpinning", async () => {
@@ -364,6 +521,263 @@ describe("workflow Skill pins and source checks", () => {
     });
   });
 
+  it("rejects a source check that has not passed and conflicts on previews made before a pin change", async () => {
+    const { skill, hash, base } = await setup();
+    const previewPath = `${base}/gates/sources/preview`;
+    const rejected = await write("POST", previewPath, engineer, {});
+    expect(rejected.status).toBe(409);
+    expect(await rejected.json()).toMatchObject({
+      error: { code: "rejected" },
+      findings: [
+        {
+          code: "SOURCE_CHECK_NOT_PASSED",
+          severity: "error",
+          requiredAction: "repair",
+        },
+      ],
+    });
+    await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });
+    expect((await write("POST", previewPath, engineer, {})).status).toBe(409);
+    await service.runSourceCheckJobs();
+    const { preview } = (await (
+      await write("POST", previewPath, engineer, {})
+    ).json()) as { preview: { confirmationHash: string } };
+    await write("DELETE", `${base}/pins/${skill.id}`, engineer, {
+      revision: 1,
+    });
+    const stale = await write(
+      "POST",
+      `${base}/gates/sources/commit`,
+      engineer,
+      {
+        confirmationHash: preview.confirmationHash,
+        requestId: "stale-preview",
+      },
+    );
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ error: { code: "conflict" } });
+    await service.runSourceCheckJobs();
+    const blocked = await write("POST", previewPath, engineer, {});
+    expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toMatchObject({ error: { code: "rejected" } });
+    expect(
+      (await service.request(`/api/v1${base}/gates/sources`, { as: engineer }))
+        .status,
+    ).toBe(200);
+    expect(stage(await view(base, { as: engineer }), "sources")).toBe(
+      "blocked",
+    );
+  });
+
+  it("replays concurrent requests once and refuses to reuse their request ID for another confirmation", async () => {
+    const { skill, hash, base } = await setup();
+    await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });
+    await service.runSourceCheckJobs();
+    const { preview } = (await (
+      await write("POST", `${base}/gates/sources/preview`, engineer, {})
+    ).json()) as { preview: { confirmationHash: string } };
+    const body = {
+      confirmationHash: preview.confirmationHash,
+      requestId: "concurrent-confirmation",
+    };
+    const responses = await Promise.all(
+      [1, 2, 3].map(() =>
+        write("POST", `${base}/gates/sources/commit`, engineer, body),
+      ),
+    );
+    expect(responses.map((response) => response.status)).toEqual([
+      200, 200, 200,
+    ]);
+    const results = await Promise.all(
+      responses.map((response) => response.json()),
+    );
+    expect(results[1]).toEqual(results[0]);
+    expect(results[2]).toEqual(results[0]);
+    const reused = await write(
+      "POST",
+      `${base}/gates/sources/commit`,
+      engineer,
+      { ...body, confirmationHash: "0".repeat(64) },
+    );
+    expect(reused.status).toBe(409);
+    const audit = await service.request(
+      "/api/v1/audit-events?action=gate.confirmed",
+      { as: admin },
+    );
+    expect(((await audit.json()) as { events: unknown[] }).events).toHaveLength(
+      1,
+    );
+    await write("DELETE", `${base}/pins/${skill.id}`, engineer, {
+      revision: 1,
+    });
+    await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });
+    await service.runSourceCheckJobs();
+    const { preview: changed } = (await (
+      await write("POST", `${base}/gates/sources/preview`, engineer, {})
+    ).json()) as { preview: { confirmationHash: string } };
+    expect(changed.confirmationHash).not.toBe(preview.confirmationHash);
+    const waitingInbox = await service.request("/api/v1/me/inbox", {
+      as: engineer,
+    });
+    expect(await waitingInbox.json()).toMatchObject({
+      pendingCount: 1,
+      unreadCount: 2,
+    });
+    expect(
+      (
+        await write("POST", `${base}/gates/sources/commit`, engineer, {
+          ...body,
+          confirmationHash: changed.confirmationHash,
+        })
+      ).status,
+    ).toBe(409);
+    const replacement = await write(
+      "POST",
+      `${base}/gates/sources/commit`,
+      engineer,
+      {
+        confirmationHash: changed.confirmationHash,
+        requestId: "replacement-confirmation",
+      },
+    );
+    expect(replacement.status).toBe(200);
+    const { confirmation: next } = (await replacement.json()) as {
+      confirmation: { id: string };
+    };
+    const history = await service.request(`/api/v1${base}/gates/sources`, {
+      as: engineer,
+    });
+    expect(await history.json()).toMatchObject({
+      confirmations: [
+        { id: next.id, invalidatedAt: null },
+        { supersededBy: next.id },
+      ],
+    });
+    const inbox = await service.request("/api/v1/me/inbox", { as: engineer });
+    const current = (await inbox.json()) as {
+      items: { state: string }[];
+      unreadCount: number;
+    };
+    expect(current.unreadCount).toBe(0);
+    expect(current.items.every((item) => item.state === "done")).toBe(true);
+  });
+
+  it("reserves Sources sign-off for people with the Engineer role and keeps each inbox private", async () => {
+    const { skill, hash, base } = await setup();
+    await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });
+    await service.runSourceCheckJobs();
+    const { preview } = (await (
+      await write("POST", `${base}/gates/sources/preview`, engineer, {})
+    ).json()) as { preview: { confirmationHash: string } };
+    const commit = {
+      confirmationHash: preview.confirmationHash,
+      requestId: "person-only",
+    };
+    for (const action of ["preview", "commit"]) {
+      const refused = await write(
+        "POST",
+        `${base}/gates/sources/${action}`,
+        lead,
+        action === "preview" ? {} : commit,
+      );
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ error: { code: "denied" } });
+    }
+    const token = await write("POST", "/me/tokens", engineer, {
+      name: "Agent",
+      scopes: ["engineer"],
+    });
+    const { secret } = (await token.json()) as { secret: string };
+    const headers = {
+      authorization: `Bearer ${secret}`,
+      "content-type": "application/json",
+    };
+    for (const action of ["preview", "commit"]) {
+      const response = await service.request(
+        `/api/v1${base}/gates/sources/${action}`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify(action === "preview" ? {} : commit),
+        },
+      );
+      expect(response.status).toBe(403);
+    }
+    const inbox = await service.request("/api/v1/me/inbox", { as: engineer });
+    const { items } = (await inbox.json()) as {
+      items: { id: string; revision: number }[];
+    };
+    expect(
+      (await service.request("/api/v1/me/inbox", { headers })).status,
+    ).toBe(200);
+    expect(
+      (
+        await write("PATCH", `/me/inbox/${items[0]!.id}`, lead, {
+          state: "read",
+          revision: 1,
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await write("PATCH", `/me/inbox/${items[0]!.id}`, engineer, {
+          state: "read",
+          revision: 99,
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await write("PATCH", `/me/inbox/${items[0]!.id}`, engineer, {
+          state: "done",
+          revision: 1,
+        })
+      ).status,
+    ).toBe(400);
+    const invalid = await write(
+      "POST",
+      `${base}/gates/sources/commit`,
+      engineer,
+      { ...commit, actorId: "someone-else" },
+    );
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ error: { code: "invalid" } });
+    expect(
+      (
+        await service.request("/api/v1/me/inbox?cursor=made-up", {
+          as: engineer,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await service.request("/api/v1/me/inbox?limit=0", { as: engineer }))
+        .status,
+    ).toBe(400);
+  });
+
+  it("retains a gate notification for an Engineer invited before their first sign-in", async () => {
+    const { skill, hash, base, workflow } = await setup();
+    const invited: TestPerson = {
+      subject: "invited-engineer",
+      email: "invited-engineer@example.com",
+    };
+    const binding = await write("POST", "/bindings", lead, {
+      scopeType: "workflow",
+      scopeId: workflow.id,
+      role: "Engineer",
+      email: invited.email,
+    });
+    expect(binding.status).toBe(201);
+    await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });
+    await service.runSourceCheckJobs();
+    const inbox = await service.request("/api/v1/me/inbox", { as: invited });
+    expect(inbox.status).toBe(200);
+    expect(await inbox.json()).toMatchObject({
+      unreadCount: 1,
+      items: [{ kind: "gate-ready", state: "unread" }],
+    });
+  });
+
   it("pins only the workflow group's Skill versions and serves only the listed methods", async () => {
     const { skill, base } = await setup();
     const other = await write("POST", "/groups", admin, { name: "Other" });
@@ -486,6 +900,44 @@ describe("workflow Skill pins and source checks", () => {
       sources: [{ hash: next }],
     });
     expect(stage(body, "sources")).toBe("active");
+  });
+
+  it("does not announce a superseded check when pins change away and back to the same content", async () => {
+    const { skill, hash, base } = await setup();
+    await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });
+    const worker = service.worker("superseded-worker");
+    const claimed = await worker.claim();
+    expect(claimed).not.toBeNull();
+    const next = await uploadVersion(
+      skill.id,
+      "primer-skill",
+      "Changed guide\n",
+    );
+    await write("POST", `${base}/pins`, engineer, {
+      skillId: skill.id,
+      hash: next,
+      revision: 1,
+    });
+    await write("POST", `${base}/pins`, engineer, {
+      skillId: skill.id,
+      hash,
+      revision: 2,
+    });
+    expect(await worker.process(claimed!)).toMatchObject({
+      status: "cancelled",
+      error: SUPERSEDED,
+    });
+    const inbox = await service.request("/api/v1/me/inbox", { as: engineer });
+    expect(await inbox.json()).toMatchObject({ items: [], unreadCount: 0 });
+    expect((await view(base, { as: engineer })).sourceCheck).toMatchObject({
+      status: "queued",
+    });
+    expect(await service.runSourceCheckJobs()).toBe(1);
+    const ready = await service.request("/api/v1/me/inbox", { as: engineer });
+    expect(await ready.json()).toMatchObject({
+      items: [{ kind: "gate-ready" }],
+      unreadCount: 1,
+    });
   });
 
   it("lets another worker take over a lapsed lease and ignores the late result", async () => {
