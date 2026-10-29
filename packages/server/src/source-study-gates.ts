@@ -41,14 +41,17 @@ export async function sourceStudyGateState(
       "SKILL_VERSION_NOT_PINNED",
       "Select a currently pinned Skill version",
     );
-  if (records.some((r) => r.status === "active" && r.stale))
+  const complete = study.studies.every(
+    (entry) => entry.skillId === skillId || entry.studied,
+  );
+  // The completion that opens Questionnaire also waits for records that cite
+  // only Skills no longer pinned, which no remaining pin's study covers.
+  const checked = complete ? [...study.facts, ...study.interfaces] : records;
+  if (checked.some((r) => r.status === "active" && r.stale))
     reject(
       "SOURCE_STUDY_EVIDENCE_STALE",
       "Update or retire records citing Skill versions that are no longer pinned",
     );
-  const complete = study.studies.every(
-    (entry) => entry.skillId === skillId || entry.studied,
-  );
   return {
     preview: gatePreview({
       gate: studyGateName(skillId),

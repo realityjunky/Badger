@@ -36,7 +36,7 @@ async function read(path: string, as = engineer) {
   expect(response.status).toBe(200);
   return response.json();
 }
-async function setup() {
+async function setup(names = ["producer-skill", "consumer-skill"]) {
   service = await startTestService({
     environment: {
       BADGER_BOOTSTRAP_ADMINISTRATORS: admin.email,
@@ -81,7 +81,7 @@ async function setup() {
     ).toBe(201);
   }
   const pins = [];
-  for (const name of ["producer-skill", "consumer-skill"]) {
+  for (const name of names) {
     const { skill } = await (
       await write("POST", "/skills", { groupId: group.id, name }, admin)
     ).json();
@@ -497,5 +497,98 @@ describe("source study through the service", () => {
         (s: { studied: boolean }) => !s.studied,
       ),
     ).toBe(true);
+  });
+
+  it("keeps Questionnaire closed while an active record cites only an unpinned Skill version", async () => {
+    const { base, pins } = await setup([
+      "producer-skill",
+      "consumer-skill",
+      "dropped-skill",
+    ]);
+    const { record } = await (
+      await write("POST", `${base}/source-study/facts`, {
+        statement: "The dropped Skill writes samples.tsv.",
+        evidence: [
+          {
+            ...pins[2],
+            path: "reference/guide.md",
+            startLine: 2,
+            endLine: 2,
+            fileHash,
+          },
+        ],
+      })
+    ).json();
+    expect(
+      (
+        await write("DELETE", `${base}/pins/${pins[2].skillId}`, {
+          revision: 1,
+        })
+      ).status,
+    ).toBe(200);
+    await service.runSourceCheckJobs();
+    const { preview: sources } = await (
+      await write("POST", `${base}/gates/sources/preview`, {})
+    ).json();
+    expect(
+      (
+        await write("POST", `${base}/gates/sources/commit`, {
+          confirmationHash: sources.confirmationHash,
+          requestId: "sources-without-dropped",
+        })
+      ).status,
+    ).toBe(200);
+    async function study(skillId: string) {
+      return write("POST", `${base}/gates/source-study/${skillId}/preview`, {});
+    }
+    const first = await (await study(pins[0].skillId)).json();
+    expect(
+      (
+        await write(
+          "POST",
+          `${base}/gates/source-study/${pins[0].skillId}/commit`,
+          {
+            confirmationHash: first.preview.confirmationHash,
+            requestId: "study-producer",
+          },
+        )
+      ).status,
+    ).toBe(200);
+
+    const last = await study(pins[1].skillId);
+    expect(last.status).toBe(409);
+    expect(await last.json()).toMatchObject({
+      error: { code: "rejected" },
+      findings: [
+        expect.objectContaining({ code: "SOURCE_STUDY_EVIDENCE_STALE" }),
+      ],
+    });
+    expect(
+      (
+        await write("DELETE", `${base}/source-study/facts/${record.id}`, {
+          revision: 1,
+        })
+      ).status,
+    ).toBe(200);
+    const ready = await study(pins[1].skillId);
+    expect(ready.status).toBe(200);
+    expect(
+      (
+        await write(
+          "POST",
+          `${base}/gates/source-study/${pins[1].skillId}/commit`,
+          {
+            confirmationHash: (await ready.json()).preview.confirmationHash,
+            requestId: "study-consumer",
+          },
+        )
+      ).status,
+    ).toBe(200);
+    expect((await read(base)).version.stages).toEqual(
+      expect.arrayContaining([
+        { id: "source-study", state: "done" },
+        { id: "questionnaire", state: "active" },
+      ]),
+    );
   });
 });

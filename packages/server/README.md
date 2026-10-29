@@ -82,7 +82,9 @@ references and any later stage that had progressed.
 Study completion reuses gate replay and conflict behavior. It requires
 confirmed Sources and current evidence: rejected previews report
 `SOURCE_SET_NOT_CONFIRMED`, `SKILL_VERSION_NOT_PINNED`, or
-`SOURCE_STUDY_EVIDENCE_STALE`. The last completion opens Questionnaire.
+`SOURCE_STUDY_EVIDENCE_STALE`. A version's completion checks the records that
+cite it; the last completion, which opens Questionnaire, checks every active
+record, including one that cites only versions no longer pinned.
 See [ADR 0019](../../docs/adr/0019-source-study-records-and-completion.md).
 
 ## Personal access tokens
