@@ -4,17 +4,46 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   run-storage:
+    name: Run storage (Linux)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, badger-ci]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w packages/kernel
+      - run: npm run test:runs -w packages/kernel
+
+  run-storage-cross-platform:
     name: Run storage (${{ matrix.os }})
+    if: vars.BADGER_CI_CROSS_PLATFORM == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        os: [macOS, Windows]
+    runs-on: [self-hosted, "${{ matrix.os }}", badger-ci]
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -24,9 +53,13 @@ jobs:
       - run: npm run test:runs -w packages/kernel
 
   build-test:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, badger-ci]
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -37,7 +70,9 @@ jobs:
       - run: npm run format:check
 
   web-e2e:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, badger-ci]
+    timeout-minutes: 30
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --ipc=host
@@ -45,6 +80,8 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -60,7 +97,9 @@ jobs:
           retention-days: 7
 
   service-postgres:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, badger-ci]
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17
@@ -69,7 +108,7 @@ jobs:
           POSTGRES_PASSWORD: badger
           POSTGRES_DB: badger
         ports:
-          - 5432:5432
+          - "127.0.0.1::5432"
         options: >-
           --health-cmd "pg_isready -U badger -d badger"
           --health-interval 5s
@@ -77,6 +116,8 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -87,4 +128,4 @@ jobs:
       - run: npm run build -w packages/mcp
       - run: npm test -w packages/server -w packages/mcp
         env:
-          BADGER_TEST_DATABASE_URL: postgres://badger:badger@127.0.0.1:5432/badger
+          BADGER_TEST_DATABASE_URL: postgres://badger:badger@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/badger
