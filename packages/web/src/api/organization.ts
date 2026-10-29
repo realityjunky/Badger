@@ -49,6 +49,8 @@ export interface OrganizationRecords {
 }
 
 export interface AuditEvent {
+  agentHost?: string | null;
+  credentialId?: string | null;
   id: string;
   occurredAt: string;
   actorPersonId: string | null;

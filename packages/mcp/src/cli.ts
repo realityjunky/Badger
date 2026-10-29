@@ -3,7 +3,7 @@ import { hostname } from "node:os";
 import { domainToASCII } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ConfigurationError, validAgentHost } from "./api.js";
-import { createExpertMcp } from "./index.js";
+import { createBadgerMcp } from "./index.js";
 
 /** A machine name outside printable ASCII is sent in its IDNA form. */
 function defaultAgentHost(): string {
@@ -14,7 +14,13 @@ function defaultAgentHost(): string {
 }
 
 try {
-  const server = createExpertMcp({
+  const profile = process.env["BADGER_MCP_PROFILE"] ?? "auto";
+  if (profile !== "auto" && profile !== "engineer" && profile !== "expert")
+    throw new ConfigurationError(
+      "BADGER_MCP_PROFILE must be auto, engineer, or expert",
+    );
+  const server = createBadgerMcp({
+    profile,
     url: process.env["BADGER_URL"] ?? "",
     token: process.env["BADGER_TOKEN"] ?? "",
     agentHost: process.env["BADGER_AGENT_HOST"] ?? defaultAgentHost(),

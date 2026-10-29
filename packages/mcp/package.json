@@ -2,7 +2,7 @@
   "name": "@realityjunky/badger-mcp",
   "version": "0.0.0",
   "private": true,
-  "description": "Local Badger MCP with the expert profile",
+  "description": "Local Badger MCP with expert and engineer profiles",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -26,6 +26,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@realityjunky/badger": "*",
+    "ajv": "^8.20.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

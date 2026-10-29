@@ -8,16 +8,21 @@ import {
 import { BadgerApi, BadgerApiError, type ExpertMcpOptions } from "./api.js";
 import { expertTools, questionnairePath } from "./tools.js";
 import { ResultResources } from "./resources.js";
+import { engineerTools } from "./engineer-tools.js";
+import { jobsPath } from "./jobs.js";
 export type { ExpertMcpOptions } from "./api.js";
 
-class ExpertMcpServer extends Server {
-  constructor(private readonly results: ResultResources) {
+class BadgerMcpServer extends Server {
+  constructor(
+    private readonly results: ResultResources,
+    profile: string,
+  ) {
     super(
-      { name: "badger-expert", version: "0.0.0" },
+      { name: `badger-${profile}`, version: "0.0.0" },
       {
         capabilities: { tools: { listChanged: true }, resources: {} },
         instructions:
-          "Submit only what the user said. Never infer an expert's answers or sign off for a person. Save and submit only with the user's instruction. People sign off in the dashboard. Read large results from the returned private local file or MCP resource.",
+          "Submit only what the user said. Never infer an expert's answers or sign off for a person. Save and submit only with the user's instruction. Engineers' Agents may draft suggestions from a claimed job's pinned evidence; those suggestions never become records until a person accepts them. People sign off in the dashboard. Read large results from the returned private local file or MCP resource.",
       },
     );
     this.onclose = () => {
@@ -37,10 +42,29 @@ class ExpertMcpServer extends Server {
 const CAPABILITY_MILLISECONDS = 30_000;
 
 export function createExpertMcp(options: ExpertMcpOptions): Server {
+  return createBadgerMcp({ ...options, profile: "expert" });
+}
+export function createEngineerMcp(options: ExpertMcpOptions): Server {
+  return createBadgerMcp({ ...options, profile: "engineer" });
+}
+export function createBadgerMcp(
+  options: ExpertMcpOptions & { profile?: "expert" | "engineer" | "auto" },
+): Server {
   const api = new BadgerApi(options);
   const resources = new ResultResources();
-  const server = new ExpertMcpServer(resources);
-  const tools = expertTools(api, server);
+  const profile = options.profile ?? "auto";
+  const server = new BadgerMcpServer(resources, profile);
+  const expert = expertTools(api, server);
+  const common = new Set(["whoami", "inbox", "open_dashboard"]);
+  const tools =
+    profile === "expert"
+      ? expert
+      : [
+          ...expert.filter(
+            (t) => profile === "auto" || common.has(t.definition.name),
+          ),
+          ...engineerTools(api),
+        ];
   // Each capability read is a token request, and tokens are rate limited, so
   // calls reuse a recent read. The service still checks every request.
   let recent: { at: number; tools: typeof tools } | undefined;
@@ -93,13 +117,17 @@ export function createExpertMcp(options: ExpertMcpOptions): Server {
           throw new Error(
             "This result is outside your current roles or token scopes",
           );
-        if (tool.permission === undefined) return tool.run(args);
+        if (tool.definition.annotations?.readOnlyHint) return tool.run(args);
         // A mutation's resource must never repeat the mutation. Check its
         // target's read permissions before returning the saved response.
         if (
           typeof args.workflowId === "string" &&
           typeof args.versionId === "string"
         ) {
+          if (typeof args.jobId === "string")
+            await api.request(
+              `${jobsPath({ workflowId: args.workflowId, versionId: args.versionId })}/${encodeURIComponent(args.jobId)}`,
+            );
           await api.request(
             questionnairePath({
               workflowId: args.workflowId,

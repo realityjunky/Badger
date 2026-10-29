@@ -12,12 +12,12 @@ export interface ExpertTool {
   run(args: unknown): Promise<unknown>;
 }
 
-const id = z
+export const id = z
   .string()
   .min(1)
   .max(200)
   .regex(/^[A-Za-z0-9_-]+$/u);
-const context = { workflowId: id, versionId: id };
+export const context = { workflowId: id, versionId: id };
 const question = { ...context, questionId: id };
 const answer = {
   ...question,
@@ -25,12 +25,13 @@ const answer = {
   questionRevision: z.number().int().min(1),
 };
 
-function tool<S extends z.ZodRawShape>(
+export function tool<S extends z.ZodRawShape>(
   name: string,
   description: string,
   shape: S,
   run: (args: z.infer<z.ZodObject<S>>) => Promise<unknown>,
   permission?: string,
+  readOnly = permission === undefined,
 ): ExpertTool {
   const schema = z.object(shape).strict();
   return {
@@ -39,7 +40,7 @@ function tool<S extends z.ZodRawShape>(
       description,
       inputSchema: z.toJSONSchema(schema) as Tool["inputSchema"],
       annotations: {
-        readOnlyHint: permission === undefined,
+        readOnlyHint: readOnly,
         openWorldHint: true,
       },
     },

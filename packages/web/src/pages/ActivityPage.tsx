@@ -117,7 +117,15 @@ export function ActivityPage() {
     {
       title: t("activity.channel"),
       key: "channel",
-      render: (_, event) => <Tag>{event.channel}</Tag>,
+      render: (_, event) => (
+        <>
+          <Tag>{event.channel}</Tag>
+          {event.agentHost && <div>{event.agentHost}</div>}
+          {event.credentialId && (
+            <div className="muted">{event.credentialId}</div>
+          )}
+        </>
+      ),
     },
     {
       title: t("activity.reason"),

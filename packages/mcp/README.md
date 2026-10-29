@@ -1,8 +1,8 @@
 # `@realityjunky/badger-mcp`
 
 The local Badger MCP runs over stdio and connects to one deployment through
-its HTTP API. It delivers the expert profile (#54); the engineer and operator
-profiles and the host installer remain planned. The service owns roles,
+its HTTP API. It delivers the expert (#54) and engineer (#55) profiles; the
+operator profile and host installer remain planned. The service owns roles,
 questionnaire records, Skill identities, and sign-offs.
 
 Build and install the local command from the repository root:
@@ -22,6 +22,7 @@ offers configuration for Claude Code, Codex, and WorkBuddy. Set:
 | `BADGER_URL`         | The deployment URL, including its base path, such as `https://badger.example/team`. HTTPS is required except on loopback HTTP addresses.     |
 | `BADGER_TOKEN`       | A personal access token created in the dashboard, normally with the `expert` scope.                                                          |
 | `BADGER_AGENT_HOST`  | Optional attribution for answers, 1 to 200 printable ASCII characters; defaults to this machine's hostname, in IDNA form if it is not ASCII. |
+| `BADGER_MCP_PROFILE` | `auto` (default), `engineer`, or `expert`. Profile selection only narrows the tools allowed by current roles and token scopes.               |
 
 The MCP never prints configuration or credentials. Stdout carries only MCP;
 startup failures go to stderr and name the setting at fault, never its value.
@@ -60,6 +61,51 @@ sends. A write that times out may still have been saved, and the tool says so:
 an identical upload returns the existing version. Server instructions require
 Agents to submit only what the user said, and only when instructed to save or
 send it. A host accepting a URL elicitation does not constitute approval.
+
+## Engineer drafting
+
+Use a token with the `engineer` scope and a workflow's Engineer role (or an
+Administrator). The engineer profile keeps `whoami`, `inbox`, and
+`open_dashboard`, and adds these tools. All version tools take `workflowId`
+and `versionId`; job tools also take `jobId`.
+
+| Tool            | Behavior                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `list_jobs`     | Read jobs, leases, and suggestions for one workflow version.                                                                                                                   |
+| `claim_job`     | Quote the queued job's `revision`; claim it and return a private local folder with `context.json`, `output-schema.json`, `claim.json`, and `skills/<skillId>/<versionHash>/…`. |
+| `submit_job`    | Supply the claimed `folder`. Read its `result.json`, validate against the schema reloaded from the service, then submit suggestions.                                           |
+| `release_job`   | Supply the claimed `folder` to return this token and Agent host's lease to the queue.                                                                                          |
+| `questionnaire` | Read the workflow version's questionnaire, including draft questions and submitted suggestions.                                                                                |
+| `ledger`        | Read the kernel's five-part ledger and optional `sinceRound` changes.                                                                                                          |
+| `readiness`     | Read the kernel's blockers by dossier topic.                                                                                                                                   |
+
+A signed-in Engineer requests `draft-questions` or `draft-follow-ups` from
+**Questionnaire → Drafting jobs and suggestions** and chooses a draft round.
+Follow-ups also name a published parent question. Claiming verifies the
+context hash and every pinned file against its inventory before returning
+the folder. Files never execute. Folders use mode `0700`, files `0600`, and
+the files persist across MCP restarts so the Agent can resume with the same
+deployment, person, token, and host. Delete the folder when finished; it
+contains workflow evidence. General large-result files remain connection-local.
+
+Write `result.json` as `{"questions":[…]}` using `output-schema.json`. Each
+question needs text, topic, targets, rationale, evidence, assignees, and
+priority. A result is limited to 1 MiB and 20 questions. Local reads refuse
+symbolic links and special files. The service validates the schema again.
+Pinned Skill bundles are limited to 32 MiB. Leases last 30 minutes and are
+bound to the claiming person, token, host, and lease ID. Expired leases
+return to the queue on the next job or Engineer questionnaire read; changed
+inputs cancel queued, claimed, and submitted jobs at the same boundaries.
+The old lease cannot submit after expiry, release, or re-claim.
+
+Submission creates suggestions and an inbox item for the requester. It
+creates no Question, Fact, resolution, or publication. The Engineer reviews,
+edits, removes suggestions from the batch, or discards the batch with a
+reason in the dashboard. Acceptance creates draft questions in the selected
+round, preserving the parent link for follow-ups. Publishing the round and
+resolving its parent remain separate people-only actions. Review decisions
+bind the exact result, edits, and current input hashes. The MCP has no
+acceptance, rejection, or sign-off tool.
 
 For an upload, provide the existing `skillId`, local `folder`, and a `scripts`
 map from each script path to the kernel's supported side effects, such as

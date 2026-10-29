@@ -9,6 +9,7 @@ import {
   acknowledgeFact,
 } from "../questionnaire/resolutions.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
+import { publicDraftingJob, reconcileDraftingJobs } from "../drafting/jobs.js";
 import { isAdministrator } from "../authorization.js";
 import { readLedger, snapshotRoundLedger } from "../questionnaire/ledger.js";
 import { readDraft, readDrafts, saveDraft } from "../questionnaire/drafts.js";
@@ -189,6 +190,7 @@ export async function handleQuestionnaire(
     .transaction(async (tx) => {
       if (
         !reads ||
+        !resource ||
         ["ledger", "inferences", "assumptions"].includes(resource ?? "")
       ) {
         await tx.query("select id from workflows where id = $1 for update", [
@@ -363,6 +365,25 @@ export async function handleQuestionnaire(
             facts: await readFacts(tx, versionId),
             comments: await readComments(tx, versionId, compose),
             concerns: await readConcerns(tx, versionId),
+            suggestions: compose
+              ? (
+                  await reconcileDraftingJobs(
+                    tx,
+                    deps,
+                    {
+                      ...context,
+                      agentHost:
+                        context.channel === "mcp"
+                          ? firstHeader(request.headers, "x-badger-agent-host")
+                          : null,
+                    },
+                    workflowId,
+                    versionId,
+                  )
+                ).jobs
+                  .filter((job) => job.status === "submitted")
+                  .map(publicDraftingJob)
+              : [],
           },
         };
       }
