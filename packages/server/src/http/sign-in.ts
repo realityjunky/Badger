@@ -1,13 +1,12 @@
 import { createHash } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { ServiceConfig } from "../config.js";
+import type { Database } from "../database/database.js";
+import type { ServiceDependencies } from "../dependencies.js";
 import { readCookie, strictCookie } from "../identity/cookies.js";
 import { OIDC_TRANSACTION_SECONDS } from "../identity/oidc.js";
-import {
-  firstHeader,
-  type IdentityAdapter,
-  type Principal,
-} from "../identity/identity.js";
+import { firstHeader, type IdentityAdapter } from "../identity/identity.js";
+import { issueSession, revokeSession } from "../sessions.js";
 import { escapeHtml } from "./page.js";
 import type { Reply } from "./responses.js";
 
@@ -33,9 +32,19 @@ export async function handleBrowserSignIn(input: {
   reply: Reply;
   url: URL;
   path: string;
-  signIn(principal: Principal, requestId: string): Promise<unknown>;
+  database: Database;
+  dependencies: ServiceDependencies;
 }): Promise<boolean> {
-  const { config, identity, request, reply, url, path, signIn } = input;
+  const {
+    config,
+    identity,
+    request,
+    reply,
+    url,
+    path,
+    database,
+    dependencies,
+  } = input;
   if (config.identity.kind !== "oidc" || identity.browser === undefined)
     return false;
   const prefix = config.basePath === "/" ? "" : config.basePath;
@@ -98,23 +107,26 @@ export async function handleBrowserSignIn(input: {
     else if (result.kind === "invalid")
       reply.error(400, "invalid", "Sign-in is invalid or expired; start again");
     else {
-      await signIn(result.principal, reply.requestId);
+      const sessionToken = await issueSession(
+        database,
+        dependencies,
+        settings,
+        result.principal,
+        reply.requestId,
+      );
       redirect(`${prefix}/`, [
-        cookie(
-          settings.sessionCookie,
-          result.sessionToken,
-          settings.sessionSeconds,
-        ),
+        cookie(settings.sessionCookie, sessionToken, settings.sessionSeconds),
         cookie(flowCookieName, "", 0),
       ]);
     }
   } else {
-    await identity.browser.signOut({
-      method: "POST",
-      headers: request.headers,
-      hostname: null,
-      remoteAddress: request.socket.remoteAddress ?? null,
-    });
+    await revokeSession(
+      database,
+      dependencies,
+      settings.issuer,
+      readCookie(request.headers, settings.sessionCookie),
+      reply.requestId,
+    );
     redirect(`${prefix}/`, [
       cookie(settings.sessionCookie, "", 0),
       cookie(flowCookieName, "", 0),

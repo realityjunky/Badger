@@ -13,6 +13,7 @@ create index oidc_transactions_expiry_idx on oidc_transactions (expires_at);
 -- Provider access, refresh and ID tokens are never retained.
 create table identity_sessions (
   token_hash text primary key,
+  person_id text not null references people (id),
   principal jsonb not null,
   created_at timestamptz not null,
   expires_at timestamptz not null

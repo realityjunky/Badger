@@ -157,7 +157,6 @@ export function createOidcIdentityAdapter(
           claims.sub.trim() === ""
         )
           return { kind: "invalid" };
-        const sessionToken = token();
         const principal: Principal = {
           issuer: settings.issuer,
           subject: claims.sub,
@@ -169,27 +168,9 @@ export function createOidcIdentityAdapter(
           emailVerified: claims.email_verified === true,
           status: "active",
           platformAdministrator: false,
-          credential: { kind: "session", id: hashCredential(sessionToken) },
+          credential: { kind: "session", id: null },
         };
-        const now = clock.now();
-        await database.query(
-          "insert into identity_sessions (token_hash, principal, created_at, expires_at) values ($1, $2, $3, $4)",
-          [
-            principal.credential.id,
-            JSON.stringify(principal),
-            now,
-            new Date(now.getTime() + settings.sessionSeconds * 1000),
-          ],
-        );
-        return { kind: "authenticated", principal, sessionToken };
-      },
-      signOut: async (request) => {
-        const credential = readCookie(request.headers, settings.sessionCookie);
-        if (credential !== null)
-          await database.query(
-            "delete from identity_sessions where token_hash = $1",
-            [hashCredential(credential)],
-          );
+        return { kind: "authenticated", principal };
       },
     },
   };

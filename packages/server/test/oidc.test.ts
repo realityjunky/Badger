@@ -71,6 +71,72 @@ async function signIn() {
 }
 
 describe("OpenID Connect sign-in", () => {
+  it("records session issuance and logout in Activity even when the person's profile is unchanged", async () => {
+    const app = await start({
+      BADGER_BOOTSTRAP_ADMINISTRATORS: "alice@example.com",
+    });
+    const first = await signIn();
+    const second = await signIn();
+    const me = await (
+      await app.request("/badger/api/v1/me", {
+        headers: { cookie: second.cookie },
+      })
+    ).json();
+    const activity = async (action: string) => {
+      const response = await app.request(
+        `/badger/api/v1/audit-events?action=${action}`,
+        { headers: { cookie: first.cookie } },
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()).events as Record<string, unknown>[];
+    };
+    const created = await activity("session.created");
+    expect(created).toHaveLength(2);
+    expect(created).toContainEqual(
+      expect.objectContaining({
+        actorPersonId: me.person.id,
+        credentialKind: "session",
+        credentialId: me.credential.id,
+        channel: "web",
+        targetType: "session",
+        targetId: me.credential.id,
+        before: null,
+        after: { revision: null, hash: me.credential.id },
+        reason: "OpenID Connect sign-in",
+        requestId: second.response.headers.get("x-request-id"),
+      }),
+    );
+    const logout = () =>
+      app.request("/badger/auth/logout", {
+        method: "POST",
+        redirect: "manual",
+        headers: {
+          cookie: second.cookie,
+          origin: "https://badger.example",
+          "x-request-id": "session-logout",
+        },
+      });
+    expect((await logout()).status).toBe(303);
+    expect((await logout()).status).toBe(303);
+    const revoked = await activity("session.revoked");
+    expect(revoked).toHaveLength(1);
+    expect(revoked[0]).toMatchObject({
+      actorPersonId: me.person.id,
+      credentialKind: "session",
+      credentialId: me.credential.id,
+      channel: "web",
+      targetType: "session",
+      targetId: me.credential.id,
+      before: { revision: null, hash: me.credential.id },
+      after: null,
+      reason: "Signed out",
+      requestId: "session-logout",
+    });
+    expect(JSON.stringify([...created, ...revoked])).not.toContain(
+      second.cookie.split("=")[1],
+    );
+  });
+
   it.skipIf(!onPostgres)(
     "shares transactions and sessions across server instances",
     async () => {

@@ -74,6 +74,10 @@ it never retains provider access, refresh or ID tokens. Multiple server
 processes share transactions and sessions through the database. Expired
 records are removed when a new sign-in begins.
 
+Issuing or revoking a session records its actor, credential hash, target,
+channel, reason and request ID in Activity, in the same database transaction.
+This includes sign-in by a returning person whose profile has not changed.
+
 An OIDC session proves the last successful sign-in until its absolute expiry
 or local logout; Badger does not introspect it at the provider on each request
 and does not implement provider logout or refresh tokens. Badger still checks

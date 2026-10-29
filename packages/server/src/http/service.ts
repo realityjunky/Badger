@@ -673,7 +673,8 @@ export function createService(options: ServiceOptions, port: number): Service {
         reply,
         url,
         path,
-        signIn,
+        database,
+        dependencies: serviceDependencies,
       })
     )
       return;

@@ -17,3 +17,9 @@ tokens are discarded after sign-in. Roles and email bindings remain under the
 existing Badger authorization and sign-in authorities. Logout deletes the
 session through a same-origin POST; provider logout and token refresh are not
 part of this adapter.
+
+Session issuance and revocation commit together with their Activity events;
+issuance also resolves the person and pending email bindings in that same
+transaction. Protocol validation proves identity before the service issues
+the credential, keeping the identity adapter separate from Badger's records
+of people and their roles.

@@ -57,11 +57,10 @@ export interface BrowserSignIn {
     transactionToken: string | null,
     callback: URL,
   ): Promise<
-    | { kind: "authenticated"; principal: Principal; sessionToken: string }
+    | { kind: "authenticated"; principal: Principal }
     | { kind: "invalid" }
     | { kind: "unavailable" }
   >;
-  signOut(request: IdentityRequest): Promise<void>;
 }
 
 export function firstHeader(
