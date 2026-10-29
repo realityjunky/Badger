@@ -24,6 +24,7 @@ import {
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 import { readGateConfirmations } from "../gates.js";
+import { readSourceStudy } from "../source-study.js";
 
 const ROOT = "/api/v1/workflows";
 // A version's pins, one pin by its Skill, its latest source check, its jobs.
@@ -396,6 +397,7 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
           sourceGate:
             (await readGateConfirmations(database, version.id, "sources"))[0] ??
             null,
+          sourceStudy: await readSourceStudy(database, version.id),
         });
   }
   return reply.json(200, {

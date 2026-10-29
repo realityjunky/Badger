@@ -41,6 +41,12 @@ them into `dist/`, so the server image carries the build and none of them.
   Activity page shows every recorded action with its actor, time, target,
   channel, and reason, filtered by actor, action, target type, and channel.
   Auditors and Administrators read all of it.
+- Workflow versions include Source study (#45): per-pin progress, fact and
+  interface editors, retirement confirmation, and immutable record history.
+  Evidence links open the exact record revision's cited, numbered lines in
+  an inspector and survive refresh under the configured base path. Engineers
+  review and mark each pinned version studied through the shared gate
+  protocol; the server advances stages and invalidates changed studies.
 - The rail is 228 px, or 64 px collapsed, and becomes a drawer below
   1024 px. The three-pane registry layout stacks below 1180 px.
 - The Skills registry reads live group-owned entries, immutable versions,

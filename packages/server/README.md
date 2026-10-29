@@ -42,6 +42,49 @@ required actions, `conflict`, or `unavailable`. A source check that has not
 passed yields `SOURCE_CHECK_NOT_PASSED`; a stale confirmation hash yields a
 conflict. These routes use migration `0009`; earlier shipped SQL is unchanged.
 
+## Source study records
+
+Source study (#45) records facts and interfaces independently under a Workflow
+version. Signed-in Engineers and Administrators add, edit, and retire them;
+workflow readers, including Observers and tokens, read their history and
+evidence. Every write keeps a revision and an Activity entry. The API uses
+migration `0010` and never changes previously shipped migrations.
+
+Using the `V` prefix above:
+
+| Method and path                                           | Behavior                                                                                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `GET V/source-study`                                      | Facts, interfaces, and study completion for each current pin; also included as `sourceStudy` in the version response.          |
+| `GET, POST V/source-study/facts`                          | List or create source-derived facts.                                                                                           |
+| `GET, POST V/source-study/interfaces`                     | List or create independent interface records.                                                                                  |
+| `GET, PATCH, DELETE V/source-study/facts/:id`             | Read a record with its revisions; replace its content or retire it, quoting `revision`. The interfaces path works identically. |
+| `GET V/source-study/facts/:id/evidence/:index?revision=N` | Open the exact citation's numbered lines at the record revision; interfaces work identically.                                  |
+| `POST V/gates/source-study/:skillId/preview`              | Send `{}` to review a current pin and its related record revisions.                                                            |
+| `POST V/gates/source-study/:skillId/commit`               | Send `{confirmationHash, requestId}` to mark the reviewed version studied.                                                     |
+| `GET V/gates/source-study/:skillId`                       | Read completion history, including invalidation and supersession.                                                              |
+
+A fact takes `{statement, evidence}`. An interface takes `{producer, consumer,
+artifact, columns, naming, validation, evidence}`; producer and consumer each
+identify `{skillId, hash}`, and columns is an array of names, empty for a
+non-tabular artifact. Every evidence item identifies `{skillId, hash, path,
+startLine, endLine, fileHash}`. Hashes must match the pinned version and its
+immutable file inventory. Lines are inclusive, numbered from 1, and limited
+to 1,000 lines and 256 KiB per citation. Binary and invalid UTF-8 evidence is
+refused. Historical revisions retain readable evidence after pin changes.
+
+Edits replace the complete content and quote the record's current revision.
+Retirement sends only `{revision}` and preserves all history. Stale writes
+return `conflict` with the current `record`. Retired records cannot be edited.
+Pin changes flag evidence as stale and invalidate study completions. Editing,
+adding, or retiring a record invalidates completions of the Skills it
+references and any later stage that had progressed.
+
+Study completion reuses gate replay and conflict behavior. It requires
+confirmed Sources and current evidence: rejected previews report
+`SOURCE_SET_NOT_CONFIRMED`, `SKILL_VERSION_NOT_PINNED`, or
+`SOURCE_STUDY_EVIDENCE_STALE`. The last completion opens Questionnaire.
+See [ADR 0019](../../docs/adr/0019-source-study-records-and-completion.md).
+
 ## Personal access tokens
 
 People create and revoke their Agents' and CLI credentials at

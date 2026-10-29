@@ -1,6 +1,7 @@
 import { apiUrl } from "../app/paths.js";
 import type { Group } from "./organization.js";
 import type { ScriptEffects } from "./skills.js";
+import type { SourceStudy } from "./source-study.js";
 
 export interface WorkflowFrame {
   name: string;
@@ -96,6 +97,7 @@ export interface WorkflowCapabilities {
   createVersion: boolean;
   managePins: boolean;
   confirmSources: boolean;
+  manageSourceStudy: boolean;
 }
 export const WORKFLOW_ROLES = [
   "Workflow owner",
@@ -137,6 +139,7 @@ export interface WorkflowVersionDetail {
   sourceCheck: WorkflowSourceCheck | null;
   jobs: WorkflowJob[];
   sourceGate: GateConfirmation | null;
+  sourceStudy: SourceStudy;
 }
 export interface GatePreview {
   gate: string;
@@ -164,7 +167,7 @@ export type WriteResult<T> =
       currentRevision?: number;
     };
 
-async function read<T>(
+export async function read<T>(
   basePath: string,
   path: string,
   signal?: AbortSignal,
@@ -185,7 +188,7 @@ async function read<T>(
 }
 
 /** Conflicts carry the current revision, without retrying the person's write. */
-async function write<T>(
+export async function write<T>(
   basePath: string,
   method: string,
   path: string,
@@ -209,7 +212,10 @@ async function write<T>(
             : "failed",
       message:
         typeof value.error?.message === "string" ? value.error.message : "",
-      currentRevision: value.workflow?.revision ?? value.binding?.revision,
+      currentRevision:
+        value.workflow?.revision ??
+        value.binding?.revision ??
+        value.record?.revision,
     };
   } catch {
     return { kind: "failed", message: "" };

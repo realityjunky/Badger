@@ -1,17 +1,20 @@
 import { commitGate, readGateConfirmations } from "../gates.js";
 import { workflowCapabilities } from "../workflow-access.js";
 import { sourcesGateState } from "../workflow-gates.js";
+import { sourceStudyGateState } from "../source-study-gates.js";
+import { studyGateName } from "../source-study-invalidation.js";
 import { listWorkflowVersions, readWorkflow } from "../workflows.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 import { objectInput, RequestError } from "./errors.js";
+import type { Queryable } from "../database/database.js";
 
 const GATE_PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/gates\/(sources)(?:\/(preview|commit))?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/gates\/(sources|source-study\/([^/]+))(?:\/(preview|commit))?$/u;
 
 export function gateMethods(path: string): string | null {
   const match = GATE_PATH.exec(path);
-  return match === null ? null : match[4] === undefined ? "GET, HEAD" : "POST";
+  return match === null ? null : match[5] === undefined ? "GET, HEAD" : "POST";
 }
 
 export async function handleGate(input: AuthorizedRequest): Promise<void> {
@@ -43,33 +46,44 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
   if (!capabilities.read)
     return reply.error(403, "denied", "This workflow is outside your roles");
   const versionId = decodeURIComponent(match[2]);
+  const skillId =
+    match[4] === undefined ? undefined : decodeURIComponent(match[4]);
+  const gate = skillId === undefined ? "sources" : studyGateName(skillId);
+  const loadState = (tx: Queryable) =>
+    skillId === undefined
+      ? sourcesGateState(tx, versionId)
+      : sourceStudyGateState(tx, versionId, skillId);
   if (
     !(await listWorkflowVersions(database, workflow.id)).some(
       (version) => version.id === versionId,
     )
   )
     return reply.error(404, "invalid", "No such workflow version");
-  if (match[4] === undefined) {
+  if (match[5] === undefined) {
     const confirmations = await readGateConfirmations(
       database,
       versionId,
-      "sources",
+      gate,
     );
     return reply.json(200, {
       confirmation: confirmations[0] ?? null,
       confirmations,
     });
   }
-  if (!capabilities.confirmSources)
+  if (
+    !(skillId === undefined
+      ? capabilities.confirmSources
+      : capabilities.manageSourceStudy)
+  )
     return reply.error(
       403,
       "denied",
-      "Only a signed-in Administrator or Engineer confirms Sources",
+      "Only a signed-in Administrator or Engineer confirms a source or study gate",
     );
   const body = await readJsonBody(request);
   if (!body.ok) return reply.error(400, "invalid", body.message);
   const value = objectInput(body.value);
-  if (match[4] === "preview") {
+  if (match[5] === "preview") {
     if (Object.keys(value).length > 0)
       throw new RequestError(400, "The preview takes an empty object");
     const state = await database.transaction(async (tx) => {
@@ -77,7 +91,7 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
         "select id from workflow_versions where id = $1 for update",
         [versionId],
       );
-      return sourcesGateState(tx, versionId);
+      return loadState(tx);
     });
     if (state.findings.length > 0)
       return reply.json(409, {
@@ -105,9 +119,9 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
     dependencies,
     context,
     versionId,
-    "sources",
+    gate,
     { confirmationHash: value.confirmationHash, requestId: value.requestId },
-    (tx) => sourcesGateState(tx, versionId),
+    loadState,
   );
   if (result.kind === "conflict")
     return reply.error(

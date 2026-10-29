@@ -32,6 +32,13 @@ the confirmation and tells the Engineer and the Workflow owner through the
 in-app inbox. See
 [ADR 0016](docs/adr/0016-gate-confirmations-and-inbox.md).
 
+Source study records source-derived facts with immutable file evidence and
+independent interfaces between Skills. Engineers add, edit, and retire these
+revisioned records, open the cited lines, and confirm each pinned version
+studied. All writes are audited; changed records or pins reopen study. The
+last study completion opens Questionnaire. See
+[ADR 0019](docs/adr/0019-source-study-records-and-completion.md).
+
 Deployments follow the [backup and restore procedure](docs/backup-and-restore.md)
 and rehearse recovery before the first real workflow. Nightly scheduling belongs
 to the deployment.
@@ -166,8 +173,9 @@ the future frame with `PATCH /workflows/:id`, and quote the workflow's
 `revision` in both edits and `POST /workflows/:id/versions`. Workflow roles use
 `POST /api/v1/bindings` with `scopeType: "workflow"` and the workflow ID as
 `scopeId`; removal quotes the binding's revision. Every write is audited.
-Later features add the source, questionnaire, and gate records that advance
-stages; clients cannot set stage states directly.
+Sources and Source study advance through their records and human gates.
+Later features add questionnaire and subsequent gate records; clients cannot
+set stage states directly.
 
 ## Adding a workspace package
 

@@ -64,6 +64,7 @@ import { handleWorkflows, workflowMethods } from "./workflows.js";
 import { handleTokens, tokenMethods } from "./tokens.js";
 import { gateMethods, handleGate } from "./gates.js";
 import { handleInbox, inboxMethods } from "./inbox.js";
+import { handleSourceStudy, sourceStudyMethods } from "./source-study.js";
 import { tokenRequestAllowed } from "./token-access.js";
 import { mayManageRoleScope } from "../workflow-access.js";
 import {
@@ -151,6 +152,7 @@ function allowedMethods(path: string): string {
     workflowMethods(path) ??
     tokenMethods(path) ??
     gateMethods(path) ??
+    sourceStudyMethods(path) ??
     inboxMethods(path);
   if (featureMethods !== null) return featureMethods;
   if (path === `${API}/me/preferences`) {
@@ -769,6 +771,8 @@ export function createService(options: ServiceOptions, port: number): Service {
       if (tokenMethods(path) !== null) return await handleTokens(authorized);
       if (gateMethods(path) !== null) return await handleGate(authorized);
       if (inboxMethods(path) !== null) return await handleInbox(authorized);
+      if (sourceStudyMethods(path) !== null)
+        return await handleSourceStudy(authorized);
       if (workflowMethods(path) !== null)
         return await handleWorkflows(authorized);
       if (path === `${API}/skills` || path.startsWith(`${API}/skills/`)) {

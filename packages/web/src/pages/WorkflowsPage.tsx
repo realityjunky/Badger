@@ -24,6 +24,7 @@ import {
 } from "./workflows/WorkflowDialog.js";
 import { WorkflowTeam } from "./workflows/WorkflowTeam.js";
 import { WorkflowSources } from "./workflows/WorkflowSources.js";
+import { WorkflowSourceStudy } from "./workflows/WorkflowSourceStudy.js";
 
 type State =
   | { kind: "loading" | "failed" | "denied" | "missing" }
@@ -301,14 +302,22 @@ export function WorkflowsPage() {
           {versionResources !== null &&
             selectedVersion !== undefined &&
             workflow !== undefined && (
-              <WorkflowSources
-                basePath={basePath}
-                workflow={workflow}
-                version={selectedVersion}
-                detail={versionResources}
-                canManage={versionResources.capabilities.managePins}
-                onChanged={reload}
-              />
+              <>
+                <WorkflowSources
+                  basePath={basePath}
+                  workflow={workflow}
+                  version={selectedVersion}
+                  detail={versionResources}
+                  canManage={versionResources.capabilities.managePins}
+                  onChanged={reload}
+                />
+                <WorkflowSourceStudy
+                  key={selectedVersion.id}
+                  basePath={basePath}
+                  detail={versionResources}
+                  onChanged={reload}
+                />
+              </>
             )}
           <WorkflowTeam
             basePath={basePath}
