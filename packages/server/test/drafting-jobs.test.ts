@@ -653,3 +653,77 @@ it("accepts follow-ups as child drafts while publication and parent resolution r
     ]),
   );
 });
+
+it.runIf(process.env["BADGER_TEST_DATABASE_URL"] !== undefined)(
+  "serializes a person's decisions alongside workflow writes without deadlocking foreign-key checks",
+  async () => {
+    const { base, questionnaire, secret, round } = await setup();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { job } = await request(
+        base,
+        "POST",
+        { kind: "draft-questions", roundId: round.id, confirmed: true },
+        undefined,
+        engineer,
+        201,
+      );
+      const { job: claim } = await request(
+        `${base}/${job.id}/claim`,
+        "POST",
+        { revision: job.revision },
+        secret,
+      );
+      const { job: submitted } = await request(
+        `${base}/${job.id}/submit`,
+        "POST",
+        {
+          leaseId: claim.lease.id,
+          contextHash: job.contextHash,
+          result: { questions: [question()] },
+        },
+        secret,
+      );
+      const decision = {
+        revision: submitted.revision,
+        questions: submitted.result.questions,
+      };
+      const { preview } = await request(
+        `${base}/${job.id}/accept-preview`,
+        "POST",
+        decision,
+      );
+      const [draft, accept] = await Promise.all([
+        service.request(
+          `/api/v1${questionnaire}/rounds/${round.id}/questions`,
+          {
+            as: engineer,
+            method: "POST",
+            headers: {
+              origin: "http://localhost",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify(question(`Concurrent draft ${attempt}`)),
+          },
+        ),
+        service.request(`/api/v1${base}/${job.id}/accept`, {
+          as: engineer,
+          method: "POST",
+          headers: {
+            origin: "http://localhost",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            ...decision,
+            requestId: `concurrent-decision-${attempt}`,
+            confirmed: true,
+            confirmationHash: preview.confirmationHash,
+          }),
+        }),
+      ]);
+      expect(draft.status, JSON.stringify(await draft.json())).toBe(201);
+      expect([200, 409], JSON.stringify(await accept.json())).toContain(
+        accept.status,
+      );
+    }
+  },
+);

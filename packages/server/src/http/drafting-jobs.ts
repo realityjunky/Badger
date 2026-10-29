@@ -70,7 +70,9 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
   const decisionCommit = action === "accept" || action === "reject";
   const result = await database.transaction(async (tx) => {
     if (decisionCommit)
-      await tx.query("select id from people where id = $1 for update", [
+      // FK checks in workflow-first writers take KEY SHARE on this row.
+      // NO KEY UPDATE serializes replay keys without blocking those checks.
+      await tx.query("select id from people where id = $1 for no key update", [
         person.id,
       ]);
     await tx.query("select id from workflows where id = $1 for update", [
