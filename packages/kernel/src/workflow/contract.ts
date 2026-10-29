@@ -1,4 +1,5 @@
 import { isWorkflowName } from "./name.js";
+import { validateArtifactReceiptDeclarations } from "../workflow-runtime/artifact-receipts.js";
 import type {
   Binding,
   BindingInput,
@@ -724,6 +725,14 @@ export function validateWorkflow(input: WorkflowInput): ValidationFinding[] {
   }
   const logicalArtifactIds = new Set<string>();
   for (const schema of input.outputSchemas ?? []) {
+    try {
+      validateArtifactReceiptDeclarations(schema);
+    } catch (error) {
+      findings.push({
+        code: "invalid-schema",
+        message: (error as Error).message,
+      });
+    }
     if (!schema.id || !schema.description || !attached.has(schema.id))
       findings.push({
         code: "orphan-output-schema",
@@ -838,7 +847,11 @@ function phase3Enabled(input: WorkflowInput): boolean {
     input.cycles !== undefined ||
     input.capabilities?.durability !== undefined ||
     input.outputSchemas?.some((schema) =>
-      schema.artifacts.some((artifact) => artifact.lifetime !== undefined),
+      schema.artifacts.some(
+        (artifact) =>
+          artifact.lifetime !== undefined ||
+          artifact.verification === "receipt",
+      ),
     ),
   );
 }

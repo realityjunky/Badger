@@ -18,6 +18,7 @@ import { validateSkillPackage } from "../skill-runtime/validate.js";
 import { sha256, slug, stableValue } from "../util.js";
 import type { WorkflowExecutionIdentity } from "./types.js";
 import { createCompletionPlan } from "./completion.js";
+import { validateArtifactReceiptDeclarations } from "./artifact-receipts.js";
 import { validateWorkflowVerificationRequirement } from "./verification-receipts.js";
 import {
   isRevisionedWorkflowProtocol,
@@ -213,6 +214,17 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
       );
     }
     schemaIds.add(schema.id);
+    validateArtifactReceiptDeclarations(schema);
+    if (
+      schema.artifacts.some(
+        (artifact) => artifact.verification === "receipt",
+      ) &&
+      !protocol.capabilities?.features.includes("revisioned-attempts")
+    ) {
+      throw new Error(
+        `Workflow Protocol Output Schema ${schema.id} artifact receipts require revisioned Attempts`,
+      );
+    }
     const artifactIds = new Set<string>();
     for (const artifact of schema.artifacts) {
       if (

@@ -74,6 +74,21 @@ incompatible lifetime scopes,
 unknown versions, link traversal, oversized reads, and content drift fail before
 Run mutation.
 
+Output Schemas may declare `externalRoots`, a map of names to absolute directory
+paths. An artifact uses `verification: "receipt"` and an optional `root` name to
+verify a declared external path, or a large Run-root artifact, by streaming its
+content through SHA-256. Paths stay relative to the selected root. WorkflowRuntime
+records the absolute path, byte size, SHA-256, modification time, and producer
+Attempt in accepted `evidence.artifactReceipts`; Agents must not invent those
+receipts. Receipt declarations enable revisioned Attempts. With
+`requireCurrentAttempt: true`, every file must have been modified at or after the
+Attempt's first persisted action; retries retain that boundary. A carried version
+keeps its original producer and cannot satisfy another Attempt's freshness
+requirement. A directory receipt hashes a bounded manifest of its files and
+directories. There are at most 256 receipts per Completion and 256 entries per
+directory receipt. Paths without receipt verification retain the Run-root
+boundary and the 2 MiB content cap.
+
 Decision Nodes compile to Engine `ask_user` actions. The continuation reports
 `await-user` and exposes the pending question, choices, required inputs,
 rationale policy, reviewer requirement summary, revision, and Attempt identity.

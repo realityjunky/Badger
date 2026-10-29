@@ -141,6 +141,16 @@ describe("WorkflowRuntime Phase 3 certification", () => {
     });
 
     expect(result.blockers).toEqual([]);
+    expect(result.evidence?.artifactReceipts).toMatchObject({
+      status: "certified",
+      externalRoot: true,
+      largeFile: true,
+      completionEvidence: true,
+      staleRejected: true,
+      containmentRejected: true,
+      legacyRunRoot: true,
+      freshProcessRecovered: true,
+    });
     expect(result.evidence?.phase3).toMatchObject({
       status: "certified",
       fixtureName: "phase3-certification-workflow",

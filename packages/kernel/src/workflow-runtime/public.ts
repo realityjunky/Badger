@@ -149,6 +149,7 @@ export type {
   WorkflowArtifactLifetime,
   WorkflowArtifactPath,
   WorkflowArtifactProducer,
+  WorkflowArtifactReceipt,
   WorkflowArtifactSelection,
   WorkflowArtifactVersionId,
   WorkflowArtifactVersion,

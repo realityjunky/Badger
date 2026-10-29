@@ -8,6 +8,9 @@ import type { RunState, WorkflowRuntimeState } from "../engine/types.js";
 import type { WorkflowArtifactMutation } from "../engine/runtime-types.js";
 import type {
   ArtifactSchema,
+  OutputSchema,
+  WorkflowArtifactReceipt,
+  WorkflowArtifactProducer,
   WorkflowArtifactId,
   WorkflowArtifactLifetime,
   WorkflowArtifactPath,
@@ -17,6 +20,10 @@ import type {
   WorkflowProtocol,
 } from "../types.js";
 import { sha256, stableValue } from "../util.js";
+import {
+  artifactStorageRoot,
+  captureArtifactReceipt,
+} from "./artifact-receipts.js";
 
 const ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
 const ARTIFACT_MAX_ENTRIES = 256;
@@ -24,6 +31,7 @@ const ARTIFACT_MAX_ENTRIES = 256;
 interface WorkflowArtifactDeclaration {
   artifactId: WorkflowArtifactId;
   schemaId: string;
+  schema: OutputSchema;
   artifact: ArtifactSchema;
 }
 
@@ -54,6 +62,7 @@ function declarations(
     schema.artifacts.map((artifact) => ({
       artifactId: `${schema.id}.${artifact.id}`,
       schemaId: schema.id,
+      schema,
       artifact,
     })),
   );
@@ -247,10 +256,19 @@ async function resolveArtifactPath(
   if (normalized.includes("*")) {
     fail(`${label} update path must identify one physical artifact`);
   }
-  const inspection = await inspectProtectedProjectPath(runRoot, normalized, {
-    label,
-    expected: workflowArtifactExpectedKind(declaration.artifact),
-  });
+  const storageRoot = artifactStorageRoot(
+    runRoot,
+    declaration.schema,
+    declaration.artifact,
+  );
+  const inspection = await inspectProtectedProjectPath(
+    storageRoot,
+    normalized,
+    {
+      label,
+      expected: workflowArtifactExpectedKind(declaration.artifact),
+    },
+  );
   return inspection.exists ? inspection.relative : null;
 }
 
@@ -312,13 +330,34 @@ async function hashArtifactPath(
   runRoot: string,
   declaration: WorkflowArtifactDeclaration,
   relativePath: string,
-): Promise<string> {
+  producer?: WorkflowArtifactProducer,
+  attemptStartedAt?: number,
+): Promise<{ contentHash: string; receipt?: WorkflowArtifactReceipt }> {
   const label = `Workflow artifact ${declaration.artifactId}`;
   if (!artifactPathMatches(relativePath, declaration.artifact.paths)) {
     fail(`${label} path is outside its declaration: ${relativePath}`);
   }
+  if (declaration.artifact.verification === "receipt") {
+    if (!producer) fail(`${label} receipt requires a producer`);
+    const receipt = await captureArtifactReceipt({
+      storageRoot: artifactStorageRoot(
+        runRoot,
+        declaration.schema,
+        declaration.artifact,
+      ),
+      relativePath,
+      artifactId: declaration.artifactId,
+      producer,
+      ...(declaration.artifact.requireCurrentAttempt
+        ? { attemptStartedAt }
+        : {}),
+    });
+    return { contentHash: receipt.sha256, receipt };
+  }
   if (declaration.artifact.kind === "directory") {
-    return hashDirectoryArtifact(runRoot, relativePath, label);
+    return {
+      contentHash: await hashDirectoryArtifact(runRoot, relativePath, label),
+    };
   }
   const result = await readProtectedProjectFile(
     runRoot,
@@ -326,7 +365,7 @@ async function hashArtifactPath(
     ARTIFACT_MAX_BYTES,
     { label },
   );
-  return sha256(result.bytes);
+  return { contentHash: sha256(result.bytes) };
 }
 
 export async function validateWorkflowArtifactVersion(
@@ -345,12 +384,18 @@ export async function validateWorkflowArtifactVersion(
   ) {
     fail(`Workflow artifact version identity is invalid: ${version.id}`);
   }
-  const currentHash = await hashArtifactPath(
+  const current = await hashArtifactPath(
     runRoot,
     declaration,
     version.path,
+    version.producer,
   );
-  if (currentHash !== version.contentHash) {
+  if (
+    current.contentHash !== version.contentHash ||
+    (version.receipt &&
+      (current.receipt?.path !== version.receipt.path ||
+        current.receipt.size !== version.receipt.size))
+  ) {
     fail(`Workflow artifact content drift detected: ${version.id}`);
   }
 }
@@ -409,6 +454,7 @@ function artifactVersionId(
   pathValue: string,
   producer: WorkflowArtifactVersion["producer"],
   scopeId: string,
+  receipt?: WorkflowArtifactReceipt,
 ): WorkflowArtifactVersionId {
   return `artifact-version-${sha256(
     JSON.stringify(
@@ -418,6 +464,7 @@ function artifactVersionId(
         path: pathValue,
         producer,
         scopeId,
+        ...(receipt ? { receipt } : {}),
       }),
     ),
   ).slice(0, 24)}`;
@@ -471,6 +518,7 @@ export async function prepareWorkflowArtifactMutation(options: {
   state: RunState;
   nodeId: string;
   actionId: string;
+  attemptStartedAt?: number;
   artifacts?: Record<WorkflowArtifactId, WorkflowArtifactPath>;
   artifactVersions?: Record<WorkflowArtifactId, WorkflowArtifactVersionId>;
 }): Promise<WorkflowArtifactMutation> {
@@ -549,11 +597,6 @@ export async function prepareWorkflowArtifactMutation(options: {
         `Attempt artifact path must include the current Attempt id: ${declaration.artifactId}`,
       );
     }
-    const contentHash = await hashArtifactPath(
-      options.runRoot,
-      declaration,
-      artifactPath,
-    );
     const scopeId = artifactScopeId(lifetime, options.state);
     const producer = {
       runId: options.state.runId,
@@ -563,12 +606,34 @@ export async function prepareWorkflowArtifactMutation(options: {
       actionId: options.actionId,
       revision: runtime.revision,
     };
+    if (
+      declaration.artifact.requireCurrentAttempt &&
+      options.attemptStartedAt === undefined
+    ) {
+      fail(
+        `Workflow artifact ${declaration.artifactId} requires persisted Attempt start evidence`,
+      );
+    }
+    let material: Awaited<ReturnType<typeof hashArtifactPath>>;
+    try {
+      material = await hashArtifactPath(
+        options.runRoot,
+        declaration,
+        artifactPath,
+        producer,
+        options.attemptStartedAt,
+      );
+    } catch (error) {
+      fail((error as Error).message);
+    }
+    const { contentHash, receipt } = material;
     const id = artifactVersionId(
       declaration.artifactId,
       contentHash,
       artifactPath,
       producer,
       scopeId,
+      receipt,
     );
     if (runtime.artifactVersions.some((version) => version.id === id)) {
       fail(`Workflow artifact version already exists: ${id}`);
@@ -583,6 +648,7 @@ export async function prepareWorkflowArtifactMutation(options: {
       path: artifactPath,
       producer,
       timestamp,
+      ...(receipt ? { receipt } : {}),
     };
     mutation.versions.push(version);
     mutation.selections.push(
@@ -618,14 +684,19 @@ export async function prepareWorkflowArtifactMutation(options: {
       );
     }
     assertSelectionScope(version, options.state);
-    const contentHash = await hashArtifactPath(
-      options.runRoot,
-      declaration,
-      version.path,
-    );
-    if (contentHash !== version.contentHash) {
-      fail(`Workflow artifact content drift detected: ${version.id}`);
+    if (
+      declaration.artifact.requireCurrentAttempt &&
+      version.producer.attemptId !== attempt.id
+    ) {
+      fail(
+        `Workflow artifact ${declaration.artifactId} is stale for this Attempt`,
+      );
     }
+    await validateWorkflowArtifactVersion(
+      options.runRoot,
+      options.protocol,
+      version,
+    );
     mutation.selections.push(
       selection(
         declaration.artifactId,
@@ -686,6 +757,31 @@ export function validateWorkflowArtifactState(
   );
   for (const version of versions) {
     const declaration = declarationFor(version.artifactId, declared);
+    const receipt = version.receipt;
+    const expectedExternalPath =
+      declaration.artifact.root === undefined
+        ? undefined
+        : path.resolve(
+            declaration.schema.externalRoots![declaration.artifact.root],
+            version.path,
+          );
+    const receiptMatches =
+      receipt !== undefined &&
+      receipt.artifactId === version.artifactId &&
+      receipt.sha256 === version.contentHash &&
+      (expectedExternalPath === undefined ||
+        receipt.path === expectedExternalPath) &&
+      JSON.stringify(stableValue(receipt.producer)) ===
+        JSON.stringify(stableValue(version.producer));
+    if (
+      declaration.artifact.verification === "receipt"
+        ? !receiptMatches
+        : receipt !== undefined
+    ) {
+      throw new Error(
+        `WorkflowRuntime artifact receipt identity is invalid: ${version.id}`,
+      );
+    }
     if (
       version.schemaId !== declaration.schemaId ||
       version.lifetime !== artifactLifetime(declaration) ||
@@ -725,6 +821,7 @@ export function validateWorkflowArtifactState(
         version.path,
         version.producer,
         version.scopeId,
+        version.receipt,
       )
     ) {
       throw new Error(

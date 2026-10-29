@@ -14,6 +14,7 @@ import { createCompletionPlan } from "../workflow-runtime/completion.js";
 import { createWorkflowRuntime } from "../workflow-runtime/public.js";
 import { certifyPhase3Workflow } from "./phase3-certification.js";
 import { certifyPhase4Workflow } from "./phase4-certification.js";
+import { certifyArtifactReceipts } from "./artifact-receipt-certification.js";
 import type {
   WorkflowContinuation,
   WorkflowExecutionIdentity,
@@ -363,6 +364,19 @@ async function certifyRevisionedWorkflow(options: {
 }
 
 export async function certifyWorkflowRuntime(options: {
+  protocol: WorkflowProtocol;
+  generatedPackageHash: string;
+  packageRoot: string;
+}): Promise<WorkflowRuntimeCertificationResult> {
+  const result = await certifyWorkflowRuntimePhases(options);
+  if (!result.evidence) return result;
+  const receipts = await certifyArtifactReceipts(options);
+  result.evidence.artifactReceipts = receipts.evidence;
+  result.blockers.push(...receipts.blockers);
+  return result;
+}
+
+async function certifyWorkflowRuntimePhases(options: {
   protocol: WorkflowProtocol;
   generatedPackageHash: string;
   packageRoot: string;

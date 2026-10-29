@@ -33,6 +33,9 @@ export interface ArtifactSchema {
   paths: string[];
   validations: ValidationKind[];
   lifetime?: WorkflowArtifactLifetime;
+  verification?: "content" | "receipt";
+  root?: string;
+  requireCurrentAttempt?: boolean;
 }
 
 export interface EvidenceSchema {
@@ -44,6 +47,7 @@ export interface OutputSchema {
   id: string;
   description: string;
   optional?: boolean;
+  externalRoots?: Record<string, string>;
   artifacts: ArtifactSchema[];
   evidence: EvidenceSchema[];
 }
@@ -1318,6 +1322,21 @@ export interface WorkflowRuntimeCertificationEvidence {
   reverseAdapterCompleted: boolean;
   phase3?: WorkflowRuntimePhase3CertificationEvidence;
   phase4?: WorkflowRuntimePhase4CertificationEvidence;
+  artifactReceipts?: WorkflowRuntimeArtifactReceiptCertificationEvidence;
+}
+
+export interface WorkflowRuntimeArtifactReceiptCertificationEvidence {
+  status: "certified" | "failed";
+  generatedPackageHash: string;
+  fixtureName: string;
+  externalRoot: boolean;
+  largeFile: boolean;
+  completionEvidence: boolean;
+  staleRejected: boolean;
+  containmentRejected: boolean;
+  legacyRunRoot: boolean;
+  freshProcessRecovered: boolean;
+  sourceIntegrity: boolean;
 }
 
 export const WORKFLOW_RUNTIME_PHASE4_NEGATIVE_CASES = [
@@ -1560,6 +1579,15 @@ export interface WorkflowArtifactProducer {
   revision: number;
 }
 
+export interface WorkflowArtifactReceipt {
+  artifactId: WorkflowArtifactId;
+  path: string;
+  size: number;
+  sha256: string;
+  mtimeMs: number;
+  producer: WorkflowArtifactProducer;
+}
+
 export interface WorkflowArtifactVersion {
   id: WorkflowArtifactVersionId;
   artifactId: WorkflowArtifactId;
@@ -1570,6 +1598,7 @@ export interface WorkflowArtifactVersion {
   path: WorkflowArtifactPath;
   producer: WorkflowArtifactProducer;
   timestamp: string;
+  receipt?: WorkflowArtifactReceipt;
 }
 
 export interface WorkflowArtifactSelection {

@@ -5,6 +5,8 @@ import type {
   NodeProtocol,
   OutputSchema,
   WorkflowProtocol,
+  WorkflowArtifactProducer,
+  WorkflowArtifactReceipt,
 } from "../types.js";
 import type { RuntimeCompletionPlan } from "../skill-runtime/types.js";
 import {
@@ -12,6 +14,22 @@ import {
   workflowArtifactExpectedKind,
 } from "./artifacts.js";
 import type { WorkflowSubmission } from "./types.js";
+import {
+  artifactStorageRoot,
+  captureArtifactReceipt,
+} from "./artifact-receipts.js";
+
+export interface WorkflowCompletionValidation {
+  blockers: string[];
+  artifactReceipts: WorkflowArtifactReceipt[];
+}
+
+interface WorkflowCompletionContext {
+  satisfiedGuardrails?: ReadonlySet<string>;
+  producer?: WorkflowArtifactProducer;
+  attemptStartedAt?: number;
+  selectedReceipts?: readonly WorkflowArtifactReceipt[];
+}
 
 const ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -167,15 +185,103 @@ export async function validateSuccessfulSubmission(
   node: NodeProtocol,
   plan: RuntimeCompletionPlan,
   submission: WorkflowSubmission,
-  satisfiedGuardrails: ReadonlySet<string> = new Set(),
-): Promise<string[]> {
-  if (submission.kind === "decision") return [];
+  context: WorkflowCompletionContext = {},
+): Promise<WorkflowCompletionValidation> {
+  const {
+    producer,
+    attemptStartedAt,
+    selectedReceipts,
+    satisfiedGuardrails = new Set<string>(),
+  } = context;
+  const artifactReceipts: WorkflowArtifactReceipt[] = [];
+  if (submission.kind === "decision") return { blockers: [], artifactReceipts };
   const evidence = submission.evidence ?? {};
   const blockers: string[] = [];
 
   for (const schemaId of plan.outputSchemas) {
     const schema = schemaFor(protocol, schemaId);
     for (const artifact of schema.artifacts) {
+      if (artifact.verification === "receipt") {
+        try {
+          if (!producer)
+            throw new Error("Artifact receipt requires a current Attempt");
+          if (
+            artifact.requireCurrentAttempt &&
+            attemptStartedAt === undefined
+          ) {
+            throw new Error(
+              "Artifact receipt requires persisted Attempt start evidence",
+            );
+          }
+          if (selectedReceipts !== undefined) {
+            const selected = selectedReceipts.filter(
+              (receipt) => receipt.artifactId === `${schema.id}.${artifact.id}`,
+            );
+            if (artifact.required && selected.length === 0) {
+              throw new Error(
+                "Artifact receipt requires an explicit update or version",
+              );
+            }
+            if (
+              artifact.requireCurrentAttempt &&
+              selected.some(
+                (receipt) => receipt.producer.attemptId !== producer.attemptId,
+              )
+            ) {
+              throw new Error(
+                `Workflow artifact ${schema.id}.${artifact.id} is stale for this Attempt`,
+              );
+            }
+            if (artifactReceipts.length + selected.length > 256) {
+              throw new Error(
+                "Output Schema artifacts exceed 256 receipts per Completion",
+              );
+            }
+            artifactReceipts.push(
+              ...selected.map((receipt) => structuredClone(receipt)),
+            );
+            continue;
+          }
+          const storageRoot = artifactStorageRoot(runRoot, schema, artifact);
+          const matches = new Set<string>();
+          for (const pattern of artifact.paths) {
+            for (const match of await matchingWorkflowArtifactPaths(
+              storageRoot,
+              pattern,
+              workflowArtifactExpectedKind(artifact),
+              `Workflow artifact ${schema.id}.${artifact.id}`,
+            )) {
+              matches.add(match);
+              if (artifactReceipts.length + matches.size > 256) {
+                throw new Error(
+                  "Output Schema artifacts exceed 256 receipts per Completion",
+                );
+              }
+            }
+          }
+          if (artifact.required && matches.size === 0) {
+            blockers.push(
+              `Missing Output Schema artifacts: ${schema.id}.${artifact.id}`,
+            );
+          }
+          for (const relativePath of matches) {
+            artifactReceipts.push(
+              await captureArtifactReceipt({
+                storageRoot,
+                relativePath,
+                artifactId: `${schema.id}.${artifact.id}`,
+                producer,
+                ...(artifact.requireCurrentAttempt ? { attemptStartedAt } : {}),
+              }),
+            );
+          }
+        } catch (error) {
+          blockers.push(
+            `Workflow artifact ${schema.id}.${artifact.id} receipt verification failed: ${(error as Error).message}`,
+          );
+        }
+        continue;
+      }
       if (!artifact.required) continue;
       let exists = false;
       try {
@@ -219,5 +325,5 @@ export async function validateSuccessfulSubmission(
     blockers.push(`Missing guardrail evidence: ${key}`);
   }
 
-  return blockers;
+  return { blockers, artifactReceipts };
 }
