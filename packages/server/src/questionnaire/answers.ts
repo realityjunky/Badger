@@ -1,3 +1,4 @@
+import { invalidateQuestionFacts } from "./resolutions.js";
 import type { WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
@@ -14,6 +15,7 @@ interface AnswerRow {
   question_id: string;
   person_id: string;
   display_name: string;
+  eligible_for_resolution: boolean;
   revision: number;
   question_revision: number;
   text: string;
@@ -41,7 +43,11 @@ export async function readAnswers(
   personId: string,
 ): Promise<Answer[]> {
   const rows = await tx.query<AnswerRow>(
-    `select r.*, p.display_name from answer_revisions r join questions q on q.id = r.question_id
+    `select r.*, p.display_name,
+      (r.state = 'submitted' and r.question_revision = q.revision
+        and exists (select 1 from question_answers head where head.question_id = r.question_id and head.person_id = r.person_id and head.revision = r.revision)
+        and exists (select 1 from question_recipients recipient join role_bindings binding on binding.id = recipient.binding_id where recipient.question_id = r.question_id and binding.person_id = r.person_id)) as eligible_for_resolution
+      from answer_revisions r join questions q on q.id = r.question_id
     join people p on p.id = r.person_id where q.workflow_version_id = $1 and q.state <> 'draft'
       and (r.person_id = $2 or r.state = 'submitted') order by r.question_id, r.person_id, r.revision`,
     [versionId, personId],
@@ -56,6 +62,7 @@ export async function readAnswers(
       questionId: row.question_id,
       personId: row.person_id,
       personName: row.display_name,
+      eligibleForResolution: row.eligible_for_resolution,
       revisions,
     });
   }
@@ -81,9 +88,10 @@ async function answerForWrite(
       round_id: string;
       revision: number;
       resolved_at: Date | string | null;
+      state: string;
       assigned: boolean;
     }>(
-      `select q.id, q.round_id, q.revision, q.resolved_at,
+      `select q.id, q.round_id, q.revision, q.resolved_at, q.state,
     exists (select 1 from question_recipients r join role_bindings b on b.id = r.binding_id
       where r.question_id = q.id and b.person_id = $3) as assigned
     from questions q where q.workflow_version_id = $1 and q.id = $2 and q.state <> 'draft'`,
@@ -97,7 +105,9 @@ async function answerForWrite(
           id: row.id,
           roundId: row.round_id,
           revision: row.revision,
-          canAnswer: row.assigned && row.resolved_at === null,
+          canAnswer:
+            row.assigned &&
+            (row.resolved_at === null || row.state === "confirmed"),
         };
   if (!question) throw new RequestError(404, "No such published question");
   if (!question.canAnswer)
@@ -137,6 +147,14 @@ async function appendAnswer(
   state: "draft" | "submitted",
   agentHost: string | null,
 ) {
+  await invalidateQuestionFacts(
+    tx,
+    deps,
+    context,
+    versionId,
+    input.questionId,
+    "The confirmed answer changed",
+  );
   const revision = input.revision + 1;
   await tx.query(
     `insert into question_answers (question_id, person_id, revision) values ($1, $2, $3)
@@ -275,7 +293,7 @@ export async function submitAnswers(
       [input.questionId, context.personId, deps.clock.now()],
     );
     await tx.query(
-      `update questions q set state = case when not exists (
+      `update questions q set state = case when q.state = 'needs-reconfirmation' then q.state when not exists (
       select 1 from question_recipients a join role_bindings b on b.id = a.binding_id where a.question_id = q.id
         and (b.person_id is null or not exists (select 1 from answer_revisions r where r.question_id = q.id
           and r.person_id = b.person_id and r.question_revision = q.revision and r.state = 'submitted'))

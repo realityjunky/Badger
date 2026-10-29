@@ -1,3 +1,4 @@
+import { invalidateQuestionFacts } from "./resolutions.js";
 import { canonicalHash } from "@realityjunky/badger";
 import { recordAudit, type WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
@@ -27,6 +28,8 @@ interface QuestionRow {
   state: Question["state"];
   position: number | null;
   resolved_at: Date | string | null;
+  parent_question_id: string | null;
+  resolution_revision: number;
   content: QuestionContent;
 }
 export function toRound(row: RoundRow): QuestionRound {
@@ -129,11 +132,13 @@ export async function readQuestions(
     revision: row.revision,
     state: row.state,
     position: row.position,
+    parentQuestionId: row.parent_question_id,
+    resolutionRevision: row.resolution_revision,
     resolvedAt: row.resolved_at === null ? null : toIsoString(row.resolved_at),
     revisions: history.get(row.id) ?? [],
     canAnswer:
       row.state !== "draft" &&
-      row.resolved_at === null &&
+      (row.resolved_at === null || row.state === "confirmed") &&
       assignedIds.has(row.id),
   }));
 }
@@ -243,7 +248,7 @@ export async function saveQuestion(
     throw new RequestError(409, "The question changed since you read it", {
       currentRevision: existing.revision,
     });
-  if (existing?.resolvedAt)
+  if (existing?.resolvedAt && existing.state !== "confirmed")
     throw new RequestError(
       409,
       "The Engineer has already resolved this question",
@@ -255,8 +260,16 @@ export async function saveQuestion(
   const id = existing?.id ?? deps.ids.next();
   const revision = (existing?.revision ?? 0) + 1;
   if (existing) {
+    await invalidateQuestionFacts(
+      tx,
+      deps,
+      context,
+      versionId,
+      id,
+      "The confirmed question or its evidence changed",
+    );
     await tx.query(
-      "update questions set revision = $2, state = case when state = 'draft' then 'draft' else 'open' end where id = $1",
+      "update questions set revision = $2, state = case when state = 'draft' then 'draft' when state = 'needs-reconfirmation' then state else 'open' end where id = $1",
       [id, revision],
     );
     await tx.query("delete from question_recipients where question_id = $1", [
@@ -308,7 +321,7 @@ export async function notifyQuestion(
   deps: ServiceDependencies,
   versionId: string,
   questionId: string,
-  revision: number,
+  revision: number | string,
 ) {
   await tx.query(
     `insert into inbox_items (id, person_id, binding_id, workflow_version_id, gate, kind, event_id, question_id, created_at, updated_at)

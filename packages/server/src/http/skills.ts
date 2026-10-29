@@ -1,3 +1,5 @@
+import { readSkillBacklog } from "../questionnaire/resolutions.js";
+import { listWorkflows } from "../workflows.js";
 import {
   createSkill,
   diffVersions,
@@ -21,6 +23,7 @@ const SKILL_ROUTES: readonly [RegExp, string][] = [
   [/^\/api\/v1\/skills\/[^/]+$/u, "GET, HEAD"],
   [/^\/api\/v1\/skills\/[^/]+\/versions$/u, "GET, HEAD, POST"],
   [/^\/api\/v1\/skills\/[^/]+\/upload-preview$/u, "POST"],
+  [/^\/api\/v1\/skills\/[^/]+\/backlog$/u, "GET, HEAD"],
   [/^\/api\/v1\/skills\/[^/]+\/diff$/u, "GET, HEAD"],
   [/^\/api\/v1\/skills\/[^/]+\/versions\/[^/]+(?:\/files)?$/u, "GET, HEAD"],
 ];
@@ -91,7 +94,7 @@ export async function handleSkillsRequest(
     });
   }
   const match = new RegExp(
-    `^${API}/skills/([^/]+)(?:/(versions|diff|upload-preview)(?:/([^/]+)(?:/(files))?)?)?$`,
+    `^${API}/skills/([^/]+)(?:/(versions|diff|upload-preview|backlog)(?:/([^/]+)(?:/(files))?)?)?$`,
     "u",
   ).exec(path);
   if (match?.[1] === undefined) return reply.error(404, "invalid", "Not found");
@@ -100,6 +103,14 @@ export async function handleSkillsRequest(
   const permission = skillGroups.find((group) => group.id === skill.groupId);
   if (permission === undefined)
     return reply.error(404, "invalid", "No such Skill");
+  if (match[2] === "backlog")
+    return reply.json(200, {
+      items: await readSkillBacklog(
+        database,
+        skill.id,
+        (await listWorkflows(database, access, person)).map((w) => w.id),
+      ),
+    });
   if (method === "POST") {
     if (!permission.canUpload)
       return reply.error(

@@ -41,6 +41,7 @@ describe("the health endpoint", () => {
           "0009",
           "0010",
           "0011",
+          "0012",
         ],
         pending: [],
         drifted: [],

@@ -33,7 +33,17 @@ export interface Question extends QuestionContent {
   id: string;
   roundId: string;
   revision: number;
-  state: "draft" | "open" | "answered";
+  state:
+    | "draft"
+    | "open"
+    | "answered"
+    | "confirmed"
+    | "followed-up"
+    | "deferred"
+    | "withdrawn"
+    | "needs-reconfirmation";
+  parentQuestionId: string | null;
+  resolutionRevision: number;
   position: number | null;
   resolvedAt: string | null;
   revisions: QuestionRevision[];
@@ -61,6 +71,7 @@ export interface Answer extends AnswerRevision {
   questionId: string;
   personId: string;
   personName: string;
+  eligibleForResolution: boolean;
   revisions: AnswerRevision[];
 }
 

@@ -7,7 +7,12 @@ import { toIsoString } from "./util.js";
 import type { WorkflowRole } from "./workflow-access.js";
 
 export type InboxState = "unread" | "read" | "done";
-export type InboxKind = "gate-ready" | "gate-invalidated" | "question-assigned";
+export type InboxKind =
+  | "gate-ready"
+  | "gate-invalidated"
+  | "question-assigned"
+  | "restatement-ready"
+  | "question-reopened";
 export interface InboxItem {
   id: string;
   workflowVersionId: string;

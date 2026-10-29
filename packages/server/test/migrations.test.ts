@@ -69,6 +69,7 @@ describe("reviewed SQL migrations", () => {
       "0009",
       "0010",
       "0011",
+      "0012",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -87,6 +88,7 @@ describe("reviewed SQL migrations", () => {
         "0009",
         "0010",
         "0011",
+        "0012",
       ],
       pending: [],
       drifted: [],
@@ -100,6 +102,9 @@ describe("reviewed SQL migrations", () => {
     expect(tables.rows.map((row) => row.table_name)).toEqual([
       "answer_revisions",
       "audit_events",
+      "confirmed_facts",
+      "fact_acknowledgements",
+      "fact_answer_revisions",
       "gate_confirmations",
       "groups",
       "inbox_items",
@@ -108,6 +113,7 @@ describe("reviewed SQL migrations", () => {
       "personal_access_tokens",
       "question_answers",
       "question_recipients",
+      "question_resolutions",
       "question_revisions",
       "question_rounds",
       "questionnaire_settings",
@@ -148,6 +154,7 @@ describe("reviewed SQL migrations", () => {
         "0009",
         "0010",
         "0011",
+        "0012",
       ],
       pending: [],
       drifted: [],
@@ -155,7 +162,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(11);
+    expect(rows.rows[0]?.count).toBe(12);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

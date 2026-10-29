@@ -30,6 +30,7 @@ import {
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { useI18n } from "../i18n/I18nContext.js";
+import { SkillBacklog } from "./skills/SkillBacklog.js";
 import { UploadSkillModal } from "./skills/UploadSkillModal.js";
 import { VersionComparison } from "./skills/VersionComparison.js";
 import { VersionFile } from "./skills/VersionFile.js";
@@ -243,6 +244,10 @@ export function SkillsPage() {
             ) : (
               <>
                 <h2 className="pane-title">{selectedSkill.name}</h2>
+                <SkillBacklog
+                  key={selectedSkill.id}
+                  skillId={selectedSkill.id}
+                />
                 {versions === null ? (
                   <Skeleton active />
                 ) : versions.length === 0 ? (

@@ -78,8 +78,11 @@ and dashboard: revisioned questions, priority-ordered publication previews,
 private autosaved answers, per-question or atomic round submission, automatic
 inbox completion, and per-person live updates with polling recovery. The
 service retains the kernel's dossier topic vocabulary; this slice does not
-compose or approve a Semantic dossier. Threads and resolutions follow in
-#47 and #48.
+compose or approve a Semantic dossier. Answer resolutions (#48) add formal
+facts linked to exact answer revisions, expert acknowledgements and disputes,
+published child questions, reasoned deferrals with Skill backlogs, withdrawal,
+and re-confirmation after answer or cited evidence changes. Sign-offs stay in
+the dashboard. Threads follow in #47.
 
 Personal access tokens (#53) are also delivered: personal settings create,
 list, and revoke scoped Agent and CLI credentials, showing the secret once.
