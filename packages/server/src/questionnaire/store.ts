@@ -1,4 +1,5 @@
 import { invalidateQuestionFacts } from "./resolutions.js";
+import { reconcileDossier } from "../dossier.js";
 import { canonicalHash } from "@realityjunky/badger";
 import { recordAudit, type WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
@@ -46,12 +47,15 @@ export function toRound(row: RoundRow): QuestionRound {
 export async function advanceQuestionnaireRevision(
   tx: Queryable,
   versionId: string,
+  deps: ServiceDependencies,
+  context: WriteContext,
 ) {
   await tx.query(
     `insert into questionnaires (workflow_version_id) values ($1)
     on conflict (workflow_version_id) do update set revision = questionnaires.revision + 1`,
     [versionId],
   );
+  await reconcileDossier(tx, deps, context, versionId);
 }
 export async function recordQuestionnaireAudit(
   tx: Queryable,
@@ -212,7 +216,7 @@ export async function createRound(
     select $1, $2, coalesce(max(number), 0) + 1, $3, $4, $5 from question_rounds where workflow_version_id = $2 returning *`,
     [id, versionId, title, context.personId, deps.clock.now()],
   );
-  await advanceQuestionnaireRevision(tx, versionId);
+  await advanceQuestionnaireRevision(tx, versionId, deps, context);
   await recordQuestionnaireAudit(
     tx,
     deps,
@@ -300,7 +304,7 @@ export async function saveQuestion(
     "update question_rounds set revision = revision + 1 where id = $1",
     [roundId],
   );
-  await advanceQuestionnaireRevision(tx, versionId);
+  await advanceQuestionnaireRevision(tx, versionId, deps, context);
   await recordQuestionnaireAudit(
     tx,
     deps,
@@ -443,7 +447,7 @@ export async function publishRound(
     "update question_rounds set state = 'published', revision = revision + 1, published_at = $2, publication_hash = $3 where id = $1 returning *",
     [roundId, deps.clock.now(), hash],
   );
-  await advanceQuestionnaireRevision(tx, versionId);
+  await advanceQuestionnaireRevision(tx, versionId, deps, context);
   await recordQuestionnaireAudit(
     tx,
     deps,

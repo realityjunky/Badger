@@ -423,7 +423,7 @@ export async function invalidateQuestionFacts(
     questionId,
     deps.ids.next(),
   );
-  await advanceQuestionnaireRevision(tx, versionId);
+  await advanceQuestionnaireRevision(tx, versionId, deps, context);
   await resolutionAudit(
     tx,
     deps,
@@ -580,7 +580,7 @@ export async function resolveQuestion(
     "update questions set state = $2, resolved_at = $3, resolution_revision = $4 where id = $1",
     [questionId, input.kind, deps.clock.now(), row.revision],
   );
-  await advanceQuestionnaireRevision(tx, versionId);
+  await advanceQuestionnaireRevision(tx, versionId, deps, context);
   await resolutionAudit(
     tx,
     deps,
@@ -725,7 +725,7 @@ export async function acknowledgeFact(
     ]);
     await notifyQuestion(tx, deps, versionId, fact.questionId, row.id);
   }
-  await advanceQuestionnaireRevision(tx, versionId);
+  await advanceQuestionnaireRevision(tx, versionId, deps, context);
   await resolutionAudit(
     tx,
     deps,

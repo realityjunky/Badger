@@ -97,6 +97,9 @@ The states of a workflow version's eight authoring stages: sources, source study
 **Semantic dossier**:
 A structured account of the workflow's meaning, including Node responsibilities, inputs, completion evidence, bindings, outputs, decisions, routes, and recovery expectations.
 
+**Dossier version**:
+An immutable snapshot of a Semantic dossier and the ledger records it relies on. The Engineer composes it, and the Workflow owner approves its exact identity. A change to those records supersedes approval while preserving the original version.
+
 **Node**:
 A meaningful stage of a workflow with its own responsibility, completion evidence, and possible outcomes.
 

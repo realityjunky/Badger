@@ -107,7 +107,7 @@ export async function saveComment(
     "insert into comment_revisions (comment_id, revision, text, actor_id, created_at) values ($1, $2, $3, $4, $5)",
     [id, revision, text, context.personId, deps.clock.now()],
   );
-  await advanceQuestionnaireRevision(tx, versionId);
+  await advanceQuestionnaireRevision(tx, versionId, deps, context);
   await recordQuestionnaireAudit(
     tx,
     deps,

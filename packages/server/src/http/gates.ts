@@ -8,9 +8,10 @@ import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 import { objectInput, RequestError } from "./errors.js";
 import type { Queryable } from "../database/database.js";
+import { dossierGateState } from "../dossier.js";
 
 const GATE_PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/gates\/(sources|source-study\/([^/]+))(?:\/(preview|commit))?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/gates\/(sources|dossier|source-study\/([^/]+))(?:\/(preview|commit))?$/u;
 
 export function gateMethods(path: string): string | null {
   const match = GATE_PATH.exec(path);
@@ -48,11 +49,13 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
   const versionId = decodeURIComponent(match[2]);
   const skillId =
     match[4] === undefined ? undefined : decodeURIComponent(match[4]);
-  const gate = skillId === undefined ? "sources" : studyGateName(skillId);
+  const gate = skillId === undefined ? match[3] : studyGateName(skillId);
   const loadState = (tx: Queryable) =>
-    skillId === undefined
-      ? sourcesGateState(tx, versionId)
-      : sourceStudyGateState(tx, versionId, skillId);
+    gate === "dossier"
+      ? dossierGateState(tx, versionId, person.id)
+      : skillId === undefined
+        ? sourcesGateState(tx, versionId)
+        : sourceStudyGateState(tx, versionId, skillId);
   if (
     !(await listWorkflowVersions(database, workflow.id)).some(
       (version) => version.id === versionId,
@@ -71,14 +74,18 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
     });
   }
   if (
-    !(skillId === undefined
-      ? capabilities.confirmSources
-      : capabilities.manageSourceStudy)
+    !(gate === "dossier"
+      ? capabilities.approveDossier
+      : skillId === undefined
+        ? capabilities.confirmSources
+        : capabilities.manageSourceStudy)
   )
     return reply.error(
       403,
       "denied",
-      "Only a signed-in Administrator or Engineer confirms a source or study gate",
+      gate === "dossier"
+        ? "Only a signed-in Workflow owner or Administrator approves a dossier"
+        : "Only a signed-in Administrator or Engineer confirms a source or study gate",
     );
   const body = await readJsonBody(request);
   if (!body.ok) return reply.error(400, "invalid", body.message);

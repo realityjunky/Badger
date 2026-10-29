@@ -48,6 +48,34 @@ required actions, `conflict`, or `unavailable`. A source check that has not
 passed yields `SOURCE_CHECK_NOT_PASSED`; a stale confirmation hash yields a
 conflict. These routes use migration `0009`; earlier shipped SQL is unchanged.
 
+## Dossier versions
+
+Dossier composition and approval (#50) use migration `0016`. The kernel
+composes a Semantic dossier from the ledger and validates it. The Engineer
+supplies only `topics`, `nodes`, and, for an upgrade, `upgradeSource` recovery;
+workflow identity, pinned source identities, facts, deferred resolutions, and
+provenance come from durable records. Readiness blockers refuse composition.
+Kernel validation findings are returned by preview and must be repaired before
+the version can be stored.
+
+| Method and path                | Behavior                                                                                                                                                    |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET V/dossier`                | Read immutable versions, the current version ID, gate confirmation, and the caller-visible kernel handoff.                                                  |
+| `POST V/dossier/preview`       | Send `{topics, nodes, upgradeSource?}`; receive `{composition}` with the snapshot, canonical JSON, hash, and kernel findings.                               |
+| `POST V/dossier/compose`       | Send the same semantic fields plus `confirmationHash` quoting the composition hash. Store a valid snapshot; identical content returns the existing version. |
+| `POST V/gates/dossier/preview` | A signed-in Workflow owner or Administrator sends `{}` to review the exact dossier hash and stage effects.                                                  |
+| `POST V/gates/dossier/commit`  | Send `{confirmationHash, requestId}` to approve that preview through the shared gate protocol.                                                              |
+| `GET V/gates/dossier`          | Read approval history, invalidation, and replacement confirmation links.                                                                                    |
+
+Canonical JSON is stored as immutable text, and its SHA-256 is the version's
+hash. A new composition requests approval in the Workflow owner's inbox.
+The kernel document's proposed `confirmed` flag is not service approval;
+only an active matching gate confirmation approves a version. Record or pin
+changes supersede that approval and invalidate later stages, notifying the
+Engineer and Workflow owner in the writer's transaction. Artifacts and
+confirmation retry responses remain unchanged. Personal access tokens may
+read dossiers and gate history but cannot compose or approve versions.
+
 ## Source study records
 
 Source study (#45) records facts and interfaces independently under a Workflow
@@ -159,15 +187,15 @@ remain available when streaming fails.
 Migration `0015` adds immutable inference/assumption revisions and round
 publication baselines. Using the questionnaire prefix `Q` above:
 
-| Endpoint | Behavior |
-| --- | --- |
-| `GET Q/ledger` | Kernel handoff with all five ledger parts, record references, per-topic blockers, deferred resolutions, and available publication baselines |
-| `GET Q/ledger?sinceRound=:id` | Also returns added, changed, and resolved ledger items since publication of that round |
-| `GET Q/inferences` or `GET Q/assumptions` | Draft records, including retired records |
-| `POST Q/inferences` or `POST Q/assumptions` | Engineer creates a draft with `statement`, `topic`, and optional `questionId` |
-| `GET Q/inferences/:id` or `GET Q/assumptions/:id` | Current record and immutable revisions |
-| `PATCH Q/inferences/:id` or `PATCH Q/assumptions/:id` | Replace draft content, quoting its current `revision` |
-| `DELETE Q/inferences/:id` or `DELETE Q/assumptions/:id` | Retire a draft, quoting only its current `revision` |
+| Endpoint                                                | Behavior                                                                                                                                    |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET Q/ledger`                                          | Kernel handoff with all five ledger parts, record references, per-topic blockers, deferred resolutions, and available publication baselines |
+| `GET Q/ledger?sinceRound=:id`                           | Also returns added, changed, and resolved ledger items since publication of that round                                                      |
+| `GET Q/inferences` or `GET Q/assumptions`               | Draft records, including retired records                                                                                                    |
+| `POST Q/inferences` or `POST Q/assumptions`             | Engineer creates a draft with `statement`, `topic`, and optional `questionId`                                                               |
+| `GET Q/inferences/:id` or `GET Q/assumptions/:id`       | Current record and immutable revisions                                                                                                      |
+| `PATCH Q/inferences/:id` or `PATCH Q/assumptions/:id`   | Replace draft content, quoting its current `revision`                                                                                       |
+| `DELETE Q/inferences/:id` or `DELETE Q/assumptions/:id` | Retire a draft, quoting only its current `revision`                                                                                         |
 
 All reads require the Workflow version's read permissions. Draft questions
 remain visible only to composing Engineers and Administrators, including in

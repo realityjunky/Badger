@@ -1,4 +1,5 @@
 import { canonicalHash } from "@realityjunky/badger";
+import { reconcileDossier } from "./dossier.js";
 import { recordAudit, type WriteContext } from "./audit.js";
 import type { Database, Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
@@ -424,6 +425,7 @@ export async function saveStudyRecord(
       reason: `Source study ${kind} ${status === "retired" ? "retired" : "recorded"}`,
       requestId: context.requestId,
     });
+    await reconcileDossier(tx, dependencies, context, versionId);
     return record(row, pins);
   });
 }

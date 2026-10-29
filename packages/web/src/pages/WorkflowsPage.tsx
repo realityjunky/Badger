@@ -25,6 +25,7 @@ import {
 import { WorkflowTeam } from "./workflows/WorkflowTeam.js";
 import { WorkflowSources } from "./workflows/WorkflowSources.js";
 import { WorkflowSourceStudy } from "./workflows/WorkflowSourceStudy.js";
+import { WorkflowDossier } from "./workflows/WorkflowDossier.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 
 type State =
@@ -345,6 +346,12 @@ export function WorkflowsPage() {
                 />
                 <WorkflowSourceStudy
                   key={selectedVersion.id}
+                  basePath={basePath}
+                  detail={versionResources}
+                  onChanged={reload}
+                />
+                <WorkflowDossier
+                  key={`dossier-${selectedVersion.id}`}
                   basePath={basePath}
                   detail={versionResources}
                   onChanged={reload}

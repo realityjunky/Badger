@@ -47,8 +47,12 @@ export function InboxPanel() {
                         : item.kind === "question-assigned"
                           ? "inbox.questionAssigned"
                           : item.kind === "gate-ready"
-                            ? "inbox.gateReady"
-                            : "inbox.gateInvalidated",
+                            ? item.gate === "dossier"
+                              ? "inbox.dossierReady"
+                              : "inbox.gateReady"
+                            : item.gate === "dossier"
+                              ? "inbox.dossierInvalidated"
+                              : "inbox.gateInvalidated",
                   { name: item.workflowName, number: item.versionNumber },
                 )}
                 {item.questionText !== null && ` · ${item.questionText}`}

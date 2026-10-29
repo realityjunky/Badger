@@ -2,6 +2,7 @@ import type { TokenScope } from "../tokens.js";
 import { skillMethods } from "./skills.js";
 import { workflowMethods } from "./workflows.js";
 import { gateMethods } from "./gates.js";
+import { dossierMethods } from "./dossier.js";
 import { inboxMethods } from "./inbox.js";
 import { sourceStudyMethods } from "./source-study.js";
 import { questionnaireMethods } from "./questionnaire.js";
@@ -24,6 +25,7 @@ export function tokenRequestAllowed(
     return true;
   if (gateMethods(path) !== null)
     return reads && gateMethods(path) === "GET, HEAD";
+  if (dossierMethods(path) !== null) return reads;
   if (inboxMethods(path) !== null) return reads;
   if (sourceStudyMethods(path) !== null) return reads;
   const questionnaire = questionnaireMethods(path);

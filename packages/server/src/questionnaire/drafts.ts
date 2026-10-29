@@ -172,7 +172,7 @@ export async function saveDraft(
       deps.clock.now(),
     ],
   );
-  await advanceQuestionnaireRevision(tx, versionId);
+  await advanceQuestionnaireRevision(tx, versionId, deps, context);
   await recordQuestionnaireAudit(
     tx,
     deps,

@@ -5,6 +5,44 @@ import type { Language } from "../preferences/model.js";
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  "dossier.title": "Dossier versions",
+  "dossier.description":
+    "The Engineer composes the agreed meaning from the ledger. The Workflow owner reviews and approves one immutable version.",
+  "dossier.compose": "Compose dossier",
+  "dossier.composeHelp":
+    "Write each topic summary and explain any non-applicability. Link supporting facts and describe each Node's responsibility. Facts and provenance come from the ledger.",
+  "dossier.reviewComposition": "Review composition",
+  "dossier.composeVersion": "Compose this version",
+  "dossier.edit": "Edit composition",
+  "dossier.reviewApproval": "Review dossier approval",
+  "dossier.approve": "Approve this version",
+  "dossier.approvalHelp":
+    "Approve the dossier and the exact record revisions shown. This completes the dossier stage and opens plan and proposal.",
+  "dossier.approved": "Dossier approved",
+  "dossier.awaiting": "Awaiting Workflow owner approval",
+  "dossier.supersededHelp":
+    "Records or the selected version changed. The Engineer must compose the current meaning and the Workflow owner must approve it again.",
+  "dossier.empty": "No dossier has been composed yet.",
+  "dossier.version": "Dossier version",
+  "dossier.versionNumber": "Dossier version {number}",
+  "dossier.hash": "Dossier hash",
+  "dossier.canonical": "Canonical JSON and record snapshot",
+  "dossier.facts": "Facts and provenance",
+  "dossier.recordRevision": "Open record · revision {revision}",
+  "dossier.nodes": "Node responsibilities",
+  "dossier.topics": "Topic summaries",
+  "dossier.summary": "summary",
+  "dossier.supportingFacts": "supporting facts",
+  "dossier.nodeId": "Node ID",
+  "dossier.responsibility": "Responsibility summary",
+  "dossier.addNode": "Add Node",
+  "dossier.removeNode": "Remove Node",
+  "dossier.upgradeSource": "Upgrade source",
+  "dossier.recovery": "Upgrade recovery policy",
+  "dossier.findings": "Kernel validation findings",
+  "dossier.failed": "The dossier request failed. Reload and try again.",
+  "inbox.dossierReady": "{name} · v{number}: approve the dossier",
+  "inbox.dossierInvalidated": "{name} · v{number}: dossier approval superseded",
   "ledger.privateQuestion":
     "An unpublished question is still being drafted by the Engineer.",
   "ledger.linkedDrafts": "Linked inference and assumption drafts",
@@ -715,6 +753,44 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  "dossier.title": "语义档案版本",
+  "dossier.description":
+    "工程师根据台账编写已达成共识的语义，工作流所有者审核并批准一个不可变版本。",
+  "dossier.compose": "编写语义档案",
+  "dossier.composeHelp":
+    "编写各主题摘要，并说明不适用的内容；关联支持事实，描述各节点职责。事实及其来源由台账生成。",
+  "dossier.reviewComposition": "审核编写结果",
+  "dossier.composeVersion": "生成此版本",
+  "dossier.edit": "继续编辑",
+  "dossier.reviewApproval": "审核语义档案批准",
+  "dossier.approve": "批准此版本",
+  "dossier.approvalHelp":
+    "批准所示档案及其绑定的记录修订。这将完成档案阶段，并开启计划与提案阶段。",
+  "dossier.approved": "语义档案已批准",
+  "dossier.awaiting": "等待工作流所有者批准",
+  "dossier.supersededHelp":
+    "记录或所选版本已变更。工程师需重新编写当前语义，工作流所有者需再次批准。",
+  "dossier.empty": "尚未生成语义档案。",
+  "dossier.version": "语义档案版本",
+  "dossier.versionNumber": "语义档案版本 {number}",
+  "dossier.hash": "语义档案哈希",
+  "dossier.canonical": "规范 JSON 与记录快照",
+  "dossier.facts": "事实与溯源",
+  "dossier.recordRevision": "查看记录 · 修订 {revision}",
+  "dossier.nodes": "节点职责",
+  "dossier.topics": "主题摘要",
+  "dossier.summary": "摘要",
+  "dossier.supportingFacts": "支持事实",
+  "dossier.nodeId": "节点 ID",
+  "dossier.responsibility": "职责摘要",
+  "dossier.addNode": "添加节点",
+  "dossier.removeNode": "删除节点",
+  "dossier.upgradeSource": "升级来源",
+  "dossier.recovery": "升级恢复策略",
+  "dossier.findings": "内核校验结果",
+  "dossier.failed": "档案请求失败，请刷新后重试。",
+  "inbox.dossierReady": "{name} · v{number}：请批准语义档案",
+  "inbox.dossierInvalidated": "{name} · v{number}：语义档案批准已失效",
   "ledger.privateQuestion": "工程师仍在起草一项尚未发布的问题。",
   "ledger.linkedDrafts": "关联的推断和假设草稿",
   "ledger.linkedDraftsHelp":

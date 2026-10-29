@@ -98,6 +98,8 @@ export interface WorkflowCapabilities {
   managePins: boolean;
   confirmSources: boolean;
   manageSourceStudy: boolean;
+  composeDossier: boolean;
+  approveDossier: boolean;
 }
 export const WORKFLOW_ROLES = [
   "Workflow owner",

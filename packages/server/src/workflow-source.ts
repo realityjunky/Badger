@@ -1,4 +1,5 @@
 import { invalidateSkillFactEvidence } from "./questionnaire/resolutions.js";
+import { reconcileDossier } from "./dossier.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
@@ -535,6 +536,7 @@ export async function pinSkillVersion(
         "The Skill pins changed",
         ["Engineer", "Workflow owner"],
       );
+      await reconcileDossier(tx, dependencies, context, versionId);
       const pinsHash = await pinsForHash(tx, versionId);
       const job = await enqueueSourceCheck(
         tx,
@@ -632,6 +634,7 @@ export async function unpinSkillVersion(
       "A Skill pin was removed",
       ["Engineer", "Workflow owner"],
     );
+    await reconcileDossier(tx, dependencies, context, versionId);
     const pinsHash = await pinsForHash(tx, versionId);
     const job = await enqueueSourceCheck(
       tx,

@@ -79,7 +79,7 @@ export async function raiseConcern(
     ["Engineer"],
     id,
   );
-  await advanceQuestionnaireRevision(tx, versionId);
+  await advanceQuestionnaireRevision(tx, versionId, deps, context);
   await recordQuestionnaireAudit(
     tx,
     deps,
@@ -173,7 +173,7 @@ export async function resolveConcern(
     "update inbox_items set state = 'done', revision = revision + 1, updated_at = $2 where concern_id = $1 and state <> 'done'",
     [id, deps.clock.now()],
   );
-  await advanceQuestionnaireRevision(tx, versionId);
+  await advanceQuestionnaireRevision(tx, versionId, deps, context);
   const concern = (await readConcerns(tx, versionId)).find((c) => c.id === id)!;
   await recordAudit(tx, deps, {
     actor: { personId: context.personId, credential: context.credential },

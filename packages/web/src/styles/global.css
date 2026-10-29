@@ -1252,3 +1252,44 @@ body {
 .questionnaire-text {
   overflow-wrap: anywhere;
 }
+
+.dossier-content {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#dossier {
+  scroll-margin-top: 84px;
+}
+.dossier-content h3,
+.dossier-content p {
+  margin: 0;
+}
+.dossier-hash {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.dossier-json {
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.dossier-topic-editor {
+  margin-block: 16px;
+  padding: 16px;
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-panel);
+}
+.dossier-version-heading,
+.dossier-readiness {
+  margin-block: 16px;
+}
+.dossier-facts {
+  margin: 0;
+  padding-inline-start: 24px;
+}
+.dossier-facts li + li {
+  margin-top: 12px;
+}

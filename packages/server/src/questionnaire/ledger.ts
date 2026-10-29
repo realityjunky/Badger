@@ -4,6 +4,7 @@ import {
   type QuestionnaireTopic,
   type QuestionnaireLedgerItem,
   type QuestionnaireRecordHandoff,
+  type QuestionnaireRecords,
 } from "@realityjunky/badger";
 import type { Queryable } from "../database/database.js";
 import { readQuestions } from "./store.js";
@@ -70,60 +71,66 @@ function visibleHandoff(
   };
 }
 
+export async function readQuestionnaireRecords(
+  tx: Queryable,
+  versionId: string,
+  personId: string,
+): Promise<QuestionnaireRecords> {
+  const questions = await readQuestions(tx, versionId, personId, true);
+  const resolutions = await readResolutions(tx, versionId);
+  const answers = await readAnswers(tx, versionId, personId);
+  const study = await readSourceStudy(tx, versionId);
+  return {
+    questions: questions.map((q) => ({
+      ...q,
+      topic: q.topic as QuestionnaireTopic,
+      resolution: resolutions.find(
+        (r) => r.questionId === q.id && r.revision === q.resolutionRevision,
+      ),
+      answers: answers
+        .filter((a) => a.questionId === q.id)
+        .flatMap((a) => {
+          const submitted = a.revisions
+            .filter((r) => r.state === "submitted")
+            .at(-1);
+          return submitted
+            ? [{ personId: a.personId, revision: submitted.revision }]
+            : [];
+        })
+        .sort((a, b) => a.personId.localeCompare(b.personId)),
+    })),
+    drafts: await readDrafts(tx, versionId),
+    facts: (await readFacts(tx, versionId))
+      .filter((f) => questions.some((q) => q.id === f.questionId))
+      .map((f) => ({
+        ...f,
+        resolutionRevision: resolutions.find((r) => r.id === f.resolutionId)!
+          .revision,
+        questionRevision: resolutions.find((r) => r.id === f.resolutionId)!
+          .questionRevision,
+        statement: f.text,
+        current:
+          questions.find((q) => q.id === f.questionId)!.resolutionRevision ===
+          resolutions.find((r) => r.id === f.resolutionId)!.revision,
+      })),
+    sourceRecords: [...study.facts, ...study.interfaces].map((r) => ({
+      ...r,
+      statement:
+        "statement" in r.content ? r.content.statement : r.content.artifact,
+    })),
+    pins: study.studies,
+  };
+}
+
 async function recordHandoff(
   tx: Queryable,
   versionId: string,
   personId: string,
   compose: boolean,
 ) {
-  const questions = await readQuestions(tx, versionId, personId, true);
-  const resolutions = await readResolutions(tx, versionId);
-  const answers = await readAnswers(tx, versionId, personId);
-  const study = await readSourceStudy(tx, versionId);
   return visibleHandoff(
     createQuestionnaireHandoff({
-      records: {
-        questions: questions.map((q) => ({
-          ...q,
-          topic: q.topic as QuestionnaireTopic,
-          resolution: resolutions.find(
-            (r) => r.questionId === q.id && r.revision === q.resolutionRevision,
-          ),
-          answers: answers
-            .filter((a) => a.questionId === q.id)
-            .flatMap((a) => {
-              const submitted = a.revisions
-                .filter((r) => r.state === "submitted")
-                .at(-1);
-              return submitted
-                ? [{ personId: a.personId, revision: submitted.revision }]
-                : [];
-            })
-            .sort((a, b) => a.personId.localeCompare(b.personId)),
-        })),
-        drafts: await readDrafts(tx, versionId),
-        facts: (await readFacts(tx, versionId))
-          .filter((f) => questions.some((q) => q.id === f.questionId))
-          .map((f) => ({
-            ...f,
-            resolutionRevision: resolutions.find(
-              (r) => r.id === f.resolutionId,
-            )!.revision,
-            questionRevision: resolutions.find((r) => r.id === f.resolutionId)!
-              .questionRevision,
-            statement: f.text,
-            current:
-              questions.find((q) => q.id === f.questionId)!
-                .resolutionRevision ===
-              resolutions.find((r) => r.id === f.resolutionId)!.revision,
-          })),
-        sourceRecords: [...study.facts, ...study.interfaces].map((r) => ({
-          ...r,
-          statement:
-            "statement" in r.content ? r.content.statement : r.content.artifact,
-        })),
-        pins: study.studies,
-      },
+      records: await readQuestionnaireRecords(tx, versionId, personId),
     }),
     compose,
   );

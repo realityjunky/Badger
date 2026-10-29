@@ -54,6 +54,18 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("refuses rewriting or deleting canonical dossier artifacts", async () => {
+    const test = await freshDatabase();
+    await applyMigrations(test.database, await loadBundledMigrations(), clock);
+    for (const statement of [
+      "update dossier_versions set canonical_json = '{}'",
+      "delete from dossier_versions",
+      "truncate dossier_versions",
+    ])
+      await expect(test.database.query(statement), statement).rejects.toThrow(
+        /immutable/u,
+      );
+  });
   it("applies the bundled reviewed SQL and reports what ran", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
@@ -73,6 +85,7 @@ describe("reviewed SQL migrations", () => {
       "0013",
       "0014",
       "0015",
+      "0016",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -95,6 +108,7 @@ describe("reviewed SQL migrations", () => {
         "0013",
         "0014",
         "0015",
+        "0016",
       ],
       pending: [],
       drifted: [],
@@ -111,6 +125,7 @@ describe("reviewed SQL migrations", () => {
       "comment_revisions",
       "concern_resolutions",
       "confirmed_facts",
+      "dossier_versions",
       "fact_acknowledgements",
       "fact_answer_revisions",
       "gate_confirmations",
@@ -173,6 +188,7 @@ describe("reviewed SQL migrations", () => {
         "0013",
         "0014",
         "0015",
+        "0016",
       ],
       pending: [],
       drifted: [],
@@ -180,7 +196,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(15);
+    expect(rows.rows[0]?.count).toBe(16);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

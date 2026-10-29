@@ -62,6 +62,12 @@ them into `dist/`, so the server image carries the build and none of them.
   and retire inference and assumption drafts. The service's kernel handoff
   supplies all membership and readiness decisions. The view and comparison
   round have URLs and retain the deployment base path.
+- Workflow versions include a **Dossier versions** panel (#50). Engineers
+  author topic summaries, supporting fact links, and Node responsibilities,
+  review kernel findings and the canonical snapshot, then compose an immutable
+  version. Workflow owners review and approve its exact hash in a separate
+  dialog. Version selection has a URL; superseded artifacts remain readable,
+  and the inbox links directly to pending or superseded dossier approvals.
 - Every question has an ordered comment thread with the author's edit history.
   Current workflow roles control posting and editing; Observers read threads.
   Field experts raise concerns from the questionnaire. Engineers open each

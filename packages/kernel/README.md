@@ -77,8 +77,7 @@ Questionnaire rounds and free-text answers (#46) are delivered in the server
 and dashboard: revisioned questions, priority-ordered publication previews,
 private autosaved answers, per-question or atomic round submission, automatic
 inbox completion, and per-person live updates with polling recovery. The
-service retains the kernel's dossier topic vocabulary; this slice does not
-compose or approve a Semantic dossier. Answer resolutions (#48) add formal
+service retains the kernel's dossier topic vocabulary. Answer resolutions (#48) add formal
 facts linked to exact answer revisions, expert acknowledgements and disputes,
 published child questions, reasoned deferrals with Skill backlogs, withdrawal,
 and re-confirmation after answer or cited evidence changes. Sign-offs stay in
@@ -91,6 +90,14 @@ items with immutable round-publication baselines. Inferences and assumptions
 remain drafts until their linked question's facts are acknowledged. This
 record-readiness result does not compose, validate, or approve a dossier; the
 existing dossier/FactoryPlan handoff retains those validation requirements.
+
+Dossier versions (#50) add `composeSemanticDossier`: the kernel projects the
+acknowledged facts, source-derived facts, confirmed inferences, and deferred
+resolutions into a Semantic dossier with Engineer-authored topic summaries
+and Node responsibilities. Its canonical snapshot includes the ledger's
+record identities and revisions. The service stores valid snapshots once,
+and the Workflow owner approves the exact hash through a human gate. Record
+changes supersede approval and notify the Engineer and Workflow owner.
 
 Question threads and expert concerns (#47) are also delivered: immutable
 comment edits, concerns linked from the
