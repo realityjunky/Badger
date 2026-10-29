@@ -43,10 +43,10 @@ export function renderHomePage(input: HomePageInput): string {
   );
 }
 
-export function renderSignedOutPage(): string {
+export function renderSignedOutPage(signInUrl?: string): string {
   return document(
     "Badger — not signed in",
     `<h1>Badger</h1>
-<p>Not signed in.</p>`,
+<p>Not signed in.</p>${signInUrl === undefined ? "" : `\n<p><a href="${escapeHtml(signInUrl)}">Sign in with your organization</a></p>`}`,
   );
 }

@@ -119,9 +119,8 @@ platform lives in code; every value below is configuration.
 Set `BADGER_ALLOWED_ORIGINS` to the public origin, so a write authenticated by
 a cookie is accepted only from Badger's own origin. Non-active platform users
 are refused; a platform that cannot be reached yields "unavailable". This
-adapter issues no Badger cookie of its own; Badger's own cookies, when a later
-adapter issues one, are SameSite=Strict, HttpOnly, and Secure, and are named
-apart from the platform's.
+adapter issues no Badger cookie of its own. OIDC's Badger cookies are
+SameSite=Strict, HttpOnly, and Secure, and are named apart from the platform's.
 
 Platform administration grants no Badger role unless
 `BADGER_PLATFORM_ADMIN_MAPPING` is on; then it maps to Administrator, and the
@@ -133,6 +132,16 @@ without `BADGER_PLATFORM_EMAILS_VERIFIED=true`, no address counts as verified,
 so no invitation applies and no bootstrap Administrator is recognized. Do not
 declare it for a platform that lets people register an address without proving
 they own it.
+
+### OpenID Connect and trusted headers
+
+Other companies can select `BADGER_IDENTITY=oidc` for Badger's authorization-code
+flow and its own Strict browser session, or `BADGER_IDENTITY=trusted-header`
+behind an authenticating proxy. Trusted headers are accepted only from configured
+TCP peers; forwarding headers never establish trust. Both adapters resolve
+verified email bindings through the existing sign-in path. See
+[identity adapter deployment settings](docs/identity-adapters.md) for client
+registration, callback URLs, cookies, logout, proxy configuration, and checks.
 
 ### Groups, roles, and bindings
 
