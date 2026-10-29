@@ -27,12 +27,30 @@ const service = await startTestService({
 
 process.stdout.write(`Badger e2e server on ${service.baseUrl}\n`);
 
+// A deployment runs the worker role beside the server, so source checks
+// finish while the dashboard watches. Poll the queue the same way here.
+let working = false;
+const worker = setInterval(async () => {
+  if (working) {
+    return;
+  }
+  working = true;
+  try {
+    await service.runSourceCheckJobs();
+  } catch (error) {
+    process.stderr.write(`Source check worker failed: ${error}\n`);
+  } finally {
+    working = false;
+  }
+}, 250);
+
 let stopping = false;
 async function stop() {
   if (stopping) {
     return;
   }
   stopping = true;
+  clearInterval(worker);
   await service.close();
   await fs.rm(storage, { recursive: true, force: true });
   process.exit(0);
