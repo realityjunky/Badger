@@ -26,6 +26,8 @@ export interface WorkflowCompletionValidation {
 
 interface WorkflowCompletionContext {
   satisfiedGuardrails?: ReadonlySet<string>;
+  /** The directories this Run bound to the declared external roots. */
+  externalRoots?: Readonly<Record<string, string>>;
   producer?: WorkflowArtifactProducer;
   attemptStartedAt?: number;
   selectedReceipts?: readonly WorkflowArtifactReceipt[];
@@ -188,6 +190,7 @@ export async function validateSuccessfulSubmission(
   context: WorkflowCompletionContext = {},
 ): Promise<WorkflowCompletionValidation> {
   const {
+    externalRoots,
     producer,
     attemptStartedAt,
     selectedReceipts,
@@ -242,7 +245,12 @@ export async function validateSuccessfulSubmission(
             );
             continue;
           }
-          const storageRoot = artifactStorageRoot(runRoot, schema, artifact);
+          const storageRoot = artifactStorageRoot(
+            runRoot,
+            externalRoots,
+            schema,
+            artifact,
+          );
           const matches = new Set<string>();
           for (const pattern of artifact.paths) {
             for (const match of await matchingWorkflowArtifactPaths(
@@ -268,6 +276,9 @@ export async function validateSuccessfulSubmission(
             artifactReceipts.push(
               await captureArtifactReceipt({
                 storageRoot,
+                ...(artifact.root !== undefined
+                  ? { rootName: artifact.root }
+                  : {}),
                 relativePath,
                 artifactId: `${schema.id}.${artifact.id}`,
                 producer,

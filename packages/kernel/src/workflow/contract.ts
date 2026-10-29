@@ -1,5 +1,8 @@
 import { isWorkflowName } from "./name.js";
-import { validateArtifactReceiptDeclarations } from "../workflow-runtime/artifact-receipts.js";
+import {
+  externalRootDeclarations,
+  validateArtifactReceiptDeclarations,
+} from "../workflow-runtime/artifact-receipts.js";
 import type {
   Binding,
   BindingInput,
@@ -724,6 +727,14 @@ export function validateWorkflow(input: WorkflowInput): ValidationFinding[] {
       for (const schema of patch.outputSchemas ?? []) attached.add(schema);
   }
   const logicalArtifactIds = new Set<string>();
+  try {
+    externalRootDeclarations(input.outputSchemas ?? []);
+  } catch (error) {
+    findings.push({
+      code: "invalid-schema",
+      message: (error as Error).message,
+    });
+  }
   for (const schema of input.outputSchemas ?? []) {
     try {
       validateArtifactReceiptDeclarations(schema);

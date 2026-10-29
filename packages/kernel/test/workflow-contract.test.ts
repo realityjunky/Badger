@@ -220,4 +220,58 @@ describe("workflow-kernel contract", () => {
       ]),
     );
   });
+
+  it("declares external roots by name and leaves their directories to each Run", () => {
+    const receiptSchema = (id: string, description: string) => ({
+      ...schema,
+      id,
+      externalRoots: { outputs: { description } },
+      artifacts: [
+        {
+          ...schema.artifacts[0],
+          verification: "receipt" as const,
+          root: "outputs",
+        },
+      ],
+    });
+    const input: WorkflowInput = {
+      kind: "workflow-kernel",
+      name: "external-root-workflow",
+      goal: "Receipt outputs in a host directory.",
+      customNodes: [node({ outputSchemas: ["prepare.v1", "review.v1"] })],
+      outputSchemas: [
+        receiptSchema("prepare.v1", "Where outputs are written."),
+        receiptSchema("review.v1", "Where outputs are written."),
+      ],
+    };
+    expect(validateWorkflow(input)).toEqual([]);
+
+    const fixed = structuredClone(input);
+    fixed.outputSchemas![0].externalRoots = {
+      outputs: "/srv/outputs" as never,
+    };
+    const conflicting = structuredClone(input);
+    conflicting.outputSchemas![1].externalRoots = {
+      outputs: { description: "Somewhere else." },
+    };
+    const unused = structuredClone(input);
+    unused.outputSchemas![1].externalRoots!.scratch = {
+      description: "Unused.",
+    };
+    for (const [invalid, message] of [
+      [fixed, "external root outputs must declare only a description"],
+      [
+        conflicting,
+        "declare external root outputs with different descriptions",
+      ],
+      [unused, "declares external root scratch, but no artifact uses it"],
+    ] as const) {
+      expect(validateWorkflow(invalid)).toContainEqual(
+        expect.objectContaining({
+          code: "invalid-schema",
+          message: expect.stringContaining(message),
+        }),
+      );
+    }
+  });
 });

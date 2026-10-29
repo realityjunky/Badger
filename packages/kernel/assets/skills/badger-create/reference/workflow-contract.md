@@ -74,13 +74,17 @@ incompatible lifetime scopes,
 unknown versions, link traversal, oversized reads, and content drift fail before
 Run mutation.
 
-Output Schemas may declare `externalRoots`, a map of names to absolute directory
-paths. An artifact uses `verification: "receipt"` and an optional `root` name to
-verify a declared external path, or a large Run-root artifact, by streaming its
-content through SHA-256. Paths stay relative to the selected root. WorkflowRuntime
-records the absolute path, byte size, SHA-256, modification time, and producer
-Attempt in accepted `evidence.artifactReceipts`; Agents must not invent those
-receipts. Receipt declarations enable revisioned Attempts. With
+Output Schemas may declare `externalRoots`, a map of names to
+`{ "description": "..." }`. A declaration never holds a directory: the person
+running the workflow binds each root to a directory when the Run starts, so ask
+what the directory holds, not where it is. An artifact uses
+`verification: "receipt"` and an optional `root` name to verify a declared
+external path, or a large Run-root artifact, by streaming its content through
+SHA-256. Every declared root must be used, and schemas that share a root name
+must describe it alike. Paths stay relative to the selected root. WorkflowRuntime
+records the absolute path, the external root and its bound directory, byte size,
+SHA-256, modification time, and producer Attempt in accepted
+`evidence.artifactReceipts`; Agents must not invent those receipts. Receipt declarations enable revisioned Attempts. With
 `requireCurrentAttempt: true`, every file must have been modified at or after the
 Attempt's first persisted action; retries retain that boundary. A carried version
 keeps its original producer and cannot satisfy another Attempt's freshness

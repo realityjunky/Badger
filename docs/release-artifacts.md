@@ -51,7 +51,9 @@ tables.
 Artifacts by receipt (#31) are delivered in WorkflowRuntime: Output Schema
 artifacts under declared external roots, or above the 2 MiB read cap, are
 verified in place and recorded in Completion evidence with their path, size,
-SHA-256, modification time, and producing Attempt. With
+SHA-256, modification time, and producing Attempt. A workflow declares each
+external root by name only, and the host binds it to a directory when a Run
+starts. With
 `requireCurrentAttempt`, an output older than the Attempt is refused as
 `artifact-stale-attempt`. Runtime certification covers receipts
 (`docs/workflow-runtime-certification.md`), and

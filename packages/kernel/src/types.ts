@@ -43,11 +43,19 @@ export interface EvidenceSchema {
   required: boolean;
 }
 
+/**
+ * A named directory outside the Run root. The workflow declares only its
+ * name and purpose; the host binds it to a directory when a Run starts.
+ */
+export interface ArtifactExternalRoot {
+  description: string;
+}
+
 export interface OutputSchema {
   id: string;
   description: string;
   optional?: boolean;
-  externalRoots?: Record<string, string>;
+  externalRoots?: Record<string, ArtifactExternalRoot>;
   artifacts: ArtifactSchema[];
   evidence: EvidenceSchema[];
 }
@@ -1330,6 +1338,7 @@ export interface WorkflowRuntimeArtifactReceiptCertificationEvidence {
   generatedPackageHash: string;
   fixtureName: string;
   externalRoot: boolean;
+  rootBindingRequired: boolean;
   largeFile: boolean;
   completionEvidence: boolean;
   staleRejected: boolean;
@@ -1581,6 +1590,8 @@ export interface WorkflowArtifactProducer {
 
 export interface WorkflowArtifactReceipt {
   artifactId: WorkflowArtifactId;
+  /** The external root and the directory the Run bound it to; absent inside the Run root. */
+  root?: { name: string; path: string };
   path: string;
   size: number;
   sha256: string;

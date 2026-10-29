@@ -5,10 +5,14 @@
 ### Added
 
 - **Artifacts by receipt**: An Output Schema can declare named external roots,
-  and an artifact can opt into `verification: "receipt"`. WorkflowRuntime then
-  verifies the artifact in place, outside the Run root or above the 2 MiB read
-  cap, by streaming SHA-256, and records its path, size, hash, modification
-  time, and producing Attempt in the accepted Completion evidence. With
+  each with only a description, and an artifact can opt into
+  `verification: "receipt"`. The host binds each root to a directory when a Run
+  starts, through the `externalRoots` start option or the script adapter's
+  `--external-root <name>=<directory>`, so a package names no host path.
+  WorkflowRuntime then verifies the artifact in place, outside the Run root or
+  above the 2 MiB read cap, by streaming SHA-256, and records its path, bound
+  root, size, hash, modification time, and producing Attempt in the accepted
+  Completion evidence. With
   `requireCurrentAttempt`, an output older than the current Attempt is refused
   as `artifact-stale-attempt`. Other artifacts keep the Run-root boundary and
   read cap, and runtime certification covers receipts (#31).

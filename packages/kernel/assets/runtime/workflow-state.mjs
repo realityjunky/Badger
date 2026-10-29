@@ -28,9 +28,23 @@ function requiredOptionValue(argv, index, option) {
   return value;
 }
 
+// The host binds each declared external root to a directory for this Run.
+function parseExternalRoot(value, externalRoots) {
+  const separator = value.indexOf("=");
+  const name = separator > 0 ? value.slice(0, separator) : "";
+  const directory = separator > 0 ? value.slice(separator + 1) : "";
+  if (!name || !directory) {
+    throw new Error("--external-root requires <name>=<directory>.");
+  }
+  if (Object.hasOwn(externalRoots, name)) {
+    throw new Error(`--external-root ${name} is given more than once.`);
+  }
+  externalRoots[name] = path.resolve(directory);
+}
+
 function parseArguments(argv) {
   const positionals = [];
-  const options = { confirmations: [] };
+  const options = { confirmations: [], externalRoots: {} };
   let positionalOnly = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -56,6 +70,14 @@ function parseArguments(argv) {
     }
     if (argument === "--confirm") {
       options.confirmations.push(requiredOptionValue(argv, index, "--confirm"));
+      index += 1;
+      continue;
+    }
+    if (argument === "--external-root") {
+      parseExternalRoot(
+        requiredOptionValue(argv, index, "--external-root"),
+        options.externalRoots,
+      );
       index += 1;
       continue;
     }
@@ -282,6 +304,9 @@ async function main() {
   const evidenceRaw = positionals.join(" ");
   const target = resolveTarget(options);
   const protocol = await readProtocol();
+  if (command !== "init" && Object.keys(options.externalRoots).length > 0) {
+    throw new Error("--external-root applies only to init.");
+  }
 
   if (command === "status") {
     requireProjectionConfirmation(options);
@@ -309,6 +334,9 @@ async function main() {
       confirmations: options.confirmations,
       ...(typeof target === "string" && options.runid
         ? { runId: options.runid }
+        : {}),
+      ...(Object.keys(options.externalRoots).length > 0
+        ? { externalRoots: options.externalRoots }
         : {}),
     };
     const continuation = await runtime.start(startOptions);

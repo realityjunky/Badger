@@ -12,6 +12,7 @@ import {
   initializeState,
   runManualAuthoringFixture,
 } from "../src/index.js";
+import { readRunState } from "../src/engine/state.js";
 import { questionnaireFixture } from "./fixtures/semantic-dossier.js";
 
 const execFileAsync = promisify(execFile);
@@ -25,7 +26,7 @@ describe("generated package runtime modes", () => {
 
   afterEach(async () => fs.rm(project, { recursive: true, force: true }));
 
-  async function generate(decision = false) {
+  async function generate(decision = false, receipts = false) {
     const skillRoot = path.join(project, "skills", "prepare");
     await fs.mkdir(skillRoot, { recursive: true });
     await fs.writeFile(
@@ -33,6 +34,29 @@ describe("generated package runtime modes", () => {
       "---\nname: prepare\ndescription: Prepare a report.\n---\n\nPrepare the requested report.\n",
     );
     const plan = questionnaireFixture().factoryPlan;
+    if (receipts) {
+      plan.workflow.outputSchemas!.push({
+        id: "report.v1",
+        description: "The prepared report.",
+        externalRoots: {
+          reports: { description: "The shared folder that holds reports." },
+        },
+        artifacts: [
+          {
+            id: "report",
+            kind: "file",
+            required: true,
+            paths: ["report.pdf"],
+            validations: ["artifact-exists"],
+            verification: "receipt",
+            root: "reports",
+            requireCurrentAttempt: true,
+          },
+        ],
+        evidence: [],
+      });
+      plan.workflow.customNodes[0]!.outputSchemas.push("report.v1");
+    }
     if (decision) {
       const node = plan.workflow.customNodes[0]!;
       plan.workflow.customNodes.push({
@@ -86,7 +110,83 @@ describe("generated package runtime modes", () => {
           `node scripts/workflow-state.mjs ${command}`,
         );
       }
+      expect(instructions, file).not.toContain("## Artifact Receipts");
     }
+  });
+
+  it("asks the person for each external root's directory and binds it at init", async () => {
+    const { generated } = await generate(false, true);
+    const entry = await fs.readFile(
+      path.join(generated.packageRoot, "SKILL.md"),
+      "utf8",
+    );
+    expect(entry).toContain("## Artifact Receipts");
+    expect(entry).toContain(
+      "- **report.v1.report**: `report.pdf` under external root `reports`; written during the current Attempt",
+    );
+    expect(entry).toContain("### External roots");
+    expect(entry).toContain(
+      "- **reports**: The shared folder that holds reports.",
+    );
+    expect(entry).toContain(
+      "ask the person for each directory; never guess one",
+    );
+    expect(entry).toContain("`--external-root <name>=<directory>`");
+    // The package names the root and leaves its directory to each Run.
+    expect(await fs.readFile(generated.protocolPath, "utf8")).not.toContain(
+      project,
+    );
+
+    const script = path.join(
+      generated.packageRoot,
+      "scripts",
+      "workflow-state.mjs",
+    );
+    const runRoot = path.join(project, "run");
+    const reports = path.join(project, "reports");
+    await fs.mkdir(reports);
+    const run = async (...args: string[]) => {
+      const result = await execFileAsync(
+        process.execPath,
+        [script, ...args, "--run-root", runRoot, "--json"],
+        { cwd: project },
+      );
+      return JSON.parse(result.stdout);
+    };
+    await expect(run("init")).rejects.toThrow(
+      "external root reports needs a directory when the Run starts",
+    );
+    await expect(run("init", "--external-root", "reports")).rejects.toThrow(
+      "--external-root requires <name>=<directory>.",
+    );
+    await expect(
+      run(
+        "init",
+        "--external-root",
+        `reports=${reports}`,
+        "--external-root",
+        `reports=${reports}`,
+      ),
+    ).rejects.toThrow("--external-root reports is given more than once.");
+    expect(await run("status")).toMatchObject({ status: "not-started" });
+
+    const started = await run(
+      "init",
+      "--run-id",
+      "bound-reports",
+      "--external-root",
+      `reports=${reports}`,
+    );
+    expect(started).toMatchObject({
+      runId: "bound-reports",
+      currentNode: "prepare",
+    });
+    expect(
+      (await readRunState(runRoot))?.workflowRuntime?.externalRoots,
+    ).toEqual({ reports });
+    await expect(
+      run("next", "--external-root", `reports=${reports}`),
+    ).rejects.toThrow("--external-root applies only to init.");
   });
 
   it("keeps MCP gate answers in the dashboard and local decisions behind the person's confirmation", async () => {

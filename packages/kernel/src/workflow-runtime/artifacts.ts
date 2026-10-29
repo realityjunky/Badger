@@ -23,6 +23,7 @@ import { sha256, stableValue } from "../util.js";
 import {
   artifactStorageRoot,
   captureArtifactReceipt,
+  externalRootDeclarations,
 } from "./artifact-receipts.js";
 
 const ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
@@ -245,6 +246,7 @@ export async function matchingWorkflowArtifactPaths(
 
 async function resolveArtifactPath(
   runRoot: string,
+  externalRoots: Readonly<Record<string, string>> | undefined,
   declaration: WorkflowArtifactDeclaration,
   requestedPath: string,
 ): Promise<string | null> {
@@ -258,6 +260,7 @@ async function resolveArtifactPath(
   }
   const storageRoot = artifactStorageRoot(
     runRoot,
+    externalRoots,
     declaration.schema,
     declaration.artifact,
   );
@@ -328,6 +331,7 @@ async function hashDirectoryArtifact(
 
 async function hashArtifactPath(
   runRoot: string,
+  externalRoots: Readonly<Record<string, string>> | undefined,
   declaration: WorkflowArtifactDeclaration,
   relativePath: string,
   producer?: WorkflowArtifactProducer,
@@ -342,9 +346,13 @@ async function hashArtifactPath(
     const receipt = await captureArtifactReceipt({
       storageRoot: artifactStorageRoot(
         runRoot,
+        externalRoots,
         declaration.schema,
         declaration.artifact,
       ),
+      ...(declaration.artifact.root !== undefined
+        ? { rootName: declaration.artifact.root }
+        : {}),
       relativePath,
       artifactId: declaration.artifactId,
       producer,
@@ -384,8 +392,10 @@ export async function validateWorkflowArtifactVersion(
   ) {
     fail(`Workflow artifact version identity is invalid: ${version.id}`);
   }
+  const root = version.receipt?.root;
   const current = await hashArtifactPath(
     runRoot,
+    root ? { [root.name]: root.path } : undefined,
     declaration,
     version.path,
     version.producer,
@@ -580,6 +590,7 @@ export async function prepareWorkflowArtifactMutation(options: {
   for (const { declaration, value: requested } of requestedUpdates.values()) {
     const artifactPath = await resolveArtifactPath(
       options.runRoot,
+      runtime.externalRoots,
       declaration,
       requested,
     );
@@ -618,6 +629,7 @@ export async function prepareWorkflowArtifactMutation(options: {
     try {
       material = await hashArtifactPath(
         options.runRoot,
+        runtime.externalRoots,
         declaration,
         artifactPath,
         producer,
@@ -735,12 +747,36 @@ export function currentWorkflowArtifactVersions(
   return current;
 }
 
+/** A Run binds exactly the external roots its protocol declares. */
+function validateWorkflowExternalRootBinding(
+  protocol: WorkflowProtocol,
+  runtime: Readonly<WorkflowRuntimeState>,
+): void {
+  const declared = [...externalRootDeclarations(protocol.outputSchemas).keys()]
+    .sort()
+    .join("\n");
+  const bound = Object.keys(runtime.externalRoots ?? {})
+    .sort()
+    .join("\n");
+  if (
+    declared !== bound ||
+    Object.values(runtime.externalRoots ?? {}).some(
+      (directory) => !path.isAbsolute(directory),
+    )
+  ) {
+    throw new Error(
+      "WorkflowRuntime external roots do not match the declared roots",
+    );
+  }
+}
+
 export function validateWorkflowArtifactState(
   protocol: WorkflowProtocol,
   runId: string,
   nodeToStep: Readonly<Record<string, string>>,
   runtime: Readonly<WorkflowRuntimeState>,
 ): void {
+  validateWorkflowExternalRootBinding(protocol, runtime);
   const versions = runtime.artifactVersions ?? [];
   const selections = runtime.artifactSelections ?? [];
   if (!versioningEnabled(protocol)) {
@@ -758,19 +794,19 @@ export function validateWorkflowArtifactState(
   for (const version of versions) {
     const declaration = declarationFor(version.artifactId, declared);
     const receipt = version.receipt;
-    const expectedExternalPath =
-      declaration.artifact.root === undefined
-        ? undefined
-        : path.resolve(
-            declaration.schema.externalRoots![declaration.artifact.root],
-            version.path,
-          );
+    const rootName = declaration.artifact.root;
+    const boundRoot =
+      rootName === undefined ? undefined : runtime.externalRoots?.[rootName];
     const receiptMatches =
       receipt !== undefined &&
       receipt.artifactId === version.artifactId &&
       receipt.sha256 === version.contentHash &&
-      (expectedExternalPath === undefined ||
-        receipt.path === expectedExternalPath) &&
+      (rootName === undefined
+        ? receipt.root === undefined
+        : boundRoot !== undefined &&
+          receipt.root?.name === rootName &&
+          receipt.root.path === boundRoot &&
+          receipt.path === path.resolve(boundRoot, version.path)) &&
       JSON.stringify(stableValue(receipt.producer)) ===
         JSON.stringify(stableValue(version.producer));
     if (

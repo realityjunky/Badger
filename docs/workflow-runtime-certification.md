@@ -6,7 +6,8 @@ WorkflowRuntime authority.
 Every certification also runs a disposable artifact-receipt fixture through a
 generated package and the public WorkflowRuntime API. The `artifactReceipts`
 evidence binds the evaluated package hash, identifies the synthetic fixture, and records
-external-root verification, a file larger than 2 MiB, runtime-generated
+external-root verification, the refusal of a Run whose declared root is unbound,
+a file larger than 2 MiB, runtime-generated
 Completion evidence, stale-Attempt refusal, symlink/junction containment, the
 legacy Run-root size cap, recovery in a fresh process, and fixture integrity.
 An incomplete or failed receipt fixture blocks certification. The fixture uses

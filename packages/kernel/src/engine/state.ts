@@ -945,6 +945,30 @@ function parseWorkflowArtifactCoordinate(
   };
 }
 
+function parseWorkflowExternalRoots(
+  value: unknown,
+): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).length > 32 ||
+    Object.entries(value).some(
+      ([name, directory]) =>
+        !name ||
+        name.length > 128 ||
+        typeof directory !== "string" ||
+        !path.isAbsolute(directory),
+    )
+  ) {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime externalRoots must map root names to absolute directories",
+    );
+  }
+  return { ...(value as Record<string, string>) };
+}
+
 function parseWorkflowArtifactReceipt(
   value: unknown,
   label: string,
@@ -955,6 +979,7 @@ function parseWorkflowArtifactReceipt(
   const receipt = value as Record<string, unknown>;
   const keys = new Set([
     "artifactId",
+    "root",
     "path",
     "size",
     "sha256",
@@ -962,6 +987,22 @@ function parseWorkflowArtifactReceipt(
     "producer",
   ]);
   const receiptPath = requiredJsonString(receipt.path, `${label}.path`);
+  const root = receipt.root as Record<string, unknown> | undefined;
+  if (
+    root !== undefined &&
+    (!root ||
+      typeof root !== "object" ||
+      Array.isArray(root) ||
+      Object.keys(root).some((key) => key !== "name" && key !== "path") ||
+      typeof root.name !== "string" ||
+      !root.name ||
+      typeof root.path !== "string" ||
+      !path.isAbsolute(root.path))
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label}.root is an invalid external root`,
+    );
+  }
   const hash = requiredJsonString(receipt.sha256, `${label}.sha256`);
   if (
     Object.keys(receipt).some((key) => !keys.has(key)) ||
@@ -979,6 +1020,9 @@ function parseWorkflowArtifactReceipt(
   }
   return {
     artifactId: requiredJsonString(receipt.artifactId, `${label}.artifactId`),
+    ...(root !== undefined
+      ? { root: { name: root.name as string, path: root.path as string } }
+      : {}),
     path: receiptPath,
     size: receipt.size,
     sha256: hash,
@@ -1110,6 +1154,7 @@ function parseWorkflowRuntime(
     "contentSnapshots",
     "repairEpisode",
     "finalization",
+    "externalRoots",
   ]);
   const unknown = Object.keys(runtime).find((key) => !keys.has(key));
   if (unknown) {
@@ -1272,6 +1317,7 @@ function parseWorkflowRuntime(
       snapshotHashes.add(snapshot.hash);
     }
   }
+  const externalRoots = parseWorkflowExternalRoots(runtime.externalRoots);
   const repairEpisode =
     runtime.repairEpisode === undefined
       ? undefined
@@ -1562,6 +1608,7 @@ function parseWorkflowRuntime(
     ...(contentSnapshots ? { contentSnapshots } : {}),
     ...(repairEpisode ? { repairEpisode } : {}),
     ...(finalization ? { finalization } : {}),
+    ...(externalRoots ? { externalRoots } : {}),
   };
 }
 

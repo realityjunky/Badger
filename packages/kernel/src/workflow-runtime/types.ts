@@ -221,12 +221,14 @@ export type StartWorkflowRunOptions =
       runId?: string;
       confirmations?: Iterable<string>;
       protectedSnapshotRoots?: readonly string[];
+      externalRoots?: Readonly<Record<string, string>>;
     }
   | {
       protocol: WorkflowProtocol;
       location: StandaloneWorkflowRunLocation;
       confirmations?: Iterable<string>;
       protectedSnapshotRoots?: readonly string[];
+      externalRoots?: Readonly<Record<string, string>>;
     }
   | {
       protocol: WorkflowProtocol;
@@ -234,6 +236,7 @@ export type StartWorkflowRunOptions =
       runId?: string;
       confirmations?: Iterable<string>;
       protectedSnapshotRoots?: readonly string[];
+      externalRoots?: Readonly<Record<string, string>>;
     };
 
 export interface ResumeWorkflowRunOptions {

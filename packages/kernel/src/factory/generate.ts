@@ -9,6 +9,7 @@ import type {
   NodeProtocol,
   UpgradeMigrationManifest,
   UpgradeSourceEvidence,
+  WorkflowProtocol,
 } from "../types.js";
 import {
   copyDirectory,
@@ -32,6 +33,7 @@ import {
   authoringProtocolProjection,
 } from "../authoring/protocol.js";
 import { normalizeWorkflowRepairPolicy } from "../workflow-runtime/repair.js";
+import { externalRootDeclarations } from "../workflow-runtime/artifact-receipts.js";
 import { deriveAuthoringPlan } from "../authoring/plan.js";
 import {
   mapAuthoringPlanPaths,
@@ -101,6 +103,50 @@ For hosts without MCP Run tools, use the bundled script adapter from the package
 - Submit Node evidence with \`node scripts/workflow-state.mjs record <node> '<json evidence>'\`.
 - Resume with \`node scripts/workflow-state.mjs resume\` or recover with \`node scripts/workflow-state.mjs recover\`.
 `;
+}
+
+/** Receipt outputs, and the directories the person binds when a Run starts. */
+function artifactReceiptsMarkdown(workflow: WorkflowProtocol): string {
+  const artifacts = workflow.outputSchemas
+    .flatMap((schema) =>
+      schema.artifacts
+        .filter((artifact) => artifact.verification === "receipt")
+        .map(
+          (artifact) =>
+            `- **${schema.id}.${artifact.id}**: ${artifact.paths.map((artifactPath) => `\`${artifactPath}\``).join(", ")} under ${artifact.root === undefined ? "the Run root" : `external root \`${artifact.root}\``}${artifact.requireCurrentAttempt ? "; written during the current Attempt" : ""}`,
+        ),
+    )
+    .join("\n");
+  if (!artifacts) return "";
+  const roots = [...externalRootDeclarations(workflow.outputSchemas)]
+    .map(([name, root]) => `- **${name}**: ${root.description}`)
+    .join("\n");
+  const binding = roots
+    ? `
+
+### External roots
+
+${roots}
+
+Each external root is a name. The person running the workflow chooses its
+directory on this host, and the choice is fixed for the Run. Before starting a
+Run, ask the person for each directory; never guess one. In MCP mode, pass the
+directories to \`start\` as \`externalRoots\`. In script adapter mode, add
+\`--external-root <name>=<directory>\` to \`node scripts/workflow-state.mjs init\`
+once per root.`
+    : "";
+  return `
+
+## Artifact Receipts
+
+${artifacts}
+
+WorkflowRuntime verifies these outputs in place by receipt and records each
+one's path, size, SHA-256, modification time, and producing Attempt in the
+Completion evidence; it never copies them. An output that must be written
+during the current Attempt is refused as stale when its file was last modified
+before the Attempt began, so write it afresh instead of reusing an earlier
+file.${binding}`;
 }
 
 function entryMarkdown(proposal: FactoryProposal): string {
@@ -264,7 +310,7 @@ WorkflowRuntime records immutable content-bound versions for declared outputs.
 Required outputs must name one explicit physical update or accepted version.
 Attempt-lifetime paths include the current Attempt id as a path segment. Later
 work must select an exact accepted version; generated scripts never infer or
-allocate a latest artifact version.
+allocate a latest artifact version.${artifactReceiptsMarkdown(proposal.workflow)}
 
 ## Verification Receipts
 

@@ -3,11 +3,14 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { inspectProtectedProjectPath } from "../engine/protected-project-path.js";
 import type {
+  ArtifactExternalRoot,
   ArtifactSchema,
   OutputSchema,
   WorkflowArtifactProducer,
   WorkflowArtifactReceipt,
 } from "../types.js";
+
+const MAX_EXTERNAL_ROOTS = 32;
 
 export function validateArtifactReceiptDeclarations(
   schema: OutputSchema,
@@ -17,22 +20,33 @@ export function validateArtifactReceiptDeclarations(
       !schema.externalRoots ||
       typeof schema.externalRoots !== "object" ||
       Array.isArray(schema.externalRoots) ||
-      Object.keys(schema.externalRoots).length > 32
+      Object.keys(schema.externalRoots).length > MAX_EXTERNAL_ROOTS
     ) {
       throw new Error(
         `Output Schema ${schema.id} artifact external roots must be a bounded map`,
       );
     }
     for (const [id, root] of Object.entries(schema.externalRoots)) {
+      // A declaration names a root; the host chooses its directory, so a
+      // workflow cannot pick the boundary that confines its own reads.
       if (
         !id ||
         id.length > 128 ||
-        typeof root !== "string" ||
-        !path.isAbsolute(root) ||
-        root.includes("\0")
+        !root ||
+        typeof root !== "object" ||
+        Array.isArray(root) ||
+        Object.keys(root).some((key) => key !== "description") ||
+        typeof root.description !== "string" ||
+        !root.description.trim() ||
+        root.description.length > 1000
       ) {
         throw new Error(
-          `Output Schema ${schema.id} artifact external root ${id} must be an absolute directory path`,
+          `Output Schema ${schema.id} artifact external root ${id} must declare only a description; the host binds its directory when a Run starts`,
+        );
+      }
+      if (!schema.artifacts.some((artifact) => artifact.root === id)) {
+        throw new Error(
+          `Output Schema ${schema.id} declares external root ${id}, but no artifact uses it`,
         );
       }
     }
@@ -87,8 +101,100 @@ export function validateArtifactReceiptDeclarations(
   }
 }
 
+/**
+ * The external roots a workflow declares, by name. A name means one
+ * directory per Run, so schemas that share a name must declare it alike.
+ */
+export function externalRootDeclarations(
+  schemas: readonly OutputSchema[],
+): Map<string, ArtifactExternalRoot> {
+  const declared = new Map<string, ArtifactExternalRoot>();
+  for (const schema of schemas) {
+    const roots = schema?.externalRoots;
+    // A malformed map is reported by validateArtifactReceiptDeclarations.
+    if (!roots || typeof roots !== "object" || Array.isArray(roots)) continue;
+    for (const [name, root] of Object.entries(roots)) {
+      if (!root || typeof root !== "object") continue;
+      const existing = declared.get(name);
+      if (existing && existing.description !== root.description) {
+        throw new Error(
+          `Output Schemas declare external root ${name} with different descriptions`,
+        );
+      }
+      declared.set(name, root);
+    }
+  }
+  if (declared.size > MAX_EXTERNAL_ROOTS) {
+    throw new Error(
+      `A workflow declares at most ${MAX_EXTERNAL_ROOTS} external roots`,
+    );
+  }
+  return declared;
+}
+
+/**
+ * Checks the directories a host binds to the declared external roots when a
+ * Run starts. Each must be an existing directory and not itself a link, the
+ * same rule the Run root follows. The result is fixed for the Run.
+ */
+export async function bindWorkflowExternalRoots(
+  schemas: readonly OutputSchema[],
+  supplied: Readonly<Record<string, string>> | undefined,
+): Promise<Record<string, string> | undefined> {
+  const declared = externalRootDeclarations(schemas);
+  if (
+    supplied !== undefined &&
+    (!supplied || typeof supplied !== "object" || Array.isArray(supplied))
+  ) {
+    throw new Error("Workflow artifact external roots must be a map");
+  }
+  for (const name of Object.keys(supplied ?? {})) {
+    if (!declared.has(name)) {
+      throw new Error(
+        `Workflow artifact external root ${name} is not declared by this workflow`,
+      );
+    }
+  }
+  if (declared.size === 0) return undefined;
+  const bound: Record<string, string> = {};
+  for (const name of [...declared.keys()].sort()) {
+    const value = supplied?.[name];
+    if (value === undefined) {
+      throw new Error(
+        `Workflow artifact external root ${name} needs a directory when the Run starts`,
+      );
+    }
+    if (
+      typeof value !== "string" ||
+      !path.isAbsolute(value) ||
+      value.includes("\0")
+    ) {
+      throw new Error(
+        `Workflow artifact external root ${name} must be bound to an absolute directory`,
+      );
+    }
+    const directory = path.resolve(value);
+    let stat;
+    try {
+      stat = await fs.lstat(directory);
+    } catch {
+      throw new Error(
+        `Workflow artifact external root ${name} directory does not exist: ${directory}`,
+      );
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error(
+        `Workflow artifact external root ${name} must be a real directory, not a link: ${directory}`,
+      );
+    }
+    bound[name] = directory;
+  }
+  return bound;
+}
+
 export function artifactStorageRoot(
   runRoot: string,
+  externalRoots: Readonly<Record<string, string>> | undefined,
   schema: OutputSchema,
   artifact: ArtifactSchema,
 ): string {
@@ -101,10 +207,10 @@ export function artifactStorageRoot(
       `Workflow artifact ${schema.id}.${artifact.id} has an undeclared external root`,
     );
   }
-  const root = schema.externalRoots![artifact.root];
+  const root = externalRoots?.[artifact.root];
   if (typeof root !== "string" || !path.isAbsolute(root)) {
     throw new Error(
-      `Workflow artifact external root ${artifact.root} must be absolute`,
+      `Workflow artifact external root ${artifact.root} is not bound for this Run`,
     );
   }
   return root;
@@ -123,10 +229,25 @@ function sameStat(left: BigIntStats, right: BigIntStats): boolean {
 
 interface CaptureArtifactReceiptOptions {
   storageRoot: string;
+  /** Names the external root that storageRoot is bound to, if any. */
+  rootName?: string;
   relativePath: string;
   artifactId: string;
   producer: WorkflowArtifactProducer;
   attemptStartedAt?: number;
+}
+
+function receiptRoot(
+  options: CaptureArtifactReceiptOptions,
+): Pick<WorkflowArtifactReceipt, "root"> {
+  return options.rootName === undefined
+    ? {}
+    : {
+        root: {
+          name: options.rootName,
+          path: path.resolve(options.storageRoot),
+        },
+      };
 }
 
 function assertFresh(
@@ -216,6 +337,7 @@ async function captureDirectoryReceipt(
   if (fileCount === 0) assertFresh(directoryStat, options);
   return {
     artifactId: options.artifactId,
+    ...receiptRoot(options),
     path: path.resolve(options.storageRoot, options.relativePath),
     size,
     sha256: createHash("sha256")
@@ -283,6 +405,7 @@ export async function captureArtifactReceipt(
     }
     return {
       artifactId: options.artifactId,
+      ...receiptRoot(options),
       path: path.resolve(inspection.target),
       size,
       sha256: hash.digest("hex"),

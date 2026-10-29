@@ -193,6 +193,10 @@ A declared loop of Nodes that a Run may repeat a bounded number of times, each r
 **Artifact receipt**:
 A record that identifies an artifact and the Attempt that produced it without holding the artifact's content.
 
+**External root**:
+A named place outside the Run root where a workflow's receipt artifacts live. The workflow declares only the name and what the place holds; the host binds the name to a directory when a Run starts, with `--external-root` or the kernel's `externalRoots` option, and the binding is fixed for that Run. A workflow that names a directory is refused.
+_Avoid_: output directory, root path
+
 **Run registry**:
 The index that lists Runs and where each one lives, so that a Run can be found without knowing its location.
 

@@ -21,7 +21,7 @@ const execFileAsync = promisify(execFile);
 const LARGE_FILE_HASH =
   "6f850bc94ae6f7de14297c01616c36d712d22864497b28a63b81d776b035e656";
 
-function receiptInput(externalRoot: string): WorkflowInput {
+function receiptInput(): WorkflowInput {
   return {
     kind: "workflow-kernel",
     name: "artifact-receipt-certification-workflow",
@@ -46,7 +46,9 @@ function receiptInput(externalRoot: string): WorkflowInput {
       {
         id: "result.v1",
         description: "Synthetic artifact receipts.",
-        externalRoots: { outputs: externalRoot },
+        externalRoots: {
+          outputs: { description: "Where the synthetic producer writes." },
+        },
         artifacts: [
           {
             id: "result",
@@ -91,6 +93,7 @@ export async function certifyArtifactReceipts(options: {
     generatedPackageHash: options.generatedPackageHash,
     fixtureName: "artifact-receipt-certification-workflow",
     externalRoot: false,
+    rootBindingRequired: false,
     largeFile: false,
     completionEvidence: false,
     staleRejected: false,
@@ -102,7 +105,7 @@ export async function certifyArtifactReceipts(options: {
   try {
     const externalRoot = path.join(root, "outputs");
     await fs.mkdir(externalRoot);
-    const input = receiptInput(externalRoot);
+    const input = receiptInput();
     const protocol = normalizeWorkflow(input).protocol;
     const generated = await generatePackage({
       proposal: {
@@ -129,9 +132,24 @@ export async function certifyArtifactReceipts(options: {
       projectRoot: root,
       destination: path.join(root, "generated"),
     });
-    // The temporary absolute root changes this hash between evaluations.
-    // Keep it local so repeated certification reports remain identical.
+    // The fixture's contents must not change while it runs.
     const fixturePackageHash = await hashDirectory(generated.packageRoot);
+    const runtime = createWorkflowRuntime();
+    // A declared root without a directory refuses the Run before it exists.
+    const unboundRoot = path.join(root, "unbound-run");
+    const unbound = await runtime
+      .start({ protocol, runRoot: unboundRoot, runId: "unbound-receipt" })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    evidence.rootBindingRequired =
+      unbound instanceof Error &&
+      /needs a directory when the Run starts/u.test(unbound.message) &&
+      !(await fs.stat(unboundRoot).then(
+        () => true,
+        () => false,
+      ));
     const runRoot = path.join(root, "run");
     const environment = { PATH: process.env.PATH };
     const started = JSON.parse(
@@ -145,13 +163,14 @@ export async function certifyArtifactReceipts(options: {
             runRoot,
             "--run-id",
             "receipt-certification",
+            "--external-root",
+            `outputs=${externalRoot}`,
             "--json",
           ],
           { cwd: generated.packageRoot, env: environment },
         )
       ).stdout,
     ) as WorkflowContinuation;
-    const runtime = createWorkflowRuntime();
     const artifactPath = path.join(externalRoot, "result.bin");
     await fs.writeFile(artifactPath, "stale\n");
     const oldTime = new Date("2000-01-01T00:00:00.000Z");
@@ -171,7 +190,10 @@ export async function certifyArtifactReceipts(options: {
         WorkflowArtifactReceipt[] | undefined
     )?.[0];
     evidence.externalRoot =
-      completed.disposition === "done" && receipt?.path === artifactPath;
+      completed.disposition === "done" &&
+      receipt?.path === artifactPath &&
+      receipt.root?.name === "outputs" &&
+      receipt.root.path === externalRoot;
     evidence.largeFile = receipt?.size === 3 * 1024 * 1024;
     evidence.completionEvidence =
       receipt?.sha256 === LARGE_FILE_HASH &&
@@ -219,6 +241,7 @@ export async function certifyArtifactReceipts(options: {
       protocol: normalizeWorkflow(unsafeInput).protocol,
       runRoot: unsafeRoot,
       runId: "unsafe-receipt",
+      externalRoots: { outputs: externalRoot },
     });
     const refused = await runtime.submit(unsafeRoot, success(unsafe));
     evidence.containmentRejected =
@@ -257,6 +280,7 @@ export async function certifyArtifactReceipts(options: {
       fixturePackageHash === (await hashDirectory(generated.packageRoot));
     const complete =
       evidence.externalRoot &&
+      evidence.rootBindingRequired &&
       evidence.largeFile &&
       evidence.completionEvidence &&
       evidence.staleRejected &&

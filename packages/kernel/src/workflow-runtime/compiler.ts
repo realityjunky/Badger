@@ -18,7 +18,10 @@ import { validateSkillPackage } from "../skill-runtime/validate.js";
 import { sha256, slug, stableValue } from "../util.js";
 import type { WorkflowExecutionIdentity } from "./types.js";
 import { createCompletionPlan } from "./completion.js";
-import { validateArtifactReceiptDeclarations } from "./artifact-receipts.js";
+import {
+  externalRootDeclarations,
+  validateArtifactReceiptDeclarations,
+} from "./artifact-receipts.js";
 import { validateWorkflowVerificationRequirement } from "./verification-receipts.js";
 import {
   isRevisionedWorkflowProtocol,
@@ -283,6 +286,8 @@ function validateProtocolShape(protocol: WorkflowProtocol): void {
       }
     }
   }
+  // One name means one directory per Run, across every schema.
+  externalRootDeclarations(protocol.outputSchemas);
   const nodeIds = new Set<string>();
   const decisionIds = new Set<string>();
   const verificationRequirementIds = new Set<string>();

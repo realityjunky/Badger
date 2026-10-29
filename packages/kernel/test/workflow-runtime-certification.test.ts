@@ -144,6 +144,7 @@ describe("WorkflowRuntime Phase 3 certification", () => {
     expect(result.evidence?.artifactReceipts).toMatchObject({
       status: "certified",
       externalRoot: true,
+      rootBindingRequired: true,
       largeFile: true,
       completionEvidence: true,
       staleRejected: true,

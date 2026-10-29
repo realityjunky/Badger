@@ -94,6 +94,8 @@ export interface WorkflowRuntimeState {
   contentSnapshots?: WorkflowContentSnapshotReference[];
   repairEpisode?: WorkflowRepairEpisodeState;
   finalization?: WorkflowFinalizationState;
+  /** The directory the host bound to each declared external root at start. */
+  externalRoots?: Record<string, string>;
 }
 
 export interface RunState {

@@ -13960,6 +13960,17 @@ function parseWorkflowArtifactCoordinate(coordinate, label) {
     revision
   };
 }
+function parseWorkflowExternalRoots(value) {
+  if (value === void 0) return void 0;
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length > 32 || Object.entries(value).some(
+    ([name, directory]) => !name || name.length > 128 || typeof directory !== "string" || !path11.isAbsolute(directory)
+  )) {
+    throw new Error(
+      "Invalid Run state: WorkflowRuntime externalRoots must map root names to absolute directories"
+    );
+  }
+  return { ...value };
+}
 function parseWorkflowArtifactReceipt(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`Invalid Run state: ${label} must be an object`);
@@ -13967,6 +13978,7 @@ function parseWorkflowArtifactReceipt(value, label) {
   const receipt = value;
   const keys = /* @__PURE__ */ new Set([
     "artifactId",
+    "root",
     "path",
     "size",
     "sha256",
@@ -13974,6 +13986,12 @@ function parseWorkflowArtifactReceipt(value, label) {
     "producer"
   ]);
   const receiptPath2 = requiredJsonString(receipt.path, `${label}.path`);
+  const root = receipt.root;
+  if (root !== void 0 && (!root || typeof root !== "object" || Array.isArray(root) || Object.keys(root).some((key) => key !== "name" && key !== "path") || typeof root.name !== "string" || !root.name || typeof root.path !== "string" || !path11.isAbsolute(root.path))) {
+    throw new Error(
+      `Invalid Run state: ${label}.root is an invalid external root`
+    );
+  }
   const hash4 = requiredJsonString(receipt.sha256, `${label}.sha256`);
   if (Object.keys(receipt).some((key) => !keys.has(key)) || !path11.isAbsolute(receiptPath2) || !/^[a-f0-9]{64}$/u.test(hash4) || typeof receipt.size !== "number" || !Number.isSafeInteger(receipt.size) || receipt.size < 0 || typeof receipt.mtimeMs !== "number" || !Number.isFinite(receipt.mtimeMs)) {
     throw new Error(
@@ -13982,6 +14000,7 @@ function parseWorkflowArtifactReceipt(value, label) {
   }
   return {
     artifactId: requiredJsonString(receipt.artifactId, `${label}.artifactId`),
+    ...root !== void 0 ? { root: { name: root.name, path: root.path } } : {},
     path: receiptPath2,
     size: receipt.size,
     sha256: hash4,
@@ -14097,7 +14116,8 @@ function parseWorkflowRuntime(value, runId, durabilityProfile) {
     "artifactSelections",
     "contentSnapshots",
     "repairEpisode",
-    "finalization"
+    "finalization",
+    "externalRoots"
   ]);
   const unknown = Object.keys(runtime).find((key) => !keys.has(key));
   if (unknown) {
@@ -14218,6 +14238,7 @@ function parseWorkflowRuntime(value, runId, durabilityProfile) {
       snapshotHashes.add(snapshot.hash);
     }
   }
+  const externalRoots = parseWorkflowExternalRoots(runtime.externalRoots);
   const repairEpisode = runtime.repairEpisode === void 0 ? void 0 : (() => {
     if (!durabilityProfile?.capabilities.includes("repair-policy")) {
       throw new Error(
@@ -14455,7 +14476,8 @@ function parseWorkflowRuntime(value, runId, durabilityProfile) {
     artifactSelections,
     ...contentSnapshots ? { contentSnapshots } : {},
     ...repairEpisode ? { repairEpisode } : {},
-    ...finalization ? { finalization } : {}
+    ...finalization ? { finalization } : {},
+    ...externalRoots ? { externalRoots } : {}
   };
 }
 function parseRunStateJson(value) {
@@ -14650,17 +14672,23 @@ import path13 from "node:path";
 import { constants, promises as fs7 } from "node:fs";
 import { createHash as createHash4 } from "node:crypto";
 import path12 from "node:path";
+var MAX_EXTERNAL_ROOTS = 32;
 function validateArtifactReceiptDeclarations(schema) {
   if (schema.externalRoots !== void 0) {
-    if (!schema.externalRoots || typeof schema.externalRoots !== "object" || Array.isArray(schema.externalRoots) || Object.keys(schema.externalRoots).length > 32) {
+    if (!schema.externalRoots || typeof schema.externalRoots !== "object" || Array.isArray(schema.externalRoots) || Object.keys(schema.externalRoots).length > MAX_EXTERNAL_ROOTS) {
       throw new Error(
         `Output Schema ${schema.id} artifact external roots must be a bounded map`
       );
     }
     for (const [id, root] of Object.entries(schema.externalRoots)) {
-      if (!id || id.length > 128 || typeof root !== "string" || !path12.isAbsolute(root) || root.includes("\0")) {
+      if (!id || id.length > 128 || !root || typeof root !== "object" || Array.isArray(root) || Object.keys(root).some((key) => key !== "description") || typeof root.description !== "string" || !root.description.trim() || root.description.length > 1e3) {
         throw new Error(
-          `Output Schema ${schema.id} artifact external root ${id} must be an absolute directory path`
+          `Output Schema ${schema.id} artifact external root ${id} must declare only a description; the host binds its directory when a Run starts`
+        );
+      }
+      if (!schema.artifacts.some((artifact) => artifact.root === id)) {
+        throw new Error(
+          `Output Schema ${schema.id} declares external root ${id}, but no artifact uses it`
         );
       }
     }
@@ -14691,23 +14719,98 @@ function validateArtifactReceiptDeclarations(schema) {
     }
   }
 }
-function artifactStorageRoot(runRoot, schema, artifact) {
+function externalRootDeclarations(schemas) {
+  const declared = /* @__PURE__ */ new Map();
+  for (const schema of schemas) {
+    const roots = schema?.externalRoots;
+    if (!roots || typeof roots !== "object" || Array.isArray(roots)) continue;
+    for (const [name, root] of Object.entries(roots)) {
+      if (!root || typeof root !== "object") continue;
+      const existing = declared.get(name);
+      if (existing && existing.description !== root.description) {
+        throw new Error(
+          `Output Schemas declare external root ${name} with different descriptions`
+        );
+      }
+      declared.set(name, root);
+    }
+  }
+  if (declared.size > MAX_EXTERNAL_ROOTS) {
+    throw new Error(
+      `A workflow declares at most ${MAX_EXTERNAL_ROOTS} external roots`
+    );
+  }
+  return declared;
+}
+async function bindWorkflowExternalRoots(schemas, supplied) {
+  const declared = externalRootDeclarations(schemas);
+  if (supplied !== void 0 && (!supplied || typeof supplied !== "object" || Array.isArray(supplied))) {
+    throw new Error("Workflow artifact external roots must be a map");
+  }
+  for (const name of Object.keys(supplied ?? {})) {
+    if (!declared.has(name)) {
+      throw new Error(
+        `Workflow artifact external root ${name} is not declared by this workflow`
+      );
+    }
+  }
+  if (declared.size === 0) return void 0;
+  const bound = {};
+  for (const name of [...declared.keys()].sort()) {
+    const value = supplied?.[name];
+    if (value === void 0) {
+      throw new Error(
+        `Workflow artifact external root ${name} needs a directory when the Run starts`
+      );
+    }
+    if (typeof value !== "string" || !path12.isAbsolute(value) || value.includes("\0")) {
+      throw new Error(
+        `Workflow artifact external root ${name} must be bound to an absolute directory`
+      );
+    }
+    const directory = path12.resolve(value);
+    let stat;
+    try {
+      stat = await fs7.lstat(directory);
+    } catch {
+      throw new Error(
+        `Workflow artifact external root ${name} directory does not exist: ${directory}`
+      );
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error(
+        `Workflow artifact external root ${name} must be a real directory, not a link: ${directory}`
+      );
+    }
+    bound[name] = directory;
+  }
+  return bound;
+}
+function artifactStorageRoot(runRoot, externalRoots, schema, artifact) {
   if (artifact.root === void 0) return runRoot;
   if (artifact.verification !== "receipt" || !Object.hasOwn(schema.externalRoots ?? {}, artifact.root)) {
     throw new Error(
       `Workflow artifact ${schema.id}.${artifact.id} has an undeclared external root`
     );
   }
-  const root = schema.externalRoots[artifact.root];
+  const root = externalRoots?.[artifact.root];
   if (typeof root !== "string" || !path12.isAbsolute(root)) {
     throw new Error(
-      `Workflow artifact external root ${artifact.root} must be absolute`
+      `Workflow artifact external root ${artifact.root} is not bound for this Run`
     );
   }
   return root;
 }
 function sameStat2(left, right) {
   return left.dev === right.dev && left.ino === right.ino && left.birthtimeNs === right.birthtimeNs && left.size === right.size && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
+}
+function receiptRoot(options) {
+  return options.rootName === void 0 ? {} : {
+    root: {
+      name: options.rootName,
+      path: path12.resolve(options.storageRoot)
+    }
+  };
 }
 function assertFresh(stat, options) {
   if (options.attemptStartedAt !== void 0 && stat.mtimeNs < BigInt(options.attemptStartedAt) * 1000000n) {
@@ -14777,6 +14880,7 @@ async function captureDirectoryReceipt(options) {
   if (fileCount === 0) assertFresh(directoryStat, options);
   return {
     artifactId: options.artifactId,
+    ...receiptRoot(options),
     path: path12.resolve(options.storageRoot, options.relativePath),
     size,
     sha256: createHash4("sha256").update(JSON.stringify({ kind: "directory", manifest })).digest("hex"),
@@ -14828,6 +14932,7 @@ async function captureArtifactReceipt(options) {
     }
     return {
       artifactId: options.artifactId,
+      ...receiptRoot(options),
       path: path12.resolve(inspection.target),
       size,
       sha256: hash4.digest("hex"),
@@ -14995,7 +15100,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
   }
   return walk("", 0);
 }
-async function resolveArtifactPath(runRoot, declaration, requestedPath) {
+async function resolveArtifactPath(runRoot, externalRoots, declaration, requestedPath) {
   const label = `Workflow artifact ${declaration.artifactId}`;
   if (!artifactPathMatches(requestedPath, declaration.artifact.paths)) {
     fail(`${label} path is outside its declaration: ${requestedPath}`);
@@ -15006,6 +15111,7 @@ async function resolveArtifactPath(runRoot, declaration, requestedPath) {
   }
   const storageRoot = artifactStorageRoot(
     runRoot,
+    externalRoots,
     declaration.schema,
     declaration.artifact
   );
@@ -15064,7 +15170,7 @@ async function hashDirectoryArtifact(runRoot, relativePath2, label) {
   await walk(relativePath2);
   return sha256(JSON.stringify(stableValue({ kind: "directory", manifest })));
 }
-async function hashArtifactPath(runRoot, declaration, relativePath2, producer, attemptStartedAt) {
+async function hashArtifactPath(runRoot, externalRoots, declaration, relativePath2, producer, attemptStartedAt) {
   const label = `Workflow artifact ${declaration.artifactId}`;
   if (!artifactPathMatches(relativePath2, declaration.artifact.paths)) {
     fail(`${label} path is outside its declaration: ${relativePath2}`);
@@ -15074,9 +15180,11 @@ async function hashArtifactPath(runRoot, declaration, relativePath2, producer, a
     const receipt = await captureArtifactReceipt({
       storageRoot: artifactStorageRoot(
         runRoot,
+        externalRoots,
         declaration.schema,
         declaration.artifact
       ),
+      ...declaration.artifact.root !== void 0 ? { rootName: declaration.artifact.root } : {},
       relativePath: relativePath2,
       artifactId: declaration.artifactId,
       producer,
@@ -15105,8 +15213,10 @@ async function validateWorkflowArtifactVersion(runRoot, protocol, version) {
   if (version.schemaId !== declaration.schemaId || version.lifetime !== artifactLifetime(declaration) || !artifactPathMatches(version.path, declaration.artifact.paths)) {
     fail(`Workflow artifact version identity is invalid: ${version.id}`);
   }
+  const root = version.receipt?.root;
   const current = await hashArtifactPath(
     runRoot,
+    root ? { [root.name]: root.path } : void 0,
     declaration,
     version.path,
     version.producer
@@ -15243,6 +15353,7 @@ async function prepareWorkflowArtifactMutation(options) {
   for (const { declaration, value: requested } of requestedUpdates.values()) {
     const artifactPath = await resolveArtifactPath(
       options.runRoot,
+      runtime.externalRoots,
       declaration,
       requested
     );
@@ -15275,6 +15386,7 @@ async function prepareWorkflowArtifactMutation(options) {
     try {
       material = await hashArtifactPath(
         options.runRoot,
+        runtime.externalRoots,
         declaration,
         artifactPath,
         producer,
@@ -15379,7 +15491,19 @@ function currentWorkflowArtifactVersions(runtime) {
   }
   return current;
 }
+function validateWorkflowExternalRootBinding(protocol, runtime) {
+  const declared = [...externalRootDeclarations(protocol.outputSchemas).keys()].sort().join("\n");
+  const bound = Object.keys(runtime.externalRoots ?? {}).sort().join("\n");
+  if (declared !== bound || Object.values(runtime.externalRoots ?? {}).some(
+    (directory) => !path13.isAbsolute(directory)
+  )) {
+    throw new Error(
+      "WorkflowRuntime external roots do not match the declared roots"
+    );
+  }
+}
 function validateWorkflowArtifactState(protocol, runId, nodeToStep, runtime) {
+  validateWorkflowExternalRootBinding(protocol, runtime);
   const versions = runtime.artifactVersions ?? [];
   const selections = runtime.artifactSelections ?? [];
   if (!versioningEnabled(protocol)) {
@@ -15397,11 +15521,9 @@ function validateWorkflowArtifactState(protocol, runId, nodeToStep, runtime) {
   for (const version of versions) {
     const declaration = declarationFor(version.artifactId, declared);
     const receipt = version.receipt;
-    const expectedExternalPath = declaration.artifact.root === void 0 ? void 0 : path13.resolve(
-      declaration.schema.externalRoots[declaration.artifact.root],
-      version.path
-    );
-    const receiptMatches = receipt !== void 0 && receipt.artifactId === version.artifactId && receipt.sha256 === version.contentHash && (expectedExternalPath === void 0 || receipt.path === expectedExternalPath) && JSON.stringify(stableValue(receipt.producer)) === JSON.stringify(stableValue(version.producer));
+    const rootName = declaration.artifact.root;
+    const boundRoot = rootName === void 0 ? void 0 : runtime.externalRoots?.[rootName];
+    const receiptMatches = receipt !== void 0 && receipt.artifactId === version.artifactId && receipt.sha256 === version.contentHash && (rootName === void 0 ? receipt.root === void 0 : boundRoot !== void 0 && receipt.root?.name === rootName && receipt.root.path === boundRoot && receipt.path === path13.resolve(boundRoot, version.path)) && JSON.stringify(stableValue(receipt.producer)) === JSON.stringify(stableValue(version.producer));
     if (declaration.artifact.verification === "receipt" ? !receiptMatches : receipt !== void 0) {
       throw new Error(
         `WorkflowRuntime artifact receipt identity is invalid: ${version.id}`
@@ -15588,6 +15710,7 @@ function missingGuardrailEvidence(node, plan, evidence, satisfiedGuardrails = /*
 }
 async function validateSuccessfulSubmission(runRoot, protocol, node, plan, submission, context = {}) {
   const {
+    externalRoots,
     producer,
     attemptStartedAt,
     selectedReceipts,
@@ -15635,7 +15758,12 @@ async function validateSuccessfulSubmission(runRoot, protocol, node, plan, submi
             );
             continue;
           }
-          const storageRoot = artifactStorageRoot(runRoot, schema, artifact);
+          const storageRoot = artifactStorageRoot(
+            runRoot,
+            externalRoots,
+            schema,
+            artifact
+          );
           const matches = /* @__PURE__ */ new Set();
           for (const pattern of artifact.paths) {
             for (const match of await matchingWorkflowArtifactPaths(
@@ -15661,6 +15789,7 @@ async function validateSuccessfulSubmission(runRoot, protocol, node, plan, submi
             artifactReceipts.push(
               await captureArtifactReceipt({
                 storageRoot,
+                ...artifact.root !== void 0 ? { rootName: artifact.root } : {},
                 relativePath: relativePath2,
                 artifactId: `${schema.id}.${artifact.id}`,
                 producer,
@@ -17476,6 +17605,7 @@ function validateProtocolShape(protocol) {
       }
     }
   }
+  externalRootDeclarations(protocol.outputSchemas);
   const nodeIds = /* @__PURE__ */ new Set();
   const decisionIds = /* @__PURE__ */ new Set();
   const verificationRequirementIds = /* @__PURE__ */ new Set();
@@ -25871,6 +26001,7 @@ async function validateCompletion(prepared, submission, mutation) {
     submission,
     {
       satisfiedGuardrails,
+      externalRoots: state.workflowRuntime?.externalRoots,
       producer: attempt ? {
         runId: state.runId,
         nodeId: prepared.node,
@@ -27461,6 +27592,10 @@ function createWorkflowRuntime() {
         const resolved = resolveWorkflowStartLocation(options);
         const compiled = await compileWorkflow(options.protocol);
         const revisioned = compiled.package.runtime?.capabilityVersion === 3;
+        const externalRoots = await bindWorkflowExternalRoots(
+          options.protocol.outputSchemas,
+          options.externalRoots
+        );
         await resolved.location.prepareStart();
         return withWorkflowRunLock(
           resolved.location,
@@ -27513,6 +27648,7 @@ function createWorkflowRuntime() {
                   verificationReceipts: [],
                   artifactVersions: [],
                   artifactSelections: [],
+                  ...externalRoots ? { externalRoots } : {},
                   ...usesWorkflowContentSnapshots(
                     compiled.identity.durabilityProfile
                   ) ? { contentSnapshots: [] } : {},

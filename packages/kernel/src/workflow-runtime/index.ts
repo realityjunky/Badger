@@ -62,6 +62,7 @@ import type {
 } from "../types.js";
 import { sha256, stableValue } from "../util.js";
 import { compileWorkflow } from "./compiler.js";
+import { bindWorkflowExternalRoots } from "./artifact-receipts.js";
 import {
   createCompletionPlan,
   validateSuccessfulSubmission,
@@ -4054,6 +4055,7 @@ async function validateCompletion(
     submission,
     {
       satisfiedGuardrails,
+      externalRoots: state.workflowRuntime?.externalRoots,
       producer: attempt
         ? {
             runId: state.runId,
@@ -6078,6 +6080,12 @@ export function createWorkflowRuntime(): WorkflowRuntime {
         const resolved = resolveWorkflowStartLocation(options);
         const compiled = await compileWorkflow(options.protocol);
         const revisioned = compiled.package.runtime?.capabilityVersion === 3;
+        // The compiler admits external roots only with revisioned Attempts,
+        // so the binding always has WorkflowRuntime state to live in.
+        const externalRoots = await bindWorkflowExternalRoots(
+          options.protocol.outputSchemas,
+          options.externalRoots,
+        );
         await resolved.location.prepareStart();
         return withWorkflowRunLock(
           resolved.location,
@@ -6132,6 +6140,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                       verificationReceipts: [],
                       artifactVersions: [],
                       artifactSelections: [],
+                      ...(externalRoots ? { externalRoots } : {}),
                       ...(usesWorkflowContentSnapshots(
                         compiled.identity.durabilityProfile,
                       )
