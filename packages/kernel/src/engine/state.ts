@@ -19,6 +19,7 @@ import type {
 import type {
   WorkflowArtifactLifetime,
   WorkflowArtifactProducer,
+  WorkflowArtifactReceipt,
   WorkflowArtifactSelection,
   WorkflowArtifactVersion,
   WorkflowDecisionReceipt,
@@ -944,6 +945,51 @@ function parseWorkflowArtifactCoordinate(
   };
 }
 
+function parseWorkflowArtifactReceipt(
+  value: unknown,
+  label: string,
+): WorkflowArtifactReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const receipt = value as Record<string, unknown>;
+  const keys = new Set([
+    "artifactId",
+    "path",
+    "size",
+    "sha256",
+    "mtimeMs",
+    "producer",
+  ]);
+  const receiptPath = requiredJsonString(receipt.path, `${label}.path`);
+  const hash = requiredJsonString(receipt.sha256, `${label}.sha256`);
+  if (
+    Object.keys(receipt).some((key) => !keys.has(key)) ||
+    !path.isAbsolute(receiptPath) ||
+    !/^[a-f0-9]{64}$/u.test(hash) ||
+    typeof receipt.size !== "number" ||
+    !Number.isSafeInteger(receipt.size) ||
+    receipt.size < 0 ||
+    typeof receipt.mtimeMs !== "number" ||
+    !Number.isFinite(receipt.mtimeMs)
+  ) {
+    throw new Error(
+      `Invalid Run state: ${label} is an invalid artifact receipt`,
+    );
+  }
+  return {
+    artifactId: requiredJsonString(receipt.artifactId, `${label}.artifactId`),
+    path: receiptPath,
+    size: receipt.size,
+    sha256: hash,
+    mtimeMs: receipt.mtimeMs,
+    producer: parseWorkflowArtifactProducer(
+      receipt.producer,
+      `${label}.producer`,
+    ),
+  };
+}
+
 function parseWorkflowArtifactVersion(
   value: unknown,
   index: number,
@@ -963,6 +1009,7 @@ function parseWorkflowArtifactVersion(
     "path",
     "producer",
     "timestamp",
+    "receipt",
   ]);
   const unknown = Object.keys(version).find((key) => !keys.has(key));
   if (unknown) {
@@ -995,6 +1042,14 @@ function parseWorkflowArtifactVersion(
       `${label}.producer`,
     ),
     timestamp: requiredJsonString(version.timestamp, `${label}.timestamp`),
+    ...(version.receipt !== undefined
+      ? {
+          receipt: parseWorkflowArtifactReceipt(
+            version.receipt,
+            `${label}.receipt`,
+          ),
+        }
+      : {}),
   };
 }
 

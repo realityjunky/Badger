@@ -40,6 +40,7 @@ import type { WorkflowArtifactMutation } from "../engine/runtime-types.js";
 import type {
   DecisionScalar,
   WorkflowArtifactProducer,
+  WorkflowArtifactReceipt,
   WorkflowDecisionScopeReference,
   WorkflowDecisionScopeSnapshot,
   WorkflowDecisionInputSchema,
@@ -64,6 +65,7 @@ import { compileWorkflow } from "./compiler.js";
 import {
   createCompletionPlan,
   validateSuccessfulSubmission,
+  type WorkflowCompletionValidation,
 } from "./completion.js";
 import {
   currentWorkflowArtifactVersions,
@@ -3795,6 +3797,7 @@ function engineOutcome(
   submission: WorkflowSubmission,
   artifactMutation?: WorkflowArtifactMutation,
   repairFailure?: ReturnType<typeof repairFailureForSubmission>,
+  artifactReceipts: readonly WorkflowArtifactReceipt[] = [],
 ): import("../engine/types.js").ActionOutcome {
   if (isWorkflowFinalizationAction(prepared.pending)) {
     if (!isDecisionSubmission(submission) || !submission.finalization) {
@@ -3872,19 +3875,20 @@ function engineOutcome(
       : submission.artifacts;
     const evidence = submission.evidence
       ? structuredClone(submission.evidence)
-      : undefined;
-    if (evidence) {
-      delete evidence.verification;
-      delete evidence.verificationReceipts;
-      delete evidence.verificationReceiptIds;
-    }
+      : {};
+    delete evidence.verification;
+    delete evidence.verificationReceipts;
+    delete evidence.verificationReceiptIds;
+    delete evidence.artifactReceipts;
+    if (artifactReceipts.length > 0)
+      evidence.artifactReceipts = structuredClone(artifactReceipts);
     return {
       actionId: prepared.pending.id,
       status: submission.status,
       summary: submission.summary,
       ...(artifacts && Object.keys(artifacts).length > 0 ? { artifacts } : {}),
       ...(submission.state ? { state: submission.state } : {}),
-      ...(evidence && Object.keys(evidence).length > 0 ? { evidence } : {}),
+      ...(Object.keys(evidence).length > 0 ? { evidence } : {}),
       ...(submission.routing ? { routing: submission.routing } : {}),
       ...(artifactMutation &&
       Object.keys(artifactMutation.selectedVersionIds).length > 0
@@ -3952,13 +3956,54 @@ function engineOutcome(
   };
 }
 
-async function completionBlockers(
+async function receiptAttemptStartedAt(
+  prepared: PreparedWorkflowSubmission,
+): Promise<number | undefined> {
+  const currentAttempt =
+    prepared.verified.state.workflowRuntime?.currentAttempt;
+  const protocol = prepared.verified.package.runtime!.protocol;
+  const node = protocol.nodes.find(
+    (candidate) => candidate.id === prepared.node,
+  );
+  if (
+    !currentAttempt ||
+    !node ||
+    !node.outputSchemas.some((schemaId) =>
+      protocol.outputSchemas.some(
+        (schema) =>
+          schema.id === schemaId &&
+          schema.artifacts.some((artifact) => artifact.requireCurrentAttempt),
+      ),
+    )
+  )
+    return undefined;
+  const trajectory = await readTrajectory(
+    prepared.location.runRoot,
+    prepared.verified.state.trajectoryRef,
+    durabilityReadOptions(prepared.verified.state, "trajectoryBytes"),
+  );
+  const firstAction = trajectory.find(
+    (event) =>
+      event.type === "action_proposed" &&
+      isRecord(event.data.action) &&
+      event.data.action.attemptId === currentAttempt.id,
+  );
+  const timestamp = firstAction ? Date.parse(firstAction.timestamp) : NaN;
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+async function validateCompletion(
   prepared: PreparedWorkflowSubmission,
   submission: WorkflowSubmission,
   mutation?: WorkflowArtifactMutation,
-): Promise<string[]> {
-  if (isDecisionSubmission(submission)) return [];
-  if (submission.status !== "succeeded" || !prepared.node) return [];
+): Promise<WorkflowCompletionValidation> {
+  if (
+    isDecisionSubmission(submission) ||
+    submission.status !== "succeeded" ||
+    !prepared.node
+  ) {
+    return { blockers: [], artifactReceipts: [] };
+  }
   const workflowNode = prepared.verified.package.runtime!.protocol.nodes.find(
     (candidate) => candidate.id === prepared.node,
   );
@@ -3989,13 +4034,44 @@ async function completionBlockers(
       )
       .map((guardrail) => `guardrail:${workflowNode.id}.${guardrail.id}`),
   );
+  const attemptStartedAt = await receiptAttemptStartedAt(prepared);
+  const selectedIds = new Set(
+    Object.values(mutation?.selectedVersionIds ?? {}),
+  );
+  const selectedReceipts = [
+    ...(prepared.verified.state.workflowRuntime?.artifactVersions ?? []),
+    ...(mutation?.versions ?? []),
+  ]
+    .filter((version) => selectedIds.has(version.id) && version.receipt)
+    .map((version) => version.receipt!);
+  const state = prepared.verified.state;
+  const attempt = state.workflowRuntime?.currentAttempt;
   return validateSuccessfulSubmission(
     prepared.location.runRoot,
     prepared.verified.package.runtime!.protocol,
     workflowNode,
     plan,
     submission,
-    satisfiedGuardrails,
+    {
+      satisfiedGuardrails,
+      producer: attempt
+        ? {
+            runId: state.runId,
+            nodeId: prepared.node,
+            cycleId: attempt.cycleId,
+            attemptId: attempt.id,
+            actionId: prepared.pending.id,
+            revision: state.workflowRuntime!.revision,
+          }
+        : undefined,
+      attemptStartedAt,
+      selectedReceipts:
+        prepared.verified.package.runtime!.protocol.capabilities?.features.includes(
+          "versioned-artifacts",
+        )
+          ? selectedReceipts
+          : undefined,
+    },
   );
 }
 
@@ -4072,6 +4148,7 @@ async function artifactMutationForSubmission(
         state: prepared.verified.state,
         nodeId: prepared.node,
         actionId: prepared.pending.id,
+        attemptStartedAt: await receiptAttemptStartedAt(prepared),
         ...(submission.artifacts ? { artifacts: submission.artifacts } : {}),
         ...(submission.artifactVersions
           ? { artifactVersions: submission.artifactVersions }
@@ -4979,9 +5056,9 @@ export async function validateWorkflowSubmission(
       artifact.mutation,
       verification.mutation,
     );
-    const blockers = await completionBlockers(prepared, submission, mutation);
-    if (blockers.length > 0) {
-      return blockedContinuation(prepared, blockers);
+    const completion = await validateCompletion(prepared, submission, mutation);
+    if (completion.blockers.length > 0) {
+      return blockedContinuation(prepared, completion.blockers);
     }
     const routeFindings = routeBlockers(prepared, submission, mutation);
     if (routeFindings.length > 0) {
@@ -6221,13 +6298,13 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               artifact.mutation,
               verification.mutation,
             );
-            const blockers = await completionBlockers(
+            const completion = await validateCompletion(
               prepared,
               submission,
               mutation,
             );
-            if (blockers.length > 0) {
-              return blockedContinuation(prepared, blockers);
+            if (completion.blockers.length > 0) {
+              return blockedContinuation(prepared, completion.blockers);
             }
             const routeFindings = routeBlockers(prepared, submission, mutation);
             if (routeFindings.length > 0) {
@@ -6250,6 +6327,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
               submission,
               mutation,
               repairFailure,
+              completion.artifactReceipts,
             );
             const finalizationDefinition =
               prepared.verified.package.runtime!.protocol.finalization;

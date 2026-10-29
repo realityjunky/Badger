@@ -1,5 +1,5 @@
 // src/workflow-runtime/index.ts
-import path17 from "node:path";
+import path18 from "node:path";
 
 // src/engine/contained-atomic-write.ts
 import { randomUUID } from "crypto";
@@ -992,39 +992,39 @@ function createWorkflowFinding(input) {
     ...input.currentActionId !== void 0 ? { currentActionId: input.currentActionId } : {}
   };
 }
-function snapshotIncompleteFinding(message, path18) {
+function snapshotIncompleteFinding(message, path19) {
   return createWorkflowFinding({
     code: "snapshot-incomplete",
     severity: "error",
     message,
-    ...path18 ? { path: path18 } : {},
+    ...path19 ? { path: path19 } : {},
     requiredAction: "stop"
   });
 }
-function snapshotStorageFailedFinding(message, path18) {
+function snapshotStorageFailedFinding(message, path19) {
   return createWorkflowFinding({
     code: "snapshot-storage-failed",
     severity: "error",
     message,
-    ...path18 ? { path: path18 } : {},
+    ...path19 ? { path: path19 } : {},
     requiredAction: "stop"
   });
 }
-function snapshotUnsafeScopeFinding(message, path18) {
+function snapshotUnsafeScopeFinding(message, path19) {
   return createWorkflowFinding({
     code: "snapshot-unsafe-scope",
     severity: "error",
     message,
-    ...path18 ? { path: path18 } : {},
+    ...path19 ? { path: path19 } : {},
     requiredAction: "stop"
   });
 }
-function snapshotUnstableFinding(message, path18) {
+function snapshotUnstableFinding(message, path19) {
   return createWorkflowFinding({
     code: "snapshot-unstable",
     severity: "error",
     message,
-    ...path18 ? { path: path18 } : {},
+    ...path19 ? { path: path19 } : {},
     requiredAction: "stop"
   });
 }
@@ -1887,21 +1887,21 @@ function recoveryRequiredFinding(currentRevision, currentActionId, recoveryPath 
     ...currentActionId === void 0 ? {} : { currentActionId }
   });
 }
-function checkpointInvalidFinding(message, path18, severity = "error") {
+function checkpointInvalidFinding(message, path19, severity = "error") {
   return createWorkflowFinding({
     code: "checkpoint-invalid",
     severity,
     message,
-    path: path18,
+    path: path19,
     requiredAction: severity === "warning" ? "none" : "stop"
   });
 }
-function checkpointHistoryAmbiguousFinding(message, path18) {
+function checkpointHistoryAmbiguousFinding(message, path19) {
   return createWorkflowFinding({
     code: "checkpoint-history-ambiguous",
     severity: "error",
     message,
-    path: path18,
+    path: path19,
     requiredAction: "stop"
   });
 }
@@ -11324,13 +11324,13 @@ async function readValidatedOperation(baseRoot, operation2, profile) {
   }
   return actual;
 }
-async function appendOperationEvent(runRoot, profile, transaction, operation2, type, phase, path18) {
+async function appendOperationEvent(runRoot, profile, transaction, operation2, type, phase, path19) {
   await appendTransactionEvent(
     runRoot,
     profile,
     transaction,
     type,
-    { phase, operationId: operation2.id, path: path18 },
+    { phase, operationId: operation2.id, path: path19 },
     operation2.id
   );
 }
@@ -13310,9 +13310,9 @@ async function stageWorkflowVerificationReceipt(options) {
     options.receipt,
     options.profile
   );
-  const path18 = receiptPath(receipt.receiptHash);
+  const path19 = receiptPath(receipt.receiptHash);
   const existingRaw = await options.transition.read(
-    path18,
+    path19,
     bounds.receiptBytes,
     RECEIPT_LABEL
   );
@@ -13333,7 +13333,7 @@ async function stageWorkflowVerificationReceipt(options) {
     return workflowVerificationReceiptReference(existing);
   }
   await options.transition.write(
-    path18,
+    path19,
     serializedReceipt(receipt),
     bounds.receiptBytes,
     RECEIPT_LABEL
@@ -13960,6 +13960,38 @@ function parseWorkflowArtifactCoordinate(coordinate, label) {
     revision
   };
 }
+function parseWorkflowArtifactReceipt(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Run state: ${label} must be an object`);
+  }
+  const receipt = value;
+  const keys = /* @__PURE__ */ new Set([
+    "artifactId",
+    "path",
+    "size",
+    "sha256",
+    "mtimeMs",
+    "producer"
+  ]);
+  const receiptPath2 = requiredJsonString(receipt.path, `${label}.path`);
+  const hash4 = requiredJsonString(receipt.sha256, `${label}.sha256`);
+  if (Object.keys(receipt).some((key) => !keys.has(key)) || !path11.isAbsolute(receiptPath2) || !/^[a-f0-9]{64}$/u.test(hash4) || typeof receipt.size !== "number" || !Number.isSafeInteger(receipt.size) || receipt.size < 0 || typeof receipt.mtimeMs !== "number" || !Number.isFinite(receipt.mtimeMs)) {
+    throw new Error(
+      `Invalid Run state: ${label} is an invalid artifact receipt`
+    );
+  }
+  return {
+    artifactId: requiredJsonString(receipt.artifactId, `${label}.artifactId`),
+    path: receiptPath2,
+    size: receipt.size,
+    sha256: hash4,
+    mtimeMs: receipt.mtimeMs,
+    producer: parseWorkflowArtifactProducer(
+      receipt.producer,
+      `${label}.producer`
+    )
+  };
+}
 function parseWorkflowArtifactVersion(value, index) {
   const label = `workflowRuntime.artifactVersions[${index}]`;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -13975,7 +14007,8 @@ function parseWorkflowArtifactVersion(value, index) {
     "contentHash",
     "path",
     "producer",
-    "timestamp"
+    "timestamp",
+    "receipt"
   ]);
   const unknown = Object.keys(version).find((key) => !keys.has(key));
   if (unknown) {
@@ -14007,7 +14040,13 @@ function parseWorkflowArtifactVersion(value, index) {
       version.producer,
       `${label}.producer`
     ),
-    timestamp: requiredJsonString(version.timestamp, `${label}.timestamp`)
+    timestamp: requiredJsonString(version.timestamp, `${label}.timestamp`),
+    ...version.receipt !== void 0 ? {
+      receipt: parseWorkflowArtifactReceipt(
+        version.receipt,
+        `${label}.receipt`
+      )
+    } : {}
   };
 }
 function parseWorkflowArtifactSelection(value, index) {
@@ -14604,8 +14643,203 @@ async function writeRunState(changeDir, state, options = {}) {
 }
 
 // src/workflow-runtime/artifacts.ts
-import { promises as fs7 } from "node:fs";
+import { promises as fs8 } from "node:fs";
+import path13 from "node:path";
+
+// src/workflow-runtime/artifact-receipts.ts
+import { constants, promises as fs7 } from "node:fs";
+import { createHash as createHash4 } from "node:crypto";
 import path12 from "node:path";
+function validateArtifactReceiptDeclarations(schema) {
+  if (schema.externalRoots !== void 0) {
+    if (!schema.externalRoots || typeof schema.externalRoots !== "object" || Array.isArray(schema.externalRoots) || Object.keys(schema.externalRoots).length > 32) {
+      throw new Error(
+        `Output Schema ${schema.id} artifact external roots must be a bounded map`
+      );
+    }
+    for (const [id, root] of Object.entries(schema.externalRoots)) {
+      if (!id || id.length > 128 || typeof root !== "string" || !path12.isAbsolute(root) || root.includes("\0")) {
+        throw new Error(
+          `Output Schema ${schema.id} artifact external root ${id} must be an absolute directory path`
+        );
+      }
+    }
+  }
+  for (const artifact of schema.artifacts) {
+    const label = `Workflow artifact ${schema.id}.${artifact.id}`;
+    if (artifact.verification !== void 0 && artifact.verification !== "content" && artifact.verification !== "receipt" || artifact.requireCurrentAttempt !== void 0 && typeof artifact.requireCurrentAttempt !== "boolean") {
+      throw new Error(`${label} has an invalid receipt policy`);
+    }
+    if (artifact.verification !== "receipt") {
+      if (artifact.root !== void 0 || artifact.requireCurrentAttempt !== void 0) {
+        throw new Error(
+          `${label} external roots and Attempt freshness require receipt verification`
+        );
+      }
+      continue;
+    }
+    if (artifact.root !== void 0 && (typeof artifact.root !== "string" || !Object.hasOwn(schema.externalRoots ?? {}, artifact.root))) {
+      throw new Error(`${label} has an undeclared external root`);
+    }
+    for (const pattern of artifact.paths) {
+      const normalized = pattern.trim().replaceAll("\\", "/");
+      if (!normalized || path12.posix.isAbsolute(normalized) || path12.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized) || normalized.includes("?") || normalized.includes("\0") || normalized.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
+        throw new Error(
+          `${label} receipt paths must stay relative to the declared root and support only * wildcards`
+        );
+      }
+    }
+  }
+}
+function artifactStorageRoot(runRoot, schema, artifact) {
+  if (artifact.root === void 0) return runRoot;
+  if (artifact.verification !== "receipt" || !Object.hasOwn(schema.externalRoots ?? {}, artifact.root)) {
+    throw new Error(
+      `Workflow artifact ${schema.id}.${artifact.id} has an undeclared external root`
+    );
+  }
+  const root = schema.externalRoots[artifact.root];
+  if (typeof root !== "string" || !path12.isAbsolute(root)) {
+    throw new Error(
+      `Workflow artifact external root ${artifact.root} must be absolute`
+    );
+  }
+  return root;
+}
+function sameStat2(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.birthtimeNs === right.birthtimeNs && left.size === right.size && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
+}
+function assertFresh(stat, options) {
+  if (options.attemptStartedAt !== void 0 && stat.mtimeNs < BigInt(options.attemptStartedAt) * 1000000n) {
+    throw new Error(
+      `Workflow artifact ${options.artifactId} is stale for this Attempt: ${options.relativePath}`
+    );
+  }
+}
+function mtimeMs(stat) {
+  return Number(stat.mtimeNs / 1000000n) + Number(stat.mtimeNs % 1000000n) / 1e6;
+}
+async function captureDirectoryReceipt(options) {
+  const label = `Workflow artifact ${options.artifactId}`;
+  const manifest = [];
+  const observed = [];
+  let size = 0;
+  let fileCount = 0;
+  async function walk(relativePath2) {
+    const inspection = await inspectProtectedProjectPath(
+      options.storageRoot,
+      relativePath2,
+      { label, expected: "any" }
+    );
+    if (!inspection.exists) throw new Error(`${label} does not exist`);
+    const stat = await fs7.lstat(inspection.target, { bigint: true });
+    observed.push({ relativePath: relativePath2, stat });
+    if (observed.length > 256)
+      throw new Error(`${label} exceeds 256 receipt entries`);
+    const manifestPath = path12.posix.relative(
+      options.relativePath,
+      relativePath2
+    );
+    if (stat.isDirectory()) {
+      if (manifestPath)
+        manifest.push({ path: manifestPath, kind: "directory" });
+      const entries = await fs7.readdir(inspection.target);
+      for (const entry of entries.sort())
+        await walk(path12.posix.join(relativePath2, entry));
+    } else {
+      const receipt = await captureArtifactReceipt({
+        ...options,
+        relativePath: relativePath2
+      });
+      manifest.push({
+        path: manifestPath,
+        kind: "file",
+        sha256: receipt.sha256
+      });
+      size += receipt.size;
+      if (!Number.isSafeInteger(size))
+        throw new Error(`${label} receipt size is not a safe integer`);
+      fileCount += 1;
+    }
+  }
+  await walk(options.relativePath);
+  for (const entry of observed) {
+    const inspection = await inspectProtectedProjectPath(
+      options.storageRoot,
+      entry.relativePath,
+      { label, expected: "any" }
+    );
+    if (!inspection.exists || !sameStat2(entry.stat, await fs7.lstat(inspection.target, { bigint: true }))) {
+      throw new Error(`${label} changed during receipt verification`);
+    }
+  }
+  const directoryStat = observed[0].stat;
+  if (fileCount === 0) assertFresh(directoryStat, options);
+  return {
+    artifactId: options.artifactId,
+    path: path12.resolve(options.storageRoot, options.relativePath),
+    size,
+    sha256: createHash4("sha256").update(JSON.stringify({ kind: "directory", manifest })).digest("hex"),
+    mtimeMs: mtimeMs(directoryStat),
+    producer: structuredClone(options.producer)
+  };
+}
+async function captureArtifactReceipt(options) {
+  const label = `Workflow artifact ${options.artifactId}`;
+  const inspect = () => inspectProtectedProjectPath(options.storageRoot, options.relativePath, {
+    label,
+    expected: "any"
+  });
+  const inspection = await inspect();
+  if (!inspection.exists) throw new Error(`${label} does not exist`);
+  if (inspection.kind === "directory") return captureDirectoryReceipt(options);
+  const before = await fs7.lstat(inspection.target, { bigint: true });
+  if (before.size > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new Error(`${label} receipt size is not a safe integer`);
+  assertFresh(before, options);
+  const realPath = await fs7.realpath(inspection.target);
+  const flags = process.platform === "win32" ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+  const handle = await fs7.open(inspection.target, flags);
+  try {
+    const assertUnchanged = async () => {
+      await inspect();
+      const opened = await handle.stat({ bigint: true });
+      const current = await fs7.lstat(inspection.target, { bigint: true });
+      if (!opened.isFile() || !current.isFile() || current.isSymbolicLink() || !sameStat2(before, opened) || !sameStat2(before, current) || await fs7.realpath(inspection.target) !== realPath) {
+        throw new Error(`${label} changed during receipt verification`);
+      }
+    };
+    await assertUnchanged();
+    const hash4 = createHash4("sha256");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let size = 0;
+    for (; ; ) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      size += bytesRead;
+      if (BigInt(size) > before.size) {
+        throw new Error(`${label} changed during receipt verification`);
+      }
+      hash4.update(buffer.subarray(0, bytesRead));
+    }
+    await assertUnchanged();
+    if (BigInt(size) !== before.size) {
+      throw new Error(`${label} changed during receipt verification`);
+    }
+    return {
+      artifactId: options.artifactId,
+      path: path12.resolve(inspection.target),
+      size,
+      sha256: hash4.digest("hex"),
+      mtimeMs: mtimeMs(before),
+      producer: structuredClone(options.producer)
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+// src/workflow-runtime/artifacts.ts
 var ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
 var ARTIFACT_MAX_ENTRIES = 256;
 var WorkflowArtifactValidationError = class extends Error {
@@ -14629,6 +14863,7 @@ function declarations(protocol) {
     (schema) => schema.artifacts.map((artifact) => ({
       artifactId: `${schema.id}.${artifact.id}`,
       schemaId: schema.id,
+      schema,
       artifact
     }))
   );
@@ -14652,7 +14887,7 @@ function declarationFor(key, candidates) {
 }
 function artifactPatternSegments(value, label) {
   const normalized = value.trim().replaceAll("\\", "/");
-  if (normalized.length === 0 || path12.posix.isAbsolute(normalized) || path12.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
+  if (normalized.length === 0 || path13.posix.isAbsolute(normalized) || path13.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
     throw new Error(`${label} must be relative to the Run root`);
   }
   const segments = normalized.split("/");
@@ -14692,11 +14927,11 @@ function workflowArtifactExpectedKind(artifact) {
   return artifact.kind === "directory" ? "directory" : "file";
 }
 async function realRunRoot(runRoot, label) {
-  const stat = await fs7.lstat(runRoot);
+  const stat = await fs8.lstat(runRoot);
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error(`${label} Run root must be a real directory`);
   }
-  return path12.resolve(runRoot);
+  return path13.resolve(runRoot);
 }
 async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, label, options = { maxMatches: ARTIFACT_MAX_ENTRIES }) {
   const segments = artifactPatternSegments(artifactPath, label);
@@ -14709,7 +14944,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
       });
       return inspection.exists ? [inspection.relative] : [];
     }
-    const current = relative.length === 0 ? root : path12.join(root, relative);
+    const current = relative.length === 0 ? root : path13.join(root, relative);
     if (relative.length > 0) {
       const inspection = await inspectProtectedProjectPath(runRoot, relative, {
         label,
@@ -14720,13 +14955,13 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
     const segment = segments[index];
     if (!segment.includes("*")) {
       return walk(
-        relative.length === 0 ? segment : path12.posix.join(relative, segment),
+        relative.length === 0 ? segment : path13.posix.join(relative, segment),
         index + 1
       );
     }
     let entries;
     try {
-      entries = await fs7.readdir(current, { withFileTypes: true });
+      entries = await fs8.readdir(current, { withFileTypes: true });
     } catch (error) {
       const code = error.code;
       if (code === "ENOENT" || code === "ENOTDIR") return [];
@@ -14739,7 +14974,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
     )) {
       if (entry.isSymbolicLink()) {
         throw new Error(
-          `${label} crosses a symbolic link or junction at ${path12.join(current, entry.name)}`
+          `${label} crosses a symbolic link or junction at ${path13.join(current, entry.name)}`
         );
       }
       if (!matcher.test(entry.name)) continue;
@@ -14748,7 +14983,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
       if (final && (expected === "file" && !entry.isFile() || expected === "directory" && !entry.isDirectory())) {
         continue;
       }
-      const next = relative.length === 0 ? entry.name : path12.posix.join(relative, entry.name);
+      const next = relative.length === 0 ? entry.name : path13.posix.join(relative, entry.name);
       matches.push(...await walk(next, index + 1));
       if (options.maxMatches !== void 0 && matches.length > options.maxMatches) {
         throw new Error(
@@ -14769,10 +15004,19 @@ async function resolveArtifactPath(runRoot, declaration, requestedPath) {
   if (normalized.includes("*")) {
     fail(`${label} update path must identify one physical artifact`);
   }
-  const inspection = await inspectProtectedProjectPath(runRoot, normalized, {
-    label,
-    expected: workflowArtifactExpectedKind(declaration.artifact)
-  });
+  const storageRoot = artifactStorageRoot(
+    runRoot,
+    declaration.schema,
+    declaration.artifact
+  );
+  const inspection = await inspectProtectedProjectPath(
+    storageRoot,
+    normalized,
+    {
+      label,
+      expected: workflowArtifactExpectedKind(declaration.artifact)
+    }
+  );
   return inspection.exists ? inspection.relative : null;
 }
 async function hashDirectoryArtifact(runRoot, relativePath2, label) {
@@ -14784,9 +15028,9 @@ async function hashDirectoryArtifact(runRoot, relativePath2, label) {
       expected: "directory"
     });
     if (!inspection.exists) throw new Error(`${label} does not exist`);
-    const entries = (await fs7.readdir(inspection.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
+    const entries = (await fs8.readdir(inspection.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
-      const relative = path12.posix.join(directory, entry.name);
+      const relative = path13.posix.join(directory, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error(
           `${label} crosses a symbolic link or junction at ${relative}`
@@ -14820,13 +15064,30 @@ async function hashDirectoryArtifact(runRoot, relativePath2, label) {
   await walk(relativePath2);
   return sha256(JSON.stringify(stableValue({ kind: "directory", manifest })));
 }
-async function hashArtifactPath(runRoot, declaration, relativePath2) {
+async function hashArtifactPath(runRoot, declaration, relativePath2, producer, attemptStartedAt) {
   const label = `Workflow artifact ${declaration.artifactId}`;
   if (!artifactPathMatches(relativePath2, declaration.artifact.paths)) {
     fail(`${label} path is outside its declaration: ${relativePath2}`);
   }
+  if (declaration.artifact.verification === "receipt") {
+    if (!producer) fail(`${label} receipt requires a producer`);
+    const receipt = await captureArtifactReceipt({
+      storageRoot: artifactStorageRoot(
+        runRoot,
+        declaration.schema,
+        declaration.artifact
+      ),
+      relativePath: relativePath2,
+      artifactId: declaration.artifactId,
+      producer,
+      ...declaration.artifact.requireCurrentAttempt ? { attemptStartedAt } : {}
+    });
+    return { contentHash: receipt.sha256, receipt };
+  }
   if (declaration.artifact.kind === "directory") {
-    return hashDirectoryArtifact(runRoot, relativePath2, label);
+    return {
+      contentHash: await hashDirectoryArtifact(runRoot, relativePath2, label)
+    };
   }
   const result = await readProtectedProjectFile(
     runRoot,
@@ -14834,7 +15095,7 @@ async function hashArtifactPath(runRoot, declaration, relativePath2) {
     ARTIFACT_MAX_BYTES,
     { label }
   );
-  return sha256(result.bytes);
+  return { contentHash: sha256(result.bytes) };
 }
 async function validateWorkflowArtifactVersion(runRoot, protocol, version) {
   const declaration = declarationFor(
@@ -14844,12 +15105,13 @@ async function validateWorkflowArtifactVersion(runRoot, protocol, version) {
   if (version.schemaId !== declaration.schemaId || version.lifetime !== artifactLifetime(declaration) || !artifactPathMatches(version.path, declaration.artifact.paths)) {
     fail(`Workflow artifact version identity is invalid: ${version.id}`);
   }
-  const currentHash = await hashArtifactPath(
+  const current = await hashArtifactPath(
     runRoot,
     declaration,
-    version.path
+    version.path,
+    version.producer
   );
-  if (currentHash !== version.contentHash) {
+  if (current.contentHash !== version.contentHash || version.receipt && (current.receipt?.path !== version.receipt.path || current.receipt.size !== version.receipt.size)) {
     fail(`Workflow artifact content drift detected: ${version.id}`);
   }
 }
@@ -14886,7 +15148,7 @@ function selection(artifactId, versionId, state, nodeId, actionId2, timestamp6) 
     timestamp: timestamp6
   };
 }
-function artifactVersionId(artifactId, contentHash2, pathValue, producer, scopeId) {
+function artifactVersionId(artifactId, contentHash2, pathValue, producer, scopeId, receipt) {
   return `artifact-version-${sha256(
     JSON.stringify(
       stableValue({
@@ -14894,7 +15156,8 @@ function artifactVersionId(artifactId, contentHash2, pathValue, producer, scopeI
         contentHash: contentHash2,
         path: pathValue,
         producer,
-        scopeId
+        scopeId,
+        ...receipt ? { receipt } : {}
       })
     )
   ).slice(0, 24)}`;
@@ -14994,11 +15257,6 @@ async function prepareWorkflowArtifactMutation(options) {
         `Attempt artifact path must include the current Attempt id: ${declaration.artifactId}`
       );
     }
-    const contentHash2 = await hashArtifactPath(
-      options.runRoot,
-      declaration,
-      artifactPath
-    );
     const scopeId = artifactScopeId(lifetime, options.state);
     const producer = {
       runId: options.state.runId,
@@ -15008,12 +15266,31 @@ async function prepareWorkflowArtifactMutation(options) {
       actionId: options.actionId,
       revision: runtime.revision
     };
+    if (declaration.artifact.requireCurrentAttempt && options.attemptStartedAt === void 0) {
+      fail(
+        `Workflow artifact ${declaration.artifactId} requires persisted Attempt start evidence`
+      );
+    }
+    let material;
+    try {
+      material = await hashArtifactPath(
+        options.runRoot,
+        declaration,
+        artifactPath,
+        producer,
+        options.attemptStartedAt
+      );
+    } catch (error) {
+      fail(error.message);
+    }
+    const { contentHash: contentHash2, receipt } = material;
     const id = artifactVersionId(
       declaration.artifactId,
       contentHash2,
       artifactPath,
       producer,
-      scopeId
+      scopeId,
+      receipt
     );
     if (runtime.artifactVersions.some((version2) => version2.id === id)) {
       fail(`Workflow artifact version already exists: ${id}`);
@@ -15027,7 +15304,8 @@ async function prepareWorkflowArtifactMutation(options) {
       contentHash: contentHash2,
       path: artifactPath,
       producer,
-      timestamp: timestamp6
+      timestamp: timestamp6,
+      ...receipt ? { receipt } : {}
     };
     mutation.versions.push(version);
     mutation.selections.push(
@@ -15062,14 +15340,16 @@ async function prepareWorkflowArtifactMutation(options) {
       );
     }
     assertSelectionScope(version, options.state);
-    const contentHash2 = await hashArtifactPath(
-      options.runRoot,
-      declaration,
-      version.path
-    );
-    if (contentHash2 !== version.contentHash) {
-      fail(`Workflow artifact content drift detected: ${version.id}`);
+    if (declaration.artifact.requireCurrentAttempt && version.producer.attemptId !== attempt.id) {
+      fail(
+        `Workflow artifact ${declaration.artifactId} is stale for this Attempt`
+      );
     }
+    await validateWorkflowArtifactVersion(
+      options.runRoot,
+      options.protocol,
+      version
+    );
     mutation.selections.push(
       selection(
         declaration.artifactId,
@@ -15116,6 +15396,17 @@ function validateWorkflowArtifactState(protocol, runId, nodeToStep, runtime) {
   );
   for (const version of versions) {
     const declaration = declarationFor(version.artifactId, declared);
+    const receipt = version.receipt;
+    const expectedExternalPath = declaration.artifact.root === void 0 ? void 0 : path13.resolve(
+      declaration.schema.externalRoots[declaration.artifact.root],
+      version.path
+    );
+    const receiptMatches = receipt !== void 0 && receipt.artifactId === version.artifactId && receipt.sha256 === version.contentHash && (expectedExternalPath === void 0 || receipt.path === expectedExternalPath) && JSON.stringify(stableValue(receipt.producer)) === JSON.stringify(stableValue(version.producer));
+    if (declaration.artifact.verification === "receipt" ? !receiptMatches : receipt !== void 0) {
+      throw new Error(
+        `WorkflowRuntime artifact receipt identity is invalid: ${version.id}`
+      );
+    }
     if (version.schemaId !== declaration.schemaId || version.lifetime !== artifactLifetime(declaration) || !artifactPathMatches(version.path, declaration.artifact.paths) || version.producer.runId !== runId || version.producer.revision >= runtime.revision) {
       throw new Error(
         `WorkflowRuntime artifact version identity is invalid: ${version.id}`
@@ -15138,7 +15429,8 @@ function validateWorkflowArtifactState(protocol, runId, nodeToStep, runtime) {
       version.contentHash,
       version.path,
       version.producer,
-      version.scopeId
+      version.scopeId,
+      version.receipt
     )) {
       throw new Error(
         `WorkflowRuntime artifact version identity is invalid: ${version.id}`
@@ -15294,13 +15586,95 @@ function missingGuardrailEvidence(node, plan, evidence, satisfiedGuardrails = /*
     )
   ).map((key) => key);
 }
-async function validateSuccessfulSubmission(runRoot, protocol, node, plan, submission, satisfiedGuardrails = /* @__PURE__ */ new Set()) {
-  if (submission.kind === "decision") return [];
+async function validateSuccessfulSubmission(runRoot, protocol, node, plan, submission, context = {}) {
+  const {
+    producer,
+    attemptStartedAt,
+    selectedReceipts,
+    satisfiedGuardrails = /* @__PURE__ */ new Set()
+  } = context;
+  const artifactReceipts = [];
+  if (submission.kind === "decision") return { blockers: [], artifactReceipts };
   const evidence = submission.evidence ?? {};
   const blockers = [];
   for (const schemaId of plan.outputSchemas) {
     const schema = schemaFor(protocol, schemaId);
     for (const artifact of schema.artifacts) {
+      if (artifact.verification === "receipt") {
+        try {
+          if (!producer)
+            throw new Error("Artifact receipt requires a current Attempt");
+          if (artifact.requireCurrentAttempt && attemptStartedAt === void 0) {
+            throw new Error(
+              "Artifact receipt requires persisted Attempt start evidence"
+            );
+          }
+          if (selectedReceipts !== void 0) {
+            const selected = selectedReceipts.filter(
+              (receipt) => receipt.artifactId === `${schema.id}.${artifact.id}`
+            );
+            if (artifact.required && selected.length === 0) {
+              throw new Error(
+                "Artifact receipt requires an explicit update or version"
+              );
+            }
+            if (artifact.requireCurrentAttempt && selected.some(
+              (receipt) => receipt.producer.attemptId !== producer.attemptId
+            )) {
+              throw new Error(
+                `Workflow artifact ${schema.id}.${artifact.id} is stale for this Attempt`
+              );
+            }
+            if (artifactReceipts.length + selected.length > 256) {
+              throw new Error(
+                "Output Schema artifacts exceed 256 receipts per Completion"
+              );
+            }
+            artifactReceipts.push(
+              ...selected.map((receipt) => structuredClone(receipt))
+            );
+            continue;
+          }
+          const storageRoot = artifactStorageRoot(runRoot, schema, artifact);
+          const matches = /* @__PURE__ */ new Set();
+          for (const pattern of artifact.paths) {
+            for (const match of await matchingWorkflowArtifactPaths(
+              storageRoot,
+              pattern,
+              workflowArtifactExpectedKind(artifact),
+              `Workflow artifact ${schema.id}.${artifact.id}`
+            )) {
+              matches.add(match);
+              if (artifactReceipts.length + matches.size > 256) {
+                throw new Error(
+                  "Output Schema artifacts exceed 256 receipts per Completion"
+                );
+              }
+            }
+          }
+          if (artifact.required && matches.size === 0) {
+            blockers.push(
+              `Missing Output Schema artifacts: ${schema.id}.${artifact.id}`
+            );
+          }
+          for (const relativePath2 of matches) {
+            artifactReceipts.push(
+              await captureArtifactReceipt({
+                storageRoot,
+                relativePath: relativePath2,
+                artifactId: `${schema.id}.${artifact.id}`,
+                producer,
+                ...artifact.requireCurrentAttempt ? { attemptStartedAt } : {}
+              })
+            );
+          }
+        } catch (error) {
+          blockers.push(
+            `Workflow artifact ${schema.id}.${artifact.id} receipt verification failed: ${error.message}`
+          );
+        }
+        continue;
+      }
       if (!artifact.required) continue;
       let exists = false;
       try {
@@ -15342,7 +15716,7 @@ async function validateSuccessfulSubmission(runRoot, protocol, node, plan, submi
   )) {
     blockers.push(`Missing guardrail evidence: ${key}`);
   }
-  return blockers;
+  return { blockers, artifactReceipts };
 }
 
 // src/workflow-runtime/routing.ts
@@ -17058,6 +17432,14 @@ function validateProtocolShape(protocol) {
       );
     }
     schemaIds.add(schema.id);
+    validateArtifactReceiptDeclarations(schema);
+    if (schema.artifacts.some(
+      (artifact) => artifact.verification === "receipt"
+    ) && !protocol.capabilities?.features.includes("revisioned-attempts")) {
+      throw new Error(
+        `Workflow Protocol Output Schema ${schema.id} artifact receipts require revisioned Attempts`
+      );
+    }
     const artifactIds = /* @__PURE__ */ new Set();
     for (const artifact of schema.artifacts) {
       if (!artifact || typeof artifact !== "object" || typeof artifact.id !== "string" || artifact.id.length === 0 || typeof artifact.required !== "boolean" || !Array.isArray(artifact.paths) || artifact.paths.some(
@@ -17649,7 +18031,7 @@ function resolverForPackage() {
 
 // src/workflow-runtime/transition-journal.ts
 import { randomUUID as randomUUID5 } from "node:crypto";
-import path13 from "node:path";
+import path14 from "node:path";
 var WORKFLOW_TRANSITION_JOURNAL_PATH = ".badger/transition-journal.json";
 var WORKFLOW_TRANSITION_JOURNAL_SCHEMA_VERSION = 1;
 var WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS = 16;
@@ -17678,9 +18060,9 @@ var WorkflowTransitionJournalPendingError = class extends Error {
   journal;
 };
 var WorkflowTransitionRecordConflictError = class extends Error {
-  constructor(path18) {
-    super(`Workflow transition record changed before journaling: ${path18}`);
-    this.path = path18;
+  constructor(path19) {
+    super(`Workflow transition record changed before journaling: ${path19}`);
+    this.path = path19;
     this.name = "WorkflowTransitionRecordConflictError";
   }
   path;
@@ -17803,7 +18185,7 @@ function orderOf(record) {
 }
 function assertSafeRecordPath(value, label) {
   const normalized = typeof value === "string" ? value.replaceAll("\\", "/") : "";
-  if (normalized.length === 0 || normalized.length > MAX_IDENTIFIER_LENGTH2 || path13.posix.isAbsolute(normalized) || path13.win32.isAbsolute(String(value)) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(String(value)) || normalized.split("/").some(
+  if (normalized.length === 0 || normalized.length > MAX_IDENTIFIER_LENGTH2 || path14.posix.isAbsolute(normalized) || path14.win32.isAbsolute(String(value)) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(String(value)) || normalized.split("/").some(
     (segment) => segment.length === 0 || segment === "." || segment === ".."
   )) {
     throw new Error(`Invalid ${label}: path must stay inside the Run root`);
@@ -18838,9 +19220,9 @@ async function recoverWorkflowTransition(runRoot, profile) {
 
 // src/workflow-runtime/run-lock.ts
 import { randomUUID as randomUUID6 } from "node:crypto";
-import { promises as fs8 } from "node:fs";
+import { promises as fs9 } from "node:fs";
 import os from "node:os";
-import path14 from "node:path";
+import path15 from "node:path";
 var WORKFLOW_RUN_LOCK_PATH = ".badger/run-lock.json";
 var WORKFLOW_RUN_LOCK_RECOVERY_PATH = ".badger/run-lock-recovery.jsonl";
 var WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY = ".badger/run-lock-quarantine";
@@ -19257,7 +19639,7 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
     return { status: "changed", diagnosis: verifiedDiagnosis };
   }
   try {
-    await fs8.rename(verified.file, quarantine.target);
+    await fs9.rename(verified.file, quarantine.target);
   } catch (error) {
     if (error.code === "ENOENT") {
       return { status: "missing" };
@@ -19283,7 +19665,7 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
         { label: "Workflow Run lock quarantine", expected: "file" }
       );
       if (!source.exists && quarantined.exists) {
-        await fs8.rename(quarantined.target, source.target);
+        await fs9.rename(quarantined.target, source.target);
       }
     } catch {
       return {
@@ -19344,7 +19726,7 @@ async function releaseLock(runRoot, handle) {
   }
   try {
     await removeContainedFile(current.file, {
-      containedRoot: path14.resolve(runRoot),
+      containedRoot: path15.resolve(runRoot),
       beforeRemove: async () => {
         const latest = await readSnapshot2(runRoot, WORKFLOW_RUN_LOCK_PATH);
         if (!latest || latest.owner.ownerToken !== handle.owner.ownerToken || !sameLockVersion(latest.identity, handle.identity)) {
@@ -19527,8 +19909,8 @@ async function recordWorkflowRunLockTakeover(runRoot, evidence, maxBytes = WORKF
 
 // src/workflow-runtime/checkpoints.ts
 import { randomUUID as randomUUID7 } from "node:crypto";
-import { promises as fs9 } from "node:fs";
-import path15 from "node:path";
+import { promises as fs10 } from "node:fs";
+import path16 from "node:path";
 var WORKFLOW_CHECKPOINT_DIRECTORY = ".badger/checkpoints";
 var WORKFLOW_CHECKPOINT_INDEX_PATH = ".badger/checkpoints/index.json";
 var WORKFLOW_CHECKPOINT_MANIFEST_DIRECTORY = ".badger/checkpoints/manifests";
@@ -20304,6 +20686,7 @@ async function captureMaterial(runRoot, relativePath2, maxBytes, label) {
 }
 async function physicalArtifactBytes(runRoot, protocol, version, maxBytes) {
   await validateWorkflowArtifactVersion(runRoot, protocol, version);
+  if (version.receipt) return version.receipt.size;
   const inspection = await inspectProtectedProjectPath(runRoot, version.path, {
     label: `Workflow checkpoint artifact ${version.id}`,
     expected: "any"
@@ -20321,8 +20704,8 @@ async function physicalArtifactBytes(runRoot, protocol, version, maxBytes) {
       label: `Workflow checkpoint artifact ${version.id}`,
       expected: "directory"
     });
-    for (const entry of (await fs9.readdir(current.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
-      const child = path15.posix.join(relativePath2, entry.name);
+    for (const entry of (await fs10.readdir(current.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
+      const child = path16.posix.join(relativePath2, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error(
           `Workflow checkpoint artifact crosses a symbolic link: ${child}`
@@ -21272,7 +21655,7 @@ async function restoreWorkflowCheckpoint(runRoot, profile, candidate) {
 }
 
 // src/workflow-runtime/location.ts
-import { promises as fs11 } from "node:fs";
+import { promises as fs12 } from "node:fs";
 import { randomUUID as randomUUID9 } from "node:crypto";
 
 // src/engine/manual-run.ts
@@ -21299,7 +21682,7 @@ function evaluateRuntime(definitions, scope, state, artifacts) {
 }
 
 // src/engine/loop.ts
-import { createHash as createHash4 } from "crypto";
+import { createHash as createHash5 } from "crypto";
 
 // src/engine/guardrails.ts
 function checkAction(action, state, guardrails, confirmations) {
@@ -21396,10 +21779,10 @@ var staticDeterministicResolver = {
 // src/engine/loop.ts
 function actionId(runId, iteration, stepId2, attempt) {
   const context = attempt ? `${runId}:${iteration}:${stepId2 ?? "adaptive"}:${attempt.id}:retry:${attempt.retryOrdinal}` : `${runId}:${iteration}:${stepId2 ?? "adaptive"}`;
-  return createHash4("sha256").update(context).digest("hex").slice(0, 16);
+  return createHash5("sha256").update(context).digest("hex").slice(0, 16);
 }
 function attemptId(runId, stepId2, visitOrdinal, cycleId) {
-  return `attempt-${createHash4("sha256").update(`${runId}:${stepId2}:${visitOrdinal}:cycle:${cycleId ?? "none"}`).digest("hex").slice(0, 24)}`;
+  return `attempt-${createHash5("sha256").update(`${runId}:${stepId2}:${visitOrdinal}:cycle:${cycleId ?? "none"}`).digest("hex").slice(0, 24)}`;
 }
 function applyPreparedWorkflowState(state, prepared) {
   if (!state.workflowRuntime) return state;
@@ -22447,8 +22830,8 @@ async function resumeManualWorkflowRun(changeDir, options, artifactMutation) {
 }
 
 // src/engine/standalone-run.ts
-import { promises as fs10 } from "node:fs";
-import path16 from "path";
+import { promises as fs11 } from "node:fs";
+import path17 from "path";
 function validateRunId(runId) {
   if (typeof runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId)) {
     throw new Error(`Invalid standalone Run id: ${String(runId)}`);
@@ -22462,16 +22845,16 @@ function validateProjectRoot(projectRoot) {
 function standaloneRunDir(projectRoot, runId) {
   validateRunId(runId);
   validateProjectRoot(projectRoot);
-  return path16.resolve(projectRoot, ".badger", "runs", runId);
+  return path17.resolve(projectRoot, ".badger", "runs", runId);
 }
 function pathSegments(projectRoot) {
-  const lexicalRoot = path16.resolve(projectRoot);
-  const root = path16.parse(lexicalRoot).root;
-  const relative = path16.relative(root, lexicalRoot);
-  return relative.length === 0 ? [] : relative.split(path16.sep);
+  const lexicalRoot = path17.resolve(projectRoot);
+  const root = path17.parse(lexicalRoot).root;
+  const relative = path17.relative(root, lexicalRoot);
+  return relative.length === 0 ? [] : relative.split(path17.sep);
 }
 function runRootRelativePath(projectRoot, runRoot) {
-  return path16.relative(projectRoot, runRoot).replaceAll("\\", "/");
+  return path17.relative(projectRoot, runRoot).replaceAll("\\", "/");
 }
 function isMissing2(error) {
   const code = error.code;
@@ -22479,24 +22862,24 @@ function isMissing2(error) {
 }
 async function resolveStandaloneProjectRoot(projectRoot, createMissing) {
   validateProjectRoot(projectRoot);
-  const lexicalRoot = path16.resolve(projectRoot);
-  let cursor = path16.parse(lexicalRoot).root;
+  const lexicalRoot = path17.resolve(projectRoot);
+  let cursor = path17.parse(lexicalRoot).root;
   for (const segment of pathSegments(lexicalRoot)) {
-    cursor = path16.join(cursor, segment);
+    cursor = path17.join(cursor, segment);
     let stat;
     try {
-      stat = await fs10.lstat(cursor);
+      stat = await fs11.lstat(cursor);
     } catch (error) {
       if (!isMissing2(error)) throw error;
       if (!createMissing) return lexicalRoot;
       try {
-        await fs10.mkdir(cursor);
+        await fs11.mkdir(cursor);
       } catch (mkdirError) {
         if (mkdirError.code !== "EEXIST") {
           throw mkdirError;
         }
       }
-      stat = await fs10.lstat(cursor);
+      stat = await fs11.lstat(cursor);
     }
     if (stat.isSymbolicLink()) {
       throw new Error("Standalone project root cannot cross a symbolic link");
@@ -22603,8 +22986,8 @@ function manualLocation(runRoot) {
       return readRunState(validatedRoot);
     },
     async prepareStart() {
-      await fs11.mkdir(validatedRoot, { recursive: true });
-      const stat = await fs11.lstat(validatedRoot);
+      await fs12.mkdir(validatedRoot, { recursive: true });
+      const stat = await fs12.lstat(validatedRoot);
       if (stat.isSymbolicLink() || !stat.isDirectory()) {
         throw new Error(
           "WorkflowRuntime manual Run root must be a real directory"
@@ -24098,7 +24481,7 @@ async function writeWorkflowStateProjection(target, projection) {
         continue;
       }
     }
-    const parent = path17.posix.dirname(relativePath2);
+    const parent = path18.posix.dirname(relativePath2);
     if (parent !== ".") {
       await ensureProtectedProjectDirectory(projectRoot, parent, { label });
       inspection = await inspectProtectedProjectPath(
@@ -25305,7 +25688,7 @@ function validateRepairDecisionResponse(verified, pending, node, submission) {
     );
   }
 }
-function engineOutcome(prepared, submission, artifactMutation, repairFailure) {
+function engineOutcome(prepared, submission, artifactMutation, repairFailure, artifactReceipts = []) {
   if (isWorkflowFinalizationAction(prepared.pending)) {
     if (!isDecisionSubmission(submission) || !submission.finalization) {
       throw new Error(
@@ -25365,19 +25748,20 @@ function engineOutcome(prepared, submission, artifactMutation, repairFailure) {
   }
   if (!isDecisionSubmission(submission)) {
     const artifacts = artifactMutation ? artifactMutation.artifactPaths : submission.artifacts;
-    const evidence = submission.evidence ? structuredClone(submission.evidence) : void 0;
-    if (evidence) {
-      delete evidence.verification;
-      delete evidence.verificationReceipts;
-      delete evidence.verificationReceiptIds;
-    }
+    const evidence = submission.evidence ? structuredClone(submission.evidence) : {};
+    delete evidence.verification;
+    delete evidence.verificationReceipts;
+    delete evidence.verificationReceiptIds;
+    delete evidence.artifactReceipts;
+    if (artifactReceipts.length > 0)
+      evidence.artifactReceipts = structuredClone(artifactReceipts);
     return {
       actionId: prepared.pending.id,
       status: submission.status,
       summary: submission.summary,
       ...artifacts && Object.keys(artifacts).length > 0 ? { artifacts } : {},
       ...submission.state ? { state: submission.state } : {},
-      ...evidence && Object.keys(evidence).length > 0 ? { evidence } : {},
+      ...Object.keys(evidence).length > 0 ? { evidence } : {},
       ...submission.routing ? { routing: submission.routing } : {},
       ...artifactMutation && Object.keys(artifactMutation.selectedVersionIds).length > 0 ? { artifactVersions: artifactMutation.selectedVersionIds } : submission.artifactVersions ? { artifactVersions: submission.artifactVersions } : {},
       ...artifactMutation && (artifactMutation.verificationReceipts?.length ?? 0) > 0 ? {
@@ -25423,9 +25807,33 @@ function engineOutcome(prepared, submission, artifactMutation, repairFailure) {
     }
   };
 }
-async function completionBlockers(prepared, submission, mutation) {
-  if (isDecisionSubmission(submission)) return [];
-  if (submission.status !== "succeeded" || !prepared.node) return [];
+async function receiptAttemptStartedAt(prepared) {
+  const currentAttempt = prepared.verified.state.workflowRuntime?.currentAttempt;
+  const protocol = prepared.verified.package.runtime.protocol;
+  const node = protocol.nodes.find(
+    (candidate) => candidate.id === prepared.node
+  );
+  if (!currentAttempt || !node || !node.outputSchemas.some(
+    (schemaId) => protocol.outputSchemas.some(
+      (schema) => schema.id === schemaId && schema.artifacts.some((artifact) => artifact.requireCurrentAttempt)
+    )
+  ))
+    return void 0;
+  const trajectory = await readTrajectory(
+    prepared.location.runRoot,
+    prepared.verified.state.trajectoryRef,
+    durabilityReadOptions(prepared.verified.state, "trajectoryBytes")
+  );
+  const firstAction = trajectory.find(
+    (event) => event.type === "action_proposed" && isRecord15(event.data.action) && event.data.action.attemptId === currentAttempt.id
+  );
+  const timestamp6 = firstAction ? Date.parse(firstAction.timestamp) : NaN;
+  return Number.isFinite(timestamp6) ? timestamp6 : void 0;
+}
+async function validateCompletion(prepared, submission, mutation) {
+  if (isDecisionSubmission(submission) || submission.status !== "succeeded" || !prepared.node) {
+    return { blockers: [], artifactReceipts: [] };
+  }
   const workflowNode = prepared.verified.package.runtime.protocol.nodes.find(
     (candidate) => candidate.id === prepared.node
   );
@@ -25445,13 +25853,37 @@ async function completionBlockers(prepared, submission, mutation) {
       )
     ).map((guardrail) => `guardrail:${workflowNode.id}.${guardrail.id}`)
   );
+  const attemptStartedAt = await receiptAttemptStartedAt(prepared);
+  const selectedIds = new Set(
+    Object.values(mutation?.selectedVersionIds ?? {})
+  );
+  const selectedReceipts = [
+    ...prepared.verified.state.workflowRuntime?.artifactVersions ?? [],
+    ...mutation?.versions ?? []
+  ].filter((version) => selectedIds.has(version.id) && version.receipt).map((version) => version.receipt);
+  const state = prepared.verified.state;
+  const attempt = state.workflowRuntime?.currentAttempt;
   return validateSuccessfulSubmission(
     prepared.location.runRoot,
     prepared.verified.package.runtime.protocol,
     workflowNode,
     plan,
     submission,
-    satisfiedGuardrails
+    {
+      satisfiedGuardrails,
+      producer: attempt ? {
+        runId: state.runId,
+        nodeId: prepared.node,
+        cycleId: attempt.cycleId,
+        attemptId: attempt.id,
+        actionId: prepared.pending.id,
+        revision: state.workflowRuntime.revision
+      } : void 0,
+      attemptStartedAt,
+      selectedReceipts: prepared.verified.package.runtime.protocol.capabilities?.features.includes(
+        "versioned-artifacts"
+      ) ? selectedReceipts : void 0
+    }
   );
 }
 function routeBlockers(prepared, submission, artifactMutation) {
@@ -25504,6 +25936,7 @@ async function artifactMutationForSubmission(prepared, submission) {
         state: prepared.verified.state,
         nodeId: prepared.node,
         actionId: prepared.pending.id,
+        attemptStartedAt: await receiptAttemptStartedAt(prepared),
         ...submission.artifacts ? { artifacts: submission.artifacts } : {},
         ...submission.artifactVersions ? { artifactVersions: submission.artifactVersions } : {}
       }),
@@ -26235,9 +26668,9 @@ async function validateWorkflowSubmission(target, submission) {
       artifact.mutation,
       verification.mutation
     );
-    const blockers = await completionBlockers(prepared, submission, mutation);
-    if (blockers.length > 0) {
-      return blockedContinuation(prepared, blockers);
+    const completion = await validateCompletion(prepared, submission, mutation);
+    if (completion.blockers.length > 0) {
+      return blockedContinuation(prepared, completion.blockers);
     }
     const routeFindings = routeBlockers(prepared, submission, mutation);
     if (routeFindings.length > 0) {
@@ -27230,13 +27663,13 @@ function createWorkflowRuntime() {
               artifact.mutation,
               verification.mutation
             );
-            const blockers = await completionBlockers(
+            const completion = await validateCompletion(
               prepared,
               submission,
               mutation
             );
-            if (blockers.length > 0) {
-              return blockedContinuation(prepared, blockers);
+            if (completion.blockers.length > 0) {
+              return blockedContinuation(prepared, completion.blockers);
             }
             const routeFindings = routeBlockers(prepared, submission, mutation);
             if (routeFindings.length > 0) {
@@ -27258,7 +27691,8 @@ function createWorkflowRuntime() {
               prepared,
               submission,
               mutation,
-              repairFailure
+              repairFailure,
+              completion.artifactReceipts
             );
             const finalizationDefinition = prepared.verified.package.runtime.protocol.finalization;
             const finalizationPreparation = finalizationDefinition && prepared.verified.identity.durabilityProfile?.capabilities.includes(

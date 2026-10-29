@@ -1225,6 +1225,7 @@ async function physicalArtifactBytes(
   maxBytes: number,
 ): Promise<number> {
   await validateWorkflowArtifactVersion(runRoot, protocol, version);
+  if (version.receipt) return version.receipt.size;
   const inspection = await inspectProtectedProjectPath(runRoot, version.path, {
     label: `Workflow checkpoint artifact ${version.id}`,
     expected: "any",
