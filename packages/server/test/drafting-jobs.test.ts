@@ -215,16 +215,23 @@ it("keeps validated Agent output as suggestions until a person accepts the revie
       questions: [question("Unreviewed edit")],
       confirmed: true,
       confirmationHash: preview.confirmationHash,
+      requestId: "job-decision",
     },
     undefined,
     engineer,
     409,
   );
-  await request(`${base}/${job.id}/accept`, "POST", {
+  const confirmation = {
     ...decision,
+    requestId: "job-decision",
     confirmed: true,
     confirmationHash: preview.confirmationHash,
-  });
+  };
+  const accepted = await request(
+    `${base}/${job.id}/accept`,
+    "POST",
+    confirmation,
+  );
   const after = await request(questionnaire);
   expect(after.questions).toEqual([
     expect.objectContaining({
@@ -233,6 +240,25 @@ it("keeps validated Agent output as suggestions until a person accepts the revie
     }),
   ]);
   expect(after.suggestions).toEqual([]);
+  await request(
+    `${questionnaire}/rounds`,
+    "POST",
+    { title: "Later inputs" },
+    undefined,
+    engineer,
+    201,
+  );
+  expect(
+    await request(`${base}/${job.id}/accept`, "POST", confirmation),
+  ).toEqual(accepted);
+  await request(
+    `${base}/${job.id}/accept`,
+    "POST",
+    { ...confirmation, questions: [question("Different replay")] },
+    undefined,
+    engineer,
+    409,
+  );
   const inbox = await request("/me/inbox");
   expect(inbox.items).toEqual(
     expect.arrayContaining([
@@ -513,6 +539,7 @@ it("filters roles and scopes and lets only a person discard reviewed suggestions
       ...decision,
       confirmed: true,
       confirmationHash: preview.confirmationHash,
+      requestId: "job-decision",
     },
     secret,
     engineer,
@@ -522,6 +549,7 @@ it("filters roles and scopes and lets only a person discard reviewed suggestions
     ...decision,
     confirmed: true,
     confirmationHash: preview.confirmationHash,
+    requestId: "job-decision",
   });
   expect(rejected.job.status).toBe("rejected");
   expect((await request(questionnaire)).questions).toEqual([]);
@@ -565,14 +593,27 @@ it("accepts follow-ups as child drafts while publication and parent resolution r
     engineer,
     201,
   );
-  const claimed = (
-    await request(
-      `${base}/${job.id}/claim`,
-      "POST",
-      { revision: job.revision },
-      secret,
-    )
-  ).job;
+  await request(
+    `${questionnaire}/questions/${parent.id}/answer`,
+    "PUT",
+    {
+      revision: 0,
+      questionRevision: parent.revision,
+      text: "Private unsubmitted answer",
+    },
+    undefined,
+    admin,
+  );
+  const claim = await request(
+    `${base}/${job.id}/claim`,
+    "POST",
+    { revision: job.revision },
+    secret,
+  );
+  expect(JSON.stringify(claim.contextBundle)).not.toContain(
+    "Private unsubmitted answer",
+  );
+  const claimed = claim.job;
   const submitted = (
     await request(
       `${base}/${job.id}/submit`,
@@ -598,6 +639,7 @@ it("accepts follow-ups as child drafts while publication and parent resolution r
     ...decision,
     confirmed: true,
     confirmationHash: preview.confirmationHash,
+    requestId: "job-decision",
   });
   const view = await request(questionnaire);
   expect(view.questions).toEqual(

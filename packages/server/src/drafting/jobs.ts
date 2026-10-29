@@ -331,6 +331,8 @@ export async function decideDraftingJob(
   actor: DraftingActor,
   job: DraftingJobRow,
   preview: ReturnType<typeof jobDecisionPreview>,
+  requestId: string,
+  inputHash: string,
 ) {
   const questionIds: string[] = [];
   if (preview.action === "accept" && "questions" in preview.decision) {
@@ -371,6 +373,16 @@ export async function decideDraftingJob(
     decided.status,
     job.revision,
     "reason" in preview.decision ? String(preview.decision.reason) : null,
+  );
+  await tx.query(
+    "insert into drafting_job_decisions (person_id, request_id, job_id, input_hash, response) values ($1,$2,$3,$4,$5)",
+    [
+      actor.personId,
+      requestId,
+      job.id,
+      inputHash,
+      JSON.stringify({ job: publicDraftingJob(decided) }),
+    ],
   );
   return decided;
 }

@@ -40,6 +40,7 @@ export function DraftingJobs({
   const [discard, setDiscard] = useState<DraftingJob | null>(null);
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState<DraftingDecisionPreview | null>(null);
+  const confirmationRequestId = useRef("");
   const sequence = useRef(0);
   const refresh = useCallback(async () => {
     const request = ++sequence.current;
@@ -99,6 +100,7 @@ export function DraftingJobs({
       ...decision,
     });
     setPreview(result.preview);
+    confirmationRequestId.current = crypto.randomUUID();
   };
   const commit = () =>
     run(async () => {
@@ -112,6 +114,7 @@ export function DraftingJobs({
           ...preview.decision,
           confirmed: true,
           confirmationHash: preview.confirmationHash,
+          requestId: confirmationRequestId.current,
         },
       );
       setPreview(null);

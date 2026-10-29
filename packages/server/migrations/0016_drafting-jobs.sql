@@ -26,6 +26,20 @@ create table drafting_jobs (
 );
 create index drafting_jobs_version_idx on drafting_jobs (workflow_version_id, created_at, id);
 
+-- Sign-off replay retains the first response even after other inputs change.
+create table drafting_job_decisions (
+  person_id text not null references people (id),
+  request_id text not null,
+  job_id text not null references drafting_jobs (id),
+  input_hash text not null,
+  response jsonb not null,
+  primary key (person_id, request_id)
+);
+create trigger drafting_job_decisions_immutable before update or delete on drafting_job_decisions
+  for each row execute function refuse_questionnaire_revision_change();
+create trigger drafting_job_decisions_no_truncate before truncate on drafting_job_decisions
+  for each statement execute function refuse_questionnaire_revision_change();
+
 alter table audit_events add column agent_host text;
 alter table inbox_items drop constraint inbox_items_kind_check;
 alter table inbox_items add constraint inbox_items_kind_check

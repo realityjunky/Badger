@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { canonicalHash } from "@realityjunky/badger";
 import {
   auditJob,
   claimDraftingJob,
@@ -64,7 +65,14 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       throw new RequestError(parsed.status ?? 400, parsed.message);
     body = objectInput(parsed.value);
   }
+  // Serialize this person's replay keys before workflow locks, including
+  // requests targeting different workflow versions on separate connections.
+  const decisionCommit = action === "accept" || action === "reject";
   const result = await database.transaction(async (tx) => {
+    if (decisionCommit)
+      await tx.query("select id from people where id = $1 for update", [
+        person.id,
+      ]);
     await tx.query("select id from workflows where id = $1 for update", [
       workflowId,
     ]);
@@ -216,15 +224,45 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         403,
         "Only a signed-in person accepts or discards suggestions",
       );
-    if (job.status !== "submitted")
-      return conflict("Only submitted suggestions can be reviewed");
     const accept = action.startsWith("accept");
     fields(body, [
       "revision",
       accept ? "questions" : "reason",
       "confirmationHash",
       "confirmed",
+      "requestId",
     ]);
+    const requestId = decisionCommit
+      ? textInput(body.requestId, "requestId", 200)
+      : null;
+    const inputHash = canonicalHash({
+      workflowId,
+      versionId,
+      jobId: job.id,
+      action,
+      body,
+    });
+    if (requestId) {
+      const previous = (
+        await tx.query<{
+          job_id: string;
+          input_hash: string;
+          response: object;
+        }>(
+          "select job_id, input_hash, response from drafting_job_decisions where person_id = $1 and request_id = $2",
+          [person.id, requestId],
+        )
+      ).rows[0];
+      if (previous) {
+        if (previous.job_id !== job.id || previous.input_hash !== inputHash)
+          return conflict(
+            "This request ID already confirmed a different drafting decision",
+          );
+        return { status: 200, value: previous.response };
+      }
+    }
+    if (job.status !== "submitted")
+      return conflict("Only submitted suggestions can be reviewed");
     if (revisionInput(body.revision) !== job.revision)
       return conflict("The job changed; review it again");
     const preview = jobDecisionPreview(
@@ -241,7 +279,15 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       throw new RequestError(400, "Confirm the reviewed suggestions");
     if (body.confirmationHash !== preview.confirmationHash)
       return conflict("The reviewed suggestions changed; preview them again");
-    const decided = await decideDraftingJob(tx, deps, actor, job, preview);
+    const decided = await decideDraftingJob(
+      tx,
+      deps,
+      actor,
+      job,
+      preview,
+      requestId!,
+      inputHash,
+    );
     return { status: 200, value: { job: publicDraftingJob(decided) } };
   });
   reply.json(result.status, result.value);

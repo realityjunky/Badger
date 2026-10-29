@@ -387,7 +387,7 @@ commit the transition even when the attempted write returns a conflict.
 | `POST /:id/release`             | Release `{leaseId, contextHash}` from the claiming person, token, and Agent host.                                                                                               |
 | `POST /:id/accept-preview`      | Preview `{revision, questions}` after the person edits or removes suggestions.                                                                                                  |
 | `POST /:id/reject-preview`      | Preview `{revision, reason}`.                                                                                                                                                   |
-| `POST /:id/accept` or `/reject` | Repeat the preview's decision with `confirmed: true` and `confirmationHash`, as a signed-in person.                                                                             |
+| `POST /:id/accept` or `/reject` | Repeat the preview's decision with `confirmed: true`, `confirmationHash`, and a client `requestId`, as a signed-in person.                                                      |
 
 Claim leases last 30 minutes. Job and Engineer questionnaire reads reconcile
 expired leases to queued jobs and cancel changed inputs. Context binds the
@@ -405,7 +405,7 @@ authority, then creates draft Questions atomically. Follow-ups keep their
 parent link; accepting them never publishes a round or resolves the parent.
 Each decision binds the submitted result, edits, job revision, and context
 hash. Changed evidence cancels the job, and changed edits invalidate the
-preview. Agents cannot request, accept, reject, or sign off on behalf of people.
+preview. An identical decision retried with the same person and client request ID returns its original response, including after later inputs change; changed replay inputs or a reused ID for another job conflict. Agents cannot request, accept, reject, or sign off on behalf of people.
 
 ## Skill uploads
 

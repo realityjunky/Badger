@@ -69,15 +69,15 @@ Administrator). The engineer profile keeps `whoami`, `inbox`, and
 `open_dashboard`, and adds these tools. All version tools take `workflowId`
 and `versionId`; job tools also take `jobId`.
 
-| Tool            | Behavior                                                                                                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `list_jobs`     | Read jobs, leases, and suggestions for one workflow version.                                                                                                                   |
-| `claim_job`     | Quote the queued job's `revision`; claim it and return a private local folder with `context.json`, `output-schema.json`, `claim.json`, and `skills/<skillId>/<versionHash>/…`. |
-| `submit_job`    | Supply the claimed `folder`. Read its `result.json`, validate against the schema reloaded from the service, then submit suggestions.                                           |
-| `release_job`   | Supply the claimed `folder` to return this token and Agent host's lease to the queue.                                                                                          |
-| `questionnaire` | Read the workflow version's questionnaire, including draft questions and submitted suggestions.                                                                                |
-| `ledger`        | Read the kernel's five-part ledger and optional `sinceRound` changes.                                                                                                          |
-| `readiness`     | Read the kernel's blockers by dossier topic.                                                                                                                                   |
+| Tool            | Behavior                                                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `list_jobs`     | Read jobs, leases, and suggestions for one workflow version.                                                                                                                               |
+| `claim_job`     | Quote the queued job's `revision`; claim it and return a private local folder with `context.json`, `job.json`, `output-schema.json`, `claim.json`, and `skills/<skillId>/<versionHash>/…`. |
+| `submit_job`    | Supply the claimed `folder`. Read its `result.json`, validate against the schema reloaded from the service, then submit suggestions.                                                       |
+| `release_job`   | Supply the claimed `folder` to return this token and Agent host's lease to the queue.                                                                                                      |
+| `questionnaire` | Read the workflow version's questionnaire, including draft questions and submitted suggestions.                                                                                            |
+| `ledger`        | Read the kernel's five-part ledger and optional `sinceRound` changes.                                                                                                                      |
+| `readiness`     | Read the kernel's blockers by dossier topic.                                                                                                                                               |
 
 A signed-in Engineer requests `draft-questions` or `draft-follow-ups` from
 **Questionnaire → Drafting jobs and suggestions** and chooses a draft round.
@@ -98,7 +98,7 @@ return to the queue on the next job or Engineer questionnaire read; changed
 inputs cancel queued, claimed, and submitted jobs at the same boundaries.
 The old lease cannot submit after expiry, release, or re-claim.
 
-Submission creates suggestions and an inbox item for the requester. It
+The claimed `job.json` identifies the job kind, selected draft round, and parent question, if any. Submission returns a dashboard review link and creates suggestions and an inbox item for the requester. Use `open_dashboard` with `action: "review_suggestions"` to offer that link through URL elicitation when the host supports it. It
 creates no Question, Fact, resolution, or publication. The Engineer reviews,
 edits, removes suggestions from the batch, or discards the batch with a
 reason in the dashboard. Acceptance creates draft questions in the selected

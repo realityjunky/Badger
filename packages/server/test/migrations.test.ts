@@ -113,6 +113,7 @@ describe("reviewed SQL migrations", () => {
       "comment_revisions",
       "concern_resolutions",
       "confirmed_facts",
+      "drafting_job_decisions",
       "drafting_jobs",
       "fact_acknowledgements",
       "fact_answer_revisions",

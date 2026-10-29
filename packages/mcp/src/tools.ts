@@ -201,6 +201,7 @@ export function expertTools(api: BadgerApi, server: Server): ExpertTool[] {
           "approve",
           "publish",
           "answer_gate",
+          "review_suggestions",
         ]),
       },
       async (args) => {
@@ -217,9 +218,12 @@ export function expertTools(api: BadgerApi, server: Server): ExpertTool[] {
           throw new Error(
             "This question is outside the selected workflow version",
           );
-        const url = args.questionId
-          ? `${api.url}/questionnaire/questions/${args.questionId}`
-          : `${api.url}/workflows/${args.workflowId}/versions/${args.versionId}`;
+        const url =
+          args.action === "review_suggestions"
+            ? `${api.url}/questionnaire?workflow=${encodeURIComponent(args.workflowId)}&version=${encodeURIComponent(args.versionId)}&panel=suggestions`
+            : args.questionId
+              ? `${api.url}/questionnaire/questions/${args.questionId}`
+              : `${api.url}/workflows/${args.workflowId}/versions/${args.versionId}`;
         if (server.getClientCapabilities()?.elicitation?.url !== undefined) {
           // Host dismissal or failure never turns into a sign-off or loses the link.
           await server

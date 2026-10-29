@@ -128,6 +128,16 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
     revision: job.revision,
   });
   folders.push(claimed.folder);
+  expect(claimed).toMatchObject({
+    kind: "draft-questions",
+    roundId: round.id,
+    parentQuestionId: null,
+  });
+  expect(
+    JSON.parse(
+      await fs.readFile(path.join(claimed.folder, "job.json"), "utf8"),
+    ),
+  ).toMatchObject({ id: job.id, kind: "draft-questions", roundId: round.id });
   if (process.platform !== "win32")
     expect((await fs.stat(claimed.folder)).mode & 0o777).toBe(0o700);
   const bundle = JSON.parse(
@@ -199,6 +209,18 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
     folder: next.folder,
   });
   expect(submitted.job.status).toBe("submitted");
+  expect(submitted).toMatchObject({
+    requiresPerson: true,
+    dashboardUrl: `${service.baseUrl}/questionnaire?workflow=${workflow.id}&version=${version.id}&panel=suggestions`,
+  });
+  const dashboard = await call(client, "open_dashboard", {
+    ...context,
+    action: "review_suggestions",
+  });
+  expect(dashboard).toMatchObject({
+    requiresPerson: true,
+    url: submitted.dashboardUrl,
+  });
   const suggestions = await request(`${base}/questionnaire`);
   expect(suggestions.suggestions).toEqual([
     expect.objectContaining({ id: job.id, result }),
@@ -207,6 +229,9 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
   expect((await call(client, "questionnaire", context)).questions).toEqual([]);
   expect(await call(client, "ledger", context)).toHaveProperty("handoff");
   expect(await call(client, "readiness", context)).toHaveProperty("readiness");
+  await request(`${base}/pins/${skill.id}`, "DELETE", { revision: 1 });
+  const cancelled = await request(`${base}/drafting-jobs/${job.id}`);
+  expect(cancelled.job.status).toBe("cancelled");
   const expertScoped = await connect(["expert"]);
   expect(
     (await expertScoped.listTools()).tools.map((t) => t.name),

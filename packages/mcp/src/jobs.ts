@@ -13,6 +13,9 @@ interface JobInput {
 }
 interface ClaimedJob {
   id: string;
+  kind: "draft-questions" | "draft-follow-ups";
+  roundId: string;
+  parentQuestionId: string | null;
   revision: number;
   status: string;
   contextHash: string;
@@ -160,6 +163,7 @@ export async function claimJob(
       ["context.json", claimed.contextBundle],
       ["output-schema.json", claimed.job.outputSchema],
       ["claim.json", claim],
+      ["job.json", claimed.job],
     ] as const)
       await fs.writeFile(
         path.join(folder, name),
@@ -169,6 +173,9 @@ export async function claimJob(
     return {
       folder,
       jobId: input.jobId,
+      kind: claimed.job.kind,
+      roundId: claimed.job.roundId,
+      parentQuestionId: claimed.job.parentQuestionId,
       revision: claimed.job.revision,
       contextHash: claimed.job.contextHash,
       leaseUntil: claimed.job.lease.until,
@@ -229,9 +236,22 @@ export async function finishJob(
         `The result does not match the job's output schema: ${ajv.errorsText(valid.errors)}`,
       );
   }
-  return api.request(`${jobsPath(input)}/${input.jobId}/${action}`, "POST", {
-    leaseId: claim.leaseId,
-    contextHash: claim.contextHash,
-    ...(action === "submit" ? { result } : {}),
-  });
+  const response = await api.request(
+    `${jobsPath(input)}/${input.jobId}/${action}`,
+    "POST",
+    {
+      leaseId: claim.leaseId,
+      contextHash: claim.contextHash,
+      ...(action === "submit" ? { result } : {}),
+    },
+  );
+  return action === "submit"
+    ? {
+        ...(response as object),
+        requiresPerson: true,
+        dashboardUrl: `${api.url}/questionnaire?workflow=${encodeURIComponent(input.workflowId)}&version=${encodeURIComponent(input.versionId)}&panel=suggestions`,
+        message:
+          "The result is a suggestion. Ask the person to review, edit, accept, or discard it in the dashboard.",
+      }
+    : response;
 }
