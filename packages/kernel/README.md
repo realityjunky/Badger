@@ -93,6 +93,14 @@ original result for the same client request ID. See
 `docs/adr/0015-pinned-skill-versions-and-source-check-jobs.md` and
 `docs/adr/0016-gate-confirmations-and-inbox.md`.
 
+Source study records (#45) are delivered in the service and dashboard:
+revisioned source-derived facts and independent interfaces, evidence links
+to immutable file lines, and human study-completion gates per pinned Skill
+version. The server validates evidence hashes, retains retired records and
+their revisions, audits writes, and invalidates changed studies. Completing
+all pins opens Questionnaire. See
+`docs/adr/0019-source-study-records-and-completion.md`.
+
 Generated packages carry their source Skills in `sources/<Skill identity hash>/`.
 The roots in `reference/resolved-skills.json` and the packaged
 `reference/authoring-plan.json` resolve from the package root. Configuration,

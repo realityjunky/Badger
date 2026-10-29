@@ -30,6 +30,7 @@ export interface WorkflowCapabilities {
   createVersion: boolean;
   managePins: boolean;
   confirmSources: boolean;
+  manageSourceStudy: boolean;
 }
 
 /** Every workflow role reads; only the responsible roles may write. */
@@ -67,6 +68,7 @@ export async function workflowCapabilities(
       engineer,
     managePins: access.tokenScopes === undefined && engineer,
     confirmSources: access.tokenScopes === undefined && engineer,
+    manageSourceStudy: access.tokenScopes === undefined && engineer,
   };
 }
 

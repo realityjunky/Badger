@@ -16,6 +16,7 @@ import { toIsoString } from "./util.js";
 import type { StageState } from "./workflows.js";
 import { invalidateGate } from "./gates.js";
 import { notifyWorkflowRoles } from "./inbox.js";
+import { invalidateStudyGates } from "./source-study-invalidation.js";
 
 export type SkillPinPurpose = "source" | "upgrade-source";
 export type SourceCheckStatus =
@@ -510,6 +511,13 @@ export async function pinSkillVersion(
       );
       const pin = toPin(pinRow.rows[0]!);
       await invalidateSourcesStage(tx, versionId, now);
+      await invalidateStudyGates(
+        tx,
+        dependencies,
+        context,
+        versionId,
+        "The Skill pins changed",
+      );
       await invalidateGate(
         tx,
         dependencies,
@@ -593,6 +601,13 @@ export async function unpinSkillVersion(
       [versionId, skillId],
     );
     await invalidateSourcesStage(tx, versionId, dependencies.clock.now());
+    await invalidateStudyGates(
+      tx,
+      dependencies,
+      context,
+      versionId,
+      "A Skill pin was removed",
+    );
     await invalidateGate(
       tx,
       dependencies,
