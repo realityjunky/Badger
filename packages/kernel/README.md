@@ -83,8 +83,13 @@ immutable Skill versions to a workflow version, and the worker role, the same
 image started with `packages/server/dist/src/worker.js`, runs this kernel's
 source check on the pinned content as a durable Postgres job. The Sources
 stage shows each source's inventory, script effects, and blockers; after a
-passed check it waits for the Engineer to confirm the source set at its gate
-(#44). See `docs/adr/0015-pinned-skill-versions-and-source-check-jobs.md`.
+passed check the Engineer previews and confirms the source set at its gate
+(#44). Confirmation records its actor, time, and exact hashes. Changing pins
+invalidates it and notifies the Engineer and Workflow owner through the
+in-app inbox, shown on My work and the top-bar badge. Gate commits replay the
+original result for the same client request ID. See
+`docs/adr/0015-pinned-skill-versions-and-source-check-jobs.md` and
+`docs/adr/0016-gate-confirmations-and-inbox.md`.
 
 Generated packages carry their source Skills in `sources/<Skill identity hash>/`.
 The roots in `reference/resolved-skills.json` and the packaged

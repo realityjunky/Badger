@@ -10,6 +10,65 @@
   box-sizing: border-box;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.inbox-items {
+  list-style: none;
+  padding: 0;
+}
+
+#sources,
+#inbox {
+  scroll-margin-top: 84px;
+}
+.inbox-item {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--badger-color-border);
+}
+.inbox-item > div:first-child {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.inbox-item p {
+  margin: 4px 0 0;
+}
+.inbox-item-unread a {
+  font-weight: 600;
+}
+.sources-gate {
+  display: grid;
+  gap: 12px;
+  margin-block: 16px;
+}
+.sources-gate > button {
+  justify-self: start;
+}
+.gate-pins code,
+.gate-hashes code,
+.gate-confirmation-hash {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 0.8em;
+}
+.gate-hashes dd {
+  margin: 0 0 12px;
+}
+
 html {
   font-size: calc(var(--badger-font-size-base) * var(--badger-font-scale, 1));
   scroll-behavior: smooth;

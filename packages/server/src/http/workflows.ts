@@ -23,6 +23,7 @@ import {
 } from "../workflow-source.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
+import { readGateConfirmations } from "../gates.js";
 
 const ROOT = "/api/v1/workflows";
 // A version's pins, one pin by its Skill, its latest source check, its jobs.
@@ -392,6 +393,9 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
           pins: await listWorkflowPins(database, version.id),
           sourceCheck: await readSourceCheck(database, version.id),
           jobs: await listWorkflowJobs(database, version.id),
+          sourceGate:
+            (await readGateConfirmations(database, version.id, "sources"))[0] ??
+            null,
         });
   }
   return reply.json(200, {

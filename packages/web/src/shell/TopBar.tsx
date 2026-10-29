@@ -14,9 +14,10 @@ import {
   Select,
   type MenuProps,
 } from "antd";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
+import { useInbox } from "../inbox/InboxContext.js";
 
 export interface TopBarProps {
   drawerMode: boolean;
@@ -28,6 +29,7 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
   const { t, format } = useI18n();
   const { preferences, person, update } = usePreferences();
   const navigate = useNavigate();
+  const inbox = useInbox();
 
   const languageItems: MenuProps["items"] = [
     {
@@ -122,22 +124,43 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
           trigger="click"
           placement="bottomRight"
           content={
-            <p className="muted inbox-empty" data-testid="inbox-empty">
-              {t("inbox.empty")}
-            </p>
+            inbox.failed ? (
+              <p role="alert">{t("inbox.failed")}</p>
+            ) : inbox.page.items.length > 0 ||
+              inbox.page.unreadCount > 0 ||
+              inbox.hasOlderPage ? (
+              <Link to="/my-work#inbox" onClick={inbox.newest}>
+                {t("inbox.view")}
+              </Link>
+            ) : (
+              <p className="muted inbox-empty" data-testid="inbox-empty">
+                {t("inbox.empty")}
+              </p>
+            )
           }
         >
           <Button
             type="text"
-            aria-label={t("inbox.open")}
+            aria-label={
+              inbox.page.unreadCount > 0
+                ? format("inbox.unreadCount", { count: inbox.page.unreadCount })
+                : t("inbox.open")
+            }
             data-testid="inbox-button"
             icon={
-              <Badge dot={false} count={0} showZero={false}>
+              <Badge
+                dot={false}
+                count={inbox.page.unreadCount}
+                showZero={false}
+              >
                 <BellOutlined />
               </Badge>
             }
           />
         </Popover>
+        <span className="sr-only" role="status" aria-atomic="true">
+          {format("inbox.unreadCount", { count: inbox.page.unreadCount })}
+        </span>
 
         <Dropdown menu={{ items: languageItems }} trigger={["click"]}>
           <Button
