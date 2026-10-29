@@ -72,8 +72,12 @@ npm run test:e2e -w packages/web
 Playwright's Chromium is a one-time download: `npx playwright install chromium`.
 
 The server package's suite runs on PGlite by default and on Postgres 17 when
-`BADGER_TEST_DATABASE_URL` points at one; CI runs both. To try the container
-against Postgres:
+`BADGER_TEST_DATABASE_URL` points at one; CI runs both. CI uses self-hosted
+GitHub Actions runners. Linux checks run automatically; Windows and macOS
+run-storage checks are opt-in once their runners are available. See the
+[runner setup and operations guide](docs/self-hosted-ci.md).
+
+To try the container against Postgres:
 
 ```bash
 docker compose up --build
