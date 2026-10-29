@@ -682,10 +682,7 @@ test("the Engineer confirms formal facts and the answering expert acknowledges o
         .getByText("Acknowledged", { exact: true }),
     ).toBeVisible();
     await testInfo.attach("acknowledged-facts", {
-      body: await respondent.screenshot({
-        fullPage: true,
-        path: `../../output/playwright/issue-48-acknowledged-${testInfo.project.name}.png`,
-      }),
+      body: await respondent.screenshot({ fullPage: true }),
       contentType: "image/png",
     });
     const duration = respondent
