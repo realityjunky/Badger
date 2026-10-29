@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { normalizeWorkflow } from "../src/index.js";
+import type { WorkflowInput } from "../src/types.js";
 import {
   createWorkflowRuntime,
   inspectWorkflowRun,
@@ -12,8 +13,37 @@ import {
   type WorkflowRunRegistry,
   type WorkflowStateProjection,
 } from "../src/workflow-runtime/public.js";
+import {
+  clearWorkflowTransitionFaultForTests,
+  setWorkflowTransitionFaultForTests,
+} from "../src/workflow-runtime/transition-journal.js";
 
-function protocol() {
+// Revision fences journal each transition, so an interrupted one needs recovery.
+const revisionFences: WorkflowInput["capabilities"] = {
+  version: 3,
+  features: ["conditional-routing", "revisioned-attempts"],
+  durability: {
+    version: 1,
+    capabilities: ["revision-fences"],
+    bounds: {
+      runStateBytes: 256 * 1024,
+      pendingActionBytes: 256 * 1024,
+      trajectoryBytes: 8 * 1024 * 1024,
+      artifactsBytes: 1024 * 1024,
+      claimBytes: 16 * 1024,
+    },
+    schemaVersions: {
+      runState: 1,
+      pendingAction: 1,
+      trajectory: 1,
+      artifacts: 1,
+      revisionClaim: 1,
+    },
+    findingCatalogVersion: 1,
+  },
+};
+
+function protocol(capabilities?: WorkflowInput["capabilities"]) {
   return normalizeWorkflow({
     kind: "workflow-kernel",
     name: "registry-workflow",
@@ -32,6 +62,7 @@ function protocol() {
       outputSchemas: [],
       guardrails: [],
     })),
+    ...(capabilities === undefined ? {} : { capabilities }),
   }).protocol;
 }
 
@@ -192,6 +223,72 @@ describe("WorkflowRuntime Run registry", () => {
       if (kind === "standalone") {
         expect(await listWorkflowRuns(projectRoot)).toMatchObject([state]);
       }
+    },
+  );
+
+  it.each([".badger/pending-action.json", ".badger/artifacts.json"])(
+    "reports a Run interrupted while writing %s as blocked until it is recovered",
+    async (interruptedPath) => {
+      const runtime = createWorkflowRuntime();
+      await runtime.start({
+        protocol: protocol(),
+        location: location("healthy-run"),
+      });
+      const target = location("interrupted-run");
+      const started = await runtime.start({
+        protocol: protocol(revisionFences),
+        location: target,
+      });
+      setWorkflowTransitionFaultForTests({
+        phase: "record-write",
+        path: interruptedPath,
+      });
+      try {
+        await expect(
+          runtime.submit(target, {
+            actionId: started.pendingAction!.id,
+            runId: started.runId,
+            nodeId: "prepare",
+            revision: started.revision,
+            execution: started.execution,
+            status: "succeeded",
+            summary: "Prepared the input.",
+          }),
+        ).rejects.toThrow("deterministic workflow transition fault");
+      } finally {
+        clearWorkflowTransitionFaultForTests();
+      }
+
+      const inspected = await runtime.inspect(target);
+      expect(inspected).toMatchObject({
+        disposition: "blocked",
+        findings: [expect.objectContaining({ code: "recovery-required" })],
+      });
+      await expect(runtime.projectState(target)).resolves.toMatchObject({
+        status: "blocked",
+        revision: inspected!.revision,
+        currentNode: inspected!.currentNode,
+        pendingAction: inspected!.pendingAction,
+        findings: inspected!.findings,
+        blockers: inspected!.blockers,
+      });
+      // One interrupted Run neither hides the project's other Runs nor fails.
+      expect(
+        (await runtime.listRuns(projectRoot)).map(({ runId, status }) => ({
+          runId,
+          status,
+        })),
+      ).toEqual([
+        { runId: "healthy-run", status: "waiting" },
+        { runId: "interrupted-run", status: "blocked" },
+      ]);
+
+      await runtime.recover(target);
+      await expect(runtime.projectState(target)).resolves.toMatchObject({
+        status: "waiting",
+        currentNode: "finish",
+        history: [{ node: "prepare", status: "succeeded" }],
+      });
     },
   );
 

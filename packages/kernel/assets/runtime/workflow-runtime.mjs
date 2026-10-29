@@ -24523,13 +24523,9 @@ function projectionStatus(state, pending, maxRetriesPerAction) {
   );
   return state.status === "failed" || !pending && retriesExhausted ? "blocked" : state.status;
 }
-async function projectWorkflowState(target) {
-  const location = resolveWorkflowRunLocation(target);
-  const state = await location.readState();
-  if (!state) return null;
-  const verified = await verifyStoredRun(location);
+async function projectedOutcomes(location, state, identity) {
   const nodeByStep = new Map(
-    Object.entries(verified.identity.nodeToStep).map(([nodeId, stepId2]) => [
+    Object.entries(identity.nodeToStep).map(([nodeId, stepId2]) => [
       stepId2,
       nodeId
     ])
@@ -24562,6 +24558,36 @@ async function projectWorkflowState(target) {
     const outcomeEvidence = event.data.outcome.evidence;
     evidence[node] = isRecord15(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
   }
+  return { trajectory, completedNodes, evidence, history };
+}
+async function recoveryStateProjection(location, state, recovery) {
+  const protocol = (await verifyStoredPackage(location.runRoot, state)).package.runtime.protocol;
+  const { completedNodes, evidence, history } = await projectedOutcomes(
+    location,
+    state,
+    recovery.execution
+  );
+  const { disposition: _disposition, ...continuation2 } = recovery;
+  return {
+    schemaVersion: 1,
+    workflow: protocol.name,
+    statePath: protocol.state.statePath,
+    status: "blocked",
+    ...continuation2,
+    completedNodes,
+    evidence: recovery.pendingAction?.type === "ask_user" ? {} : evidence,
+    history
+  };
+}
+async function projectWorkflowState(target) {
+  const location = resolveWorkflowRunLocation(target);
+  const state = await location.readState();
+  if (!state) return null;
+  const recovery = await pendingRecoveryContinuation(location);
+  if (recovery === void 0) return null;
+  if (recovery) return recoveryStateProjection(location, state, recovery);
+  const verified = await verifyStoredRun(location);
+  const { trajectory, completedNodes, evidence, history } = await projectedOutcomes(location, state, verified.identity);
   const protocol = verified.package.runtime.protocol;
   const runtimeState = state.workflowRuntime;
   const currentAttempt = runtimeState?.currentAttempt ?? null;
@@ -25394,41 +25420,41 @@ async function continuationFromVerifiedRun(verified, runRoot) {
   }
   return withAdditionalFindings(base, snapshotFindings);
 }
+async function pendingRecoveryContinuation(location) {
+  const journal = await readWorkflowTransitionJournal(location.runRoot);
+  if (journal) return recoveryRequiredContinuation(location, journal);
+  const checkpointRecovery = await readWorkflowCheckpointRecoveryJournal(
+    location.runRoot
+  );
+  if (checkpointRecovery) {
+    return checkpointRecoveryRequiredContinuation(location, checkpointRecovery);
+  }
+  try {
+    const storedState = await location.readState();
+    if (!storedState) return void 0;
+    const profile = storedState.runtimeIdentity?.durabilityProfile;
+    if (profile?.capabilities.includes("transactional-finalization")) {
+      const transaction = await readWorkflowFinalizationTransaction(
+        location.runRoot,
+        profile
+      );
+      if (transaction) {
+        return finalizationRecoveryRequiredContinuation(location, transaction);
+      }
+    }
+  } catch (error) {
+    const code = error.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return void 0;
+    throw error;
+  }
+  return null;
+}
 async function inspectWorkflowRun(target) {
   return withStructuredRuntimeErrors(async () => {
     const location = resolveWorkflowRunLocation(target);
-    const journal = await readWorkflowTransitionJournal(location.runRoot);
-    if (journal) return recoveryRequiredContinuation(location, journal);
-    const checkpointRecovery = await readWorkflowCheckpointRecoveryJournal(
-      location.runRoot
-    );
-    if (checkpointRecovery) {
-      return checkpointRecoveryRequiredContinuation(
-        location,
-        checkpointRecovery
-      );
-    }
-    try {
-      const storedState = await location.readState();
-      if (!storedState) return null;
-      const profile = storedState.runtimeIdentity?.durabilityProfile;
-      if (profile?.capabilities.includes("transactional-finalization")) {
-        const transaction = await readWorkflowFinalizationTransaction(
-          location.runRoot,
-          profile
-        );
-        if (transaction) {
-          return finalizationRecoveryRequiredContinuation(
-            location,
-            transaction
-          );
-        }
-      }
-    } catch (error) {
-      const code = error.code;
-      if (code === "ENOENT" || code === "ENOTDIR") return null;
-      throw error;
-    }
+    const recovery = await pendingRecoveryContinuation(location);
+    if (recovery === void 0) return null;
+    if (recovery) return recovery;
     return continuationFromVerifiedRun(
       await verifyStoredRun(location),
       location.runRoot

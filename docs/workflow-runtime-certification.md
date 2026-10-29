@@ -284,7 +284,8 @@ runtime construction and the four mutation operations `start`, `resume`,
 `inspectWorkflowRun`, and `projectWorkflowState` expose the same reads.
 `WorkflowRunRegistry` lists standalone Runs in a project from authoritative
 records; its entries include location, status, current Node, pending action,
-and outcome history. Projections and stray directories are never registry
+and outcome history; a Run awaiting recovery reads as blocked, as `inspect`
+reports it. Projections and stray directories are never registry
 authority. Revisioned continuations add `revision`, `attemptId`,
 `visitOrdinal`, `retryOrdinal`, `cycleId`, Cycle and visit ledgers, and
 decision receipt projections. Versioned continuations also project immutable

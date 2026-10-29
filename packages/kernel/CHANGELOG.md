@@ -8,7 +8,8 @@
   standalone Runs, including their location, status, current Node, pending
   action, and outcome history. `listWorkflowRuns`, `inspectWorkflowRun`, and
   `projectWorkflowState` are public exports with matching runtime methods.
-  Discovery ignores projections and stray directories. Mutation locks use
+  Discovery ignores projections and stray directories, and a Run awaiting
+  recovery reads as blocked, as `inspect` reports it. Mutation locks use
   hostname-independent host identities so recovery can still attribute a
   lock after a host rename, while refusing unknown owners (#32).
 

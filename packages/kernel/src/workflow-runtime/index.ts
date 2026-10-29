@@ -1926,16 +1926,18 @@ function projectionStatus(
     : state.status;
 }
 
-export async function projectWorkflowState(
-  target: WorkflowRunTarget,
-): Promise<WorkflowStateProjection | null> {
-  const location = resolveWorkflowRunLocation(target);
-  const state = await location.readState();
-  if (!state) return null;
-
-  const verified = await verifyStoredRun(location);
+/** The outcomes a Run's trajectory records, in order, by Node. */
+async function projectedOutcomes(
+  location: ResolvedWorkflowRunLocation,
+  state: RunState,
+  identity: WorkflowExecutionIdentity,
+): Promise<
+  Pick<WorkflowStateProjection, "completedNodes" | "evidence" | "history"> & {
+    trajectory: Awaited<ReturnType<typeof readTrajectory>>;
+  }
+> {
   const nodeByStep = new Map(
-    Object.entries(verified.identity.nodeToStep).map(([nodeId, stepId]) => [
+    Object.entries(identity.nodeToStep).map(([nodeId, stepId]) => [
       stepId,
       nodeId,
     ]),
@@ -1975,7 +1977,51 @@ export async function projectWorkflowState(
       ? structuredClone(outcomeEvidence)
       : {};
   }
+  return { trajectory, completedNodes, evidence, history };
+}
 
+/**
+ * While a transition, checkpoint recovery, or finalization transaction is
+ * pending, the projection reports the blocked continuation `inspect` returns.
+ */
+async function recoveryStateProjection(
+  location: ResolvedWorkflowRunLocation,
+  state: RunState,
+  recovery: WorkflowContinuation,
+): Promise<WorkflowStateProjection> {
+  const protocol = (await verifyStoredPackage(location.runRoot, state)).package
+    .runtime!.protocol;
+  const { completedNodes, evidence, history } = await projectedOutcomes(
+    location,
+    state,
+    recovery.execution,
+  );
+  const { disposition: _disposition, ...continuation } = recovery;
+  return {
+    schemaVersion: 1,
+    workflow: protocol.name,
+    statePath: protocol.state.statePath,
+    status: "blocked",
+    ...continuation,
+    completedNodes,
+    evidence: recovery.pendingAction?.type === "ask_user" ? {} : evidence,
+    history,
+  };
+}
+
+export async function projectWorkflowState(
+  target: WorkflowRunTarget,
+): Promise<WorkflowStateProjection | null> {
+  const location = resolveWorkflowRunLocation(target);
+  const state = await location.readState();
+  if (!state) return null;
+  const recovery = await pendingRecoveryContinuation(location);
+  if (recovery === undefined) return null;
+  if (recovery) return recoveryStateProjection(location, state, recovery);
+
+  const verified = await verifyStoredRun(location);
+  const { trajectory, completedNodes, evidence, history } =
+    await projectedOutcomes(location, state, verified.identity);
   const protocol = verified.package.runtime!.protocol;
   const runtimeState = state.workflowRuntime;
   const currentAttempt = runtimeState?.currentAttempt ?? null;
@@ -3113,43 +3159,51 @@ async function continuationFromVerifiedRun(
   return withAdditionalFindings(base, snapshotFindings);
 }
 
+/**
+ * The blocked continuation a pending transition, checkpoint recovery, or
+ * finalization transaction forces until `recover` resolves it; null when none
+ * is pending, and undefined when there is no Run.
+ */
+async function pendingRecoveryContinuation(
+  location: ResolvedWorkflowRunLocation,
+): Promise<WorkflowContinuation | null | undefined> {
+  const journal = await readWorkflowTransitionJournal(location.runRoot);
+  if (journal) return recoveryRequiredContinuation(location, journal);
+  const checkpointRecovery = await readWorkflowCheckpointRecoveryJournal(
+    location.runRoot,
+  );
+  if (checkpointRecovery) {
+    return checkpointRecoveryRequiredContinuation(location, checkpointRecovery);
+  }
+  try {
+    const storedState = await location.readState();
+    if (!storedState) return undefined;
+    const profile = storedState.runtimeIdentity?.durabilityProfile;
+    if (profile?.capabilities.includes("transactional-finalization")) {
+      const transaction = await readWorkflowFinalizationTransaction(
+        location.runRoot,
+        profile,
+      );
+      if (transaction) {
+        return finalizationRecoveryRequiredContinuation(location, transaction);
+      }
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    throw error;
+  }
+  return null;
+}
+
 export async function inspectWorkflowRun(
   target: WorkflowRunTarget,
 ): Promise<WorkflowContinuation | null> {
   return withStructuredRuntimeErrors(async () => {
     const location = resolveWorkflowRunLocation(target);
-    const journal = await readWorkflowTransitionJournal(location.runRoot);
-    if (journal) return recoveryRequiredContinuation(location, journal);
-    const checkpointRecovery = await readWorkflowCheckpointRecoveryJournal(
-      location.runRoot,
-    );
-    if (checkpointRecovery) {
-      return checkpointRecoveryRequiredContinuation(
-        location,
-        checkpointRecovery,
-      );
-    }
-    try {
-      const storedState = await location.readState();
-      if (!storedState) return null;
-      const profile = storedState.runtimeIdentity?.durabilityProfile;
-      if (profile?.capabilities.includes("transactional-finalization")) {
-        const transaction = await readWorkflowFinalizationTransaction(
-          location.runRoot,
-          profile,
-        );
-        if (transaction) {
-          return finalizationRecoveryRequiredContinuation(
-            location,
-            transaction,
-          );
-        }
-      }
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "ENOTDIR") return null;
-      throw error;
-    }
+    const recovery = await pendingRecoveryContinuation(location);
+    if (recovery === undefined) return null;
+    if (recovery) return recovery;
     return continuationFromVerifiedRun(
       await verifyStoredRun(location),
       location.runRoot,

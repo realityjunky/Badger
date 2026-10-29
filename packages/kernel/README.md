@@ -234,7 +234,10 @@ standalone Runs under that project's `.badger/runs/`, sorted by Run id. Each
 the `WorkflowStateProjection` fields: status, current Node, pending action,
 outcome history, and execution identity. Discovery reads authoritative Run
 records, ignores empty directories, invalid Run ids, linked entries, and
-rebuildable projections, and creates no files. Invalid records in an actual
+rebuildable projections, and creates no files. A Run awaiting recovery (a
+pending transition, checkpoint recovery, or finalization transaction) is
+listed and projected as `blocked`, with the same `recovery-required` finding
+as `inspect`. Invalid records in an actual
 Run are reported as errors rather than silently hiding it.
 
 For a standalone or manual Run target, `runtime.inspect(target)` (or
