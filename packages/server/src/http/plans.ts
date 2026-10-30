@@ -79,7 +79,7 @@ export async function handlePlan(input: AuthorizedRequest) {
       value.expectedVersionId,
     );
     return {
-      status: stored.created ? 201 : 200,
+      status: stored.changed ? 201 : 200,
       value: { version: stored.version },
     };
   });

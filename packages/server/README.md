@@ -137,17 +137,22 @@ provenance come from durable records. Readiness blockers refuse composition.
 Kernel validation findings are returned by preview and must be repaired before
 the version can be stored.
 
-| Method and path                | Behavior                                                                                                                                                    |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET V/dossier`                | Read immutable versions, the current version ID, gate confirmation, and the caller-visible kernel handoff.                                                  |
-| `POST V/dossier/preview`       | Send `{topics, nodes, upgradeSource?}`; receive `{composition}` with the snapshot, canonical JSON, hash, and kernel findings.                               |
-| `POST V/dossier/compose`       | Send the same semantic fields plus `confirmationHash` quoting the composition hash. Store a valid snapshot; identical content returns the existing version. |
-| `POST V/gates/dossier/preview` | A signed-in Workflow owner or Administrator sends `{}` to review the exact dossier hash and stage effects.                                                  |
-| `POST V/gates/dossier/commit`  | Send `{confirmationHash, requestId}` to approve that preview through the shared gate protocol.                                                              |
-| `GET V/gates/dossier`          | Read approval history, invalidation, and replacement confirmation links.                                                                                    |
+| Method and path                | Behavior                                                                                                                                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET V/dossier`                | Read immutable versions, `headVersionId`, `currentVersionId` (the head while its records are unchanged), gate confirmation, and the caller-visible kernel handoff.                                      |
+| `POST V/dossier/preview`       | Send `{topics, nodes, upgradeSource?}`; receive `{composition}` with the snapshot, canonical JSON, hash, and kernel findings.                                                                           |
+| `POST V/dossier/compose`       | Send the same semantic fields plus `confirmationHash` quoting the composition hash. Content identical to the current version returns it with 200; otherwise 201 makes a new or earlier version current. |
+| `POST V/gates/dossier/preview` | A signed-in Workflow owner or Administrator sends `{}` to review the exact dossier hash and stage effects.                                                                                              |
+| `POST V/gates/dossier/commit`  | Send `{confirmationHash, requestId}` to approve that preview through the shared gate protocol.                                                                                                          |
+| `GET V/gates/dossier`          | Read approval history, invalidation, and replacement confirmation links.                                                                                                                                |
 
 Canonical JSON is stored as immutable text, and its SHA-256 is the version's
-hash. A new composition requests approval in the Workflow owner's inbox.
+hash. The current version is named by the latest of an append-only sequence of
+heads, so it need not be the newest: composing an earlier version's content
+again selects that version again, recorded as `dossier.reselected`, without
+copying or rewriting it. Each new head supersedes approval and later stages
+exactly as a new version does, and requests approval in the Workflow owner's
+inbox. Gates, plan derivation, the proposal, and invalidation read the head.
 The kernel document's proposed `confirmed` flag is not service approval;
 only an active matching gate confirmation approves a version. Record or pin
 changes supersede that approval and invalidate later stages, notifying the
@@ -185,8 +190,10 @@ This uses migration `0023`; shipped migrations are unchanged. See
 ## Plan versions
 
 Plan versions (#58) use migration `0019`. `GET V/plan` returns immutable
-`versions`, `currentVersionId`, the current approved `dossierHash`, a derived
-`skeleton`, and plan gate `confirmation`. The skeleton is unavailable until
+`versions`, `headVersionId`, `currentVersionId` (the head while it is bound to
+the current approved dossier), the current approved `dossierHash`, a derived
+`skeleton`, and plan gate `confirmation`. As with dossiers, the latest
+append-only head names the current version. The skeleton is unavailable until
 the current dossier is approved. It fixes the name, goal, intent, English
 artifact locale, ordered Node identities, and exact pinned sources and script
 declarations; implementation choices remain for the Engineer or Agent.
@@ -194,37 +201,41 @@ declarations; implementation choices remain for the Engineer or Agent.
 `POST V/plan/preview` takes `{plan, dossierHash}` and returns `{composition}`
 with canonical JSON, hash, snapshot, and kernel findings, including incomplete
 or invalid edits. `POST V/plan/save` takes those fields plus
-`confirmationHash` and `expectedVersionId` (null for the first plan). A valid
-preview is required; concurrent saves conflict and identical latest content
-returns the original version. Both writes require a signed-in Engineer or
-Administrator and only `POST`; other methods answer 405. Tokens may only read
-the plan and its history.
+`confirmationHash` and `expectedVersionId`, the head version editing began
+from (null for the first plan). A valid preview is required; concurrent saves
+conflict. Content identical to the current version returns it with 200.
+Content identical to an earlier version selects it again with 201, recorded as
+`plan.reselected`, and supersedes approval as a new version does. Both writes
+require a signed-in Engineer or Administrator and only `POST`; other methods
+answer 405. Tokens may only read the plan and its history.
 
 The Workflow owner previews and commits `V/gates/plan` using the shared gate
 protocol. Its bound hashes identify both the Plan version and Dossier version.
-A new plan supersedes plan approval. Dossier replacement, facts, or pin changes
-invalidate dependent plan approvals atomically, preserving history and retry
-responses, and notify the Engineer and Workflow owner. Plan approval keeps the
-Plan and proposal stage active for the separate proposal gate.
+A new head, of a new or an earlier version, supersedes plan approval. Dossier
+replacement, facts, or pin changes invalidate dependent plan approvals
+atomically, preserving history and retry responses, and notify the Engineer
+and Workflow owner. Plan approval keeps the Plan and proposal stage active for
+the separate proposal gate.
 
 A signed-in Engineer requests `{kind: "draft-plan", confirmed: true}` at
 `POST V/drafting-jobs`, without a round or parent question. Existing Engineer
 MCP tools claim and submit `{plan}` against the kernel-derived output schema.
-The context's `planning` contains `input`, `skeleton`, and `basePlanVersionId`.
-The result stays a suggestion. Human acceptance uses `plan` instead of
-`questions` in the existing accept-preview/accept protocol and saves through
-the same validation and optimistic-concurrency checks as a direct save.
-Inbox links for suggestions and approvals open the workflow's `#plan` panel.
+The context's `planning` contains `input`, `skeleton`, and the head version as
+`basePlanVersionId`. The result stays a suggestion. Human acceptance uses
+`plan` instead of `questions` in the existing accept-preview/accept protocol
+and saves through the same validation and optimistic-concurrency checks as a
+direct save. Inbox links for suggestions and approvals open the workflow's
+`#plan` panel.
 
 ## Proposal approval and initialization
 
 Proposal approval (#59) uses migration `0022`. `GET V/proposal` returns the
-kernel's proposal for the currently approved plan, including its blockers,
-warnings, source identities, and `proposalHash`, together with the immutable
-`planVersionHash`, proposal `confirmation`, `currentState`, and initialization
-`jobs`. Without a current approved plan, `proposal` is null. The service uses
-managed artifact roots; a plan with an explicit `artifactRoot` reports a
-blocker before approval or initialization.
+kernel's proposal for the approved current plan version, including its
+blockers, warnings, source identities, and `proposalHash`, together with the
+immutable `planVersionHash`, proposal `confirmation`, `currentState`, and
+initialization `jobs`. Without a current approved plan, `proposal` is null.
+The service uses managed artifact roots; a plan with an explicit
+`artifactRoot` reports a blocker before approval or initialization.
 
 The signed-in Workflow owner or Administrator previews and commits
 `V/gates/proposal` through the shared gate protocol. The confirmation binds

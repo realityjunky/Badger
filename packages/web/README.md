@@ -74,16 +74,20 @@ them into `dist/`, so the server image carries the build and none of them.
   author topic summaries, supporting fact links, and Node responsibilities,
   review kernel findings and the canonical snapshot, then compose an immutable
   version. Workflow owners review and approve its exact hash in a separate
-  dialog. Version selection has a URL; superseded artifacts remain readable,
-  and the inbox links directly to pending or superseded dossier approvals.
+  dialog. The panel opens on the current version, which may be an earlier one
+  the Engineer composed again. Version selection has a URL; superseded
+  artifacts remain readable, and the inbox links directly to pending or
+  superseded dossier approvals.
 - Every question has an ordered comment thread with the author's edit history.
 - Workflow versions include **Plan versions** (#58). The approved dossier
   supplies a skeleton and pins. Engineers edit FactoryPlan JSON with live
   kernel findings, review the resulting canonical version, and save it, or
   request an Agent draft and review, edit, accept, or discard its suggestion.
   Workflow owners approve the exact plan and dossier hashes separately.
-  Historical versions have URLs; stale edits and approvals conflict, and a
-  superseded dossier invalidates dependent approvals and notifies both roles.
+  The panel opens on, and edits start from, the current version; saving an
+  earlier version's content selects it again. Historical versions have URLs;
+  stale edits and approvals conflict, and a superseded dossier invalidates
+  dependent approvals and notifies both roles.
   Current workflow roles control posting and editing; Observers read threads.
   Field experts raise concerns from the questionnaire. Engineers open each
   concern from their inbox and review a hash-bound resolution: a new draft

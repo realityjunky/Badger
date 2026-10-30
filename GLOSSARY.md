@@ -98,10 +98,10 @@ The states of a workflow version's eight authoring stages: sources, source study
 A structured account of the workflow's meaning, including Node responsibilities, inputs, completion evidence, bindings, outputs, decisions, routes, and recovery expectations.
 
 **Dossier version**:
-An immutable snapshot of a Semantic dossier and the ledger records it relies on. The Engineer composes it, and the Workflow owner approves its exact identity. A change to those records supersedes approval while preserving the original version.
+An immutable snapshot of a Semantic dossier and the ledger records it relies on. The Engineer composes it, and the Workflow owner approves its exact identity. A change to those records supersedes approval while preserving the original version. The current version is the one most recently composed; composing an earlier version's content again makes that version current again, and it needs a new approval.
 
 **Plan version**:
-An immutable FactoryPlan bound to one approved Dossier version. The Engineer saves it or accepts an Agent's draft as a version, and the Workflow owner approves its exact identity.
+An immutable FactoryPlan bound to one approved Dossier version. The Engineer saves it or accepts an Agent's draft as a version, and the Workflow owner approves its exact identity. As with a Dossier version, the current version is the one most recently saved, which may be an earlier version saved again.
 
 **Proposal**:
 The kernel's account of the workflow a FactoryPlan would initialize, including its source identities and blockers. The Workflow owner approves its exact identity before the Engineer initializes the Project.

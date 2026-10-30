@@ -153,7 +153,7 @@ describe("reviewed SQL migrations", () => {
       ),
     ).rejects.toThrow(/immutable/u);
   });
-  it("keeps plan artifacts immutable after upgrading the existing drafting schema", async () => {
+  it("keeps plan artifacts and their heads immutable after upgrading the existing drafting schema", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
     await applyMigrations(
@@ -166,6 +166,9 @@ describe("reviewed SQL migrations", () => {
       "update plan_versions set canonical_json = '{}'",
       "delete from plan_versions",
       "truncate plan_versions cascade",
+      "update plan_heads set sequence = sequence + 1",
+      "delete from plan_heads",
+      "truncate plan_heads",
     ])
       await expect(test.database.query(statement), statement).rejects.toThrow(
         /immutable/u,
@@ -214,13 +217,16 @@ describe("reviewed SQL migrations", () => {
       },
     ]);
   });
-  it("refuses rewriting or deleting canonical dossier artifacts", async () => {
+  it("refuses rewriting or deleting canonical dossier artifacts and their heads", async () => {
     const test = await freshDatabase();
     await applyMigrations(test.database, await loadBundledMigrations(), clock);
     for (const statement of [
       "update dossier_versions set canonical_json = '{}'",
       "delete from dossier_versions",
       "truncate dossier_versions cascade",
+      "update dossier_heads set sequence = sequence + 1",
+      "delete from dossier_heads",
+      "truncate dossier_heads",
     ])
       await expect(test.database.query(statement), statement).rejects.toThrow(
         /immutable/u,
@@ -302,6 +308,7 @@ describe("reviewed SQL migrations", () => {
       "comment_revisions",
       "concern_resolutions",
       "confirmed_facts",
+      "dossier_heads",
       "dossier_versions",
       "drafting_job_decisions",
       "drafting_jobs",
@@ -322,6 +329,7 @@ describe("reviewed SQL migrations", () => {
       "person_notification_preferences",
       "person_preferences",
       "personal_access_tokens",
+      "plan_heads",
       "plan_versions",
       "question_answers",
       "question_comments",

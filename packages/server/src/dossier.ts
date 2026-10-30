@@ -19,7 +19,6 @@ import type { ServiceConfig } from "./config.js";
 import { gatePreview, invalidateGate, type GateState } from "./gates.js";
 import { invalidateProposal } from "./proposal-invalidation.js";
 import { closeGateInbox, notifyWorkflowRoles } from "./inbox.js";
-import { RequestError } from "./http/errors.js";
 
 export interface DossierVersion {
   id: string;
@@ -55,6 +54,22 @@ export async function readDossierVersions(tx: Queryable, versionId: string) {
     [versionId],
   );
   return result.rows.map(toVersion);
+}
+
+/** The current version is the latest head's, which need not be the newest. */
+export async function readDossierHead(
+  tx: Queryable,
+  versionId: string,
+): Promise<DossierVersion | null> {
+  const row = (
+    await tx.query<DossierRow>(
+      `select d.* from dossier_heads h
+        join dossier_versions d on d.workflow_version_id = h.workflow_version_id and d.hash = h.dossier_hash
+       where h.workflow_version_id = $1 order by h.sequence desc limit 1`,
+      [versionId],
+    )
+  ).rows[0];
+  return row === undefined ? null : toVersion(row);
 }
 
 /** Project durable identities and provenance; all authoring rules stay in the kernel. */
@@ -102,6 +117,12 @@ export async function dossierInputs(
   };
 }
 
+/**
+ * Content identical to the current version returns it unchanged. Any other
+ * composition appends a head: to a new version, or to the earlier version
+ * with identical content, which is selected again and needs the same new
+ * approval as a new version.
+ */
 export async function storeDossier(
   tx: Queryable,
   deps: ServiceDependencies,
@@ -109,38 +130,45 @@ export async function storeDossier(
   versionId: string,
   composition: DossierComposition,
 ) {
+  const head = await readDossierHead(tx, versionId);
+  if (head?.hash === composition.hash) return { version: head, changed: false };
   const versions = await readDossierVersions(tx, versionId);
-  const existing = versions.find((v) => v.hash === composition.hash);
-  if (existing) {
-    if (existing.id !== versions[0]!.id)
-      throw new RequestError(
-        409,
-        "This composition is an earlier dossier version; review the latest version before composing again",
-      );
-    return { version: existing, created: false };
-  }
-  const id = deps.ids.next();
-  const number = (versions[0]?.number ?? 0) + 1;
-  const result = await tx.query<DossierRow>(
-    `insert into dossier_versions (id, workflow_version_id, number, hash, canonical_json, created_by, created_at)
-    values ($1,$2,$3,$4,$5,$6,$7) returning *`,
-    [
-      id,
-      versionId,
-      number,
-      composition.hash,
-      composition.canonicalJson,
-      context.personId,
-      deps.clock.now(),
-    ],
+  const earlier = versions.find((v) => v.hash === composition.hash);
+  const version =
+    earlier ??
+    toVersion(
+      (
+        await tx.query<DossierRow>(
+          `insert into dossier_versions (id, workflow_version_id, number, hash, canonical_json, created_by, created_at)
+          values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+          [
+            deps.ids.next(),
+            versionId,
+            (versions[0]?.number ?? 0) + 1,
+            composition.hash,
+            composition.canonicalJson,
+            context.personId,
+            deps.clock.now(),
+          ],
+        )
+      ).rows[0]!,
+    );
+  const headId = deps.ids.next();
+  await tx.query(
+    `insert into dossier_heads (id, workflow_version_id, sequence, dossier_hash, selected_by, selected_at)
+    select $1, $2, coalesce(max(sequence), 0) + 1, $3, $4, $5 from dossier_heads where workflow_version_id = $2`,
+    [headId, versionId, version.hash, context.personId, deps.clock.now()],
   );
+  const change = earlier
+    ? "Selecting an earlier dossier version again"
+    : "A new dossier version";
   await invalidateGate(
     tx,
     deps,
     context,
     versionId,
     "dossier",
-    "A new dossier version superseded the approval",
+    `${change} superseded the approval`,
     ["Engineer", "Workflow owner"],
   );
   await updateDossierStages(tx, deps, versionId, true);
@@ -150,7 +178,7 @@ export async function storeDossier(
     context,
     versionId,
     "plan",
-    "A new dossier version superseded the plan's meaning",
+    `${change} superseded the plan's meaning`,
     ["Engineer", "Workflow owner"],
   );
   await invalidateProposal(
@@ -158,7 +186,7 @@ export async function storeDossier(
     deps,
     context,
     versionId,
-    "A new dossier version superseded the proposal's plan",
+    `${change} superseded the proposal's plan`,
   );
   await closeGateInbox(
     tx,
@@ -167,20 +195,29 @@ export async function storeDossier(
     deps.clock.now(),
     "gate-ready",
   );
-  await notifyWorkflowRoles(tx, deps, versionId, "dossier", "gate-ready", id, [
-    "Workflow owner",
-  ]);
+  // Each head is a new request for approval, even of an earlier version.
+  await notifyWorkflowRoles(
+    tx,
+    deps,
+    versionId,
+    "dossier",
+    "gate-ready",
+    headId,
+    ["Workflow owner"],
+  );
   await recordAudit(tx, deps, {
     actor: { personId: context.personId, credential: context.credential },
     channel: context.channel,
-    action: "dossier.composed",
-    target: { type: "dossier_version", id },
-    before: null,
-    after: { revision: number, hash: composition.hash },
-    reason: "Composed a dossier version",
+    action: earlier ? "dossier.reselected" : "dossier.composed",
+    target: { type: "dossier_version", id: version.id },
+    before: earlier && head ? { revision: head.number, hash: head.hash } : null,
+    after: { revision: version.number, hash: version.hash },
+    reason: earlier
+      ? "Selected an earlier dossier version again"
+      : "Composed a dossier version",
     requestId: context.requestId,
   });
-  return { version: toVersion(result.rows[0]!), created: true };
+  return { version, changed: true };
 }
 
 async function updateDossierStages(
@@ -221,12 +258,12 @@ export async function reconcileDossier(
   context: WriteContext,
   versionId: string,
 ) {
-  const latest = (await readDossierVersions(tx, versionId))[0];
-  if (!latest) return;
+  const head = await readDossierHead(tx, versionId);
+  if (!head) return;
   const ledger = createQuestionnaireHandoff({
     records: await readQuestionnaireRecords(tx, versionId, context.personId),
   });
-  if (canonicalHash(ledger) === canonicalHash(latest.snapshot.ledger)) return;
+  if (canonicalHash(ledger) === canonicalHash(head.snapshot.ledger)) return;
   await invalidateGate(
     tx,
     deps,
@@ -260,7 +297,7 @@ export async function dossierGateState(
   versionId: string,
   personId: string,
 ): Promise<GateState> {
-  const dossier = (await readDossierVersions(tx, versionId))[0];
+  const dossier = await readDossierHead(tx, versionId);
   const ledger = createQuestionnaireHandoff({
     records: await readQuestionnaireRecords(tx, versionId, personId),
   });

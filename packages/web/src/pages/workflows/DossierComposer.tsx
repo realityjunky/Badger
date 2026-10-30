@@ -33,14 +33,13 @@ export function DossierComposer({
   const [failure, setFailure] = useState<string | null>(null);
   const errorSummary = useRef<HTMLDivElement>(null);
   const topics = view.handoff.readiness.filter((r) => r.topic !== "scope");
-  const latest = view.versions[0]?.snapshot.dossier;
-  const initial = latest
+  const head = view.versions.find((v) => v.id === view.headVersionId)?.snapshot
+    .dossier;
+  const initial = head
     ? {
-        topics: latest.topics,
-        nodes: latest.nodes,
-        ...(latest.upgradeSource
-          ? { upgradeSource: latest.upgradeSource }
-          : {}),
+        topics: head.topics,
+        nodes: head.nodes,
+        ...(head.upgradeSource ? { upgradeSource: head.upgradeSource } : {}),
       }
     : {
         topics: Object.fromEntries(

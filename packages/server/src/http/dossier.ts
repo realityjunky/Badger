@@ -2,6 +2,7 @@ import { readLedger } from "../questionnaire/ledger.js";
 import { composeSemanticDossier } from "@realityjunky/badger";
 import {
   dossierInputs,
+  readDossierHead,
   readDossierVersions,
   storeDossier,
 } from "../dossier.js";
@@ -84,11 +85,10 @@ export async function handleDossier(input: AuthorizedRequest): Promise<void> {
         person.id,
         caps.composeDossier,
       );
-      const latest = versions[0];
+      const head = await readDossierHead(tx, versionId);
       const currentVersionId =
-        latest &&
-        canonicalHash(latest.snapshot.ledger) === canonicalHash(handoff)
-          ? latest.id
+        head && canonicalHash(head.snapshot.ledger) === canonicalHash(handoff)
+          ? head.id
           : null;
       const confirmations = await readGateConfirmations(
         tx,
@@ -99,6 +99,7 @@ export async function handleDossier(input: AuthorizedRequest): Promise<void> {
         status: 200,
         value: {
           versions,
+          headVersionId: head?.id ?? null,
           currentVersionId,
           confirmation: confirmations[0] ?? null,
           confirmations,
@@ -137,7 +138,7 @@ export async function handleDossier(input: AuthorizedRequest): Promise<void> {
       composition,
     );
     return {
-      status: stored.created ? 201 : 200,
+      status: stored.changed ? 201 : 200,
       value: { version: stored.version },
     };
   });

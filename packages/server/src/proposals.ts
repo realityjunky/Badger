@@ -6,7 +6,7 @@ import type { ServiceConfig } from "./config.js";
 import type { Queryable } from "./database/database.js";
 import { canonicalHash } from "@realityjunky/badger";
 import { gatePreview, readGateConfirmations, type GateState } from "./gates.js";
-import { planGateState, readPlanVersions } from "./plans.js";
+import { planGateState, readPlanHead } from "./plans.js";
 import {
   listWorkflowJobs,
   readSourceCheck,
@@ -83,7 +83,7 @@ export async function loadProposal(
   versionId: string,
   personId: string,
 ) {
-  const plan = (await readPlanVersions(tx, versionId))[0];
+  const plan = await readPlanHead(tx, versionId);
   const approval = (await readGateConfirmations(tx, versionId, "plan")).find(
     (confirmation) => confirmation.invalidatedAt === null,
   );
