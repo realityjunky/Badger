@@ -2,7 +2,7 @@ import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
 import type { ServiceConfig } from "../config.js";
 import { workflowChannel, type ChannelRow } from "./channels.js";
-import { notificationMessage } from "./messages.js";
+import { notificationMessage, recordedRecipients } from "./messages.js";
 import type { NotificationRecipient } from "./port.js";
 import type { NotificationEvent } from "./preferences.js";
 import { eligibleNotificationItems } from "./eligibility.js";
@@ -27,9 +27,10 @@ export interface NotificationItemRow {
   requester_ids: string[];
 }
 
+// Posts never carry an email address, so a pending invitation stays unnamed.
 export const NOTIFICATION_ITEM_SELECT = `select i.id, i.workflow_version_id, v.workflow_id, w.name as workflow_name,
   i.kind, coalesce(i.person_id, b.person_id) as person_id, i.binding_id,
-  coalesce(p.display_name, b.email, 'Invited person') as name,
+  coalesce(p.display_name, 'Invited person') as name,
   prefs.wecom_user_id, prefs.mobile, prefs.mention_events, i.question_id, i.concern_id, i.gate, i.fact_id, i.drafting_job_id,
   array(select distinct a.actor_person_id from audit_events a where a.notification_action_id = i.notification_action_id and a.actor_person_id is not null) as requester_ids
   from inbox_items i join workflow_versions v on v.id = i.workflow_version_id
@@ -142,7 +143,7 @@ export async function routeNotificationAction(
           channel.robot_key,
           channel.label,
           channel.webhook_ciphertext,
-          JSON.stringify(recipients),
+          JSON.stringify(recordedRecipients(recipients)),
           JSON.stringify(content),
           deps.clock.now(),
           action.id,

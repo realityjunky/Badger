@@ -15,6 +15,7 @@ import {
   saveNotificationPreferences,
 } from "../notifications/preferences.js";
 import { listWaiting, remind } from "../notifications/reminders.js";
+import { readDeliveryLog } from "../notifications/deliveries.js";
 
 const CHANNEL =
   /^\/api\/v1\/(workflows|groups)\/([^/]+)\/notifications\/channel$/u;
@@ -51,12 +52,9 @@ export async function handleNotifications(
         403,
         "Only the Workflow owner and Administrators may read deliveries",
       );
-    const rows = await input.database.query(
-      `select id, robot_label as "robotLabel", recipients, content, status, attempts, error,
-      created_at as "createdAt", sent_at as "sentAt" from notification_deliveries where workflow_id = $1 order by created_at desc, id desc limit 100`,
-      [id],
-    );
-    return input.reply.json(200, { deliveries: rows.rows });
+    return input.reply.json(200, {
+      deliveries: await readDeliveryLog(input.database, id),
+    });
   }
   if (input.path === "/api/v1/me/notifications") {
     if (input.method === "GET" || input.method === "HEAD")

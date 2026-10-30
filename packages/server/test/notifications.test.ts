@@ -156,7 +156,145 @@ async function publishRound(workflowId: string, versionId: string) {
   return { base, questions };
 }
 
+async function saveMentions(
+  person: TestPerson,
+  wecomUserId: string | null,
+  mobile: string | null,
+) {
+  const { preferences, events } = await call<{
+    preferences: { revision: number };
+    events: string[];
+  }>("GET", "/me/notifications", undefined, person);
+  await call(
+    "PUT",
+    "/me/notifications",
+    {
+      revision: preferences.revision,
+      wecomUserId,
+      mobile,
+      mentionEvents: events,
+    },
+    person,
+  );
+}
+
 describe("WeCom notification channels", () => {
+  it("keeps mention identifiers and invitation addresses out of Remind, the delivery log, and posts", async () => {
+    const { workflowId, versionId } = await setup();
+    const invitation = "pending.expert@example.com";
+    await call(
+      "POST",
+      "/bindings",
+      {
+        scopeType: "workflow",
+        scopeId: workflowId,
+        email: invitation,
+        role: "Field expert",
+      },
+      admin,
+      201,
+    );
+    await saveMentions(engineer, "eng-wecom-7", "13900000007");
+    await saveMentions(expert, null, "13900000008");
+    await call(
+      "PUT",
+      `/workflows/${workflowId}/notifications/channel`,
+      {
+        revision: 0,
+        label: "Research chat",
+        webhookUrl,
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    expect(await service.runNotificationJobs()).toBe(1);
+    const { base } = await publishRound(workflowId, versionId);
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs()).toBe(1);
+    const round = robot.requests.at(-1)!.message;
+    expect(round.text.content).toContain("Invited person: 2");
+    expect(round.text.mentioned_mobile_list).toEqual(["13900000008"]);
+    expect(JSON.stringify(round)).not.toContain(invitation);
+
+    // A Field expert who raised a concern is its requester and may Remind
+    // the Engineers, but never learns how the chat mentions them.
+    await call(
+      "POST",
+      `${base}/concerns`,
+      { text: "PRIVATE CONCERN" },
+      expert,
+      201,
+    );
+    const { items } = await call<{
+      items: {
+        id: string;
+        kind: string;
+        canRemind: boolean;
+        recipients: unknown[];
+      }[];
+    }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/waiting`,
+      undefined,
+      expert,
+    );
+    const concern = items.find((item) => item.kind === "concern-raised")!;
+    expect(concern.canRemind).toBe(true);
+    const reminded = await call<{
+      reminder: { recipients: unknown[] };
+    }>(
+      "POST",
+      `/workflows/${workflowId}/notifications/remind`,
+      { itemId: concern.id, confirmed: true },
+      expert,
+    );
+    expect(reminded.reminder.recipients).toEqual([
+      { name: "engineer", count: 1 },
+    ]);
+    const identifiers = [
+      "eng-wecom-7",
+      "13900000007",
+      "13900000008",
+      invitation,
+    ];
+    for (const identifier of identifiers) {
+      expect(JSON.stringify({ items, reminded })).not.toContain(identifier);
+    }
+    // The reminder queued first; the concern's own post follows it.
+    for (let post = 0; post < 2; post++) {
+      service.clock.advance(3100);
+      expect(await service.runNotificationJobs()).toBe(1);
+      expect(robot.requests.at(-1)!.message.text.mentioned_list).toEqual([
+        "eng-wecom-7",
+      ]);
+    }
+
+    const { deliveries } = await call<{
+      deliveries: {
+        recipients: unknown[];
+        content: { text: Record<string, unknown> };
+      }[];
+    }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/deliveries`,
+      undefined,
+      owner,
+    );
+    expect(deliveries.map((delivery) => delivery.recipients)).toEqual([
+      [{ name: "engineer", count: 1, mention: "userid" }],
+      [{ name: "engineer", count: 1, mention: "userid" }],
+      [
+        { name: "Dr Lin", count: 2, mention: "mobile" },
+        { name: "Invited person", count: 2, mention: "name" },
+      ],
+      [],
+    ]);
+    for (const delivery of deliveries)
+      expect(Object.keys(delivery.content.text)).toEqual(["content"]);
+    for (const identifier of identifiers)
+      expect(JSON.stringify(deliveries)).not.toContain(identifier);
+  });
   it("drops a removed expert from queued mentions and reminder recipients", async () => {
     const { workflowId, versionId } = await setup();
     const { binding } = await call<{

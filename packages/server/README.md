@@ -21,9 +21,11 @@ Disconnecting cancels queued and retrying posts for that channel.
 People set their WeCom userid or mobile in **Settings → Channel addresses**
 and choose mention events in **Settings → Notifications**. Opting out affects
 chat mentions only; inbox items still arrive. Text messages support userid
-and mobile mentions; people with neither appear by name. Posts carry only
-workflow names, curated waiting-event labels, recipient counts, and links.
-Question, answer, Skill, and Run content never enters the channel payload.
+and mobile mentions; people with neither appear by name. A pending invitation
+appears as "Invited person", so posts never carry an email address. Posts
+carry only workflow names, curated waiting-event labels, recipient counts,
+and links. Question, answer, Skill, and Run content never enters the channel
+payload.
 
 Configure the server and worker with the same `BADGER_NOTIFICATION_KEY`, a
 stable random 32-byte key encoded as 64 hexadecimal characters, and
@@ -47,8 +49,11 @@ database-backed pacing reservation shared by every worker, with at least
 3.1 seconds between send attempts. Five attempts use exponential backoff and
 honor numeric `Retry-After`; final failures remain visible in the workflow's
 Delivery log and never block a gate. Remote error text and webhook URLs are
-never logged. The log shows the prepared message, recipients, robot label,
-status, attempts, and a safe error code. Messages are limited to 2,048 UTF-8
+never logged. The log shows the posted text, robot label, status, attempts,
+and a safe error code, and each recipient's name and count with how the post
+mentioned them (`userid`, `mobile`, or `name` only). Userids and mobile
+numbers stay in the post's mention lists and never appear in the log or in
+Remind's response. Messages are limited to 2,048 UTF-8
 bytes; very large recipient lists retain all structured mentions and full
 Delivery recipients while summarizing overflow display names.
 

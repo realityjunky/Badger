@@ -33,7 +33,12 @@ export interface WaitingItem {
 export interface Delivery {
   id: string;
   robotLabel: string;
-  recipients: { name: string; count: number }[];
+  /** How the post mentioned each person; the log never carries the identifiers. */
+  recipients: {
+    name: string;
+    count: number;
+    mention: "userid" | "mobile" | "name";
+  }[];
   content: { text: { content: string } };
   status: "queued" | "sending" | "retry" | "sent" | "failed" | "cancelled";
   attempts: number;

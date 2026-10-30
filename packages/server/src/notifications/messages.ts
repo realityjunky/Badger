@@ -27,6 +27,32 @@ const EVENT_LABELS: Record<NotificationEvent, { en: string; zh: string }> = {
   "gate-invalidated": { en: "Stage approval superseded", zh: "阶段审批已失效" },
 };
 
+export type RecipientMention = "userid" | "mobile" | "name";
+
+/** A post mentions by WeCom userid, else by mobile number, else names the person only. */
+export function recipientMention(
+  recipient: NotificationRecipient,
+): RecipientMention {
+  return recipient.wecomUserId !== null
+    ? "userid"
+    : recipient.mobile !== null
+      ? "mobile"
+      : "name";
+}
+
+/**
+ * What a Delivery or reminder keeps about its recipients: how each was
+ * mentioned, never the userid or mobile number the chat mentioned them by.
+ */
+export function recordedRecipients(recipients: NotificationRecipient[]) {
+  return recipients.map((recipient) => ({
+    personId: recipient.personId,
+    name: recipient.name,
+    count: recipient.count,
+    mention: recipientMention(recipient),
+  }));
+}
+
 function boundedMetadata(value: string, maxBytes: number): string {
   let result = "";
   for (const character of value) {
@@ -82,16 +108,14 @@ export function notificationMessage(input: {
       mentioned_list: [
         ...new Set(
           recipients.flatMap((person) =>
-            person.wecomUserId === null ? [] : [person.wecomUserId],
+            recipientMention(person) === "userid" ? [person.wecomUserId!] : [],
           ),
         ),
       ],
       mentioned_mobile_list: [
         ...new Set(
           recipients.flatMap((person) =>
-            person.wecomUserId !== null || person.mobile === null
-              ? []
-              : [person.mobile],
+            recipientMention(person) === "mobile" ? [person.mobile!] : [],
           ),
         ),
       ],

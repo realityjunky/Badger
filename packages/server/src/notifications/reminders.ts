@@ -12,7 +12,7 @@ import {
   notificationRecipients,
   type NotificationItemRow,
 } from "./events.js";
-import { notificationMessage } from "./messages.js";
+import { notificationMessage, recordedRecipients } from "./messages.js";
 import { eligibleNotificationItems } from "./eligibility.js";
 import type { ServiceConfig } from "../config.js";
 
@@ -200,7 +200,7 @@ export async function remind(
           robot.robot_key,
           robot.label,
           robot.webhook_ciphertext,
-          JSON.stringify(recipients),
+          JSON.stringify(recordedRecipients(recipients)),
           JSON.stringify(message),
           now,
           items.map((item) => item.id),
@@ -209,6 +209,12 @@ export async function remind(
       );
     }
     const copyText = robot === undefined ? message.text.content : null;
+    // Whoever reminds learns names and counts, never how the chat mentions people.
+    const reminded = recipients.map(({ personId, name, count }) => ({
+      personId,
+      name,
+      count,
+    }));
     await tx.query(
       `insert into notification_reminders (id, workflow_id, item_key, actor_id, recipients, copy_text, delivery_id, created_at)
       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -217,7 +223,7 @@ export async function remind(
         workflowId,
         key,
         person.id,
-        JSON.stringify(recipients),
+        JSON.stringify(reminded),
         copyText,
         deliveryId,
         now,
@@ -234,7 +240,11 @@ export async function remind(
       requestId: context.requestId,
     });
     return {
-      reminder: { id, recipients, createdAt: now.toISOString() },
+      reminder: {
+        id,
+        recipients: reminded.map(({ name, count }) => ({ name, count })),
+        createdAt: now.toISOString(),
+      },
       copyText,
       deliveryId,
       remindAfter: new Date(now.getTime() + 3_600_000).toISOString(),

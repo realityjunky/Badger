@@ -11,7 +11,7 @@ import {
 import type { NotificationChannel, RobotMessage } from "./port.js";
 import { decryptWebhook } from "./secrets.js";
 import { eligibleNotificationItems } from "./eligibility.js";
-import { notificationMessage } from "./messages.js";
+import { notificationMessage, recordedRecipients } from "./messages.js";
 
 interface DeliveryClaim {
   id: string;
@@ -100,7 +100,11 @@ export class NotificationWorker {
         });
         await tx.query(
           "update notification_deliveries set recipients = $2, content = $3 where id = $1",
-          [pending.id, JSON.stringify(recipients), JSON.stringify(content)],
+          [
+            pending.id,
+            JSON.stringify(recordedRecipients(recipients)),
+            JSON.stringify(content),
+          ],
         );
       }
       await tx.query(

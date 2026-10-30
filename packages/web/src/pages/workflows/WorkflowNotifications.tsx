@@ -224,7 +224,8 @@ export function WorkflowNotifications({
                   <p>
                     {delivery.recipients
                       .map(
-                        (recipient) => `${recipient.name}: ${recipient.count}`,
+                        (recipient) =>
+                          `${recipient.name}: ${recipient.count} (${t(`notifications.mention.${recipient.mention}`)})`,
                       )
                       .join(", ")}
                   </p>
