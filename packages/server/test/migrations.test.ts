@@ -4,6 +4,7 @@ import {
   loadBundledMigrations,
   openTestDatabase,
   type Migration,
+  type Queryable,
   type TestDatabase,
 } from "../src/testing/index.js";
 
@@ -772,5 +773,112 @@ describe("the audit schema", () => {
         channel: "web",
       }),
     ).rejects.toThrow(/audit_events_worker_credential_check/u);
+  });
+});
+
+describe("the notification schema", () => {
+  it("gives each transaction a fresh action identity that restored records cannot collide with", async () => {
+    const test = await freshDatabase();
+    await applyMigrations(test.database, await loadBundledMigrations(), clock);
+    await insertPerson(test);
+    await test.database.query(
+      `insert into people (
+         id, issuer, subject, email, display_name, status, revision,
+         created_at, updated_at
+       ) values ('person-2', 'issuer', 'subject-2', 'b@example.com', 'B',
+                 'active', 1, $1, $1)`,
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into groups (id, name, created_at, updated_at) values ('group-1', 'Research', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      `insert into workflows (id, group_id, name, goal, intent, locale, created_at, updated_at)
+       values ('workflow-1', 'group-1', 'sample', 'Goal', 'new-skill', 'en', $1, $1)`,
+      [clock.now()],
+    );
+    await test.database.query(
+      `insert into workflow_versions (id, workflow_id, number, name, goal, intent, locale, stages, created_at, updated_at)
+       values ('version-1', 'workflow-1', 1, 'sample', 'Goal', 'new-skill', 'en', '{}', $1, $1)`,
+      [clock.now()],
+    );
+    // A restore into a fresh cluster restarts its transaction counter, while
+    // restored rows keep the identities their own transactions gave them.
+    const { next } = (
+      await test.database.query<{ next: string }>(
+        "select (txid_current() + 1)::text as next",
+      )
+    ).rows[0]!;
+    const restored = Array.from({ length: 50 }, (_, offset) =>
+      (BigInt(next) + BigInt(offset)).toString(),
+    );
+    await test.database.query(
+      `insert into notification_actions (id, created_at, processed_at)
+       select id, $2, $2 from unnest($1::text[]) as id`,
+      [restored, clock.now()],
+    );
+    await test.database.query(
+      `insert into audit_events (id, occurred_at, actor_person_id, credential_kind, channel,
+         action, target_type, target_id, request_id, notification_action_id)
+       select 'restored-' || id, $2, 'person-1', 'session', 'web', 'question.published',
+         'question', 'question-old', 'request-old', id from unnest($1::text[]) as id`,
+      [restored, clock.now()],
+    );
+
+    const insertItem = (tx: Queryable, id: string, personId: string) =>
+      tx.query(
+        `insert into inbox_items (id, person_id, workflow_version_id, gate, kind, event_id, created_at, updated_at)
+         values ($1, $2, 'version-1', 'dossier', 'gate-ready', $1, $3, $3)`,
+        [id, personId, clock.now()],
+      );
+    // One action: its audit record and every inbox item it creates.
+    await test.database.transaction(async (tx) => {
+      await tx.query(
+        `insert into audit_events (id, occurred_at, actor_person_id, credential_kind, channel,
+           action, target_type, target_id, request_id)
+         values ('event-new', $1, 'person-2', 'session', 'web', 'question.published',
+           'question', 'question-new', 'request-new')`,
+        [clock.now()],
+      );
+      await insertItem(tx, "item-1", "person-1");
+      await insertItem(tx, "item-2", "person-2");
+    });
+    await insertItem(test.database, "item-3", "person-1");
+
+    const items = (
+      await test.database.query<{ id: string; action: string }>(
+        "select id, notification_action_id as action from inbox_items order by id",
+      )
+    ).rows;
+    const audited = (
+      await test.database.query<{ action: string }>(
+        "select notification_action_id as action from audit_events where id = 'event-new'",
+      )
+    ).rows[0]!;
+    expect(items[1]!.action).toBe(items[0]!.action);
+    expect(audited.action).toBe(items[0]!.action);
+    expect(items[2]!.action).not.toBe(items[0]!.action);
+    // Both new actions wait to be routed; neither was mistaken for a restored one.
+    expect(
+      (
+        await test.database.query<{ id: string }>(
+          "select id from notification_actions where processed_at is null",
+        )
+      ).rows
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual([items[0]!.action, items[2]!.action].sort());
+    // Only the new action's own actor is its requester.
+    expect(
+      (
+        await test.database.query(
+          `select distinct actor_person_id from audit_events
+           where notification_action_id = any($1::text[])`,
+          [items.map((item) => item.action)],
+        )
+      ).rows,
+    ).toEqual([{ actor_person_id: "person-2" }]);
+    for (const item of items) expect(restored).not.toContain(item.action);
   });
 });

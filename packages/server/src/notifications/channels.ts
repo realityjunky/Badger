@@ -1,5 +1,6 @@
 import { recordAudit } from "../audit.js";
 import { isAdministrator, mayManageGroup } from "../authorization.js";
+import type { ServiceConfig } from "../config.js";
 import type { Queryable } from "../database/database.js";
 import type { AuthorizedRequest } from "../http/authorized-request.js";
 import { objectInput, RequestError } from "../http/errors.js";
@@ -18,6 +19,16 @@ export interface ChannelRow {
 export interface ChannelScope {
   type: "group" | "workflow";
   id: string;
+}
+
+/** A post needs its webhook decrypted and its link made absolute. */
+export function missingNotificationSettings(config: ServiceConfig): string[] {
+  return [
+    ...(config.notifications.encryptionKey === null
+      ? ["BADGER_NOTIFICATION_KEY"]
+      : []),
+    ...(config.notifications.publicUrl === null ? ["BADGER_PUBLIC_URL"] : []),
+  ];
 }
 
 export function maskedChannel(row: ChannelRow | undefined) {
@@ -103,12 +114,13 @@ export async function saveChannel(
       400,
       "Provide revision, a label up to 80 characters, and language en or zh",
     );
-  const key = input.config.notifications.encryptionKey;
-  if (key === null || input.config.notifications.publicUrl === null)
+  const missing = missingNotificationSettings(input.config);
+  if (missing.length > 0)
     throw new RequestError(
       409,
-      "The deployment must configure BADGER_NOTIFICATION_KEY and BADGER_PUBLIC_URL",
+      `This deployment must set ${missing.join(" and ")} before a robot can be saved`,
     );
+  const key = input.config.notifications.encryptionKey!;
   const { database, dependencies: deps, context } = input;
   return database.transaction(async (tx) => {
     // Lock the scope even before its first channel exists.
@@ -168,11 +180,12 @@ export async function saveChannel(
       },
     };
     await tx.query(
-      `insert into notification_deliveries (id, workflow_id, channel_id, robot_key, robot_label,
-      webhook_ciphertext, recipients, content, available_at, created_at) values ($1,$2,$3,$4,$5,$6,'[]',$7,$8,$8)`,
+      `insert into notification_deliveries (id, workflow_id, group_id, channel_id, robot_key, robot_label,
+      webhook_ciphertext, recipients, content, available_at, created_at) values ($1,$2,$3,$4,$5,$6,$7,'[]',$8,$9,$9)`,
       [
         testDeliveryId,
         channel.workflow_id,
+        channel.group_id,
         id,
         robot,
         channel.label,
@@ -186,8 +199,12 @@ export async function saveChannel(
       channel: context.channel,
       action: "notification_channel.saved",
       target: { type: "notification_channel", id, label: channel.label },
-      before: current ? { revision: current.revision, hash: null } : null,
-      after: { revision, hash: null },
+      // The robot key is an HMAC of the webhook, never the secret itself, so
+      // a different chat shows as a changed hash and a label edit does not.
+      before: current
+        ? { revision: current.revision, hash: current.robot_key }
+        : null,
+      after: { revision, hash: robot },
       reason: "Robot settings saved; test post queued",
       requestId: context.requestId,
     });
@@ -231,7 +248,7 @@ export async function deleteChannel(
         id: current.id,
         label: current.label,
       },
-      before: { revision: current.revision, hash: null },
+      before: { revision: current.revision, hash: current.robot_key },
       after: null,
       reason: "Robot disconnected; pending posts cancelled",
       requestId: context.requestId,

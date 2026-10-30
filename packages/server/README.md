@@ -16,14 +16,24 @@ and reminders** panel. Group leads set defaults in **Settings → Channel
 addresses**; the nearest ancestor Group default applies unless a workflow has
 its own robot. Saving explicitly queues a test post. The saved webhook is
 masked; a replacement is optional when editing its label or chat language.
-Disconnecting cancels queued and retrying posts for that channel.
+Disconnecting cancels queued and retrying posts for that channel. Each post
+through a Group default records its Group: the Group's Delivery log, shown
+beside its robot settings, holds the default's test posts and every
+workflow post it sent. Saving and disconnecting are audited with the robot
+key, an HMAC of the webhook under `BADGER_NOTIFICATION_KEY`, as the before
+and after hash: a label edit keeps the hash, and a different chat changes it,
+without the webhook entering the Activity log.
 
 People set their WeCom userid or mobile in **Settings → Channel addresses**
-and choose mention events in **Settings → Notifications**. Opting out affects
-chat mentions only; inbox items still arrive. Text messages support userid
-and mobile mentions; people with neither appear by name. Posts carry only
-workflow names, curated waiting-event labels, recipient counts, and links.
-Question, answer, Skill, and Run content never enters the channel payload.
+and choose mention events in **Settings → Notifications**. A userid follows
+WeCom's rule: up to 64 letters, digits, and `_-@.`, starting with a letter or
+digit; `@all`, which would mention the whole chat, is refused in any letter
+case. Opting out affects chat mentions only; inbox items still arrive. Text
+messages support userid and mobile mentions; people with neither appear by
+name. A pending invitation appears as "Invited person", so posts never carry
+an email address. Posts carry only workflow names, curated waiting-event
+labels, recipient counts, and links. Question, answer, Skill, and Run content
+never enters the channel payload.
 
 Configure the server and worker with the same `BADGER_NOTIFICATION_KEY`, a
 stable random 32-byte key encoded as 64 hexadecimal characters, and
@@ -32,8 +42,13 @@ stable random 32-byte key encoded as 64 hexadecimal characters, and
 the deployment's secret store and back it up separately from the database.
 Changing or losing it makes existing encrypted robots and queued Deliveries
 unreadable; disconnect and reconnect channels after an intentional key change.
-No robot can be saved before these settings exist. In-app notifications and
-Copy reminder work without them.
+No robot can be saved before these settings exist, and the refusal names the
+missing one. The worker role reads them too: a worker that lacks either, or
+whose key cannot decrypt a robot, records each attempt at a post as a failed
+one with that reason in the Delivery log, and logs it, instead of leaving the
+post queued or dropping it. The post fails after its fifth attempt, so a
+worker with the settings can still send it before then. In-app notifications
+and Copy reminder work without them.
 
 Queued posts recheck current workflow and assignment capabilities before
 delivery. Completed items, revoked recipients, and mention opt-outs are removed;
@@ -44,18 +59,35 @@ The worker role runs notification delivery alongside source checks; local
 single-user mode embeds both. It reads `HTTPS_PROXY` / `https_proxy`,
 `HTTP_PROXY` / `http_proxy`, and `NO_PROXY` / `no_proxy`. Each webhook has one
 database-backed pacing reservation shared by every worker, with at least
-3.1 seconds between send attempts. Five attempts use exponential backoff and
-honor numeric `Retry-After`; final failures remain visible in the workflow's
-Delivery log and never block a gate. Remote error text and webhook URLs are
-never logged. The log shows the prepared message, recipients, robot label,
-status, attempts, and a safe error code. Messages are limited to 2,048 UTF-8
-bytes; very large recipient lists retain all structured mentions and full
-Delivery recipients while summarizing overflow display names.
+3.1 seconds between send attempts. A failed post gets five attempts with
+exponential backoff that honors numeric `Retry-After`. A rate-limited
+response (HTTP 429, or WeCom error 45008 or 45009, which carry no
+`Retry-After`) pauses the robot until its one-minute window has reset, or
+longer when `Retry-After` asks, and does not count toward those five; a post
+still rate limited after 60 attempts fails. Final failures remain visible in
+the workflow's Delivery log, and in the Group's for a Group default, and
+never block a gate. Remote error text and webhook URLs are never logged. The
+log shows the posted text, robot label, status, attempts, and a safe error
+code, and each recipient's name and count with how the post mentioned them
+(`userid`, `mobile`, or `name` only). Userids and mobile numbers stay in the
+post's mention lists and never appear in the log or in Remind's response.
+Messages are limited to 2,048 UTF-8 bytes; very large recipient lists retain
+all structured mentions and full Delivery recipients while summarizing
+overflow display names.
 
 An item's requester, its Workflow owner, and Administrators can **Remind**
 people who still need to act, at most once per logical item per hour across
 all recipients. The reminder and its recipients are audited. Without a robot,
 the same action provides **Copy reminder**, including names and the deep link.
+Remind returns its parts (workflow name, waiting event, names and counts, and
+the item's base-relative link), and the dashboard writes the text in the
+viewer's language with a link from its own origin and base path, so Copy
+reminder needs neither setting. When a robot is set but everyone waiting has
+turned off mentions for the event, a post would reach nobody: nothing is
+posted, no reminder is recorded or audited, the hour does not start, and
+Remind returns Copy reminder's parts instead. Remind resolves who may act
+before it takes the Workflow version's lock, so the hourly limit serializes
+concurrent clicks without the capability checks holding writers.
 Channel writes, preferences, and reminders require a signed-in person; personal
 access tokens cannot change channel settings or send reminders. Actions that
 Agents perform through their existing scopes create the same inbox/outbox
@@ -70,8 +102,9 @@ events as dashboard actions.
 | `DELETE /workflows/:id/notifications/channel`      | Disconnect against `{revision, confirmed: true}`                                  |
 | `GET/PUT/DELETE /groups/:id/notifications/channel` | Group lead/Administrator manages the Group default                                |
 | `GET /workflows/:id/notifications/waiting`         | Current waiting items, recipients, reminder capability, and next eligible time    |
-| `POST /workflows/:id/notifications/remind`         | Send `{itemId, confirmed: true}`; return a queued Delivery or copy text           |
+| `POST /workflows/:id/notifications/remind`         | Send `{itemId, confirmed: true}`; return a queued Delivery or Copy reminder parts |
 | `GET /workflows/:id/notifications/deliveries`      | Owner/Administrator reads the newest 100 Deliveries                               |
+| `GET /groups/:id/notifications/deliveries`         | Group lead/Administrator reads the Group default's newest 100, test posts too     |
 
 All routes use the `/api/v1` prefix and the deployment's base path. Stale
 revisions, a completed waiting item, and the hourly limit return `409`.

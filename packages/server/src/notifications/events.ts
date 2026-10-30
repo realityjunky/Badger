@@ -2,7 +2,7 @@ import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
 import type { ServiceConfig } from "../config.js";
 import { workflowChannel, type ChannelRow } from "./channels.js";
-import { notificationMessage } from "./messages.js";
+import { notificationMessage, recordedRecipients } from "./messages.js";
 import type { NotificationRecipient } from "./port.js";
 import type { NotificationEvent } from "./preferences.js";
 import { eligibleNotificationItems } from "./eligibility.js";
@@ -27,9 +27,10 @@ export interface NotificationItemRow {
   requester_ids: string[];
 }
 
+// Posts never carry an email address, so a pending invitation stays unnamed.
 export const NOTIFICATION_ITEM_SELECT = `select i.id, i.workflow_version_id, v.workflow_id, w.name as workflow_name,
   i.kind, coalesce(i.person_id, b.person_id) as person_id, i.binding_id,
-  coalesce(p.display_name, b.email, 'Invited person') as name,
+  coalesce(p.display_name, 'Invited person') as name,
   prefs.wecom_user_id, prefs.mobile, prefs.mention_events, i.question_id, i.concern_id, i.gate, i.fact_id, i.drafting_job_id,
   array(select distinct a.actor_person_id from audit_events a where a.notification_action_id = i.notification_action_id and a.actor_person_id is not null) as requester_ids
   from inbox_items i join workflow_versions v on v.id = i.workflow_version_id
@@ -119,38 +120,40 @@ export async function routeNotificationAction(
     chat.items.push(...items.filter((item) => item.workflow_id === workflowId));
     chats.set(channel.robot_key, chat);
   }
-  if (config.notifications.publicUrl !== null)
-    for (const { channel, items: records } of chats.values()) {
-      const recipients = notificationRecipients(records);
-      if (recipients.length === 0) continue;
-      const first = records[0]!;
-      const href = notificationHref(records);
-      const content = notificationMessage({
-        workflowNames: [...new Set(records.map((item) => item.workflow_name))],
-        events: records.map((item) => item.kind),
-        recipients,
-        href: `${config.notifications.publicUrl}${href}`,
-        language: channel.language,
-      });
-      await tx.query(
-        `insert into notification_deliveries (id, workflow_id, channel_id, robot_key, robot_label, webhook_ciphertext,
-      recipients, content, available_at, created_at, action_id, item_ids, language) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11,$12) on conflict do nothing`,
-        [
-          deps.ids.next(),
-          first.workflow_id,
-          channel.id,
-          channel.robot_key,
-          channel.label,
-          channel.webhook_ciphertext,
-          JSON.stringify(recipients),
-          JSON.stringify(content),
-          deps.clock.now(),
-          action.id,
-          records.map((item) => item.id),
-          channel.language,
-        ],
-      );
-    }
+  // Without BADGER_PUBLIC_URL the link stays relative. The post is queued all
+  // the same: no worker sends it unlinked, and failing it keeps it visible.
+  for (const { channel, items: records } of chats.values()) {
+    const recipients = notificationRecipients(records);
+    if (recipients.length === 0) continue;
+    const first = records[0]!;
+    const href = notificationHref(records);
+    const content = notificationMessage({
+      workflowNames: [...new Set(records.map((item) => item.workflow_name))],
+      events: records.map((item) => item.kind),
+      recipients,
+      href: `${config.notifications.publicUrl ?? ""}${href}`,
+      language: channel.language,
+    });
+    await tx.query(
+      `insert into notification_deliveries (id, workflow_id, group_id, channel_id, robot_key, robot_label, webhook_ciphertext,
+      recipients, content, available_at, created_at, action_id, item_ids, language) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13) on conflict do nothing`,
+      [
+        deps.ids.next(),
+        first.workflow_id,
+        channel.group_id,
+        channel.id,
+        channel.robot_key,
+        channel.label,
+        channel.webhook_ciphertext,
+        JSON.stringify(recordedRecipients(recipients)),
+        JSON.stringify(content),
+        deps.clock.now(),
+        action.id,
+        records.map((item) => item.id),
+        channel.language,
+      ],
+    );
+  }
   await tx.query(
     "update notification_actions set processed_at = $2 where id = $1",
     [action.id, deps.clock.now()],

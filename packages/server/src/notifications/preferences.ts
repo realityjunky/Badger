@@ -14,6 +14,18 @@ export const NOTIFICATION_EVENTS = [
   "job-submitted",
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
+
+/**
+ * WeCom's userid rule: up to 64 letters, digits, and "_-@.", starting with a
+ * letter or digit. WeCom ignores case, and "@all" in a post's mention list
+ * mentions the whole chat, so neither it nor "all" is anyone's userid.
+ */
+export function isWeComUserId(value: string): boolean {
+  return (
+    /^[a-zA-Z0-9][a-zA-Z0-9_@.-]{0,63}$/u.test(value) &&
+    !["@all", "all"].includes(value.toLowerCase())
+  );
+}
 export interface NotificationPreferences {
   revision: number;
   wecomUserId: string | null;
@@ -61,9 +73,7 @@ export async function saveNotificationPreferences(
     (revision as number) < 0 ||
     !(
       wecomUserId === null ||
-      (typeof wecomUserId === "string" &&
-        /^[a-zA-Z0-9_.-]{1,64}$/u.test(wecomUserId) &&
-        wecomUserId !== "all")
+      (typeof wecomUserId === "string" && isWeComUserId(wecomUserId))
     ) ||
     !(
       mobile === null ||

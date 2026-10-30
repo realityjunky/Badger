@@ -1,6 +1,7 @@
 import { Alert, Button, Checkbox, Form, Input } from "antd";
 import { useEffect, useState } from "react";
 import {
+  isWeComUserId,
   notificationRequest,
   type NotificationEvent,
   type NotificationPreferences,
@@ -104,8 +105,10 @@ export function NotificationSettings({
                 label={t("notifications.wecomUserId")}
                 rules={[
                   {
-                    pattern: /^[a-zA-Z0-9_.-]{1,64}$/u,
-                    message: t("notifications.identityInvalid"),
+                    validator: async (_rule, value: string | undefined) => {
+                      if (value && !isWeComUserId(value))
+                        throw new Error(t("notifications.identityInvalid"));
+                    },
                   },
                 ]}
               >

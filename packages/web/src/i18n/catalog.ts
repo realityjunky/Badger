@@ -92,6 +92,8 @@ const en = {
     "Notifications could not be updated. Reload and try again. Ask your Administrator if the problem continues.",
   "notifications.conflict":
     "This item changed or was reminded within the last hour. Reload before trying again.",
+  "notifications.robotConflict":
+    "The robot settings were not changed. Check the reason below, then reload and try again.",
   "notifications.robotLabel": "Robot label",
   "notifications.webhookUrl": "Robot webhook URL",
   "notifications.replaceWebhook":
@@ -117,12 +119,28 @@ const en = {
     "Remind the people still waiting on this item? Without a robot, you will get text to copy.",
   "notifications.hourlyLimit": "Next reminder available:",
   "notifications.reminderQueued": "Reminder queued.",
+  "notifications.reminderNotPosted":
+    "Nobody waiting on this item gets chat mentions for it, so nothing was posted and no reminder was recorded. Copy the reminder below instead.",
   "notifications.copyReminder": "Copy reminder",
+  "notifications.copyTitle": "Reminder · {workflow}",
+  "notifications.waitingFor.gate-ready": "Approval waiting",
+  "notifications.waitingFor.gate-invalidated": "Stage approval superseded",
+  "notifications.waitingFor.question-assigned": "Questions waiting for answers",
+  "notifications.waitingFor.answer-submitted": "Answers waiting for resolution",
+  "notifications.waitingFor.restatement-ready":
+    "Restatements waiting for acknowledgement",
+  "notifications.waitingFor.question-reopened":
+    "Questions waiting for attention",
+  "notifications.waitingFor.concern-raised": "Concerns waiting for resolution",
+  "notifications.waitingFor.job-submitted": "Drafts waiting for acceptance",
   "notifications.copied": "Reminder copied.",
   "notifications.copyFailed": "Select and copy the reminder text above.",
   "notifications.deliveryLog": "Delivery log",
   "notifications.noDeliveries": "No posts have been queued yet.",
   "notifications.attempts": "Attempts",
+  "notifications.mention.userid": "mentioned by WeCom userid",
+  "notifications.mention.mobile": "mentioned by mobile number",
+  "notifications.mention.name": "named without a mention",
   "notifications.status.queued": "Queued",
   "notifications.status.sending": "Sending",
   "notifications.status.retry": "Retry scheduled",
@@ -1066,6 +1084,8 @@ const zh: Record<MessageId, string> = {
     "无法更新通知。请重新加载后重试；如问题持续，请联系管理员。",
   "notifications.conflict":
     "记录已更改，或一小时内已发送提醒。请重新加载后再试。",
+  "notifications.robotConflict":
+    "机器人设置未更改。请查看下方原因，然后重新加载并重试。",
   "notifications.robotLabel": "机器人名称",
   "notifications.webhookUrl": "机器人 Webhook URL",
   "notifications.replaceWebhook":
@@ -1091,12 +1111,26 @@ const zh: Record<MessageId, string> = {
     "提醒此事项仍在等待的人员？未设置机器人时，将提供可复制的提醒文本。",
   "notifications.hourlyLimit": "下次可提醒时间：",
   "notifications.reminderQueued": "提醒已排队。",
+  "notifications.reminderNotPosted":
+    "此事项的等待人员均未开启群聊提及，因此未发送消息，也未记录提醒。请改为复制下方的提醒。",
   "notifications.copyReminder": "复制提醒",
+  "notifications.copyTitle": "提醒 · {workflow}",
+  "notifications.waitingFor.gate-ready": "等待审批",
+  "notifications.waitingFor.gate-invalidated": "阶段审批已失效",
+  "notifications.waitingFor.question-assigned": "问题等待回答",
+  "notifications.waitingFor.answer-submitted": "回答等待处理",
+  "notifications.waitingFor.restatement-ready": "重述等待确认",
+  "notifications.waitingFor.question-reopened": "问题等待处理",
+  "notifications.waitingFor.concern-raised": "专家关切等待处理",
+  "notifications.waitingFor.job-submitted": "草稿等待验收",
   "notifications.copied": "提醒已复制。",
   "notifications.copyFailed": "请选中上方提醒文本并手动复制。",
   "notifications.deliveryLog": "投递日志",
   "notifications.noDeliveries": "尚无排队的消息。",
   "notifications.attempts": "尝试次数",
+  "notifications.mention.userid": "通过企业微信 userid 提及",
+  "notifications.mention.mobile": "通过手机号码提及",
+  "notifications.mention.name": "仅列出姓名，未提及",
   "notifications.status.queued": "排队中",
   "notifications.status.sending": "发送中",
   "notifications.status.retry": "等待重试",

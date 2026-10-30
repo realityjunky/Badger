@@ -1,13 +1,17 @@
-import { Alert, Button, Collapse, Input, Popconfirm, Space, Tag } from "antd";
+import { Alert, Button, Collapse, Input, Popconfirm } from "antd";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  copyReminderText,
   notificationRequest,
+  type CopyReminder,
   type Delivery,
+  type ReminderResult,
   type WaitingItem,
 } from "../../api/notifications.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { useLiveUpdates } from "../../live/LiveUpdatesContext.js";
+import { DeliveryLog } from "../settings/DeliveryLog.js";
 import { RobotChannelSettings } from "../settings/RobotChannelSettings.js";
 
 export function WorkflowNotifications({
@@ -23,14 +27,27 @@ export function WorkflowNotifications({
   const { notice: live } = useLiveUpdates();
   const [items, setItems] = useState<WaitingItem[]>([]);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
-  const [copyText, setCopyText] = useState<string | null>(null);
+  const [copy, setCopy] = useState<CopyReminder | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<
-    "failed" | "conflict" | "reminderQueued" | "copied" | "copyFailed" | null
+    | "failed"
+    | "conflict"
+    | "reminderQueued"
+    | "reminderNotPosted"
+    | "copied"
+    | "copyFailed"
+    | null
   >(null);
+  // The server's reason for a refusal, shown under the notice.
+  const [reason, setReason] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [now, setNow] = useState(Date.now());
   const route = `/workflows/${encodeURIComponent(workflowId)}/notifications`;
+  // Written in the viewer's current language, linking from this page's origin.
+  const copyText =
+    copy === null
+      ? null
+      : copyReminderText(copy, locale, window.location.origin, basePath);
   useEffect(() => {
     const controller = new AbortController();
     const update = async () => {
@@ -54,7 +71,10 @@ export function WorkflowNotifications({
       ]);
       if (controller.signal.aborted) return;
       if (results[0].kind === "ok") setItems(results[0].value.items);
-      else setNotice("failed");
+      else {
+        setNotice("failed");
+        setReason(results[0].message);
+      }
       if (results[1]?.kind === "ok") setDeliveries(results[1].value.deliveries);
       setNow(Date.now());
     };
@@ -85,9 +105,16 @@ export function WorkflowNotifications({
           type={
             notice === "reminderQueued" || notice === "copied"
               ? "success"
-              : "error"
+              : notice === "reminderNotPosted"
+                ? "warning"
+                : "error"
           }
           message={t(`notifications.${notice}`)}
+          description={
+            notice === "failed" || notice === "conflict"
+              ? reason || undefined
+              : undefined
+          }
         />
       )}
       {mayManage && (
@@ -138,22 +165,24 @@ export function WorkflowNotifications({
                 onConfirm={async () => {
                   setBusy(item.id);
                   setNotice(null);
-                  const result = await notificationRequest<{
-                    copyText: string | null;
-                    deliveryId: string | null;
-                  }>(basePath, `${route}/remind`, "POST", {
-                    itemId: item.id,
-                    confirmed: true,
-                  });
+                  const result = await notificationRequest<ReminderResult>(
+                    basePath,
+                    `${route}/remind`,
+                    "POST",
+                    { itemId: item.id, confirmed: true },
+                  );
                   setBusy(null);
                   if (result.kind === "ok") {
-                    setCopyText(result.value.copyText);
+                    setCopy(result.value.copy);
                     if (result.value.deliveryId) setNotice("reminderQueued");
+                    else if (result.value.reminder === null)
+                      setNotice("reminderNotPosted");
                     setRefresh((value) => value + 1);
                   } else {
                     setNotice(
                       result.kind === "conflict" ? "conflict" : "failed",
                     );
+                    setReason(result.message);
                     setRefresh((value) => value + 1);
                   }
                 }}
@@ -198,46 +227,7 @@ export function WorkflowNotifications({
           </Button>
         </div>
       )}
-      {mayManage && (
-        <>
-          <h3>{t("notifications.deliveryLog")}</h3>
-          {deliveries.length === 0 && (
-            <p className="muted">{t("notifications.noDeliveries")}</p>
-          )}
-          <Collapse
-            items={deliveries.map((delivery) => ({
-              key: delivery.id,
-              label: (
-                <Space wrap>
-                  <span>{delivery.robotLabel}</span>
-                  <Tag>{t(`notifications.status.${delivery.status}`)}</Tag>
-                  <span>
-                    {t("notifications.attempts")}: {delivery.attempts}
-                  </span>
-                  <time>
-                    {new Date(delivery.createdAt).toLocaleString(locale)}
-                  </time>
-                </Space>
-              ),
-              children: (
-                <>
-                  <p>
-                    {delivery.recipients
-                      .map(
-                        (recipient) => `${recipient.name}: ${recipient.count}`,
-                      )
-                      .join(", ")}
-                  </p>
-                  <pre>{delivery.content.text.content}</pre>
-                  {delivery.error && (
-                    <Alert type="error" message={delivery.error} />
-                  )}
-                </>
-              ),
-            }))}
-          />
-        </>
-      )}
+      {mayManage && <DeliveryLog deliveries={deliveries} />}
     </section>
   );
 }

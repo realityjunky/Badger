@@ -145,6 +145,17 @@ them into `dist/`, so the server image carries the build and none of them.
   holders and invitations, and capable people assign or remove roles there.
   Workflow edits and version starts quote the revision the person reviewed;
   a conflict keeps the failed write visible until they reload and review.
+- Workflows include **Notifications and reminders** (#57): waiting items with
+  Remind, and for Workflow owners the team chat's robot settings and its
+  Delivery log. Each logged post shows its robot, status, attempts, text, and
+  recipients with how the post mentioned them, never their userids or mobile
+  numbers. Under **Settings → Channel addresses**, Group leads and
+  Administrators set a Group's default robot; its own Delivery log, polled
+  like the workflow's, shows the default's test posts and failures. A refused
+  robot change or Remind shows the server's reason, such as a setting the
+  deployment still lacks. Copy reminder's text is written in the viewer's
+  language from the parts Remind returns, with an absolute link from the
+  page's origin and base path.
 
 ## Commands
 

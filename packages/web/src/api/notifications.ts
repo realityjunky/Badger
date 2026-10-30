@@ -1,4 +1,7 @@
-import { apiUrl } from "../app/paths.js";
+import { apiUrl, normalizeBasePath } from "../app/paths.js";
+import { formatMessage, message } from "../i18n/catalog.js";
+import type { Language } from "../preferences/model.js";
+import { isRecord } from "../util/records.js";
 
 export type NotificationEvent =
   | "gate-ready"
@@ -15,6 +18,16 @@ export interface NotificationPreferences {
   mobile: string | null;
   mentionEvents: NotificationEvent[];
 }
+/**
+ * WeCom's userid rule, as the server checks it: up to 64 letters, digits,
+ * and "_-@.", starting with a letter or digit, and never "@all" or "all".
+ */
+export function isWeComUserId(value: string): boolean {
+  return (
+    /^[a-zA-Z0-9][a-zA-Z0-9_@.-]{0,63}$/u.test(value) &&
+    !["@all", "all"].includes(value.toLowerCase())
+  );
+}
 export interface RobotChannel {
   id: string;
   label: string;
@@ -30,18 +43,69 @@ export interface WaitingItem {
   canRemind: boolean;
   remindAfter: string | null;
 }
+/** What Remind returns for Copy reminder: the parts, not the text. */
+export interface CopyReminder {
+  workflowName: string;
+  event: NotificationEvent;
+  recipients: { name: string; count: number }[];
+  /** The item's page, relative to the dashboard's base path. */
+  href: string;
+}
+export interface ReminderResult {
+  /** Null when a robot post would have reached nobody, so none was recorded. */
+  reminder: {
+    id: string;
+    recipients: { name: string; count: number }[];
+    createdAt: string;
+  } | null;
+  copy: CopyReminder | null;
+  deliveryId: string | null;
+  remindAfter: string | null;
+}
+
+/**
+ * Ready-to-paste text in the viewer's language. The link starts from the
+ * page's own origin and base path, so it works without BADGER_PUBLIC_URL.
+ */
+export function copyReminderText(
+  copy: CopyReminder,
+  locale: Language,
+  origin: string,
+  basePath: string,
+): string {
+  const base = normalizeBasePath(basePath);
+  return [
+    formatMessage(locale, "notifications.copyTitle", {
+      workflow: copy.workflowName,
+    }),
+    message(locale, `notifications.waitingFor.${copy.event}`),
+    ...copy.recipients.map(
+      (recipient) =>
+        `${recipient.name.replace(/[\r\n]+/gu, " ").slice(0, 80)}: ${recipient.count}`,
+    ),
+    `${origin}${base === "/" ? "" : base}${copy.href}`,
+  ].join("\n");
+}
+
 export interface Delivery {
   id: string;
   robotLabel: string;
-  recipients: { name: string; count: number }[];
+  /** How the post mentioned each person; the log never carries the identifiers. */
+  recipients: {
+    name: string;
+    count: number;
+    mention: "userid" | "mobile" | "name";
+  }[];
   content: { text: { content: string } };
   status: "queued" | "sending" | "retry" | "sent" | "failed" | "cancelled";
   attempts: number;
   error: string | null;
   createdAt: string;
 }
+/** A refusal carries the server's reason, or "" when it gave none. */
 export type NotificationResult<T> =
-  { kind: "ok"; value: T } | { kind: "failed" | "denied" | "conflict" };
+  | { kind: "ok"; value: T }
+  | { kind: "failed" | "denied" | "conflict"; message: string };
 
 export async function notificationRequest<T>(
   basePath: string,
@@ -59,6 +123,7 @@ export async function notificationRequest<T>(
       signal,
     });
     if (response.ok) return { kind: "ok", value: (await response.json()) as T };
+    const refusal: unknown = await response.json().catch(() => null);
     return {
       kind:
         response.status === 409
@@ -66,8 +131,14 @@ export async function notificationRequest<T>(
           : response.status === 403 || response.status === 401
             ? "denied"
             : "failed",
+      message:
+        isRecord(refusal) &&
+        isRecord(refusal.error) &&
+        typeof refusal.error.message === "string"
+          ? refusal.error.message
+          : "",
     };
   } catch {
-    return { kind: "failed" };
+    return { kind: "failed", message: "" };
   }
 }

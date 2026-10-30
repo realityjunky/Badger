@@ -53,7 +53,10 @@ async function call<T = Record<string, unknown>>(
 }
 
 async function setup(
-  options: { realChannel?: boolean; environment?: Record<string, string> } = {},
+  options: {
+    realChannel?: boolean;
+    environment?: Record<string, string | undefined>;
+  } = {},
 ) {
   robot = await startStubWeComRobot();
   service = await startTestService({
@@ -156,7 +159,634 @@ async function publishRound(workflowId: string, versionId: string) {
   return { base, questions };
 }
 
+async function saveMentions(
+  person: TestPerson,
+  wecomUserId: string | null,
+  mobile: string | null,
+) {
+  const { preferences, events } = await call<{
+    preferences: { revision: number };
+    events: string[];
+  }>("GET", "/me/notifications", undefined, person);
+  await call(
+    "PUT",
+    "/me/notifications",
+    {
+      revision: preferences.revision,
+      wecomUserId,
+      mobile,
+      mentionEvents: events,
+    },
+    person,
+  );
+}
+
 describe("WeCom notification channels", () => {
+  it("keeps mention identifiers and invitation addresses out of Remind, the delivery log, and posts", async () => {
+    const { workflowId, versionId } = await setup();
+    const invitation = "pending.expert@example.com";
+    await call(
+      "POST",
+      "/bindings",
+      {
+        scopeType: "workflow",
+        scopeId: workflowId,
+        email: invitation,
+        role: "Field expert",
+      },
+      admin,
+      201,
+    );
+    await saveMentions(engineer, "eng-wecom-7", "13900000007");
+    await saveMentions(expert, null, "13900000008");
+    await call(
+      "PUT",
+      `/workflows/${workflowId}/notifications/channel`,
+      {
+        revision: 0,
+        label: "Research chat",
+        webhookUrl,
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    expect(await service.runNotificationJobs()).toBe(1);
+    const { base } = await publishRound(workflowId, versionId);
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs()).toBe(1);
+    const round = robot.requests.at(-1)!.message;
+    expect(round.text.content).toContain("Invited person: 2");
+    expect(round.text.mentioned_mobile_list).toEqual(["13900000008"]);
+    expect(JSON.stringify(round)).not.toContain(invitation);
+
+    // A Field expert who raised a concern is its requester and may Remind
+    // the Engineers, but never learns how the chat mentions them.
+    await call(
+      "POST",
+      `${base}/concerns`,
+      { text: "PRIVATE CONCERN" },
+      expert,
+      201,
+    );
+    const { items } = await call<{
+      items: {
+        id: string;
+        kind: string;
+        canRemind: boolean;
+        recipients: unknown[];
+      }[];
+    }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/waiting`,
+      undefined,
+      expert,
+    );
+    const concern = items.find((item) => item.kind === "concern-raised")!;
+    expect(concern.canRemind).toBe(true);
+    const reminded = await call<{
+      reminder: { recipients: unknown[] };
+    }>(
+      "POST",
+      `/workflows/${workflowId}/notifications/remind`,
+      { itemId: concern.id, confirmed: true },
+      expert,
+    );
+    expect(reminded.reminder.recipients).toEqual([
+      { name: "engineer", count: 1 },
+    ]);
+    const identifiers = [
+      "eng-wecom-7",
+      "13900000007",
+      "13900000008",
+      invitation,
+    ];
+    for (const identifier of identifiers) {
+      expect(JSON.stringify({ items, reminded })).not.toContain(identifier);
+    }
+    // The reminder queued first; the concern's own post follows it.
+    for (let post = 0; post < 2; post++) {
+      service.clock.advance(3100);
+      expect(await service.runNotificationJobs()).toBe(1);
+      expect(robot.requests.at(-1)!.message.text.mentioned_list).toEqual([
+        "eng-wecom-7",
+      ]);
+    }
+
+    const { deliveries } = await call<{
+      deliveries: {
+        recipients: unknown[];
+        content: { text: Record<string, unknown> };
+      }[];
+    }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/deliveries`,
+      undefined,
+      owner,
+    );
+    expect(deliveries.map((delivery) => delivery.recipients)).toEqual([
+      [{ name: "engineer", count: 1, mention: "userid" }],
+      [{ name: "engineer", count: 1, mention: "userid" }],
+      [
+        { name: "Dr Lin", count: 2, mention: "mobile" },
+        { name: "Invited person", count: 2, mention: "name" },
+      ],
+      [],
+    ]);
+    for (const delivery of deliveries)
+      expect(Object.keys(delivery.content.text)).toEqual(["content"]);
+    for (const identifier of identifiers)
+      expect(JSON.stringify(deliveries)).not.toContain(identifier);
+  });
+  it("shows a Group default's posts and failures to that Group's leads and Administrators", async () => {
+    const { workflowId, versionId, groupId } = await setup();
+    const lead = { subject: "lead", email: "lead@example.com" };
+    await call(
+      "POST",
+      "/bindings",
+      {
+        scopeType: "group",
+        scopeId: groupId,
+        email: lead.email,
+        role: "Group lead",
+      },
+      admin,
+      201,
+    );
+    await call("GET", "/me", undefined, lead);
+    robot.setFailure(200, 93000);
+    await call(
+      "PUT",
+      `/groups/${groupId}/notifications/channel`,
+      {
+        revision: 0,
+        label: "Department",
+        webhookUrl,
+        language: "en",
+        confirmed: true,
+      },
+      lead,
+    );
+    expect(await service.runNotificationJobs()).toBe(1);
+    const route = `/groups/${groupId}/notifications/deliveries`;
+    const failed = await call<{ deliveries: unknown[] }>(
+      "GET",
+      route,
+      undefined,
+      lead,
+    );
+    expect(failed.deliveries).toMatchObject([
+      {
+        robotLabel: "Department",
+        recipients: [],
+        content: { text: { content: "Badger: group robot connection test." } },
+        status: "retry",
+        attempts: 1,
+        error: "WeCom error 93000",
+      },
+    ]);
+    expect(
+      (await call<{ deliveries: unknown[] }>("GET", route)).deliveries,
+    ).toEqual(failed.deliveries);
+    await call("GET", route, undefined, owner, 403);
+    const { secret } = await call<{ secret: string }>(
+      "POST",
+      "/me/tokens",
+      { name: "Lead Agent", scopes: ["engineer"] },
+      lead,
+      201,
+    );
+    const token = await service.request(`/api/v1${route}`, {
+      headers: { authorization: `Bearer ${secret}` },
+    });
+    expect(token.status).toBe(403);
+
+    // The workflow's own posts through the Group default appear in both logs.
+    robot.setFailure(null);
+    await publishRound(workflowId, versionId);
+    for (let post = 0; post < 2; post++) {
+      service.clock.advance(3100);
+      expect(await service.runNotificationJobs()).toBe(1);
+    }
+    const group = await call<{
+      deliveries: { status: string; recipients: unknown[] }[];
+    }>("GET", route, undefined, lead);
+    expect(group.deliveries).toMatchObject([
+      {
+        status: "sent",
+        recipients: [{ name: "Dr Lin", count: 2, mention: "name" }],
+      },
+      { status: "sent", recipients: [], attempts: 2 },
+    ]);
+    const workflow = await call<{ deliveries: unknown[] }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/deliveries`,
+      undefined,
+      owner,
+    );
+    expect(workflow.deliveries).toEqual([group.deliveries[0]]);
+  });
+  it("waits out the robot's rate-limit window without spending the retries meant for failures", async () => {
+    const { workflowId } = await setup();
+    robot.setFailure(200, 45009);
+    await call(
+      "PUT",
+      `/workflows/${workflowId}/notifications/channel`,
+      {
+        revision: 0,
+        label: "Research chat",
+        webhookUrl,
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    expect(await service.runNotificationJobs()).toBe(1);
+    // WeCom's 45009 carries no Retry-After; its window is one minute.
+    for (let attempt = 2; attempt <= 7; attempt++) {
+      service.clock.advance(59_999);
+      expect(await service.runNotificationJobs()).toBe(0);
+      service.clock.advance(1);
+      expect(await service.runNotificationJobs()).toBe(1);
+    }
+    const log = async () =>
+      (
+        await call<{
+          deliveries: { status: string; attempts: number; error: string }[];
+        }>(
+          "GET",
+          `/workflows/${workflowId}/notifications/deliveries`,
+          undefined,
+          owner,
+        )
+      ).deliveries;
+    expect(await log()).toMatchObject([
+      { status: "retry", attempts: 7, error: "WeCom error 45009" },
+    ]);
+    // Ordinary failures still get all five of their attempts.
+    robot.setFailure(200, 93000);
+    service.clock.advance(60_000);
+    expect(await service.runNotificationJobs()).toBe(1);
+    for (const wait of [3100, 6200, 12400]) {
+      service.clock.advance(wait);
+      expect(await service.runNotificationJobs()).toBe(1);
+    }
+    expect(await log()).toMatchObject([
+      { status: "retry", attempts: 11, error: "WeCom error 93000" },
+    ]);
+    service.clock.advance(24800);
+    expect(await service.runNotificationJobs()).toBe(1);
+    expect(await log()).toMatchObject([
+      { status: "failed", attempts: 12, error: "WeCom error 93000" },
+    ]);
+    expect(robot.requests).toHaveLength(12);
+  });
+  it("ends a post that stays rate limited for an hour", async () => {
+    const { workflowId } = await setup();
+    robot.setFailure(200, 45009);
+    await call(
+      "PUT",
+      `/workflows/${workflowId}/notifications/channel`,
+      {
+        revision: 0,
+        label: "Research chat",
+        webhookUrl,
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    for (let attempt = 1; attempt <= 60; attempt++) {
+      expect(await service.runNotificationJobs()).toBe(1);
+      service.clock.advance(60_000);
+    }
+    expect(await service.runNotificationJobs()).toBe(0);
+    const { deliveries } = await call<{ deliveries: unknown[] }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/deliveries`,
+      undefined,
+      owner,
+    );
+    expect(deliveries).toMatchObject([
+      { status: "failed", attempts: 60, error: "WeCom error 45009" },
+    ]);
+  });
+  it("refuses a robot until the deployment has what posts need, naming what is missing", async () => {
+    for (const [index, [missing, present]] of [
+      ["BADGER_PUBLIC_URL", "BADGER_NOTIFICATION_KEY"],
+      ["BADGER_NOTIFICATION_KEY", "BADGER_PUBLIC_URL"],
+    ].entries()) {
+      if (index > 0) {
+        await service.close();
+        await robot.close();
+      }
+      const { workflowId } = await setup({
+        environment: { [missing!]: undefined },
+      });
+      const refused = await call<{ error: { message: string } }>(
+        "PUT",
+        `/workflows/${workflowId}/notifications/channel`,
+        {
+          revision: 0,
+          label: "Research chat",
+          webhookUrl,
+          language: "en",
+          confirmed: true,
+        },
+        owner,
+        409,
+      );
+      expect(refused.error.message).toContain(missing);
+      expect(refused.error.message).not.toContain(present);
+    }
+  });
+  it("records a worker's missing or unusable settings in the delivery log instead of leaving posts queued", async () => {
+    const { workflowId, versionId } = await setup();
+    const save = (revision: number) =>
+      call(
+        "PUT",
+        `/workflows/${workflowId}/notifications/channel`,
+        {
+          revision,
+          label: "Research chat",
+          webhookUrl,
+          language: "en",
+          confirmed: true,
+        },
+        owner,
+      );
+    const log = async () =>
+      (
+        await call<{
+          deliveries: { status: string; attempts: number; error: string }[];
+        }>(
+          "GET",
+          `/workflows/${workflowId}/notifications/deliveries`,
+          undefined,
+          owner,
+        )
+      ).deliveries;
+    await save(0);
+    // Without BADGER_PUBLIC_URL a worker cannot link a post, so it posts
+    // nothing, the test post included, and each attempt says why.
+    const withoutUrl = { environment: { BADGER_PUBLIC_URL: undefined } };
+    expect(await service.runNotificationJobs(withoutUrl)).toBe(1);
+    await publishRound(workflowId, versionId);
+    expect(await service.runNotificationJobs(withoutUrl)).toBe(1);
+    const lacksUrl = "Worker lacks BADGER_PUBLIC_URL";
+    expect(await log()).toMatchObject([
+      { status: "retry", attempts: 1, error: lacksUrl },
+      { status: "retry", attempts: 1, error: lacksUrl },
+    ]);
+    for (const wait of [3100, 6200, 12400, 24800]) {
+      service.clock.advance(wait);
+      expect(await service.runNotificationJobs(withoutUrl)).toBe(2);
+    }
+    expect(await log()).toMatchObject([
+      { status: "failed", attempts: 5, error: lacksUrl },
+      { status: "failed", attempts: 5, error: lacksUrl },
+    ]);
+    // Without the key, or with another one, a worker cannot read the webhook,
+    // but a worker with its settings still sends the post.
+    await save(1);
+    expect(
+      await service.runNotificationJobs({
+        environment: { BADGER_NOTIFICATION_KEY: undefined },
+      }),
+    ).toBe(1);
+    expect((await log())[0]).toMatchObject({
+      status: "retry",
+      attempts: 1,
+      error: "Worker lacks BADGER_NOTIFICATION_KEY",
+    });
+    service.clock.advance(3100);
+    expect(
+      await service.runNotificationJobs({
+        environment: { BADGER_NOTIFICATION_KEY: "cd".repeat(32) },
+      }),
+    ).toBe(1);
+    expect((await log())[0]).toMatchObject({
+      status: "retry",
+      attempts: 2,
+      error: "Worker cannot decrypt the robot with its BADGER_NOTIFICATION_KEY",
+    });
+    expect(robot.requests).toHaveLength(0);
+    service.clock.advance(6200);
+    expect(await service.runNotificationJobs()).toBe(1);
+    expect((await log())[0]).toMatchObject({
+      status: "sent",
+      attempts: 3,
+      error: null,
+    });
+    expect(robot.requests).toHaveLength(1);
+    expect(
+      service.logs.filter(
+        (entry) =>
+          entry.event === "worker.notification-settings" &&
+          entry.level === "error",
+      ),
+    ).toHaveLength(12);
+    expect(JSON.stringify(service.logs)).not.toContain("test-secret");
+  });
+  it("offers copy text without recording a reminder or starting the hour when a post would reach nobody", async () => {
+    const { workflowId, versionId } = await setup();
+    await call(
+      "PUT",
+      `/workflows/${workflowId}/notifications/channel`,
+      {
+        revision: 0,
+        label: "Research chat",
+        webhookUrl,
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    expect(await service.runNotificationJobs()).toBe(1);
+    // The only person waiting has turned chat mentions off for every event.
+    await call(
+      "PUT",
+      "/me/notifications",
+      { revision: 0, wecomUserId: "lin", mobile: null, mentionEvents: [] },
+      expert,
+    );
+    const { questions } = await publishRound(workflowId, versionId);
+    const waiting = async () =>
+      (
+        await call<{
+          items: {
+            id: string;
+            questionId: string;
+            href: string;
+            remindAfter: string | null;
+          }[];
+        }>(
+          "GET",
+          `/workflows/${workflowId}/notifications/waiting`,
+          undefined,
+          engineer,
+        )
+      ).items.find((entry) => entry.questionId === questions[0]!.id)!;
+    const item = await waiting();
+    for (let click = 0; click < 2; click++) {
+      const reminded = await call(
+        "POST",
+        `/workflows/${workflowId}/notifications/remind`,
+        { itemId: item.id, confirmed: true },
+        engineer,
+      );
+      expect(reminded).toEqual({
+        reminder: null,
+        deliveryId: null,
+        remindAfter: null,
+        copy: {
+          workflowName: "sample-workflow",
+          event: "question-assigned",
+          recipients: [{ name: "Dr Lin", count: 1 }],
+          href: item.href,
+        },
+      });
+    }
+    expect((await waiting()).remindAfter).toBeNull();
+    const { events } = await call<{ events: unknown[] }>(
+      "GET",
+      "/audit-events?action=reminder.created",
+    );
+    expect(events).toEqual([]);
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs()).toBe(0);
+    expect(robot.requests).toHaveLength(1);
+  });
+  it("keeps one reminder an hour when two people remind the same item at once", async () => {
+    const { workflowId, versionId } = await setup();
+    const { questions } = await publishRound(workflowId, versionId);
+    const { items } = await call<{
+      items: { id: string; questionId: string }[];
+    }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/waiting`,
+      undefined,
+      engineer,
+    );
+    const item = items.find((entry) => entry.questionId === questions[0]!.id)!;
+    const clicks = await Promise.all(
+      [engineer, owner].map((person) =>
+        service.request(
+          `/api/v1/workflows/${workflowId}/notifications/remind`,
+          {
+            as: person,
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              origin: "http://localhost",
+            },
+            body: JSON.stringify({ itemId: item.id, confirmed: true }),
+          },
+        ),
+      ),
+    );
+    expect(clicks.map((response) => response.status).sort()).toEqual([
+      200, 409,
+    ]);
+    const { events } = await call<{ events: unknown[] }>(
+      "GET",
+      "/audit-events?action=reminder.created",
+    );
+    expect(events).toHaveLength(1);
+  });
+  it("returns Copy reminder's parts for the dashboard to compose without BADGER_PUBLIC_URL", async () => {
+    const { workflowId, versionId } = await setup({
+      environment: {
+        BADGER_PUBLIC_URL: undefined,
+        BADGER_NOTIFICATION_KEY: undefined,
+      },
+    });
+    const { questions } = await publishRound(workflowId, versionId);
+    const { items } = await call<{
+      items: { id: string; questionId: string; href: string }[];
+    }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/waiting`,
+      undefined,
+      engineer,
+    );
+    const item = items.find((entry) => entry.questionId === questions[0]!.id)!;
+    const reminded = await call<Record<string, unknown>>(
+      "POST",
+      `/workflows/${workflowId}/notifications/remind`,
+      { itemId: item.id, confirmed: true },
+      engineer,
+    );
+    // The page's origin and base path, and the viewer's language, make the text.
+    expect(reminded).toMatchObject({
+      reminder: { recipients: [{ name: "Dr Lin", count: 1 }] },
+      deliveryId: null,
+      copy: {
+        workflowName: "sample-workflow",
+        event: "question-assigned",
+        recipients: [{ name: "Dr Lin", count: 1 }],
+        href: `/questionnaire/questions/${questions[0]!.id}`,
+      },
+    });
+    expect(reminded).not.toHaveProperty("copyText");
+    await call(
+      "POST",
+      `/workflows/${workflowId}/notifications/remind`,
+      { itemId: item.id, confirmed: true },
+      owner,
+      409,
+    );
+  });
+  it("audits which robot a channel posts through, without the webhook", async () => {
+    const { workflowId } = await setup();
+    const route = `/workflows/${workflowId}/notifications/channel`;
+    const save = (revision: number, label: string, url?: string) =>
+      call(
+        "PUT",
+        route,
+        {
+          revision,
+          label,
+          ...(url === undefined ? {} : { webhookUrl: url }),
+          language: "en",
+          confirmed: true,
+        },
+        owner,
+      );
+    await save(0, "Research chat", webhookUrl);
+    await save(1, "Renamed chat");
+    await save(
+      2,
+      "Renamed chat",
+      webhookUrl.replace("test-secret", "other-secret"),
+    );
+    await call("DELETE", route, { revision: 3, confirmed: true }, owner);
+    const { events } = await call<{
+      events: {
+        action: string;
+        before: { revision: number; hash: string } | null;
+        after: { revision: number; hash: string } | null;
+      }[];
+    }>("GET", "/audit-events?targetType=notification_channel");
+    const [disconnected, swapped, renamed, connected] = events;
+    expect(events.map((event) => event.action)).toEqual([
+      "notification_channel.disconnected",
+      "notification_channel.saved",
+      "notification_channel.saved",
+      "notification_channel.saved",
+    ]);
+    const first = connected!.after!.hash;
+    expect(first).toMatch(/^[a-f0-9]{64}$/u);
+    expect(connected!.before).toBeNull();
+    // A label edit keeps the robot; a new webhook is a different robot.
+    expect(renamed!.before).toEqual({ revision: 1, hash: first });
+    expect(renamed!.after).toEqual({ revision: 2, hash: first });
+    expect(swapped!.before).toEqual({ revision: 2, hash: first });
+    expect(swapped!.after!.hash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(swapped!.after!.hash).not.toBe(first);
+    expect(disconnected!.before).toEqual(swapped!.after);
+    expect(JSON.stringify(events)).not.toContain("secret");
+  });
   it("drops a removed expert from queued mentions and reminder recipients", async () => {
     const { workflowId, versionId } = await setup();
     const { binding } = await call<{
@@ -479,13 +1109,17 @@ describe("WeCom notification channels", () => {
     );
     const reminder = await call<{
       reminder: { id: string; recipients: { name: string }[] };
-      copyText: string;
+      copy: unknown;
       deliveryId: string | null;
     }>("POST", reminderRoute, { itemId: item.id, confirmed: true }, engineer);
     expect(reminder.deliveryId).toBeNull();
-    expect(reminder.copyText).toContain("Dr Lin");
-    expect(reminder.copyText).toContain(item.href);
-    expect(reminder.copyText).not.toContain("PRIVATE");
+    expect(reminder.copy).toEqual({
+      workflowName: "sample-workflow",
+      event: "question-assigned",
+      recipients: [{ name: "Dr Lin", count: 1 }],
+      href: item.href,
+    });
+    expect(JSON.stringify(reminder)).not.toContain("PRIVATE");
     expect(await service.runNotificationJobs()).toBe(0);
     await call(
       "POST",
@@ -610,6 +1244,9 @@ describe("WeCom notification channels", () => {
     service.clock.advance(3099);
     expect(await service.runNotificationJobs()).toBe(0);
     service.clock.advance(3801);
+    // Retry-After cannot cut the robot's one-minute rate-limit window short.
+    expect(await service.runNotificationJobs()).toBe(0);
+    service.clock.advance(50_000);
     robot.setFailure(null);
     expect(await service.runNotificationJobs()).toBe(1);
     const { deliveries } = await call<{
@@ -813,18 +1450,33 @@ describe("WeCom notification channels", () => {
       expert,
       409,
     );
-    await call(
-      "PUT",
-      "/me/notifications",
-      { revision: 1, wecomUserId: "@all", mobile: null, mentionEvents: [] },
-      expert,
-      400,
-    );
-    await call(
+    // "@all" mentions the whole chat, so no letter case of it is a userid.
+    for (const wecomUserId of ["@all", "@ALL", "@All", "ALL", "@lin"])
+      await call(
+        "PUT",
+        "/me/notifications",
+        { revision: 1, wecomUserId, mobile: null, mentionEvents: [] },
+        expert,
+        400,
+      );
+    // WeCom userids may contain "@" after a leading letter or digit.
+    const withAt = await call<{ preferences: { wecomUserId: string } }>(
       "PUT",
       "/me/notifications",
       {
         revision: 1,
+        wecomUserId: "lin.wei@lab-2_x",
+        mobile: null,
+        mentionEvents: ["question-assigned"],
+      },
+      expert,
+    );
+    expect(withAt.preferences.wecomUserId).toBe("lin.wei@lab-2_x");
+    await call(
+      "PUT",
+      "/me/notifications",
+      {
+        revision: 2,
         wecomUserId: null,
         mobile: null,
         mentionEvents: ["bogus"],

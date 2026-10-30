@@ -95,7 +95,15 @@ export interface TestService {
   ): SourceCheckWorker;
   /** Drains workflow jobs (source checks and initialization); returns how many ran. */
   runSourceCheckJobs(): Promise<number>;
-  runNotificationJobs(): Promise<number>;
+  /**
+   * Routes pending actions, then handles posts until none is ready; returns
+   * how many posts it sent or recorded as failed. `environment` is layered
+   * over the service's settings, as a worker role deployed with other
+   * settings would read them.
+   */
+  runNotificationJobs(settings?: {
+    environment?: Readonly<Record<string, string | undefined>>;
+  }): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -314,13 +322,24 @@ export async function startTestService(
       while ((await running.runOnce()) !== null) processed += 1;
       return processed;
     },
-    runNotificationJobs: async () => {
+    runNotificationJobs: async (settings = {}) => {
       const running = new NotificationWorker({
         database: connection.database,
         dependencies: { clock, ids },
-        config,
+        config:
+          settings.environment === undefined
+            ? config
+            : {
+                ...loadConfig({
+                  ...harnessEnvironment(mode, root),
+                  ...options.environment,
+                  ...settings.environment,
+                }),
+                database: config.database,
+              },
         channel:
           options.notificationChannel ?? new WeComChannel(config.notifications),
+        logger,
       });
       await running.routePending();
       let processed = 0;

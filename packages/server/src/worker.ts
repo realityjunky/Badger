@@ -84,6 +84,7 @@ export async function runNotificationWorker(
     config: options.config,
     dependencies: { clock: systemClock, ids: randomIdSource },
     channel: new WeComChannel(options.config.notifications),
+    logger: options.logger,
   });
   while (!signal?.aborted) {
     try {
