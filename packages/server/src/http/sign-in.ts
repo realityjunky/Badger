@@ -110,7 +110,9 @@ export async function handleBrowserSignIn(input: {
     });
   };
   if (path === "/auth/oidc/login") {
-    const result = await identity.browser.begin();
+    const result = await identity.browser.begin(
+      url.searchParams.get("returnTo"),
+    );
     if ("kind" in result) failed("login", result);
     else
       redirect(result.authorizationUrl, [
@@ -138,7 +140,7 @@ export async function handleBrowserSignIn(input: {
         result.principal,
         reply.requestId,
       );
-      redirect(`${prefix}/`, [
+      redirect(result.returnPath, [
         cookie(settings.sessionCookie, sessionToken, settings.sessionSeconds),
         cookie(flowCookieName, "", 0),
       ]);

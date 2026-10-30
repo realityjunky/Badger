@@ -375,6 +375,15 @@ round or a historical round with no publication baseline returns 409 rather
 than inventing history. Publication and automatic follow-up rounds capture
 their baseline atomically; retries keep the original.
 
+The record reader locks the Workflow version before reading questions,
+resolutions, answers, Source study, drafts, and facts, and holds that lock
+until its transaction commits. Questionnaire writes, Source study changes,
+Skill pin changes, and drafting acceptance take the same version lock.
+Consequently a ledger response and a published round's baseline each see
+one consistent state even though their records require several SQL queries.
+Postgres uses its normal READ COMMITTED isolation: competing requests wait
+for the version lock rather than failing from snapshot isolation conflicts.
+
 The service delegates ledger membership and readiness to the kernel's
 record-based questionnaire handoff. Confirmed user facts must be active and
 acknowledged by every person whose answer they restate. Blockers identify

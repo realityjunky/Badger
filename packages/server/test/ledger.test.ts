@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import type { QuestionnaireLedgerItem } from "@realityjunky/badger";
 import {
   startTestService,
   type TestPerson,
@@ -171,6 +172,116 @@ async function answer(base: string, id: string) {
 }
 
 describe("the questionnaire ledger and readiness", () => {
+  it.skipIf(process.env["BADGER_TEST_DATABASE_URL"] === undefined)(
+    "keeps ledger reads and publication baselines coherent while people confirm facts on Postgres",
+    async () => {
+      const { questionnaire: base, expertId } = await setup();
+      const confirmations = [];
+      const publications = [];
+      for (let index = 0; index < 6; index += 1) {
+        const candidate = await round(base, expertId);
+        await publish(base, candidate.round.id);
+        await answer(base, candidate.question.id);
+        confirmations.push(candidate.question.id);
+        publications.push((await round(base, expertId, "inputs")).round.id);
+      }
+
+      const coherent = (items: QuestionnaireLedgerItem[]) => {
+        for (const fact of items.filter(
+          (item) => item.record.type === "confirmed-fact",
+        )) {
+          const question = items.find(
+            (item) =>
+              item.record.type === "question" &&
+              item.record.id ===
+                fact.relatedRecords.find((record) => record.type === "question")
+                  ?.id,
+          );
+          const resolution = fact.relatedRecords.find(
+            (record) => record.type === "resolution",
+          );
+          expect(question?.resolution).toMatchObject({
+            id: resolution?.id,
+            revision: resolution?.revision,
+            kind: "confirmed",
+          });
+        }
+      };
+
+      await Promise.all([
+        (async () => {
+          for (const questionId of confirmations) {
+            await sign(
+              base,
+              `questions/${questionId}`,
+              "resolution-preview",
+              "resolve",
+              {
+                revision: 1,
+                kind: "confirmed",
+                facts: [
+                  {
+                    text: "Use sample_id and sequence.",
+                    answers: [{ personId: expertId, revision: 2 }],
+                  },
+                ],
+              },
+            );
+            const fact = (await call(base)).facts.find(
+              (record: { questionId: string }) =>
+                record.questionId === questionId,
+            );
+            await sign(
+              base,
+              `facts/${fact.id}`,
+              "acknowledgement-preview",
+              "acknowledge",
+              { decision: "acknowledged" },
+              expert,
+            );
+          }
+        })(),
+        (async () => {
+          for (const id of publications) await publish(base, id);
+        })(),
+        ...[engineer, observer].map(async (as) => {
+          for (let index = 0; index < 18; index += 1) {
+            const { handoff } = await call(
+              `${base}/ledger`,
+              "GET",
+              undefined,
+              as,
+            );
+            coherent(handoff.items);
+          }
+        }),
+      ]);
+
+      const current = await call(`${base}/ledger`);
+      expect(current.handoff.ledger.confirmedUserFacts).toHaveLength(6);
+      for (const id of publications) {
+        const { handoff, changes } = await call(
+          `${base}/ledger?sinceRound=${id}`,
+        );
+        // Reconstruct the stored baseline through the public comparison API.
+        const baseline = new Map<string, QuestionnaireLedgerItem>(
+          handoff.items.map((item: QuestionnaireLedgerItem) => [
+            `${item.record.type}:${item.record.id}`,
+            item,
+          ]),
+        );
+        for (const item of changes.added)
+          baseline.delete(`${item.record.type}:${item.record.id}`);
+        for (const { before } of [...changes.changed, ...changes.resolved])
+          baseline.set(`${before.record.type}:${before.record.id}`, before);
+        coherent([...baseline.values()]);
+      }
+      expect(service.logs.filter((entry) => entry.level === "error")).toEqual(
+        [],
+      );
+    },
+  );
+
   it("reports submitted answer revisions changed since a round while keeping private answer drafts hidden", async () => {
     const { questionnaire: base, expertId } = await setup();
     const first = await round(base, expertId);

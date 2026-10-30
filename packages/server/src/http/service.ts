@@ -770,7 +770,7 @@ export function createService(options: ServiceOptions, port: number): Service {
             401,
             renderSignedOutPage(
               config.identity.kind === "oidc"
-                ? `${config.basePath === "/" ? "" : config.basePath}/auth/oidc/login`
+                ? `${config.basePath === "/" ? "" : config.basePath}/auth/oidc/login?${new URLSearchParams({ returnTo: `${url.pathname}${url.search}` })}`
                 : undefined,
             ),
           );
