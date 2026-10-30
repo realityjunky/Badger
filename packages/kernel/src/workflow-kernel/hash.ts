@@ -109,6 +109,49 @@ function digestHashEntries(files: readonly HashEntry[]): string {
   return hash.digest("hex");
 }
 
+/** The same canonical directory digest for portable regular package files. */
+export function hashPackageFiles(
+  files: readonly { path: string; content: Uint8Array }[],
+): string {
+  const seen = new Set<string>();
+  const entries = files.map((file) => {
+    if (
+      !file.path ||
+      file.path.includes("\\") ||
+      file.path.includes("\0") ||
+      file.path
+        .split("/")
+        .some((part) => !part || part === "." || part === "..") ||
+      path.posix.isAbsolute(file.path) ||
+      /^[A-Za-z]:/u.test(file.path) ||
+      seen.has(file.path)
+    )
+      throw new Error("Package file path is unsafe or repeated");
+    seen.add(file.path);
+    return {
+      relativePath: file.path,
+      kind: "file" as const,
+      content: Buffer.from(file.content),
+    };
+  });
+  for (const file of seen) {
+    const parts = file.split("/");
+    for (let i = 1; i < parts.length; i++)
+      if (seen.has(parts.slice(0, i).join("/")))
+        throw new Error("Package file paths conflict");
+  }
+  entries.sort((left, right) => {
+    const a = left.relativePath.split("/"),
+      b = right.relativePath.split("/");
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      const order = compareText(a[i], b[i]);
+      if (order) return order;
+    }
+    return a.length - b.length;
+  });
+  return digestHashEntries(entries);
+}
+
 export async function hashDirectory(root: string): Promise<string> {
   const absoluteRoot = path.resolve(root);
   const stats = await fs.lstat(absoluteRoot);

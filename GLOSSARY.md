@@ -195,6 +195,12 @@ A point where work waits for a person's explicit confirmation or answer, bound t
 **Personal access token**:
 A person's credential for their Agents and the CLI, limited to the scopes they chose and never valid for an action reserved for people.
 
+**Package review**:
+The signed-in Reviewer's approval of one exact assembled package hash and its passing evaluation evidence. The Reviewer must have accepted no Authoring lane for that Workflow version; an Administrator may override that independence rule with a recorded reason.
+
+**Published package**:
+The exact reviewed and evaluated package bytes permanently made available by the Workflow owner. Later authoring, regeneration, or new Workflow versions preserve earlier published packages for installation and Runs.
+
 **MCP profile**:
 One of the three tool sets the Badger MCP offers an Agent, for engineer, expert, or operator work.
 

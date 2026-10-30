@@ -1173,6 +1173,8 @@ export async function approveReview(options: {
   state: CreatorState;
   reviewer: string;
   approve: boolean;
+  /** Service sign-off stores its own immutable evidence, leaving Creator state intact. */
+  persistState?: boolean;
 }): Promise<CreatorState> {
   if (!options.approve) throw new Error("Review approval was not confirmed");
   if (!options.reviewer.trim())
@@ -1247,13 +1249,14 @@ export async function approveReview(options: {
     approvalHash: publicationApprovalHash(review),
   };
   options.state.status = "review-approved";
-  await writeState(options.state);
+  if (options.persistState !== false) await writeState(options.state);
   return options.state;
 }
 
 export async function publishState(
   state: CreatorState,
   confirmed = false,
+  options: { persistState?: boolean; destination?: string } = {},
 ): Promise<CreatorState> {
   if (!confirmed) throw new Error("Publication requires explicit confirmation");
   const gate = await publicationGate(state, confirmed);
@@ -1274,14 +1277,24 @@ export async function publishState(
   if (packageHashBeforeCopy !== approvedPackageHash) {
     throw new Error("Generated package changed before publication");
   }
-  const destination = path.join(
-    state.projectRoot,
-    ".badger",
-    "published",
-    state.name,
-  );
+  const destination = options.destination
+    ? path.resolve(state.projectRoot, options.destination)
+    : path.join(state.projectRoot, ".badger", "published", state.name);
+  if (
+    !isWithin(state.projectRoot, destination) ||
+    destination === path.resolve(state.projectRoot)
+  )
+    throw new Error("Publication destination must remain inside the Project");
   await ensureDirectory(path.dirname(destination));
-  await fs.rm(destination, { recursive: true, force: true });
+  if (options.destination) {
+    if (
+      !isWithin(
+        await fs.realpath(state.projectRoot),
+        await fs.realpath(path.dirname(destination)),
+      )
+    )
+      throw new Error("Publication destination escapes the Project");
+  } else await fs.rm(destination, { recursive: true, force: true });
   await copyDirectory(state.generated!.packageRoot, destination);
   const publishedHash = await hashDirectory(destination);
   if (publishedHash !== approvedPackageHash) {
@@ -1294,7 +1307,7 @@ export async function publishState(
     at: new Date().toISOString(),
   };
   state.status = "published";
-  await writeState(state);
+  if (options.persistState !== false) await writeState(state);
   return state;
 }
 

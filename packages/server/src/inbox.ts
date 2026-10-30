@@ -101,19 +101,21 @@ function toItem(row: InboxRow): InboxItem {
     state: row.state,
     revision: row.revision,
     href:
-      row.evaluation_report_id !== null
-        ? `/evaluations?workflow=${encodeURIComponent(row.workflow_id)}&version=${encodeURIComponent(row.workflow_version_id)}&report=${encodeURIComponent(row.evaluation_report_id)}`
-        : row.gate === "generation" || row.gate === "package"
-          ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#package`
-          : row.gate === "plan"
-            ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#plan`
-            : row.drafting_job_id !== null
-              ? `/questionnaire?workflow=${encodeURIComponent(row.workflow_id)}&version=${encodeURIComponent(row.workflow_version_id)}&panel=suggestions`
-              : row.concern_id !== null
-                ? `/questionnaire/concerns/${encodeURIComponent(row.concern_id)}`
-                : row.question_id === null
-                  ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#${encodeURIComponent(row.gate)}`
-                  : `/questionnaire/questions/${encodeURIComponent(row.question_id)}`,
+      row.gate === "publication"
+        ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#review-publication`
+        : row.evaluation_report_id !== null
+          ? `/evaluations?workflow=${encodeURIComponent(row.workflow_id)}&version=${encodeURIComponent(row.workflow_version_id)}&report=${encodeURIComponent(row.evaluation_report_id)}`
+          : row.gate === "generation" || row.gate === "package"
+            ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#package`
+            : row.gate === "plan"
+              ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#plan`
+              : row.drafting_job_id !== null
+                ? `/questionnaire?workflow=${encodeURIComponent(row.workflow_id)}&version=${encodeURIComponent(row.workflow_version_id)}&panel=suggestions`
+                : row.concern_id !== null
+                  ? `/questionnaire/concerns/${encodeURIComponent(row.concern_id)}`
+                  : row.question_id === null
+                    ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#${encodeURIComponent(row.gate)}`
+                    : `/questionnaire/questions/${encodeURIComponent(row.question_id)}`,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };

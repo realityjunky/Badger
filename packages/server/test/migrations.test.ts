@@ -55,6 +55,19 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("keeps package reviews and published bytes immutable", async () => {
+    const test = await freshDatabase();
+    await applyMigrations(test.database, await loadBundledMigrations(), clock);
+    for (const table of ["package_reviews", "published_packages"])
+      for (const statement of [
+        `update ${table} set package_hash='${"a".repeat(64)}'`,
+        `delete from ${table}`,
+        `truncate ${table} cascade`,
+      ])
+        await expect(test.database.query(statement), statement).rejects.toThrow(
+          /immutable/u,
+        );
+  });
   it("reserves an audit Agent host for token credentials", async () => {
     const test = await freshDatabase();
     await applyMigrations(test.database, await loadBundledMigrations(), clock);
@@ -247,7 +260,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0029");
+    expect(upgraded.applied.at(-1)).toBe("0030");
     expect(
       (
         await test.database.query(
@@ -401,6 +414,7 @@ describe("reviewed SQL migrations", () => {
       "0027",
       "0028",
       "0029",
+      "0030",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -437,6 +451,7 @@ describe("reviewed SQL migrations", () => {
         "0027",
         "0028",
         "0029",
+        "0030",
       ],
       pending: [],
       drifted: [],
@@ -475,12 +490,14 @@ describe("reviewed SQL migrations", () => {
       "notification_robots",
       "oidc_transactions",
       "package_assembly_requests",
+      "package_reviews",
       "people",
       "person_notification_preferences",
       "person_preferences",
       "personal_access_tokens",
       "plan_heads",
       "plan_versions",
+      "published_packages",
       "question_answers",
       "question_comments",
       "question_imports",
@@ -554,6 +571,7 @@ describe("reviewed SQL migrations", () => {
         "0027",
         "0028",
         "0029",
+        "0030",
       ],
       pending: [],
       drifted: [],
@@ -561,7 +579,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(29);
+    expect(rows.rows[0]?.count).toBe(30);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

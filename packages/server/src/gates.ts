@@ -111,6 +111,7 @@ export async function commitGate(
     active: GateConfirmation,
     state: GateState,
   ) => Promise<boolean>,
+  onConfirm?: (tx: Queryable, confirmation: GateConfirmation) => Promise<void>,
 ): Promise<GateCommitResult> {
   const replay = async (tx: Queryable): Promise<GateCommitResult | null> => {
     const previous = await tx.query<{
@@ -189,6 +190,7 @@ export async function commitGate(
           where workflow_version_id = $1 and gate = $2 and invalidated_at is not null and superseded_by is null`,
         [versionId, gate, confirmation.id],
       );
+      await onConfirm?.(tx, confirmation);
       await tx.query(
         `update workflow_versions set stages = stages || $2::jsonb, revision = revision + 1, updated_at = $3 where id = $1`,
         [

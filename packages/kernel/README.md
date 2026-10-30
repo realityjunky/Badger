@@ -681,3 +681,14 @@ The fixtures use only disposable synthetic files and do not authorize domain
 execution or package installation.
 
 See `docs/workflow-runtime-certification.md` for the certification contract.
+
+The collaborative service may call `approveReview({..., persistState:false})`
+and `publishState(state, true, {persistState:false, destination})` over cloned
+Creator state. All kernel readiness checks still apply. An explicit publication
+destination must be inside the Project and must not already exist; standalone
+callers retain the normal persisted lifecycle and default publication location.
+`createPackageSnapshot(root, inventory)` captures regular package files as
+portable base64 bytes, inventory and canonical package hash;
+`verifyPackageSnapshot(snapshot)` verifies them with the same directory hash
+algorithm. These public seams support immutable service publications and host/Run
+consumers without reproducing package identity rules in adapters.
