@@ -70,7 +70,7 @@ export function SkillsPage() {
   const [versions, setVersions] = useState<SkillVersion[] | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading] = useState<"upload" | "git" | null>(null);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<{ groupId: string; name: string }>();
   const selectedSkill =
@@ -164,9 +164,14 @@ export function SkillsPage() {
               </Button>
             )}
             {selectedSkill?.canUpload && (
-              <Button type="primary" onClick={() => setUploading(true)}>
-                {t("skills.upload")}
-              </Button>
+              <>
+                <Button onClick={() => setUploading("git")}>
+                  {t("skills.importGit")}
+                </Button>
+                <Button type="primary" onClick={() => setUploading("upload")}>
+                  {t("skills.upload")}
+                </Button>
+              </>
             )}
           </Space>
         }
@@ -275,6 +280,14 @@ export function SkillsPage() {
                     ) : (
                       <>
                         <p>{version.description}</p>
+                        {version.gitOrigins?.map((origin) => (
+                          <p
+                            className="skills-hash"
+                            key={`${origin.repositoryId}:${origin.commit}`}
+                          >
+                            {origin.repository} · {origin.commit}
+                          </p>
+                        ))}
                         <code className="skills-hash">{version.hash}</code>
                         <Tabs
                           activeKey={tab}
@@ -430,13 +443,14 @@ export function SkillsPage() {
         </Form>
         {failure !== null && <Alert type="error" title={failure} />}
       </Modal>
-      {uploading && selectedSkill !== null && catalog !== null && (
+      {uploading !== null && selectedSkill !== null && catalog !== null && (
         <UploadSkillModal
           skill={selectedSkill}
           limits={catalog.limits}
-          onClose={() => setUploading(false)}
+          source={uploading}
+          onClose={() => setUploading(null)}
           onUploaded={(uploaded) => {
-            setUploading(false);
+            setUploading(null);
             setVersions((current) => [
               uploaded,
               ...(current ?? []).filter(

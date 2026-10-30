@@ -8,9 +8,15 @@ import {
   previewFile,
   readSkill,
   readVersion,
-  uploadVersion,
+  createVersion,
+  versionConfirmation,
 } from "../skills/library.js";
 import { inspectUpload, uploadEnvelopeBytes } from "../skills/upload.js";
+import {
+  inspectRepository,
+  listRepositories,
+  registerRepository,
+} from "../skills/repositories.js";
 import { skillGroupPermissions } from "../skills/access.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
@@ -22,7 +28,8 @@ const SKILL_ROUTES: readonly [RegExp, string][] = [
   [/^\/api\/v1\/skills$/u, "GET, HEAD, POST"],
   [/^\/api\/v1\/skills\/[^/]+$/u, "GET, HEAD"],
   [/^\/api\/v1\/skills\/[^/]+\/versions$/u, "GET, HEAD, POST"],
-  [/^\/api\/v1\/skills\/[^/]+\/upload-preview$/u, "POST"],
+  [/^\/api\/v1\/skills\/[^/]+\/(?:upload-preview|git-preview)$/u, "POST"],
+  [/^\/api\/v1\/skills\/[^/]+\/repositories$/u, "GET, HEAD, POST"],
   [/^\/api\/v1\/skills\/[^/]+\/backlog$/u, "GET, HEAD"],
   [/^\/api\/v1\/skills\/[^/]+\/diff$/u, "GET, HEAD"],
   [/^\/api\/v1\/skills\/[^/]+\/versions\/[^/]+(?:\/files)?$/u, "GET, HEAD"],
@@ -94,7 +101,7 @@ export async function handleSkillsRequest(
     });
   }
   const match = new RegExp(
-    `^${API}/skills/([^/]+)(?:/(versions|diff|upload-preview|backlog)(?:/([^/]+)(?:/(files))?)?)?$`,
+    `^${API}/skills/([^/]+)(?:/(versions|diff|upload-preview|git-preview|repositories|backlog)(?:/([^/]+)(?:/(files))?)?)?$`,
     "u",
   ).exec(path);
   if (match?.[1] === undefined) return reply.error(404, "invalid", "Not found");
@@ -118,14 +125,37 @@ export async function handleSkillsRequest(
         "denied",
         "An upload requires an Engineer or Field expert workflow role in this group",
       );
+    if (match[2] === "repositories") {
+      const body = await readJsonBody(request);
+      if (!body.ok)
+        return reply.error(body.status ?? 400, "invalid", body.message);
+      const result = await registerRepository(
+        database,
+        dependencies,
+        context,
+        config,
+        skill,
+        body.value,
+      );
+      return reply.json(result.created ? 201 : 200, {
+        repository: result.repository,
+      });
+    }
     const body = await readJsonBody(
       request,
       uploadEnvelopeBytes(config.uploads),
     );
     if (!body.ok)
       return reply.error(body.status ?? 400, "invalid", body.message);
-    if (match[2] === "upload-preview") {
-      const { source } = await inspectUpload(config, skill.name, body.value);
+    const git =
+      match[2] === "git-preview" ||
+      objectInput(body.value)["repositoryId"] !== undefined;
+    const inspect = () =>
+      git
+        ? inspectRepository(database, config, skill, body.value)
+        : inspectUpload(config, skill.name, body.value);
+    if (match[2] === "upload-preview" || match[2] === "git-preview") {
+      const { source } = await inspect();
       return reply.json(200, {
         preview: {
           hash: source.hash,
@@ -135,19 +165,24 @@ export async function handleSkillsRequest(
         },
       });
     }
-    const uploaded = await uploadVersion(
+    const expectedHash = versionConfirmation(body.value);
+    const uploaded = await createVersion(
       database,
       dependencies,
       context,
-      config,
       blobs,
       skill,
-      body.value,
+      expectedHash,
+      await inspect(),
     );
     return reply.json(uploaded.created ? 201 : 200, {
       version: uploaded.version,
     });
   }
+  if (match[2] === "repositories")
+    return reply.json(200, {
+      repositories: await listRepositories(database, skill.id),
+    });
   if (match[2] === "diff") {
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");

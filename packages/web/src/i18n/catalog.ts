@@ -548,6 +548,19 @@ const en = {
   "skills.create": "Add Skill",
   "skills.upload": "Upload version",
   "skills.confirmUpload": "Confirm immutable upload",
+  "skills.importGit": "Import from Git",
+  "skills.gitDataWarning":
+    "Never import real data. Import Skill instructions, scripts, and synthetic examples only.",
+  "skills.gitLimits":
+    "Up to {count} files, {total} MiB total, {file} MiB per file.",
+  "skills.confirmImport": "Confirm immutable import",
+  "skills.repository": "Registered repository",
+  "skills.repositoryUrl": "New repository URL",
+  "skills.registerRepository": "Register repository",
+  "skills.commit": "Commit hash",
+  "skills.commitHint":
+    "Use the full commit hash. Only the committed tree is imported; fetched content never runs.",
+  "skills.previewCommit": "Preview commit",
   "skills.dataWarning":
     "Never upload real data. Upload Skill instructions, scripts, and synthetic examples only.",
   "skills.uploadLimits":
@@ -1568,6 +1581,19 @@ const zh: Record<MessageId, string> = {
   "skills.create": "添加 Skill",
   "skills.upload": "上传版本",
   "skills.confirmUpload": "确认上传不可变版本",
+  "skills.importGit": "从 Git 导入",
+  "skills.gitDataWarning":
+    "严禁导入真实数据。仅导入 Skill 说明、脚本和合成示例。",
+  "skills.gitLimits":
+    "最多 {count} 个文件，总计 {total} MiB，每个文件 {file} MiB。",
+  "skills.confirmImport": "确认导入不可变版本",
+  "skills.repository": "已注册仓库",
+  "skills.repositoryUrl": "新仓库地址",
+  "skills.registerRepository": "注册仓库",
+  "skills.commit": "提交哈希",
+  "skills.commitHint":
+    "请输入完整的提交哈希。仅导入该提交的文件，获取的内容不会执行。",
+  "skills.previewCommit": "预览提交",
   "skills.dataWarning": "严禁上传真实数据。仅上传 Skill 说明、脚本和合成示例。",
   "skills.uploadLimits":
     "最多 {count} 个文件，总计 {total} MiB，每个文件 {file} MiB。zip 解压后同样受限。",

@@ -695,6 +695,61 @@ Each decision binds the submitted result, edits, job revision, and context
 hash. Changed evidence cancels the job, and changed edits invalidate the
 preview. An identical decision retried with the same person and client request ID returns its original response, including after later inputs change; changed replay inputs or a reused ID for another job conflict. Agents cannot request, accept, reject, or sign off on behalf of people.
 
+## Skill versions from Git
+
+The Skills page's **Import from Git** action registers a repository, previews
+one full commit hash, collects script side-effect declarations, and confirms
+an immutable version. The tree goes through the same kernel inspection as an
+upload; identical content has the same hash and returns the same version.
+Never import real data. Fetched content never executes.
+
+Deployments must set `BADGER_GIT_ALLOWED_ORIGINS` to a comma-separated list of
+exact HTTPS origins, for example `https://github.com,https://git.example.com`.
+The default is empty, disabling registration and fetching. Explicit loopback
+HTTP origins are allowed for local use. An origin enables registration; imports
+still require a repository registered for the target Skill. URLs must not carry
+credentials, queries, or fragments. This version supports public or otherwise
+unauthenticated repositories over Git smart HTTP. Private-repository credential
+management and SSH are not provided. The runtime image includes Git and CA
+certificates; a host running Node directly must install Git itself.
+
+`BADGER_GIT_TIMEOUT_MS` defaults to 30000 (100–120000). The combined received
+bytes and temporary bare repository are each capped by
+`BADGER_GIT_MAX_REPOSITORY_BYTES`, default 104857600 (1 KiB–1 GiB). The existing
+`BADGER_UPLOAD_MAX_FILES`, `BADGER_UPLOAD_MAX_FILE_BYTES`, and
+`BADGER_UPLOAD_MAX_BYTES` also cap the committed files before ignore rules.
+Git uses pack storage instead of unpacking loose objects, caps its delta-base
+cache at the total upload byte limit, and caps each allocation at that limit
+plus 16 MiB of overhead. An object that trips the allocation guard is refused
+with 413 before the application inspects the expanded tree.
+Outbound transport honors the deployment's HTTP/HTTPS proxy and `NO_PROXY`
+settings. Redirects, dumb HTTP, links, and submodules are refused. No checkout,
+Git hooks, filters, credential helpers, or imported scripts run.
+
+All routes below follow the configured base path and `/api/v1`. They use the
+same Group visibility and Engineer/Field expert upload permissions as uploads.
+Registration and imports are audited; duplicate requests retain their records.
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /skills/:id/repositories` | List registered repositories visible with this Skill. |
+| `POST /skills/:id/repositories` | Register `{url}` without fetching; return `{repository}` (201 or 200 for a duplicate). |
+| `POST /skills/:id/git-preview` | Inspect `{repositoryId, commit, scripts?}`; return `{preview}` with the kernel hash, inventory, and effects. |
+| `POST /skills/:id/versions` | Import `{repositoryId, commit, scripts?, confirmed: true, expectedHash}`; return `{version}` (201 or 200). |
+
+Commits must be full lowercase 40- or 64-character hashes. Branches, tags,
+abbreviations, and unregistered or other-Skill repository IDs are refused.
+A missing confirmation returns 400 before fetching; a mismatched source hash
+returns 409. Resource limits return 413. A transport or missing-commit failure
+returns 400 with a safe message and creates no version.
+
+Version responses include their initial `origin` (`upload` or `git`) and a
+`gitOrigins` list of `{repositoryId, repository, commit}` receipts. Importing
+an already uploaded tree appends its Git provenance without changing its
+identity, files, declarations, original actor, or timestamp. Migration `0024`
+adds these records without rewriting shipped migrations or existing versions.
+See [ADR 0029](../../docs/adr/0029-registered-git-skill-versions.md).
+
 ## Skill uploads
 
 The Skills dashboard accepts a Skill folder or zip, previews its inventory,
