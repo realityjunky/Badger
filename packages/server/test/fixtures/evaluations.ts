@@ -4,8 +4,11 @@ import { engineer } from "./planning.js";
 import { reportLaneOutput } from "./authoring.js";
 
 /** An assembled report package, reached entirely through confirmed HTTP actions. */
-export async function assembledFixture(service: TestService) {
-  const fixture = await initializedFixture(service);
+export async function assembledFixture(
+  service: TestService,
+  configurePlan?: Parameters<typeof initializedFixture>[1],
+) {
+  const fixture = await initializedFixture(service, configurePlan);
   const { call, base, approve } = fixture;
   const before = await call(`${base}/package`);
   const { confirmation } = await approve("generation");

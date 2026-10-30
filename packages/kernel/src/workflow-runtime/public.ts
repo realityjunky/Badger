@@ -3,6 +3,7 @@ export {
   inspectWorkflowRun,
   listWorkflowRuns,
   projectWorkflowState,
+  readWorkflowRunReport,
   recoverWorkflowRun,
   previewWorkflowFinalization,
   resumeWorkflowRun,
@@ -33,7 +34,11 @@ export type {
   WorkflowReceiptRequirement,
   WorkflowReceiptOutput,
   WorkflowStartRequirements,
+  WorkflowCompletionPlan,
+  WorkflowRunReport,
 } from "./types.js";
+
+export type { TrajectoryEvent as WorkflowRunEvent } from "../engine/types.js";
 
 export type {
   WorkflowFinalizationConfirmationPolicy,

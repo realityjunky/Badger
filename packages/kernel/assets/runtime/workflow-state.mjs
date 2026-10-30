@@ -295,9 +295,9 @@ function ensureCurrentNode(nodeArgument, projection) {
   ) {
     return currentNode;
   }
-  throw new Error(
-    `record must target the current Workflow Node: ${currentNode ?? "(checkpoint)"}`,
-  );
+  // WorkflowRuntime owns the refusal for a skipped or unrelated Node, just as
+  // it does through the MCP adapter. Keep the submitted identity unchanged.
+  return nodeArgument;
 }
 
 async function main() {

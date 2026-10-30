@@ -323,6 +323,7 @@ import type {
   WorkflowRuntime,
   WorkflowRunRegistryEntry,
   WorkflowRunTarget,
+  WorkflowRunReport,
   WorkflowStateProjection,
   WorkflowStateProjectionStatus,
   WorkflowDecisionSubmission,
@@ -1731,6 +1732,20 @@ function validateDecisionExecution(
   }
 }
 
+function completionPlan(protocol: WorkflowProtocol, nodeId: string | null) {
+  const node = protocol.nodes.find((node) => node.id === nodeId);
+  if (!node) return null;
+  const plan = createCompletionPlan(node);
+  return {
+    ...plan,
+    outputSchemas: plan.outputSchemas.map((id) =>
+      structuredClone(
+        protocol.outputSchemas.find((schema) => schema.id === id)!,
+      ),
+    ),
+  };
+}
+
 function continuation(
   result: ManualRunResult,
   identity: WorkflowExecutionIdentity,
@@ -1777,6 +1792,12 @@ function continuation(
     visitOrdinal: currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     pendingAction: result.action,
+    completion: completionPlan(
+      context.package.runtime!.protocol,
+      result.state.status === "completed"
+        ? null
+        : currentNode(result.state, identity, result.action),
+    ),
     receiptOutputs: workflowReceiptOutputs(
       context.package.runtime!.protocol,
       result.state.status === "completed"
@@ -2026,7 +2047,23 @@ async function recoveryStateProjection(
     completedNodes,
     evidence: recovery.pendingAction?.type === "ask_user" ? {} : evidence,
     history,
+    artifactReceipts: projectedArtifactReceipts(state),
   };
+}
+
+/** Receipt evidence was issued by Completion for these producing Attempts. */
+function projectedArtifactReceipts(state: RunState): WorkflowArtifactReceipt[] {
+  const receipts: WorkflowArtifactReceipt[] = [];
+  for (const visit of state.workflowRuntime?.visits ?? []) {
+    for (const outcome of visit.outcomes) {
+      const values = outcome.evidence?.artifactReceipts;
+      if (Array.isArray(values))
+        receipts.push(
+          ...(structuredClone(values) as WorkflowArtifactReceipt[]),
+        );
+    }
+  }
+  return receipts.slice(-MAX_PROJECTED_LEDGER_ENTRIES);
 }
 
 export async function projectWorkflowState(
@@ -2119,6 +2156,7 @@ export async function projectWorkflowState(
     evidence: verified.pending?.type === "ask_user" ? {} : evidence,
     history,
     pendingAction: verified.pending,
+    artifactReceipts: projectedArtifactReceipts(state),
     receiptOutputs: workflowReceiptOutputs(
       protocol,
       status === "completed"
@@ -3239,6 +3277,56 @@ export async function inspectWorkflowRun(
       location.runRoot,
     );
   });
+}
+
+/** A stable committed report for observers; the trajectory remains authoritative. */
+export async function readWorkflowRunReport(
+  target: WorkflowRunTarget,
+  afterSequence = 0,
+): Promise<WorkflowRunReport | null> {
+  if (!Number.isSafeInteger(afterSequence) || afterSequence < 0)
+    throw new Error("Workflow report sequence must be a non-negative integer");
+  const location = resolveWorkflowRunLocation(target);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const before = await location.readState();
+      if (!before) return null;
+      if (await readWorkflowTransitionJournal(location.runRoot))
+        throw new Error(
+          "Workflow report is unavailable until the pending transition is recovered",
+        );
+      const projection = (await projectWorkflowState(target))!;
+      const continuation = (await inspectWorkflowRun(target))!;
+      const events = await readTrajectory(
+        location.runRoot,
+        before.trajectoryRef,
+        durabilityReadOptions(before, "trajectoryBytes"),
+      );
+      const after = await location.readState();
+      if (
+        JSON.stringify(before) !== JSON.stringify(after) ||
+        projection.revision !== continuation.revision ||
+        (await readWorkflowTransitionJournal(location.runRoot))
+      )
+        continue;
+      return {
+        projection,
+        continuation,
+        events: structuredClone(
+          events.filter((event) => event.sequence > afterSequence),
+        ),
+        lastSequence: events.at(-1)?.sequence ?? 0,
+      };
+    } catch (error) {
+      if (
+        !(error instanceof RaceSafeReadError) ||
+        error.reason !== "changed" ||
+        attempt === 3
+      )
+        throw error;
+    }
+  }
+  throw new Error("Workflow Run changed while reporting; retry the read");
 }
 
 export async function previewWorkflowFinalization(
@@ -4847,6 +4935,10 @@ function blockedContinuation(
       prepared.verified.state.workflowRuntime?.currentAttempt?.retryOrdinal ??
       null,
     pendingAction: prepared.pending,
+    completion: completionPlan(
+      prepared.verified.package.runtime!.protocol,
+      prepared.node,
+    ),
     receiptOutputs: workflowReceiptOutputs(
       prepared.verified.package.runtime!.protocol,
       prepared.node,
@@ -6235,6 +6327,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
     listRuns: listWorkflowRuns,
     inspect: inspectWorkflowRun,
     projectState: projectWorkflowState,
+    readReport: readWorkflowRunReport,
 
     async start(
       options: StartWorkflowRunOptions,

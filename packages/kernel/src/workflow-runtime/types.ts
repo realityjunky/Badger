@@ -2,6 +2,7 @@ import type {
   ActionOutcome,
   EngineAction,
   RuntimeIdentity,
+  TrajectoryEvent,
   WorkflowCycleState,
   WorkflowVisitState,
 } from "../engine/types.js";
@@ -13,6 +14,7 @@ import type {
   WorkflowArtifactSelection,
   WorkflowArtifactVersionId,
   WorkflowArtifactVersion,
+  WorkflowArtifactReceipt,
   WorkflowContentSnapshotReference,
   WorkflowDecisionReceipt,
   WorkflowDecisionScopeSelection,
@@ -132,6 +134,22 @@ export interface WorkflowReceiptOutput {
   requireCurrentAttempt: boolean;
 }
 
+/** The same Completion requirements used by WorkflowRuntime submission checks. */
+export interface WorkflowCompletionPlan {
+  nodeId: string;
+  outputSchemas: OutputSchema[];
+  requiredSkillCalls: string[];
+  enforcedAugmentations: string[];
+  guardrails: string[];
+}
+
+export interface WorkflowRunReport {
+  continuation: WorkflowContinuation;
+  projection: WorkflowStateProjection;
+  events: TrajectoryEvent[];
+  lastSequence: number;
+}
+
 export interface WorkflowContinuation {
   disposition: "continue" | "await-user" | "blocked" | "done";
   runId: string;
@@ -143,6 +161,7 @@ export interface WorkflowContinuation {
   retryOrdinal: number | null;
   pendingAction: WorkflowPendingAction | null;
   receiptOutputs: WorkflowReceiptOutput[];
+  completion: WorkflowCompletionPlan | null;
   execution: WorkflowExecutionIdentity;
   decisionReceipts: WorkflowDecisionReceipt[];
   verificationReceipts: WorkflowVerificationReceiptReference[];
@@ -218,6 +237,7 @@ export interface WorkflowStateProjection {
   }>;
   pendingAction: WorkflowPendingAction | null;
   receiptOutputs: WorkflowReceiptOutput[];
+  artifactReceipts: WorkflowArtifactReceipt[];
   execution: WorkflowExecutionIdentity;
   visits: WorkflowVisitState[];
   cycles: WorkflowCycleState[];
@@ -294,6 +314,10 @@ export interface WorkflowRunRegistry {
 }
 
 export interface WorkflowRuntime extends WorkflowRunRegistry {
+  readReport(
+    target: WorkflowRunTarget,
+    afterSequence?: number,
+  ): Promise<WorkflowRunReport | null>;
   startRequirements(
     protocol: WorkflowProtocol,
   ): Promise<WorkflowStartRequirements>;

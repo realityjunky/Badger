@@ -2,12 +2,16 @@ import { engineer, owner, planningFixture } from "./planning.js";
 import type { TestService } from "../../src/testing/index.js";
 
 /** Reaches the initialized project using only the service's HTTP seam. */
-export async function initializedFixture(service: TestService) {
+export async function initializedFixture(
+  service: TestService,
+  configurePlan?: (plan: any) => void,
+) {
   const fixture = await planningFixture(service);
   const { call, base, approve } = fixture;
   await approve("dossier", owner);
   const { skeleton: plan, dossierHash } = await call(`${base}/plan`);
   plan.workflow.customNodes[0].implementation.skill = "prepare";
+  configurePlan?.(plan);
   const { composition } = await call(`${base}/plan/preview`, "POST", {
     plan,
     dossierHash,

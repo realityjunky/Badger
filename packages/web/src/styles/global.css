@@ -1422,3 +1422,44 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.runs-page {
+  gap: var(--space-5, 20px);
+}
+.run-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-block: 20px;
+}
+.run-filter .ant-select {
+  min-width: 240px;
+  max-width: 100%;
+}
+.run-overview {
+  padding: 20px;
+  margin-block: 20px;
+}
+.run-overview code,
+.runs-page .ant-descriptions-item-content {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.run-json {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 400px;
+  overflow: auto;
+  font-size: 13px;
+}
+.run-events {
+  padding-inline-start: 24px;
+}
+.run-events li {
+  margin-block: 12px;
+}
+.run-events summary {
+  cursor: pointer;
+  padding: 8px;
+}

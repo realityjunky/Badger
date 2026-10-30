@@ -5,6 +5,7 @@ import { gateMethods } from "./gates.js";
 import { dossierMethods } from "./dossier.js";
 import { planMethods } from "./plans.js";
 import { publicationMethods } from "./publications.js";
+import { runMethods } from "./runs.js";
 import { evaluationMethods } from "./evaluations.js";
 import { packageMethods } from "./packages.js";
 import { proposalMethods } from "./proposals.js";
@@ -19,6 +20,8 @@ export function tokenRequestAllowed(
   method: string,
 ): boolean {
   const reads = method === "GET" || method === "HEAD";
+  if (runMethods(path) !== null)
+    return scopes.includes("operator") || scopes.includes("engineer");
   if (draftingJobMethods(path) !== null)
     return (
       scopes.includes("engineer") &&
@@ -40,7 +43,9 @@ export function tokenRequestAllowed(
   if (planMethods(path) !== null) return reads;
   if (proposalMethods(path) !== null) return reads;
   if (publicationMethods(path) !== null)
-    return reads && scopes.includes("operator");
+    return (
+      reads && (scopes.includes("operator") || scopes.includes("engineer"))
+    );
   if (evaluationMethods(path) !== null)
     return reads && scopes.includes("engineer");
   if (packageMethods(path) !== null) return reads;

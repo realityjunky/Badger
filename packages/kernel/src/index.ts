@@ -11,6 +11,12 @@ export {
   type WorkflowKernelOptions,
 } from "./workflow-kernel/foundation.js";
 export { canonicalHash } from "./util.js";
+export { RaceSafeReadError } from "./engine/race-safe-read.js";
+export {
+  ensureProtectedProjectDirectory,
+  inspectProtectedProjectPath,
+  readProtectedProjectFile,
+} from "./engine/protected-project-path.js";
 export {
   atomicWriteContainedBytes,
   removeContainedFile,
@@ -29,6 +35,7 @@ export { questionnaireLedgerChanges } from "./factory/questionnaire-records.js";
 export * from "./factory/migration.js";
 export * from "./factory/source.js";
 export * from "./eval/run.js";
+export { certificationExecFile } from "./eval/sandbox.js";
 export * from "./publish/lifecycle.js";
 export * from "./publish/package-snapshot.js";
 export * from "./skill-runtime/index.js";

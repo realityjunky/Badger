@@ -1,11 +1,20 @@
 import { withCertificationContext, type EvaluationSandbox } from "./sandbox.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { CreatorState, EvalReport, WorkflowProtocol } from "../types.js";
+import type {
+  CreatorState,
+  EvalReport,
+  WorkflowProtocol,
+  WorkflowMcpCertificationEvidence,
+} from "../types.js";
 import { hashDirectory, atomicWrite } from "../util.js";
 import { writeState } from "../factory/state.js";
 import { toProjectRelativePath } from "../factory/project-paths.js";
 import { certifyWorkflowRuntime } from "./workflow-runtime-certification.js";
+import {
+  createPackageSnapshot,
+  type PackageSnapshot,
+} from "../publish/package-snapshot.js";
 import {
   authoringSessionGateway,
   readAuthoringPlan,
@@ -13,6 +22,13 @@ import {
 import { crossValidateAuthoringPackage } from "../authoring/cross-validation.js";
 
 export interface EvaluationOptions {
+  /** Trusted host adapter, run inside the same bounded certification context. */
+  certifyMcp?: (input: {
+    packageRoot: string;
+    protocol: WorkflowProtocol;
+    generatedPackageHash: string;
+    snapshot: PackageSnapshot;
+  }) => Promise<WorkflowMcpCertificationEvidence>;
   sandbox?: EvaluationSandbox;
   /** Host-owned unique report destination, within the Project. */
   reportPath?: string;
@@ -40,6 +56,7 @@ async function runEvaluation(
   const root = state.generated.packageRoot;
   const hash = await hashDirectory(root);
   const checks: EvalReport["checks"] = [];
+  let mcp: WorkflowMcpCertificationEvidence | undefined;
   let authoringCrossValidation: EvalReport["authoringCrossValidation"];
   const protocolPath = state.generated.protocolPath;
   const protocol = JSON.parse(
@@ -176,6 +193,48 @@ async function runEvaluation(
     passed: (await hashDirectory(root)) === hash,
     detail: "Package bytes must remain unchanged during certification",
   });
+  if (options.certifyMcp) {
+    await options.onProgress?.("mcp-certification");
+    try {
+      mcp = await options.certifyMcp({
+        packageRoot: root,
+        protocol,
+        generatedPackageHash: hash,
+        snapshot: await createPackageSnapshot(
+          root,
+          state.generated.inventory ?? [],
+        ),
+      });
+      const passed =
+        mcp.authority === "BadgerMCP" &&
+        mcp.mode === "mcp" &&
+        mcp.generatedPackageHash === hash &&
+        [
+          mcp.evaluatedPackageStarted,
+          mcp.completed,
+          mcp.rootBindingRequired,
+          mcp.refusedStartRegisteredNothing,
+          mcp.receiptRootVerified,
+          mcp.skippedNodeRefused,
+          mcp.missingCompletionRefused,
+          mcp.illegalRouteRefused,
+          mcp.exhaustedCycleRefused,
+        ].every((value) => value === true);
+      checks.push({
+        id: "mcp-runtime-certification",
+        passed,
+        detail: passed
+          ? "Actual Badger MCP tools enforced Completion, routes, Cycles, and bound artifact roots"
+          : "Badger MCP certification evidence is incomplete",
+      });
+    } catch (error) {
+      checks.push({
+        id: "mcp-runtime-certification",
+        passed: false,
+        detail: `Badger MCP certification failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }
   const passed = checks.every((check) => check.passed);
   const report: EvalReport = {
     schemaVersion: 1,
@@ -184,6 +243,7 @@ async function runEvaluation(
     checks,
     ...(authoringCrossValidation ? { authoringCrossValidation } : {}),
     ...(runtime.evidence ? { runtime: runtime.evidence } : {}),
+    ...(mcp ? { mcp } : {}),
   };
   const resultPath =
     options.reportPath ??

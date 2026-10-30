@@ -5,18 +5,26 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { BadgerApi, BadgerApiError, type ExpertMcpOptions } from "./api.js";
+import {
+  BadgerApi,
+  BadgerApiError,
+  BadgerConnectionError,
+  BadgerTimeoutError,
+  type ExpertMcpOptions,
+} from "./api.js";
 import { expertTools, questionnairePath } from "./tools.js";
 import { ResultResources } from "./resources.js";
 import { engineerTools } from "./engineer-tools.js";
 import { jobsPath } from "./jobs.js";
 import { hostTools, LocalHostPreviews } from "./host-tools.js";
+import { LocalRuns, operatorTools } from "./operator-tools.js";
 export type { ExpertMcpOptions } from "./api.js";
 
 class BadgerMcpServer extends Server {
   constructor(
     private readonly results: ResultResources,
     private readonly hostPreviews: LocalHostPreviews,
+    private readonly runs: LocalRuns,
     profile: string,
   ) {
     super(
@@ -30,6 +38,7 @@ class BadgerMcpServer extends Server {
     this.onclose = () => {
       void results.close().catch(() => undefined);
       void hostPreviews.close().catch(() => undefined);
+      void runs.close().catch(() => undefined);
     };
   }
 
@@ -39,6 +48,7 @@ class BadgerMcpServer extends Server {
     } finally {
       await this.results.close();
       await this.hostPreviews.close();
+      await this.runs.close();
     }
   }
 }
@@ -60,7 +70,8 @@ export function createBadgerMcp(
   const resources = new ResultResources();
   const profile = options.profile ?? "auto";
   const hostPreviews = new LocalHostPreviews();
-  const server = new BadgerMcpServer(resources, hostPreviews, profile);
+  const runs = new LocalRuns(api, options.agentHost);
+  const server = new BadgerMcpServer(resources, hostPreviews, runs, profile);
   const expert = expertTools(api, server);
   const common = new Set(["whoami", "inbox", "open_dashboard"]);
   const tools =
@@ -70,12 +81,14 @@ export function createBadgerMcp(
         ? [
             ...expert.filter((t) => common.has(t.definition.name)),
             ...hostTools(api, hostPreviews),
+            ...operatorTools(api, runs, options.agentHost),
           ]
         : [
             ...expert.filter(
               (t) => profile === "auto" || common.has(t.definition.name),
             ),
             ...engineerTools(api),
+            ...operatorTools(api, runs, options.agentHost),
             ...(profile === "auto" ? hostTools(api, hostPreviews) : []),
           ];
   // Each capability read is a token request, and tokens are rate limited, so
@@ -89,9 +102,25 @@ export function createBadgerMcp(
       Date.now() - recent.at < CAPABILITY_MILLISECONDS
     )
       return recent.tools;
-    const { capabilities } = await api.request<{
-      capabilities: Record<string, boolean>;
-    }>("/me/mcp");
+    const { capabilities } = await api
+      .request<{
+        capabilities: Record<string, boolean>;
+      }>("/me/mcp", "GET", undefined, recent ? 1 : 30)
+      .catch((error: unknown) => {
+        if (
+          recent &&
+          (error instanceof BadgerConnectionError ||
+            error instanceof BadgerTimeoutError)
+        )
+          return {
+            capabilities: Object.fromEntries(
+              recent.tools.flatMap((tool) =>
+                tool.permission ? [[tool.permission, true]] : [],
+              ),
+            ),
+          };
+        throw error;
+      });
     const allowed = tools.filter(
       (tool) => tool.permission === undefined || capabilities[tool.permission],
     );
@@ -134,6 +163,14 @@ export function createBadgerMcp(
         // A mutation's resource must never repeat the mutation. Check its
         // target's read permissions before returning the saved response.
         if (
+          typeof args.projectRoot === "string" &&
+          typeof args.runId === "string"
+        ) {
+          await runs.binding({
+            projectRoot: args.projectRoot,
+            runId: args.runId,
+          });
+        } else if (
           typeof args.workflowId === "string" &&
           typeof args.versionId === "string"
         ) {
@@ -163,7 +200,9 @@ export function createBadgerMcp(
             type: "text",
             text:
               error instanceof Error
-                ? error.message.slice(0, 1000)
+                ? "finding" in error
+                  ? error.message
+                  : error.message.slice(0, 1000)
                 : "Badger request failed",
           },
         ],

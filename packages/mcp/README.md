@@ -245,3 +245,66 @@ contains a token placeholder or value. Project/user paths, local CLI setup and
 limitations are documented in [the hosts workspace](../hosts/README.md). The
 dashboard uses the same renderer and supplies local preview commands; it cannot
 install to a browser person's computer. These tools never approve or publish.
+
+## Operator Runs
+
+The Operator profile offers `whoami`, `inbox`, published workflow installation,
+`start`, `next`, `submit`, `status`, `recover`, and `my_runs`. An Engineer can use
+these Run tools with an `engineer` token for `testRun:true`; production Runs
+require an Operator role and `operator` scope. The service checks the current
+workflow role and scope on every request. Revoked access is refused; a connection
+that already checked its identity may continue locally through a connection
+outage and retry reporting when the service returns.
+
+Before starting, call `status` with `workflowId`, `publicationId`, `packageHash`,
+`projectRoot` (an absolute local directory), and a new `runId`. Its
+`startRequirements` is the unchanged WorkflowRuntime reply. Ask the person for
+each declared external directory, and confirm those directories with them.
+`start` takes the same identifiers, `hostLabel`, `confirmed:true`, optional
+`testRun` (default false), and optional `externalRoots: {name: absoluteDirectory}`.
+Only `start` accepts root bindings. Runtime refusals are returned unchanged and
+create no service Run registration.
+
+`next`, `status`, and `recover` take `projectRoot` and `runId`. Replies include the
+unchanged `continuation`, the current Node's local `skillPath`, and `runUrl`.
+`continuation.completion` comes from the kernel's Completion plan, including full
+Output Schemas, required Skill Calls, augmentations and guardrails. `submit`
+takes the same location and a machine `submission`: the action, Run, revision,
+Node, execution identity, status, summary, evidence and routing read from the
+continuation. WorkflowRuntime enforces Completion and legal transitions.
+Decision/reviewer attestations, repair overrides, manual-stop decisions, human
+verification and finalization confirmations are excluded. Human gates return a
+Run dashboard link; delivery of signed-in gate answers is reserved for the gate
+feature.
+
+Published bytes are verified by the kernel snapshot hash and installed under
+`<project>/.badger/packages/<hash>`. Runtime state stays authoritative under
+`<project>/.badger/runs/<runId>`. A pre-start identity intent and private Run
+binding fix the service URL, person, machine label, Agent host, publication and
+package hash. No token is stored. The durable queue is `.badger/mcp-queue.json`
+inside the Run root. Every reporting attempt reconciles against the kernel's
+committed event stream, including a crash between runtime commit and queue write.
+Events retain their original sequence and bytes; the service stores each
+sequence once and refuses gaps or changed duplicates. Events are sent before the
+snapshot, in batches of at most 64 and about 768 KiB. Reporting runs in the
+background and retries with a 1 to 30 second backoff and on later calls; MCP close stops and drains
+retry work. `status.reporting.error` describes a reporting refusal without
+changing runtime authority. Reconnect and call `status` or `recover` to resume
+reporting a known Run. Files and ancestors reject symlinks/junctions and lexical
+traversal; another deployment or person cannot reuse the binding.
+
+Service observer bounds are 2 MiB per report request, 256 KiB per event, and 1 MiB
+per snapshot pair; oversized reports remain local with an explicit reporting
+error. Lists show the newest 100 authorized Runs, and detail shows the first 500
+events with a truncation notice. Full events remain in the authoritative local
+Run and immutable service records. Deep integrity/gate attestation is a separate
+feature; these APIs validate sequence, identity, structure and size.
+
+Service evaluation runs the trusted installed `certification.js` child inside the
+existing time, process-tree memory, private temporary-directory and scrubbed
+environment limits. It uses real in-memory MCP SDK calls against a loopback HTTP
+fixture, starts the exact selected package bytes, then exercises synthetic
+Completion, skipped-Node, route, Cycle and external-root receipt cases. Domain
+scripts are never run. The report retains `mcp-runtime-certification` and its
+`BadgerMCP` evidence alongside script certification. The kernel accepts a trusted
+host certifier callback and has no dependency on the MCP workspace.
