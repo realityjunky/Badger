@@ -823,10 +823,14 @@ exact HTTPS origins, for example `https://github.com,https://git.example.com`.
 The default is empty, disabling registration and fetching. Explicit loopback
 HTTP origins are allowed for local use. An origin enables registration; imports
 still require a repository registered for the target Skill. URLs must not carry
-credentials, queries, or fragments. This version supports public or otherwise
-unauthenticated repositories over Git smart HTTP. Private-repository credential
-management and SSH are not provided. The runtime image includes Git and CA
-certificates; a host running Node directly must install Git itself.
+credentials, and the `?` and `#` characters are refused anywhere, so not even
+an empty query or fragment reaches the host. This version supports public or
+otherwise unauthenticated repositories over Git smart HTTP. Private-repository
+credential management and SSH are not provided. Git LFS is not supported: an
+import is refused with 400 when the tree's `.gitattributes` assigns the LFS
+filter or a file is an LFS pointer, since the pointers would import in place of
+the files; upload the Skill folder instead. The runtime image includes Git and
+CA certificates; a host running Node directly must install Git itself.
 
 `BADGER_GIT_TIMEOUT_MS` defaults to 30000 (100–120000). The combined received
 bytes and temporary bare repository are each capped by
@@ -836,7 +840,11 @@ bytes and temporary bare repository are each capped by
 Git uses pack storage instead of unpacking loose objects, caps its delta-base
 cache at the total upload byte limit, and caps each allocation at that limit
 plus 16 MiB of overhead. An object that trips the allocation guard is refused
-with 413 before the application inspects the expanded tree.
+with 413 before the application inspects the expanded tree. Because each fetch
+may download and store up to `BADGER_GIT_MAX_REPOSITORY_BYTES` for a request of
+a few hundred bytes, each server process runs at most two Git fetches at once.
+A preview or import beyond that is refused with 503 `unavailable` and a
+`Retry-After` of the Git timeout in seconds, by which a running fetch has ended.
 Outbound transport honors the deployment's HTTP/HTTPS proxy and `NO_PROXY`
 settings. Redirects, dumb HTTP, links, and submodules are refused. No checkout,
 Git hooks, filters, credential helpers, or imported scripts run.
@@ -855,14 +863,23 @@ Registration and imports are audited; duplicate requests retain their records.
 Commits must be full lowercase 40- or 64-character hashes. Branches, tags,
 abbreviations, and unregistered or other-Skill repository IDs are refused.
 A missing confirmation returns 400 before fetching; a mismatched source hash
-returns 409. Resource limits return 413. A transport or missing-commit failure
-returns 400 with a safe message and creates no version.
+returns 409. Resource limits return 413. A commit the host cannot supply, an
+answer that is not Git smart HTTP, such as a redirect or a 404, and Git LFS
+content return 400 `invalid`. A timeout, an unreachable host, a 5xx or 429
+answer, a server without Git, and the concurrency limit return 503
+`unavailable`, which a later retry may overcome. Every failure carries a safe
+message and creates no version.
 
 Version responses include their initial `origin` (`upload` or `git`) and a
 `gitOrigins` list of `{repositoryId, repository, commit}` receipts. Importing
 an already uploaded tree appends its Git provenance without changing its
 identity, files, declarations, original actor, or timestamp. Migration `0024`
 adds these records without rewriting shipped migrations or existing versions.
+A receipt means the content was fetched from that repository by its commit
+hash, not that a branch or tag of the repository contains the commit: a host
+may serve a commit by hash that none of the repository's branches or tags
+reach, such as one from another repository in the same fork network. Badger
+does not yet check reachability.
 See [ADR 0029](../../docs/adr/0029-registered-git-skill-versions.md).
 
 ## Skill uploads

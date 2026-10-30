@@ -866,14 +866,24 @@ export function createService(options: ServiceOptions, port: number): Service {
           ? "denied"
           : error.status === 409
             ? "conflict"
-            : "invalid";
+            : error.status === 503
+              ? "unavailable"
+              : "invalid";
+      const headers =
+        error.retryAfterSeconds === undefined
+          ? undefined
+          : { "retry-after": String(error.retryAfterSeconds) };
       if (error.details === undefined)
-        return reply.error(error.status, code, error.message);
-      return reply.json(error.status, {
-        ...error.details,
-        error: { code, message: error.message },
-        requestId: reply.requestId,
-      });
+        return reply.error(error.status, code, error.message, headers);
+      return reply.json(
+        error.status,
+        {
+          ...error.details,
+          error: { code, message: error.message },
+          requestId: reply.requestId,
+        },
+        headers,
+      );
     }
 
     if (preferencesPath) {

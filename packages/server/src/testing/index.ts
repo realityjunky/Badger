@@ -40,4 +40,7 @@ export {
   type Migration,
   type MigrationState,
 } from "../database/migrations.js";
-export { startStubGitRepository } from "./git.js";
+export {
+  startStubGitRepository,
+  type StubGitRepositoryOptions,
+} from "./git.js";

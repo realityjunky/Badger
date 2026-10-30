@@ -48,6 +48,8 @@ function allowedRepository(config: ServiceConfig, value: unknown): string {
     url.password ||
     url.search ||
     url.hash ||
+    // A bare `?` or `#` leaves search and hash empty but stays in href.
+    /[?#]/u.test(value) ||
     !["https:", "http:"].includes(url.protocol) ||
     url.pathname === "/"
   )
