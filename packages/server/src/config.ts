@@ -117,6 +117,13 @@ export interface ServiceConfig {
    * folder; a deployment that ships them elsewhere sets BADGER_WEB_DIR.
    */
   webDirectory: string;
+  notifications: {
+    encryptionKey: string | null;
+    publicUrl: string | null;
+    httpsProxy: string | undefined;
+    httpProxy: string | undefined;
+    noProxy: string | undefined;
+  };
 }
 
 export class ConfigurationError extends Error {
@@ -664,6 +671,35 @@ export function loadConfig(
     );
   }
 
+  const notificationKey =
+    readString(environment, "BADGER_NOTIFICATION_KEY") ?? null;
+  if (notificationKey !== null && !/^[a-fA-F0-9]{64}$/u.test(notificationKey))
+    throw new ConfigurationError(
+      "BADGER_NOTIFICATION_KEY must be 32 bytes encoded as 64 hexadecimal characters",
+    );
+  const publicUrl = readString(environment, "BADGER_PUBLIC_URL") ?? null;
+  if (publicUrl !== null) {
+    let url: URL;
+    try {
+      url = new URL(publicUrl);
+    } catch {
+      throw new ConfigurationError("BADGER_PUBLIC_URL must be an absolute URL");
+    }
+    if (
+      publicUrl.length > 512 ||
+      !["https:", "http:"].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.protocol !== "https:" && !isLoopbackHostname(url.hostname)) ||
+      url.pathname.replace(/\/+$/u, "") !==
+        (readBasePath(environment) === "/" ? "" : readBasePath(environment))
+    )
+      throw new ConfigurationError(
+        "BADGER_PUBLIC_URL must use HTTPS and match BADGER_BASE_PATH (loopback HTTP is allowed)",
+      );
+  }
   return {
     mode,
     host,
@@ -697,5 +733,12 @@ export function loadConfig(
       }),
     },
     webDirectory: readWebDirectory(environment),
+    notifications: {
+      encryptionKey: notificationKey,
+      publicUrl: publicUrl?.replace(/\/+$/u, "") ?? null,
+      httpsProxy: environment.https_proxy ?? environment.HTTPS_PROXY,
+      httpProxy: environment.http_proxy ?? environment.HTTP_PROXY,
+      noProxy: environment.no_proxy ?? environment.NO_PROXY,
+    },
   };
 }

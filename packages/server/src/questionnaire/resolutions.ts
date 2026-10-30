@@ -410,13 +410,14 @@ export async function notifyQuestionEngineers(
   versionId: string,
   questionId: string,
   eventId: string,
+  kind: "question-reopened" | "answer-submitted" = "question-reopened",
 ) {
   await tx.query(
     `insert into inbox_items (id, person_id, binding_id, workflow_version_id, gate, kind, event_id, question_id, created_at, updated_at)
     select $1 || '-' || min(b.id), b.person_id, case when b.person_id is null then min(b.id) else null end,
-      $2, 'questionnaire', 'question-reopened', $3, $4, $5, $5 from role_bindings b join workflow_versions v on v.workflow_id = b.workflow_id
+      $2, 'questionnaire', $6, $3, $4, $5, $5 from role_bindings b join workflow_versions v on v.workflow_id = b.workflow_id
     where v.id = $2 and b.role = 'Engineer' group by b.person_id, case when b.person_id is null then lower(b.email) else '' end on conflict do nothing`,
-    [deps.ids.next(), versionId, eventId, questionId, deps.clock.now()],
+    [deps.ids.next(), versionId, eventId, questionId, deps.clock.now(), kind],
   );
 }
 export async function invalidateQuestionFacts(

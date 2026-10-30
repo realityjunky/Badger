@@ -11,6 +11,7 @@ export type InboxKind =
   | "gate-ready"
   | "gate-invalidated"
   | "question-assigned"
+  | "answer-submitted"
   | "restatement-ready"
   | "question-reopened"
   | "concern-raised"

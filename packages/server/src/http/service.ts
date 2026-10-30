@@ -66,6 +66,7 @@ import { handleTokens, tokenMethods } from "./tokens.js";
 import { gateMethods, handleGate } from "./gates.js";
 import { dossierMethods, handleDossier } from "./dossier.js";
 import { handleInbox, inboxMethods } from "./inbox.js";
+import { handleNotifications, notificationMethods } from "./notifications.js";
 import { handleSourceStudy, sourceStudyMethods } from "./source-study.js";
 import { handleQuestionnaire, questionnaireMethods } from "./questionnaire.js";
 import { handleEvents } from "./events.js";
@@ -164,6 +165,7 @@ function allowedMethods(path: string): string {
     dossierMethods(path) ??
     sourceStudyMethods(path) ??
     inboxMethods(path) ??
+    notificationMethods(path) ??
     questionnaireMethods(path) ??
     draftingJobMethods(path);
   if (featureMethods !== null) return featureMethods;
@@ -822,6 +824,8 @@ export function createService(options: ServiceOptions, port: number): Service {
       if (gateMethods(path) !== null) return await handleGate(authorized);
       if (dossierMethods(path) !== null) return await handleDossier(authorized);
       if (inboxMethods(path) !== null) return await handleInbox(authorized);
+      if (notificationMethods(path) !== null)
+        return await handleNotifications(authorized);
       if (sourceStudyMethods(path) !== null)
         return await handleSourceStudy(authorized);
       if (questionnaireMethods(path) !== null)

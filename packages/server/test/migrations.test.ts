@@ -74,7 +74,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0018");
+    expect(upgraded.applied.at(-1)).toBe("0019");
     expect(
       (
         await test.database.query(
@@ -85,7 +85,7 @@ describe("reviewed SQL migrations", () => {
     expect(
       (
         await test.database.query(
-          "select action, actor_person_id, agent_host from audit_events",
+          "select action, actor_person_id, agent_host, notification_action_id from audit_events",
         )
       ).rows,
     ).toEqual([
@@ -93,6 +93,7 @@ describe("reviewed SQL migrations", () => {
         action: "person.created",
         actor_person_id: "person-1",
         agent_host: null,
+        notification_action_id: null,
       },
     ]);
   });
@@ -130,6 +131,7 @@ describe("reviewed SQL migrations", () => {
       "0016",
       "0017",
       "0018",
+      "0019",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -155,6 +157,7 @@ describe("reviewed SQL migrations", () => {
         "0016",
         "0017",
         "0018",
+        "0019",
       ],
       pending: [],
       drifted: [],
@@ -181,8 +184,14 @@ describe("reviewed SQL migrations", () => {
       "groups",
       "identity_sessions",
       "inbox_items",
+      "notification_actions",
+      "notification_channels",
+      "notification_deliveries",
+      "notification_reminders",
+      "notification_robots",
       "oidc_transactions",
       "people",
+      "person_notification_preferences",
       "person_preferences",
       "personal_access_tokens",
       "question_answers",
@@ -240,6 +249,7 @@ describe("reviewed SQL migrations", () => {
         "0016",
         "0017",
         "0018",
+        "0019",
       ],
       pending: [],
       drifted: [],
@@ -247,7 +257,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(18);
+    expect(rows.rows[0]?.count).toBe(19);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

@@ -9,6 +9,85 @@ identity headers from configured proxy peers. See
 [identity adapter configuration](../../docs/identity-adapters.md) for OIDC
 registration, Strict browser sessions, proxy trust, and email binding checks.
 
+## WeCom notifications and reminders
+
+Workflow owners connect a WeCom group robot from the workflow's **Notifications
+and reminders** panel. Group leads set defaults in **Settings → Channel
+addresses**; the nearest ancestor Group default applies unless a workflow has
+its own robot. Saving explicitly queues a test post. The saved webhook is
+masked; a replacement is optional when editing its label or chat language.
+Disconnecting cancels queued and retrying posts for that channel.
+
+People set their WeCom userid or mobile in **Settings → Channel addresses**
+and choose mention events in **Settings → Notifications**. Opting out affects
+chat mentions only; inbox items still arrive. Text messages support userid
+and mobile mentions; people with neither appear by name. Posts carry only
+workflow names, curated waiting-event labels, recipient counts, and links.
+Question, answer, Skill, and Run content never enters the channel payload.
+
+Configure the server and worker with the same `BADGER_NOTIFICATION_KEY`, a
+stable random 32-byte key encoded as 64 hexadecimal characters, and
+`BADGER_PUBLIC_URL`, the dashboard's absolute HTTPS URL including
+`BADGER_BASE_PATH`. Loopback HTTP is permitted for local use. Keep the key in
+the deployment's secret store and back it up separately from the database.
+Changing or losing it makes existing encrypted robots and queued Deliveries
+unreadable; disconnect and reconnect channels after an intentional key change.
+No robot can be saved before these settings exist. In-app notifications and
+Copy reminder work without them.
+
+Queued posts recheck current workflow and assignment capabilities before
+delivery. Completed items, revoked recipients, and mention opt-outs are removed;
+an empty post is cancelled. Legacy inbox items retain no inferred requester,
+so only Workflow owners and Administrators can remind pre-upgrade items.
+
+The worker role runs notification delivery alongside source checks; local
+single-user mode embeds both. It reads `HTTPS_PROXY` / `https_proxy`,
+`HTTP_PROXY` / `http_proxy`, and `NO_PROXY` / `no_proxy`. Each webhook has one
+database-backed pacing reservation shared by every worker, with at least
+3.1 seconds between send attempts. Five attempts use exponential backoff and
+honor numeric `Retry-After`; final failures remain visible in the workflow's
+Delivery log and never block a gate. Remote error text and webhook URLs are
+never logged. The log shows the prepared message, recipients, robot label,
+status, attempts, and a safe error code. Messages are limited to 2,048 UTF-8
+bytes; very large recipient lists retain all structured mentions and full
+Delivery recipients while summarizing overflow display names.
+
+An item's requester, its Workflow owner, and Administrators can **Remind**
+people who still need to act, at most once per logical item per hour across
+all recipients. The reminder and its recipients are audited. Without a robot,
+the same action provides **Copy reminder**, including names and the deep link.
+Channel writes, preferences, and reminders require a signed-in person; personal
+access tokens cannot change channel settings or send reminders. Actions that
+Agents perform through their existing scopes create the same inbox/outbox
+events as dashboard actions.
+
+| Route                                              | Behavior                                                                          |
+| -------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `GET /me/notifications`                            | Read personal WeCom identity and mention-event choices                            |
+| `PUT /me/notifications`                            | Save `{revision, wecomUserId, mobile, mentionEvents}`                             |
+| `GET /workflows/:id/notifications/channel`         | Owner/Administrator reads masked settings and inherited default                   |
+| `PUT /workflows/:id/notifications/channel`         | Save `{revision, label, language, webhookUrl?, confirmed: true}` and queue a test |
+| `DELETE /workflows/:id/notifications/channel`      | Disconnect against `{revision, confirmed: true}`                                  |
+| `GET/PUT/DELETE /groups/:id/notifications/channel` | Group lead/Administrator manages the Group default                                |
+| `GET /workflows/:id/notifications/waiting`         | Current waiting items, recipients, reminder capability, and next eligible time    |
+| `POST /workflows/:id/notifications/remind`         | Send `{itemId, confirmed: true}`; return a queued Delivery or copy text           |
+| `GET /workflows/:id/notifications/deliveries`      | Owner/Administrator reads the newest 100 Deliveries                               |
+
+All routes use the `/api/v1` prefix and the deployment's base path. Stale
+revisions, a completed waiting item, and the hourly limit return `409`.
+See [ADR 0025](../../docs/adr/0025-transactional-notification-delivery.md).
+WeCom's [group robot documentation](https://developer.work.weixin.qq.com/document/path/91770)
+specifies the text-message limit, mention fields, and 20-posts-per-minute rate
+limit (checked 2026-10-30).
+
+The service tests capture actual HTTP requests at a stub robot, including
+mentions, grouped counts, opt-outs, shared pacing, retries, content exclusion,
+and proxy connection attempts. A real-chat acceptance check additionally needs
+an approved team robot: save it through the dashboard, check its test post,
+then publish a test Round assigned to a member with a configured mention ID.
+Confirm the mention arrives and its Delivery is sent. Keep real webhook URLs
+outside the repository, test artifacts, screenshots, and logs.
+
 ## Sources gate and inbox
 
 The Sources gate (#44) requires a passed source check. A signed-in Engineer

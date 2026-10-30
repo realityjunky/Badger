@@ -1,4 +1,7 @@
-import { invalidateQuestionFacts } from "./resolutions.js";
+import {
+  invalidateQuestionFacts,
+  notifyQuestionEngineers,
+} from "./resolutions.js";
 import type { WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
@@ -198,6 +201,20 @@ async function appendAnswer(
     ],
   );
   await advanceQuestionnaireRevision(tx, versionId, deps, context);
+  if (state === "submitted") {
+    await tx.query(
+      "update inbox_items set state = 'done', revision = revision + 1, updated_at = $2 where question_id = $1 and kind = 'answer-submitted' and state <> 'done'",
+      [input.questionId, deps.clock.now()],
+    );
+    await notifyQuestionEngineers(
+      tx,
+      deps,
+      versionId,
+      input.questionId,
+      `${input.questionId}:${context.personId}:${revision}`,
+      "answer-submitted",
+    );
+  }
   await recordQuestionnaireAudit(
     tx,
     deps,
@@ -336,7 +353,7 @@ export async function submitAnswers(
     );
     await tx.query(
       `update inbox_items i set state = 'done', revision = revision + 1, updated_at = $3
-      where i.question_id = $1 and i.state <> 'done' and (i.person_id = $2 or exists
+      where i.question_id = $1 and i.kind = 'question-assigned' and i.state <> 'done' and (i.person_id = $2 or exists
         (select 1 from role_bindings b where b.id = i.binding_id and b.person_id = $2))`,
       [input.questionId, context.personId, deps.clock.now()],
     );

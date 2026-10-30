@@ -14,6 +14,9 @@ import { startHttpServer, type StartedServer } from "../start.js";
 import { prepareStorage } from "../storage.js";
 import { filesystemBlobStore } from "../skills/blobs.js";
 import { SourceCheckWorker } from "../workflow-source.js";
+import { NotificationWorker } from "../notifications/worker.js";
+import type { NotificationChannel } from "../notifications/port.js";
+import { WeComChannel } from "../notifications/wecom.js";
 import { createFixedClock, type TestClock } from "./clock.js";
 import { openTestDatabase } from "./database.js";
 import { createSequentialIds } from "./ids.js";
@@ -32,6 +35,7 @@ import {
 export type TestServiceMode = "test-identity" | "local" | "service";
 
 export interface TestServiceOptions {
+  notificationChannel?: NotificationChannel;
   mode?: TestServiceMode;
   /**
    * Settings layered over the harness's own and read by the real config
@@ -88,6 +92,7 @@ export interface TestService {
   ): SourceCheckWorker;
   /** Runs the queued source checks with one worker; returns how many ran. */
   runSourceCheckJobs(): Promise<number>;
+  runNotificationJobs(): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -292,6 +297,19 @@ export async function startTestService(
     worker,
     runSourceCheckJobs: async () => {
       const running = worker();
+      let processed = 0;
+      while ((await running.runOnce()) !== null) processed += 1;
+      return processed;
+    },
+    runNotificationJobs: async () => {
+      const running = new NotificationWorker({
+        database: connection.database,
+        dependencies: { clock, ids },
+        config,
+        channel:
+          options.notificationChannel ?? new WeComChannel(config.notifications),
+      });
+      await running.routePending();
       let processed = 0;
       while ((await running.runOnce()) !== null) processed += 1;
       return processed;

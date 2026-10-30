@@ -10,6 +10,7 @@ export interface InboxItem {
     | "gate-ready"
     | "gate-invalidated"
     | "question-assigned"
+    | "answer-submitted"
     | "restatement-ready"
     | "question-reopened"
     | "concern-raised"

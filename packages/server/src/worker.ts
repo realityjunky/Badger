@@ -17,6 +17,9 @@ import { randomIdSource } from "./ids.js";
 import { createJsonLogger, silentLogger, type Logger } from "./log.js";
 import { prepareStorage } from "./storage.js";
 import { SourceCheckWorker } from "./workflow-source.js";
+import { NotificationWorker } from "./notifications/worker.js";
+import { WeComChannel } from "./notifications/wecom.js";
+import { setTimeout } from "node:timers/promises";
 
 export interface WorkerOptions {
   database: Database;
@@ -71,6 +74,44 @@ export async function runSourceCheckWorker(
   }
 }
 
+/** Notification delivery runs independently of source checks and never holds a gate open. */
+export async function runNotificationWorker(
+  options: WorkerOptions,
+  signal?: AbortSignal,
+): Promise<void> {
+  const worker = new NotificationWorker({
+    database: options.database,
+    config: options.config,
+    dependencies: { clock: systemClock, ids: randomIdSource },
+    channel: new WeComChannel(options.config.notifications),
+  });
+  while (!signal?.aborted) {
+    try {
+      await worker.routePending();
+      while (!signal?.aborted && (await worker.runOnce()) !== null) {
+        /* Send currently eligible posts. */
+      }
+    } catch {
+      // A channel URL must never reach a logger, including through exceptions.
+      options.logger?.error({
+        event: "worker.notifications-error",
+        error: "Notification processing failed; retrying",
+      });
+    }
+    await setTimeout(1000, undefined, { signal }).catch(() => undefined);
+  }
+}
+
+export async function runServiceWorker(
+  options: WorkerOptions,
+  signal?: AbortSignal,
+): Promise<void> {
+  await Promise.all([
+    runSourceCheckWorker(options, signal),
+    runNotificationWorker(options, signal),
+  ]);
+}
+
 /** The worker role's entry point: configure, migrate, work until signalled. */
 export async function main(
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -95,7 +136,7 @@ export async function main(
     process.once("SIGTERM", stop);
     process.once("SIGINT", stop);
     logger.info({ event: "worker.started", revision: config.revision });
-    await runSourceCheckWorker({ database, config, logger }, controller.signal);
+    await runServiceWorker({ database, config, logger }, controller.signal);
   } finally {
     await database.close();
   }

@@ -5,6 +5,69 @@ import type { Language } from "../preferences/model.js";
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  "inbox.answerSubmitted":
+    "{name} · v{number}: answer submitted for resolution",
+  "notifications.title": "Notifications and reminders",
+  "notifications.channelHelp":
+    "Connect the team's WeCom group robot. Posts contain only the workflow name, what is waiting, counts, and a link.",
+  "notifications.preferencesHelp":
+    "Choose which events mention you in the team chat. Your in-app inbox always stays active.",
+  "notifications.wecomUserId": "WeCom userid",
+  "notifications.mobile": "Mobile number",
+  "notifications.identityInvalid":
+    "Enter a valid WeCom userid or mobile number, or leave it blank.",
+  "notifications.mentionEvents": "Mention me for",
+  "notifications.save": "Save notification preferences",
+  "notifications.saved": "Notification preferences saved.",
+  "notifications.failed":
+    "Notifications could not be updated. Reload and try again. Ask your Administrator if the problem continues.",
+  "notifications.conflict":
+    "This item changed or was reminded within the last hour. Reload before trying again.",
+  "notifications.robotLabel": "Robot label",
+  "notifications.webhookUrl": "Robot webhook URL",
+  "notifications.replaceWebhook":
+    "The saved URL is masked. Leave this blank to keep it, or paste a replacement.",
+  "notifications.chatLanguage": "Chat language",
+  "notifications.saveAndTest": "Save and send test post",
+  "notifications.testQueued":
+    "Robot saved. A test post is queued; check the chat and delivery log.",
+  "notifications.disconnect": "Disconnect robot",
+  "notifications.disconnectConfirm":
+    "Disconnect this robot and cancel its queued posts? A workflow will use its Group default if one exists.",
+  "notifications.disconnected": "Robot disconnected.",
+  "notifications.groupDefault": "Using Group default",
+  "notifications.groupDefaults": "Group robot defaults",
+  "notifications.groupDefaultsHelp":
+    "Choose a Group you lead. Workflows use its robot unless their Workflow owner sets an override.",
+  "notifications.group": "Group",
+  "notifications.robotSettings": "Team chat robot",
+  "notifications.waiting": "Waiting for people",
+  "notifications.nothingWaiting": "No items are waiting.",
+  "notifications.remind": "Remind",
+  "notifications.remindConfirm":
+    "Remind the people still waiting on this item? Without a robot, you will get text to copy.",
+  "notifications.hourlyLimit": "Next reminder available:",
+  "notifications.reminderQueued": "Reminder queued.",
+  "notifications.copyReminder": "Copy reminder",
+  "notifications.copied": "Reminder copied.",
+  "notifications.copyFailed": "Select and copy the reminder text above.",
+  "notifications.deliveryLog": "Delivery log",
+  "notifications.noDeliveries": "No posts have been queued yet.",
+  "notifications.attempts": "Attempts",
+  "notifications.status.queued": "Queued",
+  "notifications.status.sending": "Sending",
+  "notifications.status.retry": "Retry scheduled",
+  "notifications.status.sent": "Sent",
+  "notifications.status.failed": "Failed",
+  "notifications.status.cancelled": "Cancelled",
+  "notifications.event.gate-ready": "Approval requested",
+  "notifications.event.gate-invalidated": "Stage invalidated",
+  "notifications.event.question-assigned": "Questions assigned",
+  "notifications.event.answer-submitted": "Answers submitted",
+  "notifications.event.restatement-ready": "Restatement to acknowledge",
+  "notifications.event.question-reopened": "Question reopened",
+  "notifications.event.concern-raised": "Expert concern raised",
+  "notifications.event.job-submitted": "Draft submitted",
   "dossier.title": "Dossier versions",
   "dossier.description":
     "The Engineer composes the agreed meaning from the ledger. The Workflow owner reviews and approves one immutable version.",
@@ -810,6 +873,68 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  "inbox.answerSubmitted": "{name} · v{number}：回答已提交，等待处理",
+  "notifications.title": "通知与提醒",
+  "notifications.channelHelp":
+    "连接团队的企业微信群机器人。消息仅包含工作流名称、待办类型、数量和链接。",
+  "notifications.preferencesHelp":
+    "选择哪些事件在团队群中提及你。站内收件箱始终保留全部待办。",
+  "notifications.wecomUserId": "企业微信 userid",
+  "notifications.mobile": "手机号码",
+  "notifications.identityInvalid":
+    "请输入有效的企业微信 userid 或手机号码，也可以留空。",
+  "notifications.mentionEvents": "这些事件在群中提及我",
+  "notifications.save": "保存通知偏好",
+  "notifications.saved": "通知偏好已保存。",
+  "notifications.failed":
+    "无法更新通知。请重新加载后重试；如问题持续，请联系管理员。",
+  "notifications.conflict":
+    "记录已更改，或一小时内已发送提醒。请重新加载后再试。",
+  "notifications.robotLabel": "机器人名称",
+  "notifications.webhookUrl": "机器人 Webhook URL",
+  "notifications.replaceWebhook":
+    "已保存的 URL 已隐藏。留空则保留，或粘贴新的 URL。",
+  "notifications.chatLanguage": "群消息语言",
+  "notifications.saveAndTest": "保存并发送测试消息",
+  "notifications.testQueued":
+    "机器人已保存，测试消息已排队。请检查群聊和投递日志。",
+  "notifications.disconnect": "断开机器人",
+  "notifications.disconnectConfirm":
+    "断开此机器人并取消排队中的消息？如有团队默认机器人，工作流将恢复使用默认设置。",
+  "notifications.disconnected": "机器人已断开。",
+  "notifications.groupDefault": "正在使用团队默认机器人",
+  "notifications.groupDefaults": "团队默认机器人",
+  "notifications.groupDefaultsHelp":
+    "选择你管理的团队。除非工作流负责人单独设置，工作流将使用团队默认机器人。",
+  "notifications.group": "团队",
+  "notifications.robotSettings": "团队群机器人",
+  "notifications.waiting": "等待处理的事项",
+  "notifications.nothingWaiting": "暂无待办事项。",
+  "notifications.remind": "提醒",
+  "notifications.remindConfirm":
+    "提醒此事项仍在等待的人员？未设置机器人时，将提供可复制的提醒文本。",
+  "notifications.hourlyLimit": "下次可提醒时间：",
+  "notifications.reminderQueued": "提醒已排队。",
+  "notifications.copyReminder": "复制提醒",
+  "notifications.copied": "提醒已复制。",
+  "notifications.copyFailed": "请选中上方提醒文本并手动复制。",
+  "notifications.deliveryLog": "投递日志",
+  "notifications.noDeliveries": "尚无排队的消息。",
+  "notifications.attempts": "尝试次数",
+  "notifications.status.queued": "排队中",
+  "notifications.status.sending": "发送中",
+  "notifications.status.retry": "等待重试",
+  "notifications.status.sent": "已发送",
+  "notifications.status.failed": "失败",
+  "notifications.status.cancelled": "已取消",
+  "notifications.event.gate-ready": "审批请求",
+  "notifications.event.gate-invalidated": "阶段失效",
+  "notifications.event.question-assigned": "问题分配",
+  "notifications.event.answer-submitted": "回答提交",
+  "notifications.event.restatement-ready": "重述待确认",
+  "notifications.event.question-reopened": "问题重新开放",
+  "notifications.event.concern-raised": "专家提出关切",
+  "notifications.event.job-submitted": "草稿提交",
   "dossier.title": "语义档案版本",
   "dossier.description":
     "工程师根据台账编写已达成共识的语义，工作流所有者审核并批准一个不可变版本。",

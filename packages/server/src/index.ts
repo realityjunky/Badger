@@ -8,7 +8,7 @@ import { randomIdSource } from "./ids.js";
 import { createJsonLogger } from "./log.js";
 import { startHttpServer } from "./start.js";
 import { prepareStorage } from "./storage.js";
-import { runSourceCheckWorker } from "./worker.js";
+import { runServiceWorker } from "./worker.js";
 
 export { ConfigurationError, loadConfig } from "./config.js";
 export type { ServiceConfig } from "./config.js";
@@ -18,6 +18,8 @@ export { startHttpServer } from "./start.js";
 export {
   createSourceCheckWorker,
   runSourceCheckWorker,
+  runNotificationWorker,
+  runServiceWorker,
   type WorkerOptions,
 } from "./worker.js";
 
@@ -52,7 +54,7 @@ export async function main(
     const stopWorker = new AbortController();
     const worker =
       config.mode === "local"
-        ? runSourceCheckWorker(
+        ? runServiceWorker(
             { database, config, logger },
             stopWorker.signal,
           ).catch((error: unknown) =>
