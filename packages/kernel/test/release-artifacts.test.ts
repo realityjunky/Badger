@@ -30,6 +30,13 @@ const serviceDecisions = [
   "0020-answer-resolution-reconfirmation.md",
   "0021-oidc-browser-sessions.md",
   "0022-questionnaire-ledger-and-round-baselines.md",
+  "0023-immutable-dossier-versions.md",
+  "0024-structured-answer-provenance.md",
+  "0025-dossier-bound-plan-versions.md",
+  "0026-transactional-notification-delivery.md",
+  "0027-transactional-proposal-initialization.md",
+  "0028-workflow-version-inheritance.md",
+  "0029-registered-git-skill-versions.md",
 ];
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
@@ -685,5 +692,89 @@ describe("Badger release artifacts", () => {
     expect(planned).toContain("issues/86");
     expect(readme).toContain("CI runs the Run storage suites on Linux.");
     expect(readme).not.toContain("suites on Linux, macOS, and Windows");
+  });
+
+  it("describes dossier, plan, and proposal gates, drafting jobs, structured answers, WeCom notifications, version changes, and Git imports as delivered", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const ledger = await readText("docs/release-artifacts.md");
+    const delivered = manual.slice(0, manual.indexOf('id="service"'));
+    const planned = manual.slice(manual.indexOf('id="service"'));
+
+    for (const heading of [
+      "Dossier versions (#50).",
+      "档案版本（#50）。",
+      "Drafting jobs (#55).",
+      "起草作业（#55）。",
+      "Structured answers and attachments (#51).",
+      "结构化回答与附件（#51）。",
+      "Plan versions (#58).",
+      "计划版本（#58）。",
+      "Source-study, restatement, translation, and import jobs (#56).",
+      "源文件研读、事实重述、问题翻译与导入作业（#56）。",
+      "WeCom group robot notifications and reminders (#57).",
+      "企业微信群机器人通知与提醒（#57）。",
+      "Proposal approval and initialization (#59).",
+      "提案批准与初始化（#59）。",
+      "Skill and workflow version changes (#52).",
+      "Skill 与工作流的版本变化（#52）。",
+      "Skill versions from registered Git repositories (#70).",
+      "从已注册 Git 仓库导入的 Skill 版本（#70）。",
+    ])
+      expect(delivered, heading).toContain(`<strong>${heading}</strong>`);
+    expect(delivered).toContain(
+      "a post to a real team chat has not been checked yet",
+    );
+    expect(delivered).toContain("尚未在真实的团队群中验证");
+    expect(delivered).toContain("and so is its engineer profile (#55)");
+    expect(delivered).toContain("工程师 profile（#55）也已交付");
+    expect(delivered).toContain('href="../packages/mcp/src/engineer-tools.ts"');
+    for (const sentence of [
+      "the later gates are to follow them",
+      "后续各门槛将沿用这一方式",
+      "composing a dossier from the ledger is to follow",
+      "由账目编制档案将随后提供",
+      "Still to come:",
+      "尚待实现的是",
+      "the engineer and operator profiles are to follow",
+      "工程师和运行者 profile 将随后提供",
+      "the other items are to arrive with their records",
+      "其他条目将随各自的记录一起到来",
+      "is to take the other jobs from its queue too: kernel transitions, evaluations, and notification delivery",
+      "Saving sends a test post",
+      "保存时会发送一条测试消息",
+    ])
+      expect(planned, sentence).not.toContain(sentence);
+    expect(planned).toContain(
+      "the Package, Evaluation, and Review and publication gates are to follow them",
+    );
+    expect(planned).toContain("and so is the operator profile:");
+    expect(planned).toContain("Planned (#65):");
+    expect(planned).toContain(
+      "A host installer is to write published packages",
+    );
+    expect(planned).toContain("WeCom app messages to individuals, email");
+    expect(planned).toContain("tested against a stub robot only");
+
+    for (const paragraph of [
+      "Dossier versions (#50)",
+      "Drafting jobs and the engineer MCP profile (#55)",
+      "Structured answers and attachments (#51)",
+      "Plan versions (#58)",
+      "Source-study, restatement, translation, and import jobs (#56)",
+      "WeCom group robot notifications, Remind, and Copy reminder (#57)",
+      "Proposal approval and initialization (#59)",
+      "Skill and workflow version changes (#52)",
+      "Skill versions from registered Git repositories (#70)",
+    ])
+      expect(ledger, paragraph).toContain(`\n${paragraph} are delivered`);
+    expect(ledger).toContain(
+      "a post to a real team chat has not been verified",
+    );
+    expect(ledger).toContain(
+      "the expert and engineer MCP profiles are delivered in `packages/mcp/` (#54, #55)",
+    );
+    expect(ledger).not.toContain(
+      "the other profiles and host installer are planned",
+    );
   });
 });

@@ -46,18 +46,18 @@ The kernel package includes:
 - bounded transactional finalization for protected local writes, removes, and moves with preview, confirmation, recovery, and final receipts;
 - versioned structured findings with bounded redaction, deterministic ordering, continuation dispositions, and derived legacy blockers.
 
-The collaborative service adds a server, a web dashboard, the Badger MCP, and a host installer beside the kernel. Its server role's walking skeleton is in `packages/server/` and the web dashboard's shell in `packages/web/`; the expert MCP profile is delivered in `packages/mcp/` (#54), while the engineer and operator profiles and the host installer are planned ([#24](https://github.com/realityjunky/Badger/issues/24)). They call into the kernel and never reimplement it, so WorkflowRuntime stays the only runtime authority. Everything shipped is generic: each deployment keeps its own launcher entries, reverse-proxy routes, and deploy scripts outside the repository. The kernel still excludes ambient resume routing.
+The collaborative service adds a server, a web dashboard, the Badger MCP, and a host installer beside the kernel. Its server role's walking skeleton is in `packages/server/` and the web dashboard's shell in `packages/web/`; the expert and engineer MCP profiles are delivered in `packages/mcp/` (#54, #55), while the operator profile and the host installer are planned ([#24](https://github.com/realityjunky/Badger/issues/24)). They call into the kernel and never reimplement it, so WorkflowRuntime stays the only runtime authority. Everything shipped is generic: each deployment keeps its own launcher entries, reverse-proxy routes, and deploy scripts outside the repository. The kernel still excludes ambient resume routing.
 
 ## Delivery status
 
 Delivered behavior and planned work are kept apart:
 
-| Surface                                     | Status                                                                                                                                                                                             | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Badger Creator and WorkflowRuntime          | Delivered                                                                                                                                                                                          | Local workflow-kernel package creation, six-lane authoring, deterministic assembly, durable Run execution, current-hash evaluation, publication approval, and distribution preview.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Surface                                     | Status                                                                                                                                                                                             | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Badger Creator and WorkflowRuntime          | Delivered                                                                                                                                                                                          | Local workflow-kernel package creation, six-lane authoring, deterministic assembly, durable Run execution, current-hash evaluation, publication approval, and distribution preview.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Collaborative service                       | Walking skeleton (#36), platform sign-in (#38), dashboard shell (#37), groups and roles (#40), workflows and versions (#41), Skill versions (#42), OpenID Connect and trusted-header sign-in (#69) | The server role in `packages/server/`: reviewed SQL migrations, the identity port with local single-user mode, platform session introspection, OpenID Connect sign-in with Badger's own sessions, and trusted proxy headers, nested groups and role bindings by email with server-side capability checks, audited writes with recorded overrides, the filtered activity log, personal preferences, and the health endpoint. Workflows, version frames, eight-stage tracks, and workflow role controls extend the server and dashboard (#41), and so do immutable Skill versions uploaded as folders or zips (#42), or imported from registered Git repositories at a commit (#70). The web dashboard's shell, Admin pages, and Activity page live in `packages/web/`. The expert and engineer MCP profiles are delivered in `packages/mcp/` (#54, #55), including leased drafting jobs and person-reviewed questionnaire suggestions; the operator profile and host installer are planned (#24). |
-| Deployment glue                             | Outside this repository                                                                                                                                                                            | Each deployment's launcher entries, reverse-proxy routes, and deploy scripts live with that deployment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Automatic distribution and domain execution | Out of scope                                                                                                                                                                                       | Distribution always needs explicit confirmation, Badger never executes domain scripts itself, and fixtures derived from protected raw data are never used.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Deployment glue                             | Outside this repository                                                                                                                                                                            | Each deployment's launcher entries, reverse-proxy routes, and deploy scripts live with that deployment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Automatic distribution and domain execution | Out of scope                                                                                                                                                                                       | Distribution always needs explicit confirmation, Badger never executes domain scripts itself, and fixtures derived from protected raw data are never used.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 The release-facing artifact map and verification commands are in
 `docs/release-artifacts.md`. It is the authoritative checklist for keeping
@@ -70,8 +70,10 @@ The collaborative service also delivers the Skills library (#42): immutable
 folder and zip uploads, source checks through this kernel, full inventories,
 script side-effect declarations, bounded file previews, and version diffs.
 An Engineer or Field expert on a workflow uploads to that workflow's Group.
-See `packages/server/README.md`
-from the repository root for its API and limits.
+Imports from registered Git repositories at a full commit hash (#70) take the
+same path, so the same tree gets the same version as an upload. See
+`packages/server/README.md` from the repository root for its API and limits,
+and `docs/adr/0029-registered-git-skill-versions.md`.
 
 Questionnaire rounds and free-text answers (#46) are delivered in the server
 and dashboard: revisioned questions, priority-ordered publication previews,
@@ -82,6 +84,13 @@ facts linked to exact answer revisions, expert acknowledgements and disputes,
 published child questions, reasoned deferrals with Skill backlogs, withdrawal,
 and re-confirmation after answer or cited evidence changes. Sign-offs stay in
 the dashboard.
+
+Structured answers (#51) let a question ask for a single or multiple choice,
+yes or no, a number in a fixed unit, a table, or a file, validated on the
+server against the question revision's type. Any answer may carry
+size-limited attachments in the blob store, and resolutions bind the
+structured values and attachment hashes, so facts keep the receipts of the
+answers they restate. See `docs/adr/0024-structured-answer-provenance.md`.
 
 Ledger and readiness (#49) derive the five-part ledger from durable records
 through `createQuestionnaireHandoff({ records })`. The kernel lists blockers
@@ -110,6 +119,24 @@ dossier and source script declarations. Canonical Plan snapshots bind the
 Dossier version hash. The service offers live validation, Agent drafting
 suggestions, immutable saves, and Workflow owner approval through the existing
 human gate protocol. Dossier changes invalidate dependent plan approvals.
+
+Proposal approval and initialization (#59) show this kernel's proposal for
+the approved Plan version, with its blockers and source identities, and bind
+the Workflow owner's gate confirmation to the proposal, plan, dossier, and
+pins. Initialization runs as a durable worker job: it restores the last
+committed Creator state bytes in a private namespace, calls this kernel's
+initialization, and commits the new state's exact bytes and hash with the
+job's outcome. Replacing a state quotes its hash, and plan or dossier changes
+invalidate the proposal and cancel unfinished jobs. See
+`docs/adr/0027-transactional-proposal-initialization.md`.
+
+Skill and workflow version changes (#52) compare cited file hashes when a pin
+changes: changed or removed evidence reopens questions, including deferrals,
+and marks source-derived facts stale, while unrelated files keep their
+confirmations. A new workflow version copies its predecessor's pins, source
+study, questionnaire records, facts, and resolutions with provenance that the
+kernel's ledger carries into dossier snapshots; approvals are never copied.
+See `docs/adr/0028-workflow-version-inheritance.md`.
 
 Question threads and expert concerns (#47) are also delivered: immutable
 comment edits, concerns linked from the
@@ -143,6 +170,23 @@ version. The server validates evidence hashes, retains retired records and
 their revisions, audits writes, and invalidates changed studies. Completing
 all pins opens Questionnaire. See
 `docs/adr/0019-source-study-records-and-completion.md`.
+
+Source drafting jobs (#56) add `source-study`, `restate-answer`,
+`translate-question`, and `import-open-questions` to the drafting jobs that
+the engineer profile claims (#55). Accepted results go through the existing
+authorities: source-study records pass the evidence checks above,
+restatements still need the expert's acknowledgement, translations attach to
+the question revision they translate, and imported open questions become
+draft questions linked to their Skill version.
+
+WeCom group robot notifications (#57) add the first channel beside the in-app
+inbox: encrypted, masked robot settings per workflow or Group, one post per
+committed action and chat that mentions the people who need to act and
+carries only metadata and a link, paced and retried delivery by the worker
+role that never blocks a gate, a delivery log, and audited Remind and Copy
+reminder actions at most once per item per hour. Posting is tested against a
+stub robot; a post to a real team chat has not been verified. See
+`docs/adr/0026-transactional-notification-delivery.md`.
 
 Generated packages carry their source Skills in `sources/<Skill identity hash>/`.
 The roots in `reference/resolved-skills.json` and the packaged
