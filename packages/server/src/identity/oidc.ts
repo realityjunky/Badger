@@ -12,6 +12,31 @@ interface Transaction {
   state: string;
   nonce: string;
   code_verifier: string;
+  return_path: string | null;
+}
+
+/** Canonicalize a dashboard destination without permitting another origin or app. */
+function dashboardReturnPath(value: string | null, publicUrl: string): string {
+  const ownUrl = new URL(publicUrl);
+  const basePath = ownUrl.pathname.replace(/\/$/u, "");
+  const fallback = `${basePath}/`;
+  if (
+    value === null ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    /[\\\u0000-\u0020\u007f]/u.test(value)
+  )
+    return fallback;
+  const destination = new URL(value, ownUrl);
+  if (
+    destination.origin !== ownUrl.origin ||
+    destination.pathname.startsWith("//") ||
+    (basePath !== "" &&
+      destination.pathname !== basePath &&
+      !destination.pathname.startsWith(`${basePath}/`))
+  )
+    return fallback;
+  return `${destination.pathname}${destination.search}${destination.hash}`;
 }
 
 /**
@@ -94,7 +119,7 @@ export function createOidcIdentityAdapter(
       };
     },
     browser: {
-      begin: async () => {
+      begin: async (returnPath) => {
         let config: client.Configuration;
         try {
           config = await configuration();
@@ -128,13 +153,14 @@ export function createOidcIdentityAdapter(
             [now],
           );
           await tx.query(
-            "insert into oidc_transactions (token_hash, state, nonce, code_verifier, expires_at) values ($1, $2, $3, $4, $5)",
+            "insert into oidc_transactions (token_hash, state, nonce, code_verifier, expires_at, return_path) values ($1, $2, $3, $4, $5, $6)",
             [
               hashCredential(transactionToken),
               state,
               nonce,
               verifier,
               new Date(now.getTime() + OIDC_TRANSACTION_SECONDS * 1000),
+              dashboardReturnPath(returnPath, settings.publicUrl),
             ],
           );
         });
@@ -146,7 +172,7 @@ export function createOidcIdentityAdapter(
         // Delete and return atomically: callbacks cannot be replayed, even on
         // another server process. The provider also enforces one-use codes.
         const taken = await database.query<Transaction>(
-          "delete from oidc_transactions where token_hash = $1 and expires_at > $2 returning state, nonce, code_verifier",
+          "delete from oidc_transactions where token_hash = $1 and expires_at > $2 returning state, nonce, code_verifier, return_path",
           [hashCredential(transactionToken), clock.now()],
         );
         const transaction = taken.rows[0];
@@ -220,7 +246,14 @@ export function createOidcIdentityAdapter(
           platformAdministrator: false,
           credential: { kind: "session", id: null },
         };
-        return { kind: "authenticated", principal };
+        return {
+          kind: "authenticated",
+          principal,
+          returnPath: dashboardReturnPath(
+            transaction.return_path,
+            settings.publicUrl,
+          ),
+        };
       },
     },
   };

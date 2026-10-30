@@ -34,14 +34,16 @@ async function start(environment: Record<string, string | undefined> = {}) {
   return service;
 }
 
-async function begin() {
-  const login = await service!.request("/badger/auth/oidc/login", {
+async function begin(returnTo?: string, prefix = "/badger") {
+  const query =
+    returnTo === undefined ? "" : `?${new URLSearchParams({ returnTo })}`;
+  const login = await service!.request(`${prefix}/auth/oidc/login${query}`, {
     redirect: "manual",
   });
   expect(login.status).toBe(303);
   const authorizationUrl = new URL(login.headers.get("location")!);
   expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
-    "https://badger.example/badger/auth/oidc/callback",
+    `https://badger.example${prefix}/auth/oidc/callback`,
   );
   const flowCookie = login.headers.getSetCookie()[0].split(";")[0];
   const authorization = await fetch(authorizationUrl, { redirect: "manual" });
@@ -50,7 +52,7 @@ async function begin() {
   return {
     flowCookie,
     callback,
-    completePath: `/badger/auth/oidc/complete${callback.search}`,
+    completePath: `${prefix}/auth/oidc/complete${callback.search}`,
   };
 }
 
@@ -71,6 +73,64 @@ async function signIn() {
 }
 
 describe("OpenID Connect sign-in", () => {
+  it("returns to the requested dashboard page and query after signing in", async () => {
+    const app = await start();
+    const destination = "/badger/my-work?view=inbox&item=gate%2F123";
+    const page = await app.request(destination);
+    expect(page.status).toBe(401);
+    expect(await page.text()).toContain(
+      `/badger/auth/oidc/login?${new URLSearchParams({ returnTo: destination })}`,
+    );
+    const flow = await begin(destination);
+    expect(flow.flowCookie).not.toContain("returnTo");
+    expect(flow.callback.searchParams.get("state")).not.toContain(destination);
+    const completed = await app.request(flow.completePath, {
+      redirect: "manual",
+      headers: { cookie: flow.flowCookie },
+    });
+    expect(completed.status).toBe(303);
+    expect(completed.headers.get("location")).toBe(destination);
+  });
+
+  it.each([
+    "https://evil.example/path",
+    "https://badger.example/badger/my-work",
+    "//evil.example/path",
+    "/\\evil.example/path",
+    "/badger\\my-work",
+    "/another-app/my-work",
+    "/badger-other/my-work",
+    "/badger/../another-app",
+    "/badger/%2e%2e/another-app",
+    "/badger/my-work\r\nlocation:https://evil.example",
+  ])(
+    "falls back to My work for an unsafe return path: %s",
+    async (returnTo) => {
+      const app = await start();
+      const flow = await begin(returnTo);
+      const completed = await app.request(flow.completePath, {
+        redirect: "manual",
+        headers: { cookie: flow.flowCookie },
+      });
+      expect(completed.status).toBe(303);
+      expect(completed.headers.get("location")).toBe("/badger/");
+    },
+  );
+
+  it("refuses a return path that normalizes to a network-path URL at the root base path", async () => {
+    const app = await start({
+      BADGER_BASE_PATH: "/",
+      BADGER_PUBLIC_URL: "https://badger.example",
+    });
+    const flow = await begin("/.//evil.example/path", "");
+    const completed = await app.request(flow.completePath, {
+      redirect: "manual",
+      headers: { cookie: flow.flowCookie },
+    });
+    expect(completed.status).toBe(303);
+    expect(completed.headers.get("location")).toBe("/");
+  });
+
   it("records session issuance and logout in Activity even when the person's profile is unchanged", async () => {
     const app = await start({
       BADGER_BOOTSTRAP_ADMINISTRATORS: "alice@example.com",
@@ -156,12 +216,14 @@ describe("OpenID Connect sign-in", () => {
         },
       });
       try {
-        const flow = await begin();
+        const destination = "/badger/settings/tokens?from=inbox";
+        const flow = await begin(destination);
         const completed = await second.request(flow.completePath, {
           redirect: "manual",
           headers: { cookie: flow.flowCookie },
         });
         expect(completed.status).toBe(303);
+        expect(completed.headers.get("location")).toBe(destination);
         const cookie = completed.headers
           .getSetCookie()
           .find((value) => value.startsWith("badger_session="))!
