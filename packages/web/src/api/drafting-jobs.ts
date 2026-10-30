@@ -1,21 +1,51 @@
 import type { QuestionContent } from "./questionnaire.js";
 import type { FactoryPlan } from "./plans.js";
+import type {
+  SourceEvidence,
+  SourceFact,
+  SkillInterface,
+} from "./source-study.js";
+export type DraftingKind =
+  | "draft-questions"
+  | "draft-follow-ups"
+  | "source-study"
+  | "restate-answer"
+  | "translate-question"
+  | "import-open-questions";
+export interface ImportedQuestion {
+  number: number;
+  source: SourceEvidence;
+  question: QuestionContent;
+}
+export type DraftingResult =
+  | { questions: QuestionContent[] | ImportedQuestion[] }
+  | { facts: SourceFact[]; interfaces: SkillInterface[] }
+  | {
+      facts: {
+        text: string;
+        answers: { personId: string; revision: number }[];
+      }[];
+    }
+  | { text: string; rationale: string };
 export interface DraftingJob {
   id: string;
-  kind: "draft-questions" | "draft-follow-ups";
-  roundId: string;
+  kind: DraftingKind;
+  roundId: string | null;
+  skillId: string | null;
+  questionId: string | null;
+  locale: string | null;
   parentQuestionId: string | null;
   status:
     "queued" | "claimed" | "submitted" | "accepted" | "rejected" | "cancelled";
   revision: number;
   contextHash: string;
-  result: { questions: QuestionContent[] } | null;
+  result: DraftingResult | null;
 }
 export interface DraftingDecisionPreview {
   jobId: string;
   revision: number;
   action: "accept" | "reject";
-  decision: { questions: QuestionContent[] } | { reason: string };
+  decision: DraftingResult | { reason: string };
   confirmationHash: string;
 }
 export interface PlanDraftingJob extends Omit<

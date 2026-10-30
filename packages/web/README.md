@@ -108,6 +108,12 @@ them into `dist/`, so the server image carries the build and none of them.
   Activity page shows every recorded action with its actor, time, target,
   channel, and reason, filtered by actor, action, target type, and channel.
   Auditors and Administrators read all of it.
+- Source drafting (#56) extends the job panel with source study, answer
+  restatement, question translation, and numbered open-question imports.
+  Engineers review and edit each result before a hash-bound confirmation.
+  Restatements still await expert acknowledgement, and question history shows
+  translation revisions and immutable import provenance. Source study links
+  directly to the drafting panel.
 - Workflow versions include Source study (#45): per-pin progress, fact and
   interface editors, retirement confirmation, and immutable record history.
   Evidence links open the exact record revision's cited, numbered lines in

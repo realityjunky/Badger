@@ -42,6 +42,46 @@ export function QuestionInspector({
           {t("questionnaire.sourceConcern")}
         </Link>
       )}
+      {question?.source && (
+        <section>
+          <h3>
+            {t("drafting.importedFrom")} {question.source.number}
+          </h3>
+          <Link
+            to={`/skills/${encodeURIComponent(question.source.skillId)}/versions/${encodeURIComponent(question.source.hash)}`}
+          >
+            {question.source.path}:{question.source.startLine}–
+            {question.source.endLine}
+          </Link>
+          <p>
+            {format("questionnaire.questionRevision", {
+              number: question.source.questionRevision,
+            })}
+          </p>
+        </section>
+      )}
+      {!!question?.translations?.length && (
+        <section>
+          <h3>{t("drafting.translations")}</h3>
+          {question.translations.map((translation) => (
+            <details
+              key={translation.id}
+              open={translation.questionRevision === question.revision}
+            >
+              <summary>
+                {translation.locale} ·{" "}
+                {format("questionnaire.questionRevision", {
+                  number: translation.questionRevision,
+                })}
+              </summary>
+              <p className="questionnaire-text" lang={translation.locale}>
+                {translation.text}
+              </p>
+              <p lang={translation.locale}>{translation.rationale}</p>
+            </details>
+          ))}
+        </section>
+      )}
       {concern && (
         <>
           <h3>{t("questionnaire.sourceConcern")}</h3>

@@ -484,36 +484,68 @@ token's validity, scopes, and current roles. Sign-offs remain session-only.
 ## Drafting jobs
 
 Under `/api/v1/workflows/:workflowId/versions/:versionId/drafting-jobs`, the
-workflow's Engineer or an Administrator can request and review questionnaire
+workflow's Engineer or an Administrator can request and review
 drafting. An `engineer` token may read, claim, submit, and release jobs within
 its person's current workflow roles. Every job action records its person,
 credential, channel, Agent host, request ID, revision, and hashes in the
 append-only Activity log. Reads that discover expiry or changed inputs
 commit the transition even when the attempted write returns a conflict.
 
-| Method and suffix               | Behavior                                                                                                                                                                        |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /`                         | List jobs, reconciling leases and input hashes.                                                                                                                                 |
-| `POST /`                        | A signed-in person requests `{kind, roundId, parentQuestionId?, confirmed: true}`. The first kinds are `draft-questions` and `draft-follow-ups`; only follow-ups name a parent. |
-| `GET /:id`                      | Read one job within this workflow version.                                                                                                                                      |
-| `POST /:id/claim`               | Claim a queued job with `{revision}`; return its context, schema, lease, and exact pinned Skill bytes.                                                                          |
-| `POST /:id/submit`              | Submit `{leaseId, contextHash, result}` against the stored schema.                                                                                                              |
-| `POST /:id/release`             | Release `{leaseId, contextHash}` from the claiming person, token, and Agent host.                                                                                               |
-| `POST /:id/accept-preview`      | Preview `{revision, questions}` after the person edits or removes suggestions.                                                                                                  |
-| `POST /:id/reject-preview`      | Preview `{revision, reason}`.                                                                                                                                                   |
-| `POST /:id/accept` or `/reject` | Repeat the preview's decision with `confirmed: true`, `confirmationHash`, and a client `requestId`, as a signed-in person.                                                      |
+| Method and suffix               | Behavior                                                                                                                   |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `GET /`                         | List jobs, reconciling leases and input hashes.                                                                            |
+| `POST /`                        | A signed-in person requests a kind with its target fields (below) and `confirmed: true`.                                   |
+| `GET /:id`                      | Read one job within this workflow version.                                                                                 |
+| `POST /:id/claim`               | Claim a queued job with `{revision}`; return its context, schema, lease, and exact pinned Skill bytes.                     |
+| `POST /:id/submit`              | Submit `{leaseId, contextHash, result}` against the stored schema.                                                         |
+| `POST /:id/release`             | Release `{leaseId, contextHash}` from the claiming person, token, and Agent host.                                          |
+| `POST /:id/accept-preview`      | Preview `{revision, ...result}` after the person edits or removes suggestions, using the result fields for that kind.      |
+| `POST /:id/reject-preview`      | Preview `{revision, reason}`.                                                                                              |
+| `POST /:id/accept` or `/reject` | Repeat the preview's decision with `confirmed: true`, `confirmationHash`, and a client `requestId`, as a signed-in person. |
 
 Claim leases last 30 minutes. Job and Engineer questionnaire reads reconcile
 expired leases to queued jobs and cancel changed inputs. Context binds the
 workflow/version frame, pinned Skill versions and file inventories, source
 study, questionnaire records, submitted answers, assignees, and the kernel's
 ledger and readiness. Private answer drafts never enter the context. The
-output schema is stored with the job; results contain up to 20 questions and
-at most 1 MiB. Pinned file transfers are limited to 32 MiB.
+output schema is stored with the job; results contain at most 1 MiB. Pinned file
+transfers are limited to 32 MiB.
+
+| Kind                    | Request target fields         | Result                                                                                                             |
+| ----------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `draft-questions`       | `roundId`                     | `{questions: [QuestionContent]}` (1–20).                                                                           |
+| `draft-follow-ups`      | `roundId`, `parentQuestionId` | The same question schema, retaining the published parent.                                                          |
+| `source-study`          | `skillId`                     | `{facts: [SourceFact], interfaces: [SkillInterface]}`; up to 100 of each, at least one record. No round is needed. |
+| `restate-answer`        | `questionId`                  | `{facts: [{text, answers: [{personId, revision}]}]}` (1–100).                                                      |
+| `translate-question`    | `questionId`, `locale`        | `{text, rationale}` in the requested BCP 47 locale.                                                                |
+| `import-open-questions` | `skillId`, `roundId`          | `{questions: [{number, source: SourceEvidence, question: QuestionContent}]}` (1–20).                               |
+
+Targets must belong to this Workflow version. A Skill target names its current
+pin; a restatement targets an answered question or one needing re-confirmation.
+Other kinds' target fields are refused. `SourceEvidence` uses the Source study
+shape: `{skillId, hash, path, startLine, endLine, fileHash}`. Source-study
+acceptance reuses the study authority's pinned-version, file-hash, UTF-8, and
+line-range validation, creates all records in one transaction, and leaves
+marking a Skill studied as a separate confirmation.
+
+Restatement acceptance uses the existing resolution authority: facts link to
+the current submitted answer revisions, take the Workflow version's locale,
+and still require the answering experts' acknowledgements. A draft answer in
+progress blocks confirmation. Acceptance previews bind that resolution's exact
+inputs as well as the job result.
+
+Accepted translations are immutable records with the original question revision,
+target locale, actor, and job. They never replace the question's canonical text;
+`questions[].translations` retains earlier translations after edits. Imported
+questions remain unpublished drafts. Their immutable `questions[].source`
+preserves the Skill version, file hash, cited range, original number, and initial
+question revision. The source citation is also included in question evidence.
+Import acceptance resolves that citation against the selected pin. Both kinds
+appear in question history, and every accepted record is audited.
 
 Only submitted jobs appear in the Engineer questionnaire's `suggestions`.
 Other roles receive no job output. Submission notifies the requester;
-acceptance, rejection, and cancellation close that inbox item. Acceptance
+acceptance, rejection, and cancellation close that inbox item. Question acceptance
 validates assignees and pinned evidence through the existing questionnaire
 authority, then creates draft Questions atomically. Follow-ups keep their
 parent link; accepting them never publishes a round or resolves the parent.

@@ -56,6 +56,19 @@ export interface Question extends QuestionContent {
     actorId: string;
     createdAt: string;
   })[];
+  translations?: {
+    id: string;
+    questionRevision: number;
+    locale: string;
+    text: string;
+    rationale: string;
+  }[];
+  source?:
+    | (import("./source-study.js").SourceEvidence & {
+        questionRevision: number;
+        number: number;
+      })
+    | null;
 }
 export interface Round {
   id: string;

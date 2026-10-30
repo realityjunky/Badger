@@ -15,14 +15,33 @@ import {
 } from "../questionnaire/store.js";
 import { toIsoString } from "../util.js";
 import { draftingContext } from "./context.js";
-import { QUESTION_DRAFT_SCHEMA, validateDraftResult } from "./schema.js";
+import {
+  DRAFT_SCHEMAS,
+  validateDraftResult,
+  type DraftingKind,
+  type DraftResult,
+} from "./schema.js";
+import {
+  saveStudyRecordInTransaction,
+  studyReferences,
+} from "../source-study.js";
+import type { BlobStore } from "../skills/blobs.js";
+import {
+  resolutionPreview,
+  resolveQuestion,
+} from "../questionnaire/resolutions.js";
+import { saveTranslation } from "../questionnaire/translations.js";
+import { saveImportedQuestion } from "../questionnaire/imports.js";
 
 export type DraftingActor = WriteContext & { agentHost: string | null };
 export interface DraftingJobRow {
   id: string;
   workflow_version_id: string;
-  kind: "draft-questions" | "draft-follow-ups" | "draft-plan";
+  kind: DraftingKind;
   round_id: string | null;
+  skill_id: string | null;
+  question_id: string | null;
+  locale: string | null;
   parent_question_id: string | null;
   requester_id: string;
   context_bundle: Awaited<ReturnType<typeof draftingContext>>["bundle"];
@@ -36,7 +55,7 @@ export interface DraftingJobRow {
   lease_token_id: string | null;
   lease_agent_host: string | null;
   lease_until: string | Date | null;
-  result: ReturnType<typeof validateDraftResult> | null;
+  result: DraftResult | null;
   result_hash: string | null;
   decision: unknown;
   created_at: string | Date;
@@ -47,6 +66,9 @@ export function publicDraftingJob(row: DraftingJobRow) {
     workflowVersionId: row.workflow_version_id,
     kind: row.kind,
     roundId: row.round_id,
+    skillId: row.skill_id,
+    questionId: row.question_id,
+    locale: row.locale,
     parentQuestionId: row.parent_question_id,
     requesterId: row.requester_id,
     contextHash: row.context_hash,
@@ -169,23 +191,25 @@ export async function createDraftingJob(
     kind: DraftingJobRow["kind"];
     roundId: string | null;
     parentQuestionId: string | null;
+    skillId: string | null;
+    questionId: string | null;
+    locale: string | null;
   },
   current: Awaited<ReturnType<typeof draftingContext>>,
 ) {
-  if (input.kind === "draft-plan") {
-    if (!current.bundle.planning)
-      throw new RequestError(
-        409,
-        "Approve the current dossier before requesting a plan draft",
-      );
-  } else {
-    const round = await readRound(tx, versionId, input.roundId!);
-    if (round.state !== "draft")
-      throw new RequestError(
-        409,
-        "Choose a draft round for the suggested questions",
-      );
-  }
+  if (input.kind === "draft-plan" && !current.bundle.planning)
+    throw new RequestError(
+      409,
+      "Approve the current dossier before requesting a plan draft",
+    );
+  const round = input.roundId
+    ? await readRound(tx, versionId, input.roundId)
+    : null;
+  if (round && round.state !== "draft")
+    throw new RequestError(
+      409,
+      "Choose a draft round for the suggested questions",
+    );
   if (input.parentQuestionId) {
     const parent = (
       await readQuestions(tx, versionId, actor.personId, true)
@@ -196,10 +220,31 @@ export async function createDraftingJob(
         "Choose a published parent question in this workflow version",
       );
   }
+  if (
+    input.skillId &&
+    !current.bundle.pins.some((p) => p.skillId === input.skillId)
+  )
+    throw new RequestError(
+      400,
+      "Choose a Skill pinned by this workflow version",
+    );
+  if (
+    input.questionId &&
+    !current.bundle.questions.some(
+      (q) =>
+        q.id === input.questionId &&
+        (input.kind !== "restate-answer" ||
+          ["answered", "needs-reconfirmation"].includes(q.state)),
+    )
+  )
+    throw new RequestError(
+      400,
+      "Choose a question in this workflow version; restatements need submitted answers",
+    );
   const job = (
     await tx.query<DraftingJobRow>(
-      `insert into drafting_jobs (id, workflow_version_id, kind, round_id, parent_question_id, requester_id, context_bundle, context_hash, output_schema, created_at, updated_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10) returning *`,
+      `insert into drafting_jobs (id, workflow_version_id, kind, round_id, parent_question_id, requester_id, context_bundle, context_hash, output_schema, created_at, updated_at, skill_id, question_id, locale)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13) returning *`,
       [
         deps.ids.next(),
         versionId,
@@ -212,9 +257,12 @@ export async function createDraftingJob(
         JSON.stringify(
           input.kind === "draft-plan"
             ? factoryPlanDraftSchema(current.bundle.planning!.input)
-            : QUESTION_DRAFT_SCHEMA,
+            : DRAFT_SCHEMAS[input.kind],
         ),
         deps.clock.now(),
+        input.skillId,
+        input.questionId,
+        input.locale,
       ],
     )
   ).rows[0]!;
@@ -274,7 +322,7 @@ export async function submitDraftingJob(
   job: DraftingJobRow,
   result: unknown,
 ) {
-  const validated = validateDraftResult(job.output_schema, result);
+  const validated = validateDraftResult(job.kind, job.output_schema, result);
   const submitted = (
     await tx.query<DraftingJobRow>(
       `update drafting_jobs set status = 'submitted', revision = revision + 1, result = $2, result_hash = $3,
@@ -320,15 +368,17 @@ export async function releaseDraftingJob(
   return released;
 }
 
-export function jobDecisionPreview(
+export async function jobDecisionPreview(
+  tx: Queryable,
+  actor: DraftingActor,
   job: DraftingJobRow,
   action: "accept" | "reject",
-  suggestion?: unknown,
+  result?: unknown,
   reason?: unknown,
 ) {
   const decision =
     action === "accept"
-      ? validateDraftResult(job.output_schema, suggestion)
+      ? validateDraftResult(job.kind, job.output_schema, result)
       : { reason };
   if ("plan" in decision) {
     const composition = composeFactoryPlan(
@@ -342,6 +392,22 @@ export function jobDecisionPreview(
         { findings: composition.findings },
       );
   }
+  const resolution =
+    action === "accept" && "facts" in decision && !("interfaces" in decision)
+      ? await resolutionPreview(
+          tx,
+          job.workflow_version_id,
+          job.question_id!,
+          actor.personId,
+          {
+            revision: job.context_bundle.questions.find(
+              (q) => q.id === job.question_id,
+            )!.revision,
+            kind: "confirmed",
+            facts: decision.facts,
+          },
+        )
+      : null;
   const bound = {
     jobId: job.id,
     revision: job.revision,
@@ -349,6 +415,7 @@ export function jobDecisionPreview(
     resultHash: job.result_hash,
     action,
     decision,
+    resolutionConfirmationHash: resolution?.confirmationHash ?? null,
   };
   return { ...bound, confirmationHash: canonicalHash(bound) };
 }
@@ -358,9 +425,10 @@ export async function decideDraftingJob(
   deps: ServiceDependencies,
   actor: DraftingActor,
   job: DraftingJobRow,
-  preview: ReturnType<typeof jobDecisionPreview>,
+  preview: Awaited<ReturnType<typeof jobDecisionPreview>>,
   requestId: string,
   inputHash: string,
+  blobs: BlobStore,
 ) {
   const questionIds: string[] = [];
   let planVersionId: string | null = null;
@@ -377,14 +445,27 @@ export async function decideDraftingJob(
   }
   if (preview.action === "accept" && "questions" in preview.decision) {
     for (const content of preview.decision.questions) {
-      const question = await saveQuestion(
-        tx,
-        deps,
-        actor,
-        job.workflow_version_id,
-        job.round_id!,
-        content,
-      );
+      const question =
+        "question" in content
+          ? await saveImportedQuestion(
+              tx,
+              deps,
+              actor,
+              blobs,
+              job.workflow_version_id,
+              job.round_id!,
+              job.id,
+              job.context_bundle.pins.find((p) => p.skillId === job.skill_id)!,
+              content,
+            )
+          : await saveQuestion(
+              tx,
+              deps,
+              actor,
+              job.workflow_version_id,
+              job.round_id!,
+              content,
+            );
       if (job.parent_question_id)
         await tx.query(
           "update questions set parent_question_id = $2 where id = $1",
@@ -393,6 +474,69 @@ export async function decideDraftingJob(
       questionIds.push(question.id);
     }
   }
+  const studyRecordIds: string[] = [];
+  if (preview.action === "accept" && "interfaces" in preview.decision) {
+    for (const [kind, contents] of [
+      ["fact", preview.decision.facts],
+      ["interface", preview.decision.interfaces],
+    ] as const) {
+      for (const content of contents) {
+        if (
+          !studyReferences(content).some((ref) => ref.skillId === job.skill_id)
+        )
+          throw new RequestError(
+            400,
+            "Study results must reference the job's pinned Skill",
+          );
+        const record = await saveStudyRecordInTransaction(
+          tx,
+          deps,
+          actor,
+          blobs,
+          job.workflow_version_id,
+          kind,
+          { content },
+        );
+        studyRecordIds.push(record.id);
+      }
+    }
+  }
+  let resolutionId: string | null = null;
+  if (
+    preview.action === "accept" &&
+    "facts" in preview.decision &&
+    !("interfaces" in preview.decision)
+  ) {
+    const result = await resolveQuestion(
+      tx,
+      deps,
+      actor,
+      job.workflow_version_id,
+      job.question_id!,
+      {
+        revision: job.context_bundle.questions.find(
+          (q) => q.id === job.question_id,
+        )!.revision,
+        kind: "confirmed",
+        facts: preview.decision.facts,
+      },
+      preview.resolutionConfirmationHash!,
+      `drafting-job:${job.id}`,
+    );
+    resolutionId = result.resolution.id;
+  }
+  const translationId =
+    preview.action === "accept" && "text" in preview.decision
+      ? await saveTranslation(tx, deps, actor, {
+          questionId: job.question_id!,
+          questionRevision: job.context_bundle.questions.find(
+            (q) => q.id === job.question_id,
+          )!.revision,
+          locale: job.locale!,
+          ...preview.decision,
+          jobId: job.id,
+        })
+      : null;
   const decided = (
     await tx.query<DraftingJobRow>(
       "update drafting_jobs set status = $2, revision = revision + 1, decision = $3, updated_at = $4 where id = $1 returning *",
@@ -404,6 +548,9 @@ export async function decideDraftingJob(
           personId: actor.personId,
           questionIds,
           ...(planVersionId ? { planVersionId } : {}),
+          studyRecordIds,
+          resolutionId,
+          translationId,
         }),
         deps.clock.now(),
       ],

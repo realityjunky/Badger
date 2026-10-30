@@ -13,8 +13,18 @@ interface JobInput {
 }
 interface ClaimedJob {
   id: string;
-  kind: "draft-questions" | "draft-follow-ups" | "draft-plan";
+  kind:
+    | "draft-questions"
+    | "draft-follow-ups"
+    | "draft-plan"
+    | "source-study"
+    | "restate-answer"
+    | "translate-question"
+    | "import-open-questions";
   roundId: string | null;
+  skillId: string | null;
+  questionId: string | null;
+  locale: string | null;
   parentQuestionId: string | null;
   revision: number;
   status: string;
@@ -176,6 +186,9 @@ export async function claimJob(
       kind: claimed.job.kind,
       roundId: claimed.job.roundId,
       parentQuestionId: claimed.job.parentQuestionId,
+      skillId: claimed.job.skillId,
+      questionId: claimed.job.questionId,
+      locale: claimed.job.locale,
       revision: claimed.job.revision,
       contextHash: claimed.job.contextHash,
       leaseUntil: claimed.job.lease.until,

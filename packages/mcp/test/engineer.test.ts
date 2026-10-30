@@ -231,6 +231,54 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
   expect((await call(client, "questionnaire", context)).questions).toEqual([]);
   expect(await call(client, "ledger", context)).toHaveProperty("handoff");
   expect(await call(client, "readiness", context)).toHaveProperty("readiness");
+  const { job: studyJob } = await request(`${base}/drafting-jobs`, "POST", {
+    kind: "source-study",
+    skillId: skill.id,
+    confirmed: true,
+  });
+  const studyClaim = await call(client, "claim_job", {
+    ...context,
+    jobId: studyJob.id,
+    revision: studyJob.revision,
+  });
+  folders.push(studyClaim.folder);
+  expect(studyClaim).toMatchObject({
+    kind: "source-study",
+    skillId: skill.id,
+    roundId: null,
+  });
+  const studyResult = {
+    facts: [
+      {
+        statement: "Samples must be kept cold.",
+        evidence: [
+          {
+            skillId: skill.id,
+            hash: preview.hash,
+            path: "SKILL.md",
+            fileHash: createHash("sha256").update(skillText).digest("hex"),
+            startLine: 7,
+            endLine: 7,
+          },
+        ],
+      },
+    ],
+    interfaces: [],
+  };
+  await fs.writeFile(
+    path.join(studyClaim.folder, "result.json"),
+    JSON.stringify(studyResult),
+  );
+  const studySubmission = await call(client, "submit_job", {
+    ...context,
+    jobId: studyJob.id,
+    folder: studyClaim.folder,
+  });
+  expect(studySubmission).toMatchObject({
+    requiresPerson: true,
+    job: { status: "submitted", result: studyResult },
+  });
+  expect((await request(`${base}/source-study`)).facts).toEqual([]);
   await service.runSourceCheckJobs();
   async function confirm(gate: string) {
     const { preview } = await request(

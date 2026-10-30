@@ -22,9 +22,23 @@ import { readWorkflow, listWorkflowVersions } from "../workflows.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 import { RequestError, objectInput } from "./errors.js";
+import {
+  DRAFT_SCHEMAS,
+  draftResultFields,
+  type DraftingKind,
+} from "../drafting/schema.js";
 
 const PATH =
   /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(claim|submit|release|accept-preview|accept|reject-preview|reject))?)?$/u;
+const REQUEST_FIELDS: Record<DraftingKind, string[]> = {
+  "draft-questions": ["roundId"],
+  "draft-follow-ups": ["roundId", "parentQuestionId"],
+  "source-study": ["skillId"],
+  "restate-answer": ["questionId"],
+  "translate-question": ["questionId", "locale"],
+  "import-open-questions": ["roundId", "skillId"],
+  "draft-plan": [],
+};
 export function draftingJobMethods(path: string): string | null {
   const match = PATH.exec(path);
   if (!match) return null;
@@ -111,26 +125,21 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
           await auditJob(tx, deps, actor, job, "listed", null);
         return { status: 200, value: { jobs: jobs.map(publicDraftingJob) } };
       }
-      fields(body, ["kind", "roundId", "parentQuestionId", "confirmed"]);
       if (context.credential.kind === "token" || body.confirmed !== true)
         throw new RequestError(
           403,
           "A signed-in Engineer requests and confirms drafting",
         );
       if (
-        body.kind !== "draft-questions" &&
-        body.kind !== "draft-follow-ups" &&
-        body.kind !== "draft-plan"
+        typeof body.kind !== "string" ||
+        (body.kind !== "draft-plan" && !Object.hasOwn(DRAFT_SCHEMAS, body.kind))
       )
-        throw new RequestError(
-          400,
-          "Choose draft-questions, draft-follow-ups, or draft-plan",
-        );
-      if (body.kind === "draft-plan" && body.roundId !== undefined)
-        throw new RequestError(
-          400,
-          "Plan drafts do not belong to a questionnaire round",
-        );
+        throw new RequestError(400, "Choose a supported drafting job kind");
+      fields(body, [
+        "kind",
+        "confirmed",
+        ...REQUEST_FIELDS[body.kind as DraftingKind],
+      ]);
       const parentQuestionId =
         body.kind === "draft-follow-ups"
           ? textInput(body.parentQuestionId, "parentQuestionId", 200)
@@ -140,18 +149,44 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         body.parentQuestionId !== undefined
       )
         throw new RequestError(400, "Only follow-ups name a parent question");
+      let locale: string | null = null;
+      if (body.kind === "translate-question") {
+        try {
+          locale =
+            Intl.getCanonicalLocales(
+              textInput(body.locale, "locale", 100),
+            )[0] ?? null;
+        } catch {
+          throw new RequestError(
+            400,
+            "Choose a valid translation language tag, such as en or zh-CN",
+          );
+        }
+      }
       const job = await createDraftingJob(
         tx,
         deps,
         actor,
         versionId,
         {
-          kind: body.kind,
-          roundId:
-            body.kind === "draft-plan"
-              ? null
-              : textInput(body.roundId, "roundId", 200),
+          kind: body.kind as DraftingKind,
+          roundId: [
+            "draft-questions",
+            "draft-follow-ups",
+            "import-open-questions",
+          ].includes(body.kind)
+            ? textInput(body.roundId, "roundId", 200)
+            : null,
           parentQuestionId,
+          skillId: ["source-study", "import-open-questions"].includes(body.kind)
+            ? textInput(body.skillId, "skillId", 200)
+            : null,
+          questionId: ["restate-answer", "translate-question"].includes(
+            body.kind,
+          )
+            ? textInput(body.questionId, "questionId", 200)
+            : null,
+          locale,
         },
         current,
       );
@@ -241,7 +276,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
     const accept = action.startsWith("accept");
     fields(body, [
       "revision",
-      accept ? (job.kind === "draft-plan" ? "plan" : "questions") : "reason",
+      ...(accept ? draftResultFields(job.kind) : ["reason"]),
       "confirmationHash",
       "confirmed",
       "requestId",
@@ -279,12 +314,14 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       return conflict("Only submitted suggestions can be reviewed");
     if (revisionInput(body.revision) !== job.revision)
       return conflict("The job changed; review it again");
-    const preview = jobDecisionPreview(
+    const preview = await jobDecisionPreview(
+      tx,
+      actor,
       job,
       accept ? "accept" : "reject",
-      job.kind === "draft-plan"
-        ? { plan: body.plan }
-        : { questions: body.questions },
+      Object.fromEntries(
+        draftResultFields(job.kind).map((key) => [key, body[key]]),
+      ),
       accept ? undefined : textInput(body.reason, "reason"),
     );
     if (action.endsWith("-preview")) {
@@ -303,6 +340,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       preview,
       requestId!,
       inputHash,
+      input.blobs,
     );
     return { status: 200, value: { job: publicDraftingJob(decided) } };
   });
