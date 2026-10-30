@@ -1,3 +1,4 @@
+import { invalidateEvaluations } from "./package-invalidation.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -458,6 +459,13 @@ export async function acceptLaneResult(
       JSON.stringify(output),
       deps.clock.now(),
     ],
+  );
+  await invalidateEvaluations(
+    tx,
+    deps,
+    actor,
+    job.workflow_version_id,
+    "Accepted Authoring output superseded evaluation",
   );
   const stateHash = await commitAuthoring(
     tx,

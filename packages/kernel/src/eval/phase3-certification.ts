@@ -1,9 +1,11 @@
-import { execFile } from "node:child_process";
+import {
+  certificationExecFile,
+  certificationTemporaryDirectory,
+  certificationProgress,
+} from "./sandbox.js";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import { generatePackage } from "../factory/generate.js";
 import { normalizeWorkflow } from "../workflow/contract.js";
 import { createCompletionPlan } from "../workflow-runtime/completion.js";
@@ -27,7 +29,6 @@ import {
   type WorkflowRuntimePhase3NegativeCase,
 } from "../types.js";
 
-const execFileAsync = promisify(execFile);
 const ZERO_HASH = "0".repeat(64);
 
 interface GeneratedFixture {
@@ -420,7 +421,7 @@ async function runGeneratedJson<T>(
   scriptName: string,
   args: string[],
 ): Promise<T> {
-  const result = await execFileAsync(
+  const result = await certificationExecFile(
     process.execPath,
     [path.join(packageRoot, "scripts", scriptName), ...args],
     { cwd: packageRoot, env: { PATH: process.env.PATH } },
@@ -447,7 +448,7 @@ async function recoverFresh(
     path.join(packageRoot, "scripts", "workflow-runtime.mjs"),
   ).href;
   const script = `const module = await import(${JSON.stringify(runtimeModule)}); const value = await module.createWorkflowRuntime().recover(${JSON.stringify(location)}); console.log(JSON.stringify(value));`;
-  const result = await execFileAsync(
+  const result = await certificationExecFile(
     process.execPath,
     ["--input-type=module", "-e", script],
     { cwd: packageRoot, env: { PATH: process.env.PATH } },
@@ -1163,8 +1164,12 @@ function initialEvidence(
 export async function certifyPhase3Workflow(options: {
   generatedPackageHash: string;
 }): Promise<Phase3CertificationResult> {
+  await certificationProgress("phase-3");
   const temporaryRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), "badger-phase3-certification-"),
+    path.join(
+      certificationTemporaryDirectory(),
+      "badger-phase3-certification-",
+    ),
   );
   const evidence = initialEvidence(options.generatedPackageHash);
   const blockers: string[] = [];

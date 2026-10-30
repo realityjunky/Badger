@@ -11,7 +11,8 @@ export type NotificationEvent =
   | "restatement-ready"
   | "question-reopened"
   | "concern-raised"
-  | "job-submitted";
+  | "job-submitted"
+  | "evaluation-finished";
 export interface NotificationPreferences {
   revision: number;
   wecomUserId: string | null;

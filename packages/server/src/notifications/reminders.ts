@@ -16,7 +16,7 @@ import { notificationMessage, recordedRecipients } from "./messages.js";
 import { eligibleNotificationItems } from "./eligibility.js";
 
 function itemKey(item: NotificationItemRow): string {
-  return `${item.kind}:${item.fact_id ?? item.drafting_job_id ?? item.question_id ?? item.concern_id ?? `${item.workflow_version_id}:${item.gate}`}`;
+  return `${item.kind}:${item.evaluation_report_id ?? item.fact_id ?? item.drafting_job_id ?? item.question_id ?? item.concern_id ?? `${item.workflow_version_id}:${item.gate}`}`;
 }
 
 async function requireWorkflowRead(

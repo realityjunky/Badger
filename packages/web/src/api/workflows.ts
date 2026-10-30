@@ -73,7 +73,7 @@ export interface WorkflowSourceCheck {
 }
 export interface WorkflowJob {
   id: string;
-  kind: "source-check" | "init" | "generate";
+  kind: "source-check" | "init" | "generate" | "evaluate";
   workflowVersionId: string;
   requesterId: string;
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
@@ -85,7 +85,8 @@ export interface WorkflowJob {
   pinsHash: string;
   /** The latest check's sources are in its read model, not in the job. */
   outcome: {
-    status: WorkflowSourceCheck["status"] | "initialized" | "generated";
+    status:
+      WorkflowSourceCheck["status"] | "initialized" | "generated" | "evaluated";
     blockers: string[];
     stateHash?: string;
   } | null;

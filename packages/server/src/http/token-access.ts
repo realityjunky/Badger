@@ -4,6 +4,7 @@ import { workflowMethods } from "./workflows.js";
 import { gateMethods } from "./gates.js";
 import { dossierMethods } from "./dossier.js";
 import { planMethods } from "./plans.js";
+import { evaluationMethods } from "./evaluations.js";
 import { packageMethods } from "./packages.js";
 import { proposalMethods } from "./proposals.js";
 import { inboxMethods } from "./inbox.js";
@@ -37,6 +38,8 @@ export function tokenRequestAllowed(
   if (dossierMethods(path) !== null) return reads;
   if (planMethods(path) !== null) return reads;
   if (proposalMethods(path) !== null) return reads;
+  if (evaluationMethods(path) !== null)
+    return reads && scopes.includes("engineer");
   if (packageMethods(path) !== null) return reads;
   if (inboxMethods(path) !== null) return reads;
   if (sourceStudyMethods(path) !== null) return reads;

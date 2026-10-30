@@ -8,6 +8,19 @@ export function engineerTools(api: BadgerApi) {
   const folder = { ...job, folder: z.string().min(1).max(4096) };
   return [
     tool(
+      "evaluation_status",
+      "Read evaluation jobs, progress, immutable report history, and kernel publication readiness for a workflow version. Starting an evaluation requires the person to confirm in the dashboard.",
+      context,
+      async (args) => ({
+        ...(await api.request<Record<string, unknown>>(
+          `/workflows/${encodeURIComponent(args.workflowId)}/versions/${encodeURIComponent(args.versionId)}/evaluations`,
+        )),
+        dashboard: `${api.url}/evaluations?workflow=${encodeURIComponent(args.workflowId)}&version=${encodeURIComponent(args.versionId)}`,
+      }),
+      "compose",
+      true,
+    ),
+    tool(
       "list_jobs",
       "List drafting jobs for a workflow version, including queued work and submitted suggestions.",
       context,

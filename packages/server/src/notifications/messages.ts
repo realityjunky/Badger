@@ -22,6 +22,7 @@ const EVENT_LABELS: Record<NotificationEvent, { en: string; zh: string }> = {
     en: "Concerns waiting for resolution",
     zh: "专家关切等待处理",
   },
+  "evaluation-finished": { en: "Evaluation finished", zh: "评估已完成" },
   "job-submitted": { en: "Drafts waiting for acceptance", zh: "草稿等待验收" },
   "gate-ready": { en: "Approval waiting", zh: "等待审批" },
   "gate-invalidated": { en: "Stage approval superseded", zh: "阶段审批已失效" },

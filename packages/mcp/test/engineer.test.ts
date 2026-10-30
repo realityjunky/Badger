@@ -682,3 +682,46 @@ it("refuses a claimed Skill path with a .git component in any letter case before
     });
   }
 });
+
+it("reads worker evaluation history and readiness through the Engineer profile while refusing an unscoped token", async () => {
+  service = await startTestService({ mode: "local" });
+  const { group } = await request("/groups", "POST", { name: "Evaluations" });
+  const { workflow, version } = await request("/workflows", "POST", {
+    groupId: group.id,
+    name: "evaluation-status",
+    goal: "Read evaluation history.",
+    intent: "new-skill",
+    locale: "en",
+  });
+  const client = await connect();
+  const tools = await client.listTools();
+  expect(
+    tools.tools.find((tool) => tool.name === "evaluation_status")?.annotations
+      ?.readOnlyHint,
+  ).toBe(true);
+  const result = await call(client, "evaluation_status", {
+    workflowId: workflow.id,
+    versionId: version.id,
+  });
+  expect(result).toMatchObject({
+    currentPackageHash: null,
+    reports: [],
+    jobs: [],
+    passingReportId: null,
+  });
+  expect(result.dashboard).toContain(
+    `/evaluations?workflow=${workflow.id}&version=${version.id}`,
+  );
+  const restricted = await connect(["expert"]);
+  expect(
+    (await restricted.listTools()).tools.map((tool) => tool.name),
+  ).not.toContain("evaluation_status");
+  expect(
+    (
+      await restricted.callTool({
+        name: "evaluation_status",
+        arguments: { workflowId: workflow.id, versionId: version.id },
+      })
+    ).isError,
+  ).toBe(true);
+});

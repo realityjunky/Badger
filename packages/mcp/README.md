@@ -210,3 +210,9 @@ Package page for human acceptance. Engineers request ready lanes, accept or
 reject results, and confirm assembly in that page; those actions are never
 MCP tools. NEEDS_CONTEXT and BLOCKED remain explicit outcomes, with the kernel's
 question or repair requirement; never guess missing context to report DONE.
+
+The Engineer profile's read-only `evaluation_status` tool returns worker progress,
+immutable evaluation history, the passing report for the current package hash,
+kernel publication readiness, and a dashboard link. It requires the Engineer
+role/capability and an `engineer` token scope. Starting an evaluation stays with
+a signed-in person in the dashboard.

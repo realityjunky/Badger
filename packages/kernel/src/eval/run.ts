@@ -1,3 +1,4 @@
+import { withCertificationContext, type EvaluationSandbox } from "./sandbox.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { CreatorState, EvalReport, WorkflowProtocol } from "../types.js";
@@ -11,11 +12,31 @@ import {
 } from "../authoring/lifecycle.js";
 import { crossValidateAuthoringPackage } from "../authoring/cross-validation.js";
 
+export interface EvaluationOptions {
+  sandbox?: EvaluationSandbox;
+  /** Host-owned unique report destination, within the Project. */
+  reportPath?: string;
+  /** Service workers retain immutable reports without changing committed state. */
+  persistState?: boolean;
+  onProgress?: (phase: string) => void | Promise<void>;
+}
+
 export async function evaluatePackage(
   state: CreatorState,
+  options: EvaluationOptions = {},
+): Promise<EvalReport> {
+  return withCertificationContext(options.sandbox, options.onProgress, () =>
+    runEvaluation(state, options),
+  );
+}
+
+async function runEvaluation(
+  state: CreatorState,
+  options: EvaluationOptions,
 ): Promise<EvalReport> {
   if (!state.generated)
     throw new Error("Generate the workflow package before evaluation");
+  await options.onProgress?.("package-checks");
   const root = state.generated.packageRoot;
   const hash = await hashDirectory(root);
   const checks: EvalReport["checks"] = [];
@@ -136,6 +157,7 @@ export async function evaluatePackage(
       }
     }
   }
+  await options.onProgress?.("runtime-certification");
   const runtime = await certifyWorkflowRuntime({
     protocol,
     generatedPackageHash: hash,
@@ -149,6 +171,11 @@ export async function evaluatePackage(
         ? runtime.blockers.join("; ")
         : "WorkflowRuntime completed generated compatibility and synthetic Phase 3 certification",
   });
+  checks.push({
+    id: "package-integrity",
+    passed: (await hashDirectory(root)) === hash,
+    detail: "Package bytes must remain unchanged during certification",
+  });
   const passed = checks.every((check) => check.passed);
   const report: EvalReport = {
     schemaVersion: 1,
@@ -158,12 +185,11 @@ export async function evaluatePackage(
     ...(authoringCrossValidation ? { authoringCrossValidation } : {}),
     ...(runtime.evidence ? { runtime: runtime.evidence } : {}),
   };
-  const resultPath = path.join(
-    state.projectRoot,
-    ".badger",
-    "eval",
-    `${state.name}.json`,
-  );
+  const resultPath =
+    options.reportPath ??
+    path.join(state.projectRoot, ".badger", "eval", `${state.name}.json`);
+  toProjectRelativePath(state.projectRoot, resultPath);
+  await options.onProgress?.("report");
   await atomicWrite(resultPath, JSON.stringify(report, null, 2) + "\n");
   state.currentHash = hash;
   state.eval = {
@@ -174,7 +200,7 @@ export async function evaluatePackage(
     ...(runtime.evidence ? { runtime: runtime.evidence } : {}),
   };
   state.status = passed ? "evaluated" : "generated";
-  await writeState(state);
+  if (options.persistState !== false) await writeState(state);
   return report;
 }
 

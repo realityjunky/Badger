@@ -15,6 +15,7 @@ import { PlaceholderPage } from "../pages/PlaceholderPage.js";
 import { QuestionnairePage } from "../pages/QuestionnairePage.js";
 import { SettingsPage } from "../pages/SettingsPage.js";
 import { SkillsPage } from "../pages/SkillsPage.js";
+import { EvaluationsPage } from "../pages/EvaluationsPage.js";
 import { WorkflowsPage } from "../pages/WorkflowsPage.js";
 import { applyTheme } from "../theme/applyTheme.js";
 import { antdTheme, fontScaleFactor, resolveTheme } from "../theme/tokens.js";
@@ -102,15 +103,7 @@ function ThemedApp({ basePath }: { basePath: string }) {
                       />
                     }
                   />
-                  <Route
-                    path="evaluations/*"
-                    element={
-                      <PlaceholderPage
-                        title="page.evaluations.title"
-                        description="page.evaluations.description"
-                      />
-                    }
-                  />
+                  <Route path="evaluations/*" element={<EvaluationsPage />} />
                   <Route path="activity" element={<ActivityPage />} />
                   <Route path="admin/*" element={<AdminPage />} />
                   <Route path="settings/*" element={<SettingsPage />} />
