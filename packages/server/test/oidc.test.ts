@@ -611,9 +611,14 @@ describe("OpenID Connect sign-in", () => {
   it("reports a held discovery request as unavailable after the configured timeout", async () => {
     const app = await start({ BADGER_OIDC_TIMEOUT_SECONDS: "1" });
     provider!.setEndpointHeld("/.well-known/openid-configuration");
+    const before = performance.now();
     const failed = await app.request("/badger/auth/oidc/login", {
       redirect: "manual",
     });
+    // The 1 s setting, not the 3 s default, ended the wait.
+    const elapsed = performance.now() - before;
+    expect(elapsed).toBeGreaterThanOrEqual(950);
+    expect(elapsed).toBeLessThan(3_000);
     expect(failed.status).toBe(503);
     expect(await failed.text()).toContain(
       "The identity provider is unavailable",
@@ -634,10 +639,14 @@ describe("OpenID Connect sign-in", () => {
     const app = await start({ BADGER_OIDC_TIMEOUT_SECONDS: "1" });
     const flow = await begin();
     provider!.setEndpointHeld("/token");
+    const before = performance.now();
     const failed = await app.request(flow.completePath, {
       headers: { cookie: flow.flowCookie },
       redirect: "manual",
     });
+    const elapsed = performance.now() - before;
+    expect(elapsed).toBeGreaterThanOrEqual(950);
+    expect(elapsed).toBeLessThan(3_000);
     expect(failed.status).toBe(503);
     expect(await failed.text()).toContain(
       "The identity provider is unavailable",
