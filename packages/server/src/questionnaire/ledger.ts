@@ -71,11 +71,19 @@ function visibleHandoff(
   };
 }
 
+/**
+ * The caller supplies a transaction. Every writer of questionnaire, source
+ * study, and pin records also locks this version, so all reads below observe
+ * one state until that transaction commits, including round publication.
+ */
 export async function readQuestionnaireRecords(
   tx: Queryable,
   versionId: string,
   personId: string,
 ): Promise<QuestionnaireRecords> {
+  await tx.query("select id from workflow_versions where id = $1 for update", [
+    versionId,
+  ]);
   const questions = await readQuestions(tx, versionId, personId, true);
   const resolutions = await readResolutions(tx, versionId);
   const answers = await readAnswers(tx, versionId, personId);
