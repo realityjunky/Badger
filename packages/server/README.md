@@ -32,8 +32,8 @@ case. Opting out affects chat mentions only; inbox items still arrive. Text
 messages support userid and mobile mentions; people with neither appear by
 name. A pending invitation appears as "Invited person", so posts never carry
 an email address. Posts carry only workflow names, curated waiting-event
-labels, recipient counts, and links. Question, answer, Skill, and Run content
-never enters the channel payload.
+labels, each recipient's name and item count, the mentions, and links.
+Question, answer, Skill, and Run content never enters the channel payload.
 
 Configure the server and worker with the same `BADGER_NOTIFICATION_KEY`, a
 stable random 32-byte key encoded as 64 hexadecimal characters, and
@@ -309,12 +309,12 @@ response.
 A signed-in Engineer or Administrator sends
 `{proposalHash, confirmed: true, requestId, replaceStateHash?}` to
 `POST V/proposal/initialize`; other methods answer 405. It returns
-`202 {job}` without running the kernel in the HTTP request.
-`replaceStateHash` must equal `currentState.hash` when replacing state; a
-conflict returns `currentStateHash`. Request IDs identify jobs per requester,
-so identical retries return the same job while changed inputs conflict.
-Personal access tokens may read these resources but cannot approve or
-initialize.
+`202 {job}`, and the kernel initializes the state in the worker, never in the
+HTTP request. `replaceStateHash` must equal `currentState.hash` when replacing
+state; a conflict returns `currentStateHash`. Request IDs identify jobs per
+requester, so identical retries return the same job while changed inputs
+conflict. Personal access tokens may read these resources but cannot approve
+or initialize.
 
 The existing workflow worker claims `init` jobs alongside source checks and
 rechecks the approval, plan, sources, and quoted state hash under the version
@@ -392,7 +392,7 @@ channel in Activity. Existing shipped migrations are unchanged.
 | `POST Q/rounds`                    | Create a draft round with `{title}`.                                                                                                                      |
 | `POST Q/rounds/:id/questions`      | Draft a free-text question with `text`, `topic`, `targets`, `rationale`, `evidence`, `assignees`, and `priority` (0–100, higher first).                   |
 | `PATCH Q/questions/:id`            | Quote `revision` and replace the question content, retaining the old revision.                                                                            |
-| `GET Q/rounds/:id/publish-preview` | Review the ordered questions, recipients, and confirmation hash.                                                                                          |
+| `GET Q/rounds/:id/publish-preview` | Review the ordered questions and the confirmation hash, which also binds each question's recipients.                                                      |
 | `POST Q/rounds/:id/publish`        | A signed-in Engineer sends `{confirmed: true, confirmationHash}`. Publish and notify the whole round together. A retry of the published hash is harmless. |
 | `PUT Q/settings`                   | Quote `revision` (0 initially) and `roundSizeLimit`: a positive integer, or `null` for no limit. Applies across this workflow's versions.                 |
 | `PUT Q/questions/:id/answer`       | Autosave `{revision, questionRevision, text}`, with revision 0 for a first draft.                                                                         |
@@ -598,11 +598,12 @@ Engineers. New facts need fresh acknowledgements. History is retained.
 Editing a confirmed answer, including its first new private draft, marks the
 question `needs-reconfirmation`; submitting that draft keeps the flag until
 an Engineer confirms again. Revising a confirmed question does the same.
-Replacing or removing a Skill pin flags only confirmed questions whose cited
-file hashes changed or disappeared. An unrelated file change preserves the
-facts. Re-confirmation requires questions to cite currently pinned evidence
-and answers submitted for their current question revision. Old facts and
-acknowledgements remain visible as inactive history.
+Replacing or removing a Skill pin flags each published question, not only a
+confirmed one, when a file it or its active facts cite changed or disappeared.
+An unrelated file change preserves the facts. Re-confirmation requires
+questions to cite currently pinned evidence and answers submitted for their
+current question revision. Old facts and acknowledgements remain visible as
+inactive history.
 
 ## Question threads and expert concerns
 
@@ -861,12 +862,12 @@ All routes below follow the configured base path and `/api/v1`. They use the
 same Group visibility and Engineer/Field expert upload permissions as uploads.
 Registration and imports are audited; duplicate requests retain their records.
 
-| Method and path | Behavior |
-| --- | --- |
-| `GET /skills/:id/repositories` | List registered repositories visible with this Skill. |
-| `POST /skills/:id/repositories` | Register `{url}` without fetching; return `{repository}` (201 or 200 for a duplicate). |
-| `POST /skills/:id/git-preview` | Inspect `{repositoryId, commit, scripts?}`; return `{preview}` with the kernel hash, inventory, and effects. |
-| `POST /skills/:id/versions` | Import `{repositoryId, commit, scripts?, confirmed: true, expectedHash}`; return `{version}` (201 or 200). |
+| Method and path                 | Behavior                                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `GET /skills/:id/repositories`  | List registered repositories visible with this Skill.                                                        |
+| `POST /skills/:id/repositories` | Register `{url}` without fetching; return `{repository}` (201 or 200 for a duplicate).                       |
+| `POST /skills/:id/git-preview`  | Inspect `{repositoryId, commit, scripts?}`; return `{preview}` with the kernel hash, inventory, and effects. |
+| `POST /skills/:id/versions`     | Import `{repositoryId, commit, scripts?, confirmed: true, expectedHash}`; return `{version}` (201 or 200).   |
 
 Commits must be full lowercase 40- or 64-character hashes. Branches, tags,
 abbreviations, and unregistered or other-Skill repository IDs are refused.
@@ -1035,10 +1036,11 @@ version with `POST /api/v1/workflows/:workflowId/versions/:versionId/pins`:
 `upgrade-source` pin, and its Sources stage stays blocked until it has one.
 The Skill version must belong to the workflow's Group. Posting a different
 hash for an already pinned Skill replaces the pin and must quote its
-`revision`; `DELETE .../pins/:skillId` quotes it too. A stale or missing
-revision returns 409 with the current pin. Every change invalidates the
-later stages that had progressed, cancels a queued check of the previous pin
-set, and queues a new source-check job. `GET` on the version, or on its
+`revision`; `DELETE .../pins/:skillId` quotes it too. A stale revision, or a
+missing one on a replacement, returns 409 with the current pin; a `DELETE`
+without a valid revision returns 400. Every change invalidates the later
+stages that had progressed, cancels a queued check of the previous pin set,
+and queues a new source-check job. `GET` on the version, or on its
 `pins`, `source-check`, and `jobs` paths, returns the pins, the latest check,
 and the job history, with each job's requester, timing, status, and outcome.
 Personal access tokens read these paths but cannot pin.
