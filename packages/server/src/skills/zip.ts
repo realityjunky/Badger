@@ -63,6 +63,8 @@ export async function readZipUpload(
     const files: UploadFile[] = [];
     let totalBytes = 0;
     for await (const entry of archive.eachEntry()) {
+      const name = entryName(entry);
+      const relative = normalizeUploadPath(name);
       // macOS metadata is not part of the Skill; it is never expanded.
       if (
         entry.fileNameRaw
@@ -70,8 +72,6 @@ export async function readZipUpload(
           .equals(MACOS_METADATA)
       )
         continue;
-      const name = entryName(entry);
-      const relative = normalizeUploadPath(name);
       const mode = (entry.externalFileAttributes >>> 16) & 0xf000;
       const directory = name.endsWith("/");
       if (

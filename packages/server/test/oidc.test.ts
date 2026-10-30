@@ -34,26 +34,40 @@ async function start(environment: Record<string, string | undefined> = {}) {
   return service;
 }
 
-async function begin(returnTo?: string, prefix = "/badger") {
+async function begin(returnTo?: string, prefix = "/badger", cookie?: string) {
   const query =
     returnTo === undefined ? "" : `?${new URLSearchParams({ returnTo })}`;
   const login = await service!.request(`${prefix}/auth/oidc/login${query}`, {
     redirect: "manual",
+    headers: cookie === undefined ? undefined : { cookie },
   });
   expect(login.status).toBe(303);
   const authorizationUrl = new URL(login.headers.get("location")!);
   expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
     `https://badger.example${prefix}/auth/oidc/callback`,
   );
-  const flowCookie = login.headers.getSetCookie()[0].split(";")[0];
+  const flowCookie = login.headers
+    .getSetCookie()
+    .find((cookie) => !cookie.includes("Max-Age=0;"))!
+    .split(";")[0];
   const authorization = await fetch(authorizationUrl, { redirect: "manual" });
   expect(authorization.status).toBe(302);
   const callback = new URL(authorization.headers.get("location")!);
   return {
     flowCookie,
+    setCookies: login.headers.getSetCookie(),
     callback,
     completePath: `${prefix}/auth/oidc/complete${callback.search}`,
   };
+}
+
+function rememberCookies(jar: Map<string, string>, cookies: readonly string[]) {
+  for (const cookie of cookies) {
+    const pair = cookie.split(";")[0];
+    const name = pair.slice(0, pair.indexOf("="));
+    if (cookie.includes("Max-Age=0;")) jar.delete(name);
+    else jar.set(name, pair);
+  }
 }
 
 async function signIn() {
@@ -73,6 +87,95 @@ async function signIn() {
 }
 
 describe("OpenID Connect sign-in", () => {
+  it("keeps at most three browser flows and drops the oldest cookie on a fourth start", async () => {
+    const app = await start();
+    const jar = new Map<string, string>();
+    const tabs = [];
+    for (let index = 0; index < 4; index += 1) {
+      const tab = await begin(
+        undefined,
+        "/badger",
+        [...jar.values()].join("; "),
+      );
+      tabs.push(tab);
+      for (const cookie of tab.setCookies) {
+        expect(cookie).toContain("; Path=/badger;");
+        expect(cookie).toContain("; HttpOnly; Secure; SameSite=Strict");
+        expect(cookie).not.toContain("Domain=");
+      }
+      rememberCookies(jar, tab.setCookies);
+      expect(jar.size).toBeLessThanOrEqual(3);
+    }
+    expect(jar.has(tabs[0].flowCookie.split("=")[0])).toBe(false);
+    const dropped = await app.request(tabs[0].completePath, {
+      redirect: "manual",
+      headers: { cookie: [...jar.values()].join("; ") },
+    });
+    expect(dropped.status).toBe(400);
+    for (const tab of tabs.slice(1)) {
+      const completed = await app.request(tab.completePath, {
+        redirect: "manual",
+        headers: { cookie: [...jar.values()].join("; ") },
+      });
+      expect(completed.status).toBe(303);
+      rememberCookies(jar, completed.headers.getSetCookie());
+    }
+    expect([...jar.keys()]).toEqual(["badger_session"]);
+  });
+
+  it("leaves other transactions intact when a cookie token does not match the callback state", async () => {
+    const app = await start();
+    const first = await begin();
+    const second = await begin();
+    const wrongToken = `${first.flowCookie.split("=")[0]}=${second.flowCookie.split("=")[1]}`;
+    const failed = await app.request(first.completePath, {
+      redirect: "manual",
+      headers: { cookie: wrongToken },
+    });
+    expect(failed.status).toBe(400);
+    for (const flow of [first, second]) {
+      const completed = await app.request(flow.completePath, {
+        redirect: "manual",
+        headers: { cookie: flow.flowCookie },
+      });
+      expect(completed.status).toBe(303);
+    }
+  });
+
+  it.each([
+    { name: "older tab first", order: [0, 1] },
+    { name: "newer tab first", order: [1, 0] },
+  ])(
+    "completes two pending sign-ins in one browser: $name",
+    async ({ order }) => {
+      const app = await start();
+      const jar = new Map<string, string>();
+      const first = await begin("/badger/my-work?tab=first");
+      rememberCookies(jar, first.setCookies);
+      const second = await begin(
+        "/badger/settings/tokens?tab=second",
+        "/badger",
+        [...jar.values()].join("; "),
+      );
+      rememberCookies(jar, second.setCookies);
+      const tabs = [first, second];
+      for (const index of order) {
+        const completed = await app.request(tabs[index].completePath, {
+          redirect: "manual",
+          headers: { cookie: [...jar.values()].join("; ") },
+        });
+        expect(completed.status).toBe(303);
+        expect(completed.headers.get("location")).toBe(
+          index === 0
+            ? "/badger/my-work?tab=first"
+            : "/badger/settings/tokens?tab=second",
+        );
+        rememberCookies(jar, completed.headers.getSetCookie());
+      }
+      expect([...jar.keys()]).toEqual(["badger_session"]);
+    },
+  );
+
   it("evicts the oldest pending sign-in without refusing a newer start", async () => {
     const app = await start({ BADGER_OIDC_MAX_PENDING_SIGN_INS: "2" });
     const oldest = await begin();
