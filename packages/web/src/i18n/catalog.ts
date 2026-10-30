@@ -5,6 +5,32 @@ import type { Language } from "../preferences/model.js";
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  "authoring.title": "Authoring lanes",
+  "authoring.request": "Request ready lanes",
+  "authoring.help":
+    "Agents draft the lanes in dependency order. Review each submitted result before accepting it; assembly waits for every lane to be current.",
+  "authoring.assemble": "Assemble package",
+  "authoring.assembled": "Package assembled",
+  "authoring.status": "Status",
+  "authoring.revision": "Session revision",
+  "authoring.blockers": "View blockers",
+  "authoring.jobs": "Lane jobs",
+  "authoring.reviewVote": "Review vote",
+  "authoring.laneDraft": "Lane draft",
+  "authoring.inspect": "Review result",
+  "authoring.followUps": "Follow-up work",
+  "authoring.question": "Open follow-up question",
+  "authoring.repair": "Repair job",
+  "authoring.accept": "Preview acceptance",
+  "authoring.reject": "Preview rejection",
+  "authoring.reason": "Reason for rejection",
+  "authoring.claims": "Lane claims",
+  "authoring.confirmDecision": "Confirm lane decision",
+  "authoring.confirm": "Confirm",
+  "authoring.confirmAssembly": "Confirm package assembly",
+  "authoring.assemblyHelp":
+    "Assemble the accepted Authoring records at this exact session revision.",
+
   "package.filterFiles": "Filter package files",
   "package.title": "Package",
   "package.description":
@@ -19,6 +45,7 @@ const en = {
     "Initialize the current approved proposal before generating its package.",
   "package.invalidated":
     "This package was superseded. Review the upstream change and generate it again.",
+  "package.assembledHash": "Assembled package hash",
   "package.hash": "Scaffold hash",
   "package.files": "Package files",
   "package.file": "File",
@@ -1044,6 +1071,31 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  "authoring.title": "创作任务通道",
+  "authoring.request": "请求可执行通道",
+  "authoring.help":
+    "智能体按依赖顺序起草各通道结果。请审阅并接受每项结果；所有通道均为当前状态后才能组装。",
+  "authoring.assemble": "组装软件包",
+  "authoring.assembled": "软件包已组装",
+  "authoring.status": "状态",
+  "authoring.revision": "创作会话修订号",
+  "authoring.blockers": "查看阻塞原因",
+  "authoring.jobs": "通道任务",
+  "authoring.reviewVote": "审阅投票",
+  "authoring.laneDraft": "通道草稿",
+  "authoring.inspect": "审阅结果",
+  "authoring.followUps": "后续工作",
+  "authoring.question": "打开后续问题",
+  "authoring.repair": "修复任务",
+  "authoring.accept": "预览接受",
+  "authoring.reject": "预览拒绝",
+  "authoring.reason": "拒绝原因",
+  "authoring.claims": "通道声明",
+  "authoring.confirmDecision": "确认通道决定",
+  "authoring.confirm": "确认",
+  "authoring.confirmAssembly": "确认软件包组装",
+  "authoring.assemblyHelp": "按此准确会话修订号组装已接受的创作记录。",
+
   "package.filterFiles": "筛选软件包文件",
   "package.title": "软件包",
   "package.description":
@@ -1056,6 +1108,7 @@ const zh: Record<MessageId, string> = {
     "生成此已批准提案和创作状态。重新生成将替换骨架，并使后续创作、评估和审阅失效。",
   "package.needInitialization": "请先初始化当前已批准的提案，再生成软件包。",
   "package.invalidated": "此软件包已被替代。请审阅上游更改后重新生成。",
+  "package.assembledHash": "组装软件包哈希",
   "package.hash": "骨架哈希",
   "package.files": "软件包文件",
   "package.file": "文件",

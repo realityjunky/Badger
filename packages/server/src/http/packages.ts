@@ -1,3 +1,10 @@
+import { publicDraftingJob } from "../drafting/jobs.js";
+import {
+  authoringView,
+  requestLaneJobs,
+  assemblyPreview,
+  assembleCurrentPackage,
+} from "../authoring.js";
 import {
   enqueueGeneration,
   packageFile,
@@ -12,10 +19,16 @@ import { readJsonBody } from "./body.js";
 import { fields } from "../questionnaire/model.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/package(?:\/(generate|file))?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/package(?:\/(generate|file|authoring|authoring-jobs|assemble-preview|assemble))?$/u;
 export function packageMethods(path: string): string | null {
   const match = PATH.exec(path);
-  return match ? (match[3] === "generate" ? "POST" : "GET, HEAD") : null;
+  return match
+    ? ["generate", "authoring-jobs", "assemble-preview", "assemble"].includes(
+        match[3] ?? "",
+      )
+      ? "POST"
+      : "GET, HEAD"
+    : null;
 }
 export async function handlePackage(input: AuthorizedRequest) {
   const { database, person, access, config } = input;
@@ -28,6 +41,22 @@ export async function handlePackage(input: AuthorizedRequest) {
   const workflowId = decodeURIComponent(workflow),
     versionId = decodeURIComponent(version);
   let generation: GenerationInput | undefined;
+  let authoringInput: Record<string, unknown> = {};
+  if (
+    ["authoring-jobs", "assemble-preview", "assemble"].includes(action ?? "")
+  ) {
+    const parsed = await readJsonBody(input.request);
+    if (!parsed.ok) throw new RequestError(400, parsed.message);
+    authoringInput = objectInput(parsed.value);
+    fields(
+      authoringInput,
+      action === "assemble-preview"
+        ? []
+        : action === "assemble"
+          ? ["confirmed", "confirmationHash", "requestId"]
+          : ["confirmed"],
+    );
+  }
   if (action === "generate") {
     const parsed = await readJsonBody(input.request);
     if (!parsed.ok) throw new RequestError(400, parsed.message);
@@ -49,6 +78,10 @@ export async function handlePackage(input: AuthorizedRequest) {
   }
   const result = await database
     .transaction(async (tx) => {
+      if (action === "assemble")
+        await tx.query("select id from people where id=$1 for no key update", [
+          person.id,
+        ]);
       await tx.query(
         "select id from workflow_versions where id = $1 for no key update",
         [versionId],
@@ -64,6 +97,60 @@ export async function handlePackage(input: AuthorizedRequest) {
       const caps = await workflowCapabilities(tx, access, person, record);
       if (!caps.read)
         throw new RequestError(403, "This workflow is outside your roles");
+      if (
+        [
+          "authoring",
+          "authoring-jobs",
+          "assemble-preview",
+          "assemble",
+        ].includes(action ?? "")
+      ) {
+        if (action === "authoring") return authoringView(tx, config, versionId);
+        if (!caps.generate)
+          throw new RequestError(
+            403,
+            "Only a signed-in Engineer manages Authoring and assembly",
+          );
+        if (action === "assemble-preview")
+          return {
+            preview: await assemblyPreview(tx, config, versionId, person.id),
+          };
+        if (authoringInput.confirmed !== true)
+          throw new RequestError(400, "Confirm the Authoring action");
+        if (action === "authoring-jobs")
+          return {
+            jobs: (
+              await requestLaneJobs(
+                tx,
+                config,
+                input.dependencies,
+                { ...input.context, agentHost: null },
+                workflowId,
+                versionId,
+              )
+            ).map((j) => publicDraftingJob(j)),
+          };
+        if (
+          typeof authoringInput.confirmationHash !== "string" ||
+          typeof authoringInput.requestId !== "string" ||
+          !/^[A-Za-z0-9._-]{1,100}$/u.test(authoringInput.requestId)
+        )
+          throw new RequestError(
+            400,
+            "Quote the assembly confirmation hash and a request ID",
+          );
+        return assembleCurrentPackage(
+          tx,
+          config,
+          input.dependencies,
+          input.context,
+          versionId,
+          {
+            confirmationHash: authoringInput.confirmationHash,
+            requestId: authoringInput.requestId,
+          },
+        );
+      }
       if (generation) {
         if (!caps.generate)
           throw new RequestError(
@@ -103,5 +190,8 @@ export async function handlePackage(input: AuthorizedRequest) {
         );
       throw error;
     });
-  input.reply.json(generation ? 202 : 200, result);
+  input.reply.json(
+    generation ? 202 : action === "authoring-jobs" ? 201 : 200,
+    result,
+  );
 }

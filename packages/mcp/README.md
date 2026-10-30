@@ -200,3 +200,13 @@ Tests use an in-memory MCP client connected to the real service harness,
 through `@realityjunky/badger-server/testing`, and exercise the real stdio
 entry point. Run `npm test -w packages/mcp` after building the workspaces.
 The same tests use Postgres when `BADGER_TEST_DATABASE_URL` is set.
+
+Authoring lanes and review votes also appear in the engineer job tools (#61).
+`claim_job` writes the kernel's bounded handoff files under `inputs/`, verifies
+their hashes against `context.json`, and includes the pinned source Skills as
+usual. Submit `{ "laneOutput": ... }` in `result.json`; the service validates
+it through the kernel. The result remains a draft and links to the workflow's
+Package page for human acceptance. Engineers request ready lanes, accept or
+reject results, and confirm assembly in that page; those actions are never
+MCP tools. NEEDS_CONTEXT and BLOCKED remain explicit outcomes, with the kernel's
+question or repair requirement; never guess missing context to report DONE.

@@ -1,4 +1,9 @@
-import { canonicalHash, deriveFactoryPlan } from "@realityjunky/badger";
+import {
+  canonicalHash,
+  deriveFactoryPlan,
+  type AuthoringPlan,
+  type AuthoringHandoff,
+} from "@realityjunky/badger";
 import { planInputs, readPlanHead } from "../plans.js";
 import type { Queryable } from "../database/database.js";
 import { listWorkflowPins } from "../workflow-source.js";
@@ -86,7 +91,15 @@ export async function draftingContext(
 
 export type DraftingBundle = Awaited<
   ReturnType<typeof draftingContext>
->["bundle"];
+>["bundle"] & {
+  authoring?: {
+    packageId: string;
+    lane: string;
+    plan: AuthoringPlan;
+    handoff: AuthoringHandoff;
+    files: { path: string; text: string; hash: string }[];
+  };
+};
 export interface DraftingTarget {
   kind: DraftingKind;
   roundId: string | null;
@@ -153,6 +166,9 @@ export function draftingInputs(bundle: DraftingBundle, target: DraftingTarget) {
     return [...heads.values()].sort((a, b) => compare(a.personId, b.personId));
   };
   switch (target.kind) {
+    case "authoring-lane":
+    case "review-vote":
+      return bundle.authoring;
     case "source-study":
       return {
         pin,

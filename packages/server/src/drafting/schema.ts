@@ -2,6 +2,7 @@ import { Ajv } from "ajv";
 import {
   SEMANTIC_DOSSIER_TOPICS,
   type FactoryPlan,
+  type AuthoringLaneOutput,
 } from "@realityjunky/badger";
 import { objectInput, RequestError } from "../http/errors.js";
 import {
@@ -22,6 +23,8 @@ import {
   type ResolutionInput,
 } from "../questionnaire/resolutions.js";
 export type DraftingKind =
+  | "authoring-lane"
+  | "review-vote"
   | "draft-questions"
   | "draft-follow-ups"
   | "draft-plan"
@@ -35,6 +38,7 @@ export interface ImportedQuestion {
   question: QuestionContent;
 }
 export type DraftResult =
+  | { laneOutput: AuthoringLaneOutput }
   | { plan: FactoryPlan }
   | { questions: QuestionContent[] }
   | { questions: ImportedQuestion[] }
@@ -177,6 +181,8 @@ const SOURCE_STUDY_SCHEMA = {
 export const DRAFT_SCHEMAS = {
   "draft-questions": QUESTION_DRAFT_SCHEMA,
   "draft-follow-ups": QUESTION_DRAFT_SCHEMA,
+  "authoring-lane": object({ laneOutput: { type: "object" } }),
+  "review-vote": object({ laneOutput: { type: "object" } }),
   "source-study": SOURCE_STUDY_SCHEMA,
   "restate-answer": object({
     facts: {
@@ -231,6 +237,8 @@ export function validateDraftResult(
       `The result does not match the job's output schema: ${ajv.errorsText(valid.errors)}`,
     );
   const input = objectInput(result);
+  if (kind === "authoring-lane" || kind === "review-vote")
+    return { laneOutput: input.laneOutput as AuthoringLaneOutput };
   if (kind === "draft-plan") return { plan: input.plan as FactoryPlan };
   if (kind === "import-open-questions") {
     const questions = (input.questions as unknown[]).map(

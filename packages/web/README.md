@@ -218,3 +218,8 @@ The journeys start the service themselves through
 root, and the implicit local Administrator. A second instance serves under
 the base path `/badger`, the way a deployment behind a reverse proxy does,
 and `e2e/base-path.spec.ts` loads the dashboard there.
+- The Package panel also offers **Authoring lanes** (#61): request only ready
+  lanes, inspect submitted claims and authored content, preview and confirm an
+  acceptance or a rejection with a reason, follow linked questions and repair
+  jobs, and confirm assembly once every lane is current. Lane results are
+  refreshed while Agents work. Read-only people see status and history.

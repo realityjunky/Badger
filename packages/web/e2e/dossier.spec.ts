@@ -1,3 +1,4 @@
+import { reportLaneOutput } from "../../server/test/fixtures/authoring.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -64,6 +65,8 @@ async function english(page: Page) {
   await page.getByTestId("language-switch").click();
   await page.getByRole("menuitem", { name: "English", exact: true }).click();
 }
+
+test.setTimeout(90_000);
 
 for (const theme of ["light", "dark"] as const) {
   test(`the Engineer accepts a plan draft and the owner approves dossier and plan, then sees supersession (${theme})`, async ({
@@ -483,7 +486,7 @@ for (const theme of ["light", "dark"] as const) {
         packagePanel.getByText("Authored leaf", { exact: true }).first(),
       ).toBeVisible();
       await expect(
-        packagePanel.getByText("skill-review", { exact: true }),
+        packagePanel.getByText("skill-review", { exact: true }).first(),
       ).toBeVisible();
       await packagePanel
         .getByLabel("Filter package files", { exact: true })
@@ -503,6 +506,128 @@ for (const theme of ["light", "dark"] as const) {
       await packagePanel
         .getByLabel("Filter package files", { exact: true })
         .fill("");
+      const authoring = packagePanel.getByTestId("workflow-authoring");
+      await authoring
+        .getByRole("button", { name: "Request ready lanes", exact: true })
+        .click();
+      await expect(
+        authoring.getByText("Lane draft", { exact: true }),
+      ).toHaveCount(3);
+      const { jobs: laneJobs } = await call<{
+        jobs: { id: string; laneId: string; revision: number }[];
+      }>("GET", `${root}/drafting-jobs`);
+      const script = laneJobs.find((job) => job.laneId === "script")!;
+      const claim = await call<{
+        job: { lease: { id: string }; contextHash: string };
+        contextBundle: { authoring: { plan: { semanticDossierHash: string } } };
+      }>("POST", `${root}/drafting-jobs/${script.id}/claim`, {
+        revision: script.revision,
+      });
+      await call("POST", `${root}/drafting-jobs/${script.id}/submit`, {
+        leaseId: claim.job.lease.id,
+        contextHash: claim.job.contextHash,
+        result: {
+          laneOutput: {
+            lane: "script",
+            status: "BLOCKED",
+            semanticDossierHash:
+              claim.contextBundle.authoring.plan.semanticDossierHash,
+            claims: [],
+            artifacts: [],
+            summary: "The report evidence needs repair.",
+            action: {
+              kind: "repair",
+              prompt: "Repair the report evidence mapping.",
+              requirement: "Keep the approved report evidence.",
+            },
+          },
+        },
+      });
+      await authoring
+        .getByRole("button", { name: "Reload records", exact: true })
+        .click();
+      await authoring
+        .getByRole("button", { name: "Review result", exact: true })
+        .click();
+      await author
+        .getByRole("dialog")
+        .getByRole("button", { name: "Preview acceptance", exact: true })
+        .click();
+      await author
+        .getByRole("dialog", { name: "Confirm lane decision" })
+        .getByRole("button", { name: "Confirm", exact: true })
+        .click();
+      await expect(author.getByRole("dialog")).toHaveCount(0);
+      await expect(
+        authoring.getByText("Repair job", { exact: false }),
+      ).toBeVisible();
+      await expect(
+        authoring.getByRole("button", {
+          name: "Assemble package",
+          exact: true,
+        }),
+      ).toBeDisabled();
+      for (let wave = 0; wave < 3; wave++) {
+        await call("POST", `${root}/package/authoring-jobs`, {
+          confirmed: true,
+        });
+        const { jobs } = await call<{
+          jobs: {
+            id: string;
+            kind: string;
+            status: string;
+            revision: number;
+          }[];
+        }>("GET", `${root}/drafting-jobs`);
+        for (const job of jobs.filter(
+          (j) =>
+            (j.kind === "authoring-lane" || j.kind === "review-vote") &&
+            j.status === "queued",
+        )) {
+          const route = `${root}/drafting-jobs/${job.id}`;
+          const claim = await call<{
+            job: { lease: { id: string }; contextHash: string };
+            contextBundle: unknown;
+          }>("POST", `${route}/claim`, { revision: job.revision });
+          const laneOutput = reportLaneOutput(claim.contextBundle);
+          const submitted = await call<{ job: { revision: number } }>(
+            "POST",
+            `${route}/submit`,
+            {
+              leaseId: claim.job.lease.id,
+              contextHash: claim.job.contextHash,
+              result: { laneOutput },
+            },
+          );
+          const decision = { revision: submitted.job.revision, laneOutput };
+          const { preview } = await call<{
+            preview: { confirmationHash: string };
+          }>("POST", `${route}/accept-preview`, decision);
+          await call("POST", `${route}/accept`, {
+            ...decision,
+            confirmed: true,
+            confirmationHash: preview.confirmationHash,
+            requestId: crypto.randomUUID(),
+          });
+        }
+      }
+      await authoring
+        .getByRole("button", { name: "Reload records", exact: true })
+        .click();
+      await authoring
+        .getByRole("button", { name: "Assemble package", exact: true })
+        .click();
+      await expect(
+        author.getByRole("dialog", { name: "Confirm package assembly" }),
+      ).toBeVisible();
+      await author
+        .getByRole("dialog", { name: "Confirm package assembly" })
+        .getByRole("button", { name: "Confirm", exact: true })
+        .click();
+      await expect(author.getByRole("dialog")).toHaveCount(0);
+      await expect(
+        authoring.getByText("Package assembled", { exact: true }),
+      ).toBeVisible();
       const packageScreenshot = info.outputPath(`package-${theme}.png`);
       await packagePanel.screenshot({
         path: packageScreenshot,

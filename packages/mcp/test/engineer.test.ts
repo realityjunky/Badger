@@ -362,6 +362,96 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
     dashboardUrl: `${service.baseUrl}/workflows/${workflow.id}/versions/${version.id}#plan`,
   });
   expect((await request(`${base}/plan`)).versions).toEqual([]);
+  const planDecision = { revision: submittedPlan.job.revision, plan };
+  const acceptedPlan = await request(
+    `${base}/drafting-jobs/${planJob.id}/accept-preview`,
+    "POST",
+    planDecision,
+  );
+  await request(`${base}/drafting-jobs/${planJob.id}/accept`, "POST", {
+    ...planDecision,
+    confirmed: true,
+    confirmationHash: acceptedPlan.preview.confirmationHash,
+    requestId: "accept-mcp-plan",
+  });
+  async function approve(gate: string) {
+    const { preview } = await request(
+      `${base}/gates/${gate}/preview`,
+      "POST",
+      {},
+    );
+    return request(`${base}/gates/${gate}/commit`, "POST", {
+      confirmationHash: preview.confirmationHash,
+      requestId: crypto.randomUUID(),
+    });
+  }
+  await approve("plan");
+  const proposal = await approve("proposal");
+  await request(`${base}/proposal/initialize`, "POST", {
+    proposalHash: proposal.confirmation.boundHashes.proposal,
+    confirmed: true,
+    requestId: "mcp-init",
+  });
+  await service.worker().runOnce();
+  const before = await request(`${base}/package`);
+  const generation = await approve("generation");
+  await request(`${base}/package/generate`, "POST", {
+    confirmed: true,
+    confirmationHash: generation.confirmation.confirmationHash,
+    stateHash: before.currentStateHash,
+    requestId: "mcp-generate",
+  });
+  await service.worker().runOnce();
+  const laneJobs = await request(`${base}/package/authoring-jobs`, "POST", {
+    confirmed: true,
+  });
+  const lane = laneJobs.jobs[0];
+  const laneClaim = await call(client, "claim_job", {
+    ...context,
+    jobId: lane.id,
+    revision: lane.revision,
+  });
+  folders.push(laneClaim.folder);
+  const laneContext = JSON.parse(
+    await fs.readFile(path.join(laneClaim.folder, "context.json"), "utf8"),
+  );
+  expect(laneContext.authoring.handoff.lane).toBe("script");
+  for (const file of laneContext.authoring.files)
+    expect(
+      await fs.readFile(path.join(laneClaim.folder, file.path), "utf8"),
+    ).toBe(file.text);
+  await fs.writeFile(
+    path.join(laneClaim.folder, "result.json"),
+    JSON.stringify({
+      laneOutput: {
+        lane: "script",
+        status: "NEEDS_CONTEXT",
+        semanticDossierHash: laneContext.authoring.plan.semanticDossierHash,
+        summary: "Confirm the sample source.",
+        claims: [],
+        artifacts: [],
+        action: {
+          kind: "question",
+          prompt: "What sample is used?",
+          requirement: "/nodes/0/responsibility",
+        },
+      },
+    }),
+  );
+  const submittedLane = await call(client, "submit_job", {
+    ...context,
+    jobId: lane.id,
+    folder: laneClaim.folder,
+  });
+  expect(submittedLane).toMatchObject({
+    requiresPerson: true,
+    dashboardUrl: `${service.baseUrl}/workflows/${workflow.id}/versions/${version.id}#package`,
+    job: { status: "submitted" },
+  });
+  expect(
+    (await request(`${base}/package/authoring`)).readiness.records.script,
+  ).toBeUndefined();
+
   await request(`${base}/pins/${skill.id}`, "DELETE", { revision: 1 });
   const cancelled = await request(`${base}/drafting-jobs/${job.id}`);
   expect(cancelled.job.status).toBe("cancelled");

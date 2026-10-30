@@ -1110,3 +1110,28 @@ Upstream changes cancel unfinished generation and notify Engineers, Reviewers,
 and Workflow owners about superseded packages. Regeneration starts a fresh
 Authoring session and invalidates progressed evaluation and review stages.
 See [ADR 0030](../../docs/adr/0030-transactional-package-generation.md).
+
+### Authoring jobs and assembly
+
+Authoring (#61, migration `0028`) extends the Package stage. `POST
+V/package/authoring-jobs` with `{ "confirmed": true }` offers the kernel's ready
+lanes as `authoring-lane` drafting jobs and its review lane as `review-vote`
+jobs. They use the existing `/drafting-jobs` list, claim, submit, release, and
+human preview/accept/reject endpoints. Claim context includes a hash-bound
+`authoring` handoff and its bounded files. Results wrap the kernel's lane output
+in `{ "laneOutput": ... }`; authored content is inline, limited to 256 KiB per
+output, with no host file paths. Dependency and generation changes cancel stale
+jobs; other lanes in the same Wave can continue independently.
+
+`GET V/package/authoring` returns kernel readiness, accepted record revisions,
+job history, and linked follow-up questions or repair jobs. NEEDS_CONTEXT creates
+a draft question in an Authoring round; BLOCKED creates a repair job with the
+current lane action. Only a signed-in Engineer or Administrator accepts results.
+Every acceptance preserves the person, lane, and revision for independent review.
+
+`POST V/package/assemble-preview` takes `{}` and returns a confirmation hash for
+the current state and revision. `POST V/package/assemble` takes that hash,
+`confirmed: true`, and a client `requestId`. It refuses missing/stale lanes,
+changed confirmation hashes, and tokens. Replays retain their first response.
+Successful assembly stores its package hash and inventory, finishes Package,
+and activates Evaluation. See ADR 0031 for the filesystem transaction boundary.

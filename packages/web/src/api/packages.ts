@@ -12,6 +12,7 @@ export interface PackageView {
     planVersionHash: string;
     proposalHash: string;
     scaffoldHash: string;
+    assembledHash: string | null;
     stateHash: string;
     files: GeneratedPackageFile[];
     authoringPlan: AuthoringPlan;
