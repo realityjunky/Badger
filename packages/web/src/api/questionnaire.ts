@@ -1,4 +1,5 @@
 import { apiUrl } from "../app/paths.js";
+import type { EvidenceChange, RecordOrigin } from "./version-changes.js";
 
 export type AnswerType =
   | { kind: "free-text" | "yes-no" | "file" }
@@ -35,6 +36,8 @@ export interface QuestionContent {
   priority: number;
 }
 export interface Question extends QuestionContent {
+  origin?: RecordOrigin | null;
+  evidenceChanges?: EvidenceChange[];
   id: string;
   roundId: string;
   revision: number;
@@ -221,6 +224,7 @@ export async function questionnaireRequest<T>(
 }
 
 export interface Resolution {
+  origin?: RecordOrigin | null;
   actorName: string;
   id: string;
   questionId: string;
@@ -234,6 +238,8 @@ export interface Resolution {
   revision: number;
 }
 export interface ConfirmedFact {
+  origin?: RecordOrigin | null;
+  evidenceChanges?: EvidenceChange[];
   attachments?: AnswerAttachment[];
   actorName: string;
   id: string;

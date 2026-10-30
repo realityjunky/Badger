@@ -5,6 +5,7 @@ import {
   type GatePreview,
   type WorkflowSkillPin,
 } from "./workflows.js";
+import type { EvidenceChange, RecordOrigin } from "./version-changes.js";
 
 export interface StudySkill {
   skillId: string;
@@ -30,6 +31,8 @@ export interface SkillInterface {
   evidence: SourceEvidence[];
 }
 interface RecordFields {
+  evidenceChanges?: EvidenceChange[];
+  origin?: RecordOrigin | null;
   id: string;
   revision: number;
   status: "active" | "retired";

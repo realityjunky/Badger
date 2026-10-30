@@ -1001,6 +1001,14 @@ body {
   gap: 16px;
 }
 
+.evidence-changes {
+  margin-block: 12px;
+}
+
+.evidence-changes .skills-compare-files {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+}
+
 .skills-path-button {
   height: auto;
   max-width: 100%;

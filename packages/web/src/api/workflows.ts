@@ -29,6 +29,7 @@ export interface WorkflowStage {
   state: StageState;
 }
 export interface WorkflowVersion extends WorkflowFrame {
+  inheritedFromVersionId?: string | null;
   id: string;
   number: number;
   revision: number;
@@ -163,6 +164,8 @@ export interface GateConfirmation {
   confirmationHash: string;
   boundHashes: Record<string, string>;
   invalidatedAt: string | null;
+  invalidationReason?: string | null;
+  supersededBy?: string | null;
 }
 export type ReadResult<T> =
   { kind: "ok"; value: T } | { kind: "denied" | "missing" | "failed" };

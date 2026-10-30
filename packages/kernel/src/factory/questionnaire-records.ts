@@ -10,6 +10,7 @@ export interface QuestionnaireRecordReference {
   hash?: string;
 }
 export interface QuestionnaireLedgerItem {
+  origin?: { workflowVersionId: string; recordId: string; revision: number };
   record: QuestionnaireRecordReference;
   topic: QuestionnaireTopic;
   statement: string;
@@ -42,6 +43,7 @@ export interface QuestionnaireLedgerItem {
   };
 }
 export interface QuestionnaireQuestionRecord {
+  origin?: QuestionnaireLedgerItem["origin"] | null;
   id: string;
   revision: number;
   topic: QuestionnaireTopic;
@@ -53,6 +55,7 @@ export interface QuestionnaireQuestionRecord {
 export interface QuestionnaireRecords {
   questions: QuestionnaireQuestionRecord[];
   facts?: {
+    origin?: QuestionnaireLedgerItem["origin"] | null;
     id: string;
     questionId: string;
     resolutionId: string;
@@ -70,6 +73,7 @@ export interface QuestionnaireRecords {
     }[];
   }[];
   drafts?: {
+    origin?: QuestionnaireLedgerItem["origin"] | null;
     id: string;
     revision: number;
     kind: "inference" | "assumption";
@@ -80,6 +84,7 @@ export interface QuestionnaireRecords {
     status: "active" | "retired";
   }[];
   sourceRecords?: {
+    origin?: QuestionnaireLedgerItem["origin"] | null;
     id: string;
     revision: number;
     kind: "fact" | "interface";
@@ -132,6 +137,7 @@ export function questionnaireRecordHandoff(
   records: QuestionnaireRecords,
 ): QuestionnaireRecordHandoff {
   const items = records.questions.map((q): QuestionnaireLedgerItem => ({
+    ...(q.origin ? { origin: q.origin } : {}),
     record: { type: "question", id: q.id, revision: q.revision },
     topic: q.topic,
     statement: q.text,
@@ -183,6 +189,7 @@ export function questionnaireRecordHandoff(
       );
     const disputed = f.acknowledgements.some((a) => a.decision === "disputed");
     return {
+      ...(f.origin ? { origin: f.origin } : {}),
       record: { type: "confirmed-fact", id: f.id, revision: 1 },
       topic: records.questions.find((q) => q.id === f.questionId)!.topic,
       statement: f.statement,
@@ -236,6 +243,7 @@ export function questionnaireRecordHandoff(
       acceptedQuestions.add(q.id);
   }
   const drafts = (records.drafts ?? []).map((d): QuestionnaireLedgerItem => ({
+    ...(d.origin ? { origin: d.origin } : {}),
     record: { type: d.kind, id: d.id, revision: d.revision },
     topic: d.topic,
     statement: d.statement,
@@ -266,6 +274,7 @@ export function questionnaireRecordHandoff(
   const activeDrafts = drafts.filter((d) => d.state !== "retired");
   const sources = (records.sourceRecords ?? []).map(
     (r): QuestionnaireLedgerItem => ({
+      ...(r.origin ? { origin: r.origin } : {}),
       record: {
         type: r.kind === "fact" ? "source-fact" : "source-interface",
         id: r.id,

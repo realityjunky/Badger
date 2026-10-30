@@ -20,6 +20,8 @@ import {
   StudyRecordInspector,
 } from "./StudyRecordDetails.js";
 import { WorkflowNotice, type WriteFailure } from "./WorkflowDialog.js";
+import { EvidenceChanges } from "../../components/EvidenceChanges.js";
+import { RecordOriginLink } from "../../components/RecordOriginLink.js";
 
 export function WorkflowSourceStudy({
   basePath,
@@ -144,6 +146,12 @@ export function WorkflowSourceStudy({
             </Space>
             <StudyContentView content={record.content} detail={detail} />
             <StudyEvidenceLinks record={record} />
+            <RecordOriginLink
+              origin={record.origin}
+              workflowId={detail.workflow.id}
+              kind="source-study"
+            />
+            <EvidenceChanges changes={record.evidenceChanges} />
             <Space wrap>
               <Link
                 to={{

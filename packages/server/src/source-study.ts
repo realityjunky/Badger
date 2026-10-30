@@ -7,6 +7,8 @@ import { objectInput, RequestError } from "./http/errors.js";
 import { readVersion } from "./skills/library.js";
 import type { BlobStore } from "./skills/blobs.js";
 import { toIsoString } from "./util.js";
+import { evidenceComparison, type EvidenceChange } from "./evidence-changes.js";
+import { readRecordOrigins, type RecordOrigin } from "./version-inheritance.js";
 import { listWorkflowPins, type WorkflowSkillPin } from "./workflow-source.js";
 import { readGateConfirmations } from "./gates.js";
 import {
@@ -47,6 +49,8 @@ export interface StudyRecord {
   status: "active" | "retired";
   content: StudyContent;
   stale: boolean;
+  evidenceChanges: EvidenceChange[];
+  origin: RecordOrigin | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -172,7 +176,12 @@ function pinned(pins: WorkflowSkillPin[], ref: StudySkill): boolean {
     (pin) => pin.skillId === ref.skillId && pin.hash === ref.hash,
   );
 }
-function record(row: RecordRow, pins: WorkflowSkillPin[]): StudyRecord {
+function record(
+  row: RecordRow,
+  pins: WorkflowSkillPin[],
+  evidenceChanges: EvidenceChange[],
+  origin: RecordOrigin | null = null,
+): StudyRecord {
   return {
     id: row.id,
     workflowVersionId: row.workflow_version_id,
@@ -180,7 +189,14 @@ function record(row: RecordRow, pins: WorkflowSkillPin[]): StudyRecord {
     revision: row.revision,
     status: row.status,
     content: row.content,
-    stale: studyReferences(row.content).some((ref) => !pinned(pins, ref)),
+    stale:
+      evidenceChanges.length > 0 ||
+      ("producer" in row.content &&
+        [row.content.producer, row.content.consumer].some(
+          (ref) => !pinned(pins, ref),
+        )),
+    evidenceChanges,
+    origin,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };
@@ -193,8 +209,21 @@ export async function studyRecords(
     "select * from source_study_records where workflow_version_id = $1 order by id",
     [versionId],
   );
+  const compare = await evidenceComparison(database, versionId);
   const pins = await listWorkflowPins(database, versionId);
-  return rows.rows.map((row) => record(row, pins));
+  const origins = await readRecordOrigins(database, versionId, "source-study");
+  return Promise.all(
+    rows.rows.map(async (row) =>
+      record(
+        row,
+        pins,
+        await compare(
+          row.content.evidence.map((e) => ({ ...e, versionHash: e.hash })),
+        ),
+        origins.get(row.id) ?? null,
+      ),
+    ),
+  );
 }
 export async function readSourceStudy(database: Queryable, versionId: string) {
   const records = await studyRecords(database, versionId);
@@ -441,5 +470,14 @@ export async function saveStudyRecordInTransaction(
     requestId: context.requestId,
   });
   await reconcileDossier(tx, dependencies, context, versionId);
-  return record(row, pins);
+  const compare = await evidenceComparison(tx, versionId);
+  return record(
+    row,
+    pins,
+    await compare(
+      row.content.evidence.map((e) => ({ ...e, versionHash: e.hash })),
+    ),
+    (await readRecordOrigins(tx, versionId, "source-study")).get(row.id) ??
+      null,
+  );
 }

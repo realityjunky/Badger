@@ -11,6 +11,8 @@ import {
 import { useI18n } from "../../i18n/I18nContext.js";
 import { AttachmentLinks } from "./AnswerAttachments.js";
 import { AnswerContent } from "./AnswerContent.js";
+import { EvidenceChanges } from "../../components/EvidenceChanges.js";
+import { RecordOriginLink } from "../../components/RecordOriginLink.js";
 
 type Kind = "confirmed" | "followed-up" | "deferred" | "withdrawn";
 interface FactDraft {
@@ -219,6 +221,11 @@ export function QuestionResolution({
             <p className="questionnaire-text" lang={fact.locale}>
               {fact.text}
             </p>
+            <RecordOriginLink
+              origin={fact.origin}
+              workflowId={view.workflow.id}
+            />
+            <EvidenceChanges changes={fact.evidenceChanges} />
             <p className="muted">
               {t("resolution.confirmedBy")}: {fact.actorName} ·{" "}
               {new Date(fact.createdAt).toLocaleString(locale)}

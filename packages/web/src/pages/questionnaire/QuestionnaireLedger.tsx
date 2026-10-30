@@ -13,6 +13,7 @@ import type {
 } from "../../api/ledger.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { LedgerDraftDialog, LedgerDraftHistory } from "./LedgerDrafts.js";
+import { RecordOriginLink } from "../../components/RecordOriginLink.js";
 
 /** Display the kernel read model; the dashboard never decides readiness. */
 export function QuestionnaireLedger({
@@ -144,6 +145,7 @@ export function QuestionnaireLedger({
         key={`${item.record.type}:${item.record.id}`}
       >
         <p>{item.statement}</p>
+        <RecordOriginLink origin={item.origin} workflowId={view.workflow.id} />
         <Space wrap>
           <Tag>{t(`ledger.state.${item.state}`)}</Tag>
           {recordLink(item.record)}
