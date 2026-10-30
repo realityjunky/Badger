@@ -56,10 +56,24 @@ create index notification_deliveries_pending_idx on notification_deliveries (ava
 -- including a round's many questions, recipients and invalidations.
 -- Legacy records have no recoverable action identity. In particular, never
 -- backfill the migration transaction's identity onto unrelated old actors.
+-- The identity is random and set once per transaction. Transaction IDs would
+-- collide with restored rows once a restore restarts the cluster's counter.
+create function current_notification_action() returns text as $$
+declare
+  action_id text := current_setting('badger.notification_action', true);
+begin
+  -- After its first transaction a session reads the reset setting as ''.
+  if action_id is null or action_id = '' then
+    action_id := gen_random_uuid()::text;
+    perform set_config('badger.notification_action', action_id, true);
+  end if;
+  return action_id;
+end;
+$$ language plpgsql;
 alter table audit_events add column notification_action_id text;
 alter table inbox_items add column notification_action_id text;
-alter table audit_events alter column notification_action_id set default txid_current()::text;
-alter table inbox_items alter column notification_action_id set default txid_current()::text;
+alter table audit_events alter column notification_action_id set default current_notification_action();
+alter table inbox_items alter column notification_action_id set default current_notification_action();
 create index audit_events_notification_action_idx on audit_events (notification_action_id);
 create index inbox_notification_action_idx on inbox_items (notification_action_id);
 

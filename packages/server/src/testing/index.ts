@@ -32,6 +32,7 @@ export {
 
 // Migration checks run the migration runner on a test database directly.
 export { openTestDatabase, type TestDatabase } from "./database.js";
+export type { Queryable } from "../database/database.js";
 export {
   applyMigrations,
   inspectMigrations,
