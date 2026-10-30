@@ -164,6 +164,8 @@ it("installs and removes a real service publication through the local MCP client
     workflowId: fixture.workflow.id,
     publicationId: publication.id,
     packageHash: publication.packageHash,
+    command: process.execPath,
+    args: [path.resolve("dist/src/cli.js")],
     target: { host: "workbuddy", scope: "project", projectRoot, homeRoot },
   };
   const preview = await call("install_workflow", args);
@@ -190,6 +192,10 @@ it("installs and removes a real service publication through the local MCP client
     publication.packageHash,
   );
   const config = await fs.readFile(path.join(projectRoot, ".mcp.json"), "utf8");
+  expect(JSON.parse(config).mcpServers.badger).toMatchObject({
+    command: process.execPath,
+    args: [path.resolve("dist/src/cli.js")],
+  });
   expect(config).toContain("${BADGER_TOKEN}");
   expect(config).not.toContain(secret);
   const removal = await call("uninstall_workflow", {

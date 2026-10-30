@@ -2,9 +2,11 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { previewInstall, commitHostPlan } from "@realityjunky/badger-hosts";
 import { createBadgerMcp } from "./index.js";
 import type { BadgerHttpTransport } from "./api.js";
 import {
@@ -32,9 +34,10 @@ const { createServer, request: httpRequest } = createRequire(import.meta.url)(
 export async function certifyBadgerMcp(options: {
   generatedPackageHash: string;
   snapshot?: PackageSnapshot;
+  transport?: "in-memory" | "stdio";
 }): Promise<WorkflowMcpCertificationEvidence> {
-  const root = await fs.mkdtemp(
-    path.join(os.tmpdir(), "badger-mcp-certification-"),
+  const root = await fs.realpath(
+    await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-certification 运行-")),
   );
   await fs.chmod(root, 0o700);
   const toolCalls: string[] = [];
@@ -279,18 +282,17 @@ export async function certifyBadgerMcp(options: {
       if (init?.body) req.write(init.body);
       req.end();
     });
-  const server = createBadgerMcp({
-    fetch: transport,
-    url: `http://127.0.0.1:${address.port}`,
-    token: "synthetic-certification-token",
-    agentHost: "MCP certification",
-    profile: "operator",
-  });
-  const [a, b] = InMemoryTransport.createLinkedPair();
+  const server =
+    options.transport === "stdio"
+      ? undefined
+      : createBadgerMcp({
+          fetch: transport,
+          url: `http://127.0.0.1:${address.port}`,
+          token: "synthetic-certification-token",
+          agentHost: "MCP certification",
+          profile: "operator",
+        });
   const client = new Client({ name: "MCP certification", version: "1" });
-  await server.connect(b);
-  await client.connect(a);
-  await client.listTools();
   async function call(name: string, args: Record<string, unknown> = {}) {
     toolCalls.push(name);
     const reply = await client.callTool({ name, arguments: args });
@@ -312,6 +314,61 @@ export async function certifyBadgerMcp(options: {
     return value;
   }
   try {
+    if (options.transport === "stdio") {
+      const projectRoot = path.join(root, "WorkBuddy project");
+      await fs.mkdir(projectRoot);
+      const plan = await previewInstall({
+        target: {
+          host: "workbuddy",
+          scope: "project",
+          projectRoot,
+          homeRoot: root,
+        },
+        publication: {
+          workflowId: "synthetic",
+          publicationId: "published",
+          packageHash: snapshot.packageHash,
+        },
+        snapshot,
+        deploymentUrl: `http://127.0.0.1:${address.port}`,
+        command: process.execPath,
+        args: [
+          ...(process.execArgv.includes("--jitless") ? ["--jitless"] : []),
+          fileURLToPath(
+            new URL(
+              "./cli.js",
+              import.meta.resolve("@realityjunky/badger-mcp"),
+            ),
+          ),
+        ],
+      });
+      await commitHostPlan(plan, {
+        confirmed: true,
+        digest: plan.preview.digest,
+      });
+      const {
+        mcpServers: { badger: entry },
+      } = JSON.parse(
+        await fs.readFile(path.join(projectRoot, ".mcp.json"), "utf8"),
+      );
+      await client.connect(
+        new StdioClientTransport({
+          command: entry.command,
+          args: entry.args,
+          cwd: projectRoot,
+          env: {
+            ...entry.env,
+            BADGER_TOKEN: "synthetic-certification-token",
+            BADGER_AGENT_HOST: "MCP certification",
+          },
+        }),
+      );
+    } else {
+      const [a, b] = InMemoryTransport.createLinkedPair();
+      await server!.connect(b);
+      await client.connect(a);
+    }
+    await client.listTools();
     const projectRoot = path.join(root, "project"),
       outputs = path.join(root, "outputs");
     await fs.mkdir(projectRoot);
@@ -550,7 +607,7 @@ export async function certifyBadgerMcp(options: {
     return evidence;
   } finally {
     await client.close();
-    await server.close();
+    await server?.close();
     await new Promise<void>((resolve, reject) =>
       service.close((error) => (error ? reject(error) : resolve())),
     );

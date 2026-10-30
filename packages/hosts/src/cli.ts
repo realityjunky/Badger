@@ -13,7 +13,7 @@ import {
 } from "./index.js";
 import { saveHostPlan, readHostPlan, removeHostPlan } from "./plans.js";
 import { downloadPublishedPackage } from "./publication.js";
-const help = `badger-hosts preview-install --url URL --workflow ID --publication ID --package-hash SHA256 --host claude|codex|workbuddy --scope project|user [--project DIR] [--home DIR] [--command EXECUTABLE] [--profile operator|auto|engineer|expert]
+const help = `badger-hosts preview-install --url URL --workflow ID --publication ID --package-hash SHA256 --host claude|codex|workbuddy --scope project|user [--project DIR] [--home DIR] [--command EXECUTABLE] [--arg VALUE ...] [--profile operator|auto|engineer|expert]
 badger-hosts preview-uninstall --workflow ID --host HOST --scope SCOPE [--project DIR] [--home DIR]
 badger-hosts commit --plan FILE --digest SHA256 --confirm
 
@@ -31,6 +31,7 @@ try {
       project: { type: "string" },
       home: { type: "string" },
       command: { type: "string" },
+      arg: { type: "string", multiple: true },
       profile: { type: "string" },
       plan: { type: "string" },
       digest: { type: "string" },
@@ -89,6 +90,7 @@ try {
         snapshot,
         deploymentUrl: url,
         ...(values.command ? { command: values.command } : {}),
+        ...(values.arg ? { args: values.arg } : {}),
         ...(values.profile ? { profile: values.profile as McpProfile } : {}),
       });
     } else plan = await previewUninstall({ target, workflowId });

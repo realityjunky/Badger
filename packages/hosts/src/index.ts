@@ -394,6 +394,7 @@ async function compile(
     configuration = renderMcpConfiguration(target.host, {
       deploymentUrl: registry!.configuration.entry.env.BADGER_URL,
       command: registry!.configuration.entry.command,
+      args: registry!.configuration.entry.args,
       profile: registry!.configuration.entry.env.BADGER_MCP_PROFILE,
     });
     for (const old of installed!.inventory)

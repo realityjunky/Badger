@@ -6,7 +6,8 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "badger-mcp": "dist/src/cli.js"
+    "badger-mcp": "dist/src/cli.js",
+    "badger-mcp-host-check": "dist/src/host-check-cli.js"
   },
   "exports": {
     ".": {
@@ -17,6 +18,7 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
+    "test:laptop": "vitest run test/host-check.test.ts test/certification.test.ts",
     "lint": "tsc -p tsconfig.test.json",
     "format:check": "prettier --check src test package.json tsconfig*.json vitest.config.ts README.md"
   },

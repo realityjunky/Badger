@@ -142,6 +142,7 @@ export function hostTools(api: BadgerApi, previews: LocalHostPreviews) {
         packageHash: hash.optional(),
         target: target.optional(),
         command: z.string().min(1).max(4096).optional(),
+        args: z.array(z.string().max(4096)).max(64).optional(),
         confirmed: z.boolean().optional(),
         previewId: id.optional(),
         digest: hash.optional(),
@@ -173,6 +174,7 @@ export function hostTools(api: BadgerApi, previews: LocalHostPreviews) {
           snapshot,
           deploymentUrl: api.url,
           command: args.command,
+          args: args.args,
         });
         return {
           ...(await previews.save(plan)),

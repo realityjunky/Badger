@@ -5,6 +5,7 @@ export type McpProfile = "auto" | "engineer" | "expert" | "operator";
 export interface McpConfiguration {
   deploymentUrl: string;
   command?: string;
+  args?: string[];
   profile?: McpProfile;
 }
 
@@ -36,15 +37,23 @@ export function mcpEntry(host: AgentHost, options: McpConfiguration) {
   if (!["claude", "codex", "workbuddy"].includes(host))
     throw new Error("Select a supported Agent host");
   const command = options.command ?? "badger-mcp";
+  const args = options.args ?? [];
   const profile = options.profile ?? "operator";
   if (!command.trim() || /[\u0000-\u001f\u007f]/u.test(command))
     throw new Error("Set an MCP executable without control characters");
+  if (
+    !Array.isArray(args) ||
+    args.some(
+      (arg) => typeof arg !== "string" || /[\u0000-\u001f\u007f]/u.test(arg),
+    )
+  )
+    throw new Error("Set MCP arguments without control characters");
   if (!["auto", "engineer", "expert", "operator"].includes(profile))
     throw new Error("Select a supported MCP profile");
   return {
     ...(host === "codex" ? {} : { type: "stdio" }),
     command,
-    args: [] as string[],
+    args: [...args],
     ...(host === "codex" ? { env_vars: ["BADGER_TOKEN"] } : {}),
     env: {
       BADGER_URL: deploymentUrl(options.deploymentUrl),
@@ -61,7 +70,7 @@ export function renderMcpConfiguration(
   const entry = mcpEntry(host, options);
   if (host !== "codex")
     return JSON.stringify({ mcpServers: { badger: entry } }, null, 2) + "\n";
-  return `[mcp_servers.badger]\ncommand = ${JSON.stringify(entry.command)}\nargs = []\nenv_vars = ["BADGER_TOKEN"]\n\n[mcp_servers.badger.env]\nBADGER_URL = ${JSON.stringify(entry.env.BADGER_URL)}\nBADGER_MCP_PROFILE = ${JSON.stringify(entry.env.BADGER_MCP_PROFILE)}\n`;
+  return `[mcp_servers.badger]\ncommand = ${JSON.stringify(entry.command)}\nargs = ${JSON.stringify(entry.args)}\nenv_vars = ["BADGER_TOKEN"]\n\n[mcp_servers.badger.env]\nBADGER_URL = ${JSON.stringify(entry.env.BADGER_URL)}\nBADGER_MCP_PROFILE = ${JSON.stringify(entry.env.BADGER_MCP_PROFILE)}\n`;
 }
 
 export function hostPaths(host: AgentHost, scope: InstallScope) {

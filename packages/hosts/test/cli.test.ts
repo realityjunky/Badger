@@ -81,12 +81,19 @@ it("downloads a hash-bound publication, gives a private actionable preview, and 
         "p-1",
         "--package-hash",
         snapshot.packageHash,
+        "--command",
+        process.execPath,
+        "--arg",
+        path.join(root, "Badger MCP", "cli.js"),
       ])
     ).stdout,
   );
   expect(authenticated).toBe(true);
   expect(JSON.stringify(result)).not.toContain("test-only-secret");
   expect(result.commitCommand).toContain(result.preview.digest);
+  expect(result.preview.configuration).toContain(
+    JSON.stringify(path.join(root, "Badger MCP", "cli.js")),
+  );
   expect((await fs.stat(result.planFile)).mode & 0o777).toBe(0o600);
   expect((await fs.stat(path.dirname(result.planFile))).mode & 0o777).toBe(
     0o700,

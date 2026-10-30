@@ -101,6 +101,12 @@ its job queues; it never switches to a billed GitHub-hosted runner. Disable
 the checks again with `--body false`. If required status checks are configured,
 align them with the enabled job names before changing this variable.
 
+The optional macOS/Windows job builds all workspaces and also runs
+`npm run test:laptop -w packages/mcp`: production stdio execution from the
+installer's WorkBuddy entry, the shared runtime certification, and synthetic MCP
+feature checks. This is protocol coverage; actual host app checks follow the
+[laptop validation procedure](laptop-host-validation.md).
+
 ## Operations
 
 Keep the runner application, operating system, and Docker updated. Monitor

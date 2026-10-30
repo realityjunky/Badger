@@ -151,6 +151,7 @@ it.each([
       snapshot: f.snapshot,
       deploymentUrl: "https://badger.example/team",
       command: '/opt/Agent Tools/"badger"',
+      args: ["C:\\Badger Tools\\运行\\cli.js", "literal $value `text`"],
     });
     expect(JSON.stringify(plan.preview)).not.toContain("DO_NOT_DISPLAY");
     expect(plan.preview.packageDirectory).toBe(
@@ -162,6 +163,12 @@ it.each([
     });
     const content = await fs.readFile(file, "utf8");
     const doc = host === "codex" ? parseToml(content) : JSON.parse(content);
+    const entry =
+      host === "codex" ? doc.mcp_servers.badger : doc.mcpServers.badger;
+    expect(entry.args).toEqual([
+      "C:\\Badger Tools\\运行\\cli.js",
+      "literal $value `text`",
+    ]);
     if (host === "codex") {
       expect(doc.mcp_servers.badger.env_vars).toEqual(["BADGER_TOKEN"]);
       expect(doc.mcp_servers.badger.env).not.toHaveProperty("BADGER_TOKEN");
@@ -172,6 +179,11 @@ it.each([
       target,
       workflowId: f.publication.workflowId,
     });
+    const removedConfiguration =
+      host === "codex"
+        ? parseToml(uninstall.preview.configuration).mcp_servers
+        : JSON.parse(uninstall.preview.configuration).mcpServers;
+    expect(removedConfiguration.badger.args).toEqual(entry.args);
     expect(
       uninstall.preview.operations
         .filter((op) => op.action === "delete")

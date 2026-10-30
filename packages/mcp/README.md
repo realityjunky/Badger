@@ -186,15 +186,27 @@ and reload current records. Resources, prompts, and elicitation are optional.
 
 ## Host compatibility
 
-| Host        | Configuration                                                                                       | Stdio tools                                               | Resources                              | URL elicitation                                                                            |
-| ----------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Claude Code | `.mcp.json` with `${BADGER_TOKEN}`, generated JSON checked in the browser journey                   | Real SDK stdio client verified; application check pending | Optional; local file fallback verified | Capability negotiation and link fallback verified with SDK; application support unverified |
-| Codex       | `~/.codex/config.toml`, generated from the official stdio format and checked in the browser journey | Real SDK stdio client verified; application check pending | Optional; local file fallback verified | Capability negotiation and link fallback verified with SDK; application support unverified |
-| WorkBuddy   | `.mcp.json` / `~/.codebuddy/.mcp.json`, environment expansion; adapter and browser checked          | Real SDK stdio client verified; application check pending | Optional; local file fallback verified | Capability negotiation and link fallback verified with SDK; application support unverified |
+| Host        | OS / app version  | Stdio tools | Prompts | Resources | URL-mode elicitation | Application evidence |
+| ----------- | ----------------- | ----------- | ------- | --------- | -------------------- | -------------------- |
+| Claude Code | Pending           | Pending     | Pending | Pending   | Pending              | Not yet recorded     |
+| Codex       | Pending           | Pending     | Pending | Pending   | Pending              | Not yet recorded     |
+| WorkBuddy   | macOS / pending   | Pending     | Pending | Pending   | Pending              | Not yet recorded     |
+| WorkBuddy   | Windows / pending | Pending     | Pending | Pending   | Pending              | Not yet recorded     |
 
-These checks establish protocol and configuration behavior; they do not claim
-manual application validation. Prompts are not required or advertised. Hosts
-without URL elicitation receive the same dashboard link as a normal tool result.
+The application table records observed host behavior separately from SDK tests.
+Follow the [laptop validation procedure](../../docs/laptop-host-validation.md)
+and link a completed, versioned record before replacing a pending result.
+Installer locations and token forwarding are documented in the
+[host adapter](../hosts/README.md#host-locations-and-token-forwarding).
+
+`npm run test:laptop -w packages/mcp` checks both in-memory and production stdio
+execution, including installer-generated WorkBuddy configuration, Completion,
+roots, receipts, routes and Cycles. The separate `badger-mcp-host-check` stdio
+executable probes tools, prompts, resources and URL elicitation in each app
+without deployment credentials. Its report records which features the client
+actually requested and the negotiated URL capability. The production MCP does
+not advertise prompts; hosts without URL elicitation receive an ordinary
+dashboard link, and large results have a private local file fallback.
 
 Tests use an in-memory MCP client connected to the real service harness,
 through `@realityjunky/badger-server/testing`, and exercise the real stdio

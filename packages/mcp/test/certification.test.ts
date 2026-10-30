@@ -2,34 +2,39 @@ import { expect, it } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { certifyBadgerMcp } from "../src/certification.js";
-it("certifies actual MCP tool calls, external-root binding, Completion and routing refusals", async () => {
-  const result = await certifyBadgerMcp({
-    generatedPackageHash: "b".repeat(64),
-  });
-  expect(result).toMatchObject({
-    authority: "BadgerMCP",
-    mode: "mcp",
-    generatedPackageHash: "b".repeat(64),
-    completed: true,
-    rootBindingRequired: true,
-    refusedStartRegisteredNothing: true,
-    receiptRootVerified: true,
-    skippedNodeRefused: true,
-    missingCompletionRefused: true,
-    illegalRouteRefused: true,
-    exhaustedCycleRefused: true,
-  });
-  expect(result.toolCalls).toEqual(
-    expect.arrayContaining([
-      "status",
-      "start",
-      "next",
-      "submit",
-      "recover",
-      "my_runs",
-    ]),
-  );
-}, 30_000);
+it.each(["in-memory", "stdio"] as const)(
+  "certifies actual %s MCP tool calls, external-root binding, Completion and routing refusals",
+  async (transport) => {
+    const result = await certifyBadgerMcp({
+      generatedPackageHash: "b".repeat(64),
+      transport,
+    });
+    expect(result).toMatchObject({
+      authority: "BadgerMCP",
+      mode: "mcp",
+      generatedPackageHash: "b".repeat(64),
+      completed: true,
+      rootBindingRequired: true,
+      refusedStartRegisteredNothing: true,
+      receiptRootVerified: true,
+      skippedNodeRefused: true,
+      missingCompletionRefused: true,
+      illegalRouteRefused: true,
+      exhaustedCycleRefused: true,
+    });
+    expect(result.toolCalls).toEqual(
+      expect.arrayContaining([
+        "status",
+        "start",
+        "next",
+        "submit",
+        "recover",
+        "my_runs",
+      ]),
+    );
+  },
+  30_000,
+);
 
 it("certifies in a JIT-less child without loading the fetch globals unavailable in the Node 22 sandbox", async () => {
   const executable = new URL("../dist/src/certification.js", import.meta.url)

@@ -29,7 +29,12 @@ badger-hosts preview-install --url https://badger.example/team \
 `--project /absolute/project` and `--home /absolute/home` override the current
 directory and operating-system home. Project and user scopes always target their
 respective root. `--command /absolute/path/to/badger-mcp` selects an executable
-with no shell interpretation; `--profile operator` is the default.
+with no shell interpretation; repeat `--arg VALUE` for each executable argument.
+For example, `--command /absolute/path/to/node --arg /absolute/Badger/packages/mcp/dist/src/cli.js`
+launches the built MCP directly on laptops, including Windows, without a global
+npm command shim. Paths with spaces must be one quoted argument. Arguments are
+part of the reviewed digest and preserved in uninstall previews.
+`--profile operator` is the default.
 
 Preview downloads through the publication API, refuses redirects, verifies the
 selected publication identity and bytes using the kernel's snapshot verifier,
@@ -95,10 +100,13 @@ References: [Codex MCP](https://developers.openai.com/codex/mcp/),
 [CodeBuddy MCP](https://www.codebuddy.cn/docs/cli/mcp).
 The filesystem, SDK and browser checks establish adapter/protocol behavior;
 they do not claim manual validation in those three host applications.
+The [laptop validation procedure](../../docs/laptop-host-validation.md) covers
+macOS and PowerShell commands, app configuration checks, actual Runs and a
+separate MCP feature probe.
 
 ## Public adapter and MCP seam
 
-`previewInstall({target, publication, snapshot, deploymentUrl, command?, profile?})`
+`previewInstall({target, publication, snapshot, deploymentUrl, command?, args?, profile?})`
 and `previewUninstall({target, workflowId})` return a serializable `HostPlan` with
 its `preview`. Every `target` supplies explicit absolute `projectRoot` and
 `homeRoot`, a `host` (`claude`, `codex`, `workbuddy`) and `scope` (`project`, `user`).

@@ -49,8 +49,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build -w packages/kernel
+      - run: npm run build
       - run: npm run test:runs -w packages/kernel
+      - run: npm run test:laptop -w packages/mcp
 
   build-test:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
