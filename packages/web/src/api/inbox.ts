@@ -14,7 +14,8 @@ export interface InboxItem {
     | "restatement-ready"
     | "question-reopened"
     | "concern-raised"
-    | "job-submitted";
+    | "job-submitted"
+    | "evaluation-finished";
   questionId: string | null;
   questionText: string | null;
   concernId: string | null;

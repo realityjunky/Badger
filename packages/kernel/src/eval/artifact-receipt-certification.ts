@@ -1,9 +1,11 @@
-import { execFile } from "node:child_process";
+import {
+  certificationExecFile,
+  certificationTemporaryDirectory,
+  certificationProgress,
+} from "./sandbox.js";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import { generatePackage } from "../factory/generate.js";
 import { normalizeWorkflow } from "../workflow/contract.js";
 import {
@@ -17,7 +19,6 @@ import type {
 } from "../types.js";
 import { hashDirectory, stableValue } from "../util.js";
 
-const execFileAsync = promisify(execFile);
 const LARGE_FILE_HASH =
   "6f850bc94ae6f7de14297c01616c36d712d22864497b28a63b81d776b035e656";
 
@@ -85,8 +86,12 @@ export async function certifyArtifactReceipts(options: {
   evidence: WorkflowRuntimeArtifactReceiptCertificationEvidence;
   blockers: string[];
 }> {
+  await certificationProgress("artifact-receipts");
   const root = await fs.mkdtemp(
-    path.join(os.tmpdir(), "badger-receipt-certification-"),
+    path.join(
+      certificationTemporaryDirectory(),
+      "badger-receipt-certification-",
+    ),
   );
   const evidence: WorkflowRuntimeArtifactReceiptCertificationEvidence = {
     status: "failed",
@@ -156,7 +161,7 @@ export async function certifyArtifactReceipts(options: {
     const environment = { PATH: process.env.PATH };
     const started = JSON.parse(
       (
-        await execFileAsync(
+        await certificationExecFile(
           process.execPath,
           [
             path.join(generated.packageRoot, "scripts", "workflow-state.mjs"),
@@ -204,7 +209,7 @@ export async function certifyArtifactReceipts(options: {
       Math.abs(receipt.mtimeMs - (await fs.stat(artifactPath)).mtimeMs) < 0.001;
     const recovered = JSON.parse(
       (
-        await execFileAsync(
+        await certificationExecFile(
           process.execPath,
           [
             "--input-type=module",

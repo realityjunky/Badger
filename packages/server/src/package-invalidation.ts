@@ -45,6 +45,7 @@ export async function invalidateGeneratedPackage(
   versionId: string,
   reason: string,
 ) {
+  await invalidateEvaluations(tx, deps, context, versionId, reason);
   for (const gate of ["package", "publication"])
     await invalidateGate(tx, deps, context, versionId, gate, reason, [
       "Reviewer",
@@ -85,4 +86,30 @@ export async function invalidateGeneratedPackage(
       id,
       ["Engineer", "Reviewer", "Workflow owner"],
     );
+}
+
+/** Cancellation leaves immutable reports intact; a running worker retains its eventual result as superseded. */
+export async function invalidateEvaluations(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  context: AuditWriteContext,
+  versionId: string,
+  reason: string,
+) {
+  const cancelled = await tx.query<{ id: string; revision: number }>(
+    `update workflow_jobs set status='cancelled',error=$3,finished_at=$2,lease_until=null,revision=revision+1
+      where workflow_version_id=$1 and kind='evaluate' and status in ('queued','running') returning id,revision`,
+    [versionId, deps.clock.now(), reason],
+  );
+  for (const job of cancelled.rows)
+    await recordAudit(tx, deps, {
+      actor: context,
+      channel: context.channel,
+      action: "workflow_evaluation.cancelled",
+      target: { type: "workflow_job", id: job.id },
+      before: { revision: job.revision - 1, hash: null },
+      after: { revision: job.revision, hash: null },
+      reason,
+      requestId: context.requestId,
+    });
 }

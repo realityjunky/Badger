@@ -1343,3 +1343,49 @@ body {
   max-height: 65vh;
   overflow: auto;
 }
+
+.evaluation-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 16px;
+}
+.evaluation-filters .field {
+  flex: 1 1 240px;
+  max-width: 420px;
+}
+.evaluation-filters .ant-select {
+  width: 100%;
+}
+.evaluation-hash {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-block: 12px;
+  font-size: 0.85em;
+}
+.evaluation-progress {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+.evaluation-checks,
+.evaluation-evidence {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.evaluation-checks > li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--badger-color-border);
+}
+.evaluation-checks p {
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+}
+.evaluation-evidence > li {
+  padding: 6px 0;
+  overflow-wrap: anywhere;
+}
+.evaluation-evidence details > ul {
+  margin-inline-start: 16px;
+}

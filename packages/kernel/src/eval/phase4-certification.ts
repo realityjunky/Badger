@@ -1,9 +1,12 @@
-import { execFile } from "node:child_process";
-import { promises as fs } from "node:fs";
 import os from "node:os";
+import {
+  certificationExecFile,
+  certificationTemporaryDirectory,
+  certificationProgress,
+} from "./sandbox.js";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import { generatePackage } from "../factory/generate.js";
 import { readRunState } from "../engine/state.js";
 import { readTrajectory } from "../engine/run-store.js";
@@ -62,7 +65,6 @@ import type {
 } from "../types.js";
 import { WORKFLOW_RUNTIME_PHASE4_NEGATIVE_CASES } from "../types.js";
 
-const execFileAsync = promisify(execFile);
 const ZERO_HASH = "0".repeat(64);
 const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 const ABSENT_PID = 2_147_483_647;
@@ -704,7 +706,7 @@ async function runGeneratedJson<T>(
   scriptName: string,
   args: string[],
 ): Promise<T> {
-  const result = await execFileAsync(
+  const result = await certificationExecFile(
     process.execPath,
     [path.join(packageRoot, "scripts", scriptName), ...args],
     { cwd: packageRoot, env: cleanEnvironment() },
@@ -728,7 +730,7 @@ async function runChildJson<T>(
   source: string,
   environment: Record<string, string> = {},
 ): Promise<T> {
-  const result = await execFileAsync(
+  const result = await certificationExecFile(
     process.execPath,
     ["--input-type=module", "--eval", source],
     {
@@ -2422,8 +2424,12 @@ export async function certifyPhase4Workflow(options: {
   generatedPackageHash: string;
   packageRoot: string;
 }): Promise<Phase4CertificationResult> {
+  await certificationProgress("phase-4");
   const temporaryRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), "badger-phase4-certification-"),
+    path.join(
+      certificationTemporaryDirectory(),
+      "badger-phase4-certification-",
+    ),
   );
   const evidence = initialEvidence(options.generatedPackageHash);
   const blockers: string[] = [];

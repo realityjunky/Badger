@@ -84,6 +84,9 @@ export async function eligibleNotificationItems(
             )
           ).has(item.question_id);
         break;
+      case "evaluation-finished":
+        canAct = capabilities.read;
+        break;
       case "restatement-ready":
         canAct = questionnaire.acknowledge;
         break;

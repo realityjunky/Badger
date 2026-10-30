@@ -1,9 +1,11 @@
+import {
+  certificationExecFile,
+  certificationTemporaryDirectory,
+  certificationProgress,
+} from "./sandbox.js";
 import { promises as fs } from "node:fs";
-import { execFile } from "node:child_process";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import type {
   NodeProtocol,
   OutputSchema,
@@ -21,8 +23,6 @@ import type {
   WorkflowRunLocation,
 } from "../workflow-runtime/public.js";
 import { stableValue } from "../util.js";
-
-const execFileAsync = promisify(execFile);
 
 export interface WorkflowRuntimeCertificationResult {
   evidence?: WorkflowRuntimeCertificationEvidence;
@@ -76,10 +76,14 @@ async function runGeneratedJson<T>(
   args: string[],
 ): Promise<T> {
   const script = path.join(packageRoot, "scripts", scriptName);
-  const result = await execFileAsync(process.execPath, [script, ...args], {
-    cwd: packageRoot,
-    env: cleanEnvironment(),
-  });
+  const result = await certificationExecFile(
+    process.execPath,
+    [script, ...args],
+    {
+      cwd: packageRoot,
+      env: cleanEnvironment(),
+    },
+  );
   return JSON.parse(result.stdout) as T;
 }
 
@@ -105,7 +109,7 @@ async function recoverInFreshProcess(
   );
   const runtimeModule = pathToFileURL(runtimeAsset).href;
   const script = `const runtimeModule = await import(${JSON.stringify(runtimeModule)}); const continuation = await runtimeModule.createWorkflowRuntime().recover(${JSON.stringify(location)}); console.log(JSON.stringify(continuation));`;
-  const result = await execFileAsync(
+  const result = await certificationExecFile(
     process.execPath,
     ["--input-type=module", "-e", script],
     { cwd: packageRoot, env: cleanEnvironment() },
@@ -283,8 +287,12 @@ async function certifyRevisionedWorkflow(options: {
   const phase3 = await certifyPhase3Workflow({
     generatedPackageHash: options.generatedPackageHash,
   });
+  await certificationProgress("runtime-certification");
   const temporaryRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), "badger-workflow-revisioned-certification-"),
+    path.join(
+      certificationTemporaryDirectory(),
+      "badger-workflow-revisioned-certification-",
+    ),
   );
   const runRoot = path.join(temporaryRoot, "run");
   const runId = `certification-${options.generatedPackageHash.slice(0, 16)}`;
@@ -384,8 +392,12 @@ async function certifyWorkflowRuntimePhases(options: {
   if (options.protocol.capabilities?.version === 3) {
     return certifyRevisionedWorkflow(options);
   }
+  await certificationProgress("runtime-certification");
   const temporaryRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), "badger-workflow-runtime-certification-"),
+    path.join(
+      certificationTemporaryDirectory(),
+      "badger-workflow-runtime-certification-",
+    ),
   );
   const runRoot = path.join(temporaryRoot, "run");
   const reverseRunRoot = path.join(temporaryRoot, "reverse-run");

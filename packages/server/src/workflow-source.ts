@@ -1,6 +1,7 @@
 import { invalidateSkillFactEvidence } from "./questionnaire/resolutions.js";
 import { reconcileDossier } from "./dossier.js";
 import { runGeneration } from "./generation.js";
+import { runEvaluation } from "./evaluations.js";
 import { runInitialization } from "./initialization.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -77,15 +78,16 @@ export interface SourceCheck {
  * model, so a version's history stays small.
  */
 export interface JobOutcome {
-  status: SourceCheckStatus | "initialized" | "generated";
+  status: SourceCheckStatus | "initialized" | "generated" | "evaluated";
   blockers: string[];
   stateHash?: string;
   scaffoldHash?: string;
+  reportId?: string;
 }
 
 export interface WorkflowJob {
   id: string;
-  kind: "source-check" | "init" | "generate";
+  kind: "source-check" | "init" | "generate" | "evaluate";
   workflowVersionId: string;
   requesterId: string;
   status: JobStatus;
@@ -102,6 +104,9 @@ export interface WorkflowJob {
   requestId: string | null;
   generationConfirmationId: string | null;
   creatorStateHash: string | null;
+  evaluationPackageId: string | null;
+  evaluationPackageHash: string | null;
+  progress: { phase: string } | null;
   outcome: JobOutcome | null;
   error: string | null;
   revision: number;
@@ -161,6 +166,9 @@ interface JobRow {
   request_id: string | null;
   generation_confirmation_id: string | null;
   creator_state_hash: string | null;
+  evaluation_package_id: string | null;
+  evaluation_package_hash: string | null;
+  progress: { phase: string } | null;
   outcome: JobOutcome | null;
   error: string | null;
   revision: number;
@@ -172,12 +180,12 @@ const PIN_COLUMNS = `p.workflow_version_id, p.skill_id, s.name as skill_name,
 const JOB_COLUMNS = `id, kind, workflow_version_id, requester_id, status,
   requested_at, started_at, finished_at, lease_until, worker_id, pins_hash,
   outcome - 'sources' as outcome, error, revision, plan_version_hash,
-  proposal_hash, proposal_confirmation_id, replace_state_hash, request_id, generation_confirmation_id, creator_state_hash`;
+  proposal_hash, proposal_confirmation_id, replace_state_hash, request_id, generation_confirmation_id, creator_state_hash, evaluation_package_id, evaluation_package_hash, progress`;
 const JOB_CLAIM_COLUMNS = `j.id, j.kind, j.workflow_version_id, j.requester_id,
   j.status, j.requested_at, j.started_at, j.finished_at, j.lease_until,
   j.worker_id, j.pins_hash, j.outcome - 'sources' as outcome, j.error,
   j.revision, j.plan_version_hash, j.proposal_hash, j.proposal_confirmation_id,
-  j.replace_state_hash, j.request_id, j.generation_confirmation_id, j.creator_state_hash`;
+  j.replace_state_hash, j.request_id, j.generation_confirmation_id, j.creator_state_hash, j.evaluation_package_id, j.evaluation_package_hash, j.progress`;
 
 function toPin(row: PinRow): WorkflowSkillPin {
   return {
@@ -230,6 +238,9 @@ function toJob(row: JobRow): WorkflowJob {
     requestId: row.request_id,
     generationConfirmationId: row.generation_confirmation_id,
     creatorStateHash: row.creator_state_hash,
+    evaluationPackageId: row.evaluation_package_id,
+    evaluationPackageHash: row.evaluation_package_hash,
+    progress: row.progress,
     outcome: row.outcome,
     error: row.error,
     revision: row.revision,
@@ -868,6 +879,8 @@ export class SourceCheckWorker {
     try {
       if (job.kind === "init")
         return await runInitialization(this.options, job);
+      if (job.kind === "evaluate")
+        return await runEvaluation(this.options, job);
       if (job.kind === "generate")
         return await runGeneration(this.options, job);
       return await this.check(job);

@@ -1,7 +1,7 @@
 import { WorkflowAuthoring } from "./WorkflowAuthoring.js";
 import { Alert, Button, Input, Modal, Space, Spin, Table, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import type { PackageView } from "../../api/packages.js";
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import type {
@@ -136,6 +136,13 @@ export function WorkflowPackage({
       <div className="workflow-card-heading">
         <h2 id="package-title">{t("package.title")}</h2>
         <Space wrap>
+          {saved?.assembledHash && (
+            <Link
+              to={`/evaluations?workflow=${encodeURIComponent(detail.workflow.id)}&version=${encodeURIComponent(detail.version.id)}`}
+            >
+              {t("page.evaluations.title")}
+            </Link>
+          )}
           {view?.canGenerate && detail.capabilities.generate && (
             <Button
               type="primary"
