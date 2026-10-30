@@ -215,6 +215,7 @@ export function createService(options: ServiceOptions, port: number): Service {
     const identityRequest: IdentityRequest = {
       method: request.method ?? "GET",
       headers: request.headers,
+      headersDistinct: request.headersDistinct,
       hostname,
       remoteAddress: request.socket.remoteAddress ?? null,
     };
