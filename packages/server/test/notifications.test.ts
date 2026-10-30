@@ -694,6 +694,79 @@ describe("WeCom notification channels", () => {
     );
     expect(events).toHaveLength(1);
   });
+  it.skipIf(process.env["BADGER_TEST_DATABASE_URL"] === undefined)(
+    "answers every Remind, ledger read, and comment that contend for one workflow version on Postgres",
+    async () => {
+      const { workflowId, versionId } = await setup();
+      const { base, questions } = await publishRound(workflowId, versionId);
+      const { items } = await call<{
+        items: { id: string; questionId: string }[];
+      }>(
+        "GET",
+        `/workflows/${workflowId}/notifications/waiting`,
+        undefined,
+        engineer,
+      );
+      const item = items.find(
+        (entry) => entry.questionId === questions[0]!.id,
+      )!;
+      const send = async (method: string, path: string, body?: unknown) =>
+        (
+          await service.request(`/api/v1${path}`, {
+            as: engineer,
+            method,
+            headers: {
+              "content-type": "application/json",
+              origin: "http://localhost",
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          })
+        ).status;
+      // A reminder's foreign key takes KEY SHARE on the workflow row, which
+      // questionnaire requests lock before the version.
+      const contenders: [() => Promise<number>, number][] = [
+        [() => send("GET", `${base}/ledger`), 200],
+        [
+          () =>
+            send("POST", `${base}/questions/${questions[1]!.id}/comments`, {
+              text: "Which freezer holds the samples?",
+            }),
+          201,
+        ],
+      ];
+      for (const [contend, status] of contenders) {
+        const statuses = await Promise.all([
+          (async () => {
+            const reminders = [];
+            for (let index = 0; index < 12; index += 1) {
+              service.clock.advance(3_600_000);
+              reminders.push(
+                await send(
+                  "POST",
+                  `/workflows/${workflowId}/notifications/remind`,
+                  { itemId: item.id, confirmed: true },
+                ),
+              );
+            }
+            return reminders;
+          })(),
+          ...[1, 2, 3].map(async () => {
+            const answered = [];
+            for (let index = 0; index < 40; index += 1)
+              answered.push(await contend());
+            return answered;
+          }),
+        ]);
+        expect(statuses).toEqual([
+          Array(12).fill(200),
+          ...Array(3).fill(Array(40).fill(status)),
+        ]);
+      }
+      expect(service.logs.filter((entry) => entry.level === "error")).toEqual(
+        [],
+      );
+    },
+  );
   it("returns Copy reminder's parts for the dashboard to compose without BADGER_PUBLIC_URL", async () => {
     const { workflowId, versionId } = await setup({
       environment: {

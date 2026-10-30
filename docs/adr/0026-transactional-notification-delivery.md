@@ -44,5 +44,8 @@ limits use the logical waiting item across all its recipients and serialize
 with its Workflow version's writers, preserving one reminder per item per
 hour. Remind resolves recipients' capabilities before taking that lock and
 rereads the item's open rows under it; writers that take the lock close the
-items they supersede, and role changes never took it. A Remind whose post
-would reach nobody records nothing, so it cannot use up the hour.
+items they supersede, and role changes never took it. Remind locks the
+workflow row before the version row, the order every transaction that takes
+both uses, so a questionnaire request holding the workflow never waits on a
+Remind that waits on it. A Remind whose post would reach nobody records
+nothing, so it cannot use up the hour.

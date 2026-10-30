@@ -212,11 +212,12 @@ export async function handleQuestionnaire(
         !resource ||
         ["ledger", "inferences", "assumptions"].includes(resource ?? "")
       ) {
-        await tx.query("select id from workflows where id = $1 for update", [
-          workflowId,
-        ]);
         await tx.query(
-          "select id from workflow_versions where id = $1 and workflow_id = $2 for update",
+          "select id from workflows where id = $1 for no key update",
+          [workflowId],
+        );
+        await tx.query(
+          "select id from workflow_versions where id = $1 and workflow_id = $2 for no key update",
           [versionId, workflowId],
         );
       }

@@ -86,8 +86,9 @@ reminder needs neither setting. When a robot is set but everyone waiting has
 turned off mentions for the event, a post would reach nobody: nothing is
 posted, no reminder is recorded or audited, the hour does not start, and
 Remind returns Copy reminder's parts instead. Remind resolves who may act
-before it takes the Workflow version's lock, so the hourly limit serializes
-concurrent clicks without the capability checks holding writers.
+before it locks the workflow and then the Workflow version, so the hourly
+limit serializes concurrent clicks without the capability checks holding
+writers.
 Channel writes, preferences, and reminders require a signed-in person; personal
 access tokens cannot change channel settings or send reminders. Actions that
 Agents perform through their existing scopes create the same inbox/outbox
@@ -519,14 +520,21 @@ round or a historical round with no publication baseline returns 409 rather
 than inventing history. Publication and automatic follow-up rounds capture
 their baseline atomically; retries keep the original.
 
-The record reader locks the Workflow version before reading questions,
-resolutions, answers, Source study, drafts, and facts, and holds that lock
-until its transaction commits. Questionnaire writes, Source study changes,
-Skill pin changes, and drafting acceptance take the same version lock.
-Consequently a ledger response and a published round's baseline each see
-one consistent state even though their records require several SQL queries.
-Postgres uses its normal READ COMMITTED isolation: competing requests wait
-for the version lock rather than failing from snapshot isolation conflicts.
+A ledger read and a round's publication each run in a questionnaire router
+transaction that first locks the workflow row, then the Workflow version row,
+and holds both until it commits; every transaction that takes both locks,
+Remind included, takes them in that order. Questionnaire writes, gate
+confirmations, Source study changes, Skill pin changes, and drafting
+acceptance all take the version lock, so a ledger response and a published
+round's baseline each see one consistent state even though their records
+require several SQL queries. The workflow lock also runs the router's locked
+requests (every write, and reads of `Q`, its ledger, and its drafts) one at a
+time across every version of the workflow. Both locks are
+`FOR NO KEY UPDATE`, which other writers' foreign-key checks do not wait for.
+Postgres keeps its normal READ COMMITTED isolation, so a competing request
+waits for the locks. Should Postgres still end a request's transaction as a
+deadlock victim or with a serialization failure, nothing it wrote is kept and
+the request answers 503 `unavailable` with `Retry-After: 1`.
 
 The service delegates ledger membership and readiness to the kernel's
 record-based questionnaire handoff. Confirmed user facts must be active and

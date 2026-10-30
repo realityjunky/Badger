@@ -88,11 +88,11 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       await tx.query("select id from people where id = $1 for no key update", [
         person.id,
       ]);
-    await tx.query("select id from workflows where id = $1 for update", [
+    await tx.query("select id from workflows where id = $1 for no key update", [
       workflowId,
     ]);
     await tx.query(
-      "select id from workflow_versions where id = $1 and workflow_id = $2 for update",
+      "select id from workflow_versions where id = $1 and workflow_id = $2 for no key update",
       [versionId, workflowId],
     );
     const workflow = await readWorkflow(tx, workflowId);

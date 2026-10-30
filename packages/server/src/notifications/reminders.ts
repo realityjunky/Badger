@@ -147,10 +147,15 @@ export async function remind(
     ),
   );
   return database.transaction(async (tx) => {
-    // This is the same lock held by questionnaire and gate writers. The
-    // waiting check and hourly limit cannot race completion or another nudge.
+    // This is the same version lock held by questionnaire and gate writers.
+    // The waiting check and hourly limit cannot race completion or another
+    // nudge. Like every transaction that takes both, it locks the workflow
+    // row first.
+    await tx.query("select id from workflows where id = $1 for no key update", [
+      workflowId,
+    ]);
     await tx.query(
-      "select id from workflow_versions where id = $1 for update",
+      "select id from workflow_versions where id = $1 for no key update",
       [initial.workflow_version_id],
     );
     const rows = await waitingRows(tx, workflowId, initial);

@@ -72,18 +72,22 @@ function visibleHandoff(
 }
 
 /**
- * The caller supplies a transaction. Every writer of questionnaire, source
- * study, and pin records also locks this version, so all reads below observe
- * one state until that transaction commits, including round publication.
+ * Precondition: the caller's transaction already holds this version's row
+ * lock, which the routers take after the workflow's. Every writer of
+ * questionnaire, Source study, pin, and gate records takes that lock too, so
+ * all reads below observe one state until the transaction commits, including
+ * round publication. The lock below restates the precondition: a caller that
+ * holds it waits for nothing, and one that does not still reads one state.
  */
 export async function readQuestionnaireRecords(
   tx: Queryable,
   versionId: string,
   personId: string,
 ): Promise<QuestionnaireRecords> {
-  await tx.query("select id from workflow_versions where id = $1 for update", [
-    versionId,
-  ]);
+  await tx.query(
+    "select id from workflow_versions where id = $1 for no key update",
+    [versionId],
+  );
   const questions = await readQuestions(tx, versionId, personId, true);
   const resolutions = await readResolutions(tx, versionId);
   const answers = await readAnswers(tx, versionId, personId);

@@ -60,7 +60,7 @@ export async function handleDossier(input: AuthorizedRequest): Promise<void> {
     );
   const result = await database.transaction(async (tx) => {
     await tx.query(
-      "select id from workflow_versions where id = $1 for update",
+      "select id from workflow_versions where id = $1 for no key update",
       [versionId],
     );
     const workflow = await readWorkflow(tx, workflowId);

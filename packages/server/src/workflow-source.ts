@@ -314,7 +314,7 @@ async function versionGroup(
   }>(
     `select v.workflow_id, w.group_id, v.intent
        from workflow_versions v join workflows w on w.id = v.workflow_id
-      where v.id = $1${lock ? " for update of v" : ""}`,
+      where v.id = $1${lock ? " for no key update of v" : ""}`,
     [workflowVersionId],
   );
   const row = result.rows[0];
@@ -1020,7 +1020,7 @@ export class SourceCheckWorker {
       // Pin changes lock the version first. Locking it here too keeps the pin
       // set read below from changing before the stage is written.
       await tx.query(
-        "select id from workflow_versions where id = $1 for update",
+        "select id from workflow_versions where id = $1 for no key update",
         [job.workflowVersionId],
       );
       // The pin content can change away and back while this job runs. Its
