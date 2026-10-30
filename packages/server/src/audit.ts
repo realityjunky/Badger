@@ -150,7 +150,10 @@ export async function recordAudit(
     actorPersonId: input.actor.personId,
     actorDisplayName: null,
     actorEmail: null,
-    agentHost: input.agentHost ?? null,
+    agentHost:
+      input.actor.credential.kind === "token"
+        ? (input.actor.credential.agentHost ?? input.agentHost ?? null)
+        : null,
     credentialKind: input.actor.credential.kind,
     credentialId: input.actor.credential.id,
     channel: input.channel,
