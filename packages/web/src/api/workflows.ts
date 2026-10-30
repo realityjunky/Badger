@@ -147,6 +147,7 @@ export interface WorkflowVersionDetail {
   sourceCheck: WorkflowSourceCheck | null;
   jobs: WorkflowJob[];
   sourceGate: GateConfirmation | null;
+  sourceGateConfirmations?: GateConfirmation[];
   sourceStudy: SourceStudy;
 }
 export interface GatePreview {
@@ -166,6 +167,28 @@ export interface GateConfirmation {
   invalidatedAt: string | null;
   invalidationReason?: string | null;
   supersededBy?: string | null;
+}
+export interface ApprovalEntry extends GateConfirmation {
+  superseded: boolean;
+}
+/**
+ * A gate's approvals, newest first, each superseded once a later change
+ * invalidated it; `bound` keeps the approvals of one artifact hash.
+ */
+export function approvalHistory(
+  confirmations: readonly GateConfirmation[] | undefined,
+  bound?: { name: string; hash: string },
+): ApprovalEntry[] {
+  return (confirmations ?? [])
+    .filter(
+      (confirmation) =>
+        bound === undefined ||
+        confirmation.boundHashes[bound.name] === bound.hash,
+    )
+    .map((confirmation) => ({
+      ...confirmation,
+      superseded: confirmation.invalidatedAt !== null,
+    }));
 }
 export type ReadResult<T> =
   { kind: "ok"; value: T } | { kind: "denied" | "missing" | "failed" };

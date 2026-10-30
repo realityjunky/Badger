@@ -9,6 +9,7 @@ import type {
 } from "../../api/workflows.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { useInbox } from "../../inbox/InboxContext.js";
+import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 
 export function WorkflowProposal({
   basePath,
@@ -217,6 +218,7 @@ export function WorkflowProposal({
           {approved && (
             <Alert type="success" showIcon title={t("proposal.approved")} />
           )}
+          <ConfirmationHistory confirmations={view.confirmations} />
           {!proposal ? (
             <Alert type="info" showIcon title={t("proposal.needPlan")} />
           ) : (

@@ -656,6 +656,15 @@ describe("workflow Skill pins and source checks", () => {
         { supersededBy: next.id },
       ],
     });
+    // The version's detail carries the same history for the Sources pane.
+    const detail = await service.request(`/api/v1${base}`, { as: engineer });
+    expect(await detail.json()).toMatchObject({
+      sourceGate: { id: next.id },
+      sourceGateConfirmations: [
+        { id: next.id, invalidatedAt: null },
+        { supersededBy: next.id, invalidatedAt: expect.any(String) },
+      ],
+    });
     const inbox = await service.request("/api/v1/me/inbox", { as: engineer });
     const current = (await inbox.json()) as {
       items: { state: string }[];

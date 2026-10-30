@@ -13,6 +13,7 @@ import type {
 } from "../../api/workflows.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { useInbox } from "../../inbox/InboxContext.js";
+import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { PlanContent } from "./PlanContent.js";
 import { PlanEditor } from "./PlanEditor.js";
 
@@ -290,6 +291,10 @@ export function WorkflowPlan({
                   title={t("plan.supersededHelp")}
                 />
               )}
+              <ConfirmationHistory
+                confirmations={view.confirmations}
+                bound={{ name: "plan", hash: selected.hash }}
+              />
               <PlanContent version={selected} />
             </>
           )}

@@ -178,9 +178,9 @@ import provenance, and linked drafts in one locked transaction.
 `inheritedFromVersionId` identifies the preceding version; each inherited
 record's `origin`, including a translation's and an imported question's
 `source`, identifies its source Workflow version, record, and revision. Copied
-translations and imports still name the drafting job that produced them. The kernel ledger carries that provenance into dossier snapshots.
-Copies retain their state, including flags, while subsequent edits remain
-independent. Attachment receipts stay readable without changing fact hashes
+translations and imports still name the drafting job that produced them. The
+kernel ledger carries that provenance into dossier snapshots. Copies retain
+their state, including flags, while subsequent edits remain independent. Attachment receipts stay readable without changing fact hashes
 or exposing private answer drafts. Original discussion and round baselines
 remain in the source version, reachable through provenance links.
 
@@ -198,8 +198,10 @@ counts the copied pins and records and the moved items, and its `after.hash`
 binds the copied source records and revisions.
 
 The new version queues its own source check and requires new gates; no dossier,
-plan, or approval is copied. `GET V/dossier` includes `confirmations` so earlier
-approvals remain visible as superseded after invalidation or replacement.
+plan, or approval is copied. `GET V/dossier`, `GET V/plan`, and
+`GET V/proposal` include `confirmations`, and `GET V` includes
+`sourceGateConfirmations`, newest first, so earlier approvals remain visible
+as superseded after invalidation or replacement.
 This uses migration `0023`, and migration `0020` lets a copied translation
 name its original job; shipped migrations are unchanged. See
 [ADR 0028](../../docs/adr/0028-workflow-version-inheritance.md).
