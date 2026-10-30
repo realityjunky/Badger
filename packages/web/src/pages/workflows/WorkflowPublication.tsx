@@ -22,6 +22,7 @@ import type {
 } from "../../api/workflows.js";
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { WorkflowHostInstall } from "./WorkflowHostInstall.js";
 
 export function WorkflowPublication({
   basePath,
@@ -46,6 +47,7 @@ export function WorkflowPublication({
     overrideReason?: string;
   } | null>(null);
   const [published, setPublished] = useState<PublishedPackageRead | null>(null);
+  const [installing, setInstalling] = useState<PublishedPackage | null>(null);
   const path = `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(detail.version.id)}/review`;
   useEffect(() => {
     const controller = new AbortController();
@@ -359,12 +361,17 @@ export function WorkflowPublication({
                 {
                   title: t("publication.package"),
                   render: (_, p) => (
-                    <Button
-                      loading={busy}
-                      onClick={() => void run(() => inspect(p))}
-                    >
-                      {t("publication.inspect")}
-                    </Button>
+                    <Space wrap>
+                      <Button
+                        loading={busy}
+                        onClick={() => void run(() => inspect(p))}
+                      >
+                        {t("publication.inspect")}
+                      </Button>
+                      <Button onClick={() => setInstalling(p)}>
+                        {t("hosts.open")}
+                      </Button>
+                    </Space>
                   ),
                 },
               ]}
@@ -414,6 +421,12 @@ export function WorkflowPublication({
           />
         )}
       </Modal>
+      <WorkflowHostInstall
+        workflowId={detail.workflow.id}
+        publication={installing}
+        deploymentUrl={`${window.location.origin}${basePath === "/" ? "" : basePath}`}
+        onClose={() => setInstalling(null)}
+      />
       <Modal
         open={published !== null}
         title={t("publication.package")}

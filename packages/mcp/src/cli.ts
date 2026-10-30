@@ -15,9 +15,14 @@ function defaultAgentHost(): string {
 
 try {
   const profile = process.env["BADGER_MCP_PROFILE"] ?? "auto";
-  if (profile !== "auto" && profile !== "engineer" && profile !== "expert")
+  if (
+    profile !== "auto" &&
+    profile !== "engineer" &&
+    profile !== "expert" &&
+    profile !== "operator"
+  )
     throw new ConfigurationError(
-      "BADGER_MCP_PROFILE must be auto, engineer, or expert",
+      "BADGER_MCP_PROFILE must be auto, engineer, expert, or operator",
     );
   const server = createBadgerMcp({
     profile,

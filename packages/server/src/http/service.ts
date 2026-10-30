@@ -80,7 +80,11 @@ import { tokenRequestAllowed } from "./token-access.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
 import { skillGroupPermissions } from "../skills/access.js";
 import { readMyQuestions } from "../questionnaire/my-questions.js";
-import { mayManageRoleScope } from "../workflow-access.js";
+import {
+  mayManageRoleScope,
+  workflowCapabilities,
+} from "../workflow-access.js";
+import { listWorkflows } from "../workflows.js";
 import {
   isFileRequest,
   readWebAsset,
@@ -940,8 +944,27 @@ export function createService(options: ServiceOptions, port: number): Service {
       const uploadSkillVersion = (
         await skillGroupPermissions(database, access, person)
       ).some((group) => group.canUpload);
+      let installPublished = false;
+      for (const workflow of await listWorkflows(database, access, person)) {
+        const caps = await workflowCapabilities(
+          database,
+          access,
+          person,
+          workflow,
+        );
+        if (caps.read && caps.readPublished) {
+          installPublished = true;
+          break;
+        }
+      }
+      // An Administrator can connect the Operator profile before creating a Workflow.
+      installPublished ||=
+        isAdministrator(access) &&
+        (access.tokenScopes === undefined ||
+          access.tokenScopes.includes("operator"));
       return reply.json(200, {
         profiles: [
+          ...(installPublished ? ["operator"] : []),
           ...(questionnaire.compose ? ["engineer"] : []),
           ...(questionnaire.answer ||
           questionnaire.raiseConcern ||
@@ -952,6 +975,7 @@ export function createService(options: ServiceOptions, port: number): Service {
         capabilities: {
           ...questionnaire,
           uploadSkillVersion,
+          installPublished,
         },
       });
     }

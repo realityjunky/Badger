@@ -1,0 +1,40 @@
+{
+  "name": "@realityjunky/badger-hosts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Previewed local installation of published Badger packages and MCP configuration",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "badger-hosts": "dist/src/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./configuration": {
+      "types": "./dist/src/configuration.d.ts",
+      "import": "./dist/src/configuration.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.test.json",
+    "format:check": "prettier --check src test package.json tsconfig*.json vitest.config.ts README.md"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@realityjunky/badger": "*",
+    "jsonc-parser": "^3.3.1",
+    "smol-toml": "^1.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.2.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
+  }
+}

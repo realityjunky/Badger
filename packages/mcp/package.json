@@ -26,6 +26,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@realityjunky/badger": "*",
+    "@realityjunky/badger-hosts": "*",
     "ajv": "^8.20.0",
     "zod": "^4.3.6"
   },

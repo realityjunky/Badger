@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Local host installation**: `packages/hosts` installs and uninstalls verified
+  publications into Claude Code, Codex, and WorkBuddy at project/user scope.
+  Exact preview digests, ownership and conflict checks, environment-only token
+  configuration, dashboard local commands, and Operator MCP installation keep
+  local writes explicit (#64). Contained atomic write/remove helpers are now
+  public for the adapter; hashing and runtime authority remain in the kernel.
+
 - **Run registry and public read models**: WorkflowRuntime lists a project's
   standalone Runs, including their location, status, current Node, pending
   action, and outcome history. `listWorkflowRuns`, `inspectWorkflowRun`, and

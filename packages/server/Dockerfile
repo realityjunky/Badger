@@ -7,15 +7,17 @@ WORKDIR /app
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 COPY package.json package-lock.json ./
 COPY packages/kernel/package.json packages/kernel/package.json
+COPY packages/hosts/package.json packages/hosts/package.json
 COPY packages/server/package.json packages/server/package.json
+COPY packages/mcp/package.json packages/mcp/package.json
 COPY packages/web/package.json packages/web/package.json
 RUN npm ci
 COPY packages/kernel packages/kernel
+COPY packages/hosts packages/hosts
 COPY packages/server packages/server
+COPY packages/mcp packages/mcp
 COPY packages/web packages/web
-RUN npm run build -w packages/kernel
-RUN npm run build -w packages/server
-RUN npm run build -w packages/web
+RUN npm run build
 RUN npm prune --omit=dev
 
 FROM node:22-bookworm-slim AS runtime
@@ -29,10 +31,15 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages/kernel/package.json ./packages/kernel/package.json
 COPY --from=build /app/packages/kernel/dist ./packages/kernel/dist
 COPY --from=build /app/packages/kernel/assets ./packages/kernel/assets
+COPY --from=build /app/packages/hosts/package.json ./packages/hosts/package.json
+COPY --from=build /app/packages/hosts/dist ./packages/hosts/dist
+COPY --from=build /app/packages/mcp/package.json ./packages/mcp/package.json
+COPY --from=build /app/packages/mcp/dist ./packages/mcp/dist
 COPY --from=build /app/packages/server/package.json ./packages/server/package.json
 COPY --from=build /app/packages/server/dist ./packages/server/dist
 COPY --from=build /app/packages/server/migrations ./packages/server/migrations
 COPY --from=build /app/packages/web/dist ./packages/web/dist
+COPY --from=build /app/packages/web/package.json ./packages/web/package.json
 
 # The deploy passes the revision it built; the health endpoint reports both.
 ARG BADGER_REVISION=unknown
