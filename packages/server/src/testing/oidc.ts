@@ -8,6 +8,8 @@ export interface StubOidcProvider {
   setClaims(claims: Readonly<Record<string, unknown>>): void;
   setFailure(status: number | null): void;
   setEndpointFailure(path: string, status: number, body: string): void;
+  /** Keep new requests to this endpoint open; null handles future requests normally. */
+  setEndpointHeld(path: string | null): void;
   setInvalidSignature(invalid: boolean): void;
   /**
    * Answer authorization with a page whose Approve link returns to Badger,
@@ -36,6 +38,7 @@ export async function startStubOidcProvider(): Promise<StubOidcProvider> {
   let failure: number | null = null;
   let endpointFailure:
     { path: string; status: number; body: string } | undefined;
+  let heldEndpoint: string | null = null;
   let invalidSignature = false;
   let consentPage = false;
   const codes = new Map<
@@ -48,6 +51,7 @@ export async function startStubOidcProvider(): Promise<StubOidcProvider> {
         .writeHead(status, { "content-type": "application/json" })
         .end(JSON.stringify(body));
     const url = new URL(request.url ?? "/", issuer);
+    if (url.pathname === heldEndpoint) return;
     if (url.pathname === endpointFailure?.path) {
       response
         .writeHead(endpointFailure.status, { "content-type": "text/plain" })
@@ -198,6 +202,9 @@ export async function startStubOidcProvider(): Promise<StubOidcProvider> {
     setEndpointFailure: (path, status, body) => {
       endpointFailure = { path, status, body };
     },
+    setEndpointHeld: (path) => {
+      heldEndpoint = path;
+    },
     setInvalidSignature: (next) => {
       invalidSignature = next;
     },
@@ -207,9 +214,10 @@ export async function startStubOidcProvider(): Promise<StubOidcProvider> {
     stop: async () => {
       if (stopped) return;
       stopped = true;
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+        server.closeAllConnections();
+      });
     },
   };
 }
