@@ -110,7 +110,7 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
       throw new RequestError(400, "The preview takes an empty object");
     const state = await database.transaction(async (tx) => {
       await tx.query(
-        "select id from workflow_versions where id = $1 for update",
+        "select id from workflow_versions where id = $1 for no key update",
         [versionId],
       );
       return loadState(tx);

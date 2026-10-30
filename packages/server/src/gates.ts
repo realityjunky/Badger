@@ -130,7 +130,7 @@ export async function commitGate(
   try {
     return await database.transaction(async (tx) => {
       await tx.query(
-        "select id from workflow_versions where id = $1 for update",
+        "select id from workflow_versions where id = $1 for no key update",
         [versionId],
       );
       const previous = await replay(tx);

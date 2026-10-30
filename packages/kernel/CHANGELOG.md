@@ -90,6 +90,20 @@
 
 ### Changed
 
+- **Checked questionnaire records**: `createQuestionnaireHandoff({ records })`
+  and `composeSemanticDossier`, which builds on it, now refuse a malformed
+  record before computing any ledger, with an error that names the record's
+  kind, its ID, and the problem. Each record needs its required fields with
+  the right types, non-empty text, positive integer revisions, a unique ID,
+  and a known topic, and its references must resolve: a fact's question and
+  answers, a current fact's resolution, an acknowledgement's answer, and a
+  draft's question. The record types now name only the values the check
+  accepts: a question's `state` is one of the eight question states, a
+  resolution's `kind` is `confirmed`, `followed-up`, `deferred`, or
+  `withdrawn`, and its `deferredKind` is `skill-internal`, `out-of-scope`, or
+  `null`. A ledger item copies only an origin's `workflowVersionId`,
+  `recordId`, and `revision`, so any other key in a record's origin no longer
+  reaches round baselines or dossier hashes (#77).
 - **Proposal-bound initialization and generation**: `init` requires the
   approved proposal's hash, `--proposal <proposalHash>` as `propose` printed
   it, and refuses a plan or Skill source set that no longer produces it. It

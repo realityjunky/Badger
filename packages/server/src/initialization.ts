@@ -26,7 +26,7 @@ export async function runInitialization(
   const { database, config, dependencies, workerId } = options;
   return database.transaction(async (tx) => {
     await tx.query(
-      "select id from workflow_versions where id = $1 for update",
+      "select id from workflow_versions where id = $1 for no key update",
       [job.workflowVersionId],
     );
     await tx.query("select id from workflow_jobs where id = $1 for update", [

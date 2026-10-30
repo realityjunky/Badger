@@ -343,9 +343,10 @@ export async function saveStudyRecordInTransaction(
   kind: StudyKind,
   change: { id?: string; revision?: number; content: StudyContent | null },
 ) {
-  await tx.query("select id from workflow_versions where id = $1 for update", [
-    versionId,
-  ]);
+  await tx.query(
+    "select id from workflow_versions where id = $1 for no key update",
+    [versionId],
+  );
   const pins = await listWorkflowPins(tx, versionId);
   const previous =
     change.id === undefined

@@ -3,6 +3,7 @@ import {
   createQuestionnaireHandoff,
   type QuestionnaireRecords,
 } from "../src/index.js";
+import { validateQuestionnaireRecords } from "../src/factory/questionnaire-record-validation.js";
 
 describe("questionnaire record handoff validation", () => {
   const question = {
@@ -152,6 +153,32 @@ describe("questionnaire record handoff validation", () => {
       ).not.toThrow();
     });
   }
+
+  it("copies only an origin's version, record, and revision into ledger items", () => {
+    const origin = {
+      workflowVersionId: "previous-version",
+      recordId: "previous-record",
+      revision: 2,
+    };
+    // Ledger items feed round baselines and dossier hashes, so a key the
+    // contract does not name must not reach them.
+    const handoff = (recorded: typeof origin) =>
+      createQuestionnaireHandoff({
+        records: {
+          questions: [{ ...question, origin: recorded }],
+          facts: [{ ...fact, origin: recorded }],
+          drafts: [{ ...draft, origin: recorded }],
+          sourceRecords: [{ ...sourceRecord, origin: recorded }],
+        },
+      });
+    const annotated = { ...origin, copiedBy: "engineer-1" };
+    const extended = handoff(annotated);
+
+    expect(extended.items.map((item) => item.origin)).toEqual(
+      Array(4).fill(origin),
+    );
+    expect(extended).toEqual(handoff(origin));
+  });
 
   it.each(["unknown-topic", Symbol("unknown-topic")])(
     "refuses an unknown topic %s before computing the ledger",
@@ -669,5 +696,41 @@ describe("questionnaire record handoff validation", () => {
         item.state,
       ]),
     ).toEqual([["inference-1", "confirmed"]]);
+  });
+
+  it("reads each question a bounded number of times however many records cite it", () => {
+    const count = 60;
+    let reads = 0;
+    const questions = new Proxy(
+      Array.from({ length: count }, (_, index) => ({
+        ...question,
+        id: `question-${index}`,
+      })),
+      {
+        get: (target, key, receiver) => {
+          if (typeof key === "string" && /^\d+$/u.test(key)) reads += 1;
+          return Reflect.get(target, key, receiver);
+        },
+      },
+    );
+
+    validateQuestionnaireRecords({
+      questions,
+      facts: Array.from({ length: count }, (_, index) => ({
+        ...fact,
+        id: `fact-${index}`,
+        questionId: `question-${index}`,
+      })),
+      drafts: Array.from({ length: count }, (_, index) => ({
+        ...draft,
+        id: `draft-${index}`,
+        questionId: `question-${index}`,
+        questionRevision: 1,
+      })),
+    });
+
+    // Scanning the questions for every fact and draft reads them about
+    // count * count times; the ledger's locked reads run this check.
+    expect(reads).toBeLessThanOrEqual(count * 8);
   });
 });

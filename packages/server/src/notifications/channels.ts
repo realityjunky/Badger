@@ -125,7 +125,7 @@ export async function saveChannel(
   return database.transaction(async (tx) => {
     // Lock the scope even before its first channel exists.
     const target = await tx.query(
-      `select id from ${scope.type === "group" ? "groups" : "workflows"} where id = $1 for update`,
+      `select id from ${scope.type === "group" ? "groups" : "workflows"} where id = $1 for no key update`,
       [scope.id],
     );
     if (target.rows.length === 0)
@@ -223,7 +223,7 @@ export async function deleteChannel(
   const { dependencies: deps, context } = input;
   return input.database.transaction(async (tx) => {
     await tx.query(
-      `select id from ${scope.type === "group" ? "groups" : "workflows"} where id = $1 for update`,
+      `select id from ${scope.type === "group" ? "groups" : "workflows"} where id = $1 for no key update`,
       [scope.id],
     );
     const current = await readChannel(tx, scope);

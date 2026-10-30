@@ -102,7 +102,8 @@ existing dossier/FactoryPlan handoff retains those validation requirements.
 The records form validates required fields, topics, identities, and references
 before computing any ledger items. Invalid records throw an error naming the
 record kind, its ID, and the problem. Historical facts may retain older
-resolution and answer revisions after the current heads advance.
+resolution and answer revisions after the current heads advance. A ledger item
+keeps only an origin's `workflowVersionId`, `recordId`, and `revision`.
 
 Dossier versions (#50) add `composeSemanticDossier`: the kernel projects the
 acknowledged facts, source-derived facts, confirmed inferences, and deferred

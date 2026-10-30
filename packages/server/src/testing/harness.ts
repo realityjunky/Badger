@@ -3,7 +3,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { loadConfig, type ServiceConfig } from "../config.js";
-import type { Database } from "../database/database.js";
+import type { Database, Queryable } from "../database/database.js";
 import { loadBundledMigrations } from "../database/migrations.js";
 import { openDatabase } from "../database/open.js";
 import { configuredIdentityAdapter } from "../identity/configured.js";
@@ -84,6 +84,12 @@ export interface TestService {
    * Postgres restart does. Only on Postgres, with a fresh test database.
    */
   interruptDatabase(): Promise<void>;
+  /**
+   * Makes the server's next transaction end as Postgres ends a deadlock
+   * victim (40P01) or a serialization failure (40001): once its work has run,
+   * the database raises that SQLSTATE and the transaction rolls back.
+   */
+  failNextTransaction(code: "40P01" | "40001"): void;
   /**
    * A worker role on the service's database, clock, IDs, and storage. Each
    * ID is a separate worker, so a test can claim a job with one and leave it,
@@ -206,17 +212,35 @@ export async function startTestService(
     info: (fields) => logs.push({ level: "info", ...fields }),
     error: (fields) => logs.push({ level: "error", ...fields }),
   };
+  // The next transaction to begin after failNextTransaction does its work,
+  // then the database itself raises the chosen SQLSTATE.
+  let failure: "40P01" | "40001" | null = null;
+  const database: Database = {
+    ...connection.database,
+    transaction: <T>(work: (tx: Queryable) => Promise<T>): Promise<T> => {
+      const code = failure;
+      failure = null;
+      return connection.database.transaction(async (tx) => {
+        const result = await work(tx);
+        if (code !== null)
+          await tx.exec(
+            `do $$ begin raise exception 'injected transaction failure' using errcode = '${code}'; end $$`,
+          );
+        return result;
+      });
+    },
+  };
   const identity =
     options.identity ??
     (mode === "test-identity"
       ? createTestIdentityAdapter()
-      : configuredIdentityAdapter(config, clock, connection.database, logger));
+      : configuredIdentityAdapter(config, clock, database, logger));
 
   let server: StartedServer;
   try {
     server = await startHttpServer({
       config,
-      database: connection.database,
+      database,
       identity,
       clock,
       ids,
@@ -315,6 +339,9 @@ export async function startTestService(
     rawRequest,
     closeDatabase: () => connection.database.close().catch(() => undefined),
     interruptDatabase: connection.interrupt,
+    failNextTransaction: (code) => {
+      failure = code;
+    },
     worker,
     runSourceCheckJobs: async () => {
       const running = worker();

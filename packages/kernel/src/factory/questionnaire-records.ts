@@ -1,6 +1,11 @@
 import { SEMANTIC_DOSSIER_TOPICS } from "./questionnaire.js";
 import { stableValue } from "../util.js";
-import { validateQuestionnaireRecords } from "./questionnaire-record-validation.js";
+import {
+  validateQuestionnaireRecords,
+  type DEFERRED_KINDS,
+  type QUESTION_STATES,
+  type RESOLUTION_KINDS,
+} from "./questionnaire-record-validation.js";
 
 export type QuestionnaireTopic =
   "scope" | (typeof SEMANTIC_DOSSIER_TOPICS)[number];
@@ -37,9 +42,9 @@ export interface QuestionnaireLedgerItem {
   resolution?: {
     id: string;
     revision: number;
-    kind: string;
+    kind: (typeof RESOLUTION_KINDS)[number];
     reason: string | null;
-    deferredKind: string | null;
+    deferredKind: (typeof DEFERRED_KINDS)[number] | null;
     skillId: string | null;
   };
 }
@@ -49,7 +54,7 @@ export interface QuestionnaireQuestionRecord {
   revision: number;
   topic: QuestionnaireTopic;
   text: string;
-  state: QuestionnaireLedgerItem["state"];
+  state: (typeof QUESTION_STATES)[number];
   resolution?: QuestionnaireLedgerItem["resolution"];
   answers?: { personId: string; revision: number }[];
 }
@@ -133,13 +138,29 @@ export interface QuestionnaireRecordHandoff {
   deferredQuestions: QuestionnaireLedgerItem[];
 }
 
+/**
+ * Ledger items feed round baselines and dossier hashes, so they carry only an
+ * origin's three fields, never other keys a caller's record holds.
+ */
+function itemOrigin(origin: QuestionnaireLedgerItem["origin"] | null) {
+  return origin
+    ? {
+        origin: {
+          workflowVersionId: origin.workflowVersionId,
+          recordId: origin.recordId,
+          revision: origin.revision,
+        },
+      }
+    : {};
+}
+
 /** The kernel owns the questionnaire's record-based readiness rules. */
 export function questionnaireRecordHandoff(
   records: QuestionnaireRecords,
 ): QuestionnaireRecordHandoff {
   validateQuestionnaireRecords(records);
   const items = records.questions.map((q): QuestionnaireLedgerItem => ({
-    ...(q.origin ? { origin: q.origin } : {}),
+    ...itemOrigin(q.origin),
     record: { type: "question", id: q.id, revision: q.revision },
     topic: q.topic,
     statement: q.text,
@@ -191,7 +212,7 @@ export function questionnaireRecordHandoff(
       );
     const disputed = f.acknowledgements.some((a) => a.decision === "disputed");
     return {
-      ...(f.origin ? { origin: f.origin } : {}),
+      ...itemOrigin(f.origin),
       record: { type: "confirmed-fact", id: f.id, revision: 1 },
       topic: records.questions.find((q) => q.id === f.questionId)!.topic,
       statement: f.statement,
@@ -245,7 +266,7 @@ export function questionnaireRecordHandoff(
       acceptedQuestions.add(q.id);
   }
   const drafts = (records.drafts ?? []).map((d): QuestionnaireLedgerItem => ({
-    ...(d.origin ? { origin: d.origin } : {}),
+    ...itemOrigin(d.origin),
     record: { type: d.kind, id: d.id, revision: d.revision },
     topic: d.topic,
     statement: d.statement,
@@ -280,7 +301,7 @@ export function questionnaireRecordHandoff(
   const activeDrafts = drafts.filter((d) => d.state !== "retired");
   const sources = (records.sourceRecords ?? []).map(
     (r): QuestionnaireLedgerItem => ({
-      ...(r.origin ? { origin: r.origin } : {}),
+      ...itemOrigin(r.origin),
       record: {
         type: r.kind === "fact" ? "source-fact" : "source-interface",
         id: r.id,

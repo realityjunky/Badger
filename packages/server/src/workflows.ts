@@ -301,13 +301,19 @@ export async function createWorkflow(
 type WorkflowConflict =
   { kind: "missing" } | { kind: "stale"; workflow: Workflow };
 
-/** The row lock also serializes metadata edits with version creation. */
+/**
+ * The row lock also serializes metadata edits with version creation. A frame
+ * edit may rename the workflow, changing its (group_id, name) key, so it locks
+ * FOR UPDATE. Version creation keeps the key and takes FOR NO KEY UPDATE, like
+ * every other workflow lock, which foreign-key checks do not wait for.
+ */
 async function lockedWorkflow(
   database: Queryable,
   id: string,
+  mode: "update" | "no key update",
 ): Promise<Workflow | null> {
   const result = await database.query<WorkflowRow>(
-    `select ${WORKFLOW_COLUMNS} from workflows where id = $1 for update`,
+    `select ${WORKFLOW_COLUMNS} from workflows where id = $1 for ${mode}`,
     [id],
   );
   return result.rows[0] === undefined ? null : toWorkflow(result.rows[0]);
@@ -348,7 +354,7 @@ export async function updateWorkflow(
 > {
   try {
     return await database.transaction(async (tx) => {
-      const current = await lockedWorkflow(tx, id);
+      const current = await lockedWorkflow(tx, id, "update");
       if (current === null) return { kind: "missing" };
       if (current.revision !== revision)
         return { kind: "stale", workflow: current };
@@ -400,7 +406,7 @@ export async function createWorkflowVersion(
   | WorkflowConflict
 > {
   return database.transaction(async (tx) => {
-    const current = await lockedWorkflow(tx, id);
+    const current = await lockedWorkflow(tx, id, "no key update");
     if (current === null) return { kind: "missing" };
     if (current.revision !== revision)
       return { kind: "stale", workflow: current };
@@ -411,7 +417,7 @@ export async function createWorkflowVersion(
     );
     const workflow = toWorkflow(result.rows[0]!);
     const versions = await tx.query<{ id: string; number: number }>(
-      `select id, number from workflow_versions where workflow_id = $1 order by number desc limit 1 for update`,
+      `select id, number from workflow_versions where workflow_id = $1 order by number desc limit 1 for no key update`,
       [id],
     );
     const version = await recordVersion(

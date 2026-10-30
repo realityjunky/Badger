@@ -132,7 +132,7 @@ interface ResolutionRow {
   actor_id: string;
   actor_name: string;
   reason: string | null;
-  deferred_kind: string | null;
+  deferred_kind: NonNullable<ResolutionInput["deferredKind"]> | null;
   skill_id: string | null;
   child_question_id: string | null;
   confirmation_hash: string;

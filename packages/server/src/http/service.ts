@@ -23,7 +23,7 @@ import {
 } from "../bindings.js";
 import type { Clock } from "../clock.js";
 import type { ServiceConfig } from "../config.js";
-import type { Database } from "../database/database.js";
+import { isTransactionConflict, type Database } from "../database/database.js";
 import type { Migration } from "../database/migrations.js";
 import {
   firstHeader,
@@ -1066,6 +1066,17 @@ export function createService(options: ServiceOptions, port: number): Service {
         });
         if (response.headersSent) {
           response.end();
+          return;
+        }
+        // Postgres rolled the losing transaction back, so the same request
+        // can be sent again once the one it contended with commits.
+        if (isTransactionConflict(error)) {
+          reply.error(
+            503,
+            "unavailable",
+            "A concurrent request held the records this one needed; try again",
+            { "retry-after": "1" },
+          );
           return;
         }
         reply.error(
