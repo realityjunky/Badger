@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import * as client from "openid-client";
-import type { Clock } from "../clock.js";
+import { setClockTimer, type Clock } from "../clock.js";
 import type { OidcSettings } from "../config.js";
 import type { Database } from "../database/database.js";
 import { silentLogger, type Logger } from "../log.js";
@@ -8,10 +8,9 @@ import { hashCredential, readCookie } from "./cookies.js";
 import type { IdentityAdapter, Principal } from "./identity.js";
 
 export const OIDC_TRANSACTION_SECONDS = 600;
-/** A different key from the migration lock; all server processes share it. */
-const OIDC_START_LOCK_KEY = "8231130000000002";
 /** A longer destination falls back to My work; migration 0026 checks it too. */
 const MAX_RETURN_PATH_BYTES = 2048;
+const EVICTION_LOG_MILLISECONDS = 60_000;
 
 interface Transaction {
   state: string;
@@ -99,8 +98,19 @@ export function createOidcIdentityAdapter(
   database: Database,
   logger: Logger = silentLogger,
 ): IdentityAdapter {
-  let pendingEvictions = 0;
-  let lastEvictionLog = -Infinity;
+  // An eviction is logged at once, with any others in the minute after it
+  // logged when that minute ends: at most one entry a minute.
+  let evictionWindow: (() => void) | null = null;
+  let unloggedEvictions = 0;
+  const logEvictions = (count: number) => {
+    logger.info({ event: "oidc.sign-ins-evicted", evictedCount: count });
+    evictionWindow = setClockTimer(clock, EVICTION_LOG_MILLISECONDS, () => {
+      evictionWindow = null;
+      const pending = unloggedEvictions;
+      unloggedEvictions = 0;
+      if (pending > 0) logEvictions(pending);
+    });
+  };
   let discovered: Promise<client.Configuration> | undefined;
   const configuration = (): Promise<client.Configuration> => {
     discovered ??= client
@@ -170,30 +180,24 @@ export function createOidcIdentityAdapter(
         });
         const now = clock.now();
         const evicted = await database.transaction(async (tx) => {
-          // Serialize starts, including on an empty table. The same
-          // transaction evicts older pending sign-ins and adds this one.
+          // Starts never wait for one another: each deletes only rows no
+          // other transaction holds, and a held row is already being deleted.
           await tx.query(
-            `select pg_advisory_xact_lock(${OIDC_START_LOCK_KEY})`,
-          );
-          await tx.query(
-            "delete from oidc_transactions where expires_at <= $1",
-            [now],
-          );
-          await tx.query(
-            "delete from identity_sessions where expires_at <= $1",
-            [now],
-          );
-          // Every transaction has the same lifetime, so expiry orders starts.
-          // Break equal-time ties deterministically; leave room for this start.
-          const removed = await tx.query(
             `delete from oidc_transactions where token_hash in (
-              select token_hash from oidc_transactions
-              order by expires_at desc, token_hash desc offset $1
+              select token_hash from oidc_transactions where expires_at <= $1
+              for update skip locked
             )`,
-            [settings.maxPendingSignIns - 1],
+            [now],
           );
           await tx.query(
-            "insert into oidc_transactions (token_hash, state, nonce, code_verifier, expires_at, return_path) values ($1, $2, $3, $4, $5, $6)",
+            `delete from identity_sessions where token_hash in (
+              select token_hash from identity_sessions where expires_at <= $1
+              for update skip locked
+            )`,
+            [now],
+          );
+          const started = await tx.query<{ sequence: string }>(
+            "insert into oidc_transactions (token_hash, state, nonce, code_verifier, expires_at, return_path) values ($1, $2, $3, $4, $5, $6) returning sequence::text as sequence",
             [
               hashCredential(transactionToken),
               state,
@@ -203,17 +207,23 @@ export function createOidcIdentityAdapter(
               dashboardReturnPath(returnPath, settings.publicUrl),
             ],
           );
+          // Starts are numbered in order. Evict each pending sign-in more
+          // than the cap's number of starts older than this one: the oldest.
+          // The sequence index reads only those rows, whatever the table's
+          // size, and the table keeps the cap plus the starts in flight.
+          const removed = await tx.query(
+            `delete from oidc_transactions where token_hash in (
+              select token_hash from oidc_transactions
+              where sequence <= $1::bigint - $2
+              for update skip locked
+            )`,
+            [started.rows[0]!.sequence, settings.maxPendingSignIns],
+          );
           return removed.rowCount;
         });
-        pendingEvictions += evicted;
-        const logTime = clock.now().getTime();
-        if (pendingEvictions > 0 && logTime - lastEvictionLog >= 60_000) {
-          logger.info({
-            event: "oidc.sign-ins-evicted",
-            evictedCount: pendingEvictions,
-          });
-          pendingEvictions = 0;
-          lastEvictionLog = logTime;
+        if (evicted > 0) {
+          if (evictionWindow === null) logEvictions(evicted);
+          else unloggedEvictions += evicted;
         }
         return {
           authorizationUrl: authorizationUrl.href,
@@ -315,6 +325,10 @@ export function createOidcIdentityAdapter(
           ),
         };
       },
+    },
+    close: () => {
+      evictionWindow?.();
+      evictionWindow = null;
     },
   };
 }

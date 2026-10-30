@@ -1042,7 +1042,10 @@ export function createService(options: ServiceOptions, port: number): Service {
   }
 
   return {
-    close: () => stopping.abort(),
+    close: () => {
+      stopping.abort();
+      identity.close?.();
+    },
     handler: (request, response) => {
       const started = performance.now();
       const requestId = resolveRequestId(request.headers["x-request-id"]);

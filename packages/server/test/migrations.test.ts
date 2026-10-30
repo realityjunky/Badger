@@ -71,6 +71,42 @@ describe("reviewed SQL migrations", () => {
     ).rejects.toThrow(/agent_host/u);
   });
 
+  it("numbers pending sign-ins in start order, existing ones first, and bounds their return path", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((migration) => migration.version <= "0025"),
+      clock,
+    );
+    const insert = (token: string, returnPath?: string) =>
+      test.database.query(
+        `insert into oidc_transactions (token_hash, state, nonce, code_verifier, expires_at${returnPath === undefined ? "" : ", return_path"})
+         values ($1, 'state', 'nonce', 'verifier', $2${returnPath === undefined ? "" : ", $3"})`,
+        [token, clock.now(), ...(returnPath === undefined ? [] : [returnPath])],
+      );
+    await insert("pending-before-upgrade");
+    await applyMigrations(test.database, migrations, clock);
+    await insert("started-after-upgrade", `/${"a".repeat(2047)}`);
+    await expect(
+      insert("oversized-return-path", `/${"a".repeat(2048)}`),
+    ).rejects.toThrow(/return_path/u);
+    const rows = await test.database.query<{
+      token_hash: string;
+      sequence: string;
+      return_path: string | null;
+    }>(
+      "select token_hash, sequence::text as sequence, return_path from oidc_transactions order by sequence",
+    );
+    expect(rows.rows.map((row) => [row.token_hash, row.return_path])).toEqual([
+      ["pending-before-upgrade", null],
+      ["started-after-upgrade", `/${"a".repeat(2047)}`],
+    ]);
+    expect(Number(rows.rows[0]!.sequence)).toBeLessThan(
+      Number(rows.rows[1]!.sequence),
+    );
+  });
+
   it("upgrades uploaded versions unchanged and preserves immutable repository provenance", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();

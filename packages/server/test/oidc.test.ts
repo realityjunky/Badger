@@ -211,53 +211,100 @@ describe("OpenID Connect sign-in", () => {
     }
   });
 
-  it("aggregates eviction logs to at most one entry per minute", async () => {
+  it("logs evictions at most once a minute, writing each minute's count when it ends", async () => {
     const app = await start({ BADGER_OIDC_MAX_PENDING_SIGN_INS: "1" });
     const evictions = () =>
       app.logs.filter((entry) => entry["event"] === "oidc.sign-ins-evicted");
+    const entry = (evictedCount: number) => ({
+      level: "info",
+      event: "oidc.sign-ins-evicted",
+      evictedCount,
+    });
     await begin();
     expect(evictions()).toEqual([]);
     await begin();
-    expect(evictions()).toEqual([
-      { level: "info", event: "oidc.sign-ins-evicted", evictedCount: 1 },
-    ]);
+    expect(evictions()).toEqual([entry(1)]);
+    await begin();
     await begin();
     app.clock.advance(59_999);
-    await begin();
-    expect(evictions()).toHaveLength(1);
+    expect(evictions()).toEqual([entry(1)]);
+    // The burst's count is written when its minute ends, with no later start.
     app.clock.advance(1);
+    expect(evictions()).toEqual([entry(1), entry(2)]);
+    // A minute without evictions writes nothing; the next eviction is
+    // written at once.
+    app.clock.advance(60_000);
+    expect(evictions()).toEqual([entry(1), entry(2)]);
     const newest = await begin();
-    expect(evictions()).toEqual([
-      { level: "info", event: "oidc.sign-ins-evicted", evictedCount: 1 },
-      { level: "info", event: "oidc.sign-ins-evicted", evictedCount: 3 },
-    ]);
+    expect(evictions()).toEqual([entry(1), entry(2), entry(1)]);
     const completed = await app.request(newest.completePath, {
       redirect: "manual",
       headers: { cookie: newest.flowCookie },
     });
     expect(completed.status).toBe(303);
+    // Closing the service stops the minute's timer.
+    await begin();
+    await begin();
+    await app.close();
+    app.clock.advance(60_000);
+    expect(evictions()).toEqual([entry(1), entry(2), entry(1)]);
+  });
+
+  it("refuses no concurrent start and keeps only the cap once the starts in flight finish", async () => {
+    const app = await start({ BADGER_OIDC_MAX_PENDING_SIGN_INS: "2" });
+    // `begin` checks that each start redirects to the provider.
+    const burst = await Promise.all(Array.from({ length: 8 }, () => begin()));
+    // Every burst start has committed, so the next start evicts all but the
+    // newest two.
+    const newest = await begin();
+    const statuses = [];
+    for (const flow of [...burst, newest]) {
+      const completed = await app.request(flow.completePath, {
+        redirect: "manual",
+        headers: { cookie: flow.flowCookie },
+      });
+      statuses.push(completed.status);
+    }
+    expect(statuses.filter((status) => status === 303)).toHaveLength(2);
+    expect(statuses.filter((status) => status === 400)).toHaveLength(7);
+    expect(statuses.at(-1)).toBe(303);
   });
 
   it.skipIf(!onPostgres)(
-    "keeps only the configured number of pending sign-ins after concurrent starts",
+    "keeps a signed-in request prompt during a burst of starts at the cap",
     async () => {
-      const app = await start({ BADGER_OIDC_MAX_PENDING_SIGN_INS: "2" });
-      const flows = await Promise.all(Array.from({ length: 8 }, () => begin()));
-      const statuses = [];
-      for (const flow of flows) {
-        const completed = await app.request(flow.completePath, {
-          redirect: "manual",
-          headers: { cookie: flow.flowCookie },
-        });
-        statuses.push(completed.status);
-      }
-      expect(statuses.filter((status) => status === 303)).toHaveLength(2);
-      expect(statuses.filter((status) => status === 400)).toHaveLength(6);
+      const app = await start();
+      const { cookie } = await signIn();
+      const login = () =>
+        app.request("/badger/auth/oidc/login", { redirect: "manual" });
+      const statuses = new Set<number>();
+      // Fill the table to the default cap of 10,000 pending sign-ins.
+      for (let started = 0; started < 10_000; started += 100)
+        for (const response of await Promise.all(
+          Array.from({ length: 100 }, login),
+        ))
+          statuses.add(response.status);
+      const burst = Array.from({ length: 500 }, login);
+      const before = performance.now();
+      const me = await app.request("/badger/api/v1/me", {
+        headers: { cookie },
+      });
+      const elapsed = performance.now() - before;
+      for (const response of await Promise.all(burst))
+        statuses.add(response.status);
+      expect(me.status).toBe(200);
+      expect([...statuses]).toEqual([303]);
+      // About 0.4 s here. Starts that waited on one another, each sorting
+      // the whole table, held every pooled connection and kept it waiting
+      // 11 s; the fill alone took over two minutes.
+      expect(elapsed).toBeLessThan(3_000);
     },
+    // The fill and burst take about 8 s; the timeout leaves room on a busy host.
+    60_000,
   );
 
   it("accepts the maximum pending sign-in setting", async () => {
-    await start({ BADGER_OIDC_MAX_PENDING_SIGN_INS: "1000000" });
+    await start({ BADGER_OIDC_MAX_PENDING_SIGN_INS: "100000" });
     await signIn();
   });
 
@@ -889,7 +936,8 @@ describe("OpenID Connect sign-in", () => {
     { BADGER_OIDC_MAX_PENDING_SIGN_INS: "0" },
     { BADGER_OIDC_MAX_PENDING_SIGN_INS: "-1" },
     { BADGER_OIDC_MAX_PENDING_SIGN_INS: "1.5" },
-    { BADGER_OIDC_MAX_PENDING_SIGN_INS: "1000001" },
+    { BADGER_OIDC_MAX_PENDING_SIGN_INS: "100001" },
+    { BADGER_OIDC_MAX_PENDING_SIGN_INS: "1000000" },
     { BADGER_OIDC_MAX_PENDING_SIGN_INS: "many" },
   ])("refuses unsafe or incomplete OIDC settings (%j)", async (settings) => {
     await expect(start(settings)).rejects.toThrow();
