@@ -96,4 +96,16 @@ export function validateRunReadModels(
     )
   )
     throw new RequestError(400, "Malformed runtime state projection");
+  const summary = projection.historySummary;
+  if (
+    summary !== undefined &&
+    (!object(summary) ||
+      ![summary.total, summary.returned, summary.omitted].every(
+        (count) => Number.isSafeInteger(count) && Number(count) >= 0,
+      ) ||
+      summary.returned !== (projection.history as unknown[]).length ||
+      Number(summary.total) !==
+        Number(summary.returned) + Number(summary.omitted))
+  )
+    throw new RequestError(400, "Malformed runtime outcome history summary");
 }

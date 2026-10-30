@@ -1,4 +1,6 @@
 import { expect, it } from "vitest";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { certifyBadgerMcp } from "../src/certification.js";
 it("certifies actual MCP tool calls, external-root binding, Completion and routing refusals", async () => {
   const result = await certifyBadgerMcp({
@@ -27,4 +29,39 @@ it("certifies actual MCP tool calls, external-root binding, Completion and routi
       "my_runs",
     ]),
   );
+}, 30_000);
+
+it("certifies in a JIT-less child without loading the fetch globals unavailable in the Node 22 sandbox", async () => {
+  const executable = new URL("../dist/src/certification.js", import.meta.url)
+    .href;
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    [
+      "--jitless",
+      "--input-type=module",
+      "--eval",
+      `
+      for (const name of ["fetch", "Response", "Request", "Headers"]) {
+        // Node 22 materializes a lazy global when redefining it; delete first
+        // so installing the refusal does not itself initialize Undici.
+        delete globalThis[name];
+        Object.defineProperty(globalThis, name, { get() {
+          throw new Error("Certification loaded fetch global: " + name);
+        }});
+      }
+      const { certifyBadgerMcp } = await import(${JSON.stringify(executable)});
+      console.log(JSON.stringify(await certifyBadgerMcp({ generatedPackageHash: "b".repeat(64) })));
+    `,
+    ],
+    { timeout: 25_000, maxBuffer: 1024 * 1024 },
+  );
+  expect(JSON.parse(stdout)).toMatchObject({
+    authority: "BadgerMCP",
+    completed: true,
+    evaluatedPackageStarted: true,
+    receiptRootVerified: true,
+    missingCompletionRefused: true,
+    illegalRouteRefused: true,
+    exhaustedCycleRefused: true,
+  });
 }, 30_000);

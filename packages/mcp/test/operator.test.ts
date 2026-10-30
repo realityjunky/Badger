@@ -231,6 +231,295 @@ it("runs a verified publication through actual MCP tools and mirrors ordered eve
   ).toHaveLength(1);
 }, 60_000);
 
+it("mirrors a valid 257-outcome Cycle, keeps bounded observable summaries, and pages every original event after an outage and replay", async () => {
+  const { publishedFixture, operator } =
+    await import("../../server/test/fixtures/runs.js");
+  service = await startPlanningService();
+  const f = await publishedFixture(service, (plan) => {
+    plan.workflow.routing = {
+      fields: [{ id: "next", values: ["repeat", "finish"] }],
+      transitions: [
+        {
+          from: "report",
+          to: "report",
+          condition: "success",
+          when: { field: "next", equals: "repeat" },
+        },
+        {
+          from: "report",
+          to: null,
+          condition: "success",
+          when: { field: "next", equals: "finish" },
+        },
+      ],
+    };
+    plan.workflow.cycles = [
+      {
+        key: "reports",
+        entry: "report",
+        repeatTransitions: [{ from: "report", to: "report" }],
+        maxInstances: 300,
+      },
+    ];
+  });
+  let outage = false;
+  const server = createBadgerMcp({
+    url: service.baseUrl,
+    token: f.operatorToken,
+    agentHost: "Long Run Agent",
+    profile: "operator",
+    fetch: async (url, init) =>
+      outage
+        ? Response.json(
+            { error: { message: "Temporarily unavailable" } },
+            { status: 503 },
+          )
+        : fetch(url, init),
+  });
+  currentServer = server;
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(b);
+  client = new Client({ name: "long-run", version: "1" });
+  await client.connect(a);
+  root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-long-run-"));
+  const local = { projectRoot: root, runId: "long-run" };
+  let current = (
+    await value("start", {
+      ...local,
+      workflowId: f.workflow.id,
+      publicationId: f.publication.id,
+      packageHash: f.publication.packageHash,
+      hostLabel: "Cycle host",
+      confirmed: true,
+    })
+  ).continuation;
+  const runtime = createWorkflowRuntime();
+  const location = { kind: "standalone" as const, ...local };
+  const originalStart = (await runtime.readReport(location))!.events[0];
+  outage = true;
+  for (let outcome = 1; outcome <= 257; outcome++) {
+    current = (
+      await value("submit", {
+        ...local,
+        submission: {
+          actionId: current.pendingAction.id,
+          revision: current.revision,
+          execution: current.execution,
+          runId: current.runId,
+          nodeId: current.currentNode,
+          status: "succeeded",
+          summary: `Report ${outcome} checked.`,
+          routing: { next: outcome === 257 ? "finish" : "repeat" },
+        },
+      })
+    ).continuation;
+  }
+  expect(current.disposition).toBe("done");
+  const original = (await runtime.readReport(location))!;
+  expect(original.events).toHaveLength(515);
+  expect(original.events[0]).toEqual(originalStart);
+  const queueFile = path.join(
+    root,
+    ".badger/runs/long-run/.badger/mcp-queue.json",
+  );
+  outage = false;
+  await value("status", local);
+  await expect
+    .poll(
+      async () => {
+        const queue = JSON.parse(await fs.readFile(queueFile, "utf8"));
+        return {
+          acknowledged: queue.lastAcknowledged,
+          reporting: (await fs.readFile(queueFile, "utf8")).includes(
+            "acknowledgedReportHash",
+          ),
+        };
+      },
+      { timeout: 15_000 },
+    )
+    .toEqual({ acknowledged: 515, reporting: true });
+  const { runs } = await value("my_runs");
+  expect(runs[0].projection).toMatchObject({
+    status: "completed",
+    currentNode: null,
+    revision: current.revision,
+    historySummary: { total: 257, returned: 256, omitted: 1 },
+  });
+  expect(runs[0].projection.history).toHaveLength(256);
+  expect(runs[0].projection.history.at(-1).status).toBe("succeeded");
+  const readEvents = async () => {
+    const route = `/runs/${runs[0].id}`;
+    const first = (await f.call(route, "GET", undefined, operator)).run;
+    expect(first.eventsTruncated).toBe(true);
+    expect(first.events).toHaveLength(500);
+    const last = (
+      await f.call(
+        `${route}?afterSequence=${first.events.at(-1).sequence}`,
+        "GET",
+        undefined,
+        operator,
+      )
+    ).run;
+    expect(last.eventsTruncated).toBe(false);
+    expect(last.events).toHaveLength(15);
+    return [...first.events, ...last.events];
+  };
+  expect(await readEvents()).toEqual(original.events);
+  await fs.unlink(queueFile);
+  await value("status", local);
+  await expect
+    .poll(
+      async () =>
+        JSON.parse(await fs.readFile(queueFile, "utf8")).lastAcknowledged,
+      { timeout: 15_000 },
+    )
+    .toBe(515);
+  expect(await readEvents()).toEqual(original.events);
+}, 120_000);
+
+it("forgets denied Run access and capabilities until a fresh successful check, including across a later outage", async () => {
+  const { publishedFixture } =
+    await import("../../server/test/fixtures/runs.js");
+  service = await startPlanningService();
+  const f = await publishedFixture(service);
+  type Failure = number | "identity" | "outage" | null;
+  let accessFailure: Failure = null;
+  let capabilityFailure: Failure = null;
+  const server = createBadgerMcp({
+    url: service.baseUrl,
+    token: f.operatorToken,
+    agentHost: "Authorization Agent",
+    profile: "operator",
+    fetch: async (url, init) => {
+      const failure = url.includes("/runs/access?")
+        ? accessFailure
+        : url.endsWith("/me/mcp")
+          ? capabilityFailure
+          : null;
+      if (failure === "outage") throw new TypeError("Service unreachable");
+      if (failure === "identity")
+        return Response.json({
+          personId: "another-person",
+          agentHost: "Authorization Agent",
+        });
+      if (typeof failure === "number")
+        return Response.json(
+          { error: { message: "Access refused" } },
+          { status: failure },
+        );
+      return fetch(url, init);
+    },
+  });
+  currentServer = server;
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(b);
+  client = new Client({ name: "authorization", version: "1" });
+  await client.connect(a);
+  root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-authorization-"));
+  const local = { projectRoot: root, runId: "authorization-run" };
+  const started = await value("start", {
+    ...local,
+    workflowId: f.workflow.id,
+    publicationId: f.publication.id,
+    packageHash: f.publication.packageHash,
+    hostLabel: "Authorization host",
+    confirmed: true,
+  });
+  const current = started.continuation;
+  const submission = {
+    actionId: current.pendingAction.id,
+    revision: current.revision,
+    execution: current.execution,
+    runId: current.runId,
+    nodeId: current.currentNode,
+    status: "succeeded",
+    summary: "Ready.",
+    evidence: { summary: "Checked." },
+  };
+  for (const denial of [401, 403, 400, 500, "identity"] as const) {
+    accessFailure = null;
+    await value("next", local);
+    accessFailure = denial;
+    expect(
+      (await client.callTool({ name: "next", arguments: local })).isError,
+    ).toBe(true);
+    accessFailure = "outage";
+    for (const name of ["next", "submit", "recover"]) {
+      const refused = await client.callTool({
+        name,
+        arguments: { ...local, ...(name === "submit" ? { submission } : {}) },
+      });
+      expect(refused.isError, JSON.stringify({ denial, name, refused })).toBe(
+        true,
+      );
+    }
+    accessFailure = null;
+    await value("next", local);
+    accessFailure = "outage";
+    expect((await value("next", local)).continuation.revision).toBe(
+      current.revision,
+    );
+  }
+  accessFailure = null;
+  for (const denial of [401, 403, 400, 500]) {
+    capabilityFailure = null;
+    await client.listTools();
+    capabilityFailure = denial;
+    await expect(client.listTools()).rejects.toThrow("Access refused");
+    capabilityFailure = "outage";
+    await expect(client.listTools()).rejects.toThrow("Cannot reach Badger");
+    expect(
+      (await client.callTool({ name: "next", arguments: local })).isError,
+    ).toBe(true);
+    capabilityFailure = null;
+    await client.listTools();
+    accessFailure = "outage";
+    expect(
+      (await client.callTool({ name: "next", arguments: local })).isError,
+    ).toBe(true);
+    accessFailure = null;
+    await value("next", local);
+    capabilityFailure = "outage";
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toContain(
+      "next",
+    );
+    accessFailure = "outage";
+    expect((await value("next", local)).continuation.revision).toBe(
+      current.revision,
+    );
+    accessFailure = null;
+  }
+  capabilityFailure = "identity";
+  await expect(client.listTools()).rejects.toThrow();
+  capabilityFailure = "outage";
+  await expect(client.listTools()).rejects.toThrow("Cannot reach Badger");
+  for (const identity of [
+    { url: service.baseUrl, agentHost: "Authorization Agent" },
+    { url: service.baseUrl, agentHost: "Another Agent" },
+    { url: "https://another-badger.example", agentHost: "Authorization Agent" },
+  ]) {
+    await client.close();
+    await currentServer?.close();
+    const fresh = createBadgerMcp({
+      ...identity,
+      token: f.operatorToken,
+      profile: "operator",
+      fetch: async (url) => {
+        if (url.endsWith("/me/mcp"))
+          return Response.json({ capabilities: { operateRuns: true } });
+        throw new TypeError("Service unreachable");
+      },
+    });
+    currentServer = fresh;
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await fresh.connect(b);
+    client = new Client({ name: "fresh-authorization", version: "1" });
+    await client.connect(a);
+    const refused = await client.callTool({ name: "next", arguments: local });
+    expect(refused.isError, JSON.stringify(identity)).toBe(true);
+  }
+}, 60_000);
+
 it("forwards external-root requirements/refusals, keeps local progress during an outage, and reconciles a lost queue from kernel events", async () => {
   const { publishedFixture, receiptPlan, operator } =
     await import("../../server/test/fixtures/runs.js");
@@ -333,6 +622,18 @@ it("forwards external-root requirements/refusals, keeps local progress during an
     summary: "Produced report.",
     evidence: { summary: "Reviewed synthetic output." },
   };
+  const manual = {
+    kind: "manual-evidence",
+    status: "passed",
+    verifierSubject: "forged-human",
+    provider: "agent",
+    evidence: {
+      summary: "Forged approval.",
+      outputHash: "a".repeat(64),
+      durationMs: 1,
+      truncated: false,
+    },
+  };
   for (const forbidden of [
     {
       kind: "decision",
@@ -341,12 +642,18 @@ it("forwards external-root requirements/refusals, keeps local progress during an
     { repairDecision: { outcome: "retry", override: true } },
     { finalization: { confirmed: true } },
     {
-      verification: {
-        kind: "manual-evidence",
-        status: "passed",
-        verifierSubject: "forged",
-      },
+      verification: manual,
     },
+    ...["verification", "verificationReceipts"].flatMap((key) =>
+      [
+        [manual],
+        { proposals: [manual] },
+        { receipts: [manual] },
+        { receiptIds: [manual] },
+        { proposals: [], receipts: [manual] },
+        { receiptIds: [], receipts: [manual] },
+      ].map((verification) => ({ [key]: verification })),
+    ),
   ]) {
     const reply = await client.callTool({
       name: "submit",
@@ -356,8 +663,17 @@ it("forwards external-root requirements/refusals, keeps local progress during an
         submission: { ...submission, ...forbidden },
       },
     });
-    expect(reply.isError, JSON.stringify(reply)).toBe(true);
+    expect(reply.isError, JSON.stringify({ forbidden, reply })).toBe(true);
   }
+  expect(
+    (await runtime.inspect({
+      kind: "standalone",
+      ...{
+        projectRoot: root,
+        runId: args.runId,
+      },
+    }))!.revision,
+  ).toBe(current.revision);
   for (const name of ["next", "status", "submit", "recover"]) {
     const reply = await client.callTool({
       name,
@@ -383,13 +699,30 @@ it("forwards external-root requirements/refusals, keeps local progress during an
     "Synthetic report output.",
   );
   const originalFetch = globalThis.fetch;
-  let outage = true;
+  let outage: number | null = 502;
   globalThis.fetch = (async (input, init) => {
     if (outage && String(input).startsWith(service.baseUrl))
-      throw new TypeError("Simulated outage");
+      return Response.json(
+        { error: { message: "Temporary service outage" } },
+        { status: outage },
+      );
     return originalFetch(input, init);
   }) as typeof fetch;
   try {
+    for (const status of [502, 503, 504]) {
+      outage = status;
+      expect(
+        (await client.listTools()).tools.map((tool) => tool.name),
+      ).toContain("submit");
+      expect(
+        (await value("next", { projectRoot: root, runId: args.runId }))
+          .continuation.revision,
+      ).toBe(current.revision);
+      expect(
+        (await value("recover", { projectRoot: root, runId: args.runId }))
+          .continuation.revision,
+      ).toBe(current.revision);
+    }
     const done = await value("submit", {
       projectRoot: root,
       runId: args.runId,
@@ -403,10 +736,20 @@ it("forwards external-root requirements/refusals, keeps local progress during an
       done.continuation.visits[0].outcomes[0].evidence.artifactReceipts[0]
         .producer.attemptId,
     ).toBe(current.attemptId);
+    const queued = JSON.parse(
+      await fs.readFile(
+        path.join(root, ".badger/runs", args.runId, ".badger/mcp-queue.json"),
+        "utf8",
+      ),
+    );
+    expect(queued.lastAcknowledged).toBeLessThan(queued.report.lastSequence);
+    expect(queued.report.events.at(-1).sequence).toBe(
+      queued.report.lastSequence,
+    );
     await client.close();
     await currentServer?.close();
   } finally {
-    outage = false;
+    outage = null;
     globalThis.fetch = originalFetch;
   }
   const queueFile = path.join(

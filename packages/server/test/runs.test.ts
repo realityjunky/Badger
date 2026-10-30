@@ -119,6 +119,16 @@ it("authorizes Run observation and operation, fixes registration identity, and v
     { ...payload, projection: { ...report.projection, visits: "unsafe" } },
     400,
   );
+  for (const historySummary of [
+    null,
+    { total: 1, returned: 0, omitted: 0 },
+    { total: 0, returned: 1, omitted: -1 },
+  ])
+    await post(
+      `${route}/events`,
+      { ...payload, projection: { ...report.projection, historySummary } },
+      400,
+    );
   await post(
     `${route}/events`,
     {
@@ -177,6 +187,11 @@ it("authorizes Run observation and operation, fixes registration identity, and v
   expect(detail.events).toEqual(report.events);
   expect(detail.projection).toEqual(report.projection);
   expect(detail.lastSequence).toBe(report.lastSequence);
+  expect(
+    (await get(`${route}?afterSequence=${report.lastSequence}`)).run.events,
+  ).toEqual([]);
+  for (const cursor of ["-1", "1.5", "NaN", "9007199254740992"])
+    await get(`${route}?afterSequence=${cursor}`, operator, undefined, 400);
   expect(
     (await get(`/workflows/${f.workflow.id}/runs`, observer)).runs,
   ).toHaveLength(2);

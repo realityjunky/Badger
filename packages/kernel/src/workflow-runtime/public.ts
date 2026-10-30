@@ -9,6 +9,7 @@ export {
   resumeWorkflowRun,
   startWorkflowRun,
   submitWorkflowRun,
+  validateWorkflowMachineVerification,
 } from "./index.js";
 
 export type {

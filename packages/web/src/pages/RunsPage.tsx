@@ -22,10 +22,11 @@ const pretty = (value: unknown) => (
   <pre className="run-json">{JSON.stringify(value, null, 2)}</pre>
 );
 export function RunsPage() {
-  const { t, locale } = useI18n();
+  const { t, locale, format } = useI18n();
   const { runId } = useParams();
   const [params, setParams] = useSearchParams();
   const workflow = params.get("workflow");
+  const afterSequence = params.get("afterSequence");
   const basePath = readBasePath(document);
   const [catalog, setCatalog] = useState<WorkflowCatalog | null>(null);
   const [runs, setRuns] = useState<Run[] | null>(null);
@@ -54,7 +55,7 @@ export function RunsPage() {
         const result = await questionnaireRequest<{ run?: Run; runs?: Run[] }>(
           basePath,
           runId
-            ? `/runs/${encodeURIComponent(runId)}`
+            ? `/runs/${encodeURIComponent(runId)}${afterSequence === null ? "" : `?afterSequence=${encodeURIComponent(afterSequence)}`}`
             : workflow
               ? `/workflows/${encodeURIComponent(workflow)}/runs`
               : "/me/runs",
@@ -80,7 +81,7 @@ export function RunsPage() {
       controller.abort();
       clearInterval(timer);
     };
-  }, [basePath, runId, workflow, refresh]);
+  }, [basePath, runId, workflow, afterSequence, refresh]);
   const state = run?.projection;
   const receipts = (state?.artifactReceipts ?? []).map((receipt, i) => ({
     ...receipt,
@@ -240,8 +241,20 @@ export function RunsPage() {
               description={t("run.humanGateHelp")}
             />
           )}
+          {state?.historySummary && state.historySummary.omitted > 0 && (
+            <Alert
+              type="info"
+              showIcon
+              message={format("run.historyLimit", state.historySummary)}
+            />
+          )}
           <Collapse
-            defaultActiveKey={["attempts", "receipts", "findings"]}
+            defaultActiveKey={[
+              "attempts",
+              "receipts",
+              "findings",
+              ...(afterSequence === null ? [] : ["events"]),
+            ]}
             items={[
               {
                 key: "attempts",
@@ -373,9 +386,33 @@ export function RunsPage() {
                 label: t("run.events"),
                 children: (
                   <>
-                    {run.eventsTruncated && (
-                      <Alert type="info" message={t("run.eventsLimit")} />
-                    )}
+                    <Space wrap>
+                      <span>
+                        {format("run.eventsRange", {
+                          first: run.events?.[0]?.sequence ?? 0,
+                          last: run.events?.at(-1)?.sequence ?? 0,
+                          total: run.lastSequence,
+                        })}
+                      </span>
+                      <Button
+                        disabled={Number(afterSequence ?? 0) === 0}
+                        onClick={() => setParams({ afterSequence: "0" })}
+                      >
+                        {t("run.firstEvents")}
+                      </Button>
+                      <Button
+                        disabled={!run.eventsTruncated}
+                        onClick={() =>
+                          setParams({
+                            afterSequence: String(
+                              run.events?.at(-1)?.sequence ?? 0,
+                            ),
+                          })
+                        }
+                      >
+                        {t("run.nextEvents")}
+                      </Button>
+                    </Space>
                     <ol className="run-events">
                       {run.events?.map((event) => (
                         <li key={event.sequence}>

@@ -27,6 +27,9 @@ on later calls and retries. Losing the queue after a committed transition cannot
 lose the event. Registration is idempotent for its fixed identity; event storage
 is immutable and unique by Run and sequence. Changed duplicate bytes, gaps,
 identity changes, malformed read models and explicit size limits are refused.
+Outcome summaries retain the most recent 256 entries with explicit total and
+omission counts. Original events remain complete and readable in ordered pages;
+summary bounds never prevent a valid long Run from advancing its mirror.
 The observer never evaluates legal routes, Completion, Cycles or Attempts.
 
 Reporting occurs independently of local committed progress, with bounded HTTP

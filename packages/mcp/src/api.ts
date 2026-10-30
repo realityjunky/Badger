@@ -1,9 +1,23 @@
+import { deploymentUrl } from "@realityjunky/badger-hosts/configuration";
+
+/** The HTTP seam needs no fetch implementation or WebAssembly-backed globals. */
+export interface BadgerHttpResponse {
+  ok: boolean;
+  status: number;
+  headers: { get(name: string): string | null };
+  json(): Promise<unknown>;
+}
+export type BadgerHttpTransport = (
+  url: string,
+  init: RequestInit,
+) => Promise<BadgerHttpResponse>;
+
 export interface ExpertMcpOptions {
   url: string;
   token: string;
   agentHost: string;
   /** Host-owned HTTP transport; certification uses Node HTTP under --jitless. */
-  fetch?: typeof fetch;
+  fetch?: BadgerHttpTransport;
 }
 
 /** A setting is wrong; the message names the setting, never its value. */
@@ -31,6 +45,16 @@ export class BadgerTimeoutError extends Error {
   }
 }
 
+/** Only transport outages and explicit gateway/service availability failures
+ * can reuse this live connection's previously successful authorization. */
+export function isRetryableBadgerFailure(error: unknown): boolean {
+  return (
+    error instanceof BadgerConnectionError ||
+    error instanceof BadgerTimeoutError ||
+    (error instanceof BadgerApiError && [502, 503, 504].includes(error.status))
+  );
+}
+
 const TIMEOUT_SECONDS = 30;
 
 /** Header values travel as bytes; printable ASCII arrives unchanged. */
@@ -42,25 +66,11 @@ export function validAgentHost(value: string): boolean {
 export class BadgerApi {
   readonly url: string;
   constructor(private readonly options: ExpertMcpOptions) {
-    let url: URL;
     try {
-      url = new URL(options.url);
-    } catch {
-      throw new ConfigurationError("BADGER_URL must be an absolute URL");
-    }
-    if (
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash ||
-      (url.protocol !== "https:" &&
-        !(
-          url.protocol === "http:" &&
-          ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
-        ))
-    ) {
+      this.url = deploymentUrl(options.url);
+    } catch (error) {
       throw new ConfigurationError(
-        "BADGER_URL must be an HTTPS deployment URL or a loopback HTTP URL without credentials, query, or fragment",
+        `BADGER_URL: ${error instanceof Error ? error.message : "Set a valid Badger deployment URL"}`,
       );
     }
     if (!options.token) throw new ConfigurationError("Set BADGER_TOKEN");
@@ -68,7 +78,6 @@ export class BadgerApi {
       throw new ConfigurationError(
         "BADGER_AGENT_HOST must be 1 to 200 printable ASCII characters",
       );
-    this.url = url.href.replace(/\/+$/u, "");
   }
 
   async request<T>(
@@ -77,7 +86,7 @@ export class BadgerApi {
     body?: unknown,
     timeoutSeconds = TIMEOUT_SECONDS,
   ): Promise<T> {
-    let response: Response;
+    let response: BadgerHttpResponse;
     try {
       response = await (this.options.fetch ?? fetch)(
         `${this.url}/api/v1${path}`,

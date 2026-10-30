@@ -1203,6 +1203,10 @@ commit atomically. See ADR 0033.
 
 Run observation is available at `GET /api/v1/me/runs`,
 `GET /api/v1/workflows/:workflowId/runs`, and `GET /api/v1/runs/:id`.
+Run detail returns up to 500 original events after the optional non-negative
+`afterSequence` cursor. `eventsTruncated` signals another page; use the last
+returned event's sequence as the next cursor. Outcome summaries retain the
+latest 256 entries and expose total/returned/omitted counts in `historySummary`.
 The local MCP registers an accepted Run with `POST /api/v1/runs/:id` and mirrors
 ordered events and kernel read models through `POST /api/v1/runs/:id/events`.
 The new reviewed `0031_runs.sql` migration keeps event sequences immutable.
