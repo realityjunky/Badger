@@ -225,54 +225,58 @@ it("previews and uploads an immutable Skill version from a folder against the co
   });
 });
 
-it("refuses a nested .git folder before opening any local file or making an upload request", async () => {
+it("refuses a nested .git folder in every spelling the service refuses, before opening any local file or making an upload request", async () => {
   const { groupId } = await setup();
   const { skill } = await write("POST", "/skills", {
     groupId,
     name: "safe-upload",
   });
-  const folder = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-git-"));
-  folders.push(folder);
-  await fs.writeFile(
-    path.join(folder, "SKILL.md"),
-    "---\nname: safe-upload\ndescription: Safe upload.\n---\n",
-  );
-  await fs.mkdir(path.join(folder, "z-repository", ".git"), {
-    recursive: true,
-  });
-  await fs.writeFile(
-    path.join(folder, "z-repository", ".git", "config"),
-    "private history",
-  );
   const { client } = await connect();
-  // Refresh permission discovery before observing this upload operation.
+  // Refresh permission discovery before observing these upload operations.
   await client.listTools();
-  const opened = vi.spyOn(fs, "open");
-  const requests = vi.spyOn(globalThis, "fetch");
-  try {
-    const result = await client.callTool({
-      name: "upload_skill_version",
-      arguments: { skillId: skill.id, folder },
+  // Letter case, the trailing dots and spaces Windows trims, and the code
+  // points HFS+ ignores.
+  for (const name of [".git", ".GIT.", ".Git ", ".g\u200cit", ".gi\ufefft"]) {
+    const folder = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-git-"));
+    folders.push(folder);
+    await fs.writeFile(
+      path.join(folder, "SKILL.md"),
+      "---\nname: safe-upload\ndescription: Safe upload.\n---\n",
+    );
+    await fs.mkdir(path.join(folder, "z-repository", name), {
+      recursive: true,
     });
-    expect(result).toMatchObject({
-      isError: true,
-      content: [
-        expect.objectContaining({
-          text: expect.stringMatching(
-            /z-repository\/\.git.*without its \.git folder.*git archive/u,
-          ),
-        }),
-      ],
-    });
-    expect(
-      opened.mock.calls.filter(([target]) =>
-        String(target).startsWith(`${folder}${path.sep}`),
-      ),
-    ).toEqual([]);
-    expect(requests).not.toHaveBeenCalled();
-  } finally {
-    opened.mockRestore();
-    requests.mockRestore();
+    await fs.writeFile(
+      path.join(folder, "z-repository", name, "config"),
+      "private history",
+    );
+    const opened = vi.spyOn(fs, "open");
+    const requests = vi.spyOn(globalThis, "fetch");
+    try {
+      const result = await client.callTool({
+        name: "upload_skill_version",
+        arguments: { skillId: skill.id, folder },
+      });
+      expect(result).toMatchObject({
+        isError: true,
+        content: [
+          expect.objectContaining({
+            text: expect.stringContaining(
+              `Upload path "z-repository/${name}" contains a .git folder; upload the Skill without its .git folder, for example from git archive output`,
+            ),
+          }),
+        ],
+      });
+      expect(
+        opened.mock.calls.filter(([target]) =>
+          String(target).startsWith(`${folder}${path.sep}`),
+        ),
+      ).toEqual([]);
+      expect(requests).not.toHaveBeenCalled();
+    } finally {
+      opened.mockRestore();
+      requests.mockRestore();
+    }
   }
 });
 

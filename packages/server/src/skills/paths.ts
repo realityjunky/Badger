@@ -12,6 +12,20 @@ export const MAX_SEGMENT_BYTES = 255;
 const RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu;
 
 /**
+ * Whether a path segment names Git metadata: `.git` in any letter case,
+ * including with the code points HFS+ ignores or the trailing dots and
+ * spaces Windows trims. Git runs commands a repository's configuration
+ * names, and `.git/config` can hold a remote URL with credentials. The
+ * Badger MCP applies the same rule.
+ */
+export function isGitMetadata(segment: string): boolean {
+  const name = segment
+    .replace(/[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/gu, "")
+    .replace(/[. ]+$/u, "");
+  return name.toLowerCase() === ".git" || name.toUpperCase() === ".GIT";
+}
+
+/**
  * Checks one upload path and returns it with `.` segments and repeated
  * separators removed. Names stay byte-exact: no Unicode normalization and no
  * separator translation, so a version hashes exactly as the kernel hashes the
@@ -51,12 +65,6 @@ export function normalizeUploadPath(value: unknown): string {
       "Upload paths may not escape the tree or use reserved names",
     );
   }
-  if (segments.some((segment) => segment.toLowerCase() === ".git")) {
-    throw new RequestError(
-      400,
-      `Upload path "${value}" contains a .git folder; upload the Skill without its .git folder, for example from git archive output`,
-    );
-  }
   if (
     segments.some((segment) => Buffer.byteLength(segment) > MAX_SEGMENT_BYTES)
   ) {
@@ -70,6 +78,22 @@ export function normalizeUploadPath(value: unknown): string {
     throw new RequestError(
       400,
       `Upload paths are limited to ${MAX_PATH_BYTES} bytes`,
+    );
+  }
+  return normalized;
+}
+
+/**
+ * A Skill file's upload path, from a folder, a zip, or a Git import: an
+ * upload path without Git metadata. The check follows the length checks, so
+ * the refusal names a bounded, normalized path.
+ */
+export function normalizeSkillPath(value: unknown): string {
+  const normalized = normalizeUploadPath(value);
+  if (normalized.split("/").some(isGitMetadata)) {
+    throw new RequestError(
+      400,
+      `Upload path "${normalized}" contains a .git folder; upload the Skill without its .git folder, for example from git archive output`,
     );
   }
   return normalized;

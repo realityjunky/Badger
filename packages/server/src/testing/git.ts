@@ -46,7 +46,9 @@ export async function startStubGitRepository(
     }
     for (const relative of options.executable ?? [])
       if (relative in changes) await fs.chmod(path.join(tree, relative), 0o755);
-    await git("add", ".");
+    // A hostile host can serve any tree name. Git refuses names that HFS+
+    // resolves to .git only where it runs on macOS, so commit them anywhere.
+    await git("-c", "core.protectHFS=false", "add", ".");
     await git("commit", "--no-verify", "-m", "Skill fixture");
   };
   const requests: string[] = [];

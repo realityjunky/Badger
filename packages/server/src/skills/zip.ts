@@ -2,7 +2,7 @@ import { crc32 } from "node:zlib";
 import { fromBufferPromise, type Entry, type ZipFile } from "yauzl";
 import type { ServiceConfig } from "../config.js";
 import { RequestError } from "../http/errors.js";
-import { normalizeUploadPath, type UploadFile } from "./paths.js";
+import { normalizeSkillPath, type UploadFile } from "./paths.js";
 
 /** General-purpose flag bit 11: the entry's name and comment are UTF-8. */
 const UTF8_NAME_FLAG = 0x800;
@@ -64,7 +64,7 @@ export async function readZipUpload(
     let totalBytes = 0;
     for await (const entry of archive.eachEntry()) {
       const name = entryName(entry);
-      const relative = normalizeUploadPath(name);
+      const relative = normalizeSkillPath(name);
       // macOS metadata is not part of the Skill; it is never expanded.
       if (
         entry.fileNameRaw

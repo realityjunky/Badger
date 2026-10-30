@@ -892,11 +892,17 @@ The Skills dashboard accepts a Skill folder or zip, previews its inventory,
 lets the person declare each script's side effects, and requires confirmation
 before storing an immutable version. Never upload real data. Instructions,
 scripts, configuration, and synthetic examples are appropriate sources.
-Uploaded files never execute on the server. Folder and zip previews and
-confirmed uploads refuse any `.git` path segment (case-insensitively),
-including empty zip directories and metadata entries. Upload the Skill without
-its `.git` folder, for example from `git archive` output. The `.git` folder
-is refused rather than added to the kernel's identity ignore list.
+Uploaded files never execute on the server. Folder and zip previews,
+confirmed uploads, and Git imports refuse any path segment that names Git
+metadata: `.git` in any letter case, including the spellings that HFS+ or
+Windows resolve to `.git`, with the code points HFS+ ignores or with trailing
+dots and spaces. Empty zip directories and metadata entries count. The
+refusal names the normalized path, after the path length checks. Upload the
+Skill without its `.git` folder, for example from `git archive` output. The
+`.git` folder is refused rather than added to the kernel's identity ignore
+list. The Badger MCP and the dashboard's folder upload apply the same rule
+before they send anything. An answer attachment is a single named file, so
+this rule does not apply to it.
 
 The kernel checks `SKILL.md` frontmatter against the Skill entry's name and
 produces the version hash, inventory, and script records. OS and editor noise
