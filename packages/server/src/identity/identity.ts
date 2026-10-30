@@ -50,6 +50,8 @@ export type IdentityResult =
 export interface IdentityAdapter {
   resolve(request: IdentityRequest): Promise<IdentityResult>;
   browser?: BrowserSignIn;
+  /** Stops the adapter's timers; the service calls it when it closes. */
+  close?(): void;
 }
 
 /** `reason` explains a failure for the operator's log; it holds no secret. */

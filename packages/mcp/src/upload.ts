@@ -67,10 +67,22 @@ interface SkillFolder {
   entries: number;
 }
 
+/**
+ * Whether a path segment names Git metadata: `.git` in any letter case,
+ * including with the code points HFS+ ignores or the trailing dots and
+ * spaces Windows trims. Git runs commands a repository configures, so
+ * neither an upload nor a claimed job folder may hold such an entry. The
+ * service applies the same rule to Skill uploads.
+ */
+export function gitMetadata(segment: string) {
+  const name = segment
+    .replace(/[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/gu, "")
+    .replace(/[. ]+$/u, "");
+  return name.toLowerCase() === ".git" || name.toUpperCase() === ".GIT";
+}
+
 function refuseGitFolder(relative: string) {
-  if (
-    relative.split(/[\\/]/u).some((segment) => segment.toLowerCase() === ".git")
-  )
+  if (relative.split(/[\\/]/u).some(gitMetadata))
     throw new Error(
       `Upload path "${relative}" contains a .git folder; upload the Skill without its .git folder, for example from git archive output`,
     );

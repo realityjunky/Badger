@@ -795,7 +795,9 @@ export function createService(options: ServiceOptions, port: number): Service {
         "denied",
         "This action requires a signed-in person or a different token scope",
       );
-    if (principal.credential.kind === "token" && !reads && agentHost === null)
+    // Every token request names its Agent host, reads included: a read can
+    // record audit events too, such as a drafting job's expired lease.
+    if (principal.credential.kind === "token" && agentHost === null)
       return reply.error(
         400,
         "invalid",
@@ -1042,7 +1044,10 @@ export function createService(options: ServiceOptions, port: number): Service {
   }
 
   return {
-    close: () => stopping.abort(),
+    close: () => {
+      stopping.abort();
+      identity.close?.();
+    },
     handler: (request, response) => {
       const started = performance.now();
       const requestId = resolveRequestId(request.headers["x-request-id"]);

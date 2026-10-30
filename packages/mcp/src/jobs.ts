@@ -5,6 +5,7 @@ import path from "node:path";
 import { Ajv } from "ajv";
 import { canonicalHash } from "@realityjunky/badger";
 import type { BadgerApi } from "./api.js";
+import { gitMetadata } from "./upload.js";
 
 interface JobInput {
   workflowId: string;
@@ -39,18 +40,6 @@ interface LocalClaim extends JobInput {
 }
 export function jobsPath(input: { workflowId: string; versionId: string }) {
   return `/workflows/${encodeURIComponent(input.workflowId)}/versions/${encodeURIComponent(input.versionId)}/drafting-jobs`;
-}
-
-/**
- * Git runs commands a repository configures, so no `.git` entry lands in any
- * letter case, including with the code points HFS+ ignores or the trailing
- * dots and spaces Windows trims.
- */
-function gitMetadata(segment: string) {
-  const name = segment
-    .replace(/[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/gu, "")
-    .replace(/[. ]+$/u, "");
-  return name.toLowerCase() === ".git" || name.toUpperCase() === ".GIT";
 }
 
 function safePath(value: string) {

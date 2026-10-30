@@ -19,7 +19,10 @@ test("a person creates a token, saves its secret once, and revokes it under a ba
   await expect(secretField).toBeVisible();
   const secret = await secretField.inputValue();
   const authenticated = await page.request.get(`${base}/api/v1/me`, {
-    headers: { authorization: `Bearer ${secret}` },
+    headers: {
+      authorization: `Bearer ${secret}`,
+      "x-badger-agent-host": "e2e-agent",
+    },
   });
   expect(authenticated.status()).toBe(200);
   await page.getByRole("button", { name: "I have saved the token" }).click();

@@ -63,14 +63,20 @@ they form part of every person's identity.
 | `BADGER_SESSION_COOKIE`            | `badger_session` | Badger's own cookie name; choose a name distinct from platform and other application cookies. `__Host-` names require the root base path. |
 | `BADGER_SESSION_SECONDS`           | `28800`          | Absolute session lifetime (8 hours); accepts 60–604800 seconds.                                                                           |
 | `BADGER_OIDC_TIMEOUT_SECONDS`      | `3`              | Timeout for each discovery, token, or signing-key request; accepts 1–60 seconds.                                                          |
-| `BADGER_OIDC_MAX_PENDING_SIGN_INS` | `10000`          | Maximum pending sign-in transactions; accepts a whole number from 1–1000000.                                                              |
+| `BADGER_OIDC_MAX_PENDING_SIGN_INS` | `10000`          | Maximum pending sign-in transactions; accepts a whole number from 1–100000.                                                               |
 | `BADGER_OIDC_EMAILS_VERIFIED`      | `false`          | Treat an ID token without an `email_verified` claim as verified; a claim the provider sends still decides.                                |
 
 Opening the signed-out dashboard offers a sign-in link carrying the requested
 page and query as `returnTo`. `GET <base>/auth/oidc/login` keeps that destination
-only when it is a path on Badger's own origin under the configured base path.
-Absolute URLs, network-path URLs (`//host`), backslashes, and paths outside
-that base path fall back to My work. The destination is stored with the
+only when it is a path on Badger's own origin under the configured base path,
+at most 2,048 bytes long. Absolute URLs, network-path URLs (`//host`),
+backslashes, paths outside that base path, and longer destinations fall back to
+My work. A reverse proxy may decode a path before it routes the request, so a
+path must also stay under the base path decoded once: encoded slashes,
+backslashes, and dots (`%2F`, `%5C`, `%2E`, in either case), `%25`, encoded
+control characters, and malformed encodings fall back to My work as well,
+while other encoded characters, such as a non-ASCII name, are kept. The
+destination is stored with the
 server-side sign-in transaction, never in a cookie or the provider's state,
 and checked again before the completed sign-in redirects there. The login
 redirect to the provider uses fresh state, nonce and PKCE values. The callback
@@ -93,22 +99,31 @@ whose name includes a hash of that sign-in's state. Starting a fourth expires
 the oldest flow cookie. A tab's completion selects its state's cookie and
 atomically consumes only the transaction matching both state and token hash;
 a failed or mismatched completion leaves other pending transactions alone.
-Successful completion clears only that flow cookie, so two tabs may finish
-in either order and each returns to its own requested page. Signing out clears
+Every completion, successful or failed, clears only that state's flow cookie:
+two tabs may finish in either order and each returns to its own requested
+page, and a failed tab's retry does not push out another tab's cookie.
+Signing out clears
 the session and any pending flow cookies sent by that browser. A transaction
 whose browser cookie was dropped remains subject to the server's expiry and
 pending-sign-in cap.
 
-When a start would exceed `BADGER_OIDC_MAX_PENDING_SIGN_INS`, Badger evicts
-the oldest pending transactions in the same database transaction as the new
-one. Starts share a database lock across server processes, keeping the cap
-even when they arrive together. A start is never refused because of the cap.
-During a flood, a person's pending sign-in may be evicted: completing it then
-shows "Sign-in is invalid or expired", and they start again. Each server
-process logs `oidc.sign-ins-evicted` with an aggregated `evictedCount` at most
-once per minute, on the next sign-in start. Rate-limit `<base>/auth/oidc/login`
-per client at the deployment's reverse proxy, which can identify clients
-before forwarding their requests.
+Badger numbers sign-in starts in order. In the same database transaction as
+its own transaction, each start evicts the pending sign-ins started more than
+`BADGER_OIDC_MAX_PENDING_SIGN_INS` starts before it, oldest first. No start
+waits for another, in one server process or across several, and a start's
+cost does not grow with the number pending, so a flood of starts does not hold
+up signed-in requests. The table holds at most the cap plus the starts still
+in flight; the next start removes any excess. A start is never refused because
+of the cap. During a flood, a person's pending sign-in may be evicted:
+completing it then shows "Sign-in is invalid or expired", and they start
+again. A pending sign-in takes up to about 3.2 KB, so the default cap bounds
+the table at about 32 MB and the maximum at about 320 MB; ten-minute expiry
+keeps it below the maximum unless starts exceed about 167 a second. Each
+server process logs `oidc.sign-ins-evicted` with the number evicted at most
+once a minute: the first eviction at once, and any later ones in that minute
+when the minute ends. Rate-limit `<base>/auth/oidc/login` per client at the
+deployment's reverse proxy, which can identify clients before forwarding their
+requests.
 
 Issuing or revoking a session records its actor, credential hash, target,
 channel, reason and request ID in Activity, in the same database transaction.

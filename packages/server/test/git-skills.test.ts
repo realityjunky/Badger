@@ -539,6 +539,43 @@ describe("Skill versions from registered Git repositories", () => {
     ).toEqual({ versions: [] });
   });
 
+  it.each([
+    // Git's own object checks refuse a name that HFS+ resolves to .git.
+    { file: "reference/.g\u200cit/config", refusedBy: "the fetch" },
+    // Only case folding resolves this name to .git, so it reaches the rule
+    // uploads share: "\u0131" is a dotless i, which uppercases to I.
+    { file: "reference/.g\u0131t/config", refusedBy: "the upload path rule" },
+  ])(
+    "refuses a tree name that resolves to .git, at $refusedBy",
+    async ({ file, refusedBy }) => {
+      const { base } = await library({
+        ...FILES,
+        [file]: "[core]\n\tfsmonitor = x\n",
+      });
+      const repositoryId = await register(base);
+      for (const route of ["git-preview", "versions"]) {
+        const response = await write(`${base}/${route}`, {
+          repositoryId,
+          commit: remote.commit,
+          confirmed: true,
+          expectedHash: "0".repeat(64),
+        });
+        expect(response.status, route).toBe(400);
+        const { error } = await response.json();
+        expect(error.code).toBe("invalid");
+        if (refusedBy === "the upload path rule")
+          expect(error.message).toBe(
+            `Upload path "${file}" contains a .git folder; upload the Skill without its .git folder, for example from git archive output`,
+          );
+      }
+      expect(
+        await (
+          await service.request(`/api/v1${base}/versions`, { as: admin })
+        ).json(),
+      ).toEqual({ versions: [] });
+    },
+  );
+
   it("rejects redirects and dumb HTTP before following other repository URLs", async () => {
     const { base } = await library();
     const other = await startStubGitRepository(FILES);

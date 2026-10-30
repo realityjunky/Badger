@@ -684,15 +684,19 @@ that provider is unavailable. An invalid, expired, or revoked token returns
 require an allowed `Origin`; bearer writes can omit it. A supplied foreign
 `Origin` or `Host` is always refused.
 
-Every token write also requires `X-Badger-Agent-Host`: a nonblank label of
-1 to 200 printable ASCII characters, as sent by the Badger MCP. Its audit
-events record the person's identity, token ID, Agent host, and `mcp` channel;
-the Activity page shows the host beside that channel. This applies to
-comments, concerns, Skill version uploads, questionnaire drafts, and all
-other permitted token writes. A missing or invalid host returns 400 before
-the application write. Token reads may omit the header. A supplied valid
-host is also recorded on `token.used`; session, local, and worker credentials
-always have an empty audit host, even if the request supplies the header.
+Every request made with a token, reads included, also requires
+`X-Badger-Agent-Host`: a nonblank label of 1 to 200 printable ASCII
+characters, as the Badger MCP sends on every request. Reads need it because
+some record audit events: an Engineer's questionnaire or drafting-job read
+returns an expired lease to the queue, or cancels a job whose inputs changed.
+Audit events of token requests record the person's identity, token ID, Agent
+host, and `mcp` channel; the Activity page shows the host beside that
+channel. This applies to `token.used`, comments, concerns, Skill version
+uploads, questionnaire drafts, drafting-job transitions, and every other
+permitted token request. A missing or invalid host returns 400 before the
+request is served; only its `token.used` event is recorded, with an empty
+host. Session, local, and worker credentials always have an empty audit host,
+even if the request supplies the header.
 
 Scopes only narrow the owner's current Badger permissions; they never grant
 a role. Role removal applies to the next request. The currently delivered
@@ -897,11 +901,17 @@ The Skills dashboard accepts a Skill folder or zip, previews its inventory,
 lets the person declare each script's side effects, and requires confirmation
 before storing an immutable version. Never upload real data. Instructions,
 scripts, configuration, and synthetic examples are appropriate sources.
-Uploaded files never execute on the server. Folder and zip previews and
-confirmed uploads refuse any `.git` path segment (case-insensitively),
-including empty zip directories and metadata entries. Upload the Skill without
-its `.git` folder, for example from `git archive` output. The `.git` folder
-is refused rather than added to the kernel's identity ignore list.
+Uploaded files never execute on the server. Folder and zip previews,
+confirmed uploads, and Git imports refuse any path segment that names Git
+metadata: `.git` in any letter case, including the spellings that HFS+ or
+Windows resolve to `.git`, with the code points HFS+ ignores or with trailing
+dots and spaces. Empty zip directories and metadata entries count. The
+refusal names the normalized path, after the path length checks. Upload the
+Skill without its `.git` folder, for example from `git archive` output. The
+`.git` folder is refused rather than added to the kernel's identity ignore
+list. The Badger MCP and the dashboard's folder upload apply the same rule
+before they send anything. An answer attachment is a single named file, so
+this rule does not apply to it.
 
 The kernel checks `SKILL.md` frontmatter against the Skill entry's name and
 produces the version hash, inventory, and script records. OS and editor noise

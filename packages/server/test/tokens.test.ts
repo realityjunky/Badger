@@ -472,6 +472,7 @@ describe("personal access tokens", () => {
     const response = await service.request("/api/v1/me", {
       headers: {
         authorization: `Bearer ${secret}`,
+        "x-badger-agent-host": "test-agent",
         "x-request-id": "agent-use",
       },
     });
@@ -501,6 +502,7 @@ describe("personal access tokens", () => {
           credentialKind: "token",
           credentialId: token.id,
           actorEmail: alice.email,
+          agentHost: "test-agent",
           channel: "mcp",
           occurredAt: "2026-10-27T00:00:01.000Z",
           requestId: "agent-use",

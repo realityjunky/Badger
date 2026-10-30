@@ -523,11 +523,14 @@ function readOidc(environment: Environment): OidcSettings {
       min: 1,
       max: 60,
     }),
+    // A pending sign-in takes up to about 3.2 KB with its indexes, so the
+    // maximum bounds a flood's rows at about 320 MB. Ten-minute expiry already
+    // keeps slower floods below it: reaching it takes 167 starts a second.
     maxPendingSignIns: readInteger(
       environment,
       "BADGER_OIDC_MAX_PENDING_SIGN_INS",
       10_000,
-      { min: 1, max: 1_000_000 },
+      { min: 1, max: 100_000 },
     ),
     emailsVerified:
       readBoolean(environment, "BADGER_OIDC_EMAILS_VERIFIED") ?? false,

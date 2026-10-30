@@ -703,6 +703,7 @@ describe("workflow Skill pins and source checks", () => {
     const headers = {
       authorization: `Bearer ${secret}`,
       "content-type": "application/json",
+      "x-badger-agent-host": "test-agent",
     };
     for (const action of ["preview", "commit"]) {
       const response = await service.request(
@@ -1003,7 +1004,10 @@ describe("workflow Skill pins and source checks", () => {
       scopes: ["engineer"],
     });
     const { secret } = (await minted.json()) as { secret: string };
-    const bearer = { authorization: `Bearer ${secret}` };
+    const bearer = {
+      authorization: `Bearer ${secret}`,
+      "x-badger-agent-host": "test-agent",
+    };
 
     const body = await view(base, { headers: bearer });
     expect(body.capabilities.managePins).toBe(false);

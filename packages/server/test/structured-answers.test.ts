@@ -415,6 +415,33 @@ describe("structured answers", () => {
     ).toBe(true);
   });
 
+  it("keeps the Skill upload's .git refusal out of attachment names", async () => {
+    const { base, create, publish } = await setup();
+    const question = await create({ kind: "file" });
+    await publish();
+    const path = `${base}/questions/${question.id}/attachments`;
+    const input = {
+      questionRevision: 1,
+      mediaType: "text/plain",
+      contentBase64: Buffer.from("Example").toString("base64"),
+    };
+    // An attachment is one named file in an answer, never part of a tree.
+    for (const name of [".git", ".GIT", "notes.git"]) {
+      const { attachment } = await json(
+        call("POST", path, { ...input, name }, expert),
+        201,
+      );
+      expect(attachment.name).toBe(name);
+    }
+    const folder = await json(
+      call("POST", path, { ...input, name: ".git/config" }, expert),
+      400,
+    );
+    expect(folder.error.message).toBe(
+      "Attachments need a file name without folders",
+    );
+  });
+
   it("enforces file size, type, count and ownership through the API", async () => {
     const { base, create, publish, save, submit } = await setup();
     const question = await create({ kind: "file" });

@@ -17,12 +17,12 @@ Alternatively launch `node /absolute/path/to/Badger/packages/mcp/dist/src/cli.js
 The dashboard's **Settings → Personal access tokens → Connect your Agent**
 offers configuration for Claude Code, Codex, and WorkBuddy. Set:
 
-| Environment variable | Meaning                                                                                                                                      |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BADGER_URL`         | The deployment URL, including its base path, such as `https://badger.example/team`. HTTPS is required except on loopback HTTP addresses.     |
-| `BADGER_TOKEN`       | A personal access token created in the dashboard, normally with the `expert` scope.                                                          |
-| `BADGER_AGENT_HOST`  | Optional attribution for answers, 1 to 200 printable ASCII characters; defaults to this machine's hostname, in IDNA form if it is not ASCII. |
-| `BADGER_MCP_PROFILE` | `auto` (default), `engineer`, or `expert`. Profile selection only narrows the tools allowed by current roles and token scopes.               |
+| Environment variable | Meaning                                                                                                                                                                                                                                                                            |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BADGER_URL`         | The deployment URL, including its base path, such as `https://badger.example/team`. HTTPS is required except on loopback HTTP addresses.                                                                                                                                           |
+| `BADGER_TOKEN`       | A personal access token created in the dashboard, normally with the `expert` scope.                                                                                                                                                                                                |
+| `BADGER_AGENT_HOST`  | The Agent host, 1 to 200 printable ASCII characters. The MCP sends it with every request, and the service requires it and records it in the audit of each one. Defaults to this machine's hostname, in IDNA form if it is not ASCII, or `unnamed-host` when neither form is valid. |
+| `BADGER_MCP_PROFILE` | `auto` (default), `engineer`, or `expert`. Profile selection only narrows the tools allowed by current roles and token scopes.                                                                                                                                                     |
 
 The MCP never prints configuration or credentials. Stdout carries only MCP;
 startup failures go to stderr and name the setting at fault, never its value.
@@ -165,10 +165,12 @@ map from each script path to the kernel's supported side effects, such as
 `{"scripts/check.py": ["none"]}`. The preview creates no immutable version.
 After the user reviews it, repeat with its hash and confirmation. Changed
 files fail the service's hash check. A metadata-only inspection of the entire
-folder refuses any `.git` path segment (case-insensitively), including an empty
-`.git` directory, before any file contents are read or upload requests are sent.
-Upload the Skill without its `.git` folder, for example from `git archive`
-output. Symbolic links and special files are refused; the service's file, total-byte, and file-count limits are also checked
+folder refuses any path segment that names Git metadata, by the rule claimed job
+folders use and the service applies to uploads: `.git` in any letter case,
+including spellings that HFS+ or Windows file systems resolve to `.git`, and
+including an empty `.git` directory. It refuses before any file contents are
+read or upload requests are sent. Upload the Skill without its `.git` folder,
+for example from `git archive` output. Symbolic links and special files are refused; the service's file, total-byte, and file-count limits are also checked
 locally before transfer. Files never execute, and real data must not be uploaded.
 
 Tool results, including their MCP envelopes, stay within 8 KiB. Larger results

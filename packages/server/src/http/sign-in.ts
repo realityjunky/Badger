@@ -104,6 +104,7 @@ export async function handleBrowserSignIn(input: {
   const failed = (
     stage: string,
     result: { kind: "invalid" | "unavailable"; reason: string },
+    cookies: string[] = [],
   ) => {
     const entry = {
       event: "oidc.sign-in-failed",
@@ -117,6 +118,7 @@ export async function handleBrowserSignIn(input: {
     reply.send({
       status: result.kind === "unavailable" ? 503 : 400,
       contentType: "text/html; charset=utf-8",
+      headers: { "set-cookie": cookies },
       body: renderSignInFailedPage(
         result.kind === "unavailable"
           ? "The identity provider is unavailable. Try again later."
@@ -167,7 +169,10 @@ export async function handleBrowserSignIn(input: {
       readCookie(request.headers, name),
       callback,
     );
-    if (result.kind !== "authenticated") failed("callback", result);
+    // Every outcome ends this flow; clearing its cookie at once keeps a
+    // failed tab from holding one of the browser's pending sign-in slots.
+    if (result.kind !== "authenticated")
+      failed("callback", result, [cookie(name, "", 0)]);
     else {
       const sessionToken = await issueSession(
         database,

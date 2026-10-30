@@ -804,6 +804,7 @@ describe("dossier versions", () => {
       const headers = {
         authorization: `Bearer ${secret}`,
         "content-type": "application/json",
+        "x-badger-agent-host": "test-agent",
       };
       expect(
         (await service.request(`/api/v1${base}/dossier`, { headers })).status,

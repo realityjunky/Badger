@@ -220,6 +220,10 @@ describe("Skill versions by upload", () => {
       ".git/config",
       "example/.git/config",
       "reference/.GIT/config",
+      // Spellings that HFS+ resolves to .git.
+      ".g\u200cit/config",
+      "reference/.Gi\ufefft/HEAD",
+      "docs/.git\u200e.\u200f/config",
     ]) {
       const content = {
         files: [file("SKILL.md", SKILL_MD), file(gitPath, "private history")],
@@ -241,6 +245,30 @@ describe("Skill versions by upload", () => {
       as: administrator,
     });
     expect(await versions.json()).toEqual({ versions: [] });
+  });
+
+  it("checks path lengths before .git segments, so a refusal names a bounded path", async () => {
+    const { skillId } = await startLibrary();
+    const long = Array.from({ length: 5 }, () => "a".repeat(250)).join("/");
+    for (const [gitPath, message] of [
+      [`${long}/.git/config`, "Upload paths are limited to 1024 bytes"],
+      [
+        `${"b".repeat(300)}/.git/config`,
+        "Each upload path segment is limited to 255 bytes",
+      ],
+      [
+        `${"./".repeat(1000)}.git/config`,
+        'Upload path ".git/config" contains a .git folder',
+      ],
+    ]) {
+      const response = await write(`/api/v1/skills/${skillId}/upload-preview`, {
+        files: [file("SKILL.md", SKILL_MD), file(gitPath!, "private history")],
+      });
+      expect(response.status).toBe(400);
+      const { error } = await response.json();
+      expect(error.message).toContain(message);
+      expect(error.message.length).toBeLessThan(1300);
+    }
   });
 
   it("keeps a kernel-identified immutable version, its full inventory, and safe previews", async () => {
@@ -307,6 +335,7 @@ describe("Skill versions by upload", () => {
       { name: "example/reference/.git/config", data: "private history" },
       { name: ".git/", directory: true },
       { name: "__MACOSX/.git/config", data: "private history" },
+      { name: "example/.g\u200dit/config", data: "private history" },
     ]) {
       for (const action of ["upload-preview", "versions"]) {
         const response = await write(`/api/v1/skills/${skillId}/${action}`, {
@@ -317,7 +346,8 @@ describe("Skill versions by upload", () => {
         });
         expect(response.status, `${action}: ${entry.name}`).toBe(400);
         const { error } = await response.json();
-        expect(error.message).toContain(entry.name);
+        // The refusal names the normalized path.
+        expect(error.message).toContain(`"${entry.name.replace(/\/$/u, "")}"`);
         expect(error.message).toMatch(/without its \.git folder.*git archive/u);
       }
     }

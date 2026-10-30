@@ -1,3 +1,5 @@
+import http from "node:http";
+import net from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { startTestService, type TestService } from "../src/testing/index.js";
 
@@ -6,6 +8,59 @@ afterEach(async () => {
   await service?.close();
   service = undefined;
 });
+
+/** Whether this host has `address`: IPv6 loopback, or a second IPv4 loopback. */
+async function hostHasAddress(address: string): Promise<boolean> {
+  const server = net.createServer();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, address, resolve);
+    });
+    return true;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error.code === "EAFNOSUPPORT" || error.code === "EADDRNOTAVAIL")
+    )
+      return false;
+    throw error;
+  } finally {
+    server.close();
+  }
+}
+
+/** An IPv4 request to the service, sent from a chosen local address. */
+function requestFrom(
+  localAddress: string,
+  port: number,
+  requestHeaders: Record<string, string>,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const outgoing = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        localAddress,
+        path: "/api/v1/me",
+        headers: requestHeaders,
+      },
+      (response) => {
+        response.setEncoding("utf8");
+        let body = "";
+        response.on("data", (chunk: string) => {
+          body += chunk;
+        });
+        response.on("end", () =>
+          resolve({ status: response.statusCode ?? 0, body }),
+        );
+      },
+    );
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+}
 
 const environment = {
   BADGER_IDENTITY: "trusted-header",
@@ -103,6 +158,7 @@ describe("signing in through trusted headers", () => {
     const bearer = await service.request("/api/v1/me", {
       headers: {
         authorization: `Bearer ${secret}`,
+        "x-badger-agent-host": "test-agent",
         "x-badger-subject": "mallory-id",
         "x-badger-email": "mallory@example.com",
       },
@@ -133,35 +189,26 @@ describe("signing in through trusted headers", () => {
     expect(response.status).toBe(401);
   });
 
-  it("matches an IPv4 proxy setting against a mapped peer on an IPv6 listener", async (context) => {
-    try {
-      service = await startTestService({
-        mode: "service",
-        environment: { ...environment, BADGER_HOST: "::" },
-      });
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        "syscall" in error &&
-        error.syscall === "listen" &&
-        "code" in error &&
-        (error.code === "EAFNOSUPPORT" || error.code === "EADDRNOTAVAIL")
-      ) {
-        context.skip();
-        return;
-      }
-      throw error;
-    }
+  it("matches an IPv4 proxy setting against mapped peers on an IPv6 listener", async (context) => {
+    // The harness reaches a listener on :: at ::1. A host can bind :: yet
+    // lack IPv6 loopback, and only some hosts route all of 127.0.0.0/8.
+    if (!(await hostHasAddress("::1")) || !(await hostHasAddress("127.0.0.2")))
+      return context.skip();
+    service = await startTestService({
+      mode: "service",
+      environment: { ...environment, BADGER_HOST: "::" },
+    });
 
     // An IPv4 connection to the dual-stack listener arrives as ::ffff:127.0.0.1.
-    const accepted = await fetch(`http://127.0.0.1:${service.port}/api/v1/me`, {
-      headers,
-    });
+    const accepted = await requestFrom("127.0.0.1", service.port, headers);
     expect(accepted.status).toBe(200);
-    expect(await accepted.json()).toMatchObject({
+    expect(JSON.parse(accepted.body)).toMatchObject({
       person: { subject: "alice-id", displayName: "Alice Ng" },
     });
-    // The harness's IPv6 loopback connection has peer ::1, outside the list.
+    // A mapped IPv4 peer outside the list, ::ffff:127.0.0.2, is not trusted.
+    const mapped = await requestFrom("127.0.0.2", service.port, headers);
+    expect(mapped.status).toBe(401);
+    // Nor is the harness's IPv6 loopback peer, ::1.
     const refused = await service.request("/api/v1/me", { headers });
     expect(refused.status).toBe(401);
   });

@@ -11,7 +11,7 @@ import { RequestError, objectInput } from "../http/errors.js";
 import {
   collisionKey,
   MAX_PATH_BYTES,
-  normalizeUploadPath,
+  normalizeSkillPath,
   type UploadFile,
 } from "./paths.js";
 import { readZipUpload } from "./zip.js";
@@ -58,7 +58,7 @@ export function normalizeUploadFiles(
   // case-insensitive file system would merge are refused instead.
   const paths = new Set<string>();
   const normalized = files.map((file) => {
-    const relative = normalizeUploadPath(file.path);
+    const relative = normalizeSkillPath(file.path);
     const key = collisionKey(relative);
     if (paths.has(key)) {
       throw new RequestError(
@@ -135,7 +135,7 @@ export async function inspectUpload(
             );
           }
           return {
-            path: normalizeUploadPath(file["path"]),
+            path: normalizeSkillPath(file["path"]),
             content: decodeUploadContent(file["content"]),
           };
         })
