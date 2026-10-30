@@ -463,6 +463,7 @@ describe("expert concerns", () => {
           headers: {
             authorization: `Bearer ${secret}`,
             "content-type": "application/json",
+            "x-badger-agent-host": "discussion-agent",
           },
           body: JSON.stringify(body),
         });

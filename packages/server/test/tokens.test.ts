@@ -59,6 +59,7 @@ function bearer(secret: string, method = "GET", body?: unknown) {
     headers: {
       authorization: `Bearer ${secret}`,
       "content-type": "application/json",
+      "x-badger-agent-host": "test-agent",
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   };
