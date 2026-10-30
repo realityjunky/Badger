@@ -52,13 +52,25 @@ version's files, declarations, original actor, or creation time. Retrying an
 import creates neither another receipt nor another audit event. Repository
 registrations and receipts cannot be rewritten or deleted.
 
-A receipt records that the content was fetched from the registered repository
-by its commit hash. It does not record that a branch or tag of that repository
-contains the commit. A host may serve a commit by hash that none of the
-repository's branches or tags reach, for example a commit from another
-repository in the same fork network, so the recorded origin can name a
-repository that never published the commit. Checking that the commit is
-reachable from the repository's branches or tags is a follow-up.
+A fetch imports only advertised branches and tags and their history, then
+requires a branch or tag containing the supplied commit. Fetching a hash alone
+was rejected: a host may serve an unpublished object from another repository
+in the same fork network. The tree must identify a commit, and both lightweight
+and annotated tags count. The same time, repository, and allocation limits
+bound the additional history; a large history may exceed them even when one
+tree is small. A receipt records the reaching `refs/heads/...` or
+`refs/tags/...` ref observed during that fetch, chosen in lexical order for
+determinism. This is evidence at import time, not a promise that the remote
+will keep the ref. Migration `0033` adds `published_ref`; historical receipts
+retain NULL because no reachability check was made at their import.
+
+`BADGER_GIT_PROXY` selects an HTTP or HTTPS proxy for the isolated smart-HTTP
+transport and Git's `http.proxy` configuration. `BADGER_GIT_NO_PROXY` selects
+hosts that bypass it. Git reaches its private loopback transport directly;
+that transport applies the proxy to the registered repository while preserving
+the same restrictions on operations, redirects, and received bytes. Proxy
+credentials never enter diagnostics or logs. Without a dedicated proxy,
+the existing deployment HTTP/HTTPS proxy settings remain in effect.
 
 ## Considered Options
 

@@ -266,7 +266,7 @@ export function createWorkflowKernel(
         if (
           !candidate?.sources.some(
             (entry) =>
-              entry.root === source.canonicalPath &&
+              entry.root === path.resolve(projectRoot, source.location) &&
               entry.hash === source.contentHash,
           )
         ) {

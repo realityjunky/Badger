@@ -4,6 +4,7 @@ import {
   acceptLaneResult,
 } from "../authoring.js";
 import type { ServiceConfig } from "../config.js";
+import { portableAuthoringHistory } from "../authoring-history.js";
 import type { AuthoringLaneId } from "@realityjunky/badger";
 import {
   canonicalHash,
@@ -190,8 +191,10 @@ export async function reconcileDraftingJobs(
   for (const job of jobs) {
     if (!["queued", "claimed", "submitted"].includes(job.status)) continue;
     const changed =
-      !isAuthoringJob(job) &&
-      job.input_hash !== draftingInputHash(current.bundle, draftingTarget(job));
+      portableAuthoringHistory(job.context_bundle).legacy ||
+      (!isAuthoringJob(job) &&
+        job.input_hash !==
+          draftingInputHash(current.bundle, draftingTarget(job)));
     const expired =
       job.status === "claimed" &&
       new Date(job.lease_until!).getTime() <= deps.clock.now().getTime();

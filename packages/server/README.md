@@ -9,6 +9,26 @@ identity headers from configured proxy peers. See
 [identity adapter configuration](../../docs/identity-adapters.md) for OIDC
 registration, Strict browser sessions, proxy trust, and email binding checks.
 
+## Building the image behind a proxy
+
+Build from the repository root. Both `npm ci` in the build stage and
+`apt-get` (Git and CA certificates) in the runtime stage need network access.
+Export the deployment's proxy variables locally, then pass both cases as
+Docker's predefined build arguments:
+
+```bash
+docker build -f packages/server/Dockerfile \
+  --build-arg HTTP_PROXY --build-arg HTTPS_PROXY --build-arg NO_PROXY \
+  --build-arg http_proxy --build-arg https_proxy --build-arg no_proxy \
+  -t badger-server .
+```
+
+Set the uppercase and lowercase variables to the same values when both are
+used. Docker exempts these predefined proxy arguments from the build cache
+and image history and does not leave them in the image. Do not declare them
+as `ARG`/`ENV` in the Dockerfile. Image pulls use the Docker daemon's own proxy
+configuration; build arguments apply to commands inside the build.
+
 ## WeCom notifications and reminders
 
 Workflow owners connect a WeCom group robot from the workflow's **Notifications
@@ -193,6 +213,15 @@ changes supersede that approval and invalidate later stages, notifying the
 Engineer and Workflow owner in the writer's transaction. Artifacts and
 confirmation retry responses remain unchanged. Personal access tokens may
 read dossiers and gate history but cannot compose or approve versions.
+
+Sources use Project-relative `location` plus `contentHash`; they never contain
+server storage paths. The kernel resolves the location under the current
+workspace root, so restoring storage elsewhere preserves approved proposals.
+Changing Skill bytes still blocks them. Legacy dossier and plan history omits
+old `canonicalPath` values and reports `requiresRecomposition: true` and
+`canonicalJson: null`. Its original bytes, hashes, and approval history remain
+stored, but those approvals cannot authorize further authoring. Compose and
+approve the portable dossier again, then save and approve its plan and proposal.
 
 ## Skill and workflow version changes
 
@@ -472,6 +501,20 @@ each, eight files and 20 MiB per answer. PDF, PNG, JPEG, UTF-8 plain text, CSV,
 and JSON are allowed; the server checks content and rejects paths, malformed
 base64, unsupported types, and files belonging to another answerer or Question.
 The questionnaire response includes these limits for upload controls.
+
+Each person may leave at most eight unreferenced uploads totaling 20 MiB on
+one Question; an additional upload returns 413 and names both limits. Saving
+an upload in any Answer revision, including a private draft, makes it referenced.
+The worker expires uploads that no revision has ever referenced after
+`BADGER_ANSWER_ATTACHMENT_RETENTION_SECONDS` (default 86400, one day; range
+60–31536000 seconds). Server and worker should use the same setting. Each
+removal records `answer.attachment-expired` in the Activity log. References in
+old revisions and inherited versions are kept forever. Unreferenced content
+is removed too, unless another attachment or an immutable Skill inventory
+uses the same hash. A durable cleanup queue retries content removal after a
+worker interruption; blob writers and cleanup share a transaction lock.
+Migration `0032` permits deletion only of never-referenced uploads; updates,
+deletion of referenced receipts, and truncation remain forbidden.
 
 `GET Q/attachments/:id` downloads the file through current workflow
 authorization. Until submission only its uploader can download it; workflow
@@ -858,8 +901,15 @@ may download and store up to `BADGER_GIT_MAX_REPOSITORY_BYTES` for a request of
 a few hundred bytes, each server process runs at most two Git fetches at once.
 A preview or import beyond that is refused with 503 `unavailable` and a
 `Retry-After` of the Git timeout in seconds, by which a running fetch has ended.
-Outbound transport honors the deployment's HTTP/HTTPS proxy and `NO_PROXY`
-settings. Redirects, dumb HTTP, links, and submodules are refused. No checkout,
+`BADGER_GIT_PROXY` sets an HTTP or HTTPS proxy URL (optional credentials;
+no path beyond `/`, query, or fragment). Invalid values fail startup with a
+configuration error that never includes the URL. `BADGER_GIT_NO_PROXY` is a
+comma-separated list of hosts that bypass it; an empty value bypasses none.
+These dedicated settings override the deployment's general HTTP/HTTPS proxy
+and `NO_PROXY` settings for Git imports. Without a dedicated proxy, the general
+settings still apply. The private Git loopback hop bypasses the proxy; its
+smart-HTTP transport routes the registered host through it. Proxy credentials
+never enter logs or responses. Redirects, dumb HTTP, links, and submodules are refused. No checkout,
 Git hooks, filters, credential helpers, or imported scripts run.
 
 All routes below follow the configured base path and `/api/v1`. They use the
@@ -884,15 +934,19 @@ answer, a server without Git, and the concurrency limit return 503
 message and creates no version.
 
 Version responses include their initial `origin` (`upload` or `git`) and a
-`gitOrigins` list of `{repositoryId, repository, commit}` receipts. Importing
+`gitOrigins` list of `{repositoryId, repository, commit, ref}` receipts. Importing
 an already uploaded tree appends its Git provenance without changing its
 identity, files, declarations, original actor, or timestamp. Migration `0024`
 adds these records without rewriting shipped migrations or existing versions.
-A receipt means the content was fetched from that repository by its commit
-hash, not that a branch or tag of the repository contains the commit: a host
-may serve a commit by hash that none of the repository's branches or tags
-reach, such as one from another repository in the same fork network. Badger
-does not yet check reachability.
+The importer fetches advertised branches and tags with their history and
+requires a ref that reaches the supplied commit. A commit with no reaching
+branch or tag is refused with 400 and an explicit message. Lightweight and
+annotated tags count, as do ancestors of branch tips. Existing resource limits
+also bound history, so a large repository can exceed them even for a small tree.
+The receipt's `ref` names the lexically first reaching `refs/heads/...` or
+`refs/tags/...` observed at import time; later changes on the remote do not
+rewrite it. Migration `0033` adds the column; receipts from before the check
+keep `ref: null` rather than inventing historical reachability evidence.
 See [ADR 0029](../../docs/adr/0029-registered-git-skill-versions.md).
 
 ## Skill uploads

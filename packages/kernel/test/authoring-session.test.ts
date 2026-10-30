@@ -126,10 +126,10 @@ describe("resumable authoring session", () => {
     dossier.workflow.goal = factoryPlan.goal;
     dossier.sources[0] = {
       ...dossier.sources[0],
-      location: factoryPlan.skillSources[0].location,
-      canonicalPath: source.root,
+      location: path.relative(project, source.root),
       contentHash: source.hash,
     };
+    factoryPlan.skillSources[0].location = dossier.sources[0].location;
     factoryPlan.semanticDossier = dossier;
     await fs.writeFile(planPath, JSON.stringify(factoryPlan));
     const { state, plan } = await createSession();

@@ -32,3 +32,20 @@ the same supersession, invalidation, and notices as a replacement; it is never
 copied or refused. Gates, plan derivation, the proposal, and invalidation read
 the head. Treating the highest version number as current was rejected: an
 Engineer could not return to an earlier meaning without a cosmetic edit.
+
+Source identity uses a normalized, Project-relative `location` and the
+Skill's `contentHash`; dossier sources contain no `canonicalPath`. The kernel
+resolves the location under the current Project root when matching inspected
+sources. Moving storage therefore preserves approval, while different source
+bytes still block the proposal. Absolute paths were rejected because they
+expose deployment details and bind meaning to a server's directory layout.
+
+Legacy artifacts containing `canonicalPath` remain immutable under their
+original hashes. Their API history is a projection without those paths,
+marked `requiresRecomposition: true`, with `canonicalJson: null` so the
+projection cannot be mistaken for the bytes that were approved. Existing
+confirmations remain historical evidence but cannot authorize further
+authoring: the kernel reports that the dossier needs recomposition without
+`canonicalPath` and a new human approval. Recomposition supersedes the old
+approval through the existing gate history. Silently rewriting stored bytes
+or transferring approval to a new hash was rejected.

@@ -1,5 +1,6 @@
 import { readLedger } from "../questionnaire/ledger.js";
 import { composeSemanticDossier } from "@realityjunky/badger";
+import { publicAuthoringVersion } from "../authoring-history.js";
 import {
   dossierInputs,
   readDossierHead,
@@ -33,7 +34,6 @@ export async function handleDossier(input: AuthorizedRequest): Promise<void> {
     request,
     dependencies,
     context,
-    config,
   } = input;
   const match = PATH.exec(path)!;
   const methods = dossierMethods(path)!;
@@ -87,7 +87,9 @@ export async function handleDossier(input: AuthorizedRequest): Promise<void> {
       );
       const head = await readDossierHead(tx, versionId);
       const currentVersionId =
-        head && canonicalHash(head.snapshot.ledger) === canonicalHash(handoff)
+        head &&
+        !publicAuthoringVersion(head).requiresRecomposition &&
+        canonicalHash(head.snapshot.ledger) === canonicalHash(handoff)
           ? head.id
           : null;
       const confirmations = await readGateConfirmations(
@@ -98,7 +100,7 @@ export async function handleDossier(input: AuthorizedRequest): Promise<void> {
       return {
         status: 200,
         value: {
-          versions,
+          versions: versions.map(publicAuthoringVersion),
           headVersionId: head?.id ?? null,
           currentVersionId,
           confirmation: confirmations[0] ?? null,
@@ -115,7 +117,7 @@ export async function handleDossier(input: AuthorizedRequest): Promise<void> {
         { readiness: handoff.readiness },
       );
     const composition = composeSemanticDossier({
-      ...(await dossierInputs(tx, version, person.id, config)),
+      ...(await dossierInputs(tx, version, person.id)),
       semantics: value,
     });
     if (match[3] === "preview") return { status: 200, value: { composition } };

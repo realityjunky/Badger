@@ -35,10 +35,12 @@ export function PlanContent({
           </li>
         ))}
       </ol>
-      <details>
-        <summary>{t("plan.canonical")}</summary>
-        <pre className="dossier-json">{version.canonicalJson}</pre>
-      </details>
+      {version.canonicalJson !== null && (
+        <details>
+          <summary>{t("plan.canonical")}</summary>
+          <pre className="dossier-json">{version.canonicalJson}</pre>
+        </details>
+      )}
     </div>
   );
 }

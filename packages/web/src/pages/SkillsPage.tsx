@@ -286,6 +286,7 @@ export function SkillsPage() {
                             key={`${origin.repositoryId}:${origin.commit}`}
                           >
                             {origin.repository} · {origin.commit}
+                            {origin.ref && <> · {origin.ref}</>}
                           </p>
                         ))}
                         <code className="skills-hash">{version.hash}</code>

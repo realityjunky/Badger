@@ -154,7 +154,7 @@ export async function inspectRepository(
   if (row === undefined)
     throw new RequestError(404, "No such registered repository for this Skill");
   const url = allowedRepository(config, row.url);
-  const files = await fetchGitFiles(config, url, commit);
+  const { files, ref } = await fetchGitFiles(config, url, commit);
   const inspected = await inspectUpload(config, skill.name, {
     files: files.map((file) => ({
       path: file.path,
@@ -162,5 +162,8 @@ export async function inspectRepository(
     })),
     ...(input["scripts"] === undefined ? {} : { scripts: input["scripts"] }),
   });
-  return { ...inspected, gitOrigin: { repositoryId, repository: url, commit } };
+  return {
+    ...inspected,
+    gitOrigin: { repositoryId, repository: url, commit, ref },
+  };
 }

@@ -340,20 +340,22 @@ describe("semantic questionnaire handoff", () => {
     expect(input).toEqual(before);
   });
 
-  it.each(["skills/prepare", "/project/../prepare", "/project//prepare"])(
-    "rejects ambiguous canonical source path %s",
-    (canonicalPath) => {
-      const input = { projectRoot: "/project", ...questionnaireFixture() };
-      input.dossier.sources[0].canonicalPath = canonicalPath;
-      expect(createQuestionnaireHandoff(input).diagnostics).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            path: "sources.prepare-source.canonicalPath",
-          }),
-        ]),
-      );
-    },
-  );
+  it.each([
+    "/project/skills/prepare",
+    "/project/../prepare",
+    "skills//prepare",
+    "C:\\skills\\prepare",
+  ])("rejects nonportable source location %s", (location) => {
+    const input = { projectRoot: "/project", ...questionnaireFixture() };
+    input.dossier.sources[0].location = location;
+    expect(createQuestionnaireHandoff(input).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "sources.prepare-source.location",
+        }),
+      ]),
+    );
+  });
   it.each([null, [], {}, { schemaVersion: 2 }])(
     "returns diagnostics for malformed dossiers",
     (dossier) => {

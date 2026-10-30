@@ -11,6 +11,7 @@ import { recordAudit, type WriteContext } from "./audit.js";
 import type { Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import { dossierGateState, readDossierHead } from "./dossier.js";
+import { publicAuthoringVersion } from "./authoring-history.js";
 import {
   gatePreview,
   readGateConfirmations,
@@ -238,7 +239,9 @@ export async function planView(
   const head = await readPlanHead(tx, versionId);
   const confirmations = await readGateConfirmations(tx, versionId, "plan");
   return {
-    versions: await readPlanVersions(tx, versionId),
+    versions: (await readPlanVersions(tx, versionId)).map(
+      publicAuthoringVersion,
+    ),
     dossierHash: inputs?.dossierHash ?? null,
     skeleton: inputs ? deriveFactoryPlan(inputs) : null,
     headVersionId: head?.id ?? null,

@@ -12,7 +12,7 @@ export function DossierContent({
 }: {
   snapshot: DossierSnapshot;
   hash: string;
-  canonicalJson: string;
+  canonicalJson: string | null;
   workflowId: string;
 }) {
   const { t, format } = useI18n();
@@ -105,10 +105,12 @@ export function DossierContent({
           </ul>
         </>
       )}
-      <details>
-        <summary>{t("dossier.canonical")}</summary>
-        <pre className="dossier-json">{canonicalJson}</pre>
-      </details>
+      {canonicalJson !== null && (
+        <details>
+          <summary>{t("dossier.canonical")}</summary>
+          <pre className="dossier-json">{canonicalJson}</pre>
+        </details>
+      )}
     </div>
   );
 }

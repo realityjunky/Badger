@@ -895,8 +895,15 @@ export async function readWorkflowTransitionJournal(
   // A committing writer replaces this file at each boundary. A reader must
   // discard a changed descriptor and validate a fresh protected read; it must
   // never weaken containment checks or replay a submission with a new revision.
+  // One transition replaces the journal before and after each bounded record,
+  // plus its fixed commit/recovery boundaries. Let that writer finish instead
+  // of exhausting three immediate reads while it is still making progress.
+  const maxAttempts =
+    2 * WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS +
+    WORKFLOW_TRANSITION_BOUNDARY_PHASES.length +
+    1;
   let raw: string | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       raw = await readOptionalEngineRunText(
         runRoot,
@@ -909,9 +916,10 @@ export async function readWorkflowTransitionJournal(
       if (
         !(error instanceof RaceSafeReadError) ||
         error.reason !== "changed" ||
-        attempt === 2
+        attempt === maxAttempts - 1
       )
         throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
     }
   }
   if (raw === null) return null;

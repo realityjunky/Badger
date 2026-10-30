@@ -73,7 +73,6 @@ export function questionnaireFixture(): {
           id: "prepare-source",
           name: "prepare",
           location: "skills/prepare",
-          canonicalPath: "/project/skills/prepare",
           contentHash: "a".repeat(64),
           roles: ["implementation of prepare"],
         },

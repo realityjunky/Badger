@@ -1,4 +1,3 @@
-import path from "node:path";
 import {
   canonicalHash,
   createQuestionnaireHandoff,
@@ -15,7 +14,6 @@ import { readSourceStudy } from "./source-study.js";
 import { listWorkflowPins } from "./workflow-source.js";
 import { toIsoString } from "./util.js";
 import type { WorkflowVersion } from "./workflows.js";
-import type { ServiceConfig } from "./config.js";
 import { gatePreview, invalidateGate, type GateState } from "./gates.js";
 import { invalidateProposal } from "./proposal-invalidation.js";
 import { closeGateInbox, notifyWorkflowRoles } from "./inbox.js";
@@ -77,7 +75,6 @@ export async function dossierInputs(
   tx: Queryable,
   version: WorkflowVersion,
   personId: string,
-  config: ServiceConfig,
 ) {
   const pins = await listWorkflowPins(tx, version.id);
   const study = await readSourceStudy(tx, version.id);
@@ -85,13 +82,6 @@ export async function dossierInputs(
     id: p.skillId,
     name: p.skillName,
     location: `skills/${p.skillName}`,
-    canonicalPath: path.resolve(
-      config.storage.workspaceDirectory,
-      "workflow-versions",
-      version.id,
-      "skills",
-      p.skillName,
-    ),
     contentHash: p.hash,
     roles: [p.purpose],
   }));

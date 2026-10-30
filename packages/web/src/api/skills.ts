@@ -49,7 +49,12 @@ export interface SkillVersion extends VersionPreview {
   uploadedBy: string;
   createdAt: string;
   origin: "upload" | "git";
-  gitOrigins: { repositoryId: string; repository: string; commit: string }[];
+  gitOrigins: {
+    repositoryId: string;
+    repository: string;
+    commit: string;
+    ref: string | null;
+  }[];
 }
 
 export interface FilePreview {
