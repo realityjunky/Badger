@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -111,28 +112,37 @@ async function call(
   return JSON.parse(content[0].text);
 }
 
-async function publishQuestion(
+/** Publishes one round with a question per entry, assigned to Field experts. */
+async function publishQuestions(
   context: { workflowId: string; versionId: string },
-  text = "How is the sample stored?",
+  contents: { text?: string; answerType?: unknown }[],
 ) {
   await service.request("/api/v1/me", { as: expert });
   const base = `/workflows/${context.workflowId}/versions/${context.versionId}/questionnaire`;
   const { round } = await write("POST", `${base}/rounds`, {
     title: "Sample handling",
   });
-  const { question } = await write(
-    "POST",
-    `${base}/rounds/${round.id}/questions`,
-    {
-      text,
-      topic: "scope",
-      targets: [{ kind: "workflow", id: "workflow" }],
-      rationale: "Capture the storage requirements.",
-      evidence: [],
-      assignees: [{ kind: "role", role: "Field expert" }],
-      priority: 10,
-    },
-  );
+  const questions = [];
+  for (const { text = "How is the sample stored?", answerType } of contents) {
+    const { question } = await write(
+      "POST",
+      `${base}/rounds/${round.id}/questions`,
+      {
+        text,
+        topic: "scope",
+        targets: [{ kind: "workflow", id: "workflow" }],
+        rationale: "Capture the storage requirements.",
+        evidence: [],
+        assignees: [{ kind: "role", role: "Field expert" }],
+        priority: 10,
+        ...(answerType === undefined ? {} : { answerType }),
+      },
+    );
+    questions.push({
+      questionId: question.id as string,
+      questionRevision: question.revision as number,
+    });
+  }
   const previewed = await service.request(
     `/api/v1${base}/rounds/${round.id}/publish-preview`,
     { as: admin },
@@ -142,11 +152,15 @@ async function publishQuestion(
     confirmed: true,
     confirmationHash: preview.confirmationHash,
   });
-  return {
-    questionId: question.id as string,
-    questionRevision: question.revision as number,
-    base,
-  };
+  return { base, questions };
+}
+
+async function publishQuestion(
+  context: { workflowId: string; versionId: string },
+  text = "How is the sample stored?",
+) {
+  const { base, questions } = await publishQuestions(context, [{ text }]);
+  return { ...questions[0]!, base };
 }
 afterEach(async () => {
   for (const client of clients.splice(0)) await client.close();
@@ -505,6 +519,7 @@ it("filters the expert profile by current roles and token scopes", async () => {
         "raise_concern",
         "save_answer",
         "submit_answer",
+        "upload_attachment",
         "upload_skill_version",
       ],
     ],
@@ -601,6 +616,178 @@ it("reads assigned work and sends only the expert's answers, comments, and conce
       expect.objectContaining({ credentialId: token.id, channel: "mcp" }),
     ],
   });
+});
+
+it("saves and submits every answer type, including an uploaded attachment, through the service's contract", async () => {
+  const { workflowId, versionId } = await setup();
+  const context = { workflowId, versionId };
+  const cases: [unknown, Record<string, unknown>, unknown][] = [
+    [{ kind: "free-text" }, { text: "Store at −80°C. 冷冻保存。" }, null],
+    [
+      { kind: "single-choice", options: ["Cold", "Frozen"] },
+      { value: "Frozen" },
+      "Frozen",
+    ],
+    [
+      { kind: "multiple-choice", options: ["Cold", "Frozen"] },
+      { value: ["Cold", "Frozen"] },
+      ["Cold", "Frozen"],
+    ],
+    [{ kind: "yes-no" }, { value: false }, false],
+    [{ kind: "number", unit: "°C" }, { value: -80 }, -80],
+    [
+      { kind: "table", columns: ["Sample", "Storage"] },
+      { value: [["Plasma", "Frozen"]] },
+      [["Plasma", "Frozen"]],
+    ],
+    [{ kind: "file" }, {}, null],
+  ];
+  const { base, questions } = await publishQuestions(
+    context,
+    cases.map(([answerType]) => ({ answerType })),
+  );
+  const { client } = await connect();
+  const folder = await fs.mkdtemp(
+    path.join(os.tmpdir(), "badger-mcp-attachment-"),
+  );
+  folders.push(folder);
+  const csv = "sample,storage\nexample,frozen\n";
+  const file = path.join(folder, "storage.csv");
+  await fs.writeFile(file, csv);
+  const fileQuestion = { ...context, ...questions.at(-1)! };
+  const { attachment } = await call(client, "upload_attachment", {
+    ...fileQuestion,
+    file,
+  });
+  expect(attachment).toMatchObject({
+    name: "storage.csv",
+    mediaType: "text/csv",
+    size: Buffer.byteLength(csv),
+    hash: createHash("sha256").update(csv).digest("hex"),
+  });
+  const expected: Record<string, unknown> = {};
+  for (const [index, [, payload, value]] of cases.entries()) {
+    const question = { ...context, ...questions[index]! };
+    const files =
+      index === cases.length - 1 ? { attachments: [attachment.id] } : {};
+    expect(
+      await call(client, "save_answer", {
+        ...question,
+        revision: 0,
+        ...payload,
+        ...files,
+      }),
+    ).toMatchObject({ answer: { revision: 1, state: "draft", value } });
+    await call(client, "submit_answer", { ...question, revision: 1 });
+    expected[question.questionId] = {
+      state: "submitted",
+      channel: "mcp",
+      value,
+      attachments: index === cases.length - 1 ? [attachment] : [],
+    };
+  }
+  const view = await (
+    await service.request(`/api/v1${base}`, { as: admin })
+  ).json();
+  expect(
+    Object.fromEntries(
+      view.answers.map(
+        (answer: {
+          questionId: string;
+          state: string;
+          channel: string;
+          value: unknown;
+          attachments: unknown[];
+        }) => [
+          answer.questionId,
+          {
+            state: answer.state,
+            channel: answer.channel,
+            value: answer.value,
+            attachments: answer.attachments,
+          },
+        ],
+      ),
+    ),
+  ).toEqual(expected);
+  const download = await service.request(
+    `/api/v1${base}/attachments/${attachment.id}`,
+    { as: admin },
+  );
+  expect(await download.text()).toBe(csv);
+});
+
+it("checks attachment assignment, revision, type, and size locally and sends nothing it refuses", async () => {
+  const { workflowId, versionId } = await setup();
+  const { questions } = await publishQuestions({ workflowId, versionId }, [
+    { answerType: { kind: "file" } },
+  ]);
+  const question = { workflowId, versionId, ...questions[0]! };
+  const folder = await fs.mkdtemp(
+    path.join(os.tmpdir(), "badger-mcp-refused-"),
+  );
+  folders.push(folder);
+  const local = (name: string) => path.join(folder, name);
+  await fs.writeFile(local("large.txt"), Buffer.alloc(5 * 1024 * 1024 + 1, 65));
+  await fs.writeFile(local("page.html"), "<p>Example</p>");
+  await fs.writeFile(local("notes.bin"), "Example");
+  await fs.writeFile(local("empty.txt"), "");
+  await fs.writeFile(local("image.png"), "Not an image");
+  await fs.symlink(local("page.html"), local("linked.txt"));
+  const { client } = await connect();
+  for (const [args, message] of [
+    [{ file: local("large.txt") }, /limited to 5242880 bytes/u],
+    [{ file: local("page.html") }, /allowed type/u],
+    [{ file: local("notes.bin") }, /allowed type/u],
+    [{ file: local("notes.bin"), mediaType: "text/html" }, /allowed type/u],
+    [{ file: local("empty.txt") }, /nonempty/u],
+    [{ file: local("linked.txt") }, /symbolic links/u],
+    [
+      {
+        file: local("notes.bin"),
+        mediaType: "text/plain",
+        questionRevision: 2,
+      },
+      /currentRevision: 1/u,
+    ],
+  ] as const) {
+    const refused = await client.callTool({
+      name: "upload_attachment",
+      arguments: { ...question, ...args },
+    });
+    expect(refused).toMatchObject({
+      isError: true,
+      content: [
+        expect.objectContaining({ text: expect.stringMatching(message) }),
+      ],
+    });
+  }
+  const { client: observing } = await connect(observer);
+  const hidden = await observing.callTool({
+    name: "upload_attachment",
+    arguments: {
+      ...question,
+      file: local("notes.bin"),
+      mediaType: "text/plain",
+    },
+  });
+  expect(hidden.isError).toBe(true);
+  // The service still validates content against the declared type.
+  const mislabeled = await client.callTool({
+    name: "upload_attachment",
+    arguments: { ...question, file: local("image.png") },
+  });
+  expect(mislabeled).toMatchObject({
+    isError: true,
+    content: [
+      expect.objectContaining({ text: expect.stringMatching(/^Badger 400 /u) }),
+    ],
+  });
+  const activity = await service.request(
+    "/api/v1/audit-events?action=answer.attachment-uploaded",
+    { as: admin },
+  );
+  expect((await activity.json()).events).toEqual([]);
 });
 
 it("identifies the token owner through an in-memory MCP client", async () => {

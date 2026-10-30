@@ -4,6 +4,7 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { randomUUID } from "node:crypto";
 import type { BadgerApi } from "./api.js";
 import { uploadSkillVersion } from "./upload.js";
+import { uploadAttachment } from "./attachments.js";
 import { SKILL_SCRIPT_SIDE_EFFECTS } from "@realityjunky/badger";
 
 export interface ExpertTool {
@@ -24,6 +25,15 @@ const answer = {
   revision: z.number().int().min(0),
   questionRevision: z.number().int().min(1),
 };
+// The service validates each value against the question's answer type.
+const answerValue = z.union([
+  z.string().max(4000),
+  z.array(z.string().max(4000)).max(100),
+  z.boolean(),
+  z.number(),
+  z.array(z.array(z.string().max(4000)).max(20)).max(100),
+  z.null(),
+]);
 
 export function tool<S extends z.ZodRawShape>(
   name: string,
@@ -114,8 +124,13 @@ export function expertTools(api: BadgerApi, server: Server): ExpertTool[] {
     ),
     tool(
       "save_answer",
-      "Save the user's own words as a draft answer; quote the revisions you read. Use revision 0 for the first draft.",
-      { ...answer, text: z.string().max(50000) },
+      "Save the user's own words as a draft answer; quote the revisions you read, using revision 0 for the first draft. A free-text question takes text; other answer types take value: one option, an array of options, true or false, a number in the question's unit, or table rows matching its columns. attachments lists every attachment the draft keeps, by the IDs upload_attachment returned.",
+      {
+        ...answer,
+        text: z.string().max(50000).optional(),
+        value: answerValue.optional(),
+        attachments: z.array(id).max(8).optional(),
+      },
       async (args) => {
         const { answer } = await api.request<{
           answer: Record<string, unknown>;
@@ -125,11 +140,28 @@ export function expertTools(api: BadgerApi, server: Server): ExpertTool[] {
           {
             revision: args.revision,
             questionRevision: args.questionRevision,
-            text: args.text,
+            ...(args.text === undefined ? {} : { text: args.text }),
+            ...(args.value === undefined ? {} : { value: args.value }),
+            ...(args.attachments === undefined
+              ? {}
+              : { attachments: args.attachments }),
           },
         );
         return { answer: currentAnswer(answer) };
       },
+      "answer",
+    ),
+    tool(
+      "upload_attachment",
+      "Upload a local file the user chose for their answer; it stays private until a submitted answer lists it. Never upload real data. Quote the question revision you read, then list the returned ID in save_answer's attachments.",
+      {
+        ...question,
+        questionRevision: z.number().int().min(1),
+        file: z.string().min(1).max(4096),
+        name: z.string().min(1).max(255).optional(),
+        mediaType: z.string().min(1).max(100).optional(),
+      },
+      (args) => uploadAttachment(api, questionnairePath(args), args),
       "answer",
     ),
     tool(

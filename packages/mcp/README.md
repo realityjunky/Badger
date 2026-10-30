@@ -38,7 +38,8 @@ Code instead of holding it.
 | `whoami`               | Read the token owner's identity and scopes.                                                                                                                                                        |
 | `inbox`                | Read a bounded page of inbox items, with absolute dashboard links and the service's next cursor.                                                                                                   |
 | `my_questions`         | Read current assigned questions, own answers, and comments, optionally for one workflow version.                                                                                                   |
-| `save_answer`          | Save the user's text with the answer and question revisions just read. First drafts use answer revision `0`.                                                                                       |
+| `save_answer`          | Save the user's answer with the answer and question revisions just read: `text` for free text, `value` for other answer types, and `attachments`. First drafts use answer revision `0`.            |
+| `upload_attachment`    | Upload a local file the user chose for an assigned question and return its attachment receipt. It stays private until a submitted answer lists it.                                                 |
 | `submit_answer`        | Submit a saved answer with its current revisions. The service marks it as sent through an Agent and records the Agent host.                                                                        |
 | `comment`              | Add the user's words to a question's thread.                                                                                                                                                       |
 | `raise_concern`        | Send volunteered workflow knowledge to the Engineer.                                                                                                                                               |
@@ -58,9 +59,29 @@ A refused call returns the status, the error kind (`invalid`, `denied`,
 as a conflict's `currentRevision` or the rate limit's `Retry-After`. Requests
 time out after 30 seconds; an upload allows another second for every 64 KiB it
 sends. A write that times out may still have been saved, and the tool says so:
-an identical upload returns the existing version. Server instructions require
+an identical Skill upload returns the existing version, and a repeated
+attachment upload stores another private copy. Server instructions require
 Agents to submit only what the user said, and only when instructed to save or
 send it. A host accepting a URL elicitation does not constitute approval.
+
+Questions from `my_questions` carry their `answerType`; a question without one
+takes free text. `save_answer` sends free text as `text` and other types as
+`value`, using the service's shapes: one of the question's options, an array
+of distinct options, `true` or `false`, a number in the question's unit, or
+table rows matching its columns. `attachments` lists the IDs of every
+attachment the draft keeps, so a save without it keeps none; a file question
+needs one before submission. The service validates values and attachments
+against the current question revision, as it does for the dashboard.
+
+`upload_attachment` takes the `questionRevision` just read and a local `file`,
+with an optional `name` (the file's base name by default) and `mediaType`
+(inferred from `.txt`, `.csv`, `.json`, `.pdf`, `.png`, `.jpg`, or `.jpeg`).
+Before sending a byte, the MCP checks that the person is a current assignee of
+that revision, that the service allows the type, and that the regular file is
+within the service's per-file size limit; symbolic links and special files are
+refused. The service validates the content and returns an immutable
+`{attachment: {id, name, mediaType, size, hash}}`. Attachments are examples
+only and must never contain real data.
 
 ## Engineer drafting
 
