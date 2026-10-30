@@ -180,16 +180,28 @@ async function boundedBundle(
     ]),
   );
   aliases.set(outputPath, "result.json");
-  const portable = (value: unknown): any =>
-    typeof value === "string"
-      ? (aliases.get(value) ?? value)
-      : Array.isArray(value)
-        ? value.map(portable)
-        : value && typeof value === "object"
-          ? Object.fromEntries(
-              Object.entries(value).map(([k, v]) => [k, portable(v)]),
-            )
-          : value;
+  const portable = (value: unknown): any => {
+    if (typeof value === "string") {
+      const alias = aliases.get(value);
+      if (alias) return alias;
+      if (path.isAbsolute(value)) {
+        const relative = path.relative(loaded.root, value);
+        if (
+          relative !== ".." &&
+          !relative.startsWith(`..${path.sep}`) &&
+          !path.isAbsolute(relative)
+        )
+          return relative.split(path.sep).join("/") || ".";
+      }
+      return value;
+    }
+    if (Array.isArray(value)) return value.map(portable);
+    return value && typeof value === "object"
+      ? Object.fromEntries(
+          Object.entries(value).map(([key, entry]) => [key, portable(entry)]),
+        )
+      : value;
+  };
   const files = [];
   let total = 0;
   for (const file of handoff.inputPaths) {
@@ -204,15 +216,30 @@ async function boundedBundle(
     if (total > 16 * 1024 * 1024)
       throw new RequestError(413, "The bounded authoring inputs exceed 16 MiB");
     let text = bytes.toString("utf8");
-    if (file === handoff.commonInputPath)
+    if (
+      file === handoff.commonInputPath ||
+      file === handoff.confirmedProposal.path
+    )
       text = JSON.stringify(portable(JSON.parse(text)), null, 2);
     files.push({ path: aliases.get(file)!, text, hash: sha(text) });
   }
+  const projectedHandoff = portable(handoff) as typeof handoff;
+  const proposal = files.find(
+    (file) => file.path === projectedHandoff.confirmedProposal.path,
+  )!;
+  projectedHandoff.confirmedProposal.hash = proposal.hash;
+  const common = files.find(
+    (file) => file.path === projectedHandoff.commonInputPath,
+  )!;
+  const commonInput = JSON.parse(common.text);
+  commonInput.confirmedProposal = projectedHandoff.confirmedProposal;
+  common.text = JSON.stringify(commonInput, null, 2);
+  common.hash = sha(common.text);
   return {
     packageId: loaded.saved.id,
     lane,
-    plan: loaded.saved.authoring_plan,
-    handoff: portable(handoff),
+    plan: portable(loaded.saved.authoring_plan),
+    handoff: projectedHandoff,
     files,
     repair: loaded.readiness.records[lane]?.action ?? null,
   };

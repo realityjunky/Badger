@@ -94,6 +94,10 @@ export async function startStubGitRepository(
       );
       return (await git("rev-parse", "HEAD")).stdout.trim();
     };
+    const bareGit = (...args: string[]) =>
+      exec("git", ["--git-dir", path.join(root, "source.git"), ...args], {
+        env: environment,
+      });
     const serve = (
       request: http.IncomingMessage,
       response: http.ServerResponse,
@@ -226,6 +230,39 @@ export async function startStubGitRepository(
       async commitFiles(changes: Record<string, string>) {
         await commitFiles(changes);
         return publish();
+      },
+      /** Serves an object by hash while no advertised branch or tag reaches it. */
+      async unpublishedCommit(changes: Record<string, string>) {
+        await commitFiles(changes);
+        await git(
+          "push",
+          "--no-verify",
+          path.join(root, "source.git"),
+          "HEAD:refs/hidden/unpublished",
+        );
+        await bareGit("config", "uploadpack.hideRefs", "refs/hidden");
+        await bareGit("config", "uploadpack.allowAnySHA1InWant", "true");
+        return (await git("rev-parse", "HEAD")).stdout.trim();
+      },
+      /** Publishes the current tree only through a tag, including annotated tags. */
+      async tagCommit(
+        changes: Record<string, string>,
+        name: string,
+        annotated = false,
+      ) {
+        await commitFiles(changes);
+        await git(
+          "tag",
+          ...(annotated ? ["-a", "-m", "Published Skill"] : []),
+          name,
+        );
+        await git(
+          "push",
+          "--no-verify",
+          path.join(root, "source.git"),
+          `refs/tags/${name}`,
+        );
+        return (await git("rev-parse", "HEAD")).stdout.trim();
       },
       async gitlink() {
         await git(

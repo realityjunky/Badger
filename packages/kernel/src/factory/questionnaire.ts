@@ -77,7 +77,6 @@ export interface SemanticDossier {
     id: string;
     name: string;
     location: string;
-    canonicalPath: string;
     contentHash: string;
     roles: string[];
   }>;
@@ -167,17 +166,23 @@ export function validateSemanticDossier(
   const sources = entries("sources");
   for (const source of sources) {
     if (
-      !isText(source.canonicalPath) ||
-      !path.isAbsolute(source.canonicalPath) ||
-      path.normalize(source.canonicalPath) !== source.canonicalPath ||
-      source.canonicalPath.includes("\0")
+      !isText(source.location) ||
+      path.isAbsolute(source.location) ||
+      path.win32.isAbsolute(source.location) ||
+      path.normalize(source.location) !== source.location ||
+      source.location.includes("\0")
     ) {
       report(
-        `sources.${source.id}.canonicalPath`,
-        "Canonical source path must be normalized and absolute",
+        `sources.${source.id}.location`,
+        "Source location must be normalized and relative to the Project",
       );
     }
-    for (const field of ["name", "location", "canonicalPath"]) {
+    if (source.canonicalPath !== undefined)
+      report(
+        `sources.${source.id}.canonicalPath`,
+        "Legacy dossier source identity requires recomposition without canonicalPath and a new approval",
+      );
+    for (const field of ["name", "location"]) {
       if (!isText(source[field]))
         report(
           `sources.${source.id}.${field}`,

@@ -210,7 +210,9 @@ export async function handleQuestionnaire(
       if (
         !reads ||
         !resource ||
-        ["ledger", "inferences", "assumptions"].includes(resource ?? "")
+        ["ledger", "inferences", "assumptions", "attachments"].includes(
+          resource ?? "",
+        )
       ) {
         await tx.query(
           "select id from workflows where id = $1 for no key update",

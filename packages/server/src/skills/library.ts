@@ -7,7 +7,7 @@ import {
   type SkillSourceFile,
   type SkillSource,
 } from "@realityjunky/badger";
-import type { BlobStore } from "./blobs.js";
+import { lockBlobStore, type BlobStore } from "./blobs.js";
 import { objectInput, RequestError } from "../http/errors.js";
 
 export interface Skill {
@@ -33,6 +33,7 @@ export interface GitOrigin {
   repositoryId: string;
   repository: string;
   commit: string;
+  ref: string | null;
 }
 
 interface SkillRow {
@@ -154,7 +155,7 @@ export async function createSkill(
 
 const VERSION_SELECT = `select v.*, coalesce((
   select jsonb_agg(jsonb_build_object(
-    'repositoryId', o.repository_id, 'repository', o.repository, 'commit', o.commit_hash
+    'repositoryId', o.repository_id, 'repository', o.repository, 'commit', o.commit_hash, 'ref', o.published_ref
   ) order by o.created_at, o.repository_id, o.commit_hash)
   from skill_version_git_origins o where o.skill_id = v.skill_id and o.hash = v.hash
 ), '[]'::jsonb) as git_origins from skill_versions v`;
@@ -228,12 +229,13 @@ export async function createVersion(
       400,
       `Declare every script's side effects before upload, using none for a script without any: ${undeclared.join(", ")}`,
     );
-  for (const file of source.inventory) {
-    const content = files.get(file.path);
-    if (content === undefined || (await blobs.put(content)) !== file.hash)
-      throw new Error("Upload inventory differs from its blobs");
-  }
   return database.transaction(async (tx) => {
+    await lockBlobStore(tx);
+    for (const file of source.inventory) {
+      const content = files.get(file.path);
+      if (content === undefined || (await blobs.put(content)) !== file.hash)
+        throw new Error("Upload inventory differs from its blobs");
+    }
     const inserted = await tx.query<VersionRow>(
       `insert into skill_versions (skill_id, hash, description, inventory, scripts, origin, uploaded_by, created_at) values ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8) on conflict do nothing returning *`,
       [
@@ -259,8 +261,8 @@ export async function createVersion(
     let originAdded = false;
     if (gitOrigin !== undefined) {
       const receipt = await tx.query(
-        `insert into skill_version_git_origins (skill_id, hash, repository_id, repository, commit_hash, imported_by, created_at)
-         values ($1, $2, $3, $4, $5, $6, $7) on conflict do nothing returning hash`,
+        `insert into skill_version_git_origins (skill_id, hash, repository_id, repository, commit_hash, imported_by, created_at, published_ref)
+         values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict do nothing returning hash`,
         [
           skill.id,
           source.hash,
@@ -269,6 +271,7 @@ export async function createVersion(
           gitOrigin.commit,
           context.personId,
           dependencies.clock.now(),
+          gitOrigin.ref,
         ],
       );
       originAdded = receipt.rows.length > 0;

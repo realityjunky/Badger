@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   startStubGitRepository,
+  startStubGitProxy,
   startTestService,
   type StubGitRepositoryOptions,
   type TestPerson,
@@ -170,6 +171,112 @@ async function plantHostileGit(root: string) {
 }
 
 describe("Skill versions from registered Git repositories", () => {
+  it.each([false, true])(
+    "uses the configured Git proxy unless the host bypasses it (%s)",
+    async (bypass) => {
+      const proxy = await startStubGitProxy();
+      try {
+        const proxyUrl = new URL(proxy.url);
+        proxyUrl.username = "git-proxy-user";
+        proxyUrl.password = "git-proxy-secret";
+        const { base } = await library(FILES, {
+          BADGER_GIT_PROXY: proxyUrl.toString(),
+          BADGER_GIT_NO_PROXY: bypass ? "127.0.0.1" : "",
+        });
+        const repositoryId = await register(base);
+        const response = await write(`${base}/git-preview`, {
+          repositoryId,
+          commit: remote.commit,
+        });
+        expect(response.status).toBe(200);
+        expect(proxy.targets.length > 0).toBe(!bypass);
+        if (!bypass)
+          expect(new Set(proxy.targets)).toEqual(
+            new Set([new URL(remote.url).host]),
+          );
+        expect(JSON.stringify(service.logs)).not.toContain("git-proxy-secret");
+        expect(await response.text()).not.toContain("git-proxy-secret");
+      } finally {
+        await proxy.close();
+      }
+    },
+  );
+  it.each([
+    "socks5://user:secret@localhost:1080",
+    "http://user:secret@",
+    "https://proxy.invalid/path?secret=value",
+  ])(
+    "rejects an invalid Git proxy at startup without disclosing credentials (%s)",
+    async (proxy) => {
+      await expect(
+        startTestService({ environment: { BADGER_GIT_PROXY: proxy } }),
+      ).rejects.toThrow(
+        "BADGER_GIT_PROXY must be an HTTP or HTTPS proxy URL without a path, query, or fragment",
+      );
+    },
+  );
+  it("refuses a served commit that no published branch or tag reaches", async () => {
+    const { base } = await library();
+    const repositoryId = await register(base);
+    const commit = await remote.unpublishedCommit({
+      "config/settings.json": '{"unpublished":true}\n',
+    });
+    const response = await write(`${base}/git-preview`, {
+      repositoryId,
+      commit,
+    });
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.message).toContain(
+      "no published branch or tag reaches",
+    );
+  });
+  it.each([false, true])(
+    "records a published tag for a commit outside every branch (annotated: %s)",
+    async (annotated) => {
+      const { base } = await library();
+      const repositoryId = await register(base);
+      const commit = await remote.tagCommit(
+        { "config/settings.json": '{"published":true}\n' },
+        "v1",
+        annotated,
+      );
+      const input = { repositoryId, commit };
+      const preview = await write(`${base}/git-preview`, input);
+      expect(preview.status).toBe(200);
+      const { preview: inspected } = await preview.json();
+      const imported = await write(`${base}/versions`, {
+        ...input,
+        confirmed: true,
+        expectedHash: inspected.hash,
+      });
+      expect(imported.status).toBe(201);
+      const { version } = await imported.json();
+      expect(version.gitOrigins).toEqual([
+        { repositoryId, repository: remote.url, commit, ref: "refs/tags/v1" },
+      ]);
+    },
+  );
+  it("accepts an ancestor of a published branch and records the reaching branch", async () => {
+    const { base } = await library();
+    const repositoryId = await register(base);
+    const commit = await remote.commitFiles({
+      "config/settings.json": '{"first":true}\n',
+    });
+    await remote.commitFiles({ "config/settings.json": '{"second":true}\n' });
+    const input = { repositoryId, commit };
+    const { preview } = await (
+      await write(`${base}/git-preview`, input)
+    ).json();
+    const imported = await write(`${base}/versions`, {
+      ...input,
+      confirmed: true,
+      expectedHash: preview.hash,
+    });
+    expect(imported.status).toBe(201);
+    expect((await imported.json()).version.gitOrigins).toEqual([
+      { repositoryId, repository: remote.url, commit, ref: "refs/heads/main" },
+    ]);
+  });
   it.each([
     { format: "sha1", protocol: 0 },
     { format: "sha1", protocol: 2 },
@@ -718,7 +825,9 @@ describe("Skill versions from registered Git repositories", () => {
       expect(await response.json()).toMatchObject({
         error: {
           code: "invalid",
-          message: "The registered repository could not supply that commit",
+          message: expect.stringContaining(
+            "no published branch or tag reaches",
+          ),
         },
       });
       expect(remote.requests).not.toHaveLength(0);

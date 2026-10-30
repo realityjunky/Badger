@@ -1,8 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import {
+  planningFixture,
+  admin,
+  engineer,
+  owner,
+} from "./fixtures/planning.js";
 import {
   applyMigrations,
   loadBundledMigrations,
   openTestDatabase,
+  startTestService,
   type Migration,
   type Queryable,
   type TestDatabase,
@@ -55,6 +63,199 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("reads legacy dossier history without storage paths and requires a new approval", async () => {
+    const test = await freshDatabase();
+    const service = await startTestService({
+      database: test,
+      environment: {
+        BADGER_BOOTSTRAP_ADMINISTRATORS: admin.email,
+        BADGER_ALLOWED_ORIGINS: "http://localhost",
+      },
+    });
+    try {
+      const { call, base, version, approve } = await planningFixture(service);
+      const approved = await approve("dossier", owner);
+      const { versions } = await call(`${base}/dossier`);
+      const { person } = await call("/me");
+      const { secret } = await call(
+        "/me/tokens",
+        "POST",
+        { name: "Legacy planner", scopes: ["engineer"] },
+        engineer,
+        201,
+      );
+      const snapshot = versions[0].snapshot;
+      snapshot.dossier.sources[0].canonicalPath =
+        "/previous-server/private-storage/workflow/skills/prepare";
+      const text = JSON.stringify(snapshot);
+      const hash = createHash("sha256").update(text).digest("hex");
+      await test.database.query(
+        `insert into drafting_jobs (id, workflow_version_id, kind, requester_id, context_bundle, context_hash, input_hash, output_schema, created_at, updated_at)
+        values ('legacy-job', $1, 'draft-plan', $2, $3::jsonb, $4, $4, '{}', $5, $5)`,
+        [
+          version.id,
+          person.id,
+          JSON.stringify({
+            planning: { input: { dossier: snapshot.dossier } },
+          }),
+          "a".repeat(64),
+          clock.now(),
+        ],
+      );
+      const planSnapshot = {
+        schemaVersion: 1,
+        kind: "badger-plan-version",
+        workflowVersionId: version.id,
+        dossierHash: hash,
+        plan: { semanticDossier: snapshot.dossier },
+      };
+      await test.database.query(
+        `insert into dossier_versions (id, workflow_version_id, number, hash, canonical_json, created_by, created_at)
+        values ('legacy-dossier', $1, 2, $2, $3, $4, $5)`,
+        [version.id, hash, text, versions[0].createdBy, clock.now()],
+      );
+      await test.database.query(
+        `insert into plan_versions (id, workflow_version_id, number, dossier_hash, hash, canonical_json, created_by, created_at)
+        values ('legacy-plan', $1, 1, $2, $3, $4, $5, $6)`,
+        [
+          version.id,
+          hash,
+          "b".repeat(64),
+          JSON.stringify(planSnapshot),
+          person.id,
+          clock.now(),
+        ],
+      );
+      await test.database.query(
+        `insert into dossier_heads (id, workflow_version_id, sequence, dossier_hash, selected_by, selected_at)
+        values ('legacy-head', $1, 2, $2, $3, $4)`,
+        [version.id, hash, versions[0].createdBy, clock.now()],
+      );
+      const confirmation = {
+        ...approved.confirmation,
+        boundHashes: { ...approved.confirmation.boundHashes, dossier: hash },
+      };
+      await test.database.query(
+        "update gate_confirmations set bound_hashes = $2::jsonb, result = $3::jsonb where id = $1",
+        [
+          confirmation.id,
+          JSON.stringify(confirmation.boundHashes),
+          JSON.stringify({ confirmation }),
+        ],
+      );
+      const history = await call(`${base}/dossier`);
+      expect(history.currentVersionId).toBeNull();
+      expect(history.versions[0]).toMatchObject({
+        hash,
+        canonicalJson: null,
+        requiresRecomposition: true,
+      });
+      expect(
+        history.versions[0].snapshot.dossier.sources[0],
+      ).not.toHaveProperty("canonicalPath");
+      expect(JSON.stringify(history)).not.toContain("/previous-server");
+      const plans = await call(`${base}/plan`);
+      expect(plans.skeleton).toBeNull();
+      expect(plans.versions[0]).toMatchObject({
+        canonicalJson: null,
+        requiresRecomposition: true,
+      });
+      expect(JSON.stringify(plans)).not.toContain("/previous-server");
+      const claim = await call(
+        `${base}/drafting-jobs/legacy-job/claim`,
+        "POST",
+        { revision: 1 },
+        engineer,
+        409,
+        secret,
+      );
+      expect(claim.job.status).toBe("cancelled");
+      expect(claim).not.toHaveProperty("contextBundle");
+      expect(JSON.stringify(claim)).not.toContain("/previous-server");
+      const rejected = await call(
+        `${base}/gates/dossier/preview`,
+        "POST",
+        {},
+        owner,
+        409,
+      );
+      expect(JSON.stringify(rejected)).toContain("requires recomposition");
+      expect(
+        (
+          await test.database.query<{ canonical_json: string }>(
+            "select canonical_json from dossier_versions where id = 'legacy-dossier'",
+          )
+        ).rows[0]!.canonical_json,
+      ).toBe(text);
+    } finally {
+      await service.close();
+    }
+  });
+  it("permits deleting only never-referenced attachments after upgrading immutable uploads", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((m) => m.version < "0032"),
+      clock,
+    );
+    await insertPerson(test);
+    await test.database.exec(`
+      insert into groups (id, name, created_at, updated_at) values ('group-1', 'Research', now(), now());
+      insert into workflows (id, group_id, name, goal, intent, locale, created_at, updated_at) values ('workflow-1', 'group-1', 'example', 'Goal', 'new-skill', 'en', now(), now());
+      insert into workflow_versions (id, workflow_id, number, name, goal, intent, locale, stages, created_at, updated_at) values ('version-1', 'workflow-1', 1, 'example', 'Goal', 'new-skill', 'en', '{}', now(), now());
+      insert into question_rounds (id, workflow_version_id, number, title, created_by, created_at) values ('round-1', 'version-1', 1, 'Evidence', 'person-1', now());
+      insert into questions (id, workflow_version_id, round_id, created_at) values ('question-1', 'version-1', 'round-1', now());
+      insert into question_revisions (question_id, revision, content, actor_id, created_at) values ('question-1', 1, '{}', 'person-1', now());
+      insert into question_answers (question_id, person_id, revision) values ('question-1', 'person-1', 1);
+    `);
+    for (const id of ["unused", "used", "inherited"])
+      await test.database.query(
+        "insert into answer_attachments (id, question_id, person_id, name, media_type, size, hash, created_at) values ($1, 'question-1', 'person-1', 'evidence.txt', 'text/plain', 1, $2, $3)",
+        [id, "a".repeat(64), clock.now()],
+      );
+    await test.database
+      .exec(`insert into answer_revisions (question_id, person_id, revision, question_revision, text, state, channel, created_at, attachments)
+      values ('question-1', 'person-1', 1, 1, '', 'draft', 'web', now(), '[{"id":"used"}]');
+      insert into inherited_answer_attachments (question_id, attachment_id) values ('question-1', 'inherited');`);
+    const before = (
+      await test.database.query("select * from answer_attachments order by id")
+    ).rows;
+    await expect(
+      test.database.query("delete from answer_attachments where id = 'unused'"),
+    ).rejects.toThrow(/immutable/u);
+    await applyMigrations(test.database, migrations, clock);
+    expect(
+      (
+        await test.database.query(
+          "select * from answer_attachments order by id",
+        )
+      ).rows,
+    ).toEqual(before);
+    for (const id of ["unused", "used", "inherited"])
+      await expect(
+        test.database.query(
+          "update answer_attachments set name = 'changed' where id = $1",
+          [id],
+        ),
+      ).rejects.toThrow(/immutable/u);
+    for (const id of ["used", "inherited"])
+      await expect(
+        test.database.query("delete from answer_attachments where id = $1", [
+          id,
+        ]),
+      ).rejects.toThrow(/immutable/u);
+    await expect(
+      test.database.query("truncate answer_attachments cascade"),
+    ).rejects.toThrow(/immutable/u);
+    expect(
+      (
+        await test.database.query(
+          "delete from answer_attachments where id = 'unused' returning id",
+        )
+      ).rows,
+    ).toEqual([{ id: "unused" }]);
+  });
   it("keeps package reviews and published bytes immutable", async () => {
     const test = await freshDatabase();
     await applyMigrations(test.database, await loadBundledMigrations(), clock);
@@ -143,7 +344,11 @@ describe("reviewed SQL migrations", () => {
     );
     const previous = (await test.database.query("select * from skill_versions"))
       .rows;
-    await applyMigrations(test.database, migrations, clock);
+    await applyMigrations(
+      test.database,
+      migrations.filter((m) => m.version < "0033"),
+      clock,
+    );
     expect(
       (await test.database.query("select * from skill_versions")).rows,
     ).toEqual(previous);
@@ -155,6 +360,20 @@ describe("reviewed SQL migrations", () => {
       "insert into skill_version_git_origins (skill_id, hash, repository_id, repository, commit_hash, imported_by, created_at) values ('skill-1', $1, 'repo-1', 'https://example.com/skill.git', $2, 'person-1', $3)",
       ["a".repeat(64), "b".repeat(40), clock.now()],
     );
+    const origins = (
+      await test.database.query("select * from skill_version_git_origins")
+    ).rows;
+    await applyMigrations(test.database, migrations, clock);
+    expect(
+      (await test.database.query("select * from skill_version_git_origins"))
+        .rows,
+    ).toEqual(origins.map((row) => ({ ...row, published_ref: null })));
+    await expect(
+      test.database.query(
+        "insert into skill_version_git_origins (skill_id, hash, repository_id, repository, commit_hash, imported_by, created_at, published_ref) values ('skill-1', $1, 'repo-1', 'https://example.com/skill.git', $2, 'person-1', $3, 'refs/hidden/private')",
+        ["a".repeat(64), "c".repeat(40), clock.now()],
+      ),
+    ).rejects.toThrow(/published_ref/u);
     for (const table of [
       "skill_versions",
       "skill_repositories",
@@ -261,7 +480,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0031");
+    expect(upgraded.applied.at(-1)).toBe("0033");
     expect(
       (
         await test.database.query(
@@ -417,6 +636,8 @@ describe("reviewed SQL migrations", () => {
       "0029",
       "0030",
       "0031",
+      "0032",
+      "0033",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -455,6 +676,8 @@ describe("reviewed SQL migrations", () => {
         "0029",
         "0030",
         "0031",
+        "0032",
+        "0033",
       ],
       pending: [],
       drifted: [],
@@ -469,6 +692,7 @@ describe("reviewed SQL migrations", () => {
       "accepted_authoring_outputs",
       "answer_attachments",
       "answer_revisions",
+      "attachment_blob_cleanup",
       "audit_events",
       "authoring_follow_ups",
       "comment_revisions",
@@ -578,6 +802,8 @@ describe("reviewed SQL migrations", () => {
         "0029",
         "0030",
         "0031",
+        "0032",
+        "0033",
       ],
       pending: [],
       drifted: [],
@@ -585,7 +811,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(31);
+    expect(rows.rows[0]?.count).toBe(33);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

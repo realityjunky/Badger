@@ -428,6 +428,12 @@ it("keeps an Agent's plan as a suggestion until an Engineer reviews and accepts 
     secret,
   );
   expect(claimed.contextBundle.planning.input.dossierHash).toBe(dossier.hash);
+  expect(JSON.stringify(claimed)).not.toContain(
+    service.config.storage.workspaceDirectory,
+  );
+  expect(
+    claimed.contextBundle.planning.input.dossier.sources[0],
+  ).not.toHaveProperty("canonicalPath");
   const plan = claimed.contextBundle.planning.skeleton;
   plan.workflow.customNodes[0].implementation.skill = "prepare";
   const lease = { leaseId: claimed.job.lease.id, contextHash: job.contextHash };

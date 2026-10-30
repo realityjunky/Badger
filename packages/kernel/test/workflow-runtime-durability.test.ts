@@ -182,13 +182,22 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
     await expect(readWorkflowTransitionJournal(runRoot)).resolves.toBeNull();
   });
 
-  it("retries a public projection when a genuine committing writer replaces its journal during the protected read", async () => {
+  it("retries a public projection across every replacement by a genuine committing writer", async () => {
     const runtime = createWorkflowRuntime();
     const started = await runtime.start({
       protocol: phase4Protocol(),
       runRoot,
       runId: "journal-reader",
     });
+    const response = {
+      actionId: started.pendingAction!.id,
+      runId: started.runId,
+      nodeId: started.currentNode,
+      revision: started.revision,
+      execution: started.execution,
+      status: "succeeded" as const,
+      summary: "Prepared.",
+    };
     const deferred = () => {
       let resolve!: () => void;
       const promise = new Promise<void>((r) => {
@@ -196,51 +205,45 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
       });
       return { promise, resolve };
     };
-    const first = deferred(),
-      releaseFirst = deferred(),
-      second = deferred(),
-      releaseSecond = deferred();
+    // Five actual record writes replace the journal at least four times while
+    // the reader holds descriptors to its previous incarnations.
+    const reached = Array.from({ length: 5 }, deferred);
+    const release = Array.from({ length: 5 }, deferred);
     const originalOpen = fs.open;
-    let intercepted = false;
+    let boundary = 0;
+    let intercepted = 0;
+    let reading = false;
     let writer: ReturnType<typeof runtime.submit> | undefined;
     try {
-      setWorkflowTransitionFaultForTests(async (boundary) => {
-        if (boundary.phase === "commit-evidence") {
-          first.resolve();
-          await releaseFirst.promise;
-        }
-        if (boundary.phase === "commit-evidence-written") {
-          second.resolve();
-          await releaseSecond.promise;
+      setWorkflowTransitionFaultForTests(async (event) => {
+        if (event.phase === "record-write" && boundary < reached.length) {
+          const index = boundary++;
+          reached[index]!.resolve();
+          await release[index]!.promise;
         }
       });
-      writer = runtime.submit(runRoot, {
-        actionId: started.pendingAction!.id,
-        runId: started.runId,
-        nodeId: started.currentNode,
-        revision: started.revision,
-        execution: started.execution,
-        status: "succeeded",
-        summary: "Prepared.",
-      });
-      await first.promise;
+      writer = runtime.submit(runRoot, response);
+      await reached[0]!.promise;
       fs.open = (async (...args: Parameters<typeof fs.open>) => {
         const handle = await originalOpen(...args);
         if (
-          !intercepted &&
+          !reading &&
+          intercepted < 4 &&
           String(args[0]).endsWith(
             `${path.sep}.badger${path.sep}transition-journal.json`,
           )
         ) {
-          intercepted = true;
+          const index = intercepted++;
           const read = handle.read.bind(handle);
           let armed = true;
           handle.read = (async (...readArgs: Parameters<typeof read>) => {
             const result = await read(...readArgs);
             if (armed) {
               armed = false;
-              releaseFirst.resolve();
-              await second.promise;
+              reading = true;
+              release[index]!.resolve();
+              await reached[index + 1]!.promise;
+              reading = false;
             }
             return result;
           }) as typeof handle.read;
@@ -248,12 +251,11 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
         return handle;
       }) as typeof fs.open;
       const projection = await runtime.projectState(runRoot);
-      expect(intercepted).toBe(true);
+      expect(intercepted).toBe(4);
       expect(projection).toMatchObject({ status: "blocked", revision: 1 });
     } finally {
       fs.open = originalOpen;
-      releaseFirst.resolve();
-      releaseSecond.resolve();
+      release.forEach((gate) => gate.resolve());
       await writer;
       clearWorkflowTransitionFaultForTests();
     }
@@ -262,6 +264,10 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
       disposition: "continue",
       currentNode: "finish",
     });
+    const stale = await runtime.submit(runRoot, response);
+    expect(stale.findings).toContainEqual(
+      expect.objectContaining({ code: "revision-conflict" }),
+    );
   });
 
   it("captures an explicit transition-journal capability and bound", async () => {

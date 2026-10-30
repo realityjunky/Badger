@@ -14,7 +14,8 @@ export interface DossierVersion {
   id: string;
   number: number;
   hash: string;
-  canonicalJson: string;
+  canonicalJson: string | null;
+  requiresRecomposition?: boolean;
   snapshot: DossierSnapshot;
   createdBy: string;
   createdAt: string;

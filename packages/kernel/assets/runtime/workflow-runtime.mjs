@@ -18239,6 +18239,21 @@ var RECORD_ORDER = [
   "trajectory",
   "revision-claim"
 ];
+var WORKFLOW_TRANSITION_BOUNDARY_PHASES = [
+  "journal-prepared",
+  "journal-verified",
+  "record-write",
+  "record-verification",
+  "commit-evidence",
+  "commit-evidence-written",
+  "journal-clearance",
+  "journal-cleared",
+  "recovery-record-write",
+  "recovery-record-verification",
+  "recovery-evidence-prepared",
+  "recovery-evidence",
+  "recovery-evidence-recorded"
+];
 var WorkflowTransitionJournalPendingError = class extends Error {
   constructor(journal) {
     super("WorkflowRuntime recovery is required before another mutation");
@@ -18751,8 +18766,9 @@ async function readJournal(runRoot, profile) {
   }
 }
 async function readWorkflowTransitionJournal(runRoot) {
+  const maxAttempts = 2 * WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS + WORKFLOW_TRANSITION_BOUNDARY_PHASES.length + 1;
   let raw = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       raw = await readOptionalEngineRunText(
         runRoot,
@@ -18762,8 +18778,9 @@ async function readWorkflowTransitionJournal(runRoot) {
       );
       break;
     } catch (error) {
-      if (!(error instanceof RaceSafeReadError) || error.reason !== "changed" || attempt === 2)
+      if (!(error instanceof RaceSafeReadError) || error.reason !== "changed" || attempt === maxAttempts - 1)
         throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1));
     }
   }
   if (raw === null) return null;

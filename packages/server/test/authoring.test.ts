@@ -1,4 +1,5 @@
 import { reportLaneOutput } from "./fixtures/authoring.js";
+import { createHash } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import type { TestService } from "../src/testing/index.js";
 import { engineer, startPlanningService } from "./fixtures/planning.js";
@@ -65,6 +66,24 @@ it("offers only current Wave lanes as bounded Agent jobs and keeps submitted out
     handoff: { capabilities: { writeCreatorState: false } },
   });
   expect(claimed.contextBundle.authoring.files.length).toBeGreaterThan(2);
+  expect(
+    JSON.stringify(claimed).includes(service.config.storage.workspaceDirectory),
+    "Authoring claims must contain only portable paths",
+  ).toBe(false);
+  const bundle = claimed.contextBundle.authoring;
+  const proposal = bundle.files.find(
+    (file: { path: string }) =>
+      file.path === bundle.handoff.confirmedProposal.path,
+  );
+  expect(createHash("sha256").update(proposal.text).digest("hex")).toBe(
+    bundle.handoff.confirmedProposal.hash,
+  );
+  const common = bundle.files.find(
+    (file: { path: string }) => file.path === bundle.handoff.commonInputPath,
+  );
+  expect(JSON.parse(common.text).confirmedProposal).toEqual(
+    bundle.handoff.confirmedProposal,
+  );
   const laneOutput = {
     semanticDossierHash:
       claimed.contextBundle.authoring.plan.semanticDossierHash,

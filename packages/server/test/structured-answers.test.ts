@@ -32,11 +32,12 @@ async function json(request: Promise<Response>, status = 200) {
   expect(response.status, JSON.stringify(value)).toBe(status);
   return value;
 }
-async function setup() {
+async function setup(environment: Record<string, string> = {}) {
   service = await startTestService({
     environment: {
       BADGER_BOOTSTRAP_ADMINISTRATORS: admin.email,
       BADGER_ALLOWED_ORIGINS: "http://localhost",
+      ...environment,
     },
   });
   const { group } = await json(
@@ -129,6 +130,8 @@ async function setup() {
     );
   return {
     base,
+    workflow,
+    group,
     round,
     content,
     create,
@@ -140,6 +143,222 @@ async function setup() {
 }
 
 describe("structured answers", () => {
+  it("keeps expired attachment content shared by an immutable Skill version", async () => {
+    const { base, group, create, publish } = await setup({
+      BADGER_ANSWER_ATTACHMENT_RETENTION_SECONDS: "60",
+    });
+    const question = await create({ kind: "file" });
+    await publish();
+    const content = "Shared source evidence";
+    const { attachment } = await json(
+      call(
+        "POST",
+        `${base}/questions/${question.id}/attachments`,
+        {
+          questionRevision: 1,
+          name: "evidence.txt",
+          mediaType: "text/plain",
+          contentBase64: Buffer.from(content).toString("base64"),
+        },
+        expert,
+      ),
+      201,
+    );
+    const { skill } = await json(
+      call("POST", "/skills", { groupId: group.id, name: "source" }, admin),
+      201,
+    );
+    const files = [
+      {
+        path: "SKILL.md",
+        content: Buffer.from(
+          "---\nname: source\ndescription: Evidence\n---\n\nSource evidence.\n",
+        ).toString("base64"),
+      },
+      {
+        path: "reference/evidence.txt",
+        content: Buffer.from(content).toString("base64"),
+      },
+    ];
+    const { preview } = await json(
+      call("POST", `/skills/${skill.id}/upload-preview`, { files }, admin),
+    );
+    await json(
+      call(
+        "POST",
+        `/skills/${skill.id}/versions`,
+        { files, expectedHash: preview.hash, confirmed: true },
+        admin,
+      ),
+      201,
+    );
+    service.clock.advance(60_000);
+    await service.worker().runOnce();
+    expect(
+      (
+        await call(
+          "GET",
+          `${base}/attachments/${attachment.id}`,
+          undefined,
+          expert,
+        )
+      ).status,
+    ).toBe(404);
+    const file = await json(
+      call(
+        "GET",
+        `/skills/${skill.id}/versions/${preview.hash}/files?path=reference/evidence.txt`,
+        undefined,
+        admin,
+      ),
+    );
+    expect(file.content).toBe(content);
+  });
+  it("keeps inherited answer attachments after the retention period", async () => {
+    const { base, workflow, create, publish, save, submit } = await setup({
+      BADGER_ANSWER_ATTACHMENT_RETENTION_SECONDS: "60",
+    });
+    const question = await create({ kind: "file" });
+    await publish();
+    const { attachment } = await json(
+      call(
+        "POST",
+        `${base}/questions/${question.id}/attachments`,
+        {
+          questionRevision: 1,
+          name: "evidence.txt",
+          mediaType: "text/plain",
+          contentBase64: Buffer.from("Inherited evidence").toString("base64"),
+        },
+        expert,
+      ),
+      201,
+    );
+    await json(save(question.id, { attachments: [attachment.id] }));
+    await json(submit(question.id));
+    const { workflow: current } = await json(
+      call("GET", `/workflows/${workflow.id}`, undefined, admin),
+    );
+    const { version } = await json(
+      call(
+        "POST",
+        `/workflows/${workflow.id}/versions`,
+        { revision: current.revision },
+        admin,
+      ),
+      201,
+    );
+    service.clock.advance(60_000);
+    await service.worker().runOnce();
+    const download = await call(
+      "GET",
+      `/workflows/${workflow.id}/versions/${version.id}/questionnaire/attachments/${attachment.id}`,
+      undefined,
+      expert,
+    );
+    expect(download.status).toBe(200);
+    expect(await download.text()).toBe("Inherited evidence");
+  });
+  it("expires unused uploads through the worker while retaining every answer revision", async () => {
+    const { base, create, publish, save, submit } = await setup({
+      BADGER_ANSWER_ATTACHMENT_RETENTION_SECONDS: "60",
+    });
+    const question = await create({ kind: "file" });
+    await publish();
+    const upload = async (text: string) =>
+      (
+        await json(
+          call(
+            "POST",
+            `${base}/questions/${question.id}/attachments`,
+            {
+              questionRevision: 1,
+              name: "evidence.txt",
+              mediaType: "text/plain",
+              contentBase64: Buffer.from(text).toString("base64"),
+            },
+            expert,
+          ),
+          201,
+        )
+      ).attachment;
+    const used = await upload("Preserved evidence");
+    const unused = await upload("Expired evidence");
+    const shared = await upload("Preserved evidence");
+    await json(save(question.id, { attachments: [used.id] }));
+    await json(submit(question.id));
+    await json(save(question.id, { revision: 2, attachments: [] }));
+    service.clock.advance(59_999);
+    await service.worker().runOnce();
+    expect(
+      (await call("GET", `${base}/attachments/${unused.id}`, undefined, expert))
+        .status,
+    ).toBe(200);
+    service.clock.advance(1);
+    await Promise.all([
+      service.worker("expiry-a").runOnce(),
+      service.worker("expiry-b").runOnce(),
+    ]);
+    expect(
+      (await call("GET", `${base}/attachments/${unused.id}`, undefined, expert))
+        .status,
+    ).toBe(404);
+    expect(
+      (await call("GET", `${base}/attachments/${shared.id}`, undefined, expert))
+        .status,
+    ).toBe(404);
+    const kept = await call("GET", `${base}/attachments/${used.id}`);
+    expect(await kept.text()).toBe("Preserved evidence");
+    const { events } = await json(
+      call(
+        "GET",
+        "/audit-events?action=answer.attachment-expired",
+        undefined,
+        admin,
+      ),
+    );
+    expect(
+      events.map((event: { targetId: string }) => event.targetId).sort(),
+    ).toEqual([unused.id, shared.id].sort());
+    expect(
+      events.every((event: { channel: string }) => event.channel === "worker"),
+    ).toBe(true);
+  });
+  it("caps each person's unreferenced uploads per question", async () => {
+    const { base, create, publish, save } = await setup();
+    const question = await create({ kind: "file" });
+    await publish();
+    const upload = () =>
+      call(
+        "POST",
+        `${base}/questions/${question.id}/attachments`,
+        {
+          questionRevision: 1,
+          name: "evidence.txt",
+          mediaType: "text/plain",
+          contentBase64: Buffer.from("Evidence").toString("base64"),
+        },
+        expert,
+      );
+    const ids: string[] = [];
+    for (let index = 0; index < 7; index++) {
+      ids.push((await json(upload(), 201)).attachment.id);
+    }
+    const competing = await Promise.all([upload(), upload()]);
+    expect(competing.map((response) => response.status).sort()).toEqual([
+      201, 413,
+    ]);
+    ids.push(
+      (await competing.find((response) => response.status === 201)!.json())
+        .attachment.id,
+    );
+    const refused = await json(upload(), 413);
+    expect(refused.error.message).toContain(
+      "8 unreferenced uploads per person per question",
+    );
+    await json(save(question.id, { attachments: ids }));
+    await json(upload(), 201);
+  });
   it("lets an assigned expert's Agent attach evidence while preserving token scopes and answer channel", async () => {
     const { base, create, publish } = await setup();
     const question = await create({ kind: "yes-no" });
@@ -502,10 +721,15 @@ describe("structured answers", () => {
         201,
       );
       files.push(attachment.id);
+      if (i === 3) {
+        const capped = await json(call("POST", path, input, expert), 413);
+        expect(capped.error.message).toContain("20 MiB");
+        await json(save(question.id, { revision: 1, attachments: files }));
+      }
     }
-    await json(save(question.id, { revision: 1, attachments: files }), 400);
+    await json(save(question.id, { revision: 2, attachments: files }), 400);
     await json(
-      save(question.id, { revision: 1, attachments: files.slice(0, 4) }),
+      save(question.id, { revision: 2, attachments: files.slice(0, 4) }),
     );
     await json(save(otherQuestion.id, { attachments: [files[0]] }), 400);
     await json(

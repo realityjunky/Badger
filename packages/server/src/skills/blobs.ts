@@ -1,10 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
+import type { Queryable } from "../database/database.js";
 
 export interface BlobStore {
   put(content: Buffer): Promise<string>;
   get(hash: string): Promise<Buffer>;
+  remove(hash: string): Promise<void>;
+}
+
+/** Writers and cleanup share this transaction lock across server processes. */
+export async function lockBlobStore(tx: Queryable): Promise<void> {
+  await tx.query("select pg_advisory_xact_lock(8231130000000003)");
 }
 
 function sha256(content: Buffer): string {
@@ -37,6 +44,9 @@ export function filesystemBlobStore(directory: string): BlobStore {
   }
 
   return {
+    async remove(hash) {
+      await fs.rm(location(hash), { force: true });
+    },
     /**
      * Stores content under its SHA-256. The bytes are written and synced to a
      * private temporary file before they gain the address, and the address

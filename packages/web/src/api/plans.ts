@@ -10,7 +10,8 @@ export interface PlanVersion {
   id: string;
   number: number;
   hash: string;
-  canonicalJson: string;
+  canonicalJson: string | null;
+  requiresRecomposition?: boolean;
   snapshot: PlanSnapshot;
   createdBy: string;
   createdAt: string;

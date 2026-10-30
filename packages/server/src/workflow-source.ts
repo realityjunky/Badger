@@ -15,6 +15,7 @@ import {
 import { recordAudit, type WriteContext } from "./audit.js";
 import type { Database, Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
+import { expireAnswerAttachments } from "./questionnaire/attachment-expiry.js";
 import type { ServiceConfig } from "./config.js";
 import type { BlobStore } from "./skills/blobs.js";
 import { toIsoString } from "./util.js";
@@ -816,6 +817,7 @@ export class SourceCheckWorker {
 
   /** Claims the next runnable job and runs it; null when none can start. */
   async runOnce(): Promise<WorkflowJob | null> {
+    await expireAnswerAttachments(this.options);
     const job = await this.claim();
     return job === null ? null : this.process(job);
   }

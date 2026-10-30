@@ -407,7 +407,6 @@ describe("project-relative Creator records", () => {
     const source = candidate!.sources[0]!;
     dossier.sources[0] = {
       ...dossier.sources[0]!,
-      canonicalPath: source.root,
       contentHash: source.hash,
     };
     await fs.writeFile(

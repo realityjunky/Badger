@@ -2,7 +2,7 @@ import type { WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
 import { RequestError } from "../http/errors.js";
-import type { BlobStore } from "../skills/blobs.js";
+import { lockBlobStore, type BlobStore } from "../skills/blobs.js";
 import { normalizeUploadPath } from "../skills/paths.js";
 import type { AnswerAttachment } from "./answer-types.js";
 import { fields, revisionInput, textInput } from "./model.js";
@@ -120,6 +120,23 @@ export async function uploadAttachment(
   if (content.length === 0 || content.toString("base64") !== encoded)
     throw new RequestError(400, "Provide a nonempty file encoded as base64");
   validateFile(content, mediaType);
+  const unused = (
+    await tx.query<{ count: number; bytes: number }>(
+      `select count(*)::int as count, coalesce(sum(a.size), 0)::int as bytes
+     from answer_attachments a where a.question_id = $1 and a.person_id = $2
+     and not answer_attachment_is_referenced(a.id)`,
+      [questionId, context.personId],
+    )
+  ).rows[0]!;
+  if (
+    unused.count >= ATTACHMENT_LIMITS.maxFiles ||
+    unused.bytes + content.length > ATTACHMENT_LIMITS.maxAnswerBytes
+  )
+    throw new RequestError(
+      413,
+      "Limited to 8 unreferenced uploads per person per question and 20 MiB in total",
+    );
+  await lockBlobStore(tx);
   const hash = await blobs.put(content);
   const id = deps.ids.next();
   await tx.query(

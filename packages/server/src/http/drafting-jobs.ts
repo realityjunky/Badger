@@ -1,4 +1,5 @@
 import { isAuthoringJob, reconcileAuthoringJobs } from "../authoring.js";
+import { portableAuthoringHistory } from "../authoring-history.js";
 import { createHash } from "node:crypto";
 import { canonicalHash } from "@realityjunky/badger";
 import {
@@ -371,5 +372,5 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
     );
     return { status: 200, value: { job: publicDraftingJob(decided) } };
   });
-  reply.json(result.status, result.value);
+  reply.json(result.status, portableAuthoringHistory(result.value).snapshot);
 }

@@ -3155,7 +3155,7 @@ function authoringLanesDocument(
               sources: plan.semanticDossier.sources.map((source) => ({
                 id: source.id,
                 name: source.name,
-                canonicalPath: source.canonicalPath,
+                location: source.location,
                 contentHash: source.contentHash,
                 roles: [...source.roles],
               })),

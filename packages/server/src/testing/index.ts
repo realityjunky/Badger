@@ -44,3 +44,4 @@ export {
   startStubGitRepository,
   type StubGitRepositoryOptions,
 } from "./git.js";
+export { startStubGitProxy } from "./git-proxy.js";

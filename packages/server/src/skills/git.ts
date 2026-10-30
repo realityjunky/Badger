@@ -54,7 +54,7 @@ export async function fetchGitFiles(
   config: ServiceConfig,
   url: string,
   commit: string,
-): Promise<UploadFile[]> {
+): Promise<{ files: UploadFile[]; ref: string }> {
   if (runningFetches >= MAX_CONCURRENT_FETCHES)
     throw new RequestError(
       503,
@@ -76,7 +76,7 @@ async function fetchCommit(
   config: ServiceConfig,
   url: string,
   commit: string,
-): Promise<UploadFile[]> {
+): Promise<{ files: UploadFile[]; ref: string }> {
   const workspace = await fs.mkdtemp(
     path.join(config.storage.workspaceDirectory, "skill-git-"),
   );
@@ -89,6 +89,12 @@ async function fetchCommit(
     GIT_TERMINAL_PROMPT: "0",
     GIT_NO_REPLACE_OBJECTS: "1",
     GIT_ATTR_NOSYSTEM: "1",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.proxy",
+    GIT_CONFIG_VALUE_0: config.git.proxy ?? "",
+    // The private smart-HTTP transport applies the proxy to the upstream.
+    // Git's loopback hop must always reach that transport directly.
+    NO_PROXY: ["127.0.0.1", config.git.noProxy].filter(Boolean).join(","),
     // Git inflates objects before ls-tree can report their expanded sizes.
     // Bound individual allocations too, including unpack/delta allocations.
     GIT_ALLOC_LIMIT: String(config.uploads.maxBytes + 16 * 1024 * 1024),
@@ -225,6 +231,11 @@ async function fetchCommit(
       400,
       "The supplied hash must identify a commit, not a tag or tree",
     );
+  const notPublished = () =>
+    new RequestError(
+      400,
+      "This commit is refused: no published branch or tag reaches it in the registered repository",
+    );
   let transport: Awaited<ReturnType<typeof openGitTransport>> | undefined;
   try {
     await run(
@@ -244,31 +255,52 @@ async function fetchCommit(
     await run(
       [
         "fetch",
-        "--depth=1",
         "--no-tags",
         "--no-recurse-submodules",
         "--",
         opened.url,
-        commit,
+        "+refs/heads/*:refs/remotes/origin/*",
+        "+refs/tags/*:refs/tags/*",
       ],
-      () =>
-        opened.failure() ??
-        new RequestError(
-          400,
-          "The registered repository could not supply that commit",
-        ),
+      () => opened.failure() ?? notPublished(),
     );
     if ((await directoryBytes(workspace)) > config.git.maxRepositoryBytes)
       throw new RequestError(
         413,
         "Git repository exceeds the fetch size limit",
       );
+    if (
+      (await run(["cat-file", "-t", commit], notPublished))
+        .toString("utf8")
+        .trim() !== "commit"
+    )
+      throw notCommit();
     const resolved = (
-      await run(["rev-parse", "--verify", `${commit}^{commit}`], notCommit)
+      await run(["rev-parse", "--verify", `${commit}^{commit}`], notPublished)
     )
       .toString("utf8")
       .trim();
     if (resolved !== commit) throw notCommit();
+    const containing = (
+      await run(
+        [
+          "for-each-ref",
+          `--contains=${commit}`,
+          "--format=%(refname)",
+          "refs/remotes/origin/",
+          "refs/tags/",
+        ],
+        failed,
+      )
+    )
+      .toString("utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .sort();
+    const published = containing[0];
+    if (!published) throw notPublished();
+    const ref = published.replace(/^refs\/remotes\/origin\//u, "refs/heads/");
     const tree = await run(
       ["ls-tree", "-r", "-l", "-z", "--full-tree", commit],
       failed,
@@ -336,7 +368,7 @@ async function fetchCommit(
         400,
         "This tree keeps files in Git LFS, which a Git import cannot fetch; upload the Skill folder instead",
       );
-    return files;
+    return { files, ref };
   } finally {
     await transport?.close();
     await fs.rm(workspace, { recursive: true, force: true });

@@ -113,7 +113,9 @@ export interface ServiceConfig {
     maxFileBytes: number;
     maxFiles: number;
   };
+  answerAttachments: { retentionSeconds: number };
   git: {
+    proxy: string | undefined;
     allowedOrigins: string[];
     timeoutMs: number;
     maxRepositoryBytes: number;
@@ -673,6 +675,7 @@ export function loadConfig(
     );
   }
 
+  const gitProxy = readGitProxy(environment);
   const port = readPort(environment);
   const database = readDatabase(environment, mode);
   const platformAdministratorMapping =
@@ -750,10 +753,26 @@ export function loadConfig(
         max: 10000,
       }),
     },
+    answerAttachments: {
+      retentionSeconds: readInteger(
+        environment,
+        "BADGER_ANSWER_ATTACHMENT_RETENTION_SECONDS",
+        86400,
+        {
+          min: 60,
+          max: 365 * 86400,
+        },
+      ),
+    },
     git: {
-      httpsProxy: environment.https_proxy ?? environment.HTTPS_PROXY,
-      httpProxy: environment.http_proxy ?? environment.HTTP_PROXY,
-      noProxy: environment.no_proxy ?? environment.NO_PROXY,
+      proxy: gitProxy,
+      httpsProxy:
+        gitProxy ?? environment.https_proxy ?? environment.HTTPS_PROXY ?? "",
+      httpProxy:
+        gitProxy ?? environment.http_proxy ?? environment.HTTP_PROXY ?? "",
+      noProxy:
+        environment.BADGER_GIT_NO_PROXY ??
+        (gitProxy ? "" : (environment.no_proxy ?? environment.NO_PROXY ?? "")),
       allowedOrigins: readGitOrigins(environment),
       timeoutMs: readInteger(environment, "BADGER_GIT_TIMEOUT_MS", 30_000, {
         min: 100,
@@ -778,6 +797,31 @@ export function loadConfig(
       noProxy: environment.no_proxy ?? environment.NO_PROXY,
     },
   };
+}
+
+/** Validate without echoing a proxy URL, which may contain credentials. */
+function readGitProxy(environment: Environment): string | undefined {
+  const proxy = readString(environment, "BADGER_GIT_PROXY");
+  if (proxy === undefined) return undefined;
+  const invalid = () =>
+    new ConfigurationError(
+      "BADGER_GIT_PROXY must be an HTTP or HTTPS proxy URL without a path, query, or fragment",
+    );
+  let url: URL;
+  try {
+    url = new URL(proxy);
+  } catch {
+    throw invalid();
+  }
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    !url.hostname ||
+    url.pathname !== "/" ||
+    proxy.includes("?") ||
+    proxy.includes("#")
+  )
+    throw invalid();
+  return proxy;
 }
 
 /** Git destinations are host policy, never something a Skill can widen. */

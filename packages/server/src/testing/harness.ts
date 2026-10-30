@@ -18,7 +18,7 @@ import { NotificationWorker } from "../notifications/worker.js";
 import type { NotificationChannel } from "../notifications/port.js";
 import { WeComChannel } from "../notifications/wecom.js";
 import { createFixedClock, type TestClock } from "./clock.js";
-import { openTestDatabase } from "./database.js";
+import { openTestDatabase, type TestDatabase } from "./database.js";
 import { createSequentialIds } from "./ids.js";
 import {
   createTestIdentityAdapter,
@@ -35,6 +35,8 @@ import {
 export type TestServiceMode = "test-identity" | "local" | "service";
 
 export interface TestServiceOptions {
+  /** A migration test may restore historical records before serving them. It owns cleanup. */
+  database?: TestDatabase;
   notificationChannel?: NotificationChannel;
   mode?: TestServiceMode;
   /**
@@ -153,6 +155,14 @@ async function connect(
   loaded: ServiceConfig,
   options: TestServiceOptions,
 ): Promise<Connection> {
+  if (options.database)
+    return {
+      kind: options.database.kind,
+      database: options.database.database,
+      config: { ...loaded, database: options.database.configuration },
+      interrupt: options.database.interrupt,
+      release: async () => undefined,
+    };
   const namesDatabase = DATABASE_SETTINGS.some(
     (name) => options.environment?.[name] !== undefined,
   );

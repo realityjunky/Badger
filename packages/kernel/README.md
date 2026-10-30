@@ -127,6 +127,16 @@ record identities and revisions. The service stores valid snapshots once,
 and the Workflow owner approves the exact hash through a human gate. Record
 changes supersede approval and notify the Engineer and Workflow owner.
 
+Dossier source identity is the normalized, Project-relative `location` plus
+`contentHash`. The kernel resolves that location against the current Project
+root when matching inspected sources, so moving the storage workspace preserves
+an approved proposal, while changed Skill bytes still make it stale. New
+dossiers omit absolute `canonicalPath` values. Legacy dossiers remain readable
+in the service's history without their storage paths; their canonical text is
+withheld (`canonicalJson: null`, `requiresRecomposition: true`). Their original
+bytes, hashes, and confirmations remain stored, but they require recomposition
+and fresh dossier, plan, and proposal approvals before further authoring.
+
 Plan versions (#58) add `deriveFactoryPlan`, `composeFactoryPlan`, and
 `factoryPlanDraftSchema`. The skeleton fixes the approved dossier's frame,
 ordered Node identities, and pinned sources; edited plans retain the exact

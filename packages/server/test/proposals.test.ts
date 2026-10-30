@@ -39,6 +39,31 @@ async function approvedPlan() {
   return { ...fixture, plan, planVersion };
 }
 
+it("keeps an approved proposal current after its storage workspace moves", async () => {
+  service = await startPlanningService();
+  const { call, base, approve } = await approvedPlan();
+  await approve("plan", owner);
+  const { proposal } = await call(`${base}/proposal`);
+  await approve("proposal", owner);
+  const previous = service.config.storage.workspaceDirectory;
+  const moved = `${previous}-restored`;
+  try {
+    await fs.rename(previous, moved);
+    service.config.storage.workspaceDirectory = moved;
+    const view = await call(`${base}/proposal`);
+    expect(view.proposal).toEqual(proposal);
+    expect(view.confirmation.invalidatedAt).toBeNull();
+    const dossier = await call(`${base}/dossier`);
+    expect(JSON.stringify(dossier)).not.toContain(previous);
+    expect(dossier.versions[0].snapshot.dossier.sources[0]).not.toHaveProperty(
+      "canonicalPath",
+    );
+  } finally {
+    service.config.storage.workspaceDirectory = previous;
+    await fs.rename(moved, previous).catch(() => undefined);
+  }
+});
+
 it("previews the kernel proposal and source identities only for the current approved plan", async () => {
   service = await startPlanningService();
   const { call, base, approve, planVersion, skill } = await approvedPlan();

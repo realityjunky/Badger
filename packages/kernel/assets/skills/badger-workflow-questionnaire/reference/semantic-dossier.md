@@ -17,8 +17,10 @@ no new handoff may carry it.
   FactoryPlan: `workflow.goal` must equal both the plan's `goal` and its
   `workflow.goal`, and the validator refuses a mismatch.
 - `sources`: every explicit Skill declaration, with unique `id`, `name`,
-  `location` as declared, inspected `canonicalPath`, `contentHash`, and
-  nonempty `roles`. Use concise role descriptions, never copied Skill bodies.
+  normalized Project-relative `location`, inspected `contentHash`, and
+  nonempty `roles`. The kernel resolves the location under the current Project
+  root. Omit `canonicalPath`; legacy dossiers containing it need recomposition
+  and fresh approval. Use concise role descriptions, never copied Skill bodies.
 - `nodes`: every active Node in normalized order, with unique `id`, unique
   nonnegative `order`, and a `responsibility` topic.
 - `topics`: every topic listed below. A topic is
@@ -81,24 +83,24 @@ Every topic needs a nonempty summary and ledger references. If inapplicable,
 explain why explicitly and obtain confirmation; an omitted or empty topic is
 an unresolved field. For Node-specific behavior, name the Node IDs.
 
-| Topic | Required meaning |
-| --- | --- |
-| `inputs` | Workflow and per-Node inputs and their origin |
-| `prerequisites` | Conditions that must hold before each Node |
-| `bindings` | Supplied implementation owner for each Node |
-| `interfaces` | Data contracts between Nodes: the shape, columns, file naming, and evidence one Node's output must provide for the next Node's input |
-| `requiredSkillCalls` | Required supplied Skill calls and completion evidence |
-| `augmentations` | Supporting Skills and how they assist the owner |
-| `outputSchemas` | Per-Node artifacts, evidence, schema identities, validation |
-| `completionEvidence` | Observable completion criteria for every Node |
-| `decisions` | Genuine decisions, stable choice IDs, inputs and reviewers |
-| `guardrails` | Advancement constraints, validation and repair requirements |
-| `routes` | Success, failure, pause, conditional, handoff and completion routes |
-| `boundedCycles` | Entries, repeat transitions, bounds and exits |
-| `capabilities` | Required capabilities and their constraints |
-| `finalization` | Final outputs and completion responsibilities |
-| `executableDisclosures` | Inspected scripts, hooks and requested execution capabilities |
-| `recoveryPolicy` | Stops, repair ownership, retries and resume entry |
+| Topic                   | Required meaning                                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `inputs`                | Workflow and per-Node inputs and their origin                                                                                        |
+| `prerequisites`         | Conditions that must hold before each Node                                                                                           |
+| `bindings`              | Supplied implementation owner for each Node                                                                                          |
+| `interfaces`            | Data contracts between Nodes: the shape, columns, file naming, and evidence one Node's output must provide for the next Node's input |
+| `requiredSkillCalls`    | Required supplied Skill calls and completion evidence                                                                                |
+| `augmentations`         | Supporting Skills and how they assist the owner                                                                                      |
+| `outputSchemas`         | Per-Node artifacts, evidence, schema identities, validation                                                                          |
+| `completionEvidence`    | Observable completion criteria for every Node                                                                                        |
+| `decisions`             | Genuine decisions, stable choice IDs, inputs and reviewers                                                                           |
+| `guardrails`            | Advancement constraints, validation and repair requirements                                                                          |
+| `routes`                | Success, failure, pause, conditional, handoff and completion routes                                                                  |
+| `boundedCycles`         | Entries, repeat transitions, bounds and exits                                                                                        |
+| `capabilities`          | Required capabilities and their constraints                                                                                          |
+| `finalization`          | Final outputs and completion responsibilities                                                                                        |
+| `executableDisclosures` | Inspected scripts, hooks and requested execution capabilities                                                                        |
+| `recoveryPolicy`        | Stops, repair ownership, retries and resume entry                                                                                    |
 
 ## Completion and identity
 
