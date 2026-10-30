@@ -214,6 +214,35 @@ function removeBinding(binding: { id: string; revision: number }) {
 }
 
 describe("Skill versions by upload", () => {
+  it("refuses .git path segments in folder previews and confirmed uploads", async () => {
+    const { skillId } = await startLibrary();
+    for (const gitPath of [
+      ".git/config",
+      "example/.git/config",
+      "reference/.GIT/config",
+    ]) {
+      const content = {
+        files: [file("SKILL.md", SKILL_MD), file(gitPath, "private history")],
+      };
+      for (const action of ["upload-preview", "versions"]) {
+        const response = await write(`/api/v1/skills/${skillId}/${action}`, {
+          ...content,
+          ...(action === "versions"
+            ? { confirmed: true, expectedHash: UNCHECKED_HASH }
+            : {}),
+        });
+        expect(response.status, `${action}: ${gitPath}`).toBe(400);
+        const { error } = await response.json();
+        expect(error.message).toContain(gitPath);
+        expect(error.message).toMatch(/without its \.git folder.*git archive/u);
+      }
+    }
+    const versions = await service.request(versionsPath(skillId), {
+      as: administrator,
+    });
+    expect(await versions.json()).toEqual({ versions: [] });
+  });
+
   it("keeps a kernel-identified immutable version, its full inventory, and safe previews", async () => {
     const { skillId } = await startLibrary();
     const response = await upload(skillId, {
@@ -269,6 +298,29 @@ describe("Skill versions by upload", () => {
     expect(await audit.json()).toMatchObject({
       events: [{ targetType: "skill_version", after: { hash: version.hash } }],
     });
+  });
+
+  it("refuses .git entries in zip previews and confirmed uploads, including empty directories and metadata", async () => {
+    const { skillId } = await startLibrary();
+    for (const entry of [
+      { name: ".git/config", data: "private history" },
+      { name: "example/reference/.git/config", data: "private history" },
+      { name: ".git/", directory: true },
+      { name: "__MACOSX/.git/config", data: "private history" },
+    ]) {
+      for (const action of ["upload-preview", "versions"]) {
+        const response = await write(`/api/v1/skills/${skillId}/${action}`, {
+          archive: zip([{ name: "SKILL.md", data: SKILL_MD }, entry]),
+          ...(action === "versions"
+            ? { confirmed: true, expectedHash: UNCHECKED_HASH }
+            : {}),
+        });
+        expect(response.status, `${action}: ${entry.name}`).toBe(400);
+        const { error } = await response.json();
+        expect(error.message).toContain(entry.name);
+        expect(error.message).toMatch(/without its \.git folder.*git archive/u);
+      }
+    }
   });
 
   it("uploads a zip without running scripts and binds their side effects immutably", async () => {
