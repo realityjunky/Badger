@@ -657,7 +657,11 @@ The Skills dashboard accepts a Skill folder or zip, previews its inventory,
 lets the person declare each script's side effects, and requires confirmation
 before storing an immutable version. Never upload real data. Instructions,
 scripts, configuration, and synthetic examples are appropriate sources.
-Uploaded files never execute on the server.
+Uploaded files never execute on the server. Folder and zip previews and
+confirmed uploads refuse any `.git` path segment (case-insensitively),
+including empty zip directories and metadata entries. Upload the Skill without
+its `.git` folder, for example from `git archive` output. The `.git` folder
+is refused rather than added to the kernel's identity ignore list.
 
 The kernel checks `SKILL.md` frontmatter against the Skill entry's name and
 produces the version hash, inventory, and script records. OS and editor noise

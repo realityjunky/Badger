@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -209,6 +209,57 @@ it("previews and uploads an immutable Skill version from a folder against the co
   expect(await versions.json()).toMatchObject({
     versions: [{ hash: current.preview.hash, origin: "upload" }],
   });
+});
+
+it("refuses a nested .git folder before opening any local file or making an upload request", async () => {
+  const { groupId } = await setup();
+  const { skill } = await write("POST", "/skills", {
+    groupId,
+    name: "safe-upload",
+  });
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-git-"));
+  folders.push(folder);
+  await fs.writeFile(
+    path.join(folder, "SKILL.md"),
+    "---\nname: safe-upload\ndescription: Safe upload.\n---\n",
+  );
+  await fs.mkdir(path.join(folder, "z-repository", ".git"), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(folder, "z-repository", ".git", "config"),
+    "private history",
+  );
+  const { client } = await connect();
+  // Refresh permission discovery before observing this upload operation.
+  await client.listTools();
+  const opened = vi.spyOn(fs, "open");
+  const requests = vi.spyOn(globalThis, "fetch");
+  try {
+    const result = await client.callTool({
+      name: "upload_skill_version",
+      arguments: { skillId: skill.id, folder },
+    });
+    expect(result).toMatchObject({
+      isError: true,
+      content: [
+        expect.objectContaining({
+          text: expect.stringMatching(
+            /z-repository\/\.git.*without its \.git folder.*git archive/u,
+          ),
+        }),
+      ],
+    });
+    expect(
+      opened.mock.calls.filter(([target]) =>
+        String(target).startsWith(`${folder}${path.sep}`),
+      ),
+    ).toEqual([]);
+    expect(requests).not.toHaveBeenCalled();
+  } finally {
+    opened.mockRestore();
+    requests.mockRestore();
+  }
 });
 
 it("returns dashboard links for people-only actions and offers URL elicitation when supported", async () => {
