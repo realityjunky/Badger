@@ -300,7 +300,8 @@ only an origin's `workflowVersionId`, `recordId`, and `revision`.
 
 Agent hosts on token writes (#79) are delivered in the server and the
 Activity page: token writes record the Agent host, and the Activity page shows
-it beside the `mcp` channel.
+it beside the `mcp` channel. Every token request, reads included, must
+name its Agent host.
 
 The `.git` refusal in Skill uploads (#80) is delivered in the server, the
 Skills page, and the expert MCP profile: a folder or zip upload with a `.git`
