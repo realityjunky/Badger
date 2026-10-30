@@ -3,6 +3,7 @@ import {
   createQuestionnaireHandoff,
   type QuestionnaireRecords,
 } from "../src/index.js";
+import { validateQuestionnaireRecords } from "../src/factory/questionnaire-record-validation.js";
 
 describe("questionnaire record handoff validation", () => {
   const question = {
@@ -695,5 +696,41 @@ describe("questionnaire record handoff validation", () => {
         item.state,
       ]),
     ).toEqual([["inference-1", "confirmed"]]);
+  });
+
+  it("reads each question a bounded number of times however many records cite it", () => {
+    const count = 60;
+    let reads = 0;
+    const questions = new Proxy(
+      Array.from({ length: count }, (_, index) => ({
+        ...question,
+        id: `question-${index}`,
+      })),
+      {
+        get: (target, key, receiver) => {
+          if (typeof key === "string" && /^\d+$/u.test(key)) reads += 1;
+          return Reflect.get(target, key, receiver);
+        },
+      },
+    );
+
+    validateQuestionnaireRecords({
+      questions,
+      facts: Array.from({ length: count }, (_, index) => ({
+        ...fact,
+        id: `fact-${index}`,
+        questionId: `question-${index}`,
+      })),
+      drafts: Array.from({ length: count }, (_, index) => ({
+        ...draft,
+        id: `draft-${index}`,
+        questionId: `question-${index}`,
+        questionRevision: 1,
+      })),
+    });
+
+    // Scanning the questions for every fact and draft reads them about
+    // count * count times; the ledger's locked reads run this check.
+    expect(reads).toBeLessThanOrEqual(count * 8);
   });
 });

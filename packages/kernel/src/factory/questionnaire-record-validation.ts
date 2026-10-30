@@ -1,4 +1,7 @@
-import type { QuestionnaireRecords } from "./questionnaire-records.js";
+import type {
+  QuestionnaireQuestionRecord,
+  QuestionnaireRecords,
+} from "./questionnaire-records.js";
 import { SEMANTIC_DOSSIER_TOPICS } from "./questionnaire.js";
 
 // The record types take their unions from these lists, so a record that
@@ -156,6 +159,20 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
       (question.answers ?? []).map((answer) => answer.personId),
     );
   }
+  // References resolve through indexes built once, so the checks below stay
+  // linear in the records. Like a scan, they keep the first question with an
+  // ID; a duplicate is refused at the end.
+  const questions = new Map<string, QuestionnaireQuestionRecord>();
+  const answerHeads = new Map<string, Map<string, { revision: number }>>();
+  for (const question of records.questions) {
+    if (questions.has(question.id)) continue;
+    questions.set(question.id, question);
+    if (question.answers !== undefined)
+      answerHeads.set(
+        question.id,
+        new Map(question.answers.map((answer) => [answer.personId, answer])),
+      );
+  }
   for (const fact of records.facts ?? []) {
     fields("fact", fact, {
       id: text,
@@ -191,7 +208,7 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
       `answer for fact "${fact.id}"`,
       fact.answers.map((answer) => answer.personId),
     );
-    const question = records.questions.find((q) => q.id === fact.questionId);
+    const question = questions.get(fact.questionId);
     if (!question)
       throw new Error(
         `Invalid fact "${fact.id}": questionId "${fact.questionId}" names a missing question`,
@@ -218,11 +235,10 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
           "resolutionRevision does not name the question's current resolution revision",
         );
     }
-    if (question.answers !== undefined)
+    const heads = answerHeads.get(question.id);
+    if (heads !== undefined)
       for (const answer of fact.answers) {
-        const head = question.answers.find(
-          (a) => a.personId === answer.personId,
-        );
+        const head = heads.get(answer.personId);
         if (!head)
           invalid(
             `answer for fact "${fact.id}"`,
@@ -236,12 +252,9 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
             "revision names a missing answer revision",
           );
       }
+    const cited = new Set(fact.answers.map((answer) => answer.personId));
     for (const acknowledgement of fact.acknowledgements)
-      if (
-        !fact.answers.some(
-          (answer) => answer.personId === acknowledgement.personId,
-        )
-      )
+      if (!cited.has(acknowledgement.personId))
         invalid(
           "acknowledgement",
           acknowledgement.id,
@@ -260,7 +273,8 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
       status: choice(["active", "retired"]),
     });
     recordOrigin("draft", draft);
-    const question = records.questions.find((q) => q.id === draft.questionId);
+    const question =
+      draft.questionId === null ? undefined : questions.get(draft.questionId);
     if (draft.questionId !== null && !question)
       invalid(
         "draft",
