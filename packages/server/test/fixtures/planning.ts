@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { expect } from "vitest";
+import assert from "node:assert/strict";
 import {
   startTestService,
   type TestPerson,
@@ -48,13 +48,14 @@ export function planningRequest(service: TestService) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const value = await response.json();
-    expect(
+    assert.equal(
       response.status,
+      status,
       JSON.stringify({
         value,
         logs: response.status === 500 ? service.logs : undefined,
       }),
-    ).toBe(status);
+    );
     return value;
   };
 }

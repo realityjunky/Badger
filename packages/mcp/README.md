@@ -2,7 +2,7 @@
 
 The local Badger MCP runs over stdio and connects to one deployment through
 its HTTP API. It delivers the expert (#54), engineer (#55), and Operator installation (#64)
-profiles. Runtime Run tools follow separately. The service owns roles,
+profiles, local Run tools (#65), and dashboard gate delivery (#66). The service owns roles,
 questionnaire records, Skill identities, and sign-offs.
 
 Build and install the local command from the repository root:
@@ -288,9 +288,13 @@ takes the same location and a machine `submission`: the action, Run, revision,
 Node, execution identity, status, summary, evidence and routing read from the
 continuation. WorkflowRuntime enforces Completion and legal transitions.
 Decision/reviewer attestations, repair overrides, manual-stop decisions, human
-verification and finalization confirmations are excluded. Human gates return a
-Run dashboard link; delivery of signed-in gate answers is reserved for the gate
-feature.
+verification and finalization confirmations are excluded from Agent submissions.
+Human gates return a Run dashboard link. A person holding the published policy's
+required authority reviews and confirms their answer there. On the next `next`
+or `status` call, the MCP delivers the service-attested answer to WorkflowRuntime
+only if its Run revision and pending action still match. Changed finalization
+effects require another review. Concurrent delivery and reconnects preserve one
+committed answer. `status` can therefore advance a Run after human sign-off.
 
 Published bytes are verified by the kernel snapshot hash and installed under
 `<project>/.badger/packages/<hash>`. Runtime state stays authoritative under
@@ -314,8 +318,9 @@ error. Lists show the newest 100 authorized Runs. Outcome summaries retain the
 latest 256 entries with explicit total/returned/omitted counts. Run detail pages
 through every original event, 500 at a time, using `afterSequence`; the dashboard
 offers first/next page controls. Full events remain in the authoritative local
-Run and immutable service records. Deep integrity/gate attestation is a separate
-feature; these APIs validate sequence, identity, structure and size.
+Run and immutable service records. These APIs validate sequence, identity,
+structure and size; dashboard gate attestations preserve the person's sign-off
+without making the service an execution authority.
 
 Service evaluation runs the trusted installed `certification.js` child inside the
 existing time, process-tree memory, private temporary-directory and scrubbed

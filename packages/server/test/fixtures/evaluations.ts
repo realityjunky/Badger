@@ -53,7 +53,21 @@ export async function assembledFixture(
         200,
         secret,
       );
-      const laneOutput = reportLaneOutput(claimed.contextBundle);
+      const decisionGuidance =
+        fixture.plan.workflow.customNodes
+          .filter((node: any) => node.decision)
+          .map(
+            (node: any) =>
+              `Decision: \`${node.decision.id}\` ${node.decision.question}\n${node.decision.choices.map((choice: any) => `Choice: \`${choice.id}\` ${choice.label}`).join("\n")}`,
+          )
+          .join("\n") +
+        (fixture.plan.workflow.capabilities?.durability
+          ? "\nWorkflowRuntime owns recovery, including repair policy and transactional finalization. Inspect its persisted pending action before resuming."
+          : "");
+      const laneOutput = reportLaneOutput(
+        claimed.contextBundle,
+        decisionGuidance,
+      );
       const { job: submitted } = await call(
         `${route}/submit`,
         "POST",

@@ -8,6 +8,8 @@ import type { NotificationEvent } from "./preferences.js";
 import { eligibleNotificationItems } from "./eligibility.js";
 
 export interface NotificationItemRow {
+  run_gate_id: string | null;
+  run_id: string | null;
   id: string;
   workflow_id: string;
   workflow_version_id: string;
@@ -32,14 +34,16 @@ export interface NotificationItemRow {
 export const NOTIFICATION_ITEM_SELECT = `select i.id, i.workflow_version_id, v.workflow_id, w.name as workflow_name,
   i.kind, coalesce(i.person_id, b.person_id) as person_id, i.binding_id,
   coalesce(p.display_name, 'Invited person') as name,
-  prefs.wecom_user_id, prefs.mobile, prefs.mention_events, i.question_id, i.concern_id, i.gate, i.fact_id, i.drafting_job_id, i.evaluation_report_id,
+  prefs.wecom_user_id, prefs.mobile, prefs.mention_events, i.question_id, i.concern_id, i.gate, i.fact_id, i.drafting_job_id, i.evaluation_report_id, i.run_gate_id, rg.run_id,
   array(select distinct a.actor_person_id from audit_events a where a.notification_action_id = i.notification_action_id and a.actor_person_id is not null) as requester_ids
   from inbox_items i join workflow_versions v on v.id = i.workflow_version_id
   join workflows w on w.id = v.workflow_id left join role_bindings b on b.id = i.binding_id
   left join people p on p.id = coalesce(i.person_id, b.person_id)
-  left join person_notification_preferences prefs on prefs.person_id = p.id`;
+  left join person_notification_preferences prefs on prefs.person_id = p.id
+  left join run_gates rg on rg.id=i.run_gate_id`;
 
 export function itemHref(item: NotificationItemRow): string {
+  if (item.run_id !== null) return `/runs/${encodeURIComponent(item.run_id)}`;
   if (item.gate === "publication")
     return `/workflows/${encodeURIComponent(item.workflow_id)}/versions/${encodeURIComponent(item.workflow_version_id)}#review-publication`;
   if (item.evaluation_report_id !== null)

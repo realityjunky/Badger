@@ -14,6 +14,9 @@ import {
 import {
   createWorkflowRuntime,
   validateWorkflowMachineVerification,
+  workflowGateBinding,
+  type WorkflowContinuation,
+  type WorkflowDecisionSubmission,
   type WorkflowRunReport,
   type WorkflowMachineSubmission,
 } from "@realityjunky/badger/workflow-runtime";
@@ -23,7 +26,11 @@ import {
   type PublishedIdentity,
   type PublishedPackageRead,
 } from "@realityjunky/badger-hosts";
-import { BadgerApi, isRetryableBadgerFailure } from "./api.js";
+import {
+  BadgerApi,
+  BadgerTimeoutError,
+  isRetryableBadgerFailure,
+} from "./api.js";
 import { id, tool } from "./tools.js";
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const local = { projectRoot: z.string().min(1).max(4096), runId: id };
@@ -123,6 +130,10 @@ export class LocalRuns {
   >();
   private readonly pending = new Map<string, Promise<void>>();
   private readonly queueTasks = new Map<string, Promise<unknown>>();
+  private readonly gateDeliveries = new Map<
+    string,
+    Promise<WorkflowContinuation>
+  >();
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly errors = new Map<string, string>();
   private readonly retries = new Map<string, { count: number; at: number }>();
@@ -380,6 +391,64 @@ export class LocalRuns {
     }
     this.schedule(args, true);
   }
+  async deliverGateAnswer(
+    args: { projectRoot: string; runId: string },
+    binding: Binding,
+    current: WorkflowContinuation,
+  ) {
+    if (current.pendingAction?.type !== "ask_user") return current;
+    const key = path.join(args.projectRoot, runRelative(args.runId));
+    const previous = this.gateDeliveries.get(key);
+    if (previous) return previous;
+    const delivery = this.deliverGateAnswerUnlocked(args, binding, current);
+    this.gateDeliveries.set(key, delivery);
+    try {
+      return await delivery;
+    } finally {
+      if (this.gateDeliveries.get(key) === delivery)
+        this.gateDeliveries.delete(key);
+    }
+  }
+  private async deliverGateAnswerUnlocked(
+    args: { projectRoot: string; runId: string },
+    binding: Binding,
+    current: WorkflowContinuation,
+  ) {
+    const key = path.join(args.projectRoot, runRelative(args.runId));
+    // Flush a newly refreshed gate before asking for its answer. Failed mirroring
+    // never makes a response for another revision eligible for local submission.
+    this.schedule(args, true);
+    await this.pending.get(key);
+    let delivery: {
+      answer: {
+        bindingHash: string;
+        submission: WorkflowDecisionSubmission;
+      } | null;
+    };
+    try {
+      delivery = await this.api.request(
+        `/runs/${binding.registrationId}/gate-answer`,
+        "GET",
+        undefined,
+        1,
+      );
+    } catch (error) {
+      if (
+        !isRetryableBadgerFailure(error) &&
+        !(error instanceof BadgerTimeoutError)
+      )
+        throw error;
+      this.errors.set(key, "Gate delivery is waiting for the Badger service");
+      return current;
+    }
+    const answer = delivery.answer;
+    if (
+      !answer ||
+      answer.bindingHash !== canonicalHash(workflowGateBinding(current))
+    )
+      return current;
+    return runtime.submit(target(args), answer.submission);
+  }
   reporting(args: { projectRoot: string; runId: string }) {
     return {
       error:
@@ -493,7 +562,7 @@ export function operatorTools(
         ? {
             requiresPerson: true,
             message:
-              "Ask the person to open the Run in Badger. Run gate answers and confirmations stay with people; gate delivery is not available yet.",
+              "Ask the person to open the Run in Badger. Their gate answer will be delivered on the next next or status call.",
           }
         : {}),
     };
@@ -583,7 +652,7 @@ export function operatorTools(
         packageHash: hash.optional(),
       },
       async (args) => {
-        const current = await runtime.inspect(target(args));
+        let current = await runtime.inspect(target(args));
         if (!current) {
           if (!args.workflowId || !args.publicationId || !args.packageHash)
             throw new Error(
@@ -603,6 +672,10 @@ export function operatorTools(
           };
         }
         const { binding } = await runs.binding(args);
+        if (current.pendingAction?.type === "ask_user") {
+          current = await runtime.resume(target(args));
+          current = await runs.deliverGateAnswer(args, binding, current);
+        }
         await runs.capture(args);
         return {
           ...result(binding, current, args),
@@ -610,7 +683,7 @@ export function operatorTools(
         };
       },
       "operateRuns",
-      true,
+      false,
     ),
     tool(
       "next",
@@ -618,7 +691,11 @@ export function operatorTools(
       local,
       async (args) => {
         const { binding } = await runs.binding(args);
-        const continuation = await runtime.resume(target(args));
+        const continuation = await runs.deliverGateAnswer(
+          args,
+          binding,
+          await runtime.resume(target(args)),
+        );
         await runs.capture(args);
         return result(binding, continuation, args);
       },

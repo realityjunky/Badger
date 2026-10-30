@@ -1,4 +1,23 @@
 import type { WorkflowRunReport, WorkflowRunEvent } from "@realityjunky/badger";
+import type {
+  WorkflowDecisionSubmission,
+  WorkflowFinalizationPreview,
+} from "@realityjunky/badger/workflow-runtime";
+export interface RunGate {
+  id: string;
+  state: "open" | "answered" | "superseded";
+  revision: number;
+  pendingAction: NonNullable<
+    WorkflowRunReport["continuation"]["pendingAction"]
+  >;
+  finalizationPreview: WorkflowFinalizationPreview | null;
+  canAnswer: boolean;
+  answer: {
+    actorId: string;
+    answeredAt: string;
+    submission: WorkflowDecisionSubmission;
+  } | null;
+}
 export interface Run {
   id: string;
   workflowId: string;

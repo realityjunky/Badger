@@ -30,6 +30,280 @@ async function value(name: string, args: Record<string, unknown> = {}) {
   if (v.localFile) v = JSON.parse(await fs.readFile(v.localFile, "utf8"));
   return v;
 }
+it("delivers only a dashboard-attested gate answer on status and next, including after reconnect", async () => {
+  const { publishedFixture, operator, decisionPlan } =
+    await import("../../server/test/fixtures/runs.js");
+  service = await startPlanningService();
+  const f = await publishedFixture(service, decisionPlan);
+  const connect = async () => {
+    currentServer = createBadgerMcp({
+      url: service.baseUrl,
+      token: f.operatorToken,
+      agentHost: "Planning Agent",
+      profile: "operator",
+    });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await currentServer.connect(b);
+    client = new Client({ name: "gate-operator", version: "1" });
+    await client.connect(a);
+  };
+  await connect();
+  root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-gate-"));
+  for (const name of ["status", "next"]) {
+    const args = { projectRoot: root, runId: `gate-${name}` };
+    const started = await value("start", {
+      ...args,
+      workflowId: f.workflow.id,
+      publicationId: f.publication.id,
+      packageHash: f.publication.packageHash,
+      hostLabel: "Lab",
+      confirmed: true,
+    });
+    expect(started.requiresPerson).toBe(true);
+    const runId = started.runUrl.split("/").at(-1);
+    const route = `/runs/${runId}`;
+    await expect
+      .poll(
+        async () =>
+          (await f.call(`${route}/gates`, "GET", undefined, operator)).gates
+            .length,
+      )
+      .toBe(1);
+    const { gates } = await f.call(
+      `${route}/gates`,
+      "GET",
+      undefined,
+      operator,
+    );
+    const gate = gates[0];
+    const answer = {
+      choiceId: "release",
+      inputs: { ticket: "REL-66" },
+      rationale: "The person reviewed release.",
+    };
+    const { preview } = await f.call(
+      `${route}/gates/${gate.id}/preview`,
+      "POST",
+      answer,
+      operator,
+    );
+    await f.call(
+      `${route}/gates/${gate.id}/answer`,
+      "POST",
+      {
+        ...answer,
+        confirmed: true,
+        confirmationHash: preview.confirmationHash,
+        requestId: `answer-${name}`,
+      },
+      operator,
+    );
+    await client.close();
+    await currentServer!.close();
+    await connect();
+    const [continued, repeated] = await Promise.all([
+      value(name, args),
+      value(name, args),
+    ]);
+    expect(continued.continuation.disposition).toBe("done");
+    expect(repeated.continuation.revision).toBe(
+      continued.continuation.revision,
+    );
+    expect(repeated.continuation.decisionReceipts).toHaveLength(1);
+    expect(repeated.continuation.decisionReceipts[0].reviewer).toEqual(
+      preview.submission.reviewer,
+    );
+  }
+}, 60_000);
+
+it("delivers manual-stop and finalization answers through WorkflowRuntime and asks again when finalization effects change", async () => {
+  const { publishedFixture, operator, durableGatePlan } =
+    await import("../../server/test/fixtures/runs.js");
+  service = await startPlanningService();
+  const f = await publishedFixture(service, durableGatePlan);
+  await f.call(
+    "/bindings",
+    "POST",
+    {
+      scopeType: "workflow",
+      scopeId: f.workflow.id,
+      email: owner.email,
+      role: "Operator",
+    },
+    admin,
+    201,
+  );
+  currentServer = createBadgerMcp({
+    url: service.baseUrl,
+    token: f.operatorToken,
+    agentHost: "Planning Agent",
+    profile: "operator",
+  });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await currentServer.connect(b);
+  client = new Client({ name: "durable-gates", version: "1" });
+  await client.connect(a);
+  root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-durable-gates-"));
+  for (const mode of ["manual-stop", "finalization"]) {
+    const args = { projectRoot: root, runId: mode };
+    const started = await value("start", {
+      ...args,
+      workflowId: f.workflow.id,
+      publicationId: f.publication.id,
+      packageHash: f.publication.packageHash,
+      hostLabel: "Lab",
+      confirmed: true,
+    });
+    const route = `/runs/${started.runUrl.split("/").at(-1)}`;
+    let current = started.continuation;
+    for (
+      let attempt = 0;
+      attempt < (mode === "manual-stop" ? 2 : 1);
+      attempt++
+    ) {
+      const reply = await value("submit", {
+        ...args,
+        submission: {
+          actionId: current.pendingAction.id,
+          revision: current.revision,
+          execution: current.execution,
+          runId: current.runId,
+          nodeId: current.currentNode,
+          status: mode === "manual-stop" ? "failed" : "succeeded",
+          summary: "Report checked.",
+          evidence: { summary: "Reviewed the report." },
+        },
+      });
+      current = reply.continuation;
+    }
+    expect(current.pendingAction.type).toBe("ask_user");
+    expect(
+      current.pendingAction[mode === "manual-stop" ? "repair" : "finalization"],
+    ).toBeTruthy();
+    const person = mode === "manual-stop" ? operator : owner;
+    const answer = {
+      choiceId: mode === "manual-stop" ? "stop" : "confirm",
+      rationale: "Reviewed this exact pending action.",
+    };
+    const answerGate = async (
+      requestId: string,
+      choiceId = answer.choiceId,
+    ) => {
+      await expect
+        .poll(
+          async () =>
+            (
+              await f.call(`${route}/gates`, "GET", undefined, person)
+            ).gates.filter((gate: any) => gate.state === "open").length,
+        )
+        .toBe(1);
+      const gate = (
+        await f.call(`${route}/gates`, "GET", undefined, person)
+      ).gates.find((gate: any) => gate.state === "open");
+      if (mode === "finalization")
+        expect(gate.finalizationPreview.operations[0]).toMatchObject({
+          kind: "write",
+          target: "released.txt",
+        });
+      if (mode === "finalization")
+        await f.call(
+          `${route}/gates/${gate.id}/preview`,
+          "POST",
+          { ...answer, rationale: "x".repeat(257) },
+          person,
+          400,
+        );
+      if (mode === "manual-stop")
+        await f.call(
+          `${route}/gates/${gate.id}/preview`,
+          "POST",
+          { ...answer, choiceId, rationale: "x".repeat(257) },
+          person,
+          400,
+        );
+      const { preview } = await f.call(
+        `${route}/gates/${gate.id}/preview`,
+        "POST",
+        { ...answer, choiceId },
+        person,
+      );
+      await f.call(
+        `${route}/gates/${gate.id}/answer`,
+        "POST",
+        {
+          ...answer,
+          choiceId,
+          confirmed: true,
+          confirmationHash: preview.confirmationHash,
+          requestId,
+        },
+        person,
+      );
+      return gate;
+    };
+    if (mode === "manual-stop") {
+      await answerGate("answer-retry", "retry-with-new-approach");
+      const retried = await value("next", args);
+      expect(retried.continuation.disposition).toBe("continue");
+      const retry = retried.continuation;
+      const failed = await value("submit", {
+        ...args,
+        submission: {
+          actionId: retry.pendingAction.id,
+          revision: retry.revision,
+          runId: retry.runId,
+          nodeId: retry.currentNode,
+          execution: retry.execution,
+          status: "failed",
+          summary: "The repaired report still fails.",
+          evidence: { summary: "Checked the repair." },
+        },
+      });
+      expect(failed.continuation.pendingAction.type).toBe("ask_user");
+      await expect
+        .poll(
+          async () =>
+            (
+              await f.call(`${route}/gates`, "GET", undefined, person)
+            ).gates.filter((gate: any) => gate.state === "open").length,
+        )
+        .toBe(1);
+      const nextGate = (
+        await f.call(`${route}/gates`, "GET", undefined, person)
+      ).gates.find((gate: any) => gate.state === "open");
+      await f.call(
+        `${route}/gates/${nextGate.id}/preview`,
+        "POST",
+        { ...answer, choiceId: "retry-with-new-approach" },
+        person,
+        400,
+      );
+    }
+    const gate = await answerGate(`answer-${mode}`);
+    if (mode === "finalization") {
+      await fs.writeFile(
+        path.join(root, "released.txt"),
+        "changed after review\n",
+      );
+      const stale = await value("next", args);
+      expect(stale.continuation.disposition).toBe("await-user");
+      expect(await fs.readFile(path.join(root, "released.txt"), "utf8")).toBe(
+        "changed after review\n",
+      );
+      expect((await answerGate("answer-refreshed-finalization")).id).not.toBe(
+        gate.id,
+      );
+    }
+    const continued = await value("next", args);
+    expect(continued.continuation.disposition).toBe(
+      mode === "manual-stop" ? "blocked" : "done",
+    );
+    if (mode === "finalization")
+      expect(await fs.readFile(path.join(root, "released.txt"), "utf8")).toBe(
+        "released\n",
+      );
+  }
+}, 300_000);
 it("runs a verified publication through actual MCP tools and mirrors ordered events and fixed person/host identity", async () => {
   service = await startPlanningService();
   const f = await assembledFixture(service);

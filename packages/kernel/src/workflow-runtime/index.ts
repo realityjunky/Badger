@@ -49,6 +49,7 @@ import type {
   NodeProtocol,
   WorkflowProtocol,
   WorkflowReviewerPolicy,
+  WorkflowReviewerAttestation,
   WorkflowVerificationKind,
   WorkflowVerificationReceipt,
   WorkflowVerificationReceiptProposal,
@@ -124,7 +125,10 @@ import {
   acquireRevisionClaim,
   type RevisionClaimInput,
 } from "./revision-claim.js";
-import { sameDurabilityProfile } from "./durability.js";
+import {
+  sameDurabilityProfile,
+  normalizeWorkflowDurabilityProtocol,
+} from "./durability.js";
 import {
   readWorkflowTransitionJournal,
   recoverWorkflowTransition,
@@ -193,6 +197,7 @@ import {
   workflowFinalizationReceiptReference,
   WorkflowFinalizationConflictError,
   WorkflowFinalizationTransactionPendingError,
+  normalizeWorkflowFinalizationDefinition,
 } from "./finalization.js";
 
 async function withStructuredRuntimeErrors<T>(
@@ -328,6 +333,7 @@ import type {
   WorkflowStateProjection,
   WorkflowStateProjectionStatus,
   WorkflowDecisionSubmission,
+  WorkflowGateAnswer,
   Submission,
   WorkflowSubmission,
 } from "./types.js";
@@ -1472,6 +1478,137 @@ function validateReviewer(
       throw new Error(`Decision reviewer lacks authority: ${required}`);
     }
   }
+}
+
+/** The context a person reviews, also compared before delivering their answer. */
+export function workflowGateBinding(current: WorkflowContinuation) {
+  return {
+    runId: current.runId,
+    revision: current.revision,
+    nodeId: current.currentNode,
+    cycleId: current.cycleId,
+    attemptId: current.attemptId,
+    execution: current.execution,
+    pendingAction: current.pendingAction,
+  };
+}
+
+/** Apply the same published-policy normalization as runtime compilation. */
+export function workflowGatePolicy(
+  protocol: WorkflowProtocol,
+  current: WorkflowContinuation,
+): WorkflowReviewerPolicy {
+  const normalized = normalizeWorkflowDurabilityProtocol(protocol);
+  const action = current.pendingAction;
+  let policy: WorkflowReviewerPolicy | undefined;
+  if (action?.finalization && normalized.finalization) {
+    policy = normalizeWorkflowFinalizationDefinition(normalized.finalization)
+      .confirmation?.reviewer;
+  } else if (action?.repair) {
+    policy = normalized.capabilities?.durability?.repairPolicy?.reviewer;
+  } else {
+    const decision = normalized.nodes.find(
+      (node) => node.id === current.currentNode,
+    )?.decision;
+    if (!decision || decision.id !== action?.decisionId)
+      throw new Error("The pending gate has no matching published decision");
+    policy = decision.reviewer;
+  }
+  return {
+    subjects: [...(policy?.subjects ?? [])].sort(),
+    authorities: [...(policy?.authorities ?? [])].sort(),
+  };
+}
+
+/** Prepare a human response without evaluating or advancing a Run. */
+export function prepareWorkflowGateAnswer(
+  current: WorkflowContinuation,
+  answer: WorkflowGateAnswer,
+  reviewer: WorkflowReviewerAttestation,
+): WorkflowDecisionSubmission {
+  const action = current.pendingAction;
+  if (action?.type !== "ask_user" || !action.decisionId)
+    throw new Error("The Run has no answerable human gate");
+  if (
+    !answer ||
+    typeof answer !== "object" ||
+    Array.isArray(answer) ||
+    Object.keys(answer).some(
+      (key) => !["choiceId", "inputs", "rationale"].includes(key),
+    )
+  )
+    throw new Error(
+      "A gate answer accepts only choiceId, inputs, and rationale",
+    );
+  const choice = action.choices?.find(
+    (choice) => choice.id === answer.choiceId,
+  );
+  if (!choice) throw new Error("Choose one of the pending gate's choices");
+  const inputs = answer.inputs ?? {};
+  validateScalarRecord(inputs, "Decision inputs");
+  validateDecisionInputSchema(
+    choice.requiredInputs ??
+      action.requiredInputs ?? { type: "object", fields: [] },
+    inputs,
+  );
+  if (
+    answer.rationale !== undefined &&
+    (typeof answer.rationale !== "string" || !answer.rationale.trim())
+  )
+    throw new Error("Gate rationale must contain text");
+  if (action.rationale?.required && !answer.rationale?.trim())
+    throw new Error("Gate rationale is required");
+  validateReviewer(reviewer, action.reviewer);
+  const submission: WorkflowDecisionSubmission = {
+    kind: "decision",
+    actionId: action.id,
+    runId: current.runId,
+    revision: current.revision,
+    nodeId: current.currentNode,
+    cycleId: current.cycleId,
+    attemptId: current.attemptId,
+    execution: structuredClone(current.execution),
+    decisionId: action.decisionId,
+    choiceId: answer.choiceId,
+    reviewer: structuredClone(reviewer),
+    ...(answer.inputs === undefined ? {} : { inputs: structuredClone(inputs) }),
+    ...(answer.rationale === undefined ? {} : { rationale: answer.rationale }),
+    ...(action.scope === undefined
+      ? {}
+      : { scope: structuredClone(action.scope) }),
+    ...(action.repair && answer.choiceId === "retry-with-new-approach"
+      ? {
+          repair: {
+            expectedSignatureHash: action.repair.signatureHash,
+            hypothesis: answer.rationale,
+          },
+        }
+      : {}),
+    ...(action.finalization === undefined
+      ? {}
+      : {
+          finalization: {
+            planHash: action.finalization.planHash,
+            decisionId: action.finalization.decisionId,
+            choiceId: answer.choiceId as "confirm" | "cancel",
+            contentSnapshotHash: action.finalization.contentSnapshotHash,
+            verificationReceiptIds: [
+              ...action.finalization.verificationReceiptIds,
+            ],
+          },
+        }),
+  };
+  if (isWorkflowRepairAction(action))
+    validateRepairDecisionResponse(
+      current,
+      action,
+      current.currentNode,
+      submission,
+    );
+  if (isWorkflowFinalizationAction(action))
+    validateFinalizationDecisionResponse(current, action, submission);
+  validateSubmission(submission);
+  return submission;
 }
 
 function validateFinalizationSubmissionShape(
@@ -3328,6 +3465,9 @@ export async function readWorkflowRunReport(
         );
       const projection = (await projectWorkflowState(target))!;
       const continuation = (await inspectWorkflowRun(target))!;
+      if (continuation.pendingAction?.finalization)
+        continuation.finalizationPreview =
+          await previewWorkflowFinalization(target);
       const events = await readTrajectory(
         location.runRoot,
         before.trajectoryRef,
@@ -3687,12 +3827,18 @@ function validateDecisionResponse(
   if (pending.type !== "ask_user") {
     throw new Error(`Decision response cannot satisfy ${pending.type} action`);
   }
+  const gateContext: WorkflowGateContext = {
+    execution: verified.identity,
+    revision: verified.state.workflowRuntime?.revision ?? 0,
+    repair: verified.state.workflowRuntime?.repairEpisode,
+    finalization: verified.state.workflowRuntime?.finalization,
+  };
   if (isWorkflowFinalizationAction(pending)) {
-    validateFinalizationDecisionResponse(verified, pending, submission);
+    validateFinalizationDecisionResponse(gateContext, pending, submission);
     return;
   }
   if (isWorkflowRepairAction(pending)) {
-    validateRepairDecisionResponse(verified, pending, node, submission);
+    validateRepairDecisionResponse(gateContext, pending, node, submission);
     return;
   }
   const runtimeState = verified.state.workflowRuntime;
@@ -3774,15 +3920,20 @@ function validateDecisionResponse(
   }
 }
 
+type WorkflowGateContext = Pick<
+  WorkflowContinuation,
+  "execution" | "revision" | "repair" | "finalization"
+>;
+
 function validateFinalizationDecisionResponse(
-  verified: VerifiedWorkflowRun,
+  context: WorkflowGateContext,
   pending: EngineAction & {
     finalization: WorkflowFinalizationPendingConfirmation;
   },
   submission: WorkflowDecisionSubmission,
 ): void {
   const finalization = pending.finalization;
-  const stateFinalization = verified.state.workflowRuntime?.finalization;
+  const stateFinalization = context.finalization;
   if (
     !stateFinalization ||
     stateFinalization.status !== "awaiting-confirmation" ||
@@ -3792,7 +3943,7 @@ function validateFinalizationDecisionResponse(
     throw new Error("Workflow finalization confirmation state is invalid");
   }
   if (
-    submission.revision !== verified.state.workflowRuntime?.revision ||
+    submission.revision !== context.revision ||
     submission.nodeId !== null ||
     submission.attemptId !== null ||
     submission.cycleId !== null
@@ -3801,7 +3952,7 @@ function validateFinalizationDecisionResponse(
       "Workflow finalization confirmation context does not match the Run",
     );
   }
-  validateDecisionExecution(submission, verified.identity);
+  validateDecisionExecution(submission, context.execution);
   if (
     submission.decisionId !== undefined &&
     submission.decisionId !== finalization.decisionId
@@ -3850,7 +4001,7 @@ function validateFinalizationDecisionResponse(
   if (
     submission.rationale !== undefined &&
     Buffer.byteLength(submission.rationale, "utf8") >
-      (verified.identity.durabilityProfile?.bounds.finalizationContentBytes ??
+      (context.execution.durabilityProfile?.bounds.finalizationContentBytes ??
         64 * 1024)
   ) {
     throw new Error(
@@ -3860,7 +4011,7 @@ function validateFinalizationDecisionResponse(
 }
 
 function validateRepairDecisionResponse(
-  verified: VerifiedWorkflowRun,
+  context: WorkflowGateContext,
   pending: EngineAction & {
     repair: WorkflowRepairPendingDecision;
   },
@@ -3868,13 +4019,12 @@ function validateRepairDecisionResponse(
   submission: WorkflowDecisionSubmission,
 ): void {
   const repair = pending.repair;
-  const runtime = verified.state.workflowRuntime;
-  const episode = runtime?.repairEpisode;
-  if (!runtime || !episode || episode.pendingDecision === undefined) {
+  const episode = context.repair;
+  if (!episode || episode.pendingDecision === undefined) {
     throw new Error("Workflow repair decision state is missing");
   }
   if (
-    submission.revision !== runtime.revision ||
+    submission.revision !== context.revision ||
     submission.nodeId !== repair.nodeId ||
     submission.attemptId !== repair.attemptId ||
     submission.cycleId !== repair.cycleId
@@ -3884,7 +4034,7 @@ function validateRepairDecisionResponse(
   if (node !== repair.nodeId) {
     throw new Error("Workflow repair decision Node does not match the Run");
   }
-  validateDecisionExecution(submission, verified.identity);
+  validateDecisionExecution(submission, context.execution);
   if (
     submission.decisionId !== undefined &&
     submission.decisionId !== repair.decisionId
@@ -3911,7 +4061,7 @@ function validateRepairDecisionResponse(
     throw new Error("Workflow repair decisions do not accept evidence scope");
   }
   validateReviewer(submission.reviewer, repair.reviewer);
-  const policy = verified.identity.durabilityProfile?.repairPolicy;
+  const policy = context.execution.durabilityProfile?.repairPolicy;
   if (!policy) throw new Error("Workflow repair decision policy is missing");
   const normalizedPolicy = normalizeWorkflowRepairPolicy(policy);
   const repairInput = submission.repair;
@@ -3986,6 +4136,12 @@ function validateRepairDecisionResponse(
   if (repair.rationale.required && !rationale) {
     throw new Error("Workflow repair decision rationale is required");
   }
+  if (
+    rationale !== undefined &&
+    Buffer.byteLength(rationale, "utf8") >
+      normalizedPolicy.maxOverrideRationaleBytes
+  )
+    throw new Error("Workflow repair rationale exceeds its bound");
   const overrideRequested =
     expectedSignature !== undefined || hypothesis !== undefined;
   if (!overrideRequested) return;
@@ -4021,7 +4177,7 @@ function validateRepairDecisionResponse(
       record.kind === "override" &&
       record.signatureHash === repair.signatureHash,
   );
-  if (overrideAlreadyUsed) {
+  if (overrideAlreadyUsed || episode.reasonCode === "override-already-used") {
     throw new Error(
       "Workflow repair override has already been used for this signature",
     );

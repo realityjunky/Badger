@@ -96,6 +96,13 @@ export interface WorkflowDecisionSubmission {
   finalization?: WorkflowFinalizationSubmission;
 }
 
+/** A person's answer contains no caller-supplied identity or runtime context. */
+export interface WorkflowGateAnswer {
+  choiceId: string;
+  inputs?: Record<string, DecisionScalar>;
+  rationale?: string;
+}
+
 export interface ManualWorkflowRunLocation {
   kind: "manual";
   runRoot: string;
@@ -180,6 +187,7 @@ export interface WorkflowContinuation {
   requiresUserDecision: boolean;
   repair?: WorkflowRepairEpisodeState;
   finalization?: WorkflowFinalizationState;
+  finalizationPreview?: WorkflowFinalizationPreview;
 }
 
 export interface WorkflowHandoff {

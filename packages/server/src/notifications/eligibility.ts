@@ -7,6 +7,10 @@ import { readQuestions } from "../questionnaire/store.js";
 import { workflowCapabilities } from "../workflow-access.js";
 import { readWorkflow } from "../workflows.js";
 import type { NotificationItemRow } from "./events.js";
+import {
+  eligibleRunGateRecipient,
+  eligibleRunGateInvitation,
+} from "../run-gates.js";
 
 /** Loads each value once per call, however many items share it. */
 function loadOnce() {
@@ -35,7 +39,16 @@ export async function eligibleNotificationItems(
   for (const item of items) {
     // Pending invitations still own their in-app item through a live binding.
     if (item.person_id === null) {
-      if (item.binding_id !== null) eligible.push(item);
+      if (
+        item.binding_id !== null &&
+        (item.run_gate_id === null ||
+          (await eligibleRunGateInvitation(
+            tx,
+            item.run_gate_id,
+            item.binding_id,
+          )))
+      )
+        eligible.push(item);
       continue;
     }
     const personId = item.person_id;
@@ -55,6 +68,15 @@ export async function eligibleNotificationItems(
       () => workflowCapabilities(tx, access, person, workflow),
     );
     if (!capabilities.read) continue;
+    if (item.run_gate_id !== null) {
+      if (
+        await once(["run-gate", item.run_gate_id, personId], () =>
+          eligibleRunGateRecipient(tx, item.run_gate_id!, person),
+        )
+      )
+        eligible.push(item);
+      continue;
+    }
     const questionnaire = await once(
       ["questionnaire", personId, workflow.id],
       () => questionnaireCapabilities(tx, access, person, workflow.id),

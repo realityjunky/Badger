@@ -11,19 +11,23 @@ import { fields } from "../questionnaire/model.js";
 import { recordAudit } from "../audit.js";
 import { toIsoString } from "../util.js";
 import { validateRunReadModels } from "../run-report.js";
+import { syncRunGate } from "../run-gates.js";
+import { handleRunGates, readRunGateAnswer } from "./run-gates.js";
 
 const ID = /^[A-Za-z0-9_-]{1,200}$/u;
-const RUN = /^\/api\/v1\/runs\/([^/]+)(?:\/(events|access))?$/u;
+const RUN =
+  /^\/api\/v1\/runs\/([^/]+)(?:\/(events|access|gate-answer|gates)(?:\/([^/]+)\/(preview|answer))?)?$/u;
 const LIST = /^\/api\/v1\/workflows\/([^/]+)\/runs$/u;
 const ACCESS = /^\/api\/v1\/workflows\/([^/]+)\/runs\/access$/u;
 export function runMethods(path: string) {
   const run = RUN.exec(path);
+  if (run?.[3] !== undefined && run[2] !== "gates") return null;
   return path === "/api/v1/me/runs" || LIST.test(path) || ACCESS.test(path)
     ? "GET, HEAD"
     : run
-      ? run[2] === "events"
+      ? run[4] !== undefined || run[2] === "events"
         ? "POST"
-        : run[2] === "access"
+        : ["access", "gates", "gate-answer"].includes(run[2])
           ? "GET, HEAD"
           : "GET, HEAD, POST"
       : null;
@@ -291,11 +295,24 @@ export async function handleRuns(input: AuthorizedRequest) {
       input,
       tx,
       row.workflow_id,
-      input.method === "POST" || match[2] === "access",
+      (input.method === "POST" && match[2] !== "gates") ||
+        match[2] === "access" ||
+        match[2] === "gate-answer",
       row.test_run,
     );
+    if (match[2] === "gates")
+      return handleRunGates(
+        input,
+        tx,
+        row,
+        match[3] && decodeURIComponent(match[3]),
+        match[4],
+        body,
+      );
     if (
-      (input.method === "POST" || match[2] === "access") &&
+      (input.method === "POST" ||
+        match[2] === "access" ||
+        match[2] === "gate-answer") &&
       (row.person_id !== input.person.id ||
         row.agent_host !==
           (input.context.credential.agentHost ?? "Badger dashboard"))
@@ -304,6 +321,7 @@ export async function handleRuns(input: AuthorizedRequest) {
         403,
         "Only the registered person and Agent host may operate this Run",
       );
+    if (match[2] === "gate-answer") return readRunGateAnswer(tx, row);
     if (match[2] === "events") {
       fields(body, ["events", "projection", "continuation", "lastSequence"]);
       if (!Array.isArray(body.events) || body.events.length > 64)
@@ -409,6 +427,13 @@ export async function handleRuns(input: AuthorizedRequest) {
           continuation ? JSON.stringify(continuation) : null,
         ],
       );
+      if (continuation)
+        await syncRunGate(
+          tx,
+          input.dependencies,
+          row,
+          continuation as unknown as WorkflowRunReport["continuation"],
+        );
       return { lastSequence: sequence };
     }
     if (match[2] === "access") return { run: view(row) };

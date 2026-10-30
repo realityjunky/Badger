@@ -928,7 +928,22 @@ const en = {
   "run.modified": "Modified",
   "run.humanGate": "Waiting for a person",
   "run.humanGateHelp":
-    "Run gate answers and confirmations belong to signed-in people. Gate delivery will be available in a later update.",
+    "Review the pending action and its evidence before answering. Your Agent will receive the answer on its next next or status call.",
+  "run.gateDecision": "Decision",
+  "run.gateRationale": "Rationale",
+  "run.gateReview": "Review answer",
+  "run.gateConfirm": "Confirm answer",
+  "run.gateEffects": "Review finalization changes",
+  "run.gateScope": "Review bound evidence",
+  "run.gateAuthority":
+    "This gate is waiting for a person with the required authority.",
+  "run.gateAttestation":
+    "Your signed-in identity and current authorities will be recorded with this answer.",
+  "run.gateRevision": "Run revision",
+  "run.gateAnswered":
+    "Answer recorded. Your Agent will receive it on its next next or status call.",
+  "run.gateFailed":
+    "Could not record this gate answer. Review the current gate and try again.",
   "run.historyLimit":
     "Showing the latest {returned} of {total} outcome summaries. Earlier outcomes remain available in Events.",
   "run.eventsRange": "Events {first}–{last} of {total}",
@@ -2209,7 +2224,19 @@ const zh: Record<MessageId, string> = {
   "run.modified": "修改时间",
   "run.humanGate": "等待人员处理",
   "run.humanGateHelp":
-    "运行确认由登录人员完成。确认结果传递将在后续更新中提供。",
+    "回答前请审阅待处理操作及其证据。Agent 下次调用 next 或 status 时将收到回答。",
+  "run.gateDecision": "决定",
+  "run.gateRationale": "理由",
+  "run.gateReview": "审阅回答",
+  "run.gateConfirm": "确认回答",
+  "run.gateEffects": "审阅最终写入变更",
+  "run.gateScope": "审阅绑定证据",
+  "run.gateAuthority": "此关卡正在等待具有所需权限的人员处理。",
+  "run.gateAttestation": "系统将随回答记录您的登录身份和当前权限。",
+  "run.gateRevision": "运行修订版本",
+  "run.gateAnswered":
+    "回答已记录。Agent 下次调用 next 或 status 时将收到回答。",
+  "run.gateFailed": "无法记录此关卡回答。请审阅当前关卡后重试。",
   "run.historyLimit":
     "显示最近 {returned} 条结果摘要，共 {total} 条。可在事件中查看更早的结果。",
   "run.eventsRange": "事件 {first}–{last}，共 {total} 个",

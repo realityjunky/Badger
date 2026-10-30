@@ -18,6 +18,7 @@ import { loadWorkflows, type WorkflowCatalog } from "../api/workflows.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { useI18n } from "../i18n/I18nContext.js";
+import { RunGatePanel } from "./RunGatePanel.js";
 const pretty = (value: unknown) => (
   <pre className="run-json">{JSON.stringify(value, null, 2)}</pre>
 );
@@ -232,15 +233,7 @@ export function RunsPage() {
               ]}
             />
           </section>
-          {(state?.requiresUserDecision ||
-            state?.pendingAction?.type === "ask_user") && (
-            <Alert
-              type="info"
-              showIcon
-              message={t("run.humanGate")}
-              description={t("run.humanGateHelp")}
-            />
-          )}
+          <RunGatePanel basePath={basePath} runId={run.id} />
           {state?.historySummary && state.historySummary.omitted > 0 && (
             <Alert
               type="info"

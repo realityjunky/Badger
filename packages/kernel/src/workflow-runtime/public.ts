@@ -10,7 +10,12 @@ export {
   startWorkflowRun,
   submitWorkflowRun,
   validateWorkflowMachineVerification,
+  prepareWorkflowGateAnswer,
+  workflowGateBinding,
+  workflowGatePolicy,
 } from "./index.js";
+
+export { parseWorkflowFinalizationPreview } from "./finalization.js";
 
 export type {
   ManualWorkflowRunLocation,
@@ -19,6 +24,7 @@ export type {
   StandaloneWorkflowRunLocation,
   StartWorkflowRunOptions,
   WorkflowDecisionSubmission,
+  WorkflowGateAnswer,
   WorkflowMachineSubmission,
   Submission,
   WorkflowContinuation,

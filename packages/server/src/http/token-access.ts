@@ -20,6 +20,10 @@ export function tokenRequestAllowed(
   method: string,
 ): boolean {
   const reads = method === "GET" || method === "HEAD";
+  if (/^\/api\/v1\/runs\/[^/]+\/gates(?:\/|$)/u.test(path))
+    return (
+      reads && (scopes.includes("operator") || scopes.includes("engineer"))
+    );
   if (runMethods(path) !== null)
     return scopes.includes("operator") || scopes.includes("engineer");
   if (draftingJobMethods(path) !== null)

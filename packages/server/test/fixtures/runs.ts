@@ -3,6 +3,106 @@ import { admin, engineer, owner } from "./planning.js";
 import type { TestService } from "../../src/testing/index.js";
 export const operator = { subject: "operator", email: "operator@example.com" };
 export const reviewer = { subject: "reviewer", email: "reviewer@example.com" };
+export function decisionPlan(plan: any, authority = "operator") {
+  const node = plan.workflow.customNodes[0];
+  node.kind = "decision";
+  node.outputSchemas = [];
+  node.decision = {
+    id: "release-report",
+    question: "May this report be released?",
+    choices: [{ id: "release", label: "Release report", to: null }],
+    inputs: {
+      type: "object",
+      fields: [{ id: "ticket", type: "string", required: true }],
+    },
+    rationale: { required: true },
+    reviewer: { authorities: [authority] },
+  };
+}
+export function durableGatePlan(plan: any) {
+  plan.workflow.capabilities = {
+    version: 3,
+    features: ["conditional-routing", "revisioned-attempts"],
+    durability: {
+      version: 1,
+      capabilities: [
+        "mutation-locks",
+        "revision-fences",
+        "transition-journal",
+        "repair-policy",
+        "transactional-finalization",
+      ],
+      bounds: {
+        runStateBytes: 256 * 1024,
+        pendingActionBytes: 256 * 1024,
+        trajectoryBytes: 8 * 1024 * 1024,
+        artifactsBytes: 1024 * 1024,
+        claimBytes: 16 * 1024,
+        transitionJournalBytes: 1024 * 1024,
+        runLockBytes: 16 * 1024,
+        repairHistoryBytes: 256 * 1024,
+        repairHistoryCount: 32,
+        finalizationPlanBytes: 256 * 1024,
+        finalizationTransactionBytes: 1024 * 1024,
+        finalizationReceiptBytes: 256 * 1024,
+        finalizationContentBytes: 256,
+        finalizationOperationCount: 16,
+        finalizationEventCount: 64,
+      },
+      schemaVersions: {
+        runState: 1,
+        pendingAction: 1,
+        trajectory: 1,
+        artifacts: 1,
+        revisionClaim: 1,
+        transitionJournal: 1,
+        runLock: 1,
+        repairEpisode: 1,
+        finalizationTransaction: 1,
+        finalizationReceipt: 1,
+      },
+      findingCatalogVersion: 1,
+      repairPolicy: {
+        maxFailures: 4,
+        warningThreshold: 1,
+        manualStopThreshold: 2,
+        allowedChoices: [
+          {
+            id: "retry-with-new-approach",
+            label: "Retry with a new approach",
+            outcome: "retry",
+          },
+          { id: "stop", label: "Stop", outcome: "stop" },
+        ],
+        allowOneTimeOverride: true,
+        maxOverrideRationaleBytes: 256,
+        reviewer: { authorities: ["operator"] },
+        rationale: { required: true },
+      },
+    },
+  };
+  plan.workflow.finalization = {
+    schemaVersion: 1,
+    roots: [{ id: "project", path: "." }],
+    operations: [
+      {
+        id: "write-result",
+        kind: "write",
+        root: "project",
+        target: "released.txt",
+        content: "released\n",
+      },
+    ],
+    confirmation: {
+      required: true,
+      reviewer: { authorities: ["workflow-owner", "operator"] },
+      rationale: { required: true },
+    },
+  };
+  const durability = plan.workflow.capabilities.durability;
+  durability.repair = durability.repairPolicy;
+  delete durability.repairPolicy;
+}
 export async function publishedFixture(
   service: TestService,
   configurePlan?: Parameters<typeof assembledFixture>[1],

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 /** A report author's independent example, submitted through the HTTP/MCP seam. */
-export function reportLaneOutput(context: any) {
+export function reportLaneOutput(context: any, decisionGuidance = "") {
   const { lane, plan } = context.authoring;
   const definition = plan.lanes.find((l: any) => l.id === lane);
   const entry = `## Decision Core
@@ -87,7 +87,7 @@ No blocking findings remain. Verdict: approved; the report examples provide suff
       path,
       kind: "markdown",
       content:
-        path === "SKILL.md"
+        (path === "SKILL.md"
           ? entry
           : path.endsWith("/SKILL.md")
             ? node
@@ -95,7 +95,8 @@ No blocking findings remain. Verdict: approved; the report examples provide suff
               ? decisions
               : path.endsWith("recovery.md")
                 ? recovery
-                : review,
+                : review) +
+        (decisionGuidance ? `\n### Run Decisions\n${decisionGuidance}` : ""),
     })),
     ...(lane === "skill-review"
       ? {

@@ -1268,6 +1268,28 @@ Registration fixes person, host label, Agent host, publication and package hash;
 replays must match that identity. Operator scope and role are both required for
 production Run writes; Engineers use engineer scope for test Runs. Signed-in
 workflow readers can inspect the Runs dashboard. These are observer models;
-WorkflowRuntime remains the runtime authority and human gate delivery remains a
-separate feature. See the MCP package README for tool schemas, retry guarantees,
+WorkflowRuntime remains the runtime authority. See the MCP package README for tool schemas, retry guarantees,
 bounds and certification details.
+
+## Dashboard Run gates
+
+Committed mirrored decisions, repair manual stops, and finalization confirmations
+open durable gates. The published package owns reviewer policy: service policies
+name stable Badger person IDs and workflow authorities `workflow-owner`,
+`engineer`, `field-expert`, `reviewer`, and `operator`. All required authorities
+must be held; a policy with none defaults to Operators. Named people must also
+hold the required authority. Inboxes and team robots link directly to the Run.
+
+`GET /api/v1/runs/:id/gates` returns the latest 100 gates with current
+`canAnswer` capabilities. A signed-in person sends `{choiceId, inputs?, rationale?}`
+to `POST /api/v1/runs/:id/gates/:gateId/preview`, then sends the same answer with
+`confirmed:true`, `confirmationHash`, and a client `requestId` to its `/answer`
+endpoint. Answers bind the exact Run revision and pending action. The service
+attaches the person's attestation, records immutable evidence and audit, and
+closes inbox items atomically. Retries return the original answer.
+
+Tokens cannot preview or answer a gate. Only the registered person and Agent
+host may retrieve `GET /api/v1/runs/:id/gate-answer`; the MCP compares the local
+kernel binding and submits that answer to WorkflowRuntime on `next` or `status`.
+Finalization previews show the kernel's exact planned operations; changed effects
+require fresh confirmation. See ADR 0036 and migration `0034_run-gates.sql`.
