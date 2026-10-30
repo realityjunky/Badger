@@ -2,8 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import { fileURLToPath } from "node:url";
 import {
   evaluatePackage,
+  certificationExecFile,
+  type WorkflowMcpCertificationEvidence,
   hashDirectory,
   reviewState,
   type CreatorState,
@@ -248,6 +251,27 @@ export async function runEvaluation(
       reportPath,
       persistState: false,
       onProgress: progress,
+      certifyMcp: async ({ generatedPackageHash, snapshot }) => {
+        // This executable belongs to the installed service distribution. A
+        // package can never choose the child command or supply its environment.
+        const executable = fileURLToPath(
+          new URL(
+            "./certification.js",
+            import.meta.resolve("@realityjunky/badger-mcp"),
+          ),
+        );
+        const inputPath = path.join(directory, "mcp-package.json");
+        await fs.writeFile(inputPath, JSON.stringify(snapshot), {
+          mode: 0o600,
+          flag: "wx",
+        });
+        const result = await certificationExecFile(
+          process.execPath,
+          [executable, generatedPackageHash, inputPath],
+          { env: { PATH: process.env.PATH } },
+        );
+        return JSON.parse(result.stdout) as WorkflowMcpCertificationEvidence;
+      },
       sandbox: {
         ...EVALUATION_LIMITS,
         tempDirectory: path.join(directory, "tmp"),

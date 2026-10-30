@@ -11,7 +11,7 @@ import { ActivityPage } from "../pages/ActivityPage.js";
 import { AdminPage } from "../pages/AdminPage.js";
 import { MyWorkPage } from "../pages/MyWorkPage.js";
 import { NotFoundPage } from "../pages/NotFoundPage.js";
-import { PlaceholderPage } from "../pages/PlaceholderPage.js";
+import { RunsPage } from "../pages/RunsPage.js";
 import { QuestionnairePage } from "../pages/QuestionnairePage.js";
 import { SettingsPage } from "../pages/SettingsPage.js";
 import { SkillsPage } from "../pages/SkillsPage.js";
@@ -94,15 +94,8 @@ function ThemedApp({ basePath }: { basePath: string }) {
                     path="skills/:skillId/versions/:versionId"
                     element={<SkillsPage />}
                   />
-                  <Route
-                    path="runs/*"
-                    element={
-                      <PlaceholderPage
-                        title="page.runs.title"
-                        description="page.runs.description"
-                      />
-                    }
-                  />
+                  <Route path="runs" element={<RunsPage />} />
+                  <Route path="runs/:runId" element={<RunsPage />} />
                   <Route path="evaluations/*" element={<EvaluationsPage />} />
                   <Route path="activity" element={<ActivityPage />} />
                   <Route path="admin/*" element={<AdminPage />} />

@@ -438,3 +438,68 @@ describe("WorkflowRuntime Phase 3 certification", () => {
     );
   }, 120_000);
 });
+
+it("binds declared external directories when certifying the selected generated package", async () => {
+  const temporary = await fs.mkdtemp(
+    path.join(os.tmpdir(), "badger-cert-external-"),
+  );
+  try {
+    const input = linearWorkflow();
+    input.outputSchemas = [
+      {
+        id: "output.v1",
+        description: "External synthetic output.",
+        externalRoots: {
+          outputs: { description: "Where to write synthetic results." },
+        },
+        artifacts: [
+          {
+            id: "result",
+            kind: "file",
+            required: true,
+            paths: ["result.bin"],
+            validations: ["artifact-exists"],
+            verification: "receipt",
+            root: "outputs",
+          },
+        ],
+        evidence: [],
+      },
+    ];
+    input.customNodes[0].outputSchemas = ["output.v1"];
+    const protocol = normalizeWorkflow(input).protocol;
+    const generated = await generatePackage({
+      proposal: {
+        schemaVersion: 1,
+        name: protocol.name,
+        goal: protocol.goal,
+        intent: "new-skill",
+        planHash: "external-cert",
+        workflow: protocol,
+        candidates: [],
+        blockers: [],
+        warnings: [],
+        canInitialize: true,
+      },
+      plan: {
+        schemaVersion: 1,
+        goal: protocol.goal,
+        skillCreatorIntent: "new-skill",
+        skillSources: [],
+        workflow: input,
+        defaultLocale: "en",
+      },
+      destination: path.join(temporary, "generated"),
+      projectRoot: temporary,
+    });
+    const result = await certifyWorkflowRuntime({
+      protocol,
+      generatedPackageHash: await hashDirectory(generated.packageRoot),
+      packageRoot: generated.packageRoot,
+    });
+    expect(result.blockers).toEqual([]);
+    expect(result.evidence?.entryAdapterStarted).toBe(true);
+  } finally {
+    await fs.rm(temporary, { recursive: true, force: true });
+  }
+}, 30_000);

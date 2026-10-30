@@ -1,0 +1,695 @@
+import { z } from "zod";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import {
+  atomicWriteContainedBytes,
+  ensureProtectedProjectDirectory,
+  inspectProtectedProjectPath,
+  readProtectedProjectFile,
+  hashDirectory,
+  canonicalHash,
+  RaceSafeReadError,
+  type WorkflowProtocol,
+} from "@realityjunky/badger";
+import {
+  createWorkflowRuntime,
+  type WorkflowRunReport,
+  type WorkflowMachineSubmission,
+} from "@realityjunky/badger/workflow-runtime";
+import {
+  verifyPublishedPackage,
+  publishedPackagePath,
+  type PublishedIdentity,
+  type PublishedPackageRead,
+} from "@realityjunky/badger-hosts";
+import { BadgerApi, BadgerConnectionError, BadgerTimeoutError } from "./api.js";
+import { id, tool } from "./tools.js";
+const hash = z.string().regex(/^[a-f0-9]{64}$/u);
+const local = { projectRoot: z.string().min(1).max(4096), runId: id };
+const publication = { workflowId: id, publicationId: id, packageHash: hash };
+interface Binding extends PublishedIdentity {
+  format: "badger-run-binding-v1";
+  deploymentUrl: string;
+  personId: string;
+  agentHost: string;
+  hostLabel: string;
+  testRun: boolean;
+  registrationId: string;
+  localRunId: string;
+  packageDirectory: string;
+}
+interface Queue {
+  format: "badger-run-queue-v1";
+  identity: Binding;
+  lastAcknowledged: number;
+  acknowledgedReportHash?: string;
+  report: WorkflowRunReport;
+}
+const BINDING = ".badger/mcp-binding.json",
+  QUEUE = ".badger/mcp-queue.json";
+const runtime = createWorkflowRuntime();
+const label = "Badger MCP Run";
+async function read<T>(
+  root: string,
+  relative: string,
+  max = 16 * 1024 * 1024,
+): Promise<T | null> {
+  const inspection = await inspectProtectedProjectPath(root, relative, {
+    label,
+    expected: "file",
+  });
+  if (!inspection.exists) return null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const value = await readProtectedProjectFile(root, relative, max, {
+        label,
+      });
+      return JSON.parse(value.bytes.toString("utf8")) as T;
+    } catch (error) {
+      if (
+        !(error instanceof RaceSafeReadError) ||
+        error.reason !== "changed" ||
+        attempt === 2
+      )
+        throw error;
+    }
+  }
+  throw new Error("The Run queue kept changing; retry the read");
+}
+async function write(
+  root: string,
+  relative: string,
+  value: unknown,
+  exclusive = false,
+) {
+  await ensureProtectedProjectDirectory(root, path.posix.dirname(relative), {
+    label,
+  });
+  await atomicWriteContainedBytes(
+    path.join(root, relative),
+    Buffer.from(JSON.stringify(value) + "\n"),
+    { containedRoot: root, exclusive },
+  );
+}
+const intent = (runId: string) => `.badger/mcp-starts/${runId}.json`;
+function target(args: { projectRoot: string; runId: string }) {
+  return {
+    kind: "standalone" as const,
+    projectRoot: args.projectRoot,
+    runId: args.runId,
+  };
+}
+function runRelative(runId: string) {
+  return `.badger/runs/${runId}`;
+}
+async function runRoot(args: { projectRoot: string; runId: string }) {
+  if (!path.isAbsolute(args.projectRoot))
+    throw new Error("Choose an absolute local project directory");
+  const inspected = await inspectProtectedProjectPath(
+    args.projectRoot,
+    runRelative(args.runId),
+    { label, expected: "directory" },
+  );
+  if (!inspected.exists) throw new Error("This local Run has not started");
+  return inspected.target;
+}
+
+/** Durable queue entries contain no credentials; the kernel stream repairs a missing queue write. */
+export class LocalRuns {
+  private readonly active = new Map<
+    string,
+    { projectRoot: string; runId: string }
+  >();
+  private readonly pending = new Map<string, Promise<void>>();
+  private readonly queueTasks = new Map<string, Promise<unknown>>();
+  private readonly timer: ReturnType<typeof setInterval>;
+  private readonly errors = new Map<string, string>();
+  private readonly retries = new Map<string, { count: number; at: number }>();
+  private closed = false;
+  private readonly authorized = new Set<string>();
+  constructor(
+    private readonly api: BadgerApi,
+    private readonly agentHost: string,
+  ) {
+    this.timer = setInterval(() => {
+      for (const args of this.active.values()) this.schedule(args);
+    }, 1000);
+    this.timer.unref();
+  }
+  private verify(binding: Binding) {
+    if (
+      binding.format !== "badger-run-binding-v1" ||
+      binding.deploymentUrl !== this.api.url ||
+      binding.agentHost !== this.agentHost
+    )
+      throw new Error(
+        "This Run belongs to another Badger deployment or Agent host",
+      );
+  }
+  remember(binding: Binding) {
+    this.verify(binding);
+    this.authorized.add(canonicalHash(binding));
+  }
+  async authorize(binding: Binding, offline = true) {
+    this.verify(binding);
+    try {
+      const access = await this.api.request<{
+        personId: string;
+        agentHost: string;
+      }>(
+        `/workflows/${encodeURIComponent(binding.workflowId)}/runs/access?testRun=${binding.testRun}`,
+        "GET",
+        undefined,
+        1,
+      );
+      if (
+        access.personId !== binding.personId ||
+        access.agentHost !== binding.agentHost
+      )
+        throw new Error(
+          "This Run belongs to another signed-in person or Agent host",
+        );
+      this.authorized.add(canonicalHash(binding));
+    } catch (error) {
+      if (
+        !offline ||
+        !this.authorized.has(canonicalHash(binding)) ||
+        !(
+          error instanceof BadgerConnectionError ||
+          error instanceof BadgerTimeoutError
+        )
+      )
+        throw error;
+    }
+  }
+  async binding(args: { projectRoot: string; runId: string }) {
+    const root = await runRoot(args);
+    let binding = await read<Binding>(root, BINDING);
+    if (!binding) {
+      binding = await read<Binding>(args.projectRoot, intent(args.runId));
+      if (!binding)
+        throw new Error("This Run was not started by the Badger MCP");
+      this.verify(binding);
+      if (!(await runtime.inspect(target(args))))
+        throw new Error("This local Run has not started");
+      await write(root, BINDING, binding, true);
+    }
+    this.verify(binding);
+    if (binding.localRunId !== args.runId)
+      throw new Error("The Run binding does not match this Run");
+    const queue = await read<Queue>(root, QUEUE);
+    if (
+      queue &&
+      (queue.format !== "badger-run-queue-v1" ||
+        canonicalHash(queue.identity) !== canonicalHash(binding))
+    )
+      throw new Error("The durable Run queue identity changed");
+    await this.authorize(binding);
+    this.active.set(root, args);
+    return { root, binding };
+  }
+  private async withQueue<T>(
+    args: { projectRoot: string; runId: string },
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const key = path.join(args.projectRoot, runRelative(args.runId));
+    const previous = this.queueTasks.get(key) ?? Promise.resolve();
+    const task = previous.catch(() => undefined).then(work);
+    this.queueTasks.set(key, task);
+    try {
+      return await task;
+    } finally {
+      if (this.queueTasks.get(key) === task) this.queueTasks.delete(key);
+    }
+  }
+  async reconcile(args: { projectRoot: string; runId: string }) {
+    return this.withQueue(args, () => this.reconcileUnlocked(args));
+  }
+  private async reconcileUnlocked(args: {
+    projectRoot: string;
+    runId: string;
+  }) {
+    const root = await runRoot(args);
+    const binding = await read<Binding>(root, BINDING);
+    if (!binding) throw new Error("Missing local Run binding");
+    this.verify(binding);
+    const previous = await read<Queue>(root, QUEUE);
+    if (
+      previous &&
+      (previous.format !== "badger-run-queue-v1" ||
+        canonicalHash(previous.identity) !== canonicalHash(binding) ||
+        !Number.isSafeInteger(previous.lastAcknowledged) ||
+        previous.lastAcknowledged < 0)
+    )
+      throw new Error("The durable Run queue identity changed");
+    const lastAcknowledged = previous?.lastAcknowledged ?? 0;
+    const report = await runtime.readReport(target(args), lastAcknowledged);
+    if (!report) throw new Error("This local Run has not started");
+    if (lastAcknowledged > report.lastSequence)
+      throw new Error(
+        "The Run event stream moved behind its mirror acknowledgement",
+      );
+    const queue: Queue = {
+      format: "badger-run-queue-v1",
+      identity: binding,
+      lastAcknowledged,
+      ...(previous?.acknowledgedReportHash
+        ? { acknowledgedReportHash: previous.acknowledgedReportHash }
+        : {}),
+      report,
+    };
+    await write(root, QUEUE, queue);
+    return queue;
+  }
+  schedule(args: { projectRoot: string; runId: string }, force = false) {
+    if (this.closed) return;
+    const key = path.join(args.projectRoot, runRelative(args.runId));
+    if (!force && (this.retries.get(key)?.at ?? 0) > Date.now()) return;
+    if (this.pending.has(key)) return;
+    const work = this.flush(args)
+      .then(() => {
+        this.errors.delete(key);
+        this.retries.delete(key);
+      })
+      .catch((error: unknown) => {
+        const count = (this.retries.get(key)?.count ?? 0) + 1;
+        this.retries.set(key, {
+          count,
+          at: Date.now() + Math.min(30000, 1000 * 2 ** Math.min(count - 1, 5)),
+        });
+        this.errors.set(
+          key,
+          error instanceof Error ? error.message : "Run reporting failed",
+        );
+      })
+      .finally(() => this.pending.delete(key));
+    this.pending.set(key, work);
+  }
+  private async flush(args: { projectRoot: string; runId: string }) {
+    const root = await runRoot(args);
+    let queue = await this.reconcile(args);
+    const reportHash = canonicalHash({
+      projection: queue.report.projection,
+      continuation: queue.report.continuation,
+    });
+    if (
+      queue.lastAcknowledged === queue.report.lastSequence &&
+      queue.acknowledgedReportHash === reportHash
+    )
+      return;
+    const { binding } = await this.binding(args);
+    if (this.closed) return;
+    const sending = queue.report;
+    await this.api.request(
+      `/runs/${binding.registrationId}`,
+      "POST",
+      {
+        workflowId: binding.workflowId,
+        publicationId: binding.publicationId,
+        packageHash: binding.packageHash,
+        localRunId: binding.localRunId,
+        hostLabel: binding.hostLabel,
+        testRun: binding.testRun,
+        execution: queue.report.continuation.execution,
+      },
+      1,
+    );
+    const events = sending.events;
+    // All original events precede the latest snapshot. Intermediate batches never
+    // claim a later snapshot while earlier events are still missing.
+    for (let offset = 0; offset < events.length || offset === 0;) {
+      if (this.closed) return;
+      const batch: typeof events = [];
+      let bytes = 0;
+      while (offset < events.length && batch.length < 64) {
+        const event = events[offset];
+        const size = Buffer.byteLength(JSON.stringify(event));
+        if (batch.length && bytes + size > 768 * 1024) break;
+        batch.push(event);
+        bytes += size;
+        offset++;
+      }
+      const last = offset >= events.length;
+      const response = await this.api.request<{ lastSequence: number }>(
+        `/runs/${binding.registrationId}/events`,
+        "POST",
+        {
+          events: batch,
+          ...(last
+            ? {
+                projection: sending.projection,
+                continuation: sending.continuation,
+                lastSequence: sending.lastSequence,
+              }
+            : {}),
+        },
+        1,
+      );
+      // Re-read after the HTTP request so a concurrently committed local transition
+      // stays in the queue. Reconciliation can always recreate it after a crash.
+      if (this.closed) return;
+      await this.withQueue(args, async () => {
+        const current = await read<Queue>(root, QUEUE);
+        const acknowledged = Math.max(
+          current?.lastAcknowledged ?? 0,
+          response.lastSequence,
+        );
+        const latest = await runtime.readReport(target(args), acknowledged);
+        if (!latest || this.closed) return;
+        queue = {
+          ...queue,
+          lastAcknowledged: acknowledged,
+          ...(last ? { acknowledgedReportHash: reportHash } : {}),
+          report: latest,
+        };
+        await write(root, QUEUE, queue);
+      });
+      if (last) break;
+    }
+  }
+  async capture(args: { projectRoot: string; runId: string }) {
+    try {
+      await this.reconcile(args);
+    } catch (error) {
+      // The runtime already committed. Preserve its reply and expose reporting
+      // failure separately; reconciliation will restore a missing queue later.
+      this.errors.set(
+        path.join(args.projectRoot, runRelative(args.runId)),
+        error instanceof Error ? error.message : "Run reporting failed",
+      );
+    }
+    this.schedule(args, true);
+  }
+  reporting(args: { projectRoot: string; runId: string }) {
+    return {
+      error:
+        this.errors.get(path.join(args.projectRoot, runRelative(args.runId))) ??
+        null,
+    };
+  }
+  async close() {
+    this.closed = true;
+    clearInterval(this.timer);
+    await Promise.allSettled(this.pending.values());
+    this.active.clear();
+  }
+}
+
+const submission = z
+  .object({
+    kind: z.literal("machine").optional(),
+    actionId: id,
+    status: z.enum(["succeeded", "failed"]),
+    summary: z.string().max(50000),
+    runId: id.optional(),
+    revision: z.number().int().min(0).optional(),
+    nodeId: z.string().max(200).nullable().optional(),
+    cycleId: z.string().max(200).nullable().optional(),
+    attemptId: id.optional(),
+    execution: z.record(z.string(), z.unknown()).optional(),
+    artifacts: z.record(z.string(), z.string()).optional(),
+    state: z.record(z.string(), z.string()).optional(),
+    evidence: z.record(z.string(), z.unknown()).optional(),
+    routing: z.record(z.string(), z.string()).optional(),
+    artifactVersions: z.record(z.string(), z.string()).optional(),
+    verification: z.unknown().optional(),
+    verificationReceipts: z.unknown().optional(),
+    verificationReceiptIds: z.array(id).optional(),
+    receiptIds: z.array(id).optional(),
+  })
+  .strict();
+export function operatorTools(
+  api: BadgerApi,
+  runs: LocalRuns,
+  agentHost: string,
+) {
+  async function published(
+    identity: PublishedIdentity,
+    projectRoot: string,
+    install = true,
+  ) {
+    if (!path.isAbsolute(projectRoot))
+      throw new Error("Choose an absolute local project directory");
+    const value = await api.request<PublishedPackageRead>(
+      publishedPackagePath(identity),
+    );
+    const snapshot = verifyPublishedPackage(value, identity);
+    const file = snapshot.files.find(
+      (file) => file.path === "reference/workflow-protocol.json",
+    );
+    if (!file) throw new Error("Published workflow protocol is missing");
+    const protocol = JSON.parse(
+      Buffer.from(file.content, "base64").toString("utf8"),
+    ) as WorkflowProtocol;
+    if (!install) return { protocol, packageDirectory: "" };
+    const relative = `.badger/packages/${identity.packageHash}`;
+    const existing = await inspectProtectedProjectPath(projectRoot, relative, {
+      label: "Published workflow package",
+      expected: "directory",
+    });
+    if (!existing.exists) {
+      await ensureProtectedProjectDirectory(projectRoot, relative, { label });
+      for (const file of snapshot.files) {
+        const at = `${relative}/${file.path}`;
+        await ensureProtectedProjectDirectory(
+          projectRoot,
+          path.posix.dirname(at),
+          { label },
+        );
+        await atomicWriteContainedBytes(
+          path.join(projectRoot, at),
+          Buffer.from(file.content, "base64"),
+          { containedRoot: projectRoot, exclusive: true },
+        );
+      }
+    }
+    const packageDirectory = path.join(projectRoot, relative);
+    if ((await hashDirectory(packageDirectory)) !== identity.packageHash)
+      throw new Error(
+        "Local published package bytes changed; restore the exact published package",
+      );
+    return {
+      protocol,
+      packageDirectory,
+    };
+  }
+  function result(
+    binding: Binding,
+    continuation: WorkflowRunReport["continuation"],
+    args: { projectRoot: string; runId: string },
+  ) {
+    const ref = continuation.pendingAction?.ref;
+    const skillPath =
+      typeof ref === "string" && /^[A-Za-z0-9_-]+$/u.test(ref)
+        ? path.join(binding.packageDirectory, ref, "SKILL.md")
+        : null;
+    return {
+      continuation,
+      reporting: runs.reporting(args),
+      skillPath,
+      runUrl: `${api.url}/runs/${binding.registrationId}`,
+      ...(continuation.requiresUserDecision ||
+      continuation.disposition === "await-user"
+        ? {
+            requiresPerson: true,
+            message:
+              "Ask the person to open the Run in Badger. Run gate answers and confirmations stay with people; gate delivery is not available yet.",
+          }
+        : {}),
+    };
+  }
+  return [
+    tool(
+      "start",
+      "Start the published workflow after the person confirms. Ask them for every external directory shown by status, then pass externalRoots unchanged.",
+      {
+        ...local,
+        ...publication,
+        hostLabel: z.string().min(1).max(200),
+        externalRoots: z.record(z.string(), z.string()).optional(),
+        testRun: z.boolean().default(false),
+        confirmed: z.literal(true),
+      },
+      async (args) => {
+        const { protocol, packageDirectory } = await published(
+          args,
+          args.projectRoot,
+        );
+        const access = await api.request<{
+          personId: string;
+          agentHost: string;
+        }>(`/workflows/${args.workflowId}/runs/access?testRun=${args.testRun}`);
+        const binding: Binding = {
+          format: "badger-run-binding-v1",
+          deploymentUrl: api.url,
+          personId: access.personId,
+          agentHost,
+          hostLabel: args.hostLabel,
+          testRun: args.testRun,
+          registrationId: randomUUID(),
+          localRunId: args.runId,
+          workflowId: args.workflowId,
+          publicationId: args.publicationId,
+          packageHash: args.packageHash,
+          packageDirectory,
+        };
+        // Persist identity before the runtime commit; recovery can bind an accepted
+        // Run even if the process dies before its queue is first written.
+        const existing = await read<Binding>(
+          args.projectRoot,
+          intent(args.runId),
+        );
+        if (existing)
+          throw new Error(
+            "This Run already has a start intent; use status or choose a new Run ID",
+          );
+        await write(args.projectRoot, intent(args.runId), binding, true);
+        runs.remember(binding);
+        let continuation;
+        try {
+          continuation = await runtime.start({
+            protocol,
+            location: target(args),
+            ...(args.externalRoots === undefined
+              ? {}
+              : { externalRoots: args.externalRoots }),
+          });
+        } catch (error) {
+          // A refused start must permit corrected roots on the same name. No service
+          // registration has occurred; the empty intent is safe to remove.
+          const { removeContainedFile } = await import("@realityjunky/badger");
+          await removeContainedFile(
+            path.join(args.projectRoot, intent(args.runId)),
+            { containedRoot: args.projectRoot },
+          );
+          throw error;
+        }
+        const root = await runRoot(args);
+        await write(root, BINDING, binding, true);
+        await runs.binding(args);
+        await runs.capture(args);
+        return result(binding, continuation, args);
+      },
+      "operateRuns",
+      false,
+    ),
+    tool(
+      "status",
+      "Read this Run. Before it starts, choose its publication to see the exact external directories and outputs to ask the person for.",
+      {
+        ...local,
+        workflowId: id.optional(),
+        publicationId: id.optional(),
+        packageHash: hash.optional(),
+      },
+      async (args) => {
+        const current = await runtime.inspect(target(args));
+        if (!current) {
+          if (!args.workflowId || !args.publicationId || !args.packageHash)
+            throw new Error(
+              "Choose a published workflow before asking for its start requirements",
+            );
+          const { protocol } = await published(
+            {
+              workflowId: args.workflowId,
+              publicationId: args.publicationId,
+              packageHash: args.packageHash,
+            },
+            args.projectRoot,
+            false,
+          );
+          return {
+            startRequirements: await runtime.startRequirements(protocol),
+          };
+        }
+        const { binding } = await runs.binding(args);
+        await runs.capture(args);
+        return {
+          ...result(binding, current, args),
+          reporting: runs.reporting(args),
+        };
+      },
+      "operateRuns",
+      true,
+    ),
+    tool(
+      "next",
+      "Read the current Node, its Skill path, required Completion evidence, and pending action.",
+      local,
+      async (args) => {
+        const { binding } = await runs.binding(args);
+        const continuation = await runtime.resume(target(args));
+        await runs.capture(args);
+        return result(binding, continuation, args);
+      },
+      "operateRuns",
+      false,
+    ),
+    tool(
+      "submit",
+      "Send this Node's machine evidence and routing to WorkflowRuntime. People answer gates and confirmations in Badger.",
+      { ...local, submission },
+      async (args) => {
+        const { binding } = await runs.binding(args);
+        const current = await runtime.inspect(target(args));
+        if (
+          current?.pendingAction?.type === "ask_user" ||
+          current?.requiresUserDecision
+        )
+          return result(binding, current, args);
+        for (const value of [
+          args.submission.verification,
+          args.submission.verificationReceipts,
+        ]) {
+          const entries = Array.isArray(value)
+            ? value
+            : value && typeof value === "object" && "proposals" in value
+              ? (value as { proposals: unknown[] }).proposals
+              : [value];
+          if (
+            Array.isArray(entries) &&
+            entries.some(
+              (entry) =>
+                entry &&
+                typeof entry === "object" &&
+                "kind" in entry &&
+                entry.kind === "manual-evidence",
+            )
+          )
+            throw new Error(
+              "A signed-in person supplies human verification evidence in Badger",
+            );
+        }
+        const continuation = await runtime.submit(
+          target(args),
+          args.submission as WorkflowMachineSubmission,
+        );
+        await runs.capture(args);
+        return result(binding, continuation, args);
+      },
+      "operateRuns",
+      false,
+    ),
+    tool(
+      "recover",
+      "Recover this local Run with WorkflowRuntime. Ask the person to review any pending decision in Badger.",
+      local,
+      async (args) => {
+        const { binding } = await runs.binding(args);
+        const continuation = await runtime.recover(target(args));
+        await runs.capture(args);
+        return result(binding, continuation, args);
+      },
+      "operateRuns",
+      false,
+    ),
+    tool(
+      "my_runs",
+      "List your Runs reported to Badger, with their status and dashboard links.",
+      {},
+      () => api.request("/me/runs"),
+      "operateRuns",
+      true,
+    ),
+  ];
+}

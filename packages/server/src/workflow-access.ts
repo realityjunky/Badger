@@ -94,9 +94,10 @@ export async function workflowCapabilities(
       access.tokenScopes === undefined && (isAdministrator(access) || owner),
     readPublished:
       access.tokenScopes === undefined ||
-      (access.tokenScopes.includes("operator") &&
+      ((access.tokenScopes.includes("operator") ||
+        access.tokenScopes.includes("engineer")) &&
         (isAdministrator(access) ||
-          roles.has("Operator") ||
+          (access.tokenScopes.includes("operator") && roles.has("Operator")) ||
           roles.has("Engineer"))),
     approveDossier:
       access.tokenScopes === undefined && (isAdministrator(access) || owner),

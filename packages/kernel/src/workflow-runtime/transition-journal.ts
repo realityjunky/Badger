@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { RaceSafeReadError } from "../engine/race-safe-read.js";
 import {
   readOptionalEngineRunText,
   removeEngineRunFile,
@@ -891,12 +892,28 @@ async function readJournal(
 export async function readWorkflowTransitionJournal(
   runRoot: string,
 ): Promise<WorkflowTransitionJournal | null> {
-  const raw = await readOptionalEngineRunText(
-    runRoot,
-    WORKFLOW_TRANSITION_JOURNAL_PATH,
-    WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
-    JOURNAL_LABEL,
-  );
+  // A committing writer replaces this file at each boundary. A reader must
+  // discard a changed descriptor and validate a fresh protected read; it must
+  // never weaken containment checks or replay a submission with a new revision.
+  let raw: string | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      raw = await readOptionalEngineRunText(
+        runRoot,
+        WORKFLOW_TRANSITION_JOURNAL_PATH,
+        WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
+        JOURNAL_LABEL,
+      );
+      break;
+    } catch (error) {
+      if (
+        !(error instanceof RaceSafeReadError) ||
+        error.reason !== "changed" ||
+        attempt === 2
+      )
+        throw error;
+    }
+  }
   if (raw === null) return null;
   try {
     const journal = parseWorkflowTransitionJournal(

@@ -23,6 +23,7 @@ Read the persisted current Node and obtain the report inputs before beginning.
 ### Required Skill Calls
 No additional Skill Calls are required.
 ### Evidence
+Output Schema report.v1: record result and summary evidence.
 Capture evidence for the completion summary; preserve the report's identity and the reasoning behind acceptance.
 ### Completion Reasoning
 The report is complete when its claims can be checked and its scope matches the confirmed request.

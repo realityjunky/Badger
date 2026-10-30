@@ -18751,12 +18751,21 @@ async function readJournal(runRoot, profile) {
   }
 }
 async function readWorkflowTransitionJournal(runRoot) {
-  const raw = await readOptionalEngineRunText(
-    runRoot,
-    WORKFLOW_TRANSITION_JOURNAL_PATH,
-    WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
-    JOURNAL_LABEL
-  );
+  let raw = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      raw = await readOptionalEngineRunText(
+        runRoot,
+        WORKFLOW_TRANSITION_JOURNAL_PATH,
+        WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
+        JOURNAL_LABEL
+      );
+      break;
+    } catch (error) {
+      if (!(error instanceof RaceSafeReadError) || error.reason !== "changed" || attempt === 2)
+        throw error;
+    }
+  }
   if (raw === null) return null;
   try {
     const journal = parseWorkflowTransitionJournal(
@@ -24435,6 +24444,19 @@ function validateDecisionExecution(submission, expected) {
     throw new Error("Decision response execution identity is required");
   }
 }
+function completionPlan(protocol, nodeId) {
+  const node = protocol.nodes.find((node2) => node2.id === nodeId);
+  if (!node) return null;
+  const plan = createCompletionPlan(node);
+  return {
+    ...plan,
+    outputSchemas: plan.outputSchemas.map(
+      (id) => structuredClone(
+        protocol.outputSchemas.find((schema) => schema.id === id)
+      )
+    )
+  };
+}
 function continuation(result, identity, context) {
   const runtimeState = result.state.workflowRuntime;
   const currentAttempt = runtimeState?.currentAttempt ?? null;
@@ -24464,6 +24486,10 @@ function continuation(result, identity, context) {
     visitOrdinal: currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: currentAttempt?.retryOrdinal ?? null,
     pendingAction: result.action,
+    completion: completionPlan(
+      context.package.runtime.protocol,
+      result.state.status === "completed" ? null : currentNode(result.state, identity, result.action)
+    ),
     receiptOutputs: workflowReceiptOutputs(
       context.package.runtime.protocol,
       result.state.status === "completed" ? null : currentNode(result.state, identity, result.action),
@@ -24640,8 +24666,22 @@ async function recoveryStateProjection(location, state, recovery) {
     ...continuation2,
     completedNodes,
     evidence: recovery.pendingAction?.type === "ask_user" ? {} : evidence,
-    history
+    history,
+    artifactReceipts: projectedArtifactReceipts(state)
   };
+}
+function projectedArtifactReceipts(state) {
+  const receipts = [];
+  for (const visit of state.workflowRuntime?.visits ?? []) {
+    for (const outcome of visit.outcomes) {
+      const values = outcome.evidence?.artifactReceipts;
+      if (Array.isArray(values))
+        receipts.push(
+          ...structuredClone(values)
+        );
+    }
+  }
+  return receipts.slice(-MAX_PROJECTED_LEDGER_ENTRIES);
 }
 async function projectWorkflowState(target) {
   const location = resolveWorkflowRunLocation(target);
@@ -24715,6 +24755,7 @@ async function projectWorkflowState(target) {
     evidence: verified.pending?.type === "ask_user" ? {} : evidence,
     history,
     pendingAction: verified.pending,
+    artifactReceipts: projectedArtifactReceipts(state),
     receiptOutputs: workflowReceiptOutputs(
       protocol,
       status === "completed" ? null : currentNode(state, verified.identity, verified.pending),
@@ -25531,6 +25572,43 @@ async function inspectWorkflowRun(target) {
       location.runRoot
     );
   });
+}
+async function readWorkflowRunReport(target, afterSequence = 0) {
+  if (!Number.isSafeInteger(afterSequence) || afterSequence < 0)
+    throw new Error("Workflow report sequence must be a non-negative integer");
+  const location = resolveWorkflowRunLocation(target);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const before = await location.readState();
+      if (!before) return null;
+      if (await readWorkflowTransitionJournal(location.runRoot))
+        throw new Error(
+          "Workflow report is unavailable until the pending transition is recovered"
+        );
+      const projection = await projectWorkflowState(target);
+      const continuation2 = await inspectWorkflowRun(target);
+      const events = await readTrajectory(
+        location.runRoot,
+        before.trajectoryRef,
+        durabilityReadOptions(before, "trajectoryBytes")
+      );
+      const after = await location.readState();
+      if (JSON.stringify(before) !== JSON.stringify(after) || projection.revision !== continuation2.revision || await readWorkflowTransitionJournal(location.runRoot))
+        continue;
+      return {
+        projection,
+        continuation: continuation2,
+        events: structuredClone(
+          events.filter((event) => event.sequence > afterSequence)
+        ),
+        lastSequence: events.at(-1)?.sequence ?? 0
+      };
+    } catch (error) {
+      if (!(error instanceof RaceSafeReadError) || error.reason !== "changed" || attempt === 3)
+        throw error;
+    }
+  }
+  throw new Error("Workflow Run changed while reporting; retry the read");
 }
 async function previewWorkflowFinalization(target) {
   return withStructuredRuntimeErrors(async () => {
@@ -26740,6 +26818,10 @@ function blockedContinuation(prepared, blockers) {
     visitOrdinal: prepared.verified.state.workflowRuntime?.currentAttempt?.visitOrdinal ?? null,
     retryOrdinal: prepared.verified.state.workflowRuntime?.currentAttempt?.retryOrdinal ?? null,
     pendingAction: prepared.pending,
+    completion: completionPlan(
+      prepared.verified.package.runtime.protocol,
+      prepared.node
+    ),
     receiptOutputs: workflowReceiptOutputs(
       prepared.verified.package.runtime.protocol,
       prepared.node,
@@ -27831,6 +27913,7 @@ function createWorkflowRuntime() {
     listRuns: listWorkflowRuns,
     inspect: inspectWorkflowRun,
     projectState: projectWorkflowState,
+    readReport: readWorkflowRunReport,
     async start(options) {
       return withStructuredRuntimeErrors(async () => {
         const resolved = resolveWorkflowStartLocation(options);
@@ -28368,6 +28451,7 @@ export {
   previewWorkflowFinalization,
   projectWorkflowHandoff,
   projectWorkflowState,
+  readWorkflowRunReport,
   recoverWorkflowRun,
   resumeWorkflowRun,
   startWorkflowRun,

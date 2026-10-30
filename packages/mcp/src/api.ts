@@ -2,10 +2,13 @@ export interface ExpertMcpOptions {
   url: string;
   token: string;
   agentHost: string;
+  /** Host-owned HTTP transport; certification uses Node HTTP under --jitless. */
+  fetch?: typeof fetch;
 }
 
 /** A setting is wrong; the message names the setting, never its value. */
 export class ConfigurationError extends Error {}
+export class BadgerConnectionError extends Error {}
 
 /** The service refused a request; `code` is its error kind. */
 export class BadgerApiError extends Error {
@@ -76,17 +79,20 @@ export class BadgerApi {
   ): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(`${this.url}/api/v1${path}`, {
-        method,
-        redirect: "error",
-        signal: AbortSignal.timeout(timeoutSeconds * 1000),
-        headers: {
-          authorization: `Bearer ${this.options.token}`,
-          "x-badger-agent-host": this.options.agentHost,
-          "content-type": "application/json",
+      response = await (this.options.fetch ?? fetch)(
+        `${this.url}/api/v1${path}`,
+        {
+          method,
+          redirect: "error",
+          signal: AbortSignal.timeout(timeoutSeconds * 1000),
+          headers: {
+            authorization: `Bearer ${this.options.token}`,
+            "x-badger-agent-host": this.options.agentHost,
+            "content-type": "application/json",
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      });
+      );
     } catch (error) {
       if (error instanceof Error && error.name === "TimeoutError")
         throw new BadgerTimeoutError(
@@ -101,7 +107,7 @@ export class BadgerApi {
         throw new Error(
           "Badger answered with a redirect, which the MCP refuses so the token stays with this deployment; check BADGER_URL, including its base path",
         );
-      throw new Error(
+      throw new BadgerConnectionError(
         "Cannot reach Badger; check BADGER_URL and the connection",
       );
     }

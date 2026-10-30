@@ -198,7 +198,9 @@ it("requires independent human review and owner publication, and exposes immutab
     409,
     operatorToken,
   );
-  await call(route, "GET", undefined, engineer, 403, secret);
+  expect(
+    (await call(route, "GET", undefined, engineer, 200, secret)).publications,
+  ).toHaveLength(1);
   await call(route, "GET", undefined, { subject: "outsider" }, 403);
   const { secret: unscoped } = await call(
     "/me/tokens",

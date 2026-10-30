@@ -1200,3 +1200,16 @@ this authorized retrieval API and kernel snapshot verification, rather than
 following any current authoring path. Review/publication never changes the
 committed Authoring namespace; their evidence, audit, stage and gate changes
 commit atomically. See ADR 0033.
+
+Run observation is available at `GET /api/v1/me/runs`,
+`GET /api/v1/workflows/:workflowId/runs`, and `GET /api/v1/runs/:id`.
+The local MCP registers an accepted Run with `POST /api/v1/runs/:id` and mirrors
+ordered events and kernel read models through `POST /api/v1/runs/:id/events`.
+The new reviewed `0031_runs.sql` migration keeps event sequences immutable.
+Registration fixes person, host label, Agent host, publication and package hash;
+replays must match that identity. Operator scope and role are both required for
+production Run writes; Engineers use engineer scope for test Runs. Signed-in
+workflow readers can inspect the Runs dashboard. These are observer models;
+WorkflowRuntime remains the runtime authority and human gate delivery remains a
+separate feature. See the MCP package README for tool schemas, retry guarantees,
+bounds and certification details.

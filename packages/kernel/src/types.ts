@@ -1297,6 +1297,23 @@ export interface EvalReport {
   checks: Array<{ id: string; passed: boolean; detail: string }>;
   authoringCrossValidation?: AuthoringCrossValidationResult;
   runtime?: WorkflowRuntimeCertificationEvidence;
+  mcp?: WorkflowMcpCertificationEvidence;
+}
+
+export interface WorkflowMcpCertificationEvidence {
+  authority: "BadgerMCP";
+  mode: "mcp";
+  generatedPackageHash: string;
+  evaluatedPackageStarted: boolean;
+  toolCalls: string[];
+  completed: boolean;
+  rootBindingRequired: boolean;
+  refusedStartRegisteredNothing: boolean;
+  receiptRootVerified: boolean;
+  skippedNodeRefused: boolean;
+  missingCompletionRefused: boolean;
+  illegalRouteRefused: boolean;
+  exhaustedCycleRefused: boolean;
 }
 
 export interface WorkflowRuntimeIdentityEvidence {

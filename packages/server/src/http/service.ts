@@ -67,6 +67,7 @@ import { gateMethods, handleGate } from "./gates.js";
 import { dossierMethods, handleDossier } from "./dossier.js";
 import { planMethods, handlePlan } from "./plans.js";
 import { publicationMethods, handlePublications } from "./publications.js";
+import { runMethods, handleRuns } from "./runs.js";
 import { evaluationMethods, handleEvaluations } from "./evaluations.js";
 import { packageMethods, handlePackage } from "./packages.js";
 import { proposalMethods, handleProposal } from "./proposals.js";
@@ -175,6 +176,7 @@ function allowedMethods(path: string): string {
     planMethods(path) ??
     proposalMethods(path) ??
     publicationMethods(path) ??
+    runMethods(path) ??
     evaluationMethods(path) ??
     packageMethods(path) ??
     sourceStudyMethods(path) ??
@@ -857,6 +859,7 @@ export function createService(options: ServiceOptions, port: number): Service {
         return await handleProposal(authorized);
       if (publicationMethods(path) !== null)
         return await handlePublications(authorized);
+      if (runMethods(path) !== null) return await handleRuns(authorized);
       if (evaluationMethods(path) !== null)
         return await handleEvaluations(authorized);
       if (packageMethods(path) !== null) return await handlePackage(authorized);
@@ -976,6 +979,7 @@ export function createService(options: ServiceOptions, port: number): Service {
           ...questionnaire,
           uploadSkillVersion,
           installPublished,
+          operateRuns: installPublished,
         },
       });
     }

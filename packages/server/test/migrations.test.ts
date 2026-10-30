@@ -201,6 +201,7 @@ describe("reviewed SQL migrations", () => {
     ).toEqual(previous.rows);
     for (const table of [
       "workflow_record_origins",
+      "workflow_run_events",
       "inherited_answer_attachments",
     ]) {
       for (const statement of [`delete from ${table}`, `truncate ${table}`])
@@ -260,7 +261,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0030");
+    expect(upgraded.applied.at(-1)).toBe("0031");
     expect(
       (
         await test.database.query(
@@ -415,6 +416,7 @@ describe("reviewed SQL migrations", () => {
       "0028",
       "0029",
       "0030",
+      "0031",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -452,6 +454,7 @@ describe("reviewed SQL migrations", () => {
         "0028",
         "0029",
         "0030",
+        "0031",
       ],
       pending: [],
       drifted: [],
@@ -525,6 +528,8 @@ describe("reviewed SQL migrations", () => {
       "workflow_kernel_states",
       "workflow_packages",
       "workflow_record_origins",
+      "workflow_run_events",
+      "workflow_runs",
       "workflow_skill_pins",
       "workflow_source_checks",
       "workflow_versions",
@@ -572,6 +577,7 @@ describe("reviewed SQL migrations", () => {
         "0028",
         "0029",
         "0030",
+        "0031",
       ],
       pending: [],
       drifted: [],
@@ -579,7 +585,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(30);
+    expect(rows.rows[0]?.count).toBe(31);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

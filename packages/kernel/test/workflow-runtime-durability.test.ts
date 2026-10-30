@@ -182,6 +182,88 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
     await expect(readWorkflowTransitionJournal(runRoot)).resolves.toBeNull();
   });
 
+  it("retries a public projection when a genuine committing writer replaces its journal during the protected read", async () => {
+    const runtime = createWorkflowRuntime();
+    const started = await runtime.start({
+      protocol: phase4Protocol(),
+      runRoot,
+      runId: "journal-reader",
+    });
+    const deferred = () => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    };
+    const first = deferred(),
+      releaseFirst = deferred(),
+      second = deferred(),
+      releaseSecond = deferred();
+    const originalOpen = fs.open;
+    let intercepted = false;
+    let writer: ReturnType<typeof runtime.submit> | undefined;
+    try {
+      setWorkflowTransitionFaultForTests(async (boundary) => {
+        if (boundary.phase === "commit-evidence") {
+          first.resolve();
+          await releaseFirst.promise;
+        }
+        if (boundary.phase === "commit-evidence-written") {
+          second.resolve();
+          await releaseSecond.promise;
+        }
+      });
+      writer = runtime.submit(runRoot, {
+        actionId: started.pendingAction!.id,
+        runId: started.runId,
+        nodeId: started.currentNode,
+        revision: started.revision,
+        execution: started.execution,
+        status: "succeeded",
+        summary: "Prepared.",
+      });
+      await first.promise;
+      fs.open = (async (...args: Parameters<typeof fs.open>) => {
+        const handle = await originalOpen(...args);
+        if (
+          !intercepted &&
+          String(args[0]).endsWith(
+            `${path.sep}.badger${path.sep}transition-journal.json`,
+          )
+        ) {
+          intercepted = true;
+          const read = handle.read.bind(handle);
+          let armed = true;
+          handle.read = (async (...readArgs: Parameters<typeof read>) => {
+            const result = await read(...readArgs);
+            if (armed) {
+              armed = false;
+              releaseFirst.resolve();
+              await second.promise;
+            }
+            return result;
+          }) as typeof handle.read;
+        }
+        return handle;
+      }) as typeof fs.open;
+      const projection = await runtime.projectState(runRoot);
+      expect(intercepted).toBe(true);
+      expect(projection).toMatchObject({ status: "blocked", revision: 1 });
+    } finally {
+      fs.open = originalOpen;
+      releaseFirst.resolve();
+      releaseSecond.resolve();
+      await writer;
+      clearWorkflowTransitionFaultForTests();
+    }
+    expect(await runtime.inspect(runRoot)).toMatchObject({
+      revision: 1,
+      disposition: "continue",
+      currentNode: "finish",
+    });
+  });
+
   it("captures an explicit transition-journal capability and bound", async () => {
     const started = await createWorkflowRuntime().start({
       protocol: phase4JournalProtocol(),

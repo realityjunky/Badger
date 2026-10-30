@@ -298,12 +298,22 @@ async function certifyRevisionedWorkflow(options: {
   const runId = `certification-${options.generatedPackageHash.slice(0, 16)}`;
   const reverseRunId = `${runId}-reverse`;
   try {
+    const requirements = await createWorkflowRuntime().startRequirements(
+      options.protocol,
+    );
+    const rootArgs: string[] = [];
+    for (const [index, requirement] of requirements.externalRoots.entries()) {
+      const directory = path.join(temporaryRoot, `external-${index}`);
+      await fs.mkdir(directory);
+      rootArgs.push("--external-root", `${requirement.name}=${directory}`);
+    }
     const started = await runGeneratedState(options.packageRoot, [
       "init",
       "--run-root",
       runRoot,
       "--run-id",
       runId,
+      ...rootArgs,
       "--json",
     ]);
     const nodeOrder = Object.keys(started.execution.nodeToStep);

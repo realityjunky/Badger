@@ -181,6 +181,11 @@ export function WorkflowsPage() {
         description={workflow?.goal ?? t("page.workflows.description")}
         actions={
           <Space wrap>
+            {workflow && (
+              <Link to={`/runs?workflow=${encodeURIComponent(workflow.id)}`}>
+                {t("page.runs.title")}
+              </Link>
+            )}
             {workflow && selectedVersion && (
               <Link
                 to={`/questionnaire?workflow=${encodeURIComponent(workflow.id)}&version=${encodeURIComponent(selectedVersion.id)}`}
