@@ -476,6 +476,52 @@ describe("OpenID Connect sign-in", () => {
     });
   });
 
+  it("reports a held discovery request as unavailable after the configured timeout", async () => {
+    const app = await start({ BADGER_OIDC_TIMEOUT_SECONDS: "1" });
+    provider!.setEndpointHeld("/.well-known/openid-configuration");
+    const failed = await app.request("/badger/auth/oidc/login", {
+      redirect: "manual",
+    });
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).toContain(
+      "The identity provider is unavailable",
+    );
+    expect(
+      app.logs.filter((entry) => entry["event"] === "oidc.sign-in-failed"),
+    ).toEqual([
+      expect.objectContaining({
+        level: "error",
+        stage: "login",
+        outcome: "unavailable",
+        reason: expect.stringMatching(/^discovery: .*timeout/iu),
+      }),
+    ]);
+  });
+
+  it("reports a held token request as unavailable after the configured timeout", async () => {
+    const app = await start({ BADGER_OIDC_TIMEOUT_SECONDS: "1" });
+    const flow = await begin();
+    provider!.setEndpointHeld("/token");
+    const failed = await app.request(flow.completePath, {
+      headers: { cookie: flow.flowCookie },
+      redirect: "manual",
+    });
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).toContain(
+      "The identity provider is unavailable",
+    );
+    expect(
+      app.logs.filter((entry) => entry["event"] === "oidc.sign-in-failed"),
+    ).toEqual([
+      expect.objectContaining({
+        level: "error",
+        stage: "callback",
+        outcome: "unavailable",
+        reason: expect.stringMatching(/^callback: .*timeout/iu),
+      }),
+    ]);
+  });
+
   it("reports provider outages as unavailable, including during the code exchange", async () => {
     const app = await start();
     provider!.setFailure(503);

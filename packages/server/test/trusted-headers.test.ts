@@ -133,6 +133,39 @@ describe("signing in through trusted headers", () => {
     expect(response.status).toBe(401);
   });
 
+  it("matches an IPv4 proxy setting against a mapped peer on an IPv6 listener", async (context) => {
+    try {
+      service = await startTestService({
+        mode: "service",
+        environment: { ...environment, BADGER_HOST: "::" },
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "syscall" in error &&
+        error.syscall === "listen" &&
+        "code" in error &&
+        (error.code === "EAFNOSUPPORT" || error.code === "EADDRNOTAVAIL")
+      ) {
+        context.skip();
+        return;
+      }
+      throw error;
+    }
+
+    // An IPv4 connection to the dual-stack listener arrives as ::ffff:127.0.0.1.
+    const accepted = await fetch(`http://127.0.0.1:${service.port}/api/v1/me`, {
+      headers,
+    });
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toMatchObject({
+      person: { subject: "alice-id", displayName: "Alice Ng" },
+    });
+    // The harness's IPv6 loopback connection has peer ::1, outside the list.
+    const refused = await service.request("/api/v1/me", { headers });
+    expect(refused.status).toBe(401);
+  });
+
   it("recognizes IPv4-mapped proxy addresses and configurable header names", async () => {
     service = await startTestService({
       mode: "service",
