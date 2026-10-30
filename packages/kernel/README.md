@@ -90,6 +90,10 @@ items with immutable round-publication baselines. Inferences and assumptions
 remain drafts until their linked question's facts are acknowledged. This
 record-readiness result does not compose, validate, or approve a dossier; the
 existing dossier/FactoryPlan handoff retains those validation requirements.
+The records form validates required fields, topics, identities, and references
+before computing any ledger items. Invalid records throw an error naming the
+record kind, its ID, and the problem. Historical facts may retain older
+resolution and answer revisions after the current heads advance.
 
 Dossier versions (#50) add `composeSemanticDossier`: the kernel projects the
 acknowledged facts, source-derived facts, confirmed inferences, and deferred
