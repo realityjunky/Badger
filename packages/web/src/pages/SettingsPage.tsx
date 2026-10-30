@@ -4,6 +4,8 @@ import { PageHeader } from "../components/PageHeader.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
 import { TokenSettings } from "./settings/TokenSettings.js";
+import { NotificationSettings } from "./settings/NotificationSettings.js";
+import { GroupRobotSettings } from "./settings/GroupRobotSettings.js";
 import {
   clampFontScale,
   FONT_SCALE_STEP,
@@ -44,8 +46,6 @@ export function SettingsPage() {
   const navigate = useNavigate();
   const segment = location.pathname.split("/")[2];
   const activeTab: TabKey = isTabKey(segment) ? segment : "appearance";
-
-  const placeholder = <p className="muted">{t("common.placeholderHint")}</p>;
 
   return (
     <div className="page" data-testid="page-settings">
@@ -170,14 +170,10 @@ export function SettingsPage() {
           {
             key: "notifications",
             label: t("settings.notifications.title"),
-            children: (
-              <section className="settings-panel">
-                <p className="muted">
-                  {t("settings.notifications.description")}
-                </p>
-                {placeholder}
-              </section>
-            ),
+            children:
+              activeTab === "notifications" ? (
+                <NotificationSettings mode="events" />
+              ) : null,
           },
           {
             key: "tokens",
@@ -188,10 +184,10 @@ export function SettingsPage() {
             key: "channels",
             label: t("settings.channels.title"),
             children: (
-              <section className="settings-panel">
-                <p className="muted">{t("settings.channels.description")}</p>
-                {placeholder}
-              </section>
+              <>
+                <NotificationSettings mode="identity" />
+                <GroupRobotSettings />
+              </>
             ),
           },
         ]}

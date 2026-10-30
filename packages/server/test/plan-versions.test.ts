@@ -1,6 +1,10 @@
 import { afterEach, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import type { TestService } from "../src/testing/index.js";
+import {
+  startTestService,
+  startStubWeComRobot,
+  type TestService,
+} from "../src/testing/index.js";
 import {
   engineer,
   owner,
@@ -11,6 +15,88 @@ import {
 
 let service: TestService;
 afterEach(async () => service?.close());
+
+it("notifies the Workflow owner for plan approval and preserves the plan reminder deep link", async () => {
+  const robot = await startStubWeComRobot();
+  try {
+    service = await startTestService({
+      notificationChannel: robot.channel,
+      environment: {
+        BADGER_BOOTSTRAP_ADMINISTRATORS: "admin@example.com",
+        BADGER_ALLOWED_ORIGINS: "http://localhost",
+        BADGER_NOTIFICATION_KEY: "ab".repeat(32),
+        BADGER_PUBLIC_URL: "https://badger.example.com",
+      },
+    });
+    const { call, base, workflow, approve } = await planningFixture(service);
+    await approve("dossier", owner);
+    await service.runNotificationJobs();
+    await call(
+      "/me/notifications",
+      "PUT",
+      {
+        revision: 0,
+        wecomUserId: "owner-id",
+        mobile: null,
+        mentionEvents: ["gate-ready"],
+      },
+      owner,
+    );
+    await call(
+      `/workflows/${workflow.id}/notifications/channel`,
+      "PUT",
+      {
+        revision: 0,
+        label: "Planning chat",
+        language: "en",
+        confirmed: true,
+        webhookUrl:
+          "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=merge-test",
+      },
+      owner,
+    );
+    expect(await service.runNotificationJobs()).toBe(1);
+    const { skeleton: plan, dossierHash } = await call(`${base}/plan`);
+    plan.workflow.customNodes[0].implementation.skill = "prepare";
+    const { composition } = await call(`${base}/plan/preview`, "POST", {
+      plan,
+      dossierHash,
+    });
+    await call(
+      `${base}/plan/save`,
+      "POST",
+      {
+        plan,
+        dossierHash,
+        confirmationHash: composition.hash,
+        expectedVersionId: null,
+      },
+      engineer,
+      201,
+    );
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs()).toBe(1);
+    expect(robot.requests.at(-1)?.message.text.mentioned_list).toEqual([
+      "owner-id",
+    ]);
+    expect(robot.requests.at(-1)?.message.text.content).toContain("#plan");
+    expect(robot.requests.at(-1)?.message.text.content).not.toContain(
+      "implementation",
+    );
+    const { items } = await call(
+      `/workflows/${workflow.id}/notifications/waiting`,
+      "GET",
+      undefined,
+      owner,
+    );
+    const waiting = items.find((item: { href: string }) =>
+      item.href.endsWith("#plan"),
+    );
+    expect(waiting?.canRemind).toBe(true);
+  } finally {
+    await robot.close();
+  }
+});
 
 it("derives and saves immutable canonical plan versions only from the currently approved dossier, with live kernel findings", async () => {
   service = await startPlanningService();

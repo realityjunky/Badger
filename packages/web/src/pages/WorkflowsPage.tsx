@@ -27,6 +27,7 @@ import { WorkflowSources } from "./workflows/WorkflowSources.js";
 import { WorkflowSourceStudy } from "./workflows/WorkflowSourceStudy.js";
 import { WorkflowDossier } from "./workflows/WorkflowDossier.js";
 import { WorkflowPlan } from "./workflows/WorkflowPlan.js";
+import { WorkflowNotifications } from "./workflows/WorkflowNotifications.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 
 type State =
@@ -371,6 +372,12 @@ export function WorkflowsPage() {
             bindings={detail.bindings}
             mayManage={detail.capabilities.manageRoles}
             onChanged={reload}
+          />
+          <WorkflowNotifications
+            key={detail.workflow.id}
+            basePath={basePath}
+            workflowId={detail.workflow.id}
+            mayManage={detail.capabilities.approveDossier}
           />
         </>
       )}

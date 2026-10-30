@@ -33,6 +33,7 @@
     "ajv": "^8.20.0",
     "openid-client": "^6.8.8",
     "pg": "^8.23.1",
+    "undici": "^7.30.1",
     "yauzl": "^3.4.0"
   },
   "devDependencies": {

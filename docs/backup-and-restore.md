@@ -23,6 +23,9 @@ the repository, readable only by the backup operator, and copy completed sets to
 an independently recoverable destination. An on-host copy handles application
 recovery but cannot recover a lost host. Store deployment secrets separately in
 the deployment's secret store; do not put credentials in manifests or logs.
+Include `BADGER_NOTIFICATION_KEY` in that separate secret backup: it decrypts
+Group robot settings and queued Deliveries. Restoring a database without the
+same key cannot restore those notification channels.
 
 ## Take a consistent backup
 
