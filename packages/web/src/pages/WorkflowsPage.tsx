@@ -27,6 +27,7 @@ import { WorkflowSources } from "./workflows/WorkflowSources.js";
 import { WorkflowSourceStudy } from "./workflows/WorkflowSourceStudy.js";
 import { WorkflowDossier } from "./workflows/WorkflowDossier.js";
 import { WorkflowPlan } from "./workflows/WorkflowPlan.js";
+import { WorkflowProposal } from "./workflows/WorkflowProposal.js";
 import { WorkflowNotifications } from "./workflows/WorkflowNotifications.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 
@@ -360,6 +361,12 @@ export function WorkflowsPage() {
                 />
                 <WorkflowPlan
                   key={`plan-${selectedVersion.id}`}
+                  basePath={basePath}
+                  detail={versionResources}
+                  onChanged={reload}
+                />
+                <WorkflowProposal
+                  key={`proposal-${selectedVersion.id}`}
                   basePath={basePath}
                   detail={versionResources}
                   onChanged={reload}

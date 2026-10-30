@@ -41,7 +41,7 @@ export function createSourceCheckWorker(
 }
 
 /**
- * Runs every job the worker can claim, then waits for a notification or the
+ * Runs source checks and initialization jobs, then waits for a notification or the
  * poll interval. An error is logged and the loop carries on after one wait,
  * so a database restart pauses the worker instead of ending it.
  */

@@ -90,7 +90,7 @@ export interface TestService {
     workerId?: string,
     options?: { leaseMilliseconds?: number; pollMilliseconds?: number },
   ): SourceCheckWorker;
-  /** Runs the queued source checks with one worker; returns how many ran. */
+  /** Drains workflow jobs (source checks and initialization); returns how many ran. */
   runSourceCheckJobs(): Promise<number>;
   runNotificationJobs(): Promise<number>;
   close(): Promise<void>;

@@ -64,9 +64,11 @@ export async function eligibleNotificationItems(
         canAct =
           item.gate === "dossier"
             ? capabilities.approveDossier
-            : item.gate === "plan"
-              ? capabilities.approvePlan
-              : capabilities.confirmSources;
+            : item.gate === "proposal"
+              ? capabilities.approveProposal
+              : item.gate === "plan"
+                ? capabilities.approvePlan
+                : capabilities.confirmSources;
         break;
       case "gate-invalidated":
         canAct = questionnaire.compose || capabilities.approveDossier;
