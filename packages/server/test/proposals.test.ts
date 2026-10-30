@@ -346,6 +346,39 @@ it("shows kernel blockers and refuses stale approval and initialization after so
   });
 });
 
+it("serves plan saves and initialization only to POST, so a read cannot skip the Origin rule", async () => {
+  service = await startPlanningService();
+  const { call, base, approve, plan, planVersion } = await approvedPlan();
+  const read = (route: string, body: unknown) =>
+    service.rawRequest({
+      path: `/api/v1${base}/${route}`,
+      as: engineer,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  plan.workflow.customNodes[0].label = "Saved by a read";
+  const edit = { plan, dossierHash: planVersion.snapshot.dossierHash };
+  const { composition } = await call(`${base}/plan/preview`, "POST", edit);
+  const save = await read("plan/save", {
+    ...edit,
+    confirmationHash: composition.hash,
+    expectedVersionId: planVersion.id,
+  });
+  expect(save.status).toBe(405);
+  expect(save.headers.allow).toBe("POST");
+  expect((await call(`${base}/plan`)).versions).toEqual([planVersion]);
+  await approve("plan", owner);
+  const approved = await approve("proposal", owner);
+  const initialize = await read("proposal/initialize", {
+    proposalHash: approved.confirmation.boundHashes.proposal,
+    confirmed: true,
+    requestId: "initialize-by-read",
+  });
+  expect(initialize.status).toBe(405);
+  expect(initialize.headers.allow).toBe("POST");
+  expect((await call(`${base}/proposal`)).jobs).toEqual([]);
+});
+
 it.each(["fact", "pin", "dossier"] as const)(
   "preserves initialized state while a changed %s invalidates its proposal",
   async (changed) => {

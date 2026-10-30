@@ -197,7 +197,8 @@ or invalid edits. `POST V/plan/save` takes those fields plus
 `confirmationHash` and `expectedVersionId` (null for the first plan). A valid
 preview is required; concurrent saves conflict and identical latest content
 returns the original version. Both writes require a signed-in Engineer or
-Administrator. Tokens may only read the plan and its history.
+Administrator and only `POST`; other methods answer 405. Tokens may only read
+the plan and its history.
 
 The Workflow owner previews and commits `V/gates/plan` using the shared gate
 protocol. Its bound hashes identify both the Plan version and Dossier version.
@@ -235,12 +236,13 @@ same transaction. Gate retries retain their original response.
 
 A signed-in Engineer or Administrator sends
 `{proposalHash, confirmed: true, requestId, replaceStateHash?}` to
-`POST V/proposal/initialize`. It returns `202 {job}` without running the
-kernel in the HTTP request. `replaceStateHash` must equal `currentState.hash`
-when replacing state; a conflict returns `currentStateHash`. Request IDs
-identify jobs per requester, so identical retries return the same job while
-changed inputs conflict. Personal access tokens may read these resources
-but cannot approve or initialize.
+`POST V/proposal/initialize`; other methods answer 405. It returns
+`202 {job}` without running the kernel in the HTTP request.
+`replaceStateHash` must equal `currentState.hash` when replacing state; a
+conflict returns `currentStateHash`. Request IDs identify jobs per requester,
+so identical retries return the same job while changed inputs conflict.
+Personal access tokens may read these resources but cannot approve or
+initialize.
 
 The existing workflow worker claims `init` jobs alongside source checks and
 rechecks the approval, plan, sources, and quoted state hash under the version
