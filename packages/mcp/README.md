@@ -106,12 +106,19 @@ from the Workflow version. Question drafting and follow-ups choose a draft round
 follow-ups also name a published parent. The other kinds are `source-study`
 (one pinned Skill), `restate-answer` (an answered question), `translate-question`
 (a question and target locale), and `import-open-questions` (a pinned Skill and
-draft round). The claim response and `job.json` identify those targets. Claiming verifies the
-context hash and every pinned file against its inventory before returning
-the folder. Files never execute. Folders use mode `0700`, files `0600`, and
-the files persist across MCP restarts so the Agent can resume with the same
-deployment, person, token, and host. Delete the folder when finished; it
-contains workflow evidence. General large-result files remain connection-local.
+draft round). The claim response and `job.json` identify those targets.
+The folder holds only the pinned Skills the job's kind reads, which the claim
+result's `skills` lists: the job's Skill for source study and imports, every
+pin for question, follow-up, and plan drafting, and none for restatement and
+translation. Before writing anything, claiming verifies the context hash and
+every file against its pin's inventory, and refuses any path with a `.git`
+component in any letter case, as a folder or a file, including spellings that
+HFS+ or Windows file systems resolve to `.git`, so Git never finds a repository
+configuration it would run; a refused claim is released. Files
+never execute. Folders use mode `0700`, files `0600`, and the files persist
+across MCP restarts so the Agent can resume with the same deployment, person,
+token, and host. Delete the folder when finished; it contains workflow
+evidence. General large-result files remain connection-local.
 
 Write `result.json` using the claimed job's `output-schema.json`. Question jobs
 use `{"questions":[…]}`; source study uses `{facts, interfaces}`; restatement uses
@@ -124,11 +131,14 @@ Each question needs text, topic, targets, rationale, evidence, assignees, and
 priority. A result is limited to 1 MiB and 20 questions (or 100 source facts,
 100 interfaces, or 100 restatement facts). Local reads refuse
 symbolic links and special files. The service validates the schema again.
-Pinned Skill bundles are limited to 32 MiB. Leases last 30 minutes and are
-bound to the claiming person, token, host, and lease ID. Expired leases
-return to the queue on the next job or Engineer questionnaire read; changed
-inputs cancel queued, claimed, and submitted jobs at the same boundaries.
-The old lease cannot submit after expiry, release, or re-claim.
+A claim's Skill files total at most twice the deployment's
+`BADGER_UPLOAD_MAX_BYTES`, so any two Skill versions within the upload limit
+fit. Leases last 30 minutes and are bound to the claiming person, token, host,
+and lease ID. Expired leases return to the queue on the next job or Engineer
+questionnaire read. At the same boundaries, a change to a job's inputs, the
+part of the context its kind's result depends on, cancels it when queued,
+claimed, or submitted; other changes, such as a comment, leave it pending. The
+old lease cannot submit after expiry, release, or re-claim.
 
 Plan drafting (#58) uses the same tools. The Engineer requests **Plan versions
 → Request plan draft** after the Workflow owner approves the dossier. A
@@ -138,7 +148,8 @@ skeleton and write `result.json` as `{"plan":{…}}` using the supplied schema.
 Submission returns a dashboard link to the workflow's `#plan` panel. A signed-in
 Engineer reviews and accepts or edits the suggestion before it becomes a Plan
 version; the Workflow owner then approves it separately. Agents cannot save,
-accept, or approve plans. Changed inputs cancel pending drafts.
+accept, or approve plans. A changed planning input or a newer Plan version
+cancels pending drafts.
 
 The claimed `job.json` identifies the job kind, selected draft round, and parent question, if any. Submission returns a dashboard review link and creates suggestions and an inbox item for the requester. Use `open_dashboard` with `action: "review_suggestions"` to offer that link through URL elicitation when the host supports it. It
 creates no Question, Fact, resolution, or publication. The Engineer reviews,

@@ -14,12 +14,18 @@ import {
   saveQuestion,
 } from "../questionnaire/store.js";
 import { toIsoString } from "../util.js";
-import { draftingContext } from "./context.js";
+import {
+  draftingContext,
+  draftingInputHash,
+  type DraftingBundle,
+  type DraftingTarget,
+} from "./context.js";
 import {
   DRAFT_SCHEMAS,
   validateDraftResult,
   type DraftingKind,
   type DraftResult,
+  type ImportedQuestion,
 } from "./schema.js";
 import {
   saveStudyRecordInTransaction,
@@ -31,7 +37,10 @@ import {
   resolveQuestion,
 } from "../questionnaire/resolutions.js";
 import { saveTranslation } from "../questionnaire/translations.js";
-import { saveImportedQuestion } from "../questionnaire/imports.js";
+import {
+  refuseImportedAgain,
+  saveImportedQuestion,
+} from "../questionnaire/imports.js";
 
 export type DraftingActor = WriteContext & { agentHost: string | null };
 export interface DraftingJobRow {
@@ -44,8 +53,9 @@ export interface DraftingJobRow {
   locale: string | null;
   parent_question_id: string | null;
   requester_id: string;
-  context_bundle: Awaited<ReturnType<typeof draftingContext>>["bundle"];
+  context_bundle: DraftingBundle;
   context_hash: string;
+  input_hash: string;
   output_schema: object;
   status:
     "queued" | "claimed" | "submitted" | "accepted" | "rejected" | "cancelled";
@@ -88,6 +98,17 @@ export function publicDraftingJob(row: DraftingJobRow) {
     resultHash: row.result_hash,
     decision: row.decision,
     createdAt: toIsoString(row.created_at),
+  };
+}
+
+export function draftingTarget(job: DraftingJobRow): DraftingTarget {
+  return {
+    kind: job.kind,
+    roundId: job.round_id,
+    parentQuestionId: job.parent_question_id,
+    skillId: job.skill_id,
+    questionId: job.question_id,
+    locale: job.locale,
   };
 }
 
@@ -137,7 +158,10 @@ async function finishInbox(
   );
 }
 
-/** Called under the workflow/version locks before reading or changing jobs. */
+/**
+ * Called under the workflow/version locks before reading or changing jobs.
+ * A job is cancelled only when the inputs its kind reads change.
+ */
 export async function reconcileDraftingJobs(
   tx: Queryable,
   deps: ServiceDependencies,
@@ -154,7 +178,8 @@ export async function reconcileDraftingJobs(
   const jobs = await readDraftingJobs(tx, versionId);
   for (const job of jobs) {
     if (!["queued", "claimed", "submitted"].includes(job.status)) continue;
-    const changed = job.context_hash !== current.hash;
+    const changed =
+      job.input_hash !== draftingInputHash(current.bundle, draftingTarget(job));
     const expired =
       job.status === "claimed" &&
       new Date(job.lease_until!).getTime() <= deps.clock.now().getTime();
@@ -187,14 +212,7 @@ export async function createDraftingJob(
   deps: ServiceDependencies,
   actor: DraftingActor,
   versionId: string,
-  input: {
-    kind: DraftingJobRow["kind"];
-    roundId: string | null;
-    parentQuestionId: string | null;
-    skillId: string | null;
-    questionId: string | null;
-    locale: string | null;
-  },
+  input: DraftingTarget,
   current: Awaited<ReturnType<typeof draftingContext>>,
 ) {
   if (input.kind === "draft-plan" && !current.bundle.planning)
@@ -243,8 +261,8 @@ export async function createDraftingJob(
     );
   const job = (
     await tx.query<DraftingJobRow>(
-      `insert into drafting_jobs (id, workflow_version_id, kind, round_id, parent_question_id, requester_id, context_bundle, context_hash, output_schema, created_at, updated_at, skill_id, question_id, locale)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13) returning *`,
+      `insert into drafting_jobs (id, workflow_version_id, kind, round_id, parent_question_id, requester_id, context_bundle, context_hash, output_schema, created_at, updated_at, skill_id, question_id, locale, input_hash)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14) returning *`,
       [
         deps.ids.next(),
         versionId,
@@ -263,6 +281,7 @@ export async function createDraftingJob(
         input.skillId,
         input.questionId,
         input.locale,
+        draftingInputHash(current.bundle, input),
       ],
     )
   ).rows[0]!;
@@ -380,6 +399,12 @@ export async function jobDecisionPreview(
     action === "accept"
       ? validateDraftResult(job.kind, job.output_schema, result)
       : { reason };
+  if (action === "accept" && job.kind === "import-open-questions")
+    await refuseImportedAgain(
+      tx,
+      job.workflow_version_id,
+      (decision as { questions: ImportedQuestion[] }).questions,
+    );
   if ("plan" in decision) {
     const composition = composeFactoryPlan(
       job.context_bundle.planning!.input,

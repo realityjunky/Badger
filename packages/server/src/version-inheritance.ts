@@ -168,8 +168,8 @@ export async function inheritVersionRecords(
   );
   await tx.query(
     `${origins} insert into question_imports
-    (question_id, question_revision, skill_id, skill_version_hash, source_number, evidence, job_id)
-    select o.record_id, i.question_revision, i.skill_id, i.skill_version_hash, i.source_number, i.evidence, i.job_id
+    (question_id, workflow_version_id, question_revision, skill_id, skill_version_hash, source_number, evidence, job_id)
+    select o.record_id, $2, i.question_revision, i.skill_id, i.skill_version_hash, i.source_number, i.evidence, i.job_id
     from question_imports i join origins o on o.source_record_id = i.question_id and o.record_type = 'import'
     where o.source_workflow_version_id = $1`,
     values,

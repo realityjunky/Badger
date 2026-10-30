@@ -41,6 +41,18 @@ export function jobsPath(input: { workflowId: string; versionId: string }) {
   return `/workflows/${encodeURIComponent(input.workflowId)}/versions/${encodeURIComponent(input.versionId)}/drafting-jobs`;
 }
 
+/**
+ * Git runs commands a repository configures, so no `.git` entry lands in any
+ * letter case, including with the code points HFS+ ignores or the trailing
+ * dots and spaces Windows trims.
+ */
+function gitMetadata(segment: string) {
+  const name = segment
+    .replace(/[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/gu, "")
+    .replace(/[. ]+$/u, "");
+  return name.toLowerCase() === ".git" || name.toUpperCase() === ".GIT";
+}
+
 function safePath(value: string) {
   if (
     !value ||
@@ -49,6 +61,10 @@ function safePath(value: string) {
     value.split("/").some((p) => !p || p === "." || p === "..")
   )
     throw new Error("The job bundle contains an unsafe file path");
+  if (value.split("/").some(gitMetadata))
+    throw new Error(
+      "A pinned Skill contains a .git path; the MCP refuses to write Git metadata into a job folder",
+    );
   return value;
 }
 
@@ -120,6 +136,7 @@ export async function claimJob(
         inventory: { path: string; hash: string }[];
       }[];
     };
+    skills: { skillId: string; versionHash: string }[];
     files: {
       skillId: string;
       versionHash: string;
@@ -134,17 +151,21 @@ export async function claimJob(
   try {
     if (canonicalHash(claimed.contextBundle) !== claimed.job.contextHash)
       throw new Error("The job context hash does not match its bundle");
-    folder = await fs.mkdtemp(path.join(os.tmpdir(), "badger-drafting-"));
-    await fs.chmod(folder, 0o700);
-    const expected = new Map<string, string>(
-      claimed.contextBundle.pins.flatMap((pin) =>
-        pin.inventory.map(
-          (file) =>
-            [`${pin.skillId}/${pin.hash}/${file.path}`, file.hash] as const,
-        ),
-      ),
-    );
-    for (const file of claimed.files) {
+    // The kind decides which pinned Skills arrive; each arrives whole, and
+    // every file is checked before anything is written.
+    const expected = new Map<string, string>();
+    for (const skill of claimed.skills) {
+      const pin = claimed.contextBundle.pins.find(
+        (p) => p.skillId === skill.skillId && p.hash === skill.versionHash,
+      );
+      if (!pin)
+        throw new Error(
+          "The job ships a Skill version its context does not pin",
+        );
+      for (const file of pin.inventory)
+        expected.set(`${pin.skillId}/${pin.hash}/${file.path}`, file.hash);
+    }
+    const writes = claimed.files.map((file) => {
       const relative = safePath(
         `${file.skillId}/${file.versionHash}/${file.path}`,
       );
@@ -155,12 +176,17 @@ export async function claimJob(
       )
         throw new Error("A pinned Skill file does not match its inventory");
       expected.delete(relative);
+      return { relative, bytes };
+    });
+    if (expected.size)
+      throw new Error("The job bundle is missing pinned Skill files");
+    folder = await fs.mkdtemp(path.join(os.tmpdir(), "badger-drafting-"));
+    await fs.chmod(folder, 0o700);
+    for (const { relative, bytes } of writes) {
       const target = path.join(folder, "skills", relative);
       await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
       await fs.writeFile(target, bytes, { mode: 0o600, flag: "wx" });
     }
-    if (expected.size)
-      throw new Error("The job bundle is missing pinned Skill files");
     const claim: LocalClaim = {
       workflowId: input.workflowId,
       versionId: input.versionId,
@@ -189,12 +215,13 @@ export async function claimJob(
       skillId: claimed.job.skillId,
       questionId: claimed.job.questionId,
       locale: claimed.job.locale,
+      skills: claimed.skills,
       revision: claimed.job.revision,
       contextHash: claimed.job.contextHash,
       leaseUntil: claimed.job.lease.until,
       resultFile: path.join(folder, "result.json"),
       message:
-        "Read context.json and the pinned skills. Write result.json using output-schema.json, then submit_job. Results remain suggestions until a person accepts them.",
+        "Read context.json and the Skill files under skills/; `skills` lists the pinned versions this kind reads. Write result.json using output-schema.json, then submit_job. Results remain suggestions until a person accepts them.",
     };
   } catch (error) {
     if (folder)

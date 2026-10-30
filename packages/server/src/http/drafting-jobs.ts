@@ -5,6 +5,7 @@ import {
   claimDraftingJob,
   createDraftingJob,
   decideDraftingJob,
+  draftingTarget,
   jobDecisionPreview,
   publicDraftingJob,
   reconcileDraftingJobs,
@@ -13,6 +14,7 @@ import {
   submitDraftingJob,
   type DraftingActor,
 } from "../drafting/jobs.js";
+import { draftingSkills } from "../drafting/context.js";
 import { readVersion } from "../skills/library.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
 import { fields, revisionInput, textInput } from "../questionnaire/model.js";
@@ -217,18 +219,25 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         revisionInput(body.revision) !== job.revision
       )
         return conflict("Read the current queued job before claiming");
+      // Only the Skills this kind reads travel. Any two Skill versions within
+      // the upload limit fit, such as a producer and its consumer.
+      const skills = draftingSkills(job.context_bundle, draftingTarget(job));
+      const versions = [];
+      let bytes = 0;
+      for (const pin of skills) {
+        const version = await readVersion(tx, pin.skillId, pin.hash);
+        for (const file of version.inventory) bytes += file.bytes;
+        versions.push({ pin, version });
+      }
+      if (bytes > 2 * input.config.uploads.maxBytes)
+        throw new RequestError(
+          413,
+          "The pinned Skill files this job reads exceed the claim byte limit",
+        );
       const claimed = await claimDraftingJob(tx, deps, actor, job);
       const files = [];
-      let bytes = 0;
-      for (const pin of job.context_bundle.pins) {
-        const version = await readVersion(tx, pin.skillId, pin.hash);
+      for (const { pin, version } of versions) {
         for (const file of version.inventory) {
-          bytes += file.bytes;
-          if (bytes > 32 * 1024 * 1024)
-            throw new RequestError(
-              400,
-              "The pinned Skill bundle exceeds 32 MiB",
-            );
           const content = await input.blobs.get(file.hash);
           if (createHash("sha256").update(content).digest("hex") !== file.hash)
             throw new Error("Pinned Skill integrity check failed");
@@ -246,6 +255,10 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         value: {
           job: publicDraftingJob(claimed),
           contextBundle: job.context_bundle,
+          skills: skills.map((pin) => ({
+            skillId: pin.skillId,
+            versionHash: pin.hash,
+          })),
           files,
         },
       };

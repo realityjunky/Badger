@@ -28,10 +28,9 @@ export async function readImportedSources(tx: Queryable, versionId: string) {
     question_revision: number;
     source_number: number;
     evidence: SourceEvidence;
-  }>(
-    `select i.* from question_imports i join questions q on q.id = i.question_id where q.workflow_version_id = $1`,
-    [versionId],
-  );
+  }>("select * from question_imports where workflow_version_id = $1", [
+    versionId,
+  ]);
   const origins = await readRecordOrigins(tx, versionId, "import");
   return new Map(
     result.rows.map((row) => [
@@ -44,6 +43,30 @@ export async function readImportedSources(tx: Queryable, versionId: string) {
       },
     ]),
   );
+}
+
+/** Each numbered source question enters a workflow version at most once. */
+export async function refuseImportedAgain(
+  tx: Queryable,
+  versionId: string,
+  items: ImportedQuestion[],
+) {
+  const imported = [...(await readImportedSources(tx, versionId))];
+  for (const { number, source } of items) {
+    const existing = imported.find(
+      ([, s]) =>
+        s.skillId === source.skillId &&
+        s.hash === source.hash &&
+        s.path === source.path &&
+        s.number === number,
+    );
+    if (existing)
+      throw new RequestError(
+        409,
+        `Question ${number} of ${source.path} is already imported into this workflow version`,
+        { questionId: existing[0] },
+      );
+  }
 }
 
 export async function saveImportedQuestion(
@@ -81,10 +104,11 @@ export async function saveImportedQuestion(
     ],
   });
   await tx.query(
-    `insert into question_imports (question_id, question_revision, skill_id, skill_version_hash, source_number, evidence, job_id)
-     values ($1,$2,$3,$4,$5,$6,$7)`,
+    `insert into question_imports (question_id, workflow_version_id, question_revision, skill_id, skill_version_hash, source_number, evidence, job_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8)`,
     [
       question.id,
+      versionId,
       question.revision,
       source.skillId,
       source.hash,

@@ -233,6 +233,89 @@ describe("reviewed SQL migrations", () => {
       },
     ]);
   });
+  it("imports a numbered source question into each workflow version only once", async () => {
+    const test = await freshDatabase();
+    await applyMigrations(test.database, await loadBundledMigrations(), clock);
+    await insertPerson(test);
+    const hash = "a".repeat(64);
+    for (const [sql, params] of [
+      [
+        "insert into groups (id, name, created_at, updated_at) values ('group-1', 'Research', $1, $1)",
+        [clock.now()],
+      ],
+      [
+        "insert into skills (id, group_id, name, created_by, created_at) values ('skill-1', 'group-1', 'example', 'person-1', $1)",
+        [clock.now()],
+      ],
+      [
+        "insert into skill_versions (skill_id, hash, description, inventory, scripts, origin, uploaded_by, created_at) values ('skill-1', $1, 'Uploaded', '[]', '[]', 'upload', 'person-1', $2)",
+        [hash, clock.now()],
+      ],
+      [
+        "insert into workflows (id, group_id, name, goal, intent, locale, created_at, updated_at) values ('workflow-1', 'group-1', 'example', 'Goal', 'new-skill', 'en', $1, $1)",
+        [clock.now()],
+      ],
+      ...["version-1", "version-2"].map(
+        (id, index) =>
+          [
+            "insert into workflow_versions (id, workflow_id, number, name, goal, intent, locale, stages, created_at, updated_at) values ($1, 'workflow-1', $2, 'example', 'Goal', 'new-skill', 'en', '{}', $3, $3)",
+            [id, index + 1, clock.now()],
+          ] as const,
+      ),
+      ...["version-1", "version-2"].map(
+        (version) =>
+          [
+            "insert into question_rounds (id, workflow_version_id, number, title, created_by, created_at) values ($1, $2, 1, 'Imports', 'person-1', $3)",
+            [`round-${version}`, version, clock.now()],
+          ] as const,
+      ),
+      ...["version-1", "version-2"].map(
+        (version) =>
+          [
+            "insert into drafting_jobs (id, workflow_version_id, kind, round_id, skill_id, requester_id, context_bundle, context_hash, input_hash, output_schema, created_at, updated_at) values ($1, $2, 'import-open-questions', $3, 'skill-1', 'person-1', '{}', $4, $4, '{}', $5, $5)",
+            [`job-${version}`, version, `round-${version}`, hash, clock.now()],
+          ] as const,
+      ),
+      ...[
+        ["question-1", "version-1"],
+        ["question-2", "version-1"],
+        ["question-3", "version-2"],
+      ].flatMap(([id, version]) => [
+        [
+          "insert into questions (id, workflow_version_id, round_id, created_at) values ($1, $2, $3, $4)",
+          [id, version, `round-${version}`, clock.now()],
+        ] as const,
+        [
+          "insert into question_revisions (question_id, revision, content, actor_id, created_at) values ($1, 1, '{}', 'person-1', $2)",
+          [id, clock.now()],
+        ] as const,
+      ]),
+    ] as const)
+      await test.database.query(sql, [...params]);
+    const source = JSON.stringify({
+      skillId: "skill-1",
+      hash,
+      path: "reference/questions.md",
+      startLine: 3,
+      endLine: 3,
+      fileHash: hash,
+    });
+    const importQuestion = (question: string, version: string, number = 1) =>
+      test.database.query(
+        "insert into question_imports (question_id, workflow_version_id, question_revision, skill_id, skill_version_hash, source_number, evidence, job_id) values ($1, $2, 1, 'skill-1', $3, $4, $5, $6)",
+        [question, version, hash, number, source, `job-${version}`],
+      );
+    await importQuestion("question-1", "version-1");
+    await expect(importQuestion("question-2", "version-1")).rejects.toThrow(
+      /question_imports_source_idx/u,
+    );
+    // An import names its own question's workflow version.
+    await expect(importQuestion("question-3", "version-1", 2)).rejects.toThrow(
+      /foreign key/u,
+    );
+    await importQuestion("question-2", "version-1", 2);
+    await importQuestion("question-3", "version-2");
+  });
   it("refuses rewriting or deleting canonical dossier artifacts and their heads", async () => {
     const test = await freshDatabase();
     await applyMigrations(test.database, await loadBundledMigrations(), clock);

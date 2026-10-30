@@ -34,17 +34,24 @@ create trigger question_translations_immutable before update or delete on questi
 create trigger question_translations_no_truncate before truncate on question_translations
   for each statement execute function refuse_questionnaire_revision_change();
 
+-- Imports name their question's workflow version, so a numbered source
+-- question can enter each workflow version at most once.
+alter table questions add constraint questions_version_key unique (id, workflow_version_id);
 create table question_imports (
   question_id text primary key,
+  workflow_version_id text not null,
   question_revision integer not null,
   skill_id text not null,
   skill_version_hash text not null,
   source_number integer not null check (source_number > 0),
   evidence jsonb not null,
   job_id text not null references drafting_jobs (id),
+  foreign key (question_id, workflow_version_id) references questions (id, workflow_version_id),
   foreign key (question_id, question_revision) references question_revisions (question_id, revision),
   foreign key (skill_id, skill_version_hash) references skill_versions (skill_id, hash)
 );
+create unique index question_imports_source_idx on question_imports
+  (workflow_version_id, skill_id, skill_version_hash, (evidence->>'path'), source_number);
 create trigger question_imports_immutable before update or delete on question_imports
   for each row execute function refuse_questionnaire_revision_change();
 create trigger question_imports_no_truncate before truncate on question_imports

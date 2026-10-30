@@ -48,11 +48,74 @@ async function request(
   return value;
 }
 
-async function setup(locale = "en") {
+interface Pin {
+  skillId: string;
+  hash: string;
+}
+interface Job {
+  id: string;
+  revision: number;
+  contextHash: string;
+}
+const encode = (text: string) => Buffer.from(text).toString("base64");
+
+/** An immutable version of the fixture Skill; `notes` adds a file. */
+async function uploadVersion(skillId: string, name: string, notes = "") {
+  const files = [
+    {
+      path: "SKILL.md",
+      content: encode(
+        `---\nname: ${name}\ndescription: Source study fixture\n---\n${source}`,
+      ),
+    },
+    { path: "reference/contract.md", content: encode(source) },
+    ...(notes ? [{ path: "reference/notes.md", content: encode(notes) }] : []),
+  ];
+  const { preview } = await request(
+    `/skills/${skillId}/upload-preview`,
+    "POST",
+    { files },
+  );
+  await request(
+    `/skills/${skillId}/versions`,
+    "POST",
+    { files, confirmed: true, expectedHash: preview.hash },
+    201,
+  );
+  return preview.hash as string;
+}
+
+async function pinSkill(
+  base: string,
+  groupId: string,
+  name: string,
+  notes = "",
+): Promise<Pin> {
+  const { skill } = await request(
+    "/skills",
+    "POST",
+    { groupId, name },
+    201,
+    admin,
+  );
+  const pin = {
+    skillId: skill.id,
+    hash: await uploadVersion(skill.id, name, notes),
+  };
+  await request(`${base}/pins`, "POST", pin, 201);
+  return pin;
+}
+
+async function setup(
+  locale = "en",
+  environment: Record<string, string> = {},
+  notes = "",
+) {
   service = await startTestService({
     environment: {
       BADGER_BOOTSTRAP_ADMINISTRATORS: admin.email,
       BADGER_ALLOWED_ORIGINS: "http://localhost",
+      ...environment,
     },
   });
   const { group } = await request(
@@ -102,50 +165,14 @@ async function setup(locale = "en") {
     201,
   );
   const base = `/workflows/${workflow.id}/versions/${version.id}`;
-  const pins = [];
-  for (const name of ["producer", "consumer"]) {
-    const { skill } = await request(
-      "/skills",
-      "POST",
-      { groupId: group.id, name },
-      201,
-      admin,
-    );
-    const files = [
-      {
-        path: "SKILL.md",
-        content: Buffer.from(
-          `---\nname: ${name}\ndescription: Source study fixture\n---\n${source}`,
-        ).toString("base64"),
-      },
-      {
-        path: "reference/contract.md",
-        content: Buffer.from(source).toString("base64"),
-      },
-    ];
-    const { preview } = await request(
-      `/skills/${skill.id}/upload-preview`,
-      "POST",
-      { files },
-    );
-    await request(
-      `/skills/${skill.id}/versions`,
-      "POST",
-      {
-        files,
-        confirmed: true,
-        expectedHash: preview.hash,
-      },
-      201,
-    );
-    const pin = { skillId: skill.id, hash: preview.hash };
-    await request(`${base}/pins`, "POST", pin, 201);
-    pins.push(pin);
-  }
+  const pins: Pin[] = [];
+  for (const name of ["producer", "consumer"])
+    pins.push(await pinSkill(base, group.id, name, notes));
   return {
     workflowId: workflow.id as string,
     versionId: version.id as string,
     base,
+    groupId: group.id as string,
     jobs: `${base}/drafting-jobs`,
     questionnaire: `${base}/questionnaire`,
     pins,
@@ -154,33 +181,52 @@ async function setup(locale = "en") {
   };
 }
 
-async function submit(
-  jobs: string,
-  job: { id: string; revision: number; contextHash: string },
-  secret: string,
-  result: unknown,
-  invalidResults: unknown[] = [],
-) {
-  const claimed = await request(
+async function create(jobs: string, target: object): Promise<Job> {
+  return (await request(jobs, "POST", { ...target, confirmed: true }, 201)).job;
+}
+
+async function claim(jobs: string, job: Job, secret: string) {
+  return request(
     `${jobs}/${job.id}/claim`,
     "POST",
     { revision: job.revision },
     200,
     secret,
   );
+}
+
+async function jobStatus(jobs: string, job: Job) {
+  return (await request(`${jobs}/${job.id}`)).job.status;
+}
+
+/** Each refusal names a result, its status, and the rule's message. */
+async function submit(
+  jobs: string,
+  job: Job,
+  secret: string,
+  result: unknown,
+  refusals: [unknown, number, RegExp][] = [],
+  claimed?: { job: { lease: { id: string } } },
+) {
+  const lease = claimed ?? (await claim(jobs, job, secret));
   const body = {
-    leaseId: claimed.job.lease.id,
+    leaseId: lease.job.lease.id,
     contextHash: job.contextHash,
     result,
   };
-  for (const invalid of [{}, ...invalidResults])
-    await request(
+  for (const [invalid, refusal, message] of [
+    [{}, 400, /output schema/u],
+    ...refusals,
+  ] as const) {
+    const { error } = await request(
       `${jobs}/${job.id}/submit`,
       "POST",
       { ...body, result: invalid },
-      400,
+      refusal,
       secret,
     );
+    expect(error.message).toMatch(message);
+  }
   const { job: submitted } = await request(
     `${jobs}/${job.id}/submit`,
     "POST",
@@ -222,6 +268,23 @@ async function accept(
   return response;
 }
 
+const citation = (pin: Pin, line = 2) => ({
+  ...pin,
+  path: "reference/contract.md",
+  startLine: line,
+  endLine: line,
+  fileHash,
+});
+const studyOf = (pin: Pin) => ({
+  facts: [
+    {
+      statement: "The producer writes samples.tsv.",
+      evidence: [citation(pin)],
+    },
+  ],
+  interfaces: [],
+});
+
 it("accepts a source study as revisioned facts and interfaces with evidence from the pinned files", async () => {
   const { base, jobs, pins, secret } = await setup();
   const { job } = await request(
@@ -232,15 +295,7 @@ it("accepts a source study as revisioned facts and interfaces with evidence from
   );
   expect(job.roundId).toBeNull();
   expect(job.outputSchema.required).toEqual(["facts", "interfaces"]);
-  const evidence = [
-    {
-      ...pins[0],
-      path: "reference/contract.md",
-      startLine: 2,
-      endLine: 2,
-      fileHash,
-    },
-  ];
+  const evidence = [citation(pins[0])];
   const result = {
     facts: [{ statement: "The producer writes samples.tsv.", evidence }],
     interfaces: [
@@ -255,7 +310,19 @@ it("accepts a source study as revisioned facts and interfaces with evidence from
       },
     ],
   };
-  const submitted = await submit(jobs, job, secret, result);
+  const submitted = await submit(jobs, job, secret, result, [
+    [{ facts: [], interfaces: [] }, 400, /anyOf/u],
+    [
+      {
+        ...result,
+        facts: [
+          { ...result.facts[0], evidence: [{ ...evidence[0], note: "" }] },
+        ],
+      },
+      400,
+      /facts\/0\/evidence\/0 must NOT have additional properties/u,
+    ],
+  ]);
   expect(await request(`${base}/source-study`)).toMatchObject({
     facts: [],
     interfaces: [],
@@ -296,19 +363,25 @@ const questionContent = {
   priority: 80,
 };
 
-async function answeredQuestion(questionnaire: string) {
+async function publishQuestions(questionnaire: string, texts: string[]) {
   const { round } = await request(
     `${questionnaire}/rounds`,
     "POST",
     { title: "Contracts" },
     201,
   );
-  const { question } = await request(
-    `${questionnaire}/rounds/${round.id}/questions`,
-    "POST",
-    questionContent,
-    201,
-  );
+  const questions = [];
+  for (const text of texts)
+    questions.push(
+      (
+        await request(
+          `${questionnaire}/rounds/${round.id}/questions`,
+          "POST",
+          { ...questionContent, text },
+          201,
+        )
+      ).question,
+    );
   const { preview } = await request(
     `${questionnaire}/rounds/${round.id}/publish-preview`,
   );
@@ -316,20 +389,37 @@ async function answeredQuestion(questionnaire: string) {
     confirmed: true,
     confirmationHash: preview.confirmationHash,
   });
+  return questions;
+}
+
+/** The expert saves and submits an answer to the question's revision. */
+async function answer(
+  questionnaire: string,
+  question: { id: string; revision: number },
+  revision: number,
+  text: string,
+) {
   await request(
     `${questionnaire}/questions/${question.id}/answer`,
     "PUT",
-    { revision: 0, questionRevision: 1, text: "需要样本编号。" },
+    { revision, questionRevision: question.revision, text },
     200,
     expert,
   );
   await request(
     `${questionnaire}/questions/${question.id}/submit`,
     "POST",
-    { revision: 1, questionRevision: 1 },
+    { revision: revision + 1, questionRevision: question.revision },
     200,
     expert,
   );
+}
+
+async function answeredQuestion(questionnaire: string) {
+  const [question] = await publishQuestions(questionnaire, [
+    questionContent.text,
+  ]);
+  await answer(questionnaire, question, 0, "需要样本编号。");
   return question;
 }
 
@@ -413,7 +503,12 @@ it("attaches an accepted translation to the exact question revision and preserve
   );
   const result = { text: "需要哪些列？", rationale: "确定表格约定。" };
   const submitted = await submit(jobs, job, secret, result, [
-    { text: " ", rationale: " " },
+    [{ text: " ", rationale: " " }, 400, /translated question/u],
+    [
+      { text: "x".repeat(1024 * 1024), rationale: "Over the result limit" },
+      413,
+      /exceeds 1 MiB/u,
+    ],
   ]);
   expect((await request(questionnaire)).questions[0].translations).toEqual([]);
   await accept(jobs, submitted, result);
@@ -437,6 +532,10 @@ it("attaches an accepted translation to the exact question revision and preserve
   expect(revised.translations).toEqual(accepted.translations);
 });
 
+const importOf = (pin: Pin, number = 1) => ({
+  questions: [{ number, source: citation(pin, 3), question: questionContent }],
+});
+
 it("imports numbered open questions only on acceptance and keeps the Skill version and source number", async () => {
   const { jobs, questionnaire, pins, secret } = await setup();
   const { round } = await request(
@@ -456,22 +555,22 @@ it("imports numbered open questions only on acceptance and keeps the Skill versi
     },
     201,
   );
-  const result = {
-    questions: [
+  const result = importOf(pins[0]);
+  const submitted = await submit(jobs, job, secret, result, [
+    [
       {
-        number: 1,
-        source: {
-          ...pins[0],
-          path: "reference/contract.md",
-          startLine: 3,
-          endLine: 3,
-          fileHash,
-        },
-        question: questionContent,
+        questions: [
+          ...result.questions,
+          {
+            ...result.questions[0],
+            question: { ...questionContent, text: "Which columns again?" },
+          },
+        ],
       },
+      400,
+      /Import each source question number once per file/u,
     ],
-  };
-  const submitted = await submit(jobs, job, secret, result);
+  ]);
   expect((await request(questionnaire)).questions).toEqual([]);
   await accept(jobs, submitted, result);
   const imported = (await request(questionnaire)).questions[0];
@@ -582,6 +681,256 @@ it("carries accepted translations and import provenance into a new workflow vers
   expect(original(importedId).source.origin).toBeNull();
 });
 
+it("imports a numbered source question into a workflow version only once", async () => {
+  const { jobs, questionnaire, pins, secret } = await setup();
+  const { round } = await request(
+    `${questionnaire}/rounds`,
+    "POST",
+    { title: "Imported questions" },
+    201,
+  );
+  const target = {
+    kind: "import-open-questions",
+    roundId: round.id,
+    skillId: pins[0].skillId,
+  };
+  const first = await create(jobs, target);
+  const second = await create(jobs, target);
+  const result = importOf(pins[0]);
+  await accept(jobs, await submit(jobs, first, secret, result), result);
+  // The accepted import is an input of every pending import from that Skill.
+  expect(await jobStatus(jobs, second)).toBe("cancelled");
+  const again = await create(jobs, target);
+  const submitted = await submit(jobs, again, secret, result);
+  const { error, questionId } = await request(
+    `${jobs}/${again.id}/accept-preview`,
+    "POST",
+    { revision: submitted.revision, ...result },
+    409,
+  );
+  expect(error.message).toBe(
+    "Question 1 of reference/contract.md is already imported into this workflow version",
+  );
+  const view = await request(questionnaire);
+  expect(view.questions).toEqual([
+    expect.objectContaining({ id: questionId, source: expect.anything() }),
+  ]);
+  const other = importOf(pins[0], 2);
+  await accept(
+    jobs,
+    await submit(jobs, await create(jobs, target), secret, other),
+    other,
+  );
+  expect((await request(questionnaire)).questions).toHaveLength(2);
+});
+
+it("keeps a claimed job when another Skill's study is accepted or an unrelated question is discussed or answered", async () => {
+  const { jobs, questionnaire, pins, secret, expertId } = await setup();
+  const [question, unrelated] = await publishQuestions(questionnaire, [
+    questionContent.text,
+    "Which file names are used?",
+  ]);
+  await answer(questionnaire, question, 0, "Sample identifiers.");
+  const studied = await create(jobs, {
+    kind: "source-study",
+    skillId: pins[0].skillId,
+  });
+  const pending: [Job, object][] = [
+    [
+      await create(jobs, { kind: "source-study", skillId: pins[1].skillId }),
+      studyOf(pins[1]),
+    ],
+    [
+      await create(jobs, {
+        kind: "translate-question",
+        questionId: question.id,
+        locale: "zh-CN",
+      }),
+      { text: "需要哪些列？", rationale: "确定表格约定。" },
+    ],
+    [
+      await create(jobs, { kind: "restate-answer", questionId: question.id }),
+      {
+        facts: [
+          {
+            text: "The table requires sample identifiers.",
+            answers: [{ personId: expertId, revision: 2 }],
+          },
+        ],
+      },
+    ],
+  ];
+  const claims = [];
+  for (const [job] of pending) claims.push(await claim(jobs, job, secret));
+  await accept(
+    jobs,
+    await submit(jobs, studied, secret, studyOf(pins[0])),
+    studyOf(pins[0]),
+  );
+  await request(
+    `${questionnaire}/questions/${unrelated.id}/comments`,
+    "POST",
+    { text: "Is this the same table?" },
+    201,
+    expert,
+  );
+  await answer(questionnaire, unrelated, 0, "samples.tsv");
+  for (const [index, [job, result]] of pending.entries()) {
+    expect(await jobStatus(jobs, job)).toBe("claimed");
+    const submitted = await submit(
+      jobs,
+      job,
+      secret,
+      result,
+      [],
+      claims[index],
+    );
+    expect(submitted.status).toBe("submitted");
+  }
+});
+
+it("cancels each kind when its own inputs change", async () => {
+  const { base, jobs, questionnaire, pins } = await setup();
+  const question = await answeredQuestion(questionnaire);
+  const { round } = await request(
+    `${questionnaire}/rounds`,
+    "POST",
+    { title: "Drafts" },
+    201,
+  );
+  const job = {
+    studyA: await create(jobs, {
+      kind: "source-study",
+      skillId: pins[0].skillId,
+    }),
+    studyB: await create(jobs, {
+      kind: "source-study",
+      skillId: pins[1].skillId,
+    }),
+    importB: await create(jobs, {
+      kind: "import-open-questions",
+      roundId: round.id,
+      skillId: pins[1].skillId,
+    }),
+    translation: await create(jobs, {
+      kind: "translate-question",
+      questionId: question.id,
+      locale: "zh-CN",
+    }),
+    restatement: await create(jobs, {
+      kind: "restate-answer",
+      questionId: question.id,
+    }),
+    followUps: await create(jobs, {
+      kind: "draft-follow-ups",
+      roundId: round.id,
+      parentQuestionId: question.id,
+    }),
+  };
+  const expected: Record<keyof typeof job, string> = {
+    studyA: "queued",
+    studyB: "queued",
+    importB: "queued",
+    translation: "queued",
+    restatement: "queued",
+    followUps: "queued",
+  };
+  const changes = async (cancelled: (keyof typeof job)[]) => {
+    for (const name of cancelled) expected[name] = "cancelled";
+    const current: Record<string, string> = {};
+    for (const [name, value] of Object.entries(job))
+      current[name] = await jobStatus(jobs, value);
+    expect(current).toEqual(expected);
+  };
+  // A new submitted answer changes what restatements and follow-ups read.
+  await answer(questionnaire, question, 2, "Also include the sequence.");
+  await changes(["restatement", "followUps"]);
+  // A new question revision is a new text to translate.
+  await request(`${questionnaire}/questions/${question.id}`, "PATCH", {
+    ...questionContent,
+    text: "Which columns and types are required?",
+    revision: 1,
+  });
+  await changes(["translation"]);
+  // A Skill's new pinned version changes only the jobs that read that Skill.
+  for (const [index, name] of ["producer", "consumer"].entries()) {
+    const hash = await uploadVersion(pins[index].skillId, name, "Revised");
+    await request(`${base}/pins`, "POST", {
+      skillId: pins[index].skillId,
+      hash,
+      revision: 1,
+    });
+    await changes(index === 0 ? ["studyA"] : ["studyB", "importB"]);
+  }
+});
+
+it("ships only the pinned Skill files a kind reads, within twice the upload limit", async () => {
+  // Each Skill fits the upload limit; three exceed a claim's limit together.
+  const notes = "x".repeat(500);
+  const { base, groupId, jobs, questionnaire, pins, secret } = await setup(
+    "en",
+    { BADGER_UPLOAD_MAX_BYTES: "1000" },
+    notes,
+  );
+  pins.push(await pinSkill(base, groupId, "reporter", notes));
+  const question = await answeredQuestion(questionnaire);
+  const { round } = await request(
+    `${questionnaire}/rounds`,
+    "POST",
+    { title: "Drafts" },
+    201,
+  );
+  for (const [target, pin] of [
+    [{ kind: "source-study", skillId: pins[1].skillId }, pins[1]],
+    [
+      {
+        kind: "import-open-questions",
+        roundId: round.id,
+        skillId: pins[2].skillId,
+      },
+      pins[2],
+    ],
+  ] as const) {
+    const claimed = await claim(jobs, await create(jobs, target), secret);
+    expect(claimed.skills).toEqual([
+      { skillId: pin.skillId, versionHash: pin.hash },
+    ]);
+    expect(
+      claimed.files
+        .map((f: { skillId: string; path: string }) => `${f.skillId}/${f.path}`)
+        .sort(),
+    ).toEqual(
+      ["SKILL.md", "reference/contract.md", "reference/notes.md"].map(
+        (path) => `${pin.skillId}/${path}`,
+      ),
+    );
+  }
+  for (const target of [
+    { kind: "translate-question", questionId: question.id, locale: "zh-CN" },
+    { kind: "restate-answer", questionId: question.id },
+  ]) {
+    const claimed = await claim(jobs, await create(jobs, target), secret);
+    expect(claimed).toMatchObject({ skills: [], files: [] });
+    expect(claimed.contextBundle.pins).toHaveLength(3);
+  }
+  const drafting = await create(jobs, {
+    kind: "draft-questions",
+    roundId: round.id,
+  });
+  const { error } = await request(
+    `${jobs}/${drafting.id}/claim`,
+    "POST",
+    { revision: drafting.revision },
+    413,
+    secret,
+  );
+  expect(error.message).toMatch(/claim byte limit/u);
+  expect((await request(`${jobs}/${drafting.id}`)).job).toMatchObject({
+    status: "queued",
+    lease: null,
+  });
+});
+
 it("refuses invented source evidence and rolls back every record in the accepted batch", async () => {
   const { base, jobs, pins, secret } = await setup();
   const { job } = await request(
@@ -590,19 +939,15 @@ it("refuses invented source evidence and rolls back every record in the accepted
     { kind: "source-study", skillId: pins[0].skillId, confirmed: true },
     201,
   );
-  const citation = {
-    ...pins[0],
-    path: "reference/contract.md",
-    startLine: 2,
-    endLine: 2,
-    fileHash,
-  };
   const result = {
     facts: [
-      { statement: "The source writes samples.tsv.", evidence: [citation] },
+      {
+        statement: "The source writes samples.tsv.",
+        evidence: [citation(pins[0])],
+      },
       {
         statement: "This claim cites an invented hash.",
-        evidence: [{ ...citation, fileHash: "0".repeat(64) }],
+        evidence: [{ ...citation(pins[0]), fileHash: "0".repeat(64) }],
       },
     ],
     interfaces: [],
@@ -640,20 +985,7 @@ it("refuses restatements of old answer revisions and cancels a draft when a new 
     { revision: submitted.revision, ...result },
     409,
   );
-  await request(
-    `${questionnaire}/questions/${question.id}/answer`,
-    "PUT",
-    { revision: 2, questionRevision: 1, text: "Also include sequence." },
-    200,
-    expert,
-  );
-  await request(
-    `${questionnaire}/questions/${question.id}/submit`,
-    "POST",
-    { revision: 3, questionRevision: 1 },
-    200,
-    expert,
-  );
+  await answer(questionnaire, question, 2, "Also include sequence.");
   await request(
     `${jobs}/${job.id}/accept-preview`,
     "POST",
