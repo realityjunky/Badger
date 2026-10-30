@@ -225,6 +225,31 @@ describe("the service's web page", () => {
     });
   });
 
+  it.each(["40P01", "40001"] as const)(
+    "answers 503 with Retry-After when the database ends a request's transaction with %s",
+    async (code) => {
+      service = await startTestService();
+      service.failNextTransaction(code);
+
+      const failed = await service.request("/api/v1/me", { as: alice });
+      expect(failed.status).toBe(503);
+      expect(failed.headers.get("retry-after")).toBe("1");
+      expect(await failed.json()).toMatchObject({
+        error: { code: "unavailable" },
+      });
+      expect(service.logs).toContainEqual(
+        expect.objectContaining({ level: "error", event: "request.failed" }),
+      );
+
+      // The transaction rolled back, so the same request can be sent again.
+      const retried = await service.request("/api/v1/me", { as: alice });
+      expect(retried.status).toBe(200);
+      expect(await retried.json()).toMatchObject({
+        person: { email: alice.email },
+      });
+    },
+  );
+
   it("serves no person page when no people-facing adapter is configured", async () => {
     service = await startTestService({ mode: "service" });
 

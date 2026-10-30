@@ -25,3 +25,17 @@ export interface Database extends Queryable {
   waitForNotification?(channel: string, signal?: AbortSignal): Promise<void>;
   close(): Promise<void>;
 }
+
+/**
+ * Postgres ended the transaction as a deadlock victim (40P01) or on a
+ * serialization failure (40001). It rolled back every write, so the same work
+ * can run again once the competing transaction commits.
+ */
+export function isTransactionConflict(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error.code === "40P01" || error.code === "40001")
+  );
+}
