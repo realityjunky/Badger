@@ -1,5 +1,6 @@
 import { SEMANTIC_DOSSIER_TOPICS } from "./questionnaire.js";
 import { stableValue } from "../util.js";
+import { validateQuestionnaireRecords } from "./questionnaire-record-validation.js";
 
 export type QuestionnaireTopic =
   "scope" | (typeof SEMANTIC_DOSSIER_TOPICS)[number];
@@ -131,6 +132,7 @@ export interface QuestionnaireRecordHandoff {
 export function questionnaireRecordHandoff(
   records: QuestionnaireRecords,
 ): QuestionnaireRecordHandoff {
+  validateQuestionnaireRecords(records);
   const items = records.questions.map((q): QuestionnaireLedgerItem => ({
     record: { type: "question", id: q.id, revision: q.revision },
     topic: q.topic,
