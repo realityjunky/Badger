@@ -1,6 +1,7 @@
 import { Alert, Button, Modal, Select, Space, Spin, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
 import {
+  gitFolderPath,
   previewUpload,
   readUploadFile,
   undeclaredScripts,
@@ -72,6 +73,16 @@ export function UploadSkillModal({
     setError(null);
     const files = Array.from(selected ?? []);
     if (files.length === 0) return;
+    // A large .git folder would otherwise read as only over the limits.
+    const gitPath = zip
+      ? null
+      : gitFolderPath(
+          files.map((file) => file.webkitRelativePath || file.name),
+        );
+    if (gitPath !== null) {
+      setError(format("skills.gitFolder", { path: gitPath }));
+      return;
+    }
     if (
       files.length > limits.maxFiles ||
       files.reduce((sum, file) => sum + file.size, 0) > limits.maxBytes ||

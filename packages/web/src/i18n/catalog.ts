@@ -591,6 +591,8 @@ const en = {
   "skills.zip": "Choose zip",
   "skills.limitExceeded":
     "The selection exceeds the upload limits. Choose a smaller Skill.",
+  "skills.gitFolder":
+    'Upload path "{path}" contains a .git folder; upload the Skill without its .git folder, for example from git archive output.',
   "skills.failed": "The Skill records could not be loaded. Retry the request.",
   "skills.previewCount": "{count} files in the source inventory",
   "skills.effects": "Script side effects",
@@ -1642,6 +1644,8 @@ const zh: Record<MessageId, string> = {
   "skills.folder": "选择 Skill 文件夹",
   "skills.zip": "选择 zip",
   "skills.limitExceeded": "所选文件超过上传限制，请选择更小的 Skill。",
+  "skills.gitFolder":
+    "上传路径“{path}”包含 .git 文件夹；请上传不含 .git 文件夹的 Skill，例如 git archive 的输出。",
   "skills.failed": "无法加载 Skill 记录，请重试。",
   "skills.previewCount": "来源清单共 {count} 个文件",
   "skills.effects": "脚本副作用",

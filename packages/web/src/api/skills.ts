@@ -200,6 +200,23 @@ export function undeclaredScripts(
     .map((script) => script.path);
 }
 
+/**
+ * The first selected path with a segment that names Git metadata: `.git` in
+ * any letter case, including with the code points HFS+ ignores or the
+ * trailing dots and spaces Windows trims. The service refuses such an
+ * upload by the same rule; checking first names the cause even when the
+ * folder is also over the upload limits.
+ */
+export function gitFolderPath(paths: readonly string[]): string | null {
+  const gitMetadata = (segment: string) => {
+    const name = segment
+      .replace(/[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/gu, "")
+      .replace(/[. ]+$/u, "");
+    return name.toLowerCase() === ".git" || name.toUpperCase() === ".GIT";
+  };
+  return paths.find((path) => path.split("/").some(gitMetadata)) ?? null;
+}
+
 export function uploadVersion(
   basePath: string,
   id: string,

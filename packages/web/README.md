@@ -132,7 +132,10 @@ them into `dist/`, so the server image carries the build and none of them.
 - The Skills registry reads live group-owned entries, immutable versions,
   source inventories, and script side-effect declarations. Folder and zip
   selection starts a preview; a person declares script effects and confirms
-  before the version is stored. Uploads warn against real data. Every version
+  before the version is stored. A selected folder that holds a `.git` folder,
+  by the server's rule, is refused before anything is read or sent, with the
+  server's message, even when it is also over the upload limits. Uploads
+  warn against real data. Every version
   and file selection has a deep link, and any two versions can be compared
   with source previews. Uploaded markup is rendered as text. The server's
   capability response controls which create and upload actions are offered.
