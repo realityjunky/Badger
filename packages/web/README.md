@@ -144,7 +144,9 @@ them into `dist/`, so the server image carries the build and none of them.
   recipients with how the post mentioned them, never their userids or mobile
   numbers. Under **Settings → Channel addresses**, Group leads and
   Administrators set a Group's default robot; its own Delivery log, polled
-  like the workflow's, shows the default's test posts and failures.
+  like the workflow's, shows the default's test posts and failures. A refused
+  robot change or Remind shows the server's reason, such as a setting the
+  deployment still lacks.
 
 ## Commands
 

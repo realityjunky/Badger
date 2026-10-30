@@ -53,7 +53,10 @@ async function call<T = Record<string, unknown>>(
 }
 
 async function setup(
-  options: { realChannel?: boolean; environment?: Record<string, string> } = {},
+  options: {
+    realChannel?: boolean;
+    environment?: Record<string, string | undefined>;
+  } = {},
 ) {
   robot = await startStubWeComRobot();
   service = await startTestService({
@@ -382,6 +385,208 @@ describe("WeCom notification channels", () => {
       owner,
     );
     expect(workflow.deliveries).toEqual([group.deliveries[0]]);
+  });
+  it("waits out the robot's rate-limit window without spending the retries meant for failures", async () => {
+    const { workflowId } = await setup();
+    robot.setFailure(200, 45009);
+    await call(
+      "PUT",
+      `/workflows/${workflowId}/notifications/channel`,
+      {
+        revision: 0,
+        label: "Research chat",
+        webhookUrl,
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    expect(await service.runNotificationJobs()).toBe(1);
+    // WeCom's 45009 carries no Retry-After; its window is one minute.
+    for (let attempt = 2; attempt <= 7; attempt++) {
+      service.clock.advance(59_999);
+      expect(await service.runNotificationJobs()).toBe(0);
+      service.clock.advance(1);
+      expect(await service.runNotificationJobs()).toBe(1);
+    }
+    const log = async () =>
+      (
+        await call<{
+          deliveries: { status: string; attempts: number; error: string }[];
+        }>(
+          "GET",
+          `/workflows/${workflowId}/notifications/deliveries`,
+          undefined,
+          owner,
+        )
+      ).deliveries;
+    expect(await log()).toMatchObject([
+      { status: "retry", attempts: 7, error: "WeCom error 45009" },
+    ]);
+    // Ordinary failures still get all five of their attempts.
+    robot.setFailure(200, 93000);
+    service.clock.advance(60_000);
+    expect(await service.runNotificationJobs()).toBe(1);
+    for (const wait of [3100, 6200, 12400]) {
+      service.clock.advance(wait);
+      expect(await service.runNotificationJobs()).toBe(1);
+    }
+    expect(await log()).toMatchObject([
+      { status: "retry", attempts: 11, error: "WeCom error 93000" },
+    ]);
+    service.clock.advance(24800);
+    expect(await service.runNotificationJobs()).toBe(1);
+    expect(await log()).toMatchObject([
+      { status: "failed", attempts: 12, error: "WeCom error 93000" },
+    ]);
+    expect(robot.requests).toHaveLength(12);
+  });
+  it("ends a post that stays rate limited for an hour", async () => {
+    const { workflowId } = await setup();
+    robot.setFailure(200, 45009);
+    await call(
+      "PUT",
+      `/workflows/${workflowId}/notifications/channel`,
+      {
+        revision: 0,
+        label: "Research chat",
+        webhookUrl,
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    for (let attempt = 1; attempt <= 60; attempt++) {
+      expect(await service.runNotificationJobs()).toBe(1);
+      service.clock.advance(60_000);
+    }
+    expect(await service.runNotificationJobs()).toBe(0);
+    const { deliveries } = await call<{ deliveries: unknown[] }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/deliveries`,
+      undefined,
+      owner,
+    );
+    expect(deliveries).toMatchObject([
+      { status: "failed", attempts: 60, error: "WeCom error 45009" },
+    ]);
+  });
+  it("refuses a robot until the deployment has what posts need, naming what is missing", async () => {
+    for (const [index, [missing, present]] of [
+      ["BADGER_PUBLIC_URL", "BADGER_NOTIFICATION_KEY"],
+      ["BADGER_NOTIFICATION_KEY", "BADGER_PUBLIC_URL"],
+    ].entries()) {
+      if (index > 0) {
+        await service.close();
+        await robot.close();
+      }
+      const { workflowId } = await setup({
+        environment: { [missing!]: undefined },
+      });
+      const refused = await call<{ error: { message: string } }>(
+        "PUT",
+        `/workflows/${workflowId}/notifications/channel`,
+        {
+          revision: 0,
+          label: "Research chat",
+          webhookUrl,
+          language: "en",
+          confirmed: true,
+        },
+        owner,
+        409,
+      );
+      expect(refused.error.message).toContain(missing);
+      expect(refused.error.message).not.toContain(present);
+    }
+  });
+  it("records a worker's missing or unusable settings in the delivery log instead of leaving posts queued", async () => {
+    const { workflowId, versionId } = await setup();
+    const save = (revision: number) =>
+      call(
+        "PUT",
+        `/workflows/${workflowId}/notifications/channel`,
+        {
+          revision,
+          label: "Research chat",
+          webhookUrl,
+          language: "en",
+          confirmed: true,
+        },
+        owner,
+      );
+    const log = async () =>
+      (
+        await call<{
+          deliveries: { status: string; attempts: number; error: string }[];
+        }>(
+          "GET",
+          `/workflows/${workflowId}/notifications/deliveries`,
+          undefined,
+          owner,
+        )
+      ).deliveries;
+    await save(0);
+    // Without BADGER_PUBLIC_URL a worker cannot link a post, so it posts
+    // nothing, the test post included, and each attempt says why.
+    const withoutUrl = { environment: { BADGER_PUBLIC_URL: undefined } };
+    expect(await service.runNotificationJobs(withoutUrl)).toBe(1);
+    await publishRound(workflowId, versionId);
+    expect(await service.runNotificationJobs(withoutUrl)).toBe(1);
+    const lacksUrl = "Worker lacks BADGER_PUBLIC_URL";
+    expect(await log()).toMatchObject([
+      { status: "retry", attempts: 1, error: lacksUrl },
+      { status: "retry", attempts: 1, error: lacksUrl },
+    ]);
+    for (const wait of [3100, 6200, 12400, 24800]) {
+      service.clock.advance(wait);
+      expect(await service.runNotificationJobs(withoutUrl)).toBe(2);
+    }
+    expect(await log()).toMatchObject([
+      { status: "failed", attempts: 5, error: lacksUrl },
+      { status: "failed", attempts: 5, error: lacksUrl },
+    ]);
+    // Without the key, or with another one, a worker cannot read the webhook,
+    // but a worker with its settings still sends the post.
+    await save(1);
+    expect(
+      await service.runNotificationJobs({
+        environment: { BADGER_NOTIFICATION_KEY: undefined },
+      }),
+    ).toBe(1);
+    expect((await log())[0]).toMatchObject({
+      status: "retry",
+      attempts: 1,
+      error: "Worker lacks BADGER_NOTIFICATION_KEY",
+    });
+    service.clock.advance(3100);
+    expect(
+      await service.runNotificationJobs({
+        environment: { BADGER_NOTIFICATION_KEY: "cd".repeat(32) },
+      }),
+    ).toBe(1);
+    expect((await log())[0]).toMatchObject({
+      status: "retry",
+      attempts: 2,
+      error: "Worker cannot decrypt the robot with its BADGER_NOTIFICATION_KEY",
+    });
+    expect(robot.requests).toHaveLength(0);
+    service.clock.advance(6200);
+    expect(await service.runNotificationJobs()).toBe(1);
+    expect((await log())[0]).toMatchObject({
+      status: "sent",
+      attempts: 3,
+      error: null,
+    });
+    expect(robot.requests).toHaveLength(1);
+    expect(
+      service.logs.filter(
+        (entry) =>
+          entry.event === "worker.notification-settings" &&
+          entry.level === "error",
+      ),
+    ).toHaveLength(12);
+    expect(JSON.stringify(service.logs)).not.toContain("test-secret");
   });
   it("drops a removed expert from queued mentions and reminder recipients", async () => {
     const { workflowId, versionId } = await setup();
@@ -836,6 +1041,9 @@ describe("WeCom notification channels", () => {
     service.clock.advance(3099);
     expect(await service.runNotificationJobs()).toBe(0);
     service.clock.advance(3801);
+    // Retry-After cannot cut the robot's one-minute rate-limit window short.
+    expect(await service.runNotificationJobs()).toBe(0);
+    service.clock.advance(50_000);
     robot.setFailure(null);
     expect(await service.runNotificationJobs()).toBe(1);
     const { deliveries } = await call<{

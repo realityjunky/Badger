@@ -8,6 +8,8 @@ import {
   notificationHref,
   type NotificationItemRow,
 } from "./events.js";
+import type { Logger } from "../log.js";
+import { missingNotificationSettings } from "./channels.js";
 import type { NotificationChannel, RobotMessage } from "./port.js";
 import { decryptWebhook } from "./secrets.js";
 import { eligibleNotificationItems } from "./eligibility.js";
@@ -19,10 +21,36 @@ interface DeliveryClaim {
   webhook_ciphertext: string;
   content: RobotMessage;
   attempts: number;
+  rate_limited_attempts: number;
   claim_id: string;
   item_ids: string[];
   language: "en" | "zh";
   reminder: boolean;
+}
+
+/** A post to send, or one this worker's settings leave unusable. */
+type Claim =
+  | { kind: "send"; delivery: DeliveryClaim; webhookUrl: string }
+  | { kind: "unusable"; id: string; error: string }
+  | null;
+
+/** WeCom allows a group robot about 20 posts a minute. */
+const PACE_MILLISECONDS = 3100;
+/** A rate-limited robot waits until its one-minute window has surely reset. */
+const RATE_LIMIT_WINDOW_MILLISECONDS = 60_000;
+const FAILED_ATTEMPT_LIMIT = 5;
+/** An hour of rate limiting ends the post, however few its failures. */
+const RATE_LIMITED_ATTEMPT_LIMIT = 60;
+
+/** A failure that is not rate limiting backs off, and the fifth is final. */
+function afterFailure(failures: number, now: Date, retryAfter = 0) {
+  return {
+    status: failures >= FAILED_ATTEMPT_LIMIT ? "failed" : "retry",
+    availableAt: new Date(
+      now.getTime() +
+        Math.max(PACE_MILLISECONDS * 2 ** (failures - 1), retryAfter),
+    ),
+  };
 }
 
 /** Durable claims and webhook-wide reservations are shared by all worker processes. */
@@ -33,6 +61,7 @@ export class NotificationWorker {
       dependencies: ServiceDependencies;
       config: ServiceConfig;
       channel: NotificationChannel;
+      logger?: Logger;
     },
   ) {}
 
@@ -53,8 +82,8 @@ export class NotificationWorker {
 
   async runOnce(): Promise<string | null> {
     const { database, dependencies: deps, config, channel } = this.options;
-    if (config.notifications.encryptionKey === null) return null;
-    const delivery = await database.transaction(async (tx) => {
+    const missing = missingNotificationSettings(config);
+    const claim = await database.transaction(async (tx): Promise<Claim> => {
       const now = deps.clock.now();
       const pending = (
         await tx.query<DeliveryClaim & { robot_key: string }>(
@@ -68,6 +97,35 @@ export class NotificationWorker {
         )
       ).rows[0];
       if (pending === undefined) return null;
+      // A worker that cannot link or read a post says so where the owner
+      // looks, instead of leaving the post queued or dropping it unseen. It
+      // counts as a failed attempt, so a worker with its settings can still
+      // send the post before the last one.
+      let unusable =
+        missing.length > 0 ? `Worker lacks ${missing.join(" and ")}` : null;
+      let webhookUrl = "";
+      if (unusable === null)
+        try {
+          webhookUrl = decryptWebhook(
+            pending.webhook_ciphertext,
+            config.notifications.encryptionKey!,
+          );
+        } catch {
+          unusable =
+            "Worker cannot decrypt the robot with its BADGER_NOTIFICATION_KEY";
+        }
+      if (unusable !== null) {
+        const next = afterFailure(
+          pending.attempts + 1 - pending.rate_limited_attempts,
+          now,
+        );
+        await tx.query(
+          `update notification_deliveries set status = $2, attempts = attempts + 1, error = $3,
+          available_at = $4, lease_until = null, claim_id = null where id = $1`,
+          [pending.id, next.status, unusable, next.availableAt],
+        );
+        return { kind: "unusable", id: pending.id, error: unusable };
+      }
       if (pending.item_ids.length > 0) {
         const records = await eligibleNotificationItems(
           tx,
@@ -113,55 +171,70 @@ export class NotificationWorker {
       );
       const reservation = await tx.query(
         `update notification_robots set available_at = $3 where robot_key = $1 and available_at <= $2 returning robot_key`,
-        [pending.robot_key, now, new Date(now.getTime() + 3100)],
+        [pending.robot_key, now, new Date(now.getTime() + PACE_MILLISECONDS)],
       );
       if (reservation.rows.length === 0) return null;
       const claimId = deps.ids.next();
-      return (
+      const delivery = (
         await tx.query<DeliveryClaim>(
           `update notification_deliveries set status = 'sending', attempts = attempts + 1,
         lease_until = $2, claim_id = $3 where id = $1 returning *`,
           [pending.id, new Date(now.getTime() + 30_000), claimId],
         )
       ).rows[0]!;
+      return { kind: "send", delivery, webhookUrl };
     });
-    if (delivery === null) return null;
+    if (claim === null) return null;
+    if (claim.kind === "unusable") {
+      this.options.logger?.error({
+        event: "worker.notification-settings",
+        delivery: claim.id,
+        error: claim.error,
+      });
+      return claim.id;
+    }
+    const { delivery, webhookUrl } = claim;
     let result;
     try {
-      result = await channel.post(
-        decryptWebhook(
-          delivery.webhook_ciphertext,
-          config.notifications.encryptionKey,
-        ),
-        delivery.content,
-      );
+      result = await channel.post(webhookUrl, delivery.content);
     } catch {
       result = { ok: false as const, error: "Notification channel failed" };
     }
     const now = deps.clock.now();
-    const status = result.ok
-      ? "sent"
-      : delivery.attempts >= 5
-        ? "failed"
-        : "retry";
-    const nextAttempt = new Date(
-      now.getTime() +
-        (result.ok
-          ? 0
-          : Math.max(
-              3100 * 2 ** (delivery.attempts - 1),
-              result.retryAfterMilliseconds ?? 0,
-            )),
-    );
+    const rateLimited = !result.ok && result.rateLimited === true;
+    const rateLimitedAttempts =
+      delivery.rate_limited_attempts + (rateLimited ? 1 : 0);
+    const { status, availableAt: nextAttempt } = result.ok
+      ? { status: "sent", availableAt: now }
+      : rateLimited
+        ? {
+            status:
+              rateLimitedAttempts >= RATE_LIMITED_ATTEMPT_LIMIT
+                ? "failed"
+                : "retry",
+            availableAt: new Date(
+              now.getTime() +
+                Math.max(
+                  RATE_LIMIT_WINDOW_MILLISECONDS,
+                  result.retryAfterMilliseconds ?? 0,
+                ),
+            ),
+          }
+        : afterFailure(
+            delivery.attempts - rateLimitedAttempts,
+            now,
+            result.retryAfterMilliseconds,
+          );
     await database.transaction(async (tx) => {
-      if (!result.ok && result.rateLimited)
+      if (rateLimited)
         await tx.query(
           "update notification_robots set available_at = greatest(available_at, $2) where robot_key = $1",
           [delivery.robot_key, nextAttempt],
         );
       await tx.query(
         `update notification_deliveries set status = $3, error = $4, available_at = $5,
-      sent_at = $6, lease_until = null, claim_id = null where id = $1 and claim_id = $2`,
+      sent_at = $6, rate_limited_attempts = $7, lease_until = null, claim_id = null
+      where id = $1 and claim_id = $2`,
         [
           delivery.id,
           delivery.claim_id,
@@ -169,6 +242,7 @@ export class NotificationWorker {
           result.ok ? null : result.error,
           nextAttempt,
           result.ok ? now : null,
+          rateLimitedAttempts,
         ],
       );
     });

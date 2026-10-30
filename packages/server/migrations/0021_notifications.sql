@@ -42,6 +42,9 @@ create table notification_deliveries (
   content jsonb not null,
   status text not null default 'queued' check (status in ('queued', 'sending', 'retry', 'sent', 'failed', 'cancelled')),
   attempts integer not null default 0,
+  -- Rate-limited attempts wait out the robot's window and have their own limit,
+  -- so they never use up the retries meant for failures.
+  rate_limited_attempts integer not null default 0,
   error text,
   available_at timestamptz not null,
   lease_until timestamptz,

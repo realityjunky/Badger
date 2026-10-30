@@ -25,7 +25,8 @@ recovery but cannot recover a lost host. Store deployment secrets separately in
 the deployment's secret store; do not put credentials in manifests or logs.
 Include `BADGER_NOTIFICATION_KEY` in that separate secret backup: it decrypts
 Group robot settings and queued Deliveries. Restoring a database without the
-same key cannot restore those notification channels.
+same key cannot restore those notification channels: a worker started with
+another key records every queued post as failed in the Delivery log.
 
 ## Take a consistent backup
 

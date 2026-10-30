@@ -120,39 +120,40 @@ export async function routeNotificationAction(
     chat.items.push(...items.filter((item) => item.workflow_id === workflowId));
     chats.set(channel.robot_key, chat);
   }
-  if (config.notifications.publicUrl !== null)
-    for (const { channel, items: records } of chats.values()) {
-      const recipients = notificationRecipients(records);
-      if (recipients.length === 0) continue;
-      const first = records[0]!;
-      const href = notificationHref(records);
-      const content = notificationMessage({
-        workflowNames: [...new Set(records.map((item) => item.workflow_name))],
-        events: records.map((item) => item.kind),
-        recipients,
-        href: `${config.notifications.publicUrl}${href}`,
-        language: channel.language,
-      });
-      await tx.query(
-        `insert into notification_deliveries (id, workflow_id, group_id, channel_id, robot_key, robot_label, webhook_ciphertext,
+  // Without BADGER_PUBLIC_URL the link stays relative. The post is queued all
+  // the same: no worker sends it unlinked, and failing it keeps it visible.
+  for (const { channel, items: records } of chats.values()) {
+    const recipients = notificationRecipients(records);
+    if (recipients.length === 0) continue;
+    const first = records[0]!;
+    const href = notificationHref(records);
+    const content = notificationMessage({
+      workflowNames: [...new Set(records.map((item) => item.workflow_name))],
+      events: records.map((item) => item.kind),
+      recipients,
+      href: `${config.notifications.publicUrl ?? ""}${href}`,
+      language: channel.language,
+    });
+    await tx.query(
+      `insert into notification_deliveries (id, workflow_id, group_id, channel_id, robot_key, robot_label, webhook_ciphertext,
       recipients, content, available_at, created_at, action_id, item_ids, language) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13) on conflict do nothing`,
-        [
-          deps.ids.next(),
-          first.workflow_id,
-          channel.group_id,
-          channel.id,
-          channel.robot_key,
-          channel.label,
-          channel.webhook_ciphertext,
-          JSON.stringify(recordedRecipients(recipients)),
-          JSON.stringify(content),
-          deps.clock.now(),
-          action.id,
-          records.map((item) => item.id),
-          channel.language,
-        ],
-      );
-    }
+      [
+        deps.ids.next(),
+        first.workflow_id,
+        channel.group_id,
+        channel.id,
+        channel.robot_key,
+        channel.label,
+        channel.webhook_ciphertext,
+        JSON.stringify(recordedRecipients(recipients)),
+        JSON.stringify(content),
+        deps.clock.now(),
+        action.id,
+        records.map((item) => item.id),
+        channel.language,
+      ],
+    );
+  }
   await tx.query(
     "update notification_actions set processed_at = $2 where id = $1",
     [action.id, deps.clock.now()],

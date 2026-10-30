@@ -29,6 +29,8 @@ export function WorkflowNotifications({
   const [notice, setNotice] = useState<
     "failed" | "conflict" | "reminderQueued" | "copied" | "copyFailed" | null
   >(null);
+  // The server's reason for a refusal, shown under the notice.
+  const [reason, setReason] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [now, setNow] = useState(Date.now());
   const route = `/workflows/${encodeURIComponent(workflowId)}/notifications`;
@@ -55,7 +57,10 @@ export function WorkflowNotifications({
       ]);
       if (controller.signal.aborted) return;
       if (results[0].kind === "ok") setItems(results[0].value.items);
-      else setNotice("failed");
+      else {
+        setNotice("failed");
+        setReason(results[0].message);
+      }
       if (results[1]?.kind === "ok") setDeliveries(results[1].value.deliveries);
       setNow(Date.now());
     };
@@ -89,6 +94,11 @@ export function WorkflowNotifications({
               : "error"
           }
           message={t(`notifications.${notice}`)}
+          description={
+            notice === "failed" || notice === "conflict"
+              ? reason || undefined
+              : undefined
+          }
         />
       )}
       {mayManage && (
@@ -155,6 +165,7 @@ export function WorkflowNotifications({
                     setNotice(
                       result.kind === "conflict" ? "conflict" : "failed",
                     );
+                    setReason(result.message);
                     setRefresh((value) => value + 1);
                   }
                 }}

@@ -37,8 +37,13 @@ stable random 32-byte key encoded as 64 hexadecimal characters, and
 the deployment's secret store and back it up separately from the database.
 Changing or losing it makes existing encrypted robots and queued Deliveries
 unreadable; disconnect and reconnect channels after an intentional key change.
-No robot can be saved before these settings exist. In-app notifications and
-Copy reminder work without them.
+No robot can be saved before these settings exist, and the refusal names the
+missing one. The worker role reads them too: a worker that lacks either, or
+whose key cannot decrypt a robot, records each attempt at a post as a failed
+one with that reason in the Delivery log, and logs it, instead of leaving the
+post queued or dropping it. The post fails after its fifth attempt, so a
+worker with the settings can still send it before then. In-app notifications
+and Copy reminder work without them.
 
 Queued posts recheck current workflow and assignment capabilities before
 delivery. Completed items, revoked recipients, and mention opt-outs are removed;
@@ -49,16 +54,21 @@ The worker role runs notification delivery alongside source checks; local
 single-user mode embeds both. It reads `HTTPS_PROXY` / `https_proxy`,
 `HTTP_PROXY` / `http_proxy`, and `NO_PROXY` / `no_proxy`. Each webhook has one
 database-backed pacing reservation shared by every worker, with at least
-3.1 seconds between send attempts. Five attempts use exponential backoff and
-honor numeric `Retry-After`; final failures remain visible in the workflow's
-Delivery log, and in the Group's for a Group default, and never block a gate. Remote error text and webhook URLs are
-never logged. The log shows the posted text, robot label, status, attempts,
-and a safe error code, and each recipient's name and count with how the post
-mentioned them (`userid`, `mobile`, or `name` only). Userids and mobile
-numbers stay in the post's mention lists and never appear in the log or in
-Remind's response. Messages are limited to 2,048 UTF-8
-bytes; very large recipient lists retain all structured mentions and full
-Delivery recipients while summarizing overflow display names.
+3.1 seconds between send attempts. A failed post gets five attempts with
+exponential backoff that honors numeric `Retry-After`. A rate-limited
+response (HTTP 429, or WeCom error 45008 or 45009, which carry no
+`Retry-After`) pauses the robot until its one-minute window has reset, or
+longer when `Retry-After` asks, and does not count toward those five; a post
+still rate limited after 60 attempts fails. Final failures remain visible in
+the workflow's Delivery log, and in the Group's for a Group default, and
+never block a gate. Remote error text and webhook URLs are never logged. The
+log shows the posted text, robot label, status, attempts, and a safe error
+code, and each recipient's name and count with how the post mentioned them
+(`userid`, `mobile`, or `name` only). Userids and mobile numbers stay in the
+post's mention lists and never appear in the log or in Remind's response.
+Messages are limited to 2,048 UTF-8 bytes; very large recipient lists retain
+all structured mentions and full Delivery recipients while summarizing
+overflow display names.
 
 An item's requester, its Workflow owner, and Administrators can **Remind**
 people who still need to act, at most once per logical item per hour across

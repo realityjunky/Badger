@@ -38,8 +38,14 @@ export function RobotChannelSettings({
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<
-    "failed" | "conflict" | "testQueued" | "disconnected" | null
+    "failed" | "robotConflict" | "testQueued" | "disconnected" | null
   >(null);
+  // The server's reason, such as a setting the deployment still lacks.
+  const [reason, setReason] = useState("");
+  const refused = (result: { kind: string; message: string }) => {
+    setNotice(result.kind === "conflict" ? "robotConflict" : "failed");
+    setReason(result.message);
+  };
   const [refresh, setRefresh] = useState(0);
   const [form] = Form.useForm<RobotValues>();
   const route = `/${scope}/${encodeURIComponent(scopeId)}/notifications/channel`;
@@ -52,7 +58,7 @@ export function RobotChannelSettings({
     }>(basePath, route, "GET", undefined, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.kind !== "ok") {
-        setNotice("failed");
+        refused(result);
         return;
       }
       setChannel(result.value.channel);
@@ -86,6 +92,11 @@ export function RobotChannelSettings({
               : "error"
           }
           message={t(`notifications.${notice}`)}
+          description={
+            notice === "failed" || notice === "robotConflict"
+              ? reason || undefined
+              : undefined
+          }
         />
       )}
       {!loaded ? (
@@ -126,8 +137,7 @@ export function RobotChannelSettings({
               form.setFieldValue("webhookUrl", "");
               setNotice("testQueued");
               onChanged?.();
-            } else
-              setNotice(result.kind === "conflict" ? "conflict" : "failed");
+            } else refused(result);
           }}
         >
           <Form.Item
@@ -176,10 +186,7 @@ export function RobotChannelSettings({
                     setNotice("disconnected");
                     setRefresh((value) => value + 1);
                     onChanged?.();
-                  } else
-                    setNotice(
-                      result.kind === "conflict" ? "conflict" : "failed",
-                    );
+                  } else refused(result);
                 }}
               >
                 <Button danger disabled={busy}>

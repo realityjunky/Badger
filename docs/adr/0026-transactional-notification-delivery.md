@@ -22,7 +22,12 @@ adapters perform network I/O after the action commits; their failures cannot
 roll back sign-off. Deliveries retain their prepared recipients, message,
 robot label, and authenticated encrypted webhook snapshot. Webhook-wide
 database reservations pace every worker and workflow sharing a robot, while
-expiring claims permit recovery after worker loss. WeCom has no idempotent
+expiring claims permit recovery after worker loss. A rate-limited response
+pauses the robot for WeCom's one-minute window and draws on its own attempt
+limit, not on the retries meant for failures. A worker whose settings cannot
+decrypt or link a post records a failed attempt with the reason, so a
+misconfigured worker shows in the log rather than staying silent, while a
+correctly configured worker can still send the post. WeCom has no idempotent
 send primitive: an acknowledgement lost after a successful post can produce
 a duplicate on retry, although ordinary action replay queues no second post.
 

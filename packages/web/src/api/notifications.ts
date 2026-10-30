@@ -1,4 +1,5 @@
 import { apiUrl } from "../app/paths.js";
+import { isRecord } from "../util/records.js";
 
 export type NotificationEvent =
   | "gate-ready"
@@ -45,8 +46,10 @@ export interface Delivery {
   error: string | null;
   createdAt: string;
 }
+/** A refusal carries the server's reason, or "" when it gave none. */
 export type NotificationResult<T> =
-  { kind: "ok"; value: T } | { kind: "failed" | "denied" | "conflict" };
+  | { kind: "ok"; value: T }
+  | { kind: "failed" | "denied" | "conflict"; message: string };
 
 export async function notificationRequest<T>(
   basePath: string,
@@ -64,6 +67,7 @@ export async function notificationRequest<T>(
       signal,
     });
     if (response.ok) return { kind: "ok", value: (await response.json()) as T };
+    const refusal: unknown = await response.json().catch(() => null);
     return {
       kind:
         response.status === 409
@@ -71,8 +75,14 @@ export async function notificationRequest<T>(
           : response.status === 403 || response.status === 401
             ? "denied"
             : "failed",
+      message:
+        isRecord(refusal) &&
+        isRecord(refusal.error) &&
+        typeof refusal.error.message === "string"
+          ? refusal.error.message
+          : "",
     };
   } catch {
-    return { kind: "failed" };
+    return { kind: "failed", message: "" };
   }
 }

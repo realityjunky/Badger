@@ -92,6 +92,8 @@ const en = {
     "Notifications could not be updated. Reload and try again. Ask your Administrator if the problem continues.",
   "notifications.conflict":
     "This item changed or was reminded within the last hour. Reload before trying again.",
+  "notifications.robotConflict":
+    "The robot settings were not changed. Check the reason below, then reload and try again.",
   "notifications.robotLabel": "Robot label",
   "notifications.webhookUrl": "Robot webhook URL",
   "notifications.replaceWebhook":
@@ -1065,6 +1067,8 @@ const zh: Record<MessageId, string> = {
     "无法更新通知。请重新加载后重试；如问题持续，请联系管理员。",
   "notifications.conflict":
     "记录已更改，或一小时内已发送提醒。请重新加载后再试。",
+  "notifications.robotConflict":
+    "机器人设置未更改。请查看下方原因，然后重新加载并重试。",
   "notifications.robotLabel": "机器人名称",
   "notifications.webhookUrl": "机器人 Webhook URL",
   "notifications.replaceWebhook":
