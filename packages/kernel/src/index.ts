@@ -26,6 +26,7 @@ export * from "./factory/migration.js";
 export * from "./factory/source.js";
 export * from "./eval/run.js";
 export * from "./publish/lifecycle.js";
+export * from "./publish/package-snapshot.js";
 export * from "./skill-runtime/index.js";
 export * from "./engine/index.js";
 export * from "./workflow-runtime/public.js";

@@ -1095,7 +1095,7 @@ Package generation (#60, migration `0027`) follows initialization. Here `V` is
   `V/gates/generation` through the shared human gate protocol. Its confirmation
   binds the proposal, Plan version, and Creator state hashes.
 - `POST V/package/generate` quotes `{confirmed: true, confirmationHash,
-  stateHash, requestId}` and returns `202 {job}`. The confirmation belongs to
+stateHash, requestId}` and returns `202 {job}`. The confirmation belongs to
   the requesting person. A repeated request ID returns the same job; changed
   inputs conflict. Tokens may read packages but never confirm or generate.
 - The worker rechecks all approved inputs and Creator state, invokes the
@@ -1161,3 +1161,42 @@ progress, report history, and kernel publication readiness. A signed-in Engineer
 starts a job with POST to that path and `{confirmed:true, packageHash, requestId}`.
 The Engineer MCP's read-only `evaluation_status` tool exposes the same history
 and readiness. Tokens cannot start jobs or sign off for people.
+
+## Independent package review and publication
+
+Let `V` be `/api/v1/workflows/:workflowId/versions/:versionId`.
+`GET V/review` returns current-hash composite Authoring, runtime and publication
+readiness from the kernel, approval history, all published Workflow versions, and
+the signed-in person's controls. A Reviewer who accepted any Authoring lane for
+this Workflow version, across every generation, cannot approve it. An
+Administrator may override independence only with a recorded `overrideReason`.
+
+`POST V/review/approve-preview` accepts `{}` or the Administrator's
+`{overrideReason}`. Commit with `POST V/review/approve` quoting
+`{confirmed:true, confirmationHash, requestId, overrideReason?}`. Only signed-in
+Reviewers and Administrators may approve. The reason is bound by the preview and
+stored with immutable review and Activity evidence. `POST V/review/publish-preview`
+accepts `{}`. Only the signed-in Workflow owner or Administrator commits
+`POST V/review/publish` with `{confirmed:true, confirmationHash, requestId}`.
+The kernel requires the exact approved package hash, current Authoring readiness
+and valid passing evaluation evidence. Changed previews conflict. Repeating an
+original request returns its original confirmation, even after invalidation;
+this does not make an invalidated approval current again. Tokens never sign off.
+
+`GET /api/v1/workflows/:workflowId/publications` lists permanent publications
+across versions. `GET /api/v1/workflows/:workflowId/publications/:publicationId/package`
+returns `{publication, snapshot}`; `?packageHash=<expected-hash>` also fences the
+selection. `snapshot` contains `packageHash`, `inventory` (path, bytes, SHA-256,
+owner), and `files` (portable path and base64 content). Every retrieval verifies
+the exact stored bytes and inventory with the public kernel
+`verifyPackageSnapshot` seam. Signed-in workflow readers can inspect publications;
+tokens need `operator` scope and an Operator, test Engineer or Administrator role
+on the visible workflow. Other workflows and scopes are refused.
+
+Publications store actual package bytes in append-only Postgres records, including
+bundled source Skills. They remain usable after upstream changes, same-version
+regeneration, or later publications. Installation and Run start should consume
+this authorized retrieval API and kernel snapshot verification, rather than
+following any current authoring path. Review/publication never changes the
+committed Authoring namespace; their evidence, audit, stage and gate changes
+commit atomically. See ADR 0033.

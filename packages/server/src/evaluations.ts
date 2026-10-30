@@ -31,7 +31,7 @@ export const EVALUATION_LIMITS = {
   memoryLimitBytes: 512 * 1024 * 1024,
   outputLimitBytes: 4 * 1024 * 1024,
 } as const;
-interface ReportRow {
+export interface ReportRow {
   id: string;
   workflow_version_id: string;
   job_id: string;
@@ -60,6 +60,7 @@ export async function loadEvaluationState(
   tx: Queryable,
   config: ServiceConfig,
   versionId: string,
+  options: { reportId?: string } = {},
 ) {
   const loaded = await loadAuthoring(tx, config, versionId);
   const history = await reports(tx, versionId);
@@ -69,6 +70,7 @@ export async function loadEvaluationState(
           (entry) =>
             entry.package_id === loaded.saved.id &&
             entry.package_hash === loaded.saved.assembled_hash &&
+            (options.reportId === undefined || entry.id === options.reportId) &&
             entry.report.passed,
         )
       : undefined;

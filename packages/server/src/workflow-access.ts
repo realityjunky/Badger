@@ -38,6 +38,9 @@ export interface WorkflowCapabilities {
   approveProposal: boolean;
   initialize: boolean;
   generate: boolean;
+  approvePackage: boolean;
+  publish: boolean;
+  readPublished: boolean;
 }
 
 /** Every workflow role reads; only the responsible roles may write. */
@@ -84,6 +87,17 @@ export async function workflowCapabilities(
       access.tokenScopes === undefined && (isAdministrator(access) || owner),
     initialize: access.tokenScopes === undefined && engineer,
     generate: access.tokenScopes === undefined && engineer,
+    approvePackage:
+      access.tokenScopes === undefined &&
+      (isAdministrator(access) || roles.has("Reviewer")),
+    publish:
+      access.tokenScopes === undefined && (isAdministrator(access) || owner),
+    readPublished:
+      access.tokenScopes === undefined ||
+      (access.tokenScopes.includes("operator") &&
+        (isAdministrator(access) ||
+          roles.has("Operator") ||
+          roles.has("Engineer"))),
     approveDossier:
       access.tokenScopes === undefined && (isAdministrator(access) || owner),
   };

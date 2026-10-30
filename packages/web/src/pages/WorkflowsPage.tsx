@@ -27,6 +27,7 @@ import { WorkflowSources } from "./workflows/WorkflowSources.js";
 import { WorkflowSourceStudy } from "./workflows/WorkflowSourceStudy.js";
 import { WorkflowDossier } from "./workflows/WorkflowDossier.js";
 import { WorkflowPlan } from "./workflows/WorkflowPlan.js";
+import { WorkflowPublication } from "./workflows/WorkflowPublication.js";
 import { WorkflowPackage } from "./workflows/WorkflowPackage.js";
 import { WorkflowProposal } from "./workflows/WorkflowProposal.js";
 import { WorkflowNotifications } from "./workflows/WorkflowNotifications.js";
@@ -383,6 +384,12 @@ export function WorkflowsPage() {
                 />
                 <WorkflowPackage
                   key={`package-${selectedVersion.id}`}
+                  basePath={basePath}
+                  detail={versionResources}
+                  onChanged={reload}
+                />
+                <WorkflowPublication
+                  key={`publication-${selectedVersion.id}`}
                   basePath={basePath}
                   detail={versionResources}
                   onChanged={reload}

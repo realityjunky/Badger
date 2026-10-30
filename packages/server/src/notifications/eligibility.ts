@@ -98,17 +98,19 @@ export async function eligibleNotificationItems(
         break;
       case "gate-ready":
         canAct =
-          item.gate === "dossier"
-            ? capabilities.approveDossier
-            : item.gate === "proposal"
-              ? capabilities.approveProposal
-              : item.gate === "plan"
-                ? capabilities.approvePlan
-                : capabilities.confirmSources;
+          item.gate === "publication"
+            ? capabilities.publish
+            : item.gate === "dossier"
+              ? capabilities.approveDossier
+              : item.gate === "proposal"
+                ? capabilities.approveProposal
+                : item.gate === "plan"
+                  ? capabilities.approvePlan
+                  : capabilities.confirmSources;
         break;
       case "gate-invalidated":
         canAct =
-          item.gate === "package"
+          item.gate === "package" || item.gate === "publication"
             ? capabilities.read
             : questionnaire.compose || capabilities.approveDossier;
         break;

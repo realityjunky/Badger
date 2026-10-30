@@ -1,4 +1,5 @@
 import { invalidateEvaluations } from "./package-invalidation.js";
+import { invalidateGate } from "./gates.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -467,6 +468,16 @@ export async function acceptLaneResult(
     job.workflow_version_id,
     "Accepted Authoring output superseded evaluation",
   );
+  for (const gate of ["package", "publication"])
+    await invalidateGate(
+      tx,
+      deps,
+      actor,
+      job.workflow_version_id,
+      gate,
+      "Accepted Authoring output superseded package review",
+      ["Reviewer", "Workflow owner"],
+    );
   const stateHash = await commitAuthoring(
     tx,
     loaded.state,

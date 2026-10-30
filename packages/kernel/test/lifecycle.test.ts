@@ -238,6 +238,32 @@ describe("standalone Creator lifecycle", () => {
     expect(reviewState(await readState(project, initial.name)).state).toBe(
       "reviewable",
     );
+    const transientApproval = await approveReview({
+      state: await readState(project, initial.name),
+      reviewer: "service-reviewer",
+      approve: true,
+      persistState: false,
+    });
+    expect(reviewState(transientApproval).state).toBe("publishable");
+    expect((await readState(project, initial.name)).review).toBeUndefined();
+    const transientPublished = await publishStateImplementation(
+      transientApproval,
+      true,
+      {
+        persistState: false,
+        destination: path.join(project, ".badger", "service-publication"),
+      },
+    );
+    expect(transientPublished.published!.path).toBe(
+      path.join(project, ".badger", "service-publication"),
+    );
+    expect((await readState(project, initial.name)).published).toBeUndefined();
+    await expect(
+      publishStateImplementation(transientApproval, true, {
+        persistState: false,
+        destination: transientPublished.published!.path,
+      }),
+    ).rejects.toThrow();
     const approved = await approveReview({
       state: await readState(project, initial.name),
       reviewer: "test-reviewer",
