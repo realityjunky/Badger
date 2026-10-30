@@ -108,13 +108,14 @@ create table notification_robots (
   available_at timestamptz not null
 );
 
+-- A reminder without a Delivery was offered as Copy reminder, whose text the
+-- dashboard writes in the viewer's language.
 create table notification_reminders (
   id text primary key,
   workflow_id text not null references workflows (id),
   item_key text not null,
   actor_id text not null references people (id),
   recipients jsonb not null,
-  copy_text text,
   delivery_id text references notification_deliveries (id),
   created_at timestamptz not null
 );

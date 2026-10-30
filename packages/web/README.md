@@ -146,7 +146,9 @@ them into `dist/`, so the server image carries the build and none of them.
   Administrators set a Group's default robot; its own Delivery log, polled
   like the workflow's, shows the default's test posts and failures. A refused
   robot change or Remind shows the server's reason, such as a setting the
-  deployment still lacks.
+  deployment still lacks. Copy reminder's text is written in the viewer's
+  language from the parts Remind returns, with an absolute link from the
+  page's origin and base path.
 
 ## Commands
 

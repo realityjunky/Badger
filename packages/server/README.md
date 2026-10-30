@@ -74,6 +74,15 @@ An item's requester, its Workflow owner, and Administrators can **Remind**
 people who still need to act, at most once per logical item per hour across
 all recipients. The reminder and its recipients are audited. Without a robot,
 the same action provides **Copy reminder**, including names and the deep link.
+Remind returns its parts (workflow name, waiting event, names and counts, and
+the item's base-relative link), and the dashboard writes the text in the
+viewer's language with a link from its own origin and base path, so Copy
+reminder needs neither setting. When a robot is set but everyone waiting has
+turned off mentions for the event, a post would reach nobody: nothing is
+posted, no reminder is recorded or audited, the hour does not start, and
+Remind returns Copy reminder's parts instead. Remind resolves who may act
+before it takes the Workflow version's lock, so the hourly limit serializes
+concurrent clicks without the capability checks holding writers.
 Channel writes, preferences, and reminders require a signed-in person; personal
 access tokens cannot change channel settings or send reminders. Actions that
 Agents perform through their existing scopes create the same inbox/outbox
@@ -88,7 +97,7 @@ events as dashboard actions.
 | `DELETE /workflows/:id/notifications/channel`      | Disconnect against `{revision, confirmed: true}`                                  |
 | `GET/PUT/DELETE /groups/:id/notifications/channel` | Group lead/Administrator manages the Group default                                |
 | `GET /workflows/:id/notifications/waiting`         | Current waiting items, recipients, reminder capability, and next eligible time    |
-| `POST /workflows/:id/notifications/remind`         | Send `{itemId, confirmed: true}`; return a queued Delivery or copy text           |
+| `POST /workflows/:id/notifications/remind`         | Send `{itemId, confirmed: true}`; return a queued Delivery or Copy reminder parts |
 | `GET /workflows/:id/notifications/deliveries`      | Owner/Administrator reads the newest 100 Deliveries                               |
 | `GET /groups/:id/notifications/deliveries`         | Group lead/Administrator reads the Group default's newest 100, test posts too     |
 

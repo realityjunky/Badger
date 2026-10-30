@@ -588,6 +588,155 @@ describe("WeCom notification channels", () => {
     ).toHaveLength(12);
     expect(JSON.stringify(service.logs)).not.toContain("test-secret");
   });
+  it("offers copy text without recording a reminder or starting the hour when a post would reach nobody", async () => {
+    const { workflowId, versionId } = await setup();
+    await call(
+      "PUT",
+      `/workflows/${workflowId}/notifications/channel`,
+      {
+        revision: 0,
+        label: "Research chat",
+        webhookUrl,
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    expect(await service.runNotificationJobs()).toBe(1);
+    // The only person waiting has turned chat mentions off for every event.
+    await call(
+      "PUT",
+      "/me/notifications",
+      { revision: 0, wecomUserId: "lin", mobile: null, mentionEvents: [] },
+      expert,
+    );
+    const { questions } = await publishRound(workflowId, versionId);
+    const waiting = async () =>
+      (
+        await call<{
+          items: {
+            id: string;
+            questionId: string;
+            href: string;
+            remindAfter: string | null;
+          }[];
+        }>(
+          "GET",
+          `/workflows/${workflowId}/notifications/waiting`,
+          undefined,
+          engineer,
+        )
+      ).items.find((entry) => entry.questionId === questions[0]!.id)!;
+    const item = await waiting();
+    for (let click = 0; click < 2; click++) {
+      const reminded = await call(
+        "POST",
+        `/workflows/${workflowId}/notifications/remind`,
+        { itemId: item.id, confirmed: true },
+        engineer,
+      );
+      expect(reminded).toEqual({
+        reminder: null,
+        deliveryId: null,
+        remindAfter: null,
+        copy: {
+          workflowName: "sample-workflow",
+          event: "question-assigned",
+          recipients: [{ name: "Dr Lin", count: 1 }],
+          href: item.href,
+        },
+      });
+    }
+    expect((await waiting()).remindAfter).toBeNull();
+    const { events } = await call<{ events: unknown[] }>(
+      "GET",
+      "/audit-events?action=reminder.created",
+    );
+    expect(events).toEqual([]);
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs()).toBe(0);
+    expect(robot.requests).toHaveLength(1);
+  });
+  it("keeps one reminder an hour when two people remind the same item at once", async () => {
+    const { workflowId, versionId } = await setup();
+    const { questions } = await publishRound(workflowId, versionId);
+    const { items } = await call<{
+      items: { id: string; questionId: string }[];
+    }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/waiting`,
+      undefined,
+      engineer,
+    );
+    const item = items.find((entry) => entry.questionId === questions[0]!.id)!;
+    const clicks = await Promise.all(
+      [engineer, owner].map((person) =>
+        service.request(
+          `/api/v1/workflows/${workflowId}/notifications/remind`,
+          {
+            as: person,
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              origin: "http://localhost",
+            },
+            body: JSON.stringify({ itemId: item.id, confirmed: true }),
+          },
+        ),
+      ),
+    );
+    expect(clicks.map((response) => response.status).sort()).toEqual([
+      200, 409,
+    ]);
+    const { events } = await call<{ events: unknown[] }>(
+      "GET",
+      "/audit-events?action=reminder.created",
+    );
+    expect(events).toHaveLength(1);
+  });
+  it("returns Copy reminder's parts for the dashboard to compose without BADGER_PUBLIC_URL", async () => {
+    const { workflowId, versionId } = await setup({
+      environment: {
+        BADGER_PUBLIC_URL: undefined,
+        BADGER_NOTIFICATION_KEY: undefined,
+      },
+    });
+    const { questions } = await publishRound(workflowId, versionId);
+    const { items } = await call<{
+      items: { id: string; questionId: string; href: string }[];
+    }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/waiting`,
+      undefined,
+      engineer,
+    );
+    const item = items.find((entry) => entry.questionId === questions[0]!.id)!;
+    const reminded = await call<Record<string, unknown>>(
+      "POST",
+      `/workflows/${workflowId}/notifications/remind`,
+      { itemId: item.id, confirmed: true },
+      engineer,
+    );
+    // The page's origin and base path, and the viewer's language, make the text.
+    expect(reminded).toMatchObject({
+      reminder: { recipients: [{ name: "Dr Lin", count: 1 }] },
+      deliveryId: null,
+      copy: {
+        workflowName: "sample-workflow",
+        event: "question-assigned",
+        recipients: [{ name: "Dr Lin", count: 1 }],
+        href: `/questionnaire/questions/${questions[0]!.id}`,
+      },
+    });
+    expect(reminded).not.toHaveProperty("copyText");
+    await call(
+      "POST",
+      `/workflows/${workflowId}/notifications/remind`,
+      { itemId: item.id, confirmed: true },
+      owner,
+      409,
+    );
+  });
   it("drops a removed expert from queued mentions and reminder recipients", async () => {
     const { workflowId, versionId } = await setup();
     const { binding } = await call<{
@@ -910,13 +1059,17 @@ describe("WeCom notification channels", () => {
     );
     const reminder = await call<{
       reminder: { id: string; recipients: { name: string }[] };
-      copyText: string;
+      copy: unknown;
       deliveryId: string | null;
     }>("POST", reminderRoute, { itemId: item.id, confirmed: true }, engineer);
     expect(reminder.deliveryId).toBeNull();
-    expect(reminder.copyText).toContain("Dr Lin");
-    expect(reminder.copyText).toContain(item.href);
-    expect(reminder.copyText).not.toContain("PRIVATE");
+    expect(reminder.copy).toEqual({
+      workflowName: "sample-workflow",
+      event: "question-assigned",
+      recipients: [{ name: "Dr Lin", count: 1 }],
+      href: item.href,
+    });
+    expect(JSON.stringify(reminder)).not.toContain("PRIVATE");
     expect(await service.runNotificationJobs()).toBe(0);
     await call(
       "POST",

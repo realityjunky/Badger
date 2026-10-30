@@ -42,4 +42,7 @@ then reuse a restored, already processed identity and never be posted, and
 the restored actors who shared it would become its requesters. Reminder
 limits use the logical waiting item across all its recipients and serialize
 with its Workflow version's writers, preserving one reminder per item per
-hour.
+hour. Remind resolves recipients' capabilities before taking that lock and
+rereads the item's open rows under it; writers that take the lock close the
+items they supersede, and role changes never took it. A Remind whose post
+would reach nobody records nothing, so it cannot use up the hour.

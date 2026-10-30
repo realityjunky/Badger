@@ -2,8 +2,11 @@ import { Alert, Button, Collapse, Input, Popconfirm } from "antd";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  copyReminderText,
   notificationRequest,
+  type CopyReminder,
   type Delivery,
+  type ReminderResult,
   type WaitingItem,
 } from "../../api/notifications.js";
 import { useI18n } from "../../i18n/I18nContext.js";
@@ -24,16 +27,27 @@ export function WorkflowNotifications({
   const { notice: live } = useLiveUpdates();
   const [items, setItems] = useState<WaitingItem[]>([]);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
-  const [copyText, setCopyText] = useState<string | null>(null);
+  const [copy, setCopy] = useState<CopyReminder | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<
-    "failed" | "conflict" | "reminderQueued" | "copied" | "copyFailed" | null
+    | "failed"
+    | "conflict"
+    | "reminderQueued"
+    | "reminderNotPosted"
+    | "copied"
+    | "copyFailed"
+    | null
   >(null);
   // The server's reason for a refusal, shown under the notice.
   const [reason, setReason] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [now, setNow] = useState(Date.now());
   const route = `/workflows/${encodeURIComponent(workflowId)}/notifications`;
+  // Written in the viewer's current language, linking from this page's origin.
+  const copyText =
+    copy === null
+      ? null
+      : copyReminderText(copy, locale, window.location.origin, basePath);
   useEffect(() => {
     const controller = new AbortController();
     const update = async () => {
@@ -91,7 +105,9 @@ export function WorkflowNotifications({
           type={
             notice === "reminderQueued" || notice === "copied"
               ? "success"
-              : "error"
+              : notice === "reminderNotPosted"
+                ? "warning"
+                : "error"
           }
           message={t(`notifications.${notice}`)}
           description={
@@ -149,17 +165,18 @@ export function WorkflowNotifications({
                 onConfirm={async () => {
                   setBusy(item.id);
                   setNotice(null);
-                  const result = await notificationRequest<{
-                    copyText: string | null;
-                    deliveryId: string | null;
-                  }>(basePath, `${route}/remind`, "POST", {
-                    itemId: item.id,
-                    confirmed: true,
-                  });
+                  const result = await notificationRequest<ReminderResult>(
+                    basePath,
+                    `${route}/remind`,
+                    "POST",
+                    { itemId: item.id, confirmed: true },
+                  );
                   setBusy(null);
                   if (result.kind === "ok") {
-                    setCopyText(result.value.copyText);
+                    setCopy(result.value.copy);
                     if (result.value.deliveryId) setNotice("reminderQueued");
+                    else if (result.value.reminder === null)
+                      setNotice("reminderNotPosted");
                     setRefresh((value) => value + 1);
                   } else {
                     setNotice(

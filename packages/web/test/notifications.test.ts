@@ -1,5 +1,44 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { notificationRequest } from "../src/api/notifications.js";
+import {
+  copyReminderText,
+  notificationRequest,
+  type CopyReminder,
+} from "../src/api/notifications.js";
+
+const copy: CopyReminder = {
+  workflowName: "sample-workflow",
+  event: "question-assigned",
+  recipients: [
+    { name: "Dr Lin", count: 2 },
+    { name: "Dr\nWu", count: 1 },
+  ],
+  href: "/questionnaire/questions/q-1",
+};
+
+describe("Copy reminder", () => {
+  it("writes the viewer's language and links from the page's origin and base path", () => {
+    expect(
+      copyReminderText(copy, "en", "https://badger.example.com", "/badger"),
+    ).toBe(
+      [
+        "Reminder · sample-workflow",
+        "Questions waiting for answers",
+        "Dr Lin: 2",
+        "Dr Wu: 1",
+        "https://badger.example.com/badger/questionnaire/questions/q-1",
+      ].join("\n"),
+    );
+    expect(copyReminderText(copy, "zh", "http://localhost:4319", "/")).toBe(
+      [
+        "提醒 · sample-workflow",
+        "问题等待回答",
+        "Dr Lin: 2",
+        "Dr Wu: 1",
+        "http://localhost:4319/questionnaire/questions/q-1",
+      ].join("\n"),
+    );
+  });
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
