@@ -155,6 +155,33 @@ Engineer and Workflow owner in the writer's transaction. Artifacts and
 confirmation retry responses remain unchanged. Personal access tokens may
 read dossiers and gate history but cannot compose or approve versions.
 
+## Skill and workflow version changes
+
+Pinning a different Skill version compares the hashes of cited files. Changed,
+removed, or unpinned evidence reopens affected questions, including deferrals,
+and supersedes their facts. Source-study facts expose `stale` using the same
+file comparison. Unrelated file changes preserve the records' confirmations.
+Question, fact, and source-study responses include `evidenceChanges` with the
+path, old and current version/file hashes, and change status. The dashboard
+loads the before/after file previews when the comparison is expanded.
+
+`POST /workflows/:id/versions` still quotes the workflow's current `revision`.
+It now copies the latest version's pins, source-study revisions, questionnaire,
+answers, facts, acknowledgements, resolutions, and linked drafts in one locked
+transaction. `inheritedFromVersionId` identifies the preceding version; each
+inherited record's `origin` identifies its source Workflow version, record,
+and revision. The kernel ledger carries that provenance into dossier snapshots.
+Copies retain their state, including flags, while subsequent edits remain
+independent. Attachment receipts stay readable without changing fact hashes
+or exposing private answer drafts. Original discussion and round baselines
+remain in the source version, reachable through provenance links.
+
+The new version queues its own source check and requires new gates; no dossier,
+plan, or approval is copied. `GET V/dossier` includes `confirmations` so earlier
+approvals remain visible as superseded after invalidation or replacement.
+This uses migration `0022`; shipped migrations are unchanged. See
+[ADR 0027](../../docs/adr/0027-workflow-version-inheritance.md).
+
 ## Plan versions
 
 Plan versions (#58) use migration `0019`. `GET V/plan` returns immutable

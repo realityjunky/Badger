@@ -345,13 +345,14 @@ async function invalidateSourcesStage(
   );
 }
 
-async function enqueueSourceCheck(
+export async function enqueueSourceCheck(
   database: Queryable,
   dependencies: ServiceDependencies,
   context: WriteContext,
   workflowVersionId: string,
-  pinsHash: string,
+  pinsHash?: string,
 ): Promise<WorkflowJob> {
+  pinsHash ??= await pinsForHash(database, workflowVersionId);
   const now = dependencies.clock.now();
   // A queued check of the previous pin set could only be discarded; the new
   // job replaces it. A running one finishes, and its result is not shown.

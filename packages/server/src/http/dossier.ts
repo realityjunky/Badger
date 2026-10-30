@@ -101,6 +101,7 @@ export async function handleDossier(input: AuthorizedRequest): Promise<void> {
           versions,
           currentVersionId,
           confirmation: confirmations[0] ?? null,
+          confirmations,
           handoff,
         },
       };

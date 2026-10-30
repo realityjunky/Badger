@@ -8,6 +8,8 @@ import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
 import { RequestError } from "../http/errors.js";
 import { toIsoString } from "../util.js";
+import { evidenceComparison } from "../evidence-changes.js";
+import { readRecordOrigins } from "../version-inheritance.js";
 import type {
   Question,
   QuestionContent,
@@ -133,26 +135,33 @@ export async function readQuestions(
   const assignedIds = new Set(assigned.rows.map((row) => row.question_id));
   const translations = await readTranslations(tx, versionId);
   const sources = await readImportedSources(tx, versionId);
-  return result.rows.map((row) => ({
-    ...row.content,
-    id: row.id,
-    roundId: row.round_id,
-    revision: row.revision,
-    state: row.state,
-    position: row.position,
-    parentQuestionId: row.parent_question_id,
-    resolutionRevision: row.resolution_revision,
-    resolvedAt: row.resolved_at === null ? null : toIsoString(row.resolved_at),
-    revisions: history.get(row.id) ?? [],
-    translations: translations.filter(
-      (translation) => translation.questionId === row.id,
-    ),
-    source: sources.get(row.id) ?? null,
-    canAnswer:
-      row.state !== "draft" &&
-      (row.resolved_at === null || row.state === "confirmed") &&
-      assignedIds.has(row.id),
-  }));
+  const compareEvidence = await evidenceComparison(tx, versionId);
+  const origins = await readRecordOrigins(tx, versionId, "question");
+  return Promise.all(
+    result.rows.map(async (row) => ({
+      ...row.content,
+      id: row.id,
+      roundId: row.round_id,
+      revision: row.revision,
+      state: row.state,
+      evidenceChanges: await compareEvidence(row.content.evidence),
+      origin: origins.get(row.id) ?? null,
+      position: row.position,
+      parentQuestionId: row.parent_question_id,
+      resolutionRevision: row.resolution_revision,
+      resolvedAt:
+        row.resolved_at === null ? null : toIsoString(row.resolved_at),
+      revisions: history.get(row.id) ?? [],
+      translations: translations.filter(
+        (translation) => translation.questionId === row.id,
+      ),
+      source: sources.get(row.id) ?? null,
+      canAnswer:
+        row.state !== "draft" &&
+        (row.resolved_at === null || row.state === "confirmed") &&
+        assignedIds.has(row.id),
+    })),
+  );
 }
 
 async function recipients(

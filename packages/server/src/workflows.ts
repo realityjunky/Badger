@@ -6,6 +6,8 @@ import type { Database, Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import type { Person } from "./people.js";
 import { toIsoString } from "./util.js";
+import { inheritVersionRecords } from "./version-inheritance.js";
+import { enqueueSourceCheck } from "./workflow-source.js";
 
 export const WORKFLOW_STAGES = [
   "sources",
@@ -38,6 +40,7 @@ export interface Workflow extends WorkflowFrame {
   updatedAt: string;
 }
 export interface WorkflowVersion extends WorkflowFrame {
+  inheritedFromVersionId: string | null;
   id: string;
   workflowId: string;
   number: number;
@@ -56,6 +59,7 @@ interface WorkflowRow extends FrameRow {
   group_id: string;
 }
 interface VersionRow extends FrameRow {
+  inherited_from_version_id: string | null;
   workflow_id: string;
   number: number;
   stages: Record<WorkflowStageId, StageState>;
@@ -64,7 +68,7 @@ interface VersionRow extends FrameRow {
 const FRAME_COLUMNS =
   "id, name, goal, intent, locale, revision, created_at, updated_at";
 const WORKFLOW_COLUMNS = `${FRAME_COLUMNS}, group_id`;
-const VERSION_COLUMNS = `${FRAME_COLUMNS}, workflow_id, number, stages`;
+const VERSION_COLUMNS = `${FRAME_COLUMNS}, workflow_id, number, stages, inherited_from_version_id`;
 
 function frameRecord(row: FrameRow) {
   return {
@@ -85,6 +89,7 @@ function toVersion(row: VersionRow): WorkflowVersion {
   return {
     ...frameRecord(row),
     workflowId: row.workflow_id,
+    inheritedFromVersionId: row.inherited_from_version_id,
     number: row.number,
     stages: WORKFLOW_STAGES.map((id) => ({ id, state: row.stages[id] })),
   };
@@ -181,14 +186,15 @@ async function recordVersion(
   context: WriteContext,
   workflow: Workflow,
   number: number,
+  inheritedFromVersionId: string | null = null,
 ): Promise<WorkflowVersion> {
   const stages = Object.fromEntries(
     WORKFLOW_STAGES.map((id, index) => [id, index === 0 ? "active" : "todo"]),
   );
   const result = await database.query<VersionRow>(
     `insert into workflow_versions
-       (id, workflow_id, number, name, goal, intent, locale, stages, revision, created_at, updated_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 1, $9, $9)
+       (id, workflow_id, number, name, goal, intent, locale, stages, revision, created_at, updated_at, inherited_from_version_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 1, $9, $9, $10)
      returning ${VERSION_COLUMNS}`,
     [
       dependencies.ids.next(),
@@ -200,6 +206,7 @@ async function recordVersion(
       workflow.locale,
       JSON.stringify(stages),
       dependencies.clock.now(),
+      inheritedFromVersionId,
     ],
   );
   const version = toVersion(result.rows[0]!);
@@ -399,8 +406,8 @@ export async function createWorkflowVersion(
       [id, dependencies.clock.now()],
     );
     const workflow = toWorkflow(result.rows[0]!);
-    const versions = await tx.query<{ number: number }>(
-      `select coalesce(max(number), 0)::int + 1 as number from workflow_versions where workflow_id = $1`,
+    const versions = await tx.query<{ id: string; number: number }>(
+      `select id, number from workflow_versions where workflow_id = $1 order by number desc limit 1 for update`,
       [id],
     );
     const version = await recordVersion(
@@ -408,8 +415,26 @@ export async function createWorkflowVersion(
       dependencies,
       context,
       workflow,
-      versions.rows[0]!.number,
+      (versions.rows[0]?.number ?? 0) + 1,
+      versions.rows[0]?.id ?? null,
     );
+    if (version.inheritedFromVersionId !== null) {
+      await inheritVersionRecords(
+        tx,
+        dependencies,
+        version.inheritedFromVersionId,
+        version.id,
+      );
+      if (
+        (
+          await tx.query(
+            "select 1 from workflow_skill_pins where workflow_version_id = $1",
+            [version.id],
+          )
+        ).rows.length > 0
+      )
+        await enqueueSourceCheck(tx, dependencies, context, version.id);
+    }
     await recordWorkflowChange(
       tx,
       dependencies,

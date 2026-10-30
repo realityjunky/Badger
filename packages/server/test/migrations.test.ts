@@ -54,6 +54,45 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("upgrades existing versions and keeps inheritance provenance and receipt links immutable", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((m) => m.version <= "0021"),
+      clock,
+    );
+    const previous = await test.database.query(
+      "select version, checksum from schema_migrations order by version",
+    );
+    await applyMigrations(test.database, migrations, clock);
+    expect(
+      (
+        await test.database.query(
+          "select version, checksum from schema_migrations where version <= '0021' order by version",
+        )
+      ).rows,
+    ).toEqual(previous.rows);
+    for (const table of [
+      "workflow_record_origins",
+      "inherited_answer_attachments",
+    ]) {
+      for (const statement of [`delete from ${table}`, `truncate ${table}`])
+        await expect(test.database.query(statement)).rejects.toThrow(
+          /immutable/u,
+        );
+    }
+    await expect(
+      test.database.query(
+        "update workflow_record_origins set source_revision = 99",
+      ),
+    ).rejects.toThrow(/immutable/u);
+    await expect(
+      test.database.query(
+        "update inherited_answer_attachments set attachment_id = 'other'",
+      ),
+    ).rejects.toThrow(/immutable/u);
+  });
   it("keeps plan artifacts immutable after upgrading the existing drafting schema", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
@@ -92,7 +131,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0021");
+    expect(upgraded.applied.at(-1)).toBe("0022");
     expect(
       (
         await test.database.query(
@@ -152,6 +191,7 @@ describe("reviewed SQL migrations", () => {
       "0019",
       "0020",
       "0021",
+      "0022",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -180,6 +220,7 @@ describe("reviewed SQL migrations", () => {
         "0019",
         "0020",
         "0021",
+        "0022",
       ],
       pending: [],
       drifted: [],
@@ -206,6 +247,7 @@ describe("reviewed SQL migrations", () => {
       "groups",
       "identity_sessions",
       "inbox_items",
+      "inherited_answer_attachments",
       "notification_actions",
       "notification_channels",
       "notification_deliveries",
@@ -239,6 +281,7 @@ describe("reviewed SQL migrations", () => {
       "source_study_records",
       "source_study_revisions",
       "workflow_jobs",
+      "workflow_record_origins",
       "workflow_skill_pins",
       "workflow_source_checks",
       "workflow_versions",
@@ -277,6 +320,7 @@ describe("reviewed SQL migrations", () => {
         "0019",
         "0020",
         "0021",
+        "0022",
       ],
       pending: [],
       drifted: [],
@@ -284,7 +328,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(21);
+    expect(rows.rows[0]?.count).toBe(22);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

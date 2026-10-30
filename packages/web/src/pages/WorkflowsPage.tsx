@@ -314,6 +314,15 @@ export function WorkflowsPage() {
                 />
               </div>
               <p>{selectedVersion.goal}</p>
+              {selectedVersion.inheritedFromVersionId && (
+                <p>
+                  <Link
+                    to={`/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(selectedVersion.inheritedFromVersionId)}`}
+                  >
+                    {t("versions.inheritedVersion")}
+                  </Link>
+                </p>
+              )}
               <Space wrap className="workflow-version-meta">
                 <Tag>{selectedVersion.name}</Tag>
                 <Tag>
