@@ -232,7 +232,10 @@ the kernel proposal, Plan version, Dossier version, and pin-set hashes. Plan
 approval notifies the owner that the proposal is ready. A changed plan or
 superseded dossier invalidates proposal approval, cancels queued or claimed
 initialization jobs, and notifies the Engineer and Workflow owner in the
-same transaction. Gate retries retain their original response.
+same transaction. The kernel can also change the proposal hash on its own, as
+after an upgrade; the owner's next commit then supersedes the stale approval
+the same way before recording the new one. Gate retries retain their original
+response.
 
 A signed-in Engineer or Administrator sends
 `{proposalHash, confirmed: true, requestId, replaceStateHash?}` to
@@ -246,12 +249,19 @@ initialize.
 
 The existing workflow worker claims `init` jobs alongside source checks and
 rechecks the approval, plan, sources, and quoted state hash under the version
-lock. It calls the kernel in a private namespace, then commits the exact
-state bytes and hash with the outcome, stage updates, and audit entry.
-An expired claimant cannot publish a state after takeover. A successful job
-marks Plan and proposal done and Package active. Failure leaves the previous
-state current. Source checks refresh source trees without erasing committed
-Creator state. See [ADR 0027](../../docs/adr/0027-transactional-proposal-initialization.md).
+lock. Like every proposal read, it materializes the stored plan as
+`plans/<hash>.json` through a temporary file and a rename, and rewrites a file
+that differs from the stored canonical JSON, such as one a crash truncated.
+It calls the kernel in a private namespace, then commits the exact state
+bytes and hash with the outcome, stage updates, and audit entry. An expired
+claimant cannot publish a state after takeover. A successful job marks Plan
+and proposal done and Package active and records `workflow.initialized`.
+Failure leaves the previous state current. Each failed or cancelled job is
+recorded once, as `workflow_initialization.failed` or
+`workflow_initialization.cancelled`, by the worker or by the writer whose
+invalidation withdrew it. Source checks refresh source trees without erasing
+committed Creator state. See
+[ADR 0027](../../docs/adr/0027-transactional-proposal-initialization.md).
 
 ## Source study records
 

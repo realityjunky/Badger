@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { TestService } from "../src/testing/index.js";
 import {
+  admin,
   engineer,
   owner,
   observer,
@@ -344,6 +345,169 @@ it("shows kernel blockers and refuses stale approval and initialization after so
     id: job.id,
     status: "cancelled",
   });
+  const { events } = await call(
+    "/audit-events?action=workflow_initialization.cancelled",
+    "GET",
+    undefined,
+    admin,
+  );
+  expect(events).toEqual([
+    expect.objectContaining({
+      targetId: job.id,
+      channel: "worker",
+      reason: "The approved proposal or its inputs changed",
+    }),
+  ]);
+});
+
+it("audits failed initializations and those an invalidation cancels, once per job", async () => {
+  service = await startPlanningService();
+  const { call, base, approve, plan, planVersion } = await approvedPlan();
+  await approve("plan", owner);
+  const { proposal } = await call(`${base}/proposal`);
+  await approve("proposal", owner);
+  const initialize = async (requestId: string, replaceStateHash?: string) =>
+    (
+      await call(
+        `${base}/proposal/initialize`,
+        "POST",
+        {
+          proposalHash: proposal.proposalHash,
+          confirmed: true,
+          requestId,
+          ...(replaceStateHash ? { replaceStateHash } : {}),
+        },
+        engineer,
+        202,
+      )
+    ).job;
+  await initialize("first");
+  await service.worker().runOnce();
+  const { currentState: initialized } = await call(`${base}/proposal`);
+  await initialize("replace-a", initialized.hash);
+  const stale = await initialize("replace-b", initialized.hash);
+  expect((await service.worker().runOnce())?.status).toBe("succeeded");
+  expect((await service.worker().runOnce())?.status).toBe("failed");
+  const { currentState: replaced } = await call(`${base}/proposal`);
+  const running = await initialize("running", replaced.hash);
+  const queued = await initialize("queued", replaced.hash);
+  const worker = service.worker();
+  const claimed = await worker.claim();
+  expect(claimed?.id).toBe(running.id);
+  plan.workflow.customNodes[0].label = "Reviewed report";
+  const body = { plan, dossierHash: planVersion.snapshot.dossierHash };
+  const { composition } = await call(`${base}/plan/preview`, "POST", body);
+  await call(
+    `${base}/plan/save`,
+    "POST",
+    {
+      ...body,
+      confirmationHash: composition.hash,
+      expectedVersionId: planVersion.id,
+    },
+    engineer,
+    201,
+  );
+  expect((await worker.process(claimed!)).status).toBe("cancelled");
+  const audit = async (action: string) =>
+    (
+      await call(
+        `/audit-events?action=workflow_initialization.${action}`,
+        "GET",
+        undefined,
+        admin,
+      )
+    ).events;
+  expect(await audit("failed")).toEqual([
+    expect.objectContaining({
+      targetType: "workflow_job",
+      targetId: stale.id,
+      channel: "worker",
+      reason: expect.stringContaining("Creator state changed"),
+    }),
+  ]);
+  const { person } = await call("/me", "GET", undefined, engineer);
+  const cancelled = await audit("cancelled");
+  expect(
+    cancelled.map((event: { targetId: string }) => event.targetId).sort(),
+  ).toEqual([running.id, queued.id].sort());
+  for (const event of cancelled)
+    expect(event).toMatchObject({
+      targetType: "workflow_job",
+      actorPersonId: person.id,
+      channel: "web",
+      reason: "A new plan version superseded the proposal",
+    });
+});
+
+it("withdraws queued initialization once when a pin changes", async () => {
+  service = await startPlanningService();
+  const { call, base, approve, skill } = await approvedPlan();
+  await approve("plan", owner);
+  const approved = await approve("proposal", owner);
+  const { job } = await call(
+    `${base}/proposal/initialize`,
+    "POST",
+    {
+      proposalHash: approved.confirmation.boundHashes.proposal,
+      confirmed: true,
+      requestId: "before-pin-change",
+    },
+    engineer,
+    202,
+  );
+  await call(`${base}/pins/${skill.id}`, "DELETE", { revision: 1 });
+  await service.runSourceCheckJobs();
+  expect((await call(`${base}/proposal`)).jobs).toEqual([
+    expect.objectContaining({ id: job.id, status: "cancelled" }),
+  ]);
+  const { events } = await call(
+    "/audit-events?action=workflow_initialization.cancelled",
+    "GET",
+    undefined,
+    admin,
+  );
+  expect(events).toEqual([
+    expect.objectContaining({ targetId: job.id, channel: "web" }),
+  ]);
+});
+
+it("rewrites a truncated materialized plan from its stored version", async () => {
+  service = await startPlanningService();
+  const { call, base, approve, version, planVersion } = await approvedPlan();
+  await approve("plan", owner);
+  const file = path.join(
+    service.config.storage.workspaceDirectory,
+    "workflow-versions",
+    version.id,
+    "plans",
+    `${planVersion.hash}.json`,
+  );
+  const text = `${JSON.stringify(planVersion.snapshot.plan, null, 2)}\n`;
+  // A crash mid-write leaves a prefix of the plan under its final name.
+  const truncate = () =>
+    fs.writeFile(file, text.slice(0, Math.floor(text.length / 2)));
+  const { proposal } = await call(`${base}/proposal`);
+  await truncate();
+  expect((await call(`${base}/proposal`)).proposal).toEqual(proposal);
+  expect(await fs.readFile(file, "utf8")).toBe(text);
+  await approve("proposal", owner);
+  await truncate();
+  await call(
+    `${base}/proposal/initialize`,
+    "POST",
+    {
+      proposalHash: proposal.proposalHash,
+      confirmed: true,
+      requestId: "after-truncation",
+    },
+    engineer,
+    202,
+  );
+  await truncate();
+  expect((await service.worker().runOnce())?.status).toBe("succeeded");
+  expect(await fs.readFile(file, "utf8")).toBe(text);
+  expect(await fs.readdir(path.dirname(file))).toEqual([path.basename(file)]);
 });
 
 it("serves plan saves and initialization only to POST, so a read cannot skip the Origin rule", async () => {

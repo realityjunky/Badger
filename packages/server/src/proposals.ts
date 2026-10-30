@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { buildProposal } from "@realityjunky/badger";
@@ -54,6 +55,27 @@ export async function approvedProposal(
   );
 }
 
+/**
+ * The stored canonical text is authoritative. A complete file takes the plan's
+ * name only by rename, and any other file there, such as one a crash
+ * truncated, is replaced from the database.
+ */
+async function materializePlan(planPath: string, text: string) {
+  try {
+    if ((await fs.readFile(planPath, "utf8")) === text) return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await fs.mkdir(path.dirname(planPath), { recursive: true });
+  const temporary = `${planPath}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporary, text, { flag: "wx" });
+    await fs.rename(temporary, planPath);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
+}
+
 /** Materialize an immutable approved plan; the kernel owns proposal derivation. */
 export async function loadProposal(
   tx: Queryable,
@@ -75,17 +97,10 @@ export async function loadProposal(
     return null;
   const { root } = workspaceLocation(config, versionId);
   const planPath = path.join(root, "plans", `${plan.hash}.json`);
-  const text = JSON.stringify(plan.snapshot.plan, null, 2) + "\n";
-  await fs.mkdir(path.dirname(planPath), { recursive: true });
-  try {
-    await fs.writeFile(planPath, text, { flag: "wx" });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    if ((await fs.readFile(planPath, "utf8")) !== text)
-      throw new Error(
-        "The materialized plan differs from its immutable version",
-      );
-  }
+  await materializePlan(
+    planPath,
+    JSON.stringify(plan.snapshot.plan, null, 2) + "\n",
+  );
   const proposal = await buildProposal({ projectRoot: root, planPath });
   // Artifact paths are supplied by the service. A saved plan cannot grant
   // itself permission to write outside the job's private kernel namespace.

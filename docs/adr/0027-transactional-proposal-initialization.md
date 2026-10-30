@@ -25,3 +25,14 @@ The worker rechecks state identity, confirmation identity, and current plan
 and source evidence. Concurrent replacements cannot consume the same state
 twice. Personal access tokens may read the proposal and job history but never
 approve or initialize a service project.
+
+The kernel derives the proposal hash, so it can change without any service
+write, as after a kernel upgrade. The owner's next commit then supersedes an
+active approval of another proposal hash under the version lock, with the
+invalidation, notices, audit, and job cancellation a writer's change causes,
+before recording the new approval. Each failed or cancelled initialization is
+recorded once, by the worker or by the writer whose invalidation withdrew it.
+The stored plan text is authoritative over its materialized file: the file is
+written through a temporary name and a rename, and a differing file, such as
+one an interrupted write truncated, is rewritten from the database rather than
+blocking every proposal read and initialization.
