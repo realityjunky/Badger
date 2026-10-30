@@ -675,15 +675,19 @@ that provider is unavailable. An invalid, expired, or revoked token returns
 require an allowed `Origin`; bearer writes can omit it. A supplied foreign
 `Origin` or `Host` is always refused.
 
-Every token write also requires `X-Badger-Agent-Host`: a nonblank label of
-1 to 200 printable ASCII characters, as sent by the Badger MCP. Its audit
-events record the person's identity, token ID, Agent host, and `mcp` channel;
-the Activity page shows the host beside that channel. This applies to
-comments, concerns, Skill version uploads, questionnaire drafts, and all
-other permitted token writes. A missing or invalid host returns 400 before
-the application write. Token reads may omit the header. A supplied valid
-host is also recorded on `token.used`; session, local, and worker credentials
-always have an empty audit host, even if the request supplies the header.
+Every request made with a token, reads included, also requires
+`X-Badger-Agent-Host`: a nonblank label of 1 to 200 printable ASCII
+characters, as the Badger MCP sends on every request. Reads need it because
+some record audit events: an Engineer's questionnaire or drafting-job read
+returns an expired lease to the queue, or cancels a job whose inputs changed.
+Audit events of token requests record the person's identity, token ID, Agent
+host, and `mcp` channel; the Activity page shows the host beside that
+channel. This applies to `token.used`, comments, concerns, Skill version
+uploads, questionnaire drafts, drafting-job transitions, and every other
+permitted token request. A missing or invalid host returns 400 before the
+request is served; only its `token.used` event is recorded, with an empty
+host. Session, local, and worker credentials always have an empty audit host,
+even if the request supplies the header.
 
 Scopes only narrow the owner's current Badger permissions; they never grant
 a role. Role removal applies to the next request. The currently delivered

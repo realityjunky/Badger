@@ -288,33 +288,98 @@ it("ignores an Agent host supplied by a signed-in person", async () => {
   ]);
 });
 
-it("keeps token reads without a host available and records a supplied host on token use", async () => {
-  const { base, token } = await setup();
-  const read = await service.request("/api/v1/me", {
-    headers: { authorization: `Bearer ${token.secret}` },
+function tokenRead(secret: string, route: string, host?: string) {
+  return service.request(`/api/v1${route}`, {
+    headers: {
+      authorization: `Bearer ${secret}`,
+      ...(host === undefined ? {} : { "x-badger-agent-host": host }),
+    },
   });
-  expect(read.status).toBe(200);
-  expect(
-    (
-      await tokenWrite(
-        token.secret,
-        `${base}/concerns`,
-        { text: "Keep frozen." },
-        "lab-workbuddy",
-      )
-    ).status,
-  ).toBe(201);
-  const { events } = await personRequest("/audit-events?action=token.used");
-  expect(events).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        credentialId: token.token.id,
-        agentHost: null,
-      }),
-      expect.objectContaining({
-        credentialId: token.token.id,
-        agentHost: "lab-workbuddy",
-      }),
-    ]),
+}
+
+it("refuses a token read without an Agent host, with the same message as a write", async () => {
+  const { base, token } = await setup();
+  const engineerToken = await createToken(engineer, "engineer");
+  const drafting = base.replace(/\/questionnaire$/u, "/drafting-jobs");
+  for (const [secret, route] of [
+    [token.secret, "/me"],
+    [token.secret, base],
+    [engineerToken.secret, base],
+    [engineerToken.secret, drafting],
+  ]) {
+    for (const host of [undefined, "lab\tworkbuddy"]) {
+      const response = await tokenRead(secret, route, host);
+      expect(response.status, route).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "invalid",
+          message:
+            "x-badger-agent-host must contain 1 to 200 printable characters",
+        },
+      });
+    }
+    expect((await tokenRead(secret, route, "lab-workbuddy")).status).toBe(200);
+  }
+});
+
+it("records the Agent host on token use", async () => {
+  const { token } = await setup();
+  expect((await tokenRead(token.secret, "/me")).status).toBe(400);
+  expect((await tokenRead(token.secret, "/me", "lab-workbuddy")).status).toBe(
+    200,
   );
+  const { events } = await personRequest("/audit-events?action=token.used");
+  // The refused request is still a use of the token, without a host.
+  expect(
+    events.map((event: { agentHost: string | null }) => event.agentHost),
+  ).toEqual(["lab-workbuddy", null]);
+});
+
+it("records the Agent host when a token's questionnaire read requeues an expired drafting lease", async () => {
+  const { base, token } = await setup();
+  const engineerToken = await createToken(engineer, "engineer");
+  const drafting = base.replace(/\/questionnaire$/u, "/drafting-jobs");
+  const { round } = await personRequest(
+    `${base}/rounds`,
+    "POST",
+    { title: "Follow-up" },
+    engineer,
+  );
+  const { job } = await personRequest(
+    drafting,
+    "POST",
+    { kind: "draft-questions", roundId: round.id, confirmed: true },
+    engineer,
+  );
+  const claimed = await tokenWrite(
+    engineerToken.secret,
+    `${drafting}/${job.id}/claim`,
+    { revision: job.revision },
+    "engineer-laptop",
+  );
+  expect(claimed.status).toBe(200);
+  service.clock.advance(30 * 60_000);
+  const expiries = async () =>
+    (await personRequest(`/audit-events?targetId=${job.id}`)).events.filter(
+      (event: { action: string }) =>
+        event.action === "drafting-job.lease-expired",
+    );
+  // A read without a host is refused before it reconciles, so it can never
+  // record the requeue without one.
+  expect((await tokenRead(engineerToken.secret, base)).status).toBe(400);
+  expect(await expiries()).toEqual([]);
+  // An expert's read reconciles no drafting job; an Engineer's does.
+  expect((await tokenRead(token.secret, base, "lab-workbuddy")).status).toBe(
+    200,
+  );
+  const read = await tokenRead(engineerToken.secret, base, "review-host");
+  expect(read.status).toBe(200);
+  expect(await expiries()).toEqual([
+    expect.objectContaining({
+      credentialKind: "token",
+      credentialId: engineerToken.token.id,
+      channel: "mcp",
+      agentHost: "review-host",
+    }),
+  ]);
 });

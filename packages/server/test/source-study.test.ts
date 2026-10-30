@@ -434,6 +434,7 @@ describe("source study through the service", () => {
       headers: {
         authorization: `Bearer ${secret}`,
         "content-type": "application/json",
+        "x-badger-agent-host": "test-agent",
       },
     };
     expect(

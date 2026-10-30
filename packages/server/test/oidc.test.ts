@@ -829,7 +829,10 @@ describe("OpenID Connect sign-in", () => {
     expect(created.status).toBe(201);
     const { secret } = await created.json();
     const me = await app.request("/badger/api/v1/me", {
-      headers: { authorization: `Bearer ${secret}` },
+      headers: {
+        authorization: `Bearer ${secret}`,
+        "x-badger-agent-host": "test-agent",
+      },
     });
     expect(me.status).toBe(200);
     expect(await me.json()).toMatchObject({

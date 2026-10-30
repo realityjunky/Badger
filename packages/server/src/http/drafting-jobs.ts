@@ -61,15 +61,13 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
   const workflowId = decodeURIComponent(rawWorkflow!);
   const versionId = decodeURIComponent(rawVersion!);
   const id = rawId ? decodeURIComponent(rawId) : null;
-  const host =
-    context.credential.kind === "token"
-      ? (context.credential.agentHost ?? null)
-      : null;
-  if (context.channel === "mcp" && host === null)
-    throw new RequestError(400, "Supply a printable Agent host label");
+  // The service refuses a token request without a valid Agent host.
   const actor: DraftingActor = {
     ...context,
-    agentHost: host,
+    agentHost:
+      context.credential.kind === "token"
+        ? (context.credential.agentHost ?? null)
+        : null,
   };
   let body: Record<string, unknown> = {};
   if (method === "POST") {

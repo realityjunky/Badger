@@ -158,6 +158,7 @@ describe("signing in through trusted headers", () => {
     const bearer = await service.request("/api/v1/me", {
       headers: {
         authorization: `Bearer ${secret}`,
+        "x-badger-agent-host": "test-agent",
         "x-badger-subject": "mallory-id",
         "x-badger-email": "mallory@example.com",
       },
