@@ -1,4 +1,14 @@
-import { Alert, Button, Drawer, Input, Modal, Select, Space, Tag } from "antd";
+import {
+  Alert,
+  Button,
+  Drawer,
+  Input,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Tag,
+} from "antd";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -208,10 +218,18 @@ export function LedgerDraftHistory({
             <Button disabled={busy} onClick={() => onEdit(inspector.record)}>
               {t("ledger.edit")}
             </Button>
-            <Button
+            <Popconfirm
+              title={t(
+                inspector.record.kind === "inference"
+                  ? "ledger.retireInferenceConfirm"
+                  : "ledger.retireAssumptionConfirm",
+              )}
+              description={t("ledger.retireHint")}
+              okText={t("ledger.retire")}
+              cancelText={t("common.cancel")}
               disabled={busy}
-              onClick={() =>
-                void run(async () => {
+              onConfirm={() =>
+                run(async () => {
                   await questionnaireRequest(
                     basePath,
                     `${path}/${inspector.record.kind === "inference" ? "inferences" : "assumptions"}/${encodeURIComponent(inspector.record.id)}`,
@@ -223,8 +241,10 @@ export function LedgerDraftHistory({
                 })
               }
             >
-              {t("ledger.retire")}
-            </Button>
+              <Button danger disabled={busy}>
+                {t("ledger.retire")}
+              </Button>
+            </Popconfirm>
           </Space>
         )}
     </Drawer>

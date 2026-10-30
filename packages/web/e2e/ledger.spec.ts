@@ -6,7 +6,8 @@ import {
   type TestService,
 } from "@realityjunky/badger-server/testing";
 
-const origin = "http://127.0.0.1:4322";
+const port = process.env["BADGER_E2E_LEDGER_PORT"] ?? "4322";
+const origin = `http://127.0.0.1:${port}`;
 const base = `${origin}/team`;
 const engineer = {
   subject: "engineer",
@@ -24,7 +25,7 @@ let service: TestService;
 test.beforeAll(async () => {
   service = await startTestService({
     environment: {
-      BADGER_PORT: "4322",
+      BADGER_PORT: port,
       BADGER_BASE_PATH: "/team",
       BADGER_WEB_DIR: path.resolve(
         path.dirname(fileURLToPath(import.meta.url)),
@@ -81,6 +82,93 @@ async function sign(
 async function english(page: Page) {
   await page.getByTestId("language-switch").click();
   await page.getByRole("menuitem", { name: "English", exact: true }).click();
+}
+
+for (const kind of ["inference", "assumption"] as const) {
+  test(`retiring an ${kind} waits for confirmation and cancelling preserves the draft`, async ({
+    browser,
+  }) => {
+    const { group } = await call<{ group: { id: string } }>("POST", "/groups", {
+      name: `Retirement ${Date.now()}`,
+    });
+    const { workflow, version } = await call<{
+      workflow: { id: string };
+      version: { id: string };
+    }>("POST", "/workflows", {
+      groupId: group.id,
+      name: `retirement-${Date.now()}`,
+      goal: "Confirm the meaning before removing a readiness blocker.",
+      intent: "new-skill",
+      locale: "en",
+    });
+    const root = `/workflows/${workflow.id}/versions/${version.id}/questionnaire`;
+    const statement = "The consumer requires sample_id.";
+    const resource = kind === "inference" ? "inferences" : "assumptions";
+    const { record } = await call<{ record: { id: string } }>(
+      "POST",
+      `${root}/${resource}`,
+      { statement, topic: "interfaces", questionId: null },
+    );
+    const context = await browser.newContext({
+      extraHTTPHeaders: { "x-badger-test-person": JSON.stringify(admin) },
+    });
+    try {
+      const page = await context.newPage();
+      const retirements: string[] = [];
+      page.on("request", (request) => {
+        if (request.method() === "DELETE") retirements.push(request.url());
+      });
+      await page.goto(
+        `${base}/questionnaire?workflow=${workflow.id}&version=${version.id}&panel=ledger`,
+      );
+      await english(page);
+      const ledger = page.getByTestId("questionnaire-ledger");
+      const draft = ledger
+        .locator(".questionnaire-record")
+        .filter({ hasText: statement });
+      await expect(ledger.getByRole("status")).toHaveText("Blocked");
+      await draft.getByRole("button", { name: "Record revision 1" }).click();
+      const history = page.getByRole("dialog", {
+        name: "Draft revision history",
+      });
+      await history.getByRole("button", { name: "Retire draft" }).click();
+      const prompt = page.locator(".ant-popconfirm");
+      await expect(
+        prompt.getByText(`Retire this ${kind}?`, { exact: true }),
+      ).toBeVisible();
+      await expect(
+        prompt.getByText(
+          "A retired draft cannot be revised. It is removed from the ledger and readiness.",
+        ),
+      ).toBeVisible();
+      expect(retirements).toEqual([]);
+      await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(prompt).toBeHidden();
+      expect(retirements).toEqual([]);
+      await expect(history).toBeVisible();
+      const unchanged = await call<{
+        record: { status: string; revision: number };
+      }>("GET", `${root}/${resource}/${record.id}`);
+      expect(unchanged.record).toMatchObject({ status: "active", revision: 1 });
+
+      await history.getByRole("button", { name: "Retire draft" }).click();
+      await prompt
+        .getByRole("button", { name: "Retire draft", exact: true })
+        .click();
+      await expect(history).toBeHidden();
+      await expect(draft).toHaveCount(0);
+      await expect(ledger.getByRole("status")).toHaveText("Ready");
+      expect(retirements).toEqual([
+        `${base}/api/v1${root}/${resource}/${record.id}`,
+      ]);
+      const retired = await call<{
+        record: { status: string; revision: number };
+      }>("GET", `${root}/${resource}/${record.id}`);
+      expect(retired.record).toMatchObject({ status: "retired", revision: 2 });
+    } finally {
+      await context.close();
+    }
+  });
 }
 
 test("the ledger shows readiness blockers, confirms a linked inference, and lists changes since a round", async ({
