@@ -164,22 +164,46 @@ file comparison. Unrelated file changes preserve the records' confirmations.
 Question, fact, and source-study responses include `evidenceChanges` with the
 path, old and current version/file hashes, and change status. The dashboard
 loads the before/after file previews when the comparison is expanded.
+The same comparison decides which citations a new or revised question may
+carry: a citation of an earlier Skill version remains valid while its file is
+byte-identical in the pinned version, so unaffected questions can be revised,
+and follow-ups can keep their parent's citations, after a re-pin. Resolution
+and concern previews apply the commit's question checks, so a follow-up or
+converted question that the commit would refuse fails before sign-off.
 
 `POST /workflows/:id/versions` still quotes the workflow's current `revision`.
 It now copies the latest version's pins, source-study revisions, questionnaire,
-answers, facts, acknowledgements, resolutions, and linked drafts in one locked
-transaction. `inheritedFromVersionId` identifies the preceding version; each
-inherited record's `origin` identifies its source Workflow version, record,
-and revision. The kernel ledger carries that provenance into dossier snapshots.
-Copies retain their state, including flags, while subsequent edits remain
-independent. Attachment receipts stay readable without changing fact hashes
+answers, facts, acknowledgements, resolutions, accepted question translations,
+import provenance, and linked drafts in one locked transaction.
+`inheritedFromVersionId` identifies the preceding version; each inherited
+record's `origin`, including a translation's and an imported question's
+`source`, identifies its source Workflow version, record, and revision. Copied
+translations and imports still name the drafting job that produced them. The
+kernel ledger carries that provenance into dossier snapshots. Copies retain
+their state, including flags, while subsequent edits remain independent. Attachment receipts stay readable without changing fact hashes
 or exposing private answer drafts. Original discussion and round baselines
 remain in the source version, reachable through provenance links.
 
+Pending questionnaire work moves with the copies, because a later version is
+always copied from the latest one and work recorded in an earlier version never
+reaches it. For each pending item about a copied question or fact, the new
+version gets the item the questionnaire would create, for the same people:
+`question-assigned` for assignees who still owed an answer, `restatement-ready`
+for unacknowledged restatements, and `answer-submitted` or `question-reopened`
+for the workflow's Engineers. The source version's items close, and the new
+items route notifications like any other questionnaire action. Gate, concern,
+and drafting-job items stay with their version, since those records are not
+copied. The `workflow_version.inherited` audit event names the source version,
+counts the copied pins and records and the moved items, and its `after.hash`
+binds the copied source records and revisions.
+
 The new version queues its own source check and requires new gates; no dossier,
-plan, or approval is copied. `GET V/dossier` includes `confirmations` so earlier
-approvals remain visible as superseded after invalidation or replacement.
-This uses migration `0023`; shipped migrations are unchanged. See
+plan, or approval is copied. `GET V/dossier`, `GET V/plan`, and
+`GET V/proposal` include `confirmations`, and `GET V` includes
+`sourceGateConfirmations`, newest first, so earlier approvals remain visible
+as superseded after invalidation or replacement.
+This uses migration `0023`, and migration `0020` lets a copied translation
+name its original job; shipped migrations are unchanged. See
 [ADR 0028](../../docs/adr/0028-workflow-version-inheritance.md).
 
 ## Plan versions
@@ -396,7 +420,8 @@ The questionnaire response includes these limits for upload controls.
 authorization. Until submission only its uploader can download it; workflow
 readers can download attachments cited by any submitted revision. The route
 always serves a download with `nosniff` and never exposes blob addresses as
-download URLs. Uploaded bytes are stored through the existing blob-store port.
+download URLs. Uploaded bytes are stored through the existing blob-store port,
+and the upload's `answer.attachment-uploaded` audit event records their hash.
 Upload screens require examples and warn against uploading real data.
 
 Resolution previews bind structured values, units, and attachment receipts.

@@ -9,12 +9,17 @@ import {
 } from "../source-study.js";
 import type { BlobStore } from "../skills/blobs.js";
 import type { ImportedQuestion } from "../drafting/schema.js";
+import {
+  readRecordOrigins,
+  type RecordOrigin,
+} from "../version-inheritance.js";
 import { recordQuestionnaireAudit, saveQuestion } from "./store.js";
 import { canonicalHash } from "@realityjunky/badger";
 
 export interface ImportedSource extends SourceEvidence {
   questionRevision: number;
   number: number;
+  origin: RecordOrigin | null;
 }
 
 export async function readImportedSources(tx: Queryable, versionId: string) {
@@ -27,6 +32,7 @@ export async function readImportedSources(tx: Queryable, versionId: string) {
     `select i.* from question_imports i join questions q on q.id = i.question_id where q.workflow_version_id = $1`,
     [versionId],
   );
+  const origins = await readRecordOrigins(tx, versionId, "import");
   return new Map(
     result.rows.map((row) => [
       row.question_id,
@@ -34,6 +40,7 @@ export async function readImportedSources(tx: Queryable, versionId: string) {
         ...row.evidence,
         questionRevision: row.question_revision,
         number: row.source_number,
+        origin: origins.get(row.question_id) ?? null,
       },
     ]),
   );

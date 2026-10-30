@@ -21,6 +21,7 @@ export interface PlanView {
   skeleton: FactoryPlan | null;
   currentVersionId: string | null;
   confirmation: GateConfirmation | null;
+  confirmations?: GateConfirmation[];
 }
 export interface PlanPreview {
   composition: PlanComposition;

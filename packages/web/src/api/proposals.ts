@@ -22,6 +22,7 @@ export interface ProposalView {
   proposal: Proposal | null;
   planVersionHash: string | null;
   confirmation: GateConfirmation | null;
+  confirmations?: GateConfirmation[];
   currentState: {
     hash: string;
     proposalHash: string;

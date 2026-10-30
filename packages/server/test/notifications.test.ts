@@ -728,6 +728,53 @@ describe("WeCom notification channels", () => {
     );
     expect(JSON.stringify(deliveries)).not.toContain("test-secret");
   });
+  it("routes the open work a new workflow version inherits, linking the new version", async () => {
+    const { workflowId, versionId } = await setup();
+    await call(
+      "PUT",
+      `/workflows/${workflowId}/notifications/channel`,
+      {
+        revision: 0,
+        label: "Research chat",
+        webhookUrl,
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    expect(await service.runNotificationJobs()).toBe(1);
+    await publishRound(workflowId, versionId);
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs()).toBe(1);
+    const { workflow } = await call<{ workflow: { revision: number } }>(
+      "GET",
+      `/workflows/${workflowId}`,
+    );
+    const { version } = await call<{ version: { id: string } }>(
+      "POST",
+      `/workflows/${workflowId}/versions`,
+      { revision: workflow.revision },
+      engineer,
+      201,
+    );
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs()).toBe(1);
+    expect(robot.requests).toHaveLength(3);
+    const post = robot.requests[2]!.message;
+    expect(post.text.content).toContain("Dr Lin: 2");
+    expect(post.text.content).toContain(
+      `https://badger.example.com/workflows/${workflowId}/versions/${version.id}`,
+    );
+    expect(JSON.stringify(post)).not.toContain("PRIVATE");
+    const { items } = await call<{
+      items: { state: string; workflowVersionId: string }[];
+    }>("GET", "/me/inbox", undefined, expert);
+    expect(
+      items
+        .filter((item) => item.state !== "done")
+        .map((item) => item.workflowVersionId),
+    ).toEqual([version.id, version.id]);
+  });
   it("saves each person's mention identity and event choices with conflict protection", async () => {
     await setup();
     const initial = await call<{

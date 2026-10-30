@@ -440,6 +440,12 @@ it("reserves hash-bound plan approval for the owner and supersedes it when the d
   const view = await call(`${base}/plan`);
   expect(view.currentVersionId).toBeNull();
   expect(view.versions).toEqual([version]);
+  expect(view.confirmations).toEqual([
+    expect.objectContaining({
+      id: approved.confirmation.id,
+      invalidatedAt: expect.any(String),
+    }),
+  ]);
   const history = await call(`${base}/gates/plan`);
   expect(history.confirmation.invalidatedAt).not.toBeNull();
   expect(

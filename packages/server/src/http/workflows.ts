@@ -39,6 +39,19 @@ async function groupName(database: Database, id: string): Promise<string> {
   return result.rows[0]?.name ?? "";
 }
 
+/** The current Sources confirmation and every earlier one, newest first. */
+async function sourceGateHistory(database: Database, versionId: string) {
+  const confirmations = await readGateConfirmations(
+    database,
+    versionId,
+    "sources",
+  );
+  return {
+    sourceGate: confirmations[0] ?? null,
+    sourceGateConfirmations: confirmations,
+  };
+}
+
 function workflowPath(path: string) {
   const match = WORKFLOW_PATH.exec(path);
   if (match === null) return null;
@@ -394,9 +407,7 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
           pins: await listWorkflowPins(database, version.id),
           sourceCheck: await readSourceCheck(database, version.id),
           jobs: await listWorkflowJobs(database, version.id),
-          sourceGate:
-            (await readGateConfirmations(database, version.id, "sources"))[0] ??
-            null,
+          ...(await sourceGateHistory(database, version.id)),
           sourceStudy: await readSourceStudy(database, version.id),
         });
   }

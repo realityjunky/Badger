@@ -145,6 +145,7 @@ export async function uploadAttachment(
     id,
     1,
     null,
+    hash,
   );
   return { id, name, mediaType, size: content.length, hash };
 }

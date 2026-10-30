@@ -1,3 +1,4 @@
+import { canonicalHash } from "@realityjunky/badger";
 import type { Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 
@@ -8,11 +9,39 @@ type RecordType =
   | "fact"
   | "acknowledgement"
   | "source-study"
-  | "draft";
+  | "draft"
+  | "translation"
+  | "import";
 export interface RecordOrigin {
   workflowVersionId: string;
   recordId: string;
   revision: number;
+}
+const COPIED: [RecordType, string][] = [
+  ["round", "rounds"],
+  ["question", "questions"],
+  ["resolution", "resolutions"],
+  ["fact", "facts"],
+  ["acknowledgement", "acknowledgements"],
+  ["source-study", "source-study records"],
+  ["draft", "drafts"],
+  ["translation", "translations"],
+  ["import", "imports"],
+];
+/** What a new version copied: nonzero counts, and a hash of the copied sources. */
+export interface InheritedRecords {
+  counts: [string, number][];
+  hash: string;
+}
+export function describeInheritance(
+  sourceId: string,
+  inherited: InheritedRecords,
+  moved: number,
+) {
+  const records =
+    inherited.counts.map(([label, count]) => `${label}: ${count}`).join(", ") ||
+    "no records";
+  return `Inherited from workflow version ${sourceId} (${records}); moved ${moved} pending inbox items`;
 }
 export async function readRecordOrigins(
   tx: Queryable,
@@ -46,7 +75,7 @@ export async function inheritVersionRecords(
   deps: ServiceDependencies,
   sourceId: string,
   versionId: string,
-) {
+): Promise<InheritedRecords> {
   const records = await tx.query<{
     type: RecordType;
     id: string;
@@ -59,6 +88,7 @@ export async function inheritVersionRecords(
      union all select 'acknowledgement', a.id, 1 from fact_acknowledgements a join confirmed_facts f on f.id = a.fact_id join question_resolutions r on r.id = f.resolution_id join questions q on q.id = r.question_id where q.workflow_version_id = $1
      union all select 'source-study', id, revision from source_study_records where workflow_version_id = $1
      union all select 'draft', id, revision from questionnaire_drafts where workflow_version_id = $1
+     union all select 'translation', t.id, 1 from question_translations t join questions q on q.id = t.question_id where q.workflow_version_id = $1
      order by type, id`,
     [sourceId],
   );
@@ -73,6 +103,15 @@ export async function inheritVersionRecords(
   // actors, hashes and timestamps remain untouched.
   const origins = `with origins as (select * from workflow_record_origins where workflow_version_id = $2)`;
   const values = [sourceId, versionId];
+  // An import has no identity of its own; its origin maps the copied question.
+  await tx.query(
+    `${origins} insert into workflow_record_origins
+     (workflow_version_id, record_type, record_id, source_workflow_version_id, source_record_id, source_revision)
+     select $2, 'import', o.record_id, $1, i.question_id, 1
+     from question_imports i join origins o on o.source_record_id = i.question_id and o.record_type = 'question'
+     where o.source_workflow_version_id = $1`,
+    values,
+  );
   await tx.query(
     `insert into workflow_skill_pins
     (workflow_version_id, skill_id, skill_version_hash, purpose, revision, pinned_by, created_at, updated_at)
@@ -113,6 +152,25 @@ export async function inheritVersionRecords(
     `${origins} insert into question_revisions (question_id, revision, content, actor_id, created_at)
     select o.record_id, r.revision, r.content, r.actor_id, r.created_at
     from question_revisions r join origins o on o.source_record_id = r.question_id and o.record_type = 'question'
+    where o.source_workflow_version_id = $1`,
+    values,
+  );
+  // Accepted translations and import provenance belong to question revisions,
+  // so they follow the copied revisions. Each still names its original job.
+  await tx.query(
+    `${origins} insert into question_translations
+    (id, question_id, question_revision, locale, text, rationale, actor_id, job_id, created_at)
+    select o.record_id, q.record_id, t.question_revision, t.locale, t.text, t.rationale, t.actor_id, t.job_id, t.created_at
+    from question_translations t join origins o on o.source_record_id = t.id and o.record_type = 'translation'
+    join origins q on q.source_record_id = t.question_id and q.record_type = 'question'
+    where o.source_workflow_version_id = $1`,
+    values,
+  );
+  await tx.query(
+    `${origins} insert into question_imports
+    (question_id, question_revision, skill_id, skill_version_hash, source_number, evidence, job_id)
+    select o.record_id, i.question_revision, i.skill_id, i.skill_version_hash, i.source_number, i.evidence, i.job_id
+    from question_imports i join origins o on o.source_record_id = i.question_id and o.record_type = 'import'
     where o.source_workflow_version_id = $1`,
     values,
   );
@@ -212,4 +270,41 @@ export async function inheritVersionRecords(
     where o.source_workflow_version_id = $1`,
     values,
   );
+  const pins = (
+    await tx.query<{ skill_id: string; skill_version_hash: string }>(
+      "select skill_id, skill_version_hash from workflow_skill_pins where workflow_version_id = $1",
+      [versionId],
+    )
+  ).rows
+    .map((pin) => ({ skillId: pin.skill_id, hash: pin.skill_version_hash }))
+    .sort((a, b) => (a.skillId < b.skillId ? -1 : 1));
+  const copied = (
+    await tx.query<{
+      record_type: RecordType;
+      source_record_id: string;
+      source_revision: number;
+    }>(
+      "select record_type, source_record_id, source_revision from workflow_record_origins where workflow_version_id = $1",
+      [versionId],
+    )
+  ).rows
+    .map((r) => ({
+      type: r.record_type,
+      id: r.source_record_id,
+      revision: r.source_revision,
+    }))
+    .sort((a, b) =>
+      a.type === b.type ? (a.id < b.id ? -1 : 1) : a.type < b.type ? -1 : 1,
+    );
+  const counts: [string, number][] = [
+    ["pins", pins.length],
+    ...COPIED.map(([type, label]): [string, number] => [
+      label,
+      copied.filter((record) => record.type === type).length,
+    ]),
+  ];
+  return {
+    counts: counts.filter(([, count]) => count > 0),
+    hash: canonicalHash({ sourceVersionId: sourceId, pins, records: copied }),
+  };
 }

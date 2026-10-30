@@ -714,7 +714,7 @@ const en = {
   "workflow.versionMissing": "This version does not belong to this workflow.",
   "workflow.newVersion": "Start new version",
   "workflow.newVersionConfirm":
-    "Start a new version with the current frame and the latest version's Skill pins, facts, answers, and resolutions? Flagged items stay open. Approvals require a new review.",
+    "Start a new version with the current frame and the latest version's Skill pins, facts, answers, and resolutions? Pending questionnaire work moves to the new version, and flagged items stay open. Approvals require a new review.",
   "versions.inheritedVersion": "Inherited from the previous workflow version",
   "versions.approvalRecorded": "Approval recorded",
   "versions.approvalSuperseded": "Approval superseded",
@@ -1525,7 +1525,7 @@ const zh: Record<MessageId, string> = {
   "workflow.versionMissing": "此版本不属于当前工作流。",
   "workflow.newVersion": "创建新版本",
   "workflow.newVersionConfirm":
-    "使用当前工作流信息，继承最新版本的 Skill 固定版本、事实、回答和处理结果？已标记项将保持待确认，审批需要重新审核。",
+    "使用当前工作流信息，继承最新版本的 Skill 固定版本、事实、回答和处理结果？待处理的问卷事项将转到新版本，已标记项将保持待确认，审批需要重新审核。",
   "versions.inheritedVersion": "继承自上一工作流版本",
   "versions.approvalRecorded": "审批已记录",
   "versions.approvalSuperseded": "审批已被替代",

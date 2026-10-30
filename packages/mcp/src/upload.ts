@@ -3,9 +3,55 @@ import path from "node:path";
 import { BadgerTimeoutError, type BadgerApi } from "./api.js";
 
 /** Allow for a slow uplink: half a minute, plus a second per 64 KiB sent. */
-function uploadTimeoutSeconds(files: { content: string }[]): number {
-  const bytes = files.reduce((sum, file) => sum + file.content.length, 0);
+export function uploadTimeoutSeconds(bytes: number): number {
   return 30 + Math.ceil(bytes / 65_536);
+}
+
+/**
+ * Read one regular file through a descriptor that refuses a final symbolic
+ * link and special files, and fails if the file is replaced or grows while
+ * it is read. `verify` runs once the file is open, before it is read.
+ */
+export async function readRegularFile(
+  target: string,
+  maximum: number,
+  tooLarge: string,
+  verify: () => Promise<void> = async () => undefined,
+): Promise<Buffer> {
+  const handle = await fs.open(
+    target,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
+  try {
+    const opened = await handle.stat();
+    await verify();
+    const current = await fs.lstat(target);
+    if (
+      !opened.isFile() ||
+      current.isSymbolicLink() ||
+      current.dev !== opened.dev ||
+      current.ino !== opened.ino
+    )
+      throw new Error("A local file changed while it was being read");
+    if (opened.size > maximum) throw new Error(tooLarge);
+    const buffer = Buffer.alloc(Math.min(opened.size + 1, maximum + 1));
+    let offset = 0;
+    while (offset < buffer.length) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        offset,
+        buffer.length - offset,
+        null,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset > opened.size || offset > maximum)
+      throw new Error("A local file changed or exceeded the upload byte limit");
+    return buffer.subarray(0, offset);
+  } finally {
+    await handle.close();
+  }
 }
 
 interface UploadLimits {
@@ -91,48 +137,14 @@ async function folderFiles(folder: SkillFolder, limits: UploadLimits) {
   const files: { path: string; content: string }[] = [];
   let total = 0;
   for (const { path: relative, target } of folder.files) {
-    const handle = await fs.open(
+    const content = await readRegularFile(
       target,
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      Math.min(limits.maxFileBytes, limits.maxBytes - total),
+      "Skill folder exceeds the file or total byte limit",
+      () => contained(root, target),
     );
-    try {
-      const opened = await handle.stat();
-      await contained(root, target);
-      const current = await fs.lstat(target);
-      if (
-        !opened.isFile() ||
-        current.isSymbolicLink() ||
-        current.dev !== opened.dev ||
-        current.ino !== opened.ino
-      )
-        throw new Error("A local file changed while the folder was being read");
-      const maximum = Math.min(limits.maxFileBytes, limits.maxBytes - total);
-      if (opened.size > maximum)
-        throw new Error("Skill folder exceeds the file or total byte limit");
-      const buffer = Buffer.alloc(Math.min(opened.size + 1, maximum + 1));
-      let offset = 0;
-      while (offset < buffer.length) {
-        const { bytesRead } = await handle.read(
-          buffer,
-          offset,
-          buffer.length - offset,
-          null,
-        );
-        if (bytesRead === 0) break;
-        offset += bytesRead;
-      }
-      if (offset > opened.size || offset > maximum)
-        throw new Error(
-          "A local file changed or exceeded the upload byte limit",
-        );
-      total += offset;
-      files.push({
-        path: relative,
-        content: buffer.subarray(0, offset).toString("base64"),
-      });
-    } finally {
-      await handle.close();
-    }
+    total += content.length;
+    files.push({ path: relative, content: content.toString("base64") });
   }
   const after = await fs.lstat(root);
   if (
@@ -186,7 +198,9 @@ export async function uploadSkillVersion(
           ? { confirmed: true, expectedHash: input.expectedHash }
           : {}),
       },
-      uploadTimeoutSeconds(files),
+      uploadTimeoutSeconds(
+        files.reduce((sum, file) => sum + file.content.length, 0),
+      ),
     );
   } catch (error) {
     if (input.confirmed && error instanceof BadgerTimeoutError)

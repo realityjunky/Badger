@@ -10,6 +10,7 @@ import { useI18n } from "../../i18n/I18nContext.js";
 import { useInbox } from "../../inbox/InboxContext.js";
 import type { MessageId } from "../../i18n/catalog.js";
 import { STAGE_LABELS } from "../../components/StageTrack.js";
+import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 
 const HASH_LABELS: Record<string, MessageId> = {
   pins: "gate.hash.pins",
@@ -106,6 +107,7 @@ export function SourcesGate({
           }
         />
       )}
+      <ConfirmationHistory confirmations={detail.sourceGateConfirmations} />
       {failure !== null && <Alert type="error" showIcon message={failure} />}
       {detail.capabilities.confirmSources &&
         detail.sourceCheck?.status === "passed" &&

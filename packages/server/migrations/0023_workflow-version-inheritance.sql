@@ -6,7 +6,8 @@ alter table workflow_versions add column inherited_from_version_id text
 create table workflow_record_origins (
   workflow_version_id text not null references workflow_versions (id),
   record_type text not null check (record_type in
-    ('round', 'question', 'resolution', 'fact', 'acknowledgement', 'source-study', 'draft')),
+    ('round', 'question', 'resolution', 'fact', 'acknowledgement', 'source-study', 'draft',
+     'translation', 'import')),
   record_id text not null,
   source_workflow_version_id text not null references workflow_versions (id),
   source_record_id text not null,

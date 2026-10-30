@@ -12,6 +12,7 @@ import {
   readRound,
   saveQuestion,
   toRound,
+  validateQuestionContent,
 } from "./store.js";
 
 export async function readConcerns(
@@ -116,6 +117,8 @@ export async function concernResolutionPreview(
       409,
       "Turn the concern into a question in a draft round",
     );
+  if (decision.outcome === "question")
+    await validateQuestionContent(tx, versionId, decision.question);
   return {
     concern,
     decision,

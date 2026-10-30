@@ -118,6 +118,7 @@ export async function proposalView(
   const loaded = await loadProposal(tx, config, versionId, personId);
   const proposal = loaded?.proposal;
   const state = await readKernelState(tx, versionId);
+  const confirmations = await readGateConfirmations(tx, versionId, "proposal");
   return {
     planVersionHash: loaded?.plan.hash ?? null,
     proposal: proposal
@@ -151,8 +152,8 @@ export async function proposalView(
           }),
         }
       : null,
-    confirmation:
-      (await readGateConfirmations(tx, versionId, "proposal"))[0] ?? null,
+    confirmation: confirmations[0] ?? null,
+    confirmations,
     currentState: state
       ? {
           hash: state.hash,

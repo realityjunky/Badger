@@ -84,6 +84,9 @@ them into `dist/`, so the server image carries the build and none of them.
   Workflow owners approve the exact plan and dossier hashes separately.
   Historical versions have URLs; stale edits and approvals conflict, and a
   superseded dossier invalidates dependent approvals and notifies both roles.
+  The Sources, dossier, plan, and proposal panes list every approval of their
+  gate, with the approver, time, and reason, and mark the ones a later change
+  superseded, so a re-pin never hides an earlier approval.
   Current workflow roles control posting and editing; Observers read threads.
   Field experts raise concerns from the questionnaire. Engineers open each
   concern from their inbox and review a hash-bound resolution: a new draft

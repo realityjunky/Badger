@@ -208,6 +208,7 @@ export async function planView(
   const inputs = await planInputs(tx, versionId, personId);
   const versions = await readPlanVersions(tx, versionId);
   const latest = versions[0];
+  const confirmations = await readGateConfirmations(tx, versionId, "plan");
   return {
     versions,
     dossierHash: inputs?.dossierHash ?? null,
@@ -216,8 +217,8 @@ export async function planView(
       inputs && latest?.snapshot.dossierHash === inputs.dossierHash
         ? latest.id
         : null,
-    confirmation:
-      (await readGateConfirmations(tx, versionId, "plan"))[0] ?? null,
+    confirmation: confirmations[0] ?? null,
+    confirmations,
   };
 }
 

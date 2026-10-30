@@ -143,6 +143,8 @@ async function setup(locale = "en") {
     pins.push(pin);
   }
   return {
+    workflowId: workflow.id as string,
+    versionId: version.id as string,
     base,
     jobs: `${base}/drafting-jobs`,
     questionnaire: `${base}/questionnaire`,
@@ -490,6 +492,94 @@ it("imports numbered open questions only on acceptance and keeps the Skill versi
   expect(
     (await request(questionnaire, "GET", undefined, 200, expert)).questions,
   ).toEqual([]);
+});
+
+it("carries accepted translations and import provenance into a new workflow version with origin links", async () => {
+  const { workflowId, versionId, jobs, questionnaire, pins, secret } =
+    await setup();
+  const question = await answeredQuestion(questionnaire);
+  const { job: translation } = await request(
+    jobs,
+    "POST",
+    {
+      kind: "translate-question",
+      questionId: question.id,
+      locale: "zh-CN",
+      confirmed: true,
+    },
+    201,
+  );
+  const translated = { text: "需要哪些列？", rationale: "确定表格约定。" };
+  await accept(
+    jobs,
+    await submit(jobs, translation, secret, translated),
+    translated,
+  );
+  const { round } = await request(
+    `${questionnaire}/rounds`,
+    "POST",
+    { title: "Imported questions" },
+    201,
+  );
+  const { job: imports } = await request(
+    jobs,
+    "POST",
+    {
+      kind: "import-open-questions",
+      roundId: round.id,
+      skillId: pins[0].skillId,
+      confirmed: true,
+    },
+    201,
+  );
+  const source = {
+    ...pins[0],
+    path: "reference/contract.md",
+    startLine: 3,
+    endLine: 3,
+    fileHash,
+  };
+  const imported = {
+    questions: [{ number: 1, source, question: questionContent }],
+  };
+  await accept(jobs, await submit(jobs, imports, secret, imported), imported);
+  const before = await request(questionnaire);
+  const original = (id: string) =>
+    before.questions.find((q: { id: string }) => q.id === id);
+  const importedId = before.questions.find(
+    (q: { source: unknown }) => q.source !== null,
+  ).id;
+
+  const { workflow } = await request(`/workflows/${workflowId}`);
+  const { version } = await request(
+    `/workflows/${workflowId}/versions`,
+    "POST",
+    { revision: workflow.revision },
+    201,
+  );
+  const inherited = await request(
+    `/workflows/${workflowId}/versions/${version.id}/questionnaire`,
+  );
+  const copy = (id: string) =>
+    inherited.questions.find(
+      (q: { origin: { recordId: string } }) => q.origin.recordId === id,
+    );
+  const [earlier] = original(question.id).translations;
+  expect(copy(question.id).translations).toHaveLength(1);
+  const [carried] = copy(question.id).translations;
+  expect(carried).toEqual({
+    ...earlier,
+    id: carried.id,
+    questionId: copy(question.id).id,
+    origin: { workflowVersionId: versionId, recordId: earlier.id, revision: 1 },
+  });
+  expect(carried.id).not.toBe(earlier.id);
+  expect(copy(importedId).source).toEqual({
+    ...original(importedId).source,
+    origin: { workflowVersionId: versionId, recordId: importedId, revision: 1 },
+  });
+  expect(original(question.id).translations[0].origin).toBeNull();
+  expect(original(importedId).source.origin).toBeNull();
 });
 
 it("refuses invented source evidence and rolls back every record in the accepted batch", async () => {

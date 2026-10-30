@@ -148,6 +148,12 @@ it("invalidates proposal approval, notifies both roles, and cancels claimed init
   const history = await call(`${base}/gates/proposal`);
   expect(history.confirmation.invalidatedAt).not.toBeNull();
   expect(history.confirmation.invalidationReason).toContain("plan");
+  expect((await call(`${base}/proposal`)).confirmations).toEqual([
+    expect.objectContaining({
+      id: approved.confirmation.id,
+      invalidatedAt: expect.any(String),
+    }),
+  ]);
   expect(
     await call(`${base}/gates/proposal/commit`, "POST", approved.body, owner),
   ).toEqual({ confirmation: approved.confirmation });

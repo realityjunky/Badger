@@ -2,6 +2,7 @@ import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
 import type { WriteContext } from "../audit.js";
 import { toIsoString } from "../util.js";
+import { readRecordOrigins } from "../version-inheritance.js";
 import { recordQuestionnaireAudit } from "./store.js";
 
 interface TranslationRow {
@@ -20,6 +21,7 @@ export async function readTranslations(tx: Queryable, versionId: string) {
      where q.workflow_version_id = $1 order by t.created_at, t.id`,
     [versionId],
   );
+  const origins = await readRecordOrigins(tx, versionId, "translation");
   return rows.rows.map((row) => ({
     id: row.id,
     questionId: row.question_id,
@@ -29,6 +31,7 @@ export async function readTranslations(tx: Queryable, versionId: string) {
     rationale: row.rationale,
     actorId: row.actor_id,
     createdAt: toIsoString(row.created_at),
+    origin: origins.get(row.id) ?? null,
   }));
 }
 export type QuestionTranslation = Awaited<

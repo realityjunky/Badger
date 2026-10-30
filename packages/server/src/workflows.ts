@@ -6,7 +6,11 @@ import type { Database, Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import type { Person } from "./people.js";
 import { toIsoString } from "./util.js";
-import { inheritVersionRecords } from "./version-inheritance.js";
+import { moveOpenWork } from "./questionnaire/inheritance.js";
+import {
+  describeInheritance,
+  inheritVersionRecords,
+} from "./version-inheritance.js";
 import { enqueueSourceCheck } from "./workflow-source.js";
 
 export const WORKFLOW_STAGES = [
@@ -418,13 +422,29 @@ export async function createWorkflowVersion(
       (versions.rows[0]?.number ?? 0) + 1,
       versions.rows[0]?.id ?? null,
     );
-    if (version.inheritedFromVersionId !== null) {
-      await inheritVersionRecords(
+    const sourceId = version.inheritedFromVersionId;
+    if (sourceId !== null) {
+      const inherited = await inheritVersionRecords(
         tx,
         dependencies,
-        version.inheritedFromVersionId,
+        sourceId,
         version.id,
       );
+      const moved = await moveOpenWork(tx, dependencies, sourceId, version.id);
+      await recordAudit(tx, dependencies, {
+        actor: { personId: context.personId, credential: context.credential },
+        channel: context.channel,
+        action: "workflow_version.inherited",
+        target: {
+          type: "workflow_version",
+          id: version.id,
+          label: `${workflow.name} · v${version.number}`,
+        },
+        before: null,
+        after: { revision: version.revision, hash: inherited.hash },
+        reason: describeInheritance(sourceId, inherited, moved),
+        requestId: context.requestId,
+      });
       if (
         (
           await tx.query(

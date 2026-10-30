@@ -61,6 +61,7 @@ export async function advanceQuestionnaireRevision(
   );
   await reconcileDossier(tx, deps, context, versionId);
 }
+/** `hash` names the content an immutable record stores, such as an upload's blob. */
 export async function recordQuestionnaireAudit(
   tx: Queryable,
   deps: ServiceDependencies,
@@ -70,6 +71,7 @@ export async function recordQuestionnaireAudit(
   id: string,
   revision: number,
   before: number | null,
+  hash: string | null = null,
 ) {
   await recordAudit(tx, deps, {
     actor: { personId: context.personId, credential: context.credential },
@@ -77,7 +79,7 @@ export async function recordQuestionnaireAudit(
     action,
     target: { type, id },
     before: before === null ? null : { revision: before, hash: null },
-    after: { revision, hash: null },
+    after: { revision, hash },
     reason: null,
     requestId: context.requestId,
   });
@@ -200,24 +202,34 @@ async function recipients(
   return matches;
 }
 
+/**
+ * A citation of an earlier Skill version stays valid while its file is
+ * byte-identical in the pinned version: the rule that flags changed evidence
+ * and that resolutions apply.
+ */
 async function validateEvidence(
   tx: Queryable,
   versionId: string,
   content: QuestionContent,
 ) {
-  for (const link of content.evidence) {
-    const result = await tx.query<{ present: boolean }>(
-      `select exists (select 1 from workflow_skill_pins p join skill_versions s on s.skill_id = p.skill_id and s.hash = p.skill_version_hash
-      where p.workflow_version_id = $1 and p.skill_id = $2 and p.skill_version_hash = $3
-        and exists (select 1 from jsonb_array_elements(s.inventory) f where f->>'path' = $4)) as present`,
-      [versionId, link.skillId, link.versionHash, link.path],
+  const changes = await (
+    await evidenceComparison(tx, versionId)
+  )(content.evidence);
+  if (changes.length > 0)
+    throw new RequestError(
+      400,
+      "Evidence must name a file that is unchanged in a pinned Skill version",
     );
-    if (!result.rows[0]?.present)
-      throw new RequestError(
-        400,
-        "Evidence must name a file in a pinned Skill version",
-      );
-  }
+}
+
+/** saveQuestion's checks, for a preview that creates the question only on sign-off. */
+export async function validateQuestionContent(
+  tx: Queryable,
+  versionId: string,
+  content: QuestionContent,
+) {
+  await validateEvidence(tx, versionId, content);
+  await recipients(tx, versionId, content);
 }
 
 export async function createRound(
@@ -337,18 +349,21 @@ export async function saveQuestion(
   )!;
 }
 
+/** An audience limits the items to those people and pending invitations' bindings. */
 export async function notifyQuestion(
   tx: Queryable,
   deps: ServiceDependencies,
   versionId: string,
   questionId: string,
   revision: number | string,
+  audience?: { personIds: string[]; bindingIds: string[] },
 ) {
   await tx.query(
     `insert into inbox_items (id, person_id, binding_id, workflow_version_id, gate, kind, event_id, question_id, created_at, updated_at)
     select $1 || '-' || min(b.id), b.person_id, case when b.person_id is null then min(b.id) else null end,
       $2, 'questionnaire', 'question-assigned', $3, $4, $5, $5
     from question_recipients a join role_bindings b on b.id = a.binding_id where a.question_id = $4
+      and ($6::text[] is null or b.person_id = any($6::text[]) or b.id = any($7::text[]))
     group by b.person_id, case when b.person_id is null then lower(b.email) else '' end on conflict do nothing`,
     [
       deps.ids.next(),
@@ -356,6 +371,8 @@ export async function notifyQuestion(
       `${questionId}:${revision}`,
       questionId,
       deps.clock.now(),
+      audience?.personIds ?? null,
+      audience?.bindingIds ?? null,
     ],
   );
 }
