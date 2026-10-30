@@ -54,6 +54,22 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("reserves an audit Agent host for token credentials", async () => {
+    const test = await freshDatabase();
+    await applyMigrations(test.database, await loadBundledMigrations(), clock);
+    await insertPerson(test);
+    await expect(
+      test.database.query(
+        `insert into audit_events (
+          id, occurred_at, actor_person_id, credential_kind, channel, action,
+          target_type, request_id, agent_host
+        ) values ('spoofed-host', $1, 'person-1', 'session', 'web',
+          'person.created', 'person', 'request-1', 'spoofed-agent')`,
+        [clock.now()],
+      ),
+    ).rejects.toThrow(/agent_host/u);
+  });
+
   it("keeps plan artifacts immutable after upgrading the existing drafting schema", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
@@ -152,6 +168,7 @@ describe("reviewed SQL migrations", () => {
       "0019",
       "0020",
       "0021",
+      "0022",
       "0023",
     ]);
 
@@ -181,6 +198,7 @@ describe("reviewed SQL migrations", () => {
         "0019",
         "0020",
         "0021",
+        "0022",
         "0023",
       ],
       pending: [],
@@ -279,6 +297,7 @@ describe("reviewed SQL migrations", () => {
         "0019",
         "0020",
         "0021",
+        "0022",
         "0023",
       ],
       pending: [],
@@ -287,7 +306,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(22);
+    expect(rows.rows[0]?.count).toBe(23);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

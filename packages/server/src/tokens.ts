@@ -69,6 +69,7 @@ export async function authenticateToken(
   dependencies: ServiceDependencies,
   authorization: string,
   requestId: string,
+  agentHost: string | null,
 ): Promise<{
   person: Person;
   principal: Principal;
@@ -123,7 +124,7 @@ export async function authenticateToken(
       displayName: person.displayName,
       status: "active",
       platformAdministrator: false,
-      credential: { kind: "token", id: row.id, scopes: row.scopes },
+      credential: { kind: "token", id: row.id, scopes: row.scopes, agentHost },
     };
     await tx.query(
       `update personal_access_tokens set last_used_at = $1, last_used_channel = 'mcp',

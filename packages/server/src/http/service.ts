@@ -723,6 +723,11 @@ export function createService(options: ServiceOptions, port: number): Service {
       });
     }
 
+    const host = firstHeader(request.headers, "x-badger-agent-host");
+    const agentHost =
+      host !== null && /^[\x20-\x7e]{1,200}$/u.test(host) && host.trim()
+        ? host
+        : null;
     const tokenAuthentication =
       authorization === null
         ? null
@@ -731,6 +736,7 @@ export function createService(options: ServiceOptions, port: number): Service {
             serviceDependencies,
             authorization,
             reply.requestId,
+            agentHost,
           );
     if (authorization !== null && tokenAuthentication === null)
       return reply.error(
@@ -785,6 +791,12 @@ export function createService(options: ServiceOptions, port: number): Service {
         403,
         "denied",
         "This action requires a signed-in person or a different token scope",
+      );
+    if (principal.credential.kind === "token" && !reads && agentHost === null)
+      return reply.error(
+        400,
+        "invalid",
+        "x-badger-agent-host must contain 1 to 200 printable characters",
       );
     const person =
       tokenAuthentication?.person ?? (await signIn(principal, reply.requestId));

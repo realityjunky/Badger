@@ -6,6 +6,8 @@ export interface Credential {
   kind: CredentialKind;
   id: string | null;
   scopes?: readonly TokenScope[];
+  /** The validated Agent host supplied with this token request. */
+  agentHost?: string | null;
 }
 
 /**
