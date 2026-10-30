@@ -1,6 +1,26 @@
 import type { QuestionnaireRecords } from "./questionnaire-records.js";
 import { SEMANTIC_DOSSIER_TOPICS } from "./questionnaire.js";
 
+// The record types take their unions from these lists, so a record that
+// type-checks is never refused for one of these fields.
+export const QUESTION_STATES = [
+  "draft",
+  "open",
+  "answered",
+  "confirmed",
+  "followed-up",
+  "deferred",
+  "withdrawn",
+  "needs-reconfirmation",
+] as const;
+export const RESOLUTION_KINDS = [
+  "confirmed",
+  "followed-up",
+  "deferred",
+  "withdrawn",
+] as const;
+export const DEFERRED_KINDS = ["skill-internal", "out-of-scope"] as const;
+
 type FieldRule = readonly [(value: unknown) => boolean, string];
 const text: FieldRule = [
   (value) => typeof value === "string" && value.trim() !== "",
@@ -89,16 +109,7 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
       state: [
         (value) =>
           typeof value === "string" &&
-          [
-            "draft",
-            "open",
-            "answered",
-            "confirmed",
-            "followed-up",
-            "deferred",
-            "withdrawn",
-            "needs-reconfirmation",
-          ].includes(value),
+          (QUESTION_STATES as readonly string[]).includes(value),
         "a question state",
       ],
       answers: optional(array),
@@ -125,9 +136,9 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
       fields("resolution", question.resolution, {
         id: text,
         revision,
-        kind: choice(["confirmed", "followed-up", "deferred", "withdrawn"]),
+        kind: choice(RESOLUTION_KINDS),
         reason: nullable(text),
-        deferredKind: nullable(choice(["skill-internal", "out-of-scope"])),
+        deferredKind: nullable(choice(DEFERRED_KINDS)),
         skillId: nullable(text),
       });
     for (const answer of question.answers ?? [])

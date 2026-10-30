@@ -153,6 +153,32 @@ describe("questionnaire record handoff validation", () => {
     });
   }
 
+  it("copies only an origin's version, record, and revision into ledger items", () => {
+    const origin = {
+      workflowVersionId: "previous-version",
+      recordId: "previous-record",
+      revision: 2,
+    };
+    // Ledger items feed round baselines and dossier hashes, so a key the
+    // contract does not name must not reach them.
+    const handoff = (recorded: typeof origin) =>
+      createQuestionnaireHandoff({
+        records: {
+          questions: [{ ...question, origin: recorded }],
+          facts: [{ ...fact, origin: recorded }],
+          drafts: [{ ...draft, origin: recorded }],
+          sourceRecords: [{ ...sourceRecord, origin: recorded }],
+        },
+      });
+    const annotated = { ...origin, copiedBy: "engineer-1" };
+    const extended = handoff(annotated);
+
+    expect(extended.items.map((item) => item.origin)).toEqual(
+      Array(4).fill(origin),
+    );
+    expect(extended).toEqual(handoff(origin));
+  });
+
   it.each(["unknown-topic", Symbol("unknown-topic")])(
     "refuses an unknown topic %s before computing the ledger",
     (topic) => {
