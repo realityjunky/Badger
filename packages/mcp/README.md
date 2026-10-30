@@ -1,8 +1,8 @@
 # `@realityjunky/badger-mcp`
 
 The local Badger MCP runs over stdio and connects to one deployment through
-its HTTP API. It delivers the expert (#54) and engineer (#55) profiles; the
-operator profile and host installer remain planned. The service owns roles,
+its HTTP API. It delivers the expert (#54), engineer (#55), and Operator installation (#64)
+profiles. Runtime Run tools follow separately. The service owns roles,
 questionnaire records, Skill identities, and sign-offs.
 
 Build and install the local command from the repository root:
@@ -22,7 +22,7 @@ offers configuration for Claude Code, Codex, and WorkBuddy. Set:
 | `BADGER_URL`         | The deployment URL, including its base path, such as `https://badger.example/team`. HTTPS is required except on loopback HTTP addresses.                                                                                                                                           |
 | `BADGER_TOKEN`       | A personal access token created in the dashboard, normally with the `expert` scope.                                                                                                                                                                                                |
 | `BADGER_AGENT_HOST`  | The Agent host, 1 to 200 printable ASCII characters. The MCP sends it with every request, and the service requires it and records it in the audit of each one. Defaults to this machine's hostname, in IDNA form if it is not ASCII, or `unnamed-host` when neither form is valid. |
-| `BADGER_MCP_PROFILE` | `auto` (default), `engineer`, or `expert`. Profile selection only narrows the tools allowed by current roles and token scopes.                                                                                                                                                     |
+| `BADGER_MCP_PROFILE` | `auto` (default), `engineer`, `expert`, or `operator`. Profile selection only narrows the tools allowed by current roles and token scopes.                                                                                                                                         |
 
 The MCP never prints configuration or credentials. Stdout carries only MCP;
 startup failures go to stderr and name the setting at fault, never its value.
@@ -190,7 +190,7 @@ and reload current records. Resources, prompts, and elicitation are optional.
 | ----------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------ |
 | Claude Code | `.mcp.json` with `${BADGER_TOKEN}`, generated JSON checked in the browser journey                   | Real SDK stdio client verified; application check pending | Optional; local file fallback verified | Capability negotiation and link fallback verified with SDK; application support unverified |
 | Codex       | `~/.codex/config.toml`, generated from the official stdio format and checked in the browser journey | Real SDK stdio client verified; application check pending | Optional; local file fallback verified | Capability negotiation and link fallback verified with SDK; application support unverified |
-| WorkBuddy   | MCP server JSON, generated configuration checked in the browser journey                             | Real SDK stdio client verified; application check pending | Optional; local file fallback verified | Capability negotiation and link fallback verified with SDK; application support unverified |
+| WorkBuddy   | `.mcp.json` / `~/.codebuddy/.mcp.json`, environment expansion; adapter and browser checked          | Real SDK stdio client verified; application check pending | Optional; local file fallback verified | Capability negotiation and link fallback verified with SDK; application support unverified |
 
 These checks establish protocol and configuration behavior; they do not claim
 manual application validation. Prompts are not required or advertised. Hosts
@@ -216,3 +216,32 @@ immutable evaluation history, the passing report for the current package hash,
 kernel publication readiness, and a dashboard link. It requires the Engineer
 role/capability and an `engineer` token scope. Starting an evaluation stays with
 a signed-in person in the dashboard.
+
+## Published workflow installation (Operator profile, #64)
+
+Set `BADGER_MCP_PROFILE=operator` for the small installation profile, or `auto`
+for all permitted tools. The token needs `operator` scope plus an Operator,
+Engineer, or Administrator role on a visible Workflow. The service capability
+`installPublished` controls discovery; every publication request rechecks access.
+
+- `list_published_workflows({workflowId?})` lists visible workflows with immutable
+  publications, or the selected workflow's published versions.
+- `install_workflow({workflowId,publicationId,packageHash,target,command?})` previews
+  verified local installation. `target` supplies `host` (`claude`, `codex`,
+  `workbuddy`), `scope` (`project`, `user`), and absolute `projectRoot`/`homeRoot`.
+- After the person reviews every operation and explicitly confirms, call
+  `install_workflow({workflowId,previewId,digest,confirmed:true})`. It commits only
+  this connection's exact preview and rechecks service access and published bytes.
+- `uninstall_workflow({workflowId,target})` previews removal of the currently
+  verified owned installation. Confirm through
+  `uninstall_workflow({workflowId,previewId,digest,confirmed:true})`.
+
+Preview plans use private temporary directories/files (`0700`/`0600`) and are
+removed on commit or connection closure. Unknown or modified files and MCP
+entries are refused. Badger MCP configuration reads `BADGER_TOKEN` from the
+Agent host's environment: Codex forwards `env_vars = ["BADGER_TOKEN"]`; Claude
+Code and WorkBuddy expand `${BADGER_TOKEN}`. Codex's environment table never
+contains a token placeholder or value. Project/user paths, local CLI setup and
+limitations are documented in [the hosts workspace](../hosts/README.md). The
+dashboard uses the same renderer and supplies local preview commands; it cannot
+install to a browser person's computer. These tools never approve or publish.

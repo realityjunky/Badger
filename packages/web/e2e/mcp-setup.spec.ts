@@ -19,14 +19,17 @@ test("copies expert MCP configuration for each host under the deployment base pa
     const config = await field.inputValue();
     expect(config).toContain(base);
     // Claude Code's .mcp.json is often committed, so it names the variable.
-    if (host === "Claude Code") {
+    if (host !== "Codex") {
       expect(JSON.parse(config).mcpServers.badger.env.BADGER_TOKEN).toBe(
         "${BADGER_TOKEN}",
       );
       expect(config).not.toContain("<YOUR_PERSONAL_ACCESS_TOKEN>");
-    } else expect(config).toContain("<YOUR_PERSONAL_ACCESS_TOKEN>");
-    if (host === "Codex") expect(config).toContain("[mcp_servers.badger.env]");
-    else
+    }
+    if (host === "Codex") {
+      expect(config).toContain("[mcp_servers.badger.env]");
+      expect(config).toContain('env_vars = ["BADGER_TOKEN"]');
+      expect(config).not.toContain("BADGER_TOKEN =");
+    } else
       expect(JSON.parse(config)).toMatchObject({
         mcpServers: {
           badger: {

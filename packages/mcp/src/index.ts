@@ -10,11 +10,13 @@ import { expertTools, questionnairePath } from "./tools.js";
 import { ResultResources } from "./resources.js";
 import { engineerTools } from "./engineer-tools.js";
 import { jobsPath } from "./jobs.js";
+import { hostTools, LocalHostPreviews } from "./host-tools.js";
 export type { ExpertMcpOptions } from "./api.js";
 
 class BadgerMcpServer extends Server {
   constructor(
     private readonly results: ResultResources,
+    private readonly hostPreviews: LocalHostPreviews,
     profile: string,
   ) {
     super(
@@ -27,6 +29,7 @@ class BadgerMcpServer extends Server {
     );
     this.onclose = () => {
       void results.close().catch(() => undefined);
+      void hostPreviews.close().catch(() => undefined);
     };
   }
 
@@ -35,6 +38,7 @@ class BadgerMcpServer extends Server {
       await super.close();
     } finally {
       await this.results.close();
+      await this.hostPreviews.close();
     }
   }
 }
@@ -48,23 +52,32 @@ export function createEngineerMcp(options: ExpertMcpOptions): Server {
   return createBadgerMcp({ ...options, profile: "engineer" });
 }
 export function createBadgerMcp(
-  options: ExpertMcpOptions & { profile?: "expert" | "engineer" | "auto" },
+  options: ExpertMcpOptions & {
+    profile?: "expert" | "engineer" | "operator" | "auto";
+  },
 ): Server {
   const api = new BadgerApi(options);
   const resources = new ResultResources();
   const profile = options.profile ?? "auto";
-  const server = new BadgerMcpServer(resources, profile);
+  const hostPreviews = new LocalHostPreviews();
+  const server = new BadgerMcpServer(resources, hostPreviews, profile);
   const expert = expertTools(api, server);
   const common = new Set(["whoami", "inbox", "open_dashboard"]);
   const tools =
     profile === "expert"
       ? expert
-      : [
-          ...expert.filter(
-            (t) => profile === "auto" || common.has(t.definition.name),
-          ),
-          ...engineerTools(api),
-        ];
+      : profile === "operator"
+        ? [
+            ...expert.filter((t) => common.has(t.definition.name)),
+            ...hostTools(api, hostPreviews),
+          ]
+        : [
+            ...expert.filter(
+              (t) => profile === "auto" || common.has(t.definition.name),
+            ),
+            ...engineerTools(api),
+            ...(profile === "auto" ? hostTools(api, hostPreviews) : []),
+          ];
   // Each capability read is a token request, and tokens are rate limited, so
   // calls reuse a recent read. The service still checks every request.
   let recent: { at: number; tools: typeof tools } | undefined;

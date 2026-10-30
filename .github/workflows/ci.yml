@@ -122,6 +122,7 @@ jobs:
       - run: npm ci
       - run: npm run build -w packages/kernel
       - run: npm run build -w packages/server
+      - run: npm run build -w packages/hosts
       - run: npm run build -w packages/mcp
       - run: npm test -w packages/server -w packages/mcp
         env:

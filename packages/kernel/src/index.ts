@@ -11,6 +11,10 @@ export {
   type WorkflowKernelOptions,
 } from "./workflow-kernel/foundation.js";
 export { canonicalHash } from "./util.js";
+export {
+  atomicWriteContainedBytes,
+  removeContainedFile,
+} from "./engine/contained-atomic-write.js";
 export { hashDirectory, hashDirectorySync } from "./workflow-kernel/hash.js";
 export * from "./factory/proposal.js";
 export * from "./factory/generate.js";

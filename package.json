@@ -4,6 +4,7 @@
   "license": "MIT",
   "workspaces": [
     "packages/kernel",
+    "packages/hosts",
     "packages/server",
     "packages/mcp",
     "packages/web"
