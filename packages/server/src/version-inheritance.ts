@@ -1,3 +1,4 @@
+import { canonicalHash } from "@realityjunky/badger";
 import type { Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 
@@ -15,6 +16,32 @@ export interface RecordOrigin {
   workflowVersionId: string;
   recordId: string;
   revision: number;
+}
+const COPIED: [RecordType, string][] = [
+  ["round", "rounds"],
+  ["question", "questions"],
+  ["resolution", "resolutions"],
+  ["fact", "facts"],
+  ["acknowledgement", "acknowledgements"],
+  ["source-study", "source-study records"],
+  ["draft", "drafts"],
+  ["translation", "translations"],
+  ["import", "imports"],
+];
+/** What a new version copied: nonzero counts, and a hash of the copied sources. */
+export interface InheritedRecords {
+  counts: [string, number][];
+  hash: string;
+}
+export function describeInheritance(
+  sourceId: string,
+  inherited: InheritedRecords,
+  moved: number,
+) {
+  const records =
+    inherited.counts.map(([label, count]) => `${label}: ${count}`).join(", ") ||
+    "no records";
+  return `Inherited from workflow version ${sourceId} (${records}); moved ${moved} pending inbox items`;
 }
 export async function readRecordOrigins(
   tx: Queryable,
@@ -48,7 +75,7 @@ export async function inheritVersionRecords(
   deps: ServiceDependencies,
   sourceId: string,
   versionId: string,
-) {
+): Promise<InheritedRecords> {
   const records = await tx.query<{
     type: RecordType;
     id: string;
@@ -243,4 +270,41 @@ export async function inheritVersionRecords(
     where o.source_workflow_version_id = $1`,
     values,
   );
+  const pins = (
+    await tx.query<{ skill_id: string; skill_version_hash: string }>(
+      "select skill_id, skill_version_hash from workflow_skill_pins where workflow_version_id = $1",
+      [versionId],
+    )
+  ).rows
+    .map((pin) => ({ skillId: pin.skill_id, hash: pin.skill_version_hash }))
+    .sort((a, b) => (a.skillId < b.skillId ? -1 : 1));
+  const copied = (
+    await tx.query<{
+      record_type: RecordType;
+      source_record_id: string;
+      source_revision: number;
+    }>(
+      "select record_type, source_record_id, source_revision from workflow_record_origins where workflow_version_id = $1",
+      [versionId],
+    )
+  ).rows
+    .map((r) => ({
+      type: r.record_type,
+      id: r.source_record_id,
+      revision: r.source_revision,
+    }))
+    .sort((a, b) =>
+      a.type === b.type ? (a.id < b.id ? -1 : 1) : a.type < b.type ? -1 : 1,
+    );
+  const counts: [string, number][] = [
+    ["pins", pins.length],
+    ...COPIED.map(([type, label]): [string, number] => [
+      label,
+      copied.filter((record) => record.type === type).length,
+    ]),
+  ];
+  return {
+    counts: counts.filter(([, count]) => count > 0),
+    hash: canonicalHash({ sourceVersionId: sourceId, pins, records: copied }),
+  };
 }

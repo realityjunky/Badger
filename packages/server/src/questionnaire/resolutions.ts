@@ -451,6 +451,29 @@ export async function notifyQuestionEngineers(
     [deps.ids.next(), versionId, eventId, questionId, deps.clock.now(), kind],
   );
 }
+/** The person whose answer a fact restates acknowledges or disputes it. */
+export async function notifyRestatement(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  versionId: string,
+  questionId: string,
+  factId: string,
+  personId: string,
+) {
+  await tx.query(
+    `insert into inbox_items (id, person_id, workflow_version_id, gate, kind, event_id, question_id, fact_id, created_at, updated_at)
+    values ($1,$2,$3,'questionnaire','restatement-ready',$4,$5,$6,$7,$7)`,
+    [
+      deps.ids.next(),
+      personId,
+      versionId,
+      `${factId}:${personId}`,
+      questionId,
+      factId,
+      deps.clock.now(),
+    ],
+  );
+}
 export async function invalidateQuestionFacts(
   tx: Queryable,
   deps: ServiceDependencies,
@@ -611,18 +634,13 @@ export async function resolveQuestion(
         "insert into fact_answer_revisions (fact_id, question_id, person_id, revision) values ($1,$2,$3,$4)",
         [factId, questionId, answer.personId, answer.revision],
       );
-      await tx.query(
-        `insert into inbox_items (id, person_id, workflow_version_id, gate, kind, event_id, question_id, fact_id, created_at, updated_at)
-        values ($1,$2,$3,'questionnaire','restatement-ready',$4,$5,$6,$7,$7)`,
-        [
-          deps.ids.next(),
-          answer.personId,
-          versionId,
-          `${factId}:${answer.personId}`,
-          questionId,
-          factId,
-          deps.clock.now(),
-        ],
+      await notifyRestatement(
+        tx,
+        deps,
+        versionId,
+        questionId,
+        factId,
+        answer.personId,
       );
     }
   }

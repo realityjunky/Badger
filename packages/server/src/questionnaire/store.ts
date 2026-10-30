@@ -349,18 +349,21 @@ export async function saveQuestion(
   )!;
 }
 
+/** An audience limits the items to those people and pending invitations' bindings. */
 export async function notifyQuestion(
   tx: Queryable,
   deps: ServiceDependencies,
   versionId: string,
   questionId: string,
   revision: number | string,
+  audience?: { personIds: string[]; bindingIds: string[] },
 ) {
   await tx.query(
     `insert into inbox_items (id, person_id, binding_id, workflow_version_id, gate, kind, event_id, question_id, created_at, updated_at)
     select $1 || '-' || min(b.id), b.person_id, case when b.person_id is null then min(b.id) else null end,
       $2, 'questionnaire', 'question-assigned', $3, $4, $5, $5
     from question_recipients a join role_bindings b on b.id = a.binding_id where a.question_id = $4
+      and ($6::text[] is null or b.person_id = any($6::text[]) or b.id = any($7::text[]))
     group by b.person_id, case when b.person_id is null then lower(b.email) else '' end on conflict do nothing`,
     [
       deps.ids.next(),
@@ -368,6 +371,8 @@ export async function notifyQuestion(
       `${questionId}:${revision}`,
       questionId,
       deps.clock.now(),
+      audience?.personIds ?? null,
+      audience?.bindingIds ?? null,
     ],
   );
 }

@@ -184,6 +184,19 @@ independent. Attachment receipts stay readable without changing fact hashes
 or exposing private answer drafts. Original discussion and round baselines
 remain in the source version, reachable through provenance links.
 
+Pending questionnaire work moves with the copies, because a later version is
+always copied from the latest one and work recorded in an earlier version never
+reaches it. For each pending item about a copied question or fact, the new
+version gets the item the questionnaire would create, for the same people:
+`question-assigned` for assignees who still owed an answer, `restatement-ready`
+for unacknowledged restatements, and `answer-submitted` or `question-reopened`
+for the workflow's Engineers. The source version's items close, and the new
+items route notifications like any other questionnaire action. Gate, concern,
+and drafting-job items stay with their version, since those records are not
+copied. The `workflow_version.inherited` audit event names the source version,
+counts the copied pins and records and the moved items, and its `after.hash`
+binds the copied source records and revisions.
+
 The new version queues its own source check and requires new gates; no dossier,
 plan, or approval is copied. `GET V/dossier` includes `confirmations` so earlier
 approvals remain visible as superseded after invalidation or replacement.
