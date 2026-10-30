@@ -173,7 +173,6 @@ const en = {
   "drafting.keepEdits": "Keep edits",
   "drafting.remove": "Remove from acceptance",
   "drafting.preview": "Review decision",
-  "drafting.accept": "Accept as draft questions",
   "drafting.acceptHelp":
     "These questions will be saved in the selected draft round. Review and publish the round separately to send them.",
   "drafting.needRound": "Create a draft round before requesting drafting.",
@@ -1093,7 +1092,6 @@ const zh: Record<MessageId, string> = {
   "drafting.keepEdits": "保留修改",
   "drafting.remove": "不接受此项",
   "drafting.preview": "审核决定",
-  "drafting.accept": "接受并创建草稿问题",
   "drafting.acceptHelp":
     "这些问题将保存至所选草稿轮次。发送前请单独审核并发布该轮次。",
   "drafting.needRound": "请先创建草稿轮次，再请求起草。",

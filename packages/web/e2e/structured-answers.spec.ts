@@ -169,7 +169,7 @@ test("the Engineer edits and reviews a structured drafting suggestion before acc
     await expect(preview).toContainText("Single choice");
     await expect(preview).toContainText("Frozen");
     await preview
-      .getByRole("button", { name: "Accept as draft questions", exact: true })
+      .getByRole("button", { name: "Accept reviewed result", exact: true })
       .click();
     await expect(page.getByText("Accepted", { exact: true })).toBeVisible();
     const accepted = await call("GET", root, undefined, engineer);
