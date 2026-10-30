@@ -83,15 +83,88 @@ describe("questionnaire record handoff validation", () => {
     ).toThrow(/question "question-1".*revision.*positive integer/u);
   });
 
-  it("refuses an unknown topic before computing the ledger", () => {
+  it.each([
+    ["workflowVersionId", 4],
+    ["recordId", null],
+    ["revision", "wrong"],
+  ])("names a question with a malformed origin %s", (field, value) => {
     expect(() =>
       createQuestionnaireHandoff({
         records: {
-          questions: [{ ...question, topic: "unknown-topic" }],
+          questions: [
+            {
+              ...question,
+              origin: {
+                workflowVersionId: "previous-version",
+                recordId: "previous-question",
+                revision: 1,
+                [field]: value,
+              },
+            },
+          ],
         } as unknown as QuestionnaireRecords,
       }),
-    ).toThrow(/question "question-1".*topic.*unknown-topic/u);
+    ).toThrow(new RegExp(`question "question-1".*origin\\.${field}`, "u"));
   });
+
+  for (const [collection, kind, record] of [
+    ["questions", "question", question],
+    ["facts", "fact", fact],
+    ["drafts", "draft", draft],
+    ["sourceRecords", "source record", sourceRecord],
+  ] as const) {
+    it.each([
+      false,
+      [],
+      {},
+      {
+        workflowVersionId: "previous-version",
+        recordId: "previous-record",
+        revision: 0,
+      },
+    ])(`refuses malformed origin on a ${kind}: %j`, (origin) => {
+      expect(() =>
+        createQuestionnaireHandoff({
+          records: {
+            questions: [question],
+            [collection]: [{ ...record, origin }],
+          } as unknown as QuestionnaireRecords,
+        }),
+      ).toThrow(new RegExp(`${kind} "${record.id}".*origin`, "u"));
+    });
+
+    it.each([
+      undefined,
+      null,
+      {
+        workflowVersionId: "previous-version",
+        recordId: "previous-record",
+        revision: 2,
+      },
+    ])(`accepts supported origin on a ${kind}: %j`, (origin) => {
+      expect(() =>
+        createQuestionnaireHandoff({
+          records: {
+            questions: [question],
+            [collection]: [{ ...record, origin }],
+          },
+        }),
+      ).not.toThrow();
+    });
+  }
+
+  it.each(["unknown-topic", Symbol("unknown-topic")])(
+    "refuses an unknown topic %s before computing the ledger",
+    (topic) => {
+      expect(() =>
+        createQuestionnaireHandoff({
+          records: {
+            questions: [{ ...question, topic }],
+          } as unknown as QuestionnaireRecords,
+        }),
+      ).toThrow(/question "question-1".*topic.*unknown-topic/u);
+    },
+  );
 
   it("names a fact whose question does not exist", () => {
     expect(() =>
@@ -279,6 +352,88 @@ describe("questionnaire record handoff validation", () => {
         records: { questions: [question], drafts: [{ ...draft, ...link }] },
       }),
     ).toThrow(/draft "inference-1".*questionRevision/u);
+  });
+
+  it("refuses a draft that borrows confirmation from another topic", () => {
+    expect(() =>
+      createQuestionnaireHandoff({
+        records: {
+          questions: [
+            {
+              ...question,
+              topic: "inputs",
+              state: "confirmed",
+              resolution,
+              answers: fact.answers,
+            },
+          ],
+          facts: [
+            {
+              ...fact,
+              active: true,
+              current: true,
+              acknowledgements: [
+                {
+                  id: "ack-1",
+                  personId: "expert-1",
+                  decision: "acknowledged",
+                },
+              ],
+            },
+          ],
+          drafts: [
+            {
+              ...draft,
+              topic: "outputSchemas",
+              questionId: question.id,
+              questionRevision: 1,
+            },
+          ],
+        },
+      }),
+    ).toThrow(/draft "inference-1".*topic.*question-1/u);
+  });
+
+  it("keeps an older draft link unresolved after its question moves to another topic", () => {
+    const handoff = createQuestionnaireHandoff({
+      records: {
+        questions: [
+          {
+            ...question,
+            revision: 2,
+            topic: "inputs",
+            state: "confirmed",
+            resolution: { ...resolution, revision: 2 },
+            answers: fact.answers,
+          },
+        ],
+        facts: [
+          {
+            ...fact,
+            questionRevision: 2,
+            resolutionRevision: 2,
+            active: true,
+            current: true,
+            acknowledgements: [
+              { id: "ack-1", personId: "expert-1", decision: "acknowledged" },
+            ],
+          },
+        ],
+        drafts: [{ ...draft, questionId: question.id, questionRevision: 1 }],
+      },
+    });
+    expect(handoff.ledger.agentInferences).toEqual([
+      expect.objectContaining({
+        record: { type: "inference", id: draft.id, revision: 1 },
+        state: "draft",
+        resolved: false,
+        relatedRecords: [{ type: "question", id: question.id, revision: 1 }],
+      }),
+    ]);
+    expect(handoff.readiness.find((r) => r.topic === "scope")).toMatchObject({
+      ready: false,
+      blockers: [expect.objectContaining({ code: "unconfirmed-inference" })],
+    });
   });
 
   it.each([

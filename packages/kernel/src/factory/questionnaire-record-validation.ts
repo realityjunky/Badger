@@ -53,6 +53,20 @@ function optional(rule: FieldRule): FieldRule {
   return [(value) => value === undefined || rule[0](value), rule[1]];
 }
 
+function recordOrigin(kind: string, record: { id: string; origin?: unknown }) {
+  if (record.origin === undefined || record.origin === null) return;
+  if (!object[0](record.origin))
+    invalid(kind, record.id, "origin must be an object or null");
+  const origin = record.origin as Record<string, unknown>;
+  for (const [field, [valid, description]] of Object.entries({
+    workflowVersionId: text,
+    recordId: text,
+    revision,
+  }))
+    if (!valid(origin[field]))
+      invalid(kind, record.id, `origin.${field} must be ${description}`);
+}
+
 function uniqueIdentities(kind: string, ids: readonly string[]) {
   const seen = new Set<string>();
   for (const id of ids) {
@@ -90,6 +104,7 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
       answers: optional(array),
       resolution: optional(object),
     });
+    recordOrigin("question", question);
     if (!Number.isSafeInteger(question.revision) || question.revision < 1)
       throw new Error(
         `Invalid question "${question.id}": revision must be a positive integer`,
@@ -104,7 +119,7 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
       )
     )
       throw new Error(
-        `Invalid question "${question.id}": topic "${question.topic}" is unknown`,
+        `Invalid question "${question.id}": topic "${String(question.topic)}" is unknown`,
       );
     if (question.resolution !== undefined)
       fields("resolution", question.resolution, {
@@ -144,6 +159,7 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
       answers: array,
       acknowledgements: array,
     });
+    recordOrigin("fact", fact);
     for (const answer of fact.answers)
       fields(
         `answer for fact "${fact.id}"`,
@@ -232,12 +248,25 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
       questionRevision: nullable(revision),
       status: choice(["active", "retired"]),
     });
+    recordOrigin("draft", draft);
     const question = records.questions.find((q) => q.id === draft.questionId);
     if (draft.questionId !== null && !question)
       invalid(
         "draft",
         draft.id,
         `questionId "${draft.questionId}" names a missing question`,
+      );
+    // Older links retain the topic of that historical question revision.
+    // The handoff leaves them unresolved if the current topic has changed.
+    if (
+      question &&
+      draft.questionRevision === question.revision &&
+      draft.topic !== question.topic
+    )
+      invalid(
+        "draft",
+        draft.id,
+        `topic must match linked question "${question.id}"`,
       );
     if (
       (draft.questionId === null) !== (draft.questionRevision === null) ||
@@ -249,7 +278,7 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
         "questionRevision must identify an existing revision of the linked question, or be null without a questionId",
       );
   }
-  for (const source of records.sourceRecords ?? [])
+  for (const source of records.sourceRecords ?? []) {
     fields("source record", source, {
       id: text,
       revision,
@@ -258,6 +287,8 @@ export function validateQuestionnaireRecords(records: QuestionnaireRecords) {
       status: choice(["active", "retired"]),
       stale: boolean,
     });
+    recordOrigin("source record", source);
+  }
   for (const pin of records.pins ?? [])
     fields(
       "skill pin",
