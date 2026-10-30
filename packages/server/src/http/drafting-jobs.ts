@@ -117,17 +117,26 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
           403,
           "A signed-in Engineer requests and confirms drafting",
         );
-      if (body.kind !== "draft-questions" && body.kind !== "draft-follow-ups")
+      if (
+        body.kind !== "draft-questions" &&
+        body.kind !== "draft-follow-ups" &&
+        body.kind !== "draft-plan"
+      )
         throw new RequestError(
           400,
-          "Choose draft-questions or draft-follow-ups",
+          "Choose draft-questions, draft-follow-ups, or draft-plan",
+        );
+      if (body.kind === "draft-plan" && body.roundId !== undefined)
+        throw new RequestError(
+          400,
+          "Plan drafts do not belong to a questionnaire round",
         );
       const parentQuestionId =
         body.kind === "draft-follow-ups"
           ? textInput(body.parentQuestionId, "parentQuestionId", 200)
           : null;
       if (
-        body.kind === "draft-questions" &&
+        body.kind !== "draft-follow-ups" &&
         body.parentQuestionId !== undefined
       )
         throw new RequestError(400, "Only follow-ups name a parent question");
@@ -138,7 +147,10 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         versionId,
         {
           kind: body.kind,
-          roundId: textInput(body.roundId, "roundId", 200),
+          roundId:
+            body.kind === "draft-plan"
+              ? null
+              : textInput(body.roundId, "roundId", 200),
           parentQuestionId,
         },
         current,
@@ -229,7 +241,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
     const accept = action.startsWith("accept");
     fields(body, [
       "revision",
-      accept ? "questions" : "reason",
+      accept ? (job.kind === "draft-plan" ? "plan" : "questions") : "reason",
       "confirmationHash",
       "confirmed",
       "requestId",
@@ -270,7 +282,9 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
     const preview = jobDecisionPreview(
       job,
       accept ? "accept" : "reject",
-      body.questions,
+      job.kind === "draft-plan"
+        ? { plan: body.plan }
+        : { questions: body.questions },
       accept ? undefined : textInput(body.reason, "reason"),
     );
     if (action.endsWith("-preview")) {

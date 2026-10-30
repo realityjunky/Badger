@@ -5,6 +5,44 @@ import type { Language } from "../preferences/model.js";
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  "plan.title": "Plan versions",
+  "plan.description":
+    "Draft from the approved dossier, review the kernel's findings, and save an immutable plan for the Workflow owner's approval.",
+  "plan.needDossier": "Approve the current dossier before planning.",
+  "plan.empty": "No plan has been saved yet.",
+  "plan.edit": "Edit plan",
+  "plan.editorHelp":
+    "Complete the FactoryPlan's implementation choices. Keep the approved frame, Node identities, Semantic dossier, and pinned sources unchanged. Validation updates as you edit.",
+  "plan.json": "FactoryPlan (JSON)",
+  "plan.invalidJson": "Enter valid JSON to validate the plan.",
+  "plan.validating": "Validating the plan",
+  "plan.valid": "The kernel found no plan blockers.",
+  "plan.reviewSave": "Review plan version",
+  "plan.save": "Save this plan version",
+  "plan.saveHelp":
+    "Save the exact plan and dossier hashes shown. The Workflow owner approves this version separately.",
+  "plan.backToEdit": "Back to editing",
+  "plan.hash": "Plan version hash",
+  "plan.canonical": "Canonical plan JSON",
+  "plan.version": "Plan version",
+  "plan.versionNumber": "Plan version {number}",
+  "plan.approved": "Plan approved",
+  "plan.reviewApproval": "Review plan approval",
+  "plan.approve": "Approve this plan",
+  "plan.approvalHelp":
+    "Approve this exact plan version and its dossier hash. Proposal approval is a separate gate.",
+  "plan.supersededHelp":
+    "This plan or its approved dossier was superseded. Review and save a plan from the current approved meaning.",
+  "plan.request": "Request plan draft",
+  "plan.requestHelp":
+    "Queue a drafting job for your Agent using the approved dossier, skeleton, and pinned Skill versions. Its result stays a suggestion until you accept it.",
+  "plan.draft": "Plan draft",
+  "plan.suggestions": "Plan drafting jobs and suggestions",
+  "plan.reviewSuggestion": "Review plan suggestion",
+  "plan.accept": "Accept as a plan version",
+  "plan.failed": "The plan request failed. Reload and try again.",
+  "inbox.planReady": "{name} · v{number}: approve the plan",
+  "inbox.planInvalidated": "{name} · v{number}: plan approval superseded",
   "dossier.title": "Dossier versions",
   "dossier.description":
     "The Engineer composes the agreed meaning from the ledger. The Workflow owner reviews and approves one immutable version.",
@@ -810,6 +848,43 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  "plan.title": "计划版本",
+  "plan.description":
+    "从已批准的语义档案起草计划，查看内核校验结果，并保存不可变的计划版本供工作流所有者批准。",
+  "plan.needDossier": "请先批准当前语义档案，再开始计划。",
+  "plan.empty": "尚未保存计划。",
+  "plan.edit": "编辑计划",
+  "plan.editorHelp":
+    "补全 FactoryPlan 的实现选择。保留已批准的工作流框架、节点标识、语义档案及固定来源。校验结果随编辑实时更新。",
+  "plan.json": "FactoryPlan（JSON）",
+  "plan.invalidJson": "请输入有效的 JSON 以校验计划。",
+  "plan.validating": "正在校验计划",
+  "plan.valid": "内核未发现计划阻塞项。",
+  "plan.reviewSave": "审阅计划版本",
+  "plan.save": "保存此计划版本",
+  "plan.saveHelp":
+    "保存所显示的确切计划及语义档案哈希。工作流所有者随后单独批准此版本。",
+  "plan.backToEdit": "返回编辑",
+  "plan.hash": "计划版本哈希",
+  "plan.canonical": "计划规范 JSON",
+  "plan.version": "计划版本",
+  "plan.versionNumber": "计划版本 {number}",
+  "plan.approved": "计划已批准",
+  "plan.reviewApproval": "审阅计划批准",
+  "plan.approve": "批准此计划",
+  "plan.approvalHelp": "批准此确切计划版本及其语义档案哈希。提案需要单独批准。",
+  "plan.supersededHelp":
+    "此计划或已批准的语义档案已被替代。请根据当前已批准的含义审阅并保存新计划。",
+  "plan.request": "请求起草计划",
+  "plan.requestHelp":
+    "基于已批准的语义档案、计划骨架及固定技能版本创建 Agent 起草任务。您接受后，建议才会成为计划版本。",
+  "plan.draft": "计划草稿",
+  "plan.suggestions": "计划起草任务与建议",
+  "plan.reviewSuggestion": "审阅计划建议",
+  "plan.accept": "接受为计划版本",
+  "plan.failed": "计划请求失败，请重新加载后重试。",
+  "inbox.planReady": "{name} · v{number}：请批准计划",
+  "inbox.planInvalidated": "{name} · v{number}：计划批准已失效",
   "dossier.title": "语义档案版本",
   "dossier.description":
     "工程师根据台账编写已达成共识的语义，工作流所有者审核并批准一个不可变版本。",

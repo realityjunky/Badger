@@ -54,6 +54,24 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("keeps plan artifacts immutable after upgrading the existing drafting schema", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((migration) => migration.version <= "0018"),
+      clock,
+    );
+    await applyMigrations(test.database, migrations, clock);
+    for (const statement of [
+      "update plan_versions set canonical_json = '{}'",
+      "delete from plan_versions",
+      "truncate plan_versions",
+    ])
+      await expect(test.database.query(statement), statement).rejects.toThrow(
+        /immutable/u,
+      );
+  });
   it("adds drafting jobs after the applied dossier migration without changing existing audit records", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
@@ -74,7 +92,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0018");
+    expect(upgraded.applied.at(-1)).toBe("0019");
     expect(
       (
         await test.database.query(
@@ -102,7 +120,7 @@ describe("reviewed SQL migrations", () => {
     for (const statement of [
       "update dossier_versions set canonical_json = '{}'",
       "delete from dossier_versions",
-      "truncate dossier_versions",
+      "truncate dossier_versions cascade",
     ])
       await expect(test.database.query(statement), statement).rejects.toThrow(
         /immutable/u,
@@ -130,6 +148,7 @@ describe("reviewed SQL migrations", () => {
       "0016",
       "0017",
       "0018",
+      "0019",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -155,6 +174,7 @@ describe("reviewed SQL migrations", () => {
         "0016",
         "0017",
         "0018",
+        "0019",
       ],
       pending: [],
       drifted: [],
@@ -185,6 +205,7 @@ describe("reviewed SQL migrations", () => {
       "people",
       "person_preferences",
       "personal_access_tokens",
+      "plan_versions",
       "question_answers",
       "question_comments",
       "question_recipients",
@@ -240,6 +261,7 @@ describe("reviewed SQL migrations", () => {
         "0016",
         "0017",
         "0018",
+        "0019",
       ],
       pending: [],
       drifted: [],
@@ -247,7 +269,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(18);
+    expect(rows.rows[0]?.count).toBe(19);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

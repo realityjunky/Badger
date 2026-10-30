@@ -76,6 +76,39 @@ Engineer and Workflow owner in the writer's transaction. Artifacts and
 confirmation retry responses remain unchanged. Personal access tokens may
 read dossiers and gate history but cannot compose or approve versions.
 
+## Plan versions
+
+Plan versions (#58) use migration `0019`. `GET V/plan` returns immutable
+`versions`, `currentVersionId`, the current approved `dossierHash`, a derived
+`skeleton`, and plan gate `confirmation`. The skeleton is unavailable until
+the current dossier is approved. It fixes the name, goal, intent, English
+artifact locale, ordered Node identities, and exact pinned sources and script
+declarations; implementation choices remain for the Engineer or Agent.
+
+`POST V/plan/preview` takes `{plan, dossierHash}` and returns `{composition}`
+with canonical JSON, hash, snapshot, and kernel findings, including incomplete
+or invalid edits. `POST V/plan/save` takes those fields plus
+`confirmationHash` and `expectedVersionId` (null for the first plan). A valid
+preview is required; concurrent saves conflict and identical latest content
+returns the original version. Both writes require a signed-in Engineer or
+Administrator. Tokens may only read the plan and its history.
+
+The Workflow owner previews and commits `V/gates/plan` using the shared gate
+protocol. Its bound hashes identify both the Plan version and Dossier version.
+A new plan supersedes plan approval. Dossier replacement, facts, or pin changes
+invalidate dependent plan approvals atomically, preserving history and retry
+responses, and notify the Engineer and Workflow owner. Plan approval keeps the
+Plan and proposal stage active for the separate proposal gate.
+
+A signed-in Engineer requests `{kind: "draft-plan", confirmed: true}` at
+`POST V/drafting-jobs`, without a round or parent question. Existing Engineer
+MCP tools claim and submit `{plan}` against the kernel-derived output schema.
+The context's `planning` contains `input`, `skeleton`, and `basePlanVersionId`.
+The result stays a suggestion. Human acceptance uses `plan` instead of
+`questions` in the existing accept-preview/accept protocol and saves through
+the same validation and optimistic-concurrency checks as a direct save.
+Inbox links for suggestions and approvals open the workflow's `#plan` panel.
+
 ## Source study records
 
 Source study (#45) records facts and interfaces independently under a Workflow
@@ -188,15 +221,15 @@ Migration `0018` adds typed values and immutable attachment receipts to Answer
 revisions. Each Question revision accepts an `answerType`; omitting it keeps
 free text. The dashboard provides matching composer and answer controls.
 
-| `answerType` | Draft payload in addition to `revision` and `questionRevision` |
-| --- | --- |
-| `{kind: "free-text"}` | `text: "Any language"` |
-| `{kind: "single-choice", options: ["Cold", "Frozen"]}` | `value: "Frozen"` |
-| `{kind: "multiple-choice", options: ["Cold", "Frozen"]}` | `value: ["Cold", "Frozen"]` |
-| `{kind: "yes-no"}` | `value: false` |
-| `{kind: "number", unit: "°C"}` | `value: 0` (always in the Question's unit) |
-| `{kind: "table", columns: ["Sample", "Storage"]}` | `value: [["Example", "Frozen"]]` |
-| `{kind: "file"}` | `attachments: ["attachment-id"]` |
+| `answerType`                                             | Draft payload in addition to `revision` and `questionRevision` |
+| -------------------------------------------------------- | -------------------------------------------------------------- |
+| `{kind: "free-text"}`                                    | `text: "Any language"`                                         |
+| `{kind: "single-choice", options: ["Cold", "Frozen"]}`   | `value: "Frozen"`                                              |
+| `{kind: "multiple-choice", options: ["Cold", "Frozen"]}` | `value: ["Cold", "Frozen"]`                                    |
+| `{kind: "yes-no"}`                                       | `value: false`                                                 |
+| `{kind: "number", unit: "°C"}`                           | `value: 0` (always in the Question's unit)                     |
+| `{kind: "table", columns: ["Sample", "Storage"]}`        | `value: [["Example", "Frozen"]]`                               |
+| `{kind: "file"}`                                         | `attachments: ["attachment-id"]`                               |
 
 Use the existing answer and submit routes. Incomplete structured drafts may
 use `value: null`, empty choice lists, or incomplete table rows; submission

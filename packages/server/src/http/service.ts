@@ -65,6 +65,7 @@ import { handleWorkflows, workflowMethods } from "./workflows.js";
 import { handleTokens, tokenMethods } from "./tokens.js";
 import { gateMethods, handleGate } from "./gates.js";
 import { dossierMethods, handleDossier } from "./dossier.js";
+import { planMethods, handlePlan } from "./plans.js";
 import { handleInbox, inboxMethods } from "./inbox.js";
 import { handleSourceStudy, sourceStudyMethods } from "./source-study.js";
 import { handleQuestionnaire, questionnaireMethods } from "./questionnaire.js";
@@ -162,6 +163,7 @@ function allowedMethods(path: string): string {
     tokenMethods(path) ??
     gateMethods(path) ??
     dossierMethods(path) ??
+    planMethods(path) ??
     sourceStudyMethods(path) ??
     inboxMethods(path) ??
     questionnaireMethods(path) ??
@@ -821,6 +823,7 @@ export function createService(options: ServiceOptions, port: number): Service {
       if (tokenMethods(path) !== null) return await handleTokens(authorized);
       if (gateMethods(path) !== null) return await handleGate(authorized);
       if (dossierMethods(path) !== null) return await handleDossier(authorized);
+      if (planMethods(path) !== null) return await handlePlan(authorized);
       if (inboxMethods(path) !== null) return await handleInbox(authorized);
       if (sourceStudyMethods(path) !== null)
         return await handleSourceStudy(authorized);

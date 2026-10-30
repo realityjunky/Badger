@@ -13,8 +13,8 @@ interface JobInput {
 }
 interface ClaimedJob {
   id: string;
-  kind: "draft-questions" | "draft-follow-ups";
-  roundId: string;
+  kind: "draft-questions" | "draft-follow-ups" | "draft-plan";
+  roundId: string | null;
   parentQuestionId: string | null;
   revision: number;
   status: string;
@@ -236,7 +236,7 @@ export async function finishJob(
         `The result does not match the job's output schema: ${ajv.errorsText(valid.errors)}`,
       );
   }
-  const response = await api.request(
+  const response = await api.request<{ job: ClaimedJob }>(
     `${jobsPath(input)}/${input.jobId}/${action}`,
     "POST",
     {
@@ -249,7 +249,10 @@ export async function finishJob(
     ? {
         ...(response as object),
         requiresPerson: true,
-        dashboardUrl: `${api.url}/questionnaire?workflow=${encodeURIComponent(input.workflowId)}&version=${encodeURIComponent(input.versionId)}&panel=suggestions`,
+        dashboardUrl:
+          response.job.kind === "draft-plan"
+            ? `${api.url}/workflows/${encodeURIComponent(input.workflowId)}/versions/${encodeURIComponent(input.versionId)}#plan`
+            : `${api.url}/questionnaire?workflow=${encodeURIComponent(input.workflowId)}&version=${encodeURIComponent(input.versionId)}&panel=suggestions`,
         message:
           "The result is a suggestion. Ask the person to review, edit, accept, or discard it in the dashboard.",
       }
