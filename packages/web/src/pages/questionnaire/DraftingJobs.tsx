@@ -75,7 +75,10 @@ export function DraftingJobs({
       if (request === sequence.current) {
         setJobs(
           result.jobs.filter(
-            (job): job is DraftingJob => job.kind !== "draft-plan",
+            (job): job is DraftingJob =>
+              job.kind !== "draft-plan" &&
+              job.kind !== "authoring-lane" &&
+              job.kind !== "review-vote",
           ),
         );
         setFailure(null);

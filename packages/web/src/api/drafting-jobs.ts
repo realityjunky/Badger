@@ -56,4 +56,15 @@ export interface PlanDraftingJob extends Omit<
   roundId: null;
   result: { plan: FactoryPlan } | null;
 }
-export type AnyDraftingJob = DraftingJob | PlanDraftingJob;
+export interface AuthoringDraftingJob extends Omit<
+  DraftingJob,
+  "kind" | "result"
+> {
+  kind: "authoring-lane" | "review-vote";
+  laneId: string;
+  result: {
+    laneOutput: import("@realityjunky/badger").AuthoringLaneOutput;
+  } | null;
+}
+export type AnyDraftingJob =
+  DraftingJob | PlanDraftingJob | AuthoringDraftingJob;

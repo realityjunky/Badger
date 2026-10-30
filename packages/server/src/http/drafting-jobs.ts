@@ -1,3 +1,4 @@
+import { isAuthoringJob, reconcileAuthoringJobs } from "../authoring.js";
 import { createHash } from "node:crypto";
 import { canonicalHash } from "@realityjunky/badger";
 import {
@@ -39,6 +40,8 @@ const REQUEST_FIELDS: Record<DraftingKind, string[]> = {
   "translate-question": ["questionId", "locale"],
   "import-open-questions": ["roundId", "skillId"],
   "draft-plan": [],
+  "authoring-lane": [],
+  "review-vote": [],
 };
 export function draftingJobMethods(path: string): string | null {
   const match = PATH.exec(path);
@@ -116,6 +119,14 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       workflowId,
       versionId,
     );
+    await reconcileAuthoringJobs(
+      tx,
+      input.config,
+      deps,
+      actor,
+      versionId,
+      jobs,
+    );
     if (!id) {
       if (method !== "POST") {
         for (const job of jobs)
@@ -132,6 +143,11 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         (body.kind !== "draft-plan" && !Object.hasOwn(DRAFT_SCHEMAS, body.kind))
       )
         throw new RequestError(400, "Choose a supported drafting job kind");
+      if (body.kind === "authoring-lane" || body.kind === "review-vote")
+        throw new RequestError(
+          400,
+          "Request Authoring lanes from the Package stage",
+        );
       fields(body, [
         "kind",
         "confirmed",
@@ -217,6 +233,8 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         revisionInput(body.revision) !== job.revision
       )
         return conflict("Read the current queued job before claiming");
+      if (isAuthoringJob(job) && !job.context_bundle.authoring)
+        throw new RequestError(409, "The Authoring job has no bounded inputs");
       // Only the Skills this kind reads travel. Any two Skill versions within
       // the upload limit fit, such as a producer and its consumer.
       const skills = draftingSkills(job.context_bundle, draftingTarget(job));
@@ -349,6 +367,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       requestId!,
       inputHash,
       input.blobs,
+      input.config,
     );
     return { status: 200, value: { job: publicDraftingJob(decided) } };
   });

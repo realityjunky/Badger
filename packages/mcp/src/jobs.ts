@@ -15,6 +15,8 @@ interface JobInput {
 interface ClaimedJob {
   id: string;
   kind:
+    | "authoring-lane"
+    | "review-vote"
     | "draft-questions"
     | "draft-follow-ups"
     | "draft-plan"
@@ -119,6 +121,7 @@ export async function claimJob(
   const claimed = await api.request<{
     job: ClaimedJob;
     contextBundle: {
+      authoring?: { files: { path: string; text: string; hash: string }[] };
       pins: {
         skillId: string;
         hash: string;
@@ -176,6 +179,17 @@ export async function claimJob(
       await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
       await fs.writeFile(target, bytes, { mode: 0o600, flag: "wx" });
     }
+    for (const file of claimed.contextBundle.authoring?.files ?? []) {
+      const relative = safePath(file.path);
+      if (
+        !relative.startsWith("inputs/") ||
+        createHash("sha256").update(file.text).digest("hex") !== file.hash
+      )
+        throw new Error("An Authoring input differs from its bounded context");
+      const target = path.join(folder, relative);
+      await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+      await fs.writeFile(target, file.text, { mode: 0o600, flag: "wx" });
+    }
     const claim: LocalClaim = {
       workflowId: input.workflowId,
       versionId: input.versionId,
@@ -210,7 +224,7 @@ export async function claimJob(
       leaseUntil: claimed.job.lease.until,
       resultFile: path.join(folder, "result.json"),
       message:
-        "Read context.json and the Skill files under skills/; `skills` lists the pinned versions this kind reads. Write result.json using output-schema.json, then submit_job. Results remain suggestions until a person accepts them.",
+        "Read context.json, any bounded Authoring files under inputs/, and the Skill files under skills/; `skills` lists the pinned versions this kind reads. Write result.json using output-schema.json, then submit_job. Results remain suggestions until a person accepts them.",
     };
   } catch (error) {
     if (folder)
@@ -279,9 +293,12 @@ export async function finishJob(
         ...(response as object),
         requiresPerson: true,
         dashboardUrl:
-          response.job.kind === "draft-plan"
-            ? `${api.url}/workflows/${encodeURIComponent(input.workflowId)}/versions/${encodeURIComponent(input.versionId)}#plan`
-            : `${api.url}/questionnaire?workflow=${encodeURIComponent(input.workflowId)}&version=${encodeURIComponent(input.versionId)}&panel=suggestions`,
+          response.job.kind === "authoring-lane" ||
+          response.job.kind === "review-vote"
+            ? `${api.url}/workflows/${encodeURIComponent(input.workflowId)}/versions/${encodeURIComponent(input.versionId)}#package`
+            : response.job.kind === "draft-plan"
+              ? `${api.url}/workflows/${encodeURIComponent(input.workflowId)}/versions/${encodeURIComponent(input.versionId)}#plan`
+              : `${api.url}/questionnaire?workflow=${encodeURIComponent(input.workflowId)}&version=${encodeURIComponent(input.versionId)}&panel=suggestions`,
         message:
           "The result is a suggestion. Ask the person to review, edit, accept, or discard it in the dashboard.",
       }

@@ -201,7 +201,9 @@ roles. Plan versions (#58) and proposal approval with initialization (#59)
 follow the same pattern. Package generation (#60) requires the Engineer's
 confirmation and runs as a worker job against the approved proposal. The Package
 panel shows each file's owner and hash, bundled sources, and the Authoring plan.
-Evaluation and review gates follow.
+Authoring lanes and review votes (#61) are Agent drafting jobs in kernel dependency
+order; Engineers accept each result and confirm assembly. Evaluation and review
+gates follow.
 
 ## Adding a workspace package
 

@@ -29,6 +29,9 @@ export interface PackageRow {
   proposal_hash: string;
   state_hash: string;
   scaffold_hash: string;
+  assembled_hash: string | null;
+  assembled_at: Date | string | null;
+  assembled_inventory: GeneratedPackageFile[] | null;
   package_path: string;
   inventory: GeneratedPackageFile[];
   authoring_plan: AuthoringPlan;
@@ -146,8 +149,9 @@ export async function packageView(
           planVersionHash: saved.plan_version_hash,
           proposalHash: saved.proposal_hash,
           scaffoldHash: saved.scaffold_hash,
+          assembledHash: saved.assembled_hash,
           stateHash: saved.state_hash,
-          files: saved.inventory,
+          files: saved.assembled_inventory ?? saved.inventory,
           authoringPlan: saved.authoring_plan,
           generatedAt: toIsoString(saved.generated_at),
         }
@@ -261,7 +265,9 @@ export async function packageFile(
   relative: string,
 ) {
   const saved = await readPackage(tx, versionId);
-  const file = saved?.inventory.find((file) => file.path === relative);
+  const file = (saved?.assembled_inventory ?? saved?.inventory)?.find(
+    (file) => file.path === relative,
+  );
   if (!saved || !file) throw new RequestError(404, "No such package file");
   if (file.bytes > 1024 * 1024)
     throw new RequestError(413, "This file is too large to preview");

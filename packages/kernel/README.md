@@ -48,6 +48,12 @@ The kernel package includes:
 
 The collaborative service adds a server, a web dashboard, the Badger MCP, and a host installer beside the kernel. Its server role's walking skeleton is in `packages/server/` and the web dashboard's shell in `packages/web/`; the expert and engineer MCP profiles are delivered in `packages/mcp/` (#54, #55), while the operator profile and the host installer are planned ([#24](https://github.com/realityjunky/Badger/issues/24)). They call into the kernel and never reimplement it, so WorkflowRuntime stays the only runtime authority. Everything shipped is generic: each deployment keeps its own launcher entries, reverse-proxy routes, and deploy scripts outside the repository. The kernel still excludes ambient resume routing.
 
+Authoring in the service (#61) uses this kernel's bounded handoffs, dispatch
+readiness, output validation, record persistence, and confirmed assembly. The
+service keeps accepted outputs immutable and replays them through the kernel in
+a new namespace before committing a session pointer; it never computes another
+lane dependency graph. See ADR 0031 for the transaction boundary.
+
 ## Delivery status
 
 Delivered behavior and planned work are kept apart:

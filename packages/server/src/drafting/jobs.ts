@@ -1,4 +1,11 @@
 import {
+  isAuthoringJob,
+  validateLaneResult,
+  acceptLaneResult,
+} from "../authoring.js";
+import type { ServiceConfig } from "../config.js";
+import type { AuthoringLaneId } from "@realityjunky/badger";
+import {
   canonicalHash,
   composeFactoryPlan,
   factoryPlanDraftSchema,
@@ -45,6 +52,8 @@ import {
 export type DraftingActor = WriteContext & { agentHost: string | null };
 export interface DraftingJobRow {
   id: string;
+  package_id: string | null;
+  lane_id: AuthoringLaneId | null;
   workflow_version_id: string;
   kind: DraftingKind;
   round_id: string | null;
@@ -75,6 +84,8 @@ export function publicDraftingJob(row: DraftingJobRow) {
     id: row.id,
     workflowVersionId: row.workflow_version_id,
     kind: row.kind,
+    packageId: row.package_id,
+    laneId: row.lane_id,
     roundId: row.round_id,
     skillId: row.skill_id,
     questionId: row.question_id,
@@ -179,6 +190,7 @@ export async function reconcileDraftingJobs(
   for (const job of jobs) {
     if (!["queued", "claimed", "submitted"].includes(job.status)) continue;
     const changed =
+      !isAuthoringJob(job) &&
       job.input_hash !== draftingInputHash(current.bundle, draftingTarget(job));
     const expired =
       job.status === "claimed" &&
@@ -342,6 +354,7 @@ export async function submitDraftingJob(
   result: unknown,
 ) {
   const validated = validateDraftResult(job.kind, job.output_schema, result);
+  if (isAuthoringJob(job)) validateLaneResult(job, validated);
   const submitted = (
     await tx.query<DraftingJobRow>(
       `update drafting_jobs set status = 'submitted', revision = revision + 1, result = $2, result_hash = $3,
@@ -363,7 +376,11 @@ export async function submitDraftingJob(
       job.workflow_version_id,
       job.id,
       deps.clock.now(),
-      job.kind === "draft-plan" ? "plan" : "questionnaire",
+      isAuthoringJob(job)
+        ? "package"
+        : job.kind === "draft-plan"
+          ? "plan"
+          : "questionnaire",
     ],
   );
   await auditJob(tx, deps, actor, submitted, "submitted", job.revision);
@@ -399,6 +416,8 @@ export async function jobDecisionPreview(
     action === "accept"
       ? validateDraftResult(job.kind, job.output_schema, result)
       : { reason };
+  if (action === "accept" && isAuthoringJob(job))
+    validateLaneResult(job, decision);
   if (action === "accept" && job.kind === "import-open-questions")
     await refuseImportedAgain(
       tx,
@@ -454,7 +473,12 @@ export async function decideDraftingJob(
   requestId: string,
   inputHash: string,
   blobs: BlobStore,
+  config: ServiceConfig,
 ) {
+  const authoringDecision =
+    preview.action === "accept" && isAuthoringJob(job)
+      ? await acceptLaneResult(tx, config, deps, actor, job, preview.decision)
+      : null;
   const questionIds: string[] = [];
   let planVersionId: string | null = null;
   if (preview.action === "accept" && "plan" in preview.decision) {
@@ -570,6 +594,7 @@ export async function decideDraftingJob(
         preview.action === "accept" ? "accepted" : "rejected",
         JSON.stringify({
           ...preview,
+          ...(authoringDecision ?? {}),
           personId: actor.personId,
           questionIds,
           ...(planVersionId ? { planVersionId } : {}),

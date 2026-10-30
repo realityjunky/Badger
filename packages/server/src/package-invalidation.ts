@@ -55,6 +55,26 @@ export async function invalidateGeneratedPackage(
       where workflow_version_id = $1 and invalidated_at is null returning id`,
     [versionId, deps.clock.now(), reason],
   );
+  const cancelledDrafts = await tx.query<{ id: string; revision: number }>(
+    `update drafting_jobs set status='cancelled', revision=revision+1, lease_id=null, lease_person_id=null, lease_token_id=null, lease_agent_host=null, lease_until=null, updated_at=$2 where workflow_version_id=$1 and kind in ('authoring-lane','review-vote') and status in ('queued','claimed','submitted') and id not in (select job_id from accepted_authoring_outputs) returning id,revision`,
+    [versionId, deps.clock.now()],
+  );
+  for (const job of cancelledDrafts.rows) {
+    await tx.query(
+      "update inbox_items set state='done',revision=revision+1,updated_at=$2 where drafting_job_id=$1 and state<>'done'",
+      [job.id, deps.clock.now()],
+    );
+    await recordAudit(tx, deps, {
+      actor: context,
+      channel: context.channel,
+      action: "drafting-job.cancelled",
+      target: { type: "drafting-job", id: job.id },
+      before: { revision: job.revision - 1, hash: null },
+      after: { revision: job.revision, hash: null },
+      reason,
+      requestId: context.requestId,
+    });
+  }
   for (const { id } of withdrawn.rows)
     await notifyWorkflowRoles(
       tx,

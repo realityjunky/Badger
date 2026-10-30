@@ -1,3 +1,4 @@
+import { WorkflowAuthoring } from "./WorkflowAuthoring.js";
 import { Alert, Button, Input, Modal, Space, Spin, Table, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
@@ -180,9 +181,15 @@ export function WorkflowPackage({
             <>
               <dl className="gate-hashes">
                 <div>
-                  <dt>{t("package.hash")}</dt>
+                  <dt>
+                    {t(
+                      saved.assembledHash
+                        ? "package.assembledHash"
+                        : "package.hash",
+                    )}
+                  </dt>
                   <dd>
-                    <code>{saved.scaffoldHash}</code>
+                    <code>{saved.assembledHash ?? saved.scaffoldHash}</code>
                   </dd>
                 </div>
                 <div>
@@ -246,6 +253,13 @@ export function WorkflowPackage({
                     ),
                   },
                 ]}
+              />
+              <WorkflowAuthoring
+                basePath={basePath}
+                path={path}
+                packageId={saved.id}
+                canManage={detail.capabilities.generate}
+                onChanged={onChanged}
               />
               <h3>{t("package.authoringPlan")}</h3>
               <dl className="gate-hashes">
