@@ -32,7 +32,11 @@ const BASE_HEADERS: Record<string, string> = {
 export interface Reply {
   readonly requestId: string;
   send(body: ResponseBody): void;
-  json(status: number, payload: unknown): void;
+  json(
+    status: number,
+    payload: unknown,
+    headers?: Record<string, string>,
+  ): void;
   html(status: number, body: string): void;
   eventStream(): {
     signal: AbortSignal;
@@ -61,11 +65,16 @@ export function replyTo(
     });
     response.end(request.method === "HEAD" ? undefined : body.body);
   };
-  const json = (status: number, payload: unknown): void => {
+  const json = (
+    status: number,
+    payload: unknown,
+    headers?: Record<string, string>,
+  ): void => {
     send({
       status,
       contentType: "application/json; charset=utf-8",
       body: `${JSON.stringify(payload)}\n`,
+      headers,
     });
   };
   return {

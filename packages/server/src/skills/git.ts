@@ -23,8 +23,56 @@ async function directoryBytes(directory: string): Promise<number> {
   return bytes;
 }
 
-/** Reads objects from a fresh bare repository; no checkout, hooks, or filters. */
+/**
+ * Whether a file is attributes that, comments aside, assign the Git LFS
+ * filter, or a Git LFS pointer, which stands in the tree for its file.
+ */
+function usesLfs(file: UploadFile): boolean {
+  if (/(?:^|\/)\.gitattributes$/u.test(file.path))
+    return file.content
+      .toString("utf8")
+      .split("\n")
+      .some((line) => {
+        const [pattern, ...assigned] = line.trim().split(/\s+/u);
+        return !pattern?.startsWith("#") && assigned.includes("filter=lfs");
+      });
+  return (
+    file.content.length < 1024 &&
+    file.content
+      .toString("latin1")
+      .startsWith("version https://git-lfs.github.com/spec/v1\n")
+  );
+}
+
+// Each fetch may download and store up to the repository byte limit for a
+// request of a few hundred bytes, so a process runs only a few at once.
+const MAX_CONCURRENT_FETCHES = 2;
+let runningFetches = 0;
+
+/** Refuses, rather than queues, a fetch beyond the concurrency limit. */
 export async function fetchGitFiles(
+  config: ServiceConfig,
+  url: string,
+  commit: string,
+): Promise<UploadFile[]> {
+  if (runningFetches >= MAX_CONCURRENT_FETCHES)
+    throw new RequestError(
+      503,
+      `At most ${MAX_CONCURRENT_FETCHES} Git imports run at once; try again shortly`,
+      undefined,
+      // A running fetch has ended by then.
+      Math.ceil(config.git.timeoutMs / 1000),
+    );
+  runningFetches += 1;
+  try {
+    return await fetchCommit(config, url, commit);
+  } finally {
+    runningFetches -= 1;
+  }
+}
+
+/** Reads objects from a fresh bare repository; no checkout, hooks, or filters. */
+async function fetchCommit(
   config: ServiceConfig,
   url: string,
   commit: string,
@@ -45,8 +93,10 @@ export async function fetchGitFiles(
     // Bound individual allocations too, including unpack/delta allocations.
     GIT_ALLOC_LIMIT: String(config.uploads.maxBytes + 16 * 1024 * 1024),
   };
+  // `refusal` explains a nonzero exit that no limit or timeout caused.
   const run = (
     args: string[],
+    refusal: () => RequestError,
     maxBytes = 4096,
     input?: string,
   ): Promise<Buffer> =>
@@ -102,7 +152,7 @@ export async function fetchGitFiles(
         } else child.kill("SIGKILL");
       };
       const timeout = setTimeout(
-        () => stop(new RequestError(400, "Git import timed out")),
+        () => stop(new RequestError(503, "Git import timed out")),
         Math.max(1, deadline - Date.now()),
       );
       const monitor = setInterval(() => {
@@ -123,7 +173,7 @@ export async function fetchGitFiles(
               if (!finished)
                 stop(
                   new RequestError(
-                    400,
+                    503,
                     "Could not inspect the fetched repository",
                   ),
                 );
@@ -158,62 +208,70 @@ export async function fetchGitFiles(
       child.stdin.on("error", () => undefined);
       child.stdin.end(input);
       child.on("error", () => {
-        failure ??= new RequestError(400, "Git is unavailable on this server");
+        failure ??= new RequestError(503, "Git is unavailable on this server");
       });
       child.on("close", (code) => {
         finished = true;
         clearTimeout(timeout);
         clearInterval(monitor);
         if (failure !== undefined) reject(failure);
-        else if (code !== 0)
-          reject(
-            new RequestError(
-              400,
-              "The registered repository could not supply that commit",
-            ),
-          );
+        else if (code !== 0) reject(refusal());
         else resolve(Buffer.concat(chunks));
       });
     });
+  const failed = () => new RequestError(503, "Git failed on this server");
+  const notCommit = () =>
+    new RequestError(
+      400,
+      "The supplied hash must identify a commit, not a tag or tree",
+    );
   let transport: Awaited<ReturnType<typeof openGitTransport>> | undefined;
   try {
-    await run([
-      "init",
-      "--bare",
-      "--template=",
-      ...(commit.length === 64 ? ["--object-format=sha256"] : []),
-    ]);
-    transport = await openGitTransport(config, url);
-    try {
-      await run([
+    await run(
+      [
+        "init",
+        "--bare",
+        "--template=",
+        ...(commit.length === 64 ? ["--object-format=sha256"] : []),
+      ],
+      failed,
+    );
+    const opened = await openGitTransport(config, url);
+    transport = opened;
+    // The transport's failure explains Git's exit: an unavailable host, an
+    // answer that is not smart HTTP, or a limit. Otherwise the commit is
+    // missing from what the host serves.
+    await run(
+      [
         "fetch",
         "--depth=1",
         "--no-tags",
         "--no-recurse-submodules",
         "--",
-        transport.url,
+        opened.url,
         commit,
-      ]);
-    } catch (error) {
-      throw transport.failure() ?? error;
-    }
+      ],
+      () =>
+        opened.failure() ??
+        new RequestError(
+          400,
+          "The registered repository could not supply that commit",
+        ),
+    );
     if ((await directoryBytes(workspace)) > config.git.maxRepositoryBytes)
       throw new RequestError(
         413,
         "Git repository exceeds the fetch size limit",
       );
     const resolved = (
-      await run(["rev-parse", "--verify", `${commit}^{commit}`])
+      await run(["rev-parse", "--verify", `${commit}^{commit}`], notCommit)
     )
       .toString("utf8")
       .trim();
-    if (resolved !== commit)
-      throw new RequestError(
-        400,
-        "The supplied hash must identify a commit, not a tag or tree",
-      );
+    if (resolved !== commit) throw notCommit();
     const tree = await run(
       ["ls-tree", "-r", "-l", "-z", "--full-tree", commit],
+      failed,
       config.uploads.maxFiles * (MAX_PATH_BYTES + 128),
     );
     let names: string;
@@ -253,11 +311,12 @@ export async function fetchGitFiles(
       );
     const blobs = await run(
       ["cat-file", "--batch"],
+      failed,
       config.uploads.maxBytes + entries.length * 128,
       entries.map((entry) => entry.hash + "\n").join(""),
     );
     let offset = 0;
-    return entries.map((entry) => {
+    const files = entries.map((entry) => {
       const end = blobs.indexOf(10, offset);
       const header = blobs.subarray(offset, end).toString("ascii");
       if (
@@ -271,6 +330,13 @@ export async function fetchGitFiles(
       offset += entry.bytes + 1;
       return { path: entry.path, content };
     });
+    // Git LFS commits pointers, which would import in place of their files.
+    if (files.some(usesLfs))
+      throw new RequestError(
+        400,
+        "This tree keeps files in Git LFS, which a Git import cannot fetch; upload the Skill folder instead",
+      );
+    return files;
   } finally {
     await transport?.close();
     await fs.rm(workspace, { recursive: true, force: true });

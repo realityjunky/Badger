@@ -4,13 +4,18 @@ Status: accepted. A Field expert or Engineer may register an HTTPS Git repositor
 for a Skill in a Group where they may upload. Registration never fetches content.
 The deployment separately enables exact origins with `BADGER_GIT_ALLOWED_ORIGINS`;
 a registration cannot widen that policy. HTTP is permitted only for explicitly
-enabled loopback origins. URLs cannot include credentials, queries, or fragments.
+enabled loopback origins. URLs cannot include credentials or the `?` and `#`
+characters, so no query or fragment, not even an empty one, reaches the host.
 The first implementation supports repositories readable without credentials over
 Git smart HTTP, with a full SHA-1 or SHA-256 commit identity rather than a moving
-branch, tag, or abbreviated hash.
+branch, tag, or abbreviated hash. Git LFS is not supported: an import is refused
+when the tree's `.gitattributes` assigns the LFS filter or a file is an LFS
+pointer, because the pointers would otherwise import in place of the files. The
+person uploads the Skill folder instead.
 
 Fetching goes through a private transport that forwards only smart-HTTP discovery
-and upload-pack operations to the registered repository. Redirects and dumb-HTTP
+and upload-pack operations to the registered repository, joining each
+operation's path to the repository's URL path. Redirects and dumb-HTTP
 alternates are refused. Git runs with isolated configuration, disabled hooks,
 no credential helpers, a private bare repository, and a scrubbed environment.
 There is no checkout, filter, archive transformation, submodule traversal, or
@@ -22,7 +27,15 @@ inflates objects before the expanded-size check, Git's individual allocations
 are limited to the total upload byte limit plus 16 MiB, its delta-base cache
 is capped at the upload byte limit, and fetches retain pack storage. Temporary
 repositories are removed after success and failure; remote diagnostics are never
-returned or logged.
+returned or logged. Since one small request can make the server download and
+store a whole repository, each process runs at most two fetches at once and
+refuses more rather than queueing them.
+
+Failures are classified by whether retrying can help. A missing commit, an
+answer that is not smart HTTP, and refused content are 400 `invalid`: the same
+request fails again. A timeout, an unreachable host, a 5xx or 429 answer, a
+server without Git, and the concurrency limit are 503 `unavailable`, and a later
+retry may succeed.
 
 The files then enter the existing upload inspection and persistence path (ADR
 0013): the kernel supplies identity and inventory, every script requires a
@@ -38,6 +51,14 @@ API exposes them as `gitOrigins`. This retains provenance without updating a
 version's files, declarations, original actor, or creation time. Retrying an
 import creates neither another receipt nor another audit event. Repository
 registrations and receipts cannot be rewritten or deleted.
+
+A receipt records that the content was fetched from the registered repository
+by its commit hash. It does not record that a branch or tag of that repository
+contains the commit. A host may serve a commit by hash that none of the
+repository's branches or tags reach, for example a commit from another
+repository in the same fork network, so the recorded origin can name a
+repository that never published the commit. Checking that the commit is
+reachable from the repository's branches or tags is a follow-up.
 
 ## Considered Options
 
