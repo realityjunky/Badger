@@ -10,11 +10,13 @@ import { objectInput, RequestError } from "./errors.js";
 import type { Queryable } from "../database/database.js";
 import { dossierGateState } from "../dossier.js";
 import { planGateState } from "../plans.js";
+import { generationGateState } from "../packages.js";
+import { invalidateGate } from "../gates.js";
 import { proposalGateState } from "../proposals.js";
 import { supersedeStaleProposalApproval } from "../proposal-invalidation.js";
 
 const GATE_PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/gates\/(sources|dossier|plan|proposal|source-study\/([^/]+))(?:\/(preview|commit))?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/gates\/(sources|dossier|plan|proposal|generation|source-study\/([^/]+))(?:\/(preview|commit))?$/u;
 
 export function gateMethods(path: string): string | null {
   const match = GATE_PATH.exec(path);
@@ -54,15 +56,17 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
     match[4] === undefined ? undefined : decodeURIComponent(match[4]);
   const gate = skillId === undefined ? match[3] : studyGateName(skillId);
   const loadState = (tx: Queryable) =>
-    gate === "proposal"
-      ? proposalGateState(tx, input.config, versionId, person.id)
-      : gate === "plan"
-        ? planGateState(tx, versionId, person.id)
-        : gate === "dossier"
-          ? dossierGateState(tx, versionId, person.id)
-          : skillId === undefined
-            ? sourcesGateState(tx, versionId)
-            : sourceStudyGateState(tx, versionId, skillId);
+    gate === "generation"
+      ? generationGateState(tx, input.config, versionId, person.id)
+      : gate === "proposal"
+        ? proposalGateState(tx, input.config, versionId, person.id)
+        : gate === "plan"
+          ? planGateState(tx, versionId, person.id)
+          : gate === "dossier"
+            ? dossierGateState(tx, versionId, person.id)
+            : skillId === undefined
+              ? sourcesGateState(tx, versionId)
+              : sourceStudyGateState(tx, versionId, skillId);
   if (
     !(await listWorkflowVersions(database, workflow.id)).some(
       (version) => version.id === versionId,
@@ -81,26 +85,30 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
     });
   }
   if (
-    !(gate === "proposal"
-      ? capabilities.approveProposal
-      : gate === "plan"
-        ? capabilities.approvePlan
-        : gate === "dossier"
-          ? capabilities.approveDossier
-          : skillId === undefined
-            ? capabilities.confirmSources
-            : capabilities.manageSourceStudy)
+    !(gate === "generation"
+      ? capabilities.generate
+      : gate === "proposal"
+        ? capabilities.approveProposal
+        : gate === "plan"
+          ? capabilities.approvePlan
+          : gate === "dossier"
+            ? capabilities.approveDossier
+            : skillId === undefined
+              ? capabilities.confirmSources
+              : capabilities.manageSourceStudy)
   )
     return reply.error(
       403,
       "denied",
-      gate === "proposal"
-        ? "Only a signed-in Workflow owner or Administrator approves a proposal"
-        : gate === "plan"
-          ? "Only a signed-in Workflow owner or Administrator approves a plan"
-          : gate === "dossier"
-            ? "Only a signed-in Workflow owner or Administrator approves a dossier"
-            : "Only a signed-in Administrator or Engineer confirms a source or study gate",
+      gate === "generation"
+        ? "Only a signed-in Engineer or Administrator confirms generation"
+        : gate === "proposal"
+          ? "Only a signed-in Workflow owner or Administrator approves a proposal"
+          : gate === "plan"
+            ? "Only a signed-in Workflow owner or Administrator approves a plan"
+            : gate === "dossier"
+              ? "Only a signed-in Workflow owner or Administrator approves a dossier"
+              : "Only a signed-in Administrator or Engineer confirms a source or study gate",
     );
   const body = await readJsonBody(request);
   if (!body.ok) return reply.error(400, "invalid", body.message);
@@ -144,17 +152,30 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
     gate,
     { confirmationHash: value.confirmationHash, requestId: value.requestId },
     loadState,
-    gate === "proposal"
-      ? (tx, active, state) =>
-          supersedeStaleProposalApproval(
+    gate === "generation"
+      ? async (tx) => {
+          await invalidateGate(
             tx,
             dependencies,
             context,
             versionId,
-            active,
-            state,
-          )
-      : undefined,
+            "generation",
+            "A new explicit generation confirmation superseded the previous attempt",
+            ["Engineer"],
+          );
+          return true;
+        }
+      : gate === "proposal"
+        ? (tx, active, state) =>
+            supersedeStaleProposalApproval(
+              tx,
+              dependencies,
+              context,
+              versionId,
+              active,
+              state,
+            )
+        : undefined,
   );
   if (result.kind === "conflict")
     return reply.error(

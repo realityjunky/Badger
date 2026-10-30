@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createWorkflowKernel } from "@realityjunky/badger";
+import { invalidatePackage } from "./package-invalidation.js";
 import { recordAudit } from "./audit.js";
 import {
   approvedProposal,
@@ -159,6 +160,18 @@ export async function runInitialization(
         ),
       );
     }
+    await invalidatePackage(
+      tx,
+      dependencies,
+      {
+        personId: null,
+        credential: { kind: "worker", id: workerId },
+        channel: "worker",
+        requestId: job.id,
+      },
+      job.workflowVersionId,
+      "Project reinitialization superseded its package",
+    );
     await tx.query(
       `insert into workflow_kernel_states
       (workflow_version_id, plan_version_hash, proposal_hash, proposal_confirmation_id, initialized_job_id, state_namespace, state_json, hash, initialized_at)

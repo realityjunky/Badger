@@ -1,3 +1,4 @@
+import { invalidatePackage } from "./package-invalidation.js";
 import { recordAudit, type WriteContext } from "./audit.js";
 import type { Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
@@ -20,6 +21,7 @@ export async function invalidateProposal(
   versionId: string,
   reason: string,
 ) {
+  await invalidatePackage(tx, deps, context, versionId, reason);
   await invalidateGate(tx, deps, context, versionId, "proposal", reason, [
     "Engineer",
     "Workflow owner",

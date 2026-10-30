@@ -39,6 +39,8 @@ export const NOTIFICATION_ITEM_SELECT = `select i.id, i.workflow_version_id, v.w
   left join person_notification_preferences prefs on prefs.person_id = p.id`;
 
 export function itemHref(item: NotificationItemRow): string {
+  if (item.gate === "generation" || item.gate === "package")
+    return `/workflows/${encodeURIComponent(item.workflow_id)}/versions/${encodeURIComponent(item.workflow_version_id)}#package`;
   if (item.gate === "plan")
     return `/workflows/${encodeURIComponent(item.workflow_id)}/versions/${encodeURIComponent(item.workflow_version_id)}#plan`;
   if (item.drafting_job_id !== null)

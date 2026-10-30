@@ -195,6 +195,14 @@ them into `dist/`, so the server image carries the build and none of them.
   language from the parts Remind returns, with an absolute link from the
   page's origin and base path.
 
+- Workflow versions include **Package** (#60). After initialization, Engineers
+  review and confirm generation against the exact proposal, plan, and Creator
+  state hashes. The panel follows worker progress and lists the scaffold hash,
+  each file's owner and SHA-256, and the kernel's lanes, Waves, and dependencies.
+  Files open in a read-only preview. Superseded packages remain visible with a
+  warning; regeneration requires a fresh confirmation. Owners and other readers
+  inspect the same inventory without the Engineer's generation controls.
+
 ## Commands
 
 ```bash

@@ -66,6 +66,10 @@ export interface WriteContext {
   requestId: string;
 }
 
+/** A writer may be a signed-in person or an autonomous worker. */
+export type AuditWriteContext = AuditActor &
+  Pick<WriteContext, "channel" | "requestId">;
+
 export interface AuditPage {
   events: AuditEvent[];
   /** Pass it back to read the next, older page; null on the last page. */

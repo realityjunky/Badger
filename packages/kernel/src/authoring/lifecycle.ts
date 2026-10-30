@@ -149,7 +149,12 @@ function portableSessionPath(workflow: string): string {
 }
 
 function sessionRoot(state: CreatorState): string {
-  return path.resolve(state.projectRoot, portableSessionPath(state.name));
+  return path.resolve(
+    state.projectRoot,
+    state.stateNamespace ?? ".badger",
+    "authoring",
+    state.name,
+  );
 }
 
 export function authoringSessionPath(state: CreatorState): string {
@@ -2279,7 +2284,7 @@ function sessionSummaryPath(state: CreatorState): string {
 function creatorStatePath(state: CreatorState): string {
   return path.join(
     state.projectRoot,
-    ".badger",
+    state.stateNamespace ?? ".badger",
     "states",
     `${state.name}.json`,
   );
@@ -2469,7 +2474,11 @@ export async function initializeAuthoringSession(options: {
   return withSessionLock(root, async () => {
     let persisted: CreatorState;
     try {
-      persisted = await readState(state.projectRoot, state.name);
+      persisted = await readState(
+        state.projectRoot,
+        state.name,
+        state.stateNamespace,
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       persisted = state;
@@ -2755,7 +2764,11 @@ export async function recordAuthoring(options: {
   return withSessionLock(root, async () => {
     let current: CreatorState;
     try {
-      current = await readState(options.state.projectRoot, options.state.name);
+      current = await readState(
+        options.state.projectRoot,
+        options.state.name,
+        options.state.stateNamespace,
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       current = options.state;
@@ -4142,7 +4155,11 @@ export async function assemblePackage(
   return withSessionLock(root, async () => {
     let current: CreatorState;
     try {
-      current = await readState(state.projectRoot, state.name);
+      current = await readState(
+        state.projectRoot,
+        state.name,
+        state.stateNamespace,
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       current = state;
@@ -4298,7 +4315,7 @@ export async function assemblePackage(
         throw new Error("Authoring session disappeared during assembly");
       const stateFile = path.join(
         current.projectRoot,
-        ".badger",
+        current.stateNamespace ?? ".badger",
         "states",
         `${current.name}.json`,
       );
@@ -4389,7 +4406,11 @@ async function authoritativeAuthoringState(
   state: CreatorState,
 ): Promise<CreatorState> {
   try {
-    const persisted = await readState(state.projectRoot, state.name);
+    const persisted = await readState(
+      state.projectRoot,
+      state.name,
+      state.stateNamespace,
+    );
     return persisted;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return state;
