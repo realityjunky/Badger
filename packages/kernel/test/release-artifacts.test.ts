@@ -777,4 +777,143 @@ describe("Badger release artifacts", () => {
       "the other profiles and host installer are planned",
     );
   });
+
+  it("describes #75–#85 and the review fixes of the dossier through Git import tickets as delivered", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const ledger = (await readText("docs/release-artifacts.md")).replace(
+      /\s+/gu,
+      " ",
+    );
+    const delivered = manual.slice(0, manual.indexOf('id="service"'));
+
+    for (const sentence of [
+      // #81–#84 in the identity row, #80 in the Skills row.
+      "it is stored with the sign-in transaction on the server (#81)",
+      "它随登录事务保存在服务端（#81）",
+      "<code>BADGER_OIDC_MAX_PENDING_SIGN_INS</code>, 10,000 by default, caps pending sign-ins: a start beyond it evicts the oldest and is never refused (#82)",
+      "自身从不被拒绝（#82）",
+      "so two tabs can sign in at once, in either order (#83)",
+      "两个标签页可以同时登录，并以任意顺序完成（#83）",
+      "A display name sent once may contain commas; the subject and email still refuse them (#84)",
+      "只发送一次的显示名可以包含逗号；主体和邮箱仍拒绝逗号（#84）",
+      "a path with a <code>.git</code> segment is refused too, with a message that suggests uploading <code>git archive</code> output instead (#80)",
+      "提示信息建议改为上传 <code>git archive</code> 的输出（#80）",
+      // #77 and #75 in the ledger paragraph.
+      "refuses a malformed record before computing any ledger, with an error that names the record's kind, ID, and problem (#77)",
+      "错误信息写明该记录的类别、ID 和问题所在（#77）",
+      "read their records under the version lock that every questionnaire writer takes",
+      "the request answers 503 with <code>Retry-After</code>, never 500 (#75)",
+      "该请求以 503 和 <code>Retry-After</code> 答复，从不返回 500（#75）",
+      // Review fixes in the nine tickets' paragraphs.
+      "The latest entry in an append-only list of heads names the current version",
+      "content identical to an earlier version selects that version again",
+      "当前版本由一份只追加的指针列表中最新的一条指明",
+      "As with dossiers, the latest head names the current plan version",
+      "与档案一样，当前计划版本由最新的一条指针指明",
+      "the exact files of the pinned Skills its kind reads",
+      "A claim whose files exceed twice the upload limit is refused with 413, and the job stays queued",
+      "领取的文件总量超过上传上限的两倍时，以 413 拒绝",
+      "the job is cancelled only when the inputs its kind reads change",
+      "importing it again is refused with 409",
+      "再次导入会以 409 拒绝",
+      "Saving a robot is refused until the deployment sets <code>BADGER_NOTIFICATION_KEY</code> and <code>BADGER_PUBLIC_URL</code>",
+      "保存机器人会被拒绝",
+      'a pending invitee as "Invited person" and never by email address',
+      "尚待接受邀请的人称为“Invited person”",
+      "after a rate-limited answer it waits at least 60 seconds, and rate-limited attempts do not use up the five",
+      "遇到限流答复时至少等待 60 秒，限流的尝试不计入这五次",
+      "a Group default's posts, test posts included, are recorded with that Group",
+      "a Remind whose post would reach nobody records nothing and offers Copy reminder instead",
+      "the Workflow owner's approval of the current proposal supersedes the stale one",
+      "工作流负责人对当前提案的批准会取代过时的那次批准",
+      "failed and cancelled jobs are audited too",
+      "audited as <code>workflow_version.inherited</code>",
+      "并以 <code>workflow_version.inherited</code> 写入审计",
+      "Pending questionnaire inbox items move to the new version",
+      "a URL with <code>?</code> or <code>#</code> is refused",
+      "Git LFS content is refused",
+      "Git LFS 内容会被拒绝",
+      "A server process runs at most two fetches at once and refuses another with 503 and <code>Retry-After</code>",
+      "and Badger does not check that yet",
+      // The dashboard.
+      "Retire asks first, naming the draft's kind and saying that a retired draft cannot be revised and leaves the ledger and readiness (#76)",
+      "“停用”会先请求确认",
+      "list every approval, marking the superseded ones (#52)",
+      "并标出已被取代的批准（#52）",
+      "whose text it writes in the viewer's language with an absolute link",
+      "复制的文字使用查看者的语言，并带有绝对链接",
+      "shown with the Group's own Delivery log (#57)",
+      "并查看该组自己的投递日志（#57）",
+      // The Badger MCP.
+      "<code>upload_attachment</code> reads a local file and checks the person's assignment, the question revision, and the service's type and size limits before sending it (#51)",
+      "A folder that holds a <code>.git</code> folder is refused before any file is read (#80)",
+      "含有 <code>.git</code> 文件夹的文件夹在读取任何文件之前就会被拒绝（#80）",
+      "a file whose path has a <code>.git</code> component, in any letter case, is refused, so the claim writes nothing and is released",
+      "此时领取不写入任何内容并释放作业",
+      'href="../packages/mcp/src/attachments.ts"',
+    ])
+      expect(delivered, sentence).toContain(sentence);
+    for (const superseded of [
+      "composing identical content returns the existing version",
+      "内容相同的编制返回已有版本",
+      "A new version asks the Workflow owner for approval",
+      "新版本会请工作流负责人批准",
+      "the exact pinned Skill files",
+      "30 分钟的租约和固定 Skill 的原样文件",
+      "输出 Schema 和固定 Skill 的原样文件",
+      "An expired lease returns the job to the queue, and changed inputs cancel it.",
+      "租约过期后作业回到队列，输入变化则作业取消。",
+      "A new plan supersedes that approval",
+      "新的计划会取代这次批准",
+      "Saving queues a test post.",
+      "保存时会排入一条测试消息。",
+      "records each post in a Delivery log that the Workflow owner and Administrators read",
+      "每条消息都记入投递日志，供工作流负责人和管理员查看",
+      "resolutions, and linked drafts in one locked transaction",
+      "处理结论和关联草稿；",
+      "saving and submitting answers, comments, concerns",
+      "保存与提交回答、评论、关切",
+      "Reading a Skill folder (regular files only, within the service's limits) and keeping",
+      "读取 Skill 文件夹（只读普通文件，并遵守服务端的限制），并把",
+    ])
+      expect(manual, superseded).not.toContain(superseded);
+
+    for (const sentence of [
+      "Consistent ledger reads (#75) are delivered in the server",
+      "Retire confirmation (#76) is delivered in the dashboard",
+      "Questionnaire record checks (#77) are delivered in the kernel",
+      "Agent hosts on token writes (#79) are delivered in the server and the Activity page: token writes record the Agent host",
+      "The `.git` refusal in Skill uploads (#80) is delivered in the server, the Skills page, and the expert MCP profile",
+      "Return to the requested page after OpenID Connect sign-in (#81) is delivered in the server",
+      "Bounded pending sign-ins (#82) are delivered in the server",
+      "Concurrent sign-ins (#83) are delivered in the server",
+      "Comma-bearing display names (#84) are delivered in the trusted-header adapter",
+      "The dashboard declares its type-only kernel dependency (#78), and server tests now cover OpenID Connect provider timeouts and IPv4-mapped proxy peers (#85)",
+      "consistent ledger reads (#75), questionnaire record checks (#77)",
+      "retire confirmation (#76), declared kernel dependency (#78)",
+      "`.git` refusal in Skill folders (#80)",
+      "The latest of the append-only heads names the current version",
+      "append-only heads name the current plan version",
+      "cancellation only when the inputs a job's kind reads change",
+      "A claim larger than twice the upload limit is refused with 413",
+      "`upload_attachment` checks a local file's type and size",
+      "a numbered source question enters a workflow version at most once; a repeat gets 409",
+      "saved only once the deployment sets `BADGER_NOTIFICATION_KEY` and `BADGER_PUBLIC_URL`",
+      'a pending invitee is named "Invited person", never by email address',
+      "the owner's approval of the current proposal supersedes the stale one",
+      "records `workflow_version.inherited`",
+      "checking reachability is a follow-up",
+    ])
+      expect(ledger, sentence).toContain(sentence);
+    for (const superseded of [
+      "cancellation on changed inputs",
+      "claiming writes the context and the exact pinned Skill files to a private local folder",
+      "Migration `0016` adds the table;",
+      "Migration `0019` adds the table;",
+      "retried with backoff through the deployment's proxy, a Delivery log, personal mention preferences",
+      "with provenance to their origins, then queues its own source check",
+      "Structured answers and attachments (#51) are delivered in the server and the Questionnaire page",
+    ])
+      expect(ledger, superseded).not.toContain(superseded);
+  });
 });

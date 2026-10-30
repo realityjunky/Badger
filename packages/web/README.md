@@ -29,9 +29,11 @@ them into `dist/`, so the server image carries the build and none of them.
   origin and base path are filled in, and the person chooses the local
   executable. Claude Code's `.mcp.json` reads `${BADGER_TOKEN}` from the
   environment, so the token stays out of a file teams often commit; for Codex
-  and WorkBuddy the person replaces the token placeholder. The configuration
-  connects the expert profile and never stores a token secret in dashboard
-  preferences.
+  and WorkBuddy the person replaces the token placeholder. The person also
+  picks a work profile, written as `BADGER_MCP_PROFILE`: all permitted work
+  (`auto`, the default), Engineer (`engineer`), or Field expert (`expert`); a
+  profile only narrows what the person's roles and token scopes allow. The
+  configuration never stores a token secret in dashboard preferences.
 
 - The Questionnaire page has rounds and questions, the answer thread, and an
   evidence/history inspector. Engineers compose questions, retain revisions,
@@ -67,9 +69,11 @@ them into `dist/`, so the server image carries the build and none of them.
 - Questionnaire's **Ledger and readiness** view shows all five ledger parts,
   expandable per-topic blockers, linked record histories, deferred resolutions,
   and changes since a chosen published round. Engineers create, revise, link,
-  and retire inference and assumption drafts. The service's kernel handoff
-  supplies all membership and readiness decisions. The view and comparison
-  round have URLs and retain the deployment base path.
+  and retire inference and assumption drafts; Retire asks first, naming the
+  draft's kind and saying that a retired draft cannot be revised and leaves
+  the ledger and readiness (#76). The service's kernel handoff supplies all
+  membership and readiness decisions. The view and comparison round have URLs
+  and retain the deployment base path.
 - Workflow versions include a **Dossier versions** panel (#50). Engineers
   author topic summaries, supporting fact links, and Node responsibilities,
   review kernel findings and the canonical snapshot, then compose an immutable
@@ -79,6 +83,12 @@ them into `dist/`, so the server image carries the build and none of them.
   artifacts remain readable, and the inbox links directly to pending or
   superseded dossier approvals.
 - Every question has an ordered comment thread with the author's edit history.
+  Current workflow roles control posting and editing; Observers read threads.
+  Field experts raise concerns from the questionnaire. Engineers open each
+  concern from their inbox and review a hash-bound resolution: a new draft
+  question, an accepted Fact source, or a decline with a reason. The question
+  composer and round publication flow handle converted concerns. All records
+  keep direct links and refresh through the existing live updates.
 - Workflow versions include **Plan versions** (#58). The approved dossier
   supplies a skeleton and pins. Engineers edit FactoryPlan JSON with live
   kernel findings, review the resulting canonical version, and save it, or
@@ -87,16 +97,28 @@ them into `dist/`, so the server image carries the build and none of them.
   The panel opens on, and edits start from, the current version; saving an
   earlier version's content selects it again. Historical versions have URLs;
   stale edits and approvals conflict, and a superseded dossier invalidates
-  dependent approvals and notifies both roles. The Sources, dossier, plan, and
+  dependent approvals and notifies both roles.
+- Workflow versions include **Proposal and initialization** (#59). Once the
+  current plan is approved, the pane shows the kernel's proposal: its hash,
+  the plan version hash, the pinned sources, any blockers, and the current
+  Creator state's hash when the project has one. Workflow owners approve the
+  exact proposal in a review dialog. Engineers then queue initialization in a
+  second dialog, which also names the Creator state's hash when it would
+  replace that state, and the pane shows each initialization job's status. A
+  superseded approval shows a warning.
+- Workflow version changes (#52) appear on the records they affect.
+  **Start new version** asks first, naming what the new version takes: the
+  current frame and the latest version's Skill pins, facts, answers, and
+  resolutions; pending questionnaire work moves to it, flagged items stay
+  open, and approvals need a new review. An inherited version links to its
+  predecessor. Inherited questions and source-study records link to their
+  originals in the earlier version, and inherited facts and ledger items to
+  that version's ledger. A question, fact, or source-study record whose cited
+  evidence changed shows a warning and each changed file before and after,
+  side by side, loaded only when expanded. The Sources, dossier, plan, and
   proposal panes list every approval of their gate, with the approver, time,
   and reason, and mark the ones a later change superseded, so a re-pin never
   hides an earlier approval.
-  Current workflow roles control posting and editing; Observers read threads.
-  Field experts raise concerns from the questionnaire. Engineers open each
-  concern from their inbox and review a hash-bound resolution: a new draft
-  question, an accepted Fact source, or a decline with a reason. The question
-  composer and round publication flow handle converted concerns. All records
-  keep direct links and refresh through the existing live updates.
 
 - Every page has a URL. The root redirects to `/my-work`; deep links, refresh,
   and history all restore the page.
@@ -115,6 +137,14 @@ them into `dist/`, so the server image carries the build and none of them.
   Activity page shows every recorded action with its actor, time, target,
   channel, and reason, filtered by actor, action, target type, and channel.
   Auditors and Administrators read all of it.
+- Questionnaire's **Drafting jobs and suggestions** panel (#55) has a URL and
+  is open to Engineers and Administrators. They request Agent drafts of
+  questions, or of follow-ups to a parent question, for a draft round, and
+  see each job's state; a job whose inputs changed shows as cancelled. They
+  review a submitted result, edit or remove each suggested question, and
+  accept the rest into that round, which they still review and publish, or
+  discard the result with a reason; both decisions take a hash-bound
+  confirmation.
 - Source drafting (#56) extends the job panel with source study, answer
   restatement, question translation, and numbered open-question imports.
   Engineers review and edit each result before a hash-bound confirmation.
@@ -136,6 +166,11 @@ them into `dist/`, so the server image carries the build and none of them.
   and file selection has a deep link, and any two versions can be compared
   with source previews. Uploaded markup is rendered as text. The server's
   capability response controls which create and upload actions are offered.
+- **Import from Git** (#70) sits beside Upload version. It picks a registered
+  repository or registers a new URL, takes a full commit hash, and previews
+  the committed tree like an upload: the person declares script effects and
+  confirms before the version is stored. Fetched content never runs, and a
+  version lists each repository and commit it was imported from.
 - One token source feeds both the CSS variables and Ant Design's theme.
   Contrast is checked at AA in both themes; reduced motion stops the stage
   marker's animation.

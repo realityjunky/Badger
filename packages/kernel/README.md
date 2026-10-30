@@ -70,10 +70,12 @@ The collaborative service also delivers the Skills library (#42): immutable
 folder and zip uploads, source checks through this kernel, full inventories,
 script side-effect declarations, bounded file previews, and version diffs.
 An Engineer or Field expert on a workflow uploads to that workflow's Group.
-Imports from registered Git repositories at a full commit hash (#70) take the
-same path, so the same tree gets the same version as an upload. See
-`packages/server/README.md` from the repository root for its API and limits,
-and `docs/adr/0029-registered-git-skill-versions.md`.
+The server and the Badger MCP refuse an upload with a `.git` path segment,
+suggesting `git archive` output instead (#80). Imports from registered Git
+repositories at a full commit hash (#70) take the same path, so the same tree
+gets the same version as an upload. See `packages/server/README.md` from the
+repository root for its API and limits, and
+`docs/adr/0029-registered-git-skill-versions.md`.
 
 Questionnaire rounds and free-text answers (#46) are delivered in the server
 and dashboard: revisioned questions, priority-ordered publication previews,
@@ -96,14 +98,20 @@ Ledger and readiness (#49) derive the five-part ledger from durable records
 through `createQuestionnaireHandoff({ records })`. The kernel lists blockers
 for scope and every dossier topic, including interfaces, and compares ledger
 items with immutable round-publication baselines. Inferences and assumptions
-remain drafts until their linked question's facts are acknowledged. This
-record-readiness result does not compose, validate, or approve a dossier; the
-existing dossier/FactoryPlan handoff retains those validation requirements.
-The records form validates required fields, topics, identities, and references
-before computing any ledger items. Invalid records throw an error naming the
-record kind, its ID, and the problem. Historical facts may retain older
-resolution and answer revisions after the current heads advance. A ledger item
-keeps only an origin's `workflowVersionId`, `recordId`, and `revision`.
+remain drafts until their linked question's facts are acknowledged, and the
+dashboard asks before retiring one (#76). This record-readiness result does not
+compose, validate, or approve a dossier; the existing dossier/FactoryPlan
+handoff retains those validation requirements. The records form checks
+required fields, types, topics, identities, and references before computing
+any ledger items (#77). Invalid records throw an error naming the record kind,
+its ID, and the problem, and the record types name only the values the handoff
+accepts. Historical facts may retain older resolution and answer revisions
+after the current heads advance. A ledger item keeps only an origin's
+`workflowVersionId`, `recordId`, and `revision`. The service reads a ledger's
+records, and a round's baseline, under the version lock that every
+questionnaire writer takes, so each read sees one consistent state; a Postgres
+deadlock or serialization failure answers 503 with `Retry-After`, never 500
+(#75).
 
 Dossier versions (#50) add `composeSemanticDossier`: the kernel projects the
 acknowledged facts, source-derived facts, confirmed inferences, and deferred
@@ -148,8 +156,18 @@ Personal access tokens (#53) are also delivered: personal settings create,
 list, and revoke scoped Agent and CLI credentials, showing the secret once.
 The server stores hashes, enforces expiration and current roles, records
 each use, and limits requests per token. Tokens never perform actions
-reserved for people. See `packages/server/README.md` for the API and scope
-rules.
+reserved for people, and token writes record the Agent host (#79). See
+`packages/server/README.md` for the API and scope rules.
+
+OpenID Connect and trusted-header sign-in (#69) have four follow-ups: after
+OpenID Connect sign-in a person returns to the page they asked for, kept only
+if it is on Badger's own origin under the base path and stored with the
+server-side transaction (#81); `BADGER_OIDC_MAX_PENDING_SIGN_INS`, 10,000 by
+default, caps pending sign-ins, and a start beyond it evicts the oldest and is
+never refused (#82); each pending sign-in has its own flow cookie, at most
+three per browser, so two tabs can sign in at once, in either order (#83); and
+a trusted-header display name sent once may contain commas, while the subject
+and email still refuse them (#84). See `docs/identity-adapters.md`.
 
 Skill pins and source checks (#43) are delivered too: an Engineer pins
 immutable Skill versions to a workflow version, and the worker role, the same
@@ -184,10 +202,15 @@ WeCom group robot notifications (#57) add the first channel beside the in-app
 inbox: encrypted, masked robot settings per workflow or Group, one post per
 committed action and chat that mentions the people who need to act and
 carries only metadata and a link, paced and retried delivery by the worker
-role that never blocks a gate, a delivery log, and audited Remind and Copy
-reminder actions at most once per item per hour. Posting is tested against a
-stub robot; a post to a real team chat has not been verified. See
+role that never blocks a gate, a delivery log, and audited Remind at most
+once per item per hour, with Copy reminder text the dashboard writes where no
+robot is set or a post would reach nobody. Posting is tested against a stub
+robot; a post to a real team chat has not been verified. See
 `docs/adr/0026-transactional-notification-delivery.md`.
+
+The dashboard declares its type-only dependency on this kernel (#78), and
+server tests cover OpenID Connect provider timeouts and IPv4-mapped proxy peers
+(#85); neither changes behavior.
 
 Generated packages carry their source Skills in `sources/<Skill identity hash>/`.
 The roots in `reference/resolved-skills.json` and the packaged
