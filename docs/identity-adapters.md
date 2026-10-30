@@ -9,8 +9,8 @@ alone grants no permission.
 Set `BADGER_MODE=service`, `BADGER_DATABASE_URL`, `BADGER_ALLOWED_HOSTNAMES`,
 `BADGER_ALLOWED_ORIGINS`, and storage mounts as described in the root README.
 Run the server behind HTTPS. Keep deployment-specific proxy routes and
-launchers outside this repository. The server applies migration `0014` before
-opening its socket. Back up and restore the database with the existing
+launchers outside this repository. The server applies its bundled migrations
+before opening its socket. Back up and restore the database with the existing
 [procedure](backup-and-restore.md).
 
 ## OpenID Connect
@@ -65,10 +65,15 @@ they form part of every person's identity.
 | `BADGER_OIDC_TIMEOUT_SECONDS` | `3`              | Timeout for each discovery, token, or signing-key request; accepts 1–60 seconds.                                                          |
 | `BADGER_OIDC_EMAILS_VERIFIED` | `false`          | Treat an ID token without an `email_verified` claim as verified; a claim the provider sends still decides.                                |
 
-Opening the signed-out dashboard offers a sign-in link. `GET
-<base>/auth/oidc/login` redirects to the provider with fresh state, nonce and
-PKCE values. The callback serves a small page that continues to a same-origin
-completion request. This extra navigation lets the transaction cookie remain
+Opening the signed-out dashboard offers a sign-in link carrying the requested
+page and query as `returnTo`. `GET <base>/auth/oidc/login` keeps that destination
+only when it is a path on Badger's own origin under the configured base path.
+Absolute URLs, network-path URLs (`//host`), backslashes, and paths outside
+that base path fall back to My work. The destination is stored with the
+server-side sign-in transaction, never in a cookie or the provider's state,
+and checked again before the completed sign-in redirects there. The login
+redirect to the provider uses fresh state, nonce and PKCE values. The callback
+serves a small page that continues to a same-origin completion request. This extra navigation lets the transaction cookie remain
 `SameSite=Strict` even though the provider callback arrives from another site;
 there is a Continue link when JavaScript is disabled. See
 [ADR 0021](adr/0021-oidc-browser-sessions.md).

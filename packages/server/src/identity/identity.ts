@@ -50,7 +50,9 @@ export interface IdentityAdapter {
 
 /** `reason` explains a failure for the operator's log; it holds no secret. */
 export interface BrowserSignIn {
-  begin(): Promise<
+  begin(
+    returnPath: string | null,
+  ): Promise<
     | { authorizationUrl: string; transactionToken: string }
     | { kind: "unavailable"; reason: string }
   >;
@@ -58,7 +60,7 @@ export interface BrowserSignIn {
     transactionToken: string | null,
     callback: URL,
   ): Promise<
-    | { kind: "authenticated"; principal: Principal }
+    | { kind: "authenticated"; principal: Principal; returnPath: string }
     | { kind: "invalid"; reason: string }
     | { kind: "unavailable"; reason: string }
   >;

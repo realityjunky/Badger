@@ -40,7 +40,7 @@ test.afterAll(async () => {
   await provider?.stop();
 });
 
-test("signs in through OpenID Connect with Strict cookies across the provider's redirect, then signs out", async ({
+test("returns to a dashboard deep link after OpenID Connect sign-in with Strict cookies, then signs out", async ({
   page,
 }) => {
   const cookieHeaders = new Map<string, string>();
@@ -49,12 +49,14 @@ test("signs in through OpenID Connect with Strict cookies across the provider's 
     if (pathname.startsWith("/team/auth/oidc/"))
       cookieHeaders.set(pathname, (await request.allHeaders())["cookie"] ?? "");
   });
-  await page.goto(`${origin}/team/my-work`);
+  const destination = `${origin}/team/settings/tokens?from=inbox&item=token%2F123`;
+  await page.goto(destination);
   await page
     .getByRole("link", { name: "Sign in with your organization" })
     .click();
   await page.getByRole("link", { name: "Approve" }).click();
-  await expect(page).toHaveURL(`${origin}/team/`);
+  await expect(page).toHaveURL(destination);
+  await expect(page.getByTestId("page-settings")).toBeVisible();
   // The browser withholds the Strict flow cookie from the provider's
   // cross-site redirect; the callback page's same-origin continuation
   // carries it to the completion, which issues the session.
