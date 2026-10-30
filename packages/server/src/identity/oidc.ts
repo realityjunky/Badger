@@ -195,16 +195,25 @@ export function createOidcIdentityAdapter(
           pendingEvictions = 0;
           lastEvictionLog = logTime;
         }
-        return { authorizationUrl: authorizationUrl.href, transactionToken };
+        return {
+          authorizationUrl: authorizationUrl.href,
+          transactionToken,
+          state,
+        };
       },
       complete: async (transactionToken, callback) => {
         if (transactionToken === null)
           return { kind: "invalid", reason: "no sign-in transaction cookie" };
-        // Delete and return atomically: callbacks cannot be replayed, even on
-        // another server process. The provider also enforces one-use codes.
+        // Match state before consuming the token: a cookie from another tab
+        // cannot consume that tab's transaction. Atomic deletion prevents
+        // replays across server processes; provider codes are also one-use.
         const taken = await database.query<Transaction>(
-          "delete from oidc_transactions where token_hash = $1 and expires_at > $2 returning state, nonce, code_verifier, return_path",
-          [hashCredential(transactionToken), clock.now()],
+          "delete from oidc_transactions where token_hash = $1 and expires_at > $2 and state = $3 returning state, nonce, code_verifier, return_path",
+          [
+            hashCredential(transactionToken),
+            clock.now(),
+            callback.searchParams.get("state"),
+          ],
         );
         const transaction = taken.rows[0];
         if (transaction === undefined)

@@ -53,7 +53,7 @@ export interface BrowserSignIn {
   begin(
     returnPath: string | null,
   ): Promise<
-    | { authorizationUrl: string; transactionToken: string }
+    | { authorizationUrl: string; transactionToken: string; state: string }
     | { kind: "unavailable"; reason: string }
   >;
   complete(

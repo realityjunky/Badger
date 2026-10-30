@@ -61,10 +61,10 @@ test("returns to a dashboard deep link after OpenID Connect sign-in with Strict 
   // cross-site redirect; the callback page's same-origin continuation
   // carries it to the completion, which issues the session.
   expect(cookieHeaders.get("/team/auth/oidc/callback")).not.toContain(
-    "badger_session_oidc_flow=",
+    "badger_session_oidc_flow_",
   );
-  expect(cookieHeaders.get("/team/auth/oidc/complete")).toContain(
-    "badger_session_oidc_flow=",
+  expect(cookieHeaders.get("/team/auth/oidc/complete")).toMatch(
+    /badger_session_oidc_flow_[a-f0-9]{64}=/u,
   );
   await page.getByTestId("language-switch").click();
   await page.getByRole("menuitem", { name: "English", exact: true }).click();
@@ -86,3 +86,44 @@ test("returns to a dashboard deep link after OpenID Connect sign-in with Strict 
   const me = await page.request.get(`${origin}/team/api/v1/me`);
   expect(me.status()).toBe(401);
 });
+
+for (const order of [
+  [0, 1],
+  [1, 0],
+]) {
+  test(`two tabs complete sign-in with ${order[0] === 0 ? "the older" : "the newer"} tab first`, async ({
+    context,
+  }) => {
+    const tabs = [await context.newPage(), await context.newPage()];
+    const destinations = [
+      `${origin}/team/settings/tokens?tab=first`,
+      `${origin}/team/settings/tokens?tab=second`,
+    ];
+    for (const [index, tab] of tabs.entries()) {
+      await tab.goto(destinations[index]);
+      await tab
+        .getByRole("link", { name: "Sign in with your organization" })
+        .click();
+      await expect(tab.getByRole("link", { name: "Approve" })).toBeVisible();
+    }
+    const pending = (await context.cookies(`${origin}/team/`)).filter(
+      (cookie) => cookie.name.startsWith("badger_session_oidc_flow_"),
+    );
+    expect(pending).toHaveLength(2);
+    for (const cookie of pending)
+      expect(cookie).toMatchObject({
+        httpOnly: true,
+        secure: true,
+        sameSite: "Strict",
+        path: "/team",
+      });
+    for (const index of order) {
+      await tabs[index].getByRole("link", { name: "Approve" }).click();
+      await expect(tabs[index]).toHaveURL(destinations[index]);
+      await expect(tabs[index].getByTestId("page-settings")).toBeVisible();
+    }
+    expect(
+      (await context.cookies(`${origin}/team/`)).map((cookie) => cookie.name),
+    ).toEqual(["badger_session"]);
+  });
+}
