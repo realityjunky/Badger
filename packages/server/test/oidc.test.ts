@@ -73,6 +73,91 @@ async function signIn() {
 }
 
 describe("OpenID Connect sign-in", () => {
+  it("evicts the oldest pending sign-in without refusing a newer start", async () => {
+    const app = await start({ BADGER_OIDC_MAX_PENDING_SIGN_INS: "2" });
+    const oldest = await begin();
+    app.clock.advance(1_000);
+    const retained = await begin();
+    app.clock.advance(1_000);
+    const newest = await begin("/badger/my-work?view=inbox");
+
+    const evicted = await app.request(oldest.completePath, {
+      redirect: "manual",
+      headers: { cookie: oldest.flowCookie },
+    });
+    expect(evicted.status).toBe(400);
+    expect(await evicted.text()).toContain("Sign-in is invalid or expired.");
+    expect(app.logs).toContainEqual(
+      expect.objectContaining({
+        event: "oidc.sign-in-failed",
+        stage: "callback",
+        outcome: "invalid",
+      }),
+    );
+
+    for (const flow of [retained, newest]) {
+      const completed = await app.request(flow.completePath, {
+        redirect: "manual",
+        headers: { cookie: flow.flowCookie },
+      });
+      expect(completed.status).toBe(303);
+      if (flow === newest)
+        expect(completed.headers.get("location")).toBe(
+          "/badger/my-work?view=inbox",
+        );
+    }
+  });
+
+  it("aggregates eviction logs to at most one entry per minute", async () => {
+    const app = await start({ BADGER_OIDC_MAX_PENDING_SIGN_INS: "1" });
+    const evictions = () =>
+      app.logs.filter((entry) => entry["event"] === "oidc.sign-ins-evicted");
+    await begin();
+    expect(evictions()).toEqual([]);
+    await begin();
+    expect(evictions()).toEqual([
+      { level: "info", event: "oidc.sign-ins-evicted", evictedCount: 1 },
+    ]);
+    await begin();
+    app.clock.advance(59_999);
+    await begin();
+    expect(evictions()).toHaveLength(1);
+    app.clock.advance(1);
+    const newest = await begin();
+    expect(evictions()).toEqual([
+      { level: "info", event: "oidc.sign-ins-evicted", evictedCount: 1 },
+      { level: "info", event: "oidc.sign-ins-evicted", evictedCount: 3 },
+    ]);
+    const completed = await app.request(newest.completePath, {
+      redirect: "manual",
+      headers: { cookie: newest.flowCookie },
+    });
+    expect(completed.status).toBe(303);
+  });
+
+  it.skipIf(!onPostgres)(
+    "keeps only the configured number of pending sign-ins after concurrent starts",
+    async () => {
+      const app = await start({ BADGER_OIDC_MAX_PENDING_SIGN_INS: "2" });
+      const flows = await Promise.all(Array.from({ length: 8 }, () => begin()));
+      const statuses = [];
+      for (const flow of flows) {
+        const completed = await app.request(flow.completePath, {
+          redirect: "manual",
+          headers: { cookie: flow.flowCookie },
+        });
+        statuses.push(completed.status);
+      }
+      expect(statuses.filter((status) => status === 303)).toHaveLength(2);
+      expect(statuses.filter((status) => status === 400)).toHaveLength(6);
+    },
+  );
+
+  it("accepts the maximum pending sign-in setting", async () => {
+    await start({ BADGER_OIDC_MAX_PENDING_SIGN_INS: "1000000" });
+    await signIn();
+  });
+
   it("returns to the requested dashboard page and query after signing in", async () => {
     const app = await start();
     const destination = "/badger/my-work?view=inbox&item=gate%2F123";
@@ -604,6 +689,11 @@ describe("OpenID Connect sign-in", () => {
       BADGER_PLATFORM_SESSION_COOKIE: "platform_cookie",
     },
     { BADGER_SESSION_SECONDS: "0" },
+    { BADGER_OIDC_MAX_PENDING_SIGN_INS: "0" },
+    { BADGER_OIDC_MAX_PENDING_SIGN_INS: "-1" },
+    { BADGER_OIDC_MAX_PENDING_SIGN_INS: "1.5" },
+    { BADGER_OIDC_MAX_PENDING_SIGN_INS: "1000001" },
+    { BADGER_OIDC_MAX_PENDING_SIGN_INS: "many" },
   ])("refuses unsafe or incomplete OIDC settings (%j)", async (settings) => {
     await expect(start(settings)).rejects.toThrow();
   });
