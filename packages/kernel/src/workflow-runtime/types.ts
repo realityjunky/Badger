@@ -235,6 +235,8 @@ export interface WorkflowStateProjection {
     status: "succeeded" | "failed";
     at: string;
   }>;
+  /** Recent outcome summaries; original outcomes remain in the ordered events. */
+  historySummary?: { total: number; returned: number; omitted: number };
   pendingAction: WorkflowPendingAction | null;
   receiptOutputs: WorkflowReceiptOutput[];
   artifactReceipts: WorkflowArtifactReceipt[];

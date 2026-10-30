@@ -23598,16 +23598,17 @@ function normalizedVerificationSubmission(submission) {
           }
           proposals.push(...value.proposals);
         }
-        const wrapperIds = value.receiptIds ?? value.receipts;
-        if (wrapperIds !== void 0) {
+        for (const key of ["receiptIds", "receipts"]) {
+          const wrapperIds = value[key];
+          if (wrapperIds === void 0) continue;
           if (!Array.isArray(wrapperIds)) {
             throw new Error(
-              verificationFailure(`${label}.receiptIds must be an array`)
+              verificationFailure(`${label}.${key} must be an array`)
             );
           }
           for (const entry of wrapperIds) {
             if (typeof entry === "string" || isRecord15(entry) && (typeof entry.receiptId === "string" || typeof entry.receiptHash === "string") && (entry.kind === void 0 || entry.kind === "workflow-verification-receipt-reference")) {
-              addReceiptEntry(entry, `${label}.receiptIds`);
+              addReceiptEntry(entry, `${label}.${key}`);
             } else {
               proposals.push(entry);
             }
@@ -23663,6 +23664,15 @@ function normalizedVerificationSubmission(submission) {
     );
   }
   return { proposals, receiptIds };
+}
+function validateWorkflowMachineVerification(submission) {
+  const { proposals } = normalizedVerificationSubmission(submission);
+  if (proposals.some(
+    (proposal) => isRecord15(proposal) && proposal.kind === "manual-evidence"
+  ))
+    throw new Error(
+      "A signed-in person supplies human verification evidence in Badger"
+    );
 }
 function verificationFailure(message) {
   return `Workflow Verification Receipt ${message}`;
@@ -24648,15 +24658,22 @@ async function projectedOutcomes(location, state, identity) {
     const outcomeEvidence = event.data.outcome.evidence;
     evidence[node] = isRecord15(outcomeEvidence) ? structuredClone(outcomeEvidence) : {};
   }
-  return { trajectory, completedNodes, evidence, history };
+  const recentHistory = boundProjectedLedger(history);
+  return {
+    trajectory,
+    completedNodes,
+    evidence,
+    history: recentHistory,
+    historySummary: {
+      total: history.length,
+      returned: recentHistory.length,
+      omitted: history.length - recentHistory.length
+    }
+  };
 }
 async function recoveryStateProjection(location, state, recovery) {
   const protocol = (await verifyStoredPackage(location.runRoot, state)).package.runtime.protocol;
-  const { completedNodes, evidence, history } = await projectedOutcomes(
-    location,
-    state,
-    recovery.execution
-  );
+  const { completedNodes, evidence, history, historySummary } = await projectedOutcomes(location, state, recovery.execution);
   const { disposition: _disposition, ...continuation2 } = recovery;
   return {
     schemaVersion: 1,
@@ -24667,6 +24684,7 @@ async function recoveryStateProjection(location, state, recovery) {
     completedNodes,
     evidence: recovery.pendingAction?.type === "ask_user" ? {} : evidence,
     history,
+    historySummary,
     artifactReceipts: projectedArtifactReceipts(state)
   };
 }
@@ -24691,7 +24709,7 @@ async function projectWorkflowState(target) {
   if (recovery === void 0) return null;
   if (recovery) return recoveryStateProjection(location, state, recovery);
   const verified = await verifyStoredRun(location);
-  const { trajectory, completedNodes, evidence, history } = await projectedOutcomes(location, state, verified.identity);
+  const { trajectory, completedNodes, evidence, history, historySummary } = await projectedOutcomes(location, state, verified.identity);
   const protocol = verified.package.runtime.protocol;
   const runtimeState = state.workflowRuntime;
   const currentAttempt = runtimeState?.currentAttempt ?? null;
@@ -24754,6 +24772,7 @@ async function projectWorkflowState(target) {
     completedNodes,
     evidence: verified.pending?.type === "ask_user" ? {} : evidence,
     history,
+    historySummary,
     pendingAction: verified.pending,
     artifactReceipts: projectedArtifactReceipts(state),
     receiptOutputs: workflowReceiptOutputs(
@@ -28456,6 +28475,7 @@ export {
   resumeWorkflowRun,
   startWorkflowRun,
   submitWorkflowRun,
+  validateWorkflowMachineVerification,
   validateWorkflowSubmission,
   verifyWorkflowProtocol,
   writeWorkflowStateProjection

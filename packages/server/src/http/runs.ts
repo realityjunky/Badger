@@ -412,15 +412,23 @@ export async function handleRuns(input: AuthorizedRequest) {
       return { lastSequence: sequence };
     }
     if (match[2] === "access") return { run: view(row) };
-    const events = await tx.query<{ payload: unknown }>(
-      "select payload from workflow_run_events where run_id=$1 order by sequence limit 500",
-      [id],
+    const after = input.url.searchParams.get("afterSequence") ?? "0";
+    if (!/^\d+$/u.test(after) || !Number.isSafeInteger(Number(after)))
+      throw new RequestError(
+        400,
+        "afterSequence must be a non-negative safe integer",
+      );
+    const events = await tx.query<{ payload: { sequence: number } }>(
+      "select payload from workflow_run_events where run_id=$1 and sequence > $2 order by sequence limit 500",
+      [id, Number(after)],
     );
     return {
       run: {
         ...view(row),
         events: events.rows.map((e) => e.payload),
-        eventsTruncated: row.last_sequence > 500,
+        eventsTruncated:
+          (events.rows.at(-1)?.payload.sequence ?? Number(after)) <
+          Number(row.last_sequence),
       },
     };
   });

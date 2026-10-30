@@ -13,6 +13,7 @@ import {
 } from "@realityjunky/badger";
 import {
   createWorkflowRuntime,
+  validateWorkflowMachineVerification,
   type WorkflowRunReport,
   type WorkflowMachineSubmission,
 } from "@realityjunky/badger/workflow-runtime";
@@ -22,7 +23,7 @@ import {
   type PublishedIdentity,
   type PublishedPackageRead,
 } from "@realityjunky/badger-hosts";
-import { BadgerApi, BadgerConnectionError, BadgerTimeoutError } from "./api.js";
+import { BadgerApi, isRetryableBadgerFailure } from "./api.js";
 import { id, tool } from "./tools.js";
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const local = { projectRoot: z.string().min(1).max(4096), runId: id };
@@ -150,8 +151,12 @@ export class LocalRuns {
     this.verify(binding);
     this.authorized.add(canonicalHash(binding));
   }
+  forgetAuthorization() {
+    this.authorized.clear();
+  }
   async authorize(binding: Binding, offline = true) {
     this.verify(binding);
+    const key = canonicalHash(binding);
     try {
       const access = await this.api.request<{
         personId: string;
@@ -169,17 +174,12 @@ export class LocalRuns {
         throw new Error(
           "This Run belongs to another signed-in person or Agent host",
         );
-      this.authorized.add(canonicalHash(binding));
+      this.authorized.add(key);
     } catch (error) {
-      if (
-        !offline ||
-        !this.authorized.has(canonicalHash(binding)) ||
-        !(
-          error instanceof BadgerConnectionError ||
-          error instanceof BadgerTimeoutError
-        )
-      )
-        throw error;
+      const outage = isRetryableBadgerFailure(error);
+      if (!outage) this.authorized.delete(key);
+      if (offline && outage && this.authorized.has(key)) return;
+      throw error;
     }
   }
   async binding(args: { projectRoot: string; runId: string }) {
@@ -637,29 +637,9 @@ export function operatorTools(
           current?.requiresUserDecision
         )
           return result(binding, current, args);
-        for (const value of [
-          args.submission.verification,
-          args.submission.verificationReceipts,
-        ]) {
-          const entries = Array.isArray(value)
-            ? value
-            : value && typeof value === "object" && "proposals" in value
-              ? (value as { proposals: unknown[] }).proposals
-              : [value];
-          if (
-            Array.isArray(entries) &&
-            entries.some(
-              (entry) =>
-                entry &&
-                typeof entry === "object" &&
-                "kind" in entry &&
-                entry.kind === "manual-evidence",
-            )
-          )
-            throw new Error(
-              "A signed-in person supplies human verification evidence in Badger",
-            );
-        }
+        validateWorkflowMachineVerification(
+          args.submission as WorkflowMachineSubmission,
+        );
         const continuation = await runtime.submit(
           target(args),
           args.submission as WorkflowMachineSubmission,

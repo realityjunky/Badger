@@ -373,6 +373,12 @@ recovery findings. `runtime.projectState(target)` (or
 `null` when no Run exists. Manual Runs are inspected by their explicit
 location; the project registry discovers standalone Runs only.
 
+Outcome history contains the latest 256 summaries. `historySummary` reports
+`total`, `returned`, and `omitted` counts, so a long Run never silently loses
+history from its read model. `runtime.readReport(target, afterSequence?)`
+preserves every original committed event and its sequence independently of
+that bounded summary.
+
 Mutation locks record a hostname-independent, hashed host identity as well
 as the hostname used for display. A hostname change preserves attribution;
 an active owner is still protected, and only explicit recovery may take over

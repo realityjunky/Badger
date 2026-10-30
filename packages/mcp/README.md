@@ -253,8 +253,11 @@ The Operator profile offers `whoami`, `inbox`, published workflow installation,
 these Run tools with an `engineer` token for `testRun:true`; production Runs
 require an Operator role and `operator` scope. The service checks the current
 workflow role and scope on every request. Revoked access is refused; a connection
-that already checked its identity may continue locally through a connection
-outage and retry reporting when the service returns.
+that already checked its exact binding may continue locally through connection
+failures, timeouts, and HTTP 502/503/504 outages and retry reporting when the
+service returns. An authorization denial, identity mismatch, or other
+non-retryable failure clears the successful check; a fresh successful service
+check is required before outage continuation becomes available again.
 
 Before starting, call `status` with `workflowId`, `publicationId`, `packageHash`,
 `projectRoot` (an absolute local directory), and a new `runId`. Its
@@ -295,8 +298,10 @@ traversal; another deployment or person cannot reuse the binding.
 
 Service observer bounds are 2 MiB per report request, 256 KiB per event, and 1 MiB
 per snapshot pair; oversized reports remain local with an explicit reporting
-error. Lists show the newest 100 authorized Runs, and detail shows the first 500
-events with a truncation notice. Full events remain in the authoritative local
+error. Lists show the newest 100 authorized Runs. Outcome summaries retain the
+latest 256 entries with explicit total/returned/omitted counts. Run detail pages
+through every original event, 500 at a time, using `afterSequence`; the dashboard
+offers first/next page controls. Full events remain in the authoritative local
 Run and immutable service records. Deep integrity/gate attestation is a separate
 feature; these APIs validate sequence, identity, structure and size.
 

@@ -8,8 +8,7 @@ import {
 import {
   BadgerApi,
   BadgerApiError,
-  BadgerConnectionError,
-  BadgerTimeoutError,
+  isRetryableBadgerFailure,
   type ExpertMcpOptions,
 } from "./api.js";
 import { expertTools, questionnairePath } from "./tools.js";
@@ -102,25 +101,36 @@ export function createBadgerMcp(
       Date.now() - recent.at < CAPABILITY_MILLISECONDS
     )
       return recent.tools;
-    const { capabilities } = await api
-      .request<{
+    let capabilities: Record<string, boolean>;
+    try {
+      const value = await api.request<{
         capabilities: Record<string, boolean>;
-      }>("/me/mcp", "GET", undefined, recent ? 1 : 30)
-      .catch((error: unknown) => {
-        if (
-          recent &&
-          (error instanceof BadgerConnectionError ||
-            error instanceof BadgerTimeoutError)
+      }>("/me/mcp", "GET", undefined, recent ? 1 : 30);
+      if (
+        !value ||
+        !value.capabilities ||
+        typeof value.capabilities !== "object" ||
+        Array.isArray(value.capabilities) ||
+        Object.values(value.capabilities).some(
+          (allowed) => typeof allowed !== "boolean",
         )
-          return {
-            capabilities: Object.fromEntries(
-              recent.tools.flatMap((tool) =>
-                tool.permission ? [[tool.permission, true]] : [],
-              ),
-            ),
-          };
+      )
+        throw new Error("Badger returned malformed MCP capabilities");
+      capabilities = value.capabilities;
+      if (!capabilities.operateRuns) runs.forgetAuthorization();
+    } catch (error) {
+      if (recent && isRetryableBadgerFailure(error)) {
+        capabilities = Object.fromEntries(
+          recent.tools.flatMap((tool) =>
+            tool.permission ? [[tool.permission, true]] : [],
+          ),
+        );
+      } else {
+        recent = undefined;
+        runs.forgetAuthorization();
         throw error;
-      });
+      }
+    }
     const allowed = tools.filter(
       (tool) => tool.permission === undefined || capabilities[tool.permission],
     );

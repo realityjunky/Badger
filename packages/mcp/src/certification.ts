@@ -1,11 +1,12 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createServer, request as httpRequest } from "node:http";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createBadgerMcp } from "./index.js";
+import type { BadgerHttpTransport } from "./api.js";
 import {
   createPackageSnapshot,
   certificationExecFile,
@@ -17,6 +18,13 @@ import {
   type PackageSnapshot,
   type WorkflowMcpCertificationEvidence,
 } from "@realityjunky/badger";
+
+// Node 22's ESM facade eagerly reads node:http's lazy WebSocket exports,
+// loading Undici and its WebAssembly parser even for a named HTTP import.
+// Read only the trusted HTTP functions through CommonJS under --jitless.
+const { createServer, request: httpRequest } = createRequire(import.meta.url)(
+  "node:http",
+) as typeof import("node:http");
 
 /** Trusted certification adapter. The loopback service speaks the production
  * HTTP contract with synthetic immutable bytes; every runtime action is an
@@ -229,7 +237,7 @@ export async function certifyBadgerMcp(options: {
   const address = service.address();
   if (!address || typeof address === "string")
     throw new Error("Missing certification service address");
-  const transport: typeof fetch = async (url, init) =>
+  const transport: BadgerHttpTransport = async (url, init) =>
     new Promise((resolve, reject) => {
       const req = httpRequest(
         String(url),
@@ -247,14 +255,23 @@ export async function certifyBadgerMcp(options: {
               req.destroy(new Error("Certification HTTP response too large"));
             else chunks.push(chunk);
           });
-          response.on("end", () =>
-            resolve(
-              new Response(Buffer.concat(chunks), {
-                status: response.statusCode,
-                headers: response.headers as Record<string, string>,
-              }),
-            ),
-          );
+          response.on("end", () => {
+            const status = response.statusCode!;
+            const body = Buffer.concat(chunks).toString("utf8");
+            resolve({
+              status,
+              ok: status >= 200 && status < 300,
+              headers: {
+                get(name) {
+                  const value = response.headers[name.toLowerCase()];
+                  return Array.isArray(value)
+                    ? value.join(", ")
+                    : (value ?? null);
+                },
+              },
+              json: async () => JSON.parse(body) as unknown,
+            });
+          });
           response.on("error", reject);
         },
       );
@@ -273,14 +290,25 @@ export async function certifyBadgerMcp(options: {
   const client = new Client({ name: "MCP certification", version: "1" });
   await server.connect(b);
   await client.connect(a);
+  await client.listTools();
   async function call(name: string, args: Record<string, unknown> = {}) {
     toolCalls.push(name);
     const reply = await client.callTool({ name, arguments: args });
     let text = (reply.content as { text: string }[])[0].text;
     if (reply.isError) return { error: text };
     let value = JSON.parse(text);
-    if (value.localFile)
-      value = JSON.parse(await fs.readFile(value.localFile, "utf8"));
+    if (value.localFile) {
+      const resource = (reply.content as { type: string; uri?: string }[]).find(
+        (item) => item.type === "resource_link",
+      );
+      if (!resource || typeof resource.uri !== "string")
+        throw new Error("Missing certification result resource");
+      const read = await client.readResource({ uri: resource.uri });
+      const content = read.contents[0];
+      if (!("text" in content))
+        throw new Error("Missing certification result text");
+      value = JSON.parse(content.text);
+    }
     return value;
   }
   try {
@@ -515,6 +543,8 @@ export async function certifyBadgerMcp(options: {
         selectedRun.error ?? "Selected package did not start through MCP",
       );
     await call("recover", { projectRoot, runId: selected.runId });
+    await client.listTools();
+    await client.listResources();
     if ((await hashDirectory(generated.packageRoot)) !== snapshot.packageHash)
       throw new Error("Certification modified package bytes");
     return evidence;

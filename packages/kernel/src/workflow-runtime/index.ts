@@ -316,6 +316,7 @@ import {
 import type {
   RecoverWorkflowRunOptions,
   ResumeWorkflowRunOptions,
+  WorkflowMachineSubmission,
   StartWorkflowRunOptions,
   WorkflowContinuation,
   WorkflowExecutionIdentity,
@@ -644,11 +645,12 @@ function normalizedVerificationSubmission(
           }
           proposals.push(...value.proposals);
         }
-        const wrapperIds = value.receiptIds ?? value.receipts;
-        if (wrapperIds !== undefined) {
+        for (const key of ["receiptIds", "receipts"] as const) {
+          const wrapperIds = value[key];
+          if (wrapperIds === undefined) continue;
           if (!Array.isArray(wrapperIds)) {
             throw new Error(
-              verificationFailure(`${label}.receiptIds must be an array`),
+              verificationFailure(`${label}.${key} must be an array`),
             );
           }
           for (const entry of wrapperIds) {
@@ -660,7 +662,7 @@ function normalizedVerificationSubmission(
                 (entry.kind === undefined ||
                   entry.kind === "workflow-verification-receipt-reference"))
             ) {
-              addReceiptEntry(entry, `${label}.receiptIds`);
+              addReceiptEntry(entry, `${label}.${key}`);
             } else {
               proposals.push(entry);
             }
@@ -716,6 +718,22 @@ function normalizedVerificationSubmission(
     );
   }
   return { proposals, receiptIds };
+}
+
+/** Machine adapters share the runtime's accepted verification representations.
+ * Manual evidence remains reserved for an authenticated person's adapter. */
+export function validateWorkflowMachineVerification(
+  submission: WorkflowMachineSubmission,
+): void {
+  const { proposals } = normalizedVerificationSubmission(submission);
+  if (
+    proposals.some(
+      (proposal) => isRecord(proposal) && proposal.kind === "manual-evidence",
+    )
+  )
+    throw new Error(
+      "A signed-in person supplies human verification evidence in Badger",
+    );
 }
 
 function verificationFailure(message: string): string {
@@ -1973,7 +1991,10 @@ async function projectedOutcomes(
   state: RunState,
   identity: WorkflowExecutionIdentity,
 ): Promise<
-  Pick<WorkflowStateProjection, "completedNodes" | "evidence" | "history"> & {
+  Pick<
+    WorkflowStateProjection,
+    "completedNodes" | "evidence" | "history" | "historySummary"
+  > & {
     trajectory: Awaited<ReturnType<typeof readTrajectory>>;
   }
 > {
@@ -2018,7 +2039,18 @@ async function projectedOutcomes(
       ? structuredClone(outcomeEvidence)
       : {};
   }
-  return { trajectory, completedNodes, evidence, history };
+  const recentHistory = boundProjectedLedger(history);
+  return {
+    trajectory,
+    completedNodes,
+    evidence,
+    history: recentHistory,
+    historySummary: {
+      total: history.length,
+      returned: recentHistory.length,
+      omitted: history.length - recentHistory.length,
+    },
+  };
 }
 
 /**
@@ -2032,11 +2064,8 @@ async function recoveryStateProjection(
 ): Promise<WorkflowStateProjection> {
   const protocol = (await verifyStoredPackage(location.runRoot, state)).package
     .runtime!.protocol;
-  const { completedNodes, evidence, history } = await projectedOutcomes(
-    location,
-    state,
-    recovery.execution,
-  );
+  const { completedNodes, evidence, history, historySummary } =
+    await projectedOutcomes(location, state, recovery.execution);
   const { disposition: _disposition, ...continuation } = recovery;
   return {
     schemaVersion: 1,
@@ -2047,6 +2076,7 @@ async function recoveryStateProjection(
     completedNodes,
     evidence: recovery.pendingAction?.type === "ask_user" ? {} : evidence,
     history,
+    historySummary,
     artifactReceipts: projectedArtifactReceipts(state),
   };
 }
@@ -2077,7 +2107,7 @@ export async function projectWorkflowState(
   if (recovery) return recoveryStateProjection(location, state, recovery);
 
   const verified = await verifyStoredRun(location);
-  const { trajectory, completedNodes, evidence, history } =
+  const { trajectory, completedNodes, evidence, history, historySummary } =
     await projectedOutcomes(location, state, verified.identity);
   const protocol = verified.package.runtime!.protocol;
   const runtimeState = state.workflowRuntime;
@@ -2155,6 +2185,7 @@ export async function projectWorkflowState(
     completedNodes,
     evidence: verified.pending?.type === "ask_user" ? {} : evidence,
     history,
+    historySummary,
     pendingAction: verified.pending,
     artifactReceipts: projectedArtifactReceipts(state),
     receiptOutputs: workflowReceiptOutputs(

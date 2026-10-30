@@ -929,7 +929,11 @@ const en = {
   "run.humanGate": "Waiting for a person",
   "run.humanGateHelp":
     "Run gate answers and confirmations belong to signed-in people. Gate delivery will be available in a later update.",
-  "run.eventsLimit": "Showing the first 500 events.",
+  "run.historyLimit":
+    "Showing the latest {returned} of {total} outcome summaries. Earlier outcomes remain available in Events.",
+  "run.eventsRange": "Events {first}–{last} of {total}",
+  "run.firstEvents": "First events",
+  "run.nextEvents": "Next events",
   "run.status.running": "Running",
   "run.status.waiting": "Waiting",
   "run.status.blocked": "Blocked",
@@ -2206,7 +2210,11 @@ const zh: Record<MessageId, string> = {
   "run.humanGate": "等待人员处理",
   "run.humanGateHelp":
     "运行确认由登录人员完成。确认结果传递将在后续更新中提供。",
-  "run.eventsLimit": "显示前 500 个事件。",
+  "run.historyLimit":
+    "显示最近 {returned} 条结果摘要，共 {total} 条。可在事件中查看更早的结果。",
+  "run.eventsRange": "事件 {first}–{last}，共 {total} 个",
+  "run.firstEvents": "最早的事件",
+  "run.nextEvents": "后续事件",
   "run.status.running": "运行中",
   "run.status.waiting": "等待中",
   "run.status.blocked": "已阻塞",
