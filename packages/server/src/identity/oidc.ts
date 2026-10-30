@@ -10,6 +10,8 @@ import type { IdentityAdapter, Principal } from "./identity.js";
 export const OIDC_TRANSACTION_SECONDS = 600;
 /** A different key from the migration lock; all server processes share it. */
 const OIDC_START_LOCK_KEY = "8231130000000002";
+/** A longer destination falls back to My work; migration 0026 checks it too. */
+const MAX_RETURN_PATH_BYTES = 2048;
 
 interface Transaction {
   state: string;
@@ -18,28 +20,46 @@ interface Transaction {
   return_path: string | null;
 }
 
-/** Canonicalize a dashboard destination without permitting another origin or app. */
+/**
+ * Canonicalize a dashboard destination without permitting another origin or
+ * app. A reverse proxy may decode the path before it routes the request, so
+ * the path must pass these checks decoded once, too.
+ */
 function dashboardReturnPath(value: string | null, publicUrl: string): string {
   const ownUrl = new URL(publicUrl);
   const basePath = ownUrl.pathname.replace(/\/$/u, "");
   const fallback = `${basePath}/`;
+  const underBase = (path: string) =>
+    basePath === "" || path === basePath || path.startsWith(`${basePath}/`);
   if (
     value === null ||
+    Buffer.byteLength(value) > MAX_RETURN_PATH_BYTES ||
     !value.startsWith("/") ||
     value.startsWith("//") ||
     /[\\\u0000-\u0020\u007f]/u.test(value)
   )
     return fallback;
   const destination = new URL(value, ownUrl);
+  const canonical = `${destination.pathname}${destination.search}${destination.hash}`;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(destination.pathname);
+  } catch {
+    return fallback;
+  }
   if (
     destination.origin !== ownUrl.origin ||
-    destination.pathname.startsWith("//") ||
-    (basePath !== "" &&
-      destination.pathname !== basePath &&
-      !destination.pathname.startsWith(`${basePath}/`))
+    !underBase(destination.pathname) ||
+    // Encoded separators and dots (%2F, %5C, %2E) and a second encoding
+    // (%25) would change the path that a decoding proxy routes.
+    /[\\%\u0000-\u001f\u007f]/u.test(decoded) ||
+    decoded.includes("//") ||
+    decoded.split("/").some((segment) => segment === "." || segment === "..") ||
+    !underBase(decoded) ||
+    Buffer.byteLength(canonical) > MAX_RETURN_PATH_BYTES
   )
     return fallback;
-  return `${destination.pathname}${destination.search}${destination.hash}`;
+  return canonical;
 }
 
 /**

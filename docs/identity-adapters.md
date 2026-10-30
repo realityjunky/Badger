@@ -68,9 +68,15 @@ they form part of every person's identity.
 
 Opening the signed-out dashboard offers a sign-in link carrying the requested
 page and query as `returnTo`. `GET <base>/auth/oidc/login` keeps that destination
-only when it is a path on Badger's own origin under the configured base path.
-Absolute URLs, network-path URLs (`//host`), backslashes, and paths outside
-that base path fall back to My work. The destination is stored with the
+only when it is a path on Badger's own origin under the configured base path,
+at most 2,048 bytes long. Absolute URLs, network-path URLs (`//host`),
+backslashes, paths outside that base path, and longer destinations fall back to
+My work. A reverse proxy may decode a path before it routes the request, so a
+path must also stay under the base path decoded once: encoded slashes,
+backslashes, and dots (`%2F`, `%5C`, `%2E`, in either case), `%25`, encoded
+control characters, and malformed encodings fall back to My work as well,
+while other encoded characters, such as a non-ASCII name, are kept. The
+destination is stored with the
 server-side sign-in transaction, never in a cookie or the provider's state,
 and checked again before the completed sign-in redirects there. The login
 redirect to the provider uses fresh state, nonce and PKCE values. The callback

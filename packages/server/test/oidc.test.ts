@@ -291,6 +291,19 @@ describe("OpenID Connect sign-in", () => {
     "/badger/../another-app",
     "/badger/%2e%2e/another-app",
     "/badger/my-work\r\nlocation:https://evil.example",
+    // A proxy that decodes the path before routing it would leave Badger.
+    "/badger/..%2Fother-app/x",
+    "/badger/..%2fother-app/x",
+    "/badger/%2e%2e%2fother-app/x",
+    "/badger/%2E%2E%2Fother-app/x",
+    "/badger/.%2E/other-app/x",
+    "/badger/..%5Cother-app/x",
+    "/badger/%2e%2e%5cother-app/x",
+    "/badger/my-work%2F%2Fevil.example",
+    "/badger/..%252Fother-app/x",
+    "/badger/%c0%ae%c0%ae%2fother-app/x",
+    "/badger/%zz/my-work",
+    "/badger/my-work%00",
   ])(
     "falls back to My work for an unsafe return path: %s",
     async (returnTo) => {
@@ -302,6 +315,41 @@ describe("OpenID Connect sign-in", () => {
       });
       expect(completed.status).toBe(303);
       expect(completed.headers.get("location")).toBe("/badger/");
+    },
+  );
+
+  it.each([
+    {
+      name: "an encoded name and query",
+      returnTo: "/badger/skills/%E4%B8%AD?file=reference%2Fnotes.md",
+      location: "/badger/skills/%E4%B8%AD?file=reference%2Fnotes.md",
+    },
+    {
+      name: "2,048 bytes",
+      returnTo: `/badger/my-work?note=${"a".repeat(2027)}`,
+      location: `/badger/my-work?note=${"a".repeat(2027)}`,
+    },
+    {
+      name: "2,049 bytes",
+      returnTo: `/badger/my-work?note=${"a".repeat(2028)}`,
+      location: "/badger/",
+    },
+    {
+      name: "over 2,048 bytes once percent-encoded",
+      returnTo: `/badger/${"{".repeat(700)}`,
+      location: "/badger/",
+    },
+  ])(
+    "keeps a return path of at most 2,048 bytes: $name",
+    async ({ returnTo, location }) => {
+      const app = await start();
+      const flow = await begin(returnTo);
+      const completed = await app.request(flow.completePath, {
+        redirect: "manual",
+        headers: { cookie: flow.flowCookie },
+      });
+      expect(completed.status).toBe(303);
+      expect(completed.headers.get("location")).toBe(location);
     },
   );
 
