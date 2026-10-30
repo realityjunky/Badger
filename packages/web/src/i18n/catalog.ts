@@ -253,6 +253,10 @@ const en = {
   "ledger.recordRevision": "Record revision",
   "ledger.history": "Draft revision history",
   "ledger.retire": "Retire draft",
+  "ledger.retireInferenceConfirm": "Retire this inference?",
+  "ledger.retireAssumptionConfirm": "Retire this assumption?",
+  "ledger.retireHint":
+    "A retired draft cannot be revised. It is removed from the ledger and readiness.",
   "ledger.save": "Save draft",
   "ledger.edit": "Edit draft",
   "ledger.state.draft": "Draft",
@@ -1170,6 +1174,10 @@ const zh: Record<MessageId, string> = {
   "ledger.recordRevision": "记录修订版",
   "ledger.history": "草稿修订历史",
   "ledger.retire": "停用草稿",
+  "ledger.retireInferenceConfirm": "停用此推断草稿？",
+  "ledger.retireAssumptionConfirm": "停用此假设草稿？",
+  "ledger.retireHint":
+    "停用后的草稿无法再修订，并将从知识账本和就绪状态中移除。",
   "ledger.save": "保存草稿",
   "ledger.edit": "编辑草稿",
   "ledger.state.draft": "草稿",

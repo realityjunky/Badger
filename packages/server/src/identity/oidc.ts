@@ -3,10 +3,13 @@ import * as client from "openid-client";
 import type { Clock } from "../clock.js";
 import type { OidcSettings } from "../config.js";
 import type { Database } from "../database/database.js";
+import { silentLogger, type Logger } from "../log.js";
 import { hashCredential, readCookie } from "./cookies.js";
 import type { IdentityAdapter, Principal } from "./identity.js";
 
 export const OIDC_TRANSACTION_SECONDS = 600;
+/** A different key from the migration lock; all server processes share it. */
+const OIDC_START_LOCK_KEY = "8231130000000002";
 
 interface Transaction {
   state: string;
@@ -74,7 +77,10 @@ export function createOidcIdentityAdapter(
   settings: OidcSettings,
   clock: Clock,
   database: Database,
+  logger: Logger = silentLogger,
 ): IdentityAdapter {
+  let pendingEvictions = 0;
+  let lastEvictionLog = -Infinity;
   let discovered: Promise<client.Configuration> | undefined;
   const configuration = (): Promise<client.Configuration> => {
     discovered ??= client
@@ -143,7 +149,12 @@ export function createOidcIdentityAdapter(
           code_challenge_method: "S256",
         });
         const now = clock.now();
-        await database.transaction(async (tx) => {
+        const evicted = await database.transaction(async (tx) => {
+          // Serialize starts, including on an empty table. The same
+          // transaction evicts older pending sign-ins and adds this one.
+          await tx.query(
+            `select pg_advisory_xact_lock(${OIDC_START_LOCK_KEY})`,
+          );
           await tx.query(
             "delete from oidc_transactions where expires_at <= $1",
             [now],
@@ -151,6 +162,15 @@ export function createOidcIdentityAdapter(
           await tx.query(
             "delete from identity_sessions where expires_at <= $1",
             [now],
+          );
+          // Every transaction has the same lifetime, so expiry orders starts.
+          // Break equal-time ties deterministically; leave room for this start.
+          const removed = await tx.query(
+            `delete from oidc_transactions where token_hash in (
+              select token_hash from oidc_transactions
+              order by expires_at desc, token_hash desc offset $1
+            )`,
+            [settings.maxPendingSignIns - 1],
           );
           await tx.query(
             "insert into oidc_transactions (token_hash, state, nonce, code_verifier, expires_at, return_path) values ($1, $2, $3, $4, $5, $6)",
@@ -163,7 +183,18 @@ export function createOidcIdentityAdapter(
               dashboardReturnPath(returnPath, settings.publicUrl),
             ],
           );
+          return removed.rowCount;
         });
+        pendingEvictions += evicted;
+        const logTime = clock.now().getTime();
+        if (pendingEvictions > 0 && logTime - lastEvictionLog >= 60_000) {
+          logger.info({
+            event: "oidc.sign-ins-evicted",
+            evictedCount: pendingEvictions,
+          });
+          pendingEvictions = 0;
+          lastEvictionLog = logTime;
+        }
         return { authorizationUrl: authorizationUrl.href, transactionToken };
       },
       complete: async (transactionToken, callback) => {
