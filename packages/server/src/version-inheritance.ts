@@ -8,7 +8,9 @@ type RecordType =
   | "fact"
   | "acknowledgement"
   | "source-study"
-  | "draft";
+  | "draft"
+  | "translation"
+  | "import";
 export interface RecordOrigin {
   workflowVersionId: string;
   recordId: string;
@@ -59,6 +61,7 @@ export async function inheritVersionRecords(
      union all select 'acknowledgement', a.id, 1 from fact_acknowledgements a join confirmed_facts f on f.id = a.fact_id join question_resolutions r on r.id = f.resolution_id join questions q on q.id = r.question_id where q.workflow_version_id = $1
      union all select 'source-study', id, revision from source_study_records where workflow_version_id = $1
      union all select 'draft', id, revision from questionnaire_drafts where workflow_version_id = $1
+     union all select 'translation', t.id, 1 from question_translations t join questions q on q.id = t.question_id where q.workflow_version_id = $1
      order by type, id`,
     [sourceId],
   );
@@ -73,6 +76,15 @@ export async function inheritVersionRecords(
   // actors, hashes and timestamps remain untouched.
   const origins = `with origins as (select * from workflow_record_origins where workflow_version_id = $2)`;
   const values = [sourceId, versionId];
+  // An import has no identity of its own; its origin maps the copied question.
+  await tx.query(
+    `${origins} insert into workflow_record_origins
+     (workflow_version_id, record_type, record_id, source_workflow_version_id, source_record_id, source_revision)
+     select $2, 'import', o.record_id, $1, i.question_id, 1
+     from question_imports i join origins o on o.source_record_id = i.question_id and o.record_type = 'question'
+     where o.source_workflow_version_id = $1`,
+    values,
+  );
   await tx.query(
     `insert into workflow_skill_pins
     (workflow_version_id, skill_id, skill_version_hash, purpose, revision, pinned_by, created_at, updated_at)
@@ -113,6 +125,25 @@ export async function inheritVersionRecords(
     `${origins} insert into question_revisions (question_id, revision, content, actor_id, created_at)
     select o.record_id, r.revision, r.content, r.actor_id, r.created_at
     from question_revisions r join origins o on o.source_record_id = r.question_id and o.record_type = 'question'
+    where o.source_workflow_version_id = $1`,
+    values,
+  );
+  // Accepted translations and import provenance belong to question revisions,
+  // so they follow the copied revisions. Each still names its original job.
+  await tx.query(
+    `${origins} insert into question_translations
+    (id, question_id, question_revision, locale, text, rationale, actor_id, job_id, created_at)
+    select o.record_id, q.record_id, t.question_revision, t.locale, t.text, t.rationale, t.actor_id, t.job_id, t.created_at
+    from question_translations t join origins o on o.source_record_id = t.id and o.record_type = 'translation'
+    join origins q on q.source_record_id = t.question_id and q.record_type = 'question'
+    where o.source_workflow_version_id = $1`,
+    values,
+  );
+  await tx.query(
+    `${origins} insert into question_imports
+    (question_id, question_revision, skill_id, skill_version_hash, source_number, evidence, job_id)
+    select o.record_id, i.question_revision, i.skill_id, i.skill_version_hash, i.source_number, i.evidence, i.job_id
+    from question_imports i join origins o on o.source_record_id = i.question_id and o.record_type = 'import'
     where o.source_workflow_version_id = $1`,
     values,
   );

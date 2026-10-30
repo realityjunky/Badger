@@ -1,8 +1,9 @@
 # Inherit Reviewed Records Without Reissuing Approvals
 
 Status: accepted. A new Workflow version copies the latest version's pinned
-Skills, source-study records, questionnaire revisions, answers, facts, and
-resolutions under the workflow and source-version locks. Each copied record
+Skills, source-study records, questionnaire revisions with their accepted
+translations and import provenance, answers, facts, and resolutions under the
+workflow and source-version locks. Each copied record
 gets a new identity and immutable provenance naming its source version,
 record, and revision. Further edits are independent, and an inheritance chain
 can always be followed to the original decision. Facts and answer attachment

@@ -23,9 +23,11 @@ create table question_translations (
   text text not null,
   rationale text not null,
   actor_id text not null references people (id),
-  job_id text not null unique references drafting_jobs (id),
+  -- An inherited copy keeps naming the job that produced the original.
+  job_id text not null references drafting_jobs (id),
   created_at timestamptz not null,
-  foreign key (question_id, question_revision) references question_revisions (question_id, revision)
+  foreign key (question_id, question_revision) references question_revisions (question_id, revision),
+  unique (question_id, job_id)
 );
 create trigger question_translations_immutable before update or delete on question_translations
   for each row execute function refuse_questionnaire_revision_change();
