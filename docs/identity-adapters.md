@@ -54,16 +54,17 @@ URL, including the base path, without a query or fragment; it must agree with
 HTTP on loopback for local testing. Issuer strings must stay stable because
 they form part of every person's identity.
 
-| Setting                       | Default          | Meaning                                                                                                                                   |
-| ----------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `BADGER_OIDC_ISSUER`          | Required         | Discovery issuer; must match provider metadata and ID tokens exactly.                                                                     |
-| `BADGER_OIDC_CLIENT_ID`       | Required         | Registered confidential client ID.                                                                                                        |
-| `BADGER_OIDC_CLIENT_SECRET`   | Required         | Client secret, used only at the token endpoint.                                                                                           |
-| `BADGER_PUBLIC_URL`           | Required         | External Badger URL including its base path.                                                                                              |
-| `BADGER_SESSION_COOKIE`       | `badger_session` | Badger's own cookie name; choose a name distinct from platform and other application cookies. `__Host-` names require the root base path. |
-| `BADGER_SESSION_SECONDS`      | `28800`          | Absolute session lifetime (8 hours); accepts 60–604800 seconds.                                                                           |
-| `BADGER_OIDC_TIMEOUT_SECONDS` | `3`              | Timeout for each discovery, token, or signing-key request; accepts 1–60 seconds.                                                          |
-| `BADGER_OIDC_EMAILS_VERIFIED` | `false`          | Treat an ID token without an `email_verified` claim as verified; a claim the provider sends still decides.                                |
+| Setting                            | Default          | Meaning                                                                                                                                   |
+| ---------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `BADGER_OIDC_ISSUER`               | Required         | Discovery issuer; must match provider metadata and ID tokens exactly.                                                                     |
+| `BADGER_OIDC_CLIENT_ID`            | Required         | Registered confidential client ID.                                                                                                        |
+| `BADGER_OIDC_CLIENT_SECRET`        | Required         | Client secret, used only at the token endpoint.                                                                                           |
+| `BADGER_PUBLIC_URL`                | Required         | External Badger URL including its base path.                                                                                              |
+| `BADGER_SESSION_COOKIE`            | `badger_session` | Badger's own cookie name; choose a name distinct from platform and other application cookies. `__Host-` names require the root base path. |
+| `BADGER_SESSION_SECONDS`           | `28800`          | Absolute session lifetime (8 hours); accepts 60–604800 seconds.                                                                           |
+| `BADGER_OIDC_TIMEOUT_SECONDS`      | `3`              | Timeout for each discovery, token, or signing-key request; accepts 1–60 seconds.                                                          |
+| `BADGER_OIDC_MAX_PENDING_SIGN_INS` | `10000`          | Maximum pending sign-in transactions; accepts a whole number from 1–1000000.                                                              |
+| `BADGER_OIDC_EMAILS_VERIFIED`      | `false`          | Treat an ID token without an `email_verified` claim as verified; a claim the provider sends still decides.                                |
 
 Opening the signed-out dashboard offers a sign-in link carrying the requested
 page and query as `returnTo`. `GET <base>/auth/oidc/login` keeps that destination
@@ -86,6 +87,17 @@ and nonce for pending transactions, and the verified identity for sessions;
 it never retains provider access, refresh or ID tokens. Multiple server
 processes share transactions and sessions through the database. Expired
 records are removed when a new sign-in begins.
+
+When a start would exceed `BADGER_OIDC_MAX_PENDING_SIGN_INS`, Badger evicts
+the oldest pending transactions in the same database transaction as the new
+one. Starts share a database lock across server processes, keeping the cap
+even when they arrive together. A start is never refused because of the cap.
+During a flood, a person's pending sign-in may be evicted: completing it then
+shows "Sign-in is invalid or expired", and they start again. Each server
+process logs `oidc.sign-ins-evicted` with an aggregated `evictedCount` at most
+once per minute, on the next sign-in start. Rate-limit `<base>/auth/oidc/login`
+per client at the deployment's reverse proxy, which can identify clients
+before forwarding their requests.
 
 Issuing or revoking a session records its actor, credential hash, target,
 channel, reason and request ID in Activity, in the same database transaction.

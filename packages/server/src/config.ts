@@ -69,6 +69,7 @@ export interface OidcSettings {
   sessionCookie: string;
   sessionSeconds: number;
   timeoutSeconds: number;
+  maxPendingSignIns: number;
   /** Whether an ID token without `email_verified` counts as verified. */
   emailsVerified: boolean;
 }
@@ -514,6 +515,12 @@ function readOidc(environment: Environment): OidcSettings {
       min: 1,
       max: 60,
     }),
+    maxPendingSignIns: readInteger(
+      environment,
+      "BADGER_OIDC_MAX_PENDING_SIGN_INS",
+      10_000,
+      { min: 1, max: 1_000_000 },
+    ),
     emailsVerified:
       readBoolean(environment, "BADGER_OIDC_EMAILS_VERIFIED") ?? false,
   };

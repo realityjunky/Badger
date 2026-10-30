@@ -190,17 +190,16 @@ export async function startTestService(
   const { config } = connection;
   const clock = createFixedClock("2026-10-27T00:00:00.000Z");
   const ids = createSequentialIds();
-  const identity =
-    options.identity ??
-    (mode === "test-identity"
-      ? createTestIdentityAdapter()
-      : configuredIdentityAdapter(config, clock, connection.database));
-
   const logs: Record<string, unknown>[] = [];
   const logger: Logger = {
     info: (fields) => logs.push({ level: "info", ...fields }),
     error: (fields) => logs.push({ level: "error", ...fields }),
   };
+  const identity =
+    options.identity ??
+    (mode === "test-identity"
+      ? createTestIdentityAdapter()
+      : configuredIdentityAdapter(config, clock, connection.database, logger));
 
   let server: StartedServer;
   try {

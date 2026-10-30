@@ -41,7 +41,12 @@ export async function main(
     const server = await startHttpServer({
       config,
       database,
-      identity: configuredIdentityAdapter(config, systemClock, database),
+      identity: configuredIdentityAdapter(
+        config,
+        systemClock,
+        database,
+        logger,
+      ),
       clock: systemClock,
       ids: randomIdSource,
       migrations,
