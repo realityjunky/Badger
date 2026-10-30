@@ -1,5 +1,5 @@
 import { canonicalHash, deriveFactoryPlan } from "@realityjunky/badger";
-import { planInputs, readPlanVersions } from "../plans.js";
+import { planInputs, readPlanHead } from "../plans.js";
 import type { Queryable } from "../database/database.js";
 import { listWorkflowPins } from "../workflow-source.js";
 import { readVersion } from "../skills/library.js";
@@ -44,7 +44,7 @@ export async function draftingContext(
     [workflowId],
   );
   const planningInput = await planInputs(tx, versionId, personId);
-  const currentPlan = (await readPlanVersions(tx, versionId))[0];
+  const currentPlan = await readPlanHead(tx, versionId);
   const bundle = {
     planning: planningInput
       ? {

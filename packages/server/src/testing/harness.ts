@@ -47,10 +47,13 @@ export interface TestServiceOptions {
   identity?: IdentityAdapter;
 }
 
+/** A request `fetch` refuses to send: a chosen Host, or a GET with a body. */
 export interface RawRequestInput {
   method?: string;
   path: string;
   headers?: Record<string, string | string[]>;
+  body?: string;
+  as?: TestPerson;
 }
 
 export interface RawResponse {
@@ -221,20 +224,22 @@ export async function startTestService(
   const baseUrl = server.url;
   const host = new URL(baseUrl).hostname.replace(/^\[|\]$/gu, "");
 
+  const personHeader = (as: TestPerson): string => {
+    if (mode !== "test-identity" || options.identity !== undefined) {
+      throw new Error(
+        "Only the test identity adapter selects a person per request",
+      );
+    }
+    return JSON.stringify(as);
+  };
+
   const request = async (
     requestPath: string,
     init: RequestInit & { as?: TestPerson } = {},
   ): Promise<Response> => {
     const { as, ...rest } = init;
     const headers = new Headers(rest.headers);
-    if (as !== undefined) {
-      if (mode !== "test-identity" || options.identity !== undefined) {
-        throw new Error(
-          "Only the test identity adapter selects a person per request",
-        );
-      }
-      headers.set(TEST_PERSON_HEADER, JSON.stringify(as));
-    }
+    if (as !== undefined) headers.set(TEST_PERSON_HEADER, personHeader(as));
     return fetch(new URL(requestPath, baseUrl), { ...rest, headers });
   };
 
@@ -246,7 +251,16 @@ export async function startTestService(
           port: server.port,
           method: input.method ?? "GET",
           path: input.path,
-          headers: input.headers ?? {},
+          headers: {
+            ...input.headers,
+            // Node frames a GET body only when its length is given.
+            ...(input.body === undefined
+              ? {}
+              : { "content-length": String(Buffer.byteLength(input.body)) }),
+            ...(input.as === undefined
+              ? {}
+              : { [TEST_PERSON_HEADER]: personHeader(input.as) }),
+          },
         },
         (response) => {
           response.setEncoding("utf8");
@@ -264,7 +278,7 @@ export async function startTestService(
         },
       );
       outgoing.on("error", reject);
-      outgoing.end();
+      outgoing.end(input.body);
     });
 
   const worker = (

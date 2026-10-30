@@ -23,3 +23,12 @@ original artifact and confirmation retry response remain intact, while gate
 history records invalidation and the replacement confirmation. This extends
 ADRs 0006, 0016, and 0022 without giving readiness or a payload flag the power
 to approve a dossier.
+
+Which version is current is append-only history too. Each composition that
+changes it appends a head naming a stored version, and the latest head is
+current, so the current version need not be the newest. Composing an earlier
+version's content again appends a head that selects that version again, with
+the same supersession, invalidation, and notices as a replacement; it is never
+copied or refused. Gates, plan derivation, the proposal, and invalidation read
+the head. Treating the highest version number as current was rejected: an
+Engineer could not return to an earlier meaning without a cosmetic edit.

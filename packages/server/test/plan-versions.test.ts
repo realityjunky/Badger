@@ -6,6 +6,7 @@ import {
   type TestService,
 } from "../src/testing/index.js";
 import {
+  admin,
   engineer,
   owner,
   observer,
@@ -300,6 +301,103 @@ it("refuses concurrent plan edits and stale approval previews while preserving e
   expect(view.versions).toHaveLength(2);
   expect(view.versions[1]).toEqual(version);
   expect(view.confirmation.invalidatedAt).not.toBeNull();
+});
+
+it("selects an earlier plan version again when its content is saved again, superseding the newer version's approval", async () => {
+  service = await startPlanningService();
+  const { call, base, approve } = await planningFixture(service);
+  await approve("dossier", owner);
+  const { skeleton, dossierHash } = await call(`${base}/plan`);
+  const first = structuredClone(skeleton);
+  first.workflow.customNodes[0].implementation.skill = "prepare";
+  const second = structuredClone(first);
+  second.workflow.customNodes[0].label = "Prepare the reviewed report";
+  const save = async (
+    plan: unknown,
+    expectedVersionId: string | null,
+    status = 201,
+  ) => {
+    const { composition } = await call(`${base}/plan/preview`, "POST", {
+      plan,
+      dossierHash,
+    });
+    return (
+      await call(
+        `${base}/plan/save`,
+        "POST",
+        {
+          plan,
+          dossierHash,
+          confirmationHash: composition.hash,
+          expectedVersionId,
+        },
+        engineer,
+        status,
+      )
+    ).version;
+  };
+  const original = await save(first, null);
+  const replacement = await save(second, original.id);
+  const approved = await approve("plan", owner);
+  expect(approved.confirmation.boundHashes.plan).toBe(replacement.hash);
+
+  await save(first, original.id, 409);
+  expect(await save(first, replacement.id)).toEqual(original);
+  const view = await call(`${base}/plan`);
+  expect(view.versions).toEqual([replacement, original]);
+  expect(view).toMatchObject({
+    headVersionId: original.id,
+    currentVersionId: original.id,
+  });
+  const { confirmation } = await call(`${base}/gates/plan`);
+  expect(confirmation).toMatchObject({
+    id: approved.confirmation.id,
+    invalidationReason: expect.stringContaining("earlier plan version"),
+  });
+  expect(confirmation.invalidatedAt).not.toBeNull();
+  for (const person of [engineer, owner])
+    expect(
+      (await call("/me/inbox", "GET", undefined, person)).items,
+    ).toContainEqual(
+      expect.objectContaining({
+        gate: "plan",
+        kind: "gate-invalidated",
+        state: "unread",
+      }),
+    );
+  const { events } = await call(
+    "/audit-events?action=plan.reselected",
+    "GET",
+    undefined,
+    admin,
+  );
+  expect(events).toEqual([
+    expect.objectContaining({
+      targetId: original.id,
+      before: { revision: 2, hash: replacement.hash },
+      after: { revision: 1, hash: original.hash },
+    }),
+  ]);
+
+  const reapproved = await approve("plan", owner);
+  expect(reapproved.confirmation.boundHashes.plan).toBe(original.hash);
+  expect((await call(`${base}/proposal`)).planVersionHash).toBe(original.hash);
+  expect(await save(first, original.id, 200)).toEqual(original);
+  expect((await call(`${base}/gates/plan`)).confirmation).toMatchObject({
+    id: reapproved.confirmation.id,
+    invalidatedAt: null,
+  });
+  const { job } = await call(
+    `${base}/drafting-jobs`,
+    "POST",
+    { kind: "draft-plan", confirmed: true },
+    engineer,
+    201,
+  );
+  const claimed = await call(`${base}/drafting-jobs/${job.id}/claim`, "POST", {
+    revision: job.revision,
+  });
+  expect(claimed.contextBundle.planning.basePlanVersionId).toBe(original.id);
 });
 
 it("keeps an Agent's plan as a suggestion until an Engineer reviews and accepts edited content", async () => {

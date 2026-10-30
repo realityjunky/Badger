@@ -485,6 +485,111 @@ describe("dossier versions", () => {
     );
   });
 
+  it("selects an earlier dossier version again when its content is composed again, superseding the newer version's approval", async () => {
+    const { base } = await setup();
+    const { factId } = await confirmedFact(base);
+    const compose = async (
+      input: ReturnType<typeof semantics>,
+      status = 201,
+    ) => {
+      const { composition } = await call(
+        `${base}/dossier/preview`,
+        "POST",
+        input,
+      );
+      return (
+        await call(
+          `${base}/dossier/compose`,
+          "POST",
+          { ...input, confirmationHash: composition.hash },
+          engineer,
+          status,
+        )
+      ).version;
+    };
+    const approve = async (requestId: string) => {
+      const { preview } = await call(
+        `${base}/gates/dossier/preview`,
+        "POST",
+        {},
+        owner,
+      );
+      return call(
+        `${base}/gates/dossier/commit`,
+        "POST",
+        { confirmationHash: preview.confirmationHash, requestId },
+        owner,
+      );
+    };
+    const first = semantics(factId);
+    const second = structuredClone(first);
+    second.nodes[0].responsibility.summary =
+      "Prepare and return the reviewed report.";
+    const original = await compose(first);
+    const replacement = await compose(second);
+    const approved = await approve("approve-replacement");
+    expect(approved.confirmation.boundHashes.dossier).toBe(replacement.hash);
+
+    expect(await compose(first)).toEqual(original);
+    const read = await call(`${base}/dossier`);
+    expect(read.versions).toEqual([replacement, original]);
+    expect(read).toMatchObject({
+      headVersionId: original.id,
+      currentVersionId: original.id,
+    });
+    const { confirmation } = await call(`${base}/gates/dossier`);
+    expect(confirmation).toMatchObject({
+      id: approved.confirmation.id,
+      invalidationReason: expect.stringContaining("earlier dossier version"),
+    });
+    expect(confirmation.invalidatedAt).not.toBeNull();
+    for (const person of [engineer, owner])
+      expect(
+        (await call("/me/inbox", "GET", undefined, person)).items,
+      ).toContainEqual(
+        expect.objectContaining({
+          gate: "dossier",
+          kind: "gate-invalidated",
+          state: "unread",
+        }),
+      );
+    expect(
+      (await call("/me/inbox", "GET", undefined, owner)).items,
+    ).toContainEqual(
+      expect.objectContaining({
+        gate: "dossier",
+        kind: "gate-ready",
+        state: "unread",
+      }),
+    );
+    const { events } = await call(
+      "/audit-events?action=dossier.reselected",
+      "GET",
+      undefined,
+      admin,
+    );
+    expect(events).toEqual([
+      expect.objectContaining({
+        targetId: original.id,
+        before: { revision: 2, hash: replacement.hash },
+        after: { revision: 1, hash: original.hash },
+      }),
+    ]);
+
+    const reapproved = await approve("approve-original-again");
+    expect(reapproved.confirmation.boundHashes.dossier).toBe(original.hash);
+    expect(
+      (await call(`${base}/gates/dossier`)).confirmations.find(
+        (c: { id: string }) => c.id === approved.confirmation.id,
+      ).supersededBy,
+    ).toBe(reapproved.confirmation.id);
+    expect(await compose(first, 200)).toEqual(original);
+    expect((await call(`${base}/gates/dossier`)).confirmation).toMatchObject({
+      id: reapproved.confirmation.id,
+      invalidatedAt: null,
+    });
+  });
+
   it("snapshots pinned source identities and evidence, supersedes on source fact changes, and requires a replacement approval", async () => {
     const { base, group } = await setup();
     const { skill } = await call(
@@ -688,13 +793,6 @@ describe("dossier versions", () => {
       409,
     );
     expect((await call(`${base}/dossier`)).currentVersionId).toBe(latest.id);
-    await call(
-      `${base}/dossier/compose`,
-      "POST",
-      { ...input, confirmationHash: composition.hash },
-      engineer,
-      409,
-    );
     for (const person of [owner, engineer]) {
       const { secret } = await call(
         "/me/tokens",

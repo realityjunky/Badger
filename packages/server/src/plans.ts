@@ -10,7 +10,7 @@ import {
 import { recordAudit, type WriteContext } from "./audit.js";
 import type { Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
-import { dossierGateState, readDossierVersions } from "./dossier.js";
+import { dossierGateState, readDossierHead } from "./dossier.js";
 import {
   gatePreview,
   readGateConfirmations,
@@ -52,13 +52,26 @@ export async function readPlanVersions(tx: Queryable, versionId: string) {
   ).rows.map(toVersion);
 }
 
+/** The current version is the latest head's, which need not be the newest. */
+export async function readPlanHead(tx: Queryable, versionId: string) {
+  const row = (
+    await tx.query<PlanRow>(
+      `select p.* from plan_heads h
+        join plan_versions p on p.workflow_version_id = h.workflow_version_id and p.hash = h.plan_hash
+       where h.workflow_version_id = $1 order by h.sequence desc limit 1`,
+      [versionId],
+    )
+  ).rows[0];
+  return row === undefined ? null : toVersion(row);
+}
+
 /** Gate history grants approval; a dossier's payload flag never does. */
 export async function planInputs(
   tx: Queryable,
   versionId: string,
   personId: string,
 ): Promise<PlanCompositionInput | null> {
-  const dossier = (await readDossierVersions(tx, versionId))[0];
+  const dossier = await readDossierHead(tx, versionId);
   const approval = (await readGateConfirmations(tx, versionId, "dossier")).find(
     (c) => c.invalidatedAt === null,
   );
@@ -109,7 +122,12 @@ export function requirePlanInputs(
   return input;
 }
 
-/** Called under the Workflow version lock by direct saves and human draft acceptance. */
+/**
+ * Called under the Workflow version lock by direct saves and human draft
+ * acceptance. Content identical to the current version returns it unchanged;
+ * otherwise the save appends a head to a new version, or to the earlier
+ * version with identical content, which then needs a new approval.
+ */
 export async function storePlan(
   tx: Queryable,
   deps: ServiceDependencies,
@@ -124,43 +142,51 @@ export async function storePlan(
       { findings: composition.findings },
     );
   const versionId = composition.snapshot.workflowVersionId;
-  const versions = await readPlanVersions(tx, versionId);
-  const latest = versions[0];
-  if (latest?.hash === composition.hash)
-    return { version: latest, created: false };
-  if (expectedVersionId !== (latest?.id ?? null))
+  const head = await readPlanHead(tx, versionId);
+  if (head?.hash === composition.hash) return { version: head, changed: false };
+  if (expectedVersionId !== (head?.id ?? null))
     throw new RequestError(
       409,
       "Another plan version was saved; reload before saving your edits",
     );
-  if (versions.some((version) => version.hash === composition.hash))
-    throw new RequestError(
-      409,
-      "This is an earlier plan version; review the latest plan",
+  const versions = await readPlanVersions(tx, versionId);
+  const earlier = versions.find((version) => version.hash === composition.hash);
+  const version =
+    earlier ??
+    toVersion(
+      (
+        await tx.query<PlanRow>(
+          `insert into plan_versions (id, workflow_version_id, dossier_hash, number, hash, canonical_json, created_by, created_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
+          [
+            deps.ids.next(),
+            versionId,
+            composition.snapshot.dossierHash,
+            (versions[0]?.number ?? 0) + 1,
+            composition.hash,
+            composition.canonicalJson,
+            context.personId,
+            deps.clock.now(),
+          ],
+        )
+      ).rows[0]!,
     );
-  const row = (
-    await tx.query<PlanRow>(
-      `insert into plan_versions (id, workflow_version_id, dossier_hash, number, hash, canonical_json, created_by, created_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
-      [
-        deps.ids.next(),
-        versionId,
-        composition.snapshot.dossierHash,
-        (latest?.number ?? 0) + 1,
-        composition.hash,
-        composition.canonicalJson,
-        context.personId,
-        deps.clock.now(),
-      ],
-    )
-  ).rows[0]!;
+  const headId = deps.ids.next();
+  await tx.query(
+    `insert into plan_heads (id, workflow_version_id, sequence, plan_hash, selected_by, selected_at)
+    select $1, $2, coalesce(max(sequence), 0) + 1, $3, $4, $5 from plan_heads where workflow_version_id = $2`,
+    [headId, versionId, version.hash, context.personId, deps.clock.now()],
+  );
+  const change = earlier
+    ? "Selecting an earlier plan version again"
+    : "A new plan version";
   await invalidateGate(
     tx,
     deps,
     context,
     versionId,
     "plan",
-    "A new plan version superseded the approval",
+    `${change} superseded the approval`,
     ["Engineer", "Workflow owner"],
   );
   await invalidateProposal(
@@ -168,7 +194,7 @@ export async function storePlan(
     deps,
     context,
     versionId,
-    "A new plan version superseded the proposal",
+    `${change} superseded the proposal`,
   );
   const { stages } = (
     await tx.query<{ stages: Record<string, string> }>(
@@ -184,20 +210,23 @@ export async function storePlan(
     [versionId, JSON.stringify(stages), deps.clock.now()],
   );
   await closeGateInbox(tx, versionId, "plan", deps.clock.now(), "gate-ready");
-  await notifyWorkflowRoles(tx, deps, versionId, "plan", "gate-ready", row.id, [
+  // Each head is a new request for approval, even of an earlier version.
+  await notifyWorkflowRoles(tx, deps, versionId, "plan", "gate-ready", headId, [
     "Workflow owner",
   ]);
   await recordAudit(tx, deps, {
     actor: { personId: context.personId, credential: context.credential },
     channel: context.channel,
-    action: "plan.saved",
-    target: { type: "plan_version", id: row.id },
-    before: null,
-    after: { revision: row.number, hash: row.hash },
-    reason: "Saved a dossier-bound plan version",
+    action: earlier ? "plan.reselected" : "plan.saved",
+    target: { type: "plan_version", id: version.id },
+    before: earlier && head ? { revision: head.number, hash: head.hash } : null,
+    after: { revision: version.number, hash: version.hash },
+    reason: earlier
+      ? "Selected an earlier plan version again"
+      : "Saved a dossier-bound plan version",
     requestId: context.requestId,
   });
-  return { version: toVersion(row), created: true };
+  return { version, changed: true };
 }
 
 export async function planView(
@@ -206,16 +235,16 @@ export async function planView(
   personId: string,
 ) {
   const inputs = await planInputs(tx, versionId, personId);
-  const versions = await readPlanVersions(tx, versionId);
-  const latest = versions[0];
+  const head = await readPlanHead(tx, versionId);
   const confirmations = await readGateConfirmations(tx, versionId, "plan");
   return {
-    versions,
+    versions: await readPlanVersions(tx, versionId),
     dossierHash: inputs?.dossierHash ?? null,
     skeleton: inputs ? deriveFactoryPlan(inputs) : null,
+    headVersionId: head?.id ?? null,
     currentVersionId:
-      inputs && latest?.snapshot.dossierHash === inputs.dossierHash
-        ? latest.id
+      inputs && head?.snapshot.dossierHash === inputs.dossierHash
+        ? head.id
         : null,
     confirmation: confirmations[0] ?? null,
     confirmations,
@@ -228,7 +257,7 @@ export async function planGateState(
   personId: string,
 ): Promise<GateState> {
   const inputs = await planInputs(tx, versionId, personId);
-  const plan = (await readPlanVersions(tx, versionId))[0];
+  const plan = await readPlanHead(tx, versionId);
   const findings: GateState["findings"] = [];
   const reject = (code: string, message: string) =>
     findings.push({

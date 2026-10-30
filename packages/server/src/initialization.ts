@@ -56,6 +56,24 @@ export async function runInitialization(
           dependencies.clock.now(),
         ],
       );
+      // Success records the state it committed as workflow.initialized.
+      if (status !== "succeeded")
+        await recordAudit(tx, dependencies, {
+          actor: {
+            personId: null,
+            credential: { kind: "worker", id: workerId },
+          },
+          channel: "worker",
+          action:
+            status === "failed"
+              ? "workflow_initialization.failed"
+              : "workflow_initialization.cancelled",
+          target: { type: "workflow_job", id: job.id },
+          before: { revision: current.revision, hash: null },
+          after: { revision: current.revision + 1, hash: null },
+          reason: error,
+          requestId: job.id,
+        });
       return (await listWorkflowJobs(tx, job.workflowVersionId)).find(
         (current) => current.id === job.id,
       )!;

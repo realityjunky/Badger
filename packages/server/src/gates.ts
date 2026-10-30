@@ -88,7 +88,12 @@ export interface GateCommitInput {
   requestId: string;
 }
 
-/** All gate commits share the version lock, hashing, replay, and audit rules. */
+/**
+ * All gate commits share the version lock, hashing, replay, and audit rules.
+ * A gate whose bound state can change without a writer passes `supersede`,
+ * which invalidates an active confirmation that no longer binds the current
+ * state and returns true, so the new confirmation can replace it.
+ */
 export async function commitGate(
   database: Database,
   dependencies: ServiceDependencies,
@@ -97,6 +102,11 @@ export async function commitGate(
   gate: string,
   input: GateCommitInput,
   loadState: (tx: Queryable) => Promise<GateState>,
+  supersede?: (
+    tx: Queryable,
+    active: GateConfirmation,
+    state: GateState,
+  ) => Promise<boolean>,
 ): Promise<GateCommitResult> {
   const replay = async (tx: Queryable): Promise<GateCommitResult | null> => {
     const previous = await tx.query<{
@@ -133,7 +143,11 @@ export async function commitGate(
       const active = (await readGateConfirmations(tx, versionId, gate)).find(
         (confirmation) => confirmation.invalidatedAt === null,
       );
-      if (active !== undefined) return { kind: "conflict" };
+      if (
+        active !== undefined &&
+        !((await supersede?.(tx, active, state)) ?? false)
+      )
+        return { kind: "conflict" };
       const now = dependencies.clock.now();
       const confirmation: GateConfirmation = {
         id: dependencies.ids.next(),

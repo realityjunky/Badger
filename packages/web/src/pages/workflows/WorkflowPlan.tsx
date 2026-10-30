@@ -55,7 +55,8 @@ export function WorkflowPlan({
   const path = `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(detail.version.id)}`;
   const selectedId = new URLSearchParams(location.search).get("planVersion");
   const selected =
-    view?.versions.find((v) => v.id === selectedId) ?? view?.versions[0];
+    view?.versions.find((v) => v.id === selectedId) ??
+    view?.versions.find((v) => v.id === view.headVersionId);
   const superseded = !!selected && selected.id !== view?.currentVersionId;
   const approved =
     !!selected &&

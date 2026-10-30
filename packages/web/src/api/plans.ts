@@ -19,6 +19,9 @@ export interface PlanView {
   versions: PlanVersion[];
   dossierHash: string | null;
   skeleton: FactoryPlan | null;
+  /** The latest head's version, which an edit quotes as its base. */
+  headVersionId: string | null;
+  /** The head, while it is bound to the current approved dossier. */
   currentVersionId: string | null;
   confirmation: GateConfirmation | null;
   confirmations?: GateConfirmation[];

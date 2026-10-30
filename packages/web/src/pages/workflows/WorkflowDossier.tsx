@@ -40,7 +40,8 @@ export function WorkflowDossier({
   const path = `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(detail.version.id)}`;
   const selectedId = new URLSearchParams(location.search).get("dossierVersion");
   const selected =
-    view?.versions.find((v) => v.id === selectedId) ?? view?.versions[0];
+    view?.versions.find((v) => v.id === selectedId) ??
+    view?.versions.find((v) => v.id === view.headVersionId);
   const superseded =
     selected !== undefined && selected.id !== view?.currentVersionId;
   const approved =

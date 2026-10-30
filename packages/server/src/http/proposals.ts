@@ -20,6 +20,11 @@ export function proposalMethods(path: string): string | null {
 
 export async function handleProposal(input: AuthorizedRequest) {
   const { database, person, access, config } = input;
+  const methods = proposalMethods(input.path)!;
+  if (!methods.split(", ").includes(input.method))
+    return input.reply.error(405, "invalid", "Method not allowed", {
+      allow: methods,
+    });
   const [, rawWorkflow, rawVersion, action] = PATH.exec(input.path)!;
   const workflowId = decodeURIComponent(rawWorkflow!);
   const versionId = decodeURIComponent(rawVersion!);

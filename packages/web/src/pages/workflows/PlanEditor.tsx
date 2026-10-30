@@ -31,7 +31,7 @@ export function PlanEditor({
   const [text, setText] = useState(JSON.stringify(initialPlan, null, 2));
   const [binding] = useState(() => ({
     dossierHash: view.dossierHash,
-    expectedVersionId: view.versions[0]?.id ?? null,
+    expectedVersionId: view.headVersionId,
   }));
   const [composition, setComposition] = useState<PlanComposition | null>(null);
   const [failure, setFailure] = useState<string | null>(null);

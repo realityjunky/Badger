@@ -375,11 +375,13 @@ export async function enqueueSourceCheck(
   const now = dependencies.clock.now();
   // A queued check of the previous pin set could only be discarded; the new
   // job replaces it. A running one finishes, and its result is not shown.
+  // Initialization is withdrawn by proposal invalidation, or by the worker's
+  // recheck of its pins, and each records its outcome.
   await database.query(
     `update workflow_jobs
         set status = 'cancelled', finished_at = $2, error = $3,
             revision = revision + 1
-      where workflow_version_id = $1 and status = 'queued'`,
+      where workflow_version_id = $1 and kind = 'source-check' and status = 'queued'`,
     [workflowVersionId, now, SUPERSEDED],
   );
   const job = await database.query<JobRow>(

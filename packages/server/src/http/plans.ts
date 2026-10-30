@@ -20,6 +20,11 @@ export function planMethods(path: string): string | null {
 }
 export async function handlePlan(input: AuthorizedRequest) {
   const { database, person, access, context, dependencies, reply } = input;
+  const methods = planMethods(input.path)!;
+  if (!methods.split(", ").includes(input.method))
+    return reply.error(405, "invalid", "Method not allowed", {
+      allow: methods,
+    });
   const [, rawWorkflow, rawVersion, action] = PATH.exec(input.path)!;
   const workflowId = decodeURIComponent(rawWorkflow!);
   const versionId = decodeURIComponent(rawVersion!);
@@ -74,7 +79,7 @@ export async function handlePlan(input: AuthorizedRequest) {
       value.expectedVersionId,
     );
     return {
-      status: stored.created ? 201 : 200,
+      status: stored.changed ? 201 : 200,
       value: { version: stored.version },
     };
   });

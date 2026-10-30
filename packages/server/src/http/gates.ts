@@ -11,6 +11,7 @@ import type { Queryable } from "../database/database.js";
 import { dossierGateState } from "../dossier.js";
 import { planGateState } from "../plans.js";
 import { proposalGateState } from "../proposals.js";
+import { supersedeStaleProposalApproval } from "../proposal-invalidation.js";
 
 const GATE_PATH =
   /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/gates\/(sources|dossier|plan|proposal|source-study\/([^/]+))(?:\/(preview|commit))?$/u;
@@ -143,6 +144,17 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
     gate,
     { confirmationHash: value.confirmationHash, requestId: value.requestId },
     loadState,
+    gate === "proposal"
+      ? (tx, active, state) =>
+          supersedeStaleProposalApproval(
+            tx,
+            dependencies,
+            context,
+            versionId,
+            active,
+            state,
+          )
+      : undefined,
   );
   if (result.kind === "conflict")
     return reply.error(

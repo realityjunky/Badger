@@ -21,6 +21,9 @@ export interface DossierVersion {
 }
 export interface DossierView {
   versions: DossierVersion[];
+  /** The latest head's version: the one last composed or selected again. */
+  headVersionId: string | null;
+  /** The head, while the records it snapshots are unchanged. */
   currentVersionId: string | null;
   confirmation: GateConfirmation | null;
   confirmations?: GateConfirmation[];

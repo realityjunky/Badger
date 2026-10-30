@@ -17,3 +17,9 @@ or record changes invalidate plan approvals in the writer's transaction while
 preserving artifacts, audit history, and original confirmation retry responses.
 Plan approval keeps Plan and proposal active because proposal approval is a
 separate gate before package authoring.
+
+As with dossiers in ADR 0023, the latest of an append-only sequence of heads
+names the current Plan version. An edit quotes the head it began from, and a
+`draft-plan` job carries it as its base. Saving an earlier version's content
+selects that version again and supersedes approval and the proposal exactly
+as a new version does.
