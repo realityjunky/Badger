@@ -61,6 +61,7 @@ export async function advanceQuestionnaireRevision(
   );
   await reconcileDossier(tx, deps, context, versionId);
 }
+/** `hash` names the content an immutable record stores, such as an upload's blob. */
 export async function recordQuestionnaireAudit(
   tx: Queryable,
   deps: ServiceDependencies,
@@ -70,6 +71,7 @@ export async function recordQuestionnaireAudit(
   id: string,
   revision: number,
   before: number | null,
+  hash: string | null = null,
 ) {
   await recordAudit(tx, deps, {
     actor: { personId: context.personId, credential: context.credential },
@@ -77,7 +79,7 @@ export async function recordQuestionnaireAudit(
     action,
     target: { type, id },
     before: before === null ? null : { revision: before, hash: null },
-    after: { revision, hash: null },
+    after: { revision, hash },
     reason: null,
     requestId: context.requestId,
   });

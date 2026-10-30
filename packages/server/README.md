@@ -396,7 +396,8 @@ The questionnaire response includes these limits for upload controls.
 authorization. Until submission only its uploader can download it; workflow
 readers can download attachments cited by any submitted revision. The route
 always serves a download with `nosniff` and never exposes blob addresses as
-download URLs. Uploaded bytes are stored through the existing blob-store port.
+download URLs. Uploaded bytes are stored through the existing blob-store port,
+and the upload's `answer.attachment-uploaded` audit event records their hash.
 Upload screens require examples and warn against uploading real data.
 
 Resolution previews bind structured values, units, and attachment receipts.

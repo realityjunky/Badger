@@ -292,6 +292,21 @@ describe("structured answers", () => {
       size: 14,
       hash: "4af5e90280eaf303ffeaefb62ffbe154be0899a5b472c7f3a24f5183e67a6cdf",
     });
+    const audit = await json(
+      call(
+        "GET",
+        "/audit-events?action=answer.attachment-uploaded",
+        undefined,
+        admin,
+      ),
+    );
+    expect(audit.events).toEqual([
+      expect.objectContaining({
+        targetType: "attachment",
+        targetId: attachment.id,
+        after: { revision: 1, hash: attachment.hash },
+      }),
+    ]);
     const filePath = `${base}/attachments/${attachment.id}`;
     expect((await call("GET", filePath)).status).toBe(404);
     await json(save(question.id, { attachments: [attachment.id] }));
