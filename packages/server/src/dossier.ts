@@ -17,6 +17,7 @@ import { toIsoString } from "./util.js";
 import type { WorkflowVersion } from "./workflows.js";
 import type { ServiceConfig } from "./config.js";
 import { gatePreview, invalidateGate, type GateState } from "./gates.js";
+import { invalidateProposal } from "./proposal-invalidation.js";
 import { closeGateInbox, notifyWorkflowRoles } from "./inbox.js";
 import { RequestError } from "./http/errors.js";
 
@@ -152,6 +153,13 @@ export async function storeDossier(
     "A new dossier version superseded the plan's meaning",
     ["Engineer", "Workflow owner"],
   );
+  await invalidateProposal(
+    tx,
+    deps,
+    context,
+    versionId,
+    "A new dossier version superseded the proposal's plan",
+  );
   await closeGateInbox(
     tx,
     versionId,
@@ -237,6 +245,13 @@ export async function reconcileDossier(
     "plan",
     "The plan's dossier records changed",
     ["Engineer", "Workflow owner"],
+  );
+  await invalidateProposal(
+    tx,
+    deps,
+    context,
+    versionId,
+    "The proposal's plan and dossier records changed",
   );
 }
 

@@ -103,6 +103,9 @@ An immutable snapshot of a Semantic dossier and the ledger records it relies on.
 **Plan version**:
 An immutable FactoryPlan bound to one approved Dossier version. The Engineer saves it or accepts an Agent's draft as a version, and the Workflow owner approves its exact identity.
 
+**Proposal**:
+The kernel's account of the workflow a FactoryPlan would initialize, including its source identities and blockers. The Workflow owner approves its exact identity before the Engineer initializes the Project.
+
 **Node**:
 A meaningful stage of a workflow with its own responsibility, completion evidence, and possible outcomes.
 

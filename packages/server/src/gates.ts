@@ -194,6 +194,16 @@ export async function commitGate(
         requestId: context.requestId,
       });
       await closeGateInbox(tx, versionId, gate, now);
+      if (gate === "plan")
+        await notifyWorkflowRoles(
+          tx,
+          dependencies,
+          versionId,
+          "proposal",
+          "gate-ready",
+          confirmation.id,
+          ["Workflow owner"],
+        );
       return { kind: "confirmed", result };
     });
   } catch (error) {

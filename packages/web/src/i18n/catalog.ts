@@ -5,6 +5,37 @@ import type { Language } from "../preferences/model.js";
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  "proposal.title": "Proposal and initialization",
+  "proposal.description":
+    "Review the kernel's proposal for the approved plan. The Workflow owner approves it before the Engineer initializes the project.",
+  "proposal.needPlan": "Approve the current plan to see its proposal.",
+  "proposal.hash": "Proposal hash",
+  "proposal.blockers": "Proposal blockers",
+  "proposal.reviewApproval": "Review proposal approval",
+  "proposal.approve": "Approve this proposal",
+  "proposal.approvalHelp":
+    "Approve this exact proposal and its source identities. Initialization runs separately as a job bound to this approval.",
+  "proposal.approved": "Proposal approved",
+  "proposal.invalidated":
+    "Proposal approval was superseded. Review the current plan and proposal again.",
+  "proposal.initialize": "Initialize project",
+  "proposal.initHelp":
+    "Queue initialization of the kernel project using exactly this approved proposal.",
+  "proposal.replace": "Replace Creator state",
+  "proposal.replaceHelp":
+    "Replace the Creator state identified below. This discards its authoring, generation, evaluation, and review progress. The job will refuse if the state changes.",
+  "proposal.currentState": "Current Creator state hash",
+  "proposal.jobs": "Initialization jobs",
+  "proposal.status.queued": "Initialization queued",
+  "proposal.status.running": "Initializing project",
+  "proposal.status.succeeded": "Project initialized",
+  "proposal.status.failed": "Initialization failed",
+  "proposal.status.cancelled": "Initialization cancelled",
+  "proposal.changed": "The proposal changed. Reload and review it again.",
+  "proposal.failed": "The proposal request failed. Reload and try again.",
+  "inbox.proposalReady": "{name} · v{number}: approve the proposal",
+  "inbox.proposalInvalidated":
+    "{name} · v{number}: proposal approval superseded",
   "plan.title": "Plan versions",
   "plan.description":
     "Draft from the approved dossier, review the kernel's findings, and save an immutable plan for the Workflow owner's approval.",
@@ -927,6 +958,34 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  "proposal.title": "提案与初始化",
+  "proposal.description":
+    "查看内核根据已批准计划生成的提案。工作流负责人批准后，工程师可初始化项目。",
+  "proposal.needPlan": "请先批准当前计划，再查看提案。",
+  "proposal.hash": "提案哈希",
+  "proposal.blockers": "提案阻塞项",
+  "proposal.reviewApproval": "审阅提案审批",
+  "proposal.approve": "批准此提案",
+  "proposal.approvalHelp":
+    "批准此提案及其来源标识。初始化将作为绑定本次审批的独立任务运行。",
+  "proposal.approved": "提案已批准",
+  "proposal.invalidated": "提案审批已失效，请重新审阅当前计划与提案。",
+  "proposal.initialize": "初始化项目",
+  "proposal.initHelp": "使用此已批准提案创建内核项目初始化任务。",
+  "proposal.replace": "替换 Creator 状态",
+  "proposal.replaceHelp":
+    "替换下方哈希标识的 Creator 状态，将清除其创作、生成、评估与审阅进度。若状态发生变化，任务将拒绝替换。",
+  "proposal.currentState": "当前 Creator 状态哈希",
+  "proposal.jobs": "初始化任务",
+  "proposal.status.queued": "初始化排队中",
+  "proposal.status.running": "正在初始化项目",
+  "proposal.status.succeeded": "项目已初始化",
+  "proposal.status.failed": "初始化失败",
+  "proposal.status.cancelled": "初始化已取消",
+  "proposal.changed": "提案已更改，请重新加载并审阅。",
+  "proposal.failed": "提案请求失败，请重新加载后重试。",
+  "inbox.proposalReady": "{name} · v{number}：等待批准提案",
+  "inbox.proposalInvalidated": "{name} · v{number}：提案审批已失效",
   "plan.title": "计划版本",
   "plan.description":
     "从已批准的语义档案起草计划，查看内核校验结果，并保存不可变的计划版本供工作流所有者批准。",

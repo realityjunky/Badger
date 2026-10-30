@@ -188,6 +188,42 @@ The result stays a suggestion. Human acceptance uses `plan` instead of
 the same validation and optimistic-concurrency checks as a direct save.
 Inbox links for suggestions and approvals open the workflow's `#plan` panel.
 
+## Proposal approval and initialization
+
+Proposal approval (#59) uses migration `0022`. `GET V/proposal` returns the
+kernel's proposal for the currently approved plan, including its blockers,
+warnings, source identities, and `proposalHash`, together with the immutable
+`planVersionHash`, proposal `confirmation`, `currentState`, and initialization
+`jobs`. Without a current approved plan, `proposal` is null. The service uses
+managed artifact roots; a plan with an explicit `artifactRoot` reports a
+blocker before approval or initialization.
+
+The signed-in Workflow owner or Administrator previews and commits
+`V/gates/proposal` through the shared gate protocol. The confirmation binds
+the kernel proposal, Plan version, Dossier version, and pin-set hashes. Plan
+approval notifies the owner that the proposal is ready. A changed plan or
+superseded dossier invalidates proposal approval, cancels queued or claimed
+initialization jobs, and notifies the Engineer and Workflow owner in the
+same transaction. Gate retries retain their original response.
+
+A signed-in Engineer or Administrator sends
+`{proposalHash, confirmed: true, requestId, replaceStateHash?}` to
+`POST V/proposal/initialize`. It returns `202 {job}` without running the
+kernel in the HTTP request. `replaceStateHash` must equal `currentState.hash`
+when replacing state; a conflict returns `currentStateHash`. Request IDs
+identify jobs per requester, so identical retries return the same job while
+changed inputs conflict. Personal access tokens may read these resources
+but cannot approve or initialize.
+
+The existing workflow worker claims `init` jobs alongside source checks and
+rechecks the approval, plan, sources, and quoted state hash under the version
+lock. It calls the kernel in a private namespace, then commits the exact
+state bytes and hash with the outcome, stage updates, and audit entry.
+An expired claimant cannot publish a state after takeover. A successful job
+marks Plan and proposal done and Package active. Failure leaves the previous
+state current. Source checks refresh source trees without erasing committed
+Creator state. See [ADR 0027](../../docs/adr/0027-transactional-proposal-initialization.md).
+
 ## Source study records
 
 Source study (#45) records facts and interfaces independently under a Workflow
