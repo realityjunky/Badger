@@ -1,5 +1,7 @@
 import { afterEach, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
+import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -9,7 +11,7 @@ import {
   type TestService,
 } from "@realityjunky/badger-server/testing";
 import { createEngineerMcp } from "../src/index.js";
-import type { FactoryPlan } from "@realityjunky/badger";
+import { canonicalHash, type FactoryPlan } from "@realityjunky/badger";
 
 let service: TestService;
 const clients: Client[] = [];
@@ -472,5 +474,121 @@ it("writes only the pinned Skills a claimed job's kind reads into its folder", a
         await fs.readFile(path.join(claimed.folder, "context.json"), "utf8"),
       ).pins,
     ).toHaveLength(2);
+  }
+});
+
+it("refuses a claimed Skill path with a .git component in any letter case before writing anything, and releases the job", async () => {
+  // Uploads refuse these paths now; a version stored earlier may hold them.
+  const versionHash = "a".repeat(64);
+  const sha256 = (text: string) =>
+    createHash("sha256").update(text).digest("hex");
+  let served: string[] = [];
+  const releases: unknown[] = [];
+  const stub = http.createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const send = (value: unknown) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(value));
+    };
+    if (request.url === "/api/v1/me/mcp")
+      return send({ capabilities: { compose: true } });
+    if (request.url?.endsWith("/release")) {
+      releases.push(JSON.parse(body));
+      return send({ job: { status: "queued" } });
+    }
+    const files = served.map((file) => ({
+      path: file,
+      text: file === "SKILL.md" ? "# Unsafe\n" : "[core]\n\tfsmonitor = x\n",
+    }));
+    const contextBundle = {
+      pins: [
+        {
+          skillId: "skill",
+          hash: versionHash,
+          inventory: files.map((f) => ({ path: f.path, hash: sha256(f.text) })),
+        },
+      ],
+    };
+    send({
+      job: {
+        id: "job",
+        kind: "source-study",
+        roundId: null,
+        skillId: "skill",
+        questionId: null,
+        locale: null,
+        parentQuestionId: null,
+        revision: 2,
+        status: "claimed",
+        contextHash: canonicalHash(contextBundle),
+        outputSchema: {},
+        lease: { id: "lease", until: "2026-10-30T00:30:00.000Z" },
+      },
+      contextBundle,
+      skills: [{ skillId: "skill", versionHash }],
+      files: files.map((f) => ({
+        skillId: "skill",
+        versionHash,
+        path: f.path,
+        hash: sha256(f.text),
+        contentBase64: Buffer.from(f.text).toString("base64"),
+      })),
+    });
+  });
+  await new Promise<void>((resolve) => stub.listen(0, "127.0.0.1", resolve));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "badger-claims-"));
+  folders.push(temporary);
+  const variables = ["TMPDIR", "TMP", "TEMP"] as const;
+  const previous = variables.map((name) => process.env[name]);
+  for (const name of variables) process.env[name] = temporary;
+  try {
+    const { port } = stub.address() as { port: number };
+    const server = createEngineerMcp({
+      url: `http://127.0.0.1:${port}`,
+      token: "secret-token",
+      agentHost: "Engineer Agent",
+    });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(b);
+    const client = new Client({ name: "Engineer Agent", version: "1" });
+    clients.push(client);
+    await client.connect(a);
+    const unsafe = [
+      ".git/config",
+      "notes/.GIT/HEAD",
+      "docs/.Git",
+      "tools/.git./config",
+      "hfs/.g\u200cit/config",
+    ];
+    for (const file of unsafe) {
+      served = ["SKILL.md", file];
+      const refused = await client.callTool({
+        name: "claim_job",
+        arguments: {
+          workflowId: "workflow",
+          versionId: "version",
+          jobId: "job",
+          revision: 1,
+        },
+      });
+      expect(refused.isError, file).toBe(true);
+      expect(JSON.stringify(refused.content)).toContain(
+        "refuses to write Git metadata",
+      );
+    }
+    expect(releases).toEqual(
+      unsafe.map(() => ({
+        leaseId: "lease",
+        contextHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      })),
+    );
+    expect(await fs.readdir(temporary)).toEqual([]);
+  } finally {
+    stub.close();
+    variables.forEach((name, index) => {
+      if (previous[index] === undefined) delete process.env[name];
+      else process.env[name] = previous[index];
+    });
   }
 });

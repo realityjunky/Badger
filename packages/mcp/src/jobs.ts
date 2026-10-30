@@ -41,6 +41,18 @@ export function jobsPath(input: { workflowId: string; versionId: string }) {
   return `/workflows/${encodeURIComponent(input.workflowId)}/versions/${encodeURIComponent(input.versionId)}/drafting-jobs`;
 }
 
+/**
+ * Git runs commands a repository configures, so no `.git` entry lands in any
+ * letter case, including with the code points HFS+ ignores or the trailing
+ * dots and spaces Windows trims.
+ */
+function gitMetadata(segment: string) {
+  const name = segment
+    .replace(/[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/gu, "")
+    .replace(/[. ]+$/u, "");
+  return name.toLowerCase() === ".git" || name.toUpperCase() === ".GIT";
+}
+
 function safePath(value: string) {
   if (
     !value ||
@@ -49,6 +61,10 @@ function safePath(value: string) {
     value.split("/").some((p) => !p || p === "." || p === "..")
   )
     throw new Error("The job bundle contains an unsafe file path");
+  if (value.split("/").some(gitMetadata))
+    throw new Error(
+      "A pinned Skill contains a .git path; the MCP refuses to write Git metadata into a job folder",
+    );
   return value;
 }
 
@@ -135,9 +151,8 @@ export async function claimJob(
   try {
     if (canonicalHash(claimed.contextBundle) !== claimed.job.contextHash)
       throw new Error("The job context hash does not match its bundle");
-    folder = await fs.mkdtemp(path.join(os.tmpdir(), "badger-drafting-"));
-    await fs.chmod(folder, 0o700);
-    // The kind decides which pinned Skills arrive; each arrives whole.
+    // The kind decides which pinned Skills arrive; each arrives whole, and
+    // every file is checked before anything is written.
     const expected = new Map<string, string>();
     for (const skill of claimed.skills) {
       const pin = claimed.contextBundle.pins.find(
@@ -150,7 +165,7 @@ export async function claimJob(
       for (const file of pin.inventory)
         expected.set(`${pin.skillId}/${pin.hash}/${file.path}`, file.hash);
     }
-    for (const file of claimed.files) {
+    const writes = claimed.files.map((file) => {
       const relative = safePath(
         `${file.skillId}/${file.versionHash}/${file.path}`,
       );
@@ -161,12 +176,17 @@ export async function claimJob(
       )
         throw new Error("A pinned Skill file does not match its inventory");
       expected.delete(relative);
+      return { relative, bytes };
+    });
+    if (expected.size)
+      throw new Error("The job bundle is missing pinned Skill files");
+    folder = await fs.mkdtemp(path.join(os.tmpdir(), "badger-drafting-"));
+    await fs.chmod(folder, 0o700);
+    for (const { relative, bytes } of writes) {
       const target = path.join(folder, "skills", relative);
       await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
       await fs.writeFile(target, bytes, { mode: 0o600, flag: "wx" });
     }
-    if (expected.size)
-      throw new Error("The job bundle is missing pinned Skill files");
     const claim: LocalClaim = {
       workflowId: input.workflowId,
       versionId: input.versionId,

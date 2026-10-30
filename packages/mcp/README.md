@@ -89,8 +89,12 @@ draft round). The claim response and `job.json` identify those targets.
 The folder holds only the pinned Skills the job's kind reads, which the claim
 result's `skills` lists: the job's Skill for source study and imports, every
 pin for question, follow-up, and plan drafting, and none for restatement and
-translation. Claiming verifies the context hash and every file against its
-pin's inventory before returning the folder. Files never execute. Folders use mode `0700`, files `0600`, and the files persist
+translation. Before writing anything, claiming verifies the context hash and
+every file against its pin's inventory, and refuses any path with a `.git`
+component in any letter case, as a folder or a file, including spellings that
+HFS+ or Windows file systems resolve to `.git`, so Git never finds a repository
+configuration it would run; a refused claim is released. Files
+never execute. Folders use mode `0700`, files `0600`, and the files persist
 across MCP restarts so the Agent can resume with the same deployment, person,
 token, and host. Delete the folder when finished; it contains workflow
 evidence. General large-result files remain connection-local.
