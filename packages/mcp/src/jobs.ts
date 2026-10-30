@@ -120,6 +120,7 @@ export async function claimJob(
         inventory: { path: string; hash: string }[];
       }[];
     };
+    skills: { skillId: string; versionHash: string }[];
     files: {
       skillId: string;
       versionHash: string;
@@ -136,14 +137,19 @@ export async function claimJob(
       throw new Error("The job context hash does not match its bundle");
     folder = await fs.mkdtemp(path.join(os.tmpdir(), "badger-drafting-"));
     await fs.chmod(folder, 0o700);
-    const expected = new Map<string, string>(
-      claimed.contextBundle.pins.flatMap((pin) =>
-        pin.inventory.map(
-          (file) =>
-            [`${pin.skillId}/${pin.hash}/${file.path}`, file.hash] as const,
-        ),
-      ),
-    );
+    // The kind decides which pinned Skills arrive; each arrives whole.
+    const expected = new Map<string, string>();
+    for (const skill of claimed.skills) {
+      const pin = claimed.contextBundle.pins.find(
+        (p) => p.skillId === skill.skillId && p.hash === skill.versionHash,
+      );
+      if (!pin)
+        throw new Error(
+          "The job ships a Skill version its context does not pin",
+        );
+      for (const file of pin.inventory)
+        expected.set(`${pin.skillId}/${pin.hash}/${file.path}`, file.hash);
+    }
     for (const file of claimed.files) {
       const relative = safePath(
         `${file.skillId}/${file.versionHash}/${file.path}`,
@@ -189,12 +195,13 @@ export async function claimJob(
       skillId: claimed.job.skillId,
       questionId: claimed.job.questionId,
       locale: claimed.job.locale,
+      skills: claimed.skills,
       revision: claimed.job.revision,
       contextHash: claimed.job.contextHash,
       leaseUntil: claimed.job.lease.until,
       resultFile: path.join(folder, "result.json"),
       message:
-        "Read context.json and the pinned skills. Write result.json using output-schema.json, then submit_job. Results remain suggestions until a person accepts them.",
+        "Read context.json and the Skill files under skills/; `skills` lists the pinned versions this kind reads. Write result.json using output-schema.json, then submit_job. Results remain suggestions until a person accepts them.",
     };
   } catch (error) {
     if (folder)

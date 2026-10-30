@@ -7,6 +7,9 @@ create table drafting_jobs (
   requester_id text not null references people (id),
   context_bundle jsonb not null,
   context_hash text not null check (context_hash ~ '^[a-f0-9]{64}$'),
+  -- The hash of the context's part this kind's result depends on; only its
+  -- change cancels the job. context_hash guards the bundle the Agent reads.
+  input_hash text not null check (input_hash ~ '^[a-f0-9]{64}$'),
   output_schema jsonb not null,
   status text not null default 'queued' check (status in ('queued', 'claimed', 'submitted', 'accepted', 'rejected', 'cancelled')),
   revision integer not null default 1 check (revision > 0),

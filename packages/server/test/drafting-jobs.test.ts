@@ -501,7 +501,7 @@ it("serializes competing claims, binds leases to the token and host, and requeue
   expect(released.job.status).toBe("queued");
 });
 
-it("cancels queued, claimed, and submitted jobs when questionnaire inputs change, including a stale submission", async () => {
+it("cancels queued, claimed, and submitted jobs when their questionnaire inputs change, including a stale submission", async () => {
   const { base, questionnaire, secret, round } = await setup();
   const jobs = [];
   for (let i = 0; i < 3; i++)
@@ -539,10 +539,24 @@ it("cancels queued, claimed, and submitted jobs when questionnaire inputs change
     },
     secret,
   );
+  // Another round is outside these jobs' inputs; a new question is not.
   await request(
     `${questionnaire}/rounds`,
     "POST",
-    { title: "New inputs" },
+    { title: "Unrelated round" },
+    undefined,
+    engineer,
+    201,
+  );
+  expect(
+    (await request(base, "GET", undefined, secret)).jobs.map(
+      (j: { status: string }) => j.status,
+    ),
+  ).toEqual(["queued", "claimed", "submitted"]);
+  await request(
+    `${questionnaire}/rounds/${round.id}/questions`,
+    "POST",
+    question("Which container is used?"),
     undefined,
     engineer,
     201,

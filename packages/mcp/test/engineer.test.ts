@@ -368,3 +368,109 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
     (await expertScoped.listTools()).tools.map((t) => t.name),
   ).not.toContain("claim_job");
 });
+
+it("writes only the pinned Skills a claimed job's kind reads into its folder", async () => {
+  service = await startTestService({ mode: "local" });
+  const { group } = await request("/groups", "POST", { name: "Research" });
+  const { workflow, version } = await request("/workflows", "POST", {
+    groupId: group.id,
+    name: "claim-folders",
+    goal: "Study sources",
+    intent: "new-skill",
+    locale: "en",
+  });
+  const context = { workflowId: workflow.id, versionId: version.id };
+  const base = `/workflows/${workflow.id}/versions/${version.id}`;
+  const pins: { skillId: string; versionHash: string }[] = [];
+  for (const name of ["storage", "transport"]) {
+    const { skill } = await request("/skills", "POST", {
+      groupId: group.id,
+      name,
+    });
+    const text = `---\nname: ${name}\ndescription: ${name} guidance.\n---\n\n# ${name}\n`;
+    const upload = {
+      files: [
+        { path: "SKILL.md", content: Buffer.from(text).toString("base64") },
+      ],
+      scripts: {},
+    };
+    const { preview } = await request(
+      `/skills/${skill.id}/upload-preview`,
+      "POST",
+      upload,
+    );
+    await request(`/skills/${skill.id}/versions`, "POST", {
+      ...upload,
+      confirmed: true,
+      expectedHash: preview.hash,
+    });
+    await request(`${base}/pins`, "POST", {
+      skillId: skill.id,
+      hash: preview.hash,
+    });
+    pins.push({ skillId: skill.id, versionHash: preview.hash });
+  }
+  await request("/bindings", "POST", {
+    scopeType: "workflow",
+    scopeId: workflow.id,
+    email: "expert@example.com",
+    role: "Field expert",
+  });
+  const { round } = await request(`${base}/questionnaire/rounds`, "POST", {
+    title: "Storage",
+  });
+  const { question } = await request(
+    `${base}/questionnaire/rounds/${round.id}/questions`,
+    "POST",
+    {
+      text: "Which sample is used?",
+      topic: "scope",
+      targets: [{ kind: "workflow", id: workflow.id }],
+      rationale: "Define the inputs.",
+      evidence: [],
+      assignees: [{ kind: "role", role: "Field expert" }],
+      priority: 90,
+    },
+  );
+  const client = await connect();
+  const bySkill = (a: { skillId: string }, b: { skillId: string }) =>
+    a.skillId.localeCompare(b.skillId);
+  for (const [target, expected] of [
+    [{ kind: "source-study", skillId: pins[1]!.skillId }, [pins[1]!]],
+    [{ kind: "draft-questions", roundId: round.id }, pins],
+    [{ kind: "translate-question", questionId: question.id, locale: "fr" }, []],
+  ] as const) {
+    const { job } = await request(`${base}/drafting-jobs`, "POST", {
+      ...target,
+      confirmed: true,
+    });
+    const claimed = await call(client, "claim_job", {
+      ...context,
+      jobId: job.id,
+      revision: job.revision,
+    });
+    folders.push(claimed.folder);
+    expect([...claimed.skills].sort(bySkill)).toEqual(
+      [...expected].sort(bySkill),
+    );
+    const entries = await fs.readdir(claimed.folder);
+    expect(entries.sort()).toEqual(
+      [
+        "claim.json",
+        "context.json",
+        "job.json",
+        "output-schema.json",
+        ...(expected.length ? ["skills"] : []),
+      ].sort(),
+    );
+    if (expected.length)
+      expect(
+        (await fs.readdir(path.join(claimed.folder, "skills"))).sort(),
+      ).toEqual(expected.map((pin) => pin.skillId).sort());
+    expect(
+      JSON.parse(
+        await fs.readFile(path.join(claimed.folder, "context.json"), "utf8"),
+      ).pins,
+    ).toHaveLength(2);
+  }
+});

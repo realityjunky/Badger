@@ -638,29 +638,41 @@ commit the transition even when the attempted write returns a conflict.
 | `GET /`                         | List jobs, reconciling leases and input hashes.                                                                            |
 | `POST /`                        | A signed-in person requests a kind with its target fields (below) and `confirmed: true`.                                   |
 | `GET /:id`                      | Read one job within this workflow version.                                                                                 |
-| `POST /:id/claim`               | Claim a queued job with `{revision}`; return its context, schema, lease, and exact pinned Skill bytes.                     |
+| `POST /:id/claim`               | Claim a queued job with `{revision}`; return its context, schema, lease, and the pinned Skill files its kind reads.        |
 | `POST /:id/submit`              | Submit `{leaseId, contextHash, result}` against the stored schema.                                                         |
 | `POST /:id/release`             | Release `{leaseId, contextHash}` from the claiming person, token, and Agent host.                                          |
 | `POST /:id/accept-preview`      | Preview `{revision, ...result}` after the person edits or removes suggestions, using the result fields for that kind.      |
 | `POST /:id/reject-preview`      | Preview `{revision, reason}`.                                                                                              |
 | `POST /:id/accept` or `/reject` | Repeat the preview's decision with `confirmed: true`, `confirmationHash`, and a client `requestId`, as a signed-in person. |
 
-Claim leases last 30 minutes. Job and Engineer questionnaire reads reconcile
-expired leases to queued jobs and cancel changed inputs. Context binds the
-workflow/version frame, pinned Skill versions and file inventories, source
-study, questionnaire records, submitted answers, assignees, and the kernel's
-ledger and readiness. Private answer drafts never enter the context. The
-output schema is stored with the job; results contain at most 1 MiB. Pinned file
-transfers are limited to 32 MiB.
+Claim leases last 30 minutes. Job reads and an Engineer's questionnaire view
+reconcile jobs: an expired lease returns its job to the queue, and a queued,
+claimed, or submitted job is cancelled exactly when its inputs change. A job's
+inputs are the part of the context its kind's result depends on (below); the
+job stores their hash when it is requested. Other changes leave it pending: a
+comment never cancels a job, and an answer cancels only the jobs that read its
+question. The context bundle binds the workflow/version frame, pinned Skill
+versions and file inventories, source study, questionnaire records, submitted
+answers, assignees, and the kernel's ledger and readiness; `contextHash` guards
+the bundle the Agent receives. Private answer drafts never enter the context.
+The output schema is stored with the job; results contain at most 1 MiB.
 
-| Kind                    | Request target fields         | Result                                                                                                             |
-| ----------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `draft-questions`       | `roundId`                     | `{questions: [QuestionContent]}` (1–20).                                                                           |
-| `draft-follow-ups`      | `roundId`, `parentQuestionId` | The same question schema, retaining the published parent.                                                          |
-| `source-study`          | `skillId`                     | `{facts: [SourceFact], interfaces: [SkillInterface]}`; up to 100 of each, at least one record. No round is needed. |
-| `restate-answer`        | `questionId`                  | `{facts: [{text, answers: [{personId, revision}]}]}` (1–100).                                                      |
-| `translate-question`    | `questionId`, `locale`        | `{text, rationale}` in the requested BCP 47 locale.                                                                |
-| `import-open-questions` | `skillId`, `roundId`          | `{questions: [{number, source: SourceEvidence, question: QuestionContent}]}` (1–20).                               |
+A claim's `skills` names the pinned Skill versions its kind reads and `files`
+carries their exact bytes: the job's Skill for source study and imports, every
+pin for question, follow-up, and plan drafting, and none for restatement and
+translation. A claim's files total at most twice `BADGER_UPLOAD_MAX_BYTES`, so
+any two Skill versions within the upload limit fit; a larger claim is refused
+with 413 and its job stays queued.
+
+| Kind                    | Request target fields         | Result                                                                                                             | Inputs                                                                                                        |
+| ----------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `draft-questions`       | `roundId`                     | `{questions: [QuestionContent]}` (1–20).                                                                           | Every pin, the round's state, and each question's revision and state.                                         |
+| `draft-follow-ups`      | `roundId`, `parentQuestionId` | The same question schema, retaining the published parent.                                                          | Every pin, the round's state, the parent's revision, state, and resolution, and its latest submitted answers. |
+| `source-study`          | `skillId`                     | `{facts: [SourceFact], interfaces: [SkillInterface]}`; up to 100 of each, at least one record. No round is needed. | The Skill's pinned version and the revisions of the source-study records that cite it or name it an endpoint. |
+| `restate-answer`        | `questionId`                  | `{facts: [{text, answers: [{personId, revision}]}]}` (1–100).                                                      | The question's revision, state, and resolution, and its latest submitted answer from each person.             |
+| `translate-question`    | `questionId`, `locale`        | `{text, rationale}` in the requested BCP 47 locale.                                                                | The question's revision.                                                                                      |
+| `import-open-questions` | `skillId`, `roundId`          | `{questions: [{number, source: SourceEvidence, question: QuestionContent}]}` (1–20).                               | The Skill's pinned version, the round's state, and the questions already imported from that version.          |
+| `draft-plan`            | None                          | `{plan}` (see [Plan versions](#plan-versions)).                                                                    | The approved planning input and the plan version it builds on.                                                |
 
 Targets must belong to this Workflow version. A Skill target names its current
 pin; a restatement targets an answered question or one needing re-confirmation.
@@ -692,7 +704,7 @@ validates assignees and pinned evidence through the existing questionnaire
 authority, then creates draft Questions atomically. Follow-ups keep their
 parent link; accepting them never publishes a round or resolves the parent.
 Each decision binds the submitted result, edits, job revision, and context
-hash. Changed evidence cancels the job, and changed edits invalidate the
+hash. A change to the job's inputs cancels it, and changed edits invalidate the
 preview. An identical decision retried with the same person and client request ID returns its original response, including after later inputs change; changed replay inputs or a reused ID for another job conflict. Agents cannot request, accept, reject, or sign off on behalf of people.
 
 ## Skill versions from Git
