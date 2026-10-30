@@ -35,6 +35,41 @@ describe("signing in through trusted headers", () => {
     });
   });
 
+  it("accepts a comma in a single display-name header", async () => {
+    service = await startTestService({ mode: "service", environment });
+    const response = await service.request("/api/v1/me", {
+      headers: { ...headers, "x-badger-name": "Ng, Alice" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      person: { displayName: "Ng, Alice" },
+    });
+  });
+
+  it("falls back to email when the display-name header is repeated", async () => {
+    service = await startTestService({ mode: "service", environment });
+    const response = await service.rawRequest({
+      path: "/api/v1/me",
+      headers: { ...headers, "x-badger-name": ["Ng, Alice", "Mallory"] },
+    });
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject({
+      person: { displayName: "alice@example.com" },
+    });
+  });
+
+  it.each(["x-badger-subject", "x-badger-email"] as const)(
+    "refuses repeated %s headers even when their values match",
+    async (name) => {
+      service = await startTestService({ mode: "service", environment });
+      const response = await service.rawRequest({
+        path: "/api/v1/me",
+        headers: { ...headers, [name]: [headers[name], headers[name]] },
+      });
+      expect(response.status).toBe(401);
+    },
+  );
+
   it("reads UTF-8 identity from the proxy and accepts personal access tokens beside it", async () => {
     service = await startTestService({
       mode: "service",
@@ -126,6 +161,7 @@ describe("signing in through trusted headers", () => {
       {},
       { "x-badger-subject": "alice-id" },
       { ...headers, "x-badger-subject": "alice-id, administrator" },
+      { ...headers, "x-badger-email": "alice,admin@example.com" },
       { ...headers, "x-badger-email": "not-an-email" },
     ];
     for (const candidate of candidates) {

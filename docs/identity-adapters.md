@@ -152,10 +152,13 @@ BADGER_BOOTSTRAP_ADMINISTRATORS=admin@example.com
 The proxy must strip every incoming identity header and replace it with its
 own authenticated values, including on unauthenticated and error paths. Use
 the provider's stable ID as the subject. Email addresses are mutable and
-should not serve as subjects. Headers are singular; missing subject/email,
-invalid email, repeated headers or comma-joined identities are refused. Send
-values as UTF-8: a value whose bytes are valid UTF-8 is read as UTF-8, so a
-name such as 张三 arrives intact.
+should not serve as subjects. Headers are singular: repeated subject/email
+headers, missing values, invalid email, and commas in either identifying value
+are refused. A display-name header sent once may contain commas, such as
+`Ng, Alice`; a repeated display-name header is refused and the email is shown
+instead. Badger checks header occurrences before Node joins their values.
+Send values as UTF-8: a value whose bytes are valid UTF-8 is read as UTF-8,
+so a name such as 张三 arrives intact.
 
 The Badger MCP and the CLI send personal access tokens as
 `Authorization: Bearer` and cannot complete the proxy's interactive login.

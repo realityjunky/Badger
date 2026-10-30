@@ -34,6 +34,8 @@ export interface Principal {
 export interface IdentityRequest {
   method: string;
   headers: Readonly<Record<string, string | string[] | undefined>>;
+  /** Each occurrence, before Node joins repeated header values. */
+  headersDistinct: Readonly<Record<string, readonly string[] | undefined>>;
   hostname: string | null;
   /** The TCP peer, supplied by the server, never a forwarded header. */
   remoteAddress: string | null;
