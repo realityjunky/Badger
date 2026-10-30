@@ -6,6 +6,8 @@ import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
 import { objectInput, RequestError } from "../http/errors.js";
 import { toIsoString } from "../util.js";
+import { evidenceComparison } from "../evidence-changes.js";
+import { readRecordOrigins } from "../version-inheritance.js";
 import {
   fields,
   parseQuestion,
@@ -154,12 +156,17 @@ function toResolution(row: ResolutionRow) {
   };
 }
 export async function readResolutions(tx: Queryable, versionId: string) {
+  const origins = await readRecordOrigins(tx, versionId, "resolution");
   return (
     await tx.query<ResolutionRow>(
       `select r.*, p.display_name as actor_name from question_resolutions r join questions q on q.id = r.question_id join people p on p.id = r.actor_id where q.workflow_version_id = $1 order by r.created_at, r.id`,
       [versionId],
     )
-  ).rows.map((row) => ({ ...toResolution(row), actorName: row.actor_name }));
+  ).rows.map((row) => ({
+    ...toResolution(row),
+    actorName: row.actor_name,
+    origin: origins.get(row.id) ?? null,
+  }));
 }
 interface FactContent extends FactDraft {
   attachments: AnswerAttachment[];
@@ -211,20 +218,35 @@ export async function readFacts(tx: Queryable, versionId: string) {
     join question_resolutions r on r.id = f.resolution_id join questions q on q.id = r.question_id where q.workflow_version_id = $1 order by a.created_at, a.id`,
     [versionId],
   );
-  return rows.rows.map((f) => ({
-    ...f.content,
-    id: f.id,
-    resolutionId: f.resolution_id,
-    questionId: f.question_id,
-    hash: f.hash,
-    actorId: f.actor_id,
-    actorName: f.actor_name,
-    active: f.active,
-    createdAt: toIsoString(f.created_at),
-    acknowledgements: acks.rows
-      .filter((a) => a.fact_id === f.id)
-      .map((a) => ({ ...toAcknowledgement(a), personName: a.person_name })),
-  }));
+  const compareEvidence = await evidenceComparison(tx, versionId);
+  const origins = await readRecordOrigins(tx, versionId, "fact");
+  const acknowledgementOrigins = await readRecordOrigins(
+    tx,
+    versionId,
+    "acknowledgement",
+  );
+  return Promise.all(
+    rows.rows.map(async (f) => ({
+      ...f.content,
+      id: f.id,
+      resolutionId: f.resolution_id,
+      questionId: f.question_id,
+      hash: f.hash,
+      actorId: f.actor_id,
+      actorName: f.actor_name,
+      active: f.active,
+      evidenceChanges: await compareEvidence(f.content.evidence),
+      origin: origins.get(f.id) ?? null,
+      createdAt: toIsoString(f.created_at),
+      acknowledgements: acks.rows
+        .filter((a) => a.fact_id === f.id)
+        .map((a) => ({
+          ...toAcknowledgement(a),
+          personName: a.person_name,
+          origin: acknowledgementOrigins.get(a.id) ?? null,
+        })),
+    })),
+  );
 }
 
 /** The preview binds submitted answer heads, evidence, locale and current resolution. */
@@ -295,12 +317,17 @@ export async function resolutionPreview(
     )
   ).rows[0];
   const evidence: FactContent["evidence"] = [];
+  if (question.evidenceChanges.length > 0)
+    throw new RequestError(
+      409,
+      "Question evidence changed; revise it to the current pinned Skill version",
+    );
   for (const link of question.evidence) {
     const file = (
       await tx.query<{ hash: string }>(
         `select f->>'hash' as hash from workflow_skill_pins p
-      join skill_versions s on s.skill_id = p.skill_id and s.hash = p.skill_version_hash,
-      jsonb_array_elements(s.inventory) f where p.workflow_version_id = $1 and p.skill_id = $2 and p.skill_version_hash = $3 and f->>'path' = $4`,
+      join skill_versions s on s.skill_id = p.skill_id and s.hash = $3,
+      jsonb_array_elements(s.inventory) f where p.workflow_version_id = $1 and p.skill_id = $2 and f->>'path' = $4`,
         [versionId, link.skillId, link.versionHash, link.path],
       )
     ).rows[0];
@@ -427,10 +454,11 @@ export async function invalidateQuestionFacts(
   versionId: string,
   questionId: string,
   reason: string,
+  evidenceChanged = false,
 ) {
   const changed = await tx.query(
-    "update questions set state = 'needs-reconfirmation', resolved_at = null where id = $1 and workflow_version_id = $2 and state = 'confirmed' returning id",
-    [questionId, versionId],
+    "update questions set state = 'needs-reconfirmation', resolved_at = null where id = $1 and workflow_version_id = $2 and (state = 'confirmed' or ($3::boolean and state not in ('draft', 'needs-reconfirmation'))) returning id",
+    [questionId, versionId, evidenceChanged],
   );
   if (changed.rows.length === 0) return;
   await closeQuestionInbox(tx, deps, questionId);
@@ -802,29 +830,18 @@ export async function invalidateSkillFactEvidence(
   versionId: string,
   skillId: string,
 ) {
-  const inventory =
-    (
-      await tx.query<{ inventory: { path: string; hash: string }[] }>(
-        `select s.inventory from workflow_skill_pins p join skill_versions s on s.skill_id = p.skill_id and s.hash = p.skill_version_hash where p.workflow_version_id = $1 and p.skill_id = $2`,
-        [versionId, skillId],
-      )
-    ).rows[0]?.inventory ?? [];
   const questions = new Set(
-    (await readFacts(tx, versionId))
-      .filter(
-        (f) =>
-          f.active &&
-          f.evidence.some(
-            (link) =>
-              link.skillId === skillId &&
-              !inventory.some(
-                (file) =>
-                  file.path === link.path && file.hash === link.fileHash,
-              ),
-          ),
-      )
-      .map((f) => f.questionId),
+    (await readQuestions(tx, versionId, context.personId, true))
+      .filter((q) => q.evidenceChanges.some((e) => e.skillId === skillId))
+      .map((q) => q.id),
   );
+  for (const id of (await readFacts(tx, versionId))
+    .filter(
+      (f) =>
+        f.active && f.evidenceChanges.some((link) => link.skillId === skillId),
+    )
+    .map((f) => f.questionId))
+    questions.add(id);
   for (const questionId of questions)
     await invalidateQuestionFacts(
       tx,
@@ -833,5 +850,6 @@ export async function invalidateSkillFactEvidence(
       versionId,
       questionId,
       "The pinned Skill evidence changed",
+      true,
     );
 }

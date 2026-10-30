@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import type { FactoryPlan, PlanView } from "../src/api/plans.js";
+import type { ProposalView } from "../src/api/proposals.js";
 import {
   startTestService,
   type TestService,
@@ -375,12 +376,90 @@ for (const theme of ["light", "dark"] as const) {
         ),
       ).toBe(true);
 
+      const proposalPanel = page.getByTestId("workflow-proposal");
+      await proposalPanel
+        .getByRole("button", { name: "Review proposal approval", exact: true })
+        .click();
+      const proposalView = await call<ProposalView>("GET", `${root}/proposal`);
+      const proposalDialog = page.getByRole("dialog");
+      await expect(
+        proposalDialog.getByText(proposalView.proposal!.proposalHash, {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(
+        proposalDialog.getByText(upload.hash, { exact: true }),
+      ).toBeVisible();
+      await proposalDialog
+        .getByRole("button", { name: "Approve this proposal", exact: true })
+        .click();
+      await expect(proposalDialog).toBeHidden();
+      await expect(
+        proposalPanel.getByText("Proposal approved", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        proposalPanel.getByRole("button", {
+          name: "Initialize project",
+          exact: true,
+        }),
+      ).toHaveCount(0);
+      await author.reload();
+      const authorProposal = author.getByTestId("workflow-proposal");
+      await authorProposal
+        .getByRole("button", { name: "Initialize project", exact: true })
+        .click();
+      await expect(
+        author
+          .getByRole("dialog")
+          .getByText(proposalView.proposal!.proposalHash, { exact: true }),
+      ).toBeVisible();
+      await author
+        .getByRole("dialog")
+        .getByRole("button", { name: "Initialize project", exact: true })
+        .click();
+      await expect(author.getByRole("dialog")).toBeHidden();
+      await expect(
+        authorProposal.getByText("Initialization queued", { exact: true }),
+      ).toBeVisible();
+      expect(await service.runSourceCheckJobs()).toBe(1);
+      await expect(
+        authorProposal.getByText("Project initialized", { exact: true }),
+      ).toBeVisible();
+      const initialized = await call<ProposalView>("GET", `${root}/proposal`);
+      await authorProposal
+        .getByRole("button", { name: "Replace Creator state", exact: true })
+        .click();
+      await expect(
+        author
+          .getByRole("dialog")
+          .getByText(initialized.currentState!.hash, { exact: true }),
+      ).toBeVisible();
+      await author
+        .getByRole("dialog")
+        .getByRole("button", { name: "Cancel", exact: true })
+        .click();
+      await expect(author.getByRole("dialog")).toBeHidden();
+      const proposalScreenshot = info.outputPath(`proposal-${theme}.png`);
+      await authorProposal.screenshot({ path: proposalScreenshot });
+      await info.attach(`proposal-${theme}`, {
+        path: proposalScreenshot,
+        contentType: "image/png",
+      });
+
       await call("PATCH", `${root}/source-study/facts/${record.id}`, {
         ...content,
         statement: "The source now returns a revised report.",
         revision: 1,
       });
       await page.reload();
+      await expect(
+        page
+          .getByTestId("workflow-proposal")
+          .getByText(
+            "Proposal approval was superseded. Review the current plan and proposal again.",
+            { exact: true },
+          ),
+      ).toBeVisible();
       await expect(
         page
           .getByTestId("workflow-dossier")

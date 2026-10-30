@@ -29,6 +29,7 @@ export interface WorkflowStage {
   state: StageState;
 }
 export interface WorkflowVersion extends WorkflowFrame {
+  inheritedFromVersionId?: string | null;
   id: string;
   number: number;
   revision: number;
@@ -72,7 +73,7 @@ export interface WorkflowSourceCheck {
 }
 export interface WorkflowJob {
   id: string;
-  kind: "source-check";
+  kind: "source-check" | "init";
   workflowVersionId: string;
   requesterId: string;
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
@@ -84,8 +85,9 @@ export interface WorkflowJob {
   pinsHash: string;
   /** The latest check's sources are in its read model, not in the job. */
   outcome: {
-    status: WorkflowSourceCheck["status"];
+    status: WorkflowSourceCheck["status"] | "initialized";
     blockers: string[];
+    stateHash?: string;
   } | null;
   error: string | null;
   revision: number;
@@ -102,6 +104,8 @@ export interface WorkflowCapabilities {
   approveDossier: boolean;
   editPlan: boolean;
   approvePlan: boolean;
+  approveProposal: boolean;
+  initialize: boolean;
 }
 export const WORKFLOW_ROLES = [
   "Workflow owner",
@@ -160,6 +164,8 @@ export interface GateConfirmation {
   confirmationHash: string;
   boundHashes: Record<string, string>;
   invalidatedAt: string | null;
+  invalidationReason?: string | null;
+  supersededBy?: string | null;
 }
 export type ReadResult<T> =
   { kind: "ok"; value: T } | { kind: "denied" | "missing" | "failed" };

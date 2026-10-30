@@ -168,7 +168,8 @@ export async function answerAttachments(
   for (const id of ids) {
     const row = (
       await tx.query<AttachmentRow>(
-        "select * from answer_attachments where id = $1 and question_id = $2 and person_id = $3",
+        `select a.* from answer_attachments a where a.id = $1 and a.person_id = $3
+         and (a.question_id = $2 or exists (select 1 from inherited_answer_attachments i where i.question_id = $2 and i.attachment_id = a.id))`,
         [id, questionId, personId],
       )
     ).rows[0];
@@ -199,9 +200,10 @@ export async function readAttachment(
 ) {
   const row = (
     await tx.query<AttachmentRow>(
-      `select a.* from answer_attachments a join questions q on q.id = a.question_id
+      `select a.* from answer_attachments a join questions q on q.id = a.question_id or exists (
+        select 1 from inherited_answer_attachments i where i.question_id = q.id and i.attachment_id = a.id)
     where a.id = $1 and q.workflow_version_id = $2 and (a.person_id = $3 or exists (
-      select 1 from answer_revisions r where r.question_id = a.question_id and r.person_id = a.person_id and r.state = 'submitted'
+      select 1 from answer_revisions r where r.question_id = q.id and r.person_id = a.person_id and r.state = 'submitted'
       and r.attachments @> jsonb_build_array(jsonb_build_object('id', a.id))))`,
       [id, versionId, personId],
     )

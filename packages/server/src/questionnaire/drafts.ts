@@ -8,6 +8,7 @@ import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
 import { RequestError } from "../http/errors.js";
 import { toIsoString } from "../util.js";
+import { readRecordOrigins } from "../version-inheritance.js";
 import { fields, revisionInput, textInput } from "./model.js";
 import {
   advanceQuestionnaireRevision,
@@ -47,7 +48,11 @@ export async function readDrafts(tx: Queryable, versionId: string) {
     on r.draft_id = d.id and r.revision = d.revision where d.workflow_version_id = $1 order by d.id`,
     [versionId],
   );
-  return result.rows.map(toDraft);
+  const origins = await readRecordOrigins(tx, versionId, "draft");
+  return result.rows.map((row) => ({
+    ...toDraft(row),
+    origin: origins.get(row.id) ?? null,
+  }));
 }
 export async function readDraft(
   tx: Queryable,

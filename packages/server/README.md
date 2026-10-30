@@ -155,6 +155,33 @@ Engineer and Workflow owner in the writer's transaction. Artifacts and
 confirmation retry responses remain unchanged. Personal access tokens may
 read dossiers and gate history but cannot compose or approve versions.
 
+## Skill and workflow version changes
+
+Pinning a different Skill version compares the hashes of cited files. Changed,
+removed, or unpinned evidence reopens affected questions, including deferrals,
+and supersedes their facts. Source-study facts expose `stale` using the same
+file comparison. Unrelated file changes preserve the records' confirmations.
+Question, fact, and source-study responses include `evidenceChanges` with the
+path, old and current version/file hashes, and change status. The dashboard
+loads the before/after file previews when the comparison is expanded.
+
+`POST /workflows/:id/versions` still quotes the workflow's current `revision`.
+It now copies the latest version's pins, source-study revisions, questionnaire,
+answers, facts, acknowledgements, resolutions, and linked drafts in one locked
+transaction. `inheritedFromVersionId` identifies the preceding version; each
+inherited record's `origin` identifies its source Workflow version, record,
+and revision. The kernel ledger carries that provenance into dossier snapshots.
+Copies retain their state, including flags, while subsequent edits remain
+independent. Attachment receipts stay readable without changing fact hashes
+or exposing private answer drafts. Original discussion and round baselines
+remain in the source version, reachable through provenance links.
+
+The new version queues its own source check and requires new gates; no dossier,
+plan, or approval is copied. `GET V/dossier` includes `confirmations` so earlier
+approvals remain visible as superseded after invalidation or replacement.
+This uses migration `0023`; shipped migrations are unchanged. See
+[ADR 0028](../../docs/adr/0028-workflow-version-inheritance.md).
+
 ## Plan versions
 
 Plan versions (#58) use migration `0019`. `GET V/plan` returns immutable
@@ -187,6 +214,42 @@ The result stays a suggestion. Human acceptance uses `plan` instead of
 `questions` in the existing accept-preview/accept protocol and saves through
 the same validation and optimistic-concurrency checks as a direct save.
 Inbox links for suggestions and approvals open the workflow's `#plan` panel.
+
+## Proposal approval and initialization
+
+Proposal approval (#59) uses migration `0022`. `GET V/proposal` returns the
+kernel's proposal for the currently approved plan, including its blockers,
+warnings, source identities, and `proposalHash`, together with the immutable
+`planVersionHash`, proposal `confirmation`, `currentState`, and initialization
+`jobs`. Without a current approved plan, `proposal` is null. The service uses
+managed artifact roots; a plan with an explicit `artifactRoot` reports a
+blocker before approval or initialization.
+
+The signed-in Workflow owner or Administrator previews and commits
+`V/gates/proposal` through the shared gate protocol. The confirmation binds
+the kernel proposal, Plan version, Dossier version, and pin-set hashes. Plan
+approval notifies the owner that the proposal is ready. A changed plan or
+superseded dossier invalidates proposal approval, cancels queued or claimed
+initialization jobs, and notifies the Engineer and Workflow owner in the
+same transaction. Gate retries retain their original response.
+
+A signed-in Engineer or Administrator sends
+`{proposalHash, confirmed: true, requestId, replaceStateHash?}` to
+`POST V/proposal/initialize`. It returns `202 {job}` without running the
+kernel in the HTTP request. `replaceStateHash` must equal `currentState.hash`
+when replacing state; a conflict returns `currentStateHash`. Request IDs
+identify jobs per requester, so identical retries return the same job while
+changed inputs conflict. Personal access tokens may read these resources
+but cannot approve or initialize.
+
+The existing workflow worker claims `init` jobs alongside source checks and
+rechecks the approval, plan, sources, and quoted state hash under the version
+lock. It calls the kernel in a private namespace, then commits the exact
+state bytes and hash with the outcome, stage updates, and audit entry.
+An expired claimant cannot publish a state after takeover. A successful job
+marks Plan and proposal done and Package active. Failure leaves the previous
+state current. Source checks refresh source trees without erasing committed
+Creator state. See [ADR 0027](../../docs/adr/0027-transactional-proposal-initialization.md).
 
 ## Source study records
 
@@ -650,6 +713,61 @@ parent link; accepting them never publishes a round or resolves the parent.
 Each decision binds the submitted result, edits, job revision, and context
 hash. Changed evidence cancels the job, and changed edits invalidate the
 preview. An identical decision retried with the same person and client request ID returns its original response, including after later inputs change; changed replay inputs or a reused ID for another job conflict. Agents cannot request, accept, reject, or sign off on behalf of people.
+
+## Skill versions from Git
+
+The Skills page's **Import from Git** action registers a repository, previews
+one full commit hash, collects script side-effect declarations, and confirms
+an immutable version. The tree goes through the same kernel inspection as an
+upload; identical content has the same hash and returns the same version.
+Never import real data. Fetched content never executes.
+
+Deployments must set `BADGER_GIT_ALLOWED_ORIGINS` to a comma-separated list of
+exact HTTPS origins, for example `https://github.com,https://git.example.com`.
+The default is empty, disabling registration and fetching. Explicit loopback
+HTTP origins are allowed for local use. An origin enables registration; imports
+still require a repository registered for the target Skill. URLs must not carry
+credentials, queries, or fragments. This version supports public or otherwise
+unauthenticated repositories over Git smart HTTP. Private-repository credential
+management and SSH are not provided. The runtime image includes Git and CA
+certificates; a host running Node directly must install Git itself.
+
+`BADGER_GIT_TIMEOUT_MS` defaults to 30000 (100–120000). The combined received
+bytes and temporary bare repository are each capped by
+`BADGER_GIT_MAX_REPOSITORY_BYTES`, default 104857600 (1 KiB–1 GiB). The existing
+`BADGER_UPLOAD_MAX_FILES`, `BADGER_UPLOAD_MAX_FILE_BYTES`, and
+`BADGER_UPLOAD_MAX_BYTES` also cap the committed files before ignore rules.
+Git uses pack storage instead of unpacking loose objects, caps its delta-base
+cache at the total upload byte limit, and caps each allocation at that limit
+plus 16 MiB of overhead. An object that trips the allocation guard is refused
+with 413 before the application inspects the expanded tree.
+Outbound transport honors the deployment's HTTP/HTTPS proxy and `NO_PROXY`
+settings. Redirects, dumb HTTP, links, and submodules are refused. No checkout,
+Git hooks, filters, credential helpers, or imported scripts run.
+
+All routes below follow the configured base path and `/api/v1`. They use the
+same Group visibility and Engineer/Field expert upload permissions as uploads.
+Registration and imports are audited; duplicate requests retain their records.
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /skills/:id/repositories` | List registered repositories visible with this Skill. |
+| `POST /skills/:id/repositories` | Register `{url}` without fetching; return `{repository}` (201 or 200 for a duplicate). |
+| `POST /skills/:id/git-preview` | Inspect `{repositoryId, commit, scripts?}`; return `{preview}` with the kernel hash, inventory, and effects. |
+| `POST /skills/:id/versions` | Import `{repositoryId, commit, scripts?, confirmed: true, expectedHash}`; return `{version}` (201 or 200). |
+
+Commits must be full lowercase 40- or 64-character hashes. Branches, tags,
+abbreviations, and unregistered or other-Skill repository IDs are refused.
+A missing confirmation returns 400 before fetching; a mismatched source hash
+returns 409. Resource limits return 413. A transport or missing-commit failure
+returns 400 with a safe message and creates no version.
+
+Version responses include their initial `origin` (`upload` or `git`) and a
+`gitOrigins` list of `{repositoryId, repository, commit}` receipts. Importing
+an already uploaded tree appends its Git provenance without changing its
+identity, files, declarations, original actor, or timestamp. Migration `0024`
+adds these records without rewriting shipped migrations or existing versions.
+See [ADR 0029](../../docs/adr/0029-registered-git-skill-versions.md).
 
 ## Skill uploads
 

@@ -5,6 +5,7 @@ import {
   readUploadFile,
   undeclaredScripts,
   uploadVersion,
+  type GitContent,
   type SideEffect,
   type Skill,
   type SkillVersion,
@@ -14,6 +15,8 @@ import {
 } from "../../api/skills.js";
 import { readBasePath } from "../../app/paths.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+
+import { GitSourceFields } from "./GitSourceFields.js";
 
 const SIDE_EFFECTS: SideEffect[] = [
   "none",
@@ -26,17 +29,21 @@ const SIDE_EFFECTS: SideEffect[] = [
 export function UploadSkillModal({
   skill,
   limits,
+  source = "upload",
   onClose,
   onUploaded,
 }: {
   skill: Skill;
+  source?: "upload" | "git";
   limits: UploadLimits;
   onClose(): void;
   onUploaded(version: SkillVersion): void;
 }) {
   const { t, format } = useI18n();
   const basePath = readBasePath(document);
-  const [content, setContent] = useState<UploadContent | null>(null);
+  const [content, setContent] = useState<UploadContent | GitContent | null>(
+    null,
+  );
   const [preview, setPreview] = useState<VersionPreview | null>(null);
   const [scripts, setScripts] = useState<Record<string, SideEffect[]>>({});
   const [busy, setBusy] = useState(false);
@@ -123,7 +130,7 @@ export function UploadSkillModal({
   return (
     <Modal
       open
-      title={`${t("skills.upload")} · ${skill.name}`}
+      title={`${t(source === "git" ? "skills.importGit" : "skills.upload")} · ${skill.name}`}
       onCancel={busy ? undefined : onClose}
       closable={!busy}
       maskClosable={!busy}
@@ -138,44 +145,77 @@ export function UploadSkillModal({
             loading={busy}
             disabled={preview === null || undeclared.length > 0}
           >
-            {t("skills.confirmUpload")}
+            {t(
+              source === "git"
+                ? "skills.confirmImport"
+                : "skills.confirmUpload",
+            )}
           </Button>
         </Space>
       }
       width={720}
     >
       <Space orientation="vertical" size="middle" className="skills-full-width">
-        <Alert type="warning" showIcon title={t("skills.dataWarning")} />
+        <Alert
+          type="warning"
+          showIcon
+          title={t(
+            source === "git" ? "skills.gitDataWarning" : "skills.dataWarning",
+          )}
+        />
         <p className="muted">
-          {format("skills.uploadLimits", {
-            count: limits.maxFiles,
-            total: Math.floor(limits.maxBytes / 1024 / 1024),
-            file: Math.floor(limits.maxFileBytes / 1024 / 1024),
-          })}
+          {format(
+            source === "git" ? "skills.gitLimits" : "skills.uploadLimits",
+            {
+              count: limits.maxFiles,
+              total: Math.floor(limits.maxBytes / 1024 / 1024),
+              file: Math.floor(limits.maxFileBytes / 1024 / 1024),
+            },
+          )}
         </p>
-        <div className="skills-upload-inputs">
-          <label className="field">
-            {t("skills.folder")}
-            <input
-              aria-label={t("skills.folder")}
-              type="file"
-              multiple
-              {...{ webkitdirectory: "" }}
-              disabled={busy}
-              onChange={(event) => void selectFiles(event.target.files, false)}
-            />
-          </label>
-          <label className="field">
-            {t("skills.zip")}
-            <input
-              aria-label={t("skills.zip")}
-              type="file"
-              accept=".zip,application/zip"
-              disabled={busy}
-              onChange={(event) => void selectFiles(event.target.files, true)}
-            />
-          </label>
-        </div>
+        {source === "git" ? (
+          <GitSourceFields
+            skillId={skill.id}
+            busy={busy}
+            onBusy={setBusy}
+            onError={setError}
+            onChange={() => {
+              setContent(null);
+              setPreview(null);
+              setScripts({});
+            }}
+            onPreview={(content, preview) => {
+              setContent(content);
+              setPreview(preview);
+            }}
+          />
+        ) : (
+          <div className="skills-upload-inputs">
+            <label className="field">
+              {t("skills.folder")}
+              <input
+                aria-label={t("skills.folder")}
+                type="file"
+                multiple
+                {...{ webkitdirectory: "" }}
+                disabled={busy}
+                onChange={(event) =>
+                  void selectFiles(event.target.files, false)
+                }
+              />
+            </label>
+            <label className="field">
+              {t("skills.zip")}
+              <input
+                aria-label={t("skills.zip")}
+                type="file"
+                accept=".zip,application/zip"
+                disabled={busy}
+                onChange={(event) => void selectFiles(event.target.files, true)}
+              />
+            </label>
+          </div>
+        )}
         {error !== null && <Alert type="error" showIcon title={error} />}
         {busy && <Spin aria-label={t("common.loading")} />}
         {preview !== null && (

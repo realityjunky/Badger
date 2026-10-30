@@ -22,6 +22,7 @@ import { readVersion } from "./skills/library.js";
 import { listWorkflowPins } from "./workflow-source.js";
 import { RequestError } from "./http/errors.js";
 import { toIsoString } from "./util.js";
+import { invalidateProposal } from "./proposal-invalidation.js";
 
 interface PlanRow {
   id: string;
@@ -161,6 +162,13 @@ export async function storePlan(
     "plan",
     "A new plan version superseded the approval",
     ["Engineer", "Workflow owner"],
+  );
+  await invalidateProposal(
+    tx,
+    deps,
+    context,
+    versionId,
+    "A new plan version superseded the proposal",
   );
   const { stages } = (
     await tx.query<{ stages: Record<string, string> }>(

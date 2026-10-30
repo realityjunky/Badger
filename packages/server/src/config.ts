@@ -113,6 +113,14 @@ export interface ServiceConfig {
     maxFileBytes: number;
     maxFiles: number;
   };
+  git: {
+    allowedOrigins: string[];
+    timeoutMs: number;
+    maxRepositoryBytes: number;
+    httpsProxy: string | undefined;
+    httpProxy: string | undefined;
+    noProxy: string | undefined;
+  };
   /**
    * The built dashboard's directory. It holds index.html and the asset
    * folder; a deployment that ships them elsewhere sets BADGER_WEB_DIR.
@@ -739,6 +747,25 @@ export function loadConfig(
         max: 10000,
       }),
     },
+    git: {
+      httpsProxy: environment.https_proxy ?? environment.HTTPS_PROXY,
+      httpProxy: environment.http_proxy ?? environment.HTTP_PROXY,
+      noProxy: environment.no_proxy ?? environment.NO_PROXY,
+      allowedOrigins: readGitOrigins(environment),
+      timeoutMs: readInteger(environment, "BADGER_GIT_TIMEOUT_MS", 30_000, {
+        min: 100,
+        max: 120_000,
+      }),
+      maxRepositoryBytes: readInteger(
+        environment,
+        "BADGER_GIT_MAX_REPOSITORY_BYTES",
+        100 * 1024 * 1024,
+        {
+          min: 1024,
+          max: 1024 * 1024 * 1024,
+        },
+      ),
+    },
     webDirectory: readWebDirectory(environment),
     notifications: {
       encryptionKey: notificationKey,
@@ -748,4 +775,34 @@ export function loadConfig(
       noProxy: environment.no_proxy ?? environment.NO_PROXY,
     },
   };
+}
+
+/** Git destinations are host policy, never something a Skill can widen. */
+function readGitOrigins(environment: Environment): string[] {
+  return (readList(environment, "BADGER_GIT_ALLOWED_ORIGINS") ?? []).map(
+    (value) => {
+      let url: URL;
+      try {
+        url = new URL(value);
+      } catch {
+        throw new ConfigurationError(
+          "BADGER_GIT_ALLOWED_ORIGINS must list HTTPS origins",
+        );
+      }
+      if (
+        (url.protocol !== "https:" &&
+          !(url.protocol === "http:" && isLoopbackHostname(url.hostname))) ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash ||
+        url.pathname !== "/"
+      ) {
+        throw new ConfigurationError(
+          "BADGER_GIT_ALLOWED_ORIGINS must list HTTPS origins (loopback HTTP is allowed)",
+        );
+      }
+      return url.origin;
+    },
+  );
 }

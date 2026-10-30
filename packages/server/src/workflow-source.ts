@@ -1,5 +1,6 @@
 import { invalidateSkillFactEvidence } from "./questionnaire/resolutions.js";
 import { reconcileDossier } from "./dossier.js";
+import { runInitialization } from "./initialization.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
@@ -75,13 +76,14 @@ export interface SourceCheck {
  * model, so a version's history stays small.
  */
 export interface JobOutcome {
-  status: SourceCheckStatus;
+  status: SourceCheckStatus | "initialized";
   blockers: string[];
+  stateHash?: string;
 }
 
 export interface WorkflowJob {
   id: string;
-  kind: "source-check";
+  kind: "source-check" | "init";
   workflowVersionId: string;
   requesterId: string;
   status: JobStatus;
@@ -91,6 +93,11 @@ export interface WorkflowJob {
   leaseUntil: string | null;
   workerId: string | null;
   pinsHash: string;
+  planVersionHash: string | null;
+  proposalHash: string | null;
+  proposalConfirmationId: string | null;
+  replaceStateHash: string | null;
+  requestId: string | null;
   outcome: JobOutcome | null;
   error: string | null;
   revision: number;
@@ -133,7 +140,7 @@ interface SourceCheckRow {
 
 interface JobRow {
   id: string;
-  kind: "source-check";
+  kind: WorkflowJob["kind"];
   workflow_version_id: string;
   requester_id: string;
   status: JobStatus;
@@ -143,6 +150,11 @@ interface JobRow {
   lease_until: Date | string | null;
   worker_id: string | null;
   pins_hash: string;
+  plan_version_hash: string | null;
+  proposal_hash: string | null;
+  proposal_confirmation_id: string | null;
+  replace_state_hash: string | null;
+  request_id: string | null;
   outcome: JobOutcome | null;
   error: string | null;
   revision: number;
@@ -153,11 +165,13 @@ const PIN_COLUMNS = `p.workflow_version_id, p.skill_id, s.name as skill_name,
   p.created_at, p.updated_at`;
 const JOB_COLUMNS = `id, kind, workflow_version_id, requester_id, status,
   requested_at, started_at, finished_at, lease_until, worker_id, pins_hash,
-  outcome - 'sources' as outcome, error, revision`;
+  outcome - 'sources' as outcome, error, revision, plan_version_hash,
+  proposal_hash, proposal_confirmation_id, replace_state_hash, request_id`;
 const JOB_CLAIM_COLUMNS = `j.id, j.kind, j.workflow_version_id, j.requester_id,
   j.status, j.requested_at, j.started_at, j.finished_at, j.lease_until,
   j.worker_id, j.pins_hash, j.outcome - 'sources' as outcome, j.error,
-  j.revision`;
+  j.revision, j.plan_version_hash, j.proposal_hash, j.proposal_confirmation_id,
+  j.replace_state_hash, j.request_id`;
 
 function toPin(row: PinRow): WorkflowSkillPin {
   return {
@@ -203,6 +217,11 @@ function toJob(row: JobRow): WorkflowJob {
     leaseUntil: row.lease_until === null ? null : toIsoString(row.lease_until),
     workerId: row.worker_id,
     pinsHash: row.pins_hash,
+    planVersionHash: row.plan_version_hash,
+    proposalHash: row.proposal_hash,
+    proposalConfirmationId: row.proposal_confirmation_id,
+    replaceStateHash: row.replace_state_hash,
+    requestId: row.request_id,
     outcome: row.outcome,
     error: row.error,
     revision: row.revision,
@@ -308,7 +327,7 @@ async function versionGroup(
       };
 }
 
-function workspaceLocation(
+export function workspaceLocation(
   config: ServiceConfig,
   versionId: string,
 ): { root: string; relative: string } {
@@ -345,13 +364,14 @@ async function invalidateSourcesStage(
   );
 }
 
-async function enqueueSourceCheck(
+export async function enqueueSourceCheck(
   database: Queryable,
   dependencies: ServiceDependencies,
   context: WriteContext,
   workflowVersionId: string,
-  pinsHash: string,
+  pinsHash?: string,
 ): Promise<WorkflowJob> {
+  pinsHash ??= await pinsForHash(database, workflowVersionId);
   const now = dependencies.clock.now();
   // A queued check of the previous pin set could only be discarded; the new
   // job replaces it. A running one finishes, and its result is not shown.
@@ -689,7 +709,7 @@ async function materializeWorkspace(
   declarations: SourceDeclaration[];
 }> {
   const { root, relative } = workspaceLocation(config, versionId);
-  await fs.rm(root, { recursive: true, force: true });
+  await fs.rm(path.join(root, "skills"), { recursive: true, force: true });
   await fs.mkdir(root, { recursive: true });
   const declarations: SourceDeclaration[] = [];
   let upgradeSource: string | undefined;
@@ -751,7 +771,11 @@ export interface SourceCheckWorkerOptions {
 }
 
 type FinalStatus = Exclude<JobStatus, "queued" | "running">;
-type FullOutcome = JobOutcome & { sources: PublicSource[] };
+type FullOutcome = {
+  status: SourceCheckStatus;
+  blockers: string[];
+  sources: PublicSource[];
+};
 
 export class SourceCheckWorker {
   private readonly options: Required<SourceCheckWorkerOptions>;
@@ -832,8 +856,11 @@ export class SourceCheckWorker {
     );
     heartbeat.unref();
     try {
+      if (job.kind === "init")
+        return await runInitialization(this.options, job);
       return await this.check(job);
     } catch (error) {
+      if (job.kind === "init") throw error;
       return await this.finish(
         job,
         "failed",
@@ -890,10 +917,16 @@ export class SourceCheckWorker {
     if (pinSetHash(pins.rows) !== job.pinsHash)
       return this.finish(job, "cancelled", null, SUPERSEDED);
     if (pins.rows.length === 0) {
-      await fs.rm(workspaceLocation(config, job.workflowVersionId).root, {
-        recursive: true,
-        force: true,
-      });
+      await fs.rm(
+        path.join(
+          workspaceLocation(config, job.workflowVersionId).root,
+          "skills",
+        ),
+        {
+          recursive: true,
+          force: true,
+        },
+      );
       return this.finish(job, "succeeded", {
         status: "blocked",
         sources: [],

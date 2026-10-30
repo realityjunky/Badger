@@ -84,7 +84,7 @@ _Avoid_: allowed directory
 The Engineer's recorded reading of one pinned Skill version before the questionnaire. It yields source-derived facts with their evidence, the interfaces between Skills, and the Skill's own open questions.
 
 **Workflow version**:
-One iteration of a workflow: the Skill versions it pins, its questionnaire, and the dossier, plan, and package built from them. A new workflow version inherits the previous one's facts and resolutions.
+One iteration of a workflow: the Skill versions it pins, its questionnaire, and the dossier, plan, and package built from them. A new workflow version inherits the previous one's facts and resolutions with provenance to their earlier records; flagged evidence stays open for re-verification, and approvals require a new review.
 
 **Workflow frame**:
 The workflow's name, goal, intent (a new Skill or an upgrade of an existing one), and language. Each workflow version keeps the frame it began with.
@@ -102,6 +102,9 @@ An immutable snapshot of a Semantic dossier and the ledger records it relies on.
 
 **Plan version**:
 An immutable FactoryPlan bound to one approved Dossier version. The Engineer saves it or accepts an Agent's draft as a version, and the Workflow owner approves its exact identity.
+
+**Proposal**:
+The kernel's account of the workflow a FactoryPlan would initialize, including its source identities and blockers. The Workflow owner approves its exact identity before the Engineer initializes the Project.
 
 **Node**:
 A meaningful stage of a workflow with its own responsibility, completion evidence, and possible outcomes.

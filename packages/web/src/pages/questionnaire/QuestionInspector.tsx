@@ -9,6 +9,8 @@ import { useI18n } from "../../i18n/I18nContext.js";
 import type { MessageId } from "../../i18n/catalog.js";
 import { AnswerContent } from "./AnswerContent.js";
 import { AnswerTypeDetails } from "./AnswerTypeDetails.js";
+import { EvidenceChanges } from "../../components/EvidenceChanges.js";
+import { RecordOriginLink } from "../../components/RecordOriginLink.js";
 
 /** Evidence and immutable revision history for the open question. */
 export function QuestionInspector({
@@ -35,6 +37,16 @@ export function QuestionInspector({
       aria-label={t("questionnaire.inspector")}
     >
       <h2 className="pane-title">{t("questionnaire.inspector")}</h2>
+      {question && view && (
+        <>
+          <RecordOriginLink
+            origin={question.origin}
+            workflowId={view.workflow.id}
+            kind="question"
+          />
+          <EvidenceChanges changes={question.evidenceChanges} />
+        </>
+      )}
       {sourceConcern && (
         <Link
           to={`/questionnaire/concerns/${encodeURIComponent(sourceConcern.id)}`}

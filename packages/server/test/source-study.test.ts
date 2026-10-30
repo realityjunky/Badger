@@ -137,6 +137,40 @@ async function setup(names = ["producer-skill", "consumer-skill"]) {
 }
 
 describe("source study through the service", () => {
+  it("blocks an interface whose uncited consumer is no longer pinned", async () => {
+    const { base, pins, evidence } = await setup();
+    const created = await write("POST", `${base}/source-study/interfaces`, {
+      producer: pins[0],
+      consumer: pins[1],
+      artifact: "samples.tsv",
+      columns: ["sample_id", "sequence"],
+      naming: "One table per batch.",
+      validation: "Both columns must be present.",
+      evidence: [evidence],
+    });
+    expect(created.status).toBe(201);
+    expect(
+      (
+        await write("DELETE", `${base}/pins/${pins[1].skillId}`, {
+          revision: 1,
+        })
+      ).status,
+    ).toBe(200);
+    const study = await read(`${base}/source-study`);
+    expect(study.interfaces[0]).toMatchObject({
+      stale: true,
+      evidenceChanges: [],
+    });
+    const response = await write(
+      "POST",
+      `${base}/gates/source-study/${pins[0].skillId}/preview`,
+      {},
+    );
+    expect(response.status).toBe(409);
+    expect(JSON.stringify(await response.json())).toContain(
+      "SOURCE_STUDY_EVIDENCE_STALE",
+    );
+  });
   it("records a source-derived fact and lets a workflow Observer open the exact cited lines", async () => {
     const { base, evidence } = await setup();
     const response = await write("POST", `${base}/source-study/facts`, {

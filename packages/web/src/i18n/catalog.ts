@@ -5,6 +5,37 @@ import type { Language } from "../preferences/model.js";
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  "proposal.title": "Proposal and initialization",
+  "proposal.description":
+    "Review the kernel's proposal for the approved plan. The Workflow owner approves it before the Engineer initializes the project.",
+  "proposal.needPlan": "Approve the current plan to see its proposal.",
+  "proposal.hash": "Proposal hash",
+  "proposal.blockers": "Proposal blockers",
+  "proposal.reviewApproval": "Review proposal approval",
+  "proposal.approve": "Approve this proposal",
+  "proposal.approvalHelp":
+    "Approve this exact proposal and its source identities. Initialization runs separately as a job bound to this approval.",
+  "proposal.approved": "Proposal approved",
+  "proposal.invalidated":
+    "Proposal approval was superseded. Review the current plan and proposal again.",
+  "proposal.initialize": "Initialize project",
+  "proposal.initHelp":
+    "Queue initialization of the kernel project using exactly this approved proposal.",
+  "proposal.replace": "Replace Creator state",
+  "proposal.replaceHelp":
+    "Replace the Creator state identified below. This discards its authoring, generation, evaluation, and review progress. The job will refuse if the state changes.",
+  "proposal.currentState": "Current Creator state hash",
+  "proposal.jobs": "Initialization jobs",
+  "proposal.status.queued": "Initialization queued",
+  "proposal.status.running": "Initializing project",
+  "proposal.status.succeeded": "Project initialized",
+  "proposal.status.failed": "Initialization failed",
+  "proposal.status.cancelled": "Initialization cancelled",
+  "proposal.changed": "The proposal changed. Reload and review it again.",
+  "proposal.failed": "The proposal request failed. Reload and try again.",
+  "inbox.proposalReady": "{name} · v{number}: approve the proposal",
+  "inbox.proposalInvalidated":
+    "{name} · v{number}: proposal approval superseded",
   "plan.title": "Plan versions",
   "plan.description":
     "Draft from the approved dossier, review the kernel's findings, and save an immutable plan for the Workflow owner's approval.",
@@ -173,7 +204,6 @@ const en = {
   "drafting.keepEdits": "Keep edits",
   "drafting.remove": "Remove from acceptance",
   "drafting.preview": "Review decision",
-  "drafting.accept": "Accept as draft questions",
   "drafting.acceptHelp":
     "These questions will be saved in the selected draft round. Review and publish the round separately to send them.",
   "drafting.needRound": "Create a draft round before requesting drafting.",
@@ -522,6 +552,19 @@ const en = {
   "skills.create": "Add Skill",
   "skills.upload": "Upload version",
   "skills.confirmUpload": "Confirm immutable upload",
+  "skills.importGit": "Import from Git",
+  "skills.gitDataWarning":
+    "Never import real data. Import Skill instructions, scripts, and synthetic examples only.",
+  "skills.gitLimits":
+    "Up to {count} files, {total} MiB total, {file} MiB per file.",
+  "skills.confirmImport": "Confirm immutable import",
+  "skills.repository": "Registered repository",
+  "skills.repositoryUrl": "New repository URL",
+  "skills.registerRepository": "Register repository",
+  "skills.commit": "Commit hash",
+  "skills.commitHint":
+    "Use the full commit hash. Only the committed tree is imported; fetched content never runs.",
+  "skills.previewCommit": "Preview commit",
   "skills.dataWarning":
     "Never upload real data. Upload Skill instructions, scripts, and synthetic examples only.",
   "skills.uploadLimits":
@@ -671,7 +714,17 @@ const en = {
   "workflow.versionMissing": "This version does not belong to this workflow.",
   "workflow.newVersion": "Start new version",
   "workflow.newVersionConfirm":
-    "Start a new version from the workflow's current name, goal, intent, and language?",
+    "Start a new version with the current frame and the latest version's Skill pins, facts, answers, and resolutions? Flagged items stay open. Approvals require a new review.",
+  "versions.inheritedVersion": "Inherited from the previous workflow version",
+  "versions.approvalRecorded": "Approval recorded",
+  "versions.approvalSuperseded": "Approval superseded",
+  "versions.inheritedRecord":
+    "View the inherited record (revision {revision}) in the earlier version",
+  "versions.evidenceChanged":
+    "Cited evidence changed. Review the file comparison and confirm again.",
+  "versions.changed": "Changed",
+  "versions.removed": "File removed",
+  "versions.unpinned": "Skill no longer pinned",
   "workflow.team": "Workflow team",
   "workflow.email": "Email",
   "workflow.emailRequired": "Enter an email address.",
@@ -931,6 +984,34 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  "proposal.title": "提案与初始化",
+  "proposal.description":
+    "查看内核根据已批准计划生成的提案。工作流负责人批准后，工程师可初始化项目。",
+  "proposal.needPlan": "请先批准当前计划，再查看提案。",
+  "proposal.hash": "提案哈希",
+  "proposal.blockers": "提案阻塞项",
+  "proposal.reviewApproval": "审阅提案审批",
+  "proposal.approve": "批准此提案",
+  "proposal.approvalHelp":
+    "批准此提案及其来源标识。初始化将作为绑定本次审批的独立任务运行。",
+  "proposal.approved": "提案已批准",
+  "proposal.invalidated": "提案审批已失效，请重新审阅当前计划与提案。",
+  "proposal.initialize": "初始化项目",
+  "proposal.initHelp": "使用此已批准提案创建内核项目初始化任务。",
+  "proposal.replace": "替换 Creator 状态",
+  "proposal.replaceHelp":
+    "替换下方哈希标识的 Creator 状态，将清除其创作、生成、评估与审阅进度。若状态发生变化，任务将拒绝替换。",
+  "proposal.currentState": "当前 Creator 状态哈希",
+  "proposal.jobs": "初始化任务",
+  "proposal.status.queued": "初始化排队中",
+  "proposal.status.running": "正在初始化项目",
+  "proposal.status.succeeded": "项目已初始化",
+  "proposal.status.failed": "初始化失败",
+  "proposal.status.cancelled": "初始化已取消",
+  "proposal.changed": "提案已更改，请重新加载并审阅。",
+  "proposal.failed": "提案请求失败，请重新加载后重试。",
+  "inbox.proposalReady": "{name} · v{number}：等待批准提案",
+  "inbox.proposalInvalidated": "{name} · v{number}：提案审批已失效",
   "plan.title": "计划版本",
   "plan.description":
     "从已批准的语义档案起草计划，查看内核校验结果，并保存不可变的计划版本供工作流所有者批准。",
@@ -1097,7 +1178,6 @@ const zh: Record<MessageId, string> = {
   "drafting.keepEdits": "保留修改",
   "drafting.remove": "不接受此项",
   "drafting.preview": "审核决定",
-  "drafting.accept": "接受并创建草稿问题",
   "drafting.acceptHelp":
     "这些问题将保存至所选草稿轮次。发送前请单独审核并发布该轮次。",
   "drafting.needRound": "请先创建草稿轮次，再请求起草。",
@@ -1445,7 +1525,15 @@ const zh: Record<MessageId, string> = {
   "workflow.versionMissing": "此版本不属于当前工作流。",
   "workflow.newVersion": "创建新版本",
   "workflow.newVersionConfirm":
-    "使用工作流当前的名称、目标、意图和语言创建新版本？",
+    "使用当前工作流信息，继承最新版本的 Skill 固定版本、事实、回答和处理结果？已标记项将保持待确认，审批需要重新审核。",
+  "versions.inheritedVersion": "继承自上一工作流版本",
+  "versions.approvalRecorded": "审批已记录",
+  "versions.approvalSuperseded": "审批已被替代",
+  "versions.inheritedRecord": "查看早期版本中的继承记录（修订 {revision}）",
+  "versions.evidenceChanged": "引用证据已变更。请查看文件对比并重新确认。",
+  "versions.changed": "已变更",
+  "versions.removed": "文件已移除",
+  "versions.unpinned": "Skill 已取消固定",
   "workflow.team": "工作流团队",
   "workflow.email": "邮箱",
   "workflow.emailRequired": "请输入邮箱地址。",
@@ -1501,6 +1589,19 @@ const zh: Record<MessageId, string> = {
   "skills.create": "添加 Skill",
   "skills.upload": "上传版本",
   "skills.confirmUpload": "确认上传不可变版本",
+  "skills.importGit": "从 Git 导入",
+  "skills.gitDataWarning":
+    "严禁导入真实数据。仅导入 Skill 说明、脚本和合成示例。",
+  "skills.gitLimits":
+    "最多 {count} 个文件，总计 {total} MiB，每个文件 {file} MiB。",
+  "skills.confirmImport": "确认导入不可变版本",
+  "skills.repository": "已注册仓库",
+  "skills.repositoryUrl": "新仓库地址",
+  "skills.registerRepository": "注册仓库",
+  "skills.commit": "提交哈希",
+  "skills.commitHint":
+    "请输入完整的提交哈希。仅导入该提交的文件，获取的内容不会执行。",
+  "skills.previewCommit": "预览提交",
   "skills.dataWarning": "严禁上传真实数据。仅上传 Skill 说明、脚本和合成示例。",
   "skills.uploadLimits":
     "最多 {count} 个文件，总计 {total} MiB，每个文件 {file} MiB。zip 解压后同样受限。",

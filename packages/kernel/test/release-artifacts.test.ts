@@ -675,4 +675,15 @@ describe("Badger release artifacts", () => {
     expect(ledger).toContain("OpenID Connect and trusted-header sign-in (#69)");
     expect(ledger).toContain("The Badger MCP's expert profile (#54)");
   });
+
+  it("plans Run storage on macOS and Windows only, after #35 shipped for Linux", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const readme = await readText("packages/kernel/README.md");
+    const planned = manual.slice(manual.indexOf('id="service"'));
+
+    expect(planned).not.toContain("issues/35");
+    expect(planned).toContain("issues/86");
+    expect(readme).toContain("CI runs the Run storage suites on Linux.");
+    expect(readme).not.toContain("suites on Linux, macOS, and Windows");
+  });
 });

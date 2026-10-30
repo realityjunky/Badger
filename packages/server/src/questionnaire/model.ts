@@ -37,6 +37,8 @@ export interface QuestionRevision extends QuestionContent {
   createdAt: string;
 }
 export interface Question extends QuestionContent {
+  evidenceChanges: import("../evidence-changes.js").EvidenceChange[];
+  origin: import("../version-inheritance.js").RecordOrigin | null;
   id: string;
   roundId: string;
   revision: number;

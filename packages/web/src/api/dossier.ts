@@ -23,6 +23,7 @@ export interface DossierView {
   versions: DossierVersion[];
   currentVersionId: string | null;
   confirmation: GateConfirmation | null;
+  confirmations?: GateConfirmation[];
   handoff: QuestionnaireRecordHandoff;
 }
 export interface DossierPreview {

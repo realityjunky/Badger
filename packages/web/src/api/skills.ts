@@ -48,6 +48,8 @@ export interface SkillVersion extends VersionPreview {
   skillId: string;
   uploadedBy: string;
   createdAt: string;
+  origin: "upload" | "git";
+  gitOrigins: { repositoryId: string; repository: string; commit: string }[];
 }
 
 export interface FilePreview {
@@ -73,6 +75,16 @@ export interface VersionDiff {
     before: ScriptEffects | null;
     after: ScriptEffects | null;
   }[];
+}
+
+export interface SkillRepository {
+  id: string;
+  url: string;
+}
+
+export interface GitContent {
+  repositoryId: string;
+  commit: string;
 }
 
 export interface UploadContent {
@@ -191,7 +203,7 @@ export function undeclaredScripts(
 export function uploadVersion(
   basePath: string,
   id: string,
-  content: UploadContent,
+  content: UploadContent | GitContent,
   scripts: Record<string, SideEffect[]>,
   expectedHash: string,
 ) {
@@ -218,4 +230,30 @@ export function readUploadFile(file: File): Promise<string> {
       reject(new Error("The selected file could not be read"));
     reader.readAsDataURL(file);
   });
+}
+
+export function loadRepositories(
+  basePath: string,
+  id: string,
+  signal?: AbortSignal,
+) {
+  return request<{ repositories: SkillRepository[] }>(
+    basePath,
+    `${skillPath(id)}/repositories`,
+    { signal },
+  );
+}
+export function registerRepository(basePath: string, id: string, url: string) {
+  return request<{ repository: SkillRepository }>(
+    basePath,
+    `${skillPath(id)}/repositories`,
+    { method: "POST", body: JSON.stringify({ url }) },
+  );
+}
+export function previewGit(basePath: string, id: string, content: GitContent) {
+  return request<{ preview: VersionPreview }>(
+    basePath,
+    `${skillPath(id)}/git-preview`,
+    { method: "POST", body: JSON.stringify(content) },
+  );
 }

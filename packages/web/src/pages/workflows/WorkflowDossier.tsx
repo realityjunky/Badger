@@ -244,6 +244,21 @@ export function WorkflowDossier({
                   title={t("dossier.supersededHelp")}
                 />
               )}
+              {(view.confirmations ?? [])
+                .filter((c) => c.boundHashes.dossier === selected.hash)
+                .map((c) => (
+                  <p key={c.id}>
+                    <Tag>
+                      {t(
+                        c.invalidatedAt
+                          ? "versions.approvalSuperseded"
+                          : "versions.approvalRecorded",
+                      )}
+                    </Tag>{" "}
+                    {c.actorId} · {new Date(c.confirmedAt).toLocaleString()}
+                    {c.invalidationReason && ` · ${c.invalidationReason}`}
+                  </p>
+                ))}
               <DossierContent
                 snapshot={selected.snapshot}
                 hash={selected.hash}
