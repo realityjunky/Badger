@@ -199,8 +199,12 @@ export async function saveChannel(
       channel: context.channel,
       action: "notification_channel.saved",
       target: { type: "notification_channel", id, label: channel.label },
-      before: current ? { revision: current.revision, hash: null } : null,
-      after: { revision, hash: null },
+      // The robot key is an HMAC of the webhook, never the secret itself, so
+      // a different chat shows as a changed hash and a label edit does not.
+      before: current
+        ? { revision: current.revision, hash: current.robot_key }
+        : null,
+      after: { revision, hash: robot },
       reason: "Robot settings saved; test post queued",
       requestId: context.requestId,
     });
@@ -244,7 +248,7 @@ export async function deleteChannel(
         id: current.id,
         label: current.label,
       },
-      before: { revision: current.revision, hash: null },
+      before: { revision: current.revision, hash: current.robot_key },
       after: null,
       reason: "Robot disconnected; pending posts cancelled",
       requestId: context.requestId,

@@ -737,6 +737,56 @@ describe("WeCom notification channels", () => {
       409,
     );
   });
+  it("audits which robot a channel posts through, without the webhook", async () => {
+    const { workflowId } = await setup();
+    const route = `/workflows/${workflowId}/notifications/channel`;
+    const save = (revision: number, label: string, url?: string) =>
+      call(
+        "PUT",
+        route,
+        {
+          revision,
+          label,
+          ...(url === undefined ? {} : { webhookUrl: url }),
+          language: "en",
+          confirmed: true,
+        },
+        owner,
+      );
+    await save(0, "Research chat", webhookUrl);
+    await save(1, "Renamed chat");
+    await save(
+      2,
+      "Renamed chat",
+      webhookUrl.replace("test-secret", "other-secret"),
+    );
+    await call("DELETE", route, { revision: 3, confirmed: true }, owner);
+    const { events } = await call<{
+      events: {
+        action: string;
+        before: { revision: number; hash: string } | null;
+        after: { revision: number; hash: string } | null;
+      }[];
+    }>("GET", "/audit-events?targetType=notification_channel");
+    const [disconnected, swapped, renamed, connected] = events;
+    expect(events.map((event) => event.action)).toEqual([
+      "notification_channel.disconnected",
+      "notification_channel.saved",
+      "notification_channel.saved",
+      "notification_channel.saved",
+    ]);
+    const first = connected!.after!.hash;
+    expect(first).toMatch(/^[a-f0-9]{64}$/u);
+    expect(connected!.before).toBeNull();
+    // A label edit keeps the robot; a new webhook is a different robot.
+    expect(renamed!.before).toEqual({ revision: 1, hash: first });
+    expect(renamed!.after).toEqual({ revision: 2, hash: first });
+    expect(swapped!.before).toEqual({ revision: 2, hash: first });
+    expect(swapped!.after!.hash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(swapped!.after!.hash).not.toBe(first);
+    expect(disconnected!.before).toEqual(swapped!.after);
+    expect(JSON.stringify(events)).not.toContain("secret");
+  });
   it("drops a removed expert from queued mentions and reminder recipients", async () => {
     const { workflowId, versionId } = await setup();
     const { binding } = await call<{
@@ -1353,18 +1403,33 @@ describe("WeCom notification channels", () => {
       expert,
       409,
     );
-    await call(
-      "PUT",
-      "/me/notifications",
-      { revision: 1, wecomUserId: "@all", mobile: null, mentionEvents: [] },
-      expert,
-      400,
-    );
-    await call(
+    // "@all" mentions the whole chat, so no letter case of it is a userid.
+    for (const wecomUserId of ["@all", "@ALL", "@All", "ALL", "@lin"])
+      await call(
+        "PUT",
+        "/me/notifications",
+        { revision: 1, wecomUserId, mobile: null, mentionEvents: [] },
+        expert,
+        400,
+      );
+    // WeCom userids may contain "@" after a leading letter or digit.
+    const withAt = await call<{ preferences: { wecomUserId: string } }>(
       "PUT",
       "/me/notifications",
       {
         revision: 1,
+        wecomUserId: "lin.wei@lab-2_x",
+        mobile: null,
+        mentionEvents: ["question-assigned"],
+      },
+      expert,
+    );
+    expect(withAt.preferences.wecomUserId).toBe("lin.wei@lab-2_x");
+    await call(
+      "PUT",
+      "/me/notifications",
+      {
+        revision: 2,
         wecomUserId: null,
         mobile: null,
         mentionEvents: ["bogus"],

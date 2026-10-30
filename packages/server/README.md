@@ -19,16 +19,21 @@ masked; a replacement is optional when editing its label or chat language.
 Disconnecting cancels queued and retrying posts for that channel. Each post
 through a Group default records its Group: the Group's Delivery log, shown
 beside its robot settings, holds the default's test posts and every
-workflow post it sent.
+workflow post it sent. Saving and disconnecting are audited with the robot
+key, an HMAC of the webhook under `BADGER_NOTIFICATION_KEY`, as the before
+and after hash: a label edit keeps the hash, and a different chat changes it,
+without the webhook entering the Activity log.
 
 People set their WeCom userid or mobile in **Settings → Channel addresses**
-and choose mention events in **Settings → Notifications**. Opting out affects
-chat mentions only; inbox items still arrive. Text messages support userid
-and mobile mentions; people with neither appear by name. A pending invitation
-appears as "Invited person", so posts never carry an email address. Posts
-carry only workflow names, curated waiting-event labels, recipient counts,
-and links. Question, answer, Skill, and Run content never enters the channel
-payload.
+and choose mention events in **Settings → Notifications**. A userid follows
+WeCom's rule: up to 64 letters, digits, and `_-@.`, starting with a letter or
+digit; `@all`, which would mention the whole chat, is refused in any letter
+case. Opting out affects chat mentions only; inbox items still arrive. Text
+messages support userid and mobile mentions; people with neither appear by
+name. A pending invitation appears as "Invited person", so posts never carry
+an email address. Posts carry only workflow names, curated waiting-event
+labels, recipient counts, and links. Question, answer, Skill, and Run content
+never enters the channel payload.
 
 Configure the server and worker with the same `BADGER_NOTIFICATION_KEY`, a
 stable random 32-byte key encoded as 64 hexadecimal characters, and

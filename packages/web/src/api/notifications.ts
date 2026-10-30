@@ -18,6 +18,16 @@ export interface NotificationPreferences {
   mobile: string | null;
   mentionEvents: NotificationEvent[];
 }
+/**
+ * WeCom's userid rule, as the server checks it: up to 64 letters, digits,
+ * and "_-@.", starting with a letter or digit, and never "@all" or "all".
+ */
+export function isWeComUserId(value: string): boolean {
+  return (
+    /^[a-zA-Z0-9][a-zA-Z0-9_@.-]{0,63}$/u.test(value) &&
+    !["@all", "all"].includes(value.toLowerCase())
+  );
+}
 export interface RobotChannel {
   id: string;
   label: string;

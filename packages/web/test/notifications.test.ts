@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   copyReminderText,
+  isWeComUserId,
   notificationRequest,
   type CopyReminder,
 } from "../src/api/notifications.js";
@@ -14,6 +15,29 @@ const copy: CopyReminder = {
   ],
   href: "/questionnaire/questions/q-1",
 };
+
+describe("the WeCom userid field", () => {
+  it("accepts WeCom's characters, '@' included, after a leading letter or digit", () => {
+    for (const value of ["lin", "lin.wei@lab-2_x", "7wu", "a".repeat(64)])
+      expect(isWeComUserId(value), value).toBe(true);
+  });
+
+  it("refuses @all in any case, and anything WeCom would not issue", () => {
+    for (const value of [
+      "@all",
+      "@ALL",
+      "@All",
+      "all",
+      "ALL",
+      "@lin",
+      "_lin",
+      "lin wei",
+      "a".repeat(65),
+      "",
+    ])
+      expect(isWeComUserId(value), value).toBe(false);
+  });
+});
 
 describe("Copy reminder", () => {
   it("writes the viewer's language and links from the page's origin and base path", () => {
