@@ -70,6 +70,11 @@ function rememberCookies(jar: Map<string, string>, cookies: readonly string[]) {
   }
 }
 
+/** A finished flow's cookie, cleared: a failed completion sets no other. */
+function clearedFlowCookie(flow: { flowCookie: string }) {
+  return `${flow.flowCookie.split("=")[0]}=; Path=/badger; Max-Age=0; HttpOnly; Secure; SameSite=Strict`;
+}
+
 async function signIn() {
   const flow = await begin();
   const response = await service!.request(flow.completePath, {
@@ -116,6 +121,38 @@ describe("OpenID Connect sign-in", () => {
       const completed = await app.request(tab.completePath, {
         redirect: "manual",
         headers: { cookie: [...jar.values()].join("; ") },
+      });
+      expect(completed.status).toBe(303);
+      rememberCookies(jar, completed.headers.getSetCookie());
+    }
+    expect([...jar.keys()]).toEqual(["badger_session"]);
+  });
+
+  it("clears a failed tab's flow cookie, so its retry keeps the other tabs' sign-ins", async () => {
+    const app = await start();
+    const jar = new Map<string, string>();
+    const cookies = () => [...jar.values()].join("; ");
+    const tabs = [];
+    for (let index = 0; index < 3; index += 1) {
+      const tab = await begin(undefined, "/badger", cookies());
+      rememberCookies(jar, tab.setCookies);
+      tabs.push(tab);
+    }
+    provider!.setClaims({ sub: "" });
+    const failed = await app.request(tabs[2].completePath, {
+      redirect: "manual",
+      headers: { cookie: cookies() },
+    });
+    expect(failed.status).toBe(400);
+    expect(failed.headers.getSetCookie()).toEqual([clearedFlowCookie(tabs[2])]);
+    rememberCookies(jar, failed.headers.getSetCookie());
+    provider!.setClaims({});
+    const retry = await begin(undefined, "/badger", cookies());
+    rememberCookies(jar, retry.setCookies);
+    for (const tab of [tabs[0], tabs[1], retry]) {
+      const completed = await app.request(tab.completePath, {
+        redirect: "manual",
+        headers: { cookie: cookies() },
       });
       expect(completed.status).toBe(303);
       rememberCookies(jar, completed.headers.getSetCookie());
@@ -844,7 +881,7 @@ describe("OpenID Connect sign-in", () => {
       redirect: "manual",
     });
     expect(response.status).toBe(400);
-    expect(response.headers.getSetCookie()).toEqual([]);
+    expect(response.headers.getSetCookie()).toEqual([clearedFlowCookie(flow)]);
     expect((await app.request("/badger/api/v1/me")).status).toBe(401);
   });
 
@@ -857,7 +894,7 @@ describe("OpenID Connect sign-in", () => {
       redirect: "manual",
     });
     expect(response.status).toBe(400);
-    expect(response.headers.getSetCookie()).toEqual([]);
+    expect(response.headers.getSetCookie()).toEqual([clearedFlowCookie(flow)]);
   });
 
   it("expires sessions and revokes logout sessions without accepting foreign-origin writes", async () => {
@@ -981,7 +1018,9 @@ describe("OpenID Connect sign-in", () => {
         headers: { cookie: flow.flowCookie },
       });
       expect(response.status).toBe(503);
-      expect(response.headers.getSetCookie()).toEqual([]);
+      expect(response.headers.getSetCookie()).toEqual([
+        clearedFlowCookie(flow),
+      ]);
     },
   );
 });

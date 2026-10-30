@@ -99,8 +99,10 @@ whose name includes a hash of that sign-in's state. Starting a fourth expires
 the oldest flow cookie. A tab's completion selects its state's cookie and
 atomically consumes only the transaction matching both state and token hash;
 a failed or mismatched completion leaves other pending transactions alone.
-Successful completion clears only that flow cookie, so two tabs may finish
-in either order and each returns to its own requested page. Signing out clears
+Every completion, successful or failed, clears only that state's flow cookie:
+two tabs may finish in either order and each returns to its own requested
+page, and a failed tab's retry does not push out another tab's cookie.
+Signing out clears
 the session and any pending flow cookies sent by that browser. A transaction
 whose browser cookie was dropped remains subject to the server's expiry and
 pending-sign-in cap.
