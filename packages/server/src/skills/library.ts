@@ -2,7 +2,6 @@ import { recordAudit, type WriteContext } from "../audit.js";
 import type { Database, Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
 import { toIsoString } from "../util.js";
-import type { ServiceConfig } from "../config.js";
 import {
   canonicalHash,
   type SkillSourceFile,
@@ -10,7 +9,6 @@ import {
 } from "@realityjunky/badger";
 import type { BlobStore } from "./blobs.js";
 import { objectInput, RequestError } from "../http/errors.js";
-import { inspectUpload } from "./upload.js";
 
 export interface Skill {
   id: string;
@@ -25,9 +23,16 @@ export interface SkillVersion {
   description: string;
   inventory: SkillSourceFile[];
   scripts: SkillSource["scripts"];
-  origin: "upload";
+  origin: "upload" | "git";
+  gitOrigins: GitOrigin[];
   uploadedBy: string;
   createdAt: string;
+}
+
+export interface GitOrigin {
+  repositoryId: string;
+  repository: string;
+  commit: string;
 }
 
 interface SkillRow {
@@ -43,7 +48,8 @@ interface VersionRow {
   description: string;
   inventory: SkillSourceFile[];
   scripts: SkillSource["scripts"];
-  origin: "upload";
+  origin: "upload" | "git";
+  git_origins?: GitOrigin[];
   uploaded_by: string;
   created_at: string | Date;
 }
@@ -65,6 +71,7 @@ function toVersion(row: VersionRow): SkillVersion {
     inventory: row.inventory,
     scripts: row.scripts,
     origin: row.origin,
+    gitOrigins: row.git_origins ?? [],
     uploadedBy: row.uploaded_by,
     createdAt: toIsoString(row.created_at),
   };
@@ -145,12 +152,19 @@ export async function createSkill(
   });
 }
 
+const VERSION_SELECT = `select v.*, coalesce((
+  select jsonb_agg(jsonb_build_object(
+    'repositoryId', o.repository_id, 'repository', o.repository, 'commit', o.commit_hash
+  ) order by o.created_at, o.repository_id, o.commit_hash)
+  from skill_version_git_origins o where o.skill_id = v.skill_id and o.hash = v.hash
+), '[]'::jsonb) as git_origins from skill_versions v`;
+
 export async function listVersions(
   database: Queryable,
   skillId: string,
 ): Promise<SkillVersion[]> {
   const rows = await database.query<VersionRow>(
-    "select * from skill_versions where skill_id = $1 order by created_at desc, hash",
+    `${VERSION_SELECT} where v.skill_id = $1 order by v.created_at desc, v.hash`,
     [skillId],
   );
   return rows.rows.map(toVersion);
@@ -162,7 +176,7 @@ export async function readVersion(
   hash: string,
 ): Promise<SkillVersion> {
   const rows = await database.query<VersionRow>(
-    "select * from skill_versions where skill_id = $1 and hash = $2",
+    `${VERSION_SELECT} where v.skill_id = $1 and v.hash = $2`,
     [skillId, hash],
   );
   if (rows.rows[0] === undefined)
@@ -170,30 +184,36 @@ export async function readVersion(
   return toVersion(rows.rows[0]);
 }
 
-export async function uploadVersion(
-  database: Database,
-  dependencies: ServiceDependencies,
-  context: WriteContext,
-  config: ServiceConfig,
-  blobs: BlobStore,
-  skill: Skill,
-  input: unknown,
-) {
+export function versionConfirmation(input: unknown): string {
   const confirmation = objectInput(input);
   if (confirmation["confirmed"] !== true)
     throw new RequestError(
       400,
-      "Confirm the upload before creating an immutable version",
+      "Confirm the source before creating an immutable version",
     );
-  // The confirmation is bound to the previewed source, not to whatever
-  // arrives with it.
   const expectedHash = confirmation["expectedHash"];
   if (typeof expectedHash !== "string" || !/^[a-f0-9]{64}$/u.test(expectedHash))
     throw new RequestError(
       400,
-      "Confirm the upload with the expectedHash its preview returned",
+      "Confirm the source with the expectedHash its preview returned",
     );
-  const { source, files } = await inspectUpload(config, skill.name, input);
+  return expectedHash;
+}
+
+export async function createVersion(
+  database: Database,
+  dependencies: ServiceDependencies,
+  context: WriteContext,
+  blobs: BlobStore,
+  skill: Skill,
+  expectedHash: string,
+  inspected: {
+    source: SkillSource;
+    files: Map<string, Buffer>;
+    gitOrigin?: GitOrigin;
+  },
+) {
+  const { source, files, gitOrigin } = inspected;
   if (expectedHash !== source.hash)
     throw new RequestError(
       409,
@@ -215,13 +235,14 @@ export async function uploadVersion(
   }
   return database.transaction(async (tx) => {
     const inserted = await tx.query<VersionRow>(
-      `insert into skill_versions (skill_id, hash, description, inventory, scripts, origin, uploaded_by, created_at) values ($1, $2, $3, $4::jsonb, $5::jsonb, 'upload', $6, $7) on conflict do nothing returning *`,
+      `insert into skill_versions (skill_id, hash, description, inventory, scripts, origin, uploaded_by, created_at) values ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8) on conflict do nothing returning *`,
       [
         skill.id,
         source.hash,
         source.description,
         JSON.stringify(source.inventory),
         JSON.stringify(source.scripts),
+        gitOrigin === undefined ? "upload" : "git",
         context.personId,
         dependencies.clock.now(),
       ],
@@ -234,12 +255,36 @@ export async function uploadVersion(
           409,
           "This immutable version already has different side-effect declarations; upload changed source content",
         );
-      return { created: false, version };
     }
+    let originAdded = false;
+    if (gitOrigin !== undefined) {
+      const receipt = await tx.query(
+        `insert into skill_version_git_origins (skill_id, hash, repository_id, repository, commit_hash, imported_by, created_at)
+         values ($1, $2, $3, $4, $5, $6, $7) on conflict do nothing returning hash`,
+        [
+          skill.id,
+          source.hash,
+          gitOrigin.repositoryId,
+          gitOrigin.repository,
+          gitOrigin.commit,
+          context.personId,
+          dependencies.clock.now(),
+        ],
+      );
+      originAdded = receipt.rows.length > 0;
+    }
+    if (row === undefined && !originAdded)
+      return {
+        created: false,
+        version: await readVersion(tx, skill.id, source.hash),
+      };
     await recordAudit(tx, dependencies, {
       actor: { personId: context.personId, credential: context.credential },
       channel: context.channel,
-      action: "skill_version.uploaded",
+      action:
+        gitOrigin === undefined
+          ? "skill_version.uploaded"
+          : "skill_version.imported",
       target: {
         type: "skill_version",
         id: `${skill.id}:${source.hash}`,
@@ -247,10 +292,16 @@ export async function uploadVersion(
       },
       before: null,
       after: { revision: null, hash: source.hash },
-      reason: "Confirmed Skill upload",
+      reason:
+        gitOrigin === undefined
+          ? "Confirmed Skill upload"
+          : `Confirmed Git import from ${gitOrigin.repository} at ${gitOrigin.commit}`,
       requestId: context.requestId,
     });
-    return { created: true, version: toVersion(row) };
+    return {
+      created: row !== undefined,
+      version: await readVersion(tx, skill.id, source.hash),
+    };
   });
 }
 

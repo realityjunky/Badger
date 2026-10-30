@@ -54,6 +54,66 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("upgrades uploaded versions unchanged and preserves immutable repository provenance", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((migration) => migration.version <= "0021"),
+      clock,
+    );
+    await insertPerson(test);
+    await test.database.query(
+      "insert into groups (id, name, created_at, updated_at) values ('group-1', 'Research', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into skills (id, group_id, name, created_by, created_at) values ('skill-1', 'group-1', 'example', 'person-1', $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into skill_versions (skill_id, hash, description, inventory, scripts, origin, uploaded_by, created_at) values ('skill-1', $1, 'Uploaded', '[]', '[]', 'upload', 'person-1', $2)",
+      ["a".repeat(64), clock.now()],
+    );
+    const previous = (await test.database.query("select * from skill_versions"))
+      .rows;
+    await applyMigrations(test.database, migrations, clock);
+    expect(
+      (await test.database.query("select * from skill_versions")).rows,
+    ).toEqual(previous);
+    await test.database.query(
+      "insert into skill_repositories (id, skill_id, url, registered_by, created_at) values ('repo-1', 'skill-1', 'https://example.com/skill.git', 'person-1', $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into skill_version_git_origins (skill_id, hash, repository_id, repository, commit_hash, imported_by, created_at) values ('skill-1', $1, 'repo-1', 'https://example.com/skill.git', $2, 'person-1', $3)",
+      ["a".repeat(64), "b".repeat(40), clock.now()],
+    );
+    for (const table of [
+      "skill_versions",
+      "skill_repositories",
+      "skill_version_git_origins",
+    ]) {
+      for (const statement of [
+        `delete from ${table}`,
+        `truncate ${table} cascade`,
+      ])
+        await expect(test.database.query(statement)).rejects.toThrow(
+          /immutable/u,
+        );
+    }
+    await expect(
+      test.database.query(
+        "update skill_version_git_origins set commit_hash = $1",
+        ["c".repeat(40)],
+      ),
+    ).rejects.toThrow(/immutable/u);
+    await expect(
+      test.database.query(
+        "update skill_repositories set url = 'https://other.example/repo' ",
+      ),
+    ).rejects.toThrow(/immutable/u);
+  });
   it("keeps plan artifacts immutable after upgrading the existing drafting schema", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
@@ -92,7 +152,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0021");
+    expect(upgraded.applied.at(-1)).toBe("0022");
     expect(
       (
         await test.database.query(
@@ -152,6 +212,7 @@ describe("reviewed SQL migrations", () => {
       "0019",
       "0020",
       "0021",
+      "0022",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -180,6 +241,7 @@ describe("reviewed SQL migrations", () => {
         "0019",
         "0020",
         "0021",
+        "0022",
       ],
       pending: [],
       drifted: [],
@@ -234,6 +296,8 @@ describe("reviewed SQL migrations", () => {
       "questions",
       "role_bindings",
       "schema_migrations",
+      "skill_repositories",
+      "skill_version_git_origins",
       "skill_versions",
       "skills",
       "source_study_records",
@@ -277,6 +341,7 @@ describe("reviewed SQL migrations", () => {
         "0019",
         "0020",
         "0021",
+        "0022",
       ],
       pending: [],
       drifted: [],
@@ -284,7 +349,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(21);
+    expect(rows.rows[0]?.count).toBe(22);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {
