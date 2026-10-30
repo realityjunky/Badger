@@ -14,7 +14,6 @@ import {
   type DraftingActor,
 } from "../drafting/jobs.js";
 import { readVersion } from "../skills/library.js";
-import { firstHeader } from "../identity/identity.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
 import { fields, revisionInput, textInput } from "../questionnaire/model.js";
 import { workflowCapabilities } from "../workflow-access.js";
@@ -60,17 +59,15 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
   const workflowId = decodeURIComponent(rawWorkflow!);
   const versionId = decodeURIComponent(rawVersion!);
   const id = rawId ? decodeURIComponent(rawId) : null;
-  const host = firstHeader(request.headers, "x-badger-agent-host");
-  if (
-    context.channel === "mcp" &&
-    (typeof host !== "string" ||
-      !/^[\x20-\x7e]{1,200}$/u.test(host) ||
-      !host.trim())
-  )
+  const host =
+    context.credential.kind === "token"
+      ? (context.credential.agentHost ?? null)
+      : null;
+  if (context.channel === "mcp" && host === null)
     throw new RequestError(400, "Supply a printable Agent host label");
   const actor: DraftingActor = {
     ...context,
-    agentHost: context.channel === "mcp" ? host! : null,
+    agentHost: host,
   };
   let body: Record<string, unknown> = {};
   if (method === "POST") {

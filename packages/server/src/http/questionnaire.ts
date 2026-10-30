@@ -52,7 +52,6 @@ import {
   submitAnswers,
   type AnswerInput,
 } from "../questionnaire/answers.js";
-import { firstHeader } from "../identity/identity.js";
 import { listWorkflowPins } from "../workflow-source.js";
 import { readComments, saveComment } from "../questionnaire/comments.js";
 import {
@@ -130,6 +129,10 @@ export async function handleQuestionnaire(
     context,
     url,
   } = input;
+  const agentHost =
+    context.credential.kind === "token"
+      ? (context.credential.agentHost ?? null)
+      : null;
   if (path === "/api/v1/questionnaire") {
     const versions = [];
     for (const workflow of await listWorkflows(database, access, person)) {
@@ -413,10 +416,7 @@ export async function handleQuestionnaire(
                     deps,
                     {
                       ...context,
-                      agentHost:
-                        context.channel === "mcp"
-                          ? firstHeader(request.headers, "x-badger-agent-host")
-                          : null,
+                      agentHost,
                     },
                     workflowId,
                     versionId,
@@ -618,14 +618,6 @@ export async function handleQuestionnaire(
         };
       }
       if (answering && id) {
-        const agentHost =
-          context.channel === "mcp"
-            ? textInput(
-                firstHeader(request.headers, "x-badger-agent-host"),
-                "x-badger-agent-host",
-                200,
-              )
-            : null;
         const answerInput = (
           value: Record<string, unknown>,
           questionId: string,

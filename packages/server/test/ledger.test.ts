@@ -1071,6 +1071,36 @@ describe("ledger drafts, links, and baselines after review", () => {
     ).toEqual([]);
   });
 
+  it("keeps the ledger readable when a linked question changes topic", async () => {
+    const { questionnaire: base, expertId } = await setup();
+    const { question, content } = await round(base, expertId);
+    const { record } = await call(
+      `${base}/inferences`,
+      "POST",
+      {
+        topic: "interfaces",
+        statement: "The consumer requires sample_id.",
+        questionId: question.id,
+      },
+      engineer,
+      201,
+    );
+    await call(`${base}/questions/${question.id}`, "PATCH", {
+      ...content,
+      topic: "inputs",
+      revision: 1,
+    });
+    const { handoff } = await call(`${base}/ledger`);
+    expect(handoff.ledger.agentInferences).toEqual([
+      expect.objectContaining({
+        record: { type: "inference", id: record.id, revision: 1 },
+        topic: "interfaces",
+        state: "draft",
+        relatedRecords: [{ type: "question", id: question.id, revision: 1 }],
+      }),
+    ]);
+  });
+
   it("compares a round baseline by its records, not by the current name of whoever resolved them", async () => {
     const { questionnaire: base, expertId } = await setup();
     const first = await round(base, expertId);

@@ -256,7 +256,11 @@ export function questionnaireRecordHandoff(
     state:
       d.status === "retired"
         ? "retired"
-        : d.questionId !== null && acceptedQuestions.has(d.questionId)
+        : d.questionId !== null &&
+            acceptedQuestions.has(d.questionId) &&
+            records.questions.some(
+              (q) => q.id === d.questionId && q.topic === d.topic,
+            )
           ? "confirmed"
           : "draft",
     resolved: false,
