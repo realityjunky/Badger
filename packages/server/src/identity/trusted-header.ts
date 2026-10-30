@@ -37,14 +37,15 @@ export function createTrustedHeaderIdentityAdapter(
       ) {
         return { kind: "anonymous" };
       }
-      const read = (name: string): string | null => {
+      const read = (name: string, allowComma = false): string | null => {
+        if (request.headersDistinct[name]?.length !== 1) return null;
         const raw = request.headers[name];
         if (typeof raw !== "string") return null;
         const value = headerText(raw);
-        // Node joins repeated headers with commas. Identity must be singular.
         return value.trim() !== "" &&
           value.length <= 1024 &&
-          !/[,\x00-\x1f\x7f-\x9f]/u.test(value)
+          !/[\x00-\x1f\x7f-\x9f]/u.test(value) &&
+          (allowComma || !value.includes(","))
           ? value.trim()
           : null;
       };
@@ -62,7 +63,7 @@ export function createTrustedHeaderIdentityAdapter(
           issuer: settings.issuer,
           subject,
           email,
-          displayName: read(settings.nameHeader) ?? email,
+          displayName: read(settings.nameHeader, true) ?? email,
           status: "active",
           credential: {
             kind: "session",

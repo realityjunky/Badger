@@ -50,7 +50,7 @@ export interface TestServiceOptions {
 export interface RawRequestInput {
   method?: string;
   path: string;
-  headers?: Record<string, string>;
+  headers?: Record<string, string | string[]>;
 }
 
 export interface RawResponse {
