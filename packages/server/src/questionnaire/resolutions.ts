@@ -22,6 +22,7 @@ import {
   notifyQuestion,
   readQuestions,
   saveQuestion,
+  validateQuestionContent,
 } from "./store.js";
 
 interface AnswerLink {
@@ -387,7 +388,10 @@ export async function resolutionPreview(
       400,
       "Defer only to a Skill pinned by this workflow version",
     );
-  // Follow-up recipients and evidence are revalidated by saveQuestion during the commit.
+  // A follow-up fails here, before sign-off, wherever saveQuestion would refuse
+  // it at the commit; the commit checks it again.
+  if (input.followUp)
+    await validateQuestionContent(tx, versionId, input.followUp);
   const bindings = input.followUp
     ? (
         await tx.query(

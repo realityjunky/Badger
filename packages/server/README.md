@@ -164,6 +164,12 @@ file comparison. Unrelated file changes preserve the records' confirmations.
 Question, fact, and source-study responses include `evidenceChanges` with the
 path, old and current version/file hashes, and change status. The dashboard
 loads the before/after file previews when the comparison is expanded.
+The same comparison decides which citations a new or revised question may
+carry: a citation of an earlier Skill version remains valid while its file is
+byte-identical in the pinned version, so unaffected questions can be revised,
+and follow-ups can keep their parent's citations, after a re-pin. Resolution
+and concern previews apply the commit's question checks, so a follow-up or
+converted question that the commit would refuse fails before sign-off.
 
 `POST /workflows/:id/versions` still quotes the workflow's current `revision`.
 It now copies the latest version's pins, source-study revisions, questionnaire,

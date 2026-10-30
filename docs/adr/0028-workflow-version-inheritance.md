@@ -12,7 +12,9 @@ not a new sign-off by the person starting the version.
 
 Changed or removed cited files reopen their questions, including deferred
 questions, and mark source-derived facts stale. Comparing file hashes rather
-than whole Skill identities preserves unrelated confirmations. Reopening is
+than whole Skill identities preserves unrelated confirmations, and the same
+comparison lets new and revised questions keep citing an earlier version
+whose file is unchanged. Reopening is
 sticky until a person reviews updated evidence and confirms again; restoring
 an old pin does not silently restore a withdrawn confirmation. The dashboard
 shows the old and current file beside each affected record.

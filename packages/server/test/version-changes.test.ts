@@ -34,7 +34,8 @@ async function uploadSkill(
   return preview;
 }
 
-async function confirmedQuestion(fixture: Fixture, evidence: unknown[] = []) {
+/** The owner's question in its own published round. */
+async function publishedQuestion(fixture: Fixture, evidence: unknown[] = []) {
   const { call, base } = fixture;
   const root = `${base}/questionnaire`;
   const { person } = await call("/me", "GET", undefined, owner);
@@ -45,18 +46,19 @@ async function confirmedQuestion(fixture: Fixture, evidence: unknown[] = []) {
     engineer,
     201,
   );
+  const content = {
+    text: "What report is required?",
+    topic: "outputSchemas",
+    targets: [{ kind: "workflow", id: "report" }],
+    rationale: "Agree the report.",
+    evidence,
+    assignees: [{ kind: "person", personId: person.id }],
+    priority: 80,
+  };
   const { question } = await call(
     `${root}/rounds/${round.id}/questions`,
     "POST",
-    {
-      text: "What report is required?",
-      topic: "outputSchemas",
-      targets: [{ kind: "workflow", id: "report" }],
-      rationale: "Agree the report.",
-      evidence,
-      assignees: [{ kind: "person", personId: person.id }],
-      priority: 80,
-    },
+    content,
     engineer,
     201,
   );
@@ -65,6 +67,17 @@ async function confirmedQuestion(fixture: Fixture, evidence: unknown[] = []) {
     confirmed: true,
     confirmationHash: preview.confirmationHash,
   });
+  return { question, content, person };
+}
+
+/** A published question with the owner's submitted answer and attachment. */
+async function answeredQuestion(fixture: Fixture, evidence: unknown[] = []) {
+  const { call, base } = fixture;
+  const root = `${base}/questionnaire`;
+  const { question, content, person } = await publishedQuestion(
+    fixture,
+    evidence,
+  );
   const { attachment } = await call(
     `${root}/questions/${question.id}/attachments`,
     "POST",
@@ -93,6 +106,16 @@ async function confirmedQuestion(fixture: Fixture, evidence: unknown[] = []) {
     "POST",
     { revision: 1, questionRevision: 1 },
     owner,
+  );
+  return { question, content, person, attachment };
+}
+
+async function confirmedQuestion(fixture: Fixture, evidence: unknown[] = []) {
+  const { call, base } = fixture;
+  const root = `${base}/questionnaire`;
+  const { question, person, attachment } = await answeredQuestion(
+    fixture,
+    evidence,
   );
   const input = {
     revision: 1,
@@ -324,6 +347,135 @@ describe("Skill and workflow version changes", () => {
     expect(inherited.resolutions[0]).toMatchObject({
       kind: "deferred",
       origin: { recordId: view.resolutions[0].id },
+    });
+  });
+
+  it("keeps records citing unchanged files confirmed across a re-pin and accepts those citations in edits and follow-ups", async () => {
+    service = await startPlanningService();
+    const fixture = await planningFixture(service);
+    const { call, base, skill } = fixture;
+    const root = `${base}/questionnaire`;
+    const instructions =
+      "---\nname: prepare\ndescription: Prepare a report\n---\n\nReturn report text.\n";
+    const upload = async (text: string) =>
+      (
+        await uploadSkill(call, skill.id, [
+          { path: "SKILL.md", content: Buffer.from(text).toString("base64") },
+          {
+            path: "reference/other.md",
+            content: Buffer.from("Unrelated.").toString("base64"),
+          },
+        ])
+      ).hash;
+    const first = await upload(instructions);
+    await call(`${base}/pins`, "POST", {
+      skillId: skill.id,
+      hash: first,
+      revision: 1,
+    });
+    const cite = (path: string) => ({
+      skillId: skill.id,
+      versionHash: first,
+      path,
+      startLine: 1,
+      endLine: 1,
+    });
+    const unchanged = await confirmedQuestion(fixture, [
+      cite("reference/other.md"),
+    ]);
+    const changed = await confirmedQuestion(fixture, [cite("SKILL.md")]);
+    const parent = await answeredQuestion(fixture, [
+      cite("reference/other.md"),
+    ]);
+    const open = await publishedQuestion(fixture, [cite("reference/other.md")]);
+    const second = await upload(
+      instructions.replace("report text", "a signed report"),
+    );
+    await call(`${base}/pins`, "POST", {
+      skillId: skill.id,
+      hash: second,
+      revision: 2,
+    });
+
+    const view = await call(root);
+    const question = (id: string) =>
+      view.questions.find((q: { id: string }) => q.id === id);
+    expect(question(unchanged.question.id)).toMatchObject({
+      state: "confirmed",
+      evidenceChanges: [],
+    });
+    expect(
+      view.facts.find((f: { id: string }) => f.id === unchanged.fact.id),
+    ).toMatchObject({
+      active: true,
+      evidenceChanges: [],
+      acknowledgements: [expect.objectContaining({ decision: "acknowledged" })],
+    });
+    expect(question(changed.question.id)).toMatchObject({
+      state: "needs-reconfirmation",
+      evidenceChanges: [{ path: "SKILL.md", status: "changed" }],
+    });
+    expect(question(parent.question.id).state).toBe("answered");
+
+    // An unaffected question keeps its earlier citation through an edit.
+    const { question: edited } = await call(
+      `${root}/questions/${open.question.id}`,
+      "PATCH",
+      {
+        ...open.content,
+        text: "Which reviewed report is required?",
+        revision: 1,
+      },
+    );
+    expect(edited).toMatchObject({
+      revision: 2,
+      evidence: [cite("reference/other.md")],
+      evidenceChanges: [],
+    });
+
+    // The preview validates a follow-up's citations before anyone signs off.
+    const followUp = (evidence: unknown[]) => ({
+      revision: 1,
+      kind: "followed-up",
+      reason: "Ask which reviewer signs.",
+      followUp: {
+        ...parent.content,
+        text: "Who reviews the report?",
+        evidence,
+      },
+    });
+    for (const evidence of [[cite("SKILL.md")], [cite("reference/missing.md")]])
+      await call(
+        `${root}/questions/${parent.question.id}/resolution-preview`,
+        "POST",
+        followUp(evidence),
+        engineer,
+        400,
+      );
+    const input = followUp(parent.content.evidence);
+    const { preview } = await call(
+      `${root}/questions/${parent.question.id}/resolution-preview`,
+      "POST",
+      input,
+    );
+    const { resolution } = await call(
+      `${root}/questions/${parent.question.id}/resolve`,
+      "POST",
+      {
+        ...input,
+        confirmed: true,
+        confirmationHash: preview.confirmationHash,
+        requestId: "follow-up-after-repin",
+      },
+    );
+    const child = (await call(root)).questions.find(
+      (q: { id: string }) => q.id === resolution.childQuestionId,
+    );
+    expect(child).toMatchObject({
+      state: "open",
+      parentQuestionId: parent.question.id,
+      evidence: [cite("reference/other.md")],
+      evidenceChanges: [],
     });
   });
 

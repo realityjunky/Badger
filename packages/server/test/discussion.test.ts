@@ -662,6 +662,28 @@ describe("expert concerns", () => {
       roundId: round.id,
       question: questionContent,
     };
+    // The question's own checks run before sign-off, not only at the commit.
+    await call(
+      "POST",
+      `${path}/resolve-preview`,
+      engineer,
+      {
+        ...questionDecision,
+        question: {
+          ...questionContent,
+          evidence: [
+            {
+              skillId: "unpinned",
+              versionHash: "0".repeat(64),
+              path: "SKILL.md",
+              startLine: 1,
+              endLine: 1,
+            },
+          ],
+        },
+      },
+      400,
+    );
     const questionPreview = await call<{
       preview: { confirmationHash: string };
     }>("POST", `${path}/resolve-preview`, engineer, questionDecision);
