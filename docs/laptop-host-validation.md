@@ -24,6 +24,9 @@ previews and commits a WorkBuddy entry in a temporary project, then the SDK
 launches that exact entry. Paths contain spaces and Unicode. Checks cover
 external root binding, receipts, skipped Nodes, missing Completion, illegal
 routes, exhausted Cycles, recovery and package identity. All data is synthetic.
+Run these stdio host checks in ordinary Node. The Linux evaluation sandbox keeps
+its in-memory transport and JIT-less execution; requesting stdio certification
+under `--jitless` is refused before any setup.
 
 The Linux full suite additionally runs `test/laptop.test.ts` against the real
 service and an immutable publication, comparing the complete committed event

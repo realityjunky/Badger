@@ -36,6 +36,10 @@ export async function certifyBadgerMcp(options: {
   snapshot?: PackageSnapshot;
   transport?: "in-memory" | "stdio";
 }): Promise<WorkflowMcpCertificationEvidence> {
+  if (options.transport === "stdio" && process.execArgv.includes("--jitless"))
+    throw new Error(
+      "Stdio host certification requires Node without --jitless; use in-memory certification inside the evaluation sandbox",
+    );
   const root = await fs.realpath(
     await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-certification 运行-")),
   );
@@ -333,7 +337,6 @@ export async function certifyBadgerMcp(options: {
         deploymentUrl: `http://127.0.0.1:${address.port}`,
         command: process.execPath,
         args: [
-          ...(process.execArgv.includes("--jitless") ? ["--jitless"] : []),
           fileURLToPath(
             new URL(
               "./cli.js",

@@ -211,6 +211,7 @@ it("installs and removes a real service publication through the local MCP client
   await expect(fs.stat(preview.preview.packageDirectory)).rejects.toThrow();
   const uncommitted = await call("install_workflow", args);
   await client.close();
+  await server.close();
   await expect(fs.stat(uncommitted.previewFile)).rejects.toThrow();
   expect(
     (

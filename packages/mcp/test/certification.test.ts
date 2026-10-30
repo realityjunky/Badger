@@ -55,6 +55,11 @@ it("certifies in a JIT-less child without loading the fetch globals unavailable 
         }});
       }
       const { certifyBadgerMcp } = await import(${JSON.stringify(executable)});
+      const { rejects } = await import("node:assert/strict");
+      await rejects(
+        certifyBadgerMcp({ generatedPackageHash: "b".repeat(64), transport: "stdio" }),
+        /Stdio host certification requires Node without --jitless/,
+      );
       console.log(JSON.stringify(await certifyBadgerMcp({ generatedPackageHash: "b".repeat(64) })));
     `,
     ],
