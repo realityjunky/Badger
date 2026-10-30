@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   startTestService,
   type TestService,
@@ -82,6 +82,40 @@ async function sign(
 async function english(page: Page) {
   await page.getByTestId("language-switch").click();
   await page.getByRole("menuitem", { name: "English", exact: true }).click();
+}
+
+async function selectByKeyboard(page: Page, combobox: Locator, name: string) {
+  await combobox.focus();
+  await combobox.press("ArrowDown");
+  await expect(combobox).toHaveAttribute("aria-expanded", "true");
+  await expect(combobox).toHaveAttribute("aria-activedescendant", /.+/u);
+  const visited = new Set<string>();
+  for (;;) {
+    const activeId = (await combobox.getAttribute("aria-activedescendant"))!;
+    const option = page.getByRole("option", {
+      name,
+      exact: true,
+      includeHidden: true,
+    });
+    if (
+      (await option.count()) === 1 &&
+      (await option.getAttribute("id")) === activeId
+    ) {
+      await combobox.press("Enter");
+      await expect(combobox).toHaveAttribute("aria-expanded", "false");
+      return;
+    }
+    expect(
+      visited.has(activeId),
+      `The combobox has no option named ${name}`,
+    ).toBe(false);
+    visited.add(activeId);
+    await combobox.press("ArrowDown");
+    await expect(combobox).not.toHaveAttribute(
+      "aria-activedescendant",
+      activeId,
+    );
+  }
 }
 
 for (const kind of ["inference", "assumption"] as const) {
@@ -266,17 +300,37 @@ test("the ledger shows readiness blockers, confirms a linked inference, and list
     await editor
       .getByLabel("Statement", { exact: true })
       .fill("The consumer requires sample_id.");
-    await editor.getByLabel("Topic", { exact: true }).click();
-    await author
-      .locator(".ant-select-item-option")
-      .filter({ hasText: /^Interfaces$/u })
-      .click();
-    await editor.getByLabel("Confirming question", { exact: true }).click();
-    await author
-      .locator(".ant-select-item-option")
-      .filter({ hasText: "Which columns does the consumer require?" })
-      .click();
+    await selectByKeyboard(
+      author,
+      editor.getByLabel("Topic", { exact: true }),
+      "Interfaces",
+    );
+    await expect(
+      editor.getByTitle("Interfaces", { exact: true }),
+    ).toBeVisible();
+    await selectByKeyboard(
+      author,
+      editor.getByLabel("Confirming question", { exact: true }),
+      "Which columns does the consumer require?",
+    );
+    await expect(
+      editor.getByTitle("Which columns does the consumer require?", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    const savedInference = author.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === `/team/api/v1${root}/inferences`,
+    );
     await editor.getByRole("button", { name: "Save draft" }).click();
+    expect(await (await savedInference).json()).toMatchObject({
+      record: {
+        topic: "interfaces",
+        questionId: question.id,
+        questionRevision: 1,
+      },
+    });
     await expect(editor).toBeHidden();
     await expect(
       ledger.getByText("Agent inferences (1)", { exact: true }),
@@ -356,11 +410,11 @@ test("the ledger shows readiness blockers, confirms a linked inference, and list
 
     // Since the round's publication, the fact and the inference were added
     // and the question was resolved; the comparison has its own URL.
-    await ledger.getByLabel("Published round", { exact: true }).click();
-    await author
-      .locator(".ant-select-item-option")
-      .filter({ hasText: "1. Contracts" })
-      .click();
+    await selectByKeyboard(
+      author,
+      ledger.getByLabel("Published round", { exact: true }),
+      "1. Contracts",
+    );
     await expect(author).toHaveURL(
       new RegExp(`panel=ledger&sinceRound=${round.id}`, "u"),
     );
