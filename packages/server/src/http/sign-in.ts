@@ -11,6 +11,8 @@ import { issueSession, revokeSession } from "../sessions.js";
 import { escapeHtml, renderSignInFailedPage } from "./page.js";
 import type { Reply } from "./responses.js";
 
+const MAX_PENDING_BROWSER_SIGN_INS = 3;
+
 /** OIDC returns cross-site. An HTML navigation starts a same-site request,
  * letting even the short-lived transaction cookie remain SameSite=Strict. */
 function continueSignIn(reply: Reply, destination: string): void {
@@ -74,7 +76,21 @@ export async function handleBrowserSignIn(input: {
     return true;
   }
   const settings = config.identity.oidc;
-  const flowCookieName = `${settings.sessionCookie}_oidc_flow`;
+  const flowCookiePrefix = `${settings.sessionCookie}_oidc_flow_`;
+  const flowCookieName = (state: string) =>
+    `${flowCookiePrefix}${createHash("sha256").update(state).digest("hex")}`;
+  const pendingFlowCookies = [
+    ...new Set(
+      (firstHeader(request.headers, "cookie") ?? "")
+        .split(";")
+        .map((part) => part.trim().split("=")[0])
+        .filter(
+          (name) =>
+            name.startsWith(flowCookiePrefix) &&
+            /^[a-f0-9]{64}$/u.test(name.slice(flowCookiePrefix.length)),
+        ),
+    ),
+  ];
   const cookie = (name: string, value: string, seconds: number) =>
     strictCookie(name, value, config.basePath, seconds);
   const redirect = (location: string, cookies: string[]) =>
@@ -116,8 +132,19 @@ export async function handleBrowserSignIn(input: {
     if ("kind" in result) failed("login", result);
     else
       redirect(result.authorizationUrl, [
+        // Cookies with the same path arrive oldest first (RFC 6265, 5.4).
+        // Leave room for this flow, without clearing another tab on completion.
+        ...pendingFlowCookies
+          .slice(
+            0,
+            Math.max(
+              0,
+              pendingFlowCookies.length - MAX_PENDING_BROWSER_SIGN_INS + 1,
+            ),
+          )
+          .map((name) => cookie(name, "", 0)),
         cookie(
-          flowCookieName,
+          flowCookieName(result.state),
           result.transactionToken,
           OIDC_TRANSACTION_SECONDS,
         ),
@@ -127,8 +154,17 @@ export async function handleBrowserSignIn(input: {
   } else if (path === "/auth/oidc/complete") {
     const callback = new URL(`${settings.publicUrl}/auth/oidc/callback`);
     callback.search = url.search;
+    const states = callback.searchParams.getAll("state");
+    if (states.length !== 1 || states[0] === "") {
+      failed("callback", {
+        kind: "invalid",
+        reason: "no unique sign-in state",
+      });
+      return true;
+    }
+    const name = flowCookieName(states[0]);
     const result = await identity.browser.complete(
-      readCookie(request.headers, flowCookieName),
+      readCookie(request.headers, name),
       callback,
     );
     if (result.kind !== "authenticated") failed("callback", result);
@@ -142,7 +178,7 @@ export async function handleBrowserSignIn(input: {
       );
       redirect(result.returnPath, [
         cookie(settings.sessionCookie, sessionToken, settings.sessionSeconds),
-        cookie(flowCookieName, "", 0),
+        cookie(name, "", 0),
       ]);
     }
   } else {
@@ -155,7 +191,7 @@ export async function handleBrowserSignIn(input: {
     );
     redirect(`${prefix}/`, [
       cookie(settings.sessionCookie, "", 0),
-      cookie(flowCookieName, "", 0),
+      ...pendingFlowCookies.map((name) => cookie(name, "", 0)),
     ]);
   }
   return true;

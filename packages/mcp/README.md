@@ -132,8 +132,11 @@ For an upload, provide the existing `skillId`, local `folder`, and a `scripts`
 map from each script path to the kernel's supported side effects, such as
 `{"scripts/check.py": ["none"]}`. The preview creates no immutable version.
 After the user reviews it, repeat with its hash and confirmation. Changed
-files fail the service's hash check. Symbolic links and special files are
-refused; the service's file, total-byte, and file-count limits are also checked
+files fail the service's hash check. A metadata-only inspection of the entire
+folder refuses any `.git` path segment (case-insensitively), including an empty
+`.git` directory, before any file contents are read or upload requests are sent.
+Upload the Skill without its `.git` folder, for example from `git archive`
+output. Symbolic links and special files are refused; the service's file, total-byte, and file-count limits are also checked
 locally before transfer. Files never execute, and real data must not be uploaded.
 
 Tool results, including their MCP envelopes, stay within 8 KiB. Larger results

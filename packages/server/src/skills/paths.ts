@@ -51,6 +51,12 @@ export function normalizeUploadPath(value: unknown): string {
       "Upload paths may not escape the tree or use reserved names",
     );
   }
+  if (segments.some((segment) => segment.toLowerCase() === ".git")) {
+    throw new RequestError(
+      400,
+      `Upload path "${value}" contains a .git folder; upload the Skill without its .git folder, for example from git archive output`,
+    );
+  }
   if (
     segments.some((segment) => Buffer.byteLength(segment) > MAX_SEGMENT_BYTES)
   ) {
