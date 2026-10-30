@@ -134,11 +134,12 @@ export async function routeNotificationAction(
         language: channel.language,
       });
       await tx.query(
-        `insert into notification_deliveries (id, workflow_id, channel_id, robot_key, robot_label, webhook_ciphertext,
-      recipients, content, available_at, created_at, action_id, item_ids, language) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11,$12) on conflict do nothing`,
+        `insert into notification_deliveries (id, workflow_id, group_id, channel_id, robot_key, robot_label, webhook_ciphertext,
+      recipients, content, available_at, created_at, action_id, item_ids, language) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13) on conflict do nothing`,
         [
           deps.ids.next(),
           first.workflow_id,
+          channel.group_id,
           channel.id,
           channel.robot_key,
           channel.label,

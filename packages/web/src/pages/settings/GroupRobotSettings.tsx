@@ -5,6 +5,7 @@ import { ledGroupIds, type Group } from "../../api/organization.js";
 import { readBasePath } from "../../app/paths.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { usePreferences } from "../../preferences/PreferencesContext.js";
+import { GroupDeliveryLog } from "./DeliveryLog.js";
 import { RobotChannelSettings } from "./RobotChannelSettings.js";
 
 export function GroupRobotSettings() {
@@ -14,6 +15,7 @@ export function GroupRobotSettings() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [refresh, setRefresh] = useState(0);
   const administrator = person?.roles.includes("Administrator") ?? false;
   const groupLead =
     person?.groups.some((group) => group.role === "Group lead") ?? false;
@@ -54,12 +56,21 @@ export function GroupRobotSettings() {
         }))}
       />
       {selected && (
-        <RobotChannelSettings
-          key={selected}
-          basePath={basePath}
-          scope="groups"
-          scopeId={selected}
-        />
+        <>
+          <RobotChannelSettings
+            key={selected}
+            basePath={basePath}
+            scope="groups"
+            scopeId={selected}
+            onChanged={() => setRefresh((value) => value + 1)}
+          />
+          <GroupDeliveryLog
+            key={`deliveries-${selected}`}
+            basePath={basePath}
+            groupId={selected}
+            refresh={refresh}
+          />
+        </>
       )}
     </section>
   );

@@ -28,9 +28,12 @@ create table notification_channels (
   unique (workflow_id)
 );
 
+-- A post through a Group default records its Group, so the Group's leads can
+-- read its log, including test posts that belong to no workflow.
 create table notification_deliveries (
   id text primary key,
   workflow_id text references workflows (id),
+  group_id text references groups (id),
   channel_id text not null,
   robot_key text not null,
   robot_label text not null,

@@ -1,4 +1,4 @@
-import { Alert, Button, Collapse, Input, Popconfirm, Space, Tag } from "antd";
+import { Alert, Button, Collapse, Input, Popconfirm } from "antd";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -8,6 +8,7 @@ import {
 } from "../../api/notifications.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { useLiveUpdates } from "../../live/LiveUpdatesContext.js";
+import { DeliveryLog } from "../settings/DeliveryLog.js";
 import { RobotChannelSettings } from "../settings/RobotChannelSettings.js";
 
 export function WorkflowNotifications({
@@ -198,47 +199,7 @@ export function WorkflowNotifications({
           </Button>
         </div>
       )}
-      {mayManage && (
-        <>
-          <h3>{t("notifications.deliveryLog")}</h3>
-          {deliveries.length === 0 && (
-            <p className="muted">{t("notifications.noDeliveries")}</p>
-          )}
-          <Collapse
-            items={deliveries.map((delivery) => ({
-              key: delivery.id,
-              label: (
-                <Space wrap>
-                  <span>{delivery.robotLabel}</span>
-                  <Tag>{t(`notifications.status.${delivery.status}`)}</Tag>
-                  <span>
-                    {t("notifications.attempts")}: {delivery.attempts}
-                  </span>
-                  <time>
-                    {new Date(delivery.createdAt).toLocaleString(locale)}
-                  </time>
-                </Space>
-              ),
-              children: (
-                <>
-                  <p>
-                    {delivery.recipients
-                      .map(
-                        (recipient) =>
-                          `${recipient.name}: ${recipient.count} (${t(`notifications.mention.${recipient.mention}`)})`,
-                      )
-                      .join(", ")}
-                  </p>
-                  <pre>{delivery.content.text.content}</pre>
-                  {delivery.error && (
-                    <Alert type="error" message={delivery.error} />
-                  )}
-                </>
-              ),
-            }))}
-          />
-        </>
-      )}
+      {mayManage && <DeliveryLog deliveries={deliveries} />}
     </section>
   );
 }

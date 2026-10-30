@@ -1,5 +1,6 @@
 import type { Queryable } from "../database/database.js";
 import { toIsoString } from "../util.js";
+import type { ChannelScope } from "./channels.js";
 import type { RecipientMention } from "./messages.js";
 import type { RobotMessage } from "./port.js";
 
@@ -16,15 +17,17 @@ interface DeliveryRow {
 }
 
 /**
- * The newest 100 Deliveries. Each shows its recipients' names, counts, and
- * how the post mentioned them, and the posted text, but never the userids
- * or mobile numbers the post's mention lists carried.
+ * The newest 100 Deliveries of a workflow, or of a Group's default robot.
+ * Each shows its recipients' names, counts, and how the post mentioned them,
+ * and the posted text, but never the userids or mobile numbers the post's
+ * mention lists carried.
  */
-export async function readDeliveryLog(tx: Queryable, workflowId: string) {
+export async function readDeliveryLog(tx: Queryable, scope: ChannelScope) {
   const rows = await tx.query<DeliveryRow>(
     `select id, robot_label, recipients, content, status, attempts, error, created_at, sent_at
-    from notification_deliveries where workflow_id = $1 order by created_at desc, id desc limit 100`,
-    [workflowId],
+    from notification_deliveries where ${scope.type === "group" ? "group_id" : "workflow_id"} = $1
+    order by created_at desc, id desc limit 100`,
+    [scope.id],
   );
   return rows.rows.map((row) => ({
     id: row.id,

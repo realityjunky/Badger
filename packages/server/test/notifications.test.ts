@@ -295,6 +295,94 @@ describe("WeCom notification channels", () => {
     for (const identifier of identifiers)
       expect(JSON.stringify(deliveries)).not.toContain(identifier);
   });
+  it("shows a Group default's posts and failures to that Group's leads and Administrators", async () => {
+    const { workflowId, versionId, groupId } = await setup();
+    const lead = { subject: "lead", email: "lead@example.com" };
+    await call(
+      "POST",
+      "/bindings",
+      {
+        scopeType: "group",
+        scopeId: groupId,
+        email: lead.email,
+        role: "Group lead",
+      },
+      admin,
+      201,
+    );
+    await call("GET", "/me", undefined, lead);
+    robot.setFailure(200, 93000);
+    await call(
+      "PUT",
+      `/groups/${groupId}/notifications/channel`,
+      {
+        revision: 0,
+        label: "Department",
+        webhookUrl,
+        language: "en",
+        confirmed: true,
+      },
+      lead,
+    );
+    expect(await service.runNotificationJobs()).toBe(1);
+    const route = `/groups/${groupId}/notifications/deliveries`;
+    const failed = await call<{ deliveries: unknown[] }>(
+      "GET",
+      route,
+      undefined,
+      lead,
+    );
+    expect(failed.deliveries).toMatchObject([
+      {
+        robotLabel: "Department",
+        recipients: [],
+        content: { text: { content: "Badger: group robot connection test." } },
+        status: "retry",
+        attempts: 1,
+        error: "WeCom error 93000",
+      },
+    ]);
+    expect(
+      (await call<{ deliveries: unknown[] }>("GET", route)).deliveries,
+    ).toEqual(failed.deliveries);
+    await call("GET", route, undefined, owner, 403);
+    const { secret } = await call<{ secret: string }>(
+      "POST",
+      "/me/tokens",
+      { name: "Lead Agent", scopes: ["engineer"] },
+      lead,
+      201,
+    );
+    const token = await service.request(`/api/v1${route}`, {
+      headers: { authorization: `Bearer ${secret}` },
+    });
+    expect(token.status).toBe(403);
+
+    // The workflow's own posts through the Group default appear in both logs.
+    robot.setFailure(null);
+    await publishRound(workflowId, versionId);
+    for (let post = 0; post < 2; post++) {
+      service.clock.advance(3100);
+      expect(await service.runNotificationJobs()).toBe(1);
+    }
+    const group = await call<{
+      deliveries: { status: string; recipients: unknown[] }[];
+    }>("GET", route, undefined, lead);
+    expect(group.deliveries).toMatchObject([
+      {
+        status: "sent",
+        recipients: [{ name: "Dr Lin", count: 2, mention: "name" }],
+      },
+      { status: "sent", recipients: [], attempts: 2 },
+    ]);
+    const workflow = await call<{ deliveries: unknown[] }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/deliveries`,
+      undefined,
+      owner,
+    );
+    expect(workflow.deliveries).toEqual([group.deliveries[0]]);
+  });
   it("drops a removed expert from queued mentions and reminder recipients", async () => {
     const { workflowId, versionId } = await setup();
     const { binding } = await call<{

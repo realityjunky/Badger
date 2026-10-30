@@ -191,11 +191,12 @@ export async function remind(
     if (robot !== undefined && recipients.length > 0) {
       deliveryId = deps.ids.next();
       await tx.query(
-        `insert into notification_deliveries (id, workflow_id, channel_id, robot_key, robot_label, webhook_ciphertext,
-        recipients, content, available_at, created_at, item_ids, language, reminder) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11,true)`,
+        `insert into notification_deliveries (id, workflow_id, group_id, channel_id, robot_key, robot_label, webhook_ciphertext,
+        recipients, content, available_at, created_at, item_ids, language, reminder) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,true)`,
         [
           deliveryId,
           workflowId,
+          robot.group_id,
           robot.id,
           robot.robot_key,
           robot.label,

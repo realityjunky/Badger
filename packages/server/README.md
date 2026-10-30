@@ -16,7 +16,10 @@ and reminders** panel. Group leads set defaults in **Settings → Channel
 addresses**; the nearest ancestor Group default applies unless a workflow has
 its own robot. Saving explicitly queues a test post. The saved webhook is
 masked; a replacement is optional when editing its label or chat language.
-Disconnecting cancels queued and retrying posts for that channel.
+Disconnecting cancels queued and retrying posts for that channel. Each post
+through a Group default records its Group: the Group's Delivery log, shown
+beside its robot settings, holds the default's test posts and every
+workflow post it sent.
 
 People set their WeCom userid or mobile in **Settings → Channel addresses**
 and choose mention events in **Settings → Notifications**. Opting out affects
@@ -48,7 +51,7 @@ single-user mode embeds both. It reads `HTTPS_PROXY` / `https_proxy`,
 database-backed pacing reservation shared by every worker, with at least
 3.1 seconds between send attempts. Five attempts use exponential backoff and
 honor numeric `Retry-After`; final failures remain visible in the workflow's
-Delivery log and never block a gate. Remote error text and webhook URLs are
+Delivery log, and in the Group's for a Group default, and never block a gate. Remote error text and webhook URLs are
 never logged. The log shows the posted text, robot label, status, attempts,
 and a safe error code, and each recipient's name and count with how the post
 mentioned them (`userid`, `mobile`, or `name` only). Userids and mobile
@@ -77,6 +80,7 @@ events as dashboard actions.
 | `GET /workflows/:id/notifications/waiting`         | Current waiting items, recipients, reminder capability, and next eligible time    |
 | `POST /workflows/:id/notifications/remind`         | Send `{itemId, confirmed: true}`; return a queued Delivery or copy text           |
 | `GET /workflows/:id/notifications/deliveries`      | Owner/Administrator reads the newest 100 Deliveries                               |
+| `GET /groups/:id/notifications/deliveries`         | Group lead/Administrator reads the Group default's newest 100, test posts too     |
 
 All routes use the `/api/v1` prefix and the deployment's base path. Stale
 revisions, a completed waiting item, and the hourly limit return `409`.

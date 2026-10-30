@@ -168,11 +168,12 @@ export async function saveChannel(
       },
     };
     await tx.query(
-      `insert into notification_deliveries (id, workflow_id, channel_id, robot_key, robot_label,
-      webhook_ciphertext, recipients, content, available_at, created_at) values ($1,$2,$3,$4,$5,$6,'[]',$7,$8,$8)`,
+      `insert into notification_deliveries (id, workflow_id, group_id, channel_id, robot_key, robot_label,
+      webhook_ciphertext, recipients, content, available_at, created_at) values ($1,$2,$3,$4,$5,$6,$7,'[]',$8,$9,$9)`,
       [
         testDeliveryId,
         channel.workflow_id,
+        channel.group_id,
         id,
         robot,
         channel.label,

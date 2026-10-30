@@ -20,7 +20,7 @@ import { readDeliveryLog } from "../notifications/deliveries.js";
 const CHANNEL =
   /^\/api\/v1\/(workflows|groups)\/([^/]+)\/notifications\/channel$/u;
 const DELIVERIES =
-  /^\/api\/v1\/workflows\/([^/]+)\/notifications\/deliveries$/u;
+  /^\/api\/v1\/(workflows|groups)\/([^/]+)\/notifications\/deliveries$/u;
 const WAITING =
   /^\/api\/v1\/workflows\/([^/]+)\/notifications\/(waiting|remind)$/u;
 export function notificationMethods(path: string): string | null {
@@ -46,14 +46,20 @@ export async function handleNotifications(
   }
   const deliveries = DELIVERIES.exec(input.path);
   if (deliveries !== null) {
-    const id = decodeURIComponent(deliveries[1]);
-    if (!(await mayManageChannel(input, { type: "workflow", id })))
+    const scope = {
+      type:
+        deliveries[1] === "groups" ? ("group" as const) : ("workflow" as const),
+      id: decodeURIComponent(deliveries[2]),
+    };
+    if (!(await mayManageChannel(input, scope)))
       throw new RequestError(
         403,
-        "Only the Workflow owner and Administrators may read deliveries",
+        scope.type === "group"
+          ? "Only the Group's leads and Administrators may read its deliveries"
+          : "Only the Workflow owner and Administrators may read deliveries",
       );
     return input.reply.json(200, {
-      deliveries: await readDeliveryLog(input.database, id),
+      deliveries: await readDeliveryLog(input.database, scope),
     });
   }
   if (input.path === "/api/v1/me/notifications") {
