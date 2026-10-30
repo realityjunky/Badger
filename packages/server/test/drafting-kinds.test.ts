@@ -308,7 +308,19 @@ it("accepts a source study as revisioned facts and interfaces with evidence from
       },
     ],
   };
-  const submitted = await submit(jobs, job, secret, result);
+  const submitted = await submit(jobs, job, secret, result, [
+    [{ facts: [], interfaces: [] }, 400, /anyOf/u],
+    [
+      {
+        ...result,
+        facts: [
+          { ...result.facts[0], evidence: [{ ...evidence[0], note: "" }] },
+        ],
+      },
+      400,
+      /facts\/0\/evidence\/0 must NOT have additional properties/u,
+    ],
+  ]);
   expect(await request(`${base}/source-study`)).toMatchObject({
     facts: [],
     interfaces: [],
@@ -490,6 +502,11 @@ it("attaches an accepted translation to the exact question revision and preserve
   const result = { text: "需要哪些列？", rationale: "确定表格约定。" };
   const submitted = await submit(jobs, job, secret, result, [
     [{ text: " ", rationale: " " }, 400, /translated question/u],
+    [
+      { text: "x".repeat(1024 * 1024), rationale: "Over the result limit" },
+      413,
+      /exceeds 1 MiB/u,
+    ],
   ]);
   expect((await request(questionnaire)).questions[0].translations).toEqual([]);
   await accept(jobs, submitted, result);
@@ -537,7 +554,21 @@ it("imports numbered open questions only on acceptance and keeps the Skill versi
     201,
   );
   const result = importOf(pins[0]);
-  const submitted = await submit(jobs, job, secret, result);
+  const submitted = await submit(jobs, job, secret, result, [
+    [
+      {
+        questions: [
+          ...result.questions,
+          {
+            ...result.questions[0],
+            question: { ...questionContent, text: "Which columns again?" },
+          },
+        ],
+      },
+      400,
+      /Import each source question number once per file/u,
+    ],
+  ]);
   expect((await request(questionnaire)).questions).toEqual([]);
   await accept(jobs, submitted, result);
   const imported = (await request(questionnaire)).questions[0];
@@ -558,6 +589,49 @@ it("imports numbered open questions only on acceptance and keeps the Skill versi
   expect(
     (await request(questionnaire, "GET", undefined, 200, expert)).questions,
   ).toEqual([]);
+});
+
+it("imports a numbered source question into a workflow version only once", async () => {
+  const { jobs, questionnaire, pins, secret } = await setup();
+  const { round } = await request(
+    `${questionnaire}/rounds`,
+    "POST",
+    { title: "Imported questions" },
+    201,
+  );
+  const target = {
+    kind: "import-open-questions",
+    roundId: round.id,
+    skillId: pins[0].skillId,
+  };
+  const first = await create(jobs, target);
+  const second = await create(jobs, target);
+  const result = importOf(pins[0]);
+  await accept(jobs, await submit(jobs, first, secret, result), result);
+  // The accepted import is an input of every pending import from that Skill.
+  expect(await jobStatus(jobs, second)).toBe("cancelled");
+  const again = await create(jobs, target);
+  const submitted = await submit(jobs, again, secret, result);
+  const { error, questionId } = await request(
+    `${jobs}/${again.id}/accept-preview`,
+    "POST",
+    { revision: submitted.revision, ...result },
+    409,
+  );
+  expect(error.message).toBe(
+    "Question 1 of reference/contract.md is already imported into this workflow version",
+  );
+  const view = await request(questionnaire);
+  expect(view.questions).toEqual([
+    expect.objectContaining({ id: questionId, source: expect.anything() }),
+  ]);
+  const other = importOf(pins[0], 2);
+  await accept(
+    jobs,
+    await submit(jobs, await create(jobs, target), secret, other),
+    other,
+  );
+  expect((await request(questionnaire)).questions).toHaveLength(2);
 });
 
 it("keeps a claimed job when another Skill's study is accepted or an unrelated question is discussed or answered", async () => {

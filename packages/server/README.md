@@ -694,8 +694,11 @@ target locale, actor, and job. They never replace the question's canonical text;
 questions remain unpublished drafts. Their immutable `questions[].source`
 preserves the Skill version, file hash, cited range, original number, and initial
 question revision. The source citation is also included in question evidence.
-Import acceptance resolves that citation against the selected pin. Both kinds
-appear in question history, and every accepted record is audited.
+Import acceptance resolves that citation against the selected pin. A numbered
+question from one file of a Skill version enters a workflow version once: an
+acceptance preview that would import it again returns 409 with the existing
+`questionId`, and the schema refuses the duplicate too. Both kinds appear in
+question history, and every accepted record is audited.
 
 Only submitted jobs appear in the Engineer questionnaire's `suggestions`.
 Other roles receive no job output. Submission notifies the requester;

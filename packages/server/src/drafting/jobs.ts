@@ -25,6 +25,7 @@ import {
   validateDraftResult,
   type DraftingKind,
   type DraftResult,
+  type ImportedQuestion,
 } from "./schema.js";
 import {
   saveStudyRecordInTransaction,
@@ -36,7 +37,10 @@ import {
   resolveQuestion,
 } from "../questionnaire/resolutions.js";
 import { saveTranslation } from "../questionnaire/translations.js";
-import { saveImportedQuestion } from "../questionnaire/imports.js";
+import {
+  refuseImportedAgain,
+  saveImportedQuestion,
+} from "../questionnaire/imports.js";
 
 export type DraftingActor = WriteContext & { agentHost: string | null };
 export interface DraftingJobRow {
@@ -395,6 +399,12 @@ export async function jobDecisionPreview(
     action === "accept"
       ? validateDraftResult(job.kind, job.output_schema, result)
       : { reason };
+  if (action === "accept" && job.kind === "import-open-questions")
+    await refuseImportedAgain(
+      tx,
+      job.workflow_version_id,
+      (decision as { questions: ImportedQuestion[] }).questions,
+    );
   if ("plan" in decision) {
     const composition = composeFactoryPlan(
       job.context_bundle.planning!.input,
