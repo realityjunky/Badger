@@ -16,6 +16,7 @@ import {
   verifyApprovedProposal,
 } from "../src/factory/state.js";
 import type { FactoryPlan } from "../src/types.js";
+import { createWorkflowKernel } from "../src/index.js";
 
 describe("Creator proposal binding", () => {
   let project: string;
@@ -74,6 +75,46 @@ describe("Creator proposal binding", () => {
       },
     };
   }
+
+  it("keeps a host's Creator namespace isolated and refuses a stored namespace that redirects persistence", async () => {
+    const stateNamespace = ".badger/jobs/generate-one";
+    const kernel = createWorkflowKernel({
+      projectRoot: project,
+      stateNamespace,
+    });
+    const proposal = await kernel.buildProposal(planPath);
+    await kernel.initializeState({
+      planPath,
+      proposalHash: proposal.proposalHash,
+      confirmed: true,
+    });
+    const generated = await generateFromApprovedProposal({
+      projectRoot: project,
+      name: "primer-workflow",
+      stateNamespace,
+      confirmed: true,
+    });
+    expect(generated.state.authoring!.sessionPath).toBe(
+      path.join(project, stateNamespace, "authoring", "primer-workflow"),
+    );
+    await expect(
+      fs.stat(path.join(project, ".badger", "states", "primer-workflow.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    const stateFile = path.join(
+      project,
+      stateNamespace,
+      "states",
+      "primer-workflow.json",
+    );
+    const stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    await fs.writeFile(
+      stateFile,
+      JSON.stringify({ ...stored, stateNamespace: "../../another-project" }),
+    );
+    await expect(kernel.readState("primer-workflow")).rejects.toThrow(
+      /namespace/u,
+    );
+  });
 
   it("hashes the plan and proposal over canonical JSON", async () => {
     const proposal = await buildProposal({ projectRoot: project, planPath });

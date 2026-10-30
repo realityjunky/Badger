@@ -350,9 +350,18 @@ export function createWorkflowKernel(
       typeof stored.draftPath !== "string"
     )
       throw new Error(`Invalid Creator state: ${name}`);
+    if (
+      stored.stateNamespace !== undefined &&
+      stored.stateNamespace !== stateNamespace
+    )
+      throw new Error(
+        `Invalid Creator state: ${name}: namespace does not match its host`,
+      );
     let state: CreatorState;
     try {
       state = mapCreatorStatePaths(stored, toResolvedPaths(projectRoot));
+      if (stateNamespace !== standaloneStateNamespace)
+        state.stateNamespace = stateNamespace;
     } catch (error) {
       throw new Error(
         `Invalid Creator state: ${name}: ${
@@ -489,6 +498,9 @@ export function createWorkflowKernel(
     );
     const state: CreatorState = {
       schemaVersion: 1,
+      ...(stateNamespace === standaloneStateNamespace
+        ? {}
+        : { stateNamespace }),
       name: plan.workflow.name,
       status: "draft",
       projectRoot,

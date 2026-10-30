@@ -5,6 +5,46 @@ import type { Language } from "../preferences/model.js";
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  "package.filterFiles": "Filter package files",
+  "package.title": "Package",
+  "package.description":
+    "Generate the scaffold from the approved proposal, then author its declared leaves. Every file keeps its owner and content hash.",
+  "package.generate": "Generate package",
+  "package.regenerate": "Regenerate package",
+  "package.review": "Review package generation",
+  "package.confirm": "Confirm generation",
+  "package.confirmHelp":
+    "Generate this approved proposal and Creator state. Regeneration replaces the scaffold and invalidates later authoring, evaluation, and review work.",
+  "package.needInitialization":
+    "Initialize the current approved proposal before generating its package.",
+  "package.invalidated":
+    "This package was superseded. Review the upstream change and generate it again.",
+  "package.hash": "Scaffold hash",
+  "package.files": "Package files",
+  "package.file": "File",
+  "package.owner": "Owner",
+  "package.owner.auto": "Deterministic backbone",
+  "package.owner.authored": "Authored leaf",
+  "package.owner.source": "Bundled source Skill",
+  "package.authoringPlan": "Authoring plan",
+  "package.authoringHash": "Authoring plan hash",
+  "package.lane": "Lane",
+  "package.wave": "Wave",
+  "package.dependencies": "Dependencies",
+  "package.jobs": "Generation jobs",
+  "package.failed": "The package request failed. Reload and try again.",
+  "package.changed":
+    "The Creator state changed. Reload and review generation again.",
+  "package.status.queued": "Generation queued",
+  "package.status.running": "Generating package",
+  "package.status.succeeded": "Package generated",
+  "package.status.failed": "Generation failed",
+  "package.status.cancelled": "Generation cancelled",
+  "inbox.packageInvalidated":
+    "{name} · v{number}: package and later work superseded",
+  "inbox.generationInvalidated":
+    "{name} · v{number}: generation confirmation superseded",
+
   "proposal.title": "Proposal and initialization",
   "proposal.description":
     "Review the kernel's proposal for the approved plan. The Workflow owner approves it before the Engineer initializes the project.",
@@ -1004,6 +1044,41 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  "package.filterFiles": "筛选软件包文件",
+  "package.title": "软件包",
+  "package.description":
+    "从已批准的提案生成骨架，然后创作声明的内容叶。每个文件均保留其所有者和内容哈希。",
+  "package.generate": "生成软件包",
+  "package.regenerate": "重新生成软件包",
+  "package.review": "审阅软件包生成",
+  "package.confirm": "确认生成",
+  "package.confirmHelp":
+    "生成此已批准提案和创作状态。重新生成将替换骨架，并使后续创作、评估和审阅失效。",
+  "package.needInitialization": "请先初始化当前已批准的提案，再生成软件包。",
+  "package.invalidated": "此软件包已被替代。请审阅上游更改后重新生成。",
+  "package.hash": "骨架哈希",
+  "package.files": "软件包文件",
+  "package.file": "文件",
+  "package.owner": "所有者",
+  "package.owner.auto": "确定性骨架",
+  "package.owner.authored": "创作内容叶",
+  "package.owner.source": "随包分发的来源 Skill",
+  "package.authoringPlan": "创作计划",
+  "package.authoringHash": "创作计划哈希",
+  "package.lane": "创作通道",
+  "package.wave": "波次",
+  "package.dependencies": "依赖",
+  "package.jobs": "生成任务",
+  "package.failed": "软件包请求失败。请重新加载后重试。",
+  "package.changed": "创作状态已更改。请重新加载并审阅生成。",
+  "package.status.queued": "生成已排队",
+  "package.status.running": "正在生成软件包",
+  "package.status.succeeded": "软件包已生成",
+  "package.status.failed": "生成失败",
+  "package.status.cancelled": "生成已取消",
+  "inbox.packageInvalidated": "{name} · v{number}：软件包及后续工作已被替代",
+  "inbox.generationInvalidated": "{name} · v{number}：生成确认已被替代",
+
   "proposal.title": "提案与初始化",
   "proposal.description":
     "查看内核根据已批准计划生成的提案。工作流负责人批准后，工程师可初始化项目。",

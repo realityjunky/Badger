@@ -1246,6 +1246,8 @@ export interface PublicationReadinessEvidence {
 
 export interface CreatorState {
   schemaVersion: 1;
+  /** Host-owned namespace; standalone projects use .badger. */
+  stateNamespace?: string;
   name: string;
   status: CreatorStatus;
   projectRoot: string;

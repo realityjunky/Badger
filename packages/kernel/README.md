@@ -139,6 +139,15 @@ job's outcome. Replacing a state quotes its hash, and plan or dossier changes
 invalidate the proposal and cancel unfinished jobs. See
 `docs/adr/0027-transactional-proposal-initialization.md`.
 
+Package scaffold generation (#60) runs this kernel's confirmed generator as a
+service job bound to the current initialized state and approved proposal. A
+job-private Creator namespace keeps rollback and retries isolated without moving
+the dossier's canonical sources. The service commits the package inventory,
+Authoring plan, and exact Creator bytes with the job outcome; its dashboard shows
+file owners, hashes, bundled source Skills, and MCP instructions. Regeneration
+starts a new Authoring session and supersedes later work. See
+`docs/adr/0030-transactional-package-generation.md`.
+
 Skill and workflow version changes (#52) compare cited file hashes when a pin
 changes: changed or removed evidence reopens questions, including deferrals,
 and marks source-derived facts stale, while unrelated files keep their

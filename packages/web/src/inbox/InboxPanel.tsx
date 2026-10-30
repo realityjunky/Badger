@@ -58,13 +58,17 @@ export function InboxPanel() {
                                     : item.gate === "proposal"
                                       ? "inbox.proposalReady"
                                       : "inbox.gateReady"
-                                : item.gate === "dossier"
-                                  ? "inbox.dossierInvalidated"
-                                  : item.gate === "plan"
-                                    ? "inbox.planInvalidated"
-                                    : item.gate === "proposal"
-                                      ? "inbox.proposalInvalidated"
-                                      : "inbox.gateInvalidated",
+                                : item.gate === "package"
+                                  ? "inbox.packageInvalidated"
+                                  : item.gate === "generation"
+                                    ? "inbox.generationInvalidated"
+                                    : item.gate === "dossier"
+                                      ? "inbox.dossierInvalidated"
+                                      : item.gate === "plan"
+                                        ? "inbox.planInvalidated"
+                                        : item.gate === "proposal"
+                                          ? "inbox.proposalInvalidated"
+                                          : "inbox.gateInvalidated",
                   { name: item.workflowName, number: item.versionNumber },
                 )}
                 {item.questionText !== null && ` · ${item.questionText}`}

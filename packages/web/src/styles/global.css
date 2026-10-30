@@ -28,6 +28,7 @@
 }
 
 #sources,
+#package,
 #inbox {
   scroll-margin-top: 84px;
 }
@@ -1330,4 +1331,15 @@ body {
 }
 .answer-attachments {
   overflow-wrap: anywhere;
+}
+
+.package-file-hash {
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+.package-file-preview {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 65vh;
+  overflow: auto;
 }

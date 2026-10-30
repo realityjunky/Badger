@@ -898,6 +898,17 @@ export async function writePackageInventory(
   );
 }
 
+/** Content leaves remain lane-owned even while their scaffold is a placeholder. */
+function scaffoldAuthoredPaths(proposal: FactoryProposal): string[] {
+  return authoringContentLeaves().flatMap((leaf) =>
+    leaf === "../<node-skill>/SKILL.md"
+      ? activeNodes(proposal).map(
+          (node) => `${nodeSkillName(proposal.name, node.id)}/SKILL.md`,
+        )
+      : [leaf],
+  );
+}
+
 async function writeScaffold(options: {
   proposal: FactoryProposal;
   plan: FactoryPlan;
@@ -1078,7 +1089,11 @@ async function writeScaffold(options: {
     path.join(root, "scripts", "badger-hook-guard.mjs"),
     badgerHookGuardScript(),
   );
-  await writePackageInventory(root, "scaffold");
+  await writePackageInventory(
+    root,
+    "scaffold",
+    scaffoldAuthoredPaths(proposal),
+  );
   return {
     authoringPlanPath,
     ...(options.sourceEvidence
@@ -1159,7 +1174,10 @@ export async function generatePackage(options: {
         : {}),
     });
     const scaffoldHash = await hashDirectory(stagingRoot);
-    const inventory = await inventoryPackage(stagingRoot);
+    const inventory = await inventoryPackage(
+      stagingRoot,
+      scaffoldAuthoredPaths(proposal),
+    );
     await replaceDirectory(stagingRoot, root);
     moved = true;
     return {

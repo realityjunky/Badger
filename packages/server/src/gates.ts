@@ -1,5 +1,9 @@
 import { canonicalHash, type WorkflowFinding } from "@realityjunky/badger";
-import { recordAudit, type WriteContext } from "./audit.js";
+import {
+  recordAudit,
+  type WriteContext,
+  type AuditWriteContext,
+} from "./audit.js";
 import type { Database, Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import { toIsoString } from "./util.js";
@@ -237,7 +241,7 @@ export async function commitGate(
 export async function invalidateGate(
   database: Queryable,
   dependencies: ServiceDependencies,
-  context: WriteContext,
+  context: AuditWriteContext,
   versionId: string,
   gate: string,
   reason: string,
@@ -271,7 +275,7 @@ export async function invalidateGate(
       recipients,
     );
     await recordAudit(database, dependencies, {
-      actor: { personId: context.personId, credential: context.credential },
+      actor: context,
       channel: context.channel,
       action: "gate.invalidated",
       target: { type: "gate_confirmation", id: row.id, label: gate },

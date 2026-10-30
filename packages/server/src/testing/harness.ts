@@ -318,7 +318,7 @@ export async function startTestService(
     options: { leaseMilliseconds?: number; pollMilliseconds?: number } = {},
   ) =>
     new SourceCheckWorker({
-      database: connection.database,
+      database,
       dependencies: { clock, ids },
       config,
       blobs: filesystemBlobStore(config.storage.blobDirectory),

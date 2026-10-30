@@ -4,6 +4,7 @@ import { workflowMethods } from "./workflows.js";
 import { gateMethods } from "./gates.js";
 import { dossierMethods } from "./dossier.js";
 import { planMethods } from "./plans.js";
+import { packageMethods } from "./packages.js";
 import { proposalMethods } from "./proposals.js";
 import { inboxMethods } from "./inbox.js";
 import { sourceStudyMethods } from "./source-study.js";
@@ -36,6 +37,7 @@ export function tokenRequestAllowed(
   if (dossierMethods(path) !== null) return reads;
   if (planMethods(path) !== null) return reads;
   if (proposalMethods(path) !== null) return reads;
+  if (packageMethods(path) !== null) return reads;
   if (inboxMethods(path) !== null) return reads;
   if (sourceStudyMethods(path) !== null) return reads;
   const questionnaire = questionnaireMethods(path);

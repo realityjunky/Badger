@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import type { FactoryPlan, PlanView } from "../src/api/plans.js";
 import type { ProposalView } from "../src/api/proposals.js";
+import type { PackageView } from "../src/api/packages.js";
 import {
   startTestService,
   type TestService,
@@ -446,12 +447,97 @@ for (const theme of ["light", "dark"] as const) {
         contentType: "image/png",
       });
 
+      const packagePanel = author.getByTestId("workflow-package");
+      await packagePanel
+        .getByRole("button", { name: "Generate package", exact: true })
+        .click();
+      const generationDialog = author.getByRole("dialog");
+      await expect(
+        generationDialog.getByText(initialized.currentState!.hash, {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await generationDialog
+        .getByRole("button", { name: "Confirm generation", exact: true })
+        .click();
+      await expect(generationDialog).toBeHidden();
+      await expect(
+        packagePanel.getByText("Generation queued", { exact: true }),
+      ).toBeVisible();
+      expect(await service.runSourceCheckJobs()).toBe(1);
+      await expect(
+        packagePanel.getByText("Package generated", { exact: true }),
+      ).toBeVisible();
+      const generated = await call<PackageView>("GET", `${root}/package`);
+      await expect(
+        packagePanel.getByText(generated.package!.scaffoldHash, {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(
+        packagePanel
+          .getByText("Deterministic backbone", { exact: true })
+          .first(),
+      ).toBeVisible();
+      await expect(
+        packagePanel.getByText("Authored leaf", { exact: true }).first(),
+      ).toBeVisible();
+      await expect(
+        packagePanel.getByText("skill-review", { exact: true }),
+      ).toBeVisible();
+      await packagePanel
+        .getByLabel("Filter package files", { exact: true })
+        .fill("SKILL.md");
+      await packagePanel
+        .getByRole("button", { name: "SKILL.md", exact: true })
+        .click();
+      await expect(
+        author
+          .getByRole("dialog")
+          .getByText("Prefer the Badger MCP Run tools", { exact: false }),
+      ).toBeVisible();
+      await author
+        .getByRole("dialog")
+        .getByRole("button", { name: "Close", exact: true })
+        .click();
+      await packagePanel
+        .getByLabel("Filter package files", { exact: true })
+        .fill("");
+      const packageScreenshot = info.outputPath(`package-${theme}.png`);
+      await packagePanel.screenshot({
+        path: packageScreenshot,
+        style: ".top-bar { visibility: hidden; }",
+      });
+      await info.attach(`package-${theme}`, {
+        path: packageScreenshot,
+        contentType: "image/png",
+      });
+      expect(
+        await author.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await page.reload();
+      await expect(
+        page
+          .getByTestId("workflow-package")
+          .getByRole("button", { name: "Regenerate package", exact: true }),
+      ).toHaveCount(0);
+
       await call("PATCH", `${root}/source-study/facts/${record.id}`, {
         ...content,
         statement: "The source now returns a revised report.",
         revision: 1,
       });
       await page.reload();
+      await expect(
+        page
+          .getByTestId("workflow-package")
+          .getByText(
+            "This package was superseded. Review the upstream change and generate it again.",
+            { exact: true },
+          ),
+      ).toBeVisible();
       await expect(
         page
           .getByTestId("workflow-proposal")

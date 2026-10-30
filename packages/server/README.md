@@ -1081,3 +1081,32 @@ Service tests import `src/testing/index.ts` and use the real HTTP seam with
 named people, fresh migrations, temporary storage, fixed time, and fixed IDs.
 Set `BADGER_TEST_DATABASE_URL` to a Postgres 17 instance to run the same tests
 against Postgres. See the repository README for the root delivery commands.
+
+## Package scaffold generation
+
+Package generation (#60, migration `0027`) follows initialization. Here `V` is
+`/api/v1/workflows/:workflowId/versions/:versionId`.
+
+- `GET V/package` reads the latest package, its current or invalidated status,
+  scaffold hash, file inventory (path, bytes, SHA-256, kernel owner), Authoring
+  plan, generation jobs, and `currentStateHash`. `canGenerate` means the current
+  Creator state still binds the approved plan and proposal.
+- A signed-in Engineer or Administrator previews and commits
+  `V/gates/generation` through the shared human gate protocol. Its confirmation
+  binds the proposal, Plan version, and Creator state hashes.
+- `POST V/package/generate` quotes `{confirmed: true, confirmationHash,
+  stateHash, requestId}` and returns `202 {job}`. The confirmation belongs to
+  the requesting person. A repeated request ID returns the same job; changed
+  inputs conflict. Tokens may read packages but never confirm or generate.
+- The worker rechecks all approved inputs and Creator state, invokes the
+  kernel's confirmed generation in a job-private namespace, and commits its
+  package inventory and exact new Creator bytes with the job outcome. Source
+  Skills and MCP/script runtime instructions come from the kernel generator.
+- `GET V/package/file?path=...` previews an inventoried file up to 1 MiB after
+  checking its recorded SHA-256. Unlisted paths are refused. An invalidated
+  package remains readable for inspection.
+
+Upstream changes cancel unfinished generation and notify Engineers, Reviewers,
+and Workflow owners about superseded packages. Regeneration starts a fresh
+Authoring session and invalidates progressed evaluation and review stages.
+See [ADR 0030](../../docs/adr/0030-transactional-package-generation.md).

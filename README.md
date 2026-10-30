@@ -198,7 +198,10 @@ with readiness (#49) build on these records. Engineers compose immutable
 dossier versions from the ledger (#50), and Workflow owners approve the exact
 hash. Changed facts or pinned evidence supersede approval and notify both
 roles. Plan versions (#58) and proposal approval with initialization (#59)
-follow the same pattern; the package, evaluation, and review gates follow.
+follow the same pattern. Package generation (#60) requires the Engineer's
+confirmation and runs as a worker job against the approved proposal. The Package
+panel shows each file's owner and hash, bundled sources, and the Authoring plan.
+Evaluation and review gates follow.
 
 ## Adding a workspace package
 

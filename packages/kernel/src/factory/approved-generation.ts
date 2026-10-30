@@ -8,6 +8,7 @@ import { readState, verifyApprovedProposal } from "./state.js";
 export interface ApprovedGenerationOptions {
   projectRoot: string;
   name: string;
+  stateNamespace?: string;
   /** The person's explicit confirmation; generation refuses without it. */
   confirmed: boolean;
   sourceRoots?: readonly string[];
@@ -32,7 +33,11 @@ export async function generateFromApprovedProposal(
 ): Promise<ApprovedGeneration> {
   if (!options.confirmed)
     throw new Error("Generation requires explicit confirmation");
-  const state = await readState(options.projectRoot, options.name);
+  const state = await readState(
+    options.projectRoot,
+    options.name,
+    options.stateNamespace,
+  );
   const { proposal, plan } = await verifyApprovedProposal(state, {
     sourceRoots: options.sourceRoots,
   });

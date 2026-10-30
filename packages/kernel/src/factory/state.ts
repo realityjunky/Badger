@@ -1,5 +1,6 @@
 import {
   createStandaloneWorkflowKernel,
+  createWorkflowKernel,
   type ApprovedProposal,
   type InitializeStateOptions,
 } from "../workflow-kernel/foundation.js";
@@ -8,13 +9,15 @@ import type { CreatorState, SkillCandidate } from "../types.js";
 export async function readState(
   projectRoot: string,
   name: string,
+  stateNamespace?: string,
 ): Promise<CreatorState> {
-  return createStandaloneWorkflowKernel({ projectRoot }).readState(name);
+  return createWorkflowKernel({ projectRoot, stateNamespace }).readState(name);
 }
 
 export async function writeState(state: CreatorState): Promise<void> {
-  await createStandaloneWorkflowKernel({
+  await createWorkflowKernel({
     projectRoot: state.projectRoot,
+    stateNamespace: state.stateNamespace,
   }).writeState(state);
 }
 

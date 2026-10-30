@@ -37,6 +37,7 @@ export interface WorkflowCapabilities {
   approvePlan: boolean;
   approveProposal: boolean;
   initialize: boolean;
+  generate: boolean;
 }
 
 /** Every workflow role reads; only the responsible roles may write. */
@@ -82,6 +83,7 @@ export async function workflowCapabilities(
     approveProposal:
       access.tokenScopes === undefined && (isAdministrator(access) || owner),
     initialize: access.tokenScopes === undefined && engineer,
+    generate: access.tokenScopes === undefined && engineer,
     approveDossier:
       access.tokenScopes === undefined && (isAdministrator(access) || owner),
   };

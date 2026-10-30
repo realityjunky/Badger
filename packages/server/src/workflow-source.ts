@@ -1,5 +1,6 @@
 import { invalidateSkillFactEvidence } from "./questionnaire/resolutions.js";
 import { reconcileDossier } from "./dossier.js";
+import { runGeneration } from "./generation.js";
 import { runInitialization } from "./initialization.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -76,14 +77,15 @@ export interface SourceCheck {
  * model, so a version's history stays small.
  */
 export interface JobOutcome {
-  status: SourceCheckStatus | "initialized";
+  status: SourceCheckStatus | "initialized" | "generated";
   blockers: string[];
   stateHash?: string;
+  scaffoldHash?: string;
 }
 
 export interface WorkflowJob {
   id: string;
-  kind: "source-check" | "init";
+  kind: "source-check" | "init" | "generate";
   workflowVersionId: string;
   requesterId: string;
   status: JobStatus;
@@ -98,6 +100,8 @@ export interface WorkflowJob {
   proposalConfirmationId: string | null;
   replaceStateHash: string | null;
   requestId: string | null;
+  generationConfirmationId: string | null;
+  creatorStateHash: string | null;
   outcome: JobOutcome | null;
   error: string | null;
   revision: number;
@@ -155,6 +159,8 @@ interface JobRow {
   proposal_confirmation_id: string | null;
   replace_state_hash: string | null;
   request_id: string | null;
+  generation_confirmation_id: string | null;
+  creator_state_hash: string | null;
   outcome: JobOutcome | null;
   error: string | null;
   revision: number;
@@ -166,12 +172,12 @@ const PIN_COLUMNS = `p.workflow_version_id, p.skill_id, s.name as skill_name,
 const JOB_COLUMNS = `id, kind, workflow_version_id, requester_id, status,
   requested_at, started_at, finished_at, lease_until, worker_id, pins_hash,
   outcome - 'sources' as outcome, error, revision, plan_version_hash,
-  proposal_hash, proposal_confirmation_id, replace_state_hash, request_id`;
+  proposal_hash, proposal_confirmation_id, replace_state_hash, request_id, generation_confirmation_id, creator_state_hash`;
 const JOB_CLAIM_COLUMNS = `j.id, j.kind, j.workflow_version_id, j.requester_id,
   j.status, j.requested_at, j.started_at, j.finished_at, j.lease_until,
   j.worker_id, j.pins_hash, j.outcome - 'sources' as outcome, j.error,
   j.revision, j.plan_version_hash, j.proposal_hash, j.proposal_confirmation_id,
-  j.replace_state_hash, j.request_id`;
+  j.replace_state_hash, j.request_id, j.generation_confirmation_id, j.creator_state_hash`;
 
 function toPin(row: PinRow): WorkflowSkillPin {
   return {
@@ -222,6 +228,8 @@ function toJob(row: JobRow): WorkflowJob {
     proposalConfirmationId: row.proposal_confirmation_id,
     replaceStateHash: row.replace_state_hash,
     requestId: row.request_id,
+    generationConfirmationId: row.generation_confirmation_id,
+    creatorStateHash: row.creator_state_hash,
     outcome: row.outcome,
     error: row.error,
     revision: row.revision,
@@ -860,9 +868,11 @@ export class SourceCheckWorker {
     try {
       if (job.kind === "init")
         return await runInitialization(this.options, job);
+      if (job.kind === "generate")
+        return await runGeneration(this.options, job);
       return await this.check(job);
     } catch (error) {
-      if (job.kind === "init") throw error;
+      if (job.kind !== "source-check") throw error;
       return await this.finish(
         job,
         "failed",
