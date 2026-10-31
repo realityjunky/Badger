@@ -1196,9 +1196,12 @@ jobs; other lanes in the same Wave can continue independently.
 
 `GET V/package/authoring` returns kernel readiness, accepted record revisions,
 job history, and linked follow-up questions or repair jobs. NEEDS_CONTEXT creates
-a draft question in an Authoring round; BLOCKED creates a repair job with the
-current lane action. Only a signed-in Engineer or Administrator accepts results.
-Every acceptance preserves the person, lane, and revision for independent review.
+a draft question in an Authoring round from the lane's question action. Only
+Wave 1 lanes must send one; without it, the draft takes the result's summary and
+a rationale naming the lane, for the Engineer to edit before publishing. BLOCKED
+creates a repair job with the current lane action. Only a signed-in Engineer or
+Administrator accepts results. Every acceptance preserves the person, lane, and
+revision for independent review.
 
 `POST V/package/assemble-preview` takes `{}` and returns a confirmation hash for
 the current state and revision. `POST V/package/assemble` takes that hash,

@@ -526,6 +526,8 @@ export async function acceptLaneResult(
       job.workflow_version_id,
       `Authoring: ${job.lane_id}`,
     );
+    // The kernel requires a question action only from Wave 1 lanes. Without
+    // one, the draft starts from the summary for the Engineer to edit.
     const question = await saveQuestion(
       tx,
       deps,
@@ -533,8 +535,14 @@ export async function acceptLaneResult(
       job.workflow_version_id,
       round.id,
       {
-        text: record.action!.prompt,
-        rationale: record.action!.requirement,
+        text:
+          record.action?.prompt ??
+          (record.summary?.trim()
+            ? record.summary
+            : `The ${job.lane_id} Authoring lane needs more context.`),
+        rationale:
+          record.action?.requirement ??
+          `The ${job.lane_id} Authoring lane reported NEEDS_CONTEXT without naming a dossier field.`,
         topic: "scope",
         targets: [{ kind: "workflow", id: "workflow" }],
         evidence: [],

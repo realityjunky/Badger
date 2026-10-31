@@ -30,6 +30,45 @@ async function generated() {
   return fixture;
 }
 
+/** An Agent drafts a lane result with a token; the signed-in Engineer accepts it. */
+async function acceptLane(
+  { call, base }: Awaited<ReturnType<typeof generated>>,
+  secret: string,
+  job: { id: string; revision: number },
+  draft: (context: any) => unknown,
+) {
+  const route = `${base}/drafting-jobs/${job.id}`;
+  const claim = await call(
+    `${route}/claim`,
+    "POST",
+    { revision: job.revision },
+    engineer,
+    200,
+    secret,
+  );
+  const laneOutput = draft(claim.contextBundle);
+  const { job: submitted } = await call(
+    `${route}/submit`,
+    "POST",
+    {
+      leaseId: claim.job.lease.id,
+      contextHash: claim.job.contextHash,
+      result: { laneOutput },
+    },
+    engineer,
+    200,
+    secret,
+  );
+  const decision = { revision: submitted.revision, laneOutput };
+  const { preview } = await call(`${route}/accept-preview`, "POST", decision);
+  return call(`${route}/accept`, "POST", {
+    ...decision,
+    confirmed: true,
+    confirmationHash: preview.confirmationHash,
+    requestId: `accept-${job.id}`,
+  });
+}
+
 it("offers only current Wave lanes as bounded Agent jobs and keeps submitted output out of the authoring session until acceptance", async () => {
   const { call, base } = await generated();
   const { jobs } = await call(
@@ -134,6 +173,67 @@ it("offers only current Wave lanes as bounded Agent jobs and keeps submitted out
   );
   await call(`${base}/package/assemble-preview`, "POST", {}, engineer, 409);
 });
+
+it.each(["skill-core", "skill-review"])(
+  "accepts NEEDS_CONTEXT from %s without a lane action and drafts its follow-up question from the summary",
+  async (lane) => {
+    const fixture = await generated();
+    const { call, base } = fixture;
+    const { secret } = await call(
+      "/me/tokens",
+      "POST",
+      { name: "context", scopes: ["engineer"] },
+      engineer,
+      201,
+    );
+    const summary = `Which report audience should ${lane} address?`;
+    let accepted;
+    for (let wave = 0; wave < 3 && !accepted; wave++) {
+      const { jobs } = await call(
+        `${base}/package/authoring-jobs`,
+        "POST",
+        { confirmed: true },
+        engineer,
+        201,
+      );
+      for (const job of jobs) {
+        if (job.laneId !== lane) {
+          await acceptLane(fixture, secret, job, reportLaneOutput);
+          continue;
+        }
+        // The kernel requires a question action only from Wave 1 lanes.
+        accepted = await acceptLane(fixture, secret, job, (context) => ({
+          lane,
+          status: "NEEDS_CONTEXT",
+          semanticDossierHash: context.authoring.plan.semanticDossierHash,
+          summary,
+          claims: [],
+          artifacts: [],
+        }));
+      }
+    }
+    expect(accepted.job.status).toBe("accepted");
+    const view = await call(`${base}/package/authoring`);
+    expect(view.readiness.records[lane]).toMatchObject({
+      status: "NEEDS_CONTEXT",
+    });
+    const followUp = view.followUps.find((f: any) => f.laneId === lane);
+    expect(followUp).toMatchObject({
+      questionId: expect.any(String),
+      repairJobId: null,
+    });
+    const { rounds, questions } = await call(`${base}/questionnaire`);
+    const question = questions.find((q: any) => q.id === followUp.questionId);
+    expect(question).toMatchObject({
+      text: summary,
+      rationale: `The ${lane} Authoring lane reported NEEDS_CONTEXT without naming a dossier field.`,
+    });
+    expect(rounds.find((r: any) => r.id === question.roundId)).toMatchObject({
+      title: `Authoring: ${lane}`,
+      state: "draft",
+    });
+  },
+);
 
 it("records accepted lanes in revision order, unlocks dependent jobs and review votes, then confirms assembly for the exact session", async () => {
   const { call, base } = await generated();
