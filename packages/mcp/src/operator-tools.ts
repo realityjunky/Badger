@@ -689,6 +689,9 @@ export class LocalRuns {
         `/runs/${binding.registrationId}/gate-answer`,
       );
     } catch (error) {
+      // A Run the service has not registered yet has no answer yet.
+      if (error instanceof BadgerApiError && error.status === 404)
+        return current;
       if (
         !isRetryableBadgerFailure(error) &&
         !(error instanceof BadgerTimeoutError)
@@ -831,11 +834,15 @@ export function operatorTools(
         ...local,
         ...publication,
         hostLabel: z.string().min(1).max(200),
-        externalRoots: z.record(z.string(), z.string()).optional(),
+        // WorkflowRuntime alone refuses root bindings, in its own words.
+        externalRoots: z.unknown().optional(),
         testRun: z.boolean().default(false),
         confirmed: z.literal(true),
       },
       async (args) => {
+        // The service refuses a blank label, so such a Run could never register.
+        if (!args.hostLabel.trim())
+          throw new Error("Host label must contain 1 to 200 characters");
         const { protocol, packageDirectory } = await published(
           args,
           args.projectRoot,
@@ -877,7 +884,9 @@ export function operatorTools(
             location: target(args),
             ...(args.externalRoots === undefined
               ? {}
-              : { externalRoots: args.externalRoots }),
+              : {
+                  externalRoots: args.externalRoots as Record<string, string>,
+                }),
           });
         } catch (error) {
           // WorkflowRuntime can commit the Run before a later step fails, such as

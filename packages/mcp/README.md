@@ -278,9 +278,10 @@ Before starting, call `status` with `workflowId`, `publicationId`, `packageHash`
 `projectRoot` (an absolute local directory), and a new `runId`. Its
 `startRequirements` is the unchanged WorkflowRuntime reply. Ask the person for
 each declared external directory, and confirm those directories with them.
-`start` takes the same identifiers, `hostLabel`, `confirmed:true`, optional
-`testRun` (default false), and optional `externalRoots: {name: absoluteDirectory}`.
-Only `start` accepts root bindings. Runtime refusals are returned unchanged and
+`start` takes the same identifiers, `hostLabel` (1 to 200 characters, not blank),
+`confirmed:true`, optional `testRun` (default false), and optional
+`externalRoots: {name: absoluteDirectory}`. Only `start` accepts root bindings,
+and only WorkflowRuntime checks them. Runtime refusals are returned unchanged and
 create no service Run registration. If WorkflowRuntime committed the Run before a
 later step failed, its start intent stays, and `status` or `recover` binds it.
 
@@ -296,7 +297,8 @@ verification and finalization confirmations are excluded from Agent submissions.
 Human gates return a Run dashboard link. A person holding the published policy's
 required authority reviews and confirms their answer there. On the next `next`
 or `status` call, the MCP delivers the service-attested answer to WorkflowRuntime
-only if its Run revision and pending action still match. Changed finalization
+only if its Run revision and pending action still match. A Run the service has
+not registered yet has no answer yet. Changed finalization
 effects require another review. Concurrent delivery and reconnects preserve one
 committed answer. `status` can therefore advance a Run after human sign-off.
 

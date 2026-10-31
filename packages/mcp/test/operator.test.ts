@@ -36,12 +36,22 @@ it("delivers only a dashboard-attested gate answer on status and next, including
     await import("../../server/test/fixtures/runs.js");
   service = await startPlanningService();
   const f = await publishedFixture(service, decisionPlan);
+  let holdRegistration = false;
   const connect = async () => {
     currentServer = createBadgerMcp({
       url: service.baseUrl,
       token: f.operatorToken,
       agentHost: "Planning Agent",
       profile: "operator",
+      fetch: async (url, init) =>
+        holdRegistration &&
+        init.method === "POST" &&
+        /\/runs\/[^/]+$/u.test(url)
+          ? Response.json(
+              { error: { message: "Registration unavailable" } },
+              { status: 503 },
+            )
+          : fetch(url, init),
     });
     const [a, b] = InMemoryTransport.createLinkedPair();
     await currentServer.connect(b);
@@ -50,6 +60,20 @@ it("delivers only a dashboard-attested gate answer on status and next, including
   };
   await connect();
   root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-gate-"));
+  // A gate whose Run the service has not registered yet has no answer yet.
+  holdRegistration = true;
+  const unregistered = { projectRoot: root, runId: "gate-unregistered" };
+  await value("start", {
+    ...unregistered,
+    workflowId: f.workflow.id,
+    publicationId: f.publication.id,
+    packageHash: f.publication.packageHash,
+    hostLabel: "Lab",
+    confirmed: true,
+  });
+  for (const name of ["status", "next"])
+    expect((await value(name, unregistered)).requiresPerson).toBe(true);
+  holdRegistration = false;
   for (const name of ["status", "next"]) {
     const args = { projectRoot: root, runId: `gate-${name}` };
     const started = await value("start", {
@@ -999,6 +1023,29 @@ it("forwards external-root requirements/refusals, keeps local progress during an
   expect((refused.content as { text: string }[])[0].text).toBe(
     "Workflow artifact external root outputs needs a directory when the Run starts: The shared folder for analysis results.",
   );
+  // WorkflowRuntime refuses every root binding in its own words, and a blank
+  // machine label, which the service would refuse, never starts a Run.
+  for (const [changed, message] of [
+    [
+      { externalRoots: { outputs: 42 } },
+      "Workflow artifact external root outputs must be bound to an absolute directory: 42",
+    ],
+    [
+      { externalRoots: "outputs" },
+      "Workflow artifact external roots must be a map",
+    ],
+    [
+      { externalRoots: { outputs: external }, hostLabel: "   " },
+      "Host label must contain 1 to 200 characters",
+    ],
+  ] as const) {
+    const reply = await client.callTool({
+      name: "start",
+      arguments: { ...args, ...changed },
+    });
+    expect(reply.isError).toBe(true);
+    expect((reply.content as { text: string }[])[0].text).toBe(message);
+  }
   expect(
     (
       await f.call(
