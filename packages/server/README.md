@@ -371,6 +371,8 @@ It calls the kernel in a private namespace, then commits the exact state
 bytes and hash with the outcome, stage updates, and audit entry. An expired
 claimant cannot publish a state after takeover. A successful job marks Plan
 and proposal done and Package active and records `workflow.initialized`.
+Reinitialization also withdraws the current package, so progressed Evaluation
+and Review and publication stages become invalidated.
 Failure leaves the previous state current. Each failed or cancelled job is
 recorded once, as `workflow_initialization.failed` or
 `workflow_initialization.cancelled`, by the worker or by the writer whose

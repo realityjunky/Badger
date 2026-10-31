@@ -193,8 +193,12 @@ export async function runInitialization(
         dependencies.clock.now(),
       ],
     );
+    // Progressed Evaluation and review stages described the withdrawn package.
     await tx.query(
-      `update workflow_versions set stages = stages || '{"plan-proposal":"done","package":"active"}'::jsonb, revision = revision + 1, updated_at = $2 where id = $1`,
+      `update workflow_versions set stages = stages || jsonb_build_object('plan-proposal','done','package','active',
+      'evaluation',case when stages->>'evaluation' = 'todo' then 'todo' else 'invalidated' end,
+      'review-publication',case when stages->>'review-publication' = 'todo' then 'todo' else 'invalidated' end),
+      revision = revision + 1, updated_at = $2 where id = $1`,
       [job.workflowVersionId, dependencies.clock.now()],
     );
     await recordAudit(tx, dependencies, {

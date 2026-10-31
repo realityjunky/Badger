@@ -8,6 +8,7 @@ import {
   startPlanningService,
 } from "./fixtures/planning.js";
 import { initializedFixture } from "./fixtures/packages.js";
+import { assembledFixture } from "./fixtures/evaluations.js";
 
 let service: TestService;
 afterEach(async () => service?.close());
@@ -289,3 +290,81 @@ it("commits package bytes and state atomically and recovers a failed worker tran
     ),
   ).toHaveLength(1);
 });
+
+it("invalidates progressed Evaluation and Review stages when reinitialization withdraws the package", async () => {
+  service = await startPlanningService();
+  const { call, base, assembled, workflow } = await assembledFixture(service);
+  const reviewer = { subject: "reviewer", email: "reviewer@example.com" };
+  await call(
+    "/bindings",
+    "POST",
+    {
+      scopeType: "workflow",
+      scopeId: workflow.id,
+      email: reviewer.email,
+      role: "Reviewer",
+    },
+    admin,
+    201,
+  );
+  await call(
+    `${base}/evaluations`,
+    "POST",
+    {
+      confirmed: true,
+      packageHash: assembled.packageHash,
+      requestId: "evaluate-before-reinitialization",
+    },
+    engineer,
+    202,
+  );
+  expect((await service.worker().runOnce())?.status).toBe("succeeded");
+  const { preview } = await call(
+    `${base}/review/approve-preview`,
+    "POST",
+    {},
+    reviewer,
+  );
+  await call(
+    `${base}/review/approve`,
+    "POST",
+    {
+      confirmed: true,
+      confirmationHash: preview.confirmationHash,
+      requestId: "approve-before-reinitialization",
+    },
+    reviewer,
+  );
+  const stages = async () =>
+    Object.fromEntries(
+      (await call(base)).version.stages.map(
+        (stage: { id: string; state: string }) => [stage.id, stage.state],
+      ),
+    );
+  expect(await stages()).toMatchObject({
+    package: "done",
+    evaluation: "done",
+    "review-publication": "active",
+  });
+  const { proposal, currentState } = await call(`${base}/proposal`);
+  await call(
+    `${base}/proposal/initialize`,
+    "POST",
+    {
+      proposalHash: proposal.proposalHash,
+      confirmed: true,
+      requestId: "reinitialize",
+      replaceStateHash: currentState.hash,
+    },
+    engineer,
+    202,
+  );
+  expect((await service.worker().runOnce())?.status).toBe("succeeded");
+  expect((await call(`${base}/package`)).package.status).toBe("invalidated");
+  expect(await stages()).toMatchObject({
+    "plan-proposal": "done",
+    package: "active",
+    evaluation: "invalidated",
+    "review-publication": "invalidated",
+  });
+}, 90_000);
