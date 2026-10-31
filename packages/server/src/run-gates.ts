@@ -188,7 +188,11 @@ export async function syncRunGate(
     Buffer.from(file.content, "base64").toString("utf8"),
   ) as WorkflowProtocol;
   const policy = workflowGatePolicy(protocol, current);
-  // The package owns authority. A client report cannot widen the policy.
+  // The published package's policy for the reported node and action must equal
+  // the reviewer policy in the report. Which policy applies follows the report's
+  // action, so a dishonest report can route the gate to the wrong people; it
+  // cannot sign off, because WorkflowRuntime checks the answer's attestation
+  // against its own pending action when the MCP delivers it.
   const normalized = (value: WorkflowReviewerPolicy) => ({
     subjects: [...(value.subjects ?? [])].sort(),
     authorities: [...(value.authorities ?? [])].sort(),

@@ -45,7 +45,11 @@ export async function handleRunGates(
         revision: gate.context.revision,
         actionId: gate.context.pendingAction!.id,
         pendingAction: gate.context.pendingAction,
-        finalizationPreview: gate.context.finalizationPreview ?? null,
+        // Only a finalization confirmation carries a preview that was checked
+        // against its pending plan when the gate opened.
+        finalizationPreview: gate.context.pendingAction?.finalization
+          ? (gate.context.finalizationPreview ?? null)
+          : null,
         policy: gate.policy,
         answer: gate.answer,
         canAnswer:
