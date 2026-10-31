@@ -512,6 +512,17 @@ async function readFileRaceSafe(file, maxBytes, options = {}) {
     await handle.close();
   }
 }
+async function retryChangedRead(read, maxAttempts) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await read();
+    } catch (error) {
+      if (!(error instanceof RaceSafeReadError) || error.reason !== "changed" || attempt >= maxAttempts)
+        throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+  }
+}
 
 // src/engine/project-config.ts
 import path2 from "node:path";
@@ -3355,6 +3366,7 @@ import path5 from "node:path";
 // src/engine/protected-run-file.ts
 import { TextDecoder as TextDecoder2 } from "util";
 var MAX_ENGINE_RUN_FILE_BYTES = 16 * 1024 * 1024;
+var ENGINE_RUN_RECORD_READ_ATTEMPTS = 8;
 function boundedMaxBytes(requested, fallback, label) {
   const value = requested ?? fallback;
   if (!Number.isSafeInteger(value) || value < 1 || value > MAX_ENGINE_RUN_FILE_BYTES) {
@@ -12453,12 +12465,15 @@ async function appendTrajectory(changeDir, relativePath2, event, options = {}) {
 }
 async function readTrajectory(changeDir, relativePath2, options = {}) {
   const normalized = assertRunPath(changeDir, relativePath2);
-  const raw = await readOptionalEngineRunText(
-    changeDir,
-    normalized,
-    RUN_FILE_LIMITS.trajectory,
-    "Run trajectory",
-    options
+  const raw = await retryChangedRead(
+    () => readOptionalEngineRunText(
+      changeDir,
+      normalized,
+      RUN_FILE_LIMITS.trajectory,
+      "Run trajectory",
+      options
+    ),
+    ENGINE_RUN_RECORD_READ_ATTEMPTS
   );
   return parseTrajectory(raw);
 }
@@ -14626,12 +14641,15 @@ function serializeRunState(state) {
   return JSON.stringify(parseRunStateJson(state), null, 2);
 }
 async function readRunState(changeDir, options = {}) {
-  const raw = await readOptionalEngineRunText(
-    changeDir,
-    RUN_STATE_FILE,
-    RUN_STATE_READ_MAX_BYTES,
-    "Run state",
-    options
+  const raw = await retryChangedRead(
+    () => readOptionalEngineRunText(
+      changeDir,
+      RUN_STATE_FILE,
+      RUN_STATE_READ_MAX_BYTES,
+      "Run state",
+      options
+    ),
+    ENGINE_RUN_RECORD_READ_ATTEMPTS
   );
   if (raw === null) return null;
   let document;
@@ -18766,23 +18784,15 @@ async function readJournal(runRoot, profile) {
   }
 }
 async function readWorkflowTransitionJournal(runRoot) {
-  const maxAttempts = 2 * WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS + WORKFLOW_TRANSITION_BOUNDARY_PHASES.length + 1;
-  let raw = null;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      raw = await readOptionalEngineRunText(
-        runRoot,
-        WORKFLOW_TRANSITION_JOURNAL_PATH,
-        WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
-        JOURNAL_LABEL
-      );
-      break;
-    } catch (error) {
-      if (!(error instanceof RaceSafeReadError) || error.reason !== "changed" || attempt === maxAttempts - 1)
-        throw error;
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
-  }
+  const raw = await retryChangedRead(
+    () => readOptionalEngineRunText(
+      runRoot,
+      WORKFLOW_TRANSITION_JOURNAL_PATH,
+      WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
+      JOURNAL_LABEL
+    ),
+    2 * WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS + WORKFLOW_TRANSITION_BOUNDARY_PHASES.length + 1
+  );
   if (raw === null) return null;
   try {
     const journal = parseWorkflowTransitionJournal(

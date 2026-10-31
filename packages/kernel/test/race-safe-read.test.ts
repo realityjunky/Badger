@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   RaceSafeReadError,
   readFileRaceSafe,
+  retryChangedRead,
 } from "../src/engine/race-safe-read.js";
 
 // Windows note: the primitive's win32 branch opens with plain O_RDONLY
@@ -143,6 +144,48 @@ describe("race-safe bounded file read", () => {
       reason: "changed",
       message: "test file changed while reading",
     });
+  });
+
+  it("reads a replaced file afresh, a bounded number of times, and retries no other failure", async () => {
+    const file = path.join(root, "data.txt");
+    await fs.writeFile(file, "original");
+    let attempts = 0;
+    const replacedWhileOpen = (times: number) => () => {
+      attempts += 1;
+      return readFileRaceSafe(file, 1024, {
+        label: "test file",
+        hooks: {
+          afterOpen: async () => {
+            if (attempts > times) return;
+            const replacement = path.join(root, `replacement-${attempts}.txt`);
+            await fs.writeFile(replacement, `replacement ${attempts}`);
+            await fs.rename(replacement, file);
+          },
+        },
+      });
+    };
+
+    const result = await retryChangedRead(replacedWhileOpen(1), 3);
+    expect(result.bytes.toString("utf8")).toBe("replacement 1");
+    expect(attempts).toBe(2);
+
+    attempts = 0;
+    await expect(
+      retryChangedRead(replacedWhileOpen(Infinity), 3),
+    ).rejects.toMatchObject({
+      reason: "changed",
+      message: "test file changed while reading",
+    });
+    expect(attempts).toBe(3);
+
+    attempts = 0;
+    await expect(
+      retryChangedRead(() => {
+        attempts += 1;
+        return readFileRaceSafe(root, 1024);
+      }, 3),
+    ).rejects.toMatchObject({ reason: "not-regular-file" });
+    expect(attempts).toBe(1);
   });
 
   it.skipIf(process.platform === "win32")(

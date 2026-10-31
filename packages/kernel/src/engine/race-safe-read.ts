@@ -225,3 +225,29 @@ export async function readFileRaceSafe(
     await handle.close();
   }
 }
+
+/**
+ * Reads again, at most `maxAttempts` times in all, while a read fails only
+ * because a writer atomically replaced the file during it. Every attempt is a
+ * complete fresh read with all of its identity and containment checks; any
+ * other failure, and the last changed read, propagates.
+ */
+export async function retryChangedRead<T>(
+  read: () => Promise<T>,
+  maxAttempts: number,
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await read();
+    } catch (error) {
+      if (
+        !(error instanceof RaceSafeReadError) ||
+        error.reason !== "changed" ||
+        attempt >= maxAttempts
+      )
+        throw error;
+      // Let the writer finish its replacement before the next fresh read.
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    }
+  }
+}

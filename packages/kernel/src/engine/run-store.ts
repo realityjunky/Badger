@@ -1,6 +1,7 @@
 import path from "path";
 
 import {
+  ENGINE_RUN_RECORD_READ_ATTEMPTS,
   readOptionalEngineRunText,
   removeEngineRunFile,
   writeEngineRunText,
@@ -8,6 +9,7 @@ import {
   type EngineRunRemoveOptions,
   type EngineRunWriteOptions,
 } from "./protected-run-file.js";
+import { retryChangedRead } from "./race-safe-read.js";
 import type { Checkpoint, EngineAction, TrajectoryEvent } from "./types.js";
 import type {
   DecisionScalarType,
@@ -757,12 +759,17 @@ export async function readTrajectory(
   options: EngineRunReadOptions = {},
 ): Promise<TrajectoryEvent[]> {
   const normalized = assertRunPath(changeDir, relativePath);
-  const raw = await readOptionalEngineRunText(
-    changeDir,
-    normalized,
-    RUN_FILE_LIMITS.trajectory,
-    "Run trajectory",
-    options,
+  // A committing writer, which may not hold a Run lock, replaces the file.
+  const raw = await retryChangedRead(
+    () =>
+      readOptionalEngineRunText(
+        changeDir,
+        normalized,
+        RUN_FILE_LIMITS.trajectory,
+        "Run trajectory",
+        options,
+      ),
+    ENGINE_RUN_RECORD_READ_ATTEMPTS,
   );
   return parseTrajectory(raw);
 }

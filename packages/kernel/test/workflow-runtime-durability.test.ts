@@ -270,6 +270,98 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
     );
   });
 
+  it("retries the Run state and trajectory reads that a genuine committing writer replaces", async () => {
+    const runtime = createWorkflowRuntime();
+    const started = await runtime.start({
+      protocol: phase4Protocol(),
+      runRoot,
+      runId: "record-reader",
+    });
+    const response = {
+      actionId: started.pendingAction!.id,
+      runId: started.runId,
+      nodeId: started.currentNode,
+      revision: started.revision,
+      execution: started.execution,
+      status: "succeeded" as const,
+      summary: "Prepared.",
+    };
+    const deferred = () => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    };
+    // The writer stops before it writes the state, after it wrote the state,
+    // and after it wrote the trajectory.
+    const stops = [
+      "record-write:.badger/run-state.json",
+      "record-verification:.badger/run-state.json",
+      "record-verification:.badger/trajectory.jsonl",
+    ];
+    const reached = stops.map(deferred);
+    const release = stops.map(deferred);
+    const originalOpen = fs.open;
+    const intercepted: string[] = [];
+    let writer: ReturnType<typeof runtime.submit> | undefined;
+    try {
+      setWorkflowTransitionFaultForTests(async (event) => {
+        const index = stops.indexOf(`${event.phase}:${event.path}`);
+        if (index < 0) return;
+        reached[index]!.resolve();
+        await release[index]!.promise;
+      });
+      writer = runtime.submit(runRoot, response);
+      await reached[0]!.promise;
+      // The reader's first read of each record lets the writer replace it.
+      const records = [
+        { file: "run-state.json", stop: 0 },
+        { file: "trajectory.jsonl", stop: 1 },
+      ];
+      fs.open = (async (...args: Parameters<typeof fs.open>) => {
+        const handle = await originalOpen(...args);
+        const record = records.find(
+          ({ file }) =>
+            !intercepted.includes(file) &&
+            String(args[0]).endsWith(`${path.sep}.badger${path.sep}${file}`),
+        );
+        if (record) {
+          intercepted.push(record.file);
+          const read = handle.read.bind(handle);
+          let armed = true;
+          handle.read = (async (...readArgs: Parameters<typeof read>) => {
+            const result = await read(...readArgs);
+            if (armed) {
+              armed = false;
+              release[record.stop]!.resolve();
+              await reached[record.stop + 1]!.promise;
+            }
+            return result;
+          }) as typeof handle.read;
+        }
+        return handle;
+      }) as typeof fs.open;
+      const projection = await runtime.projectState(runRoot);
+      expect(intercepted).toEqual(["run-state.json", "trajectory.jsonl"]);
+      expect(projection).toMatchObject({ status: "blocked", revision: 1 });
+    } finally {
+      fs.open = originalOpen;
+      release.forEach((gate) => gate.resolve());
+      await writer;
+      clearWorkflowTransitionFaultForTests();
+    }
+    expect(await runtime.inspect(runRoot)).toMatchObject({
+      revision: 1,
+      disposition: "continue",
+      currentNode: "finish",
+    });
+    const stale = await runtime.submit(runRoot, response);
+    expect(stale.findings).toContainEqual(
+      expect.objectContaining({ code: "revision-conflict" }),
+    );
+  });
+
   it("captures an explicit transition-journal capability and bound", async () => {
     const started = await createWorkflowRuntime().start({
       protocol: phase4JournalProtocol(),

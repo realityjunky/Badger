@@ -59,6 +59,7 @@ At-least-once delivery produces one immutable service record per sequence.
 Explicit bounds keep service validation auditable; oversized data stays local
 with a reporting error. Deep gate attestation and Run integrity workflows remain
 separate work. A pending interrupted kernel transition still requires explicit
-recovery; reporting does not silently commit it. Active journal replacement is
-handled by retrying only typed changed-file reads, preserving all protected-file
+recovery; reporting does not silently commit it. Active replacement of the
+transition journal, Run state, or trajectory is handled by retrying only typed
+changed-file reads, a bounded number of times, preserving all protected-file
 validation and never replaying a submitted mutation with a newer revision.

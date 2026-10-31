@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { RaceSafeReadError } from "../engine/race-safe-read.js";
+import { retryChangedRead } from "../engine/race-safe-read.js";
 import {
   readOptionalEngineRunText,
   removeEngineRunFile,
@@ -898,30 +898,18 @@ export async function readWorkflowTransitionJournal(
   // One transition replaces the journal before and after each bounded record,
   // plus its fixed commit/recovery boundaries. Let that writer finish instead
   // of exhausting three immediate reads while it is still making progress.
-  const maxAttempts =
-    2 * WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS +
-    WORKFLOW_TRANSITION_BOUNDARY_PHASES.length +
-    1;
-  let raw: string | null = null;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      raw = await readOptionalEngineRunText(
+  const raw = await retryChangedRead(
+    () =>
+      readOptionalEngineRunText(
         runRoot,
         WORKFLOW_TRANSITION_JOURNAL_PATH,
         WORKFLOW_DURABILITY_MAX_RECORD_BYTES,
         JOURNAL_LABEL,
-      );
-      break;
-    } catch (error) {
-      if (
-        !(error instanceof RaceSafeReadError) ||
-        error.reason !== "changed" ||
-        attempt === maxAttempts - 1
-      )
-        throw error;
-      await new Promise<void>((resolve) => setTimeout(resolve, 1));
-    }
-  }
+      ),
+    2 * WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS +
+      WORKFLOW_TRANSITION_BOUNDARY_PHASES.length +
+      1,
+  );
   if (raw === null) return null;
   try {
     const journal = parseWorkflowTransitionJournal(

@@ -725,6 +725,7 @@ Observers use it to repair reporting queues after a crash. Pending transitions
 remain explicit recovery requirements. `continuation.completion` contains the
 current Node's kernel-owned Completion requirements and full Output Schemas;
 `projection.artifactReceipts` contains issued receipts with external root and
-producing Attempt identity. A bounded retry of a protected journal read handles
-atomic replacements by an active writer, without retrying submitted mutations or
-relaxing file safety validation.
+producing Attempt identity. A bounded retry of each protected read of the
+transition journal, the Run state, and the trajectory handles atomic
+replacements by an active writer, including reads made before any Run lock,
+without retrying submitted mutations or relaxing file safety validation.

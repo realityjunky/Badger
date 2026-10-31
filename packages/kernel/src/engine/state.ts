@@ -1,5 +1,6 @@
 import path from "path";
 import {
+  ENGINE_RUN_RECORD_READ_ATTEMPTS,
   readOptionalEngineRunText,
   removeEngineRunFile,
   writeEngineRunText,
@@ -7,6 +8,7 @@ import {
   type EngineRunRemoveOptions,
   type EngineRunWriteOptions,
 } from "./protected-run-file.js";
+import { retryChangedRead } from "./race-safe-read.js";
 import type {
   RunState,
   RuntimeIdentity,
@@ -1820,12 +1822,17 @@ export async function readRunState(
   changeDir: string,
   options: EngineRunReadOptions = {},
 ): Promise<RunState | null> {
-  const raw = await readOptionalEngineRunText(
-    changeDir,
-    RUN_STATE_FILE,
-    RUN_STATE_READ_MAX_BYTES,
-    "Run state",
-    options,
+  // A committing writer, which may not hold a Run lock, replaces the state.
+  const raw = await retryChangedRead(
+    () =>
+      readOptionalEngineRunText(
+        changeDir,
+        RUN_STATE_FILE,
+        RUN_STATE_READ_MAX_BYTES,
+        "Run state",
+        options,
+      ),
+    ENGINE_RUN_RECORD_READ_ATTEMPTS,
   );
   if (raw === null) return null;
   let document: unknown;
