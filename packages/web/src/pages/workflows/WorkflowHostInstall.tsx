@@ -9,6 +9,7 @@ import {
 } from "@realityjunky/badger-hosts/configuration";
 import type { PublishedPackage } from "../../api/publications.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { hostSetupText } from "../../util/hostSetup.js";
 
 /** The browser prepares a local command; only the local adapter reads/writes a host. */
 export function WorkflowHostInstall({
@@ -27,13 +28,8 @@ export function WorkflowHostInstall({
   const [scope, setScope] = useState<InstallScope>("project");
   const [action, setAction] = useState<"install" | "uninstall">("install");
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
-  // A deployment URL the installer refuses, such as a plain-HTTP origin the
-  // server allows, is explained instead of shown.
-  let command = "";
-  let failure: string | null = null;
-  if (publication)
-    try {
-      command =
+  const { text: command, failure } = publication
+    ? hostSetupText(() =>
         action === "install"
           ? localInstallCommand({
               deploymentUrl,
@@ -43,10 +39,9 @@ export function WorkflowHostInstall({
               host,
               scope,
             })
-          : localUninstallCommand({ workflowId, host, scope });
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-    }
+          : localUninstallCommand({ workflowId, host, scope }),
+      )
+    : { text: "", failure: null };
   const paths = hostPaths(host, scope);
   return (
     <Modal

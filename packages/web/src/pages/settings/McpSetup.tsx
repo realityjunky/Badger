@@ -2,6 +2,7 @@ import { Alert, Button, Collapse, Input, Radio } from "antd";
 import { useState } from "react";
 import { readBasePath } from "../../app/paths.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { hostSetupText } from "../../util/hostSetup.js";
 import {
   renderMcpConfiguration,
   type AgentHost,
@@ -16,20 +17,11 @@ export function McpSetup() {
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const base = readBasePath(document);
   const url = `${window.location.origin}${base === "/" ? "" : base}`;
-  // A deployment URL or command the host configuration refuses, such as a
-  // plain-HTTP origin the server allows, is explained instead of shown.
-  let configuration = "";
-  let failure: string | null = null;
-  if (command.trim())
-    try {
-      configuration = renderMcpConfiguration(host, {
-        deploymentUrl: url,
-        command,
-        profile,
-      });
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-    }
+  const { text: configuration, failure } = command.trim()
+    ? hostSetupText(() =>
+        renderMcpConfiguration(host, { deploymentUrl: url, command, profile }),
+      )
+    : { text: "", failure: null };
 
   return (
     <Collapse

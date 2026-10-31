@@ -19,7 +19,7 @@ them into `dist/`, so the server image carries the build and none of them.
 | `src/api/`              | The Workflows, Skills, Admin, and Activity clients: scoped records, writes, revision conflicts, and filters. |
 | `src/shell/`            | The rail, top bar, and application frame.                                                                    |
 | `src/pages/`            | The pages. My work is the landing page; Workflows, Skills, Admin, and Activity read live records.            |
-| `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, base paths; rendered host setup. |
+| `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.                  |
 | `e2e/`                  | Playwright journeys against the real service, including separate Engineer and expert sessions.               |
 
 ## Behavior
