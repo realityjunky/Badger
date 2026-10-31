@@ -1215,7 +1215,9 @@ Reports group package checks, Authoring cross-validation and runtime phases,
 including negative cases. The person who started the job receives an inbox item
 when it finishes. Earlier reports remain readable after a package is superseded;
 publication readiness uses kernel evidence validation and a passing report for
-the current package hash.
+the current package hash from a job that succeeded. A job cancelled because the
+package or committed Creator state changed during evaluation keeps its report,
+which never satisfies readiness.
 
 Workers require Linux and util-linux's `/usr/bin/prlimit`; the service image
 includes it. Certification children have a 15-second wall-time bound, an

@@ -170,6 +170,56 @@ it("refuses a mismatched package hash and cancels queued evaluations when an ups
   expect(await service.worker().runOnce()).toBeNull();
 }, 60_000);
 
+it("retains a superseded evaluation's passing report without letting it satisfy readiness", async () => {
+  service = await startPlanningService();
+  const { call, base, assembled } = await assembledFixture(service);
+  const { job } = await call(
+    `${base}/evaluations`,
+    "POST",
+    {
+      confirmed: true,
+      packageHash: assembled.packageHash,
+      requestId: "superseded-evaluation",
+    },
+    engineer,
+    202,
+  );
+  const worker = service.worker();
+  const processing = worker.process((await worker.claim())!);
+  await expect
+    .poll(
+      async () =>
+        (await call(`${base}/evaluations`)).jobs[0].progress?.phase !==
+        "queued",
+    )
+    .toBe(true);
+  // Assembling again commits a new Creator state for the same package bytes
+  // while the worker certifies, so the worker finishes the job as cancelled.
+  const { preview } = await call(
+    `${base}/package/assemble-preview`,
+    "POST",
+    {},
+  );
+  const reassembled = await call(`${base}/package/assemble`, "POST", {
+    confirmed: true,
+    confirmationHash: preview.confirmationHash,
+    requestId: "reassemble-during-evaluation",
+  });
+  expect(reassembled.packageHash).toBe(assembled.packageHash);
+  expect((await processing).status).toBe("cancelled");
+  const view = await call(`${base}/evaluations`);
+  expect(view.reports).toHaveLength(1);
+  expect(view.reports[0]).toMatchObject({
+    jobId: job.id,
+    packageHash: assembled.packageHash,
+    report: { passed: true },
+  });
+  expect(view.currentPackageHash).toBe(assembled.packageHash);
+  expect(view.passingReportId).toBeNull();
+  expect(view.readiness.runtime.state).toBe("blocked");
+  expect((await call(`${base}/review`)).passingReportId).toBeNull();
+}, 90_000);
+
 it("keeps reports, inbox, and committed package state atomic when a worker completion transaction fails", async () => {
   service = await startPlanningService();
   const { call, base, assembled } = await assembledFixture(service);
