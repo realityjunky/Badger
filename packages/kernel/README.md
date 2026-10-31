@@ -143,11 +143,12 @@ location against the current Project root to its real path when matching
 inspected sources, so moving the storage workspace or reaching the Project
 through a symbolic link preserves an approved proposal, while changed Skill
 bytes still make it stale. The service declares every source as
-`skills/<name>`. New dossiers omit absolute `canonicalPath` values. Legacy dossiers remain readable
-in the service's history without their storage paths; their canonical text is
-withheld (`canonicalJson: null`, `requiresRecomposition: true`). Their original
-bytes, hashes, and confirmations remain stored, but they require recomposition
-and fresh dossier, plan, and proposal approvals before further authoring.
+`skills/<name>`. New dossiers omit absolute `canonicalPath` values. Legacy
+dossiers remain readable in the service's history without their storage paths;
+their canonical text is withheld (`canonicalJson: null`,
+`requiresRecomposition: true`). Their original bytes, hashes, and confirmations
+remain stored, but they require recomposition and fresh dossier, plan, and
+proposal approvals before further authoring.
 
 Plan versions (#58) add `deriveFactoryPlan`, `composeFactoryPlan`, and
 `factoryPlanDraftSchema`. The skeleton fixes the approved dossier's frame,
