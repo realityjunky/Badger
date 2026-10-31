@@ -9,6 +9,8 @@ export interface ContainedAtomicWriteOptions {
   beforeTemporaryOpen?: () => void | Promise<void>;
   beforeCommit?: () => void | Promise<void>;
   exclusive?: boolean;
+  /** Exact permission bits for the written file; the umask does not apply. */
+  mode?: number;
 }
 
 export interface ContainedFileRemoveOptions {
@@ -244,7 +246,10 @@ async function atomicWriteContained(
   let writtenIdentity: import("fs").Stats | undefined;
   try {
     await options.beforeTemporaryOpen?.();
-    handle = await fs.open(temporary, "wx");
+    // Created no wider than the requested mode, then set to exactly that mode
+    // before any content is written.
+    handle = await fs.open(temporary, "wx", options.mode);
+    if (options.mode !== undefined) await handle.chmod(options.mode);
     temporaryIdentity = await handle.stat();
     const [temporaryPathStat, temporaryRealPath] = await Promise.all([
       fs.lstat(temporary),

@@ -172,7 +172,8 @@ async function atomicWriteContained(file, content, options) {
   let writtenIdentity;
   try {
     await options.beforeTemporaryOpen?.();
-    handle = await fs.open(temporary, "wx");
+    handle = await fs.open(temporary, "wx", options.mode);
+    if (options.mode !== void 0) await handle.chmod(options.mode);
     temporaryIdentity = await handle.stat();
     const [temporaryPathStat, temporaryRealPath] = await Promise.all([
       fs.lstat(temporary),

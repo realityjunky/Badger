@@ -560,7 +560,7 @@ export async function commitHostPlan(
       throw new Error("Conflict: the host preview is stale; preview again");
     for (const change of current.changes) {
       const op = change.operation;
-      await inspect(root, op.path);
+      const existing = await inspect(root, op.path);
       if (op.action === "mkdir") {
         await fs.mkdir(op.path, { mode: 0o700 });
         continue;
@@ -578,6 +578,12 @@ export async function commitHostPlan(
         await atomicWriteContainedBytes(op.path, change.after, {
           containedRoot: root,
           exclusive: change.before === null,
+          // A replaced file, such as a private 0600 configuration, keeps its
+          // permission bits; a new file gets the default mode.
+          mode:
+            change.before !== null && existing
+              ? existing.mode & 0o777
+              : undefined,
           beforeCommit: unchanged,
         });
       else {

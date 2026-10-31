@@ -202,6 +202,53 @@ it.each([
   },
 );
 
+it.skipIf(process.platform === "win32").each([
+  ["claude", ".claude.json"],
+  ["codex", ".codex/config.toml"],
+  ["workbuddy", ".codebuddy/.mcp.json"],
+] as const)(
+  "keeps a private %s configuration file private through install and uninstall",
+  async (host, configuration) => {
+    const f = await fixture();
+    const target = {
+      host,
+      scope: "user" as const,
+      projectRoot: f.projectRoot,
+      homeRoot: f.homeRoot,
+    };
+    const file = path.join(f.homeRoot, configuration);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(
+      file,
+      host === "codex"
+        ? '[mcp_servers.other.env]\nTOKEN = "literal"\n'
+        : '{"mcpServers":{"other":{"command":"other","env":{"TOKEN":"literal"}}}}\n',
+    );
+    await fs.chmod(file, 0o600);
+    const plan = await previewInstall({
+      target,
+      publication: f.publication,
+      snapshot: f.snapshot,
+      deploymentUrl: "https://badger.example",
+    });
+    await commitHostPlan(plan, {
+      confirmed: true,
+      digest: plan.preview.digest,
+    });
+    expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+    const uninstall = await previewUninstall({
+      target,
+      workflowId: f.publication.workflowId,
+    });
+    await commitHostPlan(uninstall, {
+      confirmed: true,
+      digest: uninstall.preview.digest,
+    });
+    expect(await fs.readFile(file, "utf8")).toContain("literal");
+    expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+  },
+);
+
 it("refuses changed previews, unowned and modified files, and tampered published bytes before any write", async () => {
   const f = await fixture();
   const target = {

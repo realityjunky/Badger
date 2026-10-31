@@ -54,7 +54,9 @@ badger-hosts commit --plan /private/temporary/plan.json --digest PREVIEW_DIGEST 
 Commit requires both confirmation and the exact digest, takes an exclusive local
 lock, recalculates the complete preview, and refuses stale content, changed root
 identity or unsafe paths before any persistent write. Individual file writes use
-the kernel's contained atomic writer and recheck the expected hash. It verifies
+the kernel's contained atomic writer and recheck the expected hash. A replaced
+file keeps its permission bits, so a private `0600` configuration stays private
+after install and uninstall; new files get the default mode. It verifies
 the installed directory against the published hash. Successful CLI commits remove
 the private plan. Temporary locks and atomic staging files are transient adapter
 bookkeeping. A process killed while committing may leave its lock or a partial
