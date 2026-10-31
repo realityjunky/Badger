@@ -8,19 +8,19 @@ them into `dist/`, so the server image carries the build and none of them.
 
 ## Layout
 
-| Path                    | Holds                                                                                                        |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `src/theme/tokens.ts`   | The one token source: colors, layout sizes, type scale, radii, and the Ant Design theme.                     |
-| `src/styles/global.css` | Layout only; every color and the shared layout sizes come from the CSS variables `tokens.ts` writes.         |
-| `src/i18n/catalog.ts`   | zh and en message catalogs, keyed by the same message IDs.                                                   |
-| `src/app/navigation.ts` | The URL routes, the rail's sections, and the page-title lookup.                                              |
-| `src/app/paths.ts`      | Base-path normalisation, API URLs, and reading the injected base path.                                       |
-| `src/preferences/`      | The person's choices: model, API client, the saver that stores each change, and the provider.                |
-| `src/api/`              | The Workflows, Skills, Admin, and Activity clients: scoped records, writes, revision conflicts, and filters. |
-| `src/shell/`            | The rail, top bar, and application frame.                                                                    |
-| `src/pages/`            | The pages. My work is the landing page; Workflows, Skills, Admin, and Activity read live records.            |
-| `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.                  |
-| `e2e/`                  | Playwright journeys against the real service, including separate Engineer and expert sessions.               |
+| Path                    | Holds                                                                                                                                                                   |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/theme/tokens.ts`   | The one token source: colors, layout sizes, type scale, radii, and the Ant Design theme.                                                                                |
+| `src/styles/global.css` | Layout only; every color and the shared layout sizes come from the CSS variables `tokens.ts` writes.                                                                    |
+| `src/i18n/catalog.ts`   | zh and en message catalogs, keyed by the same message IDs.                                                                                                              |
+| `src/app/navigation.ts` | The URL routes, the rail's sections, and the page-title lookup.                                                                                                         |
+| `src/app/paths.ts`      | Base-path normalisation, API URLs, and reading the injected base path.                                                                                                  |
+| `src/preferences/`      | The person's choices: model, API client, the saver that stores each change, and the provider.                                                                           |
+| `src/api/`              | The API clients for every page: scoped records, writes, revision conflicts, and filters.                                                                                |
+| `src/shell/`            | The rail, top bar, and application frame.                                                                                                                               |
+| `src/pages/`            | The pages. My work is the landing page; Workflows, Questionnaire, Skills, Runs, Evaluations, Activity, Admin, and Settings read live records, and every page has a URL. |
+| `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.                                                                             |
+| `e2e/`                  | Playwright journeys against the real service, including separate Engineer and expert sessions.                                                                          |
 
 ## Behavior
 
@@ -42,15 +42,18 @@ them into `dist/`, so the server image carries the build and none of them.
   `npm run test:e2e -w packages/web -- e2e/demo.spec.ts`.
 
 - Personal access token settings include **Connect your Agent**, with copyable
-  stdio configurations for Claude Code, Codex, and WorkBuddy. The deployment's
-  origin and base path are filled in, and the person chooses the local
-  executable. Claude Code's `.mcp.json` reads `${BADGER_TOKEN}` from the
-  environment, so the token stays out of a file teams often commit; for Codex
-  and WorkBuddy the person replaces the token placeholder. The person also
-  picks a work profile, written as `BADGER_MCP_PROFILE`: all permitted work
-  (`auto`, the default), Engineer (`engineer`), or Field expert (`expert`); a
-  profile only narrows what the person's roles and token scopes allow. The
-  configuration never stores a token secret in dashboard preferences.
+  stdio configurations for Claude Code, Codex, and WorkBuddy from the host
+  installer's renderer (#64). The deployment's origin and base path are filled
+  in, and the person chooses the local executable. No configuration holds a
+  token: Claude Code's and WorkBuddy's JSON reads `${BADGER_TOKEN}` from the
+  environment, and Codex's `config.toml` forwards `BADGER_TOKEN` with
+  `env_vars`, so the person sets `BADGER_TOKEN` where the Agent host starts.
+  The panel names each host's project and user configuration files. The
+  person also picks a work profile, written as `BADGER_MCP_PROFILE`: all
+  permitted work (`auto`, the default), Engineer (`engineer`), Field expert
+  (`expert`), or Operator (`operator`); a profile only narrows what the
+  person's roles and token scopes allow. The configuration never stores a
+  token secret in dashboard preferences.
 
 - The Questionnaire page has rounds and questions, the answer thread, and an
   evidence/history inspector. Engineers compose questions, retain revisions,
@@ -219,6 +222,60 @@ them into `dist/`, so the server image carries the build and none of them.
   Files open in a read-only preview. Superseded packages remain visible with a
   warning; regeneration requires a fresh confirmation. Owners and other readers
   inspect the same inventory without the Engineer's generation controls.
+- The Package panel also offers **Authoring lanes** (#61): request only ready
+  lanes, inspect submitted claims and authored content, preview and confirm an
+  acceptance or a rejection with a reason, follow linked questions and repair
+  jobs, and confirm assembly once every lane is current. Lane results are
+  refreshed while Agents work. Read-only people see status and history.
+- The **Evaluations** page (#62) selects a workflow version and shows its
+  current assembled package, with a link to its Package panel and whether a
+  passing evaluation exists for it. Engineers confirm an evaluation of that
+  exact package hash in a dialog that says domain scripts never run and the
+  report is kept; the page follows the worker's phases, and the starter gets an
+  inbox item when it finishes. Report history lists every report with its
+  package hash, result, duration, and starter, marks reports of earlier
+  packages, and opens each report's package checks, Authoring
+  cross-validation, certification phases with their negative cases, and
+  artifact receipts.
+- Workflow versions include **Review and publication** (#63). For the current
+  package the panel shows Authoring, runtime, and publication readiness with
+  any blockers, and the review history. A Reviewer who accepted no Authoring
+  lane for the version previews and confirms approval of the exact package
+  hash; one who did is asked to find an independent Reviewer, and an
+  Administrator may override with a recorded reason. The Workflow owner then
+  previews and confirms publication. **Published versions** lists every
+  published package with its publisher and time, and keeps its exact bytes
+  after later Authoring or regeneration; inspecting one verifies its bytes and
+  inventory before listing its files.
+- Each published version offers **Install locally** (#64): the person picks
+  install or uninstall, an Agent host, and project or user scope, sees where
+  the Skills and the MCP configuration go, and copies a `badger-hosts` command
+  bound to that publication and package hash. The command runs on their
+  computer with `BADGER_TOKEN` set for an Operator token and only previews;
+  a separate commit command must quote the preview's digest. The browser never
+  writes local files.
+- The **Runs** page (#65) lists the person's own Runs, or a chosen workflow's,
+  with status, current Node, recovery state, who started each, its computer,
+  and when it last reported; test Runs are marked. Each Run's page shows its
+  publication, package hash, Agent host, pending action, and events received,
+  then its Attempts, artifact receipts, findings, and original events a page
+  at a time. When the outcome history is cut to the latest entries, the page
+  says how many it shows and that the rest remain in Events.
+- When a Run waits for a person (#66), its page shows the gate: the
+  decision's choices with any inputs and a rationale, the manual stop, or the
+  finalization's planned operations, with the evidence it binds and the
+  authority it needs. A person who holds that authority reviews the answer in
+  a dialog that says their signed-in identity and current authorities are
+  recorded with it, at the shown Run revision, and confirms it; the Agent
+  receives the answer on its next `next` or `status` call.
+- A Run that needs recovery (#67) is marked in the Runs list and on its page,
+  which asks the Operator's Agent to use `recover` on the Run's computer. The
+  page then shows the latest recovery outcome, settled or still needing
+  attention, with the time, Run revision, and event it was reported at.
+  Findings list the service's integrity findings first, each with its
+  evidence: a decision with no matching gate answer, an event sequence gap, or
+  an execution that differs from the published package. Auditors see the
+  same.
 
 ## Commands
 
@@ -235,8 +292,3 @@ The journeys start the service themselves through
 root, and the implicit local Administrator. A second instance serves under
 the base path `/badger`, the way a deployment behind a reverse proxy does,
 and `e2e/base-path.spec.ts` loads the dashboard there.
-- The Package panel also offers **Authoring lanes** (#61): request only ready
-  lanes, inspect submitted claims and authored content, preview and confirm an
-  acceptance or a rejection with a reason, follow linked questions and repair
-  jobs, and confirm assembly once every lane is current. Lane results are
-  refreshed while Agents work. Read-only people see status and history.

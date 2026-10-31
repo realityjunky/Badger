@@ -42,12 +42,10 @@ const serviceDecisions = [
   "0032-isolated-immutable-evaluations.md",
   "0033-immutable-package-publication.md",
   "0034-preview-bound-local-host-installation.md",
+  "0035-local-runtime-run-mirroring.md",
   "0036-dashboard-run-gates.md",
+  "0037-run-integrity-and-recovery.md",
 ];
-// ADR 0035 opens with "# ADR 0035: …" and "Status: Accepted", so it fails the
-// "Status: accepted." check below; it joins serviceDecisions once its header
-// follows the convention. Until then only its manual link is checked.
-const runMirroringDecision = "0035-local-runtime-run-mirroring.md";
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
   "0008-skill-identity-and-registered-roots.md",
@@ -316,7 +314,6 @@ describe("Badger release artifacts", () => {
       expect.arrayContaining([
         semanticDossierDecision,
         ...serviceDecisions,
-        runMirroringDecision,
         ...kernelDecisions,
       ]),
     );
@@ -329,11 +326,6 @@ describe("Badger release artifacts", () => {
         [...record.matchAll(/\]\(([^)]+)\)/gu)].map((match) => match[1]),
       );
     }
-    const runMirroring = await readText(`docs/adr/${runMirroringDecision}`);
-    await expectLocalLinksToResolve(
-      "docs/adr",
-      [...runMirroring.matchAll(/\]\(([^)]+)\)/gu)].map((match) => match[1]),
-    );
     expect(
       await readText(
         "docs/adr/0006-questionnaire-records-and-dossier-version-2.md",
@@ -455,7 +447,6 @@ describe("Badger release artifacts", () => {
     for (const decision of [
       semanticDossierDecision,
       ...serviceDecisions,
-      runMirroringDecision,
       ...kernelDecisions,
     ]) {
       expect(manual).toContain(`href="adr/${decision}"`);
@@ -583,7 +574,7 @@ describe("Badger release artifacts", () => {
     expect(delivered).toContain("BADGER_PLATFORM_ADMIN_MAPPING");
     expect(delivered).toContain("presents that address as verified");
     expect(planned).toContain(
-      "(ADRs) 0002–0006, 0009, 0010, 0012, 0013, 0015, 0016, and 0019–0036",
+      "(ADRs) 0002–0006, 0009, 0010, 0012, 0013, 0015, 0016, and 0019–0037",
     );
     expect(planned).not.toContain("bind people by email; a binding takes");
     expect(planned).not.toContain("inherited by its nested groups");
@@ -789,7 +780,7 @@ describe("Badger release artifacts", () => {
       "a post to a real team chat has not been verified",
     );
     expect(ledger).toContain(
-      "the expert, engineer, and operator MCP profiles are delivered in `packages/mcp/` (#54, #55, #64, #65, #66)",
+      "the expert, engineer, and operator MCP profiles are delivered in `packages/mcp/` (#54, #55, #64, #65, #66, #67)",
     );
     expect(ledger).not.toContain(
       "the other profiles and host installer are planned",
@@ -938,12 +929,16 @@ describe("Badger release artifacts", () => {
       expect(ledger, superseded).not.toContain(superseded);
   });
 
-  it("describes #60–#66, #71, and #89 as delivered and keeps #67 and #68 open", async () => {
+  it("describes #60–#67, #71, and #89 as delivered and keeps #68 open", async () => {
     const manual = await readText("docs/badger-workflow-manual.html");
     const ledger = await readText("docs/release-artifacts.md");
     const flat = (text: string) => text.replace(/\s+/gu, " ");
     const kernelReadme = flat(await readText("packages/kernel/README.md"));
     const readme = flat(await readText("README.md"));
+    const webReadme = flat(await readText("packages/web/README.md"));
+    const runMirroring = flat(
+      await readText("docs/adr/0035-local-runtime-run-mirroring.md"),
+    );
     const delivered = manual.slice(0, manual.indexOf('id="service"'));
     const planned = manual.slice(manual.indexOf('id="service"'));
 
@@ -960,6 +955,10 @@ describe("Badger release artifacts", () => {
       "从 Badger MCP 同步的 Run（#65）。",
       "Run gates (#66).",
       "Run 门槛（#66）。",
+      "Run integrity and recovery (#67).",
+      "Run 完整性与恢复（#67）。",
+      "Run recovery (#67).",
+      "Run 恢复（#67）。",
       "Read-only demo (#71).",
       "只读演示（#71）。",
       "Operator profile (#64, #65, #66).",
@@ -976,6 +975,15 @@ describe("Badger release artifacts", () => {
       'href="../packages/server/src/run-gates.ts"',
       'href="../packages/mcp/src/operator-tools.ts"',
       'href="../packages/web/src/pages/RunsPage.tsx"',
+      'href="../packages/server/src/run-integrity.ts"',
+      'href="../packages/web/e2e/run-integrity.spec.ts"',
+      'href="../packages/mcp/test/run-integrity.test.ts"',
+      // #67 moved out of §7.5 into §5.4–§5.6.
+      "The service flags a decision with no matching gate answer, a gap in the event sequence, and an execution that differs from the published package as findings on the Run",
+      "若出现没有对应门槛回答的决策、事件序列有缺口，或执行与已发布软件包不同，服务都会把它作为 finding 标记在 Run 上",
+      "A Run that needs recovery (#67) is marked in the Runs list and on its page",
+      "需要恢复的 Run（#67）在 Run 列表和其详情页上都有标记",
+      "<code>.badger/mcp-recovery.json</code>",
       "its operator profile installs published workflows (#64) and runs them (#65, #66)",
       "其运行者 profile 安装已发布的工作流（#64）并运行它们（#65、#66）",
       "Only <code>start</code> takes <code>externalRoots</code>",
@@ -1003,13 +1011,13 @@ describe("Badger release artifacts", () => {
     ])
       expect(delivered, stale).not.toContain(stale);
 
-    // #67 (Run integrity) and the remaining engineer tools stay planned.
+    // The remaining engineer tools and the laptop verification stay planned.
     for (const sentence of [
-      "The service flags a decision with no matching gate answer, a gap in the event sequence, and a package hash that differs from the published one.",
-      "若出现没有对应门槛回答的决策、事件序列有缺口，或软件包哈希与已发布版本不同，服务都会标记出来。",
       "Jobs for dossier drafts are to follow on the same terms.",
       "is still to gain dossier and proposal previews",
       "is still to be verified in the real host",
+      "#24 was first split into the sub-issues #25–#72",
+      "#24 最初拆成子 issue #25–#72",
     ])
       expect(planned, sentence).toContain(sentence);
     for (const landed of [
@@ -1020,8 +1028,17 @@ describe("Badger release artifacts", () => {
       "evaluation is to run as a sandboxed worker job",
       "Items and posts for Runs and the later stages are to arrive with their records",
       "Run 和后续阶段的条目与消息将随各自的记录一起到来",
+      // #67 is delivered (§5.4–§5.6).
+      "The service flags a decision with no matching gate answer, a gap in the event sequence, and a package hash that differs from the published one.",
+      "若出现没有对应门槛回答的决策、事件序列有缺口，或软件包哈希与已发布版本不同，服务都会标记出来。",
+      "48 sub-issues",
+      "48 个子 issue",
     ])
       expect(planned, landed).not.toContain(landed);
+    expect(manual).not.toContain(
+      "checks of each Run's events against the service's records",
+    );
+    expect(manual).not.toContain("按服务的记录核对每个 Run 的事件");
 
     for (const paragraph of [
       "Authoring lanes, review votes, and assembly (#61)",
@@ -1035,12 +1052,28 @@ describe("Badger release artifacts", () => {
     for (const paragraph of [
       "Package scaffold generation (#60)",
       "Host installation (#64)",
+      "Run integrity and recovery (#67)",
       "Demo mode (#71)",
     ])
       expect(ledger, paragraph).toContain(`\n${paragraph} is delivered`);
     expect(ledger).toContain("laptop checks prepared but not yet verified");
     expect(ledger).not.toContain("Runtime Run tools follow separately");
     expect(kernelReadme).not.toContain("Runtime Run tools follow separately");
+    expect(kernelReadme).not.toContain("Run integrity (#67) and WorkBuddy");
+    expect(kernelReadme).toContain(
+      "and Run integrity and recovery (#67), with demo mode (#71)",
+    );
+    expect(runMirroring).not.toContain("answer delivery is implemented");
+    expect(runMirroring).not.toContain("remain separate work");
+    expect(runMirroring).toContain(
+      "[ADR 0037](0037-run-integrity-and-recovery.md)",
+    );
+    expect(webReadme).toContain(
+      "Workflows, Questionnaire, Skills, Runs, Evaluations, Activity, Admin, and Settings",
+    );
+    expect(webReadme).not.toContain("replaces the token placeholder");
+    for (const ticket of ["#62", "#63", "#64", "#65", "#66", "#67"])
+      expect(webReadme, ticket).toContain(`(${ticket})`);
     expect(readme).not.toContain("Evaluation and review gates follow.");
     expect(readme).not.toContain("Future extensions (#24)");
   });
