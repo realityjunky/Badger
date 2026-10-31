@@ -102,6 +102,11 @@ const sha = (bytes: Uint8Array) =>
   createHash("sha256").update(bytes).digest("hex");
 const json = (value: unknown) =>
   Buffer.from(JSON.stringify(value, null, 2) + "\n");
+const hostNames: Record<AgentHost, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  workbuddy: "WorkBuddy",
+};
 function identifier(value: string) {
   if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,200}$/u.test(value))
     throw new Error("Invalid published package identity");
@@ -216,6 +221,15 @@ function configValue(
 function matches(a: unknown, b: unknown) {
   return canonicalHash(a ?? null) === canonicalHash(b ?? null);
 }
+/** Remove the managed TOML block without joining the lines around it. */
+function withoutBlock(text: string, block: string) {
+  const start = text.indexOf(block);
+  const before = text.slice(0, start);
+  const after = text.slice(start + block.length);
+  return before && after && !before.endsWith("\n")
+    ? `${before}\n${after}`
+    : before + after;
+}
 
 async function compile(
   input: HostPlan["input"],
@@ -226,12 +240,9 @@ async function compile(
   if (!rootStat?.isDirectory())
     throw new Error("The selected host root must already exist");
   const paths = hostPaths(target.host, target.scope);
-  const registryFile = path.join(
-    root,
-    ".badger",
-    "hosts",
-    `${target.host}.json`,
-  );
+  const registryFor = (host: AgentHost) =>
+    path.join(root, ".badger", "hosts", `${host}.json`);
+  const registryFile = registryFor(target.host);
   const oldRegistry = await read(root, registryFile);
   let registry: Registry | null = oldRegistry
     ? (JSON.parse(oldRegistry.toString("utf8")) as Registry)
@@ -261,12 +272,26 @@ async function compile(
   const original =
     previousConfig?.toString("utf8") ?? (target.host === "codex" ? "" : "{}\n");
   const current = configValue(target.host, original);
+  // Claude Code and WorkBuddy share project `.mcp.json`: while one of them
+  // owns its Badger entry, the other must not acquire it.
+  let manager: AgentHost | undefined;
+  for (const host of Object.keys(hostNames) as AgentHost[])
+    if (
+      host !== target.host &&
+      hostPaths(host, target.scope).configuration === paths.configuration &&
+      (await read(root, registryFor(host)))
+    )
+      manager = host;
   if (registry) {
     if (!matches(current.entry, registry.configuration.entry))
       throw new Error(
         "Conflict: managed Badger MCP configuration was modified",
       );
-  } else if (current.entry !== undefined)
+  } else if (manager)
+    throw new Error(
+      `Conflict: ${hostNames[manager]} manages the Badger MCP entry in ${paths.configuration}; uninstall its Badger workflows there first or use user scope`,
+    );
+  else if (current.entry !== undefined)
     throw new Error(
       "Conflict: the existing Badger MCP entry is unowned; review and remove it yourself",
     );
@@ -348,7 +373,7 @@ async function compile(
       if (owned.addition) {
         if (!nextConfig.includes(owned.addition))
           throw new Error("Conflict: managed TOML block was modified");
-        nextConfig = nextConfig.replace(owned.addition, "");
+        nextConfig = withoutBlock(nextConfig, owned.addition);
       }
       const addition =
         (nextConfig && !nextConfig.endsWith("\n")
@@ -405,7 +430,9 @@ async function compile(
       if (target.host === "codex") {
         if (!owned.addition || !nextConfig.includes(owned.addition))
           throw new Error("Conflict: managed TOML block was modified");
-        nextConfig = nextConfig.replace(owned.addition, "");
+        nextConfig = withoutBlock(nextConfig, owned.addition);
+        if (configValue(target.host, nextConfig).entry !== undefined)
+          throw new Error("Host configuration cannot be edited safely");
       } else {
         nextConfig = editJson(nextConfig, ["mcpServers", "badger"], undefined);
         const remaining = jsonObject(nextConfig);
@@ -538,20 +565,27 @@ export async function commitHostPlan(
   )
     throw new Error("Quote the exact host preview digest");
   const root = rootFor(plan.input.target);
-  const lock = path.join(
-    root,
-    `.badger-${plan.input.target.host}-install.lock`,
-  );
+  // One lock per selected root serializes every host's commits, including
+  // Claude Code's and WorkBuddy's edits to a shared `.mcp.json`.
+  const lock = path.join(root, ".badger-install.lock");
   await inspect(root, lock);
   let handle;
   try {
     handle = await fs.open(lock, "wx", 0o600);
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     throw new Error(
-      "Another local host installation is active; retry after it finishes",
+      `Another local host installation is active (lock file ${lock}); retry after it finishes, or delete the lock file if no installation is running`,
     );
   }
   try {
+    // Identify the holder for anyone who finds the lock after a crash.
+    await handle.writeFile(
+      JSON.stringify({
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+      }) + "\n",
+    );
     const current = await compile(plan.input);
     if (
       current.plan.preview.digest !== confirmation.digest ||
@@ -560,7 +594,7 @@ export async function commitHostPlan(
       throw new Error("Conflict: the host preview is stale; preview again");
     for (const change of current.changes) {
       const op = change.operation;
-      await inspect(root, op.path);
+      const existing = await inspect(root, op.path);
       if (op.action === "mkdir") {
         await fs.mkdir(op.path, { mode: 0o700 });
         continue;
@@ -578,6 +612,12 @@ export async function commitHostPlan(
         await atomicWriteContainedBytes(op.path, change.after, {
           containedRoot: root,
           exclusive: change.before === null,
+          // A replaced file, such as a private 0600 configuration, keeps its
+          // permission bits; a new file gets the default mode.
+          mode:
+            change.before !== null && existing
+              ? existing.mode & 0o777
+              : undefined,
           beforeCommit: unchanged,
         });
       else {

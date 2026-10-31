@@ -50,7 +50,10 @@ them into `dist/`, so the server image carries the build and none of them.
   picks a work profile, written as `BADGER_MCP_PROFILE`: all permitted work
   (`auto`, the default), Engineer (`engineer`), or Field expert (`expert`); a
   profile only narrows what the person's roles and token scopes allow. The
-  configuration never stores a token secret in dashboard preferences.
+  configuration never stores a token secret in dashboard preferences. When the
+  deployment URL or executable cannot be used, such as a plain-HTTP origin
+  that is not loopback, the reason replaces the configuration; a publication's
+  local install command does the same.
 
 - The Questionnaire page has rounds and questions, the answer thread, and an
   evidence/history inspector. Engineers compose questions, retain revisions,

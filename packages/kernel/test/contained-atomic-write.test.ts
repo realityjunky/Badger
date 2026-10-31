@@ -47,6 +47,28 @@ describe("contained atomic write", () => {
     expect(await temporaryFiles(root)).toEqual([]);
   });
 
+  it.skipIf(process.platform === "win32")(
+    "gives the written file exactly the requested mode whatever the umask",
+    async () => {
+      const target = path.join(root, "private.json");
+      await fs.writeFile(target, "{}\n");
+      await fs.chmod(target, 0o644);
+      await atomicWriteContainedText(target, '{"private":true}\n', {
+        containedRoot: root,
+        mode: 0o600,
+      });
+      expect((await fs.stat(target)).mode & 0o777).toBe(0o600);
+
+      const shared = path.join(root, "shared.json");
+      await atomicWriteContainedText(shared, "{}\n", {
+        containedRoot: root,
+        mode: 0o666,
+      });
+      expect((await fs.stat(shared)).mode & 0o777).toBe(0o666);
+      expect(await temporaryFiles(root)).toEqual([]);
+    },
+  );
+
   it("rejects a temporary file replaced before commit and cleans it up", async () => {
     const target = path.join(root, "state.yaml");
     await expect(

@@ -8,6 +8,8 @@ import {
   previewInstall,
   previewUninstall,
   commitHostPlan,
+  renderMcpConfiguration,
+  type HostPlan,
 } from "../src/index.js";
 import { parse as parseToml } from "smol-toml";
 
@@ -202,6 +204,53 @@ it.each([
   },
 );
 
+it.skipIf(process.platform === "win32").each([
+  ["claude", ".claude.json"],
+  ["codex", ".codex/config.toml"],
+  ["workbuddy", ".codebuddy/.mcp.json"],
+] as const)(
+  "keeps a private %s configuration file private through install and uninstall",
+  async (host, configuration) => {
+    const f = await fixture();
+    const target = {
+      host,
+      scope: "user" as const,
+      projectRoot: f.projectRoot,
+      homeRoot: f.homeRoot,
+    };
+    const file = path.join(f.homeRoot, configuration);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(
+      file,
+      host === "codex"
+        ? '[mcp_servers.other.env]\nTOKEN = "literal"\n'
+        : '{"mcpServers":{"other":{"command":"other","env":{"TOKEN":"literal"}}}}\n',
+    );
+    await fs.chmod(file, 0o600);
+    const plan = await previewInstall({
+      target,
+      publication: f.publication,
+      snapshot: f.snapshot,
+      deploymentUrl: "https://badger.example",
+    });
+    await commitHostPlan(plan, {
+      confirmed: true,
+      digest: plan.preview.digest,
+    });
+    expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+    const uninstall = await previewUninstall({
+      target,
+      workflowId: f.publication.workflowId,
+    });
+    await commitHostPlan(uninstall, {
+      confirmed: true,
+      digest: uninstall.preview.digest,
+    });
+    expect(await fs.readFile(file, "utf8")).toContain("literal");
+    expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+  },
+);
+
 it("refuses changed previews, unowned and modified files, and tampered published bytes before any write", async () => {
   const f = await fixture();
   const target = {
@@ -296,15 +345,155 @@ it("refuses unowned same-name MCP entries, symlink escapes, and unsafe package p
   await expect(previewInstall(input)).rejects.toThrow(/symbolic/iu);
   expect(await fs.readdir(f.homeRoot)).toEqual([]);
   await fs.unlink(path.join(f.projectRoot, ".claude"));
+  // SKILL.md and an inventory matching every file's bytes remain. No package
+  // hash can cover an unsafe path, so the message shows which check refused.
   const unsafe = structuredClone(input);
-  unsafe.snapshot.files[0].path = "../../escape";
-  await expect(previewInstall(unsafe)).rejects.toThrow();
+  const escape = Buffer.from("escape\n");
+  unsafe.snapshot.files.push({
+    path: "../../escape",
+    content: escape.toString("base64"),
+  });
+  unsafe.snapshot.inventory.push({
+    path: "../../escape",
+    bytes: escape.length,
+    sha256: createHash("sha256").update(escape).digest("hex"),
+    owner: "auto",
+  });
+  await expect(previewInstall(unsafe)).rejects.toThrow(
+    "Package file path is unsafe or repeated",
+  );
   const plan = await previewInstall(input);
   await fs.symlink(f.homeRoot, path.join(f.projectRoot, ".claude"), "dir");
   await expect(
     commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest }),
   ).rejects.toThrow(/symbolic/iu);
   expect(await fs.readdir(f.homeRoot)).toEqual([]);
+});
+
+it.each([
+  ["claude", "workbuddy", "Claude Code", "WorkBuddy"],
+  ["workbuddy", "claude", "WorkBuddy", "Claude Code"],
+] as const)(
+  "lets one host at a time manage the shared project .mcp.json entry: %s, then %s",
+  async (first, second, firstName, secondName) => {
+    const f = await fixture();
+    const config = path.join(f.projectRoot, ".mcp.json");
+    const unrelated = '{"mcpServers":{"other":{"command":"other"}}}\n';
+    await fs.writeFile(config, unrelated);
+    const target = (host: typeof first | typeof second) => ({
+      host,
+      scope: "project" as const,
+      projectRoot: f.projectRoot,
+      homeRoot: f.homeRoot,
+    });
+    const install = (host: typeof first | typeof second) =>
+      previewInstall({
+        target: target(host),
+        publication: f.publication,
+        snapshot: f.snapshot,
+        deploymentUrl: "https://badger.example",
+      });
+    const uninstall = (host: typeof first | typeof second) =>
+      previewUninstall({ target: target(host), workflowId: "workflow-1" });
+    const commit = (plan: HostPlan) =>
+      commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest });
+
+    await commit(await install(first));
+    const managed = await fs.readFile(config, "utf8");
+    const refusal = (await install(second).catch((error) => error)) as Error;
+    expect(refusal.message).toContain(
+      `${firstName} manages the Badger MCP entry in .mcp.json`,
+    );
+    expect(refusal.message).toMatch(
+      /uninstall .* there first or use user scope/u,
+    );
+    expect(refusal.message).not.toMatch(/remove/iu);
+    // Removing the entry by hand does not hand it to the other host.
+    const edited = JSON.parse(managed);
+    delete edited.mcpServers.badger;
+    await fs.writeFile(config, JSON.stringify(edited) + "\n");
+    await expect(install(second)).rejects.toThrow(`${firstName} manages`);
+    await fs.writeFile(config, managed);
+
+    await commit(await uninstall(first));
+    await commit(await install(second));
+    await expect(install(first)).rejects.toThrow(`${secondName} manages`);
+    await commit(await uninstall(second));
+    expect(JSON.parse(await fs.readFile(config, "utf8"))).toEqual(
+      JSON.parse(unrelated),
+    );
+  },
+);
+
+it("serializes commits for every host at a selected root with one lock", async () => {
+  const f = await fixture();
+  const [claude, workbuddy] = await Promise.all(
+    (["claude", "workbuddy"] as const).map((host) =>
+      previewInstall({
+        target: {
+          host,
+          scope: "project",
+          projectRoot: f.projectRoot,
+          homeRoot: f.homeRoot,
+        },
+        publication: f.publication,
+        snapshot: f.snapshot,
+        deploymentUrl: "https://badger.example",
+      }),
+    ),
+  );
+  const lock = path.join(f.projectRoot, ".badger-install.lock");
+  await fs.writeFile(lock, "");
+  for (const plan of [claude, workbuddy])
+    await expect(
+      commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest }),
+    ).rejects.toThrow(/installation is active/iu);
+  expect(await fs.readdir(f.projectRoot)).toEqual([".badger-install.lock"]);
+  await fs.unlink(lock);
+  await commitHostPlan(claude, {
+    confirmed: true,
+    digest: claude.preview.digest,
+  });
+  // The second commit recalculates its preview under the lock and finds the
+  // entry the first one now manages.
+  await expect(
+    commitHostPlan(workbuddy, {
+      confirmed: true,
+      digest: workbuddy.preview.digest,
+    }),
+  ).rejects.toThrow(/Claude Code manages/u);
+  expect(await fs.readdir(path.join(f.projectRoot, ".badger/hosts"))).toEqual([
+    "claude.json",
+  ]);
+});
+
+it("names a lock left by an interrupted commit and says when it may be deleted", async () => {
+  const f = await fixture();
+  const plan = await previewInstall({
+    target: {
+      host: "codex",
+      scope: "user",
+      projectRoot: f.projectRoot,
+      homeRoot: f.homeRoot,
+    },
+    publication: f.publication,
+    snapshot: f.snapshot,
+    deploymentUrl: "https://badger.example",
+  });
+  const lock = path.join(f.homeRoot, ".badger-install.lock");
+  await fs.writeFile(lock, "");
+  const refusal = (await commitHostPlan(plan, {
+    confirmed: true,
+    digest: plan.preview.digest,
+  }).catch((error) => error)) as Error;
+  expect(refusal.message).toContain(lock);
+  expect(refusal.message).toMatch(
+    /delete the lock file if no installation is running/u,
+  );
+  await expect(fs.stat(plan.preview.packageDirectory)).rejects.toThrow();
+  await fs.unlink(lock);
+  await commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest });
+  expect(await fs.readdir(f.homeRoot)).not.toContain(".badger-install.lock");
 });
 
 it("binds the selected root directory identity so a replacement home or project cannot inherit confirmation", async () => {
@@ -404,6 +593,83 @@ it("retains shared MCP ownership until the last package and verifies owned bytes
   await expect(
     previewUninstall({ target, workflowId: "workflow-2" }),
   ).rejects.toThrow(/modified/iu);
+});
+
+it.each([
+  ["uninstalling", false],
+  ["upgrading, then uninstalling", true],
+] as const)(
+  "keeps text added after Codex's managed block on its own line when %s",
+  async (_, upgrade) => {
+    const f = await fixture();
+    const target = {
+      host: "codex" as const,
+      scope: "user" as const,
+      projectRoot: f.projectRoot,
+      homeRoot: f.homeRoot,
+    };
+    const input = {
+      target,
+      publication: f.publication,
+      snapshot: f.snapshot,
+      deploymentUrl: "https://badger.example",
+    };
+    const commit = (plan: HostPlan) =>
+      commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest });
+    const file = path.join(f.homeRoot, ".codex/config.toml");
+    await fs.mkdir(path.dirname(file));
+    await fs.writeFile(file, 'model = "o3"');
+    await commit(await previewInstall(input));
+    await fs.appendFile(file, '[projects."/work"]\ntrust_level = "trusted"\n');
+    const personal = {
+      model: "o3",
+      projects: { "/work": { trust_level: "trusted" } },
+    };
+    if (upgrade) {
+      await commit(
+        await previewInstall({
+          ...input,
+          publication: { ...f.publication, publicationId: "publication-2" },
+        }),
+      );
+      expect(parseToml(await fs.readFile(file, "utf8"))).toMatchObject({
+        ...personal,
+        mcp_servers: { badger: { command: "badger-mcp" } },
+      });
+    }
+    await commit(await previewUninstall({ target, workflowId: "workflow-1" }));
+    expect(parseToml(await fs.readFile(file, "utf8"))).toEqual(personal);
+  },
+);
+
+it("refuses a Codex uninstall that would leave a Badger entry behind", async () => {
+  const f = await fixture();
+  const target = {
+    host: "codex" as const,
+    scope: "user" as const,
+    projectRoot: f.projectRoot,
+    homeRoot: f.homeRoot,
+  };
+  const file = path.join(f.homeRoot, ".codex/config.toml");
+  await fs.mkdir(path.dirname(file));
+  // A string quoting the exact managed block precedes the appended block, so
+  // removing the first match would leave the real entry in place.
+  const block = renderMcpConfiguration("codex", {
+    deploymentUrl: "https://badger.example",
+  });
+  await fs.writeFile(file, `notes = '''\n\n${block}'''\n`);
+  const plan = await previewInstall({
+    target,
+    publication: f.publication,
+    snapshot: f.snapshot,
+    deploymentUrl: "https://badger.example",
+  });
+  await commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest });
+  const installed = await fs.readFile(file, "utf8");
+  await expect(
+    previewUninstall({ target, workflowId: "workflow-1" }),
+  ).rejects.toThrow(/cannot be edited safely/u);
+  expect(await fs.readFile(file, "utf8")).toBe(installed);
 });
 
 it("refuses malformed host configuration without displaying pre-existing secret values", async () => {

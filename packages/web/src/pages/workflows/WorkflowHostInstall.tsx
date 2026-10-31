@@ -9,6 +9,7 @@ import {
 } from "@realityjunky/badger-hosts/configuration";
 import type { PublishedPackage } from "../../api/publications.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { hostSetupText } from "../../util/hostSetup.js";
 
 /** The browser prepares a local command; only the local adapter reads/writes a host. */
 export function WorkflowHostInstall({
@@ -27,18 +28,20 @@ export function WorkflowHostInstall({
   const [scope, setScope] = useState<InstallScope>("project");
   const [action, setAction] = useState<"install" | "uninstall">("install");
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
-  const command = publication
-    ? action === "install"
-      ? localInstallCommand({
-          deploymentUrl,
-          workflowId,
-          publicationId: publication.id,
-          packageHash: publication.packageHash,
-          host,
-          scope,
-        })
-      : localUninstallCommand({ workflowId, host, scope })
-    : "";
+  const { text: command, failure } = publication
+    ? hostSetupText(() =>
+        action === "install"
+          ? localInstallCommand({
+              deploymentUrl,
+              workflowId,
+              publicationId: publication.id,
+              packageHash: publication.packageHash,
+              host,
+              scope,
+            })
+          : localUninstallCommand({ workflowId, host, scope }),
+      )
+    : { text: "", failure: null };
   const paths = hostPaths(host, scope);
   return (
     <Modal
@@ -130,14 +133,19 @@ export function WorkflowHostInstall({
           title={t("hosts.prepare")}
           description={t("hosts.steps")}
         />
-        <Input.TextArea
-          readOnly
-          rows={6}
-          className="mcp-configuration"
-          aria-label={t("hosts.command")}
-          value={command}
-        />
+        {failure === null ? (
+          <Input.TextArea
+            readOnly
+            rows={6}
+            className="mcp-configuration"
+            aria-label={t("hosts.command")}
+            value={command}
+          />
+        ) : (
+          <Alert type="error" showIcon title={failure} />
+        )}
         <Button
+          disabled={!command}
           onClick={async () => {
             try {
               await navigator.clipboard.writeText(command);

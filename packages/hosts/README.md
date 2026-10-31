@@ -51,16 +51,21 @@ configuration. Review the operations before running the printed commit command:
 badger-hosts commit --plan /private/temporary/plan.json --digest PREVIEW_DIGEST --confirm
 ```
 
-Commit requires both confirmation and the exact digest, takes an exclusive local
-lock, recalculates the complete preview, and refuses stale content, changed root
+Commit requires both confirmation and the exact digest, takes the selected root's
+exclusive lock, `.badger-install.lock`, which every host's commits share,
+recalculates the complete preview, and refuses stale content, changed root
 identity or unsafe paths before any persistent write. Individual file writes use
-the kernel's contained atomic writer and recheck the expected hash. It verifies
+the kernel's contained atomic writer and recheck the expected hash. A replaced
+file keeps its permission bits, so a private `0600` configuration stays private
+after install and uninstall; new files get the default mode. It verifies
 the installed directory against the published hash. Successful CLI commits remove
 the private plan. Temporary locks and atomic staging files are transient adapter
-bookkeeping. A process killed while committing may leave its lock or a partial
-installation; inspect the preview and files before manually removing a stale
-lock or repairing files. The installer never automatically deletes unknown files
-to recover from interruption.
+bookkeeping. The lock file records the committing process ID and start time. A
+process killed while committing may leave its lock or a partial installation;
+later commits at that root refuse and name the lock file. If no installation is
+running, inspect the preview and files before manually deleting the stale lock
+or repairing files. The installer never automatically deletes unknown files to
+recover from interruption.
 
 ```sh
 badger-hosts preview-uninstall --workflow WORKFLOW_ID --host codex --scope project
@@ -74,9 +79,13 @@ packages, extra files, unowned destinations, malformed configurations and
 unowned same-name MCP entries are conflicts; review and repair them yourself,
 then preview again. There is no force/overwrite switch. JSON is edited without
 reformatting unrelated properties; Codex's managed TOML block is appended and
-removed while retaining unrelated text. Unsafe inline TOML layouts are refused.
-Claude and WorkBuddy project scope share `.mcp.json`; an entry managed by another
-host is treated as a conflict rather than silently acquiring ownership.
+removed while retaining unrelated text, and text added after the block keeps its
+own line. A removal whose result does not parse, or still has a Badger entry, is
+refused. Unsafe inline TOML layouts are refused.
+Claude Code and WorkBuddy project scope share `.mcp.json`, and one host at a time
+manages its Badger entry. While one has Badger workflows installed there, the
+other refuses and names it rather than silently acquiring ownership; uninstall
+them from that host first, or use user scope.
 
 ## Host locations and token forwarding
 

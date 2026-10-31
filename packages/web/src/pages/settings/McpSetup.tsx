@@ -1,7 +1,8 @@
-import { Button, Collapse, Input, Radio } from "antd";
+import { Alert, Button, Collapse, Input, Radio } from "antd";
 import { useState } from "react";
 import { readBasePath } from "../../app/paths.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { hostSetupText } from "../../util/hostSetup.js";
 import {
   renderMcpConfiguration,
   type AgentHost,
@@ -16,9 +17,11 @@ export function McpSetup() {
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const base = readBasePath(document);
   const url = `${window.location.origin}${base === "/" ? "" : base}`;
-  const configuration = command.trim()
-    ? renderMcpConfiguration(host, { deploymentUrl: url, command, profile })
-    : "";
+  const { text: configuration, failure } = command.trim()
+    ? hostSetupText(() =>
+        renderMcpConfiguration(host, { deploymentUrl: url, command, profile }),
+      )
+    : { text: "", failure: null };
 
   return (
     <Collapse
@@ -79,16 +82,20 @@ export function McpSetup() {
                   }}
                 />
               </div>
-              <Input.TextArea
-                readOnly
-                aria-label={t("mcp.configuration")}
-                value={configuration}
-                rows={12}
-                className="mcp-configuration"
-              />
+              {failure === null ? (
+                <Input.TextArea
+                  readOnly
+                  aria-label={t("mcp.configuration")}
+                  value={configuration}
+                  rows={12}
+                  className="mcp-configuration"
+                />
+              ) : (
+                <Alert type="error" showIcon title={failure} />
+              )}
               <div>
                 <Button
-                  disabled={!command.trim()}
+                  disabled={!configuration}
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(configuration);
