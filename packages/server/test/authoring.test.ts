@@ -2,7 +2,12 @@ import { reportLaneOutput } from "./fixtures/authoring.js";
 import { createHash } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import type { TestService } from "../src/testing/index.js";
-import { engineer, startPlanningService } from "./fixtures/planning.js";
+import {
+  admin,
+  engineer,
+  owner,
+  startPlanningService,
+} from "./fixtures/planning.js";
 import { initializedFixture } from "./fixtures/packages.js";
 
 let service: TestService;
@@ -28,6 +33,45 @@ async function generated() {
   );
   expect((await service.worker().runOnce())?.status).toBe("succeeded");
   return fixture;
+}
+
+/** An Agent drafts a lane result with a token; the signed-in Engineer accepts it. */
+async function acceptLane(
+  { call, base }: Awaited<ReturnType<typeof generated>>,
+  secret: string,
+  job: { id: string; revision: number },
+  draft: (context: any) => unknown,
+) {
+  const route = `${base}/drafting-jobs/${job.id}`;
+  const claim = await call(
+    `${route}/claim`,
+    "POST",
+    { revision: job.revision },
+    engineer,
+    200,
+    secret,
+  );
+  const laneOutput = draft(claim.contextBundle);
+  const { job: submitted } = await call(
+    `${route}/submit`,
+    "POST",
+    {
+      leaseId: claim.job.lease.id,
+      contextHash: claim.job.contextHash,
+      result: { laneOutput },
+    },
+    engineer,
+    200,
+    secret,
+  );
+  const decision = { revision: submitted.revision, laneOutput };
+  const { preview } = await call(`${route}/accept-preview`, "POST", decision);
+  return call(`${route}/accept`, "POST", {
+    ...decision,
+    confirmed: true,
+    confirmationHash: preview.confirmationHash,
+    requestId: `accept-${job.id}`,
+  });
 }
 
 it("offers only current Wave lanes as bounded Agent jobs and keeps submitted output out of the authoring session until acceptance", async () => {
@@ -132,8 +176,84 @@ it("offers only current Wave lanes as bounded Agent jobs and keeps submitted out
       questionId: expect.any(String),
     }),
   );
+  // NEEDS_CONTEXT pauses every lane, not only the one that reported it: the
+  // kernel dispatches none, and the draft question withdraws the package.
+  expect(view.readiness.state).toBe("needs-context");
+  const { jobs: drafts } = await call(`${base}/drafting-jobs`);
+  expect(
+    drafts.filter((j: any) => j.laneId !== "script").map((j: any) => j.status),
+  ).toEqual(["cancelled", "cancelled"]);
+  expect((await call(`${base}/package`)).package.status).toBe("invalidated");
+  await call(
+    `${base}/package/authoring-jobs`,
+    "POST",
+    { confirmed: true },
+    engineer,
+    409,
+  );
   await call(`${base}/package/assemble-preview`, "POST", {}, engineer, 409);
 });
+
+it.each(["skill-core", "skill-review"])(
+  "accepts NEEDS_CONTEXT from %s without a lane action and drafts its follow-up question from the summary",
+  async (lane) => {
+    const fixture = await generated();
+    const { call, base } = fixture;
+    const { secret } = await call(
+      "/me/tokens",
+      "POST",
+      { name: "context", scopes: ["engineer"] },
+      engineer,
+      201,
+    );
+    const summary = `Which report audience should ${lane} address?`;
+    let accepted;
+    for (let wave = 0; wave < 3 && !accepted; wave++) {
+      const { jobs } = await call(
+        `${base}/package/authoring-jobs`,
+        "POST",
+        { confirmed: true },
+        engineer,
+        201,
+      );
+      for (const job of jobs) {
+        if (job.laneId !== lane) {
+          await acceptLane(fixture, secret, job, reportLaneOutput);
+          continue;
+        }
+        // The kernel requires a question action only from Wave 1 lanes.
+        accepted = await acceptLane(fixture, secret, job, (context) => ({
+          lane,
+          status: "NEEDS_CONTEXT",
+          semanticDossierHash: context.authoring.plan.semanticDossierHash,
+          summary,
+          claims: [],
+          artifacts: [],
+        }));
+      }
+    }
+    expect(accepted.job.status).toBe("accepted");
+    const view = await call(`${base}/package/authoring`);
+    expect(view.readiness.records[lane]).toMatchObject({
+      status: "NEEDS_CONTEXT",
+    });
+    const followUp = view.followUps.find((f: any) => f.laneId === lane);
+    expect(followUp).toMatchObject({
+      questionId: expect.any(String),
+      repairJobId: null,
+    });
+    const { rounds, questions } = await call(`${base}/questionnaire`);
+    const question = questions.find((q: any) => q.id === followUp.questionId);
+    expect(question).toMatchObject({
+      text: summary,
+      rationale: `The ${lane} Authoring lane reported NEEDS_CONTEXT without naming a dossier field.`,
+    });
+    expect(rounds.find((r: any) => r.id === question.roundId)).toMatchObject({
+      title: `Authoring: ${lane}`,
+      state: "draft",
+    });
+  },
+);
 
 it("records accepted lanes in revision order, unlocks dependent jobs and review votes, then confirms assembly for the exact session", async () => {
   const { call, base } = await generated();
@@ -250,6 +370,116 @@ it("records accepted lanes in revision order, unlocks dependent jobs and review 
     }),
   ).toEqual(result);
 });
+
+it("keeps server storage paths out of every package-stage read model a token can read", async () => {
+  const fixture = await generated();
+  const { call, base, workflow } = fixture;
+  const reviewer = { subject: "reviewer", email: "reviewer@example.com" };
+  await call(
+    "/bindings",
+    "POST",
+    {
+      scopeType: "workflow",
+      scopeId: workflow.id,
+      email: reviewer.email,
+      role: "Reviewer",
+    },
+    admin,
+    201,
+  );
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "paths", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  const read = async (route: string) =>
+    expect(
+      JSON.stringify(
+        await call(route, "GET", undefined, engineer, 200, secret),
+      ),
+      route,
+    ).not.toContain(service.config.storage.workspaceDirectory);
+  const readStage = async () => {
+    for (const route of [
+      "package",
+      "package/authoring",
+      "evaluations",
+      "review",
+    ])
+      await read(`${base}/${route}`);
+  };
+  await readStage();
+  for (let wave = 0; wave < 3; wave++) {
+    const { jobs } = await call(
+      `${base}/package/authoring-jobs`,
+      "POST",
+      { confirmed: true },
+      engineer,
+      201,
+    );
+    for (const job of jobs)
+      await acceptLane(fixture, secret, job, reportLaneOutput);
+    await readStage();
+  }
+  const { preview } = await call(
+    `${base}/package/assemble-preview`,
+    "POST",
+    {},
+  );
+  const { packageHash } = await call(`${base}/package/assemble`, "POST", {
+    confirmed: true,
+    confirmationHash: preview.confirmationHash,
+    requestId: "assemble-paths",
+  });
+  await readStage();
+  await call(
+    `${base}/evaluations`,
+    "POST",
+    { confirmed: true, packageHash, requestId: "evaluate-paths" },
+    engineer,
+    202,
+  );
+  expect((await service.worker().runOnce())?.status).toBe("succeeded");
+  await readStage();
+  const { preview: approval } = await call(
+    `${base}/review/approve-preview`,
+    "POST",
+    {},
+    reviewer,
+  );
+  await call(
+    `${base}/review/approve`,
+    "POST",
+    {
+      confirmed: true,
+      confirmationHash: approval.confirmationHash,
+      requestId: "approve-paths",
+    },
+    reviewer,
+  );
+  const { preview: publication } = await call(
+    `${base}/review/publish-preview`,
+    "POST",
+    {},
+    owner,
+  );
+  const published = await call(
+    `${base}/review/publish`,
+    "POST",
+    {
+      confirmed: true,
+      confirmationHash: publication.confirmationHash,
+      requestId: "publish-paths",
+    },
+    owner,
+  );
+  await readStage();
+  const publications = `/workflows/${workflow.id}/publications`;
+  await read(publications);
+  await read(`${publications}/${published.confirmation.id}/package`);
+}, 90_000);
 
 it("returns a rejected lane with its reason, turns BLOCKED into a linked repair job, and refuses Agent sign-off", async () => {
   const { call, base } = await generated();
