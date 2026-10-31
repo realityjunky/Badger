@@ -121,7 +121,10 @@ it("reconciles a flagged Run through recover and retries its durable outcome aft
     )
     .toContain("package-hash-mismatch");
   await fs.writeFile(started.skillPath, originalSkill);
-  await call("recover", args);
+  await client.close();
+  await mcp.close();
+  await connect();
+  await call("status", args);
   await expect
     .poll(
       async () =>

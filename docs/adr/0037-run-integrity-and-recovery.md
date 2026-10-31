@@ -31,7 +31,8 @@ attempts report outcomes even when the kernel cannot export a committed report.
 Only the registered person and Agent host can report them. Complete
 reports settle gaps once the reported horizon is covered and package mismatches
 once the bound identity is restored. A recovery request also settles an explicit
-interruption notice. Outcomes and audits are idempotent by Run and request ID;
-replaying an older outcome cannot clear a newer interruption. Remaining integrity
+interruption notice. Outcomes and audits are idempotent by Run and request ID.
+Each recovery request binds its notice identity, so even a delayed first delivery
+of an earlier outcome cannot clear a newer interruption. Remaining integrity
 or runtime recovery findings make the outcome blocked, and the dashboard keeps
 them visible.

@@ -146,6 +146,7 @@ it("delivers manual-stop and finalization answers through WorkflowRuntime and as
   await client.connect(a);
   root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-durable-gates-"));
   for (const mode of ["manual-stop", "finalization"]) {
+    service.clock.advance(61_000);
     const args = { projectRoot: root, runId: mode };
     const started = await value("start", {
       ...args,
@@ -296,6 +297,7 @@ it("delivers manual-stop and finalization answers through WorkflowRuntime and as
       );
     }
     let continued;
+    service.clock.advance(61_000);
     if (mode === "finalization") {
       const link = fs.link;
       let interrupted = false;
@@ -321,11 +323,18 @@ it("delivers manual-stop and finalization answers through WorkflowRuntime and as
     );
     await expect
       .poll(
-        async () =>
-          (await f.call(route, "GET", undefined, operator)).run.projection
-            ?.revision,
+        async () => {
+          const status = await value("status", args);
+          const mirrored = (await f.call(route, "GET", undefined, operator))
+            .run;
+          return {
+            revision: mirrored.projection?.revision,
+            error: status.reporting.error,
+          };
+        },
+        { timeout: 10_000 },
       )
-      .toBe(continued.continuation.revision);
+      .toEqual({ revision: continued.continuation.revision, error: null });
     expect(
       (await f.call(route, "GET", undefined, operator)).run.integrityFindings,
     ).toEqual([]);

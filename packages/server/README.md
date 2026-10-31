@@ -1305,13 +1305,20 @@ uses the kernel; its compiled package hash differs from the publication's
 directory hash. One current finding per class bounds these responses, with
 earlier evidence retained in the Activity log.
 
+Registration can include `observedPackageHash` separately from its immutable
+`packageHash` binding. The MCP rehashes installed bytes on later calls. Changed
+or unreadable bytes (`observedPackageHash:null`) are flagged even when the Run
+has never reached the service before.
+
 Only the registered person and Agent host may send `POST /api/v1/runs/:id/recovery`
 with `{required:true, requestId}` when the local runtime cannot export a committed
 report. A stable notice ID makes retries idempotent; blocked recover calls can
 include `recoveries` and their runtime `revision` without claiming a committed
 snapshot.
 A full `/events` report may include `recoveryRequired` and up to 64 bounded
-`recoveries` request IDs from local `recover` calls. Requests replay exactly once
+`recoveries: [{requestId, noticeId}]` from local `recover` calls. A request binds
+the interruption notice it answers; without a notice its `noticeId` is null.
+Requests replay exactly once
 in the recovery audit. A shorter valid prefix cannot clear a gap, and a regular
 status report or an older recovery ID cannot settle a newer interruption notice.
 Recovery returns `settled` when no discrepancy or runtime recovery finding remains,

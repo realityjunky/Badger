@@ -21,6 +21,7 @@ import {
   reconcileRunIntegrity,
   recordRunRecoveries,
   RunIntegrityError,
+  runRecoveryRequests,
   type RunIntegrityRow,
 } from "../run-integrity.js";
 
@@ -201,6 +202,7 @@ export async function handleRuns(input: AuthorizedRequest) {
         "hostLabel",
         "testRun",
         "execution",
+        "observedPackageHash",
       ]);
       const workflowId = text(body.workflowId, "Workflow ID"),
         publicationId = text(body.publicationId, "Publication ID");
@@ -209,12 +211,24 @@ export async function handleRuns(input: AuthorizedRequest) {
       if (!ID.test(localRunId) || typeof body.testRun !== "boolean")
         throw new RequestError(400, "Invalid local Run identity");
       await authorize(input, tx, workflowId, true, body.testRun);
+      if (row) await authorize(input, tx, row.workflow_id, true, row.test_run);
       const { publication, snapshot } = await readPublishedPackage(
         tx,
         workflowId,
         publicationId,
       );
       const reportedPackageHash = text(body.packageHash, "Package hash");
+      const observedPackageHash =
+        body.observedPackageHash === null
+          ? null
+          : body.observedPackageHash === undefined
+            ? reportedPackageHash
+            : text(body.observedPackageHash, "Observed package hash");
+      if (
+        observedPackageHash !== null &&
+        !/^[a-f0-9]{64}$/u.test(observedPackageHash)
+      )
+        throw new RequestError(400, "Invalid observed package hash");
       if (!/^[a-f0-9]{64}$/u.test(reportedPackageHash))
         throw new RequestError(400, "Invalid published package hash");
       const execution = objectInput(body.execution);
@@ -344,6 +358,20 @@ export async function handleRuns(input: AuthorizedRequest) {
             requestId: input.context.requestId,
           });
       }
+      if (observedPackageHash !== row.package_hash) {
+        await flagRunIntegrity(
+          tx,
+          input.dependencies,
+          { ...input.context, personId: input.person.id },
+          row,
+          "package-hash-mismatch",
+          { expectedPackageHash: row.package_hash, observedPackageHash },
+        );
+        return new RunIntegrityError("package-hash-mismatch", {
+          expectedPackageHash: row.package_hash,
+          observedPackageHash,
+        });
+      }
     }
     if (!row) throw new RequestError(404, "No such Run");
     await authorize(
@@ -391,22 +419,18 @@ export async function handleRuns(input: AuthorizedRequest) {
         "insert into run_recovery_notices(run_id,request_id) values($1,$2) on conflict do nothing",
         [id, requestId],
       );
-      const requests = body.recoveries ?? [];
+      const requests = runRecoveryRequests(body.recoveries);
       if (
-        !Array.isArray(requests) ||
-        requests.length > 64 ||
-        !requests.every(
-          (value) => typeof value === "string" && ID.test(value),
-        ) ||
-        (requests.length > 0 &&
-          (!Number.isSafeInteger(body.revision) || Number(body.revision) < 0))
+        requests.length > 0 &&
+        (!Number.isSafeInteger(body.revision) || Number(body.revision) < 0)
       )
         throw new RequestError(400, "Invalid blocked recovery outcomes");
       if (notice.rowCount > 0) {
         row.recovery_required = true;
+        row.recovery_notice_id = requestId;
         await tx.query(
-          "update workflow_runs set recovery_required=true,updated_at=$2 where id=$1",
-          [id, input.dependencies.clock.now()],
+          "update workflow_runs set recovery_required=true,updated_at=$2,recovery_notice_id=$3 where id=$1",
+          [id, input.dependencies.clock.now(), requestId],
         );
         await recordAudit(tx, input.dependencies, {
           actor: {
@@ -437,9 +461,15 @@ export async function handleRuns(input: AuthorizedRequest) {
             } as WorkflowRunReport["continuation"],
           },
         );
-        if (blocked.recovery !== row.recovery)
+        if (
+          row.recovery_required &&
+          requests.some(
+            (request) => request.noticeId === row.recovery_notice_id,
+          ) &&
+          blocked.recovery !== row.recovery
+        )
           await tx.query(
-            "update workflow_runs set recovery=$2::jsonb,recovery_required=true where id=$1",
+            "update workflow_runs set recovery=$2::jsonb where id=$1",
             [id, JSON.stringify(blocked.recovery)],
           );
       }
@@ -462,18 +492,7 @@ export async function handleRuns(input: AuthorizedRequest) {
           typeof body.recoveryRequired !== "boolean"
         )
           throw new RequestError(400, "Invalid recovery status");
-        if (
-          body.recoveries !== undefined &&
-          (!Array.isArray(body.recoveries) ||
-            body.recoveries.length > 64 ||
-            !body.recoveries.every(
-              (id) => typeof id === "string" && ID.test(id),
-            ))
-        )
-          throw new RequestError(
-            400,
-            "Send at most 64 bounded recovery request IDs",
-          );
+        const recoveryRequests = runRecoveryRequests(body.recoveries);
         if (!Array.isArray(body.events) || body.events.length > 64)
           throw new RequestError(400, "Send at most 64 ordered Run events");
         let sequence = row.last_sequence;
@@ -613,20 +632,22 @@ export async function handleRuns(input: AuthorizedRequest) {
             row,
             sequence,
           );
-          const recoveryRequests = (body.recoveries ?? []) as string[];
           const existingRecoveries = await tx.query<{ request_id: string }>(
             "select request_id from run_recoveries where run_id=$1 and request_id=any($2::text[])",
-            [id, recoveryRequests],
+            [id, recoveryRequests.map((r) => r.requestId)],
           );
           const newRecoveries = recoveryRequests.filter(
             (request) =>
               !existingRecoveries.rows.some(
-                (saved) => saved.request_id === request,
+                (saved) => saved.request_id === request.requestId,
               ),
           );
           row.recovery_required =
             body.recoveryRequired === true ||
-            (row.recovery_required && newRecoveries.length === 0) ||
+            (row.recovery_required &&
+              !newRecoveries.some(
+                (r) => r.noticeId === row.recovery_notice_id,
+              )) ||
             (
               continuation.findings as {
                 code?: string;

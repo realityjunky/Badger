@@ -55,7 +55,7 @@ interface Queue {
 }
 interface RecoveryQueue {
   required: boolean;
-  requests: string[];
+  requests: { requestId: string; noticeId: string | null }[];
   noticeId?: string;
   noticeHash?: string;
 }
@@ -134,7 +134,14 @@ async function recoveryQueue(root: string): Promise<RecoveryQueue> {
     !Array.isArray(value.requests) ||
     value.requests.length > 64 ||
     !value.requests.every(
-      (id) => typeof id === "string" && /^[A-Za-z0-9_-]{1,200}$/u.test(id),
+      (request) =>
+        request &&
+        typeof request === "object" &&
+        typeof request.requestId === "string" &&
+        /^[A-Za-z0-9_-]{1,200}$/u.test(request.requestId) &&
+        (request.noticeId === null ||
+          (typeof request.noticeId === "string" &&
+            /^[A-Za-z0-9_-]{1,200}$/u.test(request.noticeId))),
     )
   )
     throw new Error("Invalid durable Run recovery queue");
@@ -166,6 +173,7 @@ export class LocalRuns {
   >();
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly errors = new Map<string, string>();
+  private readonly synchronized = new Set<string>();
   private readonly retries = new Map<string, { count: number; at: number }>();
   private closed = false;
   private readonly authorized = new Set<string>();
@@ -352,7 +360,10 @@ export class LocalRuns {
           await write(root, RECOVERY_QUEUE, {
             ...latest,
             requests: latest.requests.filter(
-              (id) => !recovery.requests.includes(id),
+              (request) =>
+                !recovery.requests.some(
+                  (sent) => sent.requestId === request.requestId,
+                ),
             ),
           });
         });
@@ -364,19 +375,28 @@ export class LocalRuns {
       projection: queue.report.projection,
       continuation: queue.report.continuation,
     });
-    const { binding } = await this.binding(args);
-    const registration = await this.register(
-      binding,
-      queue.report.continuation.execution,
-    );
+    const localBinding = await read<Binding>(root, BINDING);
+    if (!localBinding) throw new Error("Missing local Run binding");
+    this.verify(localBinding);
+    const observedPackageHash = await hashDirectory(
+      localBinding.packageDirectory,
+    ).catch(() => null);
     if (
       queue.lastAcknowledged === queue.report.lastSequence &&
       queue.acknowledgedReportHash === reportHash &&
-      !registration.run.needsRecovery &&
       !recovery.required &&
-      recovery.requests.length === 0
+      recovery.requests.length === 0 &&
+      this.synchronized.has(root) &&
+      observedPackageHash === localBinding.packageHash &&
+      !this.errors.has(path.join(args.projectRoot, runRelative(args.runId)))
     )
       return;
+    const { binding } = await this.binding(args);
+    await this.register(
+      binding,
+      queue.report.continuation.execution,
+      observedPackageHash,
+    );
     if (this.closed) return;
     const sending = queue.report;
     const events = sending.events;
@@ -443,9 +463,13 @@ export class LocalRuns {
                 }
               : {}),
             requests: latestRecovery.requests.filter(
-              (id) => !recovery.requests.includes(id),
+              (request) =>
+                !recovery.requests.some(
+                  (sent) => sent.requestId === request.requestId,
+                ),
             ),
           });
+          this.synchronized.add(root);
         }
       });
       if (last) break;
@@ -454,14 +478,20 @@ export class LocalRuns {
   private async register(
     binding: Binding,
     execution: WorkflowContinuation["execution"],
+    observedPackageHash?: string | null,
   ) {
+    if (observedPackageHash === undefined)
+      observedPackageHash = await hashDirectory(binding.packageDirectory).catch(
+        () => null,
+      );
     return this.api.request<{ run: { needsRecovery: boolean } }>(
       `/runs/${binding.registrationId}`,
       "POST",
       {
         workflowId: binding.workflowId,
         publicationId: binding.publicationId,
-        packageHash: await hashDirectory(binding.packageDirectory),
+        packageHash: binding.packageHash,
+        observedPackageHash,
         localRunId: binding.localRunId,
         hostLabel: binding.hostLabel,
         testRun: binding.testRun,
@@ -513,7 +543,10 @@ export class LocalRuns {
         );
       await write(root, RECOVERY_QUEUE, {
         ...recovery,
-        requests: [...recovery.requests, randomUUID()],
+        requests: [
+          ...recovery.requests,
+          { requestId: randomUUID(), noticeId: recovery.noticeId ?? null },
+        ],
       });
       return runtime.recover(target(args));
     });

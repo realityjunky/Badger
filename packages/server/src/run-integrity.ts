@@ -15,6 +15,7 @@ export interface RunIntegrityFinding {
 }
 export interface RunRecovery {
   requestId: string;
+  noticeId: string | null;
   outcome: "settled" | "blocked";
   revision: number;
   lastSequence: number;
@@ -25,6 +26,34 @@ export interface RunIntegrityRow {
   integrity_findings: RunIntegrityFinding[];
   recovery_required: boolean;
   recovery: RunRecovery | null;
+  recovery_notice_id: string | null;
+}
+export interface RunRecoveryRequest {
+  requestId: string;
+  noticeId: string | null;
+}
+export function runRecoveryRequests(value: unknown): RunRecoveryRequest[] {
+  if (value === undefined) return [];
+  const id = (value: unknown) =>
+    typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/u.test(value);
+  if (
+    !Array.isArray(value) ||
+    value.length > 64 ||
+    !value.every(
+      (r) =>
+        r &&
+        typeof r === "object" &&
+        !Array.isArray(r) &&
+        id(r.requestId) &&
+        (r.noticeId === null || id(r.noticeId)) &&
+        Object.keys(r).every((key) => ["requestId", "noticeId"].includes(key)),
+    )
+  )
+    throw new RequestError(
+      400,
+      "Send at most 64 bounded recovery requests bound to their notice",
+    );
+  return value as RunRecoveryRequest[];
 }
 const messages: Record<RunIntegrityCode, string> = {
   "unattested-decision":
@@ -148,12 +177,13 @@ export async function recordRunRecoveries(
   deps: ServiceDependencies,
   context: WriteContext,
   row: RunIntegrityRow,
-  requests: string[],
+  requests: RunRecoveryRequest[],
   report: Pick<WorkflowRunReport, "lastSequence" | "continuation">,
 ) {
-  for (const requestId of requests) {
+  for (const { requestId, noticeId } of requests) {
     const recovery: RunRecovery = {
       requestId,
+      noticeId,
       outcome: needsRunRecovery(row) ? "blocked" : "settled",
       revision: report.continuation.revision,
       lastSequence: report.lastSequence,
@@ -240,6 +270,8 @@ export async function hasMatchingRunGateAnswer(
           context.pendingAction.finalization.planHash ||
         finalizationConfirmation.decisionId !== submission.decisionId ||
         finalizationConfirmation.choiceId !== submission.choiceId ||
+        (outcome.rationale !== undefined &&
+          outcome.rationale !== submission.rationale) ||
         canonicalHash(finalizationConfirmation.reviewer) !==
           canonicalHash(submission.reviewer) ||
         finalizationConfirmation.rationaleHash !== rationaleHash

@@ -4,6 +4,7 @@ alter table workflow_runs add column integrity_findings jsonb not null default '
   check (jsonb_typeof(integrity_findings) = 'array');
 alter table workflow_runs add column recovery_required boolean not null default false;
 alter table workflow_runs add column recovery jsonb;
+alter table workflow_runs add column recovery_notice_id text;
 create table run_recoveries (
   run_id text not null references workflow_runs(id),
   request_id text not null,

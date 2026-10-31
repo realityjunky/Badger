@@ -135,7 +135,10 @@ it("flags an unattested local decision without losing its immutable event eviden
   });
   // A successful local recover cannot invent the missing person's sign-off.
   await f.runtime.recover(f.location);
-  await f.post({ ...report, recoveries: ["unattested-recovery"] });
+  await f.post({
+    ...report,
+    recoveries: [{ requestId: "unattested-recovery", noticeId: null }],
+  });
   expect(await f.read()).toMatchObject({
     needsRecovery: true,
     recovery: { outcome: "blocked" },
@@ -178,7 +181,10 @@ it("requires an explicit recovery outcome to settle a reported interruption and 
     400,
     f.operatorToken,
   );
-  await f.post({ ...report, recoveries: ["explicit-recovery"] });
+  await f.post({
+    ...report,
+    recoveries: [{ requestId: "explicit-recovery", noticeId: "notice-1" }],
+  });
   expect(await f.read()).toMatchObject({
     needsRecovery: false,
     recovery: { outcome: "settled" },
@@ -191,7 +197,10 @@ it("requires an explicit recovery outcome to settle a reported interruption and 
     200,
     f.operatorToken,
   );
-  await f.post({ ...report, recoveries: ["explicit-recovery"] });
+  await f.post({
+    ...report,
+    recoveries: [{ requestId: "explicit-recovery", noticeId: "notice-1" }],
+  });
   expect((await f.read()).needsRecovery).toBe(false);
   await f.call(
     `${f.route}/recovery`,
@@ -201,16 +210,77 @@ it("requires an explicit recovery outcome to settle a reported interruption and 
     200,
     f.operatorToken,
   );
-  await f.post({ ...report, recoveries: ["explicit-recovery"] });
+  await f.post({
+    ...report,
+    recoveries: [{ requestId: "explicit-recovery", noticeId: "notice-1" }],
+  });
   expect((await f.read()).needsRecovery).toBe(true);
-  await f.post({ ...report, recoveries: ["new-interruption-recovery"] });
+  await f.post({
+    ...report,
+    recoveries: [{ requestId: "delayed-first-delivery", noticeId: "notice-1" }],
+  });
+  expect((await f.read()).needsRecovery).toBe(true);
+  await f.post({
+    ...report,
+    recoveries: [
+      { requestId: "new-interruption-recovery", noticeId: "notice-2" },
+    ],
+  });
   expect((await f.read()).needsRecovery).toBe(false);
+  const settled = (await f.read()).recovery;
+  await f.call(
+    `${f.route}/recovery`,
+    "POST",
+    {
+      required: true,
+      requestId: "notice-2",
+      revision: f.current.revision,
+      recoveries: [{ requestId: "late-blocked-outcome", noticeId: "notice-2" }],
+    },
+    operator,
+    200,
+    f.operatorToken,
+  );
+  expect(await f.read()).toMatchObject({
+    needsRecovery: false,
+    recovery: settled,
+  });
 }, 60_000);
 
 it("keeps a package mismatch after refusal and settles recovery only with the bound execution", async () => {
   const f = await fixture();
   const report = (await f.runtime.readReport(f.location))!;
   await f.post(report);
+  await f.call(
+    "/runs/changed-before-registration",
+    "POST",
+    {
+      workflowId: f.workflow.id,
+      publicationId: f.publication.id,
+      packageHash: f.publication.packageHash,
+      observedPackageHash: "0".repeat(64),
+      execution: f.current.execution,
+      localRunId: f.location.runId,
+      hostLabel: "Lab",
+      testRun: false,
+    },
+    operator,
+    409,
+    f.operatorToken,
+  );
+  expect(
+    (
+      await f.call(
+        "/runs/changed-before-registration",
+        "GET",
+        undefined,
+        observer,
+      )
+    ).run,
+  ).toMatchObject({
+    needsRecovery: true,
+    integrityFindings: [{ code: "package-hash-mismatch" }],
+  });
   await f.post(
     {
       ...report,
@@ -229,8 +299,14 @@ it("keeps a package mismatch after refusal and settles recovery only with the bo
     integrityFindings: [{ code: "package-hash-mismatch" }],
     projection: report.projection,
   });
-  await f.post({ ...report, recoveries: ["restored-package"] });
-  await f.post({ ...report, recoveries: ["restored-package"] });
+  await f.post({
+    ...report,
+    recoveries: [{ requestId: "restored-package", noticeId: null }],
+  });
+  await f.post({
+    ...report,
+    recoveries: [{ requestId: "restored-package", noticeId: null }],
+  });
   expect(await f.read()).toMatchObject({
     needsRecovery: false,
     integrityFindings: [],
