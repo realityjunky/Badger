@@ -338,8 +338,9 @@ attestation findings remain visible.
 Service evaluation runs the trusted installed `certification.js` child inside the
 existing time, process-tree memory, private temporary-directory and scrubbed
 environment limits. It uses real in-memory MCP SDK calls against a loopback HTTP
-fixture, starts the exact selected package bytes, then exercises synthetic
-Completion, skipped-Node, route, Cycle and external-root receipt cases. Domain
-scripts are never run. The report retains `mcp-runtime-certification` and its
+fixture to exercise Completion, skipped-Node, route, Cycle and external-root
+receipt cases on a synthetic certification package, then starts the exact
+selected package bytes with their external roots bound. The selected package
+itself is only started. Domain scripts are never run. The report retains `mcp-runtime-certification` and its
 `BadgerMCP` evidence alongside script certification. The kernel accepts a trusted
 host certifier callback and has no dependency on the MCP workspace.

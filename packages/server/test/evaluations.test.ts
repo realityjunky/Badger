@@ -66,6 +66,21 @@ it("runs a confirmed Engineer evaluation as a progress-reporting worker job, ret
   expect(
     Object.keys(first.reports[0].report.runtime.phase3.negativeCases).length,
   ).toBeGreaterThan(0);
+  // The MCP refusals come from a synthetic package; the evaluated one is only started.
+  expect(first.reports[0].report.mcp).toMatchObject({
+    evaluatedPackageStarted: true,
+    exhaustedCycleRefused: true,
+  });
+  expect(
+    first.reports[0].report.checks.find(
+      (check: any) => check.id === "mcp-runtime-certification",
+    ),
+  ).toMatchObject({
+    passed: true,
+    detail: expect.stringContaining(
+      "started the evaluated package with its external roots bound, and enforced Completion, routes, Cycles, and bound artifact roots on a synthetic certification package",
+    ),
+  });
   expect(first.readiness.runtime.state).toBe("ready");
   expect(first.passingReportId).toBe(first.reports[0].id);
   const inbox = (await call("/me/inbox")).items.filter(
