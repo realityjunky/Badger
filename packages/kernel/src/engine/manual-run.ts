@@ -35,6 +35,7 @@ import type {
 import type {
   WorkflowDurabilityProfile,
   WorkflowFinalizationReceiptReference,
+  WorkflowFinalizationConfirmationRecord,
 } from "../types.js";
 import type { WorkflowArtifactMutation } from "./runtime-types.js";
 import {
@@ -111,6 +112,7 @@ export interface FinalizationRecovery {
   transactionId: string;
   resultingRevision: number;
   receipt: WorkflowFinalizationReceiptReference;
+  confirmation: WorkflowFinalizationConfirmationRecord;
 }
 
 export interface FinalizationRefresh {
@@ -629,18 +631,26 @@ async function resumeManualRunInternal(
         "action_completed",
         {
           action: pending,
+          finalizationConfirmation: structuredClone(
+            options.finalizationRecovery.confirmation,
+          ),
           outcome: {
             actionId: pending.id,
             status: "succeeded",
             summary: "Recovered Workflow finalization.",
             kind: "decision",
+            decisionId: pending.finalization.decisionId,
+            reviewer: structuredClone(
+              options.finalizationRecovery.confirmation.reviewer,
+            ),
             finalization: {
               planHash: pending.finalization.planHash,
               decisionId: pending.finalization.decisionId,
-              choiceId:
-                options.finalizationRecovery.status === "committed"
-                  ? "confirm"
-                  : "cancel",
+              choiceId: options.finalizationRecovery.confirmation.choiceId,
+              contentSnapshotHash: pending.finalization.contentSnapshotHash,
+              verificationReceiptIds: [
+                ...pending.finalization.verificationReceiptIds,
+              ],
             },
           },
         },

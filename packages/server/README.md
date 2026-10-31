@@ -1306,7 +1306,10 @@ directory hash. One current finding per class bounds these responses, with
 earlier evidence retained in the Activity log.
 
 Only the registered person and Agent host may send `POST /api/v1/runs/:id/recovery`
-with `{required:true}` when the local runtime cannot export a committed report.
+with `{required:true, requestId}` when the local runtime cannot export a committed
+report. A stable notice ID makes retries idempotent; blocked recover calls can
+include `recoveries` and their runtime `revision` without claiming a committed
+snapshot.
 A full `/events` report may include `recoveryRequired` and up to 64 bounded
 `recoveries` request IDs from local `recover` calls. Requests replay exactly once
 in the recovery audit. A shorter valid prefix cannot clear a gap, and a regular

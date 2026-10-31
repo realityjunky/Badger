@@ -12,3 +12,10 @@ create table run_recoveries (
 );
 create trigger run_recoveries_immutable before update or delete or truncate on run_recoveries
   for each statement execute function refuse_publication_evidence_change();
+create table run_recovery_notices (
+  run_id text not null references workflow_runs(id),
+  request_id text not null,
+  primary key (run_id, request_id)
+);
+create trigger run_recovery_notices_immutable before update or delete or truncate on run_recovery_notices
+  for each statement execute function refuse_publication_evidence_change();

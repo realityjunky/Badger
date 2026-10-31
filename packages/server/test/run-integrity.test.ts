@@ -149,21 +149,21 @@ it("requires an explicit recovery outcome to settle a reported interruption and 
   await f.call(
     `${f.route}/recovery`,
     "POST",
-    { required: true },
+    { required: true, requestId: "notice-1" },
     observer,
     403,
   );
   await f.call(
     `${f.route}/recovery`,
     "POST",
-    { required: true },
+    { required: true, requestId: "notice-1" },
     operator,
     403,
   );
   await f.call(
     `${f.route}/recovery`,
     "POST",
-    { required: true },
+    { required: true, requestId: "notice-1" },
     operator,
     200,
     f.operatorToken,
@@ -186,7 +186,17 @@ it("requires an explicit recovery outcome to settle a reported interruption and 
   await f.call(
     `${f.route}/recovery`,
     "POST",
-    { required: true },
+    { required: true, requestId: "notice-1" },
+    operator,
+    200,
+    f.operatorToken,
+  );
+  await f.post({ ...report, recoveries: ["explicit-recovery"] });
+  expect((await f.read()).needsRecovery).toBe(false);
+  await f.call(
+    `${f.route}/recovery`,
+    "POST",
+    { required: true, requestId: "notice-2" },
     operator,
     200,
     f.operatorToken,

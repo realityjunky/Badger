@@ -57,6 +57,7 @@ interface RecoveryQueue {
   required: boolean;
   requests: string[];
   noticeId?: string;
+  noticeHash?: string;
 }
 const BINDING = ".badger/mcp-binding.json",
   QUEUE = ".badger/mcp-queue.json",
@@ -127,6 +128,9 @@ async function recoveryQueue(root: string): Promise<RecoveryQueue> {
   if (!value) return { required: false, requests: [] };
   if (
     typeof value.required !== "boolean" ||
+    (value.required &&
+      (typeof value.noticeId !== "string" ||
+        !/^[A-Za-z0-9_-]{1,200}$/u.test(value.noticeId))) ||
     !Array.isArray(value.requests) ||
     value.requests.length > 64 ||
     !value.requests.every(
@@ -324,7 +328,7 @@ export class LocalRuns {
   }
   private async flush(args: { projectRoot: string; runId: string }) {
     const root = await runRoot(args);
-    const recovery = await recoveryQueue(root);
+    const recovery = await this.withQueue(args, () => recoveryQueue(root));
     if (recovery.required) {
       const { binding } = await this.binding(args);
       const current = await runtime.inspect(target(args));
@@ -333,27 +337,48 @@ export class LocalRuns {
       await this.api.request(
         `/runs/${binding.registrationId}/recovery`,
         "POST",
-        { required: true },
+        {
+          required: true,
+          requestId: recovery.noticeId,
+          ...(requiresRecovery(current)
+            ? { recoveries: recovery.requests, revision: current.revision }
+            : {}),
+        },
         1,
       );
-      if (current && requiresRecovery(current)) return;
+      if (requiresRecovery(current)) {
+        await this.withQueue(args, async () => {
+          const latest = await recoveryQueue(root);
+          await write(root, RECOVERY_QUEUE, {
+            ...latest,
+            requests: latest.requests.filter(
+              (id) => !recovery.requests.includes(id),
+            ),
+          });
+        });
+        return;
+      }
     }
     let queue = await this.reconcile(args);
     const reportHash = canonicalHash({
       projection: queue.report.projection,
       continuation: queue.report.continuation,
     });
+    const { binding } = await this.binding(args);
+    const registration = await this.register(
+      binding,
+      queue.report.continuation.execution,
+    );
     if (
       queue.lastAcknowledged === queue.report.lastSequence &&
       queue.acknowledgedReportHash === reportHash &&
+      !registration.run.needsRecovery &&
       !recovery.required &&
       recovery.requests.length === 0
     )
       return;
-    const { binding } = await this.binding(args);
     if (this.closed) return;
     const sending = queue.report;
-    await this.register(binding, queue.report.continuation.execution);
     const events = sending.events;
     // All original events precede the latest snapshot. Intermediate batches never
     // claim a later snapshot while earlier events are still missing.
@@ -411,7 +436,11 @@ export class LocalRuns {
             required: false,
             ...(latestRecovery.noticeId !== recovery.noticeId &&
             latestRecovery.required
-              ? { required: true, noticeId: latestRecovery.noticeId }
+              ? {
+                  required: true,
+                  noticeId: latestRecovery.noticeId,
+                  noticeHash: latestRecovery.noticeHash,
+                }
               : {}),
             requests: latestRecovery.requests.filter(
               (id) => !recovery.requests.includes(id),
@@ -422,17 +451,17 @@ export class LocalRuns {
       if (last) break;
     }
   }
-  private register(
+  private async register(
     binding: Binding,
     execution: WorkflowContinuation["execution"],
   ) {
-    return this.api.request(
+    return this.api.request<{ run: { needsRecovery: boolean } }>(
       `/runs/${binding.registrationId}`,
       "POST",
       {
         workflowId: binding.workflowId,
         publicationId: binding.publicationId,
-        packageHash: binding.packageHash,
+        packageHash: await hashDirectory(binding.packageDirectory),
         localRunId: binding.localRunId,
         hostLabel: binding.hostLabel,
         testRun: binding.testRun,
@@ -447,10 +476,19 @@ export class LocalRuns {
       if (current && requiresRecovery(current)) {
         await this.withQueue(args, async () => {
           const root = await runRoot(args);
+          const recovery = await recoveryQueue(root);
+          const noticeHash = canonicalHash({
+            binding: workflowGateBinding(current),
+            findings: current.findings,
+          });
           await write(root, RECOVERY_QUEUE, {
-            ...(await recoveryQueue(root)),
+            ...recovery,
             required: true,
-            noticeId: randomUUID(),
+            noticeId:
+              recovery.required && recovery.noticeHash === noticeHash
+                ? recovery.noticeId
+                : randomUUID(),
+            noticeHash,
           });
         });
       }
@@ -465,8 +503,8 @@ export class LocalRuns {
     }
     this.schedule(args, true);
   }
-  async recovered(args: { projectRoot: string; runId: string }) {
-    await this.withQueue(args, async () => {
+  async recover(args: { projectRoot: string; runId: string }) {
+    return this.withQueue(args, async () => {
       const root = await runRoot(args);
       const recovery = await recoveryQueue(root);
       if (recovery.requests.length >= 64)
@@ -477,8 +515,8 @@ export class LocalRuns {
         ...recovery,
         requests: [...recovery.requests, randomUUID()],
       });
+      return runtime.recover(target(args));
     });
-    await this.capture(args);
   }
   async deliverGateAnswer(
     args: { projectRoot: string; runId: string },
@@ -833,8 +871,12 @@ export function operatorTools(
       local,
       async (args) => {
         const { binding } = await runs.binding(args);
-        const continuation = await runtime.recover(target(args));
-        await runs.recovered(args);
+        let continuation;
+        try {
+          continuation = await runs.recover(args);
+        } finally {
+          await runs.capture(args);
+        }
         return result(binding, continuation, args);
       },
       "operateRuns",

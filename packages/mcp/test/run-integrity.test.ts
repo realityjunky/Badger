@@ -107,6 +107,27 @@ it("reconciles a flagged Run through recover and retries its durable outcome aft
   expect(
     (await f.call(route, "GET", undefined, operator)).run.recovery,
   ).toEqual(run.recovery);
+  const originalSkill = await fs.readFile(started.skillPath, "utf8");
+  await fs.appendFile(
+    started.skillPath,
+    "\nChanged installed package bytes.\n",
+  );
+  await call("status", args);
+  await expect
+    .poll(async () =>
+      (
+        await f.call(route, "GET", undefined, operator)
+      ).run.integrityFindings.map((finding: any) => finding.code),
+    )
+    .toContain("package-hash-mismatch");
+  await fs.writeFile(started.skillPath, originalSkill);
+  await call("recover", args);
+  await expect
+    .poll(
+      async () =>
+        (await f.call(route, "GET", undefined, operator)).run.needsRecovery,
+    )
+    .toBe(false);
 }, 60_000);
 
 it("reports an interrupted kernel transition before recover and mirrors its settled outcome", async () => {
@@ -119,11 +140,25 @@ it("reports an interrupted kernel transition before recover and mirrors its sett
     delete durability.repair;
   });
   root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-interruption-"));
+  let loseRecoveryReply = false;
   mcp = createBadgerMcp({
     url: service.baseUrl,
     token: f.operatorToken,
     agentHost: "Planning Agent",
     profile: "operator",
+    fetch: async (url, init) => {
+      const response = await fetch(url, init);
+      if (
+        loseRecoveryReply &&
+        response.ok &&
+        url.endsWith("/events") &&
+        JSON.parse(String(init.body)).recoveries?.length
+      ) {
+        loseRecoveryReply = false;
+        throw new Error("Lost the committed recovery response");
+      }
+      return response;
+    },
   });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await mcp.connect(b);
@@ -194,6 +229,30 @@ it("reports an interrupted kernel transition before recover and mirrors its sett
         (await f.call(route, "GET", undefined, operator)).run.needsRecovery,
     )
     .toBe(true);
+  const artifactRecord = path.join(
+    root,
+    ".badger/runs/interrupted/.badger/artifacts.json",
+  );
+  const originalRecord = await fs
+    .readFile(artifactRecord)
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+  await fs.writeFile(artifactRecord, "unknown after crash\n");
+  const blocked = await call("recover", args);
+  expect(
+    blocked.continuation.findings.map((finding: any) => finding.code),
+  ).toContain("recovery-required");
+  await expect
+    .poll(
+      async () =>
+        (await f.call(route, "GET", undefined, operator)).run.recovery?.outcome,
+    )
+    .toBe("blocked");
+  if (originalRecord) await fs.writeFile(artifactRecord, originalRecord);
+  else await fs.unlink(artifactRecord);
+  loseRecoveryReply = true;
   const recovered = await call("recover", args);
   expect(
     recovered.continuation.findings.map((finding: any) => finding.code),
@@ -206,6 +265,14 @@ it("reports an interrupted kernel transition before recover and mirrors its sett
     .toBe("settled");
   const run = (await f.call(route, "GET", undefined, operator)).run;
   expect(run.needsRecovery).toBe(false);
+  await expect
+    .poll(async () => (await call("status", args)).reporting.error, {
+      timeout: 10_000,
+    })
+    .toBeNull();
+  expect(
+    (await f.call(route, "GET", undefined, operator)).run.needsRecovery,
+  ).toBe(false);
   expect(run.continuation).toEqual(
     (await createWorkflowRuntime().readReport({ kind: "standalone", ...args }))!
       .continuation,

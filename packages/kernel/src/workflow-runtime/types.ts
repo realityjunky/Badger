@@ -324,6 +324,10 @@ export interface WorkflowRunRegistry {
 }
 
 export interface WorkflowRuntime extends WorkflowRunRegistry {
+  /** Compile the expected Run identity without creating a Run or writing files. */
+  executionIdentity(
+    protocol: WorkflowProtocol,
+  ): Promise<WorkflowExecutionIdentity>;
   readReport(
     target: WorkflowRunTarget,
     afterSequence?: number,

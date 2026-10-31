@@ -3,6 +3,7 @@ import type { Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import { recordAudit, type WriteContext } from "./audit.js";
 import { RequestError } from "./http/errors.js";
+import { createHash } from "node:crypto";
 
 export type RunIntegrityCode =
   "unattested-decision" | "event-sequence-gap" | "package-hash-mismatch";
@@ -214,6 +215,37 @@ export async function hasMatchingRunGateAnswer(
     if (canonicalHash(action) !== canonicalHash(context.pendingAction))
       return false;
     if (outcome.actionId !== submission.actionId) return false;
+    if (
+      repair &&
+      ["revision", "nodeId", "cycleId", "attemptId"].some(
+        (key) =>
+          canonicalHash(outcome[key] ?? null) !==
+          canonicalHash(submission[key] ?? null),
+      )
+    )
+      return false;
+    const finalizationConfirmation = object(data?.finalizationConfirmation);
+    if (finalizationConfirmation) {
+      const rationaleHash =
+        submission.rationale == null
+          ? null
+          : createHash("sha256")
+              .update(String(submission.rationale).trim())
+              .digest("hex");
+      if (
+        !context.pendingAction?.finalization ||
+        finalizationConfirmation.actionId !== submission.actionId ||
+        finalizationConfirmation.revision !== submission.revision ||
+        finalizationConfirmation.planHash !==
+          context.pendingAction.finalization.planHash ||
+        finalizationConfirmation.decisionId !== submission.decisionId ||
+        finalizationConfirmation.choiceId !== submission.choiceId ||
+        canonicalHash(finalizationConfirmation.reviewer) !==
+          canonicalHash(submission.reviewer) ||
+        finalizationConfirmation.rationaleHash !== rationaleHash
+      )
+        return false;
+    }
     const receipt = object(data?.decisionReceipt);
     if (
       receipt &&
@@ -255,7 +287,12 @@ export async function hasMatchingRunGateAnswer(
     const keys = repair
       ? ["choiceId", "reviewer", "rationale"]
       : context.pendingAction?.finalization
-        ? ["decisionId", "reviewer", "rationale", "finalization"]
+        ? [
+            "decisionId",
+            "reviewer",
+            ...(finalizationConfirmation ? [] : ["rationale"]),
+            "finalization",
+          ]
         : [
             "revision",
             "nodeId",

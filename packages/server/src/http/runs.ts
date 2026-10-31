@@ -1,5 +1,5 @@
 import { canonicalHash, type WorkflowRunReport } from "@realityjunky/badger";
-import { verifyWorkflowProtocol } from "@realityjunky/badger/workflow-runtime";
+import { createWorkflowRuntime } from "@realityjunky/badger/workflow-runtime";
 import { readPublishedPackage } from "../publications.js";
 import { readWorkflow } from "../workflows.js";
 import { workflowCapabilities } from "../workflow-access.js";
@@ -213,8 +213,10 @@ export async function handleRuns(input: AuthorizedRequest) {
         tx,
         workflowId,
         publicationId,
-        text(body.packageHash, "Package hash"),
       );
+      const reportedPackageHash = text(body.packageHash, "Package hash");
+      if (!/^[a-f0-9]{64}$/u.test(reportedPackageHash))
+        throw new RequestError(400, "Invalid published package hash");
       const execution = objectInput(body.execution);
       if (
         ![
@@ -229,16 +231,41 @@ export async function handleRuns(input: AuthorizedRequest) {
       );
       if (!protocolFile)
         throw new RequestError(409, "Published protocol is missing");
-      const expectedExecution = await verifyWorkflowProtocol(
+      const expectedExecution = await createWorkflowRuntime().executionIdentity(
         JSON.parse(
           Buffer.from(protocolFile.content, "base64").toString("utf8"),
         ),
       );
-      if (canonicalHash(execution) !== canonicalHash(expectedExecution))
-        throw new RequestError(
-          409,
-          "Runtime execution does not match the published package",
-        );
+      if (
+        reportedPackageHash !== publication.packageHash ||
+        canonicalHash(execution) !== canonicalHash(expectedExecution) ||
+        (row && row.package_hash !== reportedPackageHash)
+      ) {
+        const error = new RunIntegrityError("package-hash-mismatch", {
+          expectedPackageHash: row?.package_hash ?? publication.packageHash,
+          reportedPackageHash,
+          expectedExecutionHash: canonicalHash(expectedExecution),
+          reportedExecutionHash: canonicalHash(execution),
+        });
+        if (
+          row &&
+          row.workflow_id === workflowId &&
+          row.person_id === input.person.id &&
+          row.agent_host ===
+            (input.context.credential.agentHost ?? "Badger dashboard")
+        ) {
+          await flagRunIntegrity(
+            tx,
+            input.dependencies,
+            { ...input.context, personId: input.person.id },
+            row,
+            error.code,
+            error.evidence,
+          );
+          return error;
+        }
+        throw error;
+      }
       const agentHost =
         input.context.credential.agentHost ?? "Badger dashboard";
       const identity = {
@@ -351,13 +378,32 @@ export async function handleRuns(input: AuthorizedRequest) {
       );
     if (match[2] === "gate-answer") return readRunGateAnswer(tx, row);
     if (match[2] === "recovery") {
-      fields(body, ["required"]);
+      fields(body, ["required", "requestId", "recoveries", "revision"]);
       if (body.required !== true)
         throw new RequestError(
           400,
           "Only a complete report can settle recovery",
         );
-      if (!row.recovery_required) {
+      const requestId = text(body.requestId, "Recovery notice request ID");
+      if (!ID.test(requestId))
+        throw new RequestError(400, "Invalid recovery notice request ID");
+      const notice = await tx.query(
+        "insert into run_recovery_notices(run_id,request_id) values($1,$2) on conflict do nothing",
+        [id, requestId],
+      );
+      const requests = body.recoveries ?? [];
+      if (
+        !Array.isArray(requests) ||
+        requests.length > 64 ||
+        !requests.every(
+          (value) => typeof value === "string" && ID.test(value),
+        ) ||
+        (requests.length > 0 &&
+          (!Number.isSafeInteger(body.revision) || Number(body.revision) < 0))
+      )
+        throw new RequestError(400, "Invalid blocked recovery outcomes");
+      if (notice.rowCount > 0) {
+        row.recovery_required = true;
         await tx.query(
           "update workflow_runs set recovery_required=true,updated_at=$2 where id=$1",
           [id, input.dependencies.clock.now()],
@@ -376,7 +422,28 @@ export async function handleRuns(input: AuthorizedRequest) {
           requestId: input.context.requestId,
         });
       }
-      return { needsRecovery: true };
+      if (requests.length > 0) {
+        const blocked = { ...row, recovery_required: true };
+        await recordRunRecoveries(
+          tx,
+          input.dependencies,
+          { ...input.context, personId: input.person.id },
+          blocked,
+          requests,
+          {
+            lastSequence: row.last_sequence,
+            continuation: {
+              revision: Number(body.revision),
+            } as WorkflowRunReport["continuation"],
+          },
+        );
+        if (blocked.recovery !== row.recovery)
+          await tx.query(
+            "update workflow_runs set recovery=$2::jsonb,recovery_required=true where id=$1",
+            [id, JSON.stringify(blocked.recovery)],
+          );
+      }
+      return { needsRecovery: notice.rowCount > 0 || needsRunRecovery(row) };
     }
     if (match[2] === "events") {
       const context = { ...input.context, personId: input.person.id };
@@ -496,6 +563,14 @@ export async function handleRuns(input: AuthorizedRequest) {
           throw new RequestError(400, "Send the complete runtime report");
         if (projection && continuation) {
           validateRunReadModels(projection, continuation, row.local_run_id);
+          if (
+            Number.isSafeInteger(body.lastSequence) &&
+            Number(body.lastSequence) > sequence
+          )
+            throw new RunIntegrityError("event-sequence-gap", {
+              expected: sequence + 1,
+              received: body.lastSequence,
+            });
           if (
             canonicalHash(projection.execution) !==
               canonicalHash(row.execution) ||

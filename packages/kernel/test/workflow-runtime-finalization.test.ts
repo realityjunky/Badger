@@ -1326,6 +1326,18 @@ describe("WorkflowRuntime finalization preview", () => {
       const recovered = await createWorkflowRuntime().recover(root);
       expect(recovered.disposition).toBe("done");
       expect(recovered.finalization?.status).toBe("committed");
+      const report = (await runtime.readReport(root))!;
+      const recoveryEvent = report.events.find(
+        (event) =>
+          event.type === "action_completed" &&
+          event.data.finalizationConfirmation,
+      );
+      expect(recoveryEvent?.data.finalizationConfirmation).toMatchObject({
+        actionId: current.pendingAction!.id,
+        choiceId: "confirm",
+        revision: current.revision,
+        reviewer: { subject: "operator", authorities: ["workflow-owner"] },
+      });
       const receiptReference = recovered.finalization?.receipt;
       expect(receiptReference).toBeDefined();
       await expect(
