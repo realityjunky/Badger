@@ -51,8 +51,9 @@ configuration. Review the operations before running the printed commit command:
 badger-hosts commit --plan /private/temporary/plan.json --digest PREVIEW_DIGEST --confirm
 ```
 
-Commit requires both confirmation and the exact digest, takes an exclusive local
-lock, recalculates the complete preview, and refuses stale content, changed root
+Commit requires both confirmation and the exact digest, takes the selected root's
+exclusive lock, `.badger-install.lock`, which every host's commits share,
+recalculates the complete preview, and refuses stale content, changed root
 identity or unsafe paths before any persistent write. Individual file writes use
 the kernel's contained atomic writer and recheck the expected hash. A replaced
 file keeps its permission bits, so a private `0600` configuration stays private
@@ -77,8 +78,10 @@ unowned same-name MCP entries are conflicts; review and repair them yourself,
 then preview again. There is no force/overwrite switch. JSON is edited without
 reformatting unrelated properties; Codex's managed TOML block is appended and
 removed while retaining unrelated text. Unsafe inline TOML layouts are refused.
-Claude and WorkBuddy project scope share `.mcp.json`; an entry managed by another
-host is treated as a conflict rather than silently acquiring ownership.
+Claude Code and WorkBuddy project scope share `.mcp.json`, and one host at a time
+manages its Badger entry. While one has Badger workflows installed there, the
+other refuses and names it rather than silently acquiring ownership; uninstall
+them from that host first, or use user scope.
 
 ## Host locations and token forwarding
 

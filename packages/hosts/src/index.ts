@@ -102,6 +102,11 @@ const sha = (bytes: Uint8Array) =>
   createHash("sha256").update(bytes).digest("hex");
 const json = (value: unknown) =>
   Buffer.from(JSON.stringify(value, null, 2) + "\n");
+const hostNames: Record<AgentHost, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  workbuddy: "WorkBuddy",
+};
 function identifier(value: string) {
   if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,200}$/u.test(value))
     throw new Error("Invalid published package identity");
@@ -226,12 +231,9 @@ async function compile(
   if (!rootStat?.isDirectory())
     throw new Error("The selected host root must already exist");
   const paths = hostPaths(target.host, target.scope);
-  const registryFile = path.join(
-    root,
-    ".badger",
-    "hosts",
-    `${target.host}.json`,
-  );
+  const registryFor = (host: AgentHost) =>
+    path.join(root, ".badger", "hosts", `${host}.json`);
+  const registryFile = registryFor(target.host);
   const oldRegistry = await read(root, registryFile);
   let registry: Registry | null = oldRegistry
     ? (JSON.parse(oldRegistry.toString("utf8")) as Registry)
@@ -261,12 +263,26 @@ async function compile(
   const original =
     previousConfig?.toString("utf8") ?? (target.host === "codex" ? "" : "{}\n");
   const current = configValue(target.host, original);
+  // Claude Code and WorkBuddy share project `.mcp.json`: while one of them
+  // owns its Badger entry, the other must not acquire it.
+  let manager: AgentHost | undefined;
+  for (const host of Object.keys(hostNames) as AgentHost[])
+    if (
+      host !== target.host &&
+      hostPaths(host, target.scope).configuration === paths.configuration &&
+      (await read(root, registryFor(host)))
+    )
+      manager = host;
   if (registry) {
     if (!matches(current.entry, registry.configuration.entry))
       throw new Error(
         "Conflict: managed Badger MCP configuration was modified",
       );
-  } else if (current.entry !== undefined)
+  } else if (manager)
+    throw new Error(
+      `Conflict: ${hostNames[manager]} manages the Badger MCP entry in ${paths.configuration}; uninstall its Badger workflows there first or use user scope`,
+    );
+  else if (current.entry !== undefined)
     throw new Error(
       "Conflict: the existing Badger MCP entry is unowned; review and remove it yourself",
     );
@@ -538,10 +554,9 @@ export async function commitHostPlan(
   )
     throw new Error("Quote the exact host preview digest");
   const root = rootFor(plan.input.target);
-  const lock = path.join(
-    root,
-    `.badger-${plan.input.target.host}-install.lock`,
-  );
+  // One lock per selected root serializes every host's commits, including
+  // Claude Code's and WorkBuddy's edits to a shared `.mcp.json`.
+  const lock = path.join(root, ".badger-install.lock");
   await inspect(root, lock);
   let handle;
   try {

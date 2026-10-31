@@ -8,6 +8,7 @@ import {
   previewInstall,
   previewUninstall,
   commitHostPlan,
+  type HostPlan,
 } from "../src/index.js";
 import { parse as parseToml } from "smol-toml";
 
@@ -352,6 +353,103 @@ it("refuses unowned same-name MCP entries, symlink escapes, and unsafe package p
     commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest }),
   ).rejects.toThrow(/symbolic/iu);
   expect(await fs.readdir(f.homeRoot)).toEqual([]);
+});
+
+it.each([
+  ["claude", "workbuddy", "Claude Code", "WorkBuddy"],
+  ["workbuddy", "claude", "WorkBuddy", "Claude Code"],
+] as const)(
+  "lets one host at a time manage the shared project .mcp.json entry: %s, then %s",
+  async (first, second, firstName, secondName) => {
+    const f = await fixture();
+    const config = path.join(f.projectRoot, ".mcp.json");
+    const unrelated = '{"mcpServers":{"other":{"command":"other"}}}\n';
+    await fs.writeFile(config, unrelated);
+    const target = (host: typeof first | typeof second) => ({
+      host,
+      scope: "project" as const,
+      projectRoot: f.projectRoot,
+      homeRoot: f.homeRoot,
+    });
+    const install = (host: typeof first | typeof second) =>
+      previewInstall({
+        target: target(host),
+        publication: f.publication,
+        snapshot: f.snapshot,
+        deploymentUrl: "https://badger.example",
+      });
+    const uninstall = (host: typeof first | typeof second) =>
+      previewUninstall({ target: target(host), workflowId: "workflow-1" });
+    const commit = (plan: HostPlan) =>
+      commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest });
+
+    await commit(await install(first));
+    const managed = await fs.readFile(config, "utf8");
+    const refusal = (await install(second).catch((error) => error)) as Error;
+    expect(refusal.message).toContain(
+      `${firstName} manages the Badger MCP entry in .mcp.json`,
+    );
+    expect(refusal.message).toMatch(
+      /uninstall .* there first or use user scope/u,
+    );
+    expect(refusal.message).not.toMatch(/remove/iu);
+    // Removing the entry by hand does not hand it to the other host.
+    const edited = JSON.parse(managed);
+    delete edited.mcpServers.badger;
+    await fs.writeFile(config, JSON.stringify(edited) + "\n");
+    await expect(install(second)).rejects.toThrow(`${firstName} manages`);
+    await fs.writeFile(config, managed);
+
+    await commit(await uninstall(first));
+    await commit(await install(second));
+    await expect(install(first)).rejects.toThrow(`${secondName} manages`);
+    await commit(await uninstall(second));
+    expect(JSON.parse(await fs.readFile(config, "utf8"))).toEqual(
+      JSON.parse(unrelated),
+    );
+  },
+);
+
+it("serializes commits for every host at a selected root with one lock", async () => {
+  const f = await fixture();
+  const [claude, workbuddy] = await Promise.all(
+    (["claude", "workbuddy"] as const).map((host) =>
+      previewInstall({
+        target: {
+          host,
+          scope: "project",
+          projectRoot: f.projectRoot,
+          homeRoot: f.homeRoot,
+        },
+        publication: f.publication,
+        snapshot: f.snapshot,
+        deploymentUrl: "https://badger.example",
+      }),
+    ),
+  );
+  const lock = path.join(f.projectRoot, ".badger-install.lock");
+  await fs.writeFile(lock, "");
+  for (const plan of [claude, workbuddy])
+    await expect(
+      commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest }),
+    ).rejects.toThrow(/installation is active/iu);
+  expect(await fs.readdir(f.projectRoot)).toEqual([".badger-install.lock"]);
+  await fs.unlink(lock);
+  await commitHostPlan(claude, {
+    confirmed: true,
+    digest: claude.preview.digest,
+  });
+  // The second commit recalculates its preview under the lock and finds the
+  // entry the first one now manages.
+  await expect(
+    commitHostPlan(workbuddy, {
+      confirmed: true,
+      digest: workbuddy.preview.digest,
+    }),
+  ).rejects.toThrow(/Claude Code manages/u);
+  expect(await fs.readdir(path.join(f.projectRoot, ".badger/hosts"))).toEqual([
+    "claude.json",
+  ]);
 });
 
 it("binds the selected root directory identity so a replacement home or project cannot inherit confirmation", async () => {
