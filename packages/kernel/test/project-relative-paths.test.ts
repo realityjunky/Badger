@@ -7,6 +7,7 @@ import { generatePackage } from "../src/factory/generate.js";
 import {
   initializeState,
   readState,
+  verifyApprovedProposal,
   writeState,
 } from "../src/factory/state.js";
 import { readCreatorGuide } from "../src/factory/guide.js";
@@ -419,6 +420,84 @@ describe("project-relative Creator records", () => {
     await fs.rename(project, moved);
     await expectPublishableAt(moved, state.name);
   }, 60_000);
+
+  /**
+   * Writes the prepare Skill and a plan whose dossier records its source as
+   * `recorded`, with the hash the source check reports; returns the proposal.
+   */
+  async function proposeWithDossier(options: {
+    skillRoot: string;
+    declared: string;
+    recorded?: string;
+    sourceRoots?: string[];
+  }) {
+    await fs.mkdir(options.skillRoot, { recursive: true });
+    await fs.writeFile(
+      path.join(options.skillRoot, "SKILL.md"),
+      "---\nname: prepare\ndescription: Prepare a report.\n---\n\n# Prepare\n",
+    );
+    const { factoryPlan, dossier } = questionnaireFixture();
+    factoryPlan.skillSources = [
+      { name: "prepare", location: options.declared },
+    ];
+    const [candidate] = await findSkills({
+      projectRoot: project,
+      sources: factoryPlan.skillSources,
+      roots: options.sourceRoots,
+    });
+    dossier.sources[0] = {
+      ...dossier.sources[0]!,
+      location: options.recorded ?? options.declared,
+      contentHash: candidate!.sources[0]!.hash,
+    };
+    await fs.writeFile(
+      planPath,
+      JSON.stringify({ ...factoryPlan, semanticDossier: dossier }, null, 2),
+    );
+    return buildProposal({
+      projectRoot: project,
+      planPath,
+      sourceRoots: options.sourceRoots,
+    });
+  }
+
+  it("keeps a semantic dossier's approved proposal current through a symbolic link to the project", async () => {
+    const real = path.join(root, "real");
+    await fs.mkdir(real);
+    await fs.rename(project, path.join(real, "project"));
+    const linked = path.join(root, "linked");
+    await fs.symlink(real, linked, "dir");
+    const realProject = path.join(real, "project");
+    project = path.join(linked, "project");
+    planPath = path.join(project, "plan.json");
+    const approved = await proposeWithDossier({
+      skillRoot: path.join(project, "skills", "prepare"),
+      declared: "skills/prepare",
+    });
+    expect(approved.blockers).toEqual([]);
+    await initializeState({
+      projectRoot: realProject,
+      planPath: path.join(realProject, "plan.json"),
+      proposalHash: approved.proposalHash,
+      confirmed: true,
+    });
+
+    const { proposal } = await verifyApprovedProposal(
+      await readState(project, approved.name),
+    );
+    expect(proposal.proposalHash).toBe(approved.proposalHash);
+
+    await fs.appendFile(
+      path.join(project, "skills", "prepare", "SKILL.md"),
+      "\nChanged guidance.\n",
+    );
+    expect(
+      (await buildProposal({ projectRoot: project, planPath })).blockers,
+    ).toContain("Semantic dossier source identity is stale: prepare");
+    await expect(
+      verifyApprovedProposal(await readState(project, approved.name)),
+    ).rejects.toThrow("Semantic dossier source identity is stale: prepare");
+  });
 
   it("refuses escaping paths in the authoring session summary and lane records", async () => {
     const state = await runLifecycle();

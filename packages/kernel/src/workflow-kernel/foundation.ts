@@ -263,11 +263,14 @@ export function createWorkflowKernel(
         const candidate = candidates.find(
           (entry) => entry.name === source.name,
         );
+        // Discovery records a source's real path; resolve the location the
+        // same way, so a Project reached through a link keeps its sources.
+        const root = await fs
+          .realpath(path.resolve(projectRoot, source.location.trim()))
+          .catch(() => undefined);
         if (
           !candidate?.sources.some(
-            (entry) =>
-              entry.root === path.resolve(projectRoot, source.location) &&
-              entry.hash === source.contentHash,
+            (entry) => entry.root === root && entry.hash === source.contentHash,
           )
         ) {
           blockers.push(
