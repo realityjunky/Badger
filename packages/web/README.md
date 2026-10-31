@@ -24,6 +24,23 @@ them into `dist/`, so the server image carries the build and none of them.
 
 ## Behavior
 
+- **Demo mode** (#71) is available at `/demo/` under the deployment's base
+  path, for example `/badger/demo/`. It uses the same dashboard with fixed
+  synthetic records on My work, Workflows, Questionnaire, Skills, Runs,
+  Evaluations, and Activity. Follow inbox items, inspect a Skill's files,
+  read an answer thread and a Run gate, or inspect a passing evaluation.
+  The persistent banner identifies the read-only demo. Sign-offs, uploads,
+  inbox state changes, tokens, and administrative writes are unavailable.
+  Appearance and language changes last only for the current page session.
+  The account menu and signed-out page link to the demo.
+
+  The server handles the entire demo namespace before authentication or
+  live API dispatch. Only fixture GET/HEAD requests succeed; other methods
+  are refused and unknown records never fall back to live records. Browser
+  journeys run over that HTTP boundary without request interception or
+  database seeding. Run just the demo journeys after building with
+  `npm run test:e2e -w packages/web -- e2e/demo.spec.ts`.
+
 - Personal access token settings include **Connect your Agent**, with copyable
   stdio configurations for Claude Code, Codex, and WorkBuddy. The deployment's
   origin and base path are filled in, and the person chooses the local

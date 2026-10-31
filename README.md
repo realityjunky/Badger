@@ -18,6 +18,12 @@ in [`packages/mcp/`](packages/mcp/README.md). The local [host installer](package
 Everything shipped is generic: each deployment keeps its own launcher entries,
 reverse-proxy routes, and deploy scripts outside this repository.
 
+Explore the dashboard's public, read-only sample at `/demo/` beneath the
+deployment base path (for example `http://localhost:8787/demo/`). It shows
+fixture workflows, questions, Skills, Runs, evaluations, inbox items, and
+Activity without reading or changing real work. See the
+[dashboard documentation](packages/web/README.md).
+
 The Skills library (#42) now supports immutable folder and zip uploads,
 kernel source identities and inventories, script side-effect declarations,
 file previews, and version comparisons. An Engineer or Field expert on a

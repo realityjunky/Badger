@@ -5,6 +5,11 @@ import type { Language } from "../preferences/model.js";
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  "demo.title": "Demo mode · read-only",
+  "inbox.runGateReady": "{name} · v{number}: answer a Run gate",
+  "demo.open": "Explore demo",
+  "demo.description":
+    "Explore sample workflows and records. Changes are disabled; your real work is kept separate.",
   "inbox.publicationReady": "{name} · v{number}: publish the reviewed package",
   "inbox.publicationInvalidated":
     "{name} · v{number}: publication readiness invalidated",
@@ -1265,6 +1270,11 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  "demo.title": "演示模式 · 只读",
+  "inbox.runGateReady": "{name} · v{number}：回答运行关卡",
+  "demo.open": "浏览演示",
+  "demo.description":
+    "浏览示例工作流和记录。此处无法修改数据，与您的实际工作相互独立。",
   "inbox.publicationReady": "{name} · v{number}：发布已审核的软件包",
   "inbox.publicationInvalidated": "{name} · v{number}：发布就绪状态已失效",
   "publication.title": "审核与发布",

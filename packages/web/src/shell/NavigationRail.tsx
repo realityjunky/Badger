@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { navigationSections, type NavigationItem } from "../app/navigation.js";
 import { useI18n } from "../i18n/I18nContext.js";
+import { useDemoMode } from "../app/DemoContext.js";
 
 const ICONS: Record<NavigationItem["icon"], ReactNode> = {
   work: <InboxOutlined />,
@@ -47,6 +48,7 @@ export function NavigationRail({
   onNavigate,
 }: NavigationRailProps) {
   const { t } = useI18n();
+  const demoMode = useDemoMode();
   const effectiveCollapsed = collapsed && !drawer;
 
   return (
@@ -66,30 +68,35 @@ export function NavigationRail({
       </div>
 
       <nav className="rail-nav" aria-label={t("a11y.primaryNavigation")}>
-        {navigationSections.map((section) => (
-          <div className="rail-section" key={section.title}>
-            <p className="rail-section-title">{t(section.title)}</p>
-            <ul>
-              {section.items.map((item) => (
-                <li key={item.path}>
-                  <NavLink
-                    to={item.path}
-                    className={({ isActive }) =>
-                      isActive ? "rail-link rail-link-active" : "rail-link"
-                    }
-                    aria-label={t(item.title)}
-                    onClick={onNavigate}
-                  >
-                    <span className="rail-icon" aria-hidden="true">
-                      {ICONS[item.icon]}
-                    </span>
-                    <span className="rail-label">{t(item.title)}</span>
-                  </NavLink>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        {navigationSections
+          .filter(
+            (section) =>
+              !demoMode || section.title !== "nav.section.administration",
+          )
+          .map((section) => (
+            <div className="rail-section" key={section.title}>
+              <p className="rail-section-title">{t(section.title)}</p>
+              <ul>
+                {section.items.map((item) => (
+                  <li key={item.path}>
+                    <NavLink
+                      to={item.path}
+                      className={({ isActive }) =>
+                        isActive ? "rail-link rail-link-active" : "rail-link"
+                      }
+                      aria-label={t(item.title)}
+                      onClick={onNavigate}
+                    >
+                      <span className="rail-icon" aria-hidden="true">
+                        {ICONS[item.icon]}
+                      </span>
+                      <span className="rail-label">{t(item.title)}</span>
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
       </nav>
 
       {!drawer && (

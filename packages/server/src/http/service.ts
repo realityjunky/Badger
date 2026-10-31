@@ -24,6 +24,7 @@ import {
 import type { Clock } from "../clock.js";
 import type { ServiceConfig } from "../config.js";
 import { isTransactionConflict, type Database } from "../database/database.js";
+import { handleDemo } from "./demo.js";
 import type { Migration } from "../database/migrations.js";
 import {
   firstHeader,
@@ -677,6 +678,10 @@ export function createService(options: ServiceOptions, port: number): Service {
     const isApi = path === "/api" || path.startsWith("/api/");
     const preferencesPath = path === `${API}/me/preferences`;
 
+    if (path === "/demo" || path.startsWith("/demo/")) {
+      return handleDemo(config, reply, path, method, url);
+    }
+
     if (path === "/health") {
       if (!reads) {
         return reply.error(405, "invalid", "Method not allowed", {
@@ -793,6 +798,7 @@ export function createService(options: ServiceOptions, port: number): Service {
               config.identity.kind === "oidc"
                 ? `${config.basePath === "/" ? "" : config.basePath}/auth/oidc/login?${new URLSearchParams({ returnTo: `${url.pathname}${url.search}` })}`
                 : undefined,
+              `${config.basePath === "/" ? "" : config.basePath}/demo/`,
             ),
           );
     }

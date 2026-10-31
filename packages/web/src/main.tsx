@@ -18,6 +18,13 @@ if (container === null) {
 
 createRoot(container).render(
   <StrictMode>
-    <App basePath={readBasePath(document)} />
+    <App
+      basePath={readBasePath(document)}
+      demoMode={
+        document
+          .querySelector('meta[name="badger-demo"]')
+          ?.getAttribute("content") === "true"
+      }
+    />
   </StrictMode>,
 );

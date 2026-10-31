@@ -7,12 +7,15 @@ import { layout } from "../theme/tokens.js";
 import { useMediaQuery } from "../theme/useMediaQuery.js";
 import { NavigationRail } from "./NavigationRail.js";
 import { TopBar } from "./TopBar.js";
+import { Alert } from "antd";
+import { useDemoMode } from "../app/DemoContext.js";
 
 /**
  * The application frame: the rail, the top bar, and the page. Below 1024px
  * the rail becomes a drawer; the content keeps its own URL throughout.
  */
 export function AppShell() {
+  const demoMode = useDemoMode();
   const { t } = useI18n();
   const { preferences, update } = usePreferences();
   const location = useLocation();
@@ -63,6 +66,16 @@ export function AppShell() {
           onOpenRail={() => setDrawerOpen(true)}
         />
         <main id="main-content" className="app-content" tabIndex={-1}>
+          {demoMode && (
+            <Alert
+              className="demo-banner"
+              data-testid="demo-banner"
+              type="info"
+              showIcon
+              title={t("demo.title")}
+              description={t("demo.description")}
+            />
+          )}
           <Outlet />
         </main>
       </div>

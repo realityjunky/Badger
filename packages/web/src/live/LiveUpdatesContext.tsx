@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { apiUrl } from "../app/paths.js";
+import { useDemoMode } from "../app/DemoContext.js";
 
 interface Notice {
   sequence: number;
@@ -25,6 +26,7 @@ export function LiveUpdatesProvider({
   basePath: string;
   children: ReactNode;
 }) {
+  const demoMode = useDemoMode();
   const [connected, setConnected] = useState(false);
   const [notice, setNotice] = useState<Notice>({
     sequence: 0,
@@ -32,7 +34,7 @@ export function LiveUpdatesProvider({
     inbox: true,
   });
   useEffect(() => {
-    if (typeof EventSource === "undefined") return;
+    if (demoMode || typeof EventSource === "undefined") return;
     const stream = new EventSource(apiUrl(basePath, "/me/events"));
     stream.onopen = () => setConnected(true);
     stream.onerror = () => setConnected(false);
@@ -59,7 +61,7 @@ export function LiveUpdatesProvider({
     stream.addEventListener("ready", change as EventListener);
     stream.addEventListener("change", change as EventListener);
     return () => stream.close();
-  }, [basePath]);
+  }, [basePath, demoMode]);
   return (
     <LiveUpdates.Provider value={{ connected, notice }}>
       {children}

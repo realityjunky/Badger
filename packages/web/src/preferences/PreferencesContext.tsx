@@ -23,6 +23,7 @@ import {
   type PreferencesView,
   type SaveState,
 } from "./saver.js";
+import { useDemoMode } from "../app/DemoContext.js";
 
 export type { SaveState } from "./saver.js";
 
@@ -48,6 +49,7 @@ export function PreferencesProvider({
   basePath: string;
   children: ReactNode;
 }) {
+  const demoMode = useDemoMode();
   const [view, setView] = useState<PreferencesView>({
     preferences: DEFAULT_PREFERENCES,
     saveState: "idle",
@@ -95,9 +97,16 @@ export function PreferencesProvider({
 
   const update = useCallback(
     (patch: Partial<Preferences>) => {
-      void saver.change(patch);
+      if (demoMode) {
+        setView((current) => ({
+          preferences: { ...current.preferences, ...patch },
+          saveState: "idle",
+        }));
+      } else {
+        void saver.change(patch);
+      }
     },
-    [saver],
+    [saver, demoMode],
   );
 
   const value = useMemo<PreferencesContextValue>(

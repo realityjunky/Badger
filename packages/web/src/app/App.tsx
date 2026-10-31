@@ -23,16 +23,26 @@ import { useSystemTheme } from "../theme/useSystemTheme.js";
 import { normalizeBasePath } from "./paths.js";
 import { InboxProvider } from "../inbox/InboxContext.js";
 import { LiveUpdatesProvider } from "../live/LiveUpdatesContext.js";
+import { DemoContext, useDemoMode } from "./DemoContext.js";
 
-export function App({ basePath }: { basePath: string }) {
+export function App({
+  basePath,
+  demoMode = false,
+}: {
+  basePath: string;
+  demoMode?: boolean;
+}) {
   return (
-    <PreferencesProvider basePath={basePath}>
-      <ThemedApp basePath={basePath} />
-    </PreferencesProvider>
+    <DemoContext.Provider value={demoMode}>
+      <PreferencesProvider basePath={basePath}>
+        <ThemedApp basePath={basePath} />
+      </PreferencesProvider>
+    </DemoContext.Provider>
   );
 }
 
 function ThemedApp({ basePath }: { basePath: string }) {
+  const demoMode = useDemoMode();
   const { preferences } = usePreferences();
   const system = useSystemTheme();
   const resolved = resolveTheme(preferences.theme, system);
@@ -98,7 +108,10 @@ function ThemedApp({ basePath }: { basePath: string }) {
                   <Route path="runs/:runId" element={<RunsPage />} />
                   <Route path="evaluations/*" element={<EvaluationsPage />} />
                   <Route path="activity" element={<ActivityPage />} />
-                  <Route path="admin/*" element={<AdminPage />} />
+                  <Route
+                    path="admin/*"
+                    element={demoMode ? <NotFoundPage /> : <AdminPage />}
+                  />
                   <Route path="settings/*" element={<SettingsPage />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>

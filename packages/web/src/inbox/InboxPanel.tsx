@@ -3,8 +3,10 @@ import { useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useI18n } from "../i18n/I18nContext.js";
 import { useInbox } from "./InboxContext.js";
+import { useDemoMode } from "../app/DemoContext.js";
 
 export function InboxPanel() {
+  const demoMode = useDemoMode();
   const { page, failed, busy, mark, refresh, older, newest, hasOlderPage } =
     useInbox();
   const { t, format, locale } = useI18n();
@@ -34,7 +36,7 @@ export function InboxPanel() {
               <Link
                 to={item.href}
                 onClick={() => {
-                  if (item.state === "unread") void mark(item);
+                  if (!demoMode && item.state === "unread") void mark(item);
                 }}
               >
                 {format(
@@ -53,15 +55,17 @@ export function InboxPanel() {
                               : item.kind === "question-assigned"
                                 ? "inbox.questionAssigned"
                                 : item.kind === "gate-ready"
-                                  ? item.gate === "publication"
-                                    ? "inbox.publicationReady"
-                                    : item.gate === "dossier"
-                                      ? "inbox.dossierReady"
-                                      : item.gate === "plan"
-                                        ? "inbox.planReady"
-                                        : item.gate === "proposal"
-                                          ? "inbox.proposalReady"
-                                          : "inbox.gateReady"
+                                  ? item.gate.startsWith("run:")
+                                    ? "inbox.runGateReady"
+                                    : item.gate === "publication"
+                                      ? "inbox.publicationReady"
+                                      : item.gate === "dossier"
+                                        ? "inbox.dossierReady"
+                                        : item.gate === "plan"
+                                          ? "inbox.planReady"
+                                          : item.gate === "proposal"
+                                            ? "inbox.proposalReady"
+                                            : "inbox.gateReady"
                                   : item.gate === "publication"
                                     ? "inbox.publicationInvalidated"
                                     : item.gate === "package"
@@ -87,7 +91,10 @@ export function InboxPanel() {
             <Space wrap>
               <Tag>{t(`inbox.state.${item.state}`)}</Tag>
               {item.state !== "done" && (
-                <Button disabled={busy} onClick={() => void mark(item)}>
+                <Button
+                  disabled={busy || demoMode}
+                  onClick={() => void mark(item)}
+                >
                   {t(
                     item.state === "unread"
                       ? "inbox.markRead"

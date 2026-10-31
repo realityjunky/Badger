@@ -21,6 +21,7 @@ import { readBasePath } from "../app/paths.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
 import { useInbox } from "../inbox/InboxContext.js";
+import { useDemoMode } from "../app/DemoContext.js";
 
 export interface TopBarProps {
   drawerMode: boolean;
@@ -29,6 +30,7 @@ export interface TopBarProps {
 
 /** The sticky 68px bar: scope, search, inbox, language, and the user menu. */
 export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
+  const demoMode = useDemoMode();
   const { t, format } = useI18n();
   const { preferences, person, update } = usePreferences();
   const navigate = useNavigate();
@@ -84,6 +86,20 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
       label: t("nav.settings"),
       onClick: () => navigate("/settings"),
     },
+    ...(!demoMode
+      ? [
+          {
+            key: "demo",
+            label: (
+              <a
+                href={`${readBasePath(document) === "/" ? "" : readBasePath(document)}/demo/`}
+              >
+                {t("demo.open")}
+              </a>
+            ),
+          },
+        ]
+      : []),
     ...(person?.signOut
       ? [
           {

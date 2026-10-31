@@ -9,6 +9,23 @@ identity headers from configured proxy peers. See
 [identity adapter configuration](../../docs/identity-adapters.md) for OIDC
 registration, Strict browser sessions, proxy trust, and email binding checks.
 
+## Read-only demo
+
+`/demo/` beneath `BADGER_BASE_PATH` is public sample content, including its
+own `/api/v1/` namespace. It shows synthetic fixtures on the seven main
+dashboard pages and requires no identity. Demo requests are handled before
+session, bearer-token, database, worker, and blob access. They read only the
+bundled fixtures and the dashboard build. GET and HEAD are supported; every
+other method returns 405 with `Allow: GET, HEAD`. Unknown fixture records
+return 404 and never reach a live handler. The normal service and its
+authentication requirements remain on their existing URLs.
+
+The demo reuses the service process and dashboard build; it does not seed,
+reset, migrate, or clone application records. Its display capabilities
+disable writes, while the HTTP boundary also refuses direct requests.
+Theme and language changes are transient browser state. Add only synthetic
+content to `src/demo/fixtures.ts`; never import deployment or user records.
+
 ## Building the image behind a proxy
 
 Build from the repository root. Both `npm ci` in the build stage and

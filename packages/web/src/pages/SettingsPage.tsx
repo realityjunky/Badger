@@ -6,6 +6,7 @@ import { usePreferences } from "../preferences/PreferencesContext.js";
 import { TokenSettings } from "./settings/TokenSettings.js";
 import { NotificationSettings } from "./settings/NotificationSettings.js";
 import { GroupRobotSettings } from "./settings/GroupRobotSettings.js";
+import { useDemoMode } from "../app/DemoContext.js";
 import {
   clampFontScale,
   FONT_SCALE_STEP,
@@ -40,12 +41,17 @@ function isTabKey(value: string | undefined): value is TabKey {
 
 /** Appearance, language, and the other personal choices; each tab has a URL. */
 export function SettingsPage() {
+  const demoMode = useDemoMode();
   const { t, format } = useI18n();
   const { preferences, update, saveState } = usePreferences();
   const location = useLocation();
   const navigate = useNavigate();
   const segment = location.pathname.split("/")[2];
-  const activeTab: TabKey = isTabKey(segment) ? segment : "appearance";
+  const activeTab: TabKey =
+    isTabKey(segment) &&
+    (!demoMode || segment === "appearance" || segment === "language")
+      ? segment
+      : "appearance";
 
   return (
     <div className="page" data-testid="page-settings">
@@ -190,7 +196,10 @@ export function SettingsPage() {
               </>
             ),
           },
-        ]}
+        ].filter(
+          (tab) =>
+            !demoMode || tab.key === "appearance" || tab.key === "language",
+        )}
       />
     </div>
   );

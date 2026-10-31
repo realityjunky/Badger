@@ -1463,3 +1463,6 @@ body {
   cursor: pointer;
   padding: 8px;
 }
+.demo-banner {
+  margin-bottom: 20px;
+}

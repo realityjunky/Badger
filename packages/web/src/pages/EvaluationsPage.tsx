@@ -25,10 +25,12 @@ import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import { useI18n } from "../i18n/I18nContext.js";
+import { useDemoMode } from "../app/DemoContext.js";
 
 const label = (value: string) =>
   value.replace(/([a-z])([A-Z])/gu, "$1 $2").replace(/[-_]/gu, " ");
 export function EvaluationsPage() {
+  const demoMode = useDemoMode();
   const { t, locale } = useI18n();
   const { notice } = useLiveUpdates();
   const [parameters, setParameters] = useSearchParams();
@@ -45,6 +47,27 @@ export function EvaluationsPage() {
     requestId: string;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  // Open a completed fixture version on first entry; the normal dashboard
+  // still asks the person to choose their Workflow and version.
+  useEffect(() => {
+    if (!demoMode) return;
+    const first = catalog?.workflows[0];
+    if (!workflowId && first) {
+      setParameters({ workflow: first.id }, { replace: true });
+    } else if (workflowId && !versionId && detail) {
+      const selected =
+        detail.versions.find((version) =>
+          version.stages.some(
+            (stage) => stage.id === "evaluation" && stage.state === "done",
+          ),
+        ) ?? detail.versions[0];
+      if (selected)
+        setParameters(
+          { workflow: workflowId, version: selected.id },
+          { replace: true },
+        );
+    }
+  }, [demoMode, catalog, detail, workflowId, versionId, setParameters]);
   const route =
     workflowId && versionId
       ? `/workflows/${encodeURIComponent(workflowId)}/versions/${encodeURIComponent(versionId)}/evaluations`
