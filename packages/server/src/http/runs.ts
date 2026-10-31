@@ -18,6 +18,7 @@ import {
   flagRunIntegrity,
   hasMatchingRunGateAnswer,
   needsRunRecovery,
+  observeRunPackage,
   reconcileRunIntegrity,
   recordRunRecoveries,
   RunIntegrityError,
@@ -358,20 +359,14 @@ export async function handleRuns(input: AuthorizedRequest) {
             requestId: input.context.requestId,
           });
       }
-      if (observedPackageHash !== row.package_hash) {
-        await flagRunIntegrity(
-          tx,
-          input.dependencies,
-          { ...input.context, personId: input.person.id },
-          row,
-          "package-hash-mismatch",
-          { expectedPackageHash: row.package_hash, observedPackageHash },
-        );
-        return new RunIntegrityError("package-hash-mismatch", {
-          expectedPackageHash: row.package_hash,
-          observedPackageHash,
-        });
-      }
+      // Changed installed bytes are flagged; mirroring continues.
+      await observeRunPackage(
+        tx,
+        input.dependencies,
+        { ...input.context, personId: input.person.id },
+        row,
+        observedPackageHash,
+      );
     }
     if (!row) throw new RequestError(404, "No such Run");
     await authorize(

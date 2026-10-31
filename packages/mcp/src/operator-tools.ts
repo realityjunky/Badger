@@ -426,13 +426,16 @@ export class LocalRuns {
     const observedPackageHash = await hashDirectory(
       localBinding.packageDirectory,
     ).catch(() => null);
+    // Changed installed bytes are reported once; the service keeps them flagged
+    // until a registration observes the bound bytes again.
     if (
       queue.lastAcknowledged === queue.report.lastSequence &&
       queue.acknowledgedReportHash === reportHash &&
       !recovery.required &&
       recovery.requests.length === 0 &&
       this.synchronized.has(root) &&
-      observedPackageHash === localBinding.packageHash &&
+      this.registered.has(key) &&
+      this.registered.get(key) === observedPackageHash &&
       !this.errors.has(key)
     )
       return;

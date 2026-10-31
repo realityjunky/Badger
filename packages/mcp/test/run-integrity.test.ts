@@ -30,19 +30,22 @@ it("reconciles a flagged Run through recover and retries its durable outcome aft
   const f = await publishedFixture(service);
   root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-recovery-"));
   let holdEvents = true;
+  let posts = 0;
   const connect = async () => {
     mcp = createBadgerMcp({
       url: service.baseUrl,
       token: f.operatorToken,
       agentHost: "Planning Agent",
       profile: "operator",
-      fetch: async (url, init) =>
-        holdEvents && url.endsWith("/events")
+      fetch: async (url, init) => {
+        if (init.method === "POST") posts++;
+        return holdEvents && url.endsWith("/events")
           ? Response.json(
               { error: { message: "Mirror unavailable" } },
               { status: 503 },
             )
-          : fetch(url, init),
+          : fetch(url, init);
+      },
     });
     const [a, b] = InMemoryTransport.createLinkedPair();
     await mcp.connect(b);
@@ -113,13 +116,38 @@ it("reconciles a flagged Run through recover and retries its durable outcome aft
     "\nChanged installed package bytes.\n",
   );
   await call("status", args);
+  const findings = async () =>
+    (await f.call(route, "GET", undefined, operator)).run.integrityFindings.map(
+      (finding: any) => finding.code,
+    );
+  await expect.poll(findings).toContain("package-hash-mismatch");
+  // Changed bytes are flagged, not refused: later progress is still mirrored.
+  const current = (await call("next", args)).continuation;
+  await call("submit", {
+    ...args,
+    submission: {
+      actionId: current.pendingAction.id,
+      revision: current.revision,
+      runId: current.runId,
+      nodeId: current.currentNode,
+      execution: current.execution,
+      status: "succeeded",
+      summary: "Report prepared.",
+      evidence: { summary: "Reviewed the report." },
+    },
+  });
   await expect
-    .poll(async () =>
-      (
-        await f.call(route, "GET", undefined, operator)
-      ).run.integrityFindings.map((finding: any) => finding.code),
+    .poll(
+      async () =>
+        (await f.call(route, "GET", undefined, operator)).run.projection
+          ?.status,
     )
-    .toContain("package-hash-mismatch");
+    .toBe("completed");
+  expect(await findings()).toContain("package-hash-mismatch");
+  // Once reported, the changed bytes are not posted again on every tick.
+  const posted = posts;
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  expect(posts).toBe(posted);
   await fs.writeFile(started.skillPath, originalSkill);
   await client.close();
   await mcp.close();

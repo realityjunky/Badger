@@ -265,7 +265,7 @@ it("keeps a package mismatch after refusal and settles recovery only with the bo
       testRun: false,
     },
     operator,
-    409,
+    200,
     f.operatorToken,
   );
   expect(
@@ -339,4 +339,73 @@ it("keeps a package mismatch after refusal and settles recovery only with the bo
       ).events,
     ).toHaveLength(1);
   await f.call(`${f.route}/events`, "POST", report, auditor, 403);
+}, 60_000);
+
+it("flags changed installed bytes without refusing later reports, and keeps the finding until the bound bytes return", async () => {
+  const f = await fixture();
+  const register = (observedPackageHash: string | null) =>
+    f.call(
+      f.route,
+      "POST",
+      {
+        workflowId: f.workflow.id,
+        publicationId: f.publication.id,
+        packageHash: f.publication.packageHash,
+        observedPackageHash,
+        execution: f.current.execution,
+        localRunId: f.location.runId,
+        hostLabel: "Lab",
+        testRun: false,
+      },
+      operator,
+      200,
+      f.operatorToken,
+    );
+  const changed = {
+    code: "package-hash-mismatch",
+    evidence: {
+      expectedPackageHash: f.publication.packageHash,
+      observedPackageHash: "0".repeat(64),
+    },
+  };
+  await register("0".repeat(64));
+  await register("0".repeat(64));
+  expect(await f.read()).toMatchObject({
+    needsRecovery: true,
+    integrityFindings: [changed],
+  });
+  // Events, the snapshot, and a new gate still arrive; reports keep the finding.
+  const report = (await f.runtime.readReport(f.location))!;
+  await f.post(report);
+  await f.post(report);
+  expect(await f.read()).toMatchObject({
+    lastSequence: report.lastSequence,
+    events: report.events,
+    projection: report.projection,
+    needsRecovery: true,
+    integrityFindings: [changed],
+  });
+  expect(
+    (await f.call(`${f.route}/gates`, "GET", undefined, operator)).gates,
+  ).toMatchObject([{ state: "open", actionId: f.current.pendingAction!.id }]);
+  await register(null);
+  expect((await f.read()).integrityFindings).toMatchObject([
+    { evidence: { observedPackageHash: null } },
+  ]);
+  await register(f.publication.packageHash);
+  expect(await f.read()).toMatchObject({
+    needsRecovery: false,
+    integrityFindings: [],
+  });
+  const audit = async (action: string) =>
+    (
+      await f.call(
+        `/audit-events?action=${action}&targetId=integrity`,
+        "GET",
+        undefined,
+        admin,
+      )
+    ).events;
+  expect(await audit("run.integrity_detected")).toHaveLength(2);
+  expect(await audit("run.integrity_resolved")).toHaveLength(1);
 }, 60_000);

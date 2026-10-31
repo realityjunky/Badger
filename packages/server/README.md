@@ -1328,7 +1328,9 @@ earlier evidence retained in the Activity log.
 Registration can include `observedPackageHash` separately from its immutable
 `packageHash` binding. The MCP rehashes installed bytes on later calls. Changed
 or unreadable bytes (`observedPackageHash:null`) are flagged even when the Run
-has never reached the service before.
+has never reached the service before. They refuse neither the registration nor
+later reports, and the finding stays until a registration observes the bound
+bytes again.
 
 Only the registered person and Agent host may send `POST /api/v1/runs/:id/recovery`
 with `{required:true, requestId}` when the local runtime cannot export a committed

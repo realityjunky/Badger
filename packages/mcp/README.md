@@ -331,7 +331,9 @@ without making the service an execution authority.
 
 The dashboard marks Runs needing recovery and displays service integrity
 findings for unattested decisions, missing event sequences, and mismatched
-published execution identities. Use `recover` on the Run's own computer;
+published execution identities or installed package bytes. Changed installed
+bytes are reported once and do not stop mirroring; the finding stays until the
+MCP observes the published bytes again. Use `recover` on the Run's own computer;
 WorkflowRuntime remains the only recovery authority. Recovery notices and
 request IDs are persisted separately in `.badger/mcp-recovery.json` inside the
 Run root, including when an interrupted transition prevents normal reporting.

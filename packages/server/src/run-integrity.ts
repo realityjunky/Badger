@@ -139,19 +139,22 @@ export async function flagRunIntegrity(
   );
 }
 
-export async function reconcileRunIntegrity(
+/** Changed installed bytes, unlike a changed execution identity, never refuse
+ * a report, so only observing the bound bytes again settles them. */
+function installedBytesFinding(finding: RunIntegrityFinding) {
+  return (
+    finding.code === "package-hash-mismatch" &&
+    Object.hasOwn(finding.evidence, "observedPackageHash")
+  );
+}
+
+async function resolveRunIntegrity(
   tx: Queryable,
   deps: ServiceDependencies,
   context: WriteContext,
   row: RunIntegrityRow,
-  lastSequence: number,
+  resolved: RunIntegrityFinding[],
 ) {
-  const resolved = row.integrity_findings.filter(
-    (f) =>
-      f.code === "package-hash-mismatch" ||
-      (f.code === "event-sequence-gap" &&
-        lastSequence >= Number(f.evidence.received)),
-  );
   for (const finding of resolved)
     await auditIntegrity(
       tx,
@@ -165,6 +168,50 @@ export async function reconcileRunIntegrity(
     );
   row.integrity_findings = row.integrity_findings.filter(
     (f) => !resolved.includes(f),
+  );
+}
+
+export async function reconcileRunIntegrity(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  context: WriteContext,
+  row: RunIntegrityRow,
+  lastSequence: number,
+) {
+  await resolveRunIntegrity(
+    tx,
+    deps,
+    context,
+    row,
+    row.integrity_findings.filter(
+      (f) =>
+        (f.code === "package-hash-mismatch" && !installedBytesFinding(f)) ||
+        (f.code === "event-sequence-gap" &&
+          lastSequence >= Number(f.evidence.received)),
+    ),
+  );
+}
+
+/** Registration reports the installed bytes it observed. A change stays
+ * current, without refusing anything, until the bound bytes are observed. */
+export async function observeRunPackage(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  context: WriteContext,
+  row: RunIntegrityRow & { package_hash: string },
+  observedPackageHash: string | null,
+) {
+  if (observedPackageHash !== row.package_hash)
+    return flagRunIntegrity(tx, deps, context, row, "package-hash-mismatch", {
+      expectedPackageHash: row.package_hash,
+      observedPackageHash,
+    });
+  const resolved = row.integrity_findings.filter(installedBytesFinding);
+  if (resolved.length === 0) return;
+  await resolveRunIntegrity(tx, deps, context, row, resolved);
+  await tx.query(
+    "update workflow_runs set integrity_findings=$2::jsonb,updated_at=$3 where id=$1",
+    [row.id, JSON.stringify(row.integrity_findings), deps.clock.now()],
   );
 }
 

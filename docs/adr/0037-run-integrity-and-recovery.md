@@ -12,8 +12,11 @@ Event gaps and execution identity mismatches still refuse the report. A savepoin
 discards every event and snapshot from that request before committing its finding
 and audit entry. Registration checks execution against the kernel's compilation
 of the immutable published protocol. Its runtime package identity is distinct
-from the published package's directory hash. The service never recompiles routes
-or decides which transition is legal.
+from the published package's directory hash. Changed installed bytes, such as a
+cache an interpreter writes into the package, refuse neither registration nor
+reports: their finding stays current until a registration observes the bound
+bytes again. The service never recompiles routes or decides which transition is
+legal.
 
 Decision provenance is checked against immutable dashboard gate answers, including
 the exact pending action, revision, Attempt, Cycle, choice, inputs, scope,
@@ -29,8 +32,8 @@ retry them. The request is written before local recovery, and notices have stabl
 identities, so a lost HTTP response cannot reopen a settled interruption. Blocked
 attempts report outcomes even when the kernel cannot export a committed report.
 Only the registered person and Agent host can report them. Complete
-reports settle gaps once the reported horizon is covered and package mismatches
-once the bound identity is restored. A recovery request also settles an explicit
+reports settle gaps once the reported horizon is covered and execution identity
+mismatches once the bound identity is restored. A recovery request also settles an explicit
 interruption notice. Outcomes and audits are idempotent by Run and request ID.
 Each recovery request binds its notice identity, so even a delayed first delivery
 of an earlier outcome cannot clear a newer interruption. Remaining integrity
