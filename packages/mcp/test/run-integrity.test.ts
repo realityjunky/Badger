@@ -175,12 +175,14 @@ it("reports an interrupted kernel transition before recover and mirrors its sett
   });
   root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-interruption-"));
   let loseRecoveryReply = false;
+  let recoveryPosts = 0;
   mcp = createBadgerMcp({
     url: service.baseUrl,
     token: f.operatorToken,
     agentHost: "Planning Agent",
     profile: "operator",
     fetch: async (url, init) => {
+      if (url.endsWith("/recovery")) recoveryPosts++;
       const response = await fetch(url, init);
       if (
         loseRecoveryReply &&
@@ -263,6 +265,10 @@ it("reports an interrupted kernel transition before recover and mirrors its sett
         (await f.call(route, "GET", undefined, operator)).run.needsRecovery,
     )
     .toBe(true);
+  // The acknowledged notice is not posted again on every tick.
+  const noticed = recoveryPosts;
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  expect(recoveryPosts).toBe(noticed);
   const artifactRecord = path.join(
     root,
     ".badger/runs/interrupted/.badger/artifacts.json",

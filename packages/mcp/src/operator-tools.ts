@@ -186,6 +186,8 @@ export class LocalRuns {
   private readonly synchronized = new Set<string>();
   /** The installed package hash each Run last registered in this process. */
   private readonly registered = new Map<string, string | null>();
+  /** The recovery notice the service last acknowledged for each Run. */
+  private readonly noticed = new Map<string, string>();
   private readonly retries = new Map<string, { count: number; at: number }>();
   /** A rate limit applies to the token, so it pauses every Run's reporting. */
   private limitedUntil = 0;
@@ -390,9 +392,17 @@ export class LocalRuns {
     const key = path.join(args.projectRoot, runRelative(args.runId));
     const recovery = await this.withQueue(args, () => recoveryQueue(root));
     if (recovery.required) {
-      const { binding } = await this.binding(args, true);
       const current = await runtime.inspect(target(args));
       if (!current) throw new Error("This local Run has not started");
+      // While the runtime still needs recovery, the service already holds an
+      // acknowledged notice until a new notice or new requests arrive.
+      if (
+        requiresRecovery(current) &&
+        this.noticed.get(key) === recovery.noticeId &&
+        recovery.requests.length === 0
+      )
+        return;
+      const { binding } = await this.binding(args, true);
       await this.register(key, binding, current.execution);
       await this.request(
         binding,
@@ -406,6 +416,7 @@ export class LocalRuns {
             : {}),
         },
       );
+      this.noticed.set(key, recovery.noticeId!);
       if (requiresRecovery(current)) {
         await this.withQueue(args, async () => {
           const latest = await recoveryQueue(root);
