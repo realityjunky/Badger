@@ -60,10 +60,12 @@ file keeps its permission bits, so a private `0600` configuration stays private
 after install and uninstall; new files get the default mode. It verifies
 the installed directory against the published hash. Successful CLI commits remove
 the private plan. Temporary locks and atomic staging files are transient adapter
-bookkeeping. A process killed while committing may leave its lock or a partial
-installation; inspect the preview and files before manually removing a stale
-lock or repairing files. The installer never automatically deletes unknown files
-to recover from interruption.
+bookkeeping. The lock file records the committing process ID and start time. A
+process killed while committing may leave its lock or a partial installation;
+later commits at that root refuse and name the lock file. If no installation is
+running, inspect the preview and files before manually deleting the stale lock
+or repairing files. The installer never automatically deletes unknown files to
+recover from interruption.
 
 ```sh
 badger-hosts preview-uninstall --workflow WORKFLOW_ID --host codex --scope project

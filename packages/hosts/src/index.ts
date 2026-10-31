@@ -572,12 +572,20 @@ export async function commitHostPlan(
   let handle;
   try {
     handle = await fs.open(lock, "wx", 0o600);
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     throw new Error(
-      "Another local host installation is active; retry after it finishes",
+      `Another local host installation is active (lock file ${lock}); retry after it finishes, or delete the lock file if no installation is running`,
     );
   }
   try {
+    // Identify the holder for anyone who finds the lock after a crash.
+    await handle.writeFile(
+      JSON.stringify({
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+      }) + "\n",
+    );
     const current = await compile(plan.input);
     if (
       current.plan.preview.digest !== confirmation.digest ||

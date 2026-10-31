@@ -453,6 +453,35 @@ it("serializes commits for every host at a selected root with one lock", async (
   ]);
 });
 
+it("names a lock left by an interrupted commit and says when it may be deleted", async () => {
+  const f = await fixture();
+  const plan = await previewInstall({
+    target: {
+      host: "codex",
+      scope: "user",
+      projectRoot: f.projectRoot,
+      homeRoot: f.homeRoot,
+    },
+    publication: f.publication,
+    snapshot: f.snapshot,
+    deploymentUrl: "https://badger.example",
+  });
+  const lock = path.join(f.homeRoot, ".badger-install.lock");
+  await fs.writeFile(lock, "");
+  const refusal = (await commitHostPlan(plan, {
+    confirmed: true,
+    digest: plan.preview.digest,
+  }).catch((error) => error)) as Error;
+  expect(refusal.message).toContain(lock);
+  expect(refusal.message).toMatch(
+    /delete the lock file if no installation is running/u,
+  );
+  await expect(fs.stat(plan.preview.packageDirectory)).rejects.toThrow();
+  await fs.unlink(lock);
+  await commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest });
+  expect(await fs.readdir(f.homeRoot)).not.toContain(".badger-install.lock");
+});
+
 it("binds the selected root directory identity so a replacement home or project cannot inherit confirmation", async () => {
   const f = await fixture();
   const target = {
