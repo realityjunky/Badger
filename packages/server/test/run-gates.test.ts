@@ -17,14 +17,20 @@ import {
   observer,
   admin,
 } from "./fixtures/planning.js";
-import { publishedFixture, operator, decisionPlan } from "./fixtures/runs.js";
+import {
+  publishedFixture,
+  operator,
+  decisionPlan,
+  durableGatePlan,
+} from "./fixtures/runs.js";
 
 let service: TestService;
 let root: string;
-let robot: StubWeComRobot;
+let robot: StubWeComRobot | undefined;
 afterEach(async () => {
   await service?.close();
   await robot?.close();
+  robot = undefined;
   if (root) await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -364,3 +370,144 @@ it("routes a named Workflow owner's gate to their inbox and team channel, and re
   await machine(`${route}/events`, await runtime.readReport(location));
   await call(`${route}/gates/${gate.id}/preview`, "POST", answer, owner, 409);
 }, 60_000);
+
+it("opens a fresh gate when a superseded binding recurs and delivers only the most recent gate's answer", async () => {
+  service = await startPlanningService();
+  const f = await publishedFixture(service, (plan) => {
+    durableGatePlan(plan);
+    const durability = plan.workflow.capabilities.durability;
+    durability.capabilities = durability.capabilities.filter(
+      (capability: string) => capability !== "repair-policy",
+    );
+    delete durability.repair;
+  });
+  await f.call(
+    "/bindings",
+    "POST",
+    {
+      scopeType: "workflow",
+      scopeId: f.workflow.id,
+      email: owner.email,
+      role: "Operator",
+    },
+    admin,
+    201,
+  );
+  const published = await f.call(
+    `/workflows/${f.workflow.id}/publications/${f.publication.id}/package`,
+  );
+  const protocol = JSON.parse(
+    Buffer.from(
+      published.snapshot.files.find(
+        (file: any) => file.path === "reference/workflow-protocol.json",
+      ).content,
+      "base64",
+    ).toString("utf8"),
+  );
+  root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-recurring-gates-"));
+  const runtime = createWorkflowRuntime();
+  const location = {
+    kind: "standalone" as const,
+    projectRoot: root,
+    runId: "recurring",
+  };
+  const started = await runtime.start({ protocol, location });
+  const route = "/runs/recurring";
+  const machine = (url: string, body: unknown) =>
+    f.call(url, "POST", body, operator, 200, f.operatorToken);
+  await machine(route, {
+    workflowId: f.workflow.id,
+    publicationId: f.publication.id,
+    packageHash: f.publication.packageHash,
+    localRunId: location.runId,
+    hostLabel: "Lab",
+    testRun: false,
+    execution: started.execution,
+  });
+  const confirmation = await runtime.submit(location, {
+    actionId: started.pendingAction!.id,
+    revision: started.revision,
+    runId: started.runId,
+    nodeId: started.currentNode,
+    execution: started.execution,
+    status: "succeeded",
+    summary: "Report checked.",
+    evidence: { summary: "Reviewed the report." },
+  });
+  expect(confirmation.pendingAction?.finalization).toBeTruthy();
+  // Each report follows the runtime's own finalization refresh.
+  const report = async () => {
+    await runtime.resume(location);
+    await machine(`${route}/events`, await runtime.readReport(location));
+  };
+  const gates = async () =>
+    (await f.call(`${route}/gates`, "GET", undefined, owner)).gates;
+  const open = async () =>
+    (await gates()).filter((gate: any) => gate.state === "open");
+  const answer = async (gate: any, choiceId: string, requestId: string) => {
+    const body = { choiceId, rationale: "Reviewed these exact effects." };
+    const { preview } = await f.call(
+      `${route}/gates/${gate.id}/preview`,
+      "POST",
+      body,
+      owner,
+    );
+    await f.call(
+      `${route}/gates/${gate.id}/answer`,
+      "POST",
+      {
+        ...body,
+        confirmed: true,
+        confirmationHash: preview.confirmationHash,
+        requestId,
+      },
+      owner,
+    );
+  };
+  const target = path.join(root, "released.txt");
+  await report();
+  const [first] = await open();
+  // An edited target supersedes the gate; restoring it recurs its exact binding.
+  await fs.writeFile(target, "edited\n");
+  await report();
+  expect((await open()).map((gate: any) => gate.bindingHash)).not.toEqual([
+    first.bindingHash,
+  ]);
+  await fs.rm(target);
+  await report();
+  const [recurred] = await open();
+  expect(recurred).toMatchObject({ bindingHash: first.bindingHash });
+  expect(recurred.id).not.toBe(first.id);
+  expect(
+    (await f.call("/me/inbox", "GET", undefined, owner)).items.filter(
+      (item: any) => item.href === route && item.state !== "done",
+    ),
+  ).toHaveLength(1);
+  // A later gate's answer outranks an earlier, undelivered answer to the
+  // same binding.
+  await answer(recurred, "confirm", "confirm-before-edit");
+  await fs.writeFile(target, "edited\n");
+  await report();
+  await answer((await open())[0], "cancel", "cancel-edited");
+  await fs.rm(target);
+  await report();
+  const delivered = () =>
+    f.call(
+      `${route}/gate-answer`,
+      "GET",
+      undefined,
+      operator,
+      200,
+      f.operatorToken,
+    );
+  expect((await delivered()).answer).toBeNull();
+  const [fresh] = await open();
+  expect(fresh.bindingHash).toBe(first.bindingHash);
+  await answer(fresh, "confirm", "confirm-restored");
+  const { answer: latest } = await delivered();
+  expect(latest.gateId).toBe(fresh.id);
+  expect((await runtime.submit(location, latest.submission)).disposition).toBe(
+    "done",
+  );
+  expect(await fs.readFile(target, "utf8")).toBe("released\n");
+}, 300_000);

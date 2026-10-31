@@ -1308,6 +1308,9 @@ closes inbox items atomically. Retries return the original answer.
 Tokens cannot preview or answer a gate. Only the registered person and Agent
 host may retrieve `GET /api/v1/runs/:id/gate-answer`; the MCP compares the local
 kernel binding and submits that answer to WorkflowRuntime on `next` or `status`.
+Only the Run's most recent gate can be open or deliver its answer. When a
+superseded binding recurs, such as a restored finalization target, it opens a
+fresh gate unless the most recent gate is already open or answered for it.
 Finalization previews show the kernel's exact planned operations; changed effects
 require fresh confirmation. See ADR 0036 and migration `0034_run-gates.sql`.
 
