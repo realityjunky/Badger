@@ -221,6 +221,15 @@ function configValue(
 function matches(a: unknown, b: unknown) {
   return canonicalHash(a ?? null) === canonicalHash(b ?? null);
 }
+/** Remove the managed TOML block without joining the lines around it. */
+function withoutBlock(text: string, block: string) {
+  const start = text.indexOf(block);
+  const before = text.slice(0, start);
+  const after = text.slice(start + block.length);
+  return before && after && !before.endsWith("\n")
+    ? `${before}\n${after}`
+    : before + after;
+}
 
 async function compile(
   input: HostPlan["input"],
@@ -364,7 +373,7 @@ async function compile(
       if (owned.addition) {
         if (!nextConfig.includes(owned.addition))
           throw new Error("Conflict: managed TOML block was modified");
-        nextConfig = nextConfig.replace(owned.addition, "");
+        nextConfig = withoutBlock(nextConfig, owned.addition);
       }
       const addition =
         (nextConfig && !nextConfig.endsWith("\n")
@@ -421,7 +430,9 @@ async function compile(
       if (target.host === "codex") {
         if (!owned.addition || !nextConfig.includes(owned.addition))
           throw new Error("Conflict: managed TOML block was modified");
-        nextConfig = nextConfig.replace(owned.addition, "");
+        nextConfig = withoutBlock(nextConfig, owned.addition);
+        if (configValue(target.host, nextConfig).entry !== undefined)
+          throw new Error("Host configuration cannot be edited safely");
       } else {
         nextConfig = editJson(nextConfig, ["mcpServers", "badger"], undefined);
         const remaining = jsonObject(nextConfig);

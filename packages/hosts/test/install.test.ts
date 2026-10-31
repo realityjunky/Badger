@@ -8,6 +8,7 @@ import {
   previewInstall,
   previewUninstall,
   commitHostPlan,
+  renderMcpConfiguration,
   type HostPlan,
 } from "../src/index.js";
 import { parse as parseToml } from "smol-toml";
@@ -549,6 +550,83 @@ it("retains shared MCP ownership until the last package and verifies owned bytes
   await expect(
     previewUninstall({ target, workflowId: "workflow-2" }),
   ).rejects.toThrow(/modified/iu);
+});
+
+it.each([
+  ["uninstalling", false],
+  ["upgrading, then uninstalling", true],
+] as const)(
+  "keeps text added after Codex's managed block on its own line when %s",
+  async (_, upgrade) => {
+    const f = await fixture();
+    const target = {
+      host: "codex" as const,
+      scope: "user" as const,
+      projectRoot: f.projectRoot,
+      homeRoot: f.homeRoot,
+    };
+    const input = {
+      target,
+      publication: f.publication,
+      snapshot: f.snapshot,
+      deploymentUrl: "https://badger.example",
+    };
+    const commit = (plan: HostPlan) =>
+      commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest });
+    const file = path.join(f.homeRoot, ".codex/config.toml");
+    await fs.mkdir(path.dirname(file));
+    await fs.writeFile(file, 'model = "o3"');
+    await commit(await previewInstall(input));
+    await fs.appendFile(file, '[projects."/work"]\ntrust_level = "trusted"\n');
+    const personal = {
+      model: "o3",
+      projects: { "/work": { trust_level: "trusted" } },
+    };
+    if (upgrade) {
+      await commit(
+        await previewInstall({
+          ...input,
+          publication: { ...f.publication, publicationId: "publication-2" },
+        }),
+      );
+      expect(parseToml(await fs.readFile(file, "utf8"))).toMatchObject({
+        ...personal,
+        mcp_servers: { badger: { command: "badger-mcp" } },
+      });
+    }
+    await commit(await previewUninstall({ target, workflowId: "workflow-1" }));
+    expect(parseToml(await fs.readFile(file, "utf8"))).toEqual(personal);
+  },
+);
+
+it("refuses a Codex uninstall that would leave a Badger entry behind", async () => {
+  const f = await fixture();
+  const target = {
+    host: "codex" as const,
+    scope: "user" as const,
+    projectRoot: f.projectRoot,
+    homeRoot: f.homeRoot,
+  };
+  const file = path.join(f.homeRoot, ".codex/config.toml");
+  await fs.mkdir(path.dirname(file));
+  // A string quoting the exact managed block precedes the appended block, so
+  // removing the first match would leave the real entry in place.
+  const block = renderMcpConfiguration("codex", {
+    deploymentUrl: "https://badger.example",
+  });
+  await fs.writeFile(file, `notes = '''\n\n${block}'''\n`);
+  const plan = await previewInstall({
+    target,
+    publication: f.publication,
+    snapshot: f.snapshot,
+    deploymentUrl: "https://badger.example",
+  });
+  await commitHostPlan(plan, { confirmed: true, digest: plan.preview.digest });
+  const installed = await fs.readFile(file, "utf8");
+  await expect(
+    previewUninstall({ target, workflowId: "workflow-1" }),
+  ).rejects.toThrow(/cannot be edited safely/u);
+  expect(await fs.readFile(file, "utf8")).toBe(installed);
 });
 
 it("refuses malformed host configuration without displaying pre-existing secret values", async () => {

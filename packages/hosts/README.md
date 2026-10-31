@@ -77,7 +77,9 @@ packages, extra files, unowned destinations, malformed configurations and
 unowned same-name MCP entries are conflicts; review and repair them yourself,
 then preview again. There is no force/overwrite switch. JSON is edited without
 reformatting unrelated properties; Codex's managed TOML block is appended and
-removed while retaining unrelated text. Unsafe inline TOML layouts are refused.
+removed while retaining unrelated text, and text added after the block keeps its
+own line. A removal whose result does not parse, or still has a Badger entry, is
+refused. Unsafe inline TOML layouts are refused.
 Claude Code and WorkBuddy project scope share `.mcp.json`, and one host at a time
 manages its Badger entry. While one has Badger workflows installed there, the
 other refuses and names it rather than silently acquiring ownership; uninstall
