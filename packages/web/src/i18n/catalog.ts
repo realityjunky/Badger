@@ -920,6 +920,21 @@ const en = {
   "run.noAttempts": "No revisioned Attempts recorded.",
   "run.noReceipts": "No artifact receipts recorded.",
   "run.noFindings": "No current findings.",
+  "run.recovery": "Recovery",
+  "run.recoveryRequired": "Recovery required",
+  "run.recoveryHelp":
+    "Ask the Operator's Agent on the Run's computer to use recover, then reload this page to review the outcome. Unresolved integrity findings remain visible.",
+  "run.recovery.settled": "Recovery settled",
+  "run.recovery.blocked": "Recovery still needs attention",
+  "run.recoveryResult":
+    "Reported {time}, at Run revision {revision} and event {sequence}.",
+  "run.integrity.unattested-decision":
+    "A decision has no matching dashboard gate answer.",
+  "run.integrity.event-sequence-gap":
+    "The reported events have a sequence gap.",
+  "run.integrity.package-hash-mismatch":
+    "The reported execution differs from the published package.",
+  "run.integrityEvidence": "Review integrity evidence",
   "run.path": "Artifact path",
   "run.root": "External root",
   "run.localRoot": "Inside the Run root",
@@ -2216,6 +2231,18 @@ const zh: Record<MessageId, string> = {
   "run.noAttempts": "尚无带版本的执行尝试。",
   "run.noReceipts": "尚无产物回执。",
   "run.noFindings": "当前无检查问题。",
+  "run.recovery": "恢复",
+  "run.recoveryRequired": "需要恢复",
+  "run.recoveryHelp":
+    "请操作人在运行所在计算机上让 Agent 使用 recover，然后刷新本页查看结果。尚未解决的完整性问题会继续显示。",
+  "run.recovery.settled": "恢复已完成",
+  "run.recovery.blocked": "恢复仍需处理",
+  "run.recoveryResult":
+    "报告时间 {time}，运行修订 {revision}，事件序号 {sequence}。",
+  "run.integrity.unattested-decision": "有决定缺少匹配的控制台关卡回答。",
+  "run.integrity.event-sequence-gap": "报告的事件序列存在缺口。",
+  "run.integrity.package-hash-mismatch": "报告的执行身份与已发布包不一致。",
+  "run.integrityEvidence": "查看完整性证据",
   "run.path": "产物路径",
   "run.root": "外部根目录",
   "run.localRoot": "运行根目录内",

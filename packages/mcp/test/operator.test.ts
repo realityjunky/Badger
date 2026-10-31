@@ -298,6 +298,16 @@ it("delivers manual-stop and finalization answers through WorkflowRuntime and as
     expect(continued.continuation.disposition).toBe(
       mode === "manual-stop" ? "blocked" : "done",
     );
+    await expect
+      .poll(
+        async () =>
+          (await f.call(route, "GET", undefined, operator)).run.projection
+            ?.revision,
+      )
+      .toBe(continued.continuation.revision);
+    expect(
+      (await f.call(route, "GET", undefined, operator)).run.integrityFindings,
+    ).toEqual([]);
     if (mode === "finalization")
       expect(await fs.readFile(path.join(root, "released.txt"), "utf8")).toBe(
         "released\n",

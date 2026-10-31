@@ -1293,3 +1293,25 @@ host may retrieve `GET /api/v1/runs/:id/gate-answer`; the MCP compares the local
 kernel binding and submits that answer to WorkflowRuntime on `next` or `status`.
 Finalization previews show the kernel's exact planned operations; changed effects
 require fresh confirmation. See ADR 0036 and migration `0034_run-gates.sql`.
+
+## Run integrity and recovery
+
+Run list and detail responses include `integrityFindings`, `needsRecovery`, and
+the latest `recovery` outcome. The service compares decisions with immutable
+dashboard gate answers and flags missing or changed attestations. Gaps and
+execution identities that differ from the published protocol refuse the entire
+report with 409 while preserving an audited finding. Execution verification
+uses the kernel; its compiled package hash differs from the publication's
+directory hash. One current finding per class bounds these responses, with
+earlier evidence retained in the Activity log.
+
+Only the registered person and Agent host may send `POST /api/v1/runs/:id/recovery`
+with `{required:true}` when the local runtime cannot export a committed report.
+A full `/events` report may include `recoveryRequired` and up to 64 bounded
+`recoveries` request IDs from local `recover` calls. Requests replay exactly once
+in the recovery audit. A shorter valid prefix cannot clear a gap, and a regular
+status report or an older recovery ID cannot settle a newer interruption notice.
+Recovery returns `settled` when no discrepancy or runtime recovery finding remains,
+or `blocked` otherwise. Missing human answers remain visible after recovery.
+Auditors can inspect both the Run and its audited history. See ADR 0037 and
+migration `0035_run-integrity.sql`.

@@ -13,6 +13,7 @@ export {
   prepareWorkflowGateAnswer,
   workflowGateBinding,
   workflowGatePolicy,
+  verifyWorkflowProtocol,
 } from "./index.js";
 
 export { parseWorkflowFinalizationPreview } from "./finalization.js";

@@ -19,6 +19,7 @@ import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { RunGatePanel } from "./RunGatePanel.js";
+import { StatusPill } from "../components/StatusPill.js";
 const pretty = (value: unknown) => (
   <pre className="run-json">{JSON.stringify(value, null, 2)}</pre>
 );
@@ -165,6 +166,19 @@ export function RunsPage() {
                 render: (_: unknown, r: Run) =>
                   r.projection?.currentNode ?? "—",
               },
+              {
+                title: t("run.recovery"),
+                render: (_: unknown, r: Run) =>
+                  r.needsRecovery ? (
+                    <StatusPill tone="warning">
+                      {t("run.recoveryRequired")}
+                    </StatusPill>
+                  ) : r.recovery ? (
+                    t(`run.recovery.${r.recovery.outcome}`)
+                  ) : (
+                    "—"
+                  ),
+              },
               { title: t("run.person"), dataIndex: "personName" },
               { title: t("run.host"), dataIndex: "hostLabel" },
               { title: t("run.updated"), dataIndex: "updatedAt", render: time },
@@ -233,6 +247,30 @@ export function RunsPage() {
               ]}
             />
           </section>
+          {run.needsRecovery && (
+            <Alert
+              type="warning"
+              showIcon
+              message={t("run.recoveryRequired")}
+              description={t("run.recoveryHelp")}
+            />
+          )}
+          {run.recovery && (
+            <Alert
+              type={
+                run.recovery.outcome === "settled" && !run.needsRecovery
+                  ? "success"
+                  : "warning"
+              }
+              showIcon
+              message={t(`run.recovery.${run.recovery.outcome}`)}
+              description={format("run.recoveryResult", {
+                time: time(run.recovery.reportedAt),
+                revision: run.recovery.revision,
+                sequence: run.recovery.lastSequence,
+              })}
+            />
+          )}
           <RunGatePanel basePath={basePath} runId={run.id} />
           {state?.historySummary && state.historySummary.omitted > 0 && (
             <Alert
@@ -350,24 +388,41 @@ export function RunsPage() {
               {
                 key: "findings",
                 label: t("run.findings"),
-                children: state?.findings.length ? (
-                  state.findings.map((finding, i) => (
-                    <Alert
-                      key={i}
-                      type={
-                        finding.severity === "error"
-                          ? "error"
-                          : finding.severity === "warning"
-                            ? "warning"
-                            : "info"
-                      }
-                      showIcon
-                      message={finding.message}
-                    />
-                  ))
-                ) : (
-                  <Empty description={t("run.noFindings")} />
-                ),
+                children:
+                  run.integrityFindings.length || state?.findings.length ? (
+                    <>
+                      {run.integrityFindings.map((finding) => (
+                        <Alert
+                          key={finding.code}
+                          type="error"
+                          showIcon
+                          message={t(`run.integrity.${finding.code}`)}
+                          description={
+                            <details>
+                              <summary>{t("run.integrityEvidence")}</summary>
+                              {pretty(finding.evidence)}
+                            </details>
+                          }
+                        />
+                      ))}
+                      {state?.findings.map((finding, i) => (
+                        <Alert
+                          key={i}
+                          type={
+                            finding.severity === "error"
+                              ? "error"
+                              : finding.severity === "warning"
+                                ? "warning"
+                                : "info"
+                          }
+                          showIcon
+                          message={finding.message}
+                        />
+                      ))}
+                    </>
+                  ) : (
+                    <Empty description={t("run.noFindings")} />
+                  ),
               },
               {
                 key: "pending",
