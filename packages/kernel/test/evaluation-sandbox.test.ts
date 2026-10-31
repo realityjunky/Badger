@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   evaluatePackage,
+  findSkills,
   generatePackage,
   normalizeWorkflow,
   type CreatorState,
@@ -40,6 +41,30 @@ async function fixture() {
     path.join(os.tmpdir(), "badger-evaluation-sandbox-test-"),
   );
   roots.push(root);
+  // The Node's source Skill carries a domain script. Generation bundles it
+  // into the package, where certification must never execute it.
+  const domainMarker = path.join(root, "domain-executed");
+  const source = path.join(root, "skills", "reporter");
+  await fs.mkdir(path.join(source, "scripts"), { recursive: true });
+  await fs.writeFile(
+    path.join(source, "SKILL.md"),
+    "---\nname: reporter\ndescription: Prepare a report.\n---\n\n# Reporter\n\nRun `node scripts/report.mjs` to prepare the report.\n",
+  );
+  await fs.writeFile(
+    path.join(source, "scripts", "report.mjs"),
+    `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(domainMarker)}, 'bad');\n`,
+  );
+  const skillSources = [
+    {
+      name: "reporter",
+      location: "skills/reporter",
+      scripts: { "scripts/report.mjs": "local-writes" as const },
+    },
+  ];
+  const candidates = await findSkills({
+    projectRoot: root,
+    sources: skillSources,
+  });
   const workflow = {
     kind: "workflow-kernel" as const,
     name: "sandbox-evaluation",
@@ -69,7 +94,7 @@ async function fixture() {
       schemaVersion: 1,
       goal: workflow.goal,
       skillCreatorIntent: "new-skill",
-      skillSources: [],
+      skillSources,
       workflow,
       defaultLocale: "en",
     },
@@ -81,7 +106,7 @@ async function fixture() {
       planHash: "sandbox-plan",
       proposalHash: "sandbox-proposal",
       workflow: protocol,
-      candidates: [],
+      candidates,
       blockers: [],
       warnings: [],
       canInitialize: true,
@@ -96,13 +121,21 @@ async function fixture() {
     planHash: "sandbox-plan",
     draftPath: generated.packageRoot,
     currentHash: null,
-    candidates: [],
+    candidates,
     generated,
   };
   return {
     root,
     state,
     script: path.join(generated.packageRoot, "scripts", "workflow-state.mjs"),
+    domainScript: path.join(
+      generated.packageRoot,
+      "sources",
+      candidates[0]!.sources[0]!.hash,
+      "scripts",
+      "report.mjs",
+    ),
+    domainMarker,
     options: {
       persistState: false,
       reportPath: path.join(root, "report.json"),
@@ -189,14 +222,13 @@ it("kills a detached descendant still reachable from an adapter it stops", async
 }, 30_000);
 
 it("scrubs worker secrets and gives adapters private temporary storage without executing domain scripts or writing Creator state", async () => {
-  const { root, state, script, options } = await fixture();
+  const { root, state, script, domainScript, domainMarker, options } =
+    await fixture();
   options.sandbox.childTimeLimitMilliseconds = 15000;
   const observed = path.join(root, "environment.json");
-  const marker = path.join(root, "domain-executed");
-  await fs.mkdir(path.join(state.generated!.packageRoot, "domain"));
-  await fs.writeFile(
-    path.join(state.generated!.packageRoot, "domain", "never-run.mjs"),
-    `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'bad');`,
+  // Generation bundled the domain script with the package's source Skill.
+  await expect(fs.readFile(domainScript, "utf8")).resolves.toContain(
+    domainMarker,
   );
   const original = await fs.readFile(script, "utf8");
   await fs.writeFile(
@@ -213,7 +245,7 @@ it("scrubs worker secrets and gives adapters private temporary storage without e
     );
     expect(environment.home).toBe(environment.temp);
     expect(
-      await fs.stat(marker).then(
+      await fs.stat(domainMarker).then(
         () => true,
         () => false,
       ),
