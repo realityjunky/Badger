@@ -165,18 +165,22 @@ export function validateSemanticDossier(
   };
   const sources = entries("sources");
   for (const source of sources) {
-    if (
-      !isText(source.location) ||
-      path.isAbsolute(source.location) ||
-      path.win32.isAbsolute(source.location) ||
-      path.normalize(source.location) !== source.location ||
-      source.location.includes("\0")
-    ) {
+    // A location is its FactoryPlan declaration. An absolute one is confined
+    // by the source check to the Project and the host's registered roots.
+    const location = isText(source.location) ? source.location.trim() : "";
+    if (location.includes("\0"))
       report(
         `sources.${source.id}.location`,
-        "Source location must be normalized and relative to the Project",
+        "Source location must not contain a NUL character",
       );
-    }
+    else if (
+      !path.isAbsolute(location) &&
+      location.split(/[\\/]/u).includes("..")
+    )
+      report(
+        `sources.${source.id}.location`,
+        "A Project-relative source location cannot leave the Project: remove its .. segments",
+      );
     if (source.canonicalPath !== undefined)
       report(
         `sources.${source.id}.canonicalPath`,
@@ -449,13 +453,14 @@ export function validateDossierPlan(
         message: "Dossier contradicts FactoryPlan",
       });
   }
+  // Both sides spell a location one way: `./skills/x` is `skills/x`.
   const declarations = plan.skillSources.map(({ name, location }) => ({
     name,
-    location,
+    location: path.normalize(location.trim()),
   }));
   const sources = dossier.sources.map(({ name, location }) => ({
     name,
-    location,
+    location: path.normalize(location.trim()),
   }));
   const sorted = (list: typeof sources) =>
     list.sort((left, right) => left.name.localeCompare(right.name));

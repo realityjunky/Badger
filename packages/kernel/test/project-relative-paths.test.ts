@@ -499,6 +499,42 @@ describe("project-relative Creator records", () => {
     ).rejects.toThrow("Semantic dossier source identity is stale: prepare");
   });
 
+  it("gives a dossier to a source declared by an absolute location inside the project", async () => {
+    const skillRoot = path.join(project, "skills", "prepare");
+    const proposal = await proposeWithDossier({
+      skillRoot,
+      declared: skillRoot,
+    });
+    expect(proposal.blockers).toEqual([]);
+    expect(proposal.semanticDossier?.sources[0]?.location).toBe(skillRoot);
+  });
+
+  it("gives a dossier to a source declared under a registered source root", async () => {
+    const external = path.join(root, "external-skills", "prepare");
+    const proposal = await proposeWithDossier({
+      skillRoot: external,
+      declared: external,
+      sourceRoots: ["../external-skills"],
+    });
+    expect(proposal.blockers).toEqual([]);
+    expect(proposal.semanticDossier?.sources[0]?.location).toBe(external);
+  });
+
+  it.each([
+    ["./skills/prepare", "skills/prepare"],
+    ["skills/prepare", "./skills/prepare"],
+  ])(
+    "treats a declared %s and a recorded %s as one source location",
+    async (declared, recorded) => {
+      const proposal = await proposeWithDossier({
+        skillRoot: path.join(project, "skills", "prepare"),
+        declared,
+        recorded,
+      });
+      expect(proposal.blockers).toEqual([]);
+    },
+  );
+
   it("refuses escaping paths in the authoring session summary and lane records", async () => {
     const state = await runLifecycle();
     const session = path.join(project, ".badger", "authoring", state.name);

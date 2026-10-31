@@ -105,8 +105,9 @@ explicitly stop with unresolved gaps; in that case preserve the gaps in a
 Before handoff, verify all of the following:
 
 - goal, intent, workflow name, workflow goal, and default locale;
-- every explicit Skill source's normalized Project-relative location, content
-  hash, and workflow role, using the source identity in the dossier reference;
+- every explicit Skill source's location as the FactoryPlan declares it,
+  content hash, and workflow role, using the source identity in the dossier
+  reference;
 - workflow inputs and prerequisites;
 - Node IDs, kinds, labels, responsibilities, ordering, and optionality;
 - implementation bindings, Required Skill Calls, and augmentations;

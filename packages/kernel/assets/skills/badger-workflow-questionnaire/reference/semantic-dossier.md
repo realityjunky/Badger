@@ -17,10 +17,14 @@ no new handoff may carry it.
   FactoryPlan: `workflow.goal` must equal both the plan's `goal` and its
   `workflow.goal`, and the validator refuses a mismatch.
 - `sources`: every explicit Skill declaration, with unique `id`, `name`,
-  normalized Project-relative `location`, inspected `contentHash`, and
-  nonempty `roles`. The kernel resolves the location under the current Project
-  root. Omit `canonicalPath`; legacy dossiers containing it need recomposition
-  and fresh approval. Use concise role descriptions, never copied Skill bodies.
+  `location` as the FactoryPlan declares it, inspected `contentHash`, and
+  nonempty `roles`. A Project-relative location must stay inside the Project,
+  with no `..` segment; `./skills/x` and `skills/x` are the same location. An
+  absolute location inside the Project or under a registered source root stays
+  exactly as declared. The kernel resolves the location to the inspected real
+  source root. Omit `canonicalPath`; legacy dossiers containing it need
+  recomposition and fresh approval. Use concise role descriptions, never
+  copied Skill bodies.
 - `nodes`: every active Node in normalized order, with unique `id`, unique
   nonnegative `order`, and a `responsibility` topic.
 - `topics`: every topic listed below. A topic is

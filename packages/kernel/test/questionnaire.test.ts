@@ -340,22 +340,53 @@ describe("semantic questionnaire handoff", () => {
     expect(input).toEqual(before);
   });
 
-  it.each([
-    "/project/skills/prepare",
-    "/project/../prepare",
-    "skills//prepare",
-    "C:\\skills\\prepare",
-  ])("rejects nonportable source location %s", (location) => {
-    const input = { projectRoot: "/project", ...questionnaireFixture() };
-    input.dossier.sources[0].location = location;
-    expect(createQuestionnaireHandoff(input).diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
+  it.each(["../outside/prepare", "skills/../../prepare", "./.."])(
+    "refuses a Project-relative source location that leaves the Project: %s",
+    (location) => {
+      const input = { projectRoot: "/project", ...questionnaireFixture() };
+      input.factoryPlan.skillSources[0].location = location;
+      input.dossier.sources[0].location = location;
+      expect(createQuestionnaireHandoff(input).diagnostics).toEqual([
+        {
           path: "sources.prepare-source.location",
-        }),
-      ]),
-    );
-  });
+          message:
+            "A Project-relative source location cannot leave the Project: remove its .. segments",
+        },
+      ]);
+    },
+  );
+  it.each(["/project/skills/prepare", "C:\\skills\\prepare", "skills/other"])(
+    "refuses a source location other than the FactoryPlan's declaration: %s",
+    (location) => {
+      const input = { projectRoot: "/project", ...questionnaireFixture() };
+      input.dossier.sources[0].location = location;
+      expect(createQuestionnaireHandoff(input).diagnostics).toEqual([
+        {
+          path: "sources",
+          message:
+            "Dossier must describe exactly the explicit FactoryPlan sources",
+        },
+      ]);
+    },
+  );
+  it.each([
+    ["skills/prepare", "./skills/prepare"],
+    ["./skills/prepare", "skills/prepare"],
+    ["skills/prepare", "skills//prepare"],
+    ["/project/skills/prepare", "/project/skills/prepare"],
+    ["/srv/skills/prepare", "/srv/skills/prepare"],
+  ])(
+    "accepts the declared source location %s recorded as %s",
+    (declared, recorded) => {
+      const input = { projectRoot: "/project", ...questionnaireFixture() };
+      input.factoryPlan.skillSources[0].location = declared;
+      input.dossier.sources[0].location = recorded;
+      expect(createQuestionnaireHandoff(input)).toMatchObject({
+        status: "complete",
+        diagnostics: [],
+      });
+    },
+  );
   it.each([null, [], {}, { schemaVersion: 2 }])(
     "returns diagnostics for malformed dossiers",
     (dossier) => {

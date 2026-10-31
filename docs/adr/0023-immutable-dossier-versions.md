@@ -33,12 +33,21 @@ copied or refused. Gates, plan derivation, the proposal, and invalidation read
 the head. Treating the highest version number as current was rejected: an
 Engineer could not return to an earlier meaning without a cosmetic edit.
 
-Source identity uses a normalized, Project-relative `location` and the
-Skill's `contentHash`; dossier sources contain no `canonicalPath`. The kernel
-resolves the location under the current Project root when matching inspected
-sources. Moving storage therefore preserves approval, while different source
-bytes still block the proposal. Absolute paths were rejected because they
-expose deployment details and bind meaning to a server's directory layout.
+Source identity uses the source's `location`, as the FactoryPlan declares
+it, and the Skill's `contentHash`; dossier sources contain no `canonicalPath`.
+A Project-relative location must stay inside the Project, so a `..` segment is
+refused, and both sides compare it in normalized form: `./skills/x` and
+`skills/x` are one location. A plan may instead declare an absolute location
+inside the Project or under a registered source root (ADR 0008), which the
+dossier keeps exactly as declared. When matching inspected sources, the kernel
+resolves the location under the current Project root to its real path, as
+discovery does. The service declares every source as `skills/<name>`, so its
+dossiers contain no storage paths. Moving or restoring storage, or reaching it
+through a symbolic link, therefore preserves approval, while different source
+bytes still block the proposal. Recording the inspected absolute path was
+rejected because it exposes deployment details and binds meaning to a server's
+directory layout. Requiring every location to be Project-relative was rejected
+too: a plan that declares an absolute source could then carry no dossier.
 
 Legacy artifacts containing `canonicalPath` remain immutable under their
 original hashes. Their API history is a projection without those paths,
