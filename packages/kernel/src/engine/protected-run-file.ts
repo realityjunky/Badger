@@ -52,6 +52,13 @@ interface RunFileSnapshot {
 
 const MAX_ENGINE_RUN_FILE_BYTES = 16 * 1024 * 1024;
 
+/**
+ * The fresh reads a reader makes of a Run record that a writer keeps
+ * replacing. A transition replaces a record once as it commits, and once more
+ * when recovery rolls it forward, so these outlast several transitions.
+ */
+export const ENGINE_RUN_RECORD_READ_ATTEMPTS = 8;
+
 function boundedMaxBytes(
   requested: number | undefined,
   fallback: number,

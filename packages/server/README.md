@@ -532,7 +532,11 @@ removal records `answer.attachment-expired` in the Activity log. References in
 old revisions and inherited versions are kept forever. Unreferenced content
 is removed too, unless another attachment or an immutable Skill inventory
 uses the same hash. A durable cleanup queue retries content removal after a
-worker interruption; blob writers and cleanup share a transaction lock.
+worker interruption; blob writers and cleanup share a transaction lock. Content
+the worker cannot remove, for example on a restored volume it may not write,
+stays queued for a later run and is logged with its hash; it holds up neither
+other content nor workflow jobs. Any other expiry failure is logged as well,
+and the worker still claims jobs.
 Migration `0032` permits deletion only of never-referenced uploads; updates,
 deletion of referenced receipts, and truncation remain forbidden.
 
@@ -948,7 +952,10 @@ abbreviations, and unregistered or other-Skill repository IDs are refused.
 A missing confirmation returns 400 before fetching; a mismatched source hash
 returns 409. Resource limits return 413. A commit the host cannot supply, an
 answer that is not Git smart HTTP, such as a redirect or a 404, and Git LFS
-content return 400 `invalid`. A timeout, an unreachable host, a 5xx or 429
+content return 400 `invalid`. So does history with an object that Git's
+integrity check refuses, such as a legacy zero-padded file mode: the message
+says Git refused an object in the repository's history and names the object and
+the check, never quoting the remote. A timeout, an unreachable host, a 5xx or 429
 answer, a server without Git, and the concurrency limit return 503
 `unavailable`, which a later retry may overcome. Every failure carries a safe
 message and creates no version.

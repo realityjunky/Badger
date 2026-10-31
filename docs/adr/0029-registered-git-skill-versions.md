@@ -33,7 +33,11 @@ refuses more rather than queueing them.
 
 Failures are classified by whether retrying can help. A missing commit, an
 answer that is not smart HTTP, and refused content are 400 `invalid`: the same
-request fails again. A timeout, an unreachable host, a 5xx or 429 answer, a
+request fails again. Fetching keeps Git's object integrity checks on, so an
+object anywhere in the fetched history that Git refuses, such as a legacy
+zero-padded file mode, fails the import too; its message says Git refused an
+object in the repository's history and quotes the finding's object, ID, and
+fixed text, never the remote's diagnostics. A timeout, an unreachable host, a 5xx or 429 answer, a
 server without Git, and the concurrency limit are 503 `unavailable`, and a later
 retry may succeed.
 

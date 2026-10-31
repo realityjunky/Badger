@@ -44,6 +44,30 @@ function usesLfs(file: UploadFile): boolean {
   );
 }
 
+/**
+ * Git's refusal of a fetched object by its integrity check, such as a legacy
+ * zero-padded file mode anywhere in the history. Only lines this Git wrote
+ * count; it prefixes every remote message with "remote:". The excerpt keeps
+ * the finding's object, ID, and fixed text, never a value that follows it.
+ */
+function fsckRefusal(diagnostics: string): RequestError | undefined {
+  const lines = diagnostics.split(/\r\n|\r|\n/u);
+  if (!lines.some((line) => /^fatal: fsck error in pack/u.test(line)))
+    return undefined;
+  const finding = lines
+    .map((line) =>
+      /^error: object ([0-9a-f]{40,64}): ([A-Za-z]+): ([^:]*)/u.exec(line),
+    )
+    .find((match) => match !== null);
+  const excerpt = finding
+    ? `object ${finding[1]}: ${finding[2]}: ${finding[3]!.trim()}`
+    : "fsck error in packed object";
+  return new RequestError(
+    400,
+    `Git refused an object in the repository's history: ${excerpt.replace(/[^\x20-\x7e]/gu, "").slice(0, 160)}`,
+  );
+}
+
 // Each fetch may download and store up to the repository byte limit for a
 // request of a few hundred bytes, so a process runs only a few at once.
 const MAX_CONCURRENT_FETCHES = 2;
@@ -99,10 +123,11 @@ async function fetchCommit(
     // Bound individual allocations too, including unpack/delta allocations.
     GIT_ALLOC_LIMIT: String(config.uploads.maxBytes + 16 * 1024 * 1024),
   };
-  // `refusal` explains a nonzero exit that no limit or timeout caused.
+  // `refusal` explains a nonzero exit that no limit or timeout caused; it
+  // reads Git's private diagnostics and never returns them whole.
   const run = (
     args: string[],
-    refusal: () => RequestError,
+    refusal: (diagnostics: string) => RequestError,
     maxBytes = 4096,
     input?: string,
   ): Promise<Buffer> =>
@@ -197,8 +222,9 @@ async function fetchCommit(
           );
         else chunks.push(chunk);
       });
-      // Recognize only Git's allocation guard. Diagnostics remain private,
-      // bounded, and are never returned or logged, even on a remote failure.
+      // Recognize only Git's allocation guard here. Diagnostics remain
+      // private and bounded; only a refusal by this Git's integrity check is
+      // excerpted, and nothing is logged, even on a remote failure.
       let diagnosticTail = "";
       child.stderr.on("data", (chunk: Buffer) => {
         diagnosticTail = (diagnosticTail + chunk.toString("utf8")).slice(-4096);
@@ -221,7 +247,7 @@ async function fetchCommit(
         clearTimeout(timeout);
         clearInterval(monitor);
         if (failure !== undefined) reject(failure);
-        else if (code !== 0) reject(refusal());
+        else if (code !== 0) reject(refusal(diagnosticTail));
         else resolve(Buffer.concat(chunks));
       });
     });
@@ -250,8 +276,9 @@ async function fetchCommit(
     const opened = await openGitTransport(config, url);
     transport = opened;
     // The transport's failure explains Git's exit: an unavailable host, an
-    // answer that is not smart HTTP, or a limit. Otherwise the commit is
-    // missing from what the host serves.
+    // answer that is not smart HTTP, or a limit. Git's integrity check may
+    // refuse an object in the history. Otherwise the commit is missing from
+    // what the host serves.
     await run(
       [
         "fetch",
@@ -262,7 +289,8 @@ async function fetchCommit(
         "+refs/heads/*:refs/remotes/origin/*",
         "+refs/tags/*:refs/tags/*",
       ],
-      () => opened.failure() ?? notPublished(),
+      (diagnostics) =>
+        opened.failure() ?? fsckRefusal(diagnostics) ?? notPublished(),
     );
     if ((await directoryBytes(workspace)) > config.git.maxRepositoryBytes)
       throw new RequestError(

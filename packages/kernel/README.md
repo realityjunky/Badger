@@ -134,15 +134,21 @@ record identities and revisions. The service stores valid snapshots once,
 and the Workflow owner approves the exact hash through a human gate. Record
 changes supersede approval and notify the Engineer and Workflow owner.
 
-Dossier source identity is the normalized, Project-relative `location` plus
-`contentHash`. The kernel resolves that location against the current Project
-root when matching inspected sources, so moving the storage workspace preserves
-an approved proposal, while changed Skill bytes still make it stale. New
-dossiers omit absolute `canonicalPath` values. Legacy dossiers remain readable
-in the service's history without their storage paths; their canonical text is
-withheld (`canonicalJson: null`, `requiresRecomposition: true`). Their original
-bytes, hashes, and confirmations remain stored, but they require recomposition
-and fresh dossier, plan, and proposal approvals before further authoring.
+Dossier source identity is the source's `location`, as the FactoryPlan
+declares it, plus `contentHash`. A Project-relative location must stay inside
+the Project and is compared in normalized form, so `./skills/x` and `skills/x`
+are one location; an absolute location, inside the Project or under a
+registered source root, stays exactly as declared. The kernel resolves the
+location against the current Project root to its real path when matching
+inspected sources, so moving the storage workspace or reaching the Project
+through a symbolic link preserves an approved proposal, while changed Skill
+bytes still make it stale. The service declares every source as
+`skills/<name>`. New dossiers omit absolute `canonicalPath` values. Legacy
+dossiers remain readable in the service's history without their storage paths;
+their canonical text is withheld (`canonicalJson: null`,
+`requiresRecomposition: true`). Their original bytes, hashes, and confirmations
+remain stored, but they require recomposition and fresh dossier, plan, and
+proposal approvals before further authoring.
 
 Plan versions (#58) add `deriveFactoryPlan`, `composeFactoryPlan`, and
 `factoryPlanDraftSchema`. The skeleton fixes the approved dossier's frame,
@@ -731,6 +737,7 @@ Observers use it to repair reporting queues after a crash. Pending transitions
 remain explicit recovery requirements. `continuation.completion` contains the
 current Node's kernel-owned Completion requirements and full Output Schemas;
 `projection.artifactReceipts` contains issued receipts with external root and
-producing Attempt identity. A bounded retry of a protected journal read handles
-atomic replacements by an active writer, without retrying submitted mutations or
-relaxing file safety validation.
+producing Attempt identity. A bounded retry of each protected read of the
+transition journal, the Run state, and the trajectory handles atomic
+replacements by an active writer, including reads made before any Run lock,
+without retrying submitted mutations or relaxing file safety validation.

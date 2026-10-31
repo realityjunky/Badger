@@ -2,6 +2,7 @@ import { recordAudit } from "../audit.js";
 import type { ServiceConfig } from "../config.js";
 import type { Database } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
+import type { Logger } from "../log.js";
 import { lockBlobStore, type BlobStore } from "../skills/blobs.js";
 
 /** A bounded maintenance batch; workflow locks serialize answer and inheritance writes. */
@@ -11,8 +12,9 @@ export async function expireAnswerAttachments(options: {
   config: ServiceConfig;
   blobs: BlobStore;
   workerId: string;
+  logger?: Logger;
 }): Promise<void> {
-  const { database, dependencies, config, blobs, workerId } = options;
+  const { database, dependencies, config, blobs, workerId, logger } = options;
   const cutoff = new Date(
     dependencies.clock.now().getTime() -
       config.answerAttachments.retentionSeconds * 1000,
@@ -67,19 +69,30 @@ export async function expireAnswerAttachments(options: {
     "select hash from attachment_blob_cleanup order by hash limit 100",
   );
   for (const { hash } of pending.rows) {
-    await database.transaction(async (tx) => {
-      await lockBlobStore(tx);
-      const referenced = (
-        await tx.query<{ present: boolean }>(
-          `select exists (select 1 from answer_attachments where hash = $1)
+    // Content that cannot be removed, such as a blob on a restored volume the
+    // worker may not write, stays queued for a later run and holds up no
+    // other blob.
+    try {
+      await database.transaction(async (tx) => {
+        await lockBlobStore(tx);
+        const referenced = (
+          await tx.query<{ present: boolean }>(
+            `select exists (select 1 from answer_attachments where hash = $1)
          or exists (select 1 from skill_versions where inventory @> jsonb_build_array(jsonb_build_object('hash', $1::text))) as present`,
-          [hash],
-        )
-      ).rows[0]!.present;
-      if (!referenced) await blobs.remove(hash);
-      await tx.query("delete from attachment_blob_cleanup where hash = $1", [
+            [hash],
+          )
+        ).rows[0]!.present;
+        if (!referenced) await blobs.remove(hash);
+        await tx.query("delete from attachment_blob_cleanup where hash = $1", [
+          hash,
+        ]);
+      });
+    } catch (error) {
+      logger?.error({
+        event: "worker.attachment-content-cleanup-failed",
         hash,
-      ]);
-    });
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }

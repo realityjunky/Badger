@@ -62,6 +62,7 @@ with a reporting error. Gate attestation is recorded in
 [ADR 0036](0036-dashboard-run-gates.md), and Run integrity and recovery in
 [ADR 0037](0037-run-integrity-and-recovery.md). A pending interrupted kernel
 transition still requires explicit recovery; reporting does not silently commit
-it. Active journal replacement is handled by retrying only typed changed-file
-reads, preserving all protected-file validation and never replaying a submitted
+it. Active replacement of the transition journal, Run state, or trajectory is
+handled by retrying only typed changed-file reads, a bounded number of times,
+preserving all protected-file validation and never replaying a submitted
 mutation with a newer revision.

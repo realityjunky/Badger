@@ -244,6 +244,42 @@ export async function startStubGitRepository(
         await bareGit("config", "uploadpack.allowAnySHA1InWant", "true");
         return (await git("rev-parse", "HEAD")).stdout.trim();
       },
+      /**
+       * Publishes these files over the current tree on top of a commit whose
+       * tree has a zero-padded file mode, a defect old tools wrote that Git's
+       * integrity check refuses; returns the new commit.
+       */
+      async legacyHistory(changes: Record<string, string>) {
+        // Git writes a directory mode as 40000, so write the padded entry raw.
+        const subtree = (await git("rev-parse", "HEAD^{tree}")).stdout.trim();
+        const writing = exec(
+          "git",
+          [
+            "-C",
+            tree,
+            "hash-object",
+            "-t",
+            "tree",
+            "-w",
+            "--literally",
+            "--stdin",
+          ],
+          { env: environment },
+        );
+        writing.child.stdin!.end(
+          Buffer.concat([
+            Buffer.from("040000 legacy\0"),
+            Buffer.from(subtree, "hex"),
+          ]),
+        );
+        const padded = (await writing).stdout.trim();
+        const legacy = (
+          await git("commit-tree", padded, "-p", "HEAD", "-m", "Legacy tree")
+        ).stdout.trim();
+        await git("update-ref", "HEAD", legacy);
+        await commitFiles(changes);
+        return publish();
+      },
       /** Publishes the current tree only through a tag, including annotated tags. */
       async tagCommit(
         changes: Record<string, string>,
