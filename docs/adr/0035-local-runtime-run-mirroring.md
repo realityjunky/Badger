@@ -33,9 +33,11 @@ summary bounds never prevent a valid long Run from advancing its mirror.
 The observer never evaluates legal routes, Completion, Cycles or Attempts.
 
 Reporting occurs independently of local committed progress, with bounded HTTP
-requests and a 1 to 30 second retry backoff. Closing MCP drains its retry work and
+requests and a 1 to 30 second retry backoff. A token rate limit pauses reporting
+until its Retry-After. Closing MCP drains its retry work and
 removes its timers. A live connection that previously checked its exact bound
-identity can continue through a connection outage. A fresh connection must check
+identity can continue through a connection outage or a rate limit, which is never
+a denial. A fresh connection must check
 the person, role and scope before operating that Run. Rejected authorization
 never becomes an offline permission. Human decisions, overrides, manual-stop,
 manual verification and finalization confirmations are absent from the machine

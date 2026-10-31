@@ -267,8 +267,10 @@ these Run tools with an `engineer` token for `testRun:true`; production Runs
 require an Operator role and `operator` scope. The service checks the current
 workflow role and scope on every request. Revoked access is refused; a connection
 that already checked its exact binding may continue locally through connection
-failures, timeouts, and HTTP 502/503/504 outages and retry reporting when the
-service returns. An authorization denial, identity mismatch, or other
+failures, timeouts, HTTP 429 token rate limits, and HTTP 502/503/504 outages and
+retry reporting when the service returns. A rate limit is never a denial: it keeps
+the successful check, and a binding never checked in this process fails with the
+service's message. An authorization denial, identity mismatch, or other
 non-retryable failure clears the successful check; a fresh successful service
 check is required before outage continuation becomes available again.
 
@@ -308,7 +310,11 @@ Events retain their original sequence and bytes; the service stores each
 sequence once and refuses gaps or changed duplicates. Events are sent before the
 snapshot, in batches of at most 64 and about 768 KiB. Reporting runs in the
 background and retries with a 1 to 30 second backoff and on later calls; MCP close stops and drains
-retry work. `status.reporting.error` describes a reporting refusal without
+retry work. A rate limit pauses all background reporting until its
+`Retry-After`. A report reuses the access check that its tool call made within
+the last 30 seconds and registers again only after installed bytes change or an
+attempt fails; the service still authorizes every request, and a denial clears
+the successful check. `status.reporting.error` describes a reporting refusal without
 changing runtime authority. Reconnect and call `status` or `recover` to resume
 reporting a known Run. Files and ancestors reject symlinks/junctions and lexical
 traversal; another deployment or person cannot reuse the binding.

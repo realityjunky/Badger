@@ -834,6 +834,101 @@ it("forgets denied Run access and capabilities until a fresh successful check, i
   }
 }, 60_000);
 
+it("treats a token rate limit as a pause rather than a denial, keeping local progress and reporting it afterwards", async () => {
+  const { publishedFixture, operator } =
+    await import("../../server/test/fixtures/runs.js");
+  service = await startPlanningService();
+  const f = await publishedFixture(service);
+  let limited = false;
+  let requests = 0;
+  const server = createBadgerMcp({
+    url: service.baseUrl,
+    token: f.operatorToken,
+    agentHost: "Rate Limited Agent",
+    profile: "operator",
+    fetch: async (url, init) => {
+      requests++;
+      return limited
+        ? Response.json(
+            {
+              error: {
+                code: "rejected",
+                message:
+                  "The personal access token rate limit is 60 requests per minute",
+              },
+            },
+            { status: 429, headers: { "retry-after": "3" } },
+          )
+        : fetch(url, init);
+    },
+  });
+  currentServer = server;
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(b);
+  client = new Client({ name: "rate-limited", version: "1" });
+  await client.connect(a);
+  root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-rate-limit-"));
+  const local = { projectRoot: root, runId: "rate-limited" };
+  const started = await value("start", {
+    ...local,
+    workflowId: f.workflow.id,
+    publicationId: f.publication.id,
+    packageHash: f.publication.packageHash,
+    hostLabel: "Rate limited host",
+    confirmed: true,
+  });
+  const route = `/runs/${started.runUrl.split("/").at(-1)}`;
+  const mirrored = async () =>
+    (await f.call(route, "GET", undefined, operator)).run;
+  await expect
+    .poll(async () => (await mirrored()).lastSequence)
+    .toBe(
+      (await createWorkflowRuntime().readReport({
+        kind: "standalone",
+        ...local,
+      }))!.lastSequence,
+    );
+  limited = true;
+  const current = (await value("next", local)).continuation;
+  const done = await value("submit", {
+    ...local,
+    submission: {
+      actionId: current.pendingAction.id,
+      revision: current.revision,
+      execution: current.execution,
+      runId: current.runId,
+      nodeId: current.currentNode,
+      status: "succeeded",
+      summary: "Reported during a rate limit.",
+      evidence: { summary: "Checked." },
+    },
+  });
+  expect(done.continuation.disposition).toBe("done");
+  // A rate-limited capability read keeps the tools and the Run's access check.
+  expect((await client.listTools()).tools.map((tool) => tool.name)).toContain(
+    "submit",
+  );
+  expect((await value("status", local)).continuation.revision).toBe(
+    done.continuation.revision,
+  );
+  // Background reporting waits for Retry-After instead of retrying each second.
+  const paused = requests;
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  expect(requests).toBe(paused);
+  limited = false;
+  await expect
+    .poll(async () => (await mirrored()).projection?.status, {
+      timeout: 15_000,
+    })
+    .toBe("completed");
+  const report = (await createWorkflowRuntime().readReport({
+    kind: "standalone",
+    ...local,
+  }))!;
+  expect((await mirrored()).events).toEqual(report.events);
+  expect((await value("status", local)).reporting.error).toBeNull();
+}, 60_000);
+
 it("forwards external-root requirements/refusals, keeps local progress during an outage, and reconciles a lost queue from kernel events", async () => {
   const { publishedFixture, receiptPlan, operator } =
     await import("../../server/test/fixtures/runs.js");

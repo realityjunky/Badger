@@ -30,6 +30,8 @@ export class BadgerApiError extends Error {
     readonly status: number,
     readonly code: string | null,
     message: string,
+    /** Seconds the service asked the caller to wait, from `Retry-After`. */
+    readonly retryAfter: number | null = null,
   ) {
     super(message);
   }
@@ -45,12 +47,22 @@ export class BadgerTimeoutError extends Error {
   }
 }
 
-/** Only transport outages and explicit gateway/service availability failures
- * can reuse this live connection's previously successful authorization. */
+/** A rate limit is never a denial: the token is still valid, and the request
+ * may be repeated once `retryAfter` has passed. */
+export function isRateLimitedBadgerFailure(
+  error: unknown,
+): error is BadgerApiError {
+  return error instanceof BadgerApiError && error.status === 429;
+}
+
+/** Only transport outages, explicit gateway/service availability failures, and
+ * rate limits can reuse this live connection's previously successful
+ * authorization. */
 export function isRetryableBadgerFailure(error: unknown): boolean {
   return (
     error instanceof BadgerConnectionError ||
     error instanceof BadgerTimeoutError ||
+    isRateLimitedBadgerFailure(error) ||
     (error instanceof BadgerApiError && [502, 503, 504].includes(error.status))
   );
 }
@@ -137,15 +149,15 @@ export class BadgerApi {
             ["string", "number", "boolean"].includes(typeof value),
         )
         .map(([key, value]) => `${key}: ${String(value)}`);
-      const retryAfter = response.headers.get("retry-after");
+      const header = response.headers.get("retry-after");
+      const retryAfter =
+        header && /^\d+$/u.test(header) ? Number(header) : null;
       const detail = [
         typeof failure?.error?.message === "string"
           ? failure.error.message
           : "Request refused",
         ...(facts.length ? [`(${facts.join(", ")})`] : []),
-        ...(retryAfter && /^\d+$/u.test(retryAfter)
-          ? [`Retry after ${retryAfter} s.`]
-          : []),
+        ...(retryAfter === null ? [] : [`Retry after ${retryAfter} s.`]),
       ]
         .join(" ")
         .replaceAll(this.options.token, "[redacted]")
@@ -154,6 +166,7 @@ export class BadgerApi {
         response.status,
         code,
         `Badger ${response.status}${code ? ` ${code}` : ""}: ${detail}`,
+        retryAfter,
       );
     }
     return response.json() as Promise<T>;

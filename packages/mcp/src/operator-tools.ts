@@ -28,7 +28,9 @@ import {
 } from "@realityjunky/badger-hosts";
 import {
   BadgerApi,
+  BadgerApiError,
   BadgerTimeoutError,
+  isRateLimitedBadgerFailure,
   isRetryableBadgerFailure,
 } from "./api.js";
 import { id, tool } from "./tools.js";
@@ -64,6 +66,7 @@ const BINDING = ".badger/mcp-binding.json",
   RECOVERY_QUEUE = ".badger/mcp-recovery.json";
 const runtime = createWorkflowRuntime();
 const label = "Badger MCP Run";
+const RECENT_ACCESS_MILLISECONDS = 30_000;
 async function read<T>(
   root: string,
   relative: string,
@@ -174,9 +177,14 @@ export class LocalRuns {
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly errors = new Map<string, string>();
   private readonly synchronized = new Set<string>();
+  /** The installed package hash each Run last registered in this process. */
+  private readonly registered = new Map<string, string | null>();
   private readonly retries = new Map<string, { count: number; at: number }>();
+  /** A rate limit applies to the token, so it pauses every Run's reporting. */
+  private limitedUntil = 0;
   private closed = false;
-  private readonly authorized = new Set<string>();
+  /** When each binding last passed the service's access check. */
+  private readonly authorized = new Map<string, number>();
   constructor(
     private readonly api: BadgerApi,
     private readonly agentHost: string,
@@ -198,23 +206,53 @@ export class LocalRuns {
   }
   remember(binding: Binding) {
     this.verify(binding);
-    this.authorized.add(canonicalHash(binding));
+    this.authorized.set(canonicalHash(binding), Date.now());
   }
   forgetAuthorization() {
     this.authorized.clear();
   }
-  async authorize(binding: Binding, offline = true) {
+  /** A rate limit pauses background reporting until its Retry-After, and a
+   * denial clears this binding's successful check. */
+  private async request<T>(
+    binding: Binding,
+    path: string,
+    method = "GET",
+    body?: unknown,
+  ): Promise<T> {
+    try {
+      return await this.api.request<T>(path, method, body, 1);
+    } catch (error) {
+      if (isRateLimitedBadgerFailure(error))
+        this.limitedUntil = Math.max(
+          this.limitedUntil,
+          Date.now() + 1000 * (error.retryAfter ?? 1),
+        );
+      else if (
+        error instanceof BadgerApiError &&
+        [401, 403].includes(error.status)
+      )
+        this.authorized.delete(canonicalHash(binding));
+      throw error;
+    }
+  }
+  async authorize(binding: Binding, offline = true, recent = false) {
     this.verify(binding);
     const key = canonicalHash(binding);
+    // A flush follows the tool call that has just checked this binding, and
+    // the service authorizes each of the flush's requests again.
+    if (
+      recent &&
+      Date.now() - (this.authorized.get(key) ?? -Infinity) <
+        RECENT_ACCESS_MILLISECONDS
+    )
+      return;
     try {
-      const access = await this.api.request<{
+      const access = await this.request<{
         personId: string;
         agentHost: string;
       }>(
+        binding,
         `/workflows/${encodeURIComponent(binding.workflowId)}/runs/access?testRun=${binding.testRun}`,
-        "GET",
-        undefined,
-        1,
       );
       if (
         access.personId !== binding.personId ||
@@ -223,15 +261,16 @@ export class LocalRuns {
         throw new Error(
           "This Run belongs to another signed-in person or Agent host",
         );
-      this.authorized.add(key);
+      this.authorized.set(key, Date.now());
     } catch (error) {
+      // Outages and rate limits are not denials; they keep a successful check.
       const outage = isRetryableBadgerFailure(error);
       if (!outage) this.authorized.delete(key);
       if (offline && outage && this.authorized.has(key)) return;
       throw error;
     }
   }
-  async binding(args: { projectRoot: string; runId: string }) {
+  async binding(args: { projectRoot: string; runId: string }, recent = false) {
     const root = await runRoot(args);
     let binding = await read<Binding>(root, BINDING);
     if (!binding) {
@@ -253,7 +292,7 @@ export class LocalRuns {
         canonicalHash(queue.identity) !== canonicalHash(binding))
     )
       throw new Error("The durable Run queue identity changed");
-    await this.authorize(binding);
+    await this.authorize(binding, true, recent);
     this.active.set(root, args);
     return { root, binding };
   }
@@ -311,7 +350,7 @@ export class LocalRuns {
     return queue;
   }
   schedule(args: { projectRoot: string; runId: string }, force = false) {
-    if (this.closed) return;
+    if (this.closed || Date.now() < this.limitedUntil) return;
     const key = path.join(args.projectRoot, runRelative(args.runId));
     if (!force && (this.retries.get(key)?.at ?? 0) > Date.now()) return;
     if (this.pending.has(key)) return;
@@ -324,8 +363,13 @@ export class LocalRuns {
         const count = (this.retries.get(key)?.count ?? 0) + 1;
         this.retries.set(key, {
           count,
-          at: Date.now() + Math.min(30000, 1000 * 2 ** Math.min(count - 1, 5)),
+          at: Math.max(
+            this.limitedUntil,
+            Date.now() + Math.min(30000, 1000 * 2 ** Math.min(count - 1, 5)),
+          ),
         });
+        // Register again on the next attempt, as for a restored service.
+        this.registered.delete(key);
         this.errors.set(
           key,
           error instanceof Error ? error.message : "Run reporting failed",
@@ -336,13 +380,15 @@ export class LocalRuns {
   }
   private async flush(args: { projectRoot: string; runId: string }) {
     const root = await runRoot(args);
+    const key = path.join(args.projectRoot, runRelative(args.runId));
     const recovery = await this.withQueue(args, () => recoveryQueue(root));
     if (recovery.required) {
-      const { binding } = await this.binding(args);
+      const { binding } = await this.binding(args, true);
       const current = await runtime.inspect(target(args));
       if (!current) throw new Error("This local Run has not started");
-      await this.register(binding, current.execution);
-      await this.api.request(
+      await this.register(key, binding, current.execution);
+      await this.request(
+        binding,
         `/runs/${binding.registrationId}/recovery`,
         "POST",
         {
@@ -352,7 +398,6 @@ export class LocalRuns {
             ? { recoveries: recovery.requests, revision: current.revision }
             : {}),
         },
-        1,
       );
       if (requiresRecovery(current)) {
         await this.withQueue(args, async () => {
@@ -388,11 +433,12 @@ export class LocalRuns {
       recovery.requests.length === 0 &&
       this.synchronized.has(root) &&
       observedPackageHash === localBinding.packageHash &&
-      !this.errors.has(path.join(args.projectRoot, runRelative(args.runId)))
+      !this.errors.has(key)
     )
       return;
-    const { binding } = await this.binding(args);
+    const { binding } = await this.binding(args, true);
     await this.register(
+      key,
       binding,
       queue.report.continuation.execution,
       observedPackageHash,
@@ -415,7 +461,8 @@ export class LocalRuns {
         offset++;
       }
       const last = offset >= events.length;
-      const response = await this.api.request<{ lastSequence: number }>(
+      const response = await this.request<{ lastSequence: number }>(
+        binding,
         `/runs/${binding.registrationId}/events`,
         "POST",
         {
@@ -430,7 +477,6 @@ export class LocalRuns {
               }
             : {}),
         },
-        1,
       );
       // Re-read after the HTTP request so a concurrently committed local transition
       // stays in the queue. Reconciliation can always recreate it after a crash.
@@ -476,6 +522,7 @@ export class LocalRuns {
     }
   }
   private async register(
+    key: string,
     binding: Binding,
     execution: WorkflowContinuation["execution"],
     observedPackageHash?: string | null,
@@ -484,21 +531,24 @@ export class LocalRuns {
       observedPackageHash = await hashDirectory(binding.packageDirectory).catch(
         () => null,
       );
-    return this.api.request<{ run: { needsRecovery: boolean } }>(
-      `/runs/${binding.registrationId}`,
-      "POST",
-      {
-        workflowId: binding.workflowId,
-        publicationId: binding.publicationId,
-        packageHash: binding.packageHash,
-        observedPackageHash,
-        localRunId: binding.localRunId,
-        hostLabel: binding.hostLabel,
-        testRun: binding.testRun,
-        execution,
-      },
-      1,
-    );
+    // Registration is idempotent for its fixed identity. Repeat it only when the
+    // installed bytes changed or an earlier attempt failed.
+    if (
+      this.registered.has(key) &&
+      this.registered.get(key) === observedPackageHash
+    )
+      return;
+    await this.request(binding, `/runs/${binding.registrationId}`, "POST", {
+      workflowId: binding.workflowId,
+      publicationId: binding.publicationId,
+      packageHash: binding.packageHash,
+      observedPackageHash,
+      localRunId: binding.localRunId,
+      hostLabel: binding.hostLabel,
+      testRun: binding.testRun,
+      execution,
+    });
+    this.registered.set(key, observedPackageHash);
   }
   async capture(args: { projectRoot: string; runId: string }) {
     try {
@@ -586,11 +636,9 @@ export class LocalRuns {
       } | null;
     };
     try {
-      delivery = await this.api.request(
+      delivery = await this.request(
+        binding,
         `/runs/${binding.registrationId}/gate-answer`,
-        "GET",
-        undefined,
-        1,
       );
     } catch (error) {
       if (
