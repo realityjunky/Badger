@@ -223,8 +223,10 @@ async function runEvaluation(
       checks.push({
         id: "mcp-runtime-certification",
         passed,
+        // Only the start covers the evaluated package; every refusal and the
+        // completed Run come from the certifier's synthetic package.
         detail: passed
-          ? "Actual Badger MCP tools enforced Completion, routes, Cycles, and bound artifact roots"
+          ? "Actual Badger MCP tools started the evaluated package with its external roots bound, and enforced Completion, routes, Cycles, and bound artifact roots on a synthetic certification package"
           : "Badger MCP certification evidence is incomplete",
       });
     } catch (error) {

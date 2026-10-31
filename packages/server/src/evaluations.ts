@@ -49,11 +49,12 @@ export interface ReportRow {
   report: EvalReport;
   report_path: string;
   sandbox: typeof EVALUATION_LIMITS;
+  job_status: WorkflowJob["status"];
 }
 const reports = async (tx: Queryable, versionId: string) =>
   (
     await tx.query<ReportRow>(
-      "select * from evaluation_reports where workflow_version_id=$1 order by finished_at desc,id desc",
+      "select r.*,j.status as job_status from evaluation_reports r join workflow_jobs j on j.id=r.job_id where r.workflow_version_id=$1 order by r.finished_at desc,r.id desc",
       [versionId],
     )
   ).rows;
@@ -67,6 +68,8 @@ export async function loadEvaluationState(
 ) {
   const loaded = await loadAuthoring(tx, config, versionId);
   const history = await reports(tx, versionId);
+  // A job the worker finished as cancelled retains a superseded result, which
+  // never satisfies readiness even when its package bytes are still current.
   const passing =
     loaded.saved.invalidated_at === null
       ? history.find(
@@ -74,6 +77,7 @@ export async function loadEvaluationState(
             entry.package_id === loaded.saved.id &&
             entry.package_hash === loaded.saved.assembled_hash &&
             (options.reportId === undefined || entry.id === options.reportId) &&
+            entry.job_status === "succeeded" &&
             entry.report.passed,
         )
       : undefined;

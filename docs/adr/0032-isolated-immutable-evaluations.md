@@ -39,13 +39,18 @@ kills their process group above 512 MiB. This aggregate threshold is sampled;
 individual allocation bounds are enforced by the operating system. Every child
 has at most 15 seconds of wall time and 4 MiB of combined output; the evaluation
 has a 180-second certification deadline shared by all children. Timeout, memory,
-output, or accounting failures terminate the entire child process group.
+output, or accounting failures terminate the entire child process group and
+every descendant the adapter's process tree still lists. A child whose
+descendant holds its output open more than a second after the adapter exits
+fails, so the evaluation never waits on that descendant.
 
 Only PATH and explicit synthetic certification inputs reach the child, together
 with the controlled Node option and a private 0700 HOME/TMPDIR/TMP/TEMP directory.
 Synthetic Run roots also live beneath the evaluation's private temp directory.
 Generated deterministic adapters are the only scripts invoked; domain scripts
 are never executed. This is a resource and environment boundary for the trusted
-generated backbone, not a general-purpose executor for arbitrary uploaded code.
+generated backbone, not a general-purpose executor for arbitrary uploaded code:
+without cgroups, a descendant that both detaches from the process group and
+outlives the adapter can still escape the kill.
 Standalone CLI evaluation keeps its original defaults and persistence behavior;
 the service opts into the limits and immutable destination explicitly.

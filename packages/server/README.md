@@ -1223,19 +1223,23 @@ and activates Evaluation. See ADR 0031 for the filesystem transaction boundary.
 
 The Evaluations page selects a Workflow version, confirms an evaluation of its
 current assembled package, shows worker progress, and retains every report.
-Reports group package checks, Authoring cross-validation and runtime phases,
-including negative cases. The person who started the job receives an inbox item
+Reports group package checks, Authoring cross-validation and the runtime and
+Badger MCP certification phases, including negative cases. The person who started the job receives an inbox item
 when it finishes. Earlier reports remain readable after a package is superseded;
 publication readiness uses kernel evidence validation and a passing report for
-the current package hash.
+the current package hash from a job that succeeded. A job cancelled because the
+package or committed Creator state changed during evaluation keeps its report,
+which never satisfies readiness.
 
 Workers require Linux and util-linux's `/usr/bin/prlimit`; the service image
 includes it. Certification children have a 15-second wall-time bound, an
 inherited 512 MiB OS data-allocation limit, a sampled 512 MiB aggregate resident
 memory bound for their process tree, and a 4 MiB output bound. A shared 180-second
 deadline bounds certification across the evaluation. A limit failure terminates
-the child process group and retains a failing report. Child environments are
-scrubbed and temporary directories are private. Domain scripts never run.
+the child process group and every descendant still in its process tree, and
+retains a failing report. A child also fails when a descendant keeps its output
+open a second after the child exits. Child environments are scrubbed and
+temporary directories are private. Domain scripts never run.
 See [the evaluation decision](../../docs/adr/0032-isolated-immutable-evaluations.md)
 for the transaction and resource boundaries.
 

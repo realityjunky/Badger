@@ -4,21 +4,67 @@ import os from "node:os";
 import path from "node:path";
 import {
   evaluatePackage,
+  findSkills,
   generatePackage,
   normalizeWorkflow,
   type CreatorState,
 } from "../src/index.js";
 
+// Marks the detached descendants these tests start, so cleanup never signals
+// a process that merely reused one's PID.
+const DESCENDANT = "badger-evaluation-sandbox-test-descendant";
 const roots: string[] = [];
+const descendantPidFiles: string[] = [];
 afterEach(async () => {
+  for (const file of descendantPidFiles.splice(0)) {
+    const pid = Number(await fs.readFile(file, "utf8").catch(() => ""));
+    const command = await fs
+      .readFile(`/proc/${pid}/cmdline`, "utf8")
+      .catch(() => "");
+    if (!command.includes(DESCENDANT)) continue;
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* Already exited. */
+    }
+  }
   for (const root of roots.splice(0))
     await fs.rm(root, { recursive: true, force: true });
 });
+/** An adapter that leaves a detached descendant holding its stdout and stderr open for a minute. */
+function detachedDescendantAdapter(pidFile: string, then: string) {
+  descendantPidFiles.push(pidFile);
+  return `import { spawn } from 'node:child_process';\nimport { writeFileSync } from 'node:fs';\nconst descendant = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000); // ${DESCENDANT}'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });\nwriteFileSync(${JSON.stringify(pidFile)}, String(descendant.pid));\ndescendant.unref();\n${then}\n`;
+}
 async function fixture() {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), "badger-evaluation-sandbox-test-"),
   );
   roots.push(root);
+  // The Node's source Skill carries a domain script. Generation bundles it
+  // into the package, where certification must never execute it.
+  const domainMarker = path.join(root, "domain-executed");
+  const source = path.join(root, "skills", "reporter");
+  await fs.mkdir(path.join(source, "scripts"), { recursive: true });
+  await fs.writeFile(
+    path.join(source, "SKILL.md"),
+    "---\nname: reporter\ndescription: Prepare a report.\n---\n\n# Reporter\n\nRun `node scripts/report.mjs` to prepare the report.\n",
+  );
+  await fs.writeFile(
+    path.join(source, "scripts", "report.mjs"),
+    `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(domainMarker)}, 'bad');\n`,
+  );
+  const skillSources = [
+    {
+      name: "reporter",
+      location: "skills/reporter",
+      scripts: { "scripts/report.mjs": "local-writes" as const },
+    },
+  ];
+  const candidates = await findSkills({
+    projectRoot: root,
+    sources: skillSources,
+  });
   const workflow = {
     kind: "workflow-kernel" as const,
     name: "sandbox-evaluation",
@@ -48,7 +94,7 @@ async function fixture() {
       schemaVersion: 1,
       goal: workflow.goal,
       skillCreatorIntent: "new-skill",
-      skillSources: [],
+      skillSources,
       workflow,
       defaultLocale: "en",
     },
@@ -60,7 +106,7 @@ async function fixture() {
       planHash: "sandbox-plan",
       proposalHash: "sandbox-proposal",
       workflow: protocol,
-      candidates: [],
+      candidates,
       blockers: [],
       warnings: [],
       canInitialize: true,
@@ -75,13 +121,21 @@ async function fixture() {
     planHash: "sandbox-plan",
     draftPath: generated.packageRoot,
     currentHash: null,
-    candidates: [],
+    candidates,
     generated,
   };
   return {
     root,
     state,
     script: path.join(generated.packageRoot, "scripts", "workflow-state.mjs"),
+    domainScript: path.join(
+      generated.packageRoot,
+      "sources",
+      candidates[0]!.sources[0]!.hash,
+      "scripts",
+      "report.mjs",
+    ),
+    domainMarker,
     options: {
       persistState: false,
       reportPath: path.join(root, "report.json"),
@@ -127,15 +181,54 @@ it("accounts for native Buffer memory in adapter descendants and kills the proce
   expect(status === "" || /^State:\s+Z/mu.test(status)).toBe(true);
 }, 30_000);
 
-it("scrubs worker secrets and gives adapters private temporary storage without executing domain scripts or writing Creator state", async () => {
+it("fails promptly when an adapter exits while a detached descendant keeps its output open", async () => {
   const { root, state, script, options } = await fixture();
+  options.sandbox.childTimeLimitMilliseconds = 5000;
+  // The adapter itself succeeds; only the descendant holds the pipes.
+  await fs.writeFile(
+    script,
+    detachedDescendantAdapter(path.join(root, "descendant.pid"), ""),
+  );
+  const started = Date.now();
+  const report = await evaluatePackage(state, options);
+  expect(Date.now() - started).toBeLessThan(10_000);
+  expect(report.passed).toBe(false);
+  expect(
+    report.checks.find((check) => check.id === "workflow-runtime-certification")
+      ?.detail,
+  ).toContain("a descendant kept its output open");
+}, 30_000);
+
+it("kills a detached descendant still reachable from an adapter it stops", async () => {
+  const { root, state, script, options } = await fixture();
+  options.sandbox.childTimeLimitMilliseconds = 2500;
+  const descendantPid = path.join(root, "descendant.pid");
+  await fs.writeFile(
+    script,
+    detachedDescendantAdapter(descendantPid, "setTimeout(() => {}, 60000);"),
+  );
+  const started = Date.now();
+  const report = await evaluatePackage(state, options);
+  expect(Date.now() - started).toBeLessThan(10_000);
+  expect(
+    report.checks.find((check) => check.id === "workflow-runtime-certification")
+      ?.detail,
+  ).toContain("time limit");
+  const pid = await fs.readFile(descendantPid, "utf8");
+  const status = await fs
+    .readFile(`/proc/${pid}/status`, "utf8")
+    .catch(() => "");
+  expect(status === "" || /^State:\s+Z/mu.test(status)).toBe(true);
+}, 30_000);
+
+it("scrubs worker secrets and gives adapters private temporary storage without executing domain scripts or writing Creator state", async () => {
+  const { root, state, script, domainScript, domainMarker, options } =
+    await fixture();
   options.sandbox.childTimeLimitMilliseconds = 15000;
   const observed = path.join(root, "environment.json");
-  const marker = path.join(root, "domain-executed");
-  await fs.mkdir(path.join(state.generated!.packageRoot, "domain"));
-  await fs.writeFile(
-    path.join(state.generated!.packageRoot, "domain", "never-run.mjs"),
-    `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'bad');`,
+  // Generation bundled the domain script with the package's source Skill.
+  await expect(fs.readFile(domainScript, "utf8")).resolves.toContain(
+    domainMarker,
   );
   const original = await fs.readFile(script, "utf8");
   await fs.writeFile(
@@ -152,7 +245,7 @@ it("scrubs worker secrets and gives adapters private temporary storage without e
     );
     expect(environment.home).toBe(environment.temp);
     expect(
-      await fs.stat(marker).then(
+      await fs.stat(domainMarker).then(
         () => true,
         () => false,
       ),
