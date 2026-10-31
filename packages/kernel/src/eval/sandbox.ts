@@ -202,6 +202,15 @@ export async function certificationExecFile(
   }
 }
 
+/** A /proc file of the process, or null once the process is gone. */
+const processFile = (pid: number, file: string) =>
+  fs
+    .readFile(`/proc/${pid}/${file}`, "utf8")
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT" || error.code === "ESRCH") return null;
+      throw error;
+    });
+
 /** Aggregate native and JS resident memory of the complete descendant tree. */
 async function residentTreeBytes(
   pid: number,
@@ -210,22 +219,22 @@ async function residentTreeBytes(
   if (visited.has(pid)) return 0;
   visited.add(pid);
   const [status, children] = await Promise.all([
-    fs
-      .readFile(`/proc/${pid}/status`, "utf8")
-      .catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT" || error.code === "ESRCH") return "";
-        throw error;
-      }),
-    fs
-      .readFile(`/proc/${pid}/task/${pid}/children`, "utf8")
-      .catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT" || error.code === "ESRCH") return "";
-        throw error;
-      }),
+    processFile(pid, "status"),
+    processFile(pid, `task/${pid}/children`),
   ]);
-  const own = Number(/^VmRSS:\s+(\d+)\s+kB$/mu.exec(status)?.[1] ?? 0) * 1024;
+  // A process that still exists without a children file means the kernel
+  // cannot list descendants: fail closed rather than count none. Only a
+  // process that exited between the two reads has no children to count.
+  if (
+    status !== null &&
+    children === null &&
+    (await processFile(pid, "status")) !== null
+  )
+    throw new Error("The kernel does not list child processes");
+  const own =
+    Number(/^VmRSS:\s+(\d+)\s+kB$/mu.exec(status ?? "")?.[1] ?? 0) * 1024;
   const descendants = await Promise.all(
-    children
+    (children ?? "")
       .trim()
       .split(/\s+/u)
       .filter(Boolean)
