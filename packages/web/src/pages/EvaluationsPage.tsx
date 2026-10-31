@@ -19,7 +19,11 @@ import {
   type WorkflowCatalog,
   type WorkflowDetail,
 } from "../api/workflows.js";
-import type { EvaluationsView } from "../api/evaluations.js";
+import {
+  isRuntimeCheck,
+  mcpPhaseEvidence,
+  type EvaluationsView,
+} from "../api/evaluations.js";
 import { questionnaireRequest } from "../api/questionnaire.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
@@ -457,6 +461,12 @@ function ReportChecks({ report }: { report: EvalReport }) {
         >,
       });
   }
+  if (report.mcp)
+    phases.push({
+      key: "mcp",
+      title: t("evaluation.mcp"),
+      evidence: mcpPhaseEvidence(report.mcp),
+    });
   return (
     <Collapse
       defaultActiveKey={["package", "authoring", "runtime"]}
@@ -467,8 +477,7 @@ function ReportChecks({ report }: { report: EvalReport }) {
           children: checkList(
             report.checks.filter(
               (check) =>
-                !check.id.startsWith("authoring-") &&
-                check.id !== "workflow-runtime-certification",
+                !check.id.startsWith("authoring-") && !isRuntimeCheck(check.id),
             ),
           ),
         },
@@ -498,9 +507,7 @@ function ReportChecks({ report }: { report: EvalReport }) {
           children: (
             <>
               {checkList(
-                report.checks.filter(
-                  (check) => check.id === "workflow-runtime-certification",
-                ),
+                report.checks.filter((check) => isRuntimeCheck(check.id)),
               )}
               <Collapse
                 items={phases.map((phase) => ({

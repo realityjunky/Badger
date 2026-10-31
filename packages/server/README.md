@@ -1211,8 +1211,8 @@ and activates Evaluation. See ADR 0031 for the filesystem transaction boundary.
 
 The Evaluations page selects a Workflow version, confirms an evaluation of its
 current assembled package, shows worker progress, and retains every report.
-Reports group package checks, Authoring cross-validation and runtime phases,
-including negative cases. The person who started the job receives an inbox item
+Reports group package checks, Authoring cross-validation and the runtime and
+Badger MCP certification phases, including negative cases. The person who started the job receives an inbox item
 when it finishes. Earlier reports remain readable after a package is superseded;
 publication readiness uses kernel evidence validation and a passing report for
 the current package hash from a job that succeeded. A job cancelled because the
