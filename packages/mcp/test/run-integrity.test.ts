@@ -317,6 +317,48 @@ it("reports an interrupted kernel transition before recover and mirrors its sett
     (await createWorkflowRuntime().readReport({ kind: "standalone", ...args }))!
       .continuation,
   );
+  // A start that WorkflowRuntime committed before failing keeps its intent, so
+  // a later call binds the Run.
+  const startArgs = { projectRoot: root, runId: "interrupted-start" };
+  const crashStart = vi
+    .spyOn(fs, "rename")
+    .mockImplementation(async (from, to) => {
+      if (
+        String(to) ===
+        path.join(root, ".badger/runs/interrupted-start/.badger/run-state.json")
+      )
+        throw new Error("Simulated host crash");
+      return originalRename(from, to);
+    });
+  let refused;
+  try {
+    refused = await client.callTool({
+      name: "start",
+      arguments: {
+        ...startArgs,
+        workflowId: f.workflow.id,
+        publicationId: f.publication.id,
+        packageHash: f.publication.packageHash,
+        hostLabel: "Lab",
+        confirmed: true,
+      },
+    });
+  } finally {
+    crashStart.mockRestore();
+  }
+  expect(refused.isError).toBe(true);
+  expect(
+    (await call("recover", startArgs)).continuation.findings.map(
+      (finding: any) => finding.code,
+    ),
+  ).not.toContain("recovery-required");
+  await expect
+    .poll(async () =>
+      (await f.call("/me/runs", "GET", undefined, operator)).runs.map(
+        (run: any) => run.localRunId,
+      ),
+    )
+    .toContain("interrupted-start");
 }, 240_000);
 
 it("settles a recovery notice whose interruption was cleared outside recover once the Run reports a healthy runtime", async () => {

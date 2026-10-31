@@ -281,7 +281,8 @@ each declared external directory, and confirm those directories with them.
 `start` takes the same identifiers, `hostLabel`, `confirmed:true`, optional
 `testRun` (default false), and optional `externalRoots: {name: absoluteDirectory}`.
 Only `start` accepts root bindings. Runtime refusals are returned unchanged and
-create no service Run registration.
+create no service Run registration. If WorkflowRuntime committed the Run before a
+later step failed, its start intent stays, and `status` or `recover` binds it.
 
 `next`, `status`, and `recover` take `projectRoot` and `runId`. Replies include the
 unchanged `continuation`, the current Node's local `skillPath`, and `runUrl`.

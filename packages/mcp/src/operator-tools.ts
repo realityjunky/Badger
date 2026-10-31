@@ -880,6 +880,10 @@ export function operatorTools(
               : { externalRoots: args.externalRoots }),
           });
         } catch (error) {
+          // WorkflowRuntime can commit the Run before a later step fails, such as
+          // a checkpoint write. Keep that Run's intent so a later call binds it.
+          if (await runtime.inspect(target(args)).then(Boolean, () => true))
+            throw error;
           // A refused start must permit corrected roots on the same name. No service
           // registration has occurred; the empty intent is safe to remove.
           const { removeContainedFile } = await import("@realityjunky/badger");
