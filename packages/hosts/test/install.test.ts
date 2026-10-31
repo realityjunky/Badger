@@ -345,9 +345,23 @@ it("refuses unowned same-name MCP entries, symlink escapes, and unsafe package p
   await expect(previewInstall(input)).rejects.toThrow(/symbolic/iu);
   expect(await fs.readdir(f.homeRoot)).toEqual([]);
   await fs.unlink(path.join(f.projectRoot, ".claude"));
+  // SKILL.md and an inventory matching every file's bytes remain. No package
+  // hash can cover an unsafe path, so the message shows which check refused.
   const unsafe = structuredClone(input);
-  unsafe.snapshot.files[0].path = "../../escape";
-  await expect(previewInstall(unsafe)).rejects.toThrow();
+  const escape = Buffer.from("escape\n");
+  unsafe.snapshot.files.push({
+    path: "../../escape",
+    content: escape.toString("base64"),
+  });
+  unsafe.snapshot.inventory.push({
+    path: "../../escape",
+    bytes: escape.length,
+    sha256: createHash("sha256").update(escape).digest("hex"),
+    owner: "auto",
+  });
+  await expect(previewInstall(unsafe)).rejects.toThrow(
+    "Package file path is unsafe or repeated",
+  );
   const plan = await previewInstall(input);
   await fs.symlink(f.homeRoot, path.join(f.projectRoot, ".claude"), "dir");
   await expect(
