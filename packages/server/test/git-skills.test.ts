@@ -230,6 +230,25 @@ describe("Skill versions from registered Git repositories", () => {
       "no published branch or tag reaches",
     );
   });
+  it("reports Git's refusal of an object in the history, not an unpublished commit", async () => {
+    const { base } = await library();
+    const repositoryId = await register(base);
+    const commit = await remote.legacyHistory({
+      "config/settings.json": '{"legacy":true}\n',
+    });
+    const response = await write(`${base}/git-preview`, {
+      repositoryId,
+      commit,
+    });
+    expect(response.status).toBe(400);
+    const { error } = await response.json();
+    expect(error.code).toBe("invalid");
+    expect(error.message).toMatch(
+      /^Git refused an object in the repository's history: object [0-9a-f]{40}: zeroPaddedFilemode: contains zero-padded file modes$/u,
+    );
+    expect(error.message).not.toContain(service.config.storage.root);
+    expect(await workspaces()).toEqual([]);
+  });
   it.each([false, true])(
     "records a published tag for a commit outside every branch (annotated: %s)",
     async (annotated) => {

@@ -945,7 +945,10 @@ abbreviations, and unregistered or other-Skill repository IDs are refused.
 A missing confirmation returns 400 before fetching; a mismatched source hash
 returns 409. Resource limits return 413. A commit the host cannot supply, an
 answer that is not Git smart HTTP, such as a redirect or a 404, and Git LFS
-content return 400 `invalid`. A timeout, an unreachable host, a 5xx or 429
+content return 400 `invalid`. So does history with an object that Git's
+integrity check refuses, such as a legacy zero-padded file mode: the message
+says Git refused an object in the repository's history and names the object and
+the check, never quoting the remote. A timeout, an unreachable host, a 5xx or 429
 answer, a server without Git, and the concurrency limit return 503
 `unavailable`, which a later retry may overcome. Every failure carries a safe
 message and creates no version.
