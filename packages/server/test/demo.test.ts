@@ -50,6 +50,17 @@ describe("the read-only demo", () => {
       ["skills", { skills: [{ id: "demo-skill" }] }],
       ["me/runs", { runs: [{ id: "demo-run" }] }],
       [
+        "runs/demo-run",
+        {
+          run: {
+            id: "demo-run",
+            integrityFindings: [],
+            needsRecovery: false,
+            recovery: null,
+          },
+        },
+      ],
+      [
         "workflows/demo-workflow/versions/demo-version/evaluations",
         { reports: [{ id: "demo-evaluation" }] },
       ],
