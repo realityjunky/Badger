@@ -762,12 +762,12 @@ Scopes only narrow the owner's current Badger permissions; they never grant
 a role. Role removal applies to the next request. The currently delivered
 API permits these token operations:
 
-| Scopes     | API operations, subject to the person's roles                                                            |
-| ---------- | -------------------------------------------------------------------------------------------------------- |
-| All three  | Read `/me`, `/groups`, the workflow catalog and versions, and Skill entries, versions, files, and diffs. |
-| `engineer` | Start workflow versions as an Engineer; create Skill entries, preview, and upload as an Engineer.        |
-| `expert`   | Create Skill entries, preview, and upload as a Field expert.                                             |
-| `operator` | Read the available workflow and Skill APIs; Run operations arrive with the Run service.                  |
+| Scopes     | API operations, subject to the person's roles                                                                               |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------- |
+| All three  | Read `/me`, `/groups`, the workflow catalog and versions, and Skill entries, versions, files, and diffs.                    |
+| `engineer` | Start workflow versions as an Engineer; create Skill entries, preview, and upload as an Engineer.                           |
+| `expert`   | Create Skill entries, preview, and upload as a Field expert.                                                                |
+| `operator` | Read the available workflow and Skill APIs; retrieve published packages and register, report, and read Runs as an Operator. |
 
 Administrators can perform a profile's permitted operations within its
 scopes. Tokens never manage tokens, groups, role bindings, or personal
@@ -1261,8 +1261,9 @@ selection. `snapshot` contains `packageHash`, `inventory` (path, bytes, SHA-256,
 owner), and `files` (portable path and base64 content). Every retrieval verifies
 the exact stored bytes and inventory with the public kernel
 `verifyPackageSnapshot` seam. Signed-in workflow readers can inspect publications;
-tokens need `operator` scope and an Operator, test Engineer or Administrator role
-on the visible workflow. Other workflows and scopes are refused.
+tokens need `operator` scope with an Operator, Engineer, or Administrator role, or
+`engineer` scope with an Engineer or Administrator role, on the visible workflow.
+Other workflows and scopes are refused.
 
 Publications store actual package bytes in append-only Postgres records, including
 bundled source Skills. They remain usable after upstream changes, same-version
