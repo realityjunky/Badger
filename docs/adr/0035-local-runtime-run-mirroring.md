@@ -1,6 +1,6 @@
-# ADR 0035: Local runtime authority and durable Run mirroring
+# Local runtime authority and durable Run mirroring
 
-Status: Accepted
+Status: accepted.
 
 ## Context
 
@@ -39,8 +39,9 @@ identity can continue through a connection outage. A fresh connection must check
 the person, role and scope before operating that Run. Rejected authorization
 never becomes an offline permission. Human decisions, overrides, manual-stop,
 manual verification and finalization confirmations are absent from the machine
-submission schema; pending human actions return dashboard links until gate
-answer delivery is implemented.
+submission schema; pending human actions return dashboard links, where people
+answer them, and the MCP delivers those answers as
+[ADR 0036](0036-dashboard-run-gates.md) records.
 
 Evaluation retains script certification and invokes a trusted host-supplied MCP
 certifier inside the existing sandbox. Its executable belongs to the installed
@@ -57,8 +58,10 @@ inherited resource limits and process-tree accounting.
 The service is an observer and the local Run root remains the runtime authority.
 At-least-once delivery produces one immutable service record per sequence.
 Explicit bounds keep service validation auditable; oversized data stays local
-with a reporting error. Deep gate attestation and Run integrity workflows remain
-separate work. A pending interrupted kernel transition still requires explicit
-recovery; reporting does not silently commit it. Active journal replacement is
-handled by retrying only typed changed-file reads, preserving all protected-file
-validation and never replaying a submitted mutation with a newer revision.
+with a reporting error. Gate attestation is recorded in
+[ADR 0036](0036-dashboard-run-gates.md), and Run integrity and recovery in
+[ADR 0037](0037-run-integrity-and-recovery.md). A pending interrupted kernel
+transition still requires explicit recovery; reporting does not silently commit
+it. Active journal replacement is handled by retrying only typed changed-file
+reads, preserving all protected-file validation and never replaying a submitted
+mutation with a newer revision.

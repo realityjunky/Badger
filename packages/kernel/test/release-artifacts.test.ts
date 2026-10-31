@@ -37,6 +37,14 @@ const serviceDecisions = [
   "0027-transactional-proposal-initialization.md",
   "0028-workflow-version-inheritance.md",
   "0029-registered-git-skill-versions.md",
+  "0030-transactional-package-generation.md",
+  "0031-transactional-authoring-acceptance.md",
+  "0032-isolated-immutable-evaluations.md",
+  "0033-immutable-package-publication.md",
+  "0034-preview-bound-local-host-installation.md",
+  "0035-local-runtime-run-mirroring.md",
+  "0036-dashboard-run-gates.md",
+  "0037-run-integrity-and-recovery.md",
 ];
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
@@ -566,7 +574,7 @@ describe("Badger release artifacts", () => {
     expect(delivered).toContain("BADGER_PLATFORM_ADMIN_MAPPING");
     expect(delivered).toContain("presents that address as verified");
     expect(planned).toContain(
-      "(ADRs) 0002–0006, 0009, 0010, 0012, 0013, 0015, and 0016",
+      "(ADRs) 0002–0006, 0009, 0010, 0012, 0013, 0015, 0016, and 0019–0037",
     );
     expect(planned).not.toContain("bind people by email; a binding takes");
     expect(planned).not.toContain("inherited by its nested groups");
@@ -742,16 +750,17 @@ describe("Badger release artifacts", () => {
       "is to take the other jobs from its queue too: kernel transitions, evaluations, and notification delivery",
       "Saving sends a test post",
       "保存时会发送一条测试消息",
+      // #60–#66 delivered these, so §7 no longer plans them.
+      "the Package, Evaluation, and Review and publication gates are to follow them",
+      "“软件包”“评估”和“审查与发布”的门槛将沿用这一方式",
+      "and so is the operator profile:",
+      "以及运行者 profile，将随后提供",
+      "Planned (#65):",
+      "规划中（#65）",
+      "A host installer is to write published packages",
+      "宿主安装器将把已发布的软件包",
     ])
       expect(planned, sentence).not.toContain(sentence);
-    expect(planned).toContain(
-      "the Package, Evaluation, and Review and publication gates are to follow them",
-    );
-    expect(planned).toContain("and so is the operator profile:");
-    expect(planned).toContain("Planned (#65):");
-    expect(planned).toContain(
-      "A host installer is to write published packages",
-    );
     expect(planned).toContain("WeCom app messages to individuals, email");
     expect(planned).toContain("tested against a stub robot only");
 
@@ -771,7 +780,7 @@ describe("Badger release artifacts", () => {
       "a post to a real team chat has not been verified",
     );
     expect(ledger).toContain(
-      "the expert and engineer MCP profiles are delivered in `packages/mcp/` (#54, #55)",
+      "the expert, engineer, and operator MCP profiles are delivered in `packages/mcp/` (#54, #55, #64, #65, #66, #67)",
     );
     expect(ledger).not.toContain(
       "the other profiles and host installer are planned",
@@ -834,7 +843,6 @@ describe("Badger release artifacts", () => {
       "Git LFS content is refused",
       "Git LFS 内容会被拒绝",
       "A server process runs at most two fetches at once and refuses another with 503 and <code>Retry-After</code>",
-      "and Badger does not check that yet",
       // The dashboard.
       "Retire asks first, naming the draft's kind and saying that a retired draft cannot be revised and leaves the ledger and readiness (#76)",
       "“停用”会先请求确认",
@@ -875,6 +883,9 @@ describe("Badger release artifacts", () => {
       "保存与提交回答、评论、关切",
       "Reading a Skill folder (regular files only, within the service's limits) and keeping",
       "读取 Skill 文件夹（只读普通文件，并遵守服务端的限制），并把",
+      // #89 added the reachability check.
+      "and Badger does not check that yet",
+      "而 Badger 目前还不检查这一点",
     ])
       expect(manual, superseded).not.toContain(superseded);
 
@@ -902,7 +913,7 @@ describe("Badger release artifacts", () => {
       'a pending invitee is named "Invited person", never by email address',
       "the owner's approval of the current proposal supersedes the stale one",
       "records `workflow_version.inherited`",
-      "checking reachability is a follow-up",
+      "Since #89 an import also needs a branch or tag of the repository that reaches the commit",
     ])
       expect(ledger, sentence).toContain(sentence);
     for (const superseded of [
@@ -913,7 +924,157 @@ describe("Badger release artifacts", () => {
       "retried with backoff through the deployment's proxy, a Delivery log, personal mention preferences",
       "with provenance to their origins, then queues its own source check",
       "Structured answers and attachments (#51) are delivered in the server and the Questionnaire page",
+      "checking reachability is a follow-up",
     ])
       expect(ledger, superseded).not.toContain(superseded);
+  });
+
+  it("describes #60–#67, #71, and #89 as delivered and keeps #68 open", async () => {
+    const manual = await readText("docs/badger-workflow-manual.html");
+    const ledger = await readText("docs/release-artifacts.md");
+    const flat = (text: string) => text.replace(/\s+/gu, " ");
+    const kernelReadme = flat(await readText("packages/kernel/README.md"));
+    const readme = flat(await readText("README.md"));
+    const webReadme = flat(await readText("packages/web/README.md"));
+    const runMirroring = flat(
+      await readText("docs/adr/0035-local-runtime-run-mirroring.md"),
+    );
+    const delivered = manual.slice(0, manual.indexOf('id="service"'));
+    const planned = manual.slice(manual.indexOf('id="service"'));
+
+    for (const heading of [
+      "Package scaffold generation (#60).",
+      "软件包脚手架生成（#60）。",
+      "Authoring lanes and assembly (#61).",
+      "创作 lane 与组装（#61）。",
+      "Evaluations (#62).",
+      "评估（#62）。",
+      "Package review and publication (#63).",
+      "软件包审查与发布（#63）。",
+      "Runs mirrored from the Badger MCP (#65).",
+      "从 Badger MCP 同步的 Run（#65）。",
+      "Run gates (#66).",
+      "Run 门槛（#66）。",
+      "Run integrity and recovery (#67).",
+      "Run 完整性与恢复（#67）。",
+      "Run recovery (#67).",
+      "Run 恢复（#67）。",
+      "Read-only demo (#71).",
+      "只读演示（#71）。",
+      "Operator profile (#64, #65, #66).",
+      "运行者 profile（#64、#65、#66）。",
+      "Certification in MCP mode (#65).",
+      "MCP 模式下的认证（#65）。",
+    ])
+      expect(delivered, heading).toContain(`<strong>${heading}</strong>`);
+    for (const sentence of [
+      'id="code-hosts"',
+      'href="#code-hosts"',
+      'href="../packages/hosts/src/index.ts"',
+      'href="../packages/server/src/generation.ts"',
+      'href="../packages/server/src/run-gates.ts"',
+      'href="../packages/mcp/src/operator-tools.ts"',
+      'href="../packages/web/src/pages/RunsPage.tsx"',
+      'href="../packages/server/src/run-integrity.ts"',
+      'href="../packages/web/e2e/run-integrity.spec.ts"',
+      'href="../packages/mcp/test/run-integrity.test.ts"',
+      // #67 moved out of §7.5 into §5.4–§5.6.
+      "The service flags a decision with no matching gate answer, a gap in the event sequence, and an execution that differs from the published package as findings on the Run",
+      "若出现没有对应门槛回答的决策、事件序列有缺口，或执行与已发布软件包不同，服务都会把它作为 finding 标记在 Run 上",
+      "A Run that needs recovery (#67) is marked in the Runs list and on its page",
+      "需要恢复的 Run（#67）在 Run 列表和其详情页上都有标记",
+      "<code>.badger/mcp-recovery.json</code>",
+      "its operator profile installs published workflows (#64) and runs them (#65, #66)",
+      "其运行者 profile 安装已发布的工作流（#64）并运行它们（#65、#66）",
+      "Only <code>start</code> takes <code>externalRoots</code>",
+      // #89 in §3.2, §4.5, and the server's paragraphs.
+      "Each source is identified by its Project-relative location and its content hash",
+      "as often as one transition can replace it, instead of failing (#89)",
+      "Each person may leave at most eight unreferenced uploads",
+      "refuses a commit that none of them reaches",
+      "<code>BADGER_GIT_PROXY</code> sends Git fetches through an HTTP or HTTPS proxy",
+      "in upper and lower case, as build arguments",
+      // #68 is a human acceptance ticket that stays open.
+      "has not been verified in the real host yet (#68",
+      "尚未在真实宿主中验证（#68",
+    ])
+      expect(delivered, sentence).toContain(sentence);
+    for (const stale of [
+      "the operator profile of §7.5 is not built yet",
+      "§7.5 的运行者 profile 尚未实现",
+      "The other pages hold placeholders",
+      "其余页面在 §7 的记录落地之前只放置占位内容",
+      "the records that move the rest arrive with §7.3",
+      "推动其余阶段的记录随 §7.3 一起到来",
+      "workspace package joins the kernel",
+      "certification exercises the runtime and the scripts, not a live MCP",
+    ])
+      expect(delivered, stale).not.toContain(stale);
+
+    // The remaining engineer tools and the laptop verification stay planned.
+    for (const sentence of [
+      "Jobs for dossier drafts are to follow on the same terms.",
+      "is still to gain dossier and proposal previews",
+      "is still to be verified in the real host",
+      "#24 was first split into the sub-issues #25–#72",
+      "#24 最初拆成子 issue #25–#72",
+    ])
+      expect(planned, sentence).toContain(sentence);
+    for (const landed of [
+      "is to serve the API for the later stages and Runs",
+      "is to take the other jobs from its queue too",
+      "the service adds one more npm workspace package",
+      "Jobs for dossier drafts, authoring lanes in Wave order, and review votes are to follow",
+      "evaluation is to run as a sandboxed worker job",
+      "Items and posts for Runs and the later stages are to arrive with their records",
+      "Run 和后续阶段的条目与消息将随各自的记录一起到来",
+      // #67 is delivered (§5.4–§5.6).
+      "The service flags a decision with no matching gate answer, a gap in the event sequence, and a package hash that differs from the published one.",
+      "若出现没有对应门槛回答的决策、事件序列有缺口，或软件包哈希与已发布版本不同，服务都会标记出来。",
+      "48 sub-issues",
+      "48 个子 issue",
+    ])
+      expect(planned, landed).not.toContain(landed);
+    expect(manual).not.toContain(
+      "checks of each Run's events against the service's records",
+    );
+    expect(manual).not.toContain("按服务的记录核对每个 Run 的事件");
+
+    for (const paragraph of [
+      "Authoring lanes, review votes, and assembly (#61)",
+      "Sandboxed evaluations (#62)",
+      "Package review and publication (#63)",
+      "Runs through the local Badger MCP (#65)",
+      "Run gates (#66)",
+      "Review follow-ups (#89)",
+    ])
+      expect(ledger, paragraph).toContain(`\n${paragraph} are delivered`);
+    for (const paragraph of [
+      "Package scaffold generation (#60)",
+      "Host installation (#64)",
+      "Run integrity and recovery (#67)",
+      "Demo mode (#71)",
+    ])
+      expect(ledger, paragraph).toContain(`\n${paragraph} is delivered`);
+    expect(ledger).toContain("laptop checks prepared but not yet verified");
+    expect(ledger).not.toContain("Runtime Run tools follow separately");
+    expect(kernelReadme).not.toContain("Runtime Run tools follow separately");
+    expect(kernelReadme).not.toContain("Run integrity (#67) and WorkBuddy");
+    expect(kernelReadme).toContain(
+      "and Run integrity and recovery (#67), with demo mode (#71)",
+    );
+    expect(runMirroring).not.toContain("answer delivery is implemented");
+    expect(runMirroring).not.toContain("remain separate work");
+    expect(runMirroring).toContain(
+      "[ADR 0037](0037-run-integrity-and-recovery.md)",
+    );
+    expect(webReadme).toContain(
+      "Workflows, Questionnaire, Skills, Runs, Evaluations, Activity, Admin, and Settings",
+    );
+    expect(webReadme).not.toContain("replaces the token placeholder");
+    for (const ticket of ["#62", "#63", "#64", "#65", "#66", "#67"])
+      expect(webReadme, ticket).toContain(`(${ticket})`);
+    expect(readme).not.toContain("Evaluation and review gates follow.");
+    expect(readme).not.toContain("Future extensions (#24)");
   });
 });
