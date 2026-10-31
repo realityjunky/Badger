@@ -8,9 +8,10 @@ calling the kernel. Tokens can inspect packages but cannot confirm or generate.
 
 Generation runs in a new Creator namespace under the same Project root. The
 kernel records that namespace in Creator state and uses it for generation and
-authoring persistence. The Project root stays fixed because a confirmed Semantic
-dossier binds its sources' canonical paths. Copying the Project and rewriting
-those paths would change the approved plan. The worker instead initializes the
+authoring persistence. The Project root stays fixed because the approved plan
+and its Semantic dossier name their sources by locations that the kernel
+resolves against that root ([ADR 0023](0023-immutable-dossier-versions.md)).
+The worker initializes the
 exact approved proposal in its private namespace, invokes confirmed generation,
 and commits the generated package inventory, authoring plan, new Creator bytes,
 job outcome, stage changes, and audit entry together. An aborted transaction

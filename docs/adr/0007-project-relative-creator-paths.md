@@ -10,7 +10,7 @@ The hashes that bind authoring work describe what the sources contain, not where
 
 - `.badger/` is portable. A copied or renamed project passes guide, authoring, assembly, evaluation, review, and publication without regeneration, whether it moved mid-authoring or after release.
 - Publication approval readiness uses project-relative evidence paths, so a move does not stale an approval.
-- Proposing again after a move needs the dossier's canonical source paths updated, because the proposal checks them against the discovered sources.
+- Proposing again after a move needs the dossier's canonical source paths updated, because the proposal checks them against the discovered sources. Since #89, a dossier names each source by its declared location and content hash instead ([ADR 0023](0023-immutable-dossier-versions.md)), so a move no longer needs that update.
 - Authoring sessions created before this decision hold hashes that bound absolute source roots, and must be regenerated. States that hold absolute paths still load where they were written, and are rewritten relative on their next write.
 - Committing `.badger/` becomes possible; whether a deployment should commit it stays a per-deployment decision.
 
