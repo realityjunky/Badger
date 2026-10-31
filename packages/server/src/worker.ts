@@ -37,6 +37,7 @@ export function createSourceCheckWorker(
     blobs: filesystemBlobStore(options.config.storage.blobDirectory),
     dependencies: { clock: systemClock, ids: randomIdSource },
     workerId: options.workerId ?? `worker-${randomUUID()}`,
+    logger: options.logger,
   });
 }
 

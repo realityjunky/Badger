@@ -18,6 +18,7 @@ import type { ServiceDependencies } from "./dependencies.js";
 import { expireAnswerAttachments } from "./questionnaire/attachment-expiry.js";
 import type { ServiceConfig } from "./config.js";
 import type { BlobStore } from "./skills/blobs.js";
+import { silentLogger, type Logger } from "./log.js";
 import { toIsoString } from "./util.js";
 import type { StageState } from "./workflows.js";
 import { invalidateGate } from "./gates.js";
@@ -790,6 +791,8 @@ export interface SourceCheckWorkerOptions {
   leaseMilliseconds?: number;
   /** The longest wait between two looks at the queue. */
   pollMilliseconds?: number;
+  /** Where maintenance failures are reported; jobs report their own. */
+  logger?: Logger;
 }
 
 type FinalStatus = Exclude<JobStatus, "queued" | "running">;
@@ -812,12 +815,22 @@ export class SourceCheckWorker {
       pollMilliseconds:
         options.pollMilliseconds ??
         (options.database.waitForNotification === undefined ? 1_000 : 15_000),
+      logger: options.logger ?? silentLogger,
     };
   }
 
   /** Claims the next runnable job and runs it; null when none can start. */
   async runOnce(): Promise<WorkflowJob | null> {
-    await expireAnswerAttachments(this.options);
+    // Expiry is maintenance: a failure is logged, the next run retries it,
+    // and it never keeps the worker from claiming a job.
+    try {
+      await expireAnswerAttachments(this.options);
+    } catch (error) {
+      this.options.logger.error({
+        event: "worker.attachment-expiry-failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     const job = await this.claim();
     return job === null ? null : this.process(job);
   }

@@ -333,6 +333,7 @@ export async function startTestService(
       config,
       blobs: filesystemBlobStore(config.storage.blobDirectory),
       workerId,
+      logger,
       ...options,
     });
 

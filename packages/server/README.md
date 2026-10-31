@@ -529,7 +529,11 @@ removal records `answer.attachment-expired` in the Activity log. References in
 old revisions and inherited versions are kept forever. Unreferenced content
 is removed too, unless another attachment or an immutable Skill inventory
 uses the same hash. A durable cleanup queue retries content removal after a
-worker interruption; blob writers and cleanup share a transaction lock.
+worker interruption; blob writers and cleanup share a transaction lock. Content
+the worker cannot remove, for example on a restored volume it may not write,
+stays queued for a later run and is logged with its hash; it holds up neither
+other content nor workflow jobs. Any other expiry failure is logged as well,
+and the worker still claims jobs.
 Migration `0032` permits deletion only of never-referenced uploads; updates,
 deletion of referenced receipts, and truncation remain forbidden.
 

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   startTestService,
@@ -131,6 +134,7 @@ async function setup(environment: Record<string, string> = {}) {
   return {
     base,
     workflow,
+    version,
     group,
     round,
     content,
@@ -142,7 +146,140 @@ async function setup(environment: Record<string, string> = {}) {
   };
 }
 
+/** Uploads unreferenced files and pins a Skill version, queuing a source check. */
+async function expiringUploads(texts: string[]) {
+  const { base, workflow, version, group, create, publish } = await setup({
+    BADGER_ANSWER_ATTACHMENT_RETENTION_SECONDS: "60",
+  });
+  const question = await create({ kind: "file" });
+  await publish();
+  const uploads = [];
+  for (const text of texts) {
+    const { attachment } = await json(
+      call(
+        "POST",
+        `${base}/questions/${question.id}/attachments`,
+        {
+          questionRevision: 1,
+          name: "evidence.txt",
+          mediaType: "text/plain",
+          contentBase64: Buffer.from(text).toString("base64"),
+        },
+        expert,
+      ),
+      201,
+    );
+    const hash = createHash("sha256").update(text).digest("hex");
+    const file = path.join(
+      service.config.storage.blobDirectory,
+      hash.slice(0, 2),
+      hash.slice(2),
+    );
+    uploads.push({
+      text,
+      hash,
+      file,
+      path: `${base}/attachments/${attachment.id}`,
+    });
+  }
+  const { skill } = await json(
+    call("POST", "/skills", { groupId: group.id, name: "source" }, admin),
+    201,
+  );
+  const files = [
+    {
+      path: "SKILL.md",
+      content: Buffer.from(
+        "---\nname: source\ndescription: Evidence\n---\n\nSource evidence.\n",
+      ).toString("base64"),
+    },
+  ];
+  const { preview } = await json(
+    call("POST", `/skills/${skill.id}/upload-preview`, { files }, admin),
+  );
+  await json(
+    call(
+      "POST",
+      `/skills/${skill.id}/versions`,
+      { files, expectedHash: preview.hash, confirmed: true },
+      admin,
+    ),
+    201,
+  );
+  await json(
+    call(
+      "POST",
+      `/workflows/${workflow.id}/versions/${version.id}/pins`,
+      { skillId: skill.id, hash: preview.hash },
+      admin,
+    ),
+    201,
+  );
+  return uploads;
+}
+
 describe("structured answers", () => {
+  it("keeps claiming jobs when attachment expiry fails, and retries it", async () => {
+    const [upload] = await expiringUploads(["Expired evidence"]);
+    service.clock.advance(60_000);
+    // The first transaction to begin is the upload's expiry.
+    service.failNextTransaction("40001");
+
+    expect(await service.worker().runOnce()).toMatchObject({
+      kind: "source-check",
+      status: "succeeded",
+    });
+    expect(service.logs).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        event: "worker.attachment-expiry-failed",
+      }),
+    );
+    expect((await call("GET", upload!.path, undefined, expert)).status).toBe(
+      200,
+    );
+    expect(await service.worker().runOnce()).toBeNull();
+    expect((await call("GET", upload!.path, undefined, expert)).status).toBe(
+      404,
+    );
+  });
+  it("keeps claiming jobs and cleaning other content when one expired upload's content cannot be removed", async () => {
+    // Content is cleaned in hash order; the first one cannot be removed.
+    const [stuck, removable] = (
+      await expiringUploads([
+        "First expired evidence",
+        "Second expired evidence",
+      ])
+    ).sort((left, right) => left.hash.localeCompare(right.hash));
+    // A directory at the content's address refuses removal as a file does
+    // on a restored volume the worker may not write.
+    await fs.rm(stuck!.file);
+    await fs.mkdir(path.join(stuck!.file, "kept"), { recursive: true });
+    service.clock.advance(60_000);
+
+    expect(await service.worker().runOnce()).toMatchObject({
+      kind: "source-check",
+      status: "succeeded",
+    });
+    await expect(fs.stat(removable!.file)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(service.logs).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        event: "worker.attachment-content-cleanup-failed",
+        hash: stuck!.hash,
+      }),
+    );
+
+    // The content stays queued, and a later run removes it once it can.
+    await fs.rm(stuck!.file, { recursive: true });
+    await fs.writeFile(stuck!.file, stuck!.text);
+    expect(await service.worker().runOnce()).toBeNull();
+    await expect(fs.stat(stuck!.file)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
   it("keeps expired attachment content shared by an immutable Skill version", async () => {
     const { base, group, create, publish } = await setup({
       BADGER_ANSWER_ATTACHMENT_RETENTION_SECONDS: "60",
