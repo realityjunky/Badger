@@ -40,6 +40,41 @@ export const isAuthoringJob = (job: { kind: string }) =>
 const sha = (bytes: string | Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
 
+/**
+ * Kernel output as readers and Agents see it: an absolute path under the
+ * Project root becomes Project-relative, and `aliases` rename exact paths.
+ */
+function portablePaths(
+  root: string,
+  value: unknown,
+  aliases: ReadonlyMap<string, string> = new Map(),
+): any {
+  if (typeof value === "string") {
+    const alias = aliases.get(value);
+    if (alias) return alias;
+    if (path.isAbsolute(value)) {
+      const relative = path.relative(root, value);
+      if (
+        relative !== ".." &&
+        !relative.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(relative)
+      )
+        return relative.split(path.sep).join("/") || ".";
+    }
+    return value;
+  }
+  if (Array.isArray(value))
+    return value.map((entry) => portablePaths(root, entry, aliases));
+  return value && typeof value === "object"
+    ? Object.fromEntries(
+        Object.entries(value).map(([key, entry]) => [
+          key,
+          portablePaths(root, entry, aliases),
+        ]),
+      )
+    : value;
+}
+
 export async function loadAuthoring(
   tx: Queryable,
   config: ServiceConfig,
@@ -81,7 +116,7 @@ export async function authoringView(
   return {
     packageId: loaded.saved.id,
     current: loaded.saved.invalidated_at === null,
-    readiness: loaded.readiness,
+    readiness: portablePaths(loaded.root, loaded.readiness),
     jobs: (await readDraftingJobs(tx, versionId))
       .filter((j) => j.package_id === loaded.saved.id)
       .map(publicDraftingJob),
@@ -180,28 +215,8 @@ async function boundedBundle(
     ]),
   );
   aliases.set(outputPath, "result.json");
-  const portable = (value: unknown): any => {
-    if (typeof value === "string") {
-      const alias = aliases.get(value);
-      if (alias) return alias;
-      if (path.isAbsolute(value)) {
-        const relative = path.relative(loaded.root, value);
-        if (
-          relative !== ".." &&
-          !relative.startsWith(`..${path.sep}`) &&
-          !path.isAbsolute(relative)
-        )
-          return relative.split(path.sep).join("/") || ".";
-      }
-      return value;
-    }
-    if (Array.isArray(value)) return value.map(portable);
-    return value && typeof value === "object"
-      ? Object.fromEntries(
-          Object.entries(value).map(([key, entry]) => [key, portable(entry)]),
-        )
-      : value;
-  };
+  const portable = (value: unknown) =>
+    portablePaths(loaded.root, value, aliases);
   const files = [];
   let total = 0;
   for (const file of handoff.inputPaths) {

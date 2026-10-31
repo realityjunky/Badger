@@ -2,7 +2,12 @@ import { reportLaneOutput } from "./fixtures/authoring.js";
 import { createHash } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import type { TestService } from "../src/testing/index.js";
-import { engineer, startPlanningService } from "./fixtures/planning.js";
+import {
+  admin,
+  engineer,
+  owner,
+  startPlanningService,
+} from "./fixtures/planning.js";
 import { initializedFixture } from "./fixtures/packages.js";
 
 let service: TestService;
@@ -365,6 +370,116 @@ it("records accepted lanes in revision order, unlocks dependent jobs and review 
     }),
   ).toEqual(result);
 });
+
+it("keeps server storage paths out of every package-stage read model a token can read", async () => {
+  const fixture = await generated();
+  const { call, base, workflow } = fixture;
+  const reviewer = { subject: "reviewer", email: "reviewer@example.com" };
+  await call(
+    "/bindings",
+    "POST",
+    {
+      scopeType: "workflow",
+      scopeId: workflow.id,
+      email: reviewer.email,
+      role: "Reviewer",
+    },
+    admin,
+    201,
+  );
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "paths", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  const read = async (route: string) =>
+    expect(
+      JSON.stringify(
+        await call(route, "GET", undefined, engineer, 200, secret),
+      ),
+      route,
+    ).not.toContain(service.config.storage.workspaceDirectory);
+  const readStage = async () => {
+    for (const route of [
+      "package",
+      "package/authoring",
+      "evaluations",
+      "review",
+    ])
+      await read(`${base}/${route}`);
+  };
+  await readStage();
+  for (let wave = 0; wave < 3; wave++) {
+    const { jobs } = await call(
+      `${base}/package/authoring-jobs`,
+      "POST",
+      { confirmed: true },
+      engineer,
+      201,
+    );
+    for (const job of jobs)
+      await acceptLane(fixture, secret, job, reportLaneOutput);
+    await readStage();
+  }
+  const { preview } = await call(
+    `${base}/package/assemble-preview`,
+    "POST",
+    {},
+  );
+  const { packageHash } = await call(`${base}/package/assemble`, "POST", {
+    confirmed: true,
+    confirmationHash: preview.confirmationHash,
+    requestId: "assemble-paths",
+  });
+  await readStage();
+  await call(
+    `${base}/evaluations`,
+    "POST",
+    { confirmed: true, packageHash, requestId: "evaluate-paths" },
+    engineer,
+    202,
+  );
+  expect((await service.worker().runOnce())?.status).toBe("succeeded");
+  await readStage();
+  const { preview: approval } = await call(
+    `${base}/review/approve-preview`,
+    "POST",
+    {},
+    reviewer,
+  );
+  await call(
+    `${base}/review/approve`,
+    "POST",
+    {
+      confirmed: true,
+      confirmationHash: approval.confirmationHash,
+      requestId: "approve-paths",
+    },
+    reviewer,
+  );
+  const { preview: publication } = await call(
+    `${base}/review/publish-preview`,
+    "POST",
+    {},
+    owner,
+  );
+  const published = await call(
+    `${base}/review/publish`,
+    "POST",
+    {
+      confirmed: true,
+      confirmationHash: publication.confirmationHash,
+      requestId: "publish-paths",
+    },
+    owner,
+  );
+  await readStage();
+  const publications = `/workflows/${workflow.id}/publications`;
+  await read(publications);
+  await read(`${publications}/${published.confirmation.id}/package`);
+}, 90_000);
 
 it("returns a rejected lane with its reason, turns BLOCKED into a linked repair job, and refuses Agent sign-off", async () => {
   const { call, base } = await generated();
