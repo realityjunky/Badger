@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { createQuestionnaireHandoff } from "@realityjunky/badger";
+import {
+  AUTHORING_DAG,
+  AUTHORING_LANE_DEPENDENCIES,
+  AUTHORING_LANE_IDS,
+  createQuestionnaireHandoff,
+} from "@realityjunky/badger";
 import type {
   WorkflowPendingAction,
   WorkflowStateProjection,
@@ -330,6 +335,110 @@ const evaluation = {
     ],
   },
 };
+// Version 1 is the released example: its package, Authoring session, review,
+// and publication agree with its stage track, evaluation, and Run.
+const releasedStateHash = hash("demo released Creator state");
+const packageContents: [string, "auto" | "authored" | "source", string][] = [
+  [
+    "SKILL.md",
+    "auto",
+    "---\nname: sample-review-workflow\ndescription: Run the synthetic sample review.\n---\n",
+  ],
+  [
+    "reference/workflow-protocol.json",
+    "auto",
+    '{"kind":"workflow-protocol","nodes":["review","release"]}\n',
+  ],
+  [
+    "skills/release/SKILL.md",
+    "authored",
+    "# Release\n\nA person confirms the synthetic result before release.\n",
+  ],
+  ["sources/sample-review/SKILL.md", "source", content],
+];
+const packageFiles = packageContents.map(([path, owner, text]) => ({
+  path,
+  bytes: Buffer.byteLength(text),
+  sha256: hash(text),
+  owner,
+}));
+const releasedPackage = {
+  id: "demo-package",
+  generationJobId: "demo-generation-job",
+  status: "current",
+  invalidationReason: null,
+  planVersionHash: hash("demo plan version"),
+  proposalHash: hash("demo proposal"),
+  scaffoldHash: hash("demo scaffold"),
+  assembledHash: packageHash,
+  stateHash: releasedStateHash,
+  files: packageFiles,
+  authoringPlan: {
+    authoringPlanHash: hash("demo authoring plan"),
+    dag: AUTHORING_DAG,
+    lanes: AUTHORING_LANE_IDS.map((id) => ({
+      id,
+      dependencies: [...AUTHORING_LANE_DEPENDENCIES[id]],
+    })),
+  },
+  generatedAt: at,
+};
+const releasedAuthoring = {
+  packageId: releasedPackage.id,
+  current: true,
+  readiness: {
+    state: "ready",
+    status: "assembled",
+    blockers: [],
+    warnings: [],
+    evidence: {},
+    nextLanes: [],
+    completedLanes: [...AUTHORING_LANE_IDS],
+    records: Object.fromEntries(
+      AUTHORING_LANE_IDS.map((id) => [id, { lane: id, revision: 1 }]),
+    ),
+    lanes: Object.fromEntries(
+      AUTHORING_LANE_IDS.map((id) => [
+        id,
+        {
+          id,
+          dependencies: [...AUTHORING_LANE_DEPENDENCIES[id]],
+          status: "DONE",
+          executable: false,
+          blockers: [],
+          claims: [],
+          artifacts: [],
+          findings: [],
+        },
+      ]),
+    ),
+    waves: [],
+  },
+  jobs: [],
+  followUps: [],
+};
+const review = {
+  id: "demo-review",
+  packageHash,
+  reviewerName: "Morgan Lee",
+  approvedAt: "2026-10-01T09:05:00.000Z",
+  overrideReason: null,
+  invalidatedAt: null,
+  invalidationReason: null,
+};
+const publication = {
+  id: "demo-publication",
+  workflowVersionId: version.id,
+  versionNumber: version.number,
+  versionName: workflow.name,
+  reviewId: review.id,
+  packageId: releasedPackage.id,
+  packageHash,
+  publisherId: "demo-owner",
+  publisherName: "Morgan Lee",
+  publishedAt: "2026-10-01T09:10:00.000Z",
+  fileCount: packageFiles.length,
+};
 const activity = {
   id: "demo-activity",
   occurredAt: at,
@@ -544,6 +653,20 @@ export function demoResponse(path: string, query: URLSearchParams): unknown {
       jobs: [],
     },
     [`/workflows/${workflow.id}/notifications/waiting`]: { items: [] },
+    [`/workflows/${workflow.id}/publications`]: {
+      publications: [publication],
+    },
+    [`/workflows/${workflow.id}/publications/${publication.id}/package`]: {
+      publication,
+      snapshot: {
+        packageHash,
+        inventory: packageFiles,
+        files: packageContents.map(([path, , text]) => ({
+          path,
+          content: Buffer.from(text).toString("base64"),
+        })),
+      },
+    },
   };
   if (path === `/skills/${pin.skillId}/versions/${skillHash}/files`) {
     return query.get("path") === file.path
@@ -592,25 +715,28 @@ export function demoResponse(path: string, query: URLSearchParams): unknown {
         currentState: null,
         jobs: [],
       };
+    const released = selected.id === version.id;
     if (path === `${prefix}/package`)
       return {
         canGenerate: false,
-        currentStateHash: null,
-        package: null,
+        currentStateHash: released ? releasedStateHash : null,
+        package: released ? releasedPackage : null,
         jobs: [],
       };
+    if (released && path === `${prefix}/package/authoring`)
+      return releasedAuthoring;
     if (path === `${prefix}/review`)
       return {
-        currentPackageHash: null,
-        passingReportId: null,
-        approvalId: null,
+        currentPackageHash: released ? packageHash : null,
+        passingReportId: released ? evaluation.id : null,
+        approvalId: released ? review.id : null,
         readiness: null,
         canReview: false,
         canPublish: false,
         canOverride: false,
         requiresOverride: false,
-        reviews: [],
-        publications: [],
+        reviews: released ? [review] : [],
+        publications: released ? [publication] : [],
       };
     if (path === `${prefix}/questionnaire/ledger`)
       return {

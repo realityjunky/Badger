@@ -15,8 +15,9 @@ registration, Strict browser sessions, proxy trust, and email binding checks.
 own `/api/v1/` namespace. It shows synthetic fixtures on the seven main
 dashboard pages and requires no identity. Demo requests are handled before
 session, bearer-token, database, worker, and blob access. They read only the
-bundled fixtures and the dashboard build. GET and HEAD are supported; every
-other method returns 405 with `Allow: GET, HEAD`. Unknown fixture records
+bundled fixtures and the dashboard build. GET and HEAD are supported; any
+other method is refused: with 405 and `Allow: GET, HEAD`, or with 403 when the
+service's Host and Origin check refuses the request first. Unknown fixture records
 return 404 and never reach a live handler. The normal service and its
 authentication requirements remain on their existing URLs.
 
@@ -1260,9 +1261,10 @@ returns `{publication, snapshot}`; `?packageHash=<expected-hash>` also fences th
 selection. `snapshot` contains `packageHash`, `inventory` (path, bytes, SHA-256,
 owner), and `files` (portable path and base64 content). Every retrieval verifies
 the exact stored bytes and inventory with the public kernel
-`verifyPackageSnapshot` seam. Signed-in workflow readers can inspect publications;
-tokens need `operator` scope and an Operator, test Engineer or Administrator role
-on the visible workflow. Other workflows and scopes are refused.
+`verifyPackageSnapshot` seam. Signed-in workflow readers can inspect publications.
+A token needs `operator` scope held by an Operator, or `operator` or `engineer`
+scope held by an Engineer (for test Runs) or an Administrator, on the visible
+workflow. Other workflows and scopes are refused.
 
 Publications store actual package bytes in append-only Postgres records, including
 bundled source Skills. They remain usable after upstream changes, same-version

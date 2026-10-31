@@ -1394,7 +1394,7 @@ const zh: Record<MessageId, string> = {
   "authoring.title": "创作任务通道",
   "authoring.request": "请求可执行通道",
   "authoring.help":
-    "智能体按依赖顺序起草各通道结果。请审阅并接受每项结果；所有通道均为当前状态后才能组装。",
+    "Agent 按依赖顺序起草各通道结果。请审阅并接受每项结果；所有通道均为当前状态后才能组装。",
   "authoring.assemble": "组装软件包",
   "authoring.assembled": "软件包已组装",
   "authoring.status": "状态",
@@ -1509,7 +1509,7 @@ const zh: Record<MessageId, string> = {
     "此计划或已批准的语义档案已被替代。请根据当前已批准的含义审阅并保存新计划。",
   "plan.request": "请求起草计划",
   "plan.requestHelp":
-    "基于已批准的语义档案、计划骨架及固定技能版本创建 Agent 起草任务。您接受后，建议才会成为计划版本。",
+    "基于已批准的语义档案、计划骨架及固定的 Skill 版本创建 Agent 起草任务。您接受后，建议才会成为计划版本。",
   "plan.draft": "计划草稿",
   "plan.suggestions": "计划起草任务与建议",
   "plan.reviewSuggestion": "审阅计划建议",
@@ -1778,7 +1778,7 @@ const zh: Record<MessageId, string> = {
   "hosts.scope": "安装范围",
   "hosts.project": "当前项目",
   "hosts.user": "当前用户",
-  "hosts.destination": "技能位置",
+  "hosts.destination": "Skill 位置",
   "hosts.prepare": "准备本地工具",
   "hosts.steps":
     "在本地准备可用的 badger-hosts 和 badger-mcp。在终端及 Agent 客户端的环境中设置运行人员令牌 BADGER_TOKEN。在目标项目目录中运行命令。此命令仅预览本地改动。",
