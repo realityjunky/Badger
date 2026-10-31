@@ -409,3 +409,59 @@ it("flags changed installed bytes without refusing later reports, and keeps the 
   expect(await audit("run.integrity_detected")).toHaveLength(2);
   expect(await audit("run.integrity_resolved")).toHaveLength(1);
 }, 60_000);
+
+it("settles an outstanding recovery notice from a report of a runtime that no longer needs recovery, never a newer notice, without an outcome", async () => {
+  const f = await fixture();
+  const report = (await f.runtime.readReport(f.location))!;
+  await f.post(report);
+  const notice = (requestId: string) =>
+    f.call(
+      `${f.route}/recovery`,
+      "POST",
+      { required: true, requestId },
+      operator,
+      200,
+      f.operatorToken,
+    );
+  await notice("notice-1");
+  await f.post({ events: [], settledNoticeId: "notice-1" }, 400);
+  await f.post({ ...report, settledNoticeId: "not a notice" }, 400);
+  // A report that still needs recovery settles nothing.
+  await f.post({
+    ...report,
+    recoveryRequired: true,
+    settledNoticeId: "notice-1",
+  });
+  expect((await f.read()).needsRecovery).toBe(true);
+  await notice("notice-2");
+  // A late settlement of an earlier notice cannot clear a newer one.
+  await f.post({ ...report, settledNoticeId: "notice-1" });
+  expect((await f.read()).needsRecovery).toBe(true);
+  await f.post({ ...report, settledNoticeId: "notice-2" });
+  await f.post({ ...report, settledNoticeId: "notice-2" });
+  expect(await f.read()).toMatchObject({
+    needsRecovery: false,
+    recovery: null,
+  });
+  // A settled notice cannot be reopened by its own retry.
+  await notice("notice-2");
+  expect((await f.read()).needsRecovery).toBe(false);
+  const audit = await f.call(
+    "/audit-events?action=run.recovery_notice_settled&targetId=integrity",
+    "GET",
+    undefined,
+    admin,
+  );
+  expect(audit.events).toHaveLength(1);
+  expect(audit.events[0].reason).toContain("notice-2");
+  expect(
+    (
+      await f.call(
+        "/audit-events?action=run.recovered&targetId=integrity",
+        "GET",
+        undefined,
+        admin,
+      )
+    ).events,
+  ).toEqual([]);
+}, 60_000);

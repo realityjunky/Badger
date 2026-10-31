@@ -39,3 +39,14 @@ Each recovery request binds its notice identity, so even a delayed first deliver
 of an earlier outcome cannot clear a newer interruption. Remaining integrity
 or runtime recovery findings make the outcome blocked, and the dashboard keeps
 them visible.
+
+An interruption can also clear outside the MCP's own recovery: through the
+package's state script, another MCP process, or a transient read. So the MCP
+keeps a notice until a complete report settles it, and a later recovery request
+binds that notice. A complete report whose runtime needs no recovery and that
+carries no request bound to the notice names the notice as settled. The service
+accepts this only for its current notice, records no recovery outcome, and
+audits the settlement. A settlement that names any other notice is ignored, so a
+delayed or stale delivery cannot clear a newer interruption. A settled notice
+cannot reopen under its own identity, so the MCP raises a new notice for any
+later interruption, including one that recurs while a settlement is in flight.

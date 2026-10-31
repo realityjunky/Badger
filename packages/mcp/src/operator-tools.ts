@@ -126,6 +126,13 @@ function requiresRecovery(current: WorkflowContinuation) {
       f.code === "recovery-required" || f.operation?.id === "workflow.recover",
   );
 }
+/** An interruption's identity: the same one keeps its notice across calls. */
+function noticeHash(current: WorkflowContinuation) {
+  return canonicalHash({
+    binding: workflowGateBinding(current),
+    findings: current.findings,
+  });
+}
 async function recoveryQueue(root: string): Promise<RecoveryQueue> {
   const value = await read<RecoveryQueue>(root, RECOVERY_QUEUE);
   if (!value) return { required: false, requests: [] };
@@ -449,6 +456,18 @@ export class LocalRuns {
     if (this.closed) return;
     const sending = queue.report;
     const events = sending.events;
+    // A report of a runtime that needs no recovery settles the notice it was
+    // built under: through a request bound to it, or else explicitly. The
+    // service settles only that notice, so a late delivery never clears a newer one.
+    const settles =
+      recovery.required && !requiresRecovery(sending.continuation);
+    const settledNoticeId =
+      settles &&
+      !recovery.requests.some(
+        (request) => request.noticeId === recovery.noticeId,
+      )
+        ? recovery.noticeId
+        : undefined;
     // All original events precede the latest snapshot. Intermediate batches never
     // claim a later snapshot while earlier events are still missing.
     for (let offset = 0; offset < events.length || offset === 0;) {
@@ -477,6 +496,7 @@ export class LocalRuns {
                 lastSequence: sending.lastSequence,
                 recoveryRequired: requiresRecovery(sending.continuation),
                 recoveries: recovery.requests,
+                ...(settledNoticeId ? { settledNoticeId } : {}),
               }
             : {}),
         },
@@ -501,16 +521,29 @@ export class LocalRuns {
         await write(root, QUEUE, queue);
         if (last) {
           const latestRecovery = await recoveryQueue(root);
+          // Keep a notice until a report settles it, so `recover` binds to it.
+          let notice: Omit<RecoveryQueue, "requests"> = latestRecovery.required
+            ? {
+                required: true,
+                noticeId: latestRecovery.noticeId,
+                noticeHash: latestRecovery.noticeHash,
+              }
+            : { required: false };
+          if (settles && latestRecovery.noticeId === recovery.noticeId) {
+            // The service settled this notice. An interruption that recurred
+            // while the report was in flight needs a new one.
+            const now = await runtime.inspect(target(args));
+            notice =
+              now && requiresRecovery(now)
+                ? {
+                    required: true,
+                    noticeId: randomUUID(),
+                    noticeHash: noticeHash(now),
+                  }
+                : { required: false };
+          }
           await write(root, RECOVERY_QUEUE, {
-            required: false,
-            ...(latestRecovery.noticeId !== recovery.noticeId &&
-            latestRecovery.required
-              ? {
-                  required: true,
-                  noticeId: latestRecovery.noticeId,
-                  noticeHash: latestRecovery.noticeHash,
-                }
-              : {}),
+            ...notice,
             requests: latestRecovery.requests.filter(
               (request) =>
                 !recovery.requests.some(
@@ -560,18 +593,15 @@ export class LocalRuns {
         await this.withQueue(args, async () => {
           const root = await runRoot(args);
           const recovery = await recoveryQueue(root);
-          const noticeHash = canonicalHash({
-            binding: workflowGateBinding(current),
-            findings: current.findings,
-          });
+          const hash = noticeHash(current);
           await write(root, RECOVERY_QUEUE, {
             ...recovery,
             required: true,
             noticeId:
-              recovery.required && recovery.noticeHash === noticeHash
+              recovery.required && recovery.noticeHash === hash
                 ? recovery.noticeId
                 : randomUUID(),
-            noticeHash,
+            noticeHash: hash,
           });
         });
       }
@@ -594,11 +624,15 @@ export class LocalRuns {
         throw new Error(
           "Report the queued recovery outcomes before recovering again",
         );
+      // Bind the outstanding notice, which stays until a report settles it.
       await write(root, RECOVERY_QUEUE, {
         ...recovery,
         requests: [
           ...recovery.requests,
-          { requestId: randomUUID(), noticeId: recovery.noticeId ?? null },
+          {
+            requestId: randomUUID(),
+            noticeId: recovery.required ? recovery.noticeId! : null,
+          },
         ],
       });
       return runtime.recover(target(args));

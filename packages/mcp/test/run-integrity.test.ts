@@ -6,7 +6,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createWorkflowRuntime } from "@realityjunky/badger/workflow-runtime";
 import { createBadgerMcp } from "../src/index.js";
-import { startPlanningService } from "../../server/test/fixtures/planning.js";
+import {
+  admin,
+  startPlanningService,
+} from "../../server/test/fixtures/planning.js";
 import {
   publishedFixture,
   operator,
@@ -309,3 +312,103 @@ it("reports an interrupted kernel transition before recover and mirrors its sett
       .continuation,
   );
 }, 240_000);
+
+it("settles a recovery notice whose interruption was cleared outside recover once the Run reports a healthy runtime", async () => {
+  service = await startPlanningService();
+  const f = await publishedFixture(service);
+  root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-notice-"));
+  const connect = async () => {
+    mcp = createBadgerMcp({
+      url: service.baseUrl,
+      token: f.operatorToken,
+      agentHost: "Planning Agent",
+      profile: "operator",
+    });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await mcp.connect(b);
+    client = new Client({ name: "notice-operator", version: "1" });
+    await client.connect(a);
+  };
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const reply = await client.callTool({ name, arguments: args });
+    expect(reply.isError, JSON.stringify(reply)).not.toBe(true);
+    return JSON.parse((reply.content as { text: string }[])[0].text);
+  };
+  await connect();
+  const args = { projectRoot: root, runId: "noticed" };
+  const started = await call("start", {
+    ...args,
+    workflowId: f.workflow.id,
+    publicationId: f.publication.id,
+    packageHash: f.publication.packageHash,
+    hostLabel: "Lab",
+    confirmed: true,
+  });
+  const registrationId = started.runUrl.split("/").at(-1);
+  const route = `/runs/${registrationId}`;
+  const report = (await createWorkflowRuntime().readReport({
+    kind: "standalone",
+    ...args,
+  }))!;
+  await expect
+    .poll(
+      async () =>
+        (await f.call(route, "GET", undefined, operator)).run.lastSequence,
+    )
+    .toBe(report.lastSequence);
+  await client.close();
+  await mcp.close();
+  // The MCP recorded an interruption that was then cleared outside its recover,
+  // as by another process or the package's own state script.
+  const recoveryFile = path.join(
+    root,
+    ".badger/runs/noticed/.badger/mcp-recovery.json",
+  );
+  await fs.writeFile(
+    recoveryFile,
+    JSON.stringify({
+      required: true,
+      noticeId: "external-notice",
+      noticeHash: "0".repeat(64),
+      requests: [],
+    }) + "\n",
+  );
+  await connect();
+  await call("status", args);
+  const audit = async (action: string) =>
+    (
+      await f.call(
+        `/audit-events?action=${action}&targetId=${registrationId}`,
+        "GET",
+        undefined,
+        admin,
+      )
+    ).events;
+  await expect
+    .poll(async () => (await audit("run.recovery_notice_settled")).length, {
+      timeout: 10_000,
+    })
+    .toBe(1);
+  expect(await audit("run.recovery_required")).toHaveLength(1);
+  expect(await audit("run.recovered")).toEqual([]);
+  expect((await f.call(route, "GET", undefined, operator)).run).toMatchObject({
+    needsRecovery: false,
+    recovery: null,
+  });
+  await expect
+    .poll(async () => JSON.parse(await fs.readFile(recoveryFile, "utf8")))
+    .toEqual({ required: false, requests: [] });
+  // A later recover binds no settled notice and leaves the Run healthy.
+  await call("recover", args);
+  await expect
+    .poll(
+      async () =>
+        (await f.call(route, "GET", undefined, operator)).run.recovery
+          ?.noticeId,
+      { timeout: 10_000 },
+    )
+    .toBeNull();
+  expect(
+    (await f.call(route, "GET", undefined, operator)).run.needsRecovery,
+  ).toBe(false);
+}, 60_000);

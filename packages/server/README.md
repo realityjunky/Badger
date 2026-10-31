@@ -1340,6 +1340,10 @@ snapshot.
 A full `/events` report may include `recoveryRequired` and up to 64 bounded
 `recoveries: [{requestId, noticeId}]` from local `recover` calls. A request binds
 the interruption notice it answers; without a notice its `noticeId` is null.
+When the reported runtime no longer needs recovery and no request answers the
+notice, the report can name it as `settledNoticeId`. This settles only the Run's
+current notice, records no recovery outcome, and is audited as
+`run.recovery_notice_settled`; a settlement naming another notice is ignored.
 Requests replay exactly once
 in the recovery audit. A shorter valid prefix cannot clear a gap, and a regular
 status report or an older recovery ID cannot settle a newer interruption notice.

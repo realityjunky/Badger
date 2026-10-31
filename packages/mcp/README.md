@@ -338,7 +338,10 @@ WorkflowRuntime remains the only recovery authority. Recovery notices and
 request IDs are persisted separately in `.badger/mcp-recovery.json` inside the
 Run root, including when an interrupted transition prevents normal reporting.
 They survive service outages and reconnects and are reported with the next
-complete mirror. The dashboard shows a settled or blocked outcome and the
+complete mirror. A notice stays until a complete report settles it, so `recover`
+binds to it. When the runtime no longer needs recovery, for example after
+recovery outside this MCP, the next complete report settles the notice
+explicitly instead of inventing a recovery outcome. The dashboard shows a settled or blocked outcome and the
 reported revision and event cursor. Integrity findings and outcomes are audited.
 A local recovery cannot manufacture a missing human gate answer, so unresolved
 attestation findings remain visible.
