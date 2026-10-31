@@ -83,6 +83,13 @@ gets the same version as an upload. See `packages/server/README.md` from the
 repository root for its API and limits, and
 `docs/adr/0029-registered-git-skill-versions.md`.
 
+Operator Run tools and durable mirroring (#65), dashboard gate answers (#66),
+and Run integrity and recovery (#67) are delivered in the service, MCP, and
+dashboard. The service flags unattested decisions, event gaps, and mismatched
+published execution identities. Recovery stays in the local WorkflowRuntime;
+its audited outcome is shown on the Run. See `packages/server/README.md`,
+`packages/mcp/README.md`, and ADRs 0035–0037 for these observer boundaries.
+
 Questionnaire rounds and free-text answers (#46) are delivered in the server
 and dashboard: revisioned questions, priority-ordered publication previews,
 private autosaved answers, per-question or atomic round submission, automatic

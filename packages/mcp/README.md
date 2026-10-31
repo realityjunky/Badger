@@ -2,7 +2,8 @@
 
 The local Badger MCP runs over stdio and connects to one deployment through
 its HTTP API. It delivers the expert (#54), engineer (#55), and Operator installation (#64)
-profiles, local Run tools (#65), and dashboard gate delivery (#66). The service owns roles,
+profiles, local Run tools (#65), dashboard gate delivery (#66), and Run integrity
+and recovery reporting (#67). The service owns roles,
 questionnaire records, Skill identities, and sign-offs.
 
 Build and install the local command from the repository root:
@@ -321,6 +322,18 @@ offers first/next page controls. Full events remain in the authoritative local
 Run and immutable service records. These APIs validate sequence, identity,
 structure and size; dashboard gate attestations preserve the person's sign-off
 without making the service an execution authority.
+
+The dashboard marks Runs needing recovery and displays service integrity
+findings for unattested decisions, missing event sequences, and mismatched
+published execution identities. Use `recover` on the Run's own computer;
+WorkflowRuntime remains the only recovery authority. Recovery notices and
+request IDs are persisted separately in `.badger/mcp-recovery.json` inside the
+Run root, including when an interrupted transition prevents normal reporting.
+They survive service outages and reconnects and are reported with the next
+complete mirror. The dashboard shows a settled or blocked outcome and the
+reported revision and event cursor. Integrity findings and outcomes are audited.
+A local recovery cannot manufacture a missing human gate answer, so unresolved
+attestation findings remain visible.
 
 Service evaluation runs the trusted installed `certification.js` child inside the
 existing time, process-tree memory, private temporary-directory and scrubbed

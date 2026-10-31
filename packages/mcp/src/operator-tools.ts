@@ -53,8 +53,15 @@ interface Queue {
   acknowledgedReportHash?: string;
   report: WorkflowRunReport;
 }
+interface RecoveryQueue {
+  required: boolean;
+  requests: { requestId: string; noticeId: string | null }[];
+  noticeId?: string;
+  noticeHash?: string;
+}
 const BINDING = ".badger/mcp-binding.json",
-  QUEUE = ".badger/mcp-queue.json";
+  QUEUE = ".badger/mcp-queue.json",
+  RECOVERY_QUEUE = ".badger/mcp-recovery.json";
 const runtime = createWorkflowRuntime();
 const label = "Badger MCP Run";
 async function read<T>(
@@ -110,6 +117,36 @@ function target(args: { projectRoot: string; runId: string }) {
 function runRelative(runId: string) {
   return `.badger/runs/${runId}`;
 }
+function requiresRecovery(current: WorkflowContinuation) {
+  return current.findings.some(
+    (f) =>
+      f.code === "recovery-required" || f.operation?.id === "workflow.recover",
+  );
+}
+async function recoveryQueue(root: string): Promise<RecoveryQueue> {
+  const value = await read<RecoveryQueue>(root, RECOVERY_QUEUE);
+  if (!value) return { required: false, requests: [] };
+  if (
+    typeof value.required !== "boolean" ||
+    (value.required &&
+      (typeof value.noticeId !== "string" ||
+        !/^[A-Za-z0-9_-]{1,200}$/u.test(value.noticeId))) ||
+    !Array.isArray(value.requests) ||
+    value.requests.length > 64 ||
+    !value.requests.every(
+      (request) =>
+        request &&
+        typeof request === "object" &&
+        typeof request.requestId === "string" &&
+        /^[A-Za-z0-9_-]{1,200}$/u.test(request.requestId) &&
+        (request.noticeId === null ||
+          (typeof request.noticeId === "string" &&
+            /^[A-Za-z0-9_-]{1,200}$/u.test(request.noticeId))),
+    )
+  )
+    throw new Error("Invalid durable Run recovery queue");
+  return value;
+}
 async function runRoot(args: { projectRoot: string; runId: string }) {
   if (!path.isAbsolute(args.projectRoot))
     throw new Error("Choose an absolute local project directory");
@@ -136,6 +173,7 @@ export class LocalRuns {
   >();
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly errors = new Map<string, string>();
+  private readonly synchronized = new Set<string>();
   private readonly retries = new Map<string, { count: number; at: number }>();
   private closed = false;
   private readonly authorized = new Set<string>();
@@ -298,33 +336,69 @@ export class LocalRuns {
   }
   private async flush(args: { projectRoot: string; runId: string }) {
     const root = await runRoot(args);
+    const recovery = await this.withQueue(args, () => recoveryQueue(root));
+    if (recovery.required) {
+      const { binding } = await this.binding(args);
+      const current = await runtime.inspect(target(args));
+      if (!current) throw new Error("This local Run has not started");
+      await this.register(binding, current.execution);
+      await this.api.request(
+        `/runs/${binding.registrationId}/recovery`,
+        "POST",
+        {
+          required: true,
+          requestId: recovery.noticeId,
+          ...(requiresRecovery(current)
+            ? { recoveries: recovery.requests, revision: current.revision }
+            : {}),
+        },
+        1,
+      );
+      if (requiresRecovery(current)) {
+        await this.withQueue(args, async () => {
+          const latest = await recoveryQueue(root);
+          await write(root, RECOVERY_QUEUE, {
+            ...latest,
+            requests: latest.requests.filter(
+              (request) =>
+                !recovery.requests.some(
+                  (sent) => sent.requestId === request.requestId,
+                ),
+            ),
+          });
+        });
+        return;
+      }
+    }
     let queue = await this.reconcile(args);
     const reportHash = canonicalHash({
       projection: queue.report.projection,
       continuation: queue.report.continuation,
     });
+    const localBinding = await read<Binding>(root, BINDING);
+    if (!localBinding) throw new Error("Missing local Run binding");
+    this.verify(localBinding);
+    const observedPackageHash = await hashDirectory(
+      localBinding.packageDirectory,
+    ).catch(() => null);
     if (
       queue.lastAcknowledged === queue.report.lastSequence &&
-      queue.acknowledgedReportHash === reportHash
+      queue.acknowledgedReportHash === reportHash &&
+      !recovery.required &&
+      recovery.requests.length === 0 &&
+      this.synchronized.has(root) &&
+      observedPackageHash === localBinding.packageHash &&
+      !this.errors.has(path.join(args.projectRoot, runRelative(args.runId)))
     )
       return;
     const { binding } = await this.binding(args);
+    await this.register(
+      binding,
+      queue.report.continuation.execution,
+      observedPackageHash,
+    );
     if (this.closed) return;
     const sending = queue.report;
-    await this.api.request(
-      `/runs/${binding.registrationId}`,
-      "POST",
-      {
-        workflowId: binding.workflowId,
-        publicationId: binding.publicationId,
-        packageHash: binding.packageHash,
-        localRunId: binding.localRunId,
-        hostLabel: binding.hostLabel,
-        testRun: binding.testRun,
-        execution: queue.report.continuation.execution,
-      },
-      1,
-    );
     const events = sending.events;
     // All original events precede the latest snapshot. Intermediate batches never
     // claim a later snapshot while earlier events are still missing.
@@ -351,6 +425,8 @@ export class LocalRuns {
                 projection: sending.projection,
                 continuation: sending.continuation,
                 lastSequence: sending.lastSequence,
+                recoveryRequired: requiresRecovery(sending.continuation),
+                recoveries: recovery.requests,
               }
             : {}),
         },
@@ -374,12 +450,78 @@ export class LocalRuns {
           report: latest,
         };
         await write(root, QUEUE, queue);
+        if (last) {
+          const latestRecovery = await recoveryQueue(root);
+          await write(root, RECOVERY_QUEUE, {
+            required: false,
+            ...(latestRecovery.noticeId !== recovery.noticeId &&
+            latestRecovery.required
+              ? {
+                  required: true,
+                  noticeId: latestRecovery.noticeId,
+                  noticeHash: latestRecovery.noticeHash,
+                }
+              : {}),
+            requests: latestRecovery.requests.filter(
+              (request) =>
+                !recovery.requests.some(
+                  (sent) => sent.requestId === request.requestId,
+                ),
+            ),
+          });
+          this.synchronized.add(root);
+        }
       });
       if (last) break;
     }
   }
+  private async register(
+    binding: Binding,
+    execution: WorkflowContinuation["execution"],
+    observedPackageHash?: string | null,
+  ) {
+    if (observedPackageHash === undefined)
+      observedPackageHash = await hashDirectory(binding.packageDirectory).catch(
+        () => null,
+      );
+    return this.api.request<{ run: { needsRecovery: boolean } }>(
+      `/runs/${binding.registrationId}`,
+      "POST",
+      {
+        workflowId: binding.workflowId,
+        publicationId: binding.publicationId,
+        packageHash: binding.packageHash,
+        observedPackageHash,
+        localRunId: binding.localRunId,
+        hostLabel: binding.hostLabel,
+        testRun: binding.testRun,
+        execution,
+      },
+      1,
+    );
+  }
   async capture(args: { projectRoot: string; runId: string }) {
     try {
+      const current = await runtime.inspect(target(args));
+      if (current && requiresRecovery(current)) {
+        await this.withQueue(args, async () => {
+          const root = await runRoot(args);
+          const recovery = await recoveryQueue(root);
+          const noticeHash = canonicalHash({
+            binding: workflowGateBinding(current),
+            findings: current.findings,
+          });
+          await write(root, RECOVERY_QUEUE, {
+            ...recovery,
+            required: true,
+            noticeId:
+              recovery.required && recovery.noticeHash === noticeHash
+                ? recovery.noticeId
+                : randomUUID(),
+            noticeHash,
+          });
+        });
+      }
       await this.reconcile(args);
     } catch (error) {
       // The runtime already committed. Preserve its reply and expose reporting
@@ -390,6 +532,24 @@ export class LocalRuns {
       );
     }
     this.schedule(args, true);
+  }
+  async recover(args: { projectRoot: string; runId: string }) {
+    return this.withQueue(args, async () => {
+      const root = await runRoot(args);
+      const recovery = await recoveryQueue(root);
+      if (recovery.requests.length >= 64)
+        throw new Error(
+          "Report the queued recovery outcomes before recovering again",
+        );
+      await write(root, RECOVERY_QUEUE, {
+        ...recovery,
+        requests: [
+          ...recovery.requests,
+          { requestId: randomUUID(), noticeId: recovery.noticeId ?? null },
+        ],
+      });
+      return runtime.recover(target(args));
+    });
   }
   async deliverGateAnswer(
     args: { projectRoot: string; runId: string },
@@ -672,11 +832,14 @@ export function operatorTools(
           };
         }
         const { binding } = await runs.binding(args);
-        if (current.pendingAction?.type === "ask_user") {
-          current = await runtime.resume(target(args));
-          current = await runs.deliverGateAnswer(args, binding, current);
+        try {
+          if (current.pendingAction?.type === "ask_user") {
+            current = await runtime.resume(target(args));
+            current = await runs.deliverGateAnswer(args, binding, current);
+          }
+        } finally {
+          await runs.capture(args);
         }
-        await runs.capture(args);
         return {
           ...result(binding, current, args),
           reporting: runs.reporting(args),
@@ -691,12 +854,16 @@ export function operatorTools(
       local,
       async (args) => {
         const { binding } = await runs.binding(args);
-        const continuation = await runs.deliverGateAnswer(
-          args,
-          binding,
-          await runtime.resume(target(args)),
-        );
-        await runs.capture(args);
+        let continuation;
+        try {
+          continuation = await runs.deliverGateAnswer(
+            args,
+            binding,
+            await runtime.resume(target(args)),
+          );
+        } finally {
+          await runs.capture(args);
+        }
         return result(binding, continuation, args);
       },
       "operateRuns",
@@ -717,11 +884,15 @@ export function operatorTools(
         validateWorkflowMachineVerification(
           args.submission as WorkflowMachineSubmission,
         );
-        const continuation = await runtime.submit(
-          target(args),
-          args.submission as WorkflowMachineSubmission,
-        );
-        await runs.capture(args);
+        let continuation;
+        try {
+          continuation = await runtime.submit(
+            target(args),
+            args.submission as WorkflowMachineSubmission,
+          );
+        } finally {
+          await runs.capture(args);
+        }
         return result(binding, continuation, args);
       },
       "operateRuns",
@@ -733,8 +904,12 @@ export function operatorTools(
       local,
       async (args) => {
         const { binding } = await runs.binding(args);
-        const continuation = await runtime.recover(target(args));
-        await runs.capture(args);
+        let continuation;
+        try {
+          continuation = await runs.recover(args);
+        } finally {
+          await runs.capture(args);
+        }
         return result(binding, continuation, args);
       },
       "operateRuns",

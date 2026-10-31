@@ -6512,6 +6512,7 @@ export function createWorkflowRuntime(): WorkflowRuntime {
       });
     },
     listRuns: listWorkflowRuns,
+    executionIdentity: verifyWorkflowProtocol,
     inspect: inspectWorkflowRun,
     projectState: projectWorkflowState,
     readReport: readWorkflowRunReport,
@@ -7057,6 +7058,9 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                     resultingRevision: recovery.transaction.resultingRevision,
                     receipt: workflowFinalizationReceiptReference(
                       recovery.receipt,
+                    ),
+                    confirmation: structuredClone(
+                      recovery.receipt.confirmation,
                     ),
                   };
                 } else if (

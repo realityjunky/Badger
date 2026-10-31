@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createBadgerMcp } from "../src/index.js";
@@ -18,6 +18,7 @@ let client: Client;
 let currentServer: ReturnType<typeof createBadgerMcp> | undefined;
 let root: string;
 afterEach(async () => {
+  vi.restoreAllMocks();
   await client?.close();
   await currentServer?.close();
   await service?.close();
@@ -145,6 +146,7 @@ it("delivers manual-stop and finalization answers through WorkflowRuntime and as
   await client.connect(a);
   root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-mcp-durable-gates-"));
   for (const mode of ["manual-stop", "finalization"]) {
+    service.clock.advance(61_000);
     const args = { projectRoot: root, runId: mode };
     const started = await value("start", {
       ...args,
@@ -294,10 +296,48 @@ it("delivers manual-stop and finalization answers through WorkflowRuntime and as
         gate.id,
       );
     }
-    const continued = await value("next", args);
+    let continued;
+    service.clock.advance(61_000);
+    if (mode === "finalization") {
+      const link = fs.link;
+      let interrupted = false;
+      const crash = vi
+        .spyOn(fs, "link")
+        .mockImplementation(async (from, to) => {
+          if (!interrupted && String(to) === path.join(root, "released.txt")) {
+            interrupted = true;
+            throw new Error("Simulated interrupted finalization publication");
+          }
+          return link(from, to);
+        });
+      try {
+        await client.callTool({ name: "next", arguments: args });
+      } finally {
+        crash.mockRestore();
+      }
+      expect(interrupted).toBe(true);
+      continued = await value("recover", args);
+    } else continued = await value("next", args);
     expect(continued.continuation.disposition).toBe(
       mode === "manual-stop" ? "blocked" : "done",
     );
+    await expect
+      .poll(
+        async () => {
+          const status = await value("status", args);
+          const mirrored = (await f.call(route, "GET", undefined, operator))
+            .run;
+          return {
+            revision: mirrored.projection?.revision,
+            error: status.reporting.error,
+          };
+        },
+        { timeout: 10_000 },
+      )
+      .toEqual({ revision: continued.continuation.revision, error: null });
+    expect(
+      (await f.call(route, "GET", undefined, operator)).run.integrityFindings,
+    ).toEqual([]);
     if (mode === "finalization")
       expect(await fs.readFile(path.join(root, "released.txt"), "utf8")).toBe(
         "released\n",

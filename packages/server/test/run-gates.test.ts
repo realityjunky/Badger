@@ -199,6 +199,7 @@ it("opens a policy-routed Run gate, binds a person's answer and attestation, and
   expect(continued.disposition).toBe("done");
   const later = await runtime.readReport(location, report!.lastSequence);
   await machine(`${route}/events`, later);
+  expect((await read(route)).run.integrityFindings).toEqual([]);
   expect((await read(`${route}/gates`)).gates[0].state).toBe("answered");
   const audit = await read("/audit-events?limit=100", admin);
   expect(

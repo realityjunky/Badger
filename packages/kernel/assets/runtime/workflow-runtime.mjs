@@ -22885,15 +22885,26 @@ async function resumeManualRunInternal(changeDir, options = {}) {
         "action_completed",
         {
           action: pending,
+          finalizationConfirmation: structuredClone(
+            options.finalizationRecovery.confirmation
+          ),
           outcome: {
             actionId: pending.id,
             status: "succeeded",
             summary: "Recovered Workflow finalization.",
             kind: "decision",
+            decisionId: pending.finalization.decisionId,
+            reviewer: structuredClone(
+              options.finalizationRecovery.confirmation.reviewer
+            ),
             finalization: {
               planHash: pending.finalization.planHash,
               decisionId: pending.finalization.decisionId,
-              choiceId: options.finalizationRecovery.status === "committed" ? "confirm" : "cancel"
+              choiceId: options.finalizationRecovery.confirmation.choiceId,
+              contentSnapshotHash: pending.finalization.contentSnapshotHash,
+              verificationReceiptIds: [
+                ...pending.finalization.verificationReceiptIds
+              ]
             }
           }
         },
@@ -28058,6 +28069,7 @@ function createWorkflowRuntime() {
       });
     },
     listRuns: listWorkflowRuns,
+    executionIdentity: verifyWorkflowProtocol,
     inspect: inspectWorkflowRun,
     projectState: projectWorkflowState,
     readReport: readWorkflowRunReport,
@@ -28531,6 +28543,9 @@ function createWorkflowRuntime() {
                     resultingRevision: recovery.transaction.resultingRevision,
                     receipt: workflowFinalizationReceiptReference(
                       recovery.receipt
+                    ),
+                    confirmation: structuredClone(
+                      recovery.receipt.confirmation
                     )
                   };
                 } else if (current?.workflowRuntime?.finalization?.transactionId === recovery.transaction.transactionId && (current.workflowRuntime.finalization.status === "committed" || current.workflowRuntime.finalization.status === "rolled-back")) {

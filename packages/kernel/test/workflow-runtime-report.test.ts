@@ -45,7 +45,10 @@ it("exports committed ordered events and the runtime-owned Completion plan witho
     runId: "run-one",
   };
   expect(await runtime.readReport(location)).toBeNull();
+  const execution = await runtime.executionIdentity(protocol);
+  expect(await fs.readdir(root)).toEqual([]);
   const started = await runtime.start({ protocol, location });
+  expect(started.execution).toEqual(execution);
   expect(started.completion).toMatchObject({
     outputSchemas: [
       { id: "result.v1", evidence: [{ id: "summary", required: true }] },
