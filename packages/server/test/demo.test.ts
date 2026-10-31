@@ -84,6 +84,44 @@ describe("the read-only demo", () => {
     }
   });
 
+  it("shows the released version's package, review, and publication that its evaluation and Run cite", async () => {
+    service = await startTestService();
+    await service.closeDatabase();
+    const read = async (resource: string) => {
+      const response = await service!.request(`/demo/api/v1/${resource}`);
+      expect(response.status, resource).toBe(200);
+      return response.json();
+    };
+    const version = "workflows/demo-workflow/versions/demo-version";
+    const { run } = await read("runs/demo-run");
+    const evaluations = await read(`${version}/evaluations`);
+    const { package: released } = await read(`${version}/package`);
+    const review = await read(`${version}/review`);
+    expect(released).toMatchObject({
+      id: "demo-package",
+      assembledHash: evaluations.currentPackageHash,
+    });
+    expect(await read(`${version}/package/authoring`)).toMatchObject({
+      packageId: released.id,
+      readiness: { status: "assembled" },
+    });
+    expect(review).toMatchObject({
+      currentPackageHash: released.assembledHash,
+      passingReportId: evaluations.passingReportId,
+    });
+    expect(review.publications).toEqual([
+      expect.objectContaining({
+        id: run.publicationId,
+        reviewId: review.approvalId,
+        packageHash: run.packageHash,
+      }),
+    ]);
+    const { snapshot } = await read(
+      `workflows/demo-workflow/publications/${run.publicationId}/package`,
+    );
+    expect(snapshot.inventory).toEqual(released.files);
+  });
+
   it("refuses every non-read method before authentication, including sign-offs, tokens, and logout", async () => {
     service = await startTestService({
       environment: { BADGER_ALLOWED_ORIGINS: "http://localhost" },
