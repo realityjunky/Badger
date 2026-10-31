@@ -1,4 +1,4 @@
-import { Button, Collapse, Input, Radio } from "antd";
+import { Alert, Button, Collapse, Input, Radio } from "antd";
 import { useState } from "react";
 import { readBasePath } from "../../app/paths.js";
 import { useI18n } from "../../i18n/I18nContext.js";
@@ -16,9 +16,20 @@ export function McpSetup() {
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const base = readBasePath(document);
   const url = `${window.location.origin}${base === "/" ? "" : base}`;
-  const configuration = command.trim()
-    ? renderMcpConfiguration(host, { deploymentUrl: url, command, profile })
-    : "";
+  // A deployment URL or command the host configuration refuses, such as a
+  // plain-HTTP origin the server allows, is explained instead of shown.
+  let configuration = "";
+  let failure: string | null = null;
+  if (command.trim())
+    try {
+      configuration = renderMcpConfiguration(host, {
+        deploymentUrl: url,
+        command,
+        profile,
+      });
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
 
   return (
     <Collapse
@@ -79,16 +90,20 @@ export function McpSetup() {
                   }}
                 />
               </div>
-              <Input.TextArea
-                readOnly
-                aria-label={t("mcp.configuration")}
-                value={configuration}
-                rows={12}
-                className="mcp-configuration"
-              />
+              {failure === null ? (
+                <Input.TextArea
+                  readOnly
+                  aria-label={t("mcp.configuration")}
+                  value={configuration}
+                  rows={12}
+                  className="mcp-configuration"
+                />
+              ) : (
+                <Alert type="error" showIcon title={failure} />
+              )}
               <div>
                 <Button
-                  disabled={!command.trim()}
+                  disabled={!configuration}
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(configuration);

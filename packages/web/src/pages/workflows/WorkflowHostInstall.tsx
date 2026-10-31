@@ -27,18 +27,26 @@ export function WorkflowHostInstall({
   const [scope, setScope] = useState<InstallScope>("project");
   const [action, setAction] = useState<"install" | "uninstall">("install");
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
-  const command = publication
-    ? action === "install"
-      ? localInstallCommand({
-          deploymentUrl,
-          workflowId,
-          publicationId: publication.id,
-          packageHash: publication.packageHash,
-          host,
-          scope,
-        })
-      : localUninstallCommand({ workflowId, host, scope })
-    : "";
+  // A deployment URL the installer refuses, such as a plain-HTTP origin the
+  // server allows, is explained instead of shown.
+  let command = "";
+  let failure: string | null = null;
+  if (publication)
+    try {
+      command =
+        action === "install"
+          ? localInstallCommand({
+              deploymentUrl,
+              workflowId,
+              publicationId: publication.id,
+              packageHash: publication.packageHash,
+              host,
+              scope,
+            })
+          : localUninstallCommand({ workflowId, host, scope });
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
   const paths = hostPaths(host, scope);
   return (
     <Modal
@@ -130,14 +138,19 @@ export function WorkflowHostInstall({
           title={t("hosts.prepare")}
           description={t("hosts.steps")}
         />
-        <Input.TextArea
-          readOnly
-          rows={6}
-          className="mcp-configuration"
-          aria-label={t("hosts.command")}
-          value={command}
-        />
+        {failure === null ? (
+          <Input.TextArea
+            readOnly
+            rows={6}
+            className="mcp-configuration"
+            aria-label={t("hosts.command")}
+            value={command}
+          />
+        ) : (
+          <Alert type="error" showIcon title={failure} />
+        )}
         <Button
+          disabled={!command}
           onClick={async () => {
             try {
               await navigator.clipboard.writeText(command);
