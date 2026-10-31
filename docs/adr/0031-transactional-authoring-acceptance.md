@@ -5,8 +5,14 @@ leased Agent drafting jobs. The kernel's dispatch decision and bounded handoff
 own eligibility and inputs; the service stores the handoff with its context
 hash. A job binds its generation, lane, prior lane record, and accepted dependency
 material. An independent lane may be accepted while another Agent is drafting;
-a changed dependency or generation cancels the affected draft. Agents submit
-inline authored content and never name files on the service host.
+a changed dependency or generation cancels the affected draft. This holds until
+an accepted result reports NEEDS_CONTEXT. The kernel then dispatches no lane,
+and the result's draft follow-up changes the dossier's records, so the same
+transaction withdraws the package and cancels every unaccepted draft. Work
+resumes in a regenerated package, a fresh session, once the answer has come
+back through the questionnaire, new dossier, plan, and proposal approvals, and
+initialization. Agents submit inline authored content and never name files on
+the service host.
 
 A signed-in Engineer previews acceptance or rejection against the job revision,
 result, and input hashes. Rejection keeps its reason. Acceptance reinitializes

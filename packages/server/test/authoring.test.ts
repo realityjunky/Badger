@@ -171,6 +171,21 @@ it("offers only current Wave lanes as bounded Agent jobs and keeps submitted out
       questionId: expect.any(String),
     }),
   );
+  // NEEDS_CONTEXT pauses every lane, not only the one that reported it: the
+  // kernel dispatches none, and the draft question withdraws the package.
+  expect(view.readiness.state).toBe("needs-context");
+  const { jobs: drafts } = await call(`${base}/drafting-jobs`);
+  expect(
+    drafts.filter((j: any) => j.laneId !== "script").map((j: any) => j.status),
+  ).toEqual(["cancelled", "cancelled"]);
+  expect((await call(`${base}/package`)).package.status).toBe("invalidated");
+  await call(
+    `${base}/package/authoring-jobs`,
+    "POST",
+    { confirmed: true },
+    engineer,
+    409,
+  );
   await call(`${base}/package/assemble-preview`, "POST", {}, engineer, 409);
 });
 

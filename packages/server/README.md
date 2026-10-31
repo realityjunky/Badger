@@ -1192,7 +1192,12 @@ human preview/accept/reject endpoints. Claim context includes a hash-bound
 `authoring` handoff and its bounded files. Results wrap the kernel's lane output
 in `{ "laneOutput": ... }`; authored content is inline, limited to 256 KiB per
 output, with no host file paths. Dependency and generation changes cancel stale
-jobs; other lanes in the same Wave can continue independently.
+jobs; other lanes in the same Wave can continue independently until an accepted
+result reports NEEDS_CONTEXT. The kernel then dispatches no lane, and the
+result's draft follow-up question changes the dossier's records, so the same
+transaction withdraws the package and cancels each unaccepted draft. Work
+resumes in a regenerated package once the answer has come back through the
+questionnaire, new dossier, plan, and proposal approvals, and initialization.
 
 `GET V/package/authoring` returns kernel readiness, accepted record revisions,
 job history, and linked follow-up questions or repair jobs. NEEDS_CONTEXT creates
