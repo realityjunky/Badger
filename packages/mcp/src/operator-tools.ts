@@ -28,7 +28,9 @@ import {
 } from "@realityjunky/badger-hosts";
 import {
   BadgerApi,
+  BadgerApiError,
   BadgerTimeoutError,
+  isRateLimitedBadgerFailure,
   isRetryableBadgerFailure,
 } from "./api.js";
 import { id, tool } from "./tools.js";
@@ -64,6 +66,7 @@ const BINDING = ".badger/mcp-binding.json",
   RECOVERY_QUEUE = ".badger/mcp-recovery.json";
 const runtime = createWorkflowRuntime();
 const label = "Badger MCP Run";
+const RECENT_ACCESS_MILLISECONDS = 30_000;
 async function read<T>(
   root: string,
   relative: string,
@@ -123,6 +126,13 @@ function requiresRecovery(current: WorkflowContinuation) {
       f.code === "recovery-required" || f.operation?.id === "workflow.recover",
   );
 }
+/** An interruption's identity: the same one keeps its notice across calls. */
+function noticeHash(current: WorkflowContinuation) {
+  return canonicalHash({
+    binding: workflowGateBinding(current),
+    findings: current.findings,
+  });
+}
 async function recoveryQueue(root: string): Promise<RecoveryQueue> {
   const value = await read<RecoveryQueue>(root, RECOVERY_QUEUE);
   if (!value) return { required: false, requests: [] };
@@ -174,9 +184,16 @@ export class LocalRuns {
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly errors = new Map<string, string>();
   private readonly synchronized = new Set<string>();
+  /** The installed package hash each Run last registered in this process. */
+  private readonly registered = new Map<string, string | null>();
+  /** The recovery notice the service last acknowledged for each Run. */
+  private readonly noticed = new Map<string, string>();
   private readonly retries = new Map<string, { count: number; at: number }>();
+  /** A rate limit applies to the token, so it pauses every Run's reporting. */
+  private limitedUntil = 0;
   private closed = false;
-  private readonly authorized = new Set<string>();
+  /** When each binding last passed the service's access check. */
+  private readonly authorized = new Map<string, number>();
   constructor(
     private readonly api: BadgerApi,
     private readonly agentHost: string,
@@ -198,23 +215,53 @@ export class LocalRuns {
   }
   remember(binding: Binding) {
     this.verify(binding);
-    this.authorized.add(canonicalHash(binding));
+    this.authorized.set(canonicalHash(binding), Date.now());
   }
   forgetAuthorization() {
     this.authorized.clear();
   }
-  async authorize(binding: Binding, offline = true) {
+  /** A rate limit pauses background reporting until its Retry-After, and a
+   * denial clears this binding's successful check. */
+  private async request<T>(
+    binding: Binding,
+    path: string,
+    method = "GET",
+    body?: unknown,
+  ): Promise<T> {
+    try {
+      return await this.api.request<T>(path, method, body, 1);
+    } catch (error) {
+      if (isRateLimitedBadgerFailure(error))
+        this.limitedUntil = Math.max(
+          this.limitedUntil,
+          Date.now() + 1000 * (error.retryAfter ?? 1),
+        );
+      else if (
+        error instanceof BadgerApiError &&
+        [401, 403].includes(error.status)
+      )
+        this.authorized.delete(canonicalHash(binding));
+      throw error;
+    }
+  }
+  async authorize(binding: Binding, offline = true, recent = false) {
     this.verify(binding);
     const key = canonicalHash(binding);
+    // A flush follows the tool call that has just checked this binding, and
+    // the service authorizes each of the flush's requests again.
+    if (
+      recent &&
+      Date.now() - (this.authorized.get(key) ?? -Infinity) <
+        RECENT_ACCESS_MILLISECONDS
+    )
+      return;
     try {
-      const access = await this.api.request<{
+      const access = await this.request<{
         personId: string;
         agentHost: string;
       }>(
+        binding,
         `/workflows/${encodeURIComponent(binding.workflowId)}/runs/access?testRun=${binding.testRun}`,
-        "GET",
-        undefined,
-        1,
       );
       if (
         access.personId !== binding.personId ||
@@ -223,15 +270,16 @@ export class LocalRuns {
         throw new Error(
           "This Run belongs to another signed-in person or Agent host",
         );
-      this.authorized.add(key);
+      this.authorized.set(key, Date.now());
     } catch (error) {
+      // Outages and rate limits are not denials; they keep a successful check.
       const outage = isRetryableBadgerFailure(error);
       if (!outage) this.authorized.delete(key);
       if (offline && outage && this.authorized.has(key)) return;
       throw error;
     }
   }
-  async binding(args: { projectRoot: string; runId: string }) {
+  async binding(args: { projectRoot: string; runId: string }, recent = false) {
     const root = await runRoot(args);
     let binding = await read<Binding>(root, BINDING);
     if (!binding) {
@@ -253,7 +301,7 @@ export class LocalRuns {
         canonicalHash(queue.identity) !== canonicalHash(binding))
     )
       throw new Error("The durable Run queue identity changed");
-    await this.authorize(binding);
+    await this.authorize(binding, true, recent);
     this.active.set(root, args);
     return { root, binding };
   }
@@ -311,7 +359,7 @@ export class LocalRuns {
     return queue;
   }
   schedule(args: { projectRoot: string; runId: string }, force = false) {
-    if (this.closed) return;
+    if (this.closed || Date.now() < this.limitedUntil) return;
     const key = path.join(args.projectRoot, runRelative(args.runId));
     if (!force && (this.retries.get(key)?.at ?? 0) > Date.now()) return;
     if (this.pending.has(key)) return;
@@ -324,8 +372,13 @@ export class LocalRuns {
         const count = (this.retries.get(key)?.count ?? 0) + 1;
         this.retries.set(key, {
           count,
-          at: Date.now() + Math.min(30000, 1000 * 2 ** Math.min(count - 1, 5)),
+          at: Math.max(
+            this.limitedUntil,
+            Date.now() + Math.min(30000, 1000 * 2 ** Math.min(count - 1, 5)),
+          ),
         });
+        // Register again on the next attempt, as for a restored service.
+        this.registered.delete(key);
         this.errors.set(
           key,
           error instanceof Error ? error.message : "Run reporting failed",
@@ -336,13 +389,23 @@ export class LocalRuns {
   }
   private async flush(args: { projectRoot: string; runId: string }) {
     const root = await runRoot(args);
+    const key = path.join(args.projectRoot, runRelative(args.runId));
     const recovery = await this.withQueue(args, () => recoveryQueue(root));
     if (recovery.required) {
-      const { binding } = await this.binding(args);
       const current = await runtime.inspect(target(args));
       if (!current) throw new Error("This local Run has not started");
-      await this.register(binding, current.execution);
-      await this.api.request(
+      // While the runtime still needs recovery, the service already holds an
+      // acknowledged notice until a new notice or new requests arrive.
+      if (
+        requiresRecovery(current) &&
+        this.noticed.get(key) === recovery.noticeId &&
+        recovery.requests.length === 0
+      )
+        return;
+      const { binding } = await this.binding(args, true);
+      await this.register(key, binding, current.execution);
+      await this.request(
+        binding,
         `/runs/${binding.registrationId}/recovery`,
         "POST",
         {
@@ -352,8 +415,8 @@ export class LocalRuns {
             ? { recoveries: recovery.requests, revision: current.revision }
             : {}),
         },
-        1,
       );
+      this.noticed.set(key, recovery.noticeId!);
       if (requiresRecovery(current)) {
         await this.withQueue(args, async () => {
           const latest = await recoveryQueue(root);
@@ -381,18 +444,22 @@ export class LocalRuns {
     const observedPackageHash = await hashDirectory(
       localBinding.packageDirectory,
     ).catch(() => null);
+    // Changed installed bytes are reported once; the service keeps them flagged
+    // until a registration observes the bound bytes again.
     if (
       queue.lastAcknowledged === queue.report.lastSequence &&
       queue.acknowledgedReportHash === reportHash &&
       !recovery.required &&
       recovery.requests.length === 0 &&
       this.synchronized.has(root) &&
-      observedPackageHash === localBinding.packageHash &&
-      !this.errors.has(path.join(args.projectRoot, runRelative(args.runId)))
+      this.registered.has(key) &&
+      this.registered.get(key) === observedPackageHash &&
+      !this.errors.has(key)
     )
       return;
-    const { binding } = await this.binding(args);
+    const { binding } = await this.binding(args, true);
     await this.register(
+      key,
       binding,
       queue.report.continuation.execution,
       observedPackageHash,
@@ -400,6 +467,18 @@ export class LocalRuns {
     if (this.closed) return;
     const sending = queue.report;
     const events = sending.events;
+    // A report of a runtime that needs no recovery settles the notice it was
+    // built under: through a request bound to it, or else explicitly. The
+    // service settles only that notice, so a late delivery never clears a newer one.
+    const settles =
+      recovery.required && !requiresRecovery(sending.continuation);
+    const settledNoticeId =
+      settles &&
+      !recovery.requests.some(
+        (request) => request.noticeId === recovery.noticeId,
+      )
+        ? recovery.noticeId
+        : undefined;
     // All original events precede the latest snapshot. Intermediate batches never
     // claim a later snapshot while earlier events are still missing.
     for (let offset = 0; offset < events.length || offset === 0;) {
@@ -415,7 +494,8 @@ export class LocalRuns {
         offset++;
       }
       const last = offset >= events.length;
-      const response = await this.api.request<{ lastSequence: number }>(
+      const response = await this.request<{ lastSequence: number }>(
+        binding,
         `/runs/${binding.registrationId}/events`,
         "POST",
         {
@@ -427,10 +507,10 @@ export class LocalRuns {
                 lastSequence: sending.lastSequence,
                 recoveryRequired: requiresRecovery(sending.continuation),
                 recoveries: recovery.requests,
+                ...(settledNoticeId ? { settledNoticeId } : {}),
               }
             : {}),
         },
-        1,
       );
       // Re-read after the HTTP request so a concurrently committed local transition
       // stays in the queue. Reconciliation can always recreate it after a crash.
@@ -452,16 +532,29 @@ export class LocalRuns {
         await write(root, QUEUE, queue);
         if (last) {
           const latestRecovery = await recoveryQueue(root);
+          // Keep a notice until a report settles it, so `recover` binds to it.
+          let notice: Omit<RecoveryQueue, "requests"> = latestRecovery.required
+            ? {
+                required: true,
+                noticeId: latestRecovery.noticeId,
+                noticeHash: latestRecovery.noticeHash,
+              }
+            : { required: false };
+          if (settles && latestRecovery.noticeId === recovery.noticeId) {
+            // The service settled this notice. An interruption that recurred
+            // while the report was in flight needs a new one.
+            const now = await runtime.inspect(target(args));
+            notice =
+              now && requiresRecovery(now)
+                ? {
+                    required: true,
+                    noticeId: randomUUID(),
+                    noticeHash: noticeHash(now),
+                  }
+                : { required: false };
+          }
           await write(root, RECOVERY_QUEUE, {
-            required: false,
-            ...(latestRecovery.noticeId !== recovery.noticeId &&
-            latestRecovery.required
-              ? {
-                  required: true,
-                  noticeId: latestRecovery.noticeId,
-                  noticeHash: latestRecovery.noticeHash,
-                }
-              : {}),
+            ...notice,
             requests: latestRecovery.requests.filter(
               (request) =>
                 !recovery.requests.some(
@@ -476,6 +569,7 @@ export class LocalRuns {
     }
   }
   private async register(
+    key: string,
     binding: Binding,
     execution: WorkflowContinuation["execution"],
     observedPackageHash?: string | null,
@@ -484,21 +578,24 @@ export class LocalRuns {
       observedPackageHash = await hashDirectory(binding.packageDirectory).catch(
         () => null,
       );
-    return this.api.request<{ run: { needsRecovery: boolean } }>(
-      `/runs/${binding.registrationId}`,
-      "POST",
-      {
-        workflowId: binding.workflowId,
-        publicationId: binding.publicationId,
-        packageHash: binding.packageHash,
-        observedPackageHash,
-        localRunId: binding.localRunId,
-        hostLabel: binding.hostLabel,
-        testRun: binding.testRun,
-        execution,
-      },
-      1,
-    );
+    // Registration is idempotent for its fixed identity. Repeat it only when the
+    // installed bytes changed or an earlier attempt failed.
+    if (
+      this.registered.has(key) &&
+      this.registered.get(key) === observedPackageHash
+    )
+      return;
+    await this.request(binding, `/runs/${binding.registrationId}`, "POST", {
+      workflowId: binding.workflowId,
+      publicationId: binding.publicationId,
+      packageHash: binding.packageHash,
+      observedPackageHash,
+      localRunId: binding.localRunId,
+      hostLabel: binding.hostLabel,
+      testRun: binding.testRun,
+      execution,
+    });
+    this.registered.set(key, observedPackageHash);
   }
   async capture(args: { projectRoot: string; runId: string }) {
     try {
@@ -507,18 +604,15 @@ export class LocalRuns {
         await this.withQueue(args, async () => {
           const root = await runRoot(args);
           const recovery = await recoveryQueue(root);
-          const noticeHash = canonicalHash({
-            binding: workflowGateBinding(current),
-            findings: current.findings,
-          });
+          const hash = noticeHash(current);
           await write(root, RECOVERY_QUEUE, {
             ...recovery,
             required: true,
             noticeId:
-              recovery.required && recovery.noticeHash === noticeHash
+              recovery.required && recovery.noticeHash === hash
                 ? recovery.noticeId
                 : randomUUID(),
-            noticeHash,
+            noticeHash: hash,
           });
         });
       }
@@ -541,11 +635,15 @@ export class LocalRuns {
         throw new Error(
           "Report the queued recovery outcomes before recovering again",
         );
+      // Bind the outstanding notice, which stays until a report settles it.
       await write(root, RECOVERY_QUEUE, {
         ...recovery,
         requests: [
           ...recovery.requests,
-          { requestId: randomUUID(), noticeId: recovery.noticeId ?? null },
+          {
+            requestId: randomUUID(),
+            noticeId: recovery.required ? recovery.noticeId! : null,
+          },
         ],
       });
       return runtime.recover(target(args));
@@ -586,13 +684,14 @@ export class LocalRuns {
       } | null;
     };
     try {
-      delivery = await this.api.request(
+      delivery = await this.request(
+        binding,
         `/runs/${binding.registrationId}/gate-answer`,
-        "GET",
-        undefined,
-        1,
       );
     } catch (error) {
+      // A Run the service has not registered yet has no answer yet.
+      if (error instanceof BadgerApiError && error.status === 404)
+        return current;
       if (
         !isRetryableBadgerFailure(error) &&
         !(error instanceof BadgerTimeoutError)
@@ -735,11 +834,15 @@ export function operatorTools(
         ...local,
         ...publication,
         hostLabel: z.string().min(1).max(200),
-        externalRoots: z.record(z.string(), z.string()).optional(),
+        // WorkflowRuntime alone refuses root bindings, in its own words.
+        externalRoots: z.unknown().optional(),
         testRun: z.boolean().default(false),
         confirmed: z.literal(true),
       },
       async (args) => {
+        // The service refuses a blank label, so such a Run could never register.
+        if (!args.hostLabel.trim())
+          throw new Error("Host label must contain 1 to 200 characters");
         const { protocol, packageDirectory } = await published(
           args,
           args.projectRoot,
@@ -781,9 +884,15 @@ export function operatorTools(
             location: target(args),
             ...(args.externalRoots === undefined
               ? {}
-              : { externalRoots: args.externalRoots }),
+              : {
+                  externalRoots: args.externalRoots as Record<string, string>,
+                }),
           });
         } catch (error) {
+          // WorkflowRuntime can commit the Run before a later step fails, such as
+          // a checkpoint write. Keep that Run's intent so a later call binds it.
+          if (await runtime.inspect(target(args)).then(Boolean, () => true))
+            throw error;
           // A refused start must permit corrected roots on the same name. No service
           // registration has occurred; the empty intent is safe to remove.
           const { removeContainedFile } = await import("@realityjunky/badger");

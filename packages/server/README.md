@@ -1332,6 +1332,9 @@ closes inbox items atomically. Retries return the original answer.
 Tokens cannot preview or answer a gate. Only the registered person and Agent
 host may retrieve `GET /api/v1/runs/:id/gate-answer`; the MCP compares the local
 kernel binding and submits that answer to WorkflowRuntime on `next` or `status`.
+Only the Run's most recent gate can be open or deliver its answer. When a
+superseded binding recurs, such as a restored finalization target, it opens a
+fresh gate unless the most recent gate is already open or answered for it.
 Finalization previews show the kernel's exact planned operations; changed effects
 require fresh confirmation. See ADR 0036 and migration `0034_run-gates.sql`.
 
@@ -1349,7 +1352,9 @@ earlier evidence retained in the Activity log.
 Registration can include `observedPackageHash` separately from its immutable
 `packageHash` binding. The MCP rehashes installed bytes on later calls. Changed
 or unreadable bytes (`observedPackageHash:null`) are flagged even when the Run
-has never reached the service before.
+has never reached the service before. They refuse neither the registration nor
+later reports, and the finding stays until a registration observes the bound
+bytes again.
 
 Only the registered person and Agent host may send `POST /api/v1/runs/:id/recovery`
 with `{required:true, requestId}` when the local runtime cannot export a committed
@@ -1359,6 +1364,10 @@ snapshot.
 A full `/events` report may include `recoveryRequired` and up to 64 bounded
 `recoveries: [{requestId, noticeId}]` from local `recover` calls. A request binds
 the interruption notice it answers; without a notice its `noticeId` is null.
+When the reported runtime no longer needs recovery and no request answers the
+notice, the report can name it as `settledNoticeId`. This settles only the Run's
+current notice, records no recovery outcome, and is audited as
+`run.recovery_notice_settled`; a settlement naming another notice is ignored.
 Requests replay exactly once
 in the recovery audit. A shorter valid prefix cannot clear a gap, and a regular
 status report or an older recovery ID cannot settle a newer interruption notice.

@@ -18,6 +18,7 @@ import {
   flagRunIntegrity,
   hasMatchingRunGateAnswer,
   needsRunRecovery,
+  observeRunPackage,
   reconcileRunIntegrity,
   recordRunRecoveries,
   RunIntegrityError,
@@ -358,20 +359,14 @@ export async function handleRuns(input: AuthorizedRequest) {
             requestId: input.context.requestId,
           });
       }
-      if (observedPackageHash !== row.package_hash) {
-        await flagRunIntegrity(
-          tx,
-          input.dependencies,
-          { ...input.context, personId: input.person.id },
-          row,
-          "package-hash-mismatch",
-          { expectedPackageHash: row.package_hash, observedPackageHash },
-        );
-        return new RunIntegrityError("package-hash-mismatch", {
-          expectedPackageHash: row.package_hash,
-          observedPackageHash,
-        });
-      }
+      // Changed installed bytes are flagged; mirroring continues.
+      await observeRunPackage(
+        tx,
+        input.dependencies,
+        { ...input.context, personId: input.person.id },
+        row,
+        observedPackageHash,
+      );
     }
     if (!row) throw new RequestError(404, "No such Run");
     await authorize(
@@ -486,12 +481,19 @@ export async function handleRuns(input: AuthorizedRequest) {
           "lastSequence",
           "recoveryRequired",
           "recoveries",
+          "settledNoticeId",
         ]);
         if (
           body.recoveryRequired !== undefined &&
           typeof body.recoveryRequired !== "boolean"
         )
           throw new RequestError(400, "Invalid recovery status");
+        if (
+          body.settledNoticeId !== undefined &&
+          (typeof body.settledNoticeId !== "string" ||
+            !ID.test(body.settledNoticeId))
+        )
+          throw new RequestError(400, "Invalid settled recovery notice ID");
         const recoveryRequests = runRecoveryRequests(body.recoveries);
         if (!Array.isArray(body.events) || body.events.length > 64)
           throw new RequestError(400, "Send at most 64 ordered Run events");
@@ -642,12 +644,8 @@ export async function handleRuns(input: AuthorizedRequest) {
                 (saved) => saved.request_id === request.requestId,
               ),
           );
-          row.recovery_required =
+          const runtimeRecovery =
             body.recoveryRequired === true ||
-            (row.recovery_required &&
-              !newRecoveries.some(
-                (r) => r.noticeId === row.recovery_notice_id,
-              )) ||
             (
               continuation.findings as {
                 code?: string;
@@ -658,6 +656,40 @@ export async function handleRuns(input: AuthorizedRequest) {
                 f.code === "recovery-required" ||
                 f.operation?.id === "workflow.recover",
             );
+          // A recovery request bound to the current notice settles it with an
+          // outcome. Without one, a report of a runtime that no longer needs
+          // recovery settles that exact notice, never a newer one.
+          const answered = newRecoveries.some(
+            (r) => r.noticeId === row.recovery_notice_id,
+          );
+          const settledNotice =
+            row.recovery_required &&
+            !answered &&
+            !runtimeRecovery &&
+            body.settledNoticeId === row.recovery_notice_id;
+          if (settledNotice)
+            await recordAudit(tx, input.dependencies, {
+              actor: {
+                personId: input.person.id,
+                credential: input.context.credential,
+              },
+              channel: input.context.channel,
+              action: "run.recovery_notice_settled",
+              target: { type: "run", id },
+              before: {
+                revision: null,
+                hash: canonicalHash({ required: true }),
+              },
+              after: {
+                revision: null,
+                hash: canonicalHash({ required: false }),
+              },
+              reason: `The local WorkflowRuntime no longer requires recovery for notice ${row.recovery_notice_id}.`,
+              requestId: input.context.requestId,
+            });
+          row.recovery_required =
+            runtimeRecovery ||
+            (row.recovery_required && !answered && !settledNotice);
           await recordRunRecoveries(
             tx,
             input.dependencies,
@@ -672,7 +704,8 @@ export async function handleRuns(input: AuthorizedRequest) {
           );
         } else if (
           body.recoveries !== undefined ||
-          body.recoveryRequired !== undefined
+          body.recoveryRequired !== undefined ||
+          body.settledNoticeId !== undefined
         )
           throw new RequestError(
             400,

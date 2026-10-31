@@ -267,8 +267,10 @@ these Run tools with an `engineer` token for `testRun:true`; production Runs
 require an Operator role and `operator` scope. The service checks the current
 workflow role and scope on every request. Revoked access is refused; a connection
 that already checked its exact binding may continue locally through connection
-failures, timeouts, and HTTP 502/503/504 outages and retry reporting when the
-service returns. An authorization denial, identity mismatch, or other
+failures, timeouts, HTTP 429 token rate limits, and HTTP 502/503/504 outages and
+retry reporting when the service returns. A rate limit is never a denial: it keeps
+the successful check, and a binding never checked in this process fails with the
+service's message. An authorization denial, identity mismatch, or other
 non-retryable failure clears the successful check; a fresh successful service
 check is required before outage continuation becomes available again.
 
@@ -276,10 +278,12 @@ Before starting, call `status` with `workflowId`, `publicationId`, `packageHash`
 `projectRoot` (an absolute local directory), and a new `runId`. Its
 `startRequirements` is the unchanged WorkflowRuntime reply. Ask the person for
 each declared external directory, and confirm those directories with them.
-`start` takes the same identifiers, `hostLabel`, `confirmed:true`, optional
-`testRun` (default false), and optional `externalRoots: {name: absoluteDirectory}`.
-Only `start` accepts root bindings. Runtime refusals are returned unchanged and
-create no service Run registration.
+`start` takes the same identifiers, `hostLabel` (1 to 200 characters, not blank),
+`confirmed:true`, optional `testRun` (default false), and optional
+`externalRoots: {name: absoluteDirectory}`. Only `start` accepts root bindings,
+and only WorkflowRuntime checks them. Runtime refusals are returned unchanged and
+create no service Run registration. If WorkflowRuntime committed the Run before a
+later step failed, its start intent stays, and `status` or `recover` binds it.
 
 `next`, `status`, and `recover` take `projectRoot` and `runId`. Replies include the
 unchanged `continuation`, the current Node's local `skillPath`, and `runUrl`.
@@ -293,7 +297,8 @@ verification and finalization confirmations are excluded from Agent submissions.
 Human gates return a Run dashboard link. A person holding the published policy's
 required authority reviews and confirms their answer there. On the next `next`
 or `status` call, the MCP delivers the service-attested answer to WorkflowRuntime
-only if its Run revision and pending action still match. Changed finalization
+only if its Run revision and pending action still match. A Run the service has
+not registered yet has no answer yet. Changed finalization
 effects require another review. Concurrent delivery and reconnects preserve one
 committed answer. `status` can therefore advance a Run after human sign-off.
 
@@ -308,7 +313,11 @@ Events retain their original sequence and bytes; the service stores each
 sequence once and refuses gaps or changed duplicates. Events are sent before the
 snapshot, in batches of at most 64 and about 768 KiB. Reporting runs in the
 background and retries with a 1 to 30 second backoff and on later calls; MCP close stops and drains
-retry work. `status.reporting.error` describes a reporting refusal without
+retry work. A rate limit pauses all background reporting until its
+`Retry-After`. A report reuses the access check that its tool call made within
+the last 30 seconds and registers again only after installed bytes change or an
+attempt fails; the service still authorizes every request, and a denial clears
+the successful check. `status.reporting.error` describes a reporting refusal without
 changing runtime authority. Reconnect and call `status` or `recover` to resume
 reporting a known Run. Files and ancestors reject symlinks/junctions and lexical
 traversal; another deployment or person cannot reuse the binding.
@@ -325,12 +334,19 @@ without making the service an execution authority.
 
 The dashboard marks Runs needing recovery and displays service integrity
 findings for unattested decisions, missing event sequences, and mismatched
-published execution identities. Use `recover` on the Run's own computer;
+published execution identities or installed package bytes. Changed installed
+bytes are reported once and do not stop mirroring; the finding stays until the
+MCP observes the published bytes again. Use `recover` on the Run's own computer;
 WorkflowRuntime remains the only recovery authority. Recovery notices and
 request IDs are persisted separately in `.badger/mcp-recovery.json` inside the
 Run root, including when an interrupted transition prevents normal reporting.
 They survive service outages and reconnects and are reported with the next
-complete mirror. The dashboard shows a settled or blocked outcome and the
+complete mirror. While the runtime still needs recovery, the MCP posts a notice
+once and again only with a new notice or new recovery requests; failed posts
+retry with the usual backoff. A notice stays until a complete report settles it, so `recover`
+binds to it. When the runtime no longer needs recovery, for example after
+recovery outside this MCP, the next complete report settles the notice
+explicitly instead of inventing a recovery outcome. The dashboard shows a settled or blocked outcome and the
 reported revision and event cursor. Integrity findings and outcomes are audited.
 A local recovery cannot manufacture a missing human gate answer, so unresolved
 attestation findings remain visible.

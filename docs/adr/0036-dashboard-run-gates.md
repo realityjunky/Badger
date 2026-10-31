@@ -31,7 +31,11 @@ attestation to WorkflowRuntime. Concurrent deliveries share one submission.
 Committed progress is reconciled to the mirror after a crash, so an answer
 cannot be applied again after its revision changes. Service outages leave a
 gate waiting; they cannot create a human answer. A changed pending action
-supersedes its open gate and closes its old inbox items.
+supersedes its open gate and closes its old inbox items. Only a Run's most
+recent gate can be open or deliver an answer. A binding can recur byte for byte,
+as when an edited finalization target is restored; unless the most recent gate
+is open or answered for that exact binding, it gets a fresh gate and fresh inbox
+items, so an earlier answer is never delivered over a later one.
 
 Finalization reports include the kernel's canonical preview so people can
 inspect the actual operations. The service verifies its hash against the pending

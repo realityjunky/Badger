@@ -8,6 +8,7 @@ import {
 import {
   BadgerApi,
   BadgerApiError,
+  isRateLimitedBadgerFailure,
   isRetryableBadgerFailure,
   type ExpertMcpOptions,
 } from "./api.js";
@@ -126,8 +127,11 @@ export function createBadgerMcp(
           ),
         );
       } else {
-        recent = undefined;
-        runs.forgetAuthorization();
+        // A rate limit is not a denial, so it keeps every successful check.
+        if (!isRateLimitedBadgerFailure(error)) {
+          recent = undefined;
+          runs.forgetAuthorization();
+        }
         throw error;
       }
     }

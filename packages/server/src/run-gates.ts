@@ -115,6 +115,21 @@ export async function eligibleRunGateRecipient(
   );
 }
 
+/** Only a Run's most recent gate can be open or deliver its answer. */
+export async function latestRunGate(tx: Queryable, runId: string) {
+  return (
+    await tx.query<{
+      binding_hash: string;
+      state: RunGateRow["state"];
+      created_at: Date | string;
+      answer: unknown;
+    }>(
+      "select g.binding_hash,g.state,g.created_at,a.answer from run_gates g left join run_gate_answers a on a.gate_id=g.id where g.run_id=$1 order by g.created_at desc,g.id desc limit 1",
+      [runId],
+    )
+  ).rows[0];
+}
+
 /** Called while the reporting transaction holds the Run row lock. */
 export async function syncRunGate(
   tx: Queryable,
@@ -153,14 +168,11 @@ export async function syncRunGate(
   );
   for (const gate of closed.rows) await closeRunGateInbox(tx, deps, gate.id);
   if (action?.type !== "ask_user" || !action.decisionId) return;
-  if (
-    (
-      await tx.query(
-        "select id from run_gates where run_id=$1 and binding_hash=$2",
-        [run.id, bindingHash],
-      )
-    ).rows.length
-  )
+  // A binding can recur, as when an edited finalization target is restored. Its
+  // open gate, or its answer awaiting delivery, stays current; otherwise it gets
+  // a fresh gate, so an earlier gate's answer is never delivered.
+  const latest = await latestRunGate(tx, run.id);
+  if (latest?.binding_hash === bindingHash && latest.state !== "superseded")
     return;
   const published = await readPublishedPackage(
     tx,
@@ -176,7 +188,11 @@ export async function syncRunGate(
     Buffer.from(file.content, "base64").toString("utf8"),
   ) as WorkflowProtocol;
   const policy = workflowGatePolicy(protocol, current);
-  // The package owns authority. A client report cannot widen the policy.
+  // The published package's policy for the reported node and action must equal
+  // the reviewer policy in the report. Which policy applies follows the report's
+  // action, so a dishonest report can route the gate to the wrong people; it
+  // cannot sign off, because WorkflowRuntime checks the answer's attestation
+  // against its own pending action when the MCP delivers it.
   const normalized = (value: WorkflowReviewerPolicy) => ({
     subjects: [...(value.subjects ?? [])].sort(),
     authorities: [...(value.authorities ?? [])].sort(),
@@ -190,6 +206,9 @@ export async function syncRunGate(
       "The reported gate reviewer policy differs from the published package",
     );
   const id = deps.ids.next();
+  // A new gate always sorts after the Run's latest one, even if the clock
+  // stepped back, so the most recent gate is never ambiguous.
+  const after = latest ? new Date(latest.created_at).getTime() + 1 : 0;
   await tx.query(
     "insert into run_gates(id,run_id,workflow_version_id,binding_hash,context,policy,state,created_at) values($1,$2,$3,$4,$5::jsonb,$6::jsonb,'open',$7)",
     [
@@ -199,7 +218,7 @@ export async function syncRunGate(
       bindingHash,
       JSON.stringify(current),
       JSON.stringify(policy),
-      deps.clock.now(),
+      new Date(Math.max(deps.clock.now().getTime(), after)),
     ],
   );
   const people = await tx.query<{ person_id: string }>(

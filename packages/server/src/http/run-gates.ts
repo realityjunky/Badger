@@ -8,6 +8,7 @@ import {
 import type { Queryable } from "../database/database.js";
 import {
   answerRunGate,
+  latestRunGate,
   previewRunGateAnswer,
   runGateReviewer,
   type RunGateRow,
@@ -44,7 +45,11 @@ export async function handleRunGates(
         revision: gate.context.revision,
         actionId: gate.context.pendingAction!.id,
         pendingAction: gate.context.pendingAction,
-        finalizationPreview: gate.context.finalizationPreview ?? null,
+        // Only a finalization confirmation carries a preview that was checked
+        // against its pending plan when the gate opened.
+        finalizationPreview: gate.context.pendingAction?.finalization
+          ? (gate.context.finalizationPreview ?? null)
+          : null,
         policy: gate.policy,
         answer: gate.answer,
         canAnswer:
@@ -155,11 +160,13 @@ export async function readRunGateAnswer(
   run: { id: string; continuation: WorkflowContinuation | null },
 ) {
   if (!run.continuation) return { answer: null };
-  const row = (
-    await tx.query<{ answer: unknown }>(
-      "select a.answer from run_gate_answers a join run_gates g on g.id=a.gate_id where g.run_id=$1 and g.binding_hash=$2 and g.state='answered'",
-      [run.id, canonicalHash(workflowGateBinding(run.continuation))],
-    )
-  ).rows[0];
-  return { answer: row?.answer ?? null };
+  const latest = await latestRunGate(tx, run.id);
+  return {
+    answer:
+      latest?.state === "answered" &&
+      latest.binding_hash ===
+        canonicalHash(workflowGateBinding(run.continuation))
+        ? latest.answer
+        : null,
+  };
 }
