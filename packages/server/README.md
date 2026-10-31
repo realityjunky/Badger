@@ -1224,8 +1224,10 @@ includes it. Certification children have a 15-second wall-time bound, an
 inherited 512 MiB OS data-allocation limit, a sampled 512 MiB aggregate resident
 memory bound for their process tree, and a 4 MiB output bound. A shared 180-second
 deadline bounds certification across the evaluation. A limit failure terminates
-the child process group and retains a failing report. Child environments are
-scrubbed and temporary directories are private. Domain scripts never run.
+the child process group and every descendant still in its process tree, and
+retains a failing report. A child also fails when a descendant keeps its output
+open a second after the child exits. Child environments are scrubbed and
+temporary directories are private. Domain scripts never run.
 See [the evaluation decision](../../docs/adr/0032-isolated-immutable-evaluations.md)
 for the transaction and resource boundaries.
 

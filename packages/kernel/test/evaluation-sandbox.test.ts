@@ -9,11 +9,32 @@ import {
   type CreatorState,
 } from "../src/index.js";
 
+// Marks the detached descendants these tests start, so cleanup never signals
+// a process that merely reused one's PID.
+const DESCENDANT = "badger-evaluation-sandbox-test-descendant";
 const roots: string[] = [];
+const descendantPidFiles: string[] = [];
 afterEach(async () => {
+  for (const file of descendantPidFiles.splice(0)) {
+    const pid = Number(await fs.readFile(file, "utf8").catch(() => ""));
+    const command = await fs
+      .readFile(`/proc/${pid}/cmdline`, "utf8")
+      .catch(() => "");
+    if (!command.includes(DESCENDANT)) continue;
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* Already exited. */
+    }
+  }
   for (const root of roots.splice(0))
     await fs.rm(root, { recursive: true, force: true });
 });
+/** An adapter that leaves a detached descendant holding its stdout and stderr open for a minute. */
+function detachedDescendantAdapter(pidFile: string, then: string) {
+  descendantPidFiles.push(pidFile);
+  return `import { spawn } from 'node:child_process';\nimport { writeFileSync } from 'node:fs';\nconst descendant = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000); // ${DESCENDANT}'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });\nwriteFileSync(${JSON.stringify(pidFile)}, String(descendant.pid));\ndescendant.unref();\n${then}\n`;
+}
 async function fixture() {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), "badger-evaluation-sandbox-test-"),
@@ -121,6 +142,46 @@ it("accounts for native Buffer memory in adapter descendants and kills the proce
       ?.detail,
   ).toContain("memory limit");
   const pid = await fs.readFile(childPid, "utf8");
+  const status = await fs
+    .readFile(`/proc/${pid}/status`, "utf8")
+    .catch(() => "");
+  expect(status === "" || /^State:\s+Z/mu.test(status)).toBe(true);
+}, 30_000);
+
+it("fails promptly when an adapter exits while a detached descendant keeps its output open", async () => {
+  const { root, state, script, options } = await fixture();
+  options.sandbox.childTimeLimitMilliseconds = 5000;
+  // The adapter itself succeeds; only the descendant holds the pipes.
+  await fs.writeFile(
+    script,
+    detachedDescendantAdapter(path.join(root, "descendant.pid"), ""),
+  );
+  const started = Date.now();
+  const report = await evaluatePackage(state, options);
+  expect(Date.now() - started).toBeLessThan(10_000);
+  expect(report.passed).toBe(false);
+  expect(
+    report.checks.find((check) => check.id === "workflow-runtime-certification")
+      ?.detail,
+  ).toContain("a descendant kept its output open");
+}, 30_000);
+
+it("kills a detached descendant still reachable from an adapter it stops", async () => {
+  const { root, state, script, options } = await fixture();
+  options.sandbox.childTimeLimitMilliseconds = 2500;
+  const descendantPid = path.join(root, "descendant.pid");
+  await fs.writeFile(
+    script,
+    detachedDescendantAdapter(descendantPid, "setTimeout(() => {}, 60000);"),
+  );
+  const started = Date.now();
+  const report = await evaluatePackage(state, options);
+  expect(Date.now() - started).toBeLessThan(10_000);
+  expect(
+    report.checks.find((check) => check.id === "workflow-runtime-certification")
+      ?.detail,
+  ).toContain("time limit");
+  const pid = await fs.readFile(descendantPid, "utf8");
   const status = await fs
     .readFile(`/proc/${pid}/status`, "utf8")
     .catch(() => "");

@@ -1,9 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { execFile, spawn } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { promises as fs, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+
+/** How long output may stay open after the adapter itself has exited. */
+const OUTPUT_GRACE_MILLISECONDS = 1_000;
 
 export interface EvaluationSandbox {
   tempDirectory: string;
@@ -124,9 +127,17 @@ export async function certificationExecFile(
       let closed = false;
       const kill = (error?: Error) => {
         failure ??= error;
-        if (child.pid) {
+        if (!child.pid) return;
+        // Snapshot the tree before the group dies: a descendant that left the
+        // group is then reparented and no longer reachable from the adapter.
+        // Until Node reports the exit, the adapter is unreaped and its PID ours.
+        const descendants =
+          child.exitCode === null && child.signalCode === null
+            ? reachableDescendants(child.pid)
+            : [];
+        for (const pid of [-child.pid, ...descendants]) {
           try {
-            process.kill(-child.pid, "SIGKILL");
+            process.kill(pid, "SIGKILL");
           } catch {
             /* Already exited. */
           }
@@ -182,10 +193,27 @@ export async function certificationExecFile(
       child.once("error", (error) => {
         failure ??= error;
       });
+      let grace: NodeJS.Timeout | undefined;
+      child.once("exit", () => {
+        clearTimeout(timer);
+        clearInterval(memory);
+        // A detached descendant can hold the output open after the adapter
+        // exits. Stop waiting for it after a short grace and fail the child.
+        grace = setTimeout(() => {
+          kill(
+            new Error(
+              "Certification child exited while a descendant kept its output open",
+            ),
+          );
+          child.stdout.destroy();
+          child.stderr.destroy();
+        }, OUTPUT_GRACE_MILLISECONDS);
+      });
       child.once("close", (code, signal) => {
         closed = true;
         clearTimeout(timer);
         clearInterval(memory);
+        clearTimeout(grace);
         kill(); // A successful adapter must not leave descendants behind.
         if (failure) reject(failure);
         else if (code !== 0)
@@ -241,4 +269,30 @@ async function residentTreeBytes(
       .map((child) => residentTreeBytes(Number(child), visited)),
   );
   return own + descendants.reduce((sum, value) => sum + value, 0);
+}
+
+/**
+ * Every process below the adapter that a children file still lists. The walk
+ * is synchronous, so it and the kill that follows finish before this process
+ * can reap the adapter.
+ */
+function reachableDescendants(adapter: number): number[] {
+  const found = new Set<number>();
+  const pending = [adapter];
+  while (pending.length > 0) {
+    const pid = pending.pop()!;
+    let children = "";
+    try {
+      children = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8");
+    } catch {
+      /* Gone or unlisted; the group kill still reaches its members. */
+    }
+    for (const child of children.trim().split(/\s+/u).filter(Boolean)) {
+      const descendant = Number(child);
+      if (descendant === adapter || found.has(descendant)) continue;
+      found.add(descendant);
+      pending.push(descendant);
+    }
+  }
+  return [...found];
 }
