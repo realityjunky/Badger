@@ -45,22 +45,6 @@ const reviewRows = async (tx: Queryable, versionId: string) =>
     )
   ).rows;
 
-/** All accepted lanes for the Workflow version count, including older generations. */
-export async function acceptedAuthoring(
-  tx: Queryable,
-  versionId: string,
-  personId: string,
-) {
-  return (
-    (
-      await tx.query(
-        `select a.job_id from accepted_authoring_outputs a join workflow_packages p on p.id=a.package_id where p.workflow_version_id=$1 and a.person_id=$2 limit 1`,
-        [versionId, personId],
-      )
-    ).rows.length > 0
-  );
-}
-
 export async function loadPublicationState(
   tx: Queryable,
   config: ServiceConfig,
@@ -143,7 +127,6 @@ export async function reviewGateState(
   versionId: string,
   personId: string,
   action: "package" | "publication",
-  overrideReason: string | null,
 ): Promise<GateState> {
   const loaded = await loadPublicationState(
     tx,
@@ -176,7 +159,7 @@ export async function reviewGateState(
           action === "publication"
             ? (loaded.approval?.id ?? canonicalHash(null))
             : canonicalHash(null),
-        actor: canonicalHash({ personId, overrideReason }),
+        actor: canonicalHash({ personId }),
       },
       records: [
         {
@@ -212,7 +195,6 @@ export async function recordPackageSignOff(
   versionId: string,
   confirmation: GateConfirmation,
   reviewerName: string,
-  overrideReason: string | null,
 ) {
   const loaded = await loadPublicationState(
     tx,
@@ -240,7 +222,7 @@ export async function recordPackageSignOff(
           context.personId,
           reviewerName,
           deps.clock.now(),
-          overrideReason,
+          null,
           JSON.stringify(loaded.state.review),
         ],
       );
@@ -312,9 +294,7 @@ export async function recordPackageSignOff(
     channel: context.channel,
     action:
       confirmation.gate === "package"
-        ? overrideReason
-          ? "workflow_package.review_override"
-          : "workflow_package.approved"
+        ? "workflow_package.approved"
         : "workflow_package.published",
     target: {
       type:
@@ -326,10 +306,9 @@ export async function recordPackageSignOff(
     before: null,
     after: { revision: 1, hash: loaded.saved.assembled_hash },
     reason:
-      overrideReason ??
-      (confirmation.gate === "package"
-        ? "Independent Reviewer approved this exact package hash"
-        : "Workflow owner confirmed publication of the approved package"),
+      confirmation.gate === "package"
+        ? "Workflow owner or Administrator approved this exact package hash"
+        : "Workflow owner or Administrator confirmed publication of the approved package",
     requestId: context.requestId,
   });
 }

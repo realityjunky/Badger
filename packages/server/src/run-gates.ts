@@ -29,12 +29,11 @@ export interface RunGateRow {
   state: "open" | "answered" | "superseded";
   created_at: Date | string;
 }
-const AUTHORITIES: Record<string, string> = {
-  "Workflow owner": "workflow-owner",
-  Engineer: "engineer",
-  "Field expert": "field-expert",
-  Reviewer: "reviewer",
-  Operator: "operator",
+const AUTHORITIES: Record<string, string[]> = {
+  "Workflow owner": ["workflow-owner", "reviewer"],
+  Engineer: ["engineer"],
+  "Field expert": ["field-expert"],
+  Operator: ["operator"],
 };
 
 function attestRoles(
@@ -43,9 +42,7 @@ function attestRoles(
   subject?: string,
 ) {
   const authorities = [
-    ...new Set(
-      roles.flatMap((role) => (AUTHORITIES[role] ? [AUTHORITIES[role]] : [])),
-    ),
+    ...new Set(roles.flatMap((role) => AUTHORITIES[role] ?? [])),
   ].sort();
   const required = policy.authorities?.length
     ? policy.authorities

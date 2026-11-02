@@ -15,7 +15,6 @@ const ROLE_MESSAGES: Record<WorkflowRole, MessageId> = {
   "Workflow owner": "workflow.role.owner",
   Engineer: "workflow.role.engineer",
   "Field expert": "workflow.role.expert",
-  Reviewer: "workflow.role.reviewer",
   Operator: "workflow.role.operator",
   Observer: "workflow.role.observer",
 };

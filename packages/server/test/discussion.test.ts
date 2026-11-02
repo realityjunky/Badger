@@ -145,7 +145,6 @@ describe("question threads", () => {
       "Workflow owner",
       "Engineer",
       "Field expert",
-      "Reviewer",
       "Operator",
       "Observer",
     ]) {
@@ -189,12 +188,12 @@ describe("question threads", () => {
         role === "Field expert" ? 201 : 403,
       );
     }
-    await bind(workflowId, observer, "Reviewer");
+    await bind(workflowId, observer, "Workflow owner");
     await call(
       "POST",
       `${base}/questions/${questionId}/comments`,
       observer,
-      { text: "An Observer also holding Reviewer may comment" },
+      { text: "An Observer also holding Workflow owner may comment" },
       201,
     );
     const { round } = await call<{ round: { id: string } }>(

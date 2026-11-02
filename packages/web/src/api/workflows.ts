@@ -108,12 +108,13 @@ export interface WorkflowCapabilities {
   approveProposal: boolean;
   initialize: boolean;
   generate: boolean;
+  publish: boolean;
+  readPublished: boolean;
 }
 export const WORKFLOW_ROLES = [
   "Workflow owner",
   "Engineer",
   "Field expert",
-  "Reviewer",
   "Operator",
   "Observer",
 ] as const;

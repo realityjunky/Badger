@@ -375,7 +375,7 @@ it("runs a verified publication through actual MCP tools and mirrors ordered eve
   const reviewer = { subject: "reviewer", email: "reviewer@example.com" };
   for (const [person, role] of [
     [operator, "Operator"],
-    [reviewer, "Reviewer"],
+    [reviewer, "Workflow owner"],
   ] as const)
     await f.call(
       "/bindings",

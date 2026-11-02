@@ -213,163 +213,168 @@ it("opens a policy-routed Run gate, binds a person's answer and attestation, and
   ).toHaveLength(1);
 }, 60_000);
 
-it("routes a named Workflow owner's gate to their inbox and team channel, and refuses an Agent's changed policy", async () => {
-  robot = await startStubWeComRobot();
-  service = await startTestService({
-    notificationChannel: robot.channel,
-    environment: {
-      BADGER_BOOTSTRAP_ADMINISTRATORS: admin.email,
-      BADGER_ALLOWED_ORIGINS: "http://localhost",
-      BADGER_NOTIFICATION_KEY: "ab".repeat(32),
-      BADGER_PUBLIC_URL: "https://badger.example.com",
-    },
-  });
-  const call = planningRequest(service);
-  const { person } = await call("/me", "GET", undefined, owner);
-  const f = await publishedFixture(service, (plan) => {
-    decisionPlan(plan, "workflow-owner");
-    plan.workflow.customNodes[0].decision.reviewer.subjects = [person.id];
-  });
-  const { preferences, events } = await call(
-    "/me/notifications",
-    "GET",
-    undefined,
-    owner,
-  );
-  await call(
-    "/me/notifications",
-    "PUT",
-    {
-      revision: preferences.revision,
-      wecomUserId: "owner-wecom",
-      mobile: null,
-      mentionEvents: events,
-    },
-    owner,
-  );
-  await call(
-    `/workflows/${f.workflow.id}/notifications/channel`,
-    "PUT",
-    {
-      revision: 0,
-      label: "Run team",
-      webhookUrl:
-        "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-secret",
-      language: "en",
-      confirmed: true,
-    },
-    owner,
-  );
-  for (let count = 0; count < 5; count++) {
-    await service.runNotificationJobs();
-    service.clock.advance(3100);
-  }
-  const before = robot.requests.length;
-  const published = await call(
-    `/workflows/${f.workflow.id}/publications/${f.publication.id}/package`,
-  );
-  const protocol = JSON.parse(
-    Buffer.from(
-      published.snapshot.files.find(
-        (file: any) => file.path === "reference/workflow-protocol.json",
-      ).content,
-      "base64",
-    ).toString("utf8"),
-  );
-  root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-owner-gates-"));
-  const runtime = createWorkflowRuntime();
-  const location = {
-    kind: "standalone" as const,
-    projectRoot: root,
-    runId: "owner-gate",
-  };
-  const current = await runtime.start({ protocol, location });
-  const route = "/runs/owner-gate";
-  const machine = (url: string, body: unknown, status = 200) =>
-    call(url, "POST", body, operator, status, f.operatorToken);
-  await machine(route, {
-    workflowId: f.workflow.id,
-    publicationId: f.publication.id,
-    packageHash: f.publication.packageHash,
-    localRunId: location.runId,
-    hostLabel: "Lab",
-    testRun: false,
-    execution: current.execution,
-  });
-  const report = (await runtime.readReport(location))!;
-  await machine(
-    `${route}/events`,
-    {
-      ...report,
-      continuation: {
-        ...report.continuation,
-        pendingAction: {
-          ...report.continuation.pendingAction,
-          reviewer: { authorities: ["operator"] },
+it.each(["workflow-owner", "reviewer"])(
+  "routes a named Workflow owner's %s gate to their inbox and team channel, and refuses an Agent's changed policy",
+  async (authority) => {
+    robot = await startStubWeComRobot();
+    service = await startTestService({
+      notificationChannel: robot.channel,
+      environment: {
+        BADGER_BOOTSTRAP_ADMINISTRATORS: admin.email,
+        BADGER_ALLOWED_ORIGINS: "http://localhost",
+        BADGER_NOTIFICATION_KEY: "ab".repeat(32),
+        BADGER_PUBLIC_URL: "https://badger.example.com",
+      },
+    });
+    const call = planningRequest(service);
+    const { person } = await call("/me", "GET", undefined, owner);
+    const f = await publishedFixture(service, (plan) => {
+      decisionPlan(plan, authority);
+      plan.workflow.customNodes[0].decision.reviewer.subjects = [person.id];
+    });
+    const { preferences, events } = await call(
+      "/me/notifications",
+      "GET",
+      undefined,
+      owner,
+    );
+    await call(
+      "/me/notifications",
+      "PUT",
+      {
+        revision: preferences.revision,
+        wecomUserId: "owner-wecom",
+        mobile: null,
+        mentionEvents: events,
+      },
+      owner,
+    );
+    await call(
+      `/workflows/${f.workflow.id}/notifications/channel`,
+      "PUT",
+      {
+        revision: 0,
+        label: "Run team",
+        webhookUrl:
+          "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-secret",
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    for (let count = 0; count < 5; count++) {
+      await service.runNotificationJobs();
+      service.clock.advance(3100);
+    }
+    const before = robot.requests.length;
+    const published = await call(
+      `/workflows/${f.workflow.id}/publications/${f.publication.id}/package`,
+    );
+    const protocol = JSON.parse(
+      Buffer.from(
+        published.snapshot.files.find(
+          (file: any) => file.path === "reference/workflow-protocol.json",
+        ).content,
+        "base64",
+      ).toString("utf8"),
+    );
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "badger-owner-gates-"));
+    const runtime = createWorkflowRuntime();
+    const location = {
+      kind: "standalone" as const,
+      projectRoot: root,
+      runId: "owner-gate",
+    };
+    const current = await runtime.start({ protocol, location });
+    const route = "/runs/owner-gate";
+    const machine = (url: string, body: unknown, status = 200) =>
+      call(url, "POST", body, operator, status, f.operatorToken);
+    await machine(route, {
+      workflowId: f.workflow.id,
+      publicationId: f.publication.id,
+      packageHash: f.publication.packageHash,
+      localRunId: location.runId,
+      hostLabel: "Lab",
+      testRun: false,
+      execution: current.execution,
+    });
+    const report = (await runtime.readReport(location))!;
+    await machine(
+      `${route}/events`,
+      {
+        ...report,
+        continuation: {
+          ...report.continuation,
+          pendingAction: {
+            ...report.continuation.pendingAction,
+            reviewer: { authorities: ["operator"] },
+          },
         },
       },
-    },
-    409,
-  );
-  await machine(`${route}/events`, report);
-  const ownerInbox = await call("/me/inbox", "GET", undefined, owner);
-  expect(
-    ownerInbox.items.filter((item: any) => item.href === route),
-  ).toHaveLength(1);
-  expect(
-    (await call("/me/inbox", "GET", undefined, operator)).items.filter(
-      (item: any) => item.href === route,
-    ),
-  ).toHaveLength(0);
-  service.clock.advance(3100);
-  await service.runNotificationJobs();
-  expect(robot.requests.slice(before)).toHaveLength(1);
-  expect(robot.requests.at(-1)!.message.text.mentioned_list).toEqual([
-    "owner-wecom",
-  ]);
-  expect(robot.requests.at(-1)!.message.text.content).toContain(
-    `https://badger.example.com${route}`,
-  );
-  const gate = (await call(`${route}/gates`, "GET", undefined, owner)).gates[0];
-  const answer = {
-    choiceId: "release",
-    inputs: { ticket: "OWNER-66" },
-    rationale: "Approved by the named owner.",
-  };
-  await call(
-    `${route}/gates/${gate.id}/preview`,
-    "POST",
-    answer,
-    operator,
-    403,
-  );
-  const { preview } = await call(
-    `${route}/gates/${gate.id}/preview`,
-    "POST",
-    answer,
-    owner,
-  );
-  expect(preview.submission.reviewer).toEqual({
-    subject: person.id,
-    authorities: ["workflow-owner"],
-  });
-  await call(
-    `${route}/gates/${gate.id}/answer`,
-    "POST",
-    {
-      ...answer,
-      confirmed: true,
-      confirmationHash: preview.confirmationHash,
-      requestId: "owner-answer",
-    },
-    owner,
-  );
-  expect((await runtime.submit(location, preview.submission)).disposition).toBe(
-    "done",
-  );
-  await machine(`${route}/events`, await runtime.readReport(location));
-  await call(`${route}/gates/${gate.id}/preview`, "POST", answer, owner, 409);
-}, 60_000);
+      409,
+    );
+    await machine(`${route}/events`, report);
+    const ownerInbox = await call("/me/inbox", "GET", undefined, owner);
+    expect(
+      ownerInbox.items.filter((item: any) => item.href === route),
+    ).toHaveLength(1);
+    expect(
+      (await call("/me/inbox", "GET", undefined, operator)).items.filter(
+        (item: any) => item.href === route,
+      ),
+    ).toHaveLength(0);
+    service.clock.advance(3100);
+    await service.runNotificationJobs();
+    expect(robot.requests.slice(before)).toHaveLength(1);
+    expect(robot.requests.at(-1)!.message.text.mentioned_list).toEqual([
+      "owner-wecom",
+    ]);
+    expect(robot.requests.at(-1)!.message.text.content).toContain(
+      `https://badger.example.com${route}`,
+    );
+    const gate = (await call(`${route}/gates`, "GET", undefined, owner))
+      .gates[0];
+    const answer = {
+      choiceId: "release",
+      inputs: { ticket: "OWNER-66" },
+      rationale: "Approved by the named owner.",
+    };
+    await call(
+      `${route}/gates/${gate.id}/preview`,
+      "POST",
+      answer,
+      operator,
+      403,
+    );
+    const { preview } = await call(
+      `${route}/gates/${gate.id}/preview`,
+      "POST",
+      answer,
+      owner,
+    );
+    expect(preview.submission.reviewer).toEqual({
+      subject: person.id,
+      authorities: ["reviewer", "workflow-owner"],
+    });
+    await call(
+      `${route}/gates/${gate.id}/answer`,
+      "POST",
+      {
+        ...answer,
+        confirmed: true,
+        confirmationHash: preview.confirmationHash,
+        requestId: "owner-answer",
+      },
+      owner,
+    );
+    expect(
+      (await runtime.submit(location, preview.submission)).disposition,
+    ).toBe("done");
+    await machine(`${route}/events`, await runtime.readReport(location));
+    await call(`${route}/gates/${gate.id}/preview`, "POST", answer, owner, 409);
+  },
+  60_000,
+);
 
 it("opens a fresh gate when a superseded binding recurs and delivers only the most recent gate's answer", async () => {
   service = await startPlanningService();

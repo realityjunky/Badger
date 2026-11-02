@@ -1,6 +1,4 @@
-import { isAdministrator } from "../authorization.js";
 import {
-  acceptedAuthoring,
   reviewView,
   reviewGateState,
   recordPackageSignOff,
@@ -107,24 +105,12 @@ export async function handlePublications(input: AuthorizedRequest) {
     fields(
       body,
       action.endsWith("preview")
-        ? ["overrideReason"]
-        : ["confirmed", "confirmationHash", "requestId", "overrideReason"],
+        ? []
+        : ["confirmed", "confirmationHash", "requestId"],
     );
   }
-  const reason = body.overrideReason;
-  if (
-    reason !== undefined &&
-    (typeof reason !== "string" ||
-      reason.trim().length === 0 ||
-      reason.trim().length > 2000)
-  )
-    throw new RequestError(
-      400,
-      "An override reason must contain 1 to 2000 characters",
-    );
-  const overrideReason = typeof reason === "string" ? reason.trim() : null;
   const approve = action?.startsWith("approve") ?? false;
-  const authorize = async (tx: Queryable, independence: boolean) => {
+  const authorize = async (tx: Queryable) => {
     const workflow = await readWorkflow(tx, workflowId);
     if (
       !workflow ||
@@ -141,43 +127,21 @@ export async function handlePublications(input: AuthorizedRequest) {
     );
     if (!caps.read)
       throw new RequestError(403, "This workflow is outside your roles");
-    const administrator =
-      isAdministrator(input.access) && input.access.tokenScopes === undefined;
-    if (action) {
-      if (!(approve ? caps.approvePackage : caps.publish))
-        throw new RequestError(
-          403,
-          approve
-            ? "Only a signed-in Reviewer approves a package"
-            : "Only a signed-in Workflow owner publishes a package",
-        );
-      if (reason !== undefined && (!approve || !administrator))
-        throw new RequestError(
-          403,
-          "Only an Administrator may override Reviewer independence",
-        );
-      if (
-        independence &&
-        approve &&
-        (await acceptedAuthoring(tx, versionId, input.person.id)) &&
-        !(administrator && overrideReason)
-      )
-        throw new RequestError(
-          403,
-          "A Reviewer who accepted any Authoring lane for this Workflow version cannot approve it; an Administrator must record an override reason",
-        );
-    }
-    return { caps, administrator };
+    if (action && !caps.publish)
+      throw new RequestError(
+        403,
+        "Only a signed-in Workflow owner or Administrator approves or publishes a package",
+      );
+    return caps;
   };
   const loadState = async (tx: Queryable) => {
-    await authorize(tx, true);
+    await authorize(tx);
     return reviewGateState(
       tx,
       input.config,
       versionId,
       input.person.id,
       approve ? "package" : "publication",
-      overrideReason,
     );
   };
   if (action && !action.endsWith("preview")) {
@@ -192,7 +156,7 @@ export async function handlePublications(input: AuthorizedRequest) {
         400,
         "Confirm sign-off with the exact preview confirmationHash and a request ID",
       );
-    await authorize(input.database, false);
+    await authorize(input.database);
     const result = await commitGate(
       input.database,
       input.dependencies,
@@ -223,7 +187,7 @@ export async function handlePublications(input: AuthorizedRequest) {
             versionId,
             gate,
             "Current package review evidence changed",
-            ["Reviewer", "Workflow owner"],
+            ["Workflow owner"],
           );
         return true;
       },
@@ -236,7 +200,6 @@ export async function handlePublications(input: AuthorizedRequest) {
           versionId,
           confirmation,
           input.person.displayName,
-          overrideReason,
         ),
     );
     if (result.kind === "conflict")
@@ -263,14 +226,11 @@ export async function handlePublications(input: AuthorizedRequest) {
         });
       return { preview: state.preview };
     }
-    const { caps, administrator } = await authorize(tx, false);
+    const caps = await authorize(tx);
     return {
       ...(await reviewView(tx, input.config, versionId)),
       publications: await listPublishedPackages(tx, workflowId),
-      canReview: caps.approvePackage,
       canPublish: caps.publish,
-      requiresOverride: await acceptedAuthoring(tx, versionId, input.person.id),
-      canOverride: administrator,
     };
   });
   input.reply.json(200, result);

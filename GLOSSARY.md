@@ -35,16 +35,13 @@ The Group role that reads the Group's Skills and workflows.
 The append-only record of every action with its actor, time, target, channel, and reason. Auditors and Administrators read all of it, and they can filter it.
 
 **Workflow owner**:
-The person who confirms the desired workflow, its acceptable behavior, and its unresolved choices. They also assign the workflow's other roles and decide its publication.
+The person who confirms the desired workflow, its acceptable behavior, and its unresolved choices. They also assign the workflow's other roles, approve its exact evaluated package, and confirm publication. They may also accept Authoring outputs; package approval and publication share one capability.
 
 **Engineer**:
 The person who builds a workflow's package: they study its sources, ask and resolve its questions, confirm facts, and drive drafting, authoring, and evaluation.
 
 **Field expert**:
 A person who holds the domain knowledge a workflow encodes, usually the author of its source Skills. They answer its questions and acknowledge or dispute the facts restated from their answers.
-
-**Reviewer**:
-The person who approves a workflow's package for publication. They must not have accepted any of its authoring-lane results, so approval stays independent of authorship.
 
 **Operator**:
 A person who runs a workflow's published versions, answers the Run gates its Nodes leave to Operators, and recovers interrupted Runs.
@@ -196,7 +193,7 @@ A point where work waits for a person's explicit confirmation or answer, bound t
 A person's credential for their Agents and the CLI, limited to the scopes they chose and never valid for an action reserved for people.
 
 **Package review**:
-The signed-in Reviewer's approval of one exact assembled package hash and its passing evaluation evidence. The Reviewer must have accepted no Authoring lane for that Workflow version; an Administrator may override that independence rule with a recorded reason.
+The signed-in Workflow owner's or Administrator's approval of one exact assembled package hash and its passing evaluation evidence. Accepting Authoring outputs does not disqualify them. Approval and publication each require explicit confirmation.
 
 **Published package**:
 The exact reviewed and evaluated package bytes permanently made available by the Workflow owner. Later authoring, regeneration, or new Workflow versions preserve earlier published packages for installation and Runs.

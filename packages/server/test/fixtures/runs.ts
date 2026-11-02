@@ -110,7 +110,7 @@ export async function publishedFixture(
   const f = await assembledFixture(service, configurePlan);
   for (const [person, role] of [
     [operator, "Operator"],
-    [reviewer, "Reviewer"],
+    [reviewer, "Workflow owner"],
   ] as const)
     await f.call(
       "/bindings",

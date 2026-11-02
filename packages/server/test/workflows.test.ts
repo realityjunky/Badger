@@ -239,11 +239,18 @@ describe("workflows and versions", () => {
 });
 
 describe("workflow capabilities at the HTTP seam", () => {
+  it("rejects the retired Reviewer role", async () => {
+    const group = await setup();
+    const { workflow } = await createWorkflow(group.id);
+    expect(
+      (await assign(workflow.id, lead, outsider.email!, "Reviewer")).status,
+    ).toBe(400);
+  });
+
   it.each([
     ["Workflow owner", true, false],
     ["Engineer", false, true],
     ["Field expert", false, false],
-    ["Reviewer", false, false],
     ["Operator", false, false],
     ["Observer", false, false],
   ])(
@@ -263,14 +270,17 @@ describe("workflow capabilities at the HTTP seam", () => {
         as: outsider,
       });
       expect(read.status).toBe(200);
-      expect(await read.json()).toMatchObject({
+      const detail = await read.json();
+      expect(detail).toMatchObject({
         capabilities: {
           read: true,
           editWorkflow: manages,
           manageRoles: manages,
           createVersion: startsVersions,
+          publish: manages,
         },
       });
+      expect(detail.capabilities).not.toHaveProperty("approvePackage");
       expect(
         (
           await service.request(

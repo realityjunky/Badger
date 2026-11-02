@@ -842,7 +842,6 @@ describe("Skill versions by upload", () => {
       "Workflow owner",
       "Engineer",
       "Field expert",
-      "Reviewer",
       "Operator",
       "Observer",
     ]) {

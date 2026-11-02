@@ -22,6 +22,7 @@ Every generation keeps a package snapshot and its files' kernel-derived owners
 and hashes. A regeneration begins a new authoring session, so it supersedes
 later authoring, evaluation, and review work. Upstream changes withdraw active
 generation confirmations and unfinished jobs, mark the old package invalid, and
-notify the Engineer, Reviewer, and Workflow owner in the same transaction.
+notify the Engineer and Workflow owner in the same transaction, following the
+role consolidation in [ADR 0038](0038-workflow-owner-review-and-publication.md).
 Previous package files remain available for inspection. Publication history,
 when implemented, remains independent of the mutable stage track.

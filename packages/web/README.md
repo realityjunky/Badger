@@ -246,11 +246,11 @@ them into `dist/`, so the server image carries the build and none of them.
   artifact receipts.
 - Workflow versions include **Review and publication** (#63). For the current
   package the panel shows Authoring, runtime, and publication readiness with
-  any blockers, and the review history. A Reviewer who accepted no Authoring
-  lane for the version previews and confirms approval of the exact package
-  hash; one who did is asked to find an independent Reviewer, and an
-  Administrator may override with a recorded reason. The Workflow owner then
-  previews and confirms publication. **Published versions** lists every
+  any blockers, and the review history. The Workflow owner or Administrator
+  previews and confirms approval of the exact package hash, then previews and
+  confirms publication using the same capability, even if they accepted
+  Authoring lane outputs. Historical override reasons remain in review history.
+  **Published versions** lists every
   published package with its publisher and time, and keeps its exact bytes
   after later Authoring or regeneration; inspecting one verifies its bytes and
   inventory before listing its files.

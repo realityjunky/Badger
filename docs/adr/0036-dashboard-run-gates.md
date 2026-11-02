@@ -10,8 +10,11 @@ roles, and records a person's answer. It never chooses a route or advances a Run
 
 Reviewer subjects in service workflows name stable Badger person IDs. Provider
 subjects alone are not globally unique, and email addresses can change. Review
-authorities are the workflow roles `workflow-owner`, `engineer`, `field-expert`,
-`reviewer`, and `operator`. Every authority the policy requires must be held;
+authorities follow the workflow roles `workflow-owner`, `engineer`, `field-expert`,
+and `operator`. Workflow owners also attest the legacy `reviewer` authority under
+[ADR 0038](0038-workflow-owner-review-and-publication.md), preserving existing
+published policies after the Reviewer role is merged into Workflow owner.
+Every authority the policy requires must be held;
 when none is named, the gate is reserved for Operators. A named subject must
 also hold the required authority. Administrator access alone does not fabricate
 a workflow authority. Personal access tokens may read delivery for their own

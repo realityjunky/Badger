@@ -63,6 +63,241 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("merges resolved and pending Reviewers into Workflow owners without losing invitation references", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((migration) => migration.version < "0037"),
+      clock,
+    );
+    await insertPerson(test);
+    await test.database.query(
+      `insert into people (id, issuer, subject, email, display_name, status, revision, created_at, updated_at)
+       values ('person-2', 'issuer', 'second', 'second@example.com', 'Second', 'active', 1, $1, $1)`,
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into groups (id, name, created_at, updated_at) values ('group-1', 'Research', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      `insert into workflows (id, group_id, name, goal, intent, locale, created_at, updated_at)
+       values ('workflow-1', 'group-1', 'First', 'Prepare a report', 'new-skill', 'en', $1, $1),
+              ('workflow-2', 'group-1', 'Second', 'Prepare a report', 'new-skill', 'en', $1, $1)`,
+      [clock.now()],
+    );
+    await test.database.query(
+      `insert into workflow_versions (id, workflow_id, number, name, goal, intent, locale, stages, created_at, updated_at)
+       values ('version-1', 'workflow-1', 1, 'First', 'Prepare a report', 'new-skill', 'en', '{}', $1, $1)`,
+      [clock.now()],
+    );
+    for (const [id, role, personId, email, workflowId] of [
+      [
+        "resolved-owner",
+        "Workflow owner",
+        "person-1",
+        "a@example.com",
+        "workflow-1",
+      ],
+      [
+        "resolved-reviewer",
+        "Reviewer",
+        "person-1",
+        "old@example.com",
+        "workflow-1",
+      ],
+      [
+        "other-workflow-reviewer",
+        "Reviewer",
+        "person-1",
+        "a@example.com",
+        "workflow-2",
+      ],
+      [
+        "resolved-reviewer-only",
+        "Reviewer",
+        "person-2",
+        "second@example.com",
+        "workflow-1",
+      ],
+      [
+        "pending-owner",
+        "Workflow owner",
+        null,
+        "Pending@example.com",
+        "workflow-1",
+      ],
+      [
+        "pending-reviewer",
+        "Reviewer",
+        null,
+        "pending@example.com",
+        "workflow-1",
+      ],
+      [
+        "pending-reviewer-only",
+        "Reviewer",
+        null,
+        "later@example.com",
+        "workflow-1",
+      ],
+      ["pending-same-email", "Reviewer", null, "a@example.com", "workflow-1"],
+      [
+        "different-person-same-email",
+        "Reviewer",
+        "person-2",
+        "a@example.com",
+        "workflow-2",
+      ],
+    ]) {
+      await test.database.query(
+        `insert into role_bindings (id, scope_type, scope_id, workflow_id, role, person_id, email, invited_by, created_at, updated_at)
+         values ($1, 'workflow', null, $2, $3, $4, $5, 'person-1', $6, $6)`,
+        [id, workflowId, role, personId, email, clock.now()],
+      );
+    }
+    await test.database.query(
+      `insert into role_bindings (id, scope_type, scope_id, role, person_id, email, invited_by, created_at, updated_at)
+       values ('organization-auditor', 'organization', null, 'Auditor', 'person-1', 'a@example.com', 'person-1', $1, $1),
+              ('group-member', 'group', 'group-1', 'Member', 'person-1', 'a@example.com', 'person-1', $1, $1)`,
+      [clock.now()],
+    );
+    await test.database.query(
+      `insert into question_rounds (id, workflow_version_id, number, title, created_by, created_at)
+       values ('round-1', 'version-1', 1, 'Questions', 'person-1', $1)`,
+      [clock.now()],
+    );
+    await test.database.query(
+      `insert into questions (id, workflow_version_id, round_id, created_at)
+       values ('question-1', 'version-1', 'round-1', $1)`,
+      [clock.now()],
+    );
+    await test.database.query(
+      `insert into question_recipients (question_id, binding_id)
+       values ('question-1', 'pending-owner'), ('question-1', 'pending-reviewer'),
+              ('question-1', 'resolved-reviewer')`,
+    );
+    for (const [id, bindingId, eventId] of [
+      ["owner-inbox", "pending-owner", "shared"],
+      ["duplicate-inbox", "pending-reviewer", "shared"],
+      ["moved-inbox", "pending-reviewer", "unique"],
+      ["retained-inbox", "pending-reviewer-only", "sole"],
+    ])
+      await test.database.query(
+        `insert into inbox_items (id, binding_id, workflow_version_id, gate, kind, event_id, created_at, updated_at)
+         values ($1, $2, 'version-1', 'package', 'gate-ready', $3, $4, $4)`,
+        [id, bindingId, eventId, clock.now()],
+      );
+
+    await applyMigrations(test.database, migrations, clock);
+    expect(
+      (
+        await test.database.query(
+          "select id from role_bindings where role='Reviewer'",
+        )
+      ).rows,
+    ).toEqual([]);
+    const owners = await test.database.query<{
+      id: string;
+      role: string;
+      revision: number;
+      person_id: string | null;
+    }>(
+      "select id, role, revision, person_id from role_bindings where scope_type='workflow' order by id",
+    );
+    expect(owners.rows).toEqual([
+      {
+        id: "different-person-same-email",
+        role: "Workflow owner",
+        revision: 2,
+        person_id: "person-2",
+      },
+      {
+        id: "other-workflow-reviewer",
+        role: "Workflow owner",
+        revision: 2,
+        person_id: "person-1",
+      },
+      {
+        id: "pending-owner",
+        role: "Workflow owner",
+        revision: 1,
+        person_id: null,
+      },
+      {
+        id: "pending-reviewer-only",
+        role: "Workflow owner",
+        revision: 2,
+        person_id: null,
+      },
+      {
+        id: "pending-same-email",
+        role: "Workflow owner",
+        revision: 2,
+        person_id: null,
+      },
+      {
+        id: "resolved-owner",
+        role: "Workflow owner",
+        revision: 1,
+        person_id: "person-1",
+      },
+      {
+        id: "resolved-reviewer-only",
+        role: "Workflow owner",
+        revision: 2,
+        person_id: "person-2",
+      },
+    ]);
+    expect(
+      (
+        await test.database.query(
+          "select binding_id from question_recipients order by binding_id",
+        )
+      ).rows,
+    ).toEqual([
+      { binding_id: "pending-owner" },
+      { binding_id: "resolved-owner" },
+    ]);
+    expect(
+      (
+        await test.database.query(
+          "select id, binding_id from inbox_items order by id",
+        )
+      ).rows,
+    ).toEqual([
+      { id: "moved-inbox", binding_id: "pending-owner" },
+      { id: "owner-inbox", binding_id: "pending-owner" },
+      { id: "retained-inbox", binding_id: "pending-reviewer-only" },
+    ]);
+    expect(
+      (
+        await test.database.query(
+          "select role, revision from role_bindings where scope_type <> 'workflow' order by role",
+        )
+      ).rows,
+    ).toEqual([
+      { role: "Auditor", revision: 1 },
+      { role: "Member", revision: 1 },
+    ]);
+    await expect(
+      test.database.query(
+        `insert into role_bindings (id, scope_type, workflow_id, role, email, invited_by, created_at, updated_at)
+       values ('retired', 'workflow', 'workflow-1', 'Reviewer', 'retired@example.com', 'person-1', $1, $1)`,
+        [clock.now()],
+      ),
+    ).rejects.toThrow(/role_bindings_scope_role_check/u);
+    await applyMigrations(test.database, migrations, clock);
+    expect(
+      (
+        await test.database.query(
+          "select id, role, revision, person_id from role_bindings where scope_type='workflow' order by id",
+        )
+      ).rows,
+    ).toEqual(owners.rows);
+  });
+
   it("rotates historical failed attachment cleanup behind untried blobs", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
@@ -509,7 +744,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0036");
+    expect(upgraded.applied.at(-1)).toBe("0037");
     expect(
       (
         await test.database.query(
@@ -670,6 +905,7 @@ describe("reviewed SQL migrations", () => {
       "0034",
       "0035",
       "0036",
+      "0037",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -713,6 +949,7 @@ describe("reviewed SQL migrations", () => {
         "0034",
         "0035",
         "0036",
+        "0037",
       ],
       pending: [],
       drifted: [],
@@ -846,6 +1083,7 @@ describe("reviewed SQL migrations", () => {
         "0034",
         "0035",
         "0036",
+        "0037",
       ],
       pending: [],
       drifted: [],
@@ -853,7 +1091,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(36);
+    expect(rows.rows[0]?.count).toBe(37);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

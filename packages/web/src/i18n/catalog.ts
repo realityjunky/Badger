@@ -15,7 +15,7 @@ const en = {
     "{name} · v{number}: publication readiness invalidated",
   "publication.title": "Review and publication",
   "publication.description":
-    "An independent Reviewer approves the exact package; the Workflow owner confirms publication.",
+    "The Workflow owner approves the exact package and confirms publication.",
   "publication.failed": "Could not load review and publication.",
   "publication.published": "Published",
   "publication.assembleFirst":
@@ -26,18 +26,12 @@ const en = {
   "publication.ready": "Ready",
   "publication.blocked": "Blocked",
   "publication.blockers": "Readiness blockers",
-  "publication.independence":
-    "You accepted Authoring results for this Workflow version.",
-  "publication.overrideHelp":
-    "An Administrator may override independence only with a recorded reason.",
-  "publication.independentReviewer":
-    "Ask a Reviewer who accepted no Authoring lane for this version to approve.",
-  "publication.overrideReason": "Administrator override reason",
+  "publication.overrideReason": "Historical Administrator override reason",
   "publication.review": "Preview review approval",
   "publication.publish": "Preview publication",
   "publication.reviewHistory": "Review history",
   "publication.noReviews": "No package reviews yet.",
-  "publication.reviewer": "Reviewer",
+  "publication.reviewer": "Approved by",
   "publication.approvedAt": "Approved at",
   "publication.status": "Status",
   "publication.approved": "Approved",
@@ -57,7 +51,7 @@ const en = {
   "publication.reviewHelp":
     "Your signed-in identity and current evaluation evidence will be recorded for this package hash.",
   "publication.publishHelp":
-    "Publish the independently approved, evaluated bytes as a permanent version available to Operators.",
+    "Publish the approved, evaluated bytes as a permanent version available to Operators.",
   "publication.verified": "Published bytes and inventory verified",
   "publication.file": "File",
   "publication.bytes": "Bytes",
@@ -1043,7 +1037,6 @@ const en = {
   "workflow.role.owner": "Workflow owner",
   "workflow.role.engineer": "Engineer",
   "workflow.role.expert": "Field expert",
-  "workflow.role.reviewer": "Reviewer",
   "workflow.role.operator": "Operator",
   "workflow.role.observer": "Observer",
   "workflow.conflict": "The change conflicts with the current records.",
@@ -1299,8 +1292,7 @@ const zh: Record<MessageId, string> = {
   "inbox.publicationReady": "{name} · v{number}：发布已审核的软件包",
   "inbox.publicationInvalidated": "{name} · v{number}：发布就绪状态已失效",
   "publication.title": "审核与发布",
-  "publication.description":
-    "独立审核者批准当前软件包，再由工作流负责人确认发布。",
+  "publication.description": "工作流负责人批准当前软件包，并确认发布。",
   "publication.failed": "无法加载审核与发布。",
   "publication.published": "已发布",
   "publication.assembleFirst": "请先组装并评估当前软件包，再进行审核。",
@@ -1310,16 +1302,12 @@ const zh: Record<MessageId, string> = {
   "publication.ready": "就绪",
   "publication.blocked": "待处理",
   "publication.blockers": "就绪阻碍",
-  "publication.independence": "您已接受此工作流版本的编写结果。",
-  "publication.overrideHelp": "管理员仅可填写并记录原因后覆盖独立性限制。",
-  "publication.independentReviewer":
-    "请由未接受过此版本任何编写通道结果的审核者进行批准。",
-  "publication.overrideReason": "管理员覆盖原因",
+  "publication.overrideReason": "历史管理员覆盖原因",
   "publication.review": "预览审核批准",
   "publication.publish": "预览发布",
   "publication.reviewHistory": "审核历史",
   "publication.noReviews": "尚无软件包审核。",
-  "publication.reviewer": "审核者",
+  "publication.reviewer": "批准者",
   "publication.approvedAt": "批准时间",
   "publication.status": "状态",
   "publication.approved": "已批准",
@@ -1338,7 +1326,7 @@ const zh: Record<MessageId, string> = {
   "publication.confirmPublish": "确认发布",
   "publication.reviewHelp": "将为此软件包哈希记录您的登录身份与当前评估证据。",
   "publication.publishHelp":
-    "将独立审核且通过评估的软件包内容发布为操作员可使用的永久版本。",
+    "将已批准且通过评估的软件包内容发布为操作员可使用的永久版本。",
   "publication.verified": "已验证发布内容与文件清单",
   "publication.file": "文件",
   "publication.bytes": "字节",
@@ -2059,7 +2047,6 @@ const zh: Record<MessageId, string> = {
   "workflow.role.owner": "工作流负责人",
   "workflow.role.engineer": "工程师",
   "workflow.role.expert": "领域专家",
-  "workflow.role.reviewer": "审核人",
   "workflow.role.operator": "操作员",
   "workflow.role.observer": "观察者",
   "workflow.conflict": "此更改与当前记录冲突。",

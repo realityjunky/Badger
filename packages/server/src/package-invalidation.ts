@@ -48,7 +48,6 @@ export async function invalidateGeneratedPackage(
   await invalidateEvaluations(tx, deps, context, versionId, reason);
   for (const gate of ["package", "publication"])
     await invalidateGate(tx, deps, context, versionId, gate, reason, [
-      "Reviewer",
       "Workflow owner",
     ]);
   const withdrawn = await tx.query<{ id: string }>(
@@ -84,7 +83,7 @@ export async function invalidateGeneratedPackage(
       "package",
       "gate-invalidated",
       id,
-      ["Engineer", "Reviewer", "Workflow owner"],
+      ["Engineer", "Workflow owner"],
     );
 }
 

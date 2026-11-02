@@ -518,7 +518,7 @@ export async function acceptLaneResult(
       job.workflow_version_id,
       gate,
       "Accepted Authoring output superseded package review",
-      ["Reviewer", "Workflow owner"],
+      ["Workflow owner"],
     );
   const stateHash = await commitAuthoring(
     tx,

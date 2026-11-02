@@ -352,7 +352,7 @@ job's outcome in one transaction. The Package panel lists each file's kernel
 owner and SHA-256, the bundled source Skills, and the Authoring plan. A changed
 proposal cancels unfinished generation and invalidates the package, and a
 regeneration supersedes later Authoring, evaluation, and review work; both
-notify the Engineer, the Reviewer, and the Workflow owner. Migration `0027`
+notify the Engineer and the Workflow owner. Migration `0027`
 adds the job kind and the package table;
 [ADR 0030](adr/0030-transactional-package-generation.md) records the
 transaction.
@@ -384,16 +384,18 @@ readiness reads the passing report for the current package hash. Migration
 transaction boundaries.
 
 Package review and publication (#63) are delivered in the server and the
-Review and publication panel: a signed-in Reviewer who accepted no Authoring
-lane result for the workflow version approves the exact package hash with its
-passing evaluation, and an Administrator may override that rule with a
-recorded reason. The Workflow owner then publishes through the kernel, and the
+Review and publication panel: a signed-in Workflow owner or Administrator
+approves the exact package hash with its passing evaluation, then confirms
+publication through the kernel using the same capability. Accepting Authoring
+outputs does not disqualify them from approval. The
 service stores the published files, their inventory, and the package hash in
 append-only Postgres records that stay published after regeneration. Every
 retrieval verifies the stored bytes with the kernel's `verifyPackageSnapshot`.
 Migration `0030` adds the tables;
-[ADR 0033](adr/0033-immutable-package-publication.md) records why publication
-keeps its own bytes.
+[ADR 0038](adr/0038-workflow-owner-review-and-publication.md) supersedes ADR 0033's
+independent Reviewer governance while retaining its immutable publication design.
+Migration `0037` converts Reviewer bindings and pending invitations to Workflow
+owner, merging duplicates while retaining their question and inbox references.
 
 Runs through the local Badger MCP (#65) are delivered in `packages/mcp/`, the
 kernel, the server, and the Runs pages: the operator profile's `start`, `next`,

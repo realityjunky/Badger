@@ -1,6 +1,9 @@
 # Keep independent review evidence and published bytes separate from current Authoring
 
-Status: accepted. The service overlays a passing evaluation and immutable package
+Status: superseded by [ADR 0038](0038-workflow-owner-review-and-publication.md).
+The original decision follows; ADR 0038 retains its immutable storage design.
+
+The service overlays a passing evaluation and immutable package
 review onto a clone of the committed Creator state. The kernel owns review and
 publication checks, with nonpersisting lifecycle calls for service transactions.
 Changing the current Creator namespace to record sign-off would put filesystem

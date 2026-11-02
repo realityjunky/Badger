@@ -17,10 +17,7 @@ export interface ReviewView {
   passingReportId: string | null;
   approvalId: string | null;
   readiness: CompositeReadiness | null;
-  canReview: boolean;
   canPublish: boolean;
-  canOverride: boolean;
-  requiresOverride: boolean;
   reviews: {
     id: string;
     packageHash: string;

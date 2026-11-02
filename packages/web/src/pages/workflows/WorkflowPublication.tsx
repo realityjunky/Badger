@@ -1,14 +1,4 @@
-import {
-  Alert,
-  Button,
-  Collapse,
-  Input,
-  Modal,
-  Space,
-  Spin,
-  Table,
-  Tag,
-} from "antd";
+import { Alert, Button, Collapse, Modal, Space, Spin, Table, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import type {
@@ -39,12 +29,10 @@ export function WorkflowPublication({
   const [view, setView] = useState<ReviewView | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [overrideReason, setOverrideReason] = useState("");
   const [preview, setPreview] = useState<{
     action: "approve" | "publish";
     preview: GatePreview;
     requestId: string;
-    overrideReason?: string;
   } | null>(null);
   const [published, setPublished] = useState<PublishedPackageRead | null>(null);
   const [installing, setInstalling] = useState<PublishedPackage | null>(null);
@@ -92,21 +80,16 @@ export function WorkflowPublication({
     }
   }
   async function prepare(action: "approve" | "publish") {
-    const reason =
-      action === "approve" && view?.requiresOverride
-        ? overrideReason.trim()
-        : undefined;
     const { preview } = await questionnaireRequest<{ preview: GatePreview }>(
       basePath,
       `${path}/${action}-preview`,
       "POST",
-      reason ? { overrideReason: reason } : {},
+      {},
     );
     setPreview({
       action,
       preview,
       requestId: crypto.randomUUID(),
-      ...(reason ? { overrideReason: reason } : {}),
     });
   }
   async function commit() {
@@ -115,12 +98,8 @@ export function WorkflowPublication({
       confirmed: true,
       confirmationHash: preview.preview.confirmationHash,
       requestId: preview.requestId,
-      ...(preview.overrideReason
-        ? { overrideReason: preview.overrideReason }
-        : {}),
     });
     setPreview(null);
-    setOverrideReason("");
     onChanged();
   }
   async function inspect(publication: PublishedPackage) {
@@ -223,39 +202,12 @@ export function WorkflowPublication({
               )}
             </>
           )}
-          {view.requiresOverride && view.canReview && (
-            <Alert
-              type="warning"
-              showIcon
-              title={t("publication.independence")}
-              description={
-                view.canOverride
-                  ? t("publication.overrideHelp")
-                  : t("publication.independentReviewer")
-              }
-            />
-          )}
-          {view.canOverride && view.requiresOverride && (
-            <label className="field">
-              {t("publication.overrideReason")}
-              <Input.TextArea
-                value={overrideReason}
-                onChange={(event) => setOverrideReason(event.target.value)}
-                maxLength={2000}
-                rows={2}
-              />
-            </label>
-          )}
           <Space wrap>
-            {view.canReview && (
+            {view.canPublish && (
               <Button
                 type="primary"
                 loading={busy}
-                disabled={
-                  view.readiness?.state !== "reviewable" ||
-                  (view.requiresOverride &&
-                    (!view.canOverride || !overrideReason.trim()))
-                }
+                disabled={view.readiness?.state !== "reviewable"}
                 onClick={() => void run(() => prepare("approve"))}
               >
                 {t("publication.review")}
@@ -412,14 +364,6 @@ export function WorkflowPublication({
             {preview?.preview.boundHashes.package}
           </code>
         </p>
-        {preview?.overrideReason && (
-          <Alert
-            type="warning"
-            showIcon
-            title={t("publication.overrideReason")}
-            description={preview.overrideReason}
-          />
-        )}
       </Modal>
       <WorkflowHostInstall
         workflowId={detail.workflow.id}

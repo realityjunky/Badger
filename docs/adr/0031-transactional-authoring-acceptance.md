@@ -34,7 +34,8 @@ before publishing it, and the normal questionnaire invalidation rules apply.
 A BLOCKED result creates a linked repair drafting job carrying the lane's
 action and current inputs. Neither case counts as a current completed lane. Review votes are drafting
 jobs too, and the kernel validates their provider evidence and review policy.
-Their human acceptance is separate from the independent package approval.
+Their human acceptance is separate from the Workflow owner's hash-bound package
+approval ([ADR 0038](0038-workflow-owner-review-and-publication.md)).
 
 Assembly is a signed-in Engineer's confirmed action bound to the exact Creator
 state and session revision. It replays into another disposable namespace and

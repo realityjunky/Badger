@@ -12,7 +12,6 @@ export const WORKFLOW_ROLES = [
   "Workflow owner",
   "Engineer",
   "Field expert",
-  "Reviewer",
   "Operator",
   "Observer",
 ] as const;
@@ -38,7 +37,6 @@ export interface WorkflowCapabilities {
   approveProposal: boolean;
   initialize: boolean;
   generate: boolean;
-  approvePackage: boolean;
   publish: boolean;
   readPublished: boolean;
 }
@@ -87,9 +85,6 @@ export async function workflowCapabilities(
       access.tokenScopes === undefined && (isAdministrator(access) || owner),
     initialize: access.tokenScopes === undefined && engineer,
     generate: access.tokenScopes === undefined && engineer,
-    approvePackage:
-      access.tokenScopes === undefined &&
-      (isAdministrator(access) || roles.has("Reviewer")),
     publish:
       access.tokenScopes === undefined && (isAdministrator(access) || owner),
     readPublished:

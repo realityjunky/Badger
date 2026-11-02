@@ -1187,8 +1187,8 @@ stateHash, requestId}` and returns `202 {job}`. The confirmation belongs to
   checking its recorded SHA-256. Unlisted paths are refused. An invalidated
   package remains readable for inspection.
 
-Upstream changes cancel unfinished generation and notify Engineers, Reviewers,
-and Workflow owners about superseded packages. Regeneration starts a fresh
+Upstream changes cancel unfinished generation and notify Engineers and Workflow
+owners about superseded packages. Regeneration starts a fresh
 Authoring session and invalidates progressed evaluation and review stages.
 See [ADR 0030](../../docs/adr/0030-transactional-package-generation.md).
 
@@ -1256,21 +1256,21 @@ starts a job with POST to that path and `{confirmed:true, packageHash, requestId
 The Engineer MCP's read-only `evaluation_status` tool exposes the same history
 and readiness. Tokens cannot start jobs or sign off for people.
 
-## Independent package review and publication
+## Owner package review and publication
 
 Let `V` be `/api/v1/workflows/:workflowId/versions/:versionId`.
 `GET V/review` returns current-hash composite Authoring, runtime and publication
 readiness from the kernel, approval history, all published Workflow versions, and
-the signed-in person's controls. A Reviewer who accepted any Authoring lane for
-this Workflow version, across every generation, cannot approve it. An
-Administrator may override independence only with a recorded `overrideReason`.
+the signed-in person's `canPublish` control. Workflow owners and Administrators
+use the same `publish` capability to approve and publish, including when they
+accepted Authoring lane outputs. These remain separate confirmation gates.
 
-`POST V/review/approve-preview` accepts `{}` or the Administrator's
-`{overrideReason}`. Commit with `POST V/review/approve` quoting
-`{confirmed:true, confirmationHash, requestId, overrideReason?}`. Only signed-in
-Reviewers and Administrators may approve. The reason is bound by the preview and
-stored with immutable review and Activity evidence. `POST V/review/publish-preview`
-accepts `{}`. Only the signed-in Workflow owner or Administrator commits
+`POST V/review/approve-preview` accepts `{}`. Commit with `POST V/review/approve`
+quoting `{confirmed:true, confirmationHash, requestId}`. Only signed-in Workflow
+owners and Administrators may approve. The actor is bound by the preview and
+stored with immutable review and Activity evidence. `overrideReason` is no longer
+accepted; historical reasons remain visible in review history.
+`POST V/review/publish-preview` accepts `{}`. The same signed-in roles commit
 `POST V/review/publish` with `{confirmed:true, confirmationHash, requestId}`.
 The kernel requires the exact approved package hash, current Authoring readiness
 and valid passing evaluation evidence. Changed previews conflict. Repeating an
@@ -1299,7 +1299,13 @@ regeneration, or later publications. Installation and Run start should consume
 this authorized retrieval API and kernel snapshot verification, rather than
 following any current authoring path. Review/publication never changes the
 committed Authoring namespace; their evidence, audit, stage and gate changes
-commit atomically. See ADR 0033.
+commit atomically. Migration `0037` replaces Reviewer bindings with Workflow owner,
+including pending invitations, and merges duplicates while retaining question
+recipients and invitation inbox items. It rejects new Reviewer bindings. This
+grants former Reviewers the owner's full workflow capabilities. See
+[ADR 0038](../../docs/adr/0038-workflow-owner-review-and-publication.md), which
+supersedes ADR 0033's independent Reviewer governance while retaining its storage
+and integrity design.
 
 Run observation is available at `GET /api/v1/me/runs`,
 `GET /api/v1/workflows/:workflowId/runs`, and `GET /api/v1/runs/:id`.
@@ -1322,7 +1328,8 @@ bounds and certification details.
 Committed mirrored decisions, repair manual stops, and finalization confirmations
 open durable gates. The published package owns reviewer policy: service policies
 name stable Badger person IDs and workflow authorities `workflow-owner`,
-`engineer`, `field-expert`, `reviewer`, and `operator`. All required authorities
+`engineer`, `field-expert`, and `operator`. Workflow owners also attest the legacy
+`reviewer` authority so immutable published policies remain answerable. All required authorities
 must be held; a policy with none defaults to Operators. Named people must also
 hold the required authority. Inboxes and team robots link directly to the Run.
 

@@ -45,6 +45,7 @@ const serviceDecisions = [
   "0035-local-runtime-run-mirroring.md",
   "0036-dashboard-run-gates.md",
   "0037-run-integrity-and-recovery.md",
+  "0038-workflow-owner-review-and-publication.md",
 ];
 const kernelDecisions = [
   "0007-project-relative-creator-paths.md",
@@ -320,7 +321,11 @@ describe("Badger release artifacts", () => {
 
     for (const decision of [...serviceDecisions, ...kernelDecisions]) {
       const record = await readText(`docs/adr/${decision}`);
-      expect(record, decision).toMatch(/^# .+\n\nStatus: accepted\./u);
+      expect(record, decision).toMatch(
+        decision === "0033-immutable-package-publication.md"
+          ? /^# .+\n\nStatus: superseded by \[ADR 0038\]\(0038-workflow-owner-review-and-publication\.md\)\./u
+          : /^# .+\n\nStatus: accepted\./u,
+      );
       await expectLocalLinksToResolve(
         "docs/adr",
         [...record.matchAll(/\]\(([^)]+)\)/gu)].map((match) => match[1]),
@@ -395,10 +400,11 @@ describe("Badger release artifacts", () => {
         "Group lead",
         "Member",
         "Activity log",
+        "Workflow owner",
         "Field expert",
         "Engineer",
-        "Reviewer",
         "Operator",
+        "Observer",
         "Skill version",
         "Workflow version",
         "Source check",
@@ -426,6 +432,7 @@ describe("Badger release artifacts", () => {
         "Project",
       ]),
     );
+    expect(terms).not.toContain("Reviewer");
     expect(glossary).toMatch(
       /^\*\*Source check\*\*:\n.+\n_Avoid_: candidates$/mu,
     );

@@ -108,7 +108,7 @@ it("installs and removes a real service publication through the local MCP client
   const reviewer = { subject: "reviewer", email: "reviewer@example.com" };
   const operator = { subject: "operator", email: "operator@example.com" };
   for (const [as, role] of [
-    [reviewer, "Reviewer"],
+    [reviewer, "Workflow owner"],
     [operator, "Operator"],
   ] as const)
     await fixture.call(

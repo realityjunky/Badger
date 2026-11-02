@@ -211,8 +211,8 @@ panel shows each file's owner and hash, bundled sources, and the Authoring plan.
 Authoring lanes and review votes (#61) are Agent drafting jobs in kernel dependency
 order; Engineers accept each result and confirm assembly. An Engineer then
 starts a sandboxed evaluation of the assembled package, and every report is
-kept (#62). A Reviewer who accepted no Authoring lane approves the exact
-package, and the Workflow owner publishes it (#63). Operators install published
+kept (#62). The Workflow owner approves the exact package and confirms its
+publication (#63); Administrators have the same sign-off capability. Operators install published
 versions locally (#64) and run them through the Badger MCP, which mirrors each
 Run to the service (#65), and people answer Run gates in the dashboard (#66).
 The service flags Runs whose events do not match its records, and Operators

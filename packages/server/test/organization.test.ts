@@ -241,7 +241,7 @@ describe("bindings by email", () => {
     for (const [scopeType, role] of [
       ["organization", "Member"],
       ["organization", "Group lead"],
-      ["organization", "Reviewer"],
+      ["organization", "Workflow owner"],
     ] as const) {
       const response = await invite(robin, {
         email: "bob@example.com",

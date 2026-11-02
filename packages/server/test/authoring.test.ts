@@ -382,7 +382,7 @@ it("keeps server storage paths out of every package-stage read model a token can
       scopeType: "workflow",
       scopeId: workflow.id,
       email: reviewer.email,
-      role: "Reviewer",
+      role: "Workflow owner",
     },
     admin,
     201,

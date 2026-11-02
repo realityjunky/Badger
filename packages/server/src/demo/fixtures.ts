@@ -731,10 +731,7 @@ export function demoResponse(path: string, query: URLSearchParams): unknown {
         passingReportId: released ? evaluation.id : null,
         approvalId: released ? review.id : null,
         readiness: null,
-        canReview: false,
         canPublish: false,
-        canOverride: false,
-        requiresOverride: false,
         reviews: released ? [review] : [],
         publications: released ? [publication] : [],
       };

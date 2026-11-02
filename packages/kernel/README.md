@@ -2,7 +2,7 @@
 
 This package contains the Badger Creator and Engine seams. It provides a focused, filesystem-based factory for creating and upgrading Skill packages, plus a private Engine foundation for loading, snapshotting, and running Badger-compatible Skills.
 
-Badger's scope also includes a collaborative service around this kernel, so that an organization's field experts, engineers, and reviewers can build and run workflows together. The service is planned in [#24](https://github.com/realityjunky/Badger/issues/24); [Delivery status](#delivery-status) records what is built.
+Badger's scope also includes a collaborative service around this kernel, so that an organization's field experts, engineers, workflow owners, and operators can build and run workflows together. The service is planned in [#24](https://github.com/realityjunky/Badger/issues/24); [Delivery status](#delivery-status) records what is built.
 
 In the Badger repository, this is the kernel package of the npm workspace, in
 `packages/kernel/`. Paths below, such as `assets/`, are relative to it; `docs/`
