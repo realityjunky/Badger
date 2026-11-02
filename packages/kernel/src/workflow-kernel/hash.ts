@@ -114,6 +114,7 @@ export function hashPackageFiles(
   files: readonly { path: string; content: Uint8Array }[],
 ): string {
   const seen = new Set<string>();
+  const spellings = new Map<string, string>();
   const entries = files.map((file) => {
     if (
       !file.path ||
@@ -121,12 +122,35 @@ export function hashPackageFiles(
       file.path.includes("\0") ||
       file.path
         .split("/")
-        .some((part) => !part || part === "." || part === "..") ||
+        .some(
+          (part) =>
+            !part ||
+            part === "." ||
+            part === ".." ||
+            /[. ]$/u.test(part) ||
+            /[<>:"|?*\u0000-\u001f\u007f]/u.test(part) ||
+            /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³]|conin\$|conout\$)(?:\.|$)/iu.test(
+              part,
+            ),
+        ) ||
       path.posix.isAbsolute(file.path) ||
       /^[A-Za-z]:/u.test(file.path) ||
       seen.has(file.path)
     )
-      throw new Error("Package file path is unsafe or repeated");
+      throw new Error(`Package file path is unsafe or repeated: ${file.path}`);
+    const parts = file.path.split("/");
+    for (let i = 1; i <= parts.length; i++) {
+      const prefix = parts.slice(0, i).join("/");
+      const key = prefix
+        .normalize("NFC")
+        .toUpperCase()
+        .toLowerCase()
+        .normalize("NFC");
+      const previous = spellings.get(key);
+      if (previous !== undefined && previous !== prefix)
+        throw new Error(`Package file path aliases ${previous}: ${file.path}`);
+      spellings.set(key, prefix);
+    }
     seen.add(file.path);
     return {
       relativePath: file.path,
@@ -138,7 +162,7 @@ export function hashPackageFiles(
     const parts = file.split("/");
     for (let i = 1; i < parts.length; i++)
       if (seen.has(parts.slice(0, i).join("/")))
-        throw new Error("Package file paths conflict");
+        throw new Error(`Package file paths conflict: ${file}`);
   }
   entries.sort((left, right) => {
     const a = left.relativePath.split("/"),

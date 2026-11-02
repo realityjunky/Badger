@@ -2,11 +2,14 @@
 export type AgentHost = "claude" | "codex" | "workbuddy";
 export type InstallScope = "project" | "user";
 export type McpProfile = "auto" | "engineer" | "expert" | "operator";
+export type CommandShell = "posix" | "powershell";
 export interface McpConfiguration {
   deploymentUrl: string;
   command?: string;
   args?: string[];
   profile?: McpProfile;
+  platform?: "posix" | "win32";
+  mcpCliPath?: string;
 }
 
 export function deploymentUrl(value: string): string {
@@ -36,8 +39,12 @@ export function deploymentUrl(value: string): string {
 export function mcpEntry(host: AgentHost, options: McpConfiguration) {
   if (!["claude", "codex", "workbuddy"].includes(host))
     throw new Error("Select a supported Agent host");
-  const command = options.command ?? "badger-mcp";
-  const args = options.args ?? [];
+  const windows = options.platform === "win32";
+  if (windows && !options.command && !options.mcpCliPath?.trim())
+    throw new Error("Set the installed Badger MCP cli.js path for Windows");
+  const command = options.command ?? (windows ? "node" : "badger-mcp");
+  const args =
+    options.args ?? (windows && options.mcpCliPath ? [options.mcpCliPath] : []);
   const profile = options.profile ?? "operator";
   if (!command.trim() || /[\u0000-\u001f\u007f]/u.test(command))
     throw new Error("Set an MCP executable without control characters");
@@ -98,6 +105,14 @@ export function hostPaths(host: AgentHost, scope: InstallScope) {
 export function shellArgument(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
+export function shellCommand(
+  args: readonly string[],
+  shell: CommandShell = "posix",
+): string {
+  return shell === "powershell"
+    ? `& ${args.map((arg) => `'${arg.replaceAll("'", "''")}'`).join(" ")}`
+    : args.map(shellArgument).join(" ");
+}
 export function localInstallCommand(input: {
   deploymentUrl: string;
   workflowId: string;
@@ -105,6 +120,8 @@ export function localInstallCommand(input: {
   packageHash: string;
   host: AgentHost;
   scope: InstallScope;
+  shell?: CommandShell;
+  mcpCliPath?: string;
 }): string {
   const args = [
     "badger-hosts",
@@ -122,23 +139,30 @@ export function localInstallCommand(input: {
     "--scope",
     input.scope,
   ];
-  return args.map(shellArgument).join(" ");
+  if (input.shell === "powershell") {
+    if (!input.mcpCliPath?.trim())
+      throw new Error("Set the installed Badger MCP cli.js path for Windows");
+    args.push("--command", "node", "--arg", input.mcpCliPath);
+  }
+  return shellCommand(args, input.shell);
 }
 export function localUninstallCommand(input: {
   workflowId: string;
   host: AgentHost;
   scope: InstallScope;
+  shell?: CommandShell;
 }): string {
-  return [
-    "badger-hosts",
-    "preview-uninstall",
-    "--workflow",
-    input.workflowId,
-    "--host",
-    input.host,
-    "--scope",
-    input.scope,
-  ]
-    .map(shellArgument)
-    .join(" ");
+  return shellCommand(
+    [
+      "badger-hosts",
+      "preview-uninstall",
+      "--workflow",
+      input.workflowId,
+      "--host",
+      input.host,
+      "--scope",
+      input.scope,
+    ],
+    input.shell,
+  );
 }

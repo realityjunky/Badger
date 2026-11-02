@@ -15,7 +15,15 @@ export {
   workflowGatePolicy,
 } from "./index.js";
 
-export { parseWorkflowFinalizationPreview } from "./finalization.js";
+export {
+  parseWorkflowFinalizationPreview,
+  hashWorkflowFinalizationRationale,
+} from "./finalization.js";
+export { workflowContinuationRequiresRecovery } from "./predicates.js";
+export {
+  WORKFLOW_RUN_SNAPSHOT_BOUNDS,
+  workflowRunSnapshotBoundViolation,
+} from "./report-bounds.js";
 
 export type {
   ManualWorkflowRunLocation,

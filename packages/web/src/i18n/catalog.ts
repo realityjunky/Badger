@@ -513,6 +513,8 @@ const en = {
   "ledger.blocker.stale-source-evidence": "Source evidence needs updating",
   "ledger.blocker.unstudied-pin": "Pinned version not yet studied",
   "hosts.title": "Install on your computer",
+  "hosts.shell": "Shell / operating system",
+  "hosts.mcpCliPath": "Installed Badger MCP cli.js path",
   "hosts.open": "Install locally",
   "hosts.localOnly":
     "Choose your Agent host and scope. Run the command on the computer where you want to install this published package.",
@@ -928,6 +930,9 @@ const en = {
   "run.noFindings": "No current findings.",
   "run.recovery": "Recovery",
   "run.recoveryRequired": "Recovery required",
+  "run.finalizationPending": "Finalization transaction pending",
+  "run.snapshotCompacted":
+    "Snapshot summaries are shortened. Full evidence remains in the ordered events.",
   "run.recoveryHelp":
     "Ask the Operator's Agent on the Run's computer to use recover, then reload this page to review the outcome. Unresolved integrity findings remain visible.",
   "run.recovery.settled": "Recovery settled",
@@ -1771,6 +1776,8 @@ const zh: Record<MessageId, string> = {
   "ledger.blocker.stale-source-evidence": "源文档证据需要更新",
   "ledger.blocker.unstudied-pin": "固定版本尚未研读",
   "hosts.title": "安装到你的电脑",
+  "hosts.shell": "Shell / 操作系统",
+  "hosts.mcpCliPath": "已安装 Badger MCP 的 cli.js 路径",
   "hosts.open": "本地安装",
   "hosts.localOnly":
     "选择 Agent 客户端和安装范围，然后在要安装此已发布包的电脑上运行命令。",
@@ -2245,6 +2252,8 @@ const zh: Record<MessageId, string> = {
   "run.noFindings": "当前无检查问题。",
   "run.recovery": "恢复",
   "run.recoveryRequired": "需要恢复",
+  "run.finalizationPending": "最终确认事务尚未完成",
+  "run.snapshotCompacted": "快照摘要已缩短。完整证据保留在有序事件中。",
   "run.recoveryHelp":
     "请操作人在运行所在计算机上让 Agent 使用 recover，然后刷新本页查看结果。尚未解决的完整性问题会继续显示。",
   "run.recovery.settled": "恢复已完成",

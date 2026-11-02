@@ -142,7 +142,26 @@ export async function syncRunGate(
   },
   current: WorkflowContinuation,
 ) {
+  if (current.finalizationPending) {
+    const closed = await tx.query<{ id: string }>(
+      "update run_gates set state='superseded' where run_id=$1 and state='open' returning id",
+      [run.id],
+    );
+    for (const gate of closed.rows) await closeRunGateInbox(tx, deps, gate.id);
+    return;
+  }
   const action = current.pendingAction;
+  if (
+    current.finalizationPreviewRef &&
+    (current.finalizationPreviewRef.planHash !==
+      current.finalizationPreview?.planHash ||
+      current.finalizationPreviewRef.operationCount !==
+        current.finalizationPreview?.operations.length)
+  )
+    throw new RequestError(
+      400,
+      "The exact finalization preview is required for its snapshot reference",
+    );
   if (action?.finalization) {
     try {
       const preview = parseWorkflowFinalizationPreview(

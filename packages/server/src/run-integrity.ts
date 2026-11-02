@@ -3,7 +3,7 @@ import type { Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import { recordAudit, type WriteContext } from "./audit.js";
 import { RequestError } from "./http/errors.js";
-import { createHash } from "node:crypto";
+import { hashWorkflowFinalizationRationale } from "@realityjunky/badger/workflow-runtime";
 
 export type RunIntegrityCode =
   "unattested-decision" | "event-sequence-gap" | "package-hash-mismatch";
@@ -303,12 +303,9 @@ export async function hasMatchingRunGateAnswer(
       return false;
     const finalizationConfirmation = object(data?.finalizationConfirmation);
     if (finalizationConfirmation) {
-      const rationaleHash =
-        submission.rationale == null
-          ? null
-          : createHash("sha256")
-              .update(String(submission.rationale).trim())
-              .digest("hex");
+      const rationaleHash = hashWorkflowFinalizationRationale(
+        submission.rationale as string | null | undefined,
+      );
       if (
         !context.pendingAction?.finalization ||
         finalizationConfirmation.actionId !== submission.actionId ||

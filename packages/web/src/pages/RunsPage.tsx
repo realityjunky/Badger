@@ -255,6 +255,17 @@ export function RunsPage() {
               description={t("run.recoveryHelp")}
             />
           )}
+          {run.continuation?.finalizationPending && (
+            <Alert
+              type="warning"
+              showIcon
+              message={t("run.finalizationPending")}
+              description={run.continuation.finalizationPending.status}
+            />
+          )}
+          {run.continuation?.snapshotCompacted && (
+            <Alert type="info" showIcon message={t("run.snapshotCompacted")} />
+          )}
           {run.recovery && (
             <Alert
               type={

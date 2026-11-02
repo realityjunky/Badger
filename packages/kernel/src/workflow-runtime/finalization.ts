@@ -47,6 +47,12 @@ export const WORKFLOW_FINALIZATION_MAX_OPERATIONS = 256;
 export const WORKFLOW_FINALIZATION_MAX_EVENTS = 1_024;
 export const WORKFLOW_FINALIZATION_MAX_TEXT_BYTES = 64 * 1024;
 
+export function hashWorkflowFinalizationRationale(
+  rationale: string | null | undefined,
+): string | null {
+  return rationale == null ? null : sha256(rationale.trim());
+}
+
 const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const MAX_IDENTIFIER_LENGTH = 256;

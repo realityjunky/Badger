@@ -27,6 +27,46 @@ afterEach(async () => {
   for (const folder of folders.splice(0))
     await fs.rm(folder, { recursive: true, force: true });
 });
+it("lists 70 published workflows in one request after capability discovery", async () => {
+  const workflows = Array.from({ length: 70 }, (_, i) => ({
+    id: `workflow-${i}`,
+    name: `Workflow ${i}`,
+    capabilities: { readPublished: true },
+    publications: [{ id: `publication-${i}`, packageHash: "a".repeat(64) }],
+  }));
+  const requests: string[] = [];
+  const server = createBadgerMcp({
+    url: "https://badger.example",
+    token: "test-only",
+    agentHost: "Test",
+    profile: "operator",
+    fetch: async (url) => {
+      const route = new URL(url).pathname;
+      requests.push(route);
+      if (route === "/api/v1/me/mcp")
+        return Response.json({ capabilities: { installPublished: true } });
+      if (route === "/api/v1/publications" || route === "/api/v1/workflows")
+        return Response.json({ workflows });
+      return Response.json({ publications: [{}] });
+    },
+  });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(b);
+  client = new Client({ name: "Operator", version: "1" });
+  await client.connect(a);
+  try {
+    await client.listTools();
+    requests.length = 0;
+    const result = await client.callTool({
+      name: "list_published_workflows",
+      arguments: {},
+    });
+    expect(result.isError).not.toBe(true);
+    expect(requests).toEqual(["/api/v1/publications"]);
+  } finally {
+    await server.close();
+  }
+});
 it("offers only published workflow installation tools to an Operator token and keeps human sign-off in the dashboard", async () => {
   service = await startTestService({ mode: "local" });
   const response = await service.request("/api/v1/me/tokens", {

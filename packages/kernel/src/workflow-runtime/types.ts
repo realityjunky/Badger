@@ -151,6 +151,8 @@ export interface WorkflowCompletionPlan {
 }
 
 export interface WorkflowRunReport {
+  /** Exact large gate context travels outside the bounded observation pair. */
+  finalizationPreview?: WorkflowFinalizationPreview;
   continuation: WorkflowContinuation;
   projection: WorkflowStateProjection;
   events: TrajectoryEvent[];
@@ -158,6 +160,7 @@ export interface WorkflowRunReport {
 }
 
 export interface WorkflowContinuation {
+  snapshotCompacted?: boolean;
   disposition: "continue" | "await-user" | "blocked" | "done";
   runId: string;
   revision: number;
@@ -188,6 +191,12 @@ export interface WorkflowContinuation {
   repair?: WorkflowRepairEpisodeState;
   finalization?: WorkflowFinalizationState;
   finalizationPreview?: WorkflowFinalizationPreview;
+  finalizationPreviewRef?: { planHash: string; operationCount: number };
+  finalizationPending?: {
+    transactionId: string;
+    status: string;
+    planHash: string;
+  };
 }
 
 export interface WorkflowHandoff {
@@ -224,6 +233,7 @@ export type WorkflowStateProjectionStatus =
   "not-started" | "running" | "waiting" | "blocked" | "completed";
 
 export interface WorkflowStateProjection {
+  snapshotCompacted?: boolean;
   schemaVersion: 1;
   workflow: string;
   statePath: string;

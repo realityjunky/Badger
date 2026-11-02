@@ -438,7 +438,18 @@ it("opens a fresh gate when a superseded binding recurs and delivers only the mo
   // Each report follows the runtime's own finalization refresh.
   const report = async () => {
     await runtime.resume(location);
-    await machine(`${route}/events`, await runtime.readReport(location));
+    const report = (await runtime.readReport(location))!;
+    // Large previews use the same exact gate context outside the snapshot pair.
+    const preview = report.continuation.finalizationPreview;
+    if (preview) {
+      report.finalizationPreview = preview;
+      report.continuation.finalizationPreviewRef = {
+        planHash: preview.planHash,
+        operationCount: preview.operations.length,
+      };
+      delete report.continuation.finalizationPreview;
+    }
+    await machine(`${route}/events`, report);
   };
   const gates = async () =>
     (await f.call(`${route}/gates`, "GET", undefined, owner)).gates;

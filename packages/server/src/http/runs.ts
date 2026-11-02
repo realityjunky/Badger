@@ -1,5 +1,10 @@
 import { canonicalHash, type WorkflowRunReport } from "@realityjunky/badger";
-import { createWorkflowRuntime } from "@realityjunky/badger/workflow-runtime";
+import {
+  createWorkflowRuntime,
+  workflowContinuationRequiresRecovery,
+  workflowRunSnapshotBoundViolation,
+  WORKFLOW_RUN_SNAPSHOT_BOUNDS,
+} from "@realityjunky/badger/workflow-runtime";
 import { readPublishedPackage } from "../publications.js";
 import { readWorkflow } from "../workflows.js";
 import { workflowCapabilities } from "../workflow-access.js";
@@ -182,7 +187,10 @@ export async function handleRuns(input: AuthorizedRequest) {
   if (!ID.test(id)) throw new RequestError(400, "Invalid Run ID");
   let body: Record<string, unknown> = {};
   if (input.method === "POST") {
-    const parsed = await readJsonBody(input.request, 2 * 1024 * 1024);
+    const parsed = await readJsonBody(
+      input.request,
+      WORKFLOW_RUN_SNAPSHOT_BOUNDS.maxReportRequestBytes,
+    );
     if (!parsed.ok)
       throw new RequestError(parsed.status ?? 400, parsed.message);
     body = objectInput(parsed.value);
@@ -482,6 +490,7 @@ export async function handleRuns(input: AuthorizedRequest) {
           "recoveryRequired",
           "recoveries",
           "settledNoticeId",
+          "finalizationPreview",
         ]);
         if (
           body.recoveryRequired !== undefined &&
@@ -574,7 +583,7 @@ export async function handleRuns(input: AuthorizedRequest) {
           );
           sequence = Number(seq);
         }
-        const projection =
+        let projection =
             body.projection === undefined ? null : objectInput(body.projection),
           continuation =
             body.continuation === undefined
@@ -582,8 +591,27 @@ export async function handleRuns(input: AuthorizedRequest) {
               : objectInput(body.continuation);
         if ((projection === null) !== (continuation === null))
           throw new RequestError(400, "Send the complete runtime report");
+        let snapshotRejected: string | null = null;
         if (projection && continuation) {
-          validateRunReadModels(projection, continuation, row.local_run_id);
+          snapshotRejected = workflowRunSnapshotBoundViolation(
+            projection,
+            continuation,
+          );
+          if (
+            !snapshotRejected &&
+            body.finalizationPreview &&
+            Buffer.byteLength(JSON.stringify(body.finalizationPreview)) >
+              WORKFLOW_RUN_SNAPSHOT_BOUNDS.maxFinalizationPreviewBytes
+          )
+            snapshotRejected = `Run finalization preview exceeds maxFinalizationPreviewBytes (${WORKFLOW_RUN_SNAPSHOT_BOUNDS.maxFinalizationPreviewBytes})`;
+          if (!snapshotRejected)
+            validateRunReadModels(projection, continuation, row.local_run_id);
+          if (snapshotRejected) {
+            projection = null;
+            continuation = null;
+          }
+        }
+        if (projection && continuation) {
           if (
             Number.isSafeInteger(body.lastSequence) &&
             Number(body.lastSequence) > sequence
@@ -611,9 +639,7 @@ export async function handleRuns(input: AuthorizedRequest) {
             !Number.isSafeInteger(projection.revision) ||
             !["running", "waiting", "blocked", "completed"].includes(
               String(projection.status),
-            ) ||
-            Buffer.byteLength(JSON.stringify({ projection, continuation })) >
-              1024 * 1024
+            )
           )
             throw new RequestError(
               409,
@@ -646,15 +672,8 @@ export async function handleRuns(input: AuthorizedRequest) {
           );
           const runtimeRecovery =
             body.recoveryRequired === true ||
-            (
-              continuation.findings as {
-                code?: string;
-                operation?: { id?: string };
-              }[]
-            ).some(
-              (f) =>
-                f.code === "recovery-required" ||
-                f.operation?.id === "workflow.recover",
+            workflowContinuationRequiresRecovery(
+              continuation as unknown as WorkflowRunReport["continuation"],
             );
           // A recovery request bound to the current notice settles it with an
           // outcome. Without one, a report of a runtime that no longer needs
@@ -703,9 +722,10 @@ export async function handleRuns(input: AuthorizedRequest) {
             },
           );
         } else if (
-          body.recoveries !== undefined ||
-          body.recoveryRequired !== undefined ||
-          body.settledNoticeId !== undefined
+          !snapshotRejected &&
+          (body.recoveries !== undefined ||
+            body.recoveryRequired !== undefined ||
+            body.settledNoticeId !== undefined)
         )
           throw new RequestError(
             400,
@@ -725,13 +745,16 @@ export async function handleRuns(input: AuthorizedRequest) {
           ],
         );
         if (continuation)
-          await syncRunGate(
-            tx,
-            input.dependencies,
-            row,
-            continuation as unknown as WorkflowRunReport["continuation"],
-          );
-        return { lastSequence: sequence };
+          await syncRunGate(tx, input.dependencies, row, {
+            ...continuation,
+            ...(body.finalizationPreview
+              ? { finalizationPreview: body.finalizationPreview }
+              : {}),
+          } as unknown as WorkflowRunReport["continuation"]);
+        return {
+          lastSequence: sequence,
+          ...(snapshotRejected ? { snapshotRejected } : {}),
+        };
       } catch (error) {
         if (!(error instanceof RunIntegrityError)) throw error;
         await tx.exec("rollback to savepoint run_report");

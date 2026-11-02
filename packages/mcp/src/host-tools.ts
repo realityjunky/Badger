@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   previewInstall,
@@ -107,28 +108,7 @@ export function hostTools(api: BadgerApi, previews: LocalHostPreviews) {
               `/workflows/${encodeURIComponent(args.workflowId)}/publications`,
             )) as object),
           };
-        const { workflows } = await api.request<{
-          workflows: {
-            id: string;
-            name: string;
-            capabilities: { readPublished: boolean };
-          }[];
-        }>("/workflows");
-        const available = [];
-        for (const workflow of workflows.filter(
-          (w) => w.capabilities.readPublished,
-        )) {
-          const { publications } = await api.request<{
-            publications: unknown[];
-          }>(`/workflows/${encodeURIComponent(workflow.id)}/publications`);
-          if (publications.length)
-            available.push({
-              id: workflow.id,
-              name: workflow.name,
-              publications,
-            });
-        }
-        return { workflows: available };
+        return api.request("/publications");
       },
       "installPublished",
       true,
@@ -173,8 +153,14 @@ export function hostTools(api: BadgerApi, previews: LocalHostPreviews) {
           publication,
           snapshot,
           deploymentUrl: api.url,
-          command: args.command,
-          args: args.args,
+          command:
+            args.command ??
+            (process.platform === "win32" ? process.execPath : undefined),
+          args:
+            args.args ??
+            (process.platform === "win32" && args.command === undefined
+              ? [fileURLToPath(new URL("./cli.js", import.meta.url))]
+              : undefined),
         });
         return {
           ...(await previews.save(plan)),

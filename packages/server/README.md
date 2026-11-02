@@ -1288,6 +1288,11 @@ tokens need `operator` scope with an Operator, Engineer, or Administrator role, 
 `engineer` scope with an Engineer or Administrator role, on the visible workflow.
 Other workflows and scopes are refused.
 
+`GET /api/v1/publications` returns `{workflows:[{id,name,publications}]}` for
+every visible workflow whose publications the caller may install. It applies
+the same workflow and token permissions as the scoped endpoint and omits empty
+workflows, so MCP listing uses one request regardless of workflow count.
+
 Publications store actual package bytes in append-only Postgres records, including
 bundled source Skills. They remain usable after upstream changes, same-version
 regeneration, or later publications. Installation and Run start should consume

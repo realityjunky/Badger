@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   atomicWriteContainedBytes,
@@ -15,6 +16,7 @@ import {
   createWorkflowRuntime,
   validateWorkflowMachineVerification,
   workflowGateBinding,
+  workflowContinuationRequiresRecovery as requiresRecovery,
   type WorkflowContinuation,
   type WorkflowDecisionSubmission,
   type WorkflowRunReport,
@@ -70,7 +72,7 @@ const RECENT_ACCESS_MILLISECONDS = 30_000;
 async function read<T>(
   root: string,
   relative: string,
-  max = 16 * 1024 * 1024,
+  max = 64 * 1024 * 1024,
 ): Promise<T | null> {
   const inspection = await inspectProtectedProjectPath(root, relative, {
     label,
@@ -119,12 +121,6 @@ function target(args: { projectRoot: string; runId: string }) {
 }
 function runRelative(runId: string) {
   return `.badger/runs/${runId}`;
-}
-function requiresRecovery(current: WorkflowContinuation) {
-  return current.findings.some(
-    (f) =>
-      f.code === "recovery-required" || f.operation?.id === "workflow.recover",
-  );
 }
 /** An interruption's identity: the same one keeps its notice across calls. */
 function noticeHash(current: WorkflowContinuation) {
@@ -183,6 +179,7 @@ export class LocalRuns {
   >();
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly errors = new Map<string, string>();
+  private readonly snapshotRejections = new Map<string, string>();
   private readonly synchronized = new Set<string>();
   /** The installed package hash each Run last registered in this process. */
   private readonly registered = new Map<string, string | null>();
@@ -311,7 +308,40 @@ export class LocalRuns {
   ): Promise<T> {
     const key = path.join(args.projectRoot, runRelative(args.runId));
     const previous = this.queueTasks.get(key) ?? Promise.resolve();
-    const task = previous.catch(() => undefined).then(work);
+    const task = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const root = await runRoot(args);
+        await ensureProtectedProjectDirectory(root, ".badger", { label });
+        const lock = path.join(root, ".badger/mcp-queue.lock");
+        const deadline = Date.now() + 5000;
+        let handle;
+        for (;;) {
+          try {
+            handle = await fs.open(lock, "wx", 0o600);
+            break;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+            if (Date.now() >= deadline)
+              throw new Error(
+                `Run queue is locked: ${lock}. Retry when the other MCP process finishes; delete the lock file only if no MCP process is using this Run.`,
+              );
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+        }
+        try {
+          await handle.writeFile(
+            JSON.stringify({
+              pid: process.pid,
+              createdAt: new Date().toISOString(),
+            }),
+          );
+          return await work();
+        } finally {
+          await handle.close();
+          await fs.unlink(lock);
+        }
+      });
     this.queueTasks.set(key, task);
     try {
       return await task;
@@ -390,7 +420,7 @@ export class LocalRuns {
   private async flush(args: { projectRoot: string; runId: string }) {
     const root = await runRoot(args);
     const key = path.join(args.projectRoot, runRelative(args.runId));
-    const recovery = await this.withQueue(args, () => recoveryQueue(root));
+    let recovery = await this.withQueue(args, () => recoveryQueue(root));
     if (recovery.required) {
       const current = await runtime.inspect(target(args));
       if (!current) throw new Error("This local Run has not started");
@@ -398,6 +428,7 @@ export class LocalRuns {
       // acknowledged notice until a new notice or new requests arrive.
       if (
         requiresRecovery(current) &&
+        !current.finalizationPending &&
         this.noticed.get(key) === recovery.noticeId &&
         recovery.requests.length === 0
       )
@@ -417,7 +448,7 @@ export class LocalRuns {
         },
       );
       this.noticed.set(key, recovery.noticeId!);
-      if (requiresRecovery(current)) {
+      if (requiresRecovery(current) && !current.finalizationPending) {
         await this.withQueue(args, async () => {
           const latest = await recoveryQueue(root);
           await write(root, RECOVERY_QUEUE, {
@@ -434,7 +465,7 @@ export class LocalRuns {
       }
     }
     let queue = await this.reconcile(args);
-    const reportHash = canonicalHash({
+    let reportHash = canonicalHash({
       projection: queue.report.projection,
       continuation: queue.report.continuation,
     });
@@ -464,6 +495,26 @@ export class LocalRuns {
       queue.report.continuation.execution,
       observedPackageHash,
     );
+    // Registration may have rewound the durable acknowledgement after restore.
+    queue = await this.reconcile(args);
+    reportHash = canonicalHash({
+      projection: queue.report.projection,
+      continuation: queue.report.continuation,
+    });
+    if (requiresRecovery(queue.report.continuation)) {
+      await this.recordNotice(args, queue.report.continuation);
+      recovery = await this.withQueue(args, () => recoveryQueue(root));
+      await this.request(
+        binding,
+        `/runs/${binding.registrationId}/recovery`,
+        "POST",
+        {
+          required: true,
+          requestId: recovery.noticeId,
+        },
+      );
+      this.noticed.set(key, recovery.noticeId!);
+    }
     if (this.closed) return;
     const sending = queue.report;
     const events = sending.events;
@@ -494,24 +545,25 @@ export class LocalRuns {
         offset++;
       }
       const last = offset >= events.length;
-      const response = await this.request<{ lastSequence: number }>(
-        binding,
-        `/runs/${binding.registrationId}/events`,
-        "POST",
-        {
-          events: batch,
-          ...(last
-            ? {
-                projection: sending.projection,
-                continuation: sending.continuation,
-                lastSequence: sending.lastSequence,
-                recoveryRequired: requiresRecovery(sending.continuation),
-                recoveries: recovery.requests,
-                ...(settledNoticeId ? { settledNoticeId } : {}),
-              }
-            : {}),
-        },
-      );
+      const response = await this.request<{
+        lastSequence: number;
+        snapshotRejected?: string;
+      }>(binding, `/runs/${binding.registrationId}/events`, "POST", {
+        events: batch,
+        ...(last
+          ? {
+              projection: sending.projection,
+              continuation: sending.continuation,
+              ...(sending.finalizationPreview
+                ? { finalizationPreview: sending.finalizationPreview }
+                : {}),
+              lastSequence: sending.lastSequence,
+              recoveryRequired: requiresRecovery(sending.continuation),
+              recoveries: recovery.requests,
+              ...(settledNoticeId ? { settledNoticeId } : {}),
+            }
+          : {}),
+      });
       // Re-read after the HTTP request so a concurrently committed local transition
       // stays in the queue. Reconciliation can always recreate it after a crash.
       if (this.closed) return;
@@ -526,11 +578,13 @@ export class LocalRuns {
         queue = {
           ...queue,
           lastAcknowledged: acknowledged,
-          ...(last ? { acknowledgedReportHash: reportHash } : {}),
+          ...(last && !response.snapshotRejected
+            ? { acknowledgedReportHash: reportHash }
+            : {}),
           report: latest,
         };
         await write(root, QUEUE, queue);
-        if (last) {
+        if (last && !response.snapshotRejected) {
           const latestRecovery = await recoveryQueue(root);
           // Keep a notice until a report settles it, so `recover` binds to it.
           let notice: Omit<RecoveryQueue, "requests"> = latestRecovery.required
@@ -565,6 +619,11 @@ export class LocalRuns {
           this.synchronized.add(root);
         }
       });
+      if (last) {
+        if (response.snapshotRejected)
+          this.snapshotRejections.set(key, response.snapshotRejected);
+        else this.snapshotRejections.delete(key);
+      }
       if (last) break;
     }
   }
@@ -585,36 +644,67 @@ export class LocalRuns {
       this.registered.get(key) === observedPackageHash
     )
       return;
-    await this.request(binding, `/runs/${binding.registrationId}`, "POST", {
-      workflowId: binding.workflowId,
-      publicationId: binding.publicationId,
-      packageHash: binding.packageHash,
-      observedPackageHash,
-      localRunId: binding.localRunId,
-      hostLabel: binding.hostLabel,
-      testRun: binding.testRun,
-      execution,
-    });
+    const response = await this.request<{ run: { lastSequence: number } }>(
+      binding,
+      `/runs/${binding.registrationId}`,
+      "POST",
+      {
+        workflowId: binding.workflowId,
+        publicationId: binding.publicationId,
+        packageHash: binding.packageHash,
+        observedPackageHash,
+        localRunId: binding.localRunId,
+        hostLabel: binding.hostLabel,
+        testRun: binding.testRun,
+        execution,
+      },
+    );
+    await this.withQueue(
+      { projectRoot: path.resolve(key, "../../.."), runId: binding.localRunId },
+      async () => {
+        const root = key;
+        const current = await read<Queue>(root, QUEUE);
+        if (current && response.run.lastSequence < current.lastAcknowledged) {
+          const report = await runtime.readReport(
+            root,
+            response.run.lastSequence,
+          );
+          if (!report) throw new Error("This local Run has not started");
+          await write(root, QUEUE, {
+            ...current,
+            lastAcknowledged: response.run.lastSequence,
+            acknowledgedReportHash: undefined,
+            report,
+          });
+        }
+      },
+    );
     this.registered.set(key, observedPackageHash);
+  }
+  private async recordNotice(
+    args: { projectRoot: string; runId: string },
+    current: WorkflowContinuation,
+  ) {
+    await this.withQueue(args, async () => {
+      const root = await runRoot(args);
+      const recovery = await recoveryQueue(root);
+      const hash = noticeHash(current);
+      await write(root, RECOVERY_QUEUE, {
+        ...recovery,
+        required: true,
+        noticeId:
+          recovery.required && recovery.noticeHash === hash
+            ? recovery.noticeId
+            : randomUUID(),
+        noticeHash: hash,
+      });
+    });
   }
   async capture(args: { projectRoot: string; runId: string }) {
     try {
       const current = await runtime.inspect(target(args));
       if (current && requiresRecovery(current)) {
-        await this.withQueue(args, async () => {
-          const root = await runRoot(args);
-          const recovery = await recoveryQueue(root);
-          const hash = noticeHash(current);
-          await write(root, RECOVERY_QUEUE, {
-            ...recovery,
-            required: true,
-            noticeId:
-              recovery.required && recovery.noticeHash === hash
-                ? recovery.noticeId
-                : randomUUID(),
-            noticeHash: hash,
-          });
-        });
+        await this.recordNotice(args, current);
       }
       await this.reconcile(args);
     } catch (error) {
@@ -712,6 +802,9 @@ export class LocalRuns {
     return {
       error:
         this.errors.get(path.join(args.projectRoot, runRelative(args.runId))) ??
+        this.snapshotRejections.get(
+          path.join(args.projectRoot, runRelative(args.runId)),
+        ) ??
         null,
     };
   }

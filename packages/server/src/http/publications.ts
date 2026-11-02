@@ -10,7 +10,11 @@ import {
 import { commitGate, invalidateGate } from "../gates.js";
 import type { Queryable } from "../database/database.js";
 import { workflowCapabilities } from "../workflow-access.js";
-import { listWorkflowVersions, readWorkflow } from "../workflows.js";
+import {
+  listWorkflows,
+  listWorkflowVersions,
+  readWorkflow,
+} from "../workflows.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { objectInput, RequestError } from "./errors.js";
 import { readJsonBody } from "./body.js";
@@ -21,6 +25,7 @@ const REVIEW =
 const PUBLISHED =
   /^\/api\/v1\/workflows\/([^/]+)\/publications(?:\/([^/]+)\/package)?$/u;
 export const publicationMethods = (path: string) => {
+  if (path === "/api/v1/publications") return "GET, HEAD";
   const match = REVIEW.exec(path);
   return match
     ? match[3]
@@ -36,6 +41,33 @@ export async function handlePublications(input: AuthorizedRequest) {
     return input.reply.error(405, "invalid", "Method not allowed", {
       allow: methods,
     });
+  if (input.path === "/api/v1/publications") {
+    const result = await input.database.transaction(async (tx) => {
+      const available = [];
+      for (const workflow of await listWorkflows(
+        tx,
+        input.access,
+        input.person,
+      )) {
+        const caps = await workflowCapabilities(
+          tx,
+          input.access,
+          input.person,
+          workflow,
+        );
+        if (!caps.read || !caps.readPublished) continue;
+        const publications = await listPublishedPackages(tx, workflow.id);
+        if (publications.length)
+          available.push({
+            id: workflow.id,
+            name: workflow.name,
+            publications,
+          });
+      }
+      return { workflows: available };
+    });
+    return input.reply.json(200, result);
+  }
   const published = PUBLISHED.exec(input.path);
   if (published) {
     const workflowId = decodeURIComponent(published[1]);

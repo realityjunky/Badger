@@ -151,10 +151,13 @@ async function expiringUploads(texts: string[]) {
   const { base, workflow, version, group, create, publish } = await setup({
     BADGER_ANSWER_ATTACHMENT_RETENTION_SECONDS: "60",
   });
-  const question = await create({ kind: "file" });
+  const questions = [];
+  for (let i = 0; i < Math.ceil(texts.length / 8); i++)
+    questions.push(await create({ kind: "file" }));
   await publish();
   const uploads = [];
-  for (const text of texts) {
+  for (const [index, text] of texts.entries()) {
+    const question = questions[Math.floor(index / 8)]!;
     const { attachment } = await json(
       call(
         "POST",
@@ -219,6 +222,32 @@ async function expiringUploads(texts: string[]) {
 }
 
 describe("structured answers", () => {
+  it("cleans content beyond 100 persistently failing blobs", async () => {
+    const uploads = (
+      await expiringUploads(
+        Array.from({ length: 102 }, (_, i) => `Expired evidence ${i}`),
+      )
+    ).sort((a, b) => a.hash.localeCompare(b.hash));
+    const removable = uploads.at(-1)!;
+    for (const stuck of uploads) {
+      await fs.rm(stuck.file);
+      await fs.mkdir(path.join(stuck.file, "kept"), { recursive: true });
+    }
+    service.clock.advance(60_000);
+    await service.worker().runOnce();
+    service.clock.advance(1000);
+    await service.worker().runOnce();
+    await fs.rm(removable.file, { recursive: true });
+    await fs.writeFile(removable.file, removable.text);
+    service.clock.advance(1000);
+    await service.worker().runOnce();
+    await expect(fs.stat(removable.file)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect((await call("GET", removable.path, undefined, expert)).status).toBe(
+      404,
+    );
+  });
   it("keeps claiming jobs when attachment expiry fails, and retries it", async () => {
     const [upload] = await expiringUploads(["Expired evidence"]);
     service.clock.advance(60_000);

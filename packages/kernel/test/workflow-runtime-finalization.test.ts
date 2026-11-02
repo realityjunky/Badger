@@ -252,6 +252,88 @@ async function confirmOperationsRun(
 }
 
 describe("WorkflowRuntime finalization preview", () => {
+  it.skipIf(process.platform === "win32")(
+    "reports an exact large finalization preview outside the bounded snapshot pair",
+    async () => {
+      const root = await fs.mkdtemp(
+        path.join(os.tmpdir(), "badger-large-preview-"),
+      );
+      try {
+        const directory = Array.from(
+          { length: 75 },
+          (_, i) => `dir${String(i).padStart(2, "0")}${"x".repeat(45)}`,
+        ).join("/");
+        await fs.mkdir(path.join(root, directory), { recursive: true });
+        for (let i = 0; i < 66; i++) {
+          await fs.writeFile(
+            path.join(root, directory, `source-${i}.txt`),
+            "source\n",
+          );
+          await fs.writeFile(
+            path.join(root, directory, `target-${i}.txt`),
+            "target\n",
+          );
+        }
+        const large = protocol();
+        large.capabilities!.durability = {
+          ...structuredClone(finalizationProfile),
+          bounds: {
+            ...finalizationProfile.bounds,
+            finalizationPlanBytes: 4 * 1024 * 1024,
+            finalizationTransactionBytes: 4 * 1024 * 1024,
+            finalizationReceiptBytes: 4 * 1024 * 1024,
+            finalizationOperationCount: 66,
+            finalizationEventCount: 1024,
+          },
+        };
+        large.finalization!.roots = [{ id: "project", path: directory }];
+        large.finalization!.operations = Array.from({ length: 66 }, (_, i) => ({
+          id: `move-${i}`,
+          kind: "move",
+          root: "project",
+          source: `source-${i}.txt`,
+          target: `target-${i}.txt`,
+        }));
+        const runtime = createWorkflowRuntime();
+        const started = await runtime.start({
+          protocol: large,
+          runRoot: root,
+          runId: "large-preview",
+        });
+        await runtime.submit(root, {
+          actionId: started.pendingAction!.id,
+          runId: started.runId,
+          revision: started.revision,
+          execution: started.execution,
+          status: "succeeded",
+          summary: "Prepared.",
+        });
+        const preview = await previewWorkflowFinalization(root);
+        expect(Buffer.byteLength(JSON.stringify(preview))).toBeGreaterThan(
+          1048576,
+        );
+        const report = (await runtime.readReport(root))!;
+        expect(report.finalizationPreview).toEqual(preview);
+        expect(report.continuation.finalizationPreviewRef).toEqual({
+          planHash: preview.planHash,
+          operationCount: 66,
+        });
+        expect(report.continuation.finalizationPreview).toBeUndefined();
+        expect(
+          Buffer.byteLength(
+            JSON.stringify({
+              projection: report.projection,
+              continuation: report.continuation,
+            }),
+          ),
+        ).toBeLessThanOrEqual(1048576);
+        expect(report.events.length).toBeGreaterThan(0);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    90_000,
+  );
   it.each([
     ["manual", (root: string) => root],
     [
@@ -372,6 +454,12 @@ describe("WorkflowRuntime finalization preview", () => {
         root,
         finalizationProfile,
       );
+      const report = await runtime.readReport(root);
+      expect(report?.continuation.finalizationPending).toMatchObject({
+        transactionId: transaction!.transactionId,
+        planHash: transaction!.plan.planHash,
+      });
+      expect(report?.continuation.finalizationPreview).toBeUndefined();
       const quarantinePath = transaction!.operations.find(
         (operation) => operation.id === "move-source",
       )!.quarantinePath!;

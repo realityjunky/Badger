@@ -201,6 +201,29 @@ it("requires independent human review and owner publication, and exposes immutab
   expect(
     (await call(route, "GET", undefined, engineer, 200, secret)).publications,
   ).toHaveLength(1);
+  expect(
+    (
+      await call(
+        "/publications",
+        "GET",
+        undefined,
+        operator,
+        200,
+        operatorToken,
+      )
+    ).workflows,
+  ).toEqual([
+    expect.objectContaining({
+      id: workflow.id,
+      publications: [
+        expect.objectContaining({ id: published.confirmation.id }),
+      ],
+    }),
+  ]);
+  expect(
+    (await call("/publications", "GET", undefined, { subject: "outsider" }))
+      .workflows,
+  ).toEqual([]);
   await call(route, "GET", undefined, { subject: "outsider" }, 403);
   const { secret: unscoped } = await call(
     "/me/tokens",

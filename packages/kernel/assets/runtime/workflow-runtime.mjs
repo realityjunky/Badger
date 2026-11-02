@@ -1,5 +1,5 @@
 // src/workflow-runtime/index.ts
-import { promises as fs14 } from "node:fs";
+import { promises as fs15 } from "node:fs";
 import path19 from "node:path";
 
 // src/engine/contained-atomic-write.ts
@@ -7531,14 +7531,78 @@ async function readSkillSnapshot(changeDir, hash4) {
 }
 
 // src/engine/run-store.ts
-import path10 from "path";
+import path11 from "path";
 
 // src/workflow-runtime/finalization.ts
-import { promises as fs6 } from "node:fs";
-import path9 from "node:path";
+import { promises as fs8 } from "node:fs";
+import path10 from "node:path";
 
 // src/workflow-runtime/revision-claim.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
+import { promises as fs7 } from "node:fs";
+import os from "node:os";
+
+// src/workflow-runtime/host-identity.ts
+import { execFile } from "node:child_process";
+import { promises as fs6 } from "node:fs";
+import path9 from "node:path";
+import { promisify } from "node:util";
+var execFileAsync = promisify(execFile);
+var cachedHostIdentity;
+async function readHostIdentity() {
+  try {
+    let parts;
+    if (process.platform === "linux") {
+      parts = await Promise.all([
+        fs6.readFile("/proc/sys/kernel/random/boot_id", "utf8"),
+        fs6.readlink("/proc/self/ns/pid")
+      ]);
+    } else if (process.platform === "darwin") {
+      const result = await execFileAsync(
+        "/usr/sbin/sysctl",
+        ["-n", "kern.hostuuid", "kern.boottime"],
+        { timeout: 3e3, maxBuffer: 16 * 1024 }
+      );
+      parts = result.stdout.trim().split("\n");
+    } else if (process.platform === "win32") {
+      const executable = path9.join(
+        process.env.SystemRoot ?? "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe"
+      );
+      const result = await execFileAsync(
+        executable,
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "(Get-CimInstance Win32_ComputerSystemProduct).UUID; (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('O')"
+        ],
+        { timeout: 3e3, maxBuffer: 16 * 1024, windowsHide: true }
+      );
+      parts = result.stdout.trim().split(/\r?\n/u);
+    } else {
+      return null;
+    }
+    if (parts.length !== 2 || parts.some((part) => !part.trim())) return null;
+    return sha256(
+      JSON.stringify([
+        "badger-run-host-v1",
+        process.platform,
+        ...parts.map((part) => part.trim())
+      ])
+    );
+  } catch {
+    return null;
+  }
+}
+function workflowRunHostIdentity() {
+  return cachedHostIdentity ??= readHostIdentity();
+}
+
+// src/workflow-runtime/revision-claim.ts
 var CLAIM_DIRECTORY = ".badger/revision-claims";
 var CLAIM_MAX_IDENTIFIER_LENGTH = 256;
 var CLAIM_WAIT_TIMEOUT_MS = 5e3;
@@ -7576,7 +7640,7 @@ function hash(value, key, label) {
   }
   return result;
 }
-function parseExecutionIdentity(value) {
+function parseExecutionIdentity(value, allowLegacy = false) {
   const label = "Workflow revision claim execution";
   if (!isRecord5(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields3(
@@ -7603,6 +7667,21 @@ function parseExecutionIdentity(value) {
       `nodeToStep.${nodeId}`,
       label
     );
+  }
+  if (allowLegacy && value.durabilityProfile === void 0) {
+    if (value.capabilityVersion !== void 0 && value.capabilityVersion !== 3)
+      throw new Error(`Invalid ${label}: capabilityVersion`);
+    if (value.findingCatalogVersion !== void 0 && value.findingCatalogVersion !== 1)
+      throw new Error(`Invalid ${label}: findingCatalogVersion`);
+    return {
+      protocolHash: hash(value.protocolHash, "protocolHash", label),
+      packageHash: hash(value.packageHash, "packageHash", label),
+      snapshotHash: hash(value.snapshotHash, "snapshotHash", label),
+      nodeToStep,
+      ...value.capabilityVersion === 3 ? { capabilityVersion: 3 } : {},
+      ...value.resolverHash === void 0 ? {} : { resolverHash: hash(value.resolverHash, "resolverHash", label) },
+      ...value.findingCatalogVersion === 1 ? { findingCatalogVersion: 1 } : {}
+    };
   }
   if (value.capabilityVersion !== 3) {
     throw new Error(`Invalid ${label}: capabilityVersion is required`);
@@ -7646,6 +7725,9 @@ function parseClaim(value) {
       "intendedRevision",
       "execution",
       "ownerToken",
+      "ownerPid",
+      "ownerHostname",
+      "ownerHostId",
       "createdAt",
       "committedAt"
     ]),
@@ -7678,6 +7760,10 @@ function parseClaim(value) {
     throw new Error(`Invalid ${label}: committedAt does not match status`);
   }
   const ownerToken = requiredText(value.ownerToken, "ownerToken", label);
+  if (value.ownerHostId !== void 0 && value.ownerHostId !== null && (typeof value.ownerHostId !== "string" || !/^[a-f0-9]{64}$/u.test(value.ownerHostId)))
+    throw new Error(`Invalid ${label}: ownerHostId`);
+  if (value.ownerPid !== void 0 && (!Number.isSafeInteger(value.ownerPid) || Number(value.ownerPid) < 1))
+    throw new Error(`Invalid ${label}: ownerPid`);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
     ownerToken
   )) {
@@ -7696,8 +7782,17 @@ function parseClaim(value) {
       label
     ),
     intendedRevision,
-    execution: parseExecutionIdentity(value.execution),
+    execution: parseExecutionIdentity(value.execution, true),
     ownerToken,
+    ...value.ownerHostId === void 0 ? {} : { ownerHostId: value.ownerHostId },
+    ...value.ownerPid === void 0 ? {} : {
+      ownerPid: Number(value.ownerPid),
+      ownerHostname: requiredText(
+        value.ownerHostname,
+        "ownerHostname",
+        label
+      )
+    },
     createdAt: timestamp(value.createdAt, "createdAt", label),
     ...committedAt ? { committedAt: timestamp(committedAt, "committedAt", label) } : {}
   };
@@ -7705,11 +7800,8 @@ function parseClaim(value) {
 function revisionClaimPath(input) {
   return `${CLAIM_DIRECTORY}/revision-${input.expectedRevision}-${sha256(input.expectedActionId).slice(0, 24)}-${input.intendedRevision}.json`;
 }
-function profileForExecution(execution) {
-  if (!execution.durabilityProfile) {
-    throw new Error("Workflow revision claim requires a durability profile");
-  }
-  return parseWorkflowDurabilityProfile(execution.durabilityProfile);
+function claimMaxBytes(execution) {
+  return execution.durabilityProfile ? parseWorkflowDurabilityProfile(execution.durabilityProfile).bounds.claimBytes : 16 * 1024 * 1024;
 }
 function claimMatches(claim, input) {
   return claim.runId === input.runId && claim.expectedRevision === input.expectedRevision && claim.expectedActionId === input.expectedActionId && claim.intendedRevision === input.intendedRevision && JSON.stringify(stableValue(claim.execution)) === JSON.stringify(stableValue(input.execution));
@@ -7718,7 +7810,7 @@ async function readClaim(runRoot, input) {
   const raw = await readOptionalEngineRunText(
     runRoot,
     revisionClaimPath(input),
-    profileForExecution(input.execution).bounds.claimBytes,
+    claimMaxBytes(input.execution),
     "Workflow revision claim"
   );
   if (raw === null) return null;
@@ -7743,8 +7835,56 @@ function createClaim(input) {
     intendedRevision: input.intendedRevision,
     execution: structuredClone(input.execution),
     ownerToken: randomUUID4(),
+    ...input.execution.durabilityProfile ? {} : { ownerPid: process.pid, ownerHostname: os.hostname() },
     createdAt: (/* @__PURE__ */ new Date()).toISOString()
   };
+}
+async function clearAbandonedLegacyRevisionClaims(runRoot) {
+  let files;
+  try {
+    const inspected = await inspectProtectedProjectPath(
+      runRoot,
+      CLAIM_DIRECTORY,
+      { label: "Workflow revision claims", expected: "directory" }
+    );
+    if (!inspected.exists) return;
+    files = await fs7.readdir(inspected.target);
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  for (const file of files) {
+    if (!/^revision-\d+-[a-f0-9]{24}-\d+\.json$/u.test(file)) continue;
+    const relative = `${CLAIM_DIRECTORY}/${file}`;
+    const raw = await readOptionalEngineRunText(
+      runRoot,
+      relative,
+      16 * 1024 * 1024,
+      "Workflow revision claim"
+    );
+    if (!raw) continue;
+    const claim = parseClaim(JSON.parse(raw));
+    if (claim.execution.durabilityProfile || claim.status !== "prepared" || !claim.ownerPid || !claim.ownerHostId || claim.ownerHostId !== await workflowRunHostIdentity())
+      continue;
+    try {
+      process.kill(claim.ownerPid, 0);
+      continue;
+    } catch (error) {
+      if (error.code !== "ESRCH") continue;
+    }
+    await removeEngineRunFile(runRoot, relative, "Workflow revision claim", {
+      beforeRemove: async () => {
+        const current = await readOptionalEngineRunText(
+          runRoot,
+          relative,
+          16 * 1024 * 1024,
+          "Workflow revision claim"
+        );
+        if (current !== raw)
+          throw new Error("Workflow revision claim changed during recovery");
+      }
+    });
+  }
 }
 function serializeClaim(claim) {
   return `${JSON.stringify(stableValue(claim), null, 2)}
@@ -7776,8 +7916,10 @@ async function waitForExistingClaim(runRoot, input, existing) {
 }
 async function acquireRevisionClaim(runRoot, input) {
   const candidate = createClaim(input);
+  if (!input.execution.durabilityProfile)
+    candidate.ownerHostId = await workflowRunHostIdentity();
   const relativePath2 = revisionClaimPath(input);
-  const maxBytes = profileForExecution(input.execution).bounds.claimBytes;
+  const maxBytes = claimMaxBytes(input.execution);
   for (; ; ) {
     const existing = await readClaim(runRoot, input);
     if (existing) {
@@ -7876,7 +8018,7 @@ async function commitExistingRevisionClaim(runRoot, input) {
     status: "committed",
     committedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
-  const maxBytes = profileForExecution(input.execution).bounds.claimBytes;
+  const maxBytes = claimMaxBytes(input.execution);
   await writeEngineRunText(
     runRoot,
     revisionClaimPath(input),
@@ -7915,6 +8057,9 @@ var WORKFLOW_FINALIZATION_RECEIPT_DIRECTORY = ".badger/finalization/receipts";
 var WORKFLOW_FINALIZATION_MAX_OPERATIONS = 256;
 var WORKFLOW_FINALIZATION_MAX_EVENTS = 1024;
 var WORKFLOW_FINALIZATION_MAX_TEXT_BYTES = 64 * 1024;
+function hashWorkflowFinalizationRationale(rationale) {
+  return rationale == null ? null : sha256(rationale.trim());
+}
 var HASH_PATTERN3 = /^[a-f0-9]{64}$/u;
 var SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 var MAX_IDENTIFIER_LENGTH = 256;
@@ -8009,7 +8154,7 @@ function normalizePath(value, label, allowDot = false) {
   if (typeof value !== "string") throw new Error(`${label} must be a string`);
   const normalized = value.trim().replaceAll("\\", "/");
   if (allowDot && (normalized === "." || normalized === "")) return "";
-  if (normalized.length === 0 || path9.posix.isAbsolute(normalized) || path9.win32.isAbsolute(normalized) || /^(?:~|[\\/]|[A-Za-z]:)/u.test(normalized)) {
+  if (normalized.length === 0 || path10.posix.isAbsolute(normalized) || path10.win32.isAbsolute(normalized) || /^(?:~|[\\/]|[A-Za-z]:)/u.test(normalized)) {
     throw new Error(`${label} must be relative`);
   }
   const segments = normalized.split("/");
@@ -8518,8 +8663,8 @@ function parseWorkflowFinalizationState(value, profile) {
   return state;
 }
 function isInside4(root, target) {
-  const relative = path9.relative(path9.resolve(root), path9.resolve(target));
-  return relative === "" || !path9.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path9.sep}`);
+  const relative = path10.relative(path10.resolve(root), path10.resolve(target));
+  return relative === "" || !path10.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path10.sep}`);
 }
 function joinRelative(root, child) {
   return root.length > 0 ? `${root}/${child}` : child;
@@ -8571,7 +8716,7 @@ async function readMaterial(root, relative, maxBytes) {
 }
 async function assertRoot(root, relative) {
   if (relative === "") {
-    const stat = await fs6.lstat(root);
+    const stat = await fs8.lstat(root);
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
       throw new Error(
         "Workflow finalization approved root must be a real directory"
@@ -8781,13 +8926,13 @@ async function buildWorkflowFinalizationPreview(options) {
     );
   }
   for (const operation2 of operations) {
-    const approvedRoot = path9.resolve(
+    const approvedRoot = path10.resolve(
       options.baseRoot,
       ...(roots.get(operation2.rootId) ?? "").split("/")
     );
     if (operation2.stagedPath && !isInside4(
       approvedRoot,
-      path9.resolve(options.baseRoot, operation2.stagedPath)
+      path10.resolve(options.baseRoot, operation2.stagedPath)
     )) {
       throw new Error(
         `Workflow finalization staging path escapes its approved root: ${operation2.id}`
@@ -8795,7 +8940,7 @@ async function buildWorkflowFinalizationPreview(options) {
     }
     if (operation2.backupPath && !isInside4(
       approvedRoot,
-      path9.resolve(options.baseRoot, operation2.backupPath)
+      path10.resolve(options.baseRoot, operation2.backupPath)
     )) {
       throw new Error(
         `Workflow finalization backup path escapes its approved root: ${operation2.id}`
@@ -8803,7 +8948,7 @@ async function buildWorkflowFinalizationPreview(options) {
     }
     if (operation2.quarantinePath && !isInside4(
       approvedRoot,
-      path9.resolve(options.baseRoot, operation2.quarantinePath)
+      path10.resolve(options.baseRoot, operation2.quarantinePath)
     )) {
       throw new Error(
         `Workflow finalization quarantine path escapes its approved root: ${operation2.id}`
@@ -9851,7 +9996,7 @@ async function appendTransactionEvent(runRoot, profile, transaction, type, bound
 }
 function basePath(root, relative, label) {
   const normalized = normalizePath(relative, label);
-  const resolved = path9.resolve(root, ...normalized.split("/"));
+  const resolved = path10.resolve(root, ...normalized.split("/"));
   if (!isInside4(root, resolved))
     throw new Error(`${label} escapes its managed root`);
   return resolved;
@@ -9866,7 +10011,7 @@ async function writeBaseText(root, relative, content, maxBytes, beforeCommit) {
     basePath(root, relative, "Workflow finalization write target"),
     content,
     {
-      containedRoot: path9.resolve(root),
+      containedRoot: path10.resolve(root),
       beforeCommit
     }
   );
@@ -9893,10 +10038,10 @@ async function removeBaseFile(root, relative, beforeRemove) {
   }
 }
 async function moveBaseFile(root, source, destination, beforeMove, beforeSourceUnlink) {
-  const destinationParent = path9.posix.dirname(destination);
+  const destinationParent = path10.posix.dirname(destination);
   if (destinationParent !== ".") {
     await ensureProtectedProjectDirectory(
-      path9.resolve(root),
+      path10.resolve(root),
       destinationParent,
       {
         label: "Workflow finalization move destination parent"
@@ -9908,7 +10053,7 @@ async function moveBaseFile(root, source, destination, beforeMove, beforeSourceU
       basePath(root, source, "Workflow finalization move source"),
       basePath(root, destination, "Workflow finalization move destination"),
       {
-        containedRoot: path9.resolve(root),
+        containedRoot: path10.resolve(root),
         beforeMove,
         beforeSourceUnlink
       }
@@ -11958,14 +12103,14 @@ var ACTION_KEYS = /* @__PURE__ */ new Set([
 var appendLocks = /* @__PURE__ */ new Map();
 function assertRunPath(changeDir, relativePath2) {
   const normalized = typeof relativePath2 === "string" ? relativePath2.replaceAll("\\", "/") : "";
-  if (typeof relativePath2 !== "string" || normalized.length === 0 || path10.posix.isAbsolute(normalized) || path10.win32.isAbsolute(relativePath2) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(relativePath2) || normalized.split("/").some(
+  if (typeof relativePath2 !== "string" || normalized.length === 0 || path11.posix.isAbsolute(normalized) || path11.win32.isAbsolute(relativePath2) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(relativePath2) || normalized.split("/").some(
     (segment) => segment.length === 0 || segment === "." || segment === ".."
   )) {
     throw new Error("Run path must stay inside the change directory");
   }
-  const root = path10.resolve(changeDir);
-  const target = path10.resolve(root, ...normalized.split("/"));
-  if (target !== root && !target.startsWith(root + path10.sep)) {
+  const root = path11.resolve(changeDir);
+  const target = path11.resolve(root, ...normalized.split("/"));
+  if (target !== root && !target.startsWith(root + path11.sep)) {
     throw new Error("Run path must stay inside the change directory");
   }
   return normalized;
@@ -12423,7 +12568,7 @@ async function withAppendLock(key, operation2) {
 }
 async function appendTrajectory(changeDir, relativePath2, event, options = {}) {
   const normalized = assertRunPath(changeDir, relativePath2);
-  const key = `${path10.resolve(changeDir)}\0${normalized}`;
+  const key = `${path11.resolve(changeDir)}\0${normalized}`;
   await withAppendLock(key, async () => {
     const raw = await readOptionalEngineRunText(
       changeDir,
@@ -12535,7 +12680,7 @@ async function clearPendingAction(changeDir, relativePath2, options = {}) {
 }
 
 // src/engine/state.ts
-import path11 from "path";
+import path12 from "path";
 
 // src/workflow-runtime/verification-receipts.ts
 var WORKFLOW_VERIFICATION_RECEIPT_DIRECTORY = ".badger/verification-receipts";
@@ -13362,7 +13507,7 @@ async function stageWorkflowVerificationReceipt(options) {
 // src/engine/state.ts
 function assertSafeRunReference(value, key) {
   const normalized = value.replaceAll("\\", "/");
-  if (path11.posix.isAbsolute(normalized) || path11.win32.isAbsolute(value) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(value) || /[*?]/u.test(value) || normalized.split("/").some(
+  if (path12.posix.isAbsolute(normalized) || path12.win32.isAbsolute(value) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(value) || /[*?]/u.test(value) || normalized.split("/").some(
     (segment) => segment.length === 0 || segment === "." || segment === ".."
   )) {
     throw new Error(
@@ -13981,7 +14126,7 @@ function parseWorkflowArtifactCoordinate(coordinate, label) {
 function parseWorkflowExternalRoots(value) {
   if (value === void 0) return void 0;
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length > 32 || Object.entries(value).some(
-    ([name, directory]) => !name || name.length > 128 || typeof directory !== "string" || !path11.isAbsolute(directory)
+    ([name, directory]) => !name || name.length > 128 || typeof directory !== "string" || !path12.isAbsolute(directory)
   )) {
     throw new Error(
       "Invalid Run state: WorkflowRuntime externalRoots must map root names to absolute directories"
@@ -14005,13 +14150,13 @@ function parseWorkflowArtifactReceipt(value, label) {
   ]);
   const receiptPath2 = requiredJsonString(receipt.path, `${label}.path`);
   const root = receipt.root;
-  if (root !== void 0 && (!root || typeof root !== "object" || Array.isArray(root) || Object.keys(root).some((key) => key !== "name" && key !== "path") || typeof root.name !== "string" || !root.name || typeof root.path !== "string" || !path11.isAbsolute(root.path))) {
+  if (root !== void 0 && (!root || typeof root !== "object" || Array.isArray(root) || Object.keys(root).some((key) => key !== "name" && key !== "path") || typeof root.name !== "string" || !root.name || typeof root.path !== "string" || !path12.isAbsolute(root.path))) {
     throw new Error(
       `Invalid Run state: ${label}.root is an invalid external root`
     );
   }
   const hash4 = requiredJsonString(receipt.sha256, `${label}.sha256`);
-  if (Object.keys(receipt).some((key) => !keys.has(key)) || !path11.isAbsolute(receiptPath2) || !/^[a-f0-9]{64}$/u.test(hash4) || typeof receipt.size !== "number" || !Number.isSafeInteger(receipt.size) || receipt.size < 0 || typeof receipt.mtimeMs !== "number" || !Number.isFinite(receipt.mtimeMs)) {
+  if (Object.keys(receipt).some((key) => !keys.has(key)) || !path12.isAbsolute(receiptPath2) || !/^[a-f0-9]{64}$/u.test(hash4) || typeof receipt.size !== "number" || !Number.isSafeInteger(receipt.size) || receipt.size < 0 || typeof receipt.mtimeMs !== "number" || !Number.isFinite(receipt.mtimeMs)) {
     throw new Error(
       `Invalid Run state: ${label} is an invalid artifact receipt`
     );
@@ -14686,13 +14831,13 @@ async function writeRunState(changeDir, state, options = {}) {
 }
 
 // src/workflow-runtime/artifacts.ts
-import { promises as fs8 } from "node:fs";
-import path13 from "node:path";
+import { promises as fs10 } from "node:fs";
+import path14 from "node:path";
 
 // src/workflow-runtime/artifact-receipts.ts
-import { constants, promises as fs7 } from "node:fs";
+import { constants, promises as fs9 } from "node:fs";
 import { createHash as createHash4 } from "node:crypto";
-import path12 from "node:path";
+import path13 from "node:path";
 var MAX_EXTERNAL_ROOTS = 32;
 function validateArtifactReceiptDeclarations(schema) {
   if (schema.externalRoots !== void 0) {
@@ -14732,7 +14877,7 @@ function validateArtifactReceiptDeclarations(schema) {
     }
     for (const pattern of artifact.paths) {
       const normalized = pattern.trim().replaceAll("\\", "/");
-      if (!normalized || path12.posix.isAbsolute(normalized) || path12.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized) || normalized.includes("?") || normalized.includes("\0") || normalized.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
+      if (!normalized || path13.posix.isAbsolute(normalized) || path13.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized) || normalized.includes("?") || normalized.includes("\0") || normalized.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
         throw new Error(
           `${label} receipt paths must stay relative to the declared root and support only * wildcards`
         );
@@ -14840,15 +14985,15 @@ async function bindWorkflowExternalRoots(schemas, supplied) {
   const bound = {};
   for (const name of [...declared.keys()].sort()) {
     const value = supplied?.[name];
-    if (typeof value !== "string" || !path12.isAbsolute(value) || value.includes("\0")) {
+    if (typeof value !== "string" || !path13.isAbsolute(value) || value.includes("\0")) {
       throw externalRootBindingError(
         `Workflow artifact external root ${name} must be bound to an absolute directory: ${value}`
       );
     }
-    const directory = path12.resolve(value);
+    const directory = path13.resolve(value);
     let stat;
     try {
-      stat = await fs7.lstat(directory);
+      stat = await fs9.lstat(directory);
     } catch {
       throw externalRootBindingError(
         `Workflow artifact external root ${name} directory does not exist: ${directory}`
@@ -14871,7 +15016,7 @@ function artifactStorageRoot(runRoot, externalRoots, schema, artifact) {
     );
   }
   const root = externalRoots?.[artifact.root];
-  if (typeof root !== "string" || !path12.isAbsolute(root)) {
+  if (typeof root !== "string" || !path13.isAbsolute(root)) {
     throw new Error(
       `Workflow artifact external root ${artifact.root} is not bound for this Run`
     );
@@ -14885,7 +15030,7 @@ function receiptRoot(options) {
   return options.rootName === void 0 ? {} : {
     root: {
       name: options.rootName,
-      path: path12.resolve(options.storageRoot)
+      path: path13.resolve(options.storageRoot)
     }
   };
 }
@@ -14912,20 +15057,20 @@ async function captureDirectoryReceipt(options) {
       { label, expected: "any" }
     );
     if (!inspection.exists) throw new Error(`${label} does not exist`);
-    const stat = await fs7.lstat(inspection.target, { bigint: true });
+    const stat = await fs9.lstat(inspection.target, { bigint: true });
     observed.push({ relativePath: relativePath2, stat });
     if (observed.length > 256)
       throw new Error(`${label} exceeds 256 receipt entries`);
-    const manifestPath = path12.posix.relative(
+    const manifestPath = path13.posix.relative(
       options.relativePath,
       relativePath2
     );
     if (stat.isDirectory()) {
       if (manifestPath)
         manifest.push({ path: manifestPath, kind: "directory" });
-      const entries = await fs7.readdir(inspection.target);
+      const entries = await fs9.readdir(inspection.target);
       for (const entry of entries.sort())
-        await walk(path12.posix.join(relativePath2, entry));
+        await walk(path13.posix.join(relativePath2, entry));
     } else {
       const receipt = await captureArtifactReceipt({
         ...options,
@@ -14949,7 +15094,7 @@ async function captureDirectoryReceipt(options) {
       entry.relativePath,
       { label, expected: "any" }
     );
-    if (!inspection.exists || !sameStat2(entry.stat, await fs7.lstat(inspection.target, { bigint: true }))) {
+    if (!inspection.exists || !sameStat2(entry.stat, await fs9.lstat(inspection.target, { bigint: true }))) {
       throw new Error(`${label} changed during receipt verification`);
     }
   }
@@ -14958,7 +15103,7 @@ async function captureDirectoryReceipt(options) {
   return {
     artifactId: options.artifactId,
     ...receiptRoot(options),
-    path: path12.resolve(options.storageRoot, options.relativePath),
+    path: path13.resolve(options.storageRoot, options.relativePath),
     size,
     sha256: createHash4("sha256").update(JSON.stringify({ kind: "directory", manifest })).digest("hex"),
     mtimeMs: mtimeMs(directoryStat),
@@ -14974,19 +15119,19 @@ async function captureArtifactReceipt(options) {
   const inspection = await inspect();
   if (!inspection.exists) throw new Error(`${label} does not exist`);
   if (inspection.kind === "directory") return captureDirectoryReceipt(options);
-  const before = await fs7.lstat(inspection.target, { bigint: true });
+  const before = await fs9.lstat(inspection.target, { bigint: true });
   if (before.size > BigInt(Number.MAX_SAFE_INTEGER))
     throw new Error(`${label} receipt size is not a safe integer`);
   assertFresh(before, options);
-  const realPath = await fs7.realpath(inspection.target);
+  const realPath = await fs9.realpath(inspection.target);
   const flags = process.platform === "win32" ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-  const handle = await fs7.open(inspection.target, flags);
+  const handle = await fs9.open(inspection.target, flags);
   try {
     const assertUnchanged = async () => {
       await inspect();
       const opened = await handle.stat({ bigint: true });
-      const current = await fs7.lstat(inspection.target, { bigint: true });
-      if (!opened.isFile() || !current.isFile() || current.isSymbolicLink() || !sameStat2(before, opened) || !sameStat2(before, current) || await fs7.realpath(inspection.target) !== realPath) {
+      const current = await fs9.lstat(inspection.target, { bigint: true });
+      if (!opened.isFile() || !current.isFile() || current.isSymbolicLink() || !sameStat2(before, opened) || !sameStat2(before, current) || await fs9.realpath(inspection.target) !== realPath) {
         throw new Error(`${label} changed during receipt verification`);
       }
     };
@@ -15010,7 +15155,7 @@ async function captureArtifactReceipt(options) {
     return {
       artifactId: options.artifactId,
       ...receiptRoot(options),
-      path: path12.resolve(inspection.target),
+      path: path13.resolve(inspection.target),
       size,
       sha256: hash4.digest("hex"),
       mtimeMs: mtimeMs(before),
@@ -15069,7 +15214,7 @@ function declarationFor(key, candidates) {
 }
 function artifactPatternSegments(value, label) {
   const normalized = value.trim().replaceAll("\\", "/");
-  if (normalized.length === 0 || path13.posix.isAbsolute(normalized) || path13.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
+  if (normalized.length === 0 || path14.posix.isAbsolute(normalized) || path14.win32.isAbsolute(normalized) || /^(?:~|[\\/])/u.test(normalized)) {
     throw new Error(`${label} must be relative to the Run root`);
   }
   const segments = normalized.split("/");
@@ -15109,11 +15254,11 @@ function workflowArtifactExpectedKind(artifact) {
   return artifact.kind === "directory" ? "directory" : "file";
 }
 async function realRunRoot(runRoot, label) {
-  const stat = await fs8.lstat(runRoot);
+  const stat = await fs10.lstat(runRoot);
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error(`${label} Run root must be a real directory`);
   }
-  return path13.resolve(runRoot);
+  return path14.resolve(runRoot);
 }
 async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, label, options = { maxMatches: ARTIFACT_MAX_ENTRIES }) {
   const segments = artifactPatternSegments(artifactPath, label);
@@ -15126,7 +15271,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
       });
       return inspection.exists ? [inspection.relative] : [];
     }
-    const current = relative.length === 0 ? root : path13.join(root, relative);
+    const current = relative.length === 0 ? root : path14.join(root, relative);
     if (relative.length > 0) {
       const inspection = await inspectProtectedProjectPath(runRoot, relative, {
         label,
@@ -15137,13 +15282,13 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
     const segment = segments[index];
     if (!segment.includes("*")) {
       return walk(
-        relative.length === 0 ? segment : path13.posix.join(relative, segment),
+        relative.length === 0 ? segment : path14.posix.join(relative, segment),
         index + 1
       );
     }
     let entries;
     try {
-      entries = await fs8.readdir(current, { withFileTypes: true });
+      entries = await fs10.readdir(current, { withFileTypes: true });
     } catch (error) {
       const code = error.code;
       if (code === "ENOENT" || code === "ENOTDIR") return [];
@@ -15156,7 +15301,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
     )) {
       if (entry.isSymbolicLink()) {
         throw new Error(
-          `${label} crosses a symbolic link or junction at ${path13.join(current, entry.name)}`
+          `${label} crosses a symbolic link or junction at ${path14.join(current, entry.name)}`
         );
       }
       if (!matcher.test(entry.name)) continue;
@@ -15165,7 +15310,7 @@ async function matchingWorkflowArtifactPaths(runRoot, artifactPath, expected, la
       if (final && (expected === "file" && !entry.isFile() || expected === "directory" && !entry.isDirectory())) {
         continue;
       }
-      const next = relative.length === 0 ? entry.name : path13.posix.join(relative, entry.name);
+      const next = relative.length === 0 ? entry.name : path14.posix.join(relative, entry.name);
       matches.push(...await walk(next, index + 1));
       if (options.maxMatches !== void 0 && matches.length > options.maxMatches) {
         throw new Error(
@@ -15211,9 +15356,9 @@ async function hashDirectoryArtifact(runRoot, relativePath2, label) {
       expected: "directory"
     });
     if (!inspection.exists) throw new Error(`${label} does not exist`);
-    const entries = (await fs8.readdir(inspection.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
+    const entries = (await fs10.readdir(inspection.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
-      const relative = path13.posix.join(directory, entry.name);
+      const relative = path14.posix.join(directory, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error(
           `${label} crosses a symbolic link or junction at ${relative}`
@@ -15572,7 +15717,7 @@ function validateWorkflowExternalRootBinding(protocol, runtime) {
   const declared = [...externalRootDeclarations(protocol.outputSchemas).keys()].sort().join("\n");
   const bound = Object.keys(runtime.externalRoots ?? {}).sort().join("\n");
   if (declared !== bound || Object.values(runtime.externalRoots ?? {}).some(
-    (directory) => !path13.isAbsolute(directory)
+    (directory) => !path14.isAbsolute(directory)
   )) {
     throw new Error(
       "WorkflowRuntime external roots do not match the declared roots"
@@ -15600,7 +15745,7 @@ function validateWorkflowArtifactState(protocol, runId, nodeToStep, runtime) {
     const receipt = version.receipt;
     const rootName = declaration.artifact.root;
     const boundRoot = rootName === void 0 ? void 0 : runtime.externalRoots?.[rootName];
-    const receiptMatches = receipt !== void 0 && receipt.artifactId === version.artifactId && receipt.sha256 === version.contentHash && (rootName === void 0 ? receipt.root === void 0 : boundRoot !== void 0 && receipt.root?.name === rootName && receipt.root.path === boundRoot && receipt.path === path13.resolve(boundRoot, version.path)) && JSON.stringify(stableValue(receipt.producer)) === JSON.stringify(stableValue(version.producer));
+    const receiptMatches = receipt !== void 0 && receipt.artifactId === version.artifactId && receipt.sha256 === version.contentHash && (rootName === void 0 ? receipt.root === void 0 : boundRoot !== void 0 && receipt.root?.name === rootName && receipt.root.path === boundRoot && receipt.path === path14.resolve(boundRoot, version.path)) && JSON.stringify(stableValue(receipt.producer)) === JSON.stringify(stableValue(version.producer));
     if (declaration.artifact.verification === "receipt" ? !receiptMatches : receipt !== void 0) {
       throw new Error(
         `WorkflowRuntime artifact receipt identity is invalid: ${version.id}`
@@ -18236,9 +18381,152 @@ function resolverForPackage() {
   return workflowDeterministicResolver;
 }
 
+// src/workflow-runtime/report-bounds.ts
+var WORKFLOW_RUN_SNAPSHOT_BOUNDS = Object.freeze({
+  maxBytes: 1024 * 1024,
+  maxListEntries: 256,
+  maxTextLength: 4096,
+  maxIdentifierLength: 256,
+  maxActionTypeLength: 100,
+  maxFindingMessageLength: 16384,
+  maxOutcomeSummaryLength: 5e4,
+  maxFinalizationPreviewBytes: 16 * 1024 * 1024,
+  maxReportRequestBytes: 18 * 1024 * 1024
+});
+var ledgerKeys = [
+  "visits",
+  "cycles",
+  "decisionReceipts",
+  "verificationReceipts",
+  "artifactVersions",
+  "artifactSelections",
+  "contentSnapshots",
+  "receiptOutputs",
+  "blockers",
+  "findings",
+  "history",
+  "completedNodes",
+  "artifactReceipts"
+];
+function observedLists(model) {
+  const lists = ledgerKeys.flatMap(
+    (key) => Array.isArray(model[key]) ? [{ path: key, values: model[key] }] : []
+  );
+  if (Array.isArray(model.visits))
+    for (const [index, visit] of model.visits.entries()) {
+      if (visit && typeof visit === "object" && Array.isArray(visit.outcomes))
+        lists.push({
+          path: `visits[${index}].outcomes`,
+          values: visit.outcomes
+        });
+    }
+  const repair = model.repair;
+  if (Array.isArray(repair?.history))
+    lists.push({ path: "repair.history", values: repair.history });
+  return lists;
+}
+function boundWorkflowRunSnapshot(projection, continuation2) {
+  const result = structuredClone({ projection, continuation: continuation2 });
+  const bounds = WORKFLOW_RUN_SNAPSHOT_BOUNDS;
+  let compacted = false;
+  let finalizationPreview;
+  if (result.continuation.finalizationPreview && Buffer.byteLength(JSON.stringify(result.continuation.finalizationPreview)) > bounds.maxBytes / 4) {
+    finalizationPreview = result.continuation.finalizationPreview;
+    result.continuation.finalizationPreviewRef = {
+      planHash: finalizationPreview.planHash,
+      operationCount: finalizationPreview.operations.length
+    };
+    delete result.continuation.finalizationPreview;
+    compacted = true;
+  }
+  for (const model of [result.projection, result.continuation]) {
+    for (const list of observedLists(
+      model
+    )) {
+      if (list.values.length > bounds.maxListEntries) {
+        list.values.splice(0, list.values.length - bounds.maxListEntries);
+        compacted = true;
+      }
+    }
+    for (const visit of model.visits)
+      for (const outcome of visit.outcomes) {
+        if (outcome.summary.length > bounds.maxOutcomeSummaryLength) {
+          outcome.summary = outcome.summary.slice(
+            0,
+            bounds.maxOutcomeSummaryLength
+          );
+          compacted = true;
+        }
+      }
+  }
+  const collections = [];
+  for (const model of [result.projection, result.continuation]) {
+    const record = model;
+    for (const key of [
+      "visits",
+      "cycles",
+      "decisionReceipts",
+      "verificationReceipts",
+      "artifactVersions",
+      "artifactSelections",
+      "contentSnapshots",
+      "receiptOutputs",
+      "currentArtifactVersions",
+      "evidence",
+      "history",
+      "completedNodes",
+      "artifactReceipts",
+      "completion"
+    ]) {
+      if (!(key in record)) continue;
+      collections.push({
+        size: () => Buffer.byteLength(JSON.stringify(record[key]) ?? "null"),
+        shrink: () => {
+          const value = record[key];
+          if (Array.isArray(value))
+            value.splice(0, Math.ceil(value.length / 2));
+          else if (key === "evidence" || key === "currentArtifactVersions") {
+            const entries = Object.entries(value);
+            record[key] = Object.fromEntries(
+              entries.slice(Math.ceil(entries.length / 2))
+            );
+          } else record[key] = null;
+        }
+      });
+    }
+    if (model.repair) {
+      const history = model.repair.history;
+      collections.push({
+        size: () => Buffer.byteLength(JSON.stringify(history)),
+        shrink: () => {
+          history.splice(0, Math.ceil(history.length / 2));
+        }
+      });
+    }
+  }
+  while (Buffer.byteLength(JSON.stringify(result)) > bounds.maxBytes - 256) {
+    const largest = collections.filter((c) => c.size() > 4).sort((a, b) => b.size() - a.size())[0];
+    if (!largest)
+      throw new Error(
+        `Run snapshot essential context exceeds maxBytes (${bounds.maxBytes})`
+      );
+    largest.shrink();
+    compacted = true;
+  }
+  if (result.projection.historySummary) {
+    result.projection.historySummary.returned = result.projection.history.length;
+    result.projection.historySummary.omitted = result.projection.historySummary.total - result.projection.history.length;
+  }
+  if (compacted) {
+    result.projection.snapshotCompacted = true;
+    result.continuation.snapshotCompacted = true;
+  }
+  return { ...result, ...finalizationPreview ? { finalizationPreview } : {} };
+}
+
 // src/workflow-runtime/transition-journal.ts
 import { randomUUID as randomUUID5 } from "node:crypto";
-import path14 from "node:path";
+import path15 from "node:path";
 var WORKFLOW_TRANSITION_JOURNAL_PATH = ".badger/transition-journal.json";
 var WORKFLOW_TRANSITION_JOURNAL_SCHEMA_VERSION = 1;
 var WORKFLOW_TRANSITION_JOURNAL_MAX_RECORDS = 16;
@@ -18407,7 +18695,7 @@ function orderOf(record) {
 }
 function assertSafeRecordPath(value, label) {
   const normalized = typeof value === "string" ? value.replaceAll("\\", "/") : "";
-  if (normalized.length === 0 || normalized.length > MAX_IDENTIFIER_LENGTH2 || path14.posix.isAbsolute(normalized) || path14.win32.isAbsolute(String(value)) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(String(value)) || normalized.split("/").some(
+  if (normalized.length === 0 || normalized.length > MAX_IDENTIFIER_LENGTH2 || path15.posix.isAbsolute(normalized) || path15.win32.isAbsolute(String(value)) || /^(?:[A-Za-z]:|[\\/]|~)/u.test(String(value)) || normalized.split("/").some(
     (segment) => segment.length === 0 || segment === "." || segment === ".."
   )) {
     throw new Error(`Invalid ${label}: path must stay inside the Run root`);
@@ -19445,71 +19733,9 @@ async function recoverWorkflowTransition(runRoot, profile) {
 
 // src/workflow-runtime/run-lock.ts
 import { randomUUID as randomUUID6 } from "node:crypto";
-import { promises as fs10 } from "node:fs";
-import os from "node:os";
+import { promises as fs11 } from "node:fs";
+import os2 from "node:os";
 import path16 from "node:path";
-
-// src/workflow-runtime/host-identity.ts
-import { execFile } from "node:child_process";
-import { promises as fs9 } from "node:fs";
-import path15 from "node:path";
-import { promisify } from "node:util";
-var execFileAsync = promisify(execFile);
-var cachedHostIdentity;
-async function readHostIdentity() {
-  try {
-    let parts;
-    if (process.platform === "linux") {
-      parts = await Promise.all([
-        fs9.readFile("/proc/sys/kernel/random/boot_id", "utf8"),
-        fs9.readlink("/proc/self/ns/pid")
-      ]);
-    } else if (process.platform === "darwin") {
-      const result = await execFileAsync(
-        "/usr/sbin/sysctl",
-        ["-n", "kern.hostuuid", "kern.boottime"],
-        { timeout: 3e3, maxBuffer: 16 * 1024 }
-      );
-      parts = result.stdout.trim().split("\n");
-    } else if (process.platform === "win32") {
-      const executable = path15.join(
-        process.env.SystemRoot ?? "C:\\Windows",
-        "System32",
-        "WindowsPowerShell",
-        "v1.0",
-        "powershell.exe"
-      );
-      const result = await execFileAsync(
-        executable,
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-Command",
-          "(Get-CimInstance Win32_ComputerSystemProduct).UUID; (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('O')"
-        ],
-        { timeout: 3e3, maxBuffer: 16 * 1024, windowsHide: true }
-      );
-      parts = result.stdout.trim().split(/\r?\n/u);
-    } else {
-      return null;
-    }
-    if (parts.length !== 2 || parts.some((part) => !part.trim())) return null;
-    return sha256(
-      JSON.stringify([
-        "badger-run-host-v1",
-        process.platform,
-        ...parts.map((part) => part.trim())
-      ])
-    );
-  } catch {
-    return null;
-  }
-}
-function workflowRunHostIdentity() {
-  return cachedHostIdentity ??= readHostIdentity();
-}
-
-// src/workflow-runtime/run-lock.ts
 var WORKFLOW_RUN_LOCK_PATH = ".badger/run-lock.json";
 var WORKFLOW_RUN_LOCK_RECOVERY_PATH = ".badger/run-lock-recovery.jsonl";
 var WORKFLOW_RUN_LOCK_QUARANTINE_DIRECTORY = ".badger/run-lock-quarantine";
@@ -19752,7 +19978,7 @@ async function readSnapshot2(runRoot, relativePath2 = WORKFLOW_RUN_LOCK_PATH, ma
 }
 async function diagnosisFromSnapshot(snapshot) {
   if (!snapshot) return { status: "missing", owner: null, identity: null };
-  const sameHost = snapshot.owner.hostId === void 0 ? snapshot.owner.hostname === os.hostname() : snapshot.owner.hostId !== null && snapshot.owner.hostId === await workflowRunHostIdentity();
+  const sameHost = snapshot.owner.hostId === void 0 ? snapshot.owner.hostname === os2.hostname() : snapshot.owner.hostId !== null && snapshot.owner.hostId === await workflowRunHostIdentity();
   if (!sameHost) {
     return {
       status: "unknown",
@@ -19843,7 +20069,7 @@ async function newLockRecord(operation2) {
     kind: "workflow-run-lock",
     ownerToken: randomUUID6(),
     pid: process.pid,
-    hostname: os.hostname(),
+    hostname: os2.hostname(),
     hostId: await workflowRunHostIdentity(),
     createdAt: (/* @__PURE__ */ new Date()).toISOString(),
     operation: operation2
@@ -19941,7 +20167,7 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
     return { status: "changed", diagnosis: verifiedDiagnosis };
   }
   try {
-    await fs10.rename(verified.file, quarantine.target);
+    await fs11.rename(verified.file, quarantine.target);
   } catch (error) {
     if (error.code === "ENOENT") {
       return { status: "missing" };
@@ -19967,7 +20193,7 @@ async function takeOverStaleLock(runRoot, expected, maxBytes) {
         { label: "Workflow Run lock quarantine", expected: "file" }
       );
       if (!source.exists && quarantined.exists) {
-        await fs10.rename(quarantined.target, source.target);
+        await fs11.rename(quarantined.target, source.target);
       }
     } catch {
       return {
@@ -20212,7 +20438,7 @@ async function recordWorkflowRunLockTakeover(runRoot, evidence, maxBytes = WORKF
 
 // src/workflow-runtime/checkpoints.ts
 import { randomUUID as randomUUID7 } from "node:crypto";
-import { promises as fs11 } from "node:fs";
+import { promises as fs12 } from "node:fs";
 import path17 from "node:path";
 var WORKFLOW_CHECKPOINT_DIRECTORY = ".badger/checkpoints";
 var WORKFLOW_CHECKPOINT_INDEX_PATH = ".badger/checkpoints/index.json";
@@ -21007,7 +21233,7 @@ async function physicalArtifactBytes(runRoot, protocol, version, maxBytes) {
       label: `Workflow checkpoint artifact ${version.id}`,
       expected: "directory"
     });
-    for (const entry of (await fs11.readdir(current.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
+    for (const entry of (await fs12.readdir(current.target, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
       const child = path17.posix.join(relativePath2, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error(
@@ -21958,7 +22184,7 @@ async function restoreWorkflowCheckpoint(runRoot, profile, candidate) {
 }
 
 // src/workflow-runtime/location.ts
-import { promises as fs13 } from "node:fs";
+import { promises as fs14 } from "node:fs";
 import { randomUUID as randomUUID9 } from "node:crypto";
 
 // src/engine/manual-run.ts
@@ -23144,7 +23370,7 @@ async function resumeManualWorkflowRun(changeDir, options, artifactMutation) {
 }
 
 // src/engine/standalone-run.ts
-import { promises as fs12 } from "node:fs";
+import { promises as fs13 } from "node:fs";
 import path18 from "path";
 function validateRunId(runId) {
   if (typeof runId !== "string" || runId.length > 255 || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId) || runId.endsWith(".") || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(runId)) {
@@ -23182,18 +23408,18 @@ async function resolveStandaloneProjectRoot(projectRoot, createMissing) {
     cursor = path18.join(cursor, segment);
     let stat;
     try {
-      stat = await fs12.lstat(cursor);
+      stat = await fs13.lstat(cursor);
     } catch (error) {
       if (!isMissing2(error)) throw error;
       if (!createMissing) return lexicalRoot;
       try {
-        await fs12.mkdir(cursor);
+        await fs13.mkdir(cursor);
       } catch (mkdirError) {
         if (mkdirError.code !== "EEXIST") {
           throw mkdirError;
         }
       }
-      stat = await fs12.lstat(cursor);
+      stat = await fs13.lstat(cursor);
     }
     if (stat.isSymbolicLink()) {
       throw new Error("Standalone project root cannot cross a symbolic link");
@@ -23300,8 +23526,8 @@ function manualLocation(runRoot) {
       return readRunState(validatedRoot);
     },
     async prepareStart() {
-      await fs13.mkdir(validatedRoot, { recursive: true });
-      const stat = await fs13.lstat(validatedRoot);
+      await fs14.mkdir(validatedRoot, { recursive: true });
+      const stat = await fs14.lstat(validatedRoot);
       if (stat.isSymbolicLink() || !stat.isDirectory()) {
         throw new Error(
           "WorkflowRuntime manual Run root must be a real directory"
@@ -24100,7 +24326,7 @@ function redactVisitEvidence(visits) {
     })
   }));
 }
-var MAX_PROJECTED_LEDGER_ENTRIES = 256;
+var MAX_PROJECTED_LEDGER_ENTRIES = WORKFLOW_RUN_SNAPSHOT_BOUNDS.maxListEntries;
 function boundProjectedLedger(values) {
   return structuredClone(values.slice(-MAX_PROJECTED_LEDGER_ENTRIES));
 }
@@ -24966,7 +25192,7 @@ async function listWorkflowRuns(projectRoot) {
     expected: "directory"
   });
   if (!registry.exists) return [];
-  const entries = await fs14.readdir(registry.target, { withFileTypes: true });
+  const entries = await fs15.readdir(registry.target, { withFileTypes: true });
   entries.sort(
     (left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0
   );
@@ -25644,14 +25870,14 @@ async function assertRevisionFence(location, input, checkPendingAction = true) {
   if (!state) {
     throw new Error("WorkflowRuntime Run disappeared during submission");
   }
-  const currentRevision = state.workflowRuntime?.revision ?? 0;
+  const currentRevision = state.workflowRuntime?.revision ?? state.retries[input.expectedActionId] ?? 0;
   const currentActionId = state.pending;
   const pending = checkPendingAction ? await readPendingAction(
     location.runRoot,
     state.pendingRef,
     durabilityReadOptions(state, "pendingActionBytes")
   ) : null;
-  if (state.runId !== input.runId || currentRevision !== input.expectedRevision || currentActionId !== input.expectedActionId || checkPendingAction && (!pending || pending.id !== input.expectedActionId) || !state.runtimeIdentity || !samePhase4ExecutionIdentity(identityFromState(state), input.execution)) {
+  if (state.runId !== input.runId || currentRevision !== input.expectedRevision || currentActionId !== input.expectedActionId || checkPendingAction && (!pending || pending.id !== input.expectedActionId) || !state.runtimeIdentity || !sameExecutionIdentity(identityFromState(state), input.execution)) {
     const current = await verifyStoredRun(location);
     throw new WorkflowRevisionConflictError(
       current,
@@ -25747,7 +25973,15 @@ async function readWorkflowRunReport(target, afterSequence = 0) {
         );
       const projection = await projectWorkflowState(target);
       const continuation2 = await inspectWorkflowRun(target);
-      if (continuation2.pendingAction?.finalization)
+      const profile = before.runtimeIdentity?.durabilityProfile;
+      const transaction = usesWorkflowFinalization(profile) ? await readWorkflowFinalizationTransaction(location.runRoot, profile) : null;
+      if (transaction)
+        continuation2.finalizationPending = {
+          transactionId: transaction.transactionId,
+          status: transaction.status,
+          planHash: transaction.plan.planHash
+        };
+      else if (continuation2.pendingAction?.finalization)
         continuation2.finalizationPreview = await previewWorkflowFinalization(target);
       const events = await readTrajectory(
         location.runRoot,
@@ -25758,8 +25992,7 @@ async function readWorkflowRunReport(target, afterSequence = 0) {
       if (JSON.stringify(before) !== JSON.stringify(after) || projection.revision !== continuation2.revision || await readWorkflowTransitionJournal(location.runRoot))
         continue;
       return {
-        projection,
-        continuation: continuation2,
+        ...boundWorkflowRunSnapshot(projection, continuation2),
         events: structuredClone(
           events.filter((event) => event.sequence > afterSequence)
         ),
@@ -27135,8 +27368,14 @@ async function recoveryRequiredContinuation(location, journal) {
 }
 async function finalizationRecoveryRequiredContinuation(location, transaction, unknownPaths = []) {
   const verified = await verifyStoredRun(location);
+  const current = await continuationFromVerifiedRun(verified, location.runRoot);
+  current.finalizationPending = {
+    transactionId: transaction.transactionId,
+    status: transaction.status,
+    planHash: transaction.plan.planHash
+  };
   return withAdditionalFindings(
-    await continuationFromVerifiedRun(verified, location.runRoot),
+    current,
     [
       recoveryRequiredFinding(
         verified.state.workflowRuntime?.revision ?? transaction.revision,
@@ -27573,7 +27812,7 @@ function prepareWorkflowFinalizationForLocation(location, definition, profile, e
             (left, right) => left.localeCompare(right)
           )
         },
-        rationaleHash: outcome.rationale === void 0 ? null : sha256(outcome.rationale.trim()),
+        rationaleHash: hashWorkflowFinalizationRationale(outcome.rationale),
         confirmedAt: (/* @__PURE__ */ new Date()).toISOString()
       };
       const applied = await applyWorkflowFinalization({
@@ -28340,33 +28579,13 @@ function createWorkflowRuntime() {
               prepared.verified.identity.durabilityProfile,
               prepared.verified.identity
             ) : void 0;
-            if (prepared.verified.identity.durabilityProfile === void 0) {
-              const result = await prepared.location.resume(
-                {
-                  resolver: resolverForPackage(),
-                  outcome,
-                  prepareAction: prepareWorkflowActionForLocation(location),
-                  prepareOutcome: prepareVerificationReceiptRecords(
-                    mutation,
-                    prepared.verified.identity.durabilityProfile
-                  ),
-                  ...finalizationPreparation ? { prepareFinalization: finalizationPreparation } : {}
-                },
-                mutation
-              );
-              await clearFinalizationAfterResult(prepared.location, result);
-              return continuation(
-                result,
-                prepared.verified.identity,
-                prepared.verified
-              );
-            }
+            const revision = prepared.verified.state.workflowRuntime?.revision ?? prepared.verified.state.retries[prepared.pending.id] ?? 0;
             const claimInput = {
-              runId: submission.runId,
-              expectedRevision: submission.revision,
-              expectedActionId: submission.actionId,
-              intendedRevision: submission.revision + 1,
-              execution: structuredClone(submission.execution)
+              runId: prepared.verified.state.runId,
+              expectedRevision: revision,
+              expectedActionId: prepared.pending.id,
+              intendedRevision: revision + 1,
+              execution: structuredClone(prepared.verified.identity)
             };
             const claim = await acquireRevisionClaim(
               prepared.location.runRoot,
@@ -28413,6 +28632,8 @@ function createWorkflowRuntime() {
                 prepared.verified
               );
             } catch (error) {
+              if (!prepared.verified.identity.durabilityProfile)
+                await claim.abandon().catch(() => void 0);
               if (error instanceof WorkflowRevisionConflictError) {
                 return conflictContinuation(error.verified, error.finding);
               }
@@ -28475,6 +28696,8 @@ function createWorkflowRuntime() {
           "workflow.recover",
           profile,
           async (lock) => {
+            if (!profile)
+              await clearAbandonedLegacyRevisionClaims(location.runRoot);
             if (lock?.takeover && profile?.bounds.runLockBytes) {
               await recordWorkflowRunLockTakeover(
                 location.runRoot,

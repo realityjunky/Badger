@@ -50,3 +50,12 @@ audits the settlement. A settlement that names any other notice is ignored, so a
 delayed or stale delivery cannot clear a newer interruption. A settled notice
 cannot reopen under its own identity, so the MCP raises a new notice for any
 later interruption, including one that recurs while a settlement is in flight.
+
+Before posting a complete report that requires recovery, the MCP persists and
+posts a notice even if the interruption first appeared during report preparation.
+This gives every report-raised requirement a notice that a later healthy report
+can settle. A pending finalization transaction still exports a committed report:
+its transaction ID, plan hash, and status replace the preview. The service stores
+that observation and supersedes open gates until recovery restores an answerable
+runtime. Recovery predicates and finalization rationale hashing come from the
+kernel's public WorkflowRuntime API.

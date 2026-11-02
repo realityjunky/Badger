@@ -63,6 +63,31 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("rotates historical failed attachment cleanup behind untried blobs", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((m) => m.version < "0036"),
+      clock,
+    );
+    await test.database.query(
+      "insert into attachment_blob_cleanup(hash) values ($1),($2)",
+      ["a".repeat(64), "b".repeat(64)],
+    );
+    await applyMigrations(test.database, migrations, clock);
+    await test.database.query(
+      "update attachment_blob_cleanup set last_attempt_at=$1 where hash=$2",
+      [clock.now(), "a".repeat(64)],
+    );
+    expect(
+      (
+        await test.database.query<{ hash: string }>(
+          "select hash from attachment_blob_cleanup order by last_attempt_at nulls first, hash",
+        )
+      ).rows.map((r) => r.hash),
+    ).toEqual(["b".repeat(64), "a".repeat(64)]);
+  });
   it("reads legacy dossier history without storage paths and requires a new approval", async () => {
     const test = await freshDatabase();
     const service = await startTestService({
@@ -484,7 +509,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0035");
+    expect(upgraded.applied.at(-1)).toBe("0036");
     expect(
       (
         await test.database.query(
@@ -644,6 +669,7 @@ describe("reviewed SQL migrations", () => {
       "0033",
       "0034",
       "0035",
+      "0036",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -686,6 +712,7 @@ describe("reviewed SQL migrations", () => {
         "0033",
         "0034",
         "0035",
+        "0036",
       ],
       pending: [],
       drifted: [],
@@ -818,6 +845,7 @@ describe("reviewed SQL migrations", () => {
         "0033",
         "0034",
         "0035",
+        "0036",
       ],
       pending: [],
       drifted: [],
@@ -825,7 +853,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(35);
+    expect(rows.rows[0]?.count).toBe(36);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

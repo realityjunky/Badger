@@ -70,4 +70,20 @@ test("copies expert MCP configuration for each host under the deployment base pa
       animations: "disabled",
     });
   }
+  await page.getByRole("radio", { name: "Windows", exact: true }).check();
+  const cli = "C:\\Agent's tools\\badger-mcp\\cli.js";
+  await page
+    .getByRole("textbox", {
+      name: "Installed Badger MCP cli.js path",
+      exact: true,
+    })
+    .fill(cli);
+  await page.getByRole("radio", { name: "Claude Code", exact: true }).check();
+  expect(JSON.parse(await field.inputValue()).mcpServers.badger).toMatchObject({
+    command: "node",
+    args: [cli],
+  });
+  await page.getByRole("radio", { name: "Codex", exact: true }).check();
+  expect(await field.inputValue()).toContain('command = "node"');
+  expect(await field.inputValue()).toContain(`args = ${JSON.stringify([cli])}`);
 });

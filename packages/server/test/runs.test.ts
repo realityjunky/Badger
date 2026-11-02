@@ -114,6 +114,19 @@ it("authorizes Run observation and operation, fixes registration identity, and v
   expect((await get("/me/runs", engineer, engineerToken)).runs).toHaveLength(1);
   await get(`${route}/access`, engineer, engineerToken, 403);
   const payload = { ...report };
+  const refusedSnapshot = await post(`${route}/events`, {
+    ...payload,
+    projection: {
+      ...report.projection,
+      visits: Array.from({ length: 257 }, () => report.projection.visits[0]),
+    },
+  });
+  expect(refusedSnapshot.snapshotRejected).toContain("maxListEntries (256)");
+  expect((await get(route)).run).toMatchObject({
+    lastSequence: report.lastSequence,
+    projection: null,
+    events: report.events,
+  });
   await post(
     `${route}/events`,
     { ...payload, projection: { ...report.projection, visits: "unsafe" } },
@@ -187,6 +200,21 @@ it("authorizes Run observation and operation, fixes registration identity, and v
   expect(detail.events).toEqual(report.events);
   expect(detail.projection).toEqual(report.projection);
   expect(detail.lastSequence).toBe(report.lastSequence);
+  const tooLarge = await post(`${route}/events`, {
+    ...payload,
+    projection: {
+      ...report.projection,
+      evidence: { huge: { value: "x".repeat(1024 * 1024) } },
+    },
+  });
+  expect(tooLarge.snapshotRejected).toContain("maxBytes (1048576)");
+  expect((await get(route)).run.projection).toEqual(report.projection);
+  const tooLong = await post(`${route}/events`, {
+    ...payload,
+    projection: { ...report.projection, currentNode: "x".repeat(257) },
+  });
+  expect(tooLong.snapshotRejected).toContain("text length (256)");
+  expect((await get(route)).run.events).toEqual(report.events);
   expect(
     (await get(`${route}?afterSequence=${report.lastSequence}`)).run.events,
   ).toEqual([]);

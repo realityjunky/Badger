@@ -14,14 +14,21 @@ export function McpSetup() {
   const [host, setHost] = useState<AgentHost>("claude");
   const [profile, setProfile] = useState<McpProfile>("auto");
   const [command, setCommand] = useState("badger-mcp");
+  const [platform, setPlatform] = useState<"posix" | "win32">("posix");
+  const [mcpCliPath, setMcpCliPath] = useState("");
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const base = readBasePath(document);
   const url = `${window.location.origin}${base === "/" ? "" : base}`;
-  const { text: configuration, failure } = command.trim()
-    ? hostSetupText(() =>
-        renderMcpConfiguration(host, { deploymentUrl: url, command, profile }),
-      )
-    : { text: "", failure: null };
+  const { text: configuration, failure } =
+    platform === "win32" || command.trim()
+      ? hostSetupText(() =>
+          renderMcpConfiguration(host, {
+            deploymentUrl: url,
+            profile,
+            ...(platform === "win32" ? { platform, mcpCliPath } : { command }),
+          }),
+        )
+      : { text: "", failure: null };
 
   return (
     <Collapse
@@ -70,18 +77,51 @@ export function McpSetup() {
                 />
               </div>
               <div className="field">
-                <label className="field-label" htmlFor="mcp-command">
-                  {t("mcp.command")}
-                </label>
-                <Input
-                  id="mcp-command"
-                  value={command}
+                <span className="field-label" id="mcp-platform-label">
+                  {t("hosts.shell")}
+                </span>
+                <Radio.Group
+                  aria-labelledby="mcp-platform-label"
+                  value={platform}
                   onChange={(event) => {
-                    setCommand(event.target.value);
+                    setPlatform(event.target.value as "posix" | "win32");
                     setCopy("idle");
                   }}
+                  options={[
+                    { value: "posix", label: "macOS / Linux" },
+                    { value: "win32", label: "Windows" },
+                  ]}
                 />
               </div>
+              {platform === "win32" ? (
+                <div className="field">
+                  <label className="field-label" htmlFor="mcp-cli-path">
+                    {t("hosts.mcpCliPath")}
+                  </label>
+                  <Input
+                    id="mcp-cli-path"
+                    value={mcpCliPath}
+                    onChange={(event) => {
+                      setMcpCliPath(event.target.value);
+                      setCopy("idle");
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="field">
+                  <label className="field-label" htmlFor="mcp-command">
+                    {t("mcp.command")}
+                  </label>
+                  <Input
+                    id="mcp-command"
+                    value={command}
+                    onChange={(event) => {
+                      setCommand(event.target.value);
+                      setCopy("idle");
+                    }}
+                  />
+                </div>
+              )}
               {failure === null ? (
                 <Input.TextArea
                   readOnly

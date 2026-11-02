@@ -6,7 +6,7 @@ import {
   previewInstall,
   previewUninstall,
   commitHostPlan,
-  shellArgument,
+  shellCommand,
   type AgentHost,
   type InstallScope,
   type McpProfile,
@@ -89,13 +89,16 @@ try {
         publication,
         snapshot,
         deploymentUrl: url,
+        ...(process.platform === "win32" && !values.command
+          ? { platform: "win32" as const }
+          : {}),
         ...(values.command ? { command: values.command } : {}),
         ...(values.arg ? { args: values.arg } : {}),
         ...(values.profile ? { profile: values.profile as McpProfile } : {}),
       });
     } else plan = await previewUninstall({ target, workflowId });
     const planFile = await saveHostPlan(plan);
-    const commitCommand = [
+    const commitArgs = [
       "badger-hosts",
       "commit",
       "--plan",
@@ -103,15 +106,21 @@ try {
       "--digest",
       plan.preview.digest,
       "--confirm",
-    ]
-      .map(shellArgument)
-      .join(" ");
+    ];
+    const commitCommand = shellCommand(
+      commitArgs,
+      process.platform === "win32" ? "powershell" : "posix",
+    );
     process.stdout.write(
       JSON.stringify(
         {
           preview: plan.preview,
           planFile,
           commitCommand,
+          commitCommands: {
+            posix: shellCommand(commitArgs),
+            powershell: shellCommand(commitArgs, "powershell"),
+          },
           message:
             "Review every local operation, then confirm this digest. Set BADGER_TOKEN in the environment that starts your host. Sign-offs stay in the dashboard.",
         },

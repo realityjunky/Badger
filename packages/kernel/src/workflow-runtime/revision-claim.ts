@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import { inspectProtectedProjectPath } from "../engine/protected-project-path.js";
 import {
   readOptionalEngineRunText,
   removeEngineRunFile,
@@ -6,9 +9,9 @@ import {
 } from "../engine/protected-run-file.js";
 import type { RuntimeIdentity } from "../engine/types.js";
 import { RaceSafeReadError } from "../engine/race-safe-read.js";
-import type { WorkflowDurabilityProfile } from "../types.js";
 import { stableValue, sha256 } from "../util.js";
 import { parseWorkflowDurabilityProfile } from "./durability.js";
+import { workflowRunHostIdentity } from "./host-identity.js";
 
 const CLAIM_DIRECTORY = ".badger/revision-claims";
 const CLAIM_MAX_IDENTIFIER_LENGTH = 256;
@@ -34,6 +37,9 @@ export interface WorkflowRevisionClaim {
   intendedRevision: number;
   execution: RuntimeIdentity;
   ownerToken: string;
+  ownerPid?: number;
+  ownerHostname?: string;
+  ownerHostId?: string | null;
   createdAt: string;
   committedAt?: string;
 }
@@ -104,7 +110,10 @@ function hash(value: unknown, key: string, label: string): string {
   return result;
 }
 
-export function parseExecutionIdentity(value: unknown): RuntimeIdentity {
+export function parseExecutionIdentity(
+  value: unknown,
+  allowLegacy = false,
+): RuntimeIdentity {
   const label = "Workflow revision claim execution";
   if (!isRecord(value)) throw new Error(`Invalid ${label}: must be an object`);
   assertKnownFields(
@@ -131,6 +140,30 @@ export function parseExecutionIdentity(value: unknown): RuntimeIdentity {
       `nodeToStep.${nodeId}`,
       label,
     );
+  }
+  if (allowLegacy && value.durabilityProfile === undefined) {
+    if (value.capabilityVersion !== undefined && value.capabilityVersion !== 3)
+      throw new Error(`Invalid ${label}: capabilityVersion`);
+    if (
+      value.findingCatalogVersion !== undefined &&
+      value.findingCatalogVersion !== 1
+    )
+      throw new Error(`Invalid ${label}: findingCatalogVersion`);
+    return {
+      protocolHash: hash(value.protocolHash, "protocolHash", label),
+      packageHash: hash(value.packageHash, "packageHash", label),
+      snapshotHash: hash(value.snapshotHash, "snapshotHash", label),
+      nodeToStep,
+      ...(value.capabilityVersion === 3
+        ? { capabilityVersion: 3 as const }
+        : {}),
+      ...(value.resolverHash === undefined
+        ? {}
+        : { resolverHash: hash(value.resolverHash, "resolverHash", label) }),
+      ...(value.findingCatalogVersion === 1
+        ? { findingCatalogVersion: 1 as const }
+        : {}),
+    };
   }
   if (value.capabilityVersion !== 3) {
     throw new Error(`Invalid ${label}: capabilityVersion is required`);
@@ -178,6 +211,9 @@ function parseClaim(value: unknown): WorkflowRevisionClaim {
       "intendedRevision",
       "execution",
       "ownerToken",
+      "ownerPid",
+      "ownerHostname",
+      "ownerHostId",
       "createdAt",
       "committedAt",
     ]),
@@ -214,6 +250,18 @@ function parseClaim(value: unknown): WorkflowRevisionClaim {
   }
   const ownerToken = requiredText(value.ownerToken, "ownerToken", label);
   if (
+    value.ownerHostId !== undefined &&
+    value.ownerHostId !== null &&
+    (typeof value.ownerHostId !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(value.ownerHostId))
+  )
+    throw new Error(`Invalid ${label}: ownerHostId`);
+  if (
+    value.ownerPid !== undefined &&
+    (!Number.isSafeInteger(value.ownerPid) || Number(value.ownerPid) < 1)
+  )
+    throw new Error(`Invalid ${label}: ownerPid`);
+  if (
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
       ownerToken,
     )
@@ -233,8 +281,21 @@ function parseClaim(value: unknown): WorkflowRevisionClaim {
       label,
     ),
     intendedRevision,
-    execution: parseExecutionIdentity(value.execution),
+    execution: parseExecutionIdentity(value.execution, true),
     ownerToken,
+    ...(value.ownerHostId === undefined
+      ? {}
+      : { ownerHostId: value.ownerHostId as string | null }),
+    ...(value.ownerPid === undefined
+      ? {}
+      : {
+          ownerPid: Number(value.ownerPid),
+          ownerHostname: requiredText(
+            value.ownerHostname,
+            "ownerHostname",
+            label,
+          ),
+        }),
     createdAt: timestamp(value.createdAt, "createdAt", label),
     ...(committedAt
       ? { committedAt: timestamp(committedAt, "committedAt", label) }
@@ -246,13 +307,11 @@ export function revisionClaimPath(input: RevisionClaimInput): string {
   return `${CLAIM_DIRECTORY}/revision-${input.expectedRevision}-${sha256(input.expectedActionId).slice(0, 24)}-${input.intendedRevision}.json`;
 }
 
-function profileForExecution(
-  execution: RuntimeIdentity,
-): WorkflowDurabilityProfile {
-  if (!execution.durabilityProfile) {
-    throw new Error("Workflow revision claim requires a durability profile");
-  }
-  return parseWorkflowDurabilityProfile(execution.durabilityProfile);
+function claimMaxBytes(execution: RuntimeIdentity): number {
+  return execution.durabilityProfile
+    ? parseWorkflowDurabilityProfile(execution.durabilityProfile).bounds
+        .claimBytes
+    : 16 * 1024 * 1024;
 }
 
 function claimMatches(
@@ -276,7 +335,7 @@ async function readClaim(
   const raw = await readOptionalEngineRunText(
     runRoot,
     revisionClaimPath(input),
-    profileForExecution(input.execution).bounds.claimBytes,
+    claimMaxBytes(input.execution),
     "Workflow revision claim",
   );
   if (raw === null) return null;
@@ -306,8 +365,69 @@ function createClaim(input: RevisionClaimInput): WorkflowRevisionClaim {
     intendedRevision: input.intendedRevision,
     execution: structuredClone(input.execution),
     ownerToken: randomUUID(),
+    ...(input.execution.durabilityProfile
+      ? {}
+      : { ownerPid: process.pid, ownerHostname: os.hostname() }),
     createdAt: new Date().toISOString(),
   };
+}
+
+/** Explicit recovery can clear a legacy claim whose local owner is proven dead.
+ * A live or remote owner stays protected even when it has no mutation-lock profile. */
+export async function clearAbandonedLegacyRevisionClaims(
+  runRoot: string,
+): Promise<void> {
+  let files: string[];
+  try {
+    const inspected = await inspectProtectedProjectPath(
+      runRoot,
+      CLAIM_DIRECTORY,
+      { label: "Workflow revision claims", expected: "directory" },
+    );
+    if (!inspected.exists) return;
+    files = await fs.readdir(inspected.target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  for (const file of files) {
+    if (!/^revision-\d+-[a-f0-9]{24}-\d+\.json$/u.test(file)) continue;
+    const relative = `${CLAIM_DIRECTORY}/${file}`;
+    const raw = await readOptionalEngineRunText(
+      runRoot,
+      relative,
+      16 * 1024 * 1024,
+      "Workflow revision claim",
+    );
+    if (!raw) continue;
+    const claim = parseClaim(JSON.parse(raw));
+    if (
+      claim.execution.durabilityProfile ||
+      claim.status !== "prepared" ||
+      !claim.ownerPid ||
+      !claim.ownerHostId ||
+      claim.ownerHostId !== (await workflowRunHostIdentity())
+    )
+      continue;
+    try {
+      process.kill(claim.ownerPid, 0);
+      continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") continue;
+    }
+    await removeEngineRunFile(runRoot, relative, "Workflow revision claim", {
+      beforeRemove: async () => {
+        const current = await readOptionalEngineRunText(
+          runRoot,
+          relative,
+          16 * 1024 * 1024,
+          "Workflow revision claim",
+        );
+        if (current !== raw)
+          throw new Error("Workflow revision claim changed during recovery");
+      },
+    });
+  }
 }
 
 function serializeClaim(claim: WorkflowRevisionClaim): string {
@@ -348,8 +468,10 @@ export async function acquireRevisionClaim(
   input: RevisionClaimInput,
 ): Promise<RevisionClaimResult> {
   const candidate = createClaim(input);
+  if (!input.execution.durabilityProfile)
+    candidate.ownerHostId = await workflowRunHostIdentity();
   const relativePath = revisionClaimPath(input);
-  const maxBytes = profileForExecution(input.execution).bounds.claimBytes;
+  const maxBytes = claimMaxBytes(input.execution);
   for (;;) {
     const existing = await readClaim(runRoot, input);
     if (existing) {
@@ -463,7 +585,7 @@ export async function commitExistingRevisionClaim(
     status: "committed",
     committedAt: new Date().toISOString(),
   };
-  const maxBytes = profileForExecution(input.execution).bounds.claimBytes;
+  const maxBytes = claimMaxBytes(input.execution);
   await writeEngineRunText(
     runRoot,
     revisionClaimPath(input),

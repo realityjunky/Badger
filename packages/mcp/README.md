@@ -322,15 +322,33 @@ changing runtime authority. Reconnect and call `status` or `recover` to resume
 reporting a known Run. Files and ancestors reject symlinks/junctions and lexical
 traversal; another deployment or person cannot reuse the binding.
 
-Service observer bounds are 2 MiB per report request, 256 KiB per event, and 1 MiB
-per snapshot pair; oversized reports remain local with an explicit reporting
-error. Lists show the newest 100 authorized Runs. Outcome summaries retain the
+Service observer bounds are 18 MiB per report request, 256 KiB per event, and 1 MiB
+per snapshot pair. The kernel bounds snapshot lists (including each Attempt's outcomes) and
+compacts older observation evidence to fit the shared snapshot budget, retaining
+the original ordered events. A refused snapshot still commits that request's
+events and retains the previous snapshot; `status.reporting.error` names the
+refused bound. Lists show the newest 100 authorized Runs. Outcome summaries retain the
 latest 256 entries with explicit total/returned/omitted counts. Run detail pages
 through every original event, 500 at a time, using `afterSequence`; the dashboard
 offers first/next page controls. Full events remain in the authoritative local
 Run and immutable service records. These APIs validate sequence, identity,
 structure and size; dashboard gate attestations preserve the person's sign-off
 without making the service an execution authority.
+
+A large exact finalization preview travels outside the snapshot pair, with its
+plan hash and operation count referenced by the continuation. The service
+verifies the original preview before opening its gate and shows every operation
+to the person. Preview bytes are bounded at 16 MiB; event batching remains at
+about 768 KiB, so ordinary reports stay small.
+
+Registration rewinds the durable acknowledgement when the service's event cursor
+has moved back after a restore, and resends missing original events. Queue and
+recovery-file updates share `.badger/mcp-queue.lock` across MCP processes. A lock
+left by a killed process is refused with its full path; delete it only after
+checking that no MCP process is using the Run. A report that needs recovery
+records a durable notice before posting its snapshot, including interruptions
+first observed while reporting. A pending finalization transaction is reported
+with its identity and status instead of trying to produce a finalization preview.
 
 The dashboard marks Runs needing recovery and displays service integrity
 findings for unattested decisions, missing event sequences, and mismatched

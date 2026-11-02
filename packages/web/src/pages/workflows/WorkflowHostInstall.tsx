@@ -6,6 +6,7 @@ import {
   localUninstallCommand,
   type AgentHost,
   type InstallScope,
+  type CommandShell,
 } from "@realityjunky/badger-hosts/configuration";
 import type { PublishedPackage } from "../../api/publications.js";
 import { useI18n } from "../../i18n/I18nContext.js";
@@ -26,6 +27,8 @@ export function WorkflowHostInstall({
   const { t } = useI18n();
   const [host, setHost] = useState<AgentHost>("claude");
   const [scope, setScope] = useState<InstallScope>("project");
+  const [shell, setShell] = useState<CommandShell>("posix");
+  const [mcpCliPath, setMcpCliPath] = useState("");
   const [action, setAction] = useState<"install" | "uninstall">("install");
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const { text: command, failure } = publication
@@ -38,8 +41,10 @@ export function WorkflowHostInstall({
               packageHash: publication.packageHash,
               host,
               scope,
+              shell,
+              mcpCliPath,
             })
-          : localUninstallCommand({ workflowId, host, scope }),
+          : localUninstallCommand({ workflowId, host, scope, shell }),
       )
     : { text: "", failure: null };
   const paths = hostPaths(host, scope);
@@ -133,6 +138,38 @@ export function WorkflowHostInstall({
           title={t("hosts.prepare")}
           description={t("hosts.steps")}
         />
+        <div className="field">
+          <span className="field-label" id="install-shell-label">
+            {t("hosts.shell")}
+          </span>
+          <Radio.Group
+            aria-labelledby="install-shell-label"
+            value={shell}
+            onChange={(event) => {
+              setShell(event.target.value as CommandShell);
+              setCopy("idle");
+            }}
+            options={[
+              { value: "posix", label: "POSIX (macOS / Linux)" },
+              { value: "powershell", label: "PowerShell (Windows)" },
+            ]}
+          />
+        </div>
+        {shell === "powershell" && action === "install" && (
+          <div className="field">
+            <label className="field-label" htmlFor="install-mcp-cli">
+              {t("hosts.mcpCliPath")}
+            </label>
+            <Input
+              id="install-mcp-cli"
+              value={mcpCliPath}
+              onChange={(event) => {
+                setMcpCliPath(event.target.value);
+                setCopy("idle");
+              }}
+            />
+          </div>
+        )}
         {failure === null ? (
           <Input.TextArea
             readOnly

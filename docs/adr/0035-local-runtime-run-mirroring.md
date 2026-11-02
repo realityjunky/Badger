@@ -20,17 +20,44 @@ precedes service registration. A Run-local binding and queue contain no token an
 reject links, junctions and path traversal. Root requirements and Completion
 plans are kernel read models, and only start accepts external root bindings.
 
-The kernel exports a stable committed Run report containing its unchanged
+The kernel exports a stable committed Run report containing its bounded
 continuation, projection, issued artifact receipts, and original trajectory
 stream with sequence numbers. The adapter reconciles its queue from that stream
 on later calls and retries. Losing the queue after a committed transition cannot
 lose the event. Registration is idempotent for its fixed identity; event storage
 is immutable and unique by Run and sequence. Changed duplicate bytes, gaps,
 identity changes, malformed read models and explicit size limits are refused.
+Snapshot limits come from the kernel: 256 entries per observation ledger and
+per Attempt's outcomes, and 1 MiB for the projection and continuation together.
+Older observation evidence is shortened to that budget; execution identity and
+pending gate context stay intact. `snapshotCompacted` states that full evidence
+must be read from the unchanged original events. A refused bounded snapshot keeps
+the previous snapshot and still commits that request's valid events, returning
+`snapshotRejected` with the exceeded bound. Malformed models and integrity
+violations retain their existing refusal behavior.
+A large finalization preview travels outside the snapshot pair, referenced by
+its exact plan hash and operation count. The service parses the original preview
+and stores it with the human gate, so the person still reviews every operation.
+Preview bytes are limited to 16 MiB and the complete request to 18 MiB; ordinary
+event batching remains about 768 KiB.
 Outcome summaries retain the most recent 256 entries with explicit total and
 omission counts. Original events remain complete and readable in ordered pages;
 summary bounds never prevent a valid long Run from advancing its mirror.
 The observer never evaluates legal routes, Completion, Cycles or Attempts.
+
+Registration compares the service's cursor with the durable acknowledgement and
+rewinds it after a restore, replaying missing original events idempotently. The
+Run root's `.badger/mcp-queue.lock` serializes queue and recovery-file updates
+across MCP processes. An interrupted owner leaves an explicit lock conflict; the
+message names the file and permits manual removal only when no MCP process is
+using that Run.
+
+Submissions own an exclusive revision claim even without a durability profile.
+This protects the interval between a revision check and filesystem publication
+across processes. Legacy claims record their local process owner; explicit
+recovery clears a prepared claim only when its hashed host identity matches the
+current boot and PID namespace and its owner is proven dead. A live, remote, or
+unknown owner remains protected, as ADR 0018 requires.
 
 Reporting occurs independently of local committed progress, with bounded HTTP
 requests and a 1 to 30 second retry backoff. A token rate limit pauses reporting

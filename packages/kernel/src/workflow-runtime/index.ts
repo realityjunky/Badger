@@ -123,8 +123,13 @@ import {
 } from "./findings.js";
 import {
   acquireRevisionClaim,
+  clearAbandonedLegacyRevisionClaims,
   type RevisionClaimInput,
 } from "./revision-claim.js";
+import {
+  WORKFLOW_RUN_SNAPSHOT_BOUNDS,
+  boundWorkflowRunSnapshot,
+} from "./report-bounds.js";
 import {
   sameDurabilityProfile,
   normalizeWorkflowDurabilityProtocol,
@@ -187,6 +192,7 @@ import {
 } from "./repair.js";
 import {
   applyWorkflowFinalization,
+  hashWorkflowFinalizationRationale,
   buildWorkflowFinalizationPreview,
   clearWorkflowFinalizationTransaction,
   parseWorkflowFinalizationState,
@@ -1205,7 +1211,8 @@ function redactVisitEvidence(
   }));
 }
 
-const MAX_PROJECTED_LEDGER_ENTRIES = 256;
+const MAX_PROJECTED_LEDGER_ENTRIES =
+  WORKFLOW_RUN_SNAPSHOT_BOUNDS.maxListEntries;
 
 function boundProjectedLedger<T>(values: readonly T[]): T[] {
   return structuredClone(values.slice(-MAX_PROJECTED_LEDGER_ENTRIES)) as T[];
@@ -3318,7 +3325,10 @@ async function assertRevisionFence(
   if (!state) {
     throw new Error("WorkflowRuntime Run disappeared during submission");
   }
-  const currentRevision = state.workflowRuntime?.revision ?? 0;
+  const currentRevision =
+    state.workflowRuntime?.revision ??
+    state.retries[input.expectedActionId] ??
+    0;
   const currentActionId = state.pending;
   const pending = checkPendingAction
     ? await readPendingAction(
@@ -3334,7 +3344,7 @@ async function assertRevisionFence(
     (checkPendingAction &&
       (!pending || pending.id !== input.expectedActionId)) ||
     !state.runtimeIdentity ||
-    !samePhase4ExecutionIdentity(identityFromState(state), input.execution)
+    !sameExecutionIdentity(identityFromState(state), input.execution)
   ) {
     const current = await verifyStoredRun(location);
     throw new WorkflowRevisionConflictError(
@@ -3465,7 +3475,17 @@ export async function readWorkflowRunReport(
         );
       const projection = (await projectWorkflowState(target))!;
       const continuation = (await inspectWorkflowRun(target))!;
-      if (continuation.pendingAction?.finalization)
+      const profile = before.runtimeIdentity?.durabilityProfile;
+      const transaction = usesWorkflowFinalization(profile)
+        ? await readWorkflowFinalizationTransaction(location.runRoot, profile!)
+        : null;
+      if (transaction)
+        continuation.finalizationPending = {
+          transactionId: transaction.transactionId,
+          status: transaction.status,
+          planHash: transaction.plan.planHash,
+        };
+      else if (continuation.pendingAction?.finalization)
         continuation.finalizationPreview =
           await previewWorkflowFinalization(target);
       const events = await readTrajectory(
@@ -3481,8 +3501,7 @@ export async function readWorkflowRunReport(
       )
         continue;
       return {
-        projection,
-        continuation,
+        ...boundWorkflowRunSnapshot(projection, continuation),
         events: structuredClone(
           events.filter((event) => event.sequence > afterSequence),
         ),
@@ -5311,8 +5330,14 @@ async function finalizationRecoveryRequiredContinuation(
   unknownPaths: readonly string[] = [],
 ): Promise<WorkflowContinuation> {
   const verified = await verifyStoredRun(location);
+  const current = await continuationFromVerifiedRun(verified, location.runRoot);
+  current.finalizationPending = {
+    transactionId: transaction.transactionId,
+    status: transaction.status,
+    planHash: transaction.plan.planHash,
+  };
   return withAdditionalFindings(
-    await continuationFromVerifiedRun(verified, location.runRoot),
+    current,
     [
       recoveryRequiredFinding(
         verified.state.workflowRuntime?.revision ?? transaction.revision,
@@ -5850,10 +5875,7 @@ function prepareWorkflowFinalizationForLocation(
             left.localeCompare(right),
           ),
         },
-        rationaleHash:
-          outcome.rationale === undefined
-            ? null
-            : sha256(outcome.rationale.trim()),
+        rationaleHash: hashWorkflowFinalizationRationale(outcome.rationale),
         confirmedAt: new Date().toISOString(),
       };
       const applied = await applyWorkflowFinalization({
@@ -6800,36 +6822,16 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                     prepared.verified.identity,
                   )
                 : undefined;
-            if (prepared.verified.identity.durabilityProfile === undefined) {
-              const result = await prepared.location.resume(
-                {
-                  resolver: resolverForPackage(),
-                  outcome,
-                  prepareAction: prepareWorkflowActionForLocation(location),
-                  prepareOutcome: prepareVerificationReceiptRecords(
-                    mutation,
-                    prepared.verified.identity.durabilityProfile,
-                  ),
-                  ...(finalizationPreparation
-                    ? { prepareFinalization: finalizationPreparation }
-                    : {}),
-                },
-                mutation,
-              );
-              await clearFinalizationAfterResult(prepared.location, result);
-              return continuation(
-                result,
-                prepared.verified.identity,
-                prepared.verified,
-              );
-            }
-
+            const revision =
+              prepared.verified.state.workflowRuntime?.revision ??
+              prepared.verified.state.retries[prepared.pending.id] ??
+              0;
             const claimInput: RevisionClaimInput = {
-              runId: submission.runId!,
-              expectedRevision: submission.revision!,
-              expectedActionId: submission.actionId,
-              intendedRevision: submission.revision! + 1,
-              execution: structuredClone(submission.execution!),
+              runId: prepared.verified.state.runId,
+              expectedRevision: revision,
+              expectedActionId: prepared.pending.id,
+              intendedRevision: revision + 1,
+              execution: structuredClone(prepared.verified.identity),
             };
             const claim = await acquireRevisionClaim(
               prepared.location.runRoot,
@@ -6880,6 +6882,8 @@ export function createWorkflowRuntime(): WorkflowRuntime {
                 prepared.verified,
               );
             } catch (error) {
+              if (!prepared.verified.identity.durabilityProfile)
+                await claim.abandon().catch(() => undefined);
               if (error instanceof WorkflowRevisionConflictError) {
                 return conflictContinuation(error.verified, error.finding);
               }
@@ -6951,6 +6955,8 @@ export function createWorkflowRuntime(): WorkflowRuntime {
           "workflow.recover",
           profile,
           async (lock) => {
+            if (!profile)
+              await clearAbandonedLegacyRevisionClaims(location.runRoot);
             if (lock?.takeover && profile?.bounds.runLockBytes) {
               await recordWorkflowRunLockTakeover(
                 location.runRoot,

@@ -1,16 +1,19 @@
 import { RequestError } from "./http/errors.js";
+import { WORKFLOW_RUN_SNAPSHOT_BOUNDS as bounds } from "@realityjunky/badger/workflow-runtime";
 const object = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
-const text = (value: unknown, max = 4096) =>
+const text = (value: unknown, max: number = bounds.maxTextLength) =>
   typeof value === "string" && value.length <= max;
-const array = (value: unknown, max = 256): value is unknown[] =>
-  Array.isArray(value) && value.length <= max;
+const array = (
+  value: unknown,
+  max: number = bounds.maxListEntries,
+): value is unknown[] => Array.isArray(value) && value.length <= max;
 const hash = (value: unknown) =>
   typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 function receipt(value: unknown, runId: string) {
   if (
     !object(value) ||
-    !text(value.artifactId, 256) ||
+    !text(value.artifactId, bounds.maxIdentifierLength) ||
     !text(value.path) ||
     !Number.isSafeInteger(value.size) ||
     Number(value.size) < 0 ||
@@ -18,13 +21,15 @@ function receipt(value: unknown, runId: string) {
     !Number.isFinite(value.mtimeMs) ||
     !object(value.producer) ||
     value.producer.runId !== runId ||
-    !text(value.producer.attemptId, 256) ||
-    !text(value.producer.nodeId, 256)
+    !text(value.producer.attemptId, bounds.maxIdentifierLength) ||
+    !text(value.producer.nodeId, bounds.maxIdentifierLength)
   )
     return false;
   return (
     value.root === undefined ||
-    (object(value.root) && text(value.root.name, 256) && text(value.root.path))
+    (object(value.root) &&
+      text(value.root.name, bounds.maxIdentifierLength) &&
+      text(value.root.path))
   );
 }
 /** Structural bounds only. Runtime checks, routes, Attempts and Completion are
@@ -38,20 +43,21 @@ export function validateRunReadModels(
   for (const value of [projection, continuation]) {
     if (
       !["currentNode", "cycleId", "attemptId"].every(
-        (key) => value[key] === null || text(value[key], 256),
+        (key) =>
+          value[key] === null || text(value[key], bounds.maxIdentifierLength),
       ) ||
       !object(value.execution) ||
       !(
         value.pendingAction === null ||
         (object(value.pendingAction) &&
-          text(value.pendingAction.id, 256) &&
-          text(value.pendingAction.type, 100))
+          text(value.pendingAction.id, bounds.maxIdentifierLength) &&
+          text(value.pendingAction.type, bounds.maxActionTypeLength))
       ) ||
       !array(value.findings) ||
       !value.findings.every(
         (f) =>
           object(f) &&
-          text(f.message, 16384) &&
+          text(f.message, bounds.maxFindingMessageLength) &&
           ["info", "warning", "error"].includes(String(f.severity)),
       ) ||
       ![
@@ -70,12 +76,12 @@ export function validateRunReadModels(
     for (const visit of value.visits as unknown[]) {
       if (
         !object(visit) ||
-        !text(visit.attemptId, 256) ||
+        !text(visit.attemptId, bounds.maxIdentifierLength) ||
         !array(visit.outcomes) ||
         !visit.outcomes.every(
           (outcome) =>
             object(outcome) &&
-            text(outcome.summary, 50000) &&
+            text(outcome.summary, bounds.maxOutcomeSummaryLength) &&
             ["succeeded", "failed"].includes(String(outcome.status)),
         )
       )

@@ -118,6 +118,58 @@ test("an Operator reviews and answers a Run gate in the dashboard, then the Agen
       path: testInfo.outputPath("run-gate-completed.png"),
       fullPage: true,
     });
+    const runId = started.runUrl.split("/").at(-1);
+    await page.route(`**/api/v1/runs/${runId}`, async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.run.continuation.finalizationPending = {
+        transactionId: "interrupted-finalization",
+        status: "applying",
+        planHash: "a".repeat(64),
+      };
+      await route.fulfill({ response, json: body });
+    });
+    await page
+      .getByRole("button", { name: "Reload records", exact: true })
+      .click();
+    await expect(
+      page.getByText("Finalization transaction pending", { exact: true }),
+    ).toBeVisible();
+    await page.goto(
+      `${service.baseUrl}/workflows/${f.workflow.id}/versions/${f.version.id}#review-publication`,
+    );
+    await page
+      .getByRole("button", { name: "Install locally", exact: true })
+      .click();
+    const install = page.getByRole("dialog", {
+      name: "Install on your computer",
+    });
+    const command = install.getByRole("textbox", {
+      name: "Local preview command",
+    });
+    expect(await command.inputValue()).toContain(
+      "'badger-hosts' 'preview-install'",
+    );
+    await install
+      .getByRole("radio", { name: "Uninstall", exact: true })
+      .check();
+    expect(await command.inputValue()).toContain("'preview-uninstall'");
+    await install
+      .getByRole("radio", { name: "PowerShell (Windows)", exact: true })
+      .check();
+    expect(await command.inputValue()).toContain(
+      "& 'badger-hosts' 'preview-uninstall'",
+    );
+    await install.getByRole("radio", { name: "Install", exact: true }).check();
+    await install
+      .getByRole("textbox", { name: "Installed Badger MCP cli.js path" })
+      .fill("C:\\Badger MCP\\cli.js");
+    expect(await command.inputValue()).toContain(
+      "& 'badger-hosts' 'preview-install'",
+    );
+    expect(await command.inputValue()).toContain(
+      "'--command' 'node' '--arg' 'C:\\Badger MCP\\cli.js'",
+    );
   } finally {
     await client?.close();
     await mcp?.close();

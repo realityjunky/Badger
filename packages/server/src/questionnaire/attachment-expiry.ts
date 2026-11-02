@@ -66,13 +66,19 @@ export async function expireAnswerAttachments(options: {
     });
   }
   const pending = await database.query<{ hash: string }>(
-    "select hash from attachment_blob_cleanup order by hash limit 100",
+    "select hash from attachment_blob_cleanup order by last_attempt_at nulls first, hash limit 100",
   );
   for (const { hash } of pending.rows) {
     // Content that cannot be removed, such as a blob on a restored volume the
     // worker may not write, stays queued for a later run and holds up no
     // other blob.
     try {
+      // Commit the attempt independently: a failed removal must still rotate
+      // behind untouched content on the next maintenance batch.
+      await database.query(
+        "update attachment_blob_cleanup set last_attempt_at=$2 where hash=$1",
+        [hash, dependencies.clock.now()],
+      );
       await database.transaction(async (tx) => {
         await lockBlobStore(tx);
         const referenced = (

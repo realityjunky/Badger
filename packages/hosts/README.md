@@ -36,6 +36,21 @@ npm command shim. Paths with spaces must be one quoted argument. Arguments are
 part of the reviewed digest and preserved in uninstall previews.
 `--profile operator` is the default.
 
+The dashboard offers **POSIX (macOS / Linux)** and **PowerShell (Windows)**
+commands for both install and uninstall. PowerShell uses the call operator `&`
+and doubles embedded single quotes. Select Windows in MCP setup and supply the
+installed MCP's `cli.js` path: Agent hosts start `node` directly, since Windows
+command shims need a shell. For example:
+
+```powershell
+& 'badger-hosts' 'preview-install' '--url' 'https://badger.example/team' '--workflow' 'WORKFLOW_ID' '--publication' 'PUBLICATION_ID' '--package-hash' 'SHA256' '--host' 'codex' '--scope' 'project' '--command' 'node' '--arg' 'C:\Badger\packages\mcp\dist\src\cli.js'
+& 'badger-hosts' 'preview-uninstall' '--workflow' 'WORKFLOW_ID' '--host' 'codex' '--scope' 'project'
+```
+
+CLI previews include `commitCommands.posix` and `commitCommands.powershell`;
+`commitCommand` selects the local platform's form. Review the preview and run
+the form for your shell with its exact digest.
+
 Preview downloads through the publication API, refuses redirects, verifies the
 selected publication identity and bytes using the kernel's snapshot verifier,
 then reads local ownership and every destination. It prints all persistent file

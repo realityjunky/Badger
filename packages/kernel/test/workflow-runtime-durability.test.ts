@@ -168,6 +168,78 @@ describe("WorkflowRuntime Phase 4 revision fences", () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
+  it("refuses an overlapping stale submission without a durability profile before it can disturb a live commit", async () => {
+    const runtime = createWorkflowRuntime();
+    const protocol = phase4Protocol();
+    delete protocol.capabilities.durability;
+    const started = await runtime.start({
+      protocol,
+      runRoot,
+      runId: "no-lock-overlap",
+    });
+    const response = {
+      actionId: started.pendingAction!.id,
+      runId: started.runId,
+      revision: started.revision,
+      execution: started.execution,
+      nodeId: started.currentNode,
+      status: "succeeded" as const,
+      summary: "Prepared.",
+    };
+    let reached!: () => void, release!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const proceed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const originalOpen = fs.open;
+    let armed = true;
+    fs.open = (async (...args: Parameters<typeof fs.open>) => {
+      if (
+        armed &&
+        String(args[0]).includes(".artifacts.json.") &&
+        args[1] === "wx"
+      ) {
+        armed = false;
+        reached();
+        await proceed;
+      }
+      return originalOpen(...args);
+    }) as typeof fs.open;
+    let stale: ReturnType<typeof runtime.submit> | undefined;
+    try {
+      stale = runtime.submit(runRoot, response);
+      await Promise.race([
+        paused,
+        new Promise((_, reject) =>
+          setTimeout(
+            () =>
+              reject(new Error("Submission did not reach the write boundary")),
+            5000,
+          ),
+        ),
+      ]);
+      const refused = await runtime.submit(runRoot, response);
+      expect(refused.findings).toContainEqual(
+        expect.objectContaining({ code: "revision-conflict" }),
+      );
+      release();
+      expect((await stale).currentNode).toBe("finish");
+      const healthy = await runtime.inspect(runRoot);
+      expect(
+        healthy?.findings.some(
+          (finding) => finding.operation?.id === "workflow.recover",
+        ),
+      ).toBe(false);
+      expect(healthy?.revision).toBe(1);
+    } finally {
+      release();
+      fs.open = originalOpen;
+      await stale?.catch(() => undefined);
+    }
+  }, 15_000);
+
   it("captures the versioned durability profile in package and Run identity", async () => {
     const started = await createWorkflowRuntime().start({
       protocol: phase4Protocol(),
