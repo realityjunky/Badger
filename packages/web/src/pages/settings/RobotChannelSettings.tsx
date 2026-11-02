@@ -50,14 +50,17 @@ export function RobotChannelSettings({
   const [form] = Form.useForm<RobotValues>();
   const route = `/${scope}/${encodeURIComponent(scopeId)}/notifications/channel`;
   useEffect(() => {
-    const controller = new AbortController();
     setLoaded(false);
+  }, [basePath, route]);
+  useEffect(() => {
+    const controller = new AbortController();
     void notificationRequest<{
       channel: RobotChannel | null;
       inheritedChannel: RobotChannel | null;
     }>(basePath, route, "GET", undefined, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.kind !== "ok") {
+        if (result.kind === "denied") setLoaded(false);
         refused(result);
         return;
       }

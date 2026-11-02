@@ -20,8 +20,10 @@ export function SkillBacklog({ skillId }: { skillId: string }) {
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
   useEffect(() => {
-    const controller = new AbortController();
     setItems(null);
+  }, [skillId]);
+  useEffect(() => {
+    const controller = new AbortController();
     void questionnaireRequest<{ items: BacklogItem[] }>(
       readBasePath(document),
       `/skills/${encodeURIComponent(skillId)}/backlog`,

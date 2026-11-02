@@ -62,9 +62,13 @@ export function WorkflowsPage() {
       : detail?.versions.find((entry) => entry.id === versionId);
 
   useEffect(() => {
-    const controller = new AbortController();
     setState({ kind: "loading" });
     setDialog(null);
+    setFailure(null);
+  }, [basePath, workflowId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     setFailure(null);
     if (workflowId === undefined) {
       void loadWorkflows(basePath, controller.signal).then((result) => {
@@ -91,20 +95,25 @@ export function WorkflowsPage() {
   }, [basePath, workflowId, refresh]);
 
   useEffect(() => {
+    setVersionResources(null);
+  }, [basePath, workflowId, selectedVersion?.id]);
+
+  useEffect(() => {
     if (workflowId === undefined || selectedVersion === undefined) {
-      setVersionResources(null);
       return;
     }
     const controller = new AbortController();
-    setVersionResources(null);
     void loadWorkflowVersion(
       basePath,
       workflowId,
       selectedVersion.id,
       controller.signal,
     ).then((result) => {
-      if (!controller.signal.aborted && result.kind === "ok")
-        setVersionResources(result.value);
+      if (!controller.signal.aborted) {
+        if (result.kind === "ok") setVersionResources(result.value);
+        else if (result.kind === "denied" || result.kind === "missing")
+          setVersionResources(null);
+      }
     });
     return () => controller.abort();
   }, [basePath, workflowId, selectedVersion?.id, refresh]);
@@ -421,7 +430,10 @@ export function WorkflowsPage() {
           workflow={dialog.kind === "edit" ? dialog.workflow : null}
           groups={state.kind === "catalog" ? state.value.createGroups : []}
           onCancel={() => setDialog(null)}
-          onReload={reload}
+          onReload={() => {
+            setDialog(null);
+            reload();
+          }}
           onSubmit={async (values) => {
             if (dialog.kind === "edit") {
               const result = await editWorkflow(

@@ -25,8 +25,10 @@ export function NotificationSettings({
   const [refresh, setRefresh] = useState(0);
   const [form] = Form.useForm<NotificationPreferences>();
   useEffect(() => {
-    const controller = new AbortController();
     setCurrent(null);
+  }, [basePath]);
+  useEffect(() => {
+    const controller = new AbortController();
     void notificationRequest<{
       preferences: NotificationPreferences;
       events: NotificationEvent[];
@@ -37,7 +39,10 @@ export function NotificationSettings({
           setCurrent(result.value.preferences);
           setEvents(result.value.events);
           form.setFieldsValue(result.value.preferences);
-        } else setNotice("failed");
+        } else {
+          if (result.kind === "denied") setCurrent(null);
+          setNotice("failed");
+        }
       },
     );
     return () => controller.abort();

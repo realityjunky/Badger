@@ -13,7 +13,10 @@ import {
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { Run } from "../api/runs.js";
-import { questionnaireRequest } from "../api/questionnaire.js";
+import {
+  QuestionnaireError,
+  questionnaireRequest,
+} from "../api/questionnaire.js";
 import { loadWorkflows, type WorkflowCatalog } from "../api/workflows.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
@@ -45,11 +48,13 @@ export function RunsPage() {
     return () => controller.abort();
   }, [basePath]);
   useEffect(() => {
-    const controller = new AbortController();
-    let loading = false;
     setFailure(null);
     setRun(null);
     setRuns(null);
+  }, [basePath, runId, workflow, afterSequence]);
+  useEffect(() => {
+    const controller = new AbortController();
+    let loading = false;
     const load = async () => {
       if (loading) return;
       loading = true;
@@ -71,8 +76,16 @@ export function RunsPage() {
           setFailure(null);
         }
       } catch (error) {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
+          if (
+            error instanceof QuestionnaireError &&
+            [401, 403, 404].includes(error.status)
+          ) {
+            setRun(null);
+            setRuns(null);
+          }
           setFailure(error instanceof Error ? error.message : t("run.failed"));
+        }
       } finally {
         loading = false;
       }

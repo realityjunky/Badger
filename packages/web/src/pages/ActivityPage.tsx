@@ -34,7 +34,11 @@ export function ActivityPage() {
 
   const load = useCallback(
     async (filters: ActivityFilters, signal?: AbortSignal) => {
-      setState({ kind: "loading" });
+      setState((current) =>
+        current.kind === "ready"
+          ? { ...current, loadingMore: true }
+          : { kind: "loading" },
+      );
       const loaded = await loadActivity(basePath, filters, null, signal);
       if (signal?.aborted === true) {
         return;

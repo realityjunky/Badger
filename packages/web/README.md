@@ -145,6 +145,10 @@ them into `dist/`, so the server image carries the build and none of them.
 
 - Every page has a URL. The root redirects to `/my-work`; deep links, refresh,
   and history all restore the page.
+- Edits and refreshes of the current record keep its panels mounted while
+  updated records load, preserving scroll position, expanded sections, and
+  form state. Selecting another record resets its data, and access refusals
+  remove records the person can no longer read.
 - Appearance and language are saved per person through
   `/api/v1/me/preferences`, with the revision the client read. A stale write
   is a conflict, not a silent overwrite.

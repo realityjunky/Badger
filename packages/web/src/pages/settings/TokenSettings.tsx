@@ -53,14 +53,20 @@ export function TokenSettings() {
   };
 
   useEffect(() => {
+    setTokens(null);
+    setFailure(null);
+  }, [basePath]);
+  useEffect(() => {
     const controller = new AbortController();
     setLoadFailed(false);
-    setTokens(null);
     setFailure(null);
     void loadTokens(basePath, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.kind === "ok") setTokens(result.value.tokens);
-      else setLoadFailed(true);
+      else {
+        setLoadFailed(true);
+        if (result.kind === "denied") setTokens(null);
+      }
     });
     return () => controller.abort();
   }, [basePath, refresh]);
