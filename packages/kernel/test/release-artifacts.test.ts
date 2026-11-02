@@ -565,20 +565,23 @@ describe("Badger release artifacts", () => {
     expect(planned).not.toContain("the AI platform's session, OpenID Connect");
   });
 
-  it("describes the delivered groups, roles, and bindings outside the plans", async () => {
+  it("describes groups, roles, and bindings in the service overview without tracking references", async () => {
     const manual = await readText("docs/badger-workflow-manual.html");
     const delivered = manual.slice(0, manual.indexOf('id="service"'));
-    const planned = manual.slice(manual.indexOf('id="service"'));
+    const service = manual.slice(
+      manual.indexOf('id="service"'),
+      manual.indexOf('id="sources"'),
+    );
 
     expect(delivered).toContain("bindings.ts");
     expect(delivered).toContain("BADGER_PLATFORM_ADMIN_MAPPING");
     expect(delivered).toContain("presents that address as verified");
-    expect(planned).toContain(
-      "(ADRs) 0002–0006, 0009, 0010, 0012, 0013, 0015, 0016, and 0019–0037",
-    );
-    expect(planned).not.toContain("bind people by email; a binding takes");
-    expect(planned).not.toContain("inherited by its nested groups");
-    expect(planned).not.toContain("every write is audited with its actor");
+    expect(service).toContain("Signing in grants no role by itself.");
+    expect(service).toContain("Bindings are additive");
+    expect(service).not.toMatch(/\bADRs?\b|adr\/|\/issues\/|#\d+/u);
+    expect(service).not.toContain("bind people by email; a binding takes");
+    expect(service).not.toContain("inherited by its nested groups");
+    expect(service).not.toContain("every write is audited with its actor");
   });
 
   it("describes the delivered workflows and Skill versions outside the plans", async () => {
@@ -683,23 +686,23 @@ describe("Badger release artifacts", () => {
     expect(planned).not.toContain("已交付（#54）");
     expect(planned).not.toContain("become read models over these records");
     expect(planned).not.toContain("变成基于这些记录的读模型");
-    expect(planned).not.toContain(
-      "OpenID Connect, or headers from a trusted proxy",
-    );
+    expect(planned).toContain("platform session introspection, OpenID Connect");
     expect(ledger).toContain("ledger and readiness (#49)");
     expect(ledger).toContain("OpenID Connect and trusted-header sign-in (#69)");
     expect(ledger).toContain("The Badger MCP's expert profile (#54)");
   });
 
-  it("plans Run storage on macOS and Windows only, after #35 shipped for Linux", async () => {
+  it("describes portable Run storage as available in the service overview", async () => {
     const manual = await readText("docs/badger-workflow-manual.html");
-    const readme = await readText("packages/kernel/README.md");
-    const planned = manual.slice(manual.indexOf('id="service"'));
+    const service = manual.slice(
+      manual.indexOf('id="service"'),
+      manual.indexOf('id="sources"'),
+    );
 
-    expect(planned).not.toContain("issues/35");
-    expect(planned).toContain("issues/86");
-    expect(readme).toContain("CI runs the Run storage suites on Linux.");
-    expect(readme).not.toContain("suites on Linux, macOS, and Windows");
+    expect(service).toContain(
+      "Run storage supports Linux, macOS, and Windows.",
+    );
+    expect(service).toContain("Run 存储支持 Linux、macOS 和 Windows。");
   });
 
   it("describes dossier, plan, and proposal gates, drafting jobs, structured answers, WeCom notifications, version changes, and Git imports as delivered", async () => {
@@ -761,8 +764,10 @@ describe("Badger release artifacts", () => {
       "宿主安装器将把已发布的软件包",
     ])
       expect(planned, sentence).not.toContain(sentence);
-    expect(planned).toContain("WeCom app messages to individuals, email");
-    expect(planned).toContain("tested against a stub robot only");
+    expect(planned).toContain("Everyone has an in-app inbox");
+    expect(planned).toContain(
+      "The worker paces posts to the robot's rate limit",
+    );
 
     for (const paragraph of [
       "Dossier versions (#50)",
@@ -929,7 +934,7 @@ describe("Badger release artifacts", () => {
       expect(ledger, superseded).not.toContain(superseded);
   });
 
-  it("describes #60–#67, #71, and #89 as delivered and keeps #68 open", async () => {
+  it("describes delivery records and the completed service overview", async () => {
     const manual = await readText("docs/badger-workflow-manual.html");
     const ledger = await readText("docs/release-artifacts.md");
     const flat = (text: string) => text.replace(/\s+/gu, " ");
@@ -940,7 +945,10 @@ describe("Badger release artifacts", () => {
       await readText("docs/adr/0035-local-runtime-run-mirroring.md"),
     );
     const delivered = manual.slice(0, manual.indexOf('id="service"'));
-    const planned = manual.slice(manual.indexOf('id="service"'));
+    const service = manual.slice(
+      manual.indexOf('id="service"'),
+      manual.indexOf('id="sources"'),
+    );
 
     for (const heading of [
       "Package scaffold generation (#60).",
@@ -1011,15 +1019,18 @@ describe("Badger release artifacts", () => {
     ])
       expect(delivered, stale).not.toContain(stale);
 
-    // The remaining engineer tools and the laptop verification stay planned.
     for (const sentence of [
-      "Jobs for dossier drafts are to follow on the same terms.",
-      "is still to gain dossier and proposal previews",
-      "is still to be verified in the real host",
-      "#24 was first split into the sub-issues #25–#72",
-      "#24 最初拆成子 issue #25–#72",
+      "dossier and plan drafts",
+      "档案与计划草稿",
+      "preview dossier validation and proposals",
+      "预览档案校验和提案",
+      "WorkBuddy on a macOS or Windows laptop",
+      "macOS、Windows 笔记本上的 WorkBuddy",
     ])
-      expect(planned, sentence).toContain(sentence);
+      expect(service, sentence).toContain(sentence);
+    expect(service).not.toMatch(
+      /\bplanned\b|not built yet|still to|to follow|规划中|尚未实现/u,
+    );
     for (const landed of [
       "is to serve the API for the later stages and Runs",
       "is to take the other jobs from its queue too",
@@ -1034,7 +1045,7 @@ describe("Badger release artifacts", () => {
       "48 sub-issues",
       "48 个子 issue",
     ])
-      expect(planned, landed).not.toContain(landed);
+      expect(service, landed).not.toContain(landed);
     expect(manual).not.toContain(
       "checks of each Run's events against the service's records",
     );
