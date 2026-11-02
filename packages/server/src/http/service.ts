@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   decodeAuditCursor,
   listAuditEvents,
+  recordAudit,
   type AuditChannel,
   type AuditFilters,
   type WriteContext,
@@ -20,6 +21,7 @@ import {
   parseBindingInput,
   readBindingById,
   removeBinding,
+  type RoleBinding,
 } from "../bindings.js";
 import type { Clock } from "../clock.js";
 import type { ServiceConfig } from "../config.js";
@@ -74,6 +76,7 @@ import { packageMethods, handlePackage } from "./packages.js";
 import { proposalMethods, handleProposal } from "./proposals.js";
 import { handleInbox, inboxMethods } from "./inbox.js";
 import { handleNotifications, notificationMethods } from "./notifications.js";
+import { deliverInvitation } from "../invitation-delivery.js";
 import { handleSourceStudy, sourceStudyMethods } from "./source-study.js";
 import { handleQuestionnaire, questionnaireMethods } from "./questionnaire.js";
 import { handleEvents } from "./events.js";
@@ -153,6 +156,10 @@ function readAuditLimit(raw: string | null): number | null {
 
 const GROUP_PATH = new RegExp(`^${API}/groups/([^/]+)$`, "u");
 const BINDING_PATH = new RegExp(`^${API}/bindings/([^/]+)$`, "u");
+const INVITATION_EMAIL_PATH = new RegExp(
+  `^${API}/bindings/([^/]+)/invitation-email$`,
+  "u",
+);
 
 function matchedId(pattern: RegExp, path: string): string | null {
   const match = pattern.exec(path);
@@ -192,6 +199,7 @@ function allowedMethods(path: string): string {
   if (path === `${API}/bindings`) {
     return "POST";
   }
+  if (matchedId(INVITATION_EMAIL_PATH, path) !== null) return "POST";
   if (matchedId(BINDING_PATH, path) !== null) {
     return "DELETE";
   }
@@ -439,7 +447,88 @@ export function createService(options: ServiceOptions, port: number): Service {
         "That person or address already holds this role here",
       );
     }
-    return reply.json(201, { binding: created.binding });
+    const invitationDelivery = await sendInvitation(
+      created.binding,
+      person,
+      principal,
+      reply,
+    );
+    return reply.json(201, { binding: created.binding, invitationDelivery });
+  }
+
+  async function sendInvitation(
+    binding: RoleBinding,
+    person: Person,
+    principal: Principal,
+    reply: Reply,
+  ) {
+    const invitationDelivery = await deliverInvitation(
+      config,
+      binding,
+      principal,
+    );
+    if (invitationDelivery.status !== "not-configured")
+      await recordAudit(database, serviceDependencies, {
+        actor: { personId: person.id, credential: principal.credential },
+        channel: writeContextFor(person, principal, reply).channel,
+        action: `invitation.email_${invitationDelivery.status}`,
+        target: { type: "role_binding", id: binding.id, label: binding.email },
+        before: null,
+        after: { revision: binding.revision, hash: null },
+        reason:
+          invitationDelivery.status === "sent"
+            ? "Invitation email accepted by the delivery service"
+            : "Invitation email delivery failed; the role binding remains recorded",
+        requestId: reply.requestId,
+      });
+    return invitationDelivery;
+  }
+
+  async function handleInvitationEmail(
+    request: IncomingMessage,
+    reply: Reply,
+    person: Person,
+    principal: Principal,
+    access: Access,
+    bindingId: string,
+  ): Promise<void> {
+    if (principal.credential.kind === "token")
+      return reply.error(
+        403,
+        "denied",
+        "Only a signed-in person sends invitations",
+      );
+    const binding = await readBindingById(database, bindingId);
+    if (binding === null)
+      return reply.error(404, "invalid", "No such role binding");
+    if (!(await mayManageRoleScope(database, access, person, binding)))
+      return reply.error(
+        403,
+        "denied",
+        "Only a person who manages this scope sends its invitations",
+      );
+    const body = await readJsonBody(request);
+    if (!body.ok) return reply.error(400, "invalid", body.message);
+    if (
+      typeof body.value !== "object" ||
+      body.value === null ||
+      !("revision" in body.value) ||
+      !Number.isInteger(body.value.revision)
+    )
+      return reply.error(400, "invalid", "revision must be a whole number");
+    if (body.value.revision !== binding.revision)
+      return reply.error(
+        409,
+        "conflict",
+        "The binding changed since you read it",
+      );
+    const invitationDelivery = await sendInvitation(
+      binding,
+      person,
+      principal,
+      reply,
+    );
+    return reply.json(200, { invitationDelivery });
   }
 
   async function handleRemoveBinding(
@@ -1030,6 +1119,16 @@ export function createService(options: ServiceOptions, port: number): Service {
     if (path === `${API}/bindings` && method === "POST") {
       return handleCreateBinding(request, reply, person, principal, access);
     }
+    const invitationBindingId = matchedId(INVITATION_EMAIL_PATH, path);
+    if (invitationBindingId !== null && method === "POST")
+      return handleInvitationEmail(
+        request,
+        reply,
+        person,
+        principal,
+        access,
+        invitationBindingId,
+      );
     const bindingId = matchedId(BINDING_PATH, path);
     if (bindingId !== null && method === "DELETE") {
       return handleRemoveBinding(

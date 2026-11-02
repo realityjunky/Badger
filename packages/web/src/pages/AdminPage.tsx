@@ -19,6 +19,7 @@ import {
   loadOrganization,
   mayChangeBinding,
   removeBinding,
+  resendInvitation,
   type Group,
   type Invitation,
   type Member,
@@ -72,6 +73,12 @@ export function AdminPage() {
 
   const [state, setState] = useState<State>({ kind: "loading" });
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeType, setNoticeType] = useState<"success" | "warning">(
+    "warning",
+  );
+  const [sendingInvitation, setSendingInvitation] = useState<string | null>(
+    null,
+  );
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
@@ -123,8 +130,12 @@ export function AdminPage() {
     ): Promise<WriteOutcome> => {
       const result = await written;
       if (result.kind === "ok") {
+        const status = result.invitationDelivery?.status;
+        setNotice(status ? t(`admin.invite.delivery.${status}`) : null);
+        setNoticeType(status === "sent" ? "success" : "warning");
         await reload();
       } else if (result.kind !== "rejected") {
+        setNoticeType("warning");
         setNotice(
           result.kind === "denied" ? t("admin.denied") : t("admin.writeFailed"),
         );
@@ -133,6 +144,21 @@ export function AdminPage() {
     },
     [reload, t],
   );
+
+  const resend = async (invitation: {
+    id: string;
+    revision: number;
+  }): Promise<void> => {
+    if (sendingInvitation !== null) return;
+    setSendingInvitation(invitation.id);
+    try {
+      await reportWrite(
+        resendInvitation(basePath, invitation.id, invitation.revision),
+      );
+    } finally {
+      setSendingInvitation(null);
+    }
+  };
 
   const memberColumns: TableColumnsType<Member> = [
     {
@@ -172,6 +198,17 @@ export function AdminPage() {
             key: "actions",
             render: (_: unknown, member: Member) => (
               <Space size={4} wrap>
+                {member.bindings.find(mayChange) && (
+                  <Button
+                    size="small"
+                    disabled={sendingInvitation !== null}
+                    onClick={() =>
+                      void resend(member.bindings.find(mayChange)!)
+                    }
+                  >
+                    {t("admin.invite.resend")}
+                  </Button>
+                )}
                 {member.bindings.filter(mayChange).map((binding) => (
                   <Popconfirm
                     key={binding.id}
@@ -233,22 +270,32 @@ export function AdminPage() {
             key: "actions",
             render: (_: unknown, invitation: Invitation) =>
               mayChange(invitation) ? (
-                <Popconfirm
-                  title={t("admin.removeConfirm")}
-                  onConfirm={() =>
-                    void reportWrite(
-                      removeBinding(
-                        basePath,
-                        invitation.id,
-                        invitation.revision,
-                      ),
-                    )
-                  }
-                >
-                  <Button size="small" danger>
-                    {t("admin.remove")}
+                <Space>
+                  <Button
+                    size="small"
+                    disabled={sendingInvitation !== null}
+                    loading={sendingInvitation === invitation.id}
+                    onClick={() => void resend(invitation)}
+                  >
+                    {t("admin.invite.resend")}
                   </Button>
-                </Popconfirm>
+                  <Popconfirm
+                    title={t("admin.removeConfirm")}
+                    onConfirm={() =>
+                      void reportWrite(
+                        removeBinding(
+                          basePath,
+                          invitation.id,
+                          invitation.revision,
+                        ),
+                      )
+                    }
+                  >
+                    <Button size="small" danger>
+                      {t("admin.remove")}
+                    </Button>
+                  </Popconfirm>
+                </Space>
               ) : null,
           },
         ]
@@ -265,7 +312,7 @@ export function AdminPage() {
       />
       {notice !== null && (
         <Alert
-          type="warning"
+          type={noticeType}
           showIcon
           closable
           message={notice}

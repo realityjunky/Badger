@@ -9,6 +9,43 @@ identity headers from configured proxy peers. See
 [identity adapter configuration](../../docs/identity-adapters.md) for OIDC
 registration, Strict browser sessions, proxy trust, and email binding checks.
 
+## Invitation emails
+
+**Invite by email** records the role binding, then asks the deployment's email
+service to deliver the invitation. Configure `BADGER_INVITATION_DELIVERY_URL`,
+`BADGER_INVITATION_DELIVERY_TOKEN`, and `BADGER_PUBLIC_URL` together. The delivery
+URL is a trusted HTTP(S) endpoint; use HTTPS outside a trusted private network.
+The token belongs only to this integration. `BADGER_INVITATION_DELIVERY_TIMEOUT_MS`
+defaults to 30000 and accepts 1–60000 milliseconds. Redirects are refused.
+
+The endpoint receives a JSON POST with a bearer token and these fields:
+
+```json
+{
+  "bindingId": "binding-id",
+  "email": "person@example.com",
+  "role": "Member",
+  "scopeType": "group",
+  "scopeId": "group-id",
+  "url": "https://badger.example/",
+  "inviter": { "issuer": "https://identity.example", "subject": "person-id" }
+}
+```
+
+Return a successful HTTP status with `{"emailSent": true}` only after accepting
+the email for delivery. Other responses, invalid JSON, and timeouts report a
+failed delivery. The role binding remains saved. The response to creating a
+binding includes `invitationDelivery.status`: `sent`, `failed`, or `not-configured`.
+Without delivery settings, share the dashboard link manually; no email is sent.
+
+The dashboard reports this result and offers **Resend email** for pending
+invitations and existing members. `POST /api/v1/bindings/:id/invitation-email`
+with `{ "revision": 1 }` resends the current binding's invitation. The signed-in
+person must be allowed to manage its scope. The integration may use its own
+account invitation and activation system, including application entry grants,
+while Badger continues to own every role binding. See
+[ADR 0039](../../docs/adr/0039-invitation-email-delivery.md).
+
 ## Read-only demo
 
 `/demo/` beneath `BADGER_BASE_PATH` is public sample content, including its

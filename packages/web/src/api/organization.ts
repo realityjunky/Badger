@@ -103,10 +103,14 @@ export type LoadOutcome<T> =
  * Administrator may override with a recorded reason.
  */
 export type WriteOutcome =
-  | { kind: "ok" }
+  | { kind: "ok"; invitationDelivery?: InvitationDelivery }
   | { kind: "denied" }
   | { kind: "rejected" }
   | { kind: "failed" };
+
+export interface InvitationDelivery {
+  status: "sent" | "failed" | "not-configured";
+}
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
@@ -293,7 +297,19 @@ async function send(
     body: JSON.stringify(body),
   });
   if (response.ok) {
-    return { kind: "ok" };
+    const answer = await readJson(response);
+    const delivery = isRecord(answer)
+      ? answer["invitationDelivery"]
+      : undefined;
+    const status = isRecord(delivery) ? delivery["status"] : undefined;
+    return {
+      kind: "ok",
+      ...(status === "sent" ||
+      status === "failed" ||
+      status === "not-configured"
+        ? { invitationDelivery: { status } }
+        : {}),
+    };
   }
   if (response.status === 403) {
     return { kind: "denied" };
@@ -331,6 +347,19 @@ export async function inviteByEmail(
   },
 ): Promise<WriteOutcome> {
   return send("POST", basePath, "/bindings", input);
+}
+
+export function resendInvitation(
+  basePath: string,
+  id: string,
+  revision: number,
+): Promise<WriteOutcome> {
+  return send(
+    "POST",
+    basePath,
+    `/bindings/${encodeURIComponent(id)}/invitation-email`,
+    { revision },
+  );
 }
 
 /** The groups a person leads and every group inside them. */

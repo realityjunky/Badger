@@ -1,4 +1,4 @@
-import { Button, Form, Input, Popconfirm, Select, Tag } from "antd";
+import { Alert, Button, Form, Input, Popconfirm, Select, Tag } from "antd";
 import { useState } from "react";
 import {
   assignWorkflowRole,
@@ -10,6 +10,10 @@ import {
 import { useI18n } from "../../i18n/I18nContext.js";
 import type { MessageId } from "../../i18n/catalog.js";
 import { WorkflowNotice, type WriteFailure } from "./WorkflowDialog.js";
+import {
+  resendInvitation,
+  type InvitationDelivery,
+} from "../../api/organization.js";
 
 const ROLE_MESSAGES: Record<WorkflowRole, MessageId> = {
   "Workflow owner": "workflow.role.owner",
@@ -36,6 +40,7 @@ export function WorkflowTeam({
   const [form] = Form.useForm<{ email: string; role: WorkflowRole }>();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<WriteFailure | null>(null);
+  const [delivery, setDelivery] = useState<InvitationDelivery | null>(null);
 
   const assign = async ({
     email,
@@ -54,9 +59,28 @@ export function WorkflowTeam({
         role,
       );
       if (result.kind === "ok") {
+        setFailure(null);
+        setDelivery(result.value.invitationDelivery ?? null);
         form.resetFields(["email"]);
         onChanged();
       } else setFailure(result);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const resend = async (binding: WorkflowBinding) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await resendInvitation(
+        basePath,
+        binding.id,
+        binding.revision,
+      );
+      if (result.kind === "ok") {
+        setFailure(null);
+        setDelivery(result.invitationDelivery ?? null);
+      } else setFailure({ kind: "failed", message: "" });
     } finally {
       setBusy(false);
     }
@@ -79,6 +103,13 @@ export function WorkflowTeam({
       {failure !== null && (
         <WorkflowNotice failure={failure} onReload={onChanged} />
       )}
+      {delivery !== null && (
+        <Alert
+          showIcon
+          type={delivery.status === "sent" ? "success" : "warning"}
+          message={t(`admin.invite.delivery.${delivery.status}`)}
+        />
+      )}
       <ul className="workflow-roles">
         {bindings.map((binding) => (
           <li key={binding.id}>
@@ -90,6 +121,11 @@ export function WorkflowTeam({
             </div>
             <Tag>{t(ROLE_MESSAGES[binding.role])}</Tag>
             {binding.pending && <Tag>{t("workflow.invited")}</Tag>}
+            {mayManage && (
+              <Button disabled={busy} onClick={() => void resend(binding)}>
+                {t("admin.invite.resend")}
+              </Button>
+            )}
             {mayManage && (
               <Popconfirm
                 title={t("workflow.removeConfirm")}

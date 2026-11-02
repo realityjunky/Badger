@@ -1106,6 +1106,12 @@ const en = {
   "admin.invite.groupPlaceholder": "Choose a group",
   "admin.invite.role": "Role",
   "admin.invite.submit": "Invite by email",
+  "admin.invite.resend": "Resend email",
+  "admin.invite.delivery.sent": "Invitation email sent.",
+  "admin.invite.delivery.failed":
+    "The role is saved, but the invitation email could not be sent. Use Resend email to try again.",
+  "admin.invite.delivery.not-configured":
+    "The role is saved. Email delivery is not configured; share the Badger link with this person.",
   "admin.remove": "Remove",
   "admin.removeConfirm": "Remove this invitation?",
   "admin.removeBindingConfirm": "Remove this role binding?",
@@ -2314,6 +2320,12 @@ const zh: Record<MessageId, string> = {
   "admin.invitations.scope": "范围",
   "admin.invitations.invitedBy": "邀请人",
   "admin.invitations.none": "没有待接受的邀请。",
+  "admin.invite.resend": "重新发送邮件",
+  "admin.invite.delivery.sent": "邀请邮件已发送。",
+  "admin.invite.delivery.failed":
+    "角色已保存，但邀请邮件发送失败。请点击“重新发送邮件”重试。",
+  "admin.invite.delivery.not-configured":
+    "角色已保存。尚未配置邮件发送，请将 Badger 链接分享给对方。",
   "admin.invite.email": "邮箱",
   "admin.invite.emailPlaceholder": "person@example.com",
   "admin.invite.scope": "范围",

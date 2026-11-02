@@ -1,5 +1,5 @@
 import { apiUrl } from "../app/paths.js";
-import type { Group } from "./organization.js";
+import type { Group, InvitationDelivery } from "./organization.js";
 import type { ScriptEffects } from "./skills.js";
 import type { SourceStudy } from "./source-study.js";
 
@@ -382,7 +382,10 @@ export function assignWorkflowRole(
   email: string,
   role: WorkflowRole,
 ) {
-  return write<{ binding: WorkflowBinding }>(basePath, "POST", "/bindings", {
+  return write<{
+    binding: WorkflowBinding;
+    invitationDelivery?: InvitationDelivery;
+  }>(basePath, "POST", "/bindings", {
     scopeType: "workflow",
     scopeId: id,
     email,

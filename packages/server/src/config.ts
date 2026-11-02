@@ -128,6 +128,11 @@ export interface ServiceConfig {
    * folder; a deployment that ships them elsewhere sets BADGER_WEB_DIR.
    */
   webDirectory: string;
+  invitationDelivery: {
+    url: string;
+    token: string;
+    timeoutMs: number;
+  } | null;
   notifications: {
     encryptionKey: string | null;
     publicUrl: string | null;
@@ -721,6 +726,42 @@ export function loadConfig(
         "BADGER_PUBLIC_URL must use HTTPS and match BADGER_BASE_PATH (loopback HTTP is allowed)",
       );
   }
+  const invitationUrl = readString(
+    environment,
+    "BADGER_INVITATION_DELIVERY_URL",
+  );
+  const invitationToken = readString(
+    environment,
+    "BADGER_INVITATION_DELIVERY_TOKEN",
+  );
+  if (invitationUrl !== undefined || invitationToken !== undefined) {
+    if (!invitationUrl || !invitationToken || !publicUrl)
+      throw new ConfigurationError(
+        "Invitation delivery requires BADGER_INVITATION_DELIVERY_URL, BADGER_INVITATION_DELIVERY_TOKEN, and BADGER_PUBLIC_URL",
+      );
+    let url: URL;
+    try {
+      url = new URL(invitationUrl);
+    } catch {
+      throw new ConfigurationError(
+        "BADGER_INVITATION_DELIVERY_URL must be an absolute HTTP(S) URL",
+      );
+    }
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.hash ||
+      url.search
+    )
+      throw new ConfigurationError(
+        "BADGER_INVITATION_DELIVERY_URL must be an HTTP(S) endpoint without credentials, query, or fragment",
+      );
+    if (/[\r\n]/u.test(invitationToken))
+      throw new ConfigurationError(
+        "BADGER_INVITATION_DELIVERY_TOKEN must not contain line breaks",
+      );
+  }
   return {
     mode,
     host,
@@ -734,6 +775,19 @@ export function loadConfig(
     identity,
     bootstrapAdministrators: readBootstrapAdministrators(environment),
     platformAdministratorMapping,
+    invitationDelivery:
+      invitationUrl && invitationToken
+        ? {
+            url: invitationUrl,
+            token: invitationToken,
+            timeoutMs: readInteger(
+              environment,
+              "BADGER_INVITATION_DELIVERY_TIMEOUT_MS",
+              30000,
+              { min: 1, max: 60000 },
+            ),
+          }
+        : null,
     storage: readStorage(environment),
     uploads: {
       maxBytes: readInteger(

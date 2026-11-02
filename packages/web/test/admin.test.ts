@@ -1,9 +1,45 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ledGroupIds,
   mayChangeBinding,
+  inviteByEmail,
+  resendInvitation,
   type Group,
 } from "../src/api/organization.js";
+
+afterEach(() => vi.unstubAllGlobals());
+
+it.each(["sent", "failed", "not-configured"])(
+  "preserves the invitation's %s delivery result",
+  async (status) => {
+    const fetcher = vi.fn().mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ invitationDelivery: { status } }), {
+          status: 201,
+        }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    expect(
+      await inviteByEmail("/badger", {
+        email: "person@example.com",
+        role: "Member",
+        scopeType: "group",
+        scopeId: "group-1",
+      }),
+    ).toEqual({ kind: "ok", invitationDelivery: { status } });
+    expect(await resendInvitation("/badger", "binding-1", 3)).toEqual({
+      kind: "ok",
+      invitationDelivery: { status },
+    });
+    expect(fetcher).toHaveBeenLastCalledWith(
+      "/badger/api/v1/bindings/binding-1/invitation-email",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ revision: 3 }),
+      }),
+    );
+  },
+);
 
 function group(id: string, parentId: string | null = null): Group {
   return { id, name: id, parentId, revision: 1 };
