@@ -45,6 +45,221 @@ const robinAdministers = {
   },
 };
 
+describe("changing an accepted group role", () => {
+  async function setup() {
+    service = await startTestService(robinAdministers);
+    const groupResponse = await write("POST", "/api/v1/groups", robin, {
+      name: "PrimerDesigner",
+    });
+    const group = ((await groupResponse.json()) as { group: { id: string } })
+      .group;
+    await me(bob);
+    const response = await invite(robin, {
+      scopeType: "group",
+      scopeId: group.id,
+      email: bob.email!,
+      role: "Member",
+    });
+    const binding = ((await response.json()) as { binding: Binding }).binding;
+    return { group, binding };
+  }
+
+  it("promotes the same person atomically and records the old and new role", async () => {
+    const { group, binding } = await setup();
+    const person = await me(bob, "bob.changed@example.com");
+    const changed = await write(
+      "PATCH",
+      `/api/v1/bindings/${binding.id}`,
+      robin,
+      {
+        role: "Group lead",
+        revision: binding.revision,
+      },
+    );
+    expect(changed.status).toBe(200);
+    expect(await changed.json()).toMatchObject({
+      binding: {
+        id: binding.id,
+        personId: person.person.id,
+        role: "Group lead",
+        revision: 2,
+        pending: false,
+      },
+    });
+    expect((await me(bob, "bob.changed@example.com")).person.groups).toEqual([
+      { id: group.id, name: "PrimerDesigner", role: "Group lead" },
+    ]);
+    const audit = await service!.request(
+      "/api/v1/audit-events?action=role_binding.changed",
+      { as: robin },
+    );
+    expect(await audit.json()).toMatchObject({
+      events: [
+        {
+          action: "role_binding.changed",
+          reason: "Group role changed from Member to Group lead",
+        },
+      ],
+    });
+    const stale = await write(
+      "PATCH",
+      `/api/v1/bindings/${binding.id}`,
+      robin,
+      {
+        role: "Member",
+        revision: 1,
+      },
+    );
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({
+      binding: { role: "Group lead", revision: 2 },
+    });
+  });
+
+  it("limits changes to group leads and Administrators, and refuses other role scopes", async () => {
+    const { group, binding } = await setup();
+    expect(
+      (
+        await write("PATCH", `/api/v1/bindings/${binding.id}`, bob, {
+          role: "Group lead",
+          revision: 1,
+        })
+      ).status,
+    ).toBe(403);
+    await invite(robin, {
+      scopeType: "group",
+      scopeId: group.id,
+      email: alice.email!,
+      role: "Group lead",
+    });
+    await me(alice);
+    expect(
+      (
+        await write("PATCH", `/api/v1/bindings/${binding.id}`, alice, {
+          role: "Group lead",
+          revision: 1,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await write("PATCH", `/api/v1/bindings/${binding.id}`, robin, {
+          role: "Administrator",
+          revision: 2,
+        })
+      ).status,
+    ).toBe(400);
+    const organization = await invite(robin, {
+      email: carol.email!,
+      role: "Auditor",
+    });
+    await me(carol);
+    const organizationBinding = (
+      (await organization.json()) as { binding: Binding }
+    ).binding;
+    expect(
+      (
+        await write(
+          "PATCH",
+          `/api/v1/bindings/${organizationBinding.id}`,
+          robin,
+          { role: "Member", revision: 2 },
+        )
+      ).status,
+    ).toBe(400);
+  });
+
+  it("keeps existing roles when the requested role is already held", async () => {
+    const { group, binding } = await setup();
+    await invite(robin, {
+      scopeType: "group",
+      scopeId: group.id,
+      email: bob.email!,
+      role: "Group lead",
+    });
+    expect(
+      (
+        await write("PATCH", `/api/v1/bindings/${binding.id}`, robin, {
+          role: "Group lead",
+          revision: 1,
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (await me(bob)).person.groups.map((entry) => entry.role).sort(),
+    ).toEqual(["Group lead", "Member"]);
+  });
+
+  it("serializes concurrent changes and keeps inherited management within its subtree", async () => {
+    const { group, binding } = await setup();
+    const childResponse = await write("POST", "/api/v1/groups", robin, {
+      name: "Nested team",
+      parentId: group.id,
+    });
+    const { group: child } = await childResponse.json();
+    const otherResponse = await write("POST", "/api/v1/groups", robin, {
+      name: "Other team",
+    });
+    const { group: other } = await otherResponse.json();
+    await invite(robin, {
+      email: alice.email!,
+      role: "Group lead",
+      scopeType: "group",
+      scopeId: group.id,
+    });
+    await me(alice);
+    const childBindingResponse = await invite(robin, {
+      email: bob.email!,
+      role: "Member",
+      scopeType: "group",
+      scopeId: child.id,
+    });
+    const { binding: childBinding } = await childBindingResponse.json();
+    const otherBindingResponse = await invite(robin, {
+      email: bob.email!,
+      role: "Member",
+      scopeType: "group",
+      scopeId: other.id,
+    });
+    const { binding: otherBinding } = await otherBindingResponse.json();
+    expect(
+      (
+        await write("PATCH", `/api/v1/bindings/${childBinding.id}`, alice, {
+          role: "Group lead",
+          revision: 1,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await write("PATCH", `/api/v1/bindings/${otherBinding.id}`, alice, {
+          role: "Group lead",
+          revision: 1,
+        })
+      ).status,
+    ).toBe(403);
+    const changes = await Promise.all(
+      [1, 2].map(() =>
+        write("PATCH", `/api/v1/bindings/${binding.id}`, robin, {
+          role: "Group lead",
+          revision: 1,
+        }),
+      ),
+    );
+    expect(changes.map((response) => response.status).sort()).toEqual([
+      200, 409,
+    ]);
+    const managed = await service!.request("/api/v1/groups?management=true", {
+      as: alice,
+    });
+    expect(
+      (await managed.json()).groups
+        .map((entry: { id: string }) => entry.id)
+        .sort(),
+    ).toEqual([group.id, child.id].sort());
+  });
+});
+
 interface Binding {
   id: string;
   email: string;

@@ -161,7 +161,28 @@ them into `dist/`, so the server image carries the build and none of them.
   requires confirmation and quotes the record's revision.
 - The Admin page lists members, roles, groups, and pending invitations, and
   lets an Administrator create nested groups and invite people by email. The
-  Activity page shows every recorded action with its actor, time, target,
+  Groups tab opens each group's members at `/admin/groups/:groupId`.
+  Administrators and the group's leads change an accepted Member or Group lead
+  role in a confirmation dialog, against the revision they reviewed. The same
+  binding keeps its person even after their email changes. Inherited roles are
+  labeled with their granting group and are edited there. Member rows link to
+  group role management. Group and text filters are retained in the URL.
+  Integrations shows deployment configuration status for sign-in, invitation
+  email, and WeCom delivery, with links to group and workflow settings.
+  Administrators and Auditors read this status; credentials are never returned.
+  Personal token management remains in Personal settings; the former
+  `/admin/tokens` URL redirects to `/settings/tokens`.
+  The Admin header identifies organization administration and uses these local
+  filters instead of workflow controls.
+  The top bar's Group selector filters the workflow catalog or Skill library;
+  Workflow and Version open the corresponding record and preserve Questionnaire
+  or Evaluations context. Runs select a workflow, and Skills select a group.
+  Selection restores from deep links and browser history. Search returns
+  permitted workflows, questions, and Skills in that context, including draft
+  questions only for their Engineers and Administrators, and links to each
+  record. Typing cancels older requests; failed searches offer Enter to retry.
+  The version selector has room for its full placeholder.
+  The Activity page shows every recorded action with its actor, time, target,
   channel, and reason, filtered by actor, action, target type, and channel.
   Auditors and Administrators read all of it.
 - Questionnaire's **Drafting jobs and suggestions** panel (#55) has a URL and

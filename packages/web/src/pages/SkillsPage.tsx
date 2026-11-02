@@ -66,6 +66,7 @@ export function SkillsPage() {
   const navigate = useNavigate();
   const { skillId, versionId } = useParams();
   const [parameters, setParameters] = useSearchParams();
+  const groupId = parameters.get("group");
   const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
   const [versions, setVersions] = useState<SkillVersion[] | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -199,32 +200,34 @@ export function SkillsPage() {
         <div className="three-pane skills-registry">
           <aside className="pane" aria-label={t("skills.library")}>
             <h2 className="pane-title">{t("skills.library")}</h2>
-            {catalog.skills.length === 0 && (
-              <p className="muted">{t("skills.empty")}</p>
-            )}
+            {catalog.skills.filter(
+              (skill) => !groupId || skill.groupId === groupId,
+            ).length === 0 && <p className="muted">{t("skills.empty")}</p>}
             <ul className="skills-list">
-              {catalog.skills.map((skill) => (
-                <li key={skill.id}>
-                  <Link
-                    className={
-                      skill.id === skillId
-                        ? "skills-link selected"
-                        : "skills-link"
-                    }
-                    aria-current={skill.id === skillId ? "page" : undefined}
-                    to={`/skills/${encodeURIComponent(skill.id)}`}
-                  >
-                    <strong>{skill.name}</strong>
-                    <span className="muted">
-                      {
-                        catalog.groups.find(
-                          (group) => group.id === skill.groupId,
-                        )?.name
+              {catalog.skills
+                .filter((skill) => !groupId || skill.groupId === groupId)
+                .map((skill) => (
+                  <li key={skill.id}>
+                    <Link
+                      className={
+                        skill.id === skillId
+                          ? "skills-link selected"
+                          : "skills-link"
                       }
-                    </span>
-                  </Link>
-                </li>
-              ))}
+                      aria-current={skill.id === skillId ? "page" : undefined}
+                      to={`/skills/${encodeURIComponent(skill.id)}`}
+                    >
+                      <strong>{skill.name}</strong>
+                      <span className="muted">
+                        {
+                          catalog.groups.find(
+                            (group) => group.id === skill.groupId,
+                          )?.name
+                        }
+                      </span>
+                    </Link>
+                  </li>
+                ))}
             </ul>
             {version !== null && (
               <>

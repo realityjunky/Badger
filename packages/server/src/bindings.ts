@@ -11,6 +11,7 @@ import {
 } from "./authorization.js";
 import type { Database, Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
+import { RequestError } from "./http/errors.js";
 import type { Person } from "./people.js";
 import { toIsoString } from "./util.js";
 import {
@@ -518,6 +519,65 @@ export type RemoveBindingResult =
   | { kind: "removed"; binding: RoleBinding }
   | { kind: "stale"; binding: RoleBinding }
   | { kind: "missing" };
+
+export async function changeGroupRole(
+  database: Database,
+  dependencies: ServiceDependencies,
+  context: WriteContext,
+  id: string,
+  revision: number,
+  role: GroupRole,
+): Promise<RoleBinding> {
+  try {
+    return await database.transaction(async (tx) => {
+      const current = await readBinding(tx, id, true);
+      if (current === null) throw new RequestError(404, "No such role binding");
+      if (current.scope_type !== "group" || current.person_id === null)
+        throw new RequestError(
+          400,
+          "Only an accepted group role can be changed",
+        );
+      if (current.revision !== revision)
+        throw new RequestError(409, "The binding changed since you read it", {
+          binding: toBinding(current),
+        });
+      if (current.role === role) return toBinding(current);
+      const changed = await tx.query<BindingRow>(
+        `update role_bindings set role = $1, revision = revision + 1, updated_at = $2
+          where id = $3 returning ${BINDING_COLUMNS}`,
+        [role, dependencies.clock.now(), id],
+      );
+      const binding = changed.rows[0]!;
+      await recordAudit(tx, dependencies, {
+        actor: { personId: context.personId, credential: context.credential },
+        channel: context.channel,
+        action: "role_binding.changed",
+        target: {
+          type: "role_binding",
+          id,
+          label: await bindingLabel(tx, binding),
+        },
+        before: { revision, hash: null },
+        after: { revision: binding.revision, hash: null },
+        reason: `Group role changed from ${current.role} to ${role}`,
+        requestId: context.requestId,
+      });
+      return toBinding(binding);
+    });
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "23505"
+    )
+      throw new RequestError(
+        409,
+        "This person already holds that role in the group",
+      );
+    throw error;
+  }
+}
 
 /**
  * Removes a binding against the revision the caller read. The write and its

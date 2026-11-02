@@ -512,7 +512,57 @@ const versionDetail = (selected: typeof version) => ({
 
 /** Explicit fixture routes; an unknown ID can never fall through to live data. */
 export function demoResponse(path: string, query: URLSearchParams): unknown {
+  if (path === "/search") {
+    const needle = (query.get("q") ?? "").trim().toLocaleLowerCase();
+    if (
+      !needle ||
+      (query.has("group") && query.get("group") !== workflow.groupId) ||
+      (query.has("workflow") && query.get("workflow") !== workflow.id) ||
+      (query.has("version") &&
+        ![version.id, draftVersion.id].includes(query.get("version") ?? ""))
+    )
+      return { results: [] };
+    return {
+      results: [
+        {
+          kind: "workflow",
+          id: workflow.id,
+          label: workflow.name,
+          context: workflow.goal,
+          href: `/workflows/${workflow.id}`,
+        },
+        {
+          kind: "question",
+          id: question.id,
+          label: question.text,
+          context: workflow.name,
+          href: `/questionnaire/questions/${question.id}`,
+        },
+        {
+          kind: "skill",
+          id: pin.skillId,
+          label: pin.skillName,
+          context: "Example team",
+          href: `/skills/${pin.skillId}`,
+        },
+      ].filter((result) =>
+        `${result.label} ${result.context}`
+          .toLocaleLowerCase()
+          .includes(needle),
+      ),
+    };
+  }
   const records: Record<string, unknown> = {
+    "/groups": {
+      groups: [
+        {
+          id: workflow.groupId,
+          name: "Example team",
+          parentId: null,
+          revision: 1,
+        },
+      ],
+    },
     "/me": {
       person: {
         id: "demo-viewer",

@@ -66,6 +66,9 @@ import { escapeHtml, renderHomePage, renderSignedOutPage } from "./page.js";
 import { replyTo, type Reply } from "./responses.js";
 import { handleWorkflows, workflowMethods } from "./workflows.js";
 import { handleTokens, tokenMethods } from "./tokens.js";
+import { handleGroupRoleChange } from "./group-roles.js";
+import { handleSearch } from "./search.js";
+import { handleIntegrations } from "./integrations.js";
 import { gateMethods, handleGate } from "./gates.js";
 import { dossierMethods, handleDossier } from "./dossier.js";
 import { planMethods, handlePlan } from "./plans.js";
@@ -201,7 +204,7 @@ function allowedMethods(path: string): string {
   }
   if (matchedId(INVITATION_EMAIL_PATH, path) !== null) return "POST";
   if (matchedId(BINDING_PATH, path) !== null) {
-    return "DELETE";
+    return "PATCH, DELETE";
   }
   if (path === `${API}/groups`) {
     return "GET, HEAD, POST";
@@ -932,6 +935,11 @@ export function createService(options: ServiceOptions, port: number): Service {
       blobs,
     };
     try {
+      if (path === `${API}/search`) return await handleSearch(authorized);
+      if (path === `${API}/admin/integrations`)
+        return handleIntegrations(authorized);
+      if (method === "PATCH" && matchedId(BINDING_PATH, path) !== null)
+        return await handleGroupRoleChange(authorized);
       if (path === `${API}/me/events`)
         return await handleEvents(
           authorized,
@@ -1144,8 +1152,18 @@ export function createService(options: ServiceOptions, port: number): Service {
       return handleCreateGroup(request, reply, person, principal, access);
     }
     if (path === `${API}/groups`) {
+      const visibility =
+        url.searchParams.get("management") === "true"
+          ? await managementVisibility(database, access, person)
+          : undefined;
+      if (visibility === null)
+        return reply.error(
+          403,
+          "denied",
+          "Only Administrators, Auditors, and Group leads read managed groups",
+        );
       return reply.json(200, {
-        groups: await listGroups(database, access, person),
+        groups: await listGroups(database, access, person, visibility),
       });
     }
     const groupId = matchedId(GROUP_PATH, path);

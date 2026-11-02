@@ -4,7 +4,10 @@ import {
   mayChangeBinding,
   inviteByEmail,
   resendInvitation,
+  changeGroupRole,
+  groupBindings,
   type Group,
+  type Member,
 } from "../src/api/organization.js";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -51,6 +54,88 @@ const tree = [
   group("sequencing", "assays"),
   group("clinical"),
 ];
+
+it("keeps group membership scoped to direct and ancestor grants", () => {
+  const member: Member = {
+    person: {
+      id: "person",
+      email: "person@example.com",
+      displayName: "Person",
+    },
+    organizationRoles: [],
+    groups: [],
+    bindings: [
+      {
+        id: "root",
+        role: "Member",
+        revision: 1,
+        scopeType: "group",
+        scopeId: "research",
+        scopeName: "Research",
+      },
+      {
+        id: "own",
+        role: "Group lead",
+        revision: 2,
+        scopeType: "group",
+        scopeId: "assays",
+        scopeName: "Assays",
+      },
+      {
+        id: "other",
+        role: "Member",
+        revision: 1,
+        scopeType: "group",
+        scopeId: "clinical",
+        scopeName: "Clinical",
+      },
+      {
+        id: "workflow",
+        role: "Engineer",
+        revision: 1,
+        scopeType: "workflow",
+        scopeId: "sequencing",
+        scopeName: "Workflow",
+      },
+    ],
+  };
+  expect(
+    groupBindings(member, "sequencing", tree).map((binding) => binding.id),
+  ).toEqual(["root", "own"]);
+  expect(
+    groupBindings(member, "clinical", tree).map((binding) => binding.id),
+  ).toEqual(["other"]);
+});
+
+it("changes the reviewed binding by identity and preserves a revision conflict", async () => {
+  const fetcher = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ error: { code: "conflict" } }), {
+      status: 409,
+    }),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  expect(
+    await changeGroupRole(
+      "/badger",
+      {
+        id: "binding/1",
+        revision: 3,
+        role: "Member",
+        scopeType: "group",
+        scopeId: "group",
+        scopeName: "Group",
+      },
+      "Group lead",
+    ),
+  ).toEqual({ kind: "conflict" });
+  expect(fetcher).toHaveBeenCalledWith(
+    "/badger/api/v1/bindings/binding%2F1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ role: "Group lead", revision: 3 }),
+    }),
+  );
+});
 
 describe("the groups a person leads", () => {
   it("reach every group inside a led group, and nothing beside or above it", () => {

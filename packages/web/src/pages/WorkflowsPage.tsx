@@ -1,6 +1,11 @@
 import { Alert, Button, Popconfirm, Select, Space, Tag } from "antd";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import {
   createWorkflow,
   editWorkflow,
@@ -43,6 +48,8 @@ export function WorkflowsPage() {
   const { t, format } = useI18n();
   const { notice } = useLiveUpdates();
   const { workflowId, versionId } = useParams();
+  const [parameters] = useSearchParams();
+  const groupId = parameters.get("group");
   const navigate = useNavigate();
   const basePath = readBasePath(document);
   const [state, setState] = useState<State>({ kind: "loading" });
@@ -255,47 +262,51 @@ export function WorkflowsPage() {
       )}
       {state.kind === "catalog" && (
         <div className="workflow-catalog">
-          {state.value.workflows.length === 0 && (
+          {state.value.workflows.filter(
+            (entry) => !groupId || entry.groupId === groupId,
+          ).length === 0 && (
             <p className="empty-state">{t("workflow.empty")}</p>
           )}
-          {state.value.workflows.map((entry) => (
-            <article className="workflow-card" key={entry.id}>
-              <div className="workflow-card-heading">
-                <div>
-                  <h2>
-                    <Link to={`/workflows/${encodeURIComponent(entry.id)}`}>
-                      {entry.name}
-                    </Link>
-                  </h2>
-                  <p className="muted">{entry.groupName}</p>
+          {state.value.workflows
+            .filter((entry) => !groupId || entry.groupId === groupId)
+            .map((entry) => (
+              <article className="workflow-card" key={entry.id}>
+                <div className="workflow-card-heading">
+                  <div>
+                    <h2>
+                      <Link to={`/workflows/${encodeURIComponent(entry.id)}`}>
+                        {entry.name}
+                      </Link>
+                    </h2>
+                    <p className="muted">{entry.groupName}</p>
+                  </div>
+                  <Space wrap>
+                    <Tag>
+                      {t(
+                        entry.intent === "new-skill"
+                          ? "workflow.intent.new"
+                          : "workflow.intent.upgrade",
+                      )}
+                    </Tag>
+                    <Tag>{entry.locale}</Tag>
+                  </Space>
                 </div>
-                <Space wrap>
-                  <Tag>
-                    {t(
-                      entry.intent === "new-skill"
-                        ? "workflow.intent.new"
-                        : "workflow.intent.upgrade",
-                    )}
-                  </Tag>
-                  <Tag>{entry.locale}</Tag>
-                </Space>
-              </div>
-              <p>{entry.goal}</p>
-              {entry.latestVersion !== null && (
-                <>
-                  <Link
-                    className="workflow-version-link"
-                    to={`/workflows/${encodeURIComponent(entry.id)}/versions/${encodeURIComponent(entry.latestVersion.id)}`}
-                  >
-                    {format("workflow.versionNumber", {
-                      number: entry.latestVersion.number,
-                    })}
-                  </Link>
-                  <StageTrack stages={entry.latestVersion.stages} />
-                </>
-              )}
-            </article>
-          ))}
+                <p>{entry.goal}</p>
+                {entry.latestVersion !== null && (
+                  <>
+                    <Link
+                      className="workflow-version-link"
+                      to={`/workflows/${encodeURIComponent(entry.id)}/versions/${encodeURIComponent(entry.latestVersion.id)}`}
+                    >
+                      {format("workflow.versionNumber", {
+                        number: entry.latestVersion.number,
+                      })}
+                    </Link>
+                    <StageTrack stages={entry.latestVersion.stages} />
+                  </>
+                )}
+              </article>
+            ))}
         </div>
       )}
       {detail !== null && (

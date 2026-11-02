@@ -11,7 +11,14 @@ import {
 } from "antd";
 import type { TableColumnsType } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import {
+  Link,
+  Navigate,
+  useLocation,
+  useMatch,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 import {
   createGroup,
   inviteByEmail,
@@ -20,25 +27,24 @@ import {
   mayChangeBinding,
   removeBinding,
   resendInvitation,
+  changeGroupRole,
+  groupBindings,
   type Group,
   type Invitation,
   type Member,
   type OrganizationRecords,
   type WriteOutcome,
   type ScopeType,
+  type MemberBinding,
 } from "../api/organization.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
+import { GroupRoleDialog } from "./admin/GroupRoleDialog.js";
+import { IntegrationStatus } from "./admin/IntegrationStatus.js";
 
-const TABS = [
-  "members",
-  "groups",
-  "invitations",
-  "integrations",
-  "tokens",
-] as const;
+const TABS = ["members", "groups", "invitations", "integrations"] as const;
 type TabKey = (typeof TABS)[number];
 
 function isTab(value: string | undefined): value is TabKey {
@@ -59,6 +65,10 @@ export function AdminPage() {
   const { t } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
+  const [parameters, setParameters] = useSearchParams();
+  const selectedGroupId = useMatch("/admin/groups/:groupId")?.params.groupId;
+  const groupFilter = selectedGroupId ?? parameters.get("group");
+  const search = parameters.get("q") ?? "";
   const basePath = readBasePath(document);
   const segment = location.pathname.split("/")[2];
   const active: TabKey = isTab(segment) ? segment : "members";
@@ -70,6 +80,12 @@ export function AdminPage() {
   const groupLead =
     person?.groups.some((group) => group.role === "Group lead") ?? false;
   const mayManage = administrator || groupLead;
+  const mayReadIntegrations =
+    administrator || (person?.roles.includes("Auditor") ?? false);
+  const [editingRole, setEditingRole] = useState<{
+    member: Member;
+    binding: MemberBinding;
+  } | null>(null);
 
   const [state, setState] = useState<State>({ kind: "loading" });
   const [notice, setNotice] = useState<string | null>(null);
@@ -137,7 +153,11 @@ export function AdminPage() {
       } else if (result.kind !== "rejected") {
         setNoticeType("warning");
         setNotice(
-          result.kind === "denied" ? t("admin.denied") : t("admin.writeFailed"),
+          result.kind === "denied"
+            ? t("admin.denied")
+            : result.kind === "conflict"
+              ? t("admin.role.conflict")
+              : t("admin.writeFailed"),
         );
       }
       return result;
@@ -177,10 +197,20 @@ export function AdminPage() {
       render: (_, member) => (
         <Space size={[4, 4]} wrap>
           {[
-            ...member.organizationRoles,
-            ...member.groups.map((group) => `${group.role} · ${group.name}`),
+            ...(selectedGroupId ? [] : member.organizationRoles),
+            ...(selectedGroupId
+              ? groupBindings(member, selectedGroupId, groups ?? []).map(
+                  (binding) =>
+                    binding.scopeId === selectedGroupId
+                      ? binding.role
+                      : `${binding.role} · ${t("admin.role.inherited")} ${binding.scopeName ?? binding.scopeId}`,
+                )
+              : member.groups.map((group) => `${group.role} · ${group.name}`)),
             ...member.bindings
-              .filter((binding) => binding.scopeType === "workflow")
+              .filter(
+                (binding) =>
+                  !selectedGroupId && binding.scopeType === "workflow",
+              )
               .map(
                 (binding) =>
                   `${binding.role} · ${binding.scopeName ?? binding.scopeId}`,
@@ -198,7 +228,43 @@ export function AdminPage() {
             key: "actions",
             render: (_: unknown, member: Member) => (
               <Space size={4} wrap>
-                {member.bindings.find(mayChange) && (
+                {!selectedGroupId &&
+                  [
+                    ...new Set(
+                      member.bindings
+                        .filter((binding) => binding.scopeType === "group")
+                        .map((binding) => binding.scopeId),
+                    ),
+                  ].map(
+                    (groupId) =>
+                      groupId && (
+                        <Link
+                          key={groupId}
+                          to={`/admin/groups/${encodeURIComponent(groupId)}?q=${encodeURIComponent(member.person.email)}`}
+                        >
+                          {t("admin.role.manage")} ·{" "}
+                          {groupNames.get(groupId) ?? groupId}
+                        </Link>
+                      ),
+                  )}
+                {selectedGroupId &&
+                  member.bindings
+                    .filter(
+                      (binding) =>
+                        binding.scopeType === "group" &&
+                        binding.scopeId === selectedGroupId &&
+                        mayChange(binding),
+                    )
+                    .map((binding) => (
+                      <Button
+                        key={`change-${binding.id}`}
+                        size="small"
+                        onClick={() => setEditingRole({ member, binding })}
+                      >
+                        {t("admin.role.change")} · {binding.role}
+                      </Button>
+                    ))}
+                {!selectedGroupId && member.bindings.find(mayChange) && (
                   <Button
                     size="small"
                     disabled={sendingInvitation !== null}
@@ -209,21 +275,29 @@ export function AdminPage() {
                     {t("admin.invite.resend")}
                   </Button>
                 )}
-                {member.bindings.filter(mayChange).map((binding) => (
-                  <Popconfirm
-                    key={binding.id}
-                    title={t("admin.removeBindingConfirm")}
-                    onConfirm={() =>
-                      void reportWrite(
-                        removeBinding(basePath, binding.id, binding.revision),
-                      )
-                    }
-                  >
-                    <Button size="small" danger>
-                      {binding.role}
-                    </Button>
-                  </Popconfirm>
-                ))}
+                {member.bindings
+                  .filter(
+                    (binding) =>
+                      mayChange(binding) &&
+                      (!selectedGroupId ||
+                        (binding.scopeType === "group" &&
+                          binding.scopeId === selectedGroupId)),
+                  )
+                  .map((binding) => (
+                    <Popconfirm
+                      key={binding.id}
+                      title={t("admin.removeBindingConfirm")}
+                      onConfirm={() =>
+                        void reportWrite(
+                          removeBinding(basePath, binding.id, binding.revision),
+                        )
+                      }
+                    >
+                      <Button size="small" danger>
+                        {t("admin.removeRole")} · {binding.role}
+                      </Button>
+                    </Popconfirm>
+                  ))}
               </Space>
             ),
           },
@@ -232,7 +306,15 @@ export function AdminPage() {
   ];
 
   const groupColumns: TableColumnsType<Group> = [
-    { title: t("admin.groups.name"), dataIndex: "name", key: "name" },
+    {
+      title: t("admin.groups.name"),
+      key: "name",
+      render: (_, group) => (
+        <Link to={`/admin/groups/${encodeURIComponent(group.id)}`}>
+          {group.name}
+        </Link>
+      ),
+    },
     {
       title: t("admin.groups.parent"),
       key: "parent",
@@ -302,7 +384,40 @@ export function AdminPage() {
       : []),
   ];
 
-  const placeholder = <p className="empty-state">{t("page.placeholder")}</p>;
+  const matches = (value: string) =>
+    value.toLocaleLowerCase().includes(search.toLocaleLowerCase());
+  const visibleMembers =
+    state.kind === "ready"
+      ? state.records.members.filter(
+          (member) =>
+            (!groupFilter ||
+              groupBindings(member, groupFilter, state.records.groups).length >
+                0) &&
+            matches(
+              [
+                member.person.displayName,
+                member.person.email,
+                ...member.organizationRoles,
+                ...member.groups.flatMap((group) => [group.name, group.role]),
+              ].join(" "),
+            ),
+        )
+      : [];
+  const selectedGroup = groups?.find((group) => group.id === selectedGroupId);
+  const filterChanged = (key: string, value: string | undefined) =>
+    setParameters(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true },
+    );
+
+  if (segment === "tokens") return <Navigate to="/settings/tokens" replace />;
+  if (segment === "integrations" && person && !mayReadIntegrations)
+    return <Navigate to="/admin/members" replace />;
 
   return (
     <div className="page" data-testid="page-admin">
@@ -332,88 +447,175 @@ export function AdminPage() {
         <Alert type="error" showIcon message={t("admin.failed")} />
       )}
       {state.kind === "ready" && (
-        <Tabs
-          className="underline-tabs"
-          activeKey={active}
-          onChange={(key) => navigate(`/admin/${key}`)}
-          items={[
-            {
-              key: "members",
-              label: t("admin.tab.members"),
-              children: (
-                <Table<Member>
-                  rowKey={(member) => member.person.id}
-                  dataSource={state.records.members}
-                  columns={memberColumns}
-                  pagination={false}
-                  size="small"
+        <>
+          {active !== "integrations" && (
+            <Space wrap style={{ marginBottom: 16 }}>
+              {!selectedGroupId && (
+                <Select
+                  aria-label={t("admin.filter.group")}
+                  placeholder={t("scope.allGroups")}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  style={{ minWidth: 200 }}
+                  value={parameters.get("group") ?? undefined}
+                  options={state.records.groups.map((group) => ({
+                    value: group.id,
+                    label: group.name,
+                  }))}
+                  onChange={(value: string | undefined) =>
+                    filterChanged("group", value)
+                  }
                 />
-              ),
-            },
-            {
-              key: "groups",
-              label: t("admin.tab.groups"),
-              children: (
-                <GroupPanel
-                  groups={state.records.groups}
-                  groupNames={groupNames}
-                  columns={groupColumns}
-                  canCreate={administrator}
-                  onCreate={async (name, parentId) => {
-                    await reportWrite(createGroup(basePath, name, parentId));
-                  }}
-                />
-              ),
-            },
-            {
-              key: "invitations",
-              label: t("admin.tab.invitations"),
-              children: (
-                <Space
-                  direction="vertical"
-                  size="large"
-                  style={{ width: "100%" }}
-                >
-                  {mayManage && (
-                    <InvitePanel
-                      groups={
-                        administrator
-                          ? state.records.groups
-                          : state.records.groups.filter((group) =>
-                              led.has(group.id),
-                            )
-                      }
-                      administrator={administrator}
-                      onInvite={(input) =>
-                        reportWrite(inviteByEmail(basePath, input))
-                      }
-                    />
-                  )}
-                  {state.records.invitations.length === 0 ? (
-                    <p className="empty-state">{t("admin.invitations.none")}</p>
+              )}
+              <Input
+                allowClear
+                aria-label={t("admin.filter.search")}
+                placeholder={t("admin.filter.search")}
+                value={search}
+                onChange={(event) => filterChanged("q", event.target.value)}
+              />
+            </Space>
+          )}
+          <Tabs
+            className="underline-tabs"
+            activeKey={active}
+            onChange={(key) => navigate(`/admin/${key}${location.search}`)}
+            items={[
+              {
+                key: "members",
+                label: t("admin.tab.members"),
+                children: (
+                  <Table<Member>
+                    rowKey={(member) => member.person.id}
+                    dataSource={visibleMembers}
+                    columns={memberColumns}
+                    pagination={false}
+                    size="small"
+                  />
+                ),
+              },
+              {
+                key: "groups",
+                label: t("admin.tab.groups"),
+                children: selectedGroupId ? (
+                  selectedGroup ? (
+                    <section>
+                      <Space wrap>
+                        <Link to="/admin/groups">{t("admin.groups.back")}</Link>
+                        <h2>{selectedGroup.name}</h2>
+                        {(administrator || led.has(selectedGroup.id)) && (
+                          <Link
+                            to={`/admin/invitations?group=${encodeURIComponent(selectedGroup.id)}`}
+                          >
+                            {t("admin.invite.submit")}
+                          </Link>
+                        )}
+                      </Space>
+                      <p className="muted">{t("admin.role.inheritance")}</p>
+                      <Table<Member>
+                        rowKey={(member) => member.person.id}
+                        dataSource={visibleMembers}
+                        columns={memberColumns}
+                        pagination={false}
+                        size="small"
+                      />
+                    </section>
                   ) : (
-                    <Table<Invitation>
-                      rowKey="id"
-                      dataSource={state.records.invitations}
-                      columns={invitationColumns}
-                      pagination={false}
-                      size="small"
-                    />
-                  )}
-                </Space>
-              ),
-            },
-            {
-              key: "integrations",
-              label: t("admin.tab.integrations"),
-              children: placeholder,
-            },
-            {
-              key: "tokens",
-              label: t("admin.tab.tokens"),
-              children: placeholder,
-            },
-          ]}
+                    <Alert type="warning" title={t("admin.groups.missing")} />
+                  )
+                ) : (
+                  <GroupPanel
+                    groups={state.records.groups.filter(
+                      (group) =>
+                        (!groupFilter || group.id === groupFilter) &&
+                        matches(group.name),
+                    )}
+                    parentGroups={state.records.groups}
+                    groupNames={groupNames}
+                    columns={groupColumns}
+                    canCreate={administrator}
+                    onCreate={async (name, parentId) => {
+                      await reportWrite(createGroup(basePath, name, parentId));
+                    }}
+                  />
+                ),
+              },
+              {
+                key: "invitations",
+                label: t("admin.tab.invitations"),
+                children: (
+                  <Space
+                    direction="vertical"
+                    size="large"
+                    style={{ width: "100%" }}
+                  >
+                    {mayManage && (
+                      <InvitePanel
+                        groups={
+                          administrator
+                            ? state.records.groups
+                            : state.records.groups.filter((group) =>
+                                led.has(group.id),
+                              )
+                        }
+                        administrator={administrator}
+                        selectedGroupId={parameters.get("group") ?? undefined}
+                        key={parameters.get("group") ?? "all"}
+                        onInvite={(input) =>
+                          reportWrite(inviteByEmail(basePath, input))
+                        }
+                      />
+                    )}
+                    {state.records.invitations.length === 0 ? (
+                      <p className="empty-state">
+                        {t("admin.invitations.none")}
+                      </p>
+                    ) : (
+                      <Table<Invitation>
+                        rowKey="id"
+                        dataSource={state.records.invitations.filter(
+                          (invitation) =>
+                            (!groupFilter ||
+                              (invitation.scopeType === "group" &&
+                                invitation.scopeId === groupFilter)) &&
+                            matches(
+                              `${invitation.email} ${invitation.role} ${invitation.scopeName ?? ""}`,
+                            ),
+                        )}
+                        columns={invitationColumns}
+                        pagination={false}
+                        size="small"
+                      />
+                    )}
+                  </Space>
+                ),
+              },
+              {
+                key: "integrations",
+                label: t("admin.tab.integrations"),
+                children:
+                  active === "integrations" && mayReadIntegrations ? (
+                    <IntegrationStatus />
+                  ) : null,
+              },
+            ].filter(
+              (tab) => tab.key !== "integrations" || mayReadIntegrations,
+            )}
+          />
+        </>
+      )}
+      {editingRole && (
+        <GroupRoleDialog
+          key={editingRole.binding.id}
+          member={editingRole.member}
+          binding={editingRole.binding}
+          groupName={groupNames.get(editingRole.binding.scopeId ?? "") ?? ""}
+          onSave={(role) =>
+            reportWrite(changeGroupRole(basePath, editingRole.binding, role))
+          }
+          onReload={() => reload()}
+          onClose={() => setEditingRole(null)}
         />
       )}
     </div>
@@ -422,12 +624,14 @@ export function AdminPage() {
 
 function GroupPanel({
   groups,
+  parentGroups,
   groupNames,
   columns,
   canCreate,
   onCreate,
 }: {
   groups: Group[];
+  parentGroups: Group[];
   groupNames: Map<string, string>;
   columns: TableColumnsType<Group>;
   canCreate: boolean;
@@ -470,7 +674,7 @@ function GroupPanel({
             allowClear
             placeholder={t("admin.groups.topLevel")}
             onChange={(value) => setParentId(value ?? null)}
-            options={groups.map((group) => ({
+            options={parentGroups.map((group) => ({
               value: group.id,
               label: groupNames.get(group.id) ?? group.name,
             }))}
@@ -498,10 +702,12 @@ function GroupPanel({
 function InvitePanel({
   groups,
   administrator,
+  selectedGroupId,
   onInvite,
 }: {
   groups: Group[];
   administrator: boolean;
+  selectedGroupId?: string;
   onInvite(input: {
     email: string;
     role: string;
@@ -513,11 +719,13 @@ function InvitePanel({
   const { t } = useI18n();
   const [email, setEmail] = useState("");
   const [scopeType, setScopeType] = useState<"organization" | "group">(
-    administrator ? "organization" : "group",
+    selectedGroupId ? "group" : administrator ? "organization" : "group",
   );
-  const [scopeId, setScopeId] = useState<string | null>(null);
+  const [scopeId, setScopeId] = useState<string | null>(
+    selectedGroupId ?? null,
+  );
   const [role, setRole] = useState(
-    administrator
+    administrator && !selectedGroupId
       ? (ORGANIZATION_ROLES[0] ?? "Administrator")
       : (GROUP_ROLES[1] ?? "Member"),
   );

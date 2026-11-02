@@ -86,8 +86,8 @@ export const layout = {
   railDrawerBreakpoint: 1024,
   gutter: 16,
   scopeSelectWidth: 150,
-  scopeSelectWorkflowWidth: 165,
-  scopeSelectVersionWidth: 120,
+  scopeSelectWorkflowWidth: 185,
+  scopeSelectVersionWidth: 160,
 } as const;
 
 /** Base 14px on the 13/14/16/20/24 scale; page titles at 26px. */

@@ -291,7 +291,7 @@ body {
 .top-bar-search {
   flex: 1;
   max-width: 420px;
-  min-width: var(--badger-layout-scope-select-version-width);
+  min-width: 0;
 }
 
 .top-bar-actions {
@@ -299,6 +299,17 @@ body {
   align-items: center;
   gap: 4px;
   margin-left: auto;
+}
+
+.search-result {
+  display: flex;
+  flex-direction: column;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.search-result small {
+  color: var(--badger-color-text-muted);
 }
 
 .user-name {

@@ -48,6 +48,17 @@ describe("the read-only demo", () => {
       ["workflows/demo-workflow", { workflow: { name: "Sample review" } }],
       ["questionnaire", { versions: [{ workflowId: "demo-workflow" }] }],
       ["skills", { skills: [{ id: "demo-skill" }] }],
+      ["groups", { groups: [{ id: "demo-group", name: "Example team" }] }],
+      [
+        "search?q=sample",
+        {
+          results: [
+            { kind: "workflow", id: "demo-workflow" },
+            { kind: "question", id: "demo-question" },
+            { kind: "skill", id: "demo-skill" },
+          ],
+        },
+      ],
       ["me/runs", { runs: [{ id: "demo-run" }] }],
       [
         "runs/demo-run",
@@ -75,12 +86,29 @@ describe("the read-only demo", () => {
       "skills/real-skill/versions",
       "runs/real-run",
       "me/tokens",
-      "groups",
+      "groups/real-group",
     ]) {
       expect(
         (await service.request(`/demo/api/v1/${resource}`)).status,
         resource,
       ).toBe(404);
+    }
+  });
+
+  it("searches only fixtures within the selected demo scope", async () => {
+    service = await startTestService();
+    await service.closeDatabase();
+    for (const parameters of [
+      "q=",
+      "q=sample&group=real-group",
+      "q=sample&workflow=real-workflow",
+      "q=sample&version=real-version",
+    ]) {
+      const response = await service.request(
+        `/demo/api/v1/search?${parameters}`,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ results: [] });
     }
   });
 

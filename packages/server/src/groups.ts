@@ -165,8 +165,9 @@ export async function listGroups(
   database: Queryable,
   access: Access,
   person: Person,
+  visibility?: Visibility,
 ): Promise<Group[]> {
-  const visible = await visibleGroups(database, access, person);
+  const visible = visibility ?? (await visibleGroups(database, access, person));
   const rows = visible.everything
     ? await database.query<GroupRow>(
         `select ${GROUP_COLUMNS} from groups order by name, id`,

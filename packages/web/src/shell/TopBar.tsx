@@ -2,26 +2,26 @@ import {
   BellOutlined,
   GlobalOutlined,
   MenuOutlined,
-  SearchOutlined,
   UserOutlined,
 } from "@ant-design/icons";
 import {
   Badge,
   Button,
   Dropdown,
-  Input,
   Popover,
-  Select,
   Typography,
   type MenuProps,
 } from "antd";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { readBasePath } from "../app/paths.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
 import { useInbox } from "../inbox/InboxContext.js";
 import { useDemoMode } from "../app/DemoContext.js";
+import { ScopeSelector } from "./ScopeSelector.js";
+import { GlobalSearch } from "./GlobalSearch.js";
+import { scopeSelection, type ScopeSelection } from "./scope.js";
 
 export interface TopBarProps {
   drawerMode: boolean;
@@ -34,6 +34,20 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
   const { t, format } = useI18n();
   const { preferences, person, update } = usePreferences();
   const navigate = useNavigate();
+  const location = useLocation();
+  const administration =
+    location.pathname === "/admin" || location.pathname.startsWith("/admin/");
+  const contextual =
+    !administration &&
+    !location.pathname.startsWith("/settings") &&
+    location.pathname !== "/activity";
+  const [resolvedScope, setResolvedScope] = useState<
+    (ScopeSelection & { location: string }) | null
+  >(null);
+  const scope =
+    resolvedScope?.location === `${location.pathname}${location.search}`
+      ? resolvedScope
+      : scopeSelection(location.pathname, location.search);
   const inbox = useInbox();
   const [signOutFailed, setSignOutFailed] = useState(false);
 
@@ -123,50 +137,14 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
         />
       )}
 
-      <div
-        className="scope-selector"
-        data-testid="scope-selector"
-        role="group"
-        aria-label={t("topBar.scopeLabel")}
-      >
-        <Select
-          className="scope-select"
-          aria-label={t("scope.group")}
-          placeholder={t("scope.selectGroup")}
-          options={[]}
-          popupMatchSelectWidth={false}
-        />
-        <span className="scope-arrow" aria-hidden="true">
-          /
-        </span>
-        <Select
-          className="scope-select scope-select-workflow"
-          aria-label={t("scope.workflow")}
-          placeholder={t("scope.selectWorkflow")}
-          options={[]}
-          popupMatchSelectWidth={false}
-        />
-        <span className="scope-arrow" aria-hidden="true">
-          /
-        </span>
-        <Select
-          className="scope-select scope-select-version"
-          aria-label={t("scope.version")}
-          placeholder={t("scope.selectVersion")}
-          options={[]}
-          popupMatchSelectWidth={false}
-        />
-      </div>
-
-      <div className="top-bar-search">
-        <Input
-          allowClear
-          prefix={<SearchOutlined aria-hidden="true" />}
-          aria-label={t("topBar.search")}
-          placeholder={t("topBar.searchPlaceholder")}
-          data-testid="search-input"
-        />
-      </div>
+      {administration ? (
+        <Typography.Text>{t("admin.context")}</Typography.Text>
+      ) : (
+        <>
+          {contextual && <ScopeSelector onResolve={setResolvedScope} />}
+          <GlobalSearch scope={contextual ? scope : {}} />
+        </>
+      )}
 
       <div className="top-bar-actions">
         <Popover

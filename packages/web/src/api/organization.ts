@@ -106,6 +106,7 @@ export type WriteOutcome =
   | { kind: "ok"; invitationDelivery?: InvitationDelivery }
   | { kind: "denied" }
   | { kind: "rejected" }
+  | { kind: "conflict" }
   | { kind: "failed" };
 
 export interface InvitationDelivery {
@@ -236,7 +237,7 @@ export async function loadOrganization(
   signal?: AbortSignal,
 ): Promise<LoadOutcome<OrganizationRecords>> {
   const [groups, members, invitations] = await Promise.all([
-    get(basePath, "/groups", signal),
+    get(basePath, "/groups?management=true", signal),
     get(basePath, "/members", signal),
     get(basePath, "/invitations", signal),
   ]);
@@ -323,6 +324,7 @@ async function send(
     ) {
       return { kind: "rejected" };
     }
+    return { kind: "conflict" };
   }
   return { kind: "failed" };
 }
@@ -417,6 +419,38 @@ export async function removeBinding(
   return send("DELETE", basePath, `/bindings/${encodeURIComponent(id)}`, {
     revision,
   });
+}
+
+export function changeGroupRole(
+  basePath: string,
+  binding: MemberBinding,
+  role: string,
+): Promise<WriteOutcome> {
+  return send(
+    "PATCH",
+    basePath,
+    `/bindings/${encodeURIComponent(binding.id)}`,
+    { role, revision: binding.revision },
+  );
+}
+
+export function groupBindings(
+  member: Member,
+  groupId: string,
+  groups: readonly Group[],
+): MemberBinding[] {
+  const ancestors = new Set<string>();
+  let current: string | null = groupId;
+  while (current !== null && !ancestors.has(current)) {
+    ancestors.add(current);
+    current = groups.find((group) => group.id === current)?.parentId ?? null;
+  }
+  return member.bindings.filter(
+    (binding) =>
+      binding.scopeType === "group" &&
+      binding.scopeId !== null &&
+      ancestors.has(binding.scopeId),
+  );
 }
 
 /** The activity log's query string, with only the filters that are set. */

@@ -760,6 +760,36 @@ counts separately as pending work. Its items close when it is resolved.
 Comments and concerns advance the existing questionnaire revision, so the
 per-person event stream and polling refresh open records and inboxes.
 
+## Dashboard administration and search
+
+`PATCH /api/v1/bindings/:id` changes an accepted group binding with
+`{role, revision}`. Only `Member` and `Group lead` are accepted, and the caller
+must be an Administrator or a lead of that group or an ancestor. The existing
+person and binding IDs are preserved. Revision conflicts and an already-held
+role return 409 without changing access. The update and its Activity event
+commit together; the event records the old and new role. Organization roles,
+workflow roles, and pending invitations are not changed through this endpoint.
+Personal access tokens cannot call it.
+
+`GET /api/v1/groups?management=true` returns the groups within the caller's
+existing management visibility, including ancestors whose grants are inherited.
+It requires an Administrator, Auditor, or Group lead. The ordinary groups
+endpoint retains its existing visibility.
+
+`GET /api/v1/admin/integrations` requires an Administrator or Auditor and reports
+configuration readiness for sign-in, invitation email, and WeCom delivery. It
+returns provider kinds and booleans, never URLs or credentials, and performs no
+external connection tests. Configuration stays with the deployment.
+
+`GET /api/v1/search?q=...` searches authorized workflow names/goals, current
+question text, and Skill names, returning up to ten records per kind with
+dashboard links. Optional `group`, `workflow`, and `version` parameters narrow
+the scope; `version` also requires `workflow`. Query text is limited to 200 characters and matched literally;
+empty queries return no results. The existing workflow and Skill visibility
+and questionnaire composition capabilities govern the results, including draft
+privacy. This dashboard endpoint requires a person; it is not a token API.
+The read-only demo searches only its own fixtures.
+
 ## Personal access tokens
 
 People create and revoke their Agents' and CLI credentials at
