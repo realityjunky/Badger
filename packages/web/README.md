@@ -229,6 +229,11 @@ them into `dist/`, so the server image carries the build and none of them.
   Group, kernel-valid name, goal, intent, and locale. A workflow's version URL
   selects its saved frame and eight stage states. Its team panel shows role
   holders and invitations, and capable people assign or remove roles there.
+  Its email field suggests registered members of the workflow's Group,
+  including members inherited from ancestor Groups. Search by name or email
+  and select a person to fill their address, or enter an address manually.
+  Suggestions are available only to people who may manage workflow roles;
+  selecting a person saves nothing until **Assign role** is pressed.
   Workflow edits and version starts quote the revision the person reviewed;
   a conflict keeps the failed write visible until they reload and review.
 - Workflows include **Notifications and reminders** (#57): waiting items with

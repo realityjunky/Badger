@@ -127,6 +127,11 @@ export interface WorkflowBinding {
   pending: boolean;
   revision: number;
 }
+export interface WorkflowGroupMember {
+  id: string;
+  email: string;
+  displayName: string;
+}
 export interface WorkflowCatalog {
   workflows: (Workflow & {
     groupName: string;
@@ -140,6 +145,7 @@ export interface WorkflowDetail {
   groupName: string;
   versions: WorkflowVersion[];
   bindings: WorkflowBinding[];
+  groupMembers: WorkflowGroupMember[];
   capabilities: WorkflowCapabilities;
 }
 export interface WorkflowVersionDetail {

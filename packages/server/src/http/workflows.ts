@@ -1,6 +1,6 @@
 import { mayManageGroup } from "../authorization.js";
 import type { Database } from "../database/database.js";
-import { listGroups } from "../groups.js";
+import { listGroupMembers, listGroups } from "../groups.js";
 import { workflowCapabilities } from "../workflow-access.js";
 import {
   createWorkflow,
@@ -417,5 +417,8 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
     versions,
     capabilities,
     bindings: await listWorkflowBindings(database, workflow.id),
+    groupMembers: capabilities.manageRoles
+      ? await listGroupMembers(database, workflow.groupId)
+      : [],
   });
 }

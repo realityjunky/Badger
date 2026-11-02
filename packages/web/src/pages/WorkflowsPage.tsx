@@ -425,6 +425,7 @@ export function WorkflowsPage() {
             basePath={basePath}
             workflowId={detail.workflow.id}
             bindings={detail.bindings}
+            groupMembers={detail.groupMembers}
             mayManage={detail.capabilities.manageRoles}
             onChanged={reload}
           />

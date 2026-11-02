@@ -272,6 +272,9 @@ describe("workflow capabilities at the HTTP seam", () => {
       expect(read.status).toBe(200);
       const detail = await read.json();
       expect(detail).toMatchObject({
+        groupMembers: manages
+          ? [{ email: lead.email, displayName: lead.subject }]
+          : [],
         capabilities: {
           read: true,
           editWorkflow: manages,
@@ -442,6 +445,7 @@ describe("workflow capabilities at the HTTP seam", () => {
     });
     expect(read.status).toBe(200);
     expect(await read.json()).toMatchObject({
+      groupMembers: [],
       capabilities: {
         read: true,
         editWorkflow: false,
@@ -475,6 +479,116 @@ describe("workflow capabilities at the HTTP seam", () => {
         })
       ).status,
     ).toBe(403);
+  });
+});
+
+describe("workflow group member suggestions", () => {
+  it("offers registered direct and inherited members only to role managers", async () => {
+    const group = await setup();
+    const childResponse = await write("POST", "/groups", admin, {
+      name: "Assays",
+      parentId: group.id,
+    });
+    const { group: child } = (await childResponse.json()) as {
+      group: { id: string };
+    };
+    const siblingResponse = await write("POST", "/groups", admin, {
+      name: "Clinical",
+      parentId: group.id,
+    });
+    const { group: sibling } = (await siblingResponse.json()) as {
+      group: { id: string };
+    };
+    const descendantResponse = await write("POST", "/groups", admin, {
+      name: "Sequencing",
+      parentId: child.id,
+    });
+    const { group: descendant } = (await descendantResponse.json()) as {
+      group: { id: string };
+    };
+    const { workflow } = await createWorkflow(child.id);
+    const direct = {
+      subject: "direct",
+      email: "direct@example.com",
+      displayName: "Direct member",
+    };
+    const inherited = { ...engineer, displayName: "Ancestor member" };
+    const nested = { subject: "nested", email: "nested@example.com" };
+    const owner = { subject: "owner", email: "owner@example.com" };
+    for (const [scopeId, person] of [
+      [group.id, inherited],
+      [group.id, direct],
+      [child.id, direct],
+      [sibling.id, outsider],
+      [descendant.id, nested],
+    ] as const) {
+      expect(
+        (
+          await write("POST", "/bindings", admin, {
+            scopeType: "group",
+            scopeId,
+            role: "Member",
+            email: person.email,
+          })
+        ).status,
+      ).toBe(201);
+      expect((await service.request("/api/v1/me", { as: person })).status).toBe(
+        200,
+      );
+    }
+    await write("POST", "/bindings", admin, {
+      scopeType: "group",
+      scopeId: child.id,
+      role: "Member",
+      email: "pending@example.com",
+    });
+    const renamed = { ...inherited, email: "renamed@example.com" };
+    await service.request("/api/v1/me", { as: renamed });
+    expect(
+      (await assign(workflow.id, lead, owner.email, "Workflow owner")).status,
+    ).toBe(201);
+    for (const manager of [admin, lead, owner]) {
+      const response = await service.request(
+        `/api/v1/workflows/${workflow.id}`,
+        { as: manager },
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        capabilities: { manageRoles: true },
+        groupMembers: [
+          {
+            id: expect.any(String),
+            email: renamed.email,
+            displayName: inherited.displayName,
+          },
+          {
+            id: expect.any(String),
+            email: direct.email,
+            displayName: direct.displayName,
+          },
+          {
+            id: expect.any(String),
+            email: lead.email,
+            displayName: lead.subject,
+          },
+        ],
+      });
+    }
+    expect(
+      (await service.request("/api/v1/members", { as: owner })).status,
+    ).toBe(403);
+    const reader = await service.request(`/api/v1/workflows/${workflow.id}`, {
+      as: direct,
+    });
+    expect(await reader.json()).toMatchObject({
+      capabilities: { manageRoles: false },
+      groupMembers: [],
+    });
+    const assigned = await assign(workflow.id, owner, direct.email, "Observer");
+    expect(assigned.status).toBe(201);
+    expect(await assigned.json()).toMatchObject({
+      binding: { email: direct.email, pending: false },
+    });
   });
 });
 

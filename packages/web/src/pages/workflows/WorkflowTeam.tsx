@@ -1,10 +1,20 @@
-import { Alert, Button, Form, Input, Popconfirm, Select, Tag } from "antd";
+import {
+  Alert,
+  AutoComplete,
+  Button,
+  Form,
+  Input,
+  Popconfirm,
+  Select,
+  Tag,
+} from "antd";
 import { useState } from "react";
 import {
   assignWorkflowRole,
   removeWorkflowRole,
   WORKFLOW_ROLES,
   type WorkflowBinding,
+  type WorkflowGroupMember,
   type WorkflowRole,
 } from "../../api/workflows.js";
 import { useI18n } from "../../i18n/I18nContext.js";
@@ -27,12 +37,14 @@ export function WorkflowTeam({
   basePath,
   workflowId,
   bindings,
+  groupMembers,
   mayManage,
   onChanged,
 }: {
   basePath: string;
   workflowId: string;
   bindings: WorkflowBinding[];
+  groupMembers: WorkflowGroupMember[];
   mayManage: boolean;
   onChanged(): void;
 }) {
@@ -157,6 +169,8 @@ export function WorkflowTeam({
           <Form.Item
             name="email"
             label={t("workflow.email")}
+            extra={t("workflow.emailHelp")}
+            validateTrigger="onBlur"
             rules={[
               {
                 required: true,
@@ -165,7 +179,21 @@ export function WorkflowTeam({
               },
             ]}
           >
-            <Input type="email" autoComplete="email" />
+            <AutoComplete
+              disabled={busy}
+              defaultActiveFirstOption={false}
+              options={groupMembers.map((member) => ({
+                value: member.email,
+                label: `${member.displayName} · ${member.email}`,
+              }))}
+              filterOption={(input, option) =>
+                (option?.label ?? "")
+                  .toLowerCase()
+                  .includes(input.trim().toLowerCase())
+              }
+            >
+              <Input type="email" autoComplete="email" />
+            </AutoComplete>
           </Form.Item>
           <Form.Item
             name="role"

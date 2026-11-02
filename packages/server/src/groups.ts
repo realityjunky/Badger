@@ -9,7 +9,7 @@ import type {
 import { configuredAdministratorFor, visibleGroups } from "./authorization.js";
 import type { ServiceConfig } from "./config.js";
 import type { Database, Queryable } from "./database/database.js";
-import { isInside, lockGroupTree } from "./group-tree.js";
+import { isInside, lockGroupTree, withAncestors } from "./group-tree.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import type { Person } from "./people.js";
 import type { BindingRole } from "./bindings.js";
@@ -180,6 +180,39 @@ export async function listGroups(
         [[...visible.groupIds]],
       );
   return rows.rows.map(toGroup);
+}
+
+export interface GroupMember {
+  id: string;
+  email: string;
+  displayName: string;
+}
+
+export async function listGroupMembers(
+  database: Queryable,
+  groupId: string,
+): Promise<GroupMember[]> {
+  const groupIds = await withAncestors(database, [groupId]);
+  const result = await database.query<{
+    id: string;
+    email: string;
+    display_name: string;
+  }>(
+    `select p.id, p.email, p.display_name
+       from people p
+      where exists (
+        select 1 from role_bindings b
+         where b.person_id = p.id and b.scope_type = 'group'
+           and b.scope_id = any($1::text[])
+      )
+      order by p.display_name, p.id`,
+    [[...groupIds]],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+  }));
 }
 
 export type CreateGroupResult =
