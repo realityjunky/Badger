@@ -41,16 +41,22 @@ test.beforeEach(async ({ page }) => {
   await page.getByRole("menuitem", { name: "English", exact: true }).click();
 });
 
-test("Documentation is beside Language, opens the current section, and links to every guide", async ({
+test("Documentation is in the sidebar, opens the current section, and links to every guide", async ({
   page,
 }) => {
-  const documentation = page.getByRole("button", {
+  const rail = page.getByTestId("navigation-rail");
+  const documentation = rail.getByRole("button", {
     name: "Documentation",
     exact: true,
   });
   await expect(documentation).toBeVisible();
-  const language = page.getByTestId("language-switch");
-  await language.focus();
+  await expect(
+    page.getByTestId("top-bar").getByRole("button", {
+      name: "Documentation",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await rail.getByRole("link", { name: "Personal settings" }).focus();
   await page.keyboard.press("Tab");
   await expect(documentation).toBeFocused();
   await page.keyboard.press("Enter");
@@ -332,6 +338,8 @@ for (const theme of ["light", "dark"] as const) {
       })
       .click();
     await page.setViewportSize({ width: 375, height: 812 });
+    await page.getByTestId("rail-open").click();
+    await documentation.scrollIntoViewIfNeeded();
     await expect(documentation).toBeInViewport();
     await documentation.focus();
     await page.keyboard.press("Enter");

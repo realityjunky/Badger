@@ -1,6 +1,7 @@
 import {
   ApartmentOutlined,
   AppstoreOutlined,
+  BookOutlined,
   ExperimentOutlined,
   FolderOpenOutlined,
   HistoryOutlined,
@@ -12,12 +13,16 @@ import {
   SettingOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
-import { Button } from "antd";
+import { Button, Tooltip } from "antd";
 import type { ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { navigationSections, type NavigationItem } from "../app/navigation.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { useDemoMode } from "../app/DemoContext.js";
+import {
+  currentDocumentationSection,
+  documentationSearch,
+} from "../documentation/sections.js";
 
 const ICONS: Record<NavigationItem["icon"], ReactNode> = {
   work: <InboxOutlined />,
@@ -49,6 +54,8 @@ export function NavigationRail({
 }: NavigationRailProps) {
   const { t } = useI18n();
   const demoMode = useDemoMode();
+  const location = useLocation();
+  const navigate = useNavigate();
   const effectiveCollapsed = collapsed && !drawer;
 
   return (
@@ -94,6 +101,41 @@ export function NavigationRail({
                     </NavLink>
                   </li>
                 ))}
+                {section.title === "nav.section.system" && (
+                  <li>
+                    <Tooltip
+                      title={t("documentation.tooltip")}
+                      trigger={["hover", "focus"]}
+                      placement="right"
+                    >
+                      <button
+                        type="button"
+                        className="rail-link"
+                        aria-label={t("documentation.title")}
+                        aria-haspopup="dialog"
+                        onClick={() =>
+                          void navigate(
+                            {
+                              ...location,
+                              search: documentationSearch(
+                                location.search,
+                                currentDocumentationSection(location.pathname),
+                              ),
+                            },
+                            { replace: true },
+                          )
+                        }
+                      >
+                        <span className="rail-icon" aria-hidden="true">
+                          <BookOutlined />
+                        </span>
+                        <span className="rail-label">
+                          {t("documentation.title")}
+                        </span>
+                      </button>
+                    </Tooltip>
+                  </li>
+                )}
               </ul>
             </div>
           ))}

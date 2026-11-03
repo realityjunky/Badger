@@ -1,6 +1,5 @@
 import {
   BellOutlined,
-  BookOutlined,
   GlobalOutlined,
   MenuOutlined,
   UserOutlined,
@@ -10,7 +9,6 @@ import {
   Button,
   Dropdown,
   Popover,
-  Tooltip,
   Typography,
   type MenuProps,
 } from "antd";
@@ -24,17 +22,13 @@ import { useDemoMode } from "../app/DemoContext.js";
 import { ScopeSelector } from "./ScopeSelector.js";
 import { GlobalSearch } from "./GlobalSearch.js";
 import { scopeSelection, type ScopeSelection } from "./scope.js";
-import {
-  currentDocumentationSection,
-  documentationSearch,
-} from "../documentation/sections.js";
 
 export interface TopBarProps {
   drawerMode: boolean;
   onOpenRail(): void;
 }
 
-/** The sticky bar: scope, search, inbox, language, documentation, and account. */
+/** The sticky bar: scope, search, inbox, language, and account. */
 export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
   const demoMode = useDemoMode();
   const { t, format } = useI18n();
@@ -206,31 +200,6 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
             {t(preferences.language === "zh" ? "language.zh" : "language.en")}
           </Button>
         </Dropdown>
-
-        <Tooltip
-          title={t("documentation.tooltip")}
-          trigger={["hover", "focus"]}
-        >
-          <Button
-            type="text"
-            icon={<BookOutlined />}
-            aria-label={t("documentation.title")}
-            onClick={() =>
-              void navigate(
-                {
-                  ...location,
-                  search: documentationSearch(
-                    location.search,
-                    currentDocumentationSection(location.pathname),
-                  ),
-                },
-                { replace: true },
-              )
-            }
-          >
-            {t("documentation.title")}
-          </Button>
-        </Tooltip>
 
         {signOutFailed && (
           <Typography.Text type="danger" role="alert">

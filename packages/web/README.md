@@ -25,9 +25,9 @@ them into `dist/`, so the server image carries the build and none of them.
 
 ## Behavior
 
-- **Documentation** (#94) sits beside Language on every page and opens the
-  current section's guide. The nine stable `help` query values are `my-work`,
-  `workflows`, `questionnaire`, `skills`, `runs`, `evaluations`, `activity`,
+- **Documentation** (#94) sits in the left sidebar's System section on every
+  page and opens the current section's guide. The nine stable `help` query values
+  are `my-work`, `workflows`, `questionnaire`, `skills`, `runs`, `evaluations`, `activity`,
   `admin`, and `settings`; for example `/skills?help=skills`. The upload dialog's
   Script side effects link opens `help=script-side-effects`, with definitions
   and synthetic examples for all five declarations. Links retain the current

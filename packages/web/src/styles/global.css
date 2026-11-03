@@ -201,6 +201,15 @@ body {
   white-space: nowrap;
 }
 
+button.rail-link {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .rail-link:hover {
   background: var(--badger-color-accent-soft);
   color: var(--badger-color-accent);
