@@ -19,6 +19,7 @@ export interface AuthorizedRequest {
   dependencies: ServiceDependencies;
   context: WriteContext;
   access: Access;
+  refreshAccess(): Promise<Access>;
   person: Person;
   blobs: BlobStore;
 }

@@ -38,6 +38,7 @@ COPY --from=build /app/packages/mcp/dist ./packages/mcp/dist
 COPY --from=build /app/packages/server/package.json ./packages/server/package.json
 COPY --from=build /app/packages/server/dist ./packages/server/dist
 COPY --from=build /app/packages/server/migrations ./packages/server/migrations
+COPY --from=build /app/packages/server/config ./packages/server/config
 COPY --from=build /app/packages/web/dist ./packages/web/dist
 COPY --from=build /app/packages/web/package.json ./packages/web/package.json
 

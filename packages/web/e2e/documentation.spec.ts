@@ -135,7 +135,7 @@ for (const source of ["folder", "zip"] as const) {
       });
     }
     await expect(upload).toContainText("2 files in the source inventory");
-    const hash = await upload.locator(".skills-hash").innerText();
+    const hash = await upload.locator(".skills-hash").first().innerText();
     const declaration = upload.getByRole("combobox", {
       name: "Script side effects scripts/report.py",
       exact: true,
@@ -185,7 +185,7 @@ for (const source of ["folder", "zip"] as const) {
     await expect(guide).toBeHidden();
     await expect(help).toBeFocused();
     await expect(page).toHaveURL(new URL(original, page.url()).href);
-    await expect(upload.locator(".skills-hash")).toHaveText(hash);
+    await expect(upload.locator(".skills-hash").first()).toHaveText(hash);
     await expect(
       upload.getByText("Local writes", { exact: true }),
     ).toBeVisible();
@@ -212,7 +212,7 @@ for (const source of ["folder", "zip"] as const) {
     await guide
       .getByRole("button", { name: "Return to dashboard", exact: true })
       .click();
-    await expect(upload.locator(".skills-hash")).toHaveText(hash);
+    await expect(upload.locator(".skills-hash").first()).toHaveText(hash);
     await expect(
       upload.getByText("Local writes", { exact: true }),
     ).toBeVisible();

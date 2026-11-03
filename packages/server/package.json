@@ -16,12 +16,12 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/export-llm-schema.mjs",
     "start": "node dist/src/index.js",
     "start:worker": "node dist/src/worker.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "format:check": "prettier --check src test package.json tsconfig.json tsconfig.test.json vitest.config.ts",
+    "format:check": "prettier --check src test config scripts package.json tsconfig.json tsconfig.test.json vitest.config.ts",
     "lint": "tsc -p tsconfig.test.json"
   },
   "engines": {

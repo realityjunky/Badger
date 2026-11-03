@@ -1,0 +1,197 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Badger LLM configuration file v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["revision", "configuration"],
+  "properties": {
+    "revision": { "type": "integer", "minimum": 0 },
+    "configuration": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Badger LLM configuration v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "models", "bindings", "prompts", "limits"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "models": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "provider",
+              "protocol",
+              "model",
+              "apiBaseUrl",
+              "secretRef",
+              "enabled",
+              "descriptors",
+              "settings"
+            ],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,79}$" },
+              "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "model": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "provider": { "enum": ["deepseek", "openai-compatible"] },
+              "protocol": { "enum": ["litellm-chat", "openai-chat"] },
+              "apiBaseUrl": { "type": "string", "maxLength": 2048 },
+              "secretRef": {
+                "anyOf": [
+                  { "type": "null" },
+                  {
+                    "type": "string",
+                    "pattern": "^(stored:[a-z][a-z0-9-]{0,79}|env:BADGER_LLM_SECRET_[A-Z0-9_]{1,80})$"
+                  }
+                ]
+              },
+              "enabled": { "type": "boolean" },
+              "descriptors": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["key", "label", "type", "default", "mapping"],
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]{0,79}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "type": {
+                      "enum": ["boolean", "integer", "number", "enum"]
+                    },
+                    "default": { "type": ["string", "number", "boolean"] },
+                    "minimum": { "type": "number" },
+                    "maximum": { "type": "number" },
+                    "options": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 20,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["value", "label"],
+                        "properties": {
+                          "value": { "type": ["string", "number", "boolean"] },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          }
+                        }
+                      }
+                    },
+                    "mapping": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["target"],
+                      "properties": {
+                        "target": {
+                          "enum": [
+                            "context-budget",
+                            "max_tokens",
+                            "thinking.type",
+                            "reasoning_effort",
+                            "temperature",
+                            "top_p"
+                          ]
+                        },
+                        "values": {
+                          "type": "object",
+                          "maxProperties": 20,
+                          "additionalProperties": {
+                            "type": ["string", "number", "boolean"]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "settings": {
+                "type": "object",
+                "maxProperties": 16,
+                "additionalProperties": {
+                  "type": ["string", "number", "boolean"]
+                }
+              }
+            }
+          }
+        },
+        "bindings": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,79}$"
+          },
+          "additionalProperties": {
+            "anyOf": [
+              { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,79}$" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "prompts": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,79}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["description", "text"],
+            "properties": {
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "text": { "type": "string", "minLength": 1, "maxLength": 32000 }
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "timeoutMs",
+            "maxConcurrent",
+            "maxSourceBytes",
+            "maxResponseBytes"
+          ],
+          "properties": {
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 120000
+            },
+            "maxConcurrent": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "maxSourceBytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 1048576
+            },
+            "maxResponseBytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 262144
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { applyMigrations } from "./database/migrations.js";
 import { createService, type ServiceOptions } from "./http/service.js";
+import { initializeLlmConfiguration } from "./llm/store.js";
 
 export interface StartedServer {
   url: string;
@@ -22,6 +23,10 @@ export async function startHttpServer(
   options: ServiceOptions,
 ): Promise<StartedServer> {
   await applyMigrations(options.database, options.migrations, options.clock);
+  await initializeLlmConfiguration(options.database, options.config, {
+    clock: options.clock,
+    ids: options.ids,
+  });
 
   const server = createServer();
   await new Promise<void>((resolve, reject) => {

@@ -5,6 +5,7 @@ import {
   gitFolderPath,
   previewUpload,
   readUploadFile,
+  suggestScriptEffects,
   undeclaredScripts,
   uploadVersion,
   type GitContent,
@@ -14,6 +15,7 @@ import {
   type UploadContent,
   type UploadLimits,
   type VersionPreview,
+  type SuggestionResult,
 } from "../../api/skills.js";
 import { readBasePath } from "../../app/paths.js";
 import { useI18n } from "../../i18n/I18nContext.js";
@@ -52,10 +54,70 @@ export function UploadSkillModal({
   const [scripts, setScripts] = useState<Record<string, SideEffect[]>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suggestion, setSuggestion] = useState<SuggestionResult | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  const editedScripts = useRef(new Set<string>());
   const controller = useRef<AbortController | null>(null);
   const selection = useRef(0);
   const undeclared =
     preview === null ? [] : undeclaredScripts(preview, scripts);
+
+  useEffect(() => {
+    setSuggestion(null);
+    setSuggestionError(null);
+    const task = preview?.suggestion;
+    if (!preview || task?.state !== "ready" || !task.id) {
+      setSuggesting(false);
+      return;
+    }
+    const generation = selection.current;
+    const pending = new AbortController();
+    setSuggesting(true);
+    void suggestScriptEffects(
+      basePath,
+      skill.id,
+      task.id,
+      preview.hash,
+      pending.signal,
+    )
+      .then(({ suggestion }) => {
+        if (pending.signal.aborted || generation !== selection.current) return;
+        if (
+          suggestion.binding.sourceHash !== preview.hash ||
+          suggestion.binding.promptRevision !== task.prompt.revision ||
+          suggestion.binding.configurationRevision !==
+            task.binding?.configurationRevision
+        ) {
+          setSuggestionError(t("llm.stale"));
+          return;
+        }
+        setSuggestion(suggestion);
+        setScripts((current) => {
+          if (generation !== selection.current) return current;
+          const next = { ...current };
+          for (const script of suggestion.scripts)
+            if (
+              script.complete &&
+              script.effects.length &&
+              !editedScripts.current.has(script.path)
+            )
+              next[script.path] = script.effects;
+          return next;
+        });
+      })
+      .catch((failure: unknown) => {
+        if (!pending.signal.aborted && generation === selection.current)
+          setSuggestionError(
+            failure instanceof Error ? failure.message : t("llm.failed"),
+          );
+      })
+      .finally(() => {
+        if (!pending.signal.aborted && generation === selection.current)
+          setSuggesting(false);
+      });
+    return () => pending.abort();
+  }, [basePath, preview, skill.id, t]);
 
   useEffect(
     () => () => {
@@ -73,6 +135,7 @@ export function UploadSkillModal({
     setContent(null);
     setPreview(null);
     setScripts({});
+    editedScripts.current.clear();
     setError(null);
     const files = Array.from(selected ?? []);
     if (files.length === 0) return;
@@ -123,6 +186,8 @@ export function UploadSkillModal({
 
   async function confirm() {
     if (content === null || preview === null || undeclared.length > 0) return;
+    selection.current += 1;
+    setSuggesting(false);
     setBusy(true);
     setError(null);
     try {
@@ -194,6 +259,8 @@ export function UploadSkillModal({
             onBusy={setBusy}
             onError={setError}
             onChange={() => {
+              selection.current += 1;
+              editedScripts.current.clear();
               setContent(null);
               setPreview(null);
               setScripts({});
@@ -254,6 +321,36 @@ export function UploadSkillModal({
             >
               {t("documentation.effects.link")}
             </Link>
+            {suggesting && (
+              <p role="status">
+                <Spin size="small" /> {t("llm.suggesting")}
+              </p>
+            )}
+            {(suggestionError ||
+              suggestion?.message ||
+              preview.suggestion?.message) && (
+              <Alert
+                type="warning"
+                showIcon
+                title={
+                  suggestionError ??
+                  suggestion?.message ??
+                  preview.suggestion?.message
+                }
+              />
+            )}
+            {preview.suggestion && (
+              <details>
+                <summary>{t("llm.activePrompt")}</summary>
+                <p>{preview.suggestion.prompt.description}</p>
+                <code className="skills-hash">
+                  {preview.suggestion.prompt.revision}
+                </code>
+                <pre className="source-preview">
+                  {preview.suggestion.prompt.text}
+                </pre>
+              </details>
+            )}
             {preview.scripts.length === 0 && <p>{t("skills.noScripts")}</p>}
             {preview.scripts.map((script) => (
               <label key={script.path} className="field">
@@ -269,6 +366,7 @@ export function UploadSkillModal({
                     label: t(`skills.effect.${effect}`),
                   }))}
                   onChange={(effects: SideEffect[]) => {
+                    editedScripts.current.add(script.path);
                     const last = effects[effects.length - 1];
                     const normalized =
                       last === "none"
@@ -282,6 +380,30 @@ export function UploadSkillModal({
                     });
                   }}
                 />
+                {suggestion?.scripts
+                  .filter((item) => item.path === script.path)
+                  .map((item) => (
+                    <div key={item.path}>
+                      <p>{item.rationale}</p>
+                      {!item.complete && (
+                        <p role="status">
+                          {t("llm.needsReview")} {item.uncertainty}
+                        </p>
+                      )}
+                      {item.citations.map((citation, index) => (
+                        <details key={`${citation.path}-${index}`}>
+                          <summary>
+                            {citation.path}:{citation.startLine}–
+                            {citation.endLine}
+                          </summary>
+                          <code className="skills-hash">{citation.hash}</code>
+                          <pre className="source-preview">
+                            {citation.excerpt}
+                          </pre>
+                        </details>
+                      ))}
+                    </div>
+                  ))}
               </label>
             ))}
             {undeclared.length > 0 && (

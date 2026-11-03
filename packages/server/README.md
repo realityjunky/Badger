@@ -1045,6 +1045,13 @@ See [ADR 0029](../../docs/adr/0029-registered-git-skill-versions.md).
 
 ## Skill uploads
 
+Administrator-configured models can suggest editable script side effects
+automatically after an upload or Git preview. See
+[LLM configuration and uploader review](../../docs/llm-configuration.md) for
+model connections, Task prompts, encrypted keys, the versioned file format,
+revision conflicts, bounded provider calls and manual fallback. The final
+hash-bound immutable upload confirmation remains with the person.
+
 The Skills dashboard accepts a Skill folder or zip, previews its inventory,
 lets the person declare each script's side effects, and requires confirmation
 before storing an immutable version. Never upload real data. Instructions,
