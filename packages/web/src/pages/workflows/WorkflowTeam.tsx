@@ -6,8 +6,11 @@ import {
   Input,
   Popconfirm,
   Select,
+  Space,
+  Table,
   Tag,
 } from "antd";
+import type { TableColumnsType } from "antd";
 import { useState } from "react";
 import {
   assignWorkflowRole,
@@ -24,6 +27,7 @@ import {
   resendInvitation,
   type InvitationDelivery,
 } from "../../api/organization.js";
+import { groupWorkflowBindings, type WorkflowTeamMember } from "./team.js";
 
 const ROLE_MESSAGES: Record<WorkflowRole, MessageId> = {
   "Workflow owner": "workflow.role.owner",
@@ -53,6 +57,7 @@ export function WorkflowTeam({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<WriteFailure | null>(null);
   const [delivery, setDelivery] = useState<InvitationDelivery | null>(null);
+  const members = groupWorkflowBindings(bindings);
 
   const assign = async ({
     email,
@@ -109,6 +114,70 @@ export function WorkflowTeam({
     }
   };
 
+  const columns: TableColumnsType<WorkflowTeamMember> = [
+    {
+      title: t("admin.members.name"),
+      dataIndex: "displayName",
+      key: "name",
+    },
+    {
+      title: t("admin.members.email"),
+      dataIndex: "email",
+      key: "email",
+    },
+    {
+      title: t("admin.members.roles"),
+      key: "roles",
+      render: (_, member) => (
+        <Space size={[4, 4]} wrap>
+          {member.bindings.map((binding) => (
+            <Tag key={binding.id}>
+              {t(ROLE_MESSAGES[binding.role])}
+              {binding.pending && ` · ${t("workflow.invited")}`}
+            </Tag>
+          ))}
+        </Space>
+      ),
+    },
+    ...(mayManage
+      ? [
+          {
+            title: "",
+            key: "actions",
+            render: (_: unknown, member: WorkflowTeamMember) => (
+              <Space size={[4, 4]} wrap>
+                <Button
+                  size="small"
+                  disabled={busy}
+                  onClick={() => void resend(member.bindings[0]!)}
+                >
+                  {t("admin.invite.resend")}
+                </Button>
+                {member.bindings.map((binding) => (
+                  <Popconfirm
+                    key={binding.id}
+                    title={t("workflow.removeConfirm")}
+                    onConfirm={() => remove(binding)}
+                    okText={t("workflow.remove")}
+                    cancelText={t("workflow.cancel")}
+                  >
+                    <Button
+                      size="small"
+                      danger
+                      disabled={busy}
+                      aria-label={`${t("workflow.remove")} · ${t(ROLE_MESSAGES[binding.role])} · ${member.email}`}
+                    >
+                      {t("workflow.remove")} · {t(ROLE_MESSAGES[binding.role])}
+                    </Button>
+                  </Popconfirm>
+                ))}
+              </Space>
+            ),
+          },
+        ]
+      : []),
+  ];
+
   return (
     <section className="workflow-panel" aria-labelledby="workflow-team-title">
       <h2 id="workflow-team-title">{t("workflow.team")}</h2>
@@ -122,41 +191,16 @@ export function WorkflowTeam({
           message={t(`admin.invite.delivery.${delivery.status}`)}
         />
       )}
-      <ul className="workflow-roles">
-        {bindings.map((binding) => (
-          <li key={binding.id}>
-            <div className="workflow-role-person">
-              {binding.displayName !== null && (
-                <strong>{binding.displayName}</strong>
-              )}
-              <span>{binding.email}</span>
-            </div>
-            <Tag>{t(ROLE_MESSAGES[binding.role])}</Tag>
-            {binding.pending && <Tag>{t("workflow.invited")}</Tag>}
-            {mayManage && (
-              <Button disabled={busy} onClick={() => void resend(binding)}>
-                {t("admin.invite.resend")}
-              </Button>
-            )}
-            {mayManage && (
-              <Popconfirm
-                title={t("workflow.removeConfirm")}
-                onConfirm={() => remove(binding)}
-                okText={t("workflow.remove")}
-                cancelText={t("workflow.cancel")}
-              >
-                <Button
-                  danger
-                  disabled={busy}
-                  aria-label={`${t("workflow.remove")} ${t(ROLE_MESSAGES[binding.role])} · ${binding.email}`}
-                >
-                  {t("workflow.remove")}
-                </Button>
-              </Popconfirm>
-            )}
-          </li>
-        ))}
-      </ul>
+      <Table<WorkflowTeamMember>
+        className="workflow-team-table"
+        rowKey="key"
+        dataSource={members}
+        columns={columns}
+        pagination={false}
+        size="small"
+        tableLayout="fixed"
+        scroll={{ x: 720 }}
+      />
       {mayManage && (
         <Form
           form={form}

@@ -437,26 +437,21 @@ body {
   margin-bottom: 0;
 }
 
-.workflow-roles {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.workflow-team-table .ant-space,
+.workflow-team-table .ant-space-item,
+.workflow-team-table .ant-tag {
+  max-width: 100%;
 }
 
-.workflow-roles li {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--badger-color-border);
+.workflow-team-table .ant-tag,
+.workflow-team-table .ant-btn {
+  white-space: normal;
 }
 
-.workflow-role-person {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: min(220px, 100%);
+.workflow-team-table .ant-btn {
+  height: auto;
+  min-height: 24px;
+  text-align: start;
 }
 
 .workflow-role-form {

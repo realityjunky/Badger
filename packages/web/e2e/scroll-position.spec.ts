@@ -130,25 +130,51 @@ test("assigning and removing workflow roles keep the page's scroll position", as
     exact: true,
   });
   await expect(saveRobot).toBeVisible();
-  await team.getByRole("textbox", { name: "Email" }).fill("scroll@example.com");
+  await team
+    .getByRole("combobox", { name: /Email/u })
+    .fill("scroll@example.com");
   const role = team.getByRole("combobox", { name: /Workflow role/u });
+  const roleSelect = team.locator(".ant-select").filter({
+    has: page.getByRole("combobox", { name: /Workflow role/u }),
+  });
   await role.click();
   await role.press("ArrowDown");
   await role.press("Enter");
-  await expect(team.locator(".ant-select")).toContainText("Field expert");
-  const assign = team.getByRole("button", { name: "Assign role", exact: true });
+  await expect(roleSelect).toContainText("Field expert");
+  const assign = team.getByRole("button", { name: /Assign role$/u });
   await assign.scrollIntoViewIfNeeded();
   const beforeAssign = await page.evaluate(() => window.scrollY);
   expect(beforeAssign).toBeGreaterThan(100);
   const detailUrl = `${base}/api/v1/workflows/${workflow.id}`;
   await keepScrollDuringRefresh(page, detailUrl, team, () => assign.click());
-  const binding = team.locator("li").filter({ hasText: "scroll@example.com" });
+  const binding = team
+    .getByRole("row")
+    .filter({ hasText: "scroll@example.com" });
   await expect(binding).toBeVisible();
   await expectScrollNear(page, beforeAssign);
-  await expect(team.locator(".ant-select")).toContainText("Field expert");
+  await expect(roleSelect).toContainText("Field expert");
   await expect(saveRobot).toBeVisible();
 
-  const remove = binding.getByRole("button", { name: /^Remove role/u });
+  await team
+    .getByRole("combobox", { name: /Email/u })
+    .fill("scroll@example.com");
+  await role.click();
+  await role.press("ArrowDown");
+  await role.press("ArrowDown");
+  await role.press("Enter");
+  await expect(roleSelect).toContainText("Observer");
+  await assign.click();
+  await expect(binding).toHaveCount(1);
+  await expect(binding.locator(".ant-tag")).toHaveText([
+    "Field expert · Invited",
+    "Observer · Invited",
+  ]);
+  await expect(
+    binding.getByRole("button", { name: /^Remove role/u }),
+  ).toHaveCount(2);
+  const remove = binding.getByRole("button", {
+    name: /^Remove role · Field expert/u,
+  });
   await remove.scrollIntoViewIfNeeded();
   await remove.click();
   const confirmation = page.getByRole("tooltip");
@@ -168,7 +194,8 @@ test("assigning and removing workflow roles keep the page's scroll position", as
       confirmBox!.y + confirmBox!.height / 2,
     ),
   );
-  await expect(binding).toHaveCount(0);
+  await expect(binding).toHaveCount(1);
+  await expect(binding.locator(".ant-tag")).toHaveText(["Observer · Invited"]);
   await expectScrollNear(page, beforeRemove);
   await expect(saveRobot).toBeVisible();
 });

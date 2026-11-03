@@ -227,8 +227,10 @@ them into `dist/`, so the server image carries the build and none of them.
   marker's animation.
 - The Workflows catalog reads live, scoped workflows. Creation asks for a
   Group, kernel-valid name, goal, intent, and locale. A workflow's version URL
-  selects its saved frame and eight stage states. Its team panel shows role
-  holders and invitations, and capable people assign or remove roles there.
+  selects its saved frame and eight stage states. Its team panel shows one
+  table row per person with their workflow roles together, and groups pending
+  invitations by email. Capable people assign roles there, resend an email per
+  person, and remove each role with its own labeled confirmation button.
   Its email field suggests registered members of the workflow's Group,
   including members inherited from ancestor Groups. Search by name or email
   and select a person to fill their address, or enter an address manually.

@@ -123,6 +123,7 @@ export interface WorkflowBinding {
   id: string;
   email: string;
   displayName: string | null;
+  personId: string | null;
   role: WorkflowRole;
   pending: boolean;
   revision: number;
