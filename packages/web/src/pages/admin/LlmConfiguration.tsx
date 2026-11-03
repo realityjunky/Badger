@@ -40,7 +40,7 @@ const basicDescriptors: ModelSetting[] = [
     label: "Maximum output tokens",
     type: "integer",
     minimum: 256,
-    maximum: 32768,
+    maximum: 200000,
     default: 4096,
     mapping: { target: "max_tokens" },
   },

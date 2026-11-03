@@ -52,6 +52,9 @@ provider values fail validation. Supported request targets are
 `thinking.type`, `reasoning_effort`, `temperature`, `top_p` and `max_tokens`.
 `context-budget` is a local coverage limit, never an output-token parameter.
 Every model must define separate context and output descriptors.
+Output-token settings and descriptor ranges support at most **200,000 tokens**.
+Each connection's descriptor sets its selectable maximum, and its context budget
+must leave room for input in addition to the selected output-token allowance.
 
 The profile maps thinking to `{"thinking":{"type":"enabled"}}` and Max to
 `{"reasoning_effort":"max"}`. It does not use `budget_tokens`, translate Max

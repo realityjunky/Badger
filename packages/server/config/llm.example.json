@@ -65,7 +65,7 @@
             "label": "Maximum output tokens",
             "type": "integer",
             "minimum": 256,
-            "maximum": 32768,
+            "maximum": 200000,
             "default": 8192,
             "mapping": {
               "target": "max_tokens"

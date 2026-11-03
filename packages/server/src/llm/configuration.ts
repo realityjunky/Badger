@@ -246,7 +246,7 @@ function mappedSetting(
       typeof mapped !== "number" ||
       !Number.isInteger(mapped) ||
       mapped < 256 ||
-      mapped > (target === "context-budget" ? 2000000 : 32768)
+      mapped > (target === "context-budget" ? 2000000 : 200000)
     )
       fail();
   } else if (target === "thinking.type") {
@@ -390,7 +390,7 @@ export function validateConfiguration(value: unknown): LlmConfiguration {
           target === "context-budget"
             ? 2000000
             : target === "max_tokens"
-              ? 32768
+              ? 200000
               : target === "temperature"
                 ? 2
                 : target === "top_p"

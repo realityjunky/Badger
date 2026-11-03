@@ -104,7 +104,7 @@ function model(url: string) {
         label: "Maximum output tokens",
         type: "integer",
         minimum: 256,
-        maximum: 32768,
+        maximum: 200000,
         default: 4096,
         mapping: { target: "max_tokens" },
       },
@@ -191,6 +191,7 @@ describe("Administrator LLM configuration", () => {
     const saved = await configure(provider.url);
     expect(saved.credentials.flash.configured).toBe(true);
     expect(JSON.stringify(saved)).not.toContain("synthetic-provider-secret-95");
+    saved.configuration.models[0].settings.output = 200000;
     const normalSave = await write(
       "/api/v1/admin/llm",
       { revision: saved.revision, configuration: saved.configuration },
@@ -207,7 +208,7 @@ describe("Administrator LLM configuration", () => {
       model: "deepseek-v4.1-flash",
       thinking: { type: "enabled" },
       reasoning_effort: "max",
-      max_tokens: 4096,
+      max_tokens: 200000,
       drop_params: false,
     });
     expect(provider.requests[0]).not.toHaveProperty("context");
@@ -421,7 +422,10 @@ describe("Administrator LLM configuration", () => {
         });
       },
       (c: typeof current.configuration) => {
-        c.models[0].settings.output = 500000;
+        c.models[0].settings.output = 200001;
+      },
+      (c: typeof current.configuration) => {
+        c.models[0].descriptors[3].maximum = 200001;
       },
       (c: typeof current.configuration) => {
         c.models[0].settings.unknown = true;
