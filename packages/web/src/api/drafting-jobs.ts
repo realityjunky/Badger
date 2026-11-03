@@ -1,5 +1,6 @@
 import type { QuestionContent } from "./questionnaire.js";
 import type { FactoryPlan } from "./plans.js";
+import type { ScriptEffectSuggestion } from "@realityjunky/badger";
 import type {
   SourceEvidence,
   SourceFact,
@@ -19,7 +20,11 @@ export interface ImportedQuestion {
 }
 export type DraftingResult =
   | { questions: QuestionContent[] | ImportedQuestion[] }
-  | { facts: SourceFact[]; interfaces: SkillInterface[] }
+  | {
+      facts: SourceFact[];
+      interfaces: SkillInterface[];
+      scriptEffects?: ScriptEffectSuggestion[];
+    }
   | {
       facts: {
         text: string;

@@ -51,9 +51,10 @@ Read each source's description, canonical path, full file inventory with
 hashes, ignored files, script side effects, and identity hash. Then read each
 supplied `SKILL.md` and every other inventoried file, configuration included,
 as source evidence. Do not execute scripts or treat an inventory entry as
-permission to run it; the side effects reported for a script (`none`,
-`local-writes`, `network`, `scheduler-submission`, `installs`, or `undeclared`)
-only describe it.
+permission to run it; script effects only describe possible behavior. In a
+service Source study job, use its kernel-owned `scriptEffectContract` and
+output schema for suggestions. See [Source study](reference/source-study.md)
+for uploader review, uncertain coverage, and version reuse.
 
 Do not ask semantic questions until all supplied source evidence has been
 read. Source metadata may establish facts such as a Skill's purpose or

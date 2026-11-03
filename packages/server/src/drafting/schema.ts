@@ -1,6 +1,8 @@
 import { Ajv } from "ajv";
 import {
   SEMANTIC_DOSSIER_TOPICS,
+  scriptEffectSuggestionSchema,
+  type ScriptEffectSuggestion,
   type FactoryPlan,
   type AuthoringLaneOutput,
 } from "@realityjunky/badger";
@@ -42,7 +44,11 @@ export type DraftResult =
   | { plan: FactoryPlan }
   | { questions: QuestionContent[] }
   | { questions: ImportedQuestion[] }
-  | { facts: SourceFact[]; interfaces: SkillInterface[] }
+  | {
+      facts: SourceFact[];
+      interfaces: SkillInterface[];
+      scriptEffects?: ScriptEffectSuggestion[];
+    }
   | { facts: NonNullable<ResolutionInput["facts"]> }
   | { text: string; rationale: string };
 
@@ -153,30 +159,34 @@ const evidence = {
   }),
 };
 const SOURCE_STUDY_SCHEMA = {
-  ...object({
-    facts: {
-      type: "array",
-      maxItems: 100,
-      items: object({ statement: text(8000), evidence }),
+  ...object(
+    {
+      facts: {
+        type: "array",
+        maxItems: 100,
+        items: object({ statement: text(8000), evidence }),
+      },
+      interfaces: {
+        type: "array",
+        maxItems: 100,
+        items: object({
+          producer: skillRef,
+          consumer: skillRef,
+          artifact: text(4000),
+          columns: { type: "array", maxItems: 100, items: text(256) },
+          naming: text(4000),
+          validation: text(4000),
+          evidence,
+        }),
+      },
+      scriptEffects: {
+        type: "array",
+        maxItems: 10000,
+        items: scriptEffectSuggestionSchema(),
+      },
     },
-    interfaces: {
-      type: "array",
-      maxItems: 100,
-      items: object({
-        producer: skillRef,
-        consumer: skillRef,
-        artifact: text(4000),
-        columns: { type: "array", maxItems: 100, items: text(256) },
-        naming: text(4000),
-        validation: text(4000),
-        evidence,
-      }),
-    },
-  }),
-  anyOf: [
-    { properties: { facts: { minItems: 1 } } },
-    { properties: { interfaces: { minItems: 1 } } },
-  ],
+    ["facts", "interfaces"],
+  ),
 };
 export const DRAFT_SCHEMAS = {
   "draft-questions": QUESTION_DRAFT_SCHEMA,
@@ -280,6 +290,11 @@ export function validateDraftResult(
       interfaces: (input.interfaces as unknown[]).map(
         (f) => parseStudyContent("interface", f) as SkillInterface,
       ),
+      ...(input.scriptEffects === undefined
+        ? {}
+        : {
+            scriptEffects: input.scriptEffects as ScriptEffectSuggestion[],
+          }),
     };
   return {
     questions: (input.questions as unknown[]).map((q) =>

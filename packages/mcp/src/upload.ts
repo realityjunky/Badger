@@ -173,7 +173,6 @@ export async function uploadSkillVersion(
   input: {
     skillId: string;
     folder: string;
-    scripts: Record<string, string[]>;
     confirmed?: boolean;
     expectedHash?: string;
   },
@@ -205,7 +204,6 @@ export async function uploadSkillVersion(
       "POST",
       {
         files,
-        scripts: input.scripts,
         ...(input.confirmed
           ? { confirmed: true, expectedHash: input.expectedHash }
           : {}),

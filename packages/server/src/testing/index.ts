@@ -7,7 +7,6 @@ export {
   type TestServiceOptions,
 } from "./harness.js";
 export type { TestPerson } from "./identity.js";
-export { startStubLlmProvider } from "./llm.js";
 export {
   startStubWeComRobot,
   startStubHttpsProxy,

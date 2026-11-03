@@ -69,7 +69,6 @@ import { handleTokens, tokenMethods } from "./tokens.js";
 import { handleGroupRoleChange } from "./group-roles.js";
 import { handleSearch } from "./search.js";
 import { handleIntegrations } from "./integrations.js";
-import { handleLlm, llmMethods } from "./llm.js";
 import { gateMethods, handleGate } from "./gates.js";
 import { dossierMethods, handleDossier } from "./dossier.js";
 import { planMethods, handlePlan } from "./plans.js";
@@ -82,6 +81,7 @@ import { handleInbox, inboxMethods } from "./inbox.js";
 import { handleNotifications, notificationMethods } from "./notifications.js";
 import { deliverInvitation } from "../invitation-delivery.js";
 import { handleSourceStudy, sourceStudyMethods } from "./source-study.js";
+import { handleScriptEffects, scriptEffectMethods } from "./script-effects.js";
 import { handleQuestionnaire, questionnaireMethods } from "./questionnaire.js";
 import { handleEvents } from "./events.js";
 import { draftingJobMethods, handleDraftingJobs } from "./drafting-jobs.js";
@@ -180,7 +180,7 @@ function matchedId(pattern: RegExp, path: string): string | null {
 /** The methods a path serves, for the Allow header and the write check. */
 function allowedMethods(path: string): string {
   const featureMethods =
-    llmMethods(path) ??
+    scriptEffectMethods(path) ??
     skillMethods(path) ??
     workflowMethods(path) ??
     tokenMethods(path) ??
@@ -938,7 +938,6 @@ export function createService(options: ServiceOptions, port: number): Service {
       blobs,
     };
     try {
-      if (llmMethods(path) !== null) return await handleLlm(authorized);
       if (path === `${API}/search`) return await handleSearch(authorized);
       if (path === `${API}/admin/integrations`)
         return handleIntegrations(authorized);
@@ -975,6 +974,8 @@ export function createService(options: ServiceOptions, port: number): Service {
         return await handleNotifications(authorized);
       if (sourceStudyMethods(path) !== null)
         return await handleSourceStudy(authorized);
+      if (scriptEffectMethods(path) !== null)
+        return await handleScriptEffects(authorized);
       if (questionnaireMethods(path) !== null)
         return await handleQuestionnaire(authorized);
       if (draftingJobMethods(path) !== null)

@@ -28,8 +28,8 @@ them into `dist/`, so the server image carries the build and none of them.
 - **Documentation** (#94) sits in the left sidebar's System section on every
   page and opens the current section's guide. The nine stable `help` query values
   are `my-work`, `workflows`, `questionnaire`, `skills`, `runs`, `evaluations`, `activity`,
-  `admin`, and `settings`; for example `/skills?help=skills`. The upload dialog's
-  Script side effects link opens `help=script-side-effects`, with definitions
+  `admin`, and `settings`; for example `/skills?help=skills`. The
+  `help=script-side-effects` guide contains definitions
   and synthetic examples for all five declarations. Links retain the current
   page, scope, filters, and anchor, including deployment and demo prefixes.
   The guide overlays the page so folder/zip selections, preview hashes, and
@@ -224,7 +224,7 @@ them into `dist/`, so the server image carries the build and none of them.
   1024 px. The three-pane registry layout stacks below 1180 px.
 - The Skills registry reads live group-owned entries, immutable versions,
   source inventories, and script side-effect declarations. Folder and zip
-  selection starts a preview; a person declares script effects and confirms
+  selection starts a preview; effects stay pending while a person confirms
   before the version is stored. A selected folder that holds a `.git` folder,
   by the server's rule, is refused before anything is read or sent, with the
   server's message, even when it is also over the upload limits. Uploads
@@ -234,9 +234,17 @@ them into `dist/`, so the server image carries the build and none of them.
   capability response controls which create and upload actions are offered.
 - **Import from Git** (#70) sits beside Upload version. It picks a registered
   repository or registers a new URL, takes a full commit hash, and previews
-  the committed tree like an upload: the person declares script effects and
-  confirms before the version is stored. Fetched content never runs, and a
+  the committed tree like an upload: the person confirms its exact hash
+  before the version is stored. Fetched content never runs, and a
   version lists each repository and commit it was imported from.
+- Script effects are reviewed inside Source study. The Engineer requests the
+  existing per-Skill Agent job and separately sends its effect draft to the
+  original uploader. The typed shared panel and `/source-reviews/:skillId/:hash`
+  Inbox link offer narrow review access, citations, corrections, uncertainty
+  answers, clarification, history, and explicit personal hash confirmation.
+  Complete confirmed coverage gates study completion. Other workflows reuse
+  the same entry/version's confirmation; corrections reopen dependent work.
+  See [the review flow](../../docs/script-effect-review.md).
 - One token source feeds both the CSS variables and Ant Design's theme.
   Contrast is checked at AA in both themes; reduced motion stops the stage
   marker's animation.

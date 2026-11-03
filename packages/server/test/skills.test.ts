@@ -214,6 +214,35 @@ function removeBinding(binding: { id: string; revision: number }) {
 }
 
 describe("Skill versions by upload", () => {
+  it("uploads scripts with pending effect review and preserves the first uploader on deduplication", async () => {
+    const { skillId, groupId } = await startLibrary();
+    const files = [
+      file("SKILL.md", SKILL_MD),
+      file("scripts/run.sh", "#!/bin/sh\nprintf 'study only'\n"),
+    ];
+    const preview = await previewOf(skillId, { files });
+    const response = await write(versionsPath(skillId), {
+      files,
+      confirmed: true,
+      expectedHash: preview.hash,
+    });
+    expect(response.status).toBe(201);
+    const { version } = await response.json();
+    expect(version.scripts).toEqual([
+      { path: "scripts/run.sh", sideEffects: "undeclared" },
+    ]);
+    const other: TestPerson = { subject: "other", email: "other@example.com" };
+    const workflow = await createWorkflow(groupId, "other-uploader");
+    await assignWorkflowRole(workflow.id, other, "Engineer");
+    const duplicate = await write(
+      versionsPath(skillId),
+      { files, confirmed: true, expectedHash: preview.hash },
+      other,
+    );
+    expect(duplicate.status).toBe(200);
+    expect(await duplicate.json()).toEqual({ version });
+  });
+
   it("refuses .git path segments in folder previews and confirmed uploads", async () => {
     const { skillId } = await startLibrary();
     for (const gitPath of [
@@ -353,35 +382,28 @@ describe("Skill versions by upload", () => {
     }
   });
 
-  it("uploads a zip without running scripts and binds their side effects immutably", async () => {
+  it("uploads a zip with pending effects without running scripts and deduplicates folder ingress", async () => {
     const { skillId } = await startLibrary();
     const archive =
       "UEsDBBQAAAAIAFCKXF0XQtDYMgAAADwAAAAQAAAAZXhhbXBsZS9TS0lMTC5tZNPV1eXKS8xNtVJIrUjMLchJ5UpJLU4uyiwoyczPs1JwhQgqBGdn5uRw6QIVcynDBLkAUEsDBBQAAAAIAFCKXF2L+KIZHQAAABsAAAAWAAAAZXhhbXBsZS9zY3JpcHRzL3J1bi5zaFNW1E/KzNMvzuAqKMrMK0lTyEstSy3SLSrN4wIAUEsBAhQDFAAAAAgAUIpcXRdC0NgyAAAAPAAAABAAAAAAAAAAAAAAAIABAAAAAGV4YW1wbGUvU0tJTEwubWRQSwECFAMUAAAACABQilxdi/iiGR0AAAAbAAAAFgAAAAAAAAAAAAAAgAFgAAAAZXhhbXBsZS9zY3JpcHRzL3J1bi5zaFBLBQYAAAAAAgACAIIAAACxAAAAAAA=";
     const response = await upload(skillId, {
       archive,
-      scripts: { "scripts/run.sh": ["local-writes", "network"] },
     });
     expect(response.status).toBe(201);
     const { version } = (await response.json()) as {
       version: { hash: string; scripts: unknown[] };
     };
     expect(version.scripts).toEqual([
-      { path: "scripts/run.sh", sideEffects: ["local-writes", "network"] },
+      { path: "scripts/run.sh", sideEffects: "undeclared" },
     ]);
     const duplicate = await upload(skillId, {
       files: [
         file("SKILL.md", SKILL_MD),
         file("scripts/run.sh", "#!/bin/sh\nprintf never-run\n"),
       ],
-      scripts: { "scripts/run.sh": ["network", "local-writes"] },
     });
     expect(duplicate.status).toBe(200);
     expect(await duplicate.json()).toMatchObject({ version });
-    const conflicting = await upload(skillId, {
-      archive,
-      scripts: { "scripts/run.sh": "none" },
-    });
-    expect(conflicting.status).toBe(409);
     const invalid = await write(versionsPath(skillId), {
       confirmed: true,
       expectedHash: version.hash,
@@ -422,7 +444,7 @@ describe("Skill versions by upload", () => {
     );
   });
 
-  it("previews before confirmation, requires every script's declaration, and compares any two versions without losing old files", async () => {
+  it("previews before confirmation and compares file versions while effects remain pending", async () => {
     const { skillId } = await startLibrary();
     const first = {
       files: [
@@ -446,18 +468,7 @@ describe("Skill versions by upload", () => {
     });
     expect(await before.json()).toEqual({ versions: [] });
     expect((await write(versionsPath(skillId), first)).status).toBe(400);
-    const undeclared = await write(
-      versionsPath(skillId),
-      await confirmation(skillId, first),
-    );
-    expect(undeclared.status).toBe(400);
-    expect(await undeclared.json()).toMatchObject({
-      error: { message: expect.stringContaining("scripts/run.sh") },
-    });
-    const created = await upload(skillId, {
-      ...first,
-      scripts: { "scripts/run.sh": "local-writes" },
-    });
+    const created = await upload(skillId, first);
     expect(created.status).toBe(201);
     const { version: original } = (await created.json()) as {
       version: { hash: string };
@@ -468,7 +479,6 @@ describe("Skill versions by upload", () => {
         file("config/new.json", "true\n"),
         file("scripts/run.sh", "exit 0\n"),
       ],
-      scripts: { "scripts/run.sh": "none" },
     });
     const { version: updated } = (await second.json()) as {
       version: { hash: string };
@@ -487,9 +497,7 @@ describe("Skill versions by upload", () => {
         { path: "config/new.json", status: "added" },
         { path: "reference/old.md", status: "removed" },
       ],
-      scripts: [
-        { path: "scripts/run.sh", before: ["local-writes"], after: ["none"] },
-      ],
+      scripts: [],
     });
     const old = await service.request(
       `${versionsPath(skillId)}/${original.hash}/files?path=reference/old.md`,

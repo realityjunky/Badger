@@ -1115,12 +1115,21 @@ export interface SkillSource {
   scripts: Array<{ path: string; sideEffects: SkillScriptSideEffects }>;
   inventory: SkillSourceFile[];
   hash: string;
+  effectDeclaration?: ScriptEffectRevisionBinding;
+}
+
+export interface ScriptEffectRevisionBinding {
+  skillId: string;
+  sourceHash: string;
+  revision: number;
+  hash: string;
 }
 
 export interface SkillSourceDeclaration {
   name: string;
   location: string;
   scripts?: Record<string, SkillScriptSideEffect | SkillScriptSideEffect[]>;
+  effectDeclaration?: ScriptEffectRevisionBinding;
 }
 
 export interface SkillSourceManifest {

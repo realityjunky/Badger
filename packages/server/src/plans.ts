@@ -24,6 +24,7 @@ import { listWorkflowPins } from "./workflow-source.js";
 import { RequestError } from "./http/errors.js";
 import { toIsoString } from "./util.js";
 import { invalidateProposal } from "./proposal-invalidation.js";
+import { effectHead, effectFindings } from "./script-effects.js";
 
 interface PlanRow {
   id: string;
@@ -90,14 +91,27 @@ export async function planInputs(
     );
     if (!pin) return null;
     const version = await readVersion(tx, pin.skillId, pin.hash);
+    const effects = await effectHead(tx, pin.skillId, pin.hash);
+    if (effectFindings(version, effects).length) return null;
     const scripts = Object.fromEntries(
-      version.scripts
-        .filter((script) => script.sideEffects !== "undeclared")
-        .map((script) => [script.path, script.sideEffects]),
+      (effects?.content.scripts ?? []).map((script) => [
+        script.path,
+        script.effects,
+      ]),
     );
     skillSources.push({
       name: source.name,
       location: source.location,
+      ...(version.scripts.length && effects
+        ? {
+            effectDeclaration: {
+              skillId: pin.skillId,
+              sourceHash: pin.hash,
+              revision: effects.revision,
+              hash: effects.hash,
+            },
+          }
+        : {}),
       ...(Object.keys(scripts).length
         ? { scripts: scripts as SkillSourceDeclaration["scripts"] }
         : {}),
@@ -246,7 +260,10 @@ export async function planView(
     skeleton: inputs ? deriveFactoryPlan(inputs) : null,
     headVersionId: head?.id ?? null,
     currentVersionId:
-      inputs && head?.snapshot.dossierHash === inputs.dossierHash
+      inputs &&
+      head?.snapshot.dossierHash === inputs.dossierHash &&
+      canonicalHash(head.snapshot.plan.skillSources) ===
+        canonicalHash(inputs.skillSources)
         ? head.id
         : null,
     confirmation: confirmations[0] ?? null,
@@ -278,6 +295,14 @@ export async function planGateState(
   if (!plan)
     reject("PLAN_NOT_SAVED", "Ask the Engineer to save a plan version");
   else if (inputs) {
+    if (
+      canonicalHash(plan.snapshot.plan.skillSources) !==
+      canonicalHash(inputs.skillSources)
+    )
+      reject(
+        "SCRIPT_EFFECT_DECLARATIONS_SUPERSEDED",
+        "Save and review a plan bound to the current confirmed script effect declaration revision",
+      );
     if (plan.snapshot.dossierHash !== inputs.dossierHash)
       reject(
         "PLAN_SUPERSEDED",

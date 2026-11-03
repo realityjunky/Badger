@@ -24,13 +24,15 @@ fixture workflows, questions, Skills, Runs, evaluations, inbox items, and
 Activity without reading or changing real work. See the
 [dashboard documentation](packages/web/README.md).
 
-The Skills library also supports Administrator-configured LLM suggestions
-for script side effects (#95), with editable declarations, source evidence,
-inspectable Task prompts and explicit immutable upload confirmation. See
-[LLM configuration and uploader review](docs/llm-configuration.md).
+Skill uploads require no model connection or effect declarations. During
+Source study, the Engineer's Agent drafts effects from the pinned files and
+the original uploader personally reviews and confirms them (#96). Workflows
+reuse the confirmation for the same version. See
+[Script effect review](docs/script-effect-review.md) and
+[retirement of the former model configuration](docs/llm-configuration.md).
 
 The Skills library (#42) now supports immutable folder and zip uploads,
-kernel source identities and inventories, script side-effect declarations,
+kernel source identities and inventories, pending script-effect review,
 file previews, and version comparisons. An Engineer or Field expert on a
 workflow uploads to that workflow's Group. See
 [the server package](packages/server/README.md) for the API, permissions,

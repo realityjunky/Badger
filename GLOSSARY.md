@@ -66,6 +66,12 @@ The directory in which a workflow is built and run locally. Badger's records of 
 **Skill version**:
 An immutable snapshot of one Skill's files, identified by a hash of their content; changed content makes a new version.
 
+**Responsible uploader**:
+The person who first uploaded an immutable version within its Skill entry. Deduplicating the same version preserves this responsibility. Only this person, with current access, may confirm its script-effect declarations.
+
+**Script effect review**:
+The original uploader's review of what every script in one immutable Skill version can do, based on an Engineer-routed Source study draft. Proposals, clarification, corrections, and personal confirmations retain separate revisions. The confirmed revision is reusable by workflows within that Skill entry and access boundary; it describes behavior without granting execution permission.
+
 **Skill pin**:
 A revisioned reference from a Workflow version to one immutable Skill version, used as a source or, in an upgrade, as the upgrade source. Pin changes invalidate the Sources stage and queue a source check.
 
@@ -78,7 +84,7 @@ A directory outside the Project that the host lets source locations point into, 
 _Avoid_: allowed directory
 
 **Source study**:
-The Engineer's recorded reading of one pinned Skill version before the questionnaire. It yields source-derived facts with their evidence, the interfaces between Skills, and the Skill's own open questions.
+The Engineer's recorded reading of one pinned Skill version before the questionnaire. It yields source-derived facts with their evidence, the interfaces between Skills, the Skill's own open questions, and script-effect suggestions for the responsible uploader's separate review. Completion requires current confirmed script coverage when the version has scripts.
 
 **Workflow version**:
 One iteration of a workflow: the Skill versions it pins, its questionnaire, and the dossier, plan, and package built from them. A new workflow version inherits the previous one's facts and resolutions with provenance to their earlier records, and its pending questionnaire work moves with them; flagged evidence stays open for re-verification, and approvals require a new review.

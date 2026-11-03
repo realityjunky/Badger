@@ -41,6 +41,9 @@ export async function sourceStudyGateState(
       "SKILL_VERSION_NOT_PINNED",
       "Select a currently pinned Skill version",
     );
+  const effectReview = study.effects.find((entry) => entry.skillId === skillId);
+  for (const finding of effectReview?.findings ?? [])
+    reject(finding.code, finding.message);
   const complete = study.studies.every(
     (entry) => entry.skillId === skillId || entry.studied,
   );
@@ -80,6 +83,14 @@ export async function sourceStudyGateState(
         })),
       ],
       boundHashes: {
+        scriptEffects: canonicalHash(
+          effectReview?.review
+            ? {
+                revision: effectReview.review.revision,
+                hash: effectReview.review.hash,
+              }
+            : null,
+        ),
         pin: canonicalHash(
           pin === undefined
             ? null

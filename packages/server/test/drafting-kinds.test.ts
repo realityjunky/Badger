@@ -311,7 +311,6 @@ it("accepts a source study as revisioned facts and interfaces with evidence from
     ],
   };
   const submitted = await submit(jobs, job, secret, result, [
-    [{ facts: [], interfaces: [] }, 400, /anyOf/u],
     [
       {
         ...result,

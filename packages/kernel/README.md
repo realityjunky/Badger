@@ -220,6 +220,13 @@ original result for the same client request ID. See
 `docs/adr/0015-pinned-skill-versions-and-source-check-jobs.md` and
 `docs/adr/0016-gate-confirmations-and-inbox.md`.
 
+Script-effect reviews (#96) use the kernel's versioned `scriptEffectContract`,
+suggestion validator, and coverage findings. Uploads remain declaration-free;
+the existing Source study Agent job drafts effects and the original uploader
+personally confirms the complete set. Plans and packaged source evidence bind
+the confirmed declaration revision/hash. See
+[Script effect review](../../docs/script-effect-review.md).
+
 Source study records (#45) are delivered in the service and dashboard:
 revisioned source-derived facts and independent interfaces, evidence links
 to immutable file lines, and human study-completion gates per pinned Skill

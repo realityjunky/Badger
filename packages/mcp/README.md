@@ -161,9 +161,8 @@ resolving its parent remain separate people-only actions. Review decisions
 bind the exact result, edits, and current input hashes. The MCP has no
 acceptance, rejection, or sign-off tool.
 
-For an upload, provide the existing `skillId`, local `folder`, and a `scripts`
-map from each script path to the kernel's supported side effects, such as
-`{"scripts/check.py": ["none"]}`. The preview creates no immutable version.
+For an upload, provide the existing `skillId` and local `folder`. No effect
+declarations or model credentials are needed. The preview creates no immutable version.
 After the user reviews it, repeat with its hash and confirmation. Changed
 files fail the service's hash check. A metadata-only inspection of the entire
 folder refuses any path segment that names Git metadata, by the rule claimed job
@@ -173,6 +172,16 @@ including an empty `.git` directory. It refuses before any file contents are
 read or upload requests are sent. Upload the Skill without its `.git` folder,
 for example from `git archive` output. Symbolic links and special files are refused; the service's file, total-byte, and file-count limits are also checked
 locally before transfer. Files never execute, and real data must not be uploaded.
+
+For a `source-study` job, read `context.json`'s `scriptEffectContract` and the
+exact pinned files locally, including relevant helpers and configuration.
+Draft `scriptEffects` with each script's version/path, proposed labels,
+rationale, immutable citations, conditional behavior, and uncertainty using
+`output-schema.json`. Preserve useful facts and interfaces even when effects
+remain incomplete. Empty or omitted entries remain pending. The Engineer
+accepts findings and separately routes effects in Source study; the original
+uploader personally confirms them in the dashboard. The MCP cannot sign off.
+See [the complete review flow](../../docs/script-effect-review.md).
 
 Tool results, including their MCP envelopes, stay within 8 KiB. Larger results
 return a private local JSON file path and a `badger://results/…` resource link.

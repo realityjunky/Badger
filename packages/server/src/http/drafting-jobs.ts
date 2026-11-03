@@ -291,7 +291,14 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       requireLease(actor, job, body.leaseId, body.contextHash);
       const updated =
         action === "submit"
-          ? await submitDraftingJob(tx, deps, actor, job, body.result)
+          ? await submitDraftingJob(
+              tx,
+              deps,
+              actor,
+              job,
+              body.result,
+              input.blobs,
+            )
           : await releaseDraftingJob(tx, deps, actor, job);
       return { status: 200, value: { job: publicDraftingJob(updated) } };
     }
@@ -346,6 +353,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       actor,
       job,
       accept ? "accept" : "reject",
+      input.blobs,
       Object.fromEntries(
         draftResultFields(job.kind).map((key) => [key, body[key]]),
       ),

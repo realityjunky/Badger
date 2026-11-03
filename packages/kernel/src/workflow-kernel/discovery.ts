@@ -166,6 +166,29 @@ async function readSource(
         blocker: `Skill source ${realRoot} declares name ${frontmatter.name}, not ${declaration.name}`,
       };
     const inventory = identitySkillFiles(await inventorySkill(realRoot));
+    const sourceHash = hashSkillIdentity(inventory);
+    if (declaration.effectDeclaration !== undefined) {
+      const binding = declaration.effectDeclaration;
+      if (
+        !binding ||
+        typeof binding !== "object" ||
+        Array.isArray(binding) ||
+        Object.keys(binding).some(
+          (key) => !["skillId", "sourceHash", "revision", "hash"].includes(key),
+        ) ||
+        typeof binding.skillId !== "string" ||
+        !binding.skillId.trim() ||
+        binding.skillId.length > 200 ||
+        binding.sourceHash !== sourceHash ||
+        !Number.isSafeInteger(binding.revision) ||
+        binding.revision < 1 ||
+        typeof binding.hash !== "string" ||
+        !/^[a-f0-9]{64}$/u.test(binding.hash)
+      )
+        throw new Error(
+          "The effect declaration revision must identify this exact source hash and a valid confirmed revision",
+        );
+    }
     const references = inventory
       .filter(
         (file) =>
@@ -189,7 +212,12 @@ async function readSource(
         references,
         scripts,
         inventory,
-        hash: hashSkillIdentity(inventory),
+        hash: sourceHash,
+        ...(declaration.effectDeclaration
+          ? {
+              effectDeclaration: structuredClone(declaration.effectDeclaration),
+            }
+          : {}),
       },
       status: "available",
       blocker: "",

@@ -26,6 +26,10 @@ const EVENT_LABELS: Record<NotificationEvent, { en: string; zh: string }> = {
   "job-submitted": { en: "Drafts waiting for acceptance", zh: "草稿等待验收" },
   "gate-ready": { en: "Approval waiting", zh: "等待审批" },
   "gate-invalidated": { en: "Stage approval superseded", zh: "阶段审批已失效" },
+  "script-effect-review": {
+    en: "Uploader script effect review pending",
+    zh: "等待上传人审阅脚本影响",
+  },
 };
 
 export type RecipientMention = "userid" | "mobile" | "name";

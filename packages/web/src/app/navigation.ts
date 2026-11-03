@@ -14,6 +14,10 @@ export const routes: readonly RouteDefinition[] = [
   { pattern: "/", title: "page.myWork.title" },
   { pattern: "/my-work", title: "page.myWork.title" },
   { pattern: "/workflows", title: "page.workflows.title" },
+  {
+    pattern: "/source-reviews/:skillId/:hash",
+    title: "page.sourceReview.title",
+  },
   { pattern: "/workflows/:workflowId", title: "page.workflows.title" },
   {
     pattern: "/workflows/:workflowId/versions/:versionId",
@@ -40,7 +44,6 @@ export const routes: readonly RouteDefinition[] = [
   { pattern: "/admin/groups/:groupId", title: "page.admin.title" },
   { pattern: "/admin/invitations", title: "page.admin.title" },
   { pattern: "/admin/integrations", title: "page.admin.title" },
-  { pattern: "/admin/llm", title: "page.admin.title" },
   { pattern: "/admin/tokens", title: "page.admin.title" },
   { pattern: "/settings", title: "page.settings.title" },
   { pattern: "/settings/appearance", title: "page.settings.title" },
@@ -107,6 +110,7 @@ export const navigationSections: readonly NavigationSection[] = [
 const PAGE_PREFIXES: readonly (readonly [string, MessageId])[] = [
   ["/my-work", "page.myWork.title"],
   ["/workflows", "page.workflows.title"],
+  ["/source-reviews", "page.sourceReview.title"],
   ["/questionnaire", "page.questionnaire.title"],
   ["/skills", "page.skills.title"],
   ["/runs", "page.runs.title"],

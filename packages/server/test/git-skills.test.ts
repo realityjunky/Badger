@@ -503,7 +503,7 @@ describe("Skill versions from registered Git repositories", () => {
   });
 
   it.each([0, 2] as const)(
-    "keeps script declarations immutable and never runs fetched content, host Git configuration, or export rules over protocol v%i",
+    "imports scripts with pending review and never runs content, host Git configuration, or export rules over protocol v%i",
     async (protocol) => {
       const root = await fs.mkdtemp(join(tmpdir(), "badger-hostile-git-"));
       try {
@@ -594,24 +594,15 @@ describe("Skill versions from registered Git repositories", () => {
           confirmed: true,
           expectedHash: inspected.hash,
         };
-        expect((await write(`${target}/versions`, confirmation)).status).toBe(
-          400,
-        );
-        // A refused import leaves no temporary repository behind.
-        expect(await workspaces()).toEqual([]);
-        const created = await write(`${target}/versions`, {
-          ...confirmation,
-          scripts: { "scripts/run.sh": ["none"] },
-        });
+        const created = await write(`${target}/versions`, confirmation);
         expect(created.status).toBe(201);
         expect(
           (
             await write(`${target}/versions`, {
               ...confirmation,
-              scripts: { "scripts/run.sh": ["network"] },
             })
           ).status,
-        ).toBe(409);
+        ).toBe(200);
         // Export rules stay ordinary content: no substitution or omission.
         const skill = await service.request(
           `/api/v1${target}/versions/${inspected.hash}/files?path=SKILL.md`,
@@ -627,7 +618,6 @@ describe("Skill versions from registered Git repositories", () => {
           })),
           confirmed: true,
           expectedHash: inspected.hash,
-          scripts: { "scripts/run.sh": ["none"] },
         });
         expect(upload.status).toBe(200);
         expect(await hostile.take()).toEqual([]);

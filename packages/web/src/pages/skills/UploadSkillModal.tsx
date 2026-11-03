@@ -1,35 +1,22 @@
-import { Alert, Button, Modal, Select, Space, Spin, Typography } from "antd";
+import { Alert, Button, Modal, Space, Spin, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   gitFolderPath,
   previewUpload,
   readUploadFile,
-  suggestScriptEffects,
-  undeclaredScripts,
   uploadVersion,
   type GitContent,
-  type SideEffect,
   type Skill,
   type SkillVersion,
   type UploadContent,
   type UploadLimits,
   type VersionPreview,
-  type SuggestionResult,
 } from "../../api/skills.js";
 import { readBasePath } from "../../app/paths.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { documentationSearch } from "../../documentation/sections.js";
-
 import { GitSourceFields } from "./GitSourceFields.js";
-
-const SIDE_EFFECTS: SideEffect[] = [
-  "none",
-  "local-writes",
-  "network",
-  "scheduler-submission",
-  "installs",
-];
 
 export function UploadSkillModal({
   skill,
@@ -51,74 +38,10 @@ export function UploadSkillModal({
     null,
   );
   const [preview, setPreview] = useState<VersionPreview | null>(null);
-  const [scripts, setScripts] = useState<Record<string, SideEffect[]>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [suggestion, setSuggestion] = useState<SuggestionResult | null>(null);
-  const [suggesting, setSuggesting] = useState(false);
-  const [suggestionError, setSuggestionError] = useState<string | null>(null);
-  const editedScripts = useRef(new Set<string>());
   const controller = useRef<AbortController | null>(null);
   const selection = useRef(0);
-  const undeclared =
-    preview === null ? [] : undeclaredScripts(preview, scripts);
-
-  useEffect(() => {
-    setSuggestion(null);
-    setSuggestionError(null);
-    const task = preview?.suggestion;
-    if (!preview || task?.state !== "ready" || !task.id) {
-      setSuggesting(false);
-      return;
-    }
-    const generation = selection.current;
-    const pending = new AbortController();
-    setSuggesting(true);
-    void suggestScriptEffects(
-      basePath,
-      skill.id,
-      task.id,
-      preview.hash,
-      pending.signal,
-    )
-      .then(({ suggestion }) => {
-        if (pending.signal.aborted || generation !== selection.current) return;
-        if (
-          suggestion.binding.sourceHash !== preview.hash ||
-          suggestion.binding.promptRevision !== task.prompt.revision ||
-          suggestion.binding.configurationRevision !==
-            task.binding?.configurationRevision
-        ) {
-          setSuggestionError(t("llm.stale"));
-          return;
-        }
-        setSuggestion(suggestion);
-        setScripts((current) => {
-          if (generation !== selection.current) return current;
-          const next = { ...current };
-          for (const script of suggestion.scripts)
-            if (
-              script.complete &&
-              script.effects.length &&
-              !editedScripts.current.has(script.path)
-            )
-              next[script.path] = script.effects;
-          return next;
-        });
-      })
-      .catch((failure: unknown) => {
-        if (!pending.signal.aborted && generation === selection.current)
-          setSuggestionError(
-            failure instanceof Error ? failure.message : t("llm.failed"),
-          );
-      })
-      .finally(() => {
-        if (!pending.signal.aborted && generation === selection.current)
-          setSuggesting(false);
-      });
-    return () => pending.abort();
-  }, [basePath, preview, skill.id, t]);
-
   useEffect(
     () => () => {
       selection.current += 1;
@@ -134,12 +57,9 @@ export function UploadSkillModal({
     const signal = controller.current.signal;
     setContent(null);
     setPreview(null);
-    setScripts({});
-    editedScripts.current.clear();
     setError(null);
     const files = Array.from(selected ?? []);
-    if (files.length === 0) return;
-    // A large .git folder would otherwise read as only over the limits.
+    if (!files.length) return;
     const gitPath = zip
       ? null
       : gitFolderPath(
@@ -185,9 +105,8 @@ export function UploadSkillModal({
   }
 
   async function confirm() {
-    if (content === null || preview === null || undeclared.length > 0) return;
+    if (!content || !preview) return;
     selection.current += 1;
-    setSuggesting(false);
     setBusy(true);
     setError(null);
     try {
@@ -195,7 +114,6 @@ export function UploadSkillModal({
         basePath,
         skill.id,
         content,
-        scripts,
         preview.hash,
       );
       onUploaded(result.version);
@@ -205,7 +123,6 @@ export function UploadSkillModal({
       setBusy(false);
     }
   }
-
   return (
     <Modal
       open
@@ -213,6 +130,7 @@ export function UploadSkillModal({
       onCancel={busy ? undefined : onClose}
       closable={!busy}
       maskClosable={!busy}
+      width={720}
       footer={
         <Space>
           <Button onClick={onClose} disabled={busy}>
@@ -222,7 +140,7 @@ export function UploadSkillModal({
             type="primary"
             onClick={() => void confirm()}
             loading={busy}
-            disabled={preview === null || undeclared.length > 0}
+            disabled={!preview}
           >
             {t(
               source === "git"
@@ -232,7 +150,6 @@ export function UploadSkillModal({
           </Button>
         </Space>
       }
-      width={720}
     >
       <Space orientation="vertical" size="middle" className="skills-full-width">
         <Alert
@@ -260,10 +177,8 @@ export function UploadSkillModal({
             onError={setError}
             onChange={() => {
               selection.current += 1;
-              editedScripts.current.clear();
               setContent(null);
               setPreview(null);
-              setScripts({});
             }}
             onPreview={(content, preview) => {
               setContent(content);
@@ -297,9 +212,9 @@ export function UploadSkillModal({
             </label>
           </div>
         )}
-        {error !== null && <Alert type="error" showIcon title={error} />}
+        {error && <Alert type="error" showIcon title={error} />}
         {busy && <Spin aria-label={t("common.loading")} />}
-        {preview !== null && (
+        {preview && (
           <>
             <Typography.Paragraph>
               {format("skills.previewCount", {
@@ -308,112 +223,32 @@ export function UploadSkillModal({
             </Typography.Paragraph>
             <code className="skills-hash">{preview.hash}</code>
             <h3>{t("skills.effects")}</h3>
-            <p className="muted">{t("skills.effectsHint")}</p>
             <Link
               to={{
-                ...location,
+                pathname: location.pathname,
                 search: documentationSearch(
                   location.search,
                   "script-side-effects",
                 ),
+                hash: location.hash,
               }}
               replace
             >
               {t("documentation.effects.link")}
             </Link>
-            {suggesting && (
-              <p role="status">
-                <Spin size="small" /> {t("llm.suggesting")}
-              </p>
-            )}
-            {(suggestionError ||
-              suggestion?.message ||
-              preview.suggestion?.message) && (
-              <Alert
-                type="warning"
-                showIcon
-                title={
-                  suggestionError ??
-                  suggestion?.message ??
-                  preview.suggestion?.message
-                }
-              />
-            )}
-            {preview.suggestion && (
-              <details>
-                <summary>{t("llm.activePrompt")}</summary>
-                <p>{preview.suggestion.prompt.description}</p>
-                <code className="skills-hash">
-                  {preview.suggestion.prompt.revision}
-                </code>
-                <pre className="source-preview">
-                  {preview.suggestion.prompt.text}
-                </pre>
-              </details>
-            )}
-            {preview.scripts.length === 0 && <p>{t("skills.noScripts")}</p>}
-            {preview.scripts.map((script) => (
-              <label key={script.path} className="field">
-                <code>{script.path}</code>
-                <Select
-                  mode="multiple"
-                  disabled={busy}
-                  aria-label={`${t("skills.effects")} ${script.path}`}
-                  placeholder={t("skills.undeclared")}
-                  value={scripts[script.path] ?? []}
-                  options={SIDE_EFFECTS.map((effect) => ({
-                    value: effect,
-                    label: t(`skills.effect.${effect}`),
-                  }))}
-                  onChange={(effects: SideEffect[]) => {
-                    editedScripts.current.add(script.path);
-                    const last = effects[effects.length - 1];
-                    const normalized =
-                      last === "none"
-                        ? ["none" as const]
-                        : effects.filter((effect) => effect !== "none");
-                    setScripts((current) => {
-                      const next = { ...current };
-                      if (normalized.length === 0) delete next[script.path];
-                      else next[script.path] = normalized;
-                      return next;
-                    });
-                  }}
-                />
-                {suggestion?.scripts
-                  .filter((item) => item.path === script.path)
-                  .map((item) => (
-                    <div key={item.path}>
-                      <p>{item.rationale}</p>
-                      {!item.complete && (
-                        <p role="status">
-                          {t("llm.needsReview")} {item.uncertainty}
-                        </p>
-                      )}
-                      {item.citations.map((citation, index) => (
-                        <details key={`${citation.path}-${index}`}>
-                          <summary>
-                            {citation.path}:{citation.startLine}–
-                            {citation.endLine}
-                          </summary>
-                          <code className="skills-hash">{citation.hash}</code>
-                          <pre className="source-preview">
-                            {citation.excerpt}
-                          </pre>
-                        </details>
-                      ))}
-                    </div>
+            {preview.scripts.length ? (
+              <>
+                <Alert type="info" title={t("effects.uploadPending")} />
+                <ul>
+                  {preview.scripts.map((script) => (
+                    <li key={script.path}>
+                      <code>{script.path}</code> · {t("effects.pending")}
+                    </li>
                   ))}
-              </label>
-            ))}
-            {undeclared.length > 0 && (
-              <Alert
-                type="warning"
-                showIcon
-                title={format("skills.declareRemaining", {
-                  count: undeclared.length,
-                })}
-              />
+                </ul>
+              </>
+            ) : (
+              <p>{t("skills.noScripts")}</p>
             )}
             <Alert type="info" title={t("skills.immutableHint")} />
           </>

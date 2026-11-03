@@ -190,7 +190,6 @@ it("previews and uploads an immutable Skill version from a folder against the co
   const args = {
     skillId: skill.id,
     folder,
-    scripts: { "scripts/check.py": ["none"] },
   };
   const { preview } = await call(client, "upload_skill_version", args);
   expect(preview.hash).toMatch(/^[a-f0-9]{64}$/u);

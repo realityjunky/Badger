@@ -1,5 +1,6 @@
 import {
   canonicalHash,
+  scriptEffectContract,
   deriveFactoryPlan,
   type AuthoringPlan,
   type AuthoringHandoff,
@@ -8,6 +9,7 @@ import { planInputs, readPlanHead } from "../plans.js";
 import type { Queryable } from "../database/database.js";
 import { listWorkflowPins } from "../workflow-source.js";
 import { readVersion } from "../skills/library.js";
+import { effectHead } from "../script-effects.js";
 import { readSourceStudy, studyReferences } from "../source-study.js";
 import { readQuestions, readSettings } from "../questionnaire/store.js";
 import { readConcerns } from "../questionnaire/concerns.js";
@@ -30,7 +32,15 @@ export async function draftingContext(
   const pins = [];
   for (const pin of await listWorkflowPins(tx, versionId)) {
     const skill = await readVersion(tx, pin.skillId, pin.hash);
-    pins.push({ ...pin, inventory: skill.inventory, scripts: skill.scripts });
+    const effects = await effectHead(tx, pin.skillId, pin.hash);
+    pins.push({
+      ...pin,
+      inventory: skill.inventory,
+      scripts: skill.scripts,
+      effectRevision: effects
+        ? { revision: effects.revision, hash: effects.hash }
+        : null,
+    });
   }
   const questions = (await readQuestions(tx, versionId, personId, true)).map(
     ({ canAnswer: _canAnswer, ...q }) => q,
@@ -66,6 +76,7 @@ export async function draftingContext(
   const planningInput = await planInputs(tx, versionId, personId);
   const currentPlan = await readPlanHead(tx, versionId);
   const bundle = {
+    scriptEffectContract: scriptEffectContract(),
     planning: planningInput
       ? {
           input: planningInput,
@@ -172,6 +183,10 @@ export function draftingInputs(bundle: DraftingBundle, target: DraftingTarget) {
     case "source-study":
       return {
         pin,
+        contract: bundle.scriptEffectContract,
+        effectRevision:
+          bundle.pins.find((entry) => entry.skillId === target.skillId)
+            ?.effectRevision ?? null,
         records: [...bundle.sourceStudy.facts, ...bundle.sourceStudy.interfaces]
           .filter((r) =>
             studyReferences(r.content).some(

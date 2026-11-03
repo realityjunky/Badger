@@ -114,14 +114,6 @@ export interface ServiceConfig {
     maxFiles: number;
   };
   answerAttachments: { retentionSeconds: number };
-  llm: {
-    configurationFile: string | null;
-    encryptionKey: string | null;
-    externalSecrets: Readonly<Record<string, string>>;
-    httpsProxy: string | undefined;
-    httpProxy: string | undefined;
-    noProxy: string | undefined;
-  };
   git: {
     proxy: string | undefined;
     allowedOrigins: string[];
@@ -707,11 +699,6 @@ export function loadConfig(
 
   const notificationKey =
     readString(environment, "BADGER_NOTIFICATION_KEY") ?? null;
-  const llmKey = readString(environment, "BADGER_LLM_KEY") ?? null;
-  if (llmKey !== null && !/^[a-fA-F0-9]{64}$/u.test(llmKey))
-    throw new ConfigurationError(
-      "BADGER_LLM_KEY must be 32 bytes encoded as 64 hexadecimal characters",
-    );
   if (notificationKey !== null && !/^[a-fA-F0-9]{64}$/u.test(notificationKey))
     throw new ConfigurationError(
       "BADGER_NOTIFICATION_KEY must be 32 bytes encoded as 64 hexadecimal characters",
@@ -802,21 +789,6 @@ export function loadConfig(
           }
         : null,
     storage: readStorage(environment),
-    llm: {
-      configurationFile:
-        readString(environment, "BADGER_LLM_CONFIG_FILE") ?? null,
-      encryptionKey: llmKey,
-      externalSecrets: Object.fromEntries(
-        Object.entries(environment).filter(
-          (entry): entry is [string, string] =>
-            /^BADGER_LLM_SECRET_[A-Z0-9_]{1,80}$/u.test(entry[0]) &&
-            typeof entry[1] === "string",
-        ),
-      ),
-      httpsProxy: environment.https_proxy ?? environment.HTTPS_PROXY,
-      httpProxy: environment.http_proxy ?? environment.HTTP_PROXY,
-      noProxy: environment.no_proxy ?? environment.NO_PROXY,
-    },
     uploads: {
       maxBytes: readInteger(
         environment,

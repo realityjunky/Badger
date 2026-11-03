@@ -11,6 +11,7 @@ import { packageMethods } from "./packages.js";
 import { proposalMethods } from "./proposals.js";
 import { inboxMethods } from "./inbox.js";
 import { sourceStudyMethods } from "./source-study.js";
+import { scriptEffectMethods } from "./script-effects.js";
 import { questionnaireMethods } from "./questionnaire.js";
 import { draftingJobMethods } from "./drafting-jobs.js";
 
@@ -20,6 +21,7 @@ export function tokenRequestAllowed(
   method: string,
 ): boolean {
   const reads = method === "GET" || method === "HEAD";
+  if (scriptEffectMethods(path) !== null) return reads;
   if (/^\/api\/v1\/runs\/[^/]+\/gates(?:\/|$)/u.test(path))
     return (
       reads && (scopes.includes("operator") || scopes.includes("engineer"))

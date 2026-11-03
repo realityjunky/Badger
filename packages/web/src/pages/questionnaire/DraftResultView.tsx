@@ -36,7 +36,8 @@ export function hasDraftItems(result: DraftingResult) {
     return !!result.text.trim() && !!result.rationale.trim();
   return (
     result.facts.length > 0 ||
-    ("interfaces" in result && result.interfaces.length > 0)
+    ("interfaces" in result &&
+      (result.interfaces.length > 0 || (result.scriptEffects?.length ?? 0) > 0))
   );
 }
 
@@ -122,6 +123,26 @@ export function DraftResultView({
     return (
       <>
         <h3>{t("study.facts")}</h3>
+        {!!result.scriptEffects?.length && (
+          <section>
+            <h3>{t("effects.title")}</h3>
+            <p>{t("effects.routingHelp")}</p>
+            {result.scriptEffects.map((row) => (
+              <article className="drafting-suggestion" key={row.path}>
+                <code>{row.path}</code>
+                <p>
+                  {row.effects
+                    .map((effect) => t(`skills.effect.${effect}`))
+                    .join(", ") || t("effects.pending")}
+                </p>
+                <p>{row.rationale}</p>
+                <p>{row.conditionalBehavior}</p>
+                {row.uncertainty && <p>{row.uncertainty}</p>}
+                <DraftEvidence evidence={row.evidence} />
+              </article>
+            ))}
+          </section>
+        )}
         {result.facts.map((fact, index) => (
           <section className="drafting-suggestion" key={index}>
             {text(

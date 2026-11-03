@@ -5,6 +5,7 @@ import { isRecord } from "../util/records.js";
 
 export type NotificationEvent =
   | "gate-ready"
+  | "script-effect-review"
   | "gate-invalidated"
   | "question-assigned"
   | "answer-submitted"

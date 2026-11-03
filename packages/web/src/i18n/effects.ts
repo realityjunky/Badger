@@ -1,0 +1,83 @@
+export const effectsEn = {
+  "page.sourceReview.title": "Source study",
+  "effects.title": "Script effect review",
+  "effects.help":
+    "Study the pinned files, then ask the original uploader to review what each script can do. Uploading and accepting study findings do not confirm declarations.",
+  "effects.uploader": "Responsible uploader",
+  "effects.pending": "Effect review pending",
+  "effects.confirmed": "Uploader confirmed",
+  "effects.directLink": "Open this Source study review",
+  "effects.definitions": "Effect definitions",
+  "effects.agentDraft": "Source study Agent draft",
+  "effects.requestDraft": "Request Source study draft",
+  "effects.route": "Send effect draft to uploader",
+  "effects.routingHelp":
+    "Sending a draft creates one shared review task for this version. Accept facts and interfaces separately in Suggestions.",
+  "effects.rationale": "Why these effects apply",
+  "effects.conditional": "Conditional behavior and invoked tools",
+  "effects.answer": "Answer the uncertainty",
+  "effects.sourcePath": "Citation source path",
+  "effects.addCitation": "Add source citation",
+  "effects.removeCitation": "Remove citation",
+  "effects.rowReviewed": "I reviewed this script's declaration",
+  "effects.note": "Clarification or correction note",
+  "effects.save": "Save review draft",
+  "effects.clarify": "Request clarification",
+  "effects.preview": "Review complete declaration set",
+  "effects.confirm": "Personally confirm declarations",
+  "effects.personalConfirmation":
+    "As this version's uploader, confirm this complete declaration set. This confirmation binds the source version, review revision, effects, rationale, evidence, your identity, and review time. It grants no execution permission.",
+  "effects.correct": "Correct declarations",
+  "effects.history": "Declaration review history",
+  "effects.citedLines": "Cited immutable source lines",
+  "effects.citationUnavailable":
+    "These cited source lines are unavailable. Check the exact version and file hash.",
+  "effects.failed":
+    "This review could not be loaded or saved. Reload the current revision and try again.",
+  "effects.uploadPending":
+    "Upload these immutable files now. Script effects remain pending until Source study and the original uploader's personal confirmation.",
+  "inbox.scriptEffectReview": "{name} · Script effect review",
+  "notifications.event.script-effect-review": "Script effect review",
+  "notifications.waitingFor.script-effect-review": "Uploader review pending",
+};
+
+export const effectsZh: Record<keyof typeof effectsEn, string> = {
+  "page.sourceReview.title": "来源研读",
+  "effects.title": "脚本影响审阅",
+  "effects.help":
+    "研读固定版本的文件后，请原上传人审阅每个脚本可能产生的影响。上传文件或接受研读结论不会确认声明。",
+  "effects.uploader": "负责的上传人",
+  "effects.pending": "待审阅脚本影响",
+  "effects.confirmed": "上传人已确认",
+  "effects.directLink": "打开此来源研读审阅",
+  "effects.definitions": "影响标签定义",
+  "effects.agentDraft": "来源研读 Agent 草稿",
+  "effects.requestDraft": "请求来源研读草稿",
+  "effects.route": "发送影响草稿给上传人",
+  "effects.routingHelp":
+    "发送后，此版本共用一项审阅任务。事实和接口请在建议面板中另行接受。",
+  "effects.rationale": "影响判定依据",
+  "effects.conditional": "条件行为与调用工具",
+  "effects.answer": "回答不确定事项",
+  "effects.sourcePath": "引用来源路径",
+  "effects.addCitation": "添加来源引用",
+  "effects.removeCitation": "移除引用",
+  "effects.rowReviewed": "我已审阅此脚本的声明",
+  "effects.note": "澄清或更正说明",
+  "effects.save": "保存审阅草稿",
+  "effects.clarify": "请求澄清",
+  "effects.preview": "审阅完整声明集",
+  "effects.confirm": "由本人确认声明",
+  "effects.personalConfirmation":
+    "作为此版本的上传人，确认这份完整声明。确认绑定来源版本、审阅修订、影响、依据、引用、您的身份与审阅时间。声明不授予执行权限。",
+  "effects.correct": "更正声明",
+  "effects.history": "声明审阅历史",
+  "effects.citedLines": "不可变来源引用行",
+  "effects.citationUnavailable": "无法读取引用行，请检查版本和文件哈希。",
+  "effects.failed": "无法读取或保存审阅，请重新加载当前修订后再试。",
+  "effects.uploadPending":
+    "现在上传不可变文件。脚本影响将在来源研读后，由原上传人亲自审阅并确认。",
+  "inbox.scriptEffectReview": "{name} · 脚本影响审阅",
+  "notifications.event.script-effect-review": "脚本影响审阅",
+  "notifications.waitingFor.script-effect-review": "等待上传人审阅",
+};

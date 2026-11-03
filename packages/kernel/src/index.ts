@@ -34,6 +34,7 @@ export type * from "./factory/questionnaire-records.js";
 export { questionnaireLedgerChanges } from "./factory/questionnaire-records.js";
 export * from "./factory/migration.js";
 export * from "./factory/source.js";
+export * from "./factory/script-effects.js";
 export * from "./eval/run.js";
 export { certificationExecFile } from "./eval/sandbox.js";
 export * from "./publish/lifecycle.js";

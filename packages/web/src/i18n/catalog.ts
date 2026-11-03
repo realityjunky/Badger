@@ -1,81 +1,14 @@
 import type { Language } from "../preferences/model.js";
 import { documentationEn, documentationZh } from "./documentation.js";
+import { effectsEn, effectsZh } from "./effects.js";
 
 /**
  * Every message the dashboard shows, keyed by a stable message ID. Records
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  ...effectsEn,
   ...documentationEn,
-  "llm.actions": "LLM configuration actions",
-  "llm.unsaved": "Unsaved changes",
-  "llm.allSaved": "All changes saved",
-  "llm.saveBeforeTest": "Save changes before testing this connection.",
-  "llm.keyEntryHelp":
-    "Enter a key and save this configuration. Keys are stored encrypted and are never displayed again.",
-  "llm.preserveKeyHelp":
-    "Preserve existing key keeps the saved key when you save changes to other fields. Choose Replace key to enter a new key, or Clear key to remove it.",
-  "llm.advancedCredentials": "Advanced credential references",
-  "llm.secretRefHelp":
-    "Use a reference only when an operator provided one, such as env:BADGER_LLM_SECRET_FLASH. Leave this field alone when entering an API key above; never paste the key itself here.",
-  "llm.tab": "LLM configuration",
-  "llm.adminHelp":
-    "Manage model connections, function assignments and task prompts. Accepted revision:",
-  "llm.save": "Save LLM configuration",
-  "llm.saved": "LLM configuration saved.",
-  "llm.reload": "Reload accepted settings",
-  "llm.export": "Export accepted configuration",
-  "llm.reloadFile": "Accept external file revision",
-  "llm.connections": "Model connections",
-  "llm.addModel": "Add model connection",
-  "llm.newModel": "New model",
-  "llm.importProfiles": "Import model profiles (JSON)",
-  "llm.importFailed":
-    "Enter valid model profile or descriptor JSON; the server validates the full configuration on Save.",
-  "llm.duplicateProfile":
-    "A model identifier is already present. Import profiles with unique identifiers.",
-  "llm.name": "Display name",
-  "llm.model": "Model alias",
-  "llm.provider": "Provider",
-  "llm.protocol": "Protocol",
-  "llm.apiBase": "API base URL",
-  "llm.enabled": "Enabled",
-  "llm.secretRef": "Protected secret reference",
-  "llm.apiKey": "API key",
-  "llm.keyConfigured": "Configured · masked",
-  "llm.keyMissing": "Not configured",
-  "llm.keyAction": "API key action",
-  "llm.preserveKey": "Preserve existing key",
-  "llm.replaceKey": "Replace key",
-  "llm.clearKey": "Clear key",
-  "llm.replacementKey": "Replacement API key",
-  "llm.externalSecretHelp":
-    "Encrypted key storage is unavailable. Ask the operator to enable it, or enter a protected external secret reference.",
-  "llm.settings": "Model settings",
-  "llm.contextHelp":
-    "Input/context budget limits evidence coverage. Maximum output tokens separately limits the model response. Controls and provider mappings come from this model's descriptors.",
-  "llm.testConnection": "Test saved connection",
-  "llm.testHelp":
-    "Save changes before testing. The test sends synthetic evidence. Request acceptance alone does not prove that an upstream proxy honored every setting.",
-  "llm.descriptors": "Setting descriptors and provider mappings",
-  "llm.descriptorsHelp":
-    "Advanced model profile configuration: define types, options, defaults, ranges and request targets. Unsupported or invalid settings are refused.",
-  "llm.applyDescriptors": "Apply descriptor edits",
-  "llm.assignments": "Function-to-model assignments",
-  "llm.assignedModel": "Assigned model",
-  "llm.scriptFunction": "Script side-effect suggestion",
-  "llm.prompts": "Task prompts",
-  "llm.promptText": "Task prompt text",
-  "llm.promptHelp":
-    "Use {{source}} and {{scripts}} placeholders. Editing a prompt cannot change the response schema, allowed effects or the person's final confirmation.",
-  "llm.suggesting":
-    "Analyzing script effects… You can enter or change declarations while suggestions run.",
-  "llm.activePrompt": "Inspect active task prompt and revision",
-  "llm.needsReview": "Needs manual review.",
-  "llm.stale":
-    "The suggestion belongs to different upload or configuration evidence. Preview again or declare effects manually.",
-  "llm.failed":
-    "Suggestions or configuration could not be loaded. Manual declarations remain available.",
   "demo.title": "Demo mode · read-only",
   "inbox.runGateReady": "{name} · v{number}: answer a Run gate",
   "demo.open": "Explore demo",
@@ -865,20 +798,16 @@ const en = {
   "skills.failed": "The Skill records could not be loaded. Retry the request.",
   "skills.previewCount": "{count} files in the source inventory",
   "skills.effects": "Script side effects",
-  "skills.effectsHint":
-    "Declare every script's possible effects, including called programs and optional modes. Inspect uncertain behavior before choosing None. Uploading and previewing never execute scripts.",
-  "skills.declareRemaining":
-    "Undeclared scripts: {count}. Confirm becomes available once every script is declared.",
   "skills.noScripts":
     "This version contains no scripts. No side-effect declarations are needed.",
-  "skills.undeclared": "Undeclared",
+  "skills.undeclared": "Effect review pending",
   "skills.effect.none": "None",
   "skills.effect.local-writes": "Local writes",
   "skills.effect.network": "Network",
   "skills.effect.scheduler-submission": "Scheduler submission",
   "skills.effect.installs": "Installs",
   "skills.immutableHint":
-    "Files and declarations cannot change after upload. Changed source content creates a new version.",
+    "Files cannot change after upload. Declarations keep separate Source study review history; changed source content creates a new version.",
   "skills.missingFile": "This file is absent from this version.",
   "skills.selectFile": "Select a file in the tree to preview it.",
   "skills.previewTooLarge":
@@ -1404,70 +1333,8 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  ...effectsZh,
   ...documentationZh,
-  "llm.actions": "LLM 配置操作",
-  "llm.unsaved": "有未保存的更改",
-  "llm.allSaved": "所有更改已保存",
-  "llm.saveBeforeTest": "请先保存更改，再测试此连接。",
-  "llm.keyEntryHelp": "输入密钥后保存配置。密钥将加密存储，保存后不再显示。",
-  "llm.preserveKeyHelp":
-    "保留现有密钥表示保存其他字段时继续使用已保存的密钥。选择替换密钥可输入新密钥，选择清除密钥可移除它。",
-  "llm.advancedCredentials": "高级凭据引用",
-  "llm.secretRefHelp":
-    "仅在运维人员提供引用时使用，例如 env:BADGER_LLM_SECRET_FLASH。通过上方输入 API 密钥时无需修改此字段，切勿在此粘贴密钥本身。",
-  "llm.tab": "LLM 配置",
-  "llm.adminHelp": "管理模型连接、功能分配和任务提示词。当前接受的修订号：",
-  "llm.save": "保存 LLM 配置",
-  "llm.saved": "LLM 配置已保存。",
-  "llm.reload": "重新加载当前配置",
-  "llm.export": "导出当前配置",
-  "llm.reloadFile": "接受外部文件修订",
-  "llm.connections": "模型连接",
-  "llm.addModel": "添加模型连接",
-  "llm.newModel": "新模型",
-  "llm.importProfiles": "导入模型配置（JSON）",
-  "llm.importFailed":
-    "请输入有效的模型或设置描述 JSON；保存时服务器将验证完整配置。",
-  "llm.duplicateProfile": "模型标识已存在，请导入具有唯一标识的配置。",
-  "llm.name": "显示名称",
-  "llm.model": "模型别名",
-  "llm.provider": "提供商",
-  "llm.protocol": "协议",
-  "llm.apiBase": "API 基础 URL",
-  "llm.enabled": "已启用",
-  "llm.secretRef": "受保护的密钥引用",
-  "llm.apiKey": "API 密钥",
-  "llm.keyConfigured": "已配置 · 已隐藏",
-  "llm.keyMissing": "未配置",
-  "llm.keyAction": "API 密钥操作",
-  "llm.preserveKey": "保留现有密钥",
-  "llm.replaceKey": "替换密钥",
-  "llm.clearKey": "清除密钥",
-  "llm.replacementKey": "替换用的 API 密钥",
-  "llm.externalSecretHelp":
-    "加密密钥存储不可用。请让运维人员启用，或输入受保护的外部密钥引用。",
-  "llm.settings": "模型设置",
-  "llm.contextHelp":
-    "输入/上下文预算限制证据覆盖量，最大输出 token 数单独限制响应。控件和提供商映射来自该模型的设置描述。",
-  "llm.testConnection": "测试已保存的连接",
-  "llm.testHelp":
-    "请先保存再测试。测试仅发送合成证据；接受请求并不证明上游代理实际应用了所有设置。",
-  "llm.descriptors": "设置描述和提供商映射",
-  "llm.descriptorsHelp":
-    "高级模型配置：定义类型、选项、默认值、范围和请求字段。无效或不支持的设置将被拒绝。",
-  "llm.applyDescriptors": "应用设置描述",
-  "llm.assignments": "功能与模型分配",
-  "llm.assignedModel": "分配的模型",
-  "llm.scriptFunction": "脚本副作用建议",
-  "llm.prompts": "任务提示词",
-  "llm.promptText": "任务提示词正文",
-  "llm.promptHelp":
-    "使用 {{source}} 和 {{scripts}} 占位符。编辑提示词不能改变响应格式、允许的副作用或用户最终确认要求。",
-  "llm.suggesting": "正在分析脚本副作用… 等待期间仍可填写或修改声明。",
-  "llm.activePrompt": "查看当前任务提示词和修订号",
-  "llm.needsReview": "需要人工检查。",
-  "llm.stale": "建议对应的上传或配置已变化，请重新预览或手动声明。",
-  "llm.failed": "无法加载建议或配置，仍可手动声明副作用。",
   "demo.title": "演示模式 · 只读",
   "inbox.runGateReady": "{name} · v{number}：回答运行关卡",
   "demo.open": "浏览演示",
@@ -2299,19 +2166,15 @@ const zh: Record<MessageId, string> = {
   "skills.failed": "无法加载 Skill 记录，请重试。",
   "skills.previewCount": "来源清单共 {count} 个文件",
   "skills.effects": "脚本副作用",
-  "skills.effectsHint":
-    "声明每个脚本可能产生的副作用，包括所调用程序和可选模式。行为不确定时，先检查再选择“无”。上传和预览绝不执行脚本。",
-  "skills.declareRemaining":
-    "尚未声明副作用的脚本：{count} 个。全部声明后才能确认上传。",
   "skills.noScripts": "此版本不包含脚本，无需声明副作用。",
-  "skills.undeclared": "尚未声明",
+  "skills.undeclared": "待审阅脚本影响",
   "skills.effect.none": "无",
   "skills.effect.local-writes": "本地写入",
   "skills.effect.network": "网络访问",
   "skills.effect.scheduler-submission": "提交调度任务",
   "skills.effect.installs": "安装软件",
   "skills.immutableHint":
-    "上传后文件和声明不可更改。来源内容变化会创建新版本。",
+    "上传后文件不可更改。声明保留独立的来源研读历史；来源内容变化会创建新版本。",
   "skills.missingFile": "此版本中不存在该文件。",
   "skills.selectFile": "在文件树中选择文件以查看预览。",
   "skills.previewTooLarge":

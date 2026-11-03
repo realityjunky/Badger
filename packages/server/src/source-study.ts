@@ -11,6 +11,7 @@ import { evidenceComparison, type EvidenceChange } from "./evidence-changes.js";
 import { readRecordOrigins, type RecordOrigin } from "./version-inheritance.js";
 import { listWorkflowPins, type WorkflowSkillPin } from "./workflow-source.js";
 import { readGateConfirmations } from "./gates.js";
+import { effectHead, effectFindings } from "./script-effects.js";
 import {
   invalidateStudyGates,
   studyGateName,
@@ -228,6 +229,18 @@ export async function studyRecords(
 export async function readSourceStudy(database: Queryable, versionId: string) {
   const records = await studyRecords(database, versionId);
   const pins = await listWorkflowPins(database, versionId);
+  const effects = await Promise.all(
+    pins.map(async (pin) => {
+      const version = await readVersion(database, pin.skillId, pin.hash);
+      const review = await effectHead(database, pin.skillId, pin.hash);
+      return {
+        skillId: pin.skillId,
+        hash: pin.hash,
+        review,
+        findings: effectFindings(version, review),
+      };
+    }),
+  );
   const studies = await Promise.all(
     pins.map(async (pin) => {
       const confirmations = await readGateConfirmations(
@@ -238,7 +251,11 @@ export async function readSourceStudy(database: Queryable, versionId: string) {
       const confirmation = confirmations[0] ?? null;
       return {
         ...pin,
-        studied: confirmation !== null && confirmation.invalidatedAt === null,
+        studied:
+          confirmation !== null &&
+          confirmation.invalidatedAt === null &&
+          effects.find((entry) => entry.skillId === pin.skillId)!.findings
+            .length === 0,
         confirmation,
       };
     }),
@@ -247,6 +264,7 @@ export async function readSourceStudy(database: Queryable, versionId: string) {
     facts: records.filter((r) => r.kind === "fact"),
     interfaces: records.filter((r) => r.kind === "interface"),
     studies,
+    effects,
   };
 }
 export async function evidenceLines(

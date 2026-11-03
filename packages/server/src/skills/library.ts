@@ -2,11 +2,7 @@ import { recordAudit, type WriteContext } from "../audit.js";
 import type { Database, Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
 import { toIsoString } from "../util.js";
-import {
-  canonicalHash,
-  type SkillSourceFile,
-  type SkillSource,
-} from "@realityjunky/badger";
+import { type SkillSourceFile, type SkillSource } from "@realityjunky/badger";
 import { lockBlobStore, type BlobStore } from "./blobs.js";
 import { objectInput, RequestError } from "../http/errors.js";
 
@@ -221,14 +217,6 @@ export async function createVersion(
       "The source differs from the preview you confirmed; preview it again",
       { hash: source.hash },
     );
-  const undeclared = source.scripts
-    .filter((script) => script.sideEffects === "undeclared")
-    .map((script) => script.path);
-  if (undeclared.length > 0)
-    throw new RequestError(
-      400,
-      `Declare every script's side effects before upload, using none for a script without any: ${undeclared.join(", ")}`,
-    );
   return database.transaction(async (tx) => {
     await lockBlobStore(tx);
     for (const file of source.inventory) {
@@ -250,14 +238,6 @@ export async function createVersion(
       ],
     );
     const row = inserted.rows[0];
-    if (row === undefined) {
-      const version = await readVersion(tx, skill.id, source.hash);
-      if (canonicalHash(version.scripts) !== canonicalHash(source.scripts))
-        throw new RequestError(
-          409,
-          "This immutable version already has different side-effect declarations; upload changed source content",
-        );
-    }
     let originAdded = false;
     if (gitOrigin !== undefined) {
       const receipt = await tx.query(

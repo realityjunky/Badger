@@ -713,6 +713,41 @@ button.rail-link {
   font-size: 12px;
 }
 
+.effect-review-panel,
+.effect-review-row,
+.effect-review-actions,
+.effect-citations {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.effect-review-panel .field,
+.effect-review-panel .ant-select {
+  min-width: 0;
+  width: 100%;
+}
+
+.effect-review-panel details > summary {
+  cursor: pointer;
+  padding-block: 8px;
+}
+
+.effect-review-panel dd {
+  margin: 4px 0 16px;
+}
+
+.effect-citations > div {
+  min-width: 0;
+}
+
+.effect-citations .ant-btn-link {
+  height: auto;
+  max-width: 100%;
+  white-space: normal;
+  text-align: start;
+}
+
 .study-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1598,22 +1633,6 @@ button.rail-link {
 .demo-banner {
   margin-bottom: 20px;
 }
-.llm-connection {
-  margin-block: 16px;
-  padding: 16px;
-  border: 1px solid var(--badger-color-border);
-  border-radius: 8px;
-}
-
-.llm-connection > summary {
-  cursor: pointer;
-  margin-bottom: 16px;
-}
-
-.llm-connection .field > .ant-switch {
-  align-self: flex-start;
-}
-
 .source-preview {
   max-height: 360px;
   overflow: auto;

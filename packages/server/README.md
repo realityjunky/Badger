@@ -1007,12 +1007,12 @@ All routes below follow the configured base path and `/api/v1`. They use the
 same Group visibility and Engineer/Field expert upload permissions as uploads.
 Registration and imports are audited; duplicate requests retain their records.
 
-| Method and path                 | Behavior                                                                                                     |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `GET /skills/:id/repositories`  | List registered repositories visible with this Skill.                                                        |
-| `POST /skills/:id/repositories` | Register `{url}` without fetching; return `{repository}` (201 or 200 for a duplicate).                       |
-| `POST /skills/:id/git-preview`  | Inspect `{repositoryId, commit, scripts?}`; return `{preview}` with the kernel hash, inventory, and effects. |
-| `POST /skills/:id/versions`     | Import `{repositoryId, commit, scripts?, confirmed: true, expectedHash}`; return `{version}` (201 or 200).   |
+| Method and path                 | Behavior                                                                                                   |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `GET /skills/:id/repositories`  | List registered repositories visible with this Skill.                                                      |
+| `POST /skills/:id/repositories` | Register `{url}` without fetching; return `{repository}` (201 or 200 for a duplicate).                     |
+| `POST /skills/:id/git-preview`  | Inspect `{repositoryId, commit}`; return `{preview}` with the kernel hash, inventory, and pending effects. |
+| `POST /skills/:id/versions`     | Import `{repositoryId, commit, confirmed: true, expectedHash}`; return `{version}` (201 or 200).           |
 
 Commits must be full lowercase 40- or 64-character hashes. Branches, tags,
 abbreviations, and unregistered or other-Skill repository IDs are refused.
@@ -1045,15 +1045,15 @@ See [ADR 0029](../../docs/adr/0029-registered-git-skill-versions.md).
 
 ## Skill uploads
 
-Administrator-configured models can suggest editable script side effects
-automatically after an upload or Git preview. See
-[LLM configuration and uploader review](../../docs/llm-configuration.md) for
-model connections, Task prompts, encrypted keys, the versioned file format,
-revision conflicts, bounded provider calls and manual fallback. The final
-hash-bound immutable upload confirmation remains with the person.
+Uploads require no script declarations or model connection. During Source
+study, the Engineer's Agent drafts effects from the exact pinned files and the
+original uploader personally reviews and confirms them. See
+[Script effect review](../../docs/script-effect-review.md) and the
+[retirement policy](../../docs/llm-configuration.md) for historical declarations
+and encrypted credentials. Hash-bound upload confirmation remains explicit.
 
-The Skills dashboard accepts a Skill folder or zip, previews its inventory,
-lets the person declare each script's side effects, and requires confirmation
+The Skills dashboard accepts a Skill folder or zip, previews its inventory
+and pending script effects, and requires confirmation
 before storing an immutable version. Never upload real data. Instructions,
 scripts, configuration, and synthetic examples are appropriate sources.
 Uploaded files never execute on the server. Folder and zip previews,
@@ -1072,10 +1072,11 @@ The kernel checks `SKILL.md` frontmatter against the Skill entry's name and
 produces the version hash, inventory, and script records. OS and editor noise
 uses the kernel's fixed ignore list and does not create a new version. An
 identical upload returns the existing version, including its original actor
-and timestamp. Every script must be declared before a version is created;
-`none` is a declaration. Files and declarations cannot be edited or deleted
-through the API. Identical content with different declarations is a conflict;
-change the source to record the corrected effects and upload a new version.
+and timestamp. Script effects remain pending until Source study review.
+Files stay immutable; proposals, corrections, and personal confirmations have
+separate append-only revisions. Deduplication preserves the original uploader
+and review. New content hashes require new review; the same entry/version's
+confirmed revision is shared by workflows within its access boundary.
 
 Files live in the configured blob directory, addressed by SHA-256. A blob is
 written and synced to a temporary file, linked into its address, and its
@@ -1096,8 +1097,7 @@ collection is not part of this change.
 | `BADGER_UPLOAD_MAX_FILES`      | 1000     | Maximum uploaded files, or zip entries including directories.  |
 
 The JSON body may hold the base64 of `BADGER_UPLOAD_MAX_BYTES`, plus 2,176
-bytes per allowed file for its path (named in `files` and again in
-`scripts`), JSON keys, and padding, plus 4 KiB. A larger body is refused with
+bytes per allowed file for paths, JSON keys, and padding, plus 4 KiB. A larger body is refused with
 413 while it is read. Zip entry sizes are checked before expansion, actual
 streamed bytes are capped, and each expanded file's checksum is checked.
 Encrypted archives, links, special files, duplicates, and file/directory
@@ -1129,8 +1129,8 @@ version.
 Every route is under the configured base path followed by `/api/v1`.
 Cookie-authenticated writes require an allowed `Origin`. Read responses and
 errors are JSON. Upload limit errors and oversized bodies return 413; empty
-uploads, invalid paths, and missing or invalid declarations return 400;
-changed confirmations or conflicting immutable metadata return 409. A method a
+uploads, invalid paths, and upload-time declarations return 400;
+changed confirmations return 409. A method a
 route does not serve returns 405 with an `Allow` header. Unauthorized reads do
 not reveal the Skill's existence.
 
@@ -1153,18 +1153,28 @@ Folder content is encoded as base64:
   "files": [
     { "path": "SKILL.md", "content": "BASE64_FILE_BYTES" },
     { "path": "scripts/run.sh", "content": "BASE64_FILE_BYTES" }
-  ],
-  "scripts": { "scripts/run.sh": ["local-writes", "network"] }
+  ]
 }
 ```
 
-For a zip, replace `files` with `archive`, containing its base64 bytes. Paths
-in `scripts` refer to the Skill root, after any enclosing folder is removed.
-Supported effects are `none`, `local-writes`, `network`,
-`scheduler-submission`, and `installs`. `none` stands alone. A preview reports
-a script without a declaration as `undeclared`; `versions` refuses the upload
-with 400 until every script is declared. Extra or nonexistent script paths
-are refused.
+For a zip, replace `files` with `archive`, containing its base64 bytes.
+Preview and stored script inventory report `undeclared`, a pending review
+state. Omit `scripts`; an empty legacy map is tolerated, while nonempty
+upload-time declarations are refused. The versioned kernel contract supplies
+the later Source study job's schema, definitions, and panel choices.
+
+The shared review API lives under `/skills/:id/versions/:hash/effects`:
+`GET` returns the contract, responsible uploader, availability, current rows,
+findings, and history. `POST /route` takes `{workflowVersionId, jobId,
+jobRevision, revision}` for a signed-in Engineer's current study draft.
+`POST` saves uploader-edited `{revision, scripts, note?}`;
+`POST /clarify` takes `{revision, note}`. `POST /preview` takes `{revision}`
+and returns the complete-set confirmation hash. `POST /confirm` takes
+`{confirmationHash, requestId}` and records an idempotent personal receipt.
+`GET /evidence?path=...&fileHash=...&startLine=...&endLine=...` returns bounded
+numbered lines from this immutable version. Tokens can read and draft through
+Source study jobs but cannot route or confirm reviews. Current Skill library
+access and exact uploader identity are checked server-side.
 
 Send the content to `upload-preview` first, then post the same content to
 `versions` with `"confirmed": true` and `"expectedHash": "HASH_FROM_PREVIEW"`.

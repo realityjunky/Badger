@@ -22,6 +22,7 @@ import {
 import { WorkflowNotice, type WriteFailure } from "./WorkflowDialog.js";
 import { EvidenceChanges } from "../../components/EvidenceChanges.js";
 import { RecordOriginLink } from "../../components/RecordOriginLink.js";
+import { ScriptEffectsPanel } from "./ScriptEffectsPanel.js";
 
 export function WorkflowSourceStudy({
   basePath,
@@ -261,6 +262,17 @@ export function WorkflowSourceStudy({
         ))}
       </div>
       {records("fact", study.facts)}
+      {study.studies.map((pin) => (
+        <ScriptEffectsPanel
+          key={`${pin.skillId}:${pin.hash}`}
+          basePath={basePath}
+          skillId={pin.skillId}
+          hash={pin.hash}
+          workflowBase={base}
+          canManage={canManage}
+          onChanged={onChanged}
+        />
+      ))}
       {records("interface", study.interfaces)}
       {editor !== null && (
         <StudyRecordDialog

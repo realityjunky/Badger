@@ -16,7 +16,8 @@ export type InboxKind =
   | "question-reopened"
   | "concern-raised"
   | "job-submitted"
-  | "evaluation-finished";
+  | "evaluation-finished"
+  | "script-effect-review";
 export interface InboxItem {
   id: string;
   workflowVersionId: string;
@@ -36,6 +37,8 @@ export interface InboxItem {
 }
 
 interface InboxRow {
+  effect_skill_id: string | null;
+  effect_source_hash: string | null;
   run_id: string | null;
   evaluation_report_id: string | null;
   drafting_job_id: string | null;
@@ -58,7 +61,8 @@ interface InboxRow {
 
 const COLUMNS = `i.id, i.workflow_version_id, v.workflow_id, v.name as workflow_name,
   v.number as version_number, i.gate, i.kind, i.state, i.revision, i.created_at, i.updated_at, i.question_id, qr.content->>'text' as question_text,
-  i.concern_id, c.text as concern_text, i.drafting_job_id, i.evaluation_report_id, rg.run_id`;
+  i.concern_id, c.text as concern_text, i.drafting_job_id, i.evaluation_report_id, rg.run_id,
+  i.effect_skill_id, i.effect_source_hash`;
 const FROM = `inbox_items i join workflow_versions v on v.id = i.workflow_version_id
   join workflows w on w.id = v.workflow_id left join questions q on q.id = i.question_id
   left join question_revisions qr on qr.question_id = q.id and qr.revision = q.revision
@@ -68,7 +72,11 @@ const FROM = `inbox_items i join workflow_versions v on v.id = i.workflow_versio
 const VISIBLE = `(i.person_id = $1 or exists (select 1 from role_bindings recipient
   where recipient.id = i.binding_id and recipient.person_id = $1))
   and ($2::boolean or w.group_id = any($3::text[])
-  or exists (select 1 from role_bindings b where b.workflow_id = w.id and b.person_id = $1))`;
+  or exists (select 1 from role_bindings b where b.workflow_id = w.id and b.person_id = $1)
+  or (i.effect_skill_id is not null and exists (
+    select 1 from skills es join workflows ew on ew.group_id = es.group_id
+    join role_bindings eb on eb.workflow_id = ew.id
+    where es.id = i.effect_skill_id and eb.person_id = $1)))`;
 
 /** A monotone revision sum also detects changes outside the displayed page. */
 export async function inboxFingerprint(
@@ -103,23 +111,25 @@ function toItem(row: InboxRow): InboxItem {
     state: row.state,
     revision: row.revision,
     href:
-      row.run_id !== null
-        ? `/runs/${encodeURIComponent(row.run_id)}`
-        : row.gate === "publication"
-          ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#review-publication`
-          : row.evaluation_report_id !== null
-            ? `/evaluations?workflow=${encodeURIComponent(row.workflow_id)}&version=${encodeURIComponent(row.workflow_version_id)}&report=${encodeURIComponent(row.evaluation_report_id)}`
-            : row.gate === "generation" || row.gate === "package"
-              ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#package`
-              : row.gate === "plan"
-                ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#plan`
-                : row.drafting_job_id !== null
-                  ? `/questionnaire?workflow=${encodeURIComponent(row.workflow_id)}&version=${encodeURIComponent(row.workflow_version_id)}&panel=suggestions`
-                  : row.concern_id !== null
-                    ? `/questionnaire/concerns/${encodeURIComponent(row.concern_id)}`
-                    : row.question_id === null
-                      ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#${encodeURIComponent(row.gate)}`
-                      : `/questionnaire/questions/${encodeURIComponent(row.question_id)}`,
+      row.effect_skill_id !== null
+        ? `/source-reviews/${encodeURIComponent(row.effect_skill_id)}/${encodeURIComponent(row.effect_source_hash!)}#source-study`
+        : row.run_id !== null
+          ? `/runs/${encodeURIComponent(row.run_id)}`
+          : row.gate === "publication"
+            ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#review-publication`
+            : row.evaluation_report_id !== null
+              ? `/evaluations?workflow=${encodeURIComponent(row.workflow_id)}&version=${encodeURIComponent(row.workflow_version_id)}&report=${encodeURIComponent(row.evaluation_report_id)}`
+              : row.gate === "generation" || row.gate === "package"
+                ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#package`
+                : row.gate === "plan"
+                  ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#plan`
+                  : row.drafting_job_id !== null
+                    ? `/questionnaire?workflow=${encodeURIComponent(row.workflow_id)}&version=${encodeURIComponent(row.workflow_version_id)}&panel=suggestions`
+                    : row.concern_id !== null
+                      ? `/questionnaire/concerns/${encodeURIComponent(row.concern_id)}`
+                      : row.question_id === null
+                        ? `/workflows/${encodeURIComponent(row.workflow_id)}/versions/${encodeURIComponent(row.workflow_version_id)}#${encodeURIComponent(row.gate)}`
+                        : `/questionnaire/questions/${encodeURIComponent(row.question_id)}`,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };

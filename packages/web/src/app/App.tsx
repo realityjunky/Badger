@@ -17,6 +17,7 @@ import { SettingsPage } from "../pages/SettingsPage.js";
 import { SkillsPage } from "../pages/SkillsPage.js";
 import { EvaluationsPage } from "../pages/EvaluationsPage.js";
 import { WorkflowsPage } from "../pages/WorkflowsPage.js";
+import { SourceReviewPage } from "../pages/SourceReviewPage.js";
 import { applyTheme } from "../theme/applyTheme.js";
 import { antdTheme, fontScaleFactor, resolveTheme } from "../theme/tokens.js";
 import { useSystemTheme } from "../theme/useSystemTheme.js";
@@ -81,6 +82,10 @@ function ThemedApp({ basePath }: { basePath: string }) {
                   <Route index element={<Navigate to="/my-work" replace />} />
                   <Route path="my-work" element={<MyWorkPage />} />
                   <Route path="workflows" element={<WorkflowsPage />} />
+                  <Route
+                    path="source-reviews/:skillId/:hash"
+                    element={<SourceReviewPage />}
+                  />
                   <Route
                     path="workflows/:workflowId"
                     element={<WorkflowsPage />}

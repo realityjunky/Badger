@@ -10,7 +10,7 @@ import {
   startTestService,
   type TestService,
 } from "@realityjunky/badger-server/testing";
-import { createEngineerMcp } from "../src/index.js";
+import { createBadgerMcp, createEngineerMcp } from "../src/index.js";
 import { canonicalHash, type FactoryPlan } from "@realityjunky/badger";
 
 let service: TestService;
@@ -32,15 +32,19 @@ async function request(route: string, method = "GET", body?: unknown) {
   expect(response.ok, JSON.stringify(value)).toBe(true);
   return value;
 }
-async function connect(scopes = ["engineer"]) {
+async function connect(
+  scopes = ["engineer"],
+  profile: "engineer" | "auto" = "engineer",
+) {
   const { secret } = await request("/me/tokens", "POST", {
     name: "Engineer Agent",
     scopes,
   });
-  const server = createEngineerMcp({
+  const server = createBadgerMcp({
     url: service.baseUrl,
     token: secret,
     agentHost: "Engineer Agent",
+    profile,
   });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(b);
@@ -58,6 +62,131 @@ async function call(
   expect(response.isError, JSON.stringify(response)).not.toBe(true);
   return JSON.parse((response.content as { text: string }[])[0].text);
 }
+
+it("uploads a scripted Skill without declarations and drafts effects from the hash-verified local Source study files", async () => {
+  service = await startTestService({ mode: "local" });
+  const { group } = await request("/groups", "POST", { name: "Research" });
+  const { workflow, version } = await request("/workflows", "POST", {
+    groupId: group.id,
+    name: "script-study",
+    goal: "Study a script locally",
+    intent: "new-skill",
+    locale: "en",
+  });
+  const { skill } = await request("/skills", "POST", {
+    groupId: group.id,
+    name: "example",
+  });
+  const folder = await fs.mkdtemp(
+    path.join(os.tmpdir(), "badger-mcp-effects-"),
+  );
+  folders.push(folder);
+  await fs.mkdir(path.join(folder, "scripts"));
+  await fs.writeFile(
+    path.join(folder, "SKILL.md"),
+    "---\nname: example\ndescription: Example script\n---\nRead scripts/run.sh.\n",
+  );
+  const script = "printf example > output.txt\n";
+  await fs.writeFile(path.join(folder, "scripts/run.sh"), script);
+  const client = await connect(["engineer"], "auto");
+  const tools = (await client.listTools()).tools;
+  expect(
+    tools.find((tool) => tool.name === "upload_skill_version")!.inputSchema
+      .properties,
+  ).not.toHaveProperty("scripts");
+  const { preview } = await call(client, "upload_skill_version", {
+    skillId: skill.id,
+    folder,
+  });
+  await call(client, "upload_skill_version", {
+    skillId: skill.id,
+    folder,
+    confirmed: true,
+    expectedHash: preview.hash,
+  });
+  const base = `/workflows/${workflow.id}/versions/${version.id}`;
+  const pin = { skillId: skill.id, hash: preview.hash };
+  await request(`${base}/pins`, "POST", pin);
+  const { job } = await request(`${base}/drafting-jobs`, "POST", {
+    kind: "source-study",
+    skillId: skill.id,
+    confirmed: true,
+  });
+  const context = {
+    workflowId: workflow.id,
+    versionId: version.id,
+    jobId: job.id,
+  };
+  const claim = await call(client, "claim_job", {
+    ...context,
+    revision: job.revision,
+  });
+  folders.push(claim.folder);
+  const bundle = JSON.parse(
+    await fs.readFile(path.join(claim.folder, "context.json"), "utf8"),
+  );
+  expect(
+    bundle.scriptEffectContract.labels.map(
+      (label: { value: string }) => label.value,
+    ),
+  ).toEqual([
+    "none",
+    "local-writes",
+    "network",
+    "scheduler-submission",
+    "installs",
+  ]);
+  expect(claim.message).toMatch(/scriptEffectContract/u);
+  expect(
+    await fs.readFile(
+      path.join(
+        claim.folder,
+        "skills",
+        skill.id,
+        preview.hash,
+        "scripts/run.sh",
+      ),
+      "utf8",
+    ),
+  ).toBe(script);
+  const suggestion = {
+    ...pin,
+    path: "scripts/run.sh",
+    effects: ["local-writes"],
+    rationale: "Creates output.txt.",
+    evidence: [
+      {
+        ...pin,
+        path: "scripts/run.sh",
+        fileHash: createHash("sha256").update(script).digest("hex"),
+        startLine: 1,
+        endLine: 1,
+      },
+    ],
+    conditionalBehavior: "",
+    uncertainty: null,
+  };
+  await fs.writeFile(
+    path.join(claim.folder, "result.json"),
+    JSON.stringify({ facts: [], interfaces: [], scriptEffects: [suggestion] }),
+  );
+  const submitted = await call(client, "submit_job", {
+    ...context,
+    folder: claim.folder,
+  });
+  expect(submitted).toMatchObject({
+    requiresPerson: true,
+    job: { status: "submitted", result: { scriptEffects: [suggestion] } },
+  });
+  const panel = await request(
+    `/skills/${skill.id}/versions/${preview.hash}/effects`,
+  );
+  expect(panel.review).toBeNull();
+  expect(panel.findings[0].code).toBe("SCRIPT_EFFECTS_PENDING");
+  expect(tools.map((tool) => tool.name)).not.toContain(
+    "confirm_script_effects",
+  );
+});
 
 it("offers the engineer profile and hands a claimed job's context and exact pinned files to a private local folder", async () => {
   service = await startTestService({ mode: "local" });

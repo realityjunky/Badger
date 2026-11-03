@@ -72,9 +72,9 @@ export const documentationEn = {
   "documentation.skills.inventory":
     "Review the source inventory's file count and source hash in the upload preview. After upload, use the file tree, Inventory tab (paths, sizes, and file hashes), read-only file previews, and version comparison to inspect stored versions. Uploading, importing, and previewing never execute uploaded scripts.",
   "documentation.skills.confirm":
-    "Declare each inventoried script's possible side effects, inspect uncertain behavior, then use Confirm immutable upload (or Confirm immutable import) to store the previewed source hash and declarations together. Files and declarations are immutable; identical content and declarations reuse the version. To correct a declaration, change the source too, for example by documenting the correction in SKILL.md, then upload a new version.",
+    "Review the inventory and exact hash, then use Confirm immutable upload (or Confirm immutable import). Effects stay pending without a model connection. In Source study, the Engineer's Agent drafts effects and the original uploader corrects rows, answers uncertainties, and personally confirms the complete set. The same entry/version's confirmation is reusable; corrections append history and reopen dependent work without changing files.",
   "documentation.skills.next":
-    "Open the target Workflow version in Workflows. In Sources, select the Skill and its immutable version hash and choose Pin version. Review and confirm Sources, then complete Source study before questionnaire work.",
+    "Open the target Workflow version, pin the immutable Skill hash, and confirm Sources. Read-only study and ordinary Questionnaire work remain available while effect review is pending. Final study completion requires complete uploader-confirmed script coverage.",
   "documentation.effects.link": "Understand script side-effect declarations",
   "documentation.effects.intro":
     "A declaration describes what a script could do when executed later. It does not run the script or grant it permission. Inspect the script, subprocesses, wrappers, and supported optional execution modes; declare possible behavior across those paths, not only one selected run. If you are unsure, inspect the source or ask its author before confirming; do not default to none.",
@@ -221,9 +221,9 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.skills.inventory":
     "审阅上传预览中的来源清单文件数与来源哈希。上传后，通过文件树、清单标签页（路径、大小和文件哈希）、只读文件预览与版本比较检查已存储版本。上传、导入和预览绝不执行上传的脚本。",
   "documentation.skills.confirm":
-    "声明清单中每个脚本可能产生的副作用，检查不确定的行为，再使用“确认上传不可变版本”或“确认导入不可变版本”，将预览的来源哈希与声明一起存储。文件和声明均不可变；相同内容与声明会复用已有版本。纠正声明时也需更改来源，例如在 SKILL.md 中说明更正，再上传新版本。",
+    "审阅清单与精确哈希，再确认上传或导入不可变版本。无需模型连接，脚本影响保持待审阅。来源研读时，由工程师的 Agent 起草，原上传人更正各行、回答不确定事项并亲自确认完整声明。同一条目和版本可复用确认；更正会追加历史并重新开启依赖工作，不改动文件。",
   "documentation.skills.next":
-    "在“工作流”中打开目标工作流版本。在“来源”中选择 Skill 及其不可变版本哈希，点击“固定版本”。审阅并确认来源，再完成来源研读，之后开展问卷工作。",
+    "打开目标工作流版本，固定 Skill 的不可变哈希并确认来源。脚本影响待审阅时，仍可只读研读及开展普通问卷工作。最终完成研读需要上传人确认完整的脚本声明。",
   "documentation.effects.link": "了解脚本副作用声明",
   "documentation.effects.intro":
     "声明描述脚本以后执行时可能做什么，不会运行脚本或授予权限。请检查脚本、子进程、包装脚本，以及支持的可选执行模式；声明应覆盖这些路径的可能行为，而非仅针对某一次运行。不确定时，请先检查来源或询问作者，不要默认选择 none。",

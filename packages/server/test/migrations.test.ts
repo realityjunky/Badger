@@ -63,6 +63,130 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("preserves legacy declarations and provider provenance as pending history and retires encrypted configuration without creating attestations", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((migration) => migration.version < "0039"),
+      clock,
+    );
+    await insertPerson(test);
+    await test.database.query(
+      "insert into groups (id, name, created_at, updated_at) values ('group-1', 'Research', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into skills (id, group_id, name, created_by, created_at) values ('skill-1', 'group-1', 'example', 'person-1', $1)",
+      [clock.now()],
+    );
+    const hash = "a".repeat(64);
+    const scripts = [{ path: "scripts/run.sh", sideEffects: ["local-writes"] }];
+    await test.database.query(
+      "insert into skill_versions (skill_id, hash, description, inventory, scripts, origin, uploaded_by, created_at) values ('skill-1', $1, 'Uploaded', '[]', $2, 'upload', 'person-1', $3)",
+      [hash, JSON.stringify(scripts), clock.now()],
+    );
+    await test.database.query(
+      "insert into llm_configuration (revision, configuration, content_hash, updated_at) values (5, $1, $2, $3)",
+      [
+        JSON.stringify({
+          provider: "historical-provider",
+          task: "upload-effects",
+        }),
+        "b".repeat(64),
+        clock.now(),
+      ],
+    );
+    await test.database.query(
+      "insert into llm_secrets (reference, ciphertext) values ('upload-provider', 'encrypted-upload-secret'), ('unrelated-reference', 'encrypted-other-secret')",
+    );
+    await test.database.query(
+      `insert into skill_suggestion_previews (id, skill_id, person_id, source_hash, configuration_revision, binding, evidence, status, result, expires_at)
+       values ('preview-1', 'skill-1', 'person-1', $1, 5, '{}', '{"provider":"historical-provider"}', 'finished', '{"scripts":[]}', $2)`,
+      [hash, clock.now()],
+    );
+    const original = (await test.database.query("select * from skill_versions"))
+      .rows;
+    const configuration = (
+      await test.database.query("select * from llm_configuration")
+    ).rows;
+    const secrets = (
+      await test.database.query("select * from llm_secrets order by reference")
+    ).rows;
+    const provenance = (
+      await test.database.query("select * from skill_suggestion_previews")
+    ).rows;
+    await applyMigrations(test.database, migrations, clock);
+    expect(
+      (await test.database.query("select * from skill_versions")).rows,
+    ).toEqual(original);
+    const history = (
+      await test.database.query<{
+        kind: string;
+        actor_id: string;
+        content: {
+          scripts: {
+            effects: string[];
+            reviewed: boolean;
+            evidence: unknown[];
+          }[];
+        };
+      }>("select * from script_effect_revisions")
+    ).rows;
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      kind: "legacy",
+      actor_id: "person-1",
+      content: {
+        scripts: [
+          {
+            effects: ["local-writes"],
+            reviewed: false,
+            evidence: [],
+            uncertaintyAnswer: "",
+          },
+        ],
+      },
+    });
+    expect(
+      (await test.database.query("select * from script_effect_confirmations"))
+        .rows,
+    ).toEqual([]);
+    expect(
+      (await test.database.query("select * from retired_llm_configuration"))
+        .rows,
+    ).toEqual(configuration);
+    expect(
+      (
+        await test.database.query(
+          "select * from retired_llm_secrets order by reference",
+        )
+      ).rows,
+    ).toEqual(secrets);
+    expect(
+      (
+        await test.database.query(
+          "select * from retired_skill_suggestion_previews",
+        )
+      ).rows,
+    ).toEqual(provenance);
+    for (const table of [
+      "script_effect_revisions",
+      "script_effect_confirmations",
+      "retired_llm_configuration",
+      "retired_llm_secrets",
+      "retired_skill_suggestion_previews",
+    ])
+      await expect(test.database.query(`delete from ${table}`)).rejects.toThrow(
+        /append-only|offline archive/u,
+      );
+    await expect(
+      test.database.query(
+        "insert into retired_llm_secrets (reference, ciphertext) values ('new-provider', 'encrypted-new-key')",
+      ),
+    ).rejects.toThrow(/offline archive/u);
+  });
+
   it("merges resolved and pending Reviewers into Workflow owners without losing invitation references", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
@@ -744,7 +868,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0038");
+    expect(upgraded.applied.at(-1)).toBe("0040");
     expect(
       (
         await test.database.query(
@@ -907,6 +1031,8 @@ describe("reviewed SQL migrations", () => {
       "0036",
       "0037",
       "0038",
+      "0039",
+      "0040",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -952,6 +1078,8 @@ describe("reviewed SQL migrations", () => {
         "0036",
         "0037",
         "0038",
+        "0039",
+        "0040",
       ],
       pending: [],
       drifted: [],
@@ -984,9 +1112,6 @@ describe("reviewed SQL migrations", () => {
       "identity_sessions",
       "inbox_items",
       "inherited_answer_attachments",
-      "llm_call_leases",
-      "llm_configuration",
-      "llm_secrets",
       "notification_actions",
       "notification_channels",
       "notification_deliveries",
@@ -1017,14 +1142,18 @@ describe("reviewed SQL migrations", () => {
       "questionnaire_settings",
       "questionnaires",
       "questions",
+      "retired_llm_configuration",
+      "retired_llm_secrets",
+      "retired_skill_suggestion_previews",
       "role_bindings",
       "run_gate_answers",
       "run_gates",
       "run_recoveries",
       "run_recovery_notices",
       "schema_migrations",
+      "script_effect_confirmations",
+      "script_effect_revisions",
       "skill_repositories",
-      "skill_suggestion_previews",
       "skill_version_git_origins",
       "skill_versions",
       "skills",
@@ -1091,6 +1220,8 @@ describe("reviewed SQL migrations", () => {
         "0036",
         "0037",
         "0038",
+        "0039",
+        "0040",
       ],
       pending: [],
       drifted: [],
@@ -1098,7 +1229,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(38);
+    expect(rows.rows[0]?.count).toBe(40);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

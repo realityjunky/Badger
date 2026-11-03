@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   startStubPlatform,
@@ -496,6 +497,141 @@ describe("the platform-administrator mapping", () => {
     });
 
     expect(await roles()).toEqual([]);
+  });
+
+  it("lets a mapped Administrator personally confirm their upload without workflow bindings", async () => {
+    await startWithPlatform({
+      users: {
+        "token-alice": platformAdministrator,
+        "token-bob": {
+          id: "platform-bob",
+          email: "bob@example.com",
+          emailVerified: true,
+        },
+      },
+      environment: {
+        BADGER_PLATFORM_ADMIN_MAPPING: "true",
+        BADGER_BOOTSTRAP_ADMINISTRATORS: "bob@example.com",
+        BADGER_ALLOWED_ORIGINS: "http://localhost",
+      },
+    });
+    async function call(path: string, body?: unknown, token = "token-bob") {
+      const response = await service!.request(`/api/v1${path}`, {
+        method: body === undefined ? "GET" : "POST",
+        headers: {
+          cookie: cookieFor(token),
+          origin: "http://localhost",
+          "content-type": "application/json",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const value = await response.json();
+      expect(response.ok, JSON.stringify(value)).toBe(true);
+      return value;
+    }
+    const { group } = await call("/groups", { name: "Effects" });
+    const { workflow, version } = await call("/workflows", {
+      groupId: group.id,
+      name: "mapped-uploader",
+      goal: "Study source effects",
+      intent: "new-skill",
+      locale: "en",
+    });
+    const { skill } = await call(
+      "/skills",
+      { groupId: group.id, name: "example" },
+      "token-alice",
+    );
+    const source = "printf example > output.txt\n";
+    const files = [
+      {
+        path: "SKILL.md",
+        content: Buffer.from(
+          "---\nname: example\ndescription: A source fixture\n---\nRead scripts/run.sh.\n",
+        ).toString("base64"),
+      },
+      {
+        path: "scripts/run.sh",
+        content: Buffer.from(source).toString("base64"),
+      },
+    ];
+    const { preview: upload } = await call(
+      `/skills/${skill.id}/upload-preview`,
+      { files },
+      "token-alice",
+    );
+    await call(
+      `/skills/${skill.id}/versions`,
+      { files, confirmed: true, expectedHash: upload.hash },
+      "token-alice",
+    );
+    const base = `/workflows/${workflow.id}/versions/${version.id}`;
+    const pin = { skillId: skill.id, hash: upload.hash };
+    const effects = `/skills/${skill.id}/versions/${upload.hash}/effects`;
+    await call(`${base}/pins`, pin);
+    const { job } = await call(`${base}/drafting-jobs`, {
+      kind: "source-study",
+      skillId: skill.id,
+      confirmed: true,
+    });
+    const claim = await call(`${base}/drafting-jobs/${job.id}/claim`, {
+      revision: job.revision,
+    });
+    const row = {
+      ...pin,
+      path: "scripts/run.sh",
+      effects: ["local-writes"],
+      rationale: "The script creates output.txt.",
+      evidence: [
+        {
+          ...pin,
+          path: "scripts/run.sh",
+          fileHash: createHash("sha256").update(source).digest("hex"),
+          startLine: 1,
+          endLine: 1,
+        },
+      ],
+      conditionalBehavior: "",
+      uncertainty: null,
+    };
+    const submitted = await call(`${base}/drafting-jobs/${job.id}/submit`, {
+      leaseId: claim.job.lease.id,
+      contextHash: job.contextHash,
+      result: { facts: [], interfaces: [], scriptEffects: [row] },
+    });
+    const routed = await call(`${effects}/route`, {
+      workflowVersionId: version.id,
+      jobId: job.id,
+      jobRevision: submitted.job.revision,
+      revision: 0,
+    });
+    const panel = await call(effects, undefined, "token-alice");
+    expect(panel).toMatchObject({ canReview: true, uploaderAvailable: true });
+    const { review } = await call(
+      effects,
+      {
+        revision: routed.review.revision,
+        scripts: [{ ...row, reviewed: true, uncertaintyAnswer: "" }],
+      },
+      "token-alice",
+    );
+    const { preview } = await call(
+      `${effects}/preview`,
+      { revision: review.revision },
+      "token-alice",
+    );
+    const confirmed = await call(
+      `${effects}/confirm`,
+      {
+        confirmationHash: preview.confirmationHash,
+        requestId: "mapped-uploader-confirmation",
+      },
+      "token-alice",
+    );
+    expect(confirmed.review).toMatchObject({
+      kind: "confirmation",
+      actorId: panel.uploadedBy,
+    });
   });
 
   it("is refused with an identity adapter that is not the platform", async () => {

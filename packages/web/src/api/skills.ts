@@ -1,10 +1,6 @@
 import { apiUrl } from "../app/paths.js";
 import { isRecord } from "../util/records.js";
-import type {
-  SuggestionPreview,
-  SuggestionResult,
-} from "@realityjunky/badger-server";
-export type { SuggestionResult } from "@realityjunky/badger-server";
+import type { SkillScriptSideEffect } from "@realityjunky/badger";
 
 export interface SkillFile {
   path: string;
@@ -12,8 +8,7 @@ export interface SkillFile {
   hash: string;
 }
 
-export type SideEffect =
-  "none" | "local-writes" | "network" | "scheduler-submission" | "installs";
+export type SideEffect = SkillScriptSideEffect;
 export type ScriptEffects = SideEffect[] | "undeclared";
 
 export interface Skill {
@@ -47,7 +42,6 @@ export interface VersionPreview {
   description: string;
   inventory: SkillFile[];
   scripts: { path: string; sideEffects: ScriptEffects }[];
-  suggestion?: SuggestionPreview;
 }
 
 export interface SkillVersion extends VersionPreview {
@@ -198,37 +192,6 @@ export function previewUpload(
   );
 }
 
-export function suggestScriptEffects(
-  basePath: string,
-  id: string,
-  previewId: string,
-  expectedHash: string,
-  signal?: AbortSignal,
-) {
-  return request<{ suggestion: SuggestionResult }>(
-    basePath,
-    `${skillPath(id)}/side-effect-suggestions`,
-    {
-      method: "POST",
-      body: JSON.stringify({ previewId, expectedHash }),
-      signal,
-    },
-  );
-}
-
-/**
- * The previewed scripts still without a declaration. The service refuses an
- * upload until there are none; `none` is itself a declaration.
- */
-export function undeclaredScripts(
-  preview: VersionPreview,
-  scripts: Record<string, SideEffect[]>,
-): string[] {
-  return preview.scripts
-    .filter((script) => (scripts[script.path] ?? []).length === 0)
-    .map((script) => script.path);
-}
-
 /**
  * The first selected path with a segment that names Git metadata: `.git` in
  * any letter case, including with the code points HFS+ ignores or the
@@ -250,7 +213,6 @@ export function uploadVersion(
   basePath: string,
   id: string,
   content: UploadContent | GitContent,
-  scripts: Record<string, SideEffect[]>,
   expectedHash: string,
 ) {
   return request<{ version: SkillVersion }>(
@@ -260,7 +222,6 @@ export function uploadVersion(
       method: "POST",
       body: JSON.stringify({
         ...content,
-        scripts,
         confirmed: true,
         expectedHash,
       }),

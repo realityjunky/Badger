@@ -2,7 +2,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   checkSkillSources,
-  readSkillSourceManifest,
   type SkillSource,
   type SkillSourceDeclaration,
 } from "@realityjunky/badger";
@@ -158,23 +157,14 @@ export async function inspectUpload(
       });
     }
     const declaration: SkillSourceDeclaration = { name, location: "source" };
-    if (input["scripts"] !== undefined) {
-      const scripts = objectInput(input["scripts"]);
-      declaration.scripts = scripts as SkillSourceDeclaration["scripts"];
-      const manifest = path.join(workspace, "source-manifest.json");
-      await fs.writeFile(
-        manifest,
-        JSON.stringify({ schemaVersion: 1, sources: [declaration] }),
+    if (
+      input["scripts"] !== undefined &&
+      Object.keys(objectInput(input["scripts"])).length
+    )
+      throw new RequestError(
+        400,
+        "Declare script effects in Source study after upload",
       );
-      try {
-        await readSkillSourceManifest(manifest);
-      } catch {
-        throw new RequestError(
-          400,
-          "Script side effects must use scripts/ paths and the kernel's supported effects; none stands alone",
-        );
-      }
-    }
     const [candidate] = await checkSkillSources({
       projectRoot: workspace,
       sources: [declaration],
@@ -184,17 +174,6 @@ export async function inspectUpload(
       throw new RequestError(
         400,
         "The kernel source check refused this Skill; check its name and SKILL.md frontmatter",
-      );
-    }
-    const scriptPaths = new Set(source.scripts.map((script) => script.path));
-    if (
-      Object.keys(declaration.scripts ?? {}).some(
-        (script) => !scriptPaths.has(script),
-      )
-    ) {
-      throw new RequestError(
-        400,
-        "Side-effect declarations must name scripts in this version",
       );
     }
     return {

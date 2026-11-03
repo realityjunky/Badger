@@ -56,6 +56,9 @@ describe("the dashboard's addresses", () => {
       "page.questionnaire.title",
     );
     expect(pageTitleKey("/settings/appearance")).toBe("page.settings.title");
+    expect(pageTitleKey("/source-reviews/skill-1/hash-1")).toBe(
+      "page.sourceReview.title",
+    );
     expect(pageTitleKey("/not-a-page")).toBe("page.notFound.title");
   });
 });

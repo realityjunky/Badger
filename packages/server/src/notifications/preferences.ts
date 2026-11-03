@@ -13,6 +13,7 @@ export const NOTIFICATION_EVENTS = [
   "concern-raised",
   "job-submitted",
   "evaluation-finished",
+  "script-effect-review",
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 

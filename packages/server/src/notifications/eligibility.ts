@@ -2,6 +2,8 @@ import { accessFor } from "../authorization.js";
 import type { ServiceConfig } from "../config.js";
 import type { Queryable } from "../database/database.js";
 import { readPersonById } from "../people.js";
+import { skillGroupPermissions } from "../skills/access.js";
+import { readSkill, readVersion } from "../skills/library.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
 import { readQuestions } from "../questionnaire/store.js";
 import { workflowCapabilities } from "../workflow-access.js";
@@ -63,6 +65,26 @@ export async function eligibleNotificationItems(
     const access = await once(["access", personId], () =>
       accessFor(tx, person, null, config),
     );
+    if (item.kind === "script-effect-review") {
+      if (item.effect_skill_id === null || item.effect_source_hash === null)
+        continue;
+      const skill = await once(["skill", item.effect_skill_id], () =>
+        readSkill(tx, item.effect_skill_id!),
+      );
+      const version = await once(
+        ["source", item.effect_skill_id, item.effect_source_hash],
+        () => readVersion(tx, item.effect_skill_id!, item.effect_source_hash!),
+      );
+      const groups = await once(["skill-access", personId], () =>
+        skillGroupPermissions(tx, access, person),
+      );
+      if (
+        version.uploadedBy === person.id &&
+        groups.some((group) => group.id === skill?.groupId)
+      )
+        eligible.push(item);
+      continue;
+    }
     const capabilities = await once(
       ["capabilities", personId, workflow.id],
       () => workflowCapabilities(tx, access, person, workflow),

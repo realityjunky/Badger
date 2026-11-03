@@ -8,6 +8,7 @@ export interface InboxItem {
   gate: string;
   kind:
     | "gate-ready"
+    | "script-effect-review"
     | "gate-invalidated"
     | "question-assigned"
     | "answer-submitted"

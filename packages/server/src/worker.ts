@@ -20,7 +20,6 @@ import { SourceCheckWorker } from "./workflow-source.js";
 import { NotificationWorker } from "./notifications/worker.js";
 import { WeComChannel } from "./notifications/wecom.js";
 import { setTimeout } from "node:timers/promises";
-import { initializeLlmConfiguration } from "./llm/store.js";
 
 export interface WorkerOptions {
   database: Database;
@@ -109,10 +108,6 @@ export async function runServiceWorker(
   options: WorkerOptions,
   signal?: AbortSignal,
 ): Promise<void> {
-  await initializeLlmConfiguration(options.database, options.config, {
-    clock: systemClock,
-    ids: randomIdSource,
-  });
   await Promise.all([
     runSourceCheckWorker(options, signal),
     runNotificationWorker(options, signal),

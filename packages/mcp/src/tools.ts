@@ -5,7 +5,6 @@ import { randomUUID } from "node:crypto";
 import type { BadgerApi } from "./api.js";
 import { uploadSkillVersion } from "./upload.js";
 import { uploadAttachment } from "./attachments.js";
-import { SKILL_SCRIPT_SIDE_EFFECTS } from "@realityjunky/badger";
 
 export interface ExpertTool {
   definition: Tool;
@@ -204,13 +203,10 @@ export function expertTools(api: BadgerApi, server: Server): ExpertTool[] {
     ),
     tool(
       "upload_skill_version",
-      "Preview a local Skill folder, then upload its exact reviewed hash after the user confirms. Never upload real data. Declare each script's side effects.",
+      "Preview a local Skill folder, then upload its exact reviewed hash after the user confirms. Never upload real data. Script effects remain pending for Source study and personal uploader confirmation; no model connection is required.",
       {
         skillId: id,
         folder: z.string().min(1).max(4096),
-        scripts: z
-          .record(z.string(), z.array(z.enum(SKILL_SCRIPT_SIDE_EFFECTS)))
-          .default({}),
         confirmed: z.boolean().optional(),
         expectedHash: z
           .string()

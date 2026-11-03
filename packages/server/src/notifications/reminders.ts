@@ -16,6 +16,8 @@ import { notificationMessage, recordedRecipients } from "./messages.js";
 import { eligibleNotificationItems } from "./eligibility.js";
 
 function itemKey(item: NotificationItemRow): string {
+  if (item.effect_skill_id !== null)
+    return `${item.kind}:${item.effect_skill_id}:${item.effect_source_hash}`;
   return `${item.kind}:${item.evaluation_report_id ?? item.fact_id ?? item.drafting_job_id ?? item.question_id ?? item.concern_id ?? `${item.workflow_version_id}:${item.gate}`}`;
 }
 

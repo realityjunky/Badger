@@ -115,7 +115,7 @@ test("Documentation is in the sidebar, opens the current section, and links to e
 });
 
 for (const source of ["folder", "zip"] as const) {
-  test(`side-effect help preserves an in-progress ${source} upload and its declarations`, async ({
+  test(`side-effect help preserves an in-progress declaration-free ${source} upload`, async ({
     page,
   }, testInfo) => {
     const { skillId, groupId } = await createSkill(page);
@@ -142,13 +142,8 @@ for (const source of ["folder", "zip"] as const) {
     }
     await expect(upload).toContainText("2 files in the source inventory");
     const hash = await upload.locator(".skills-hash").first().innerText();
-    const declaration = upload.getByRole("combobox", {
-      name: "Script side effects scripts/report.py",
-      exact: true,
-    });
-    await declaration.click();
-    await page.getByText("Local writes", { exact: true }).click();
-    await declaration.press("Escape");
+    await expect(upload.getByRole("combobox")).toHaveCount(0);
+    await expect(upload).toContainText("Effect review pending");
     const help = upload.getByRole("link", {
       name: "Understand script side-effect declarations",
       exact: true,
@@ -192,9 +187,7 @@ for (const source of ["folder", "zip"] as const) {
     await expect(help).toBeFocused();
     await expect(page).toHaveURL(new URL(original, page.url()).href);
     await expect(upload.locator(".skills-hash").first()).toHaveText(hash);
-    await expect(
-      upload.getByText("Local writes", { exact: true }),
-    ).toBeVisible();
+    await expect(upload).toContainText("Effect review pending");
     const input = upload.getByLabel(
       source === "folder" ? "Choose Skill folder" : "Choose zip",
       { exact: true },
@@ -219,9 +212,7 @@ for (const source of ["folder", "zip"] as const) {
       .getByRole("button", { name: "Return to dashboard", exact: true })
       .click();
     await expect(upload.locator(".skills-hash").first()).toHaveText(hash);
-    await expect(
-      upload.getByText("Local writes", { exact: true }),
-    ).toBeVisible();
+    await expect(upload).toContainText("Effect review pending");
   });
 }
 

@@ -40,6 +40,8 @@ import {
   studyReferences,
 } from "../source-study.js";
 import type { BlobStore } from "../skills/blobs.js";
+import { effectHead, validateEffectDraft } from "../script-effects.js";
+import { readVersion } from "../skills/library.js";
 import {
   resolutionPreview,
   resolveQuestion,
@@ -190,11 +192,26 @@ export async function reconcileDraftingJobs(
   const jobs = await readDraftingJobs(tx, versionId);
   for (const job of jobs) {
     if (!["queued", "claimed", "submitted"].includes(job.status)) continue;
+    let inputs = current.bundle;
+    if (job.kind === "source-study" && job.status === "submitted") {
+      const pin = job.context_bundle.pins.find(
+        (entry) => entry.skillId === job.skill_id,
+      );
+      const review = pin ? await effectHead(tx, pin.skillId, pin.hash) : null;
+      if (pin && review?.content.sourceJobId === job.id)
+        inputs = {
+          ...inputs,
+          pins: inputs.pins.map((entry) =>
+            entry.skillId === pin.skillId && entry.hash === pin.hash
+              ? { ...entry, effectRevision: pin.effectRevision }
+              : entry,
+          ),
+        };
+    }
     const changed =
       portableAuthoringHistory(job.context_bundle).legacy ||
       (!isAuthoringJob(job) &&
-        job.input_hash !==
-          draftingInputHash(current.bundle, draftingTarget(job)));
+        job.input_hash !== draftingInputHash(inputs, draftingTarget(job)));
     const expired =
       job.status === "claimed" &&
       new Date(job.lease_until!).getTime() <= deps.clock.now().getTime();
@@ -355,8 +372,20 @@ export async function submitDraftingJob(
   actor: DraftingActor,
   job: DraftingJobRow,
   result: unknown,
+  blobs: BlobStore,
 ) {
   const validated = validateDraftResult(job.kind, job.output_schema, result);
+  if ("interfaces" in validated && validated.scriptEffects !== undefined) {
+    const pin = job.context_bundle.pins.find(
+      (entry) => entry.skillId === job.skill_id,
+    )!;
+    validated.scriptEffects = await validateEffectDraft(
+      tx,
+      blobs,
+      await readVersion(tx, pin.skillId, pin.hash),
+      validated.scriptEffects,
+    );
+  }
   if (isAuthoringJob(job)) validateLaneResult(job, validated);
   const submitted = (
     await tx.query<DraftingJobRow>(
@@ -412,6 +441,7 @@ export async function jobDecisionPreview(
   actor: DraftingActor,
   job: DraftingJobRow,
   action: "accept" | "reject",
+  blobs: BlobStore,
   result?: unknown,
   reason?: unknown,
 ) {
@@ -419,6 +449,17 @@ export async function jobDecisionPreview(
     action === "accept"
       ? validateDraftResult(job.kind, job.output_schema, result)
       : { reason };
+  if ("interfaces" in decision && decision.scriptEffects !== undefined) {
+    const pin = job.context_bundle.pins.find(
+      (entry) => entry.skillId === job.skill_id,
+    )!;
+    decision.scriptEffects = await validateEffectDraft(
+      tx,
+      blobs,
+      await readVersion(tx, pin.skillId, pin.hash),
+      decision.scriptEffects,
+    );
+  }
   if (action === "accept" && isAuthoringJob(job))
     validateLaneResult(job, decision);
   if (action === "accept" && job.kind === "import-open-questions")
