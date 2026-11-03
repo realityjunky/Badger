@@ -40,6 +40,7 @@ export const routes: readonly RouteDefinition[] = [
   { pattern: "/admin/groups/:groupId", title: "page.admin.title" },
   { pattern: "/admin/invitations", title: "page.admin.title" },
   { pattern: "/admin/integrations", title: "page.admin.title" },
+  { pattern: "/admin/llm", title: "page.admin.title" },
   { pattern: "/admin/tokens", title: "page.admin.title" },
   { pattern: "/settings", title: "page.settings.title" },
   { pattern: "/settings/appearance", title: "page.settings.title" },

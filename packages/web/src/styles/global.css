@@ -1472,3 +1472,21 @@ body {
 .demo-banner {
   margin-bottom: 20px;
 }
+.llm-connection {
+  margin-block: 16px;
+  padding: 16px;
+  border: 1px solid var(--badger-color-border);
+  border-radius: 8px;
+}
+
+.llm-connection > summary {
+  cursor: pointer;
+  margin-bottom: 16px;
+}
+
+.source-preview {
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

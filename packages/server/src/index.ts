@@ -12,6 +12,17 @@ import { runServiceWorker } from "./worker.js";
 
 export { ConfigurationError, loadConfig } from "./config.js";
 export type { ServiceConfig } from "./config.js";
+export type {
+  LlmConfiguration,
+  ModelConnection,
+  ModelSetting,
+  SettingValue,
+} from "./llm/configuration.js";
+export type {
+  SuggestionPreview,
+  SuggestionResult,
+  ScriptSuggestion,
+} from "./llm/suggestions.js";
 export { openDatabase } from "./database/open.js";
 export { createService } from "./http/service.js";
 export { startHttpServer } from "./start.js";

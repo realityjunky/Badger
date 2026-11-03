@@ -1,5 +1,10 @@
 import { apiUrl } from "../app/paths.js";
 import { isRecord } from "../util/records.js";
+import type {
+  SuggestionPreview,
+  SuggestionResult,
+} from "@realityjunky/badger-server";
+export type { SuggestionResult } from "@realityjunky/badger-server";
 
 export interface SkillFile {
   path: string;
@@ -42,6 +47,7 @@ export interface VersionPreview {
   description: string;
   inventory: SkillFile[];
   scripts: { path: string; sideEffects: ScriptEffects }[];
+  suggestion?: SuggestionPreview;
 }
 
 export interface SkillVersion extends VersionPreview {
@@ -189,6 +195,24 @@ export function previewUpload(
     basePath,
     `${skillPath(id)}/upload-preview`,
     { method: "POST", body: JSON.stringify(content), signal },
+  );
+}
+
+export function suggestScriptEffects(
+  basePath: string,
+  id: string,
+  previewId: string,
+  expectedHash: string,
+  signal?: AbortSignal,
+) {
+  return request<{ suggestion: SuggestionResult }>(
+    basePath,
+    `${skillPath(id)}/side-effect-suggestions`,
+    {
+      method: "POST",
+      body: JSON.stringify({ previewId, expectedHash }),
+      signal,
+    },
   );
 }
 

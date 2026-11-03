@@ -6,6 +6,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 import { startTestService } from "@realityjunky/badger-server/testing";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -21,6 +22,8 @@ const service = await startTestService({
     BADGER_STORAGE_DIR: storage,
     BADGER_LOCAL_ADMIN_NAME: "Alex Chen",
     BADGER_LOCAL_ADMIN_EMAIL: "alex@example.com",
+    // Ephemeral encryption key for synthetic LLM setup journeys.
+    BADGER_LLM_KEY: randomBytes(32).toString("hex"),
     ...(basePath === undefined ? {} : { BADGER_BASE_PATH: basePath }),
   },
 });

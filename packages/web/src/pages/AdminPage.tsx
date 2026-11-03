@@ -43,8 +43,15 @@ import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
 import { GroupRoleDialog } from "./admin/GroupRoleDialog.js";
 import { IntegrationStatus } from "./admin/IntegrationStatus.js";
+import { LlmConfigurationPanel } from "./admin/LlmConfiguration.js";
 
-const TABS = ["members", "groups", "invitations", "integrations"] as const;
+const TABS = [
+  "members",
+  "groups",
+  "invitations",
+  "integrations",
+  "llm",
+] as const;
 type TabKey = (typeof TABS)[number];
 
 function isTab(value: string | undefined): value is TabKey {
@@ -416,6 +423,8 @@ export function AdminPage() {
     );
 
   if (segment === "tokens") return <Navigate to="/settings/tokens" replace />;
+  if (segment === "llm" && person && !administrator)
+    return <Navigate to="/admin/members" replace />;
   if (segment === "integrations" && person && !mayReadIntegrations)
     return <Navigate to="/admin/members" replace />;
 
@@ -448,7 +457,7 @@ export function AdminPage() {
       )}
       {state.kind === "ready" && (
         <>
-          {active !== "integrations" && (
+          {active !== "integrations" && active !== "llm" && (
             <Space wrap style={{ marginBottom: 16 }}>
               {!selectedGroupId && (
                 <Select
@@ -599,8 +608,18 @@ export function AdminPage() {
                     <IntegrationStatus />
                   ) : null,
               },
+              {
+                key: "llm",
+                label: t("llm.tab"),
+                children:
+                  active === "llm" && administrator ? (
+                    <LlmConfigurationPanel />
+                  ) : null,
+              },
             ].filter(
-              (tab) => tab.key !== "integrations" || mayReadIntegrations,
+              (tab) =>
+                (tab.key !== "integrations" || mayReadIntegrations) &&
+                (tab.key !== "llm" || administrator),
             )}
           />
         </>

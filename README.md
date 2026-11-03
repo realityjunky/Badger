@@ -24,6 +24,11 @@ fixture workflows, questions, Skills, Runs, evaluations, inbox items, and
 Activity without reading or changing real work. See the
 [dashboard documentation](packages/web/README.md).
 
+The Skills library also supports Administrator-configured LLM suggestions
+for script side effects (#95), with editable declarations, source evidence,
+inspectable Task prompts and explicit immutable upload confirmation. See
+[LLM configuration and uploader review](docs/llm-configuration.md).
+
 The Skills library (#42) now supports immutable folder and zip uploads,
 kernel source identities and inventories, script side-effect declarations,
 file previews, and version comparisons. An Engineer or Field expert on a

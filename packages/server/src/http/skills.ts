@@ -21,6 +21,7 @@ import { skillGroupPermissions } from "../skills/access.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 import { objectInput } from "./errors.js";
+import { prepareSuggestions, suggestEffects } from "../llm/suggestions.js";
 
 const API = "/api/v1";
 
@@ -29,6 +30,7 @@ const SKILL_ROUTES: readonly [RegExp, string][] = [
   [/^\/api\/v1\/skills\/[^/]+$/u, "GET, HEAD"],
   [/^\/api\/v1\/skills\/[^/]+\/versions$/u, "GET, HEAD, POST"],
   [/^\/api\/v1\/skills\/[^/]+\/(?:upload-preview|git-preview)$/u, "POST"],
+  [/^\/api\/v1\/skills\/[^/]+\/side-effect-suggestions$/u, "POST"],
   [/^\/api\/v1\/skills\/[^/]+\/repositories$/u, "GET, HEAD, POST"],
   [/^\/api\/v1\/skills\/[^/]+\/backlog$/u, "GET, HEAD"],
   [/^\/api\/v1\/skills\/[^/]+\/diff$/u, "GET, HEAD"],
@@ -101,7 +103,7 @@ export async function handleSkillsRequest(
     });
   }
   const match = new RegExp(
-    `^${API}/skills/([^/]+)(?:/(versions|diff|upload-preview|git-preview|repositories|backlog)(?:/([^/]+)(?:/(files))?)?)?$`,
+    `^${API}/skills/([^/]+)(?:/(versions|diff|upload-preview|git-preview|side-effect-suggestions|repositories|backlog)(?:/([^/]+)(?:/(files))?)?)?$`,
     "u",
   ).exec(path);
   if (match?.[1] === undefined) return reply.error(404, "invalid", "Not found");
@@ -125,6 +127,34 @@ export async function handleSkillsRequest(
         "denied",
         "An upload requires an Engineer or Field expert workflow role in this group",
       );
+    if (match[2] === "side-effect-suggestions") {
+      const read = await readJsonBody(request);
+      if (!read.ok)
+        return reply.error(read.status ?? 400, "invalid", read.message);
+      const body = objectInput(read.value);
+      return reply.json(200, {
+        suggestion: await suggestEffects(
+          database,
+          config,
+          dependencies,
+          person.id,
+          skill.id,
+          body.previewId,
+          body.expectedHash,
+          async () => {
+            const current = await input.refreshAccess();
+            const permissions = await skillGroupPermissions(
+              database,
+              current,
+              person,
+            );
+            return permissions.some(
+              (group) => group.id === skill.groupId && group.canUpload,
+            );
+          },
+        ),
+      });
+    }
     if (match[2] === "repositories") {
       const body = await readJsonBody(request);
       if (!body.ok)
@@ -155,13 +185,22 @@ export async function handleSkillsRequest(
         ? inspectRepository(database, config, skill, body.value)
         : inspectUpload(config, skill.name, body.value);
     if (match[2] === "upload-preview" || match[2] === "git-preview") {
-      const { source } = await inspect();
+      const inspected = await inspect();
+      const { source } = inspected;
       return reply.json(200, {
         preview: {
           hash: source.hash,
           inventory: source.inventory,
           scripts: source.scripts,
           description: source.description,
+          suggestion: await prepareSuggestions(
+            database,
+            config,
+            dependencies,
+            skill.id,
+            person.id,
+            inspected,
+          ),
         },
       });
     }

@@ -69,6 +69,7 @@ import { handleTokens, tokenMethods } from "./tokens.js";
 import { handleGroupRoleChange } from "./group-roles.js";
 import { handleSearch } from "./search.js";
 import { handleIntegrations } from "./integrations.js";
+import { handleLlm, llmMethods } from "./llm.js";
 import { gateMethods, handleGate } from "./gates.js";
 import { dossierMethods, handleDossier } from "./dossier.js";
 import { planMethods, handlePlan } from "./plans.js";
@@ -179,6 +180,7 @@ function matchedId(pattern: RegExp, path: string): string | null {
 /** The methods a path serves, for the Allow header and the write check. */
 function allowedMethods(path: string): string {
   const featureMethods =
+    llmMethods(path) ??
     skillMethods(path) ??
     workflowMethods(path) ??
     tokenMethods(path) ??
@@ -931,10 +933,12 @@ export function createService(options: ServiceOptions, port: number): Service {
       dependencies: serviceDependencies,
       context: writeContextFor(person, principal, reply),
       access,
+      refreshAccess: () => accessFor(database, person, principal, config),
       person,
       blobs,
     };
     try {
+      if (llmMethods(path) !== null) return await handleLlm(authorized);
       if (path === `${API}/search`) return await handleSearch(authorized);
       if (path === `${API}/admin/integrations`)
         return handleIntegrations(authorized);
