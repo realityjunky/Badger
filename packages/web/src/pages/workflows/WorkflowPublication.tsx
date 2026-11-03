@@ -13,6 +13,7 @@ import type {
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { WorkflowHostInstall } from "./WorkflowHostInstall.js";
+import { WorkflowPanel } from "./WorkflowPanel.js";
 
 export function WorkflowPublication({
   basePath,
@@ -115,21 +116,19 @@ export function WorkflowPublication({
   );
   const date = (value: string) => new Date(value).toLocaleString(locale);
   return (
-    <section
+    <WorkflowPanel
+      title={t("publication.title")}
       ref={section}
       id="review-publication"
-      className="workflow-panel publication-panel"
+      className="publication-panel"
       aria-labelledby="publication-title"
-    >
-      <div className="panel-heading">
-        <div>
-          <h2 id="publication-title">{t("publication.title")}</h2>
-          <p className="muted">{t("publication.description")}</p>
-        </div>
-        {currentPublished && (
+      actions={
+        currentPublished && (
           <Tag color="success">{t("publication.published")}</Tag>
-        )}
-      </div>
+        )
+      }
+    >
+      <p className="muted">{t("publication.description")}</p>
       {failure && <Alert type="error" showIcon title={failure} />}
       {!view ? (
         <Spin />
@@ -412,6 +411,6 @@ export function WorkflowPublication({
           </>
         )}
       </Modal>
-    </section>
+    </WorkflowPanel>
   );
 }

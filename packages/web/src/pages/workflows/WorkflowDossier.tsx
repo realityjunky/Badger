@@ -12,6 +12,7 @@ import { useInbox } from "../../inbox/InboxContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { DossierComposer } from "./DossierComposer.js";
 import { DossierContent } from "./DossierContent.js";
+import { WorkflowPanel } from "./WorkflowPanel.js";
 
 export function WorkflowDossier({
   basePath,
@@ -125,16 +126,15 @@ export function WorkflowDossier({
   const reviewed = view?.versions.find((v) => v.id === review?.versionId);
 
   return (
-    <section
+    <WorkflowPanel
+      title={t("dossier.title")}
       ref={section}
       id="dossier"
-      className="workflow-panel"
       data-testid="workflow-dossier"
       aria-labelledby="dossier-title"
-    >
-      <div className="workflow-card-heading">
-        <h2 id="dossier-title">{t("dossier.title")}</h2>
-        {view && detail.capabilities.composeDossier && (
+      actions={
+        view &&
+        detail.capabilities.composeDossier && (
           <Button
             type="primary"
             disabled={busy || view.handoff.status !== "complete"}
@@ -142,8 +142,9 @@ export function WorkflowDossier({
           >
             {t("dossier.compose")}
           </Button>
-        )}
-      </div>
+        )
+      }
+    >
       <p className="muted">{t("dossier.description")}</p>
       {failure && (
         <Alert
@@ -297,6 +298,6 @@ export function WorkflowDossier({
           />
         )}
       </Modal>
-    </section>
+    </WorkflowPanel>
   );
 }

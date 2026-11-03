@@ -19,6 +19,7 @@ import { StatusPill } from "../../components/StatusPill.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { SourcesGate } from "./SourcesGate.js";
 import { useInbox } from "../../inbox/InboxContext.js";
+import { WorkflowPanel } from "./WorkflowPanel.js";
 
 interface SkillOption {
   skill: Skill;
@@ -141,15 +142,14 @@ export function WorkflowSources({
   const job = detail.jobs.find((entry) => entry.id === check?.jobId);
   const when = (value: string) => new Date(value).toLocaleString(locale);
   return (
-    <section
+    <WorkflowPanel
+      title={t("workflow.sources")}
       ref={section}
       id="sources"
-      className="workflow-panel workflow-sources"
+      className="workflow-sources"
       aria-labelledby="workflow-sources-title"
-    >
-      <div className="workflow-card-heading">
-        <h2 id="workflow-sources-title">{t("workflow.sources")}</h2>
-        {check !== null && (
+      actions={
+        check !== null && (
           <StatusPill
             tone={
               check.status === "passed"
@@ -161,8 +161,9 @@ export function WorkflowSources({
           >
             {t(`workflow.sourceStatus.${check.status}`)}
           </StatusPill>
-        )}
-      </div>
+        )
+      }
+    >
       <p className="muted">{t("workflow.sourcesDescription")}</p>
       <SourcesGate
         key={detail.version.id}
@@ -348,6 +349,6 @@ export function WorkflowSources({
           ))}
         </div>
       )}
-    </section>
+    </WorkflowPanel>
   );
 }

@@ -214,6 +214,9 @@ them into `dist/`, so the server image carries the build and none of them.
   Restatements still await expert acknowledgement, and question history shows
   translation revisions and immutable import provenance. Source study links
   directly to the drafting panel.
+- Each panel on a Workflow's detail page has its own Collapse/Expand button
+  beside the title. Panels start expanded, preserve form edits while collapsed,
+  and reopen when a direct link targets their content.
 - Workflow versions include Source study (#45): per-pin progress, fact and
   interface editors, retirement confirmation, and immutable record history.
   Evidence links open the exact record revision's cited, numbered lines in

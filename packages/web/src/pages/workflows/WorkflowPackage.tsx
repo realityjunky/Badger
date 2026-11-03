@@ -9,6 +9,7 @@ import type {
   WorkflowVersionDetail,
 } from "../../api/workflows.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { WorkflowPanel } from "./WorkflowPanel.js";
 
 export function WorkflowPackage({
   basePath,
@@ -126,15 +127,13 @@ export function WorkflowPackage({
     (j) => j.status === "queued" || j.status === "running",
   );
   return (
-    <section
+    <WorkflowPanel
+      title={t("package.title")}
       ref={section}
       id="package"
-      className="workflow-panel"
       data-testid="workflow-package"
       aria-labelledby="package-title"
-    >
-      <div className="workflow-card-heading">
-        <h2 id="package-title">{t("package.title")}</h2>
+      actions={
         <Space wrap>
           {saved?.assembledHash && (
             <Link
@@ -162,7 +161,8 @@ export function WorkflowPackage({
             {t("workflow.reload")}
           </Button>
         </Space>
-      </div>
+      }
+    >
       <p className="muted">{t("package.description")}</p>
       {failure && <Alert type="error" showIcon title={failure} />}
       {!view ? (
@@ -355,6 +355,6 @@ export function WorkflowPackage({
       >
         <pre className="package-file-preview">{file?.text}</pre>
       </Modal>
-    </section>
+    </WorkflowPanel>
   );
 }

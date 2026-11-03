@@ -16,6 +16,7 @@ import { useInbox } from "../../inbox/InboxContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { PlanContent } from "./PlanContent.js";
 import { PlanEditor } from "./PlanEditor.js";
+import { WorkflowPanel } from "./WorkflowPanel.js";
 
 export function WorkflowPlan({
   basePath,
@@ -188,15 +189,13 @@ export function WorkflowPlan({
     (version) => version.id === approval?.versionId,
   );
   return (
-    <section
+    <WorkflowPanel
+      title={t("plan.title")}
       ref={section}
       id="plan"
-      className="workflow-panel"
       data-testid="workflow-plan"
       aria-labelledby="plan-title"
-    >
-      <div className="workflow-card-heading">
-        <h2 id="plan-title">{t("plan.title")}</h2>
+      actions={
         <Space wrap>
           {view?.skeleton && detail.capabilities.editPlan && (
             <>
@@ -228,7 +227,8 @@ export function WorkflowPlan({
             {t("workflow.reload")}
           </Button>
         </Space>
-      </div>
+      }
+    >
       <p className="muted">{t("plan.description")}</p>
       {failure && <Alert type="error" showIcon title={failure} />}
       {!view && !failure && <Spin aria-label={t("common.loading")} />}
@@ -425,6 +425,6 @@ export function WorkflowPlan({
         />
         {failure && <Alert type="error" title={failure} />}
       </Modal>
-    </section>
+    </WorkflowPanel>
   );
 }

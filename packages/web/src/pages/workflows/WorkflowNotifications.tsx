@@ -13,6 +13,7 @@ import { useI18n } from "../../i18n/I18nContext.js";
 import { useLiveUpdates } from "../../live/LiveUpdatesContext.js";
 import { DeliveryLog } from "../settings/DeliveryLog.js";
 import { RobotChannelSettings } from "../settings/RobotChannelSettings.js";
+import { WorkflowPanel } from "./WorkflowPanel.js";
 
 export function WorkflowNotifications({
   basePath,
@@ -88,17 +89,16 @@ export function WorkflowNotifications({
     };
   }, [basePath, route, mayManage, refresh, live]);
   return (
-    <section
-      className="workflow-panel"
+    <WorkflowPanel
+      title={t("notifications.title")}
       id="notifications"
       aria-labelledby="workflow-notifications-title"
-    >
-      <div className="workflow-card-heading">
-        <h2 id="workflow-notifications-title">{t("notifications.title")}</h2>
+      actions={
         <Button onClick={() => setRefresh((value) => value + 1)}>
           {t("workflow.reload")}
         </Button>
-      </div>
+      }
+    >
       {notice && (
         <Alert
           showIcon
@@ -228,6 +228,6 @@ export function WorkflowNotifications({
         </div>
       )}
       {mayManage && <DeliveryLog deliveries={deliveries} />}
-    </section>
+    </WorkflowPanel>
   );
 }

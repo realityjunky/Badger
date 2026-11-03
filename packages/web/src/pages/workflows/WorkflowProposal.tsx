@@ -10,6 +10,7 @@ import type {
 import { useI18n } from "../../i18n/I18nContext.js";
 import { useInbox } from "../../inbox/InboxContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
+import { WorkflowPanel } from "./WorkflowPanel.js";
 
 export function WorkflowProposal({
   basePath,
@@ -156,15 +157,13 @@ export function WorkflowProposal({
   const reviewed = review?.view.proposal;
   const replacing = review?.kind === "initialize" && !!review.view.currentState;
   return (
-    <section
+    <WorkflowPanel
+      title={t("proposal.title")}
       ref={section}
       id="proposal"
-      className="workflow-panel"
       data-testid="workflow-proposal"
       aria-labelledby="proposal-title"
-    >
-      <div className="workflow-card-heading">
-        <h2 id="proposal-title">{t("proposal.title")}</h2>
+      actions={
         <Space wrap>
           {proposal?.canInitialize &&
             !approved &&
@@ -205,7 +204,8 @@ export function WorkflowProposal({
             {t("workflow.reload")}
           </Button>
         </Space>
-      </div>
+      }
+    >
       <p className="muted">{t("proposal.description")}</p>
       {failure && <Alert type="error" showIcon title={failure} />}
       {!view ? (
@@ -358,6 +358,6 @@ export function WorkflowProposal({
         </ul>
         {failure && <Alert type="error" showIcon title={failure} />}
       </Modal>
-    </section>
+    </WorkflowPanel>
   );
 }

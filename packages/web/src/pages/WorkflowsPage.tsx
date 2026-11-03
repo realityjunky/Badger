@@ -29,6 +29,7 @@ import {
 } from "./workflows/WorkflowDialog.js";
 import { WorkflowTeam } from "./workflows/WorkflowTeam.js";
 import { WorkflowSources } from "./workflows/WorkflowSources.js";
+import { WorkflowPanel } from "./workflows/WorkflowPanel.js";
 import { WorkflowSourceStudy } from "./workflows/WorkflowSourceStudy.js";
 import { WorkflowDossier } from "./workflows/WorkflowDossier.js";
 import { WorkflowPlan } from "./workflows/WorkflowPlan.js";
@@ -319,12 +320,11 @@ export function WorkflowsPage() {
               message={t("workflow.versionMissing")}
             />
           ) : (
-            <section
-              className="workflow-panel"
+            <WorkflowPanel
+              key={selectedVersion.id}
+              title={t("workflow.version")}
               aria-labelledby="workflow-version-title"
-            >
-              <div className="workflow-card-heading">
-                <h2 id="workflow-version-title">{t("workflow.version")}</h2>
+              actions={
                 <Select
                   aria-label={t("workflow.version")}
                   value={selectedVersion.id}
@@ -340,7 +340,8 @@ export function WorkflowsPage() {
                     }),
                   }))}
                 />
-              </div>
+              }
+            >
               <p>{selectedVersion.goal}</p>
               {selectedVersion.inheritedFromVersionId && (
                 <p>
@@ -369,13 +370,14 @@ export function WorkflowsPage() {
                     : selectedVersion.stages
                 }
               />
-            </section>
+            </WorkflowPanel>
           )}
           {versionResources !== null &&
             selectedVersion !== undefined &&
             workflow !== undefined && (
               <>
                 <WorkflowSources
+                  key={`sources-${selectedVersion.id}`}
                   basePath={basePath}
                   workflow={workflow}
                   version={selectedVersion}
@@ -422,6 +424,7 @@ export function WorkflowsPage() {
               </>
             )}
           <WorkflowTeam
+            key={`team-${detail.workflow.id}`}
             basePath={basePath}
             workflowId={detail.workflow.id}
             bindings={detail.bindings}

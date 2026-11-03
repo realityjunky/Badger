@@ -28,6 +28,7 @@ import {
   type InvitationDelivery,
 } from "../../api/organization.js";
 import { groupWorkflowBindings, type WorkflowTeamMember } from "./team.js";
+import { WorkflowPanel } from "./WorkflowPanel.js";
 
 const ROLE_MESSAGES: Record<WorkflowRole, MessageId> = {
   "Workflow owner": "workflow.role.owner",
@@ -179,8 +180,10 @@ export function WorkflowTeam({
   ];
 
   return (
-    <section className="workflow-panel" aria-labelledby="workflow-team-title">
-      <h2 id="workflow-team-title">{t("workflow.team")}</h2>
+    <WorkflowPanel
+      title={t("workflow.team")}
+      aria-labelledby="workflow-team-title"
+    >
       {failure !== null && (
         <WorkflowNotice failure={failure} onReload={onChanged} />
       )}
@@ -258,6 +261,6 @@ export function WorkflowTeam({
           </Form.Item>
         </Form>
       )}
-    </section>
+    </WorkflowPanel>
   );
 }

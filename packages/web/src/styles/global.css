@@ -540,6 +540,27 @@ button.rail-link {
   font-size: calc(var(--badger-font-size-md) * var(--badger-font-scale, 1));
 }
 
+.workflow-panel-heading {
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.workflow-panel-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workflow-panel-title h2 {
+  margin: 0;
+}
+
+.workflow-panel[data-collapsed="true"] > .workflow-panel-heading {
+  margin-bottom: 0;
+}
+
 .workflow-card a,
 .workflow-version-link {
   color: var(--badger-color-accent);

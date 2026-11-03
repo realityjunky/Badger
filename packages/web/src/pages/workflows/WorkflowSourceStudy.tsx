@@ -23,6 +23,7 @@ import { WorkflowNotice, type WriteFailure } from "./WorkflowDialog.js";
 import { EvidenceChanges } from "../../components/EvidenceChanges.js";
 import { RecordOriginLink } from "../../components/RecordOriginLink.js";
 import { ScriptEffectsPanel } from "./ScriptEffectsPanel.js";
+import { WorkflowPanel } from "./WorkflowPanel.js";
 
 export function WorkflowSourceStudy({
   basePath,
@@ -189,21 +190,19 @@ export function WorkflowSourceStudy({
     );
   }
   return (
-    <section
-      className="workflow-panel source-study-panel"
+    <WorkflowPanel
+      title={t("stage.sourceStudy")}
+      className="source-study-panel"
       id="source-study"
       aria-labelledby="source-study-title"
-    >
-      <div className="workflow-card-heading">
-        <div>
-          <h2 id="source-study-title">{t("stage.sourceStudy")}</h2>
-          <p className="muted">{t("study.description")}</p>
-        </div>
+      actions={
         <label className="study-retired-toggle">
           <Switch checked={retired} onChange={setRetired} />{" "}
           {t("study.showRetired")}
         </label>
-      </div>
+      }
+    >
+      <p className="muted">{t("study.description")}</p>
       {failure !== null && (
         <WorkflowNotice failure={failure} onReload={onChanged} />
       )}
@@ -314,6 +313,6 @@ export function WorkflowSourceStudy({
           </>
         )}
       </Modal>
-    </section>
+    </WorkflowPanel>
   );
 }

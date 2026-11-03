@@ -1312,6 +1312,10 @@ const en = {
   "inbox.markUnread": "Mark unread",
   "inbox.older": "Older items",
   "inbox.newest": "Newest items",
+  "workflow.collapsePanel": "Collapse",
+  "workflow.expandPanel": "Expand",
+  "workflow.collapsePanelLabel": "Collapse {name}",
+  "workflow.expandPanelLabel": "Expand {name}",
   "gate.review": "Review Sources",
   "gate.confirm": "Confirm source set",
   "gate.effects":
@@ -2562,6 +2566,10 @@ const zh: Record<MessageId, string> = {
   "inbox.markUnread": "标为未读",
   "inbox.older": "更早的消息",
   "inbox.newest": "最新消息",
+  "workflow.collapsePanel": "收起",
+  "workflow.expandPanel": "展开",
+  "workflow.collapsePanelLabel": "收起{name}",
+  "workflow.expandPanelLabel": "展开{name}",
   "gate.review": "审阅来源",
   "gate.confirm": "确认来源集合",
   "gate.effects":
