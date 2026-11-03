@@ -1610,6 +1610,10 @@ button.rail-link {
   margin-bottom: 16px;
 }
 
+.llm-connection .field > .ant-switch {
+  align-self: flex-start;
+}
+
 .source-preview {
   max-height: 360px;
   overflow: auto;
