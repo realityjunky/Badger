@@ -23,6 +23,111 @@ async function call(page: Page, path: string, body?: unknown) {
   );
 }
 
+test("connection settings expose API key entry and keep save and test feedback visible", async ({
+  page,
+}) => {
+  const provider = await startStubLlmProvider();
+  const id = `settings-feedback-${Date.now()}`;
+  try {
+    await page.goto("/admin/llm");
+    await page.getByTestId("language-switch").click();
+    await page.getByRole("menuitem", { name: "English", exact: true }).click();
+    const example = JSON.parse(
+      await fs.readFile(
+        new URL("../../server/config/llm.example.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    const profile = {
+      ...example.configuration.models[0],
+      id,
+      name: `Settings ${id}`,
+    };
+    await page.getByLabel("Import model profiles (JSON)").setInputFiles({
+      name: "profile.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify({ models: [profile] })),
+    });
+    const key = page.getByLabel(`API key · ${id}`, { exact: true });
+    await expect(key).toBeVisible();
+    const earlyConnection = page
+      .locator("details.llm-connection")
+      .filter({ has: page.locator("summary").filter({ hasText: id }) });
+    await page
+      .getByRole("button", { name: "Save LLM configuration", exact: true })
+      .click();
+    await expect(
+      page.getByText("LLM configuration saved.", { exact: true }),
+    ).toBeVisible();
+    await earlyConnection
+      .getByRole("button", { name: "Test saved connection", exact: true })
+      .click();
+    await expect(earlyConnection.getByRole("alert")).toContainText(
+      "Enter the model API base URL",
+    );
+    await expect(earlyConnection.getByRole("alert")).toBeInViewport({
+      ratio: 1,
+    });
+    expect(provider.requests).toHaveLength(0);
+    await key.fill("synthetic-settings-key");
+    await page.getByLabel(`API base URL · ${id}`).fill(provider.url);
+    const connection = page
+      .locator("details.llm-connection")
+      .filter({ has: page.locator("summary").filter({ hasText: id }) });
+    const testConnection = connection.getByRole("button", {
+      name: "Test saved connection",
+      exact: true,
+    });
+    await expect(testConnection).toBeDisabled();
+    await expect(
+      connection.getByText("Save changes before testing this connection.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page
+      .getByLabel("Task prompt text · script-side-effects")
+      .scrollIntoViewIfNeeded();
+    const save = page.getByRole("button", {
+      name: "Save LLM configuration",
+      exact: true,
+    });
+    await expect(save).toBeInViewport({ ratio: 1 });
+    await save.click();
+    await expect(
+      page.getByText("LLM configuration saved.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("LLM configuration saved.", { exact: true }),
+    ).toBeInViewport({ ratio: 1 });
+    await expect(key).toHaveCount(0);
+    provider.requireKey("synthetic-settings-key");
+    provider.respond({ scripts: [] }, { status: 401 });
+    await testConnection.click();
+    const error = connection.getByRole("alert");
+    await expect(error).toContainText("Model HTTP 401");
+    await expect(error).toBeInViewport({ ratio: 1 });
+    provider.respond({ scripts: [] });
+    await testConnection.click();
+    const accepted = connection.getByRole("alert");
+    await expect(accepted).toContainText(
+      "provider accepted the configured request",
+    );
+    await expect(accepted).toBeInViewport({ ratio: 1 });
+    await page.getByLabel(`Display name · ${id}`).fill(`Updated ${id}`);
+    await save.click();
+    await expect(
+      page.getByText("LLM configuration saved.", { exact: true }),
+    ).toBeVisible();
+    await testConnection.click();
+    await expect(connection.getByRole("alert")).toContainText(
+      "provider accepted the configured request",
+    );
+    expect(provider.requests).toHaveLength(3);
+  } finally {
+    await provider.close();
+  }
+});
+
 test("an Administrator configures a model and a person reviews automatic editable upload suggestions", async ({
   page,
 }) => {
@@ -55,13 +160,8 @@ test("an Administrator configures a model and a person reviews automatic editabl
       buffer: Buffer.from(JSON.stringify({ models: [profile] })),
     });
     await page.getByLabel(`API base URL · ${id}`).fill(provider.url);
-    await page.getByLabel(`API key action · ${id}`).click();
     await page
-      .locator(".ant-select-dropdown:visible")
-      .getByText("Replace key", { exact: true })
-      .click();
-    await page
-      .getByLabel(`Replacement API key · ${id}`)
+      .getByLabel(`API key · ${id}`, { exact: true })
       .fill("synthetic-browser-key-95");
     await page.getByLabel("Assigned model · script-side-effects").click();
     await page
@@ -78,7 +178,9 @@ test("an Administrator configures a model and a person reviews automatic editabl
     await expect(
       page.getByText("LLM configuration saved.", { exact: true }),
     ).toBeVisible();
-    await expect(page.getByLabel(`Replacement API key · ${id}`)).toHaveCount(0);
+    await expect(
+      page.getByLabel(`API key · ${id}`, { exact: true }),
+    ).toHaveCount(0);
     const connection = page
       .locator("details.llm-connection")
       .filter({ has: page.locator("summary").filter({ hasText: id }) });
