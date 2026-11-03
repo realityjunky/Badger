@@ -18,11 +18,26 @@ them into `dist/`, so the server image carries the build and none of them.
 | `src/preferences/`      | The person's choices: model, API client, the saver that stores each change, and the provider.                                                                           |
 | `src/api/`              | The API clients for every page: scoped records, writes, revision conflicts, and filters.                                                                                |
 | `src/shell/`            | The rail, top bar, and application frame.                                                                                                                               |
+| `src/documentation/`    | The guide overlay, stable help topics, and section navigation. Its English and Chinese copy lives in `src/i18n/documentation.ts`.                                       |
 | `src/pages/`            | The pages. My work is the landing page; Workflows, Questionnaire, Skills, Runs, Evaluations, Activity, Admin, and Settings read live records, and every page has a URL. |
 | `test/`                 | Pure-helper tests: tokens, contrast, catalogs, routes, preferences, saving, and base paths.                                                                             |
 | `e2e/`                  | Playwright journeys against the real service, including separate Engineer and expert sessions.                                                                          |
 
 ## Behavior
+
+- **Documentation** (#94) sits beside Language on every page and opens the
+  current section's guide. The nine stable `help` query values are `my-work`,
+  `workflows`, `questionnaire`, `skills`, `runs`, `evaluations`, `activity`,
+  `admin`, and `settings`; for example `/skills?help=skills`. The upload dialog's
+  Script side effects link opens `help=script-side-effects`, with definitions
+  and synthetic examples for all five declarations. Links retain the current
+  page, scope, filters, and anchor, including deployment and demo prefixes.
+  The guide overlays the page so folder/zip selections, preview hashes, and
+  declaration edits survive navigation within help and dismissal. Escape or
+  Return to dashboard closes it and restores focus to its trigger. Help uses
+  the dashboard language, theme, and text scale, including in read-only demo
+  mode. Sharing or reloading a help URL opens that topic; file selections and
+  other unsaved edits remain local to the current page session.
 
 - **Demo mode** (#71) is available at `/demo/` under the deployment's base
   path, for example `/badger/demo/`. It uses the same dashboard with fixed

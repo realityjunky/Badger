@@ -9,6 +9,7 @@ import { NavigationRail } from "./NavigationRail.js";
 import { TopBar } from "./TopBar.js";
 import { Alert } from "antd";
 import { useDemoMode } from "../app/DemoContext.js";
+import { DocumentationDialog } from "../documentation/DocumentationDialog.js";
 
 /**
  * The application frame: the rail, the top bar, and the page. Below 1024px
@@ -79,6 +80,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+      <DocumentationDialog />
     </div>
   );
 }

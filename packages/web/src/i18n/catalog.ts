@@ -1,10 +1,12 @@
 import type { Language } from "../preferences/model.js";
+import { documentationEn, documentationZh } from "./documentation.js";
 
 /**
  * Every message the dashboard shows, keyed by a stable message ID. Records
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  ...documentationEn,
   "demo.title": "Demo mode · read-only",
   "inbox.runGateReady": "{name} · v{number}: answer a Run gate",
   "demo.open": "Explore demo",
@@ -795,10 +797,11 @@ const en = {
   "skills.previewCount": "{count} files in the source inventory",
   "skills.effects": "Script side effects",
   "skills.effectsHint":
-    "Declare every script's side effects for this version. Choose None for a script that has none.",
+    "Declare every script's possible effects, including called programs and optional modes. Inspect uncertain behavior before choosing None. Uploading and previewing never execute scripts.",
   "skills.declareRemaining":
     "Undeclared scripts: {count}. Confirm becomes available once every script is declared.",
-  "skills.noScripts": "This version contains no scripts.",
+  "skills.noScripts":
+    "This version contains no scripts. No side-effect declarations are needed.",
   "skills.undeclared": "Undeclared",
   "skills.effect.none": "None",
   "skills.effect.local-writes": "Local writes",
@@ -1332,6 +1335,7 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  ...documentationZh,
   "demo.title": "演示模式 · 只读",
   "inbox.runGateReady": "{name} · v{number}：回答运行关卡",
   "demo.open": "浏览演示",
@@ -2164,10 +2168,10 @@ const zh: Record<MessageId, string> = {
   "skills.previewCount": "来源清单共 {count} 个文件",
   "skills.effects": "脚本副作用",
   "skills.effectsHint":
-    "为此版本中的每个脚本声明副作用。没有副作用的脚本请选择“无”。",
+    "声明每个脚本可能产生的副作用，包括所调用程序和可选模式。行为不确定时，先检查再选择“无”。上传和预览绝不执行脚本。",
   "skills.declareRemaining":
     "尚未声明副作用的脚本：{count} 个。全部声明后才能确认上传。",
-  "skills.noScripts": "此版本不包含脚本。",
+  "skills.noScripts": "此版本不包含脚本，无需声明副作用。",
   "skills.undeclared": "尚未声明",
   "skills.effect.none": "无",
   "skills.effect.local-writes": "本地写入",

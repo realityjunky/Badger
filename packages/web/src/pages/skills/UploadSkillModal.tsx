@@ -1,5 +1,6 @@
 import { Alert, Button, Modal, Select, Space, Spin, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import {
   gitFolderPath,
   previewUpload,
@@ -16,6 +17,7 @@ import {
 } from "../../api/skills.js";
 import { readBasePath } from "../../app/paths.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { documentationSearch } from "../../documentation/sections.js";
 
 import { GitSourceFields } from "./GitSourceFields.js";
 
@@ -41,6 +43,7 @@ export function UploadSkillModal({
   onUploaded(version: SkillVersion): void;
 }) {
   const { t, format } = useI18n();
+  const location = useLocation();
   const basePath = readBasePath(document);
   const [content, setContent] = useState<UploadContent | GitContent | null>(
     null,
@@ -239,6 +242,18 @@ export function UploadSkillModal({
             <code className="skills-hash">{preview.hash}</code>
             <h3>{t("skills.effects")}</h3>
             <p className="muted">{t("skills.effectsHint")}</p>
+            <Link
+              to={{
+                ...location,
+                search: documentationSearch(
+                  location.search,
+                  "script-side-effects",
+                ),
+              }}
+              replace
+            >
+              {t("documentation.effects.link")}
+            </Link>
             {preview.scripts.length === 0 && <p>{t("skills.noScripts")}</p>}
             {preview.scripts.map((script) => (
               <label key={script.path} className="field">
