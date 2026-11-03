@@ -7,6 +7,17 @@ import { documentationEn, documentationZh } from "./documentation.js";
  */
 const en = {
   ...documentationEn,
+  "llm.actions": "LLM configuration actions",
+  "llm.unsaved": "Unsaved changes",
+  "llm.allSaved": "All changes saved",
+  "llm.saveBeforeTest": "Save changes before testing this connection.",
+  "llm.keyEntryHelp":
+    "Enter a key and save this configuration. Keys are stored encrypted and are never displayed again.",
+  "llm.preserveKeyHelp":
+    "Preserve existing key keeps the saved key when you save changes to other fields. Choose Replace key to enter a new key, or Clear key to remove it.",
+  "llm.advancedCredentials": "Advanced credential references",
+  "llm.secretRefHelp":
+    "Use a reference only when an operator provided one, such as env:BADGER_LLM_SECRET_FLASH. Leave this field alone when entering an API key above; never paste the key itself here.",
   "llm.tab": "LLM configuration",
   "llm.adminHelp":
     "Manage model connections, function assignments and task prompts. Accepted revision:",
@@ -1394,6 +1405,16 @@ export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
   ...documentationZh,
+  "llm.actions": "LLM 配置操作",
+  "llm.unsaved": "有未保存的更改",
+  "llm.allSaved": "所有更改已保存",
+  "llm.saveBeforeTest": "请先保存更改，再测试此连接。",
+  "llm.keyEntryHelp": "输入密钥后保存配置。密钥将加密存储，保存后不再显示。",
+  "llm.preserveKeyHelp":
+    "保留现有密钥表示保存其他字段时继续使用已保存的密钥。选择替换密钥可输入新密钥，选择清除密钥可移除它。",
+  "llm.advancedCredentials": "高级凭据引用",
+  "llm.secretRefHelp":
+    "仅在运维人员提供引用时使用，例如 env:BADGER_LLM_SECRET_FLASH。通过上方输入 API 密钥时无需修改此字段，切勿在此粘贴密钥本身。",
   "llm.tab": "LLM 配置",
   "llm.adminHelp": "管理模型连接、功能分配和任务提示词。当前接受的修订号：",
   "llm.save": "保存 LLM 配置",

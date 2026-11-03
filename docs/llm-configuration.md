@@ -10,20 +10,24 @@ edit, reload or test these settings through the dashboard or direct API.
    [`packages/server/config/llm.example.json`](../packages/server/config/llm.example.json),
    or add a connection. Importing profiles adds models and preserves existing
    models, assignments and prompts; duplicate identifiers are refused.
-2. Enter the deployment's LiteLLM API base URL, including its `/v1` prefix
+2. Enter your API base URL, including its `/v1` prefix
    when applicable. Badger appends `/chat/completions`. Use HTTPS; loopback
    HTTP is supported for local testing. URLs cannot contain credentials,
    query parameters or fragments.
-3. Configure a protected secret reference such as
-   `env:BADGER_LLM_SECRET_FLASH`, or choose **Replace key** after the operator
-   enables encrypted storage. Save preserves an existing key unless Replace
-   or Clear is selected. Keys never return in configuration reads or exports,
-   and the dashboard stores no key in browser persistence.
+3. Enter the API key directly in **API key** when no key is configured. After
+   saving, only configured/masked status remains. **Preserve existing key**
+   keeps that saved key when other fields change; choose **Replace key** to
+   enter another key or **Clear key** to remove it explicitly. Keys never
+   return in configuration reads or exports or enter browser persistence.
+   **Advanced credential references** is for operator-provided references such
+   as `env:BADGER_LLM_SECRET_FLASH`; it is not an API key input.
 4. Choose an enabled model under **Function-to-model assignments → Script
    side-effect suggestion**, inspect **Task prompts**, and save.
-5. **Test saved connection** sends a synthetic JSON task with the exact saved
-   model settings. Unsaved changes must be saved before testing. A successful
-   response proves that the request and JSON response succeeded, not that a
+5. Use the persistent **Save LLM configuration** bar to save field changes.
+   Unsaved changes are marked explicitly and keep connection testing disabled
+   until saved. **Test saved connection** then sends a synthetic JSON task with
+   the exact saved settings; progress and results appear beside that button.
+   A successful response proves that the request and JSON response succeeded, not that a
    proxy honored every provider option. Record live verification separately.
 
 Model identifiers are stable. Disable a connection to stop using it without
