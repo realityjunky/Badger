@@ -62,3 +62,59 @@ export async function resolveSecret(
     );
   return secret;
 }
+
+/** Inspect decoded strings and property names, independently of JSON escaping. */
+export function containsSecret(
+  value: unknown,
+  secrets: readonly string[],
+): boolean {
+  const pending: unknown[] = [value];
+  const protectedValues = [
+    ...new Set(
+      secrets
+        .filter((secret) => secret.length > 0)
+        .flatMap((secret) => [secret, JSON.stringify(secret).slice(1, -1)]),
+    ),
+  ];
+  while (pending.length) {
+    const entry = pending.pop();
+    if (typeof entry === "string") {
+      if (protectedValues.some((secret) => entry.includes(secret))) return true;
+    } else if (Array.isArray(entry)) {
+      for (const item of entry) pending.push(item);
+    } else if (entry !== null && typeof entry === "object") {
+      for (const [key, item] of Object.entries(entry)) {
+        if (protectedValues.some((secret) => key.includes(secret))) return true;
+        pending.push(item);
+      }
+    }
+  }
+  return false;
+}
+
+export function assertSecretFree(value: unknown, secrets: readonly string[]) {
+  if (containsSecret(value, secrets))
+    throw new RequestError(
+      400,
+      "Keep credentials only in write-only secret fields or protected external references",
+    );
+}
+
+export async function protectedSecretValues(
+  db: Queryable,
+  config: ServiceConfig,
+  models: readonly ModelConnection[],
+): Promise<string[]> {
+  const values = [
+    ...Object.values(config.llm.externalSecrets),
+    ...(config.llm.encryptionKey ? [config.llm.encryptionKey] : []),
+  ];
+  for (const model of models) {
+    try {
+      values.push(await resolveSecret(db, config, model));
+    } catch (error) {
+      if (!(error instanceof RequestError)) throw error;
+    }
+  }
+  return [...new Set(values)];
+}

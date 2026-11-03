@@ -411,6 +411,9 @@ describe("Administrator LLM configuration", () => {
         c.prompts["script-side-effects"].text = "Wrong {{secret}}";
       },
       (c: typeof current.configuration) => {
+        c.prompts["script-side-effects"].text += "{{source}}";
+      },
+      (c: typeof current.configuration) => {
         c.models[0].settings.effort = "ultra";
         c.models[0].descriptors[1].options.push({
           value: "ultra",
@@ -493,6 +496,176 @@ describe("Administrator LLM configuration", () => {
 });
 
 describe("Protected LLM credentials", () => {
+  it("withholds a persisted prompt when a later external key makes it sensitive while preserving manual uploads", async () => {
+    temporary = await fs.mkdtemp(
+      path.join(tmpdir(), "badger-sensitive-prompt-"),
+    );
+    const environment = {
+      BADGER_STORAGE_DIR: path.join(temporary, "storage"),
+      BADGER_DATABASE_PATH: path.join(temporary, "database"),
+      BADGER_ALLOWED_ORIGINS: "http://localhost",
+    };
+    service = await startTestService({ mode: "local", environment });
+    const local = (path: string, body: unknown, method = "POST") =>
+      service.request(`/api/v1${path}`, {
+        method,
+        headers: {
+          origin: "http://localhost",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    const current = await (await service.request("/api/v1/admin/llm")).json();
+    const futureKey = "synthetic-future-provider-key-95";
+    current.configuration.prompts["script-side-effects"].text += futureKey;
+    const saved = await local(
+      "/admin/llm",
+      { revision: current.revision, configuration: current.configuration },
+      "PUT",
+    );
+    expect(saved.status).toBe(200);
+    const persistentIds = service.ids;
+    await service.close();
+    service = await startTestService({
+      mode: "local",
+      environment: { ...environment, BADGER_LLM_SECRET_FUTURE: futureKey },
+      ids: persistentIds,
+    });
+    const config = await service.request("/api/v1/admin/llm");
+    expect(config.status).toBe(400);
+    expect(await config.text()).not.toContain(futureKey);
+    const { group } = await (
+      await local("/groups", { name: "Manual fallback" })
+    ).json();
+    const { skill } = await (
+      await local("/skills", { groupId: group.id, name: "example" })
+    ).json();
+    const previewResponse = await local(
+      `/skills/${skill.id}/upload-preview`,
+      uploadedSource,
+    );
+    expect(previewResponse.status).toBe(200);
+    const text = await previewResponse.text();
+    expect(text).not.toContain(futureKey);
+    const { preview } = JSON.parse(text);
+    expect(preview.suggestion).toMatchObject({
+      state: "unconfigured",
+      id: null,
+    });
+    expect(preview.suggestion.prompt.text).toContain("withheld");
+    const confirmed = await local(`/skills/${skill.id}/versions`, {
+      ...uploadedSource,
+      confirmed: true,
+      expectedHash: preview.hash,
+      scripts: { "scripts/run.sh": ["network", "local-writes"] },
+    });
+    expect(confirmed.status).toBe(201);
+  });
+
+  it("rejects escaped keys in configuration, source and provider output across configured models", async () => {
+    provider = await startStubLlmProvider();
+    await start({
+      BADGER_LLM_KEY: "ab".repeat(32),
+      HTTP_PROXY: "",
+      HTTPS_PROXY: "",
+      NO_PROXY: "*",
+    });
+    let current = await configure(provider.url);
+    const escapedKey = 'synthetic-key-\\"-95';
+    const invalid = structuredClone(current.configuration);
+    invalid.prompts["script-side-effects"].text += escapedKey;
+    const leaked = await write(
+      "/api/v1/admin/llm",
+      {
+        revision: current.revision,
+        configuration: invalid,
+        secrets: { flash: { action: "replace", value: escapedKey } },
+      },
+      administrator,
+      "PUT",
+    );
+    expect(leaked.status).toBe(400);
+    expect(await leaked.text()).not.toContain(
+      JSON.stringify(escapedKey).slice(1, -1),
+    );
+    const reflected = structuredClone(current.configuration);
+    reflected.models[0].descriptors[1].key = "synthetic-provider-secret-95";
+    reflected.models[0].descriptors[1].default = "unsupported";
+    const error = await write(
+      "/api/v1/admin/llm",
+      { revision: current.revision, configuration: reflected },
+      administrator,
+      "PUT",
+    );
+    expect(error.status).toBe(400);
+    expect(await error.text()).not.toContain("synthetic-provider-secret-95");
+    current.configuration.models.push({
+      ...model(provider.url),
+      id: "other",
+      name: "Other model",
+    });
+    current = await (
+      await write(
+        "/api/v1/admin/llm",
+        {
+          revision: current.revision,
+          configuration: current.configuration,
+          secrets: { other: { action: "replace", value: escapedKey } },
+        },
+        administrator,
+        "PUT",
+      )
+    ).json();
+    const entry = await skill();
+    const base = `/api/v1/skills/${entry.id}`;
+    const contaminated = {
+      files: [
+        ...uploadedSource.files,
+        file("references/credentials.txt", escapedKey),
+      ],
+    };
+    const source = await (
+      await write(`${base}/upload-preview`, contaminated)
+    ).json();
+    const withheld = await write(`${base}/side-effect-suggestions`, {
+      previewId: source.preview.suggestion.id,
+      expectedHash: source.preview.hash,
+    });
+    expect((await withheld.json()).suggestion.status).toBe("failed");
+    expect(provider.requests).toHaveLength(0);
+    const { preview } = await (
+      await write(`${base}/upload-preview`, uploadedSource)
+    ).json();
+    const hash = preview.inventory.find(
+      (entry: { path: string }) => entry.path === "scripts/run.sh",
+    ).hash;
+    provider.respond({
+      scripts: [
+        {
+          path: "scripts/run.sh",
+          effects: ["network"],
+          rationale: escapedKey,
+          complete: true,
+          uncertainty: "",
+          citations: [
+            { path: "scripts/run.sh", hash, startLine: 1, endLine: 1 },
+          ],
+        },
+      ],
+    });
+    const result = await write(`${base}/side-effect-suggestions`, {
+      previewId: preview.suggestion.id,
+      expectedHash: preview.hash,
+    });
+    const text = await result.text();
+    expect(JSON.parse(text).suggestion).toMatchObject({
+      status: "failed",
+      scripts: [],
+    });
+    expect(text).not.toContain(JSON.stringify(escapedKey).slice(1, -1));
+    expect(provider.requests).toHaveLength(1);
+  });
+
   it("supports external references without encryption and refuses prompts containing configured keys", async () => {
     provider = await startStubLlmProvider();
     provider.requireKey("synthetic-external-key-95");
@@ -567,6 +740,55 @@ async function skill() {
 }
 
 describe("Script side-effect suggestions", () => {
+  it("keeps validated manual upload available when temporary suggestion preview capacity is full", async () => {
+    provider = await startStubLlmProvider();
+    await start({
+      BADGER_LLM_KEY: "ab".repeat(32),
+      HTTP_PROXY: "",
+      HTTPS_PROXY: "",
+      NO_PROXY: "*",
+    });
+    let current = await configure(provider.url);
+    const entry = await skill();
+    const base = `/api/v1/skills/${entry.id}`;
+    for (let index = 0; index < 10; index += 1) {
+      const { preview } = await (
+        await write(`${base}/upload-preview`, uploadedSource)
+      ).json();
+      expect(preview.suggestion.state).toBe("ready");
+      provider.holdResponses();
+      const pending = write(`${base}/side-effect-suggestions`, {
+        previewId: preview.suggestion.id,
+        expectedHash: preview.hash,
+      });
+      await expect
+        .poll(() => provider.requests.length, { interval: 10, timeout: 10000 })
+        .toBe(index + 1);
+      current = await (
+        await write(
+          "/api/v1/admin/llm",
+          { revision: current.revision, configuration: current.configuration },
+          administrator,
+          "PUT",
+        )
+      ).json();
+      provider.releaseResponses();
+      expect((await pending).status).toBe(409);
+    }
+    const response = await write(`${base}/upload-preview`, uploadedSource);
+    expect(response.status).toBe(200);
+    const { preview } = await response.json();
+    expect(preview.suggestion).toMatchObject({ state: "incomplete", id: null });
+    expect(preview.suggestion.message).toContain("capacity");
+    const manual = await write(`${base}/versions`, {
+      ...uploadedSource,
+      confirmed: true,
+      expectedHash: preview.hash,
+      scripts: { "scripts/run.sh": ["network", "local-writes"] },
+    });
+    expect(manual.status).toBe(201);
+  });
+
   it("binds suggestions to validated preview evidence and preserves explicit immutable confirmation", async () => {
     provider = await startStubLlmProvider();
     await start({

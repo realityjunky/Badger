@@ -8,7 +8,11 @@ import {
   type LlmConfiguration,
   type ModelConnection,
 } from "./configuration.js";
-import { resolveSecret } from "./secrets.js";
+import {
+  containsSecret,
+  protectedSecretValues,
+  resolveSecret,
+} from "./secrets.js";
 
 export const SUGGESTION_SCHEMA = {
   type: "object",
@@ -110,7 +114,11 @@ export async function callModel(
       "Complete evidence exceeds the configured context budget; increase input context budget or review scripts manually",
     );
   const secret = await resolveSecret(db, config, model);
-  if (JSON.stringify(messages).includes(JSON.stringify(secret).slice(1, -1)))
+  const protectedValues = [
+    secret,
+    ...(await protectedSecretValues(db, config, effective.models)),
+  ];
+  if (containsSecret(messages, protectedValues))
     throw new RequestError(
       400,
       "Source or task prompt contains the configured API key; remove credentials before requesting suggestions",
@@ -180,7 +188,7 @@ export async function callModel(
       chunks.push(buffer);
     }
     const text = Buffer.concat(chunks).toString("utf8");
-    if (text.includes(secret))
+    if (containsSecret(text, protectedValues))
       throw new RequestError(
         400,
         "Model returned sensitive material; result withheld",
@@ -198,7 +206,7 @@ export async function callModel(
         "Model output is incomplete or malformed; check maximum output tokens and review scripts manually",
       );
     const result: unknown = JSON.parse(choice.message.content);
-    if (JSON.stringify(result).includes(secret))
+    if (containsSecret(result, protectedValues))
       throw new RequestError(
         400,
         "Model returned sensitive material; result withheld",

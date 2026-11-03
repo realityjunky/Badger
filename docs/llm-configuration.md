@@ -76,7 +76,8 @@ declarations or to run Badger's tests.
 ## Durable configuration and file reloads
 
 The shipped [JSON schema](../packages/server/config/llm.schema.json) describes
-the version 1 `{revision, configuration}` file. Runtime validation also checks
+the version 1 `{revision, configuration}` file. The server build generates it
+from the runtime validator's authoritative definition. Runtime validation also checks
 descriptor defaults and selected values, referenced model IDs, URL safety and
 prompt placeholders. Configuration files contain secret references, never keys.
 Treat references and prompts as operator-managed configuration.
@@ -118,8 +119,8 @@ this repository. TLS verification remains enabled and redirects are refused.
 ## Task prompts and uploader review
 
 The `script-side-effects` task prompt has a stable function identifier,
-description and content hash. Prompt text must contain `{{source}}` and
-`{{scripts}}`, with no unknown placeholders. The system message independently
+description and content hash. Prompt text must contain exactly one `{{source}}` and
+one `{{scripts}}`, with no unknown placeholders. The system message independently
 fixes the response schema and exactly these effects: `none`, `local-writes`,
 `network`, `scheduler-submission`, `installs`. `none` must stand alone.
 Prompt edits cannot widen the effect set or bypass confirmation.

@@ -49,13 +49,11 @@ test("an Administrator configures a model and a person reviews automatic editabl
     const profile = example.configuration.models[0];
     profile.id = id;
     profile.name = `Browser Flash ${suffix}`;
-    await page
-      .getByLabel("Import model profiles (JSON)")
-      .setInputFiles({
-        name: "profile.json",
-        mimeType: "application/json",
-        buffer: Buffer.from(JSON.stringify({ models: [profile] })),
-      });
+    await page.getByLabel("Import model profiles (JSON)").setInputFiles({
+      name: "profile.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify({ models: [profile] })),
+    });
     await page.getByLabel(`API base URL · ${id}`).fill(provider.url);
     await page.getByLabel(`API key action · ${id}`).click();
     await page

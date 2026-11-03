@@ -10,7 +10,11 @@ import {
   validateConfiguration,
   type LlmConfiguration,
 } from "./configuration.js";
-import { encryptSecret, resolveSecret } from "./secrets.js";
+import {
+  assertSecretFree,
+  encryptSecret,
+  protectedSecretValues,
+} from "./secrets.js";
 
 export interface AcceptedConfiguration {
   revision: number;
@@ -94,7 +98,7 @@ export async function initializeLlmConfiguration(
       : { revision: 0, configuration: defaultConfiguration() };
     assertSecretFree(
       loaded.configuration,
-      Object.values(config.llm.externalSecrets),
+      await protectedSecretValues(tx, config, []),
     );
     if (loaded.revision !== 0)
       throw new RequestError(
@@ -125,6 +129,10 @@ export async function initializeLlmConfiguration(
 
 export async function configurationView(db: Queryable, config: ServiceConfig) {
   const accepted = await readConfiguration(db);
+  assertSecretFree(
+    accepted.configuration,
+    await protectedSecretValues(db, config, accepted.configuration.models),
+  );
   const stored = await db.query<{ reference: string }>(
     "select reference from llm_secrets",
   );
@@ -178,13 +186,12 @@ export async function saveConfiguration(
         409,
         "LLM configuration changed; reload it and apply your edits to the current revision",
       );
-    const protectedValues = Object.values(config.llm.externalSecrets);
+    const protectedValues = await protectedSecretValues(
+      tx,
+      config,
+      current.configuration.models,
+    );
     for (const model of current.configuration.models) {
-      try {
-        protectedValues.push(await resolveSecret(tx, config, model));
-      } catch (error) {
-        if (!(error instanceof RequestError)) throw error;
-      }
       const next = configuration.models.find((entry) => entry.id === model.id);
       if (
         next &&
@@ -223,11 +230,8 @@ export async function saveConfiguration(
             "Configure BADGER_LLM_KEY or use a protected external secret reference before storing API keys",
           );
         // A submitted key must never be smuggled into settings or task prompts.
-        if (JSON.stringify(configuration).includes(change.value))
-          throw new RequestError(
-            400,
-            "Keep API keys only in the write-only secret field",
-          );
+        protectedValues.push(change.value);
+        assertSecretFree(configuration, protectedValues);
         await tx.query(
           "insert into llm_secrets (reference, ciphertext) values ($1, $2) on conflict (reference) do update set ciphertext = excluded.ciphertext",
           [ref, encryptSecret(change.value, ref, config.llm.encryptionKey)],
@@ -239,6 +243,7 @@ export async function saveConfiguration(
           "Explicitly replace a nonempty API key or clear it",
         );
     }
+    assertSecretFree(configuration, protectedValues);
     const effectiveHash = contentHash(configuration);
     await tx.query(
       "update llm_configuration set revision = revision + 1, configuration = $1, content_hash = $2, updated_at = $3 where singleton = true",
@@ -276,17 +281,4 @@ export async function saveConfiguration(
       });
   });
   return configurationView(db, config);
-}
-
-function assertSecretFree(configuration: LlmConfiguration, values: string[]) {
-  const json = JSON.stringify(configuration);
-  if (
-    values.some(
-      (value) => value && json.includes(JSON.stringify(value).slice(1, -1)),
-    )
-  )
-    throw new RequestError(
-      400,
-      "Keep API keys only in write-only secret fields or protected external references",
-    );
 }

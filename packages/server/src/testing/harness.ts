@@ -35,6 +35,8 @@ import {
 export type TestServiceMode = "test-identity" | "local" | "service";
 
 export interface TestServiceOptions {
+  /** Retain a fixture's ID source when restarting against its durable database. */
+  ids?: IdSource;
   /** A migration test may restore historical records before serving them. It owns cleanup. */
   database?: TestDatabase;
   notificationChannel?: NotificationChannel;
@@ -216,7 +218,7 @@ export async function startTestService(
 
   const { config } = connection;
   const clock = createFixedClock("2026-10-27T00:00:00.000Z");
-  const ids = createSequentialIds();
+  const ids = options.ids ?? createSequentialIds();
   const logs: Record<string, unknown>[] = [];
   const logger: Logger = {
     info: (fields) => logs.push({ level: "info", ...fields }),

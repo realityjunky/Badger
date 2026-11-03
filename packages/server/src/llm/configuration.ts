@@ -217,7 +217,7 @@ function mappedSetting(
   const fail = (): never => {
     throw new RequestError(
       400,
-      `Invalid setting ${descriptor.key}; check its type, options, range and provider mapping`,
+      "Invalid model setting; check its type, options, range and provider mapping",
     );
   };
   if (descriptor.type === "boolean" && typeof value !== "boolean") fail();
@@ -427,13 +427,13 @@ export function validateConfiguration(value: unknown): LlmConfiguration {
     );
     if (
       placeholders.some((p) => !["source", "scripts"].includes(p)) ||
-      !placeholders.includes("source") ||
-      !placeholders.includes("scripts") ||
+      placeholders.filter((p) => p === "source").length !== 1 ||
+      placeholders.filter((p) => p === "scripts").length !== 1 ||
       /\{\{|\}\}/u.test(prompt.text.replace(/\{\{(source|scripts)\}\}/gu, ""))
     )
       throw new RequestError(
         400,
-        `Task prompt ${id} must use only the required {{source}} and {{scripts}} placeholders`,
+        "Task prompts must contain exactly one {{source}} and one {{scripts}} placeholder, with no unknown placeholders",
       );
   }
   for (const [id, binding] of Object.entries(config.bindings)) {

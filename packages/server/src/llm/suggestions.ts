@@ -12,6 +12,7 @@ import { RequestError } from "../http/errors.js";
 import { contentHash, SCRIPT_EFFECT_FUNCTION } from "./configuration.js";
 import { callModel, RESPONSE_RULES, SUGGESTION_SCHEMA } from "./provider.js";
 import { readConfiguration } from "./store.js";
+import { containsSecret, protectedSecretValues } from "./secrets.js";
 
 export interface SuggestionBinding {
   sourceHash: string;
@@ -78,6 +79,22 @@ export async function prepareSuggestions(
   );
   const accepted = await readConfiguration(db);
   const task = accepted.configuration.prompts[SCRIPT_EFFECT_FUNCTION];
+  const protectedValues = await protectedSecretValues(
+    db,
+    config,
+    accepted.configuration.models,
+  );
+  const unsafeConfiguration = containsSecret(
+    accepted.configuration,
+    protectedValues,
+  );
+  const visibleTask = containsSecret(task, protectedValues)
+    ? {
+        description:
+          "Task prompt withheld because it contains configured credentials.",
+        text: "[Task prompt withheld; an Administrator must remove credential material.]",
+      }
+    : task;
   const preview: SuggestionPreview = {
     id: null,
     state: "unconfigured",
@@ -85,11 +102,17 @@ export async function prepareSuggestions(
       "Automatic suggestions are not configured; declare script effects manually.",
     prompt: {
       functionId: SCRIPT_EFFECT_FUNCTION,
-      ...task,
+      ...visibleTask,
       revision: contentHash(task),
     },
     binding: null,
   };
+  if (unsafeConfiguration)
+    return {
+      ...preview,
+      message:
+        "LLM configuration contains credential material and must be repaired by an Administrator. Declare script effects manually.",
+    };
   if (!inspected.source.scripts.length)
     return { ...preview, state: "no-scripts", message: null };
   const model = accepted.configuration.models.find(
@@ -144,7 +167,7 @@ export async function prepareSuggestions(
     modelRevision: contentHash(model),
   };
   const id = randomUUID();
-  await db.transaction(async (tx) => {
+  const admitted = await db.transaction(async (tx) => {
     await tx.query("select pg_advisory_xact_lock(8231130000000295)");
     await tx.query(
       "delete from skill_suggestion_previews where expires_at < $1",
@@ -159,11 +182,7 @@ export async function prepareSuggestions(
       "select count(*)::integer as count from skill_suggestion_previews where person_id = $1",
       [personId],
     );
-    if (count.rows[0].count >= 10)
-      throw new RequestError(
-        503,
-        "Too many active suggestion previews; finish an existing request or continue manually",
-      );
+    if (count.rows[0].count >= 10) return false;
     await tx.query(
       "insert into skill_suggestion_previews (id, skill_id, person_id, source_hash, configuration_revision, binding, evidence, status, expires_at) values ($1,$2,$3,$4,$5,$6,$7,'ready',$8)",
       [
@@ -177,7 +196,15 @@ export async function prepareSuggestions(
         new Date(deps.clock.now().getTime() + 15 * 60000),
       ],
     );
+    return true;
   });
+  if (!admitted)
+    return {
+      ...preview,
+      state: "incomplete",
+      message:
+        "Suggestion preview capacity is full; declare scripts manually or preview again after active requests finish.",
+    };
   return { ...preview, id, state: "ready", message: null, binding };
 }
 
