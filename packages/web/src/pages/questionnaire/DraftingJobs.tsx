@@ -12,6 +12,8 @@ import type {
   DraftingResult,
 } from "../../api/drafting-jobs.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { normalizeBasePath } from "../../app/paths.js";
+import { draftingPrompt } from "../../util/draftingPrompt.js";
 import { QuestionComposer } from "./QuestionComposer.js";
 import { AnswerTypeDetails } from "./AnswerTypeDetails.js";
 import type { MessageId } from "../../i18n/catalog.js";
@@ -47,6 +49,8 @@ export function DraftingJobs({
   const jobsPath = path.replace(/\/questionnaire$/u, "/drafting-jobs");
   const [jobs, setJobs] = useState<DraftingJob[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
+  const [copiedJobId, setCopiedJobId] = useState<string | null>(null);
+  const [manualPrompt, setManualPrompt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [roundId, setRoundId] = useState<string>();
@@ -135,6 +139,22 @@ export function DraftingJobs({
     setQuestionId(undefined);
     setRequesting(true);
   };
+  const copyAgentPrompt = async (job: DraftingJob) => {
+    const base = normalizeBasePath(basePath);
+    const prompt = draftingPrompt(
+      `${window.location.origin}${base === "/" ? "" : base}`,
+      view,
+      job,
+    );
+    setCopiedJobId(null);
+    setManualPrompt(null);
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopiedJobId(job.id);
+    } catch {
+      setManualPrompt(prompt);
+    }
+  };
   const previewDecision = async (
     job: DraftingJob,
     action: "accept" | "reject",
@@ -215,6 +235,19 @@ export function DraftingJobs({
                 </span>
               )}
               <Tag>{t(`drafting.state.${job.status}`)}</Tag>
+              {job.status === "queued" && (
+                <>
+                  <Button
+                    disabled={busy}
+                    onClick={() => void copyAgentPrompt(job)}
+                  >
+                    {t("drafting.copyPrompt")}
+                  </Button>
+                  <span role="status">
+                    {copiedJobId === job.id && t("drafting.promptCopied")}
+                  </span>
+                </>
+              )}
               {job.status === "submitted" && (
                 <>
                   <Button
@@ -245,6 +278,23 @@ export function DraftingJobs({
           </li>
         ))}
       </ul>
+      <Modal
+        open={manualPrompt !== null}
+        title={t("drafting.agentPrompt")}
+        width={800}
+        footer={null}
+        onCancel={() => setManualPrompt(null)}
+      >
+        <p role="status">{t("drafting.copyPromptFailed")}</p>
+        <Input.TextArea
+          readOnly
+          aria-label={t("drafting.agentPrompt")}
+          value={manualPrompt ?? ""}
+          rows={16}
+          className="mcp-configuration"
+          onFocus={(event) => event.currentTarget.select()}
+        />
+      </Modal>
       <Modal
         open={requesting}
         title={t("drafting.request")}

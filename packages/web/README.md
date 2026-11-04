@@ -207,7 +207,12 @@ them into `dist/`, so the server image carries the build and none of them.
   review a submitted result, edit or remove each suggested question, and
   accept the rest into that round, which they still review and publish, or
   discard the result with a reason; both decisions take a hash-bound
-  confirmation.
+  confirmation. Each queued job offers **Copy Agent prompt**: a template with
+  the deployment, workflow version, job identity, and selected pinned Skill.
+  Paste it into a connected Agent to claim the current revision, read the
+  downloaded evidence, and submit suggestions for human review. Copying calls
+  no model and does not claim or change the job. If clipboard access fails,
+  a dialog provides the prompt for manual copying.
 - Source drafting (#56) extends the job panel with source study, answer
   restatement, question translation, and numbered open-question imports.
   Engineers review and edit each result before a hash-bound confirmation.

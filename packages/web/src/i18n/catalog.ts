@@ -393,6 +393,11 @@ const en = {
   "drafting.openJobs": "Draft with your Agent",
   "drafting.request": "Request drafting",
   "drafting.empty": "No drafting jobs for this version.",
+  "drafting.copyPrompt": "Copy Agent prompt",
+  "drafting.promptCopied": "Prompt copied. Paste it into your connected Agent.",
+  "drafting.agentPrompt": "Agent prompt",
+  "drafting.copyPromptFailed":
+    "Automatic copy failed. Select and copy the prompt below, then paste it into your connected Agent.",
   "drafting.questions": "Draft questions",
   "drafting.followUps": "Draft follow-ups",
   "drafting.review": "Review suggestions",
@@ -1704,6 +1709,11 @@ const zh: Record<MessageId, string> = {
   "drafting.openJobs": "通过 Agent 起草",
   "drafting.request": "请求起草",
   "drafting.empty": "此版本暂无起草任务。",
+  "drafting.copyPrompt": "复制 Agent 提示词",
+  "drafting.promptCopied": "提示词已复制，请粘贴到已连接的 Agent 中。",
+  "drafting.agentPrompt": "Agent 提示词",
+  "drafting.copyPromptFailed":
+    "自动复制失败。请选中并复制下方提示词，然后粘贴到已连接的 Agent 中。",
   "drafting.questions": "起草问题",
   "drafting.followUps": "起草追问",
   "drafting.review": "审核建议",
