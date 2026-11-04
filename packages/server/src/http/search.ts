@@ -67,8 +67,9 @@ export async function handleSearch(input: AuthorizedRequest): Promise<void> {
     text: string;
     name: string;
     number: number;
+    semantic_version: string | null;
   }>(
-    `select q.id, left(r.content->>'text', 200) as text, v.name, v.number
+    `select q.id, left(r.content->>'text', 200) as text, v.name, v.number, v.semantic_version
        from questions q
        join question_revisions r on r.question_id = q.id and r.revision = q.revision
        join workflow_versions v on v.id = q.workflow_version_id
@@ -90,7 +91,7 @@ export async function handleSearch(input: AuthorizedRequest): Promise<void> {
       kind: "question",
       id: question.id,
       label: question.text,
-      context: `${question.name} · v${question.number}`,
+      context: `${question.name} · ${question.semantic_version ?? `v${question.number}`}`,
       href: `/questionnaire/questions/${encodeURIComponent(question.id)}`,
     })),
   );

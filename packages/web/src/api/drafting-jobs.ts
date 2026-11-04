@@ -45,6 +45,13 @@ export interface DraftingJob {
   revision: number;
   contextHash: string;
   result: DraftingResult | null;
+  review: {
+    result: DraftingResult;
+    resultHash: string;
+    revision: number;
+    personId: string;
+    updatedAt: string;
+  } | null;
 }
 export interface DraftingDecisionPreview {
   jobId: string;

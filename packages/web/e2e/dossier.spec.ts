@@ -380,6 +380,7 @@ for (const theme of ["light", "dark"] as const) {
         ),
       ).toBe(true);
 
+      await page.goto(`${base}${root}#proposal`);
       const proposalPanel = page.getByTestId("workflow-proposal");
       await proposalPanel
         .getByRole("button", { name: "Review proposal approval", exact: true })
@@ -407,7 +408,7 @@ for (const theme of ["light", "dark"] as const) {
           exact: true,
         }),
       ).toHaveCount(0);
-      await author.reload();
+      await author.goto(`${base}${root}#proposal`);
       const authorProposal = author.getByTestId("workflow-proposal");
       await authorProposal
         .getByRole("button", { name: "Initialize project", exact: true })
@@ -450,6 +451,7 @@ for (const theme of ["light", "dark"] as const) {
         contentType: "image/png",
       });
 
+      await author.goto(`${base}${root}#package`);
       const packagePanel = author.getByTestId("workflow-package");
       await packagePanel
         .getByRole("button", { name: "Generate package", exact: true })
@@ -642,7 +644,7 @@ for (const theme of ["light", "dark"] as const) {
           () => document.documentElement.scrollWidth <= innerWidth,
         ),
       ).toBe(true);
-      await page.reload();
+      await page.goto(`${base}${root}#package`);
       await expect(
         page
           .getByTestId("workflow-package")
@@ -663,6 +665,7 @@ for (const theme of ["light", "dark"] as const) {
             { exact: true },
           ),
       ).toBeVisible();
+      await page.goto(`${base}${root}#proposal`);
       await expect(
         page
           .getByTestId("workflow-proposal")
@@ -671,11 +674,13 @@ for (const theme of ["light", "dark"] as const) {
             { exact: true },
           ),
       ).toBeVisible();
+      await page.goto(`${base}${root}#dossier`);
       await expect(
         page
           .getByTestId("workflow-dossier")
           .getByText("Superseded", { exact: true }),
       ).toBeVisible();
+      await page.goto(`${base}${root}#plan`);
       await expect(
         page
           .getByTestId("workflow-plan")
@@ -686,6 +691,7 @@ for (const theme of ["light", "dark"] as const) {
           .getByTestId("workflow-plan")
           .getByRole("button", { name: "Review plan approval", exact: true }),
       ).toHaveCount(0);
+      await page.goto(`${base}${root}#dossier`);
       await expect(
         page
           .getByTestId("workflow-dossier")

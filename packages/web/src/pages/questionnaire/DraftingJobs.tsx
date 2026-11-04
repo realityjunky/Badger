@@ -51,6 +51,7 @@ export function DraftingJobs({
   const [failure, setFailure] = useState<string | null>(null);
   const [copiedJobId, setCopiedJobId] = useState<string | null>(null);
   const [manualPrompt, setManualPrompt] = useState<string | null>(null);
+  const [savedJobId, setSavedJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [roundId, setRoundId] = useState<string>();
@@ -67,6 +68,8 @@ export function DraftingJobs({
   const [discard, setDiscard] = useState<DraftingJob | null>(null);
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState<DraftingDecisionPreview | null>(null);
+  const [decisionJob, setDecisionJob] = useState<DraftingJob | null>(null);
+  const canDecide = view.capabilities.compose;
   const confirmationRequestId = useRef("");
   const sequence = useRef(0);
   const refresh = useCallback(async () => {
@@ -109,6 +112,7 @@ export function DraftingJobs({
     try {
       await action();
     } catch (error) {
+      await refresh();
       setFailure(
         error instanceof Error ? error.message : t("questionnaire.failed"),
       );
@@ -185,6 +189,8 @@ export function DraftingJobs({
         },
       );
       setPreview(null);
+      setDecisionJob(null);
+      setSavedJobId(null);
       setReview(null);
       setDiscard(null);
       setEditing(null);
@@ -196,10 +202,15 @@ export function DraftingJobs({
       <h2 className="pane-title">{t("drafting.title")}</h2>
       <p className="muted">{t("drafting.help")}</p>
       {failure && <Alert type="error" showIcon message={failure} />}
+      {savedJobId && (
+        <Alert type="success" showIcon message={t("drafting.reviewSaved")} />
+      )}
       <Space wrap>
-        <Button disabled={busy} onClick={startRequest}>
-          {t("drafting.request")}
-        </Button>
+        {canDecide && (
+          <Button disabled={busy} onClick={startRequest}>
+            {t("drafting.request")}
+          </Button>
+        )}
         <Button disabled={busy} onClick={() => void refresh()}>
           {t("workflow.reload")}
         </Button>
@@ -235,7 +246,7 @@ export function DraftingJobs({
                 </span>
               )}
               <Tag>{t(`drafting.state.${job.status}`)}</Tag>
-              {job.status === "queued" && (
+              {job.status === "queued" && canDecide && (
                 <>
                   <Button
                     disabled={busy}
@@ -248,30 +259,66 @@ export function DraftingJobs({
                   </span>
                 </>
               )}
+              {job.review && <Tag>{t("drafting.savedEdits")}</Tag>}
               {job.status === "submitted" && (
                 <>
                   <Button
                     disabled={busy}
-                    onClick={() => {
-                      setPreview(null);
-                      setEditing(null);
-                      setReview({
-                        job,
-                        result: structuredClone(job.result!),
-                      });
-                    }}
+                    onClick={() =>
+                      void run(async () => {
+                        const current = await questionnaireRequest<{
+                          job: DraftingJob;
+                        }>(basePath, `${jobsPath}/${job.id}`);
+                        if (current.job.status !== "submitted") {
+                          await refresh();
+                          return;
+                        }
+                        setPreview(null);
+                        setEditing(null);
+                        setSavedJobId(null);
+                        setReview({
+                          job: current.job,
+                          result: structuredClone(
+                            current.job.review?.result ?? current.job.result!,
+                          ),
+                        });
+                      })
+                    }
                   >
                     {t("drafting.review")}
                   </Button>
-                  <Button
-                    disabled={busy}
-                    onClick={() => {
-                      setReason("");
-                      setDiscard(job);
-                    }}
-                  >
-                    {t("drafting.discard")}
-                  </Button>
+                  {canDecide && (
+                    <>
+                      <Button
+                        disabled={busy}
+                        onClick={() =>
+                          void run(async () => {
+                            const current = await questionnaireRequest<{
+                              job: DraftingJob;
+                            }>(basePath, `${jobsPath}/${job.id}`);
+                            setDecisionJob(current.job);
+                            await previewDecision(
+                              current.job,
+                              "accept",
+                              current.job.review?.result ?? current.job.result!,
+                            );
+                          })
+                        }
+                      >
+                        {t("drafting.reviewDecisions")}
+                      </Button>
+                      <Button
+                        disabled={busy}
+                        onClick={() => {
+                          setFailure(null);
+                          setReason("");
+                          setDiscard(job);
+                        }}
+                      >
+                        {t("drafting.discard")}
+                      </Button>
+                    </>
+                  )}
                 </>
               )}
             </Space>
@@ -438,7 +485,7 @@ export function DraftingJobs({
         open={review !== null && editing === null && preview === null}
         title={t("drafting.review")}
         width={800}
-        okText={t("drafting.preview")}
+        okText={t("drafting.saveReview")}
         cancelText={t("common.cancel")}
         confirmLoading={busy}
         okButtonProps={{ disabled: !review || !hasDraftItems(review.result) }}
@@ -447,11 +494,24 @@ export function DraftingJobs({
         }}
         onOk={() =>
           void run(async () => {
-            if (review)
-              await previewDecision(review.job, "accept", review.result);
+            if (!review) return;
+            await questionnaireRequest(
+              basePath,
+              `${jobsPath}/${review.job.id}/review`,
+              "POST",
+              {
+                revision: review.job.revision,
+                result: review.result,
+              },
+            );
+            setSavedJobId(review.job.id);
+            setReview(null);
+            await refresh();
+            onChanged();
           })
         }
       >
+        <p className="muted">{t("drafting.reviewHelp")}</p>
         {review?.job.questionId && (
           <p>
             {view.questions.find((q) => q.id === review.job.questionId)?.text} ·{" "}
@@ -564,7 +624,11 @@ export function DraftingJobs({
       </Modal>
       <Modal
         open={preview !== null}
-        title={t("drafting.preview")}
+        title={t(
+          preview?.action === "accept"
+            ? "drafting.reviewDecisions"
+            : "drafting.preview",
+        )}
         width={800}
         okText={t(
           preview?.action === "accept"
@@ -582,7 +646,7 @@ export function DraftingJobs({
           <>
             <p>{t("drafting.acceptHelp")}</p>
             <p>
-              {view.rounds.find((r) => r.id === review?.job.roundId)?.title}
+              {view.rounds.find((r) => r.id === decisionJob?.roundId)?.title}
             </p>
             {preview.decision.questions.map((item, index) => {
               const q = "question" in item ? item.question : item;
@@ -640,7 +704,7 @@ export function DraftingJobs({
           <DraftResultView
             result={preview.decision}
             view={view}
-            questionId={review?.job.questionId}
+            questionId={decisionJob?.questionId}
           />
         ) : (
           <p className="questionnaire-text">

@@ -324,6 +324,7 @@ interface PublishedMetadataRow {
   published_at: string | Date;
   file_count: number;
   version_number: number;
+  semantic_version: string | null;
   version_name: string;
 }
 interface PublishedRow extends PublishedMetadataRow {
@@ -333,6 +334,7 @@ const publishedMetadata = (r: PublishedMetadataRow) => ({
   id: r.id,
   workflowVersionId: r.workflow_version_id,
   versionNumber: r.version_number,
+  semanticVersion: r.semantic_version,
   versionName: r.version_name,
   reviewId: r.review_id,
   packageId: r.package_id,
@@ -347,7 +349,7 @@ const publishedMetadata = (r: PublishedMetadataRow) => ({
 export async function listPublishedPackages(tx: Queryable, workflowId: string) {
   const result = await tx.query<PublishedMetadataRow>(
     `select p.id,p.workflow_version_id,p.review_id,p.package_id,p.package_hash,p.publisher_id,p.publisher_name,p.published_at,
-      jsonb_array_length(p.snapshot->'inventory') as file_count,v.number as version_number,v.name as version_name
+      jsonb_array_length(p.snapshot->'inventory') as file_count,v.number as version_number,v.name as version_name,v.semantic_version
       from published_packages p join workflow_versions v on v.id=p.workflow_version_id where v.workflow_id=$1 order by p.published_at desc,p.id desc`,
     [workflowId],
   );
@@ -363,7 +365,7 @@ export async function readPublishedPackage(
 ) {
   const row = (
     await tx.query<PublishedRow>(
-      `select p.*,jsonb_array_length(p.snapshot->'inventory') as file_count,v.number as version_number,v.name as version_name from published_packages p join workflow_versions v on v.id=p.workflow_version_id where v.workflow_id=$1 and p.id=$2`,
+      `select p.*,jsonb_array_length(p.snapshot->'inventory') as file_count,v.number as version_number,v.name as version_name,v.semantic_version from published_packages p join workflow_versions v on v.id=p.workflow_version_id where v.workflow_id=$1 and p.id=$2`,
       [workflowId, publicationId],
     )
   ).rows[0];

@@ -46,7 +46,11 @@ async function call(
   return value;
 }
 
-async function workflow(groupId: string, name: string) {
+async function workflow(
+  groupId: string,
+  name: string,
+  assignedEngineer = engineer,
+) {
   const { workflow, version } = await call(
     "/workflows",
     "POST",
@@ -60,14 +64,14 @@ async function workflow(groupId: string, name: string) {
     201,
     admin,
   );
-  await call(
+  const { binding } = await call(
     "/bindings",
     "POST",
     {
       scopeType: "workflow",
       scopeId: workflow.id,
       role: "Engineer",
-      email: engineer.email,
+      email: assignedEngineer.email,
     },
     201,
     admin,
@@ -75,6 +79,7 @@ async function workflow(groupId: string, name: string) {
   return {
     workflow,
     version,
+    engineerBinding: binding,
     base: `/workflows/${workflow.id}/versions/${version.id}`,
   };
 }
@@ -95,19 +100,8 @@ async function setup() {
     201,
     admin,
   );
-  const own = await workflow(group.id, "uploader-library");
-  const { binding: uploaderBinding } = await call(
-    "/bindings",
-    "POST",
-    {
-      scopeType: "workflow",
-      scopeId: own.workflow.id,
-      role: "Engineer",
-      email: uploader.email,
-    },
-    201,
-    admin,
-  );
+  const own = await workflow(group.id, "uploader-library", uploader);
+  const uploaderBinding = own.engineerBinding;
   const target = await workflow(group.id, "study-effects");
   const { skill } = await call(
     "/skills",

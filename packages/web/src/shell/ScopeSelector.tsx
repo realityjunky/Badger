@@ -11,6 +11,8 @@ import {
   type WorkflowDetail,
 } from "../api/workflows.js";
 import type { Group } from "../api/organization.js";
+import { workflowVersionLabel } from "../util/workflowVersion.js";
+import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import {
   scopeDestination,
   scopeSelection,
@@ -23,6 +25,7 @@ export function ScopeSelector({
   onResolve(scope: ScopeSelection & { location: string }): void;
 }) {
   const { t } = useI18n();
+  const { notice } = useLiveUpdates();
   const location = useLocation();
   const navigate = useNavigate();
   const basePath = readBasePath(document);
@@ -146,7 +149,7 @@ export function ScopeSelector({
       },
     );
     return () => controller.abort();
-  }, [basePath, workflowId, location.pathname, refresh]);
+  }, [basePath, workflowId, location.pathname, refresh, notice]);
 
   return (
     <div
@@ -214,7 +217,7 @@ export function ScopeSelector({
                 loading={!!workflowId && currentDetail === null && !failed}
                 options={(currentDetail?.versions ?? []).map((version) => ({
                   value: version.id,
-                  label: `v${version.number}`,
+                  label: workflowVersionLabel(version),
                 }))}
                 onChange={(version: string | undefined) =>
                   navigate(

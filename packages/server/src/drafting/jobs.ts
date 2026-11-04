@@ -79,6 +79,11 @@ export interface DraftingJobRow {
   lease_until: string | Date | null;
   result: DraftResult | null;
   result_hash: string | null;
+  review_result: DraftResult | null;
+  review_hash: string | null;
+  review_person_id: string | null;
+  review_updated_at: string | Date | null;
+  review_revision: number;
   decision: unknown;
   created_at: string | Date;
 }
@@ -110,9 +115,23 @@ export function publicDraftingJob(row: DraftingJobRow) {
           },
     result: row.result,
     resultHash: row.result_hash,
+    review:
+      row.review_result === null
+        ? null
+        : {
+            result: row.review_result,
+            resultHash: row.review_hash,
+            personId: row.review_person_id,
+            revision: row.review_revision,
+            updatedAt: toIsoString(row.review_updated_at!),
+          },
     decision: row.decision,
     createdAt: toIsoString(row.created_at),
   };
+}
+
+export function isQuestionnaireDraftingJob(job: DraftingJobRow) {
+  return job.kind !== "draft-plan" && !isAuthoringJob(job);
 }
 
 export function draftingTarget(job: DraftingJobRow): DraftingTarget {
@@ -145,7 +164,7 @@ export async function auditJob(
       before === null ? null : { revision: before, hash: job.context_hash },
     after: {
       revision: job.revision,
-      hash: job.result_hash ?? job.context_hash,
+      hash: job.review_hash ?? job.result_hash ?? job.context_hash,
     },
     reason,
     requestId: actor.requestId,

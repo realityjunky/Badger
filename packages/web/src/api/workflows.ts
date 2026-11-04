@@ -32,6 +32,8 @@ export interface WorkflowVersion extends WorkflowFrame {
   inheritedFromVersionId?: string | null;
   id: string;
   number: number;
+  semanticVersion?: string | null;
+  labelRevision?: number;
   revision: number;
   stages: WorkflowStage[];
 }
@@ -256,6 +258,7 @@ export async function write<T>(
       message:
         typeof value.error?.message === "string" ? value.error.message : "",
       currentRevision:
+        value.label?.labelRevision ??
         value.workflow?.revision ??
         value.binding?.revision ??
         value.record?.revision,
@@ -315,12 +318,31 @@ export function editWorkflow(
     { name, goal, intent, locale, revision: workflow.revision },
   );
 }
-export function startVersion(basePath: string, workflow: Workflow) {
+export function startVersion(
+  basePath: string,
+  workflow: Workflow,
+  semanticVersion: string | null = null,
+) {
   return write<{ workflow: Workflow; version: WorkflowVersion }>(
     basePath,
     "POST",
     `/workflows/${encodeURIComponent(workflow.id)}/versions`,
-    { revision: workflow.revision },
+    { revision: workflow.revision, semanticVersion },
+  );
+}
+export function editVersionLabel(
+  basePath: string,
+  workflowId: string,
+  version: WorkflowVersion,
+  semanticVersion: string | null,
+) {
+  return write<{
+    label: { semanticVersion: string | null; labelRevision: number };
+  }>(
+    basePath,
+    "PATCH",
+    `/workflows/${encodeURIComponent(workflowId)}/versions/${encodeURIComponent(version.id)}`,
+    { semanticVersion, labelRevision: version.labelRevision ?? 0 },
   );
 }
 export function pinSkillVersion(

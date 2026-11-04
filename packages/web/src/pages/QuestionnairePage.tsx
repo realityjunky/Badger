@@ -26,6 +26,7 @@ import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
+import { workflowVersionLabel } from "../util/workflowVersion.js";
 import {
   AnswerEditor,
   type AnswerEditorHandle,
@@ -204,10 +205,11 @@ export function QuestionnairePage() {
       : view?.questions.find((q) => q.roundId === roundId);
   const selectedConcern = view?.concerns.find((c) => c.id === concernId);
   const compose = view?.capabilities.compose === true;
+  const reviewSuggestions = view?.capabilities.reviewSuggestions === true;
   const activeTab: QuestionnaireTab =
     query.get("panel") === "ledger"
       ? "ledger"
-      : query.get("panel") === "suggestions" && compose
+      : query.get("panel") === "suggestions" && reviewSuggestions
         ? "suggestions"
         : "questions";
   const ownAnswer = view?.answers.find(
@@ -307,7 +309,7 @@ export function QuestionnairePage() {
           }
           options={versions.map((v) => ({
             value: `${v.workflowId}/${v.versionId}`,
-            label: `${v.workflowName} · v${v.number}`,
+            label: `${v.workflowName} · ${workflowVersionLabel(v)}`,
           }))}
           onChange={(value) => {
             const chosen = versions.find(
@@ -348,7 +350,7 @@ export function QuestionnairePage() {
         activeTab={activeTab}
         onChange={changePanel}
         suggestions={
-          view && path && compose ? (
+          view && path && reviewSuggestions ? (
             <DraftingJobs
               key={path}
               basePath={basePath}

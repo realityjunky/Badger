@@ -116,7 +116,15 @@ test("assigning and removing workflow roles keep the page's scroll position", as
     intent: "new-skill",
     locale: "en",
   });
-  await page.goto(`${base}/workflows/${workflow.id}/versions/${version.id}`);
+  for (let index = 0; index < 12; index++)
+    await call(page, "POST", "/bindings", {
+      scopeType: "workflow",
+      scopeId: workflow.id,
+      email: `scroll-expert-${index}@example.com`,
+      role: "Field expert",
+    });
+  const workflowUrl = `${base}/workflows/${workflow.id}/versions/${version.id}`;
+  await page.goto(`${workflowUrl}#notifications`);
   const team = page.locator(".workflow-panel").filter({
     has: page.getByRole("heading", { name: "Workflow team", exact: true }),
   });
@@ -130,6 +138,7 @@ test("assigning and removing workflow roles keep the page's scroll position", as
     exact: true,
   });
   await expect(saveRobot).toBeVisible();
+  await page.goto(`${workflowUrl}#team`);
   await team
     .getByRole("combobox", { name: /Email/u })
     .fill("scroll@example.com");
@@ -153,7 +162,7 @@ test("assigning and removing workflow roles keep the page's scroll position", as
   await expect(binding).toBeVisible();
   await expectScrollNear(page, beforeAssign);
   await expect(roleSelect).toContainText("Field expert");
-  await expect(saveRobot).toBeVisible();
+  await expect(saveRobot).toBeHidden();
 
   await team
     .getByRole("combobox", { name: /Email/u })
@@ -197,6 +206,7 @@ test("assigning and removing workflow roles keep the page's scroll position", as
   await expect(binding).toHaveCount(1);
   await expect(binding.locator(".ant-tag")).toHaveText(["Observer · Invited"]);
   await expectScrollNear(page, beforeRemove);
+  await page.goto(`${workflowUrl}#notifications`);
   await expect(saveRobot).toBeVisible();
 });
 

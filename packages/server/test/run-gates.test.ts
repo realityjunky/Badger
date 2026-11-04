@@ -173,6 +173,16 @@ it("opens a policy-routed Run gate, binds a person's answer and attestation, and
       revision: current.revision,
     },
   });
+  const { bindings } = await f.call(`/workflows/${f.workflow.id}`);
+  const currentEngineer = bindings.find(
+    (binding: { role: string }) => binding.role === "Engineer",
+  );
+  await f.call(
+    `/bindings/${currentEngineer.id}`,
+    "DELETE",
+    { revision: currentEngineer.revision },
+    admin,
+  );
   await f.call(
     "/bindings",
     "POST",

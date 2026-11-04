@@ -445,6 +445,13 @@ export function createService(options: ServiceOptions, port: number): Service {
     if (created.kind === "missing-workflow") {
       return reply.error(400, "invalid", "The workflow does not exist");
     }
+    if (created.kind === "engineer-assigned") {
+      return reply.error(
+        409,
+        "conflict",
+        "This workflow already has an Engineer assignment or invitation. Remove it before assigning a replacement.",
+      );
+    }
     if (created.kind === "conflict") {
       return reply.error(
         409,

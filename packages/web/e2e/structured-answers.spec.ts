@@ -160,10 +160,14 @@ test("the Engineer edits and reviews a structured drafting suggestion before acc
       .fill("Cold\nFrozen");
     await page.getByRole("button", { name: "Keep edits", exact: true }).click();
     await page
-      .getByRole("button", { name: "Review decision", exact: true })
+      .getByRole("dialog", { name: "Review suggestions", exact: true })
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Review decisions", exact: true })
       .click();
     const preview = page.getByRole("dialog", {
-      name: "Review decision",
+      name: "Review decisions",
       exact: true,
     });
     await expect(preview).toContainText("Single choice");

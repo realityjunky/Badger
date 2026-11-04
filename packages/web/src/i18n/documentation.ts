@@ -26,9 +26,9 @@ export const documentationEn = {
   "documentation.my-work.next":
     "Follow the item to its evidence, review what changed, and use the action offered for your role. Return to My work to find the next item.",
   "documentation.workflows.purpose":
-    "Workflows holds the workflow frame, team, and version history. Select a Workflow version to follow its eight-stage track. Uploading a Skill to a Group's library only makes a source available; it does not pin it, study it, answer a Question, or confirm any stage.",
+    "Workflows holds the workflow frame, team, and version history. Select a Workflow version, then use full-width tabs for its sources, Source study, dossier, plan, proposal, package, review and publication, team, and notifications. Existing links and browser Back select the appropriate tab; visited tabs keep local edits. Uploading a Skill to a Group's library only makes a source available; it does not pin it, study it, answer a Question, or confirm any stage.",
   "documentation.workflows.roles":
-    "Group leads and Administrators create workflows; Workflow owners also edit their workflow and assign its team. Engineers pin sources, confirm Sources, complete Source study, and build and evaluate packages. Workflow owners approve dossiers, plans, proposals, and packages and confirm publication. Administrators can perform these actions. Other readers inspect the records their roles permit.",
+    "Group leads and Administrators create workflows; Workflow owners also edit their workflow and assign its team. Each workflow can have one Engineer, including a pending invitation; remove the existing assignment before replacing it. Engineers pin sources, confirm Sources, complete Source study, and build and evaluate packages. Workflow owners approve dossiers, plans, proposals, and packages and confirm publication. Administrators can perform these actions. Other readers inspect the records their roles permit.",
   "documentation.workflows.sources":
     "1. Sources: choose a Skill from the workflow's Group library and pin one immutable version hash. Review the source check and explicitly confirm the source set. Changing pins invalidates this confirmation and requires a fresh check.",
   "documentation.workflows.study":
@@ -48,9 +48,9 @@ export const documentationEn = {
   "documentation.workflows.next":
     "Open the first incomplete stage and resolve its named blockers. Use Questionnaire for missing domain knowledge. After publication, use Install locally to preview the host command and confirm its separate commit on your computer.",
   "documentation.questionnaire.purpose":
-    "Questionnaire collects the workflow knowledge needed to build a package. Select a workflow and version, then use the full-width Rounds and questions, Drafting jobs and suggestions, or Ledger and readiness tab. Drafting is available to Engineers and Administrators. In Rounds and questions, hide the rounds list when you need more reading space; Evidence and history opens a drawer for the selected Question or Concern, with an expanded-width option. Switching tabs keeps your selection, search, unfinished edits, and scroll position.",
+    "Questionnaire collects the workflow knowledge needed to build a package. Select a workflow and version, then use the full-width Rounds and questions, Drafting jobs and suggestions, or Ledger and readiness tab. Suggestion review is available to Engineers, Field experts, and Administrators. In Rounds and questions, hide the rounds list when you need more reading space; Evidence and history opens a drawer for the selected Question or Concern, with an expanded-width option. Switching tabs keeps your selection, search, unfinished edits, and scroll position.",
   "documentation.questionnaire.roles":
-    "Engineers compose and publish Questions and Rounds, resolve Answers, and confirm Facts. They also request drafting jobs and accept or discard the Agent's suggestions. Assigned people answer Questions; Field experts acknowledge or dispute Facts restated from their Answers and can raise Concerns. Workflow roles other than Observer can comment. Observers and Auditors read without changing records.",
+    "Engineers compose and publish Questions and Rounds, resolve Answers, and confirm Facts. They also request drafting jobs and accept or discard the Agent's suggestions. Engineers and Field experts can edit and save shared suggestions before the Engineer decides. Assigned people answer Questions; Field experts acknowledge or dispute Facts restated from their Answers and can raise Concerns. Workflow roles other than Observer can comment. Observers and Auditors read without changing records.",
   "documentation.questionnaire.answer":
     "Read the Question, its reason, requested answer format, and evidence before saving an Answer. Use the thread for discussion and attach synthetic examples when useful. Answer revisions retain their history.",
   "documentation.questionnaire.resolve":
@@ -62,7 +62,7 @@ export const documentationEn = {
   "documentation.questionnaire.drafting.work":
     "Request drafting offers six kinds. Draft questions and Draft follow-ups write into a draft round you choose, and follow-ups may also name a parent Question. Study a source Skill drafts source-derived Facts and interfaces for one pinned Skill version. Restate an answer as facts drafts formal Facts from an answered Question. Translate a question takes the source Question and a target language such as zh-CN. Import a Skill's open questions takes a pinned Skill version and a draft round. Create a draft round first when the kind needs one; the request cannot be sent while a required field is empty.",
   "documentation.questionnaire.drafting.review":
-    "Review suggestions: open a submitted result and inspect each suggestion's text, rationale, answer type, topic, and priority. Edit a suggestion in full, remove it from acceptance, or keep your edits for the rest of the review. Review decision previews the exact batch and its hash; only your hash-bound confirmation accepts it, and accepted questions are created in the chosen draft round, which you still review and publish separately. Discard suggestions requires a reason and takes the same hash-bound confirmation. Accepted restatements still need the answering expert's acknowledgement.",
+    "Review suggestions: the workflow's Engineer and Field experts inspect and edit the submitted statements, then Save to share their changes. Reopening loads the latest saved edits; saving does not accept results. If someone saved a newer review, reopen it before saving again. The Engineer separately opens Review decisions to preview the latest persisted batch and explicitly Accept reviewed result. A later save invalidates that preview. Accepted questions enter the chosen draft round, which still requires separate publication. Discard suggestions requires a reason and hash-bound confirmation. Accepted restatements still need the answering expert's acknowledgement.",
   "documentation.questionnaire.next":
     "Clear the open Questions, acknowledgement requests, and readiness blockers. The Engineer can then compose the dossier in Workflows using the current Ledger evidence.",
   "documentation.skills.purpose":
@@ -181,9 +181,9 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.my-work.next":
     "跟随消息查看证据，审阅变更，并使用您的角色可执行的操作。返回“我的工作”继续处理下一项。",
   "documentation.workflows.purpose":
-    "“工作流”管理工作流框架、团队和版本历史。选择工作流版本后，可沿八个阶段推进。将 Skill 上传到团队库仅使来源可用，不会自动固定版本、完成研读、回答问题或确认任何阶段。",
+    "“工作流”管理工作流框架、团队和版本历史。选择工作流版本后，可通过全宽选项卡查看来源、来源研读、档案、计划、提案、软件包、审核与发布、团队和通知。原有链接和浏览器后退会切换至相应选项卡，已访问的选项卡会保留本地编辑。将 Skill 上传到团队库仅使来源可用，不会自动固定版本、完成研读、回答问题或确认任何阶段。",
   "documentation.workflows.roles":
-    "团队负责人和管理员创建工作流；工作流负责人也可编辑自己的工作流并分配团队角色。工程师固定来源、确认来源、完成来源研读，并构建和评估软件包。工作流负责人批准语义档案、计划、提案和软件包，并确认发布。管理员可以执行这些操作。其他读者查看其角色允许访问的记录。",
+    "团队负责人和管理员创建工作流；工作流负责人也可编辑自己的工作流并分配团队角色。每个工作流只能分配一名工程师，待接受的邀请也占用名额；替换前请先移除现有分配。工程师固定来源、确认来源、完成来源研读，并构建和评估软件包。工作流负责人批准语义档案、计划、提案和软件包，并确认发布。管理员可以执行这些操作。其他读者查看其角色允许访问的记录。",
   "documentation.workflows.sources":
     "1. 来源：从工作流所属团队的库中选择 Skill，固定一个不可变版本的哈希。审阅来源检查并明确确认来源集合。更改固定版本会使本次确认失效，必须重新检查。",
   "documentation.workflows.study":
@@ -203,9 +203,9 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.next":
     "打开第一个未完成阶段，处理列出的阻碍。缺少领域知识时使用“问卷”。发布后，通过“本地安装”预览主机命令，并在自己的计算机上单独确认提交。",
   "documentation.questionnaire.purpose":
-    "“问卷”收集构建软件包所需的工作流知识。选择工作流与版本，再使用占满内容区宽度的“轮次与问题”“起草任务与建议”或“台账与就绪状态”选项卡。起草功能仅供工程师与管理员使用。在“轮次与问题”中，可隐藏轮次列表以扩大阅读空间；“证据与历史”会打开当前问题或关注事项的抽屉，并可展开至全宽。切换选项卡会保留所选记录、搜索、未完成的编辑和滚动位置。",
+    "“问卷”收集构建软件包所需的工作流知识。选择工作流与版本，再使用占满内容区宽度的“轮次与问题”“起草任务与建议”或“台账与就绪状态”选项卡。工程师、领域专家和管理员均可审核建议。在“轮次与问题”中，可隐藏轮次列表以扩大阅读空间；“证据与历史”会打开当前问题或关注事项的抽屉，并可展开至全宽。切换选项卡会保留所选记录、搜索、未完成的编辑和滚动位置。",
   "documentation.questionnaire.roles":
-    "工程师编写并发布问题和轮次、解决回答并确认事实，也可请求起草任务并接受或丢弃 Agent 的建议。被分配的人员回答问题；领域专家认可或质疑从其回答重述的事实，也可提出关注事项。除观察者外的工作流角色可评论。观察者和审计员只读，不更改记录。",
+    "工程师编写并发布问题和轮次、解决回答并确认事实，也可请求起草任务并接受或丢弃 Agent 的建议。工程师和领域专家可先编辑并保存共享建议，再由工程师作出决定。被分配的人员回答问题；领域专家认可或质疑从其回答重述的事实，也可提出关注事项。除观察者外的工作流角色可评论。观察者和审计员只读，不更改记录。",
   "documentation.questionnaire.answer":
     "保存回答前，阅读问题、提问原因、要求的回答格式与证据。通过讨论串交流，并在需要时附上合成示例。回答的每次修订都会保留历史。",
   "documentation.questionnaire.resolve":
@@ -217,7 +217,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.questionnaire.drafting.work":
     "“请求起草”提供六种类别。“起草问题”和“起草追问”写入您选择的草稿轮次，追问还可指定父问题；“研读来源 Skill”为一个固定的 Skill 版本起草来源事实和接口；“将回答重述为事实”从已回答的问题起草正式事实；“翻译问题”需要来源问题和目标语言（例如 zh-CN）；“导入 Skill 的开放问题”需要固定的 Skill 版本和草稿轮次。类别需要轮次时请先创建草稿轮次；必填项为空时无法发送请求。",
   "documentation.questionnaire.drafting.review":
-    "审核建议：打开已提交的结果，检查每条建议的文本、理由、回答类型、主题和优先级。可完整编辑建议、将其从本次接受中移除，或保留修改继续审核。“审核决定”会预览确切批次及其哈希；只有经您确认的哈希绑定操作才会接受，接受的问题会创建在所选草稿轮次中，仍需您单独审核并发布。“丢弃建议”必须填写原因，并采用同样的哈希绑定确认。被接受的重述事实仍需作答专家认可。",
+    "审核建议：工作流的工程师和领域专家检查并编辑已提交的陈述，再点击“保存”共享修改。重新打开时会载入最新保存内容；保存不会接受结果。如果他人已保存更新，请重新打开后再编辑保存。工程师通过单独的“审核决定”按钮预览最新保存的批次，并明确点击“接受已审核结果”；后续保存会使旧预览失效。接受的问题进入所选草稿轮次，仍需单独发布。“丢弃建议”必须填写原因并确认哈希绑定操作。被接受的重述事实仍需作答专家认可。",
   "documentation.questionnaire.next":
     "处理未解决问题、待认可请求及就绪阻碍后，工程师可返回“工作流”，根据当前台账证据编写语义档案。",
   "documentation.skills.purpose":

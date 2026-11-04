@@ -30,10 +30,11 @@ export async function handleEvents(
     const versions = await database.query<{
       id: string;
       revision: number;
+      label_revision: number;
       questionnaire_revision: number;
       settings_revision: number;
     }>(
-      `select v.id, v.revision, coalesce(q.revision, 0) as questionnaire_revision, coalesce(s.revision, 0) as settings_revision,
+      `select v.id, v.revision, v.label_revision, coalesce(q.revision, 0) as questionnaire_revision, coalesce(s.revision, 0) as settings_revision,
       coalesce((select sum(j.revision) from drafting_jobs j where j.workflow_version_id = v.id), 0)::text as drafting_revision
       from workflow_versions v join workflows w on w.id = v.workflow_id
       left join questionnaires q on q.workflow_version_id = v.id

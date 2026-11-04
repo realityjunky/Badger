@@ -1,4 +1,4 @@
-import { Alert, Button, Popconfirm, Select, Space, Tag } from "antd";
+import { Alert, Button, Select, Space, Tag } from "antd";
 import { useEffect, useState } from "react";
 import {
   Link,
@@ -9,6 +9,7 @@ import {
 import {
   createWorkflow,
   editWorkflow,
+  editVersionLabel,
   loadWorkflow,
   loadWorkflowVersion,
   loadWorkflows,
@@ -17,19 +18,19 @@ import {
   type WorkflowCatalog,
   type WorkflowDetail,
   type WorkflowVersionDetail,
+  type WorkflowVersion,
 } from "../api/workflows.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { StageTrack } from "../components/StageTrack.js";
 import { useI18n } from "../i18n/I18nContext.js";
-import {
-  WorkflowDialog,
-  WorkflowNotice,
-  type WriteFailure,
-} from "./workflows/WorkflowDialog.js";
+import { WorkflowDialog } from "./workflows/WorkflowDialog.js";
+import { WorkflowVersionDialog } from "./workflows/WorkflowVersionDialog.js";
+import { workflowVersionLabel } from "../util/workflowVersion.js";
 import { WorkflowTeam } from "./workflows/WorkflowTeam.js";
 import { WorkflowSources } from "./workflows/WorkflowSources.js";
 import { WorkflowPanel } from "./workflows/WorkflowPanel.js";
+import { WorkflowTabs } from "./workflows/WorkflowTabs.js";
 import { WorkflowSourceStudy } from "./workflows/WorkflowSourceStudy.js";
 import { WorkflowDossier } from "./workflows/WorkflowDossier.js";
 import { WorkflowPlan } from "./workflows/WorkflowPlan.js";
@@ -46,7 +47,7 @@ type State =
 
 /** Catalog and version deep links share the service's scoped records. */
 export function WorkflowsPage() {
-  const { t, format } = useI18n();
+  const { t } = useI18n();
   const { notice } = useLiveUpdates();
   const { workflowId, versionId } = useParams();
   const [parameters] = useSearchParams();
@@ -58,8 +59,11 @@ export function WorkflowsPage() {
   const [dialog, setDialog] = useState<
     { kind: "create" } | { kind: "edit"; workflow: Workflow } | null
   >(null);
-  const [failure, setFailure] = useState<WriteFailure | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [versionDialog, setVersionDialog] = useState<{
+    workflow: Workflow;
+    version: WorkflowVersion | null;
+    versions: WorkflowVersion[];
+  } | null>(null);
   const [versionResources, setVersionResources] =
     useState<WorkflowVersionDetail | null>(null);
   const detail = state.kind === "detail" ? state.value : null;
@@ -72,12 +76,11 @@ export function WorkflowsPage() {
   useEffect(() => {
     setState({ kind: "loading" });
     setDialog(null);
-    setFailure(null);
+    setVersionDialog(null);
   }, [basePath, workflowId]);
 
   useEffect(() => {
     const controller = new AbortController();
-    setFailure(null);
     if (workflowId === undefined) {
       void loadWorkflows(basePath, controller.signal).then((result) => {
         if (!controller.signal.aborted)
@@ -139,7 +142,19 @@ export function WorkflowsPage() {
         if (!controller.signal.aborted && result.kind === "ok")
           setVersionResources(result.value);
       });
-    if (notice.versionIds.includes(selectedVersion.id)) update();
+    if (notice.versionIds.includes(selectedVersion.id)) {
+      update();
+      void loadWorkflow(basePath, workflowId, controller.signal).then(
+        (result) => {
+          if (!controller.signal.aborted)
+            setState(
+              result.kind === "ok"
+                ? { kind: "detail", value: result.value }
+                : result,
+            );
+        },
+      );
+    }
     const timer = setInterval(() => {
       if (!document.hidden) update();
     }, 10000);
@@ -174,22 +189,6 @@ export function WorkflowsPage() {
   }, [basePath, workflowId, versionResources, checkStatus]);
 
   const reload = () => setRefresh((value) => value + 1);
-
-  const newVersion = async () => {
-    if (workflow === undefined || busy) return;
-    setBusy(true);
-    try {
-      const result = await startVersion(basePath, workflow);
-      if (result.kind === "ok") {
-        navigate(
-          `/workflows/${encodeURIComponent(workflow.id)}/versions/${encodeURIComponent(result.value.version.id)}`,
-        );
-        reload();
-      } else setFailure(result);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <div className="page workflow-page" data-testid="page-workflows">
@@ -228,23 +227,22 @@ export function WorkflowsPage() {
               </Button>
             )}
             {detail?.capabilities.createVersion && (
-              <Popconfirm
-                title={t("workflow.newVersionConfirm")}
-                onConfirm={newVersion}
-                okText={t("workflow.newVersion")}
-                cancelText={t("workflow.cancel")}
+              <Button
+                type="primary"
+                onClick={() =>
+                  setVersionDialog({
+                    workflow: detail.workflow,
+                    version: null,
+                    versions: detail.versions,
+                  })
+                }
               >
-                <Button type="primary" loading={busy}>
-                  {t("workflow.newVersion")}
-                </Button>
-              </Popconfirm>
+                {t("workflow.newVersion")}
+              </Button>
             )}
           </Space>
         }
       />
-      {failure !== null && (
-        <WorkflowNotice failure={failure} onReload={reload} />
-      )}
       {state.kind === "loading" && (
         <p role="status" className="muted">
           {t("common.loading")}
@@ -299,9 +297,7 @@ export function WorkflowsPage() {
                       className="workflow-version-link"
                       to={`/workflows/${encodeURIComponent(entry.id)}/versions/${encodeURIComponent(entry.latestVersion.id)}`}
                     >
-                      {format("workflow.versionNumber", {
-                        number: entry.latestVersion.number,
-                      })}
+                      {workflowVersionLabel(entry.latestVersion)}
                     </Link>
                     <StageTrack stages={entry.latestVersion.stages} />
                   </>
@@ -313,132 +309,252 @@ export function WorkflowsPage() {
       {detail !== null && (
         <>
           <p className="muted">{detail.groupName}</p>
-          {selectedVersion === undefined ? (
-            <Alert
-              type="warning"
-              showIcon
-              message={t("workflow.versionMissing")}
-            />
-          ) : (
-            <WorkflowPanel
-              key={selectedVersion.id}
-              title={t("workflow.version")}
-              aria-labelledby="workflow-version-title"
-              actions={
-                <Select
-                  aria-label={t("workflow.version")}
-                  value={selectedVersion.id}
-                  onChange={(id) =>
-                    navigate(
-                      `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(id)}`,
-                    )
-                  }
-                  options={detail.versions.map((entry) => ({
-                    value: entry.id,
-                    label: format("workflow.versionNumber", {
-                      number: entry.number,
-                    }),
-                  }))}
-                />
-              }
-            >
-              <p>{selectedVersion.goal}</p>
-              {selectedVersion.inheritedFromVersionId && (
-                <p>
-                  <Link
-                    to={`/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(selectedVersion.inheritedFromVersionId)}`}
-                  >
-                    {t("versions.inheritedVersion")}
-                  </Link>
-                </p>
-              )}
-              <Space wrap className="workflow-version-meta">
-                <Tag>{selectedVersion.name}</Tag>
-                <Tag>
-                  {t(
-                    selectedVersion.intent === "new-skill"
-                      ? "workflow.intent.new"
-                      : "workflow.intent.upgrade",
-                  )}
-                </Tag>
-                <Tag>{selectedVersion.locale}</Tag>
-              </Space>
-              <StageTrack
-                stages={
-                  versionResources?.version.id === selectedVersion.id
-                    ? versionResources.version.stages
-                    : selectedVersion.stages
-                }
-              />
-            </WorkflowPanel>
-          )}
-          {versionResources !== null &&
-            selectedVersion !== undefined &&
-            workflow !== undefined && (
-              <>
-                <WorkflowSources
-                  key={`sources-${selectedVersion.id}`}
-                  basePath={basePath}
-                  workflow={workflow}
-                  version={selectedVersion}
-                  detail={versionResources}
-                  canManage={versionResources.capabilities.managePins}
-                  onChanged={reload}
-                />
-                <WorkflowSourceStudy
-                  key={selectedVersion.id}
-                  basePath={basePath}
-                  detail={versionResources}
-                  onChanged={reload}
-                />
-                <WorkflowDossier
-                  key={`dossier-${selectedVersion.id}`}
-                  basePath={basePath}
-                  detail={versionResources}
-                  onChanged={reload}
-                />
-                <WorkflowPlan
-                  key={`plan-${selectedVersion.id}`}
-                  basePath={basePath}
-                  detail={versionResources}
-                  onChanged={reload}
-                />
-                <WorkflowProposal
-                  key={`proposal-${selectedVersion.id}`}
-                  basePath={basePath}
-                  detail={versionResources}
-                  onChanged={reload}
-                />
-                <WorkflowPackage
-                  key={`package-${selectedVersion.id}`}
-                  basePath={basePath}
-                  detail={versionResources}
-                  onChanged={reload}
-                />
-                <WorkflowPublication
-                  key={`publication-${selectedVersion.id}`}
-                  basePath={basePath}
-                  detail={versionResources}
-                  onChanged={reload}
-                />
-              </>
-            )}
-          <WorkflowTeam
-            key={`team-${detail.workflow.id}`}
-            basePath={basePath}
-            workflowId={detail.workflow.id}
-            bindings={detail.bindings}
-            groupMembers={detail.groupMembers}
-            mayManage={detail.capabilities.manageRoles}
-            onChanged={reload}
-          />
-          <WorkflowNotifications
-            key={detail.workflow.id}
-            basePath={basePath}
-            workflowId={detail.workflow.id}
-            mayManage={detail.capabilities.approveDossier}
+          <WorkflowTabs
+            key={`${detail.workflow.id}:${selectedVersion?.id ?? "missing"}`}
+            items={[
+              {
+                key: "version",
+                label: t("workflow.version"),
+                children:
+                  selectedVersion === undefined ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message={t("workflow.versionMissing")}
+                    />
+                  ) : (
+                    <WorkflowPanel
+                      key={selectedVersion.id}
+                      id="version"
+                      title={t("workflow.version")}
+                      aria-labelledby="workflow-version-title"
+                      actions={
+                        <Space wrap>
+                          <Select
+                            aria-label={t("workflow.version")}
+                            value={selectedVersion.id}
+                            onChange={(id) =>
+                              navigate(
+                                `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(id)}`,
+                              )
+                            }
+                            options={detail.versions.map((entry) => ({
+                              value: entry.id,
+                              label: workflowVersionLabel(entry),
+                            }))}
+                          />
+                          {detail.capabilities.createVersion && (
+                            <Button
+                              onClick={() =>
+                                setVersionDialog({
+                                  workflow: detail.workflow,
+                                  version: selectedVersion,
+                                  versions: detail.versions,
+                                })
+                              }
+                            >
+                              {t("workflow.editVersionLabel")}
+                            </Button>
+                          )}
+                        </Space>
+                      }
+                    >
+                      <p>{selectedVersion.goal}</p>
+                      {selectedVersion.inheritedFromVersionId && (
+                        <p>
+                          <Link
+                            to={`/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(selectedVersion.inheritedFromVersionId)}`}
+                          >
+                            {t("versions.inheritedVersion")}
+                          </Link>
+                        </p>
+                      )}
+                      <Space wrap className="workflow-version-meta">
+                        {selectedVersion.semanticVersion && (
+                          <Tag>{`v${selectedVersion.number}`}</Tag>
+                        )}
+                        <Tag>{selectedVersion.name}</Tag>
+                        <Tag>
+                          {t(
+                            selectedVersion.intent === "new-skill"
+                              ? "workflow.intent.new"
+                              : "workflow.intent.upgrade",
+                          )}
+                        </Tag>
+                        <Tag>{selectedVersion.locale}</Tag>
+                      </Space>
+                      <StageTrack
+                        stages={
+                          versionResources?.version.id === selectedVersion.id
+                            ? versionResources.version.stages
+                            : selectedVersion.stages
+                        }
+                      />
+                    </WorkflowPanel>
+                  ),
+              },
+              ...(versionResources !== null &&
+              selectedVersion !== undefined &&
+              workflow !== undefined
+                ? [
+                    {
+                      key: "sources",
+                      label: t("workflow.sources"),
+                      children: (
+                        <WorkflowSources
+                          key={`sources-${selectedVersion.id}`}
+                          basePath={basePath}
+                          workflow={workflow}
+                          version={selectedVersion}
+                          detail={versionResources}
+                          canManage={versionResources.capabilities.managePins}
+                          onChanged={reload}
+                        />
+                      ),
+                    },
+                    {
+                      key: "source-study",
+                      label: t("stage.sourceStudy"),
+                      children: (
+                        <WorkflowSourceStudy
+                          key={selectedVersion.id}
+                          basePath={basePath}
+                          detail={versionResources}
+                          onChanged={reload}
+                        />
+                      ),
+                    },
+                    {
+                      key: "dossier",
+                      label: t("dossier.title"),
+                      children: (
+                        <WorkflowDossier
+                          key={`dossier-${selectedVersion.id}`}
+                          basePath={basePath}
+                          detail={versionResources}
+                          onChanged={reload}
+                        />
+                      ),
+                    },
+                    {
+                      key: "plan",
+                      label: t("plan.title"),
+                      children: (
+                        <WorkflowPlan
+                          key={`plan-${selectedVersion.id}`}
+                          basePath={basePath}
+                          detail={versionResources}
+                          onChanged={reload}
+                        />
+                      ),
+                    },
+                    {
+                      key: "proposal",
+                      label: t("proposal.title"),
+                      children: (
+                        <WorkflowProposal
+                          key={`proposal-${selectedVersion.id}`}
+                          basePath={basePath}
+                          detail={versionResources}
+                          onChanged={reload}
+                        />
+                      ),
+                    },
+                    {
+                      key: "package",
+                      label: t("package.title"),
+                      children: (
+                        <WorkflowPackage
+                          key={`package-${selectedVersion.id}`}
+                          basePath={basePath}
+                          detail={versionResources}
+                          onChanged={reload}
+                        />
+                      ),
+                    },
+                    {
+                      key: "review-publication",
+                      label: t("publication.title"),
+                      children: (
+                        <WorkflowPublication
+                          key={`publication-${selectedVersion.id}`}
+                          basePath={basePath}
+                          detail={versionResources}
+                          onChanged={reload}
+                        />
+                      ),
+                    },
+                  ]
+                : []),
+              {
+                key: "team",
+                label: t("workflow.team"),
+                children: (
+                  <WorkflowTeam
+                    key={`team-${detail.workflow.id}`}
+                    basePath={basePath}
+                    workflowId={detail.workflow.id}
+                    bindings={detail.bindings}
+                    groupMembers={detail.groupMembers}
+                    mayManage={detail.capabilities.manageRoles}
+                    onChanged={reload}
+                  />
+                ),
+              },
+              {
+                key: "notifications",
+                label: t("notifications.title"),
+                children: (
+                  <WorkflowNotifications
+                    key={detail.workflow.id}
+                    basePath={basePath}
+                    workflowId={detail.workflow.id}
+                    mayManage={detail.capabilities.approveDossier}
+                  />
+                ),
+              },
+            ]}
           />
         </>
+      )}
+      {versionDialog !== null && (
+        <WorkflowVersionDialog
+          version={versionDialog.version}
+          versions={versionDialog.versions}
+          onCancel={() => setVersionDialog(null)}
+          onReload={() => {
+            setVersionDialog(null);
+            reload();
+          }}
+          onSubmit={async (semanticVersion) => {
+            if (versionDialog.version === null) {
+              const result = await startVersion(
+                basePath,
+                versionDialog.workflow,
+                semanticVersion,
+              );
+              if (result.kind === "ok") {
+                setVersionDialog(null);
+                navigate(
+                  `/workflows/${encodeURIComponent(versionDialog.workflow.id)}/versions/${encodeURIComponent(result.value.version.id)}`,
+                );
+                reload();
+              }
+              return result;
+            }
+            const result = await editVersionLabel(
+              basePath,
+              versionDialog.workflow.id,
+              versionDialog.version,
+              semanticVersion,
+            );
+            if (result.kind === "ok") {
+              setVersionDialog(null);
+              reload();
+            }
+            return result;
+          }}
+        />
       )}
       {dialog !== null && (
         <WorkflowDialog

@@ -8,6 +8,7 @@ import {
   createDraftingJob,
   decideDraftingJob,
   draftingTarget,
+  isQuestionnaireDraftingJob,
   jobDecisionPreview,
   publicDraftingJob,
   reconcileDraftingJobs,
@@ -16,6 +17,7 @@ import {
   submitDraftingJob,
   type DraftingActor,
 } from "../drafting/jobs.js";
+import { saveDraftingReview } from "../drafting/reviews.js";
 import { draftingSkills } from "../drafting/context.js";
 import { readVersion } from "../skills/library.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
@@ -32,7 +34,7 @@ import {
 } from "../drafting/schema.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(claim|submit|release|accept-preview|accept|reject-preview|reject))?)?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(claim|submit|release|review|accept-preview|accept|reject-preview|reject))?)?$/u;
 const REQUEST_FIELDS: Record<DraftingKind, string[]> = {
   "draft-questions": ["roundId"],
   "draft-follow-ups": ["roundId", "parentQuestionId"],
@@ -105,13 +107,28 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       )
     )
       throw new RequestError(404, "No such workflow version");
+    const capabilities = await questionnaireCapabilities(
+      tx,
+      access,
+      person,
+      workflowId,
+    );
     if (
       !(await workflowCapabilities(tx, access, person, workflow)).read ||
-      !(await questionnaireCapabilities(tx, access, person, workflowId)).compose
+      !(capabilities.compose || capabilities.reviewSuggestions)
     )
       throw new RequestError(
         403,
-        "Only this workflow's Engineer manages drafting jobs",
+        "Only this workflow's Engineer and Field experts review drafting suggestions",
+      );
+    if (
+      (action === "review" && !capabilities.reviewSuggestions) ||
+      (((action && action !== "review") || (!id && method === "POST")) &&
+        !capabilities.compose)
+    )
+      throw new RequestError(
+        403,
+        "Only this workflow's Engineer manages drafting jobs and decisions",
       );
     const { jobs, current } = await reconcileDraftingJobs(
       tx,
@@ -120,19 +137,23 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       workflowId,
       versionId,
     );
-    await reconcileAuthoringJobs(
-      tx,
-      input.config,
-      deps,
-      actor,
-      versionId,
-      jobs,
-    );
+    if (capabilities.compose)
+      await reconcileAuthoringJobs(
+        tx,
+        input.config,
+        deps,
+        actor,
+        versionId,
+        jobs,
+      );
     if (!id) {
       if (method !== "POST") {
-        for (const job of jobs)
+        const visible = capabilities.compose
+          ? jobs
+          : jobs.filter(isQuestionnaireDraftingJob);
+        for (const job of visible)
           await auditJob(tx, deps, actor, job, "listed", null);
-        return { status: 200, value: { jobs: jobs.map(publicDraftingJob) } };
+        return { status: 200, value: { jobs: visible.map(publicDraftingJob) } };
       }
       if (context.credential.kind === "token" || body.confirmed !== true)
         throw new RequestError(
@@ -207,7 +228,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       return { status: 201, value: { job: publicDraftingJob(job) } };
     }
     const job = jobs.find((j) => j.id === id);
-    if (!job)
+    if (!job || (!capabilities.compose && !isQuestionnaireDraftingJob(job)))
       throw new RequestError(
         404,
         "No such drafting job in this workflow version",
@@ -227,6 +248,29 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
     });
     if (job.status === "cancelled")
       return conflict("The job's inputs changed; request a new job");
+    if (action === "review") {
+      if (!isQuestionnaireDraftingJob(job))
+        throw new RequestError(
+          400,
+          "Review edits are for questionnaire suggestions",
+        );
+      fields(body, ["revision", "result"]);
+      if (job.status !== "submitted")
+        return conflict("Only submitted suggestions can be edited");
+      if (revisionInput(body.revision) !== job.revision)
+        return conflict(
+          "The suggestions changed. Reopen the review before saving your edits.",
+        );
+      const saved = await saveDraftingReview(
+        tx,
+        deps,
+        actor,
+        job,
+        body.result,
+        input.blobs,
+      );
+      return { status: 200, value: { job: publicDraftingJob(saved) } };
+    }
     if (action === "claim") {
       fields(body, ["revision"]);
       if (
@@ -348,6 +392,20 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       return conflict("Only submitted suggestions can be reviewed");
     if (revisionInput(body.revision) !== job.revision)
       return conflict("The job changed; review it again");
+    if (
+      accept &&
+      job.review_hash !== null &&
+      canonicalHash(
+        Object.fromEntries(
+          draftResultFields(job.kind)
+            .filter((key) => body[key] !== undefined)
+            .map((key) => [key, body[key]]),
+        ),
+      ) !== job.review_hash
+    )
+      return conflict(
+        "The saved review changed. Open Review decisions again to use the saved edits.",
+      );
     const preview = await jobDecisionPreview(
       tx,
       actor,

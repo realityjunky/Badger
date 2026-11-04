@@ -774,6 +774,23 @@ describe("workflow Skill pins and source checks", () => {
       subject: "invited-engineer",
       email: "invited-engineer@example.com",
     };
+    await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });
+    const detail = await service.request(`/api/v1/workflows/${workflow.id}`, {
+      as: lead,
+    });
+    const { bindings } = (await detail.json()) as {
+      bindings: { id: string; role: string; revision: number }[];
+    };
+    const currentEngineer = bindings.find(
+      (binding) => binding.role === "Engineer",
+    )!;
+    expect(
+      (
+        await write("DELETE", `/bindings/${currentEngineer.id}`, lead, {
+          revision: currentEngineer.revision,
+        })
+      ).status,
+    ).toBe(200);
     const binding = await write("POST", "/bindings", lead, {
       scopeType: "workflow",
       scopeId: workflow.id,
@@ -781,7 +798,6 @@ describe("workflow Skill pins and source checks", () => {
       email: invited.email,
     });
     expect(binding.status).toBe(201);
-    await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });
     await service.runSourceCheckJobs();
     const inbox = await service.request("/api/v1/me/inbox", { as: invited });
     expect(inbox.status).toBe(200);

@@ -12,6 +12,7 @@ import {
   inheritVersionRecords,
 } from "./version-inheritance.js";
 import { enqueueSourceCheck } from "./workflow-source.js";
+import { versionLabelExists } from "./workflow-version-labels.js";
 
 export const WORKFLOW_STAGES = [
   "sources",
@@ -191,14 +192,15 @@ async function recordVersion(
   workflow: Workflow,
   number: number,
   inheritedFromVersionId: string | null = null,
+  semanticVersion: string | null = null,
 ): Promise<WorkflowVersion> {
   const stages = Object.fromEntries(
     WORKFLOW_STAGES.map((id, index) => [id, index === 0 ? "active" : "todo"]),
   );
   const result = await database.query<VersionRow>(
     `insert into workflow_versions
-       (id, workflow_id, number, name, goal, intent, locale, stages, revision, created_at, updated_at, inherited_from_version_id)
-     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 1, $9, $9, $10)
+       (id, workflow_id, number, name, goal, intent, locale, stages, revision, created_at, updated_at, inherited_from_version_id, semantic_version)
+     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 1, $9, $9, $10, $11)
      returning ${VERSION_COLUMNS}`,
     [
       dependencies.ids.next(),
@@ -211,6 +213,7 @@ async function recordVersion(
       JSON.stringify(stages),
       dependencies.clock.now(),
       inheritedFromVersionId,
+      semanticVersion,
     ],
   );
   const version = toVersion(result.rows[0]!);
@@ -221,7 +224,7 @@ async function recordVersion(
     target: {
       type: "workflow_version",
       id: version.id,
-      label: `${workflow.name} · v${number}`,
+      label: `${workflow.name} · ${semanticVersion ?? `v${number}`}`,
     },
     before: null,
     after: { revision: version.revision, hash: null },
@@ -401,15 +404,19 @@ export async function createWorkflowVersion(
   context: WriteContext,
   id: string,
   revision: number,
+  semanticVersion: string | null = null,
 ): Promise<
   | { kind: "created"; workflow: Workflow; version: WorkflowVersion }
   | WorkflowConflict
+  | { kind: "duplicate-label" }
 > {
   return database.transaction(async (tx) => {
     const current = await lockedWorkflow(tx, id, "no key update");
     if (current === null) return { kind: "missing" };
     if (current.revision !== revision)
       return { kind: "stale", workflow: current };
+    if (await versionLabelExists(tx, id, semanticVersion))
+      return { kind: "duplicate-label" };
     const result = await tx.query<WorkflowRow>(
       `update workflows set revision = revision + 1, updated_at = $2
         where id = $1 returning ${WORKFLOW_COLUMNS}`,
@@ -427,6 +434,7 @@ export async function createWorkflowVersion(
       workflow,
       (versions.rows[0]?.number ?? 0) + 1,
       versions.rows[0]?.id ?? null,
+      semanticVersion,
     );
     const sourceId = version.inheritedFromVersionId;
     if (sourceId !== null) {

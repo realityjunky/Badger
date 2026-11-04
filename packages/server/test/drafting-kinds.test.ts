@@ -285,6 +285,236 @@ const studyOf = (pin: Pin) => ({
   interfaces: [],
 });
 
+it("shares saved source-study edits with Field experts and binds Engineer decisions to the latest saved review", async () => {
+  const { base, jobs, questionnaire, pins, secret, expertId } = await setup();
+  const job = await create(jobs, {
+    kind: "source-study",
+    skillId: pins[0].skillId,
+  });
+  const original = studyOf(pins[0]);
+  const submitted = await submit(jobs, job, secret, original);
+  const originalHash = submitted.resultHash;
+  expect(submitted.review).toBeNull();
+  expect(
+    await request(questionnaire, "GET", undefined, 200, expert),
+  ).toMatchObject({
+    capabilities: { compose: false, reviewSuggestions: true },
+    suggestions: [{ id: job.id }],
+  });
+  expect(await request(jobs, "GET", undefined, 200, expert)).toMatchObject({
+    jobs: [{ id: job.id, result: original }],
+  });
+  for (const action of [
+    "claim",
+    "submit",
+    "release",
+    "accept-preview",
+    "accept",
+    "reject-preview",
+    "reject",
+  ])
+    await request(`${jobs}/${job.id}/${action}`, "POST", {}, 403, expert);
+  await request(
+    jobs,
+    "POST",
+    { kind: "source-study", skillId: pins[0].skillId, confirmed: true },
+    403,
+    expert,
+  );
+  await request(
+    `${jobs}/${job.id}/review`,
+    "POST",
+    { revision: submitted.revision, result: original },
+    403,
+    secret,
+  );
+  const expertToken = await request(
+    "/me/tokens",
+    "POST",
+    { name: "Expert Agent", scopes: ["expert"] },
+    201,
+    expert,
+  );
+  await request(jobs, "GET", undefined, 403, expertToken.secret);
+  await request(
+    `${jobs}/${job.id}/review`,
+    "POST",
+    { revision: submitted.revision, result: original },
+    403,
+    expertToken.secret,
+  );
+  await request(
+    `${jobs}/${job.id}/review`,
+    "POST",
+    { revision: submitted.revision, result: {} },
+    400,
+    expert,
+  );
+
+  const result = {
+    ...original,
+    facts: [{ ...original.facts[0], statement: "生产者输出 samples.tsv。" }],
+  };
+  const { job: saved } = await request(
+    `${jobs}/${job.id}/review`,
+    "POST",
+    { revision: submitted.revision, result },
+    200,
+    expert,
+  );
+  expect(saved).toMatchObject({
+    revision: submitted.revision + 1,
+    status: "submitted",
+    result: original,
+    resultHash: originalHash,
+    review: { result, personId: expertId, revision: submitted.revision + 1 },
+  });
+  expect(await request(`${jobs}/${job.id}`)).toMatchObject({ job: saved });
+  expect(await request(`${base}/source-study`)).toMatchObject({
+    facts: [],
+    interfaces: [],
+  });
+  await request(
+    `${jobs}/${job.id}/review`,
+    "POST",
+    { revision: submitted.revision, result: original },
+    409,
+  );
+
+  const competing = ["工程师修改", "领域专家修改"].map((statement) => ({
+    ...result,
+    facts: [{ ...result.facts[0], statement }],
+  }));
+  const responses = await Promise.all(
+    competing.map((edit, index) =>
+      service.request(`/api/v1${jobs}/${job.id}/review`, {
+        as: index === 0 ? engineer : expert,
+        method: "POST",
+        headers: {
+          origin: "http://localhost",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ revision: saved.revision, result: edit }),
+      }),
+    ),
+  );
+  expect(responses.map((response) => response.status).sort()).toEqual([
+    200, 409,
+  ]);
+  const { job: current } = await request(`${jobs}/${job.id}`);
+  expect(current.resultHash).toBe(originalHash);
+  const { preview } = await request(
+    `${jobs}/${job.id}/accept-preview`,
+    "POST",
+    { revision: current.revision, ...current.review.result },
+  );
+  const finalEdit = {
+    ...result,
+    facts: [
+      {
+        ...result.facts[0],
+        statement: "输出表 samples.tsv 必须包含 sample_id 列。",
+      },
+    ],
+  };
+  const { job: final } = await request(
+    `${jobs}/${job.id}/review`,
+    "POST",
+    { revision: current.revision, result: finalEdit },
+    200,
+    expert,
+  );
+  await request(
+    `${jobs}/${job.id}/accept`,
+    "POST",
+    {
+      revision: preview.revision,
+      ...preview.decision,
+      confirmationHash: preview.confirmationHash,
+      confirmed: true,
+      requestId: crypto.randomUUID(),
+    },
+    409,
+  );
+  await request(
+    `${jobs}/${job.id}/accept-preview`,
+    "POST",
+    { revision: final.revision, ...original },
+    409,
+  );
+  await accept(jobs, final, final.review.result);
+  const study = await request(`${base}/source-study`);
+  expect(study.facts).toHaveLength(1);
+  expect(study.facts[0].content).toEqual(finalEdit.facts[0]);
+  await request(
+    `${jobs}/${job.id}/review`,
+    "POST",
+    { revision: final.revision + 1, result: original },
+    409,
+    expert,
+  );
+  const audit = await request(
+    "/audit-events?action=drafting-job.review-saved",
+    "GET",
+    undefined,
+    200,
+    admin,
+  );
+  expect(audit.events).toHaveLength(3);
+  expect(
+    audit.events.every(
+      (event: { targetId: string }) => event.targetId === job.id,
+    ),
+  ).toBe(true);
+});
+
+it("limits suggestion editing to people assigned as Engineer or Field expert in that workflow", async () => {
+  const { jobs, workflowId, pins, secret } = await setup();
+  const readers = ["Workflow owner", "Observer", "Field expert"] as const;
+  const outsiders = readers.map((role, index) => ({
+    subject: `reader-${index}`,
+    email: `reader-${index}@example.com`,
+    role,
+  }));
+  for (const reader of outsiders) {
+    if (reader.role !== "Field expert")
+      await request(
+        "/bindings",
+        "POST",
+        {
+          scopeType: "workflow",
+          scopeId: workflowId,
+          email: reader.email,
+          role: reader.role,
+        },
+        201,
+        admin,
+      );
+  }
+  const job = await create(jobs, {
+    kind: "source-study",
+    skillId: pins[0].skillId,
+  });
+  const submitted = await submit(jobs, job, secret, studyOf(pins[0]));
+  for (const reader of outsiders) {
+    await request(jobs, "GET", undefined, 403, reader);
+    await request(
+      `${jobs}/${job.id}/review`,
+      "POST",
+      { revision: submitted.revision, result: submitted.result },
+      403,
+      reader,
+    );
+  }
+  await request(
+    `${jobs}/${job.id}/review`,
+    "POST",
+    { revision: submitted.revision, result: submitted.result },
+    200,
+    admin,
+  );
+});
+
 it("accepts a source study as revisioned facts and interfaces with evidence from the pinned files", async () => {
   const { base, jobs, pins, secret } = await setup();
   const { job } = await request(
@@ -349,6 +579,60 @@ it("accepts a source study as revisioned facts and interfaces with evidence from
   ).toMatchObject({
     evidence: evidence[0],
     lines: [{ number: 2, text: "Write samples.tsv." }],
+  });
+});
+
+it("preserves source-study jobs and reviewed confirmation hashes across version label edits", async () => {
+  const { base, jobs, pins, secret } = await setup();
+  await service.runSourceCheckJobs();
+  const { preview: sources } = await request(
+    `${base}/gates/sources/preview`,
+    "POST",
+    {},
+  );
+  const before = (await request(base)).version;
+  await request(base, "PATCH", { labelRevision: 0, semanticVersion: "0.1.0" });
+  expect((await request(base)).version).toEqual({
+    ...before,
+    semanticVersion: "0.1.0",
+    labelRevision: 1,
+  });
+  await request(`${base}/gates/sources/commit`, "POST", {
+    confirmationHash: sources.confirmationHash,
+    requestId: crypto.randomUUID(),
+  });
+  const job = await create(jobs, {
+    kind: "source-study",
+    skillId: pins[0].skillId,
+  });
+  await request(base, "PATCH", { labelRevision: 1, semanticVersion: "0.2.0" });
+  expect((await request(`${jobs}/${job.id}`)).job).toMatchObject({
+    status: "queued",
+    contextHash: job.contextHash,
+    revision: job.revision,
+  });
+  const claimed = await claim(jobs, job, secret);
+  await request(base, "PATCH", { labelRevision: 2, semanticVersion: "0.3.0" });
+  const result = studyOf(pins[0]);
+  const submitted = await submit(jobs, job, secret, result, [], claimed);
+  const decision = { revision: submitted.revision, ...result };
+  const { preview } = await request(
+    `${jobs}/${job.id}/accept-preview`,
+    "POST",
+    decision,
+  );
+  await request(base, "PATCH", { labelRevision: 3, semanticVersion: "1.0.0" });
+  const { job: accepted } = await request(`${jobs}/${job.id}/accept`, "POST", {
+    ...decision,
+    confirmed: true,
+    confirmationHash: preview.confirmationHash,
+    requestId: crypto.randomUUID(),
+  });
+  expect(accepted.status).toBe("accepted");
+  expect((await request(`${base}/source-study`)).facts).toHaveLength(1);
+  expect((await request(base)).sourceGate).toMatchObject({
+    confirmationHash: sources.confirmationHash,
+    invalidatedAt: null,
   });
 });
 

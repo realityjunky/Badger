@@ -66,6 +66,8 @@ interface Workflow {
 interface Version {
   id: string;
   number: number;
+  semanticVersion: string | null;
+  labelRevision: number;
   revision: number;
   stages: { id: string; state: string }[];
 }
@@ -97,6 +99,51 @@ async function createWorkflow(groupId: string, as = lead) {
 }
 
 describe("workflows and versions", () => {
+  it("reserves one Engineer assignment for pending and accepted invitations, and permits replacing it after removal", async () => {
+    const group = await setup();
+    const { workflow } = await createWorkflow(group.id);
+    const responses = await Promise.all([
+      assign(workflow.id, lead, engineer.email!, "Engineer"),
+      assign(workflow.id, lead, outsider.email!, "Engineer"),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      201, 409,
+    ]);
+    const winner = responses.findIndex((response) => response.status === 201);
+    const assigned = (await responses[winner]!.json()) as { binding: Binding };
+    expect(assigned.binding.pending).toBe(true);
+    const conflict = await responses[1 - winner]!.json();
+    expect(conflict.error.message).toMatch(/already has an Engineer/u);
+    const assignedPerson = winner === 0 ? engineer : outsider;
+    const replacement = winner === 0 ? outsider : engineer;
+    await service.request("/api/v1/me", { as: assignedPerson });
+    expect(
+      (await assign(workflow.id, lead, replacement.email!, "Engineer")).status,
+    ).toBe(409);
+    expect(
+      (await assign(workflow.id, lead, replacement.email!, "Field expert"))
+        .status,
+    ).toBe(201);
+    const detail = await service.request(`/api/v1/workflows/${workflow.id}`, {
+      as: lead,
+    });
+    const { bindings } = (await detail.json()) as { bindings: Binding[] };
+    const engineerBinding = bindings.find(
+      (binding) => binding.role === "Engineer",
+    )!;
+    expect(engineerBinding.pending).toBe(false);
+    expect(
+      (
+        await write("DELETE", `/bindings/${engineerBinding.id}`, lead, {
+          revision: engineerBinding.revision,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await assign(workflow.id, lead, replacement.email!, "Engineer")).status,
+    ).toBe(201);
+  });
+
   it("lets a Group lead create a workflow with its first version and eight stages", async () => {
     const group = await setup();
     const { workflow, version } = await createWorkflow(group.id);
@@ -238,6 +285,270 @@ describe("workflows and versions", () => {
   });
 });
 
+describe("workflow version labels", () => {
+  it("labels existing iterations and creates chosen labels without renumbering history", async () => {
+    const group = await setup();
+    const { workflow, version } = await createWorkflow(group.id);
+    const base = `/workflows/${workflow.id}`;
+    const first = `${base}/versions/${version.id}`;
+    expect(version).toMatchObject({ semanticVersion: null, labelRevision: 0 });
+    expect(
+      (
+        await write("PATCH", first, admin, {
+          labelRevision: 0,
+          semanticVersion: "0.1.0",
+        })
+      ).status,
+    ).toBe(200);
+    const labelled = await service.request(`/api/v1${first}`, { as: lead });
+    expect(await labelled.json()).toMatchObject({
+      workflow,
+      version: { ...version, semanticVersion: "0.1.0", labelRevision: 1 },
+    });
+    const created = await write("POST", `${base}/versions`, admin, {
+      revision: 1,
+      semanticVersion: "0.2.0",
+    });
+    expect(created.status).toBe(201);
+    const next = await created.json();
+    expect(next).toMatchObject({
+      workflow: { revision: 2 },
+      version: {
+        number: 2,
+        semanticVersion: "0.2.0",
+        labelRevision: 0,
+        inheritedFromVersionId: version.id,
+      },
+    });
+    for (const path of [base, `${base}/versions`]) {
+      const response = await service.request(`/api/v1${path}`, { as: lead });
+      expect(await response.json()).toMatchObject({
+        versions: [
+          { id: next.version.id, number: 2, semanticVersion: "0.2.0" },
+          { id: version.id, number: 1, semanticVersion: "0.1.0" },
+        ],
+      });
+    }
+    const catalog = await service.request("/api/v1/workflows", { as: lead });
+    expect(await catalog.json()).toMatchObject({
+      workflows: [
+        { latestVersion: { id: next.version.id, semanticVersion: "0.2.0" } },
+      ],
+    });
+    const questionnaire = await service.request("/api/v1/questionnaire", {
+      as: lead,
+    });
+    expect(await questionnaire.json()).toMatchObject({
+      versions: [
+        { versionId: next.version.id, semanticVersion: "0.2.0" },
+        { versionId: version.id, semanticVersion: "0.1.0" },
+      ],
+    });
+    expect(
+      (
+        await write("PATCH", first, admin, {
+          labelRevision: 1,
+          semanticVersion: null,
+        })
+      ).status,
+    ).toBe(200);
+    const cleared = await service.request(`/api/v1${first}`, { as: lead });
+    expect(await cleared.json()).toMatchObject({
+      workflow: { revision: 2 },
+      version: { ...version, semanticVersion: null, labelRevision: 2 },
+    });
+    const audit = await service.request(
+      `/api/v1/audit-events?targetId=${version.id}`,
+      { as: admin },
+    );
+    expect((await audit.json()).events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "workflow_version.label_updated",
+          targetType: "workflow_version_label",
+          before: { revision: 1, hash: null },
+          after: { revision: 2, hash: null },
+          reason: "Version label changed from 0.1.0 to v1",
+        }),
+      ]),
+    );
+  });
+
+  it("rejects malformed, duplicate, stale, and out-of-workflow label writes atomically", async () => {
+    const group = await setup();
+    const { workflow, version } = await createWorkflow(group.id);
+    const base = `/workflows/${workflow.id}`;
+    const first = `${base}/versions/${version.id}`;
+    for (const semanticVersion of [
+      "",
+      "v1.2.3",
+      "1.2",
+      "1.2.3.4",
+      "01.2.3",
+      "1.02.3",
+      "1.2.03",
+      "-1.0.0",
+      "1.2.3-beta",
+      "1.2.3+build",
+      "1. 2.3",
+      "1".repeat(61) + ".0.0",
+      123,
+      {},
+    ]) {
+      for (const [method, path, body] of [
+        ["PATCH", first, { labelRevision: 0, semanticVersion }],
+        ["POST", `${base}/versions`, { revision: 1, semanticVersion }],
+      ] as const) {
+        expect((await write(method, path, admin, body)).status).toBe(400);
+      }
+    }
+    expect(
+      (
+        await write("PATCH", first, admin, {
+          labelRevision: 0,
+          semanticVersion: "0.1.0",
+          number: 8,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await write("PATCH", first, admin, {
+          labelRevision: -1,
+          semanticVersion: "0.1.0",
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await write("PATCH", first, admin, {
+          labelRevision: 0,
+          semanticVersion: "0.1.0",
+        })
+      ).status,
+    ).toBe(200);
+    const stale = await write("PATCH", first, admin, {
+      labelRevision: 0,
+      semanticVersion: "0.2.0",
+    });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({
+      label: { semanticVersion: "0.1.0", labelRevision: 1 },
+    });
+    expect(
+      (
+        await write("POST", `${base}/versions`, admin, {
+          revision: 1,
+          semanticVersion: "0.1.0",
+        })
+      ).status,
+    ).toBe(409);
+    const created = await write("POST", `${base}/versions`, admin, {
+      revision: 1,
+      semanticVersion: "0.2.0",
+    });
+    expect(created.status).toBe(201);
+    const next = await created.json();
+    expect(next).toMatchObject({
+      workflow: { revision: 2 },
+      version: { number: 2 },
+    });
+    expect(
+      (
+        await write("PATCH", first, admin, {
+          labelRevision: 1,
+          semanticVersion: "0.2.0",
+        })
+      ).status,
+    ).toBe(409);
+    const other = await write("POST", "/workflows", admin, {
+      groupId: group.id,
+      ...frame,
+      name: "other",
+    });
+    const otherWorkflow = await other.json();
+    expect(
+      (
+        await write(
+          "PATCH",
+          `/workflows/${otherWorkflow.workflow.id}/versions/${version.id}`,
+          admin,
+          {
+            labelRevision: 1,
+            semanticVersion: "0.3.0",
+          },
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await write(
+          "PATCH",
+          `/workflows/${otherWorkflow.workflow.id}/versions/${otherWorkflow.version.id}`,
+          admin,
+          {
+            labelRevision: 0,
+            semanticVersion: "0.2.0",
+          },
+        )
+      ).status,
+    ).toBe(200);
+    const { secret } = await (
+      await write("POST", "/me/tokens", admin, {
+        name: "Engineer Agent",
+        scopes: ["engineer"],
+      })
+    ).json();
+    const agent = await service.request(`/api/v1${first}`, {
+      method: "PATCH",
+      headers: {
+        authorization: `Bearer ${secret}`,
+        "x-badger-agent-host": "Test Agent",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ labelRevision: 1, semanticVersion: "0.3.0" }),
+    });
+    expect(agent.status).toBe(403);
+  });
+
+  it("serializes concurrent label edits without advancing the authoring revision", async () => {
+    const group = await setup();
+    const { workflow, version } = await createWorkflow(group.id);
+    const path = `/workflows/${workflow.id}/versions/${version.id}`;
+    const results = await Promise.all(
+      ["1.0.0", "2.0.0"].map((semanticVersion) =>
+        write("PATCH", path, admin, { labelRevision: 0, semanticVersion }),
+      ),
+    );
+    expect(results.map((response) => response.status).sort()).toEqual([
+      200, 409,
+    ]);
+    const current = await service.request(`/api/v1${path}`, { as: admin });
+    expect(await current.json()).toMatchObject({
+      workflow: { revision: 1 },
+      version: { labelRevision: 1, revision: 1, number: 1 },
+    });
+    const next = await write(
+      "POST",
+      `/workflows/${workflow.id}/versions`,
+      admin,
+      { revision: 1 },
+    );
+    const nextVersion = (await next.json()).version;
+    const duplicates = await Promise.all(
+      [version.id, nextVersion.id].map((id, index) =>
+        write("PATCH", `/workflows/${workflow.id}/versions/${id}`, admin, {
+          labelRevision: index === 0 ? 1 : 0,
+          semanticVersion: "3.0.0",
+        }),
+      ),
+    );
+    expect(duplicates.map((response) => response.status).sort()).toEqual([
+      200, 409,
+    ]);
+  });
+});
+
 describe("workflow capabilities at the HTTP seam", () => {
   it("rejects the retired Reviewer role", async () => {
     const group = await setup();
@@ -284,6 +595,19 @@ describe("workflow capabilities at the HTTP seam", () => {
         },
       });
       expect(detail.capabilities).not.toHaveProperty("approvePackage");
+      expect(
+        (
+          await write(
+            "PATCH",
+            `/workflows/${workflow.id}/versions/${version.id}`,
+            outsider,
+            {
+              labelRevision: 0,
+              semanticVersion: "0.1.0",
+            },
+          )
+        ).status,
+      ).toBe(startsVersions ? 200 : 403);
       expect(
         (
           await service.request(

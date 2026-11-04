@@ -5,6 +5,7 @@ export interface InboxItem {
   workflowVersionId: string;
   workflowName: string;
   versionNumber: number;
+  semanticVersion?: string | null;
   gate: string;
   kind:
     | "gate-ready"

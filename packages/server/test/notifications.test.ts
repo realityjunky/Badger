@@ -929,8 +929,8 @@ describe("WeCom notification channels", () => {
       {
         scopeType: "workflow",
         scopeId: workflowId,
-        email: expert.email,
-        role: "Engineer",
+        email: engineer.email,
+        role: "Field expert",
       },
       admin,
       201,
@@ -940,7 +940,7 @@ describe("WeCom notification channels", () => {
       "POST",
       "/me/tokens",
       { name: "Expert Agent", scopes: ["expert"] },
-      expert,
+      engineer,
       201,
     );
     const q = questions[0]!;
@@ -968,7 +968,7 @@ describe("WeCom notification channels", () => {
     });
     const mine = await call<{
       items: { kind: string; state: string; questionId: string }[];
-    }>("GET", "/me/inbox", undefined, expert);
+    }>("GET", "/me/inbox", undefined, engineer);
     expect(
       mine.items.find(
         (item) => item.kind === "answer-submitted" && item.questionId === q.id,

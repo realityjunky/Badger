@@ -1,0 +1,3 @@
+# Workflow version labels stay outside authoring state
+
+Workflow versions keep their automatic iteration numbers and stable identities, with an optional, unique-per-workflow `major.minor.patch` display label. Labels have their own optimistic concurrency revision and audit trail. Public read models expose labels, while canonical authoring and drafting contexts retain their existing version representation, so editing a label cannot invalidate queued jobs, hash-bound previews, or approvals. A signed-in Administrator or workflow Engineer can edit an existing label without starting another iteration; creating a version retains the existing inheritance and review rules.

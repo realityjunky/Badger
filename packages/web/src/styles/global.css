@@ -557,10 +557,6 @@ button.rail-link {
   margin: 0;
 }
 
-.workflow-panel[data-collapsed="true"] > .workflow-panel-heading {
-  margin-bottom: 0;
-}
-
 .workflow-card a,
 .workflow-version-link {
   color: var(--badger-color-accent);
@@ -861,7 +857,8 @@ button.rail-link {
   );
 }
 
-.questionnaire-tabs > .ant-tabs-nav {
+.questionnaire-tabs > .ant-tabs-nav,
+.workflow-tabs > .ant-tabs-nav {
   position: sticky;
   top: var(--badger-layout-top-bar-height);
   z-index: 10;
@@ -869,7 +866,9 @@ button.rail-link {
 }
 
 .questionnaire-tabs .ant-tabs-content-holder,
-.questionnaire-tabs .ant-tabs-tabpane {
+.questionnaire-tabs .ant-tabs-tabpane,
+.workflow-tabs > .ant-tabs-body-holder,
+.workflow-tabs .ant-tabs-content {
   min-width: 0;
 }
 

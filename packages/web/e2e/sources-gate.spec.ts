@@ -93,7 +93,7 @@ test("a person confirms Sources, and the inbox announces its invalidation under 
   });
 
   // The gate opens once the worker's check passes, and shows what it binds.
-  await page.goto(`${base}${versionPath}`);
+  await page.goto(`${base}${versionPath}#sources`);
   const review = page.getByRole("button", { name: "Review Sources" });
   await expect(review).toBeVisible({ timeout: 20_000 });
   await review.click();

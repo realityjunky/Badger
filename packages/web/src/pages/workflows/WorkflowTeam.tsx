@@ -11,7 +11,7 @@ import {
   Tag,
 } from "antd";
 import type { TableColumnsType } from "antd";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   assignWorkflowRole,
   removeWorkflowRole,
@@ -59,6 +59,17 @@ export function WorkflowTeam({
   const [failure, setFailure] = useState<WriteFailure | null>(null);
   const [delivery, setDelivery] = useState<InvitationDelivery | null>(null);
   const members = groupWorkflowBindings(bindings);
+  const engineerAssigned = bindings.some(
+    (binding) => binding.role === "Engineer",
+  );
+  useEffect(() => {
+    if (
+      mayManage &&
+      engineerAssigned &&
+      form.getFieldValue("role") === "Engineer"
+    )
+      form.setFieldValue("role", "Field expert");
+  }, [engineerAssigned, form, mayManage]);
 
   const assign = async ({
     email,
@@ -182,6 +193,7 @@ export function WorkflowTeam({
   return (
     <WorkflowPanel
       title={t("workflow.team")}
+      id="team"
       aria-labelledby="workflow-team-title"
     >
       {failure !== null && (
@@ -209,7 +221,9 @@ export function WorkflowTeam({
           form={form}
           layout="vertical"
           className="workflow-role-form"
-          initialValues={{ role: "Engineer" }}
+          initialValues={{
+            role: engineerAssigned ? "Field expert" : "Engineer",
+          }}
           disabled={busy}
           onFinish={(values) => void assign(values)}
         >
@@ -245,12 +259,18 @@ export function WorkflowTeam({
           <Form.Item
             name="role"
             label={t("workflow.role")}
+            extra={t(
+              engineerAssigned
+                ? "workflow.engineerAssigned"
+                : "workflow.singleEngineer",
+            )}
             rules={[{ required: true }]}
           >
             <Select
               options={WORKFLOW_ROLES.map((role) => ({
                 value: role,
                 label: t(ROLE_MESSAGES[role]),
+                disabled: role === "Engineer" && engineerAssigned,
               }))}
             />
           </Form.Item>

@@ -151,9 +151,15 @@ export interface QuestionnaireView {
   };
   personId: string;
   workflow: { id: string; name: string };
-  version: { id: string; number: number; locale: string };
+  version: {
+    id: string;
+    number: number;
+    locale: string;
+    semanticVersion?: string | null;
+  };
   capabilities: {
     compose: boolean;
+    reviewSuggestions: boolean;
     resolve: boolean;
     acknowledge: boolean;
     comment: boolean;
@@ -176,6 +182,7 @@ export interface QuestionnaireVersion {
   workflowName: string;
   versionId: string;
   number: number;
+  semanticVersion?: string | null;
 }
 export interface RoundPreview {
   confirmationHash: string;

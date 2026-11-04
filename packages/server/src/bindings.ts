@@ -252,6 +252,7 @@ async function readBinding(
 export type CreateBindingResult =
   | { kind: "created"; binding: RoleBinding }
   | { kind: "conflict" }
+  | { kind: "engineer-assigned" }
   | { kind: "missing-group" }
   | { kind: "missing-workflow" };
 
@@ -357,7 +358,12 @@ export async function recordBinding(
   );
   const row = inserted.rows[0];
   if (row === undefined) {
-    return { kind: "conflict" };
+    return {
+      kind:
+        input.scopeType === "workflow" && input.role === "Engineer"
+          ? "engineer-assigned"
+          : "conflict",
+    };
   }
 
   await recordAudit(tx, dependencies, {

@@ -374,7 +374,7 @@ const en = {
   "inbox.dossierInvalidated": "{name} · v{number}: dossier approval superseded",
   "drafting.title": "Drafting jobs and suggestions",
   "drafting.help":
-    "Your Agent drafts from the pinned evidence. Review each result before accepting it into the workflow's records.",
+    "The workflow's Engineer and Field experts review and save shared edits. The Engineer then reviews decisions and accepts the saved result into the workflow's records.",
   "drafting.kind": "Work to draft",
   "drafting.sourceStudy": "Study a source Skill",
   "drafting.restatement": "Restate an answer as facts",
@@ -401,6 +401,13 @@ const en = {
   "drafting.questions": "Draft questions",
   "drafting.followUps": "Draft follow-ups",
   "drafting.review": "Review suggestions",
+  "drafting.reviewDecisions": "Review decisions",
+  "drafting.saveReview": "Save",
+  "drafting.reviewHelp":
+    "Save your edits to share them with the workflow's Engineer and Field experts. The Engineer accepts results separately in Review decisions.",
+  "drafting.reviewSaved":
+    "Review edits saved. The Engineer can now review decisions using the saved result.",
+  "drafting.savedEdits": "Saved review edits",
   "drafting.discard": "Discard suggestions",
   "drafting.edit": "Edit suggestion",
   "drafting.keepEdits": "Keep edits",
@@ -1028,6 +1035,23 @@ const en = {
   "workflow.versionNumber": "Version {number}",
   "workflow.versionMissing": "This version does not belong to this workflow.",
   "workflow.newVersion": "Start new version",
+  "workflow.editVersionLabel": "Edit version label",
+  "workflow.versionLabel": "Version label",
+  "workflow.versionLabelHint":
+    "Use major.minor.patch, such as 0.2.0. Leave blank to display v{number}.",
+  "workflow.versionLabelInvalid":
+    "Enter major.minor.patch with no leading zeroes, at most 64 characters.",
+  "workflow.versionLabelDuplicate":
+    "This workflow already has that version label.",
+  "workflow.versionLabelEditHint":
+    "Change this version's display label. Its history, queued jobs, and approvals stay attached to the same version.",
+  "workflow.versionBumpFrom":
+    "Suggest the next label from {version}. Choose the bump that fits your change, or enter a label.",
+  "workflow.versionBumpFirst":
+    "Start with 0.1.0 or enter a label. Bump suggestions become available once a version has a label.",
+  "workflow.versionBump.patch": "Patch",
+  "workflow.versionBump.minor": "Minor",
+  "workflow.versionBump.major": "Major",
   "workflow.newVersionConfirm":
     "Start a new version with the current frame and the latest version's Skill pins, facts, answers, and resolutions? Pending questionnaire work moves to the new version, and flagged items stay open. Approvals require a new review.",
   "versions.inheritedVersion": "Inherited from the previous workflow version",
@@ -1041,6 +1065,11 @@ const en = {
   "versions.removed": "File removed",
   "versions.unpinned": "Skill no longer pinned",
   "workflow.team": "Workflow team",
+  "workflow.moreTabs": "More workflow tabs",
+  "workflow.singleEngineer":
+    "A workflow can have one Engineer. Pending invitations reserve this assignment too.",
+  "workflow.engineerAssigned":
+    "An Engineer is already assigned or invited. Remove that role before assigning a replacement.",
   "workflow.email": "Email",
   "workflow.emailHelp": "Choose a group member or enter an email address.",
   "workflow.emailRequired": "Enter an email address.",
@@ -1321,10 +1350,6 @@ const en = {
   "inbox.markUnread": "Mark unread",
   "inbox.older": "Older items",
   "inbox.newest": "Newest items",
-  "workflow.collapsePanel": "Collapse",
-  "workflow.expandPanel": "Expand",
-  "workflow.collapsePanelLabel": "Collapse {name}",
-  "workflow.expandPanelLabel": "Expand {name}",
   "gate.review": "Review Sources",
   "gate.confirm": "Confirm source set",
   "gate.effects":
@@ -1694,7 +1719,7 @@ const zh: Record<MessageId, string> = {
   "inbox.dossierInvalidated": "{name} · v{number}：语义档案批准已失效",
   "drafting.title": "起草任务与建议",
   "drafting.help":
-    "你的 Agent 根据固定版本的证据起草。逐项审核并接受后，结果才会进入工作流记录。",
+    "工作流的工程师和领域专家可审核建议并保存共享修改。随后由工程师审核决定并接受已保存的结果，结果才会进入工作流记录。",
   "drafting.kind": "起草内容",
   "drafting.sourceStudy": "研读来源 Skill",
   "drafting.restatement": "将回答重述为事实",
@@ -1721,6 +1746,13 @@ const zh: Record<MessageId, string> = {
   "drafting.questions": "起草问题",
   "drafting.followUps": "起草追问",
   "drafting.review": "审核建议",
+  "drafting.reviewDecisions": "审核决定",
+  "drafting.saveReview": "保存",
+  "drafting.reviewHelp":
+    "保存修改后，工作流的工程师和领域专家均可查看。工程师须通过“审核决定”单独接受结果。",
+  "drafting.reviewSaved":
+    "审核修改已保存。工程师现在可通过“审核决定”审阅已保存的结果。",
+  "drafting.savedEdits": "已保存审核修改",
   "drafting.discard": "丢弃建议",
   "drafting.edit": "编辑建议",
   "drafting.keepEdits": "保留修改",
@@ -2095,6 +2127,22 @@ const zh: Record<MessageId, string> = {
   "workflow.versionNumber": "版本 {number}",
   "workflow.versionMissing": "此版本不属于当前工作流。",
   "workflow.newVersion": "创建新版本",
+  "workflow.editVersionLabel": "编辑版本标签",
+  "workflow.versionLabel": "版本标签",
+  "workflow.versionLabelHint":
+    "使用主版本.次版本.修订版本格式，例如 0.2.0。留空则显示 v{number}。",
+  "workflow.versionLabelInvalid":
+    "请输入主版本.次版本.修订版本，数字不能有前导零，最多 64 个字符。",
+  "workflow.versionLabelDuplicate": "此工作流已使用该版本标签。",
+  "workflow.versionLabelEditHint":
+    "修改此版本的显示标签。历史、排队任务及审批仍属于同一个版本。",
+  "workflow.versionBumpFrom":
+    "根据 {version} 建议下一个标签。请按变更内容选择升级幅度，也可手动输入。",
+  "workflow.versionBumpFirst":
+    "可从 0.1.0 开始，也可自行输入。已有版本有标签后即可使用升级建议。",
+  "workflow.versionBump.patch": "修订版本",
+  "workflow.versionBump.minor": "次版本",
+  "workflow.versionBump.major": "主版本",
   "workflow.newVersionConfirm":
     "使用当前工作流信息，继承最新版本的 Skill 固定版本、事实、回答和处理结果？待处理的问卷事项将转到新版本，已标记项将保持待确认，审批需要重新审核。",
   "versions.inheritedVersion": "继承自上一工作流版本",
@@ -2106,6 +2154,11 @@ const zh: Record<MessageId, string> = {
   "versions.removed": "文件已移除",
   "versions.unpinned": "Skill 已取消固定",
   "workflow.team": "工作流团队",
+  "workflow.moreTabs": "更多工作流选项卡",
+  "workflow.singleEngineer":
+    "每个工作流只能分配一名工程师，待接受的邀请也会占用该名额。",
+  "workflow.engineerAssigned":
+    "已分配或邀请一名工程师。请先移除其角色，再分配新的工程师。",
   "workflow.email": "邮箱",
   "workflow.emailHelp": "选择群组成员或输入邮箱地址。",
   "workflow.emailRequired": "请输入邮箱地址。",
@@ -2584,10 +2637,6 @@ const zh: Record<MessageId, string> = {
   "inbox.markUnread": "标为未读",
   "inbox.older": "更早的消息",
   "inbox.newest": "最新消息",
-  "workflow.collapsePanel": "收起",
-  "workflow.expandPanel": "展开",
-  "workflow.collapsePanelLabel": "收起{name}",
-  "workflow.expandPanelLabel": "展开{name}",
   "gate.review": "审阅来源",
   "gate.confirm": "确认来源集合",
   "gate.effects":

@@ -291,7 +291,8 @@ export function WorkflowPublication({
               columns={[
                 {
                   title: t("evaluation.version"),
-                  render: (_, p) => `${p.versionName} · v${p.versionNumber}`,
+                  render: (_, p) =>
+                    `${p.versionName} · ${p.semanticVersion ?? `v${p.versionNumber}`}`,
                 },
                 {
                   title: t("evaluation.hash"),

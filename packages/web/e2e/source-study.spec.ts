@@ -97,12 +97,13 @@ test("an Engineer records a cited fact, opens its lines, and marks the pinned ve
   });
 
   // Study waits for the confirmed source set.
-  await page.goto(`${base}${versionPath}`);
+  await page.goto(`${base}${versionPath}#source-study`);
   const study = page.locator("#source-study");
   await expect(study).toContainText(
     "Confirm the current Sources gate before marking versions studied",
   );
   await expect(study).toContainText("0 of 1 pinned versions studied");
+  await page.goto(`${base}${versionPath}#sources`);
   const reviewSources = page.getByRole("button", { name: "Review Sources" });
   await expect(reviewSources).toBeVisible({ timeout: 20_000 });
   await reviewSources.click();
@@ -111,6 +112,7 @@ test("an Engineer records a cited fact, opens its lines, and marks the pinned ve
     .getByRole("button", { name: "Confirm source set" })
     .click();
   await expect(page.getByText(/^Sources confirmed /u)).toBeVisible();
+  await page.goto(`${base}${versionPath}#source-study`);
 
   // A fact cites lines of a file in the pinned version's inventory.
   await study.getByRole("button", { name: "Add fact" }).click();

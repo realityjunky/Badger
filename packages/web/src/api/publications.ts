@@ -3,6 +3,7 @@ export interface PublishedPackage {
   id: string;
   workflowVersionId: string;
   versionNumber: number;
+  semanticVersion?: string | null;
   versionName: string;
   reviewId: string;
   packageId: string;

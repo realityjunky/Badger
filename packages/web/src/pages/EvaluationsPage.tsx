@@ -30,6 +30,7 @@ import { PageHeader } from "../components/PageHeader.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { useDemoMode } from "../app/DemoContext.js";
+import { workflowVersionLabel } from "../util/workflowVersion.js";
 
 const label = (value: string) =>
   value.replace(/([a-z])([A-Z])/gu, "$1 $2").replace(/[-_]/gu, " ");
@@ -220,7 +221,7 @@ export function EvaluationsPage() {
             }
             options={detail?.versions.map((version) => ({
               value: version.id,
-              label: `${version.name} · v${version.number}`,
+              label: `${version.name} · ${workflowVersionLabel(version)}`,
             }))}
           />
         </label>

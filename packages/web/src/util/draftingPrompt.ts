@@ -13,6 +13,9 @@ export function draftingPrompt(
     workflowName: view.workflow.name,
     versionId: view.version.id,
     versionNumber: view.version.number,
+    ...(view.version.semanticVersion
+      ? { versionLabel: view.version.semanticVersion }
+      : {}),
     workflowLocale: view.version.locale,
     jobId: job.id,
     kind: job.kind,

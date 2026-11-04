@@ -23,6 +23,7 @@ export interface InboxItem {
   workflowVersionId: string;
   workflowName: string;
   versionNumber: number;
+  semanticVersion: string | null;
   gate: string;
   kind: InboxKind;
   state: InboxState;
@@ -47,6 +48,7 @@ interface InboxRow {
   workflow_id: string;
   workflow_name: string;
   version_number: number;
+  semantic_version: string | null;
   gate: string;
   kind: InboxKind;
   state: InboxState;
@@ -60,7 +62,7 @@ interface InboxRow {
 }
 
 const COLUMNS = `i.id, i.workflow_version_id, v.workflow_id, v.name as workflow_name,
-  v.number as version_number, i.gate, i.kind, i.state, i.revision, i.created_at, i.updated_at, i.question_id, qr.content->>'text' as question_text,
+  v.number as version_number, v.semantic_version, i.gate, i.kind, i.state, i.revision, i.created_at, i.updated_at, i.question_id, qr.content->>'text' as question_text,
   i.concern_id, c.text as concern_text, i.drafting_job_id, i.evaluation_report_id, rg.run_id,
   i.effect_skill_id, i.effect_source_hash`;
 const FROM = `inbox_items i join workflow_versions v on v.id = i.workflow_version_id
@@ -86,7 +88,7 @@ export async function inboxFingerprint(
 ) {
   const visibility = await visibleGroups(database, access, person);
   const result = await database.query<{ count: string; revision: string }>(
-    `select count(*)::text as count, coalesce(sum(i.revision), 0)::text as revision from ${FROM} where ${VISIBLE}`,
+    `select count(*)::text as count, coalesce(sum(i.revision + v.label_revision), 0)::text as revision from ${FROM} where ${VISIBLE}`,
     [
       person.id,
       visibility.everything,
@@ -102,6 +104,7 @@ function toItem(row: InboxRow): InboxItem {
     workflowVersionId: row.workflow_version_id,
     workflowName: row.workflow_name,
     versionNumber: row.version_number,
+    semanticVersion: row.semantic_version,
     gate: row.gate,
     kind: row.kind,
     questionId: row.question_id,

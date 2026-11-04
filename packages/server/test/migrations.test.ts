@@ -63,6 +63,204 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("requires resolving duplicate Engineer assignments before enforcing one assignment including pending invitations", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((migration) => migration.version < "0042"),
+      clock,
+    );
+    await insertPerson(test);
+    await test.database.query(
+      "insert into groups (id, name, created_at, updated_at) values ('engineer-group', 'Research', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into workflows (id, group_id, name, goal, intent, locale, created_at, updated_at) values ('engineer-workflow', 'engineer-group', 'Engineers', 'Study sources', 'new-skill', 'en', $1, $1)",
+      [clock.now()],
+    );
+    for (const bindingId of ["first", "second"])
+      await test.database.query(
+        "insert into role_bindings (id, scope_type, role, email, invited_by, workflow_id, created_at, updated_at) values ($1, 'workflow', 'Engineer', $2, 'person-1', 'engineer-workflow', $3, $3)",
+        [bindingId, `${bindingId}@example.com`, clock.now()],
+      );
+    const before = (
+      await test.database.query<{ id: string }>(
+        "select * from role_bindings order by id",
+      )
+    ).rows;
+    await expect(
+      applyMigrations(test.database, migrations, clock),
+    ).rejects.toThrow(/more than one Engineer/u);
+    expect(
+      (await test.database.query("select * from role_bindings order by id"))
+        .rows,
+    ).toEqual(before);
+    await test.database.query("delete from role_bindings where id = 'second'");
+    await applyMigrations(test.database, migrations, clock);
+    expect(
+      (await test.database.query("select * from role_bindings order by id"))
+        .rows,
+    ).toEqual(before.filter((row) => row.id === "first"));
+    await expect(
+      test.database.query(
+        "insert into role_bindings (id, scope_type, role, email, invited_by, workflow_id, created_at, updated_at) values ('third', 'workflow', 'Engineer', 'third@example.com', 'person-1', 'engineer-workflow', $1, $1)",
+        [clock.now()],
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+  });
+
+  it("preserves submitted Agent results during review migration and keeps saved review revisions immutable", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((migration) => migration.version < "0043"),
+      clock,
+    );
+    await insertPerson(test);
+    await test.database.query(
+      "insert into groups (id, name, created_at, updated_at) values ('review-group', 'Research', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into workflows (id, group_id, name, goal, intent, locale, created_at, updated_at) values ('review-workflow', 'review-group', 'Reviews', 'Study sources', 'new-skill', 'en', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into workflow_versions (id, workflow_id, number, name, goal, intent, locale, stages, created_at, updated_at) values ('review-version', 'review-workflow', 1, 'Reviews', 'Study sources', 'new-skill', 'en', '{}', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into question_rounds (id, workflow_version_id, number, title, created_by, created_at) values ('review-round', 'review-version', 1, 'Review', 'person-1', $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into drafting_jobs (id, workflow_version_id, kind, round_id, requester_id, context_bundle, context_hash, input_hash, output_schema, status, revision, result, result_hash, created_at, updated_at) values ('review-job', 'review-version', 'draft-questions', 'review-round', 'person-1', '{}', $1, $1, '{}', 'submitted', 3, '{\"questions\": []}', $1, $2, $2)",
+      ["a".repeat(64), clock.now()],
+    );
+    const before = (await test.database.query("select * from drafting_jobs"))
+      .rows[0];
+    await applyMigrations(test.database, migrations, clock);
+    const after = (
+      await test.database.query<Record<string, unknown>>(
+        "select * from drafting_jobs",
+      )
+    ).rows[0]!;
+    const {
+      review_result,
+      review_hash,
+      review_person_id,
+      review_updated_at,
+      review_revision,
+      ...original
+    } = after;
+    expect(original).toEqual(before);
+    expect([
+      review_result,
+      review_hash,
+      review_person_id,
+      review_updated_at,
+      review_revision,
+    ]).toEqual([null, null, null, null, 0]);
+    await expect(
+      test.database.query(
+        "update drafting_jobs set review_result = '{}' where id = 'review-job'",
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await test.database.query(
+      "insert into drafting_job_review_revisions (job_id, revision, result, result_hash, person_id, created_at) values ('review-job', 4, '{\"questions\": []}', $1, 'person-1', $2)",
+      ["b".repeat(64), clock.now()],
+    );
+    for (const statement of [
+      "update drafting_job_review_revisions set result = '{}'",
+      "delete from drafting_job_review_revisions",
+      "truncate drafting_job_review_revisions",
+    ])
+      await expect(test.database.query(statement)).rejects.toThrow(
+        /immutable/u,
+      );
+  });
+
+  it("adds optional labels without rewriting legacy iterations and enforces their storage constraints", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((migration) => migration.version < "0041"),
+      clock,
+    );
+    await test.database.query(
+      "insert into groups (id, name, created_at, updated_at) values ('labels-group', 'Research', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into workflows (id, group_id, name, goal, intent, locale, created_at, updated_at) values ('labels-workflow', 'labels-group', 'labels', 'Review source Skills.', 'new-skill', 'en', $1, $1)",
+      [clock.now()],
+    );
+    for (const number of [1, 2])
+      await test.database.query(
+        "insert into workflow_versions (id, workflow_id, number, name, goal, intent, locale, stages, created_at, updated_at) values ($1, 'labels-workflow', $2, 'labels', 'Review source Skills.', 'new-skill', 'en', '{}', $3, $3)",
+        [`labels-${number}`, number, clock.now()],
+      );
+    const before = (
+      await test.database.query(
+        "select * from workflow_versions order by number",
+      )
+    ).rows;
+    await applyMigrations(test.database, migrations, clock);
+    const after = (
+      await test.database.query<Record<string, unknown>>(
+        "select * from workflow_versions order by number",
+      )
+    ).rows;
+    expect(
+      after.map(({ semantic_version, label_revision, ...version }) => {
+        expect(semantic_version).toBeNull();
+        expect(label_revision).toBe(0);
+        return version;
+      }),
+    ).toEqual(before);
+    await test.database.query(
+      "update workflow_versions set semantic_version = '0.1.0' where id = 'labels-1'",
+    );
+    await expect(
+      test.database.query(
+        "update workflow_versions set semantic_version = '0.1.0' where id = 'labels-2'",
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+    for (const label of [
+      "1.2",
+      "01.2.3",
+      "1.2.03",
+      "1.2.3-beta",
+      "1.2.3\n",
+      "1".repeat(61) + ".0.0",
+    ])
+      await expect(
+        test.database.query(
+          "update workflow_versions set semantic_version = $1 where id = 'labels-2'",
+          [label],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      test.database.query(
+        "update workflow_versions set label_revision = -1 where id = 'labels-1'",
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await test.database.query(
+      "update workflow_versions set semantic_version = null",
+    );
+    expect(
+      (
+        await test.database.query(
+          "select semantic_version from workflow_versions",
+        )
+      ).rows,
+    ).toEqual([{ semantic_version: null }, { semantic_version: null }]);
+  });
+
   it("preserves legacy declarations and provider provenance as pending history and retires encrypted configuration without creating attestations", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
@@ -868,7 +1066,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0040");
+    expect(upgraded.applied.at(-1)).toBe("0043");
     expect(
       (
         await test.database.query(
@@ -1033,6 +1231,9 @@ describe("reviewed SQL migrations", () => {
       "0038",
       "0039",
       "0040",
+      "0041",
+      "0042",
+      "0043",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -1080,6 +1281,9 @@ describe("reviewed SQL migrations", () => {
         "0038",
         "0039",
         "0040",
+        "0041",
+        "0042",
+        "0043",
       ],
       pending: [],
       drifted: [],
@@ -1103,6 +1307,7 @@ describe("reviewed SQL migrations", () => {
       "dossier_heads",
       "dossier_versions",
       "drafting_job_decisions",
+      "drafting_job_review_revisions",
       "drafting_jobs",
       "evaluation_reports",
       "fact_acknowledgements",
@@ -1222,6 +1427,9 @@ describe("reviewed SQL migrations", () => {
         "0038",
         "0039",
         "0040",
+        "0041",
+        "0042",
+        "0043",
       ],
       pending: [],
       drifted: [],
@@ -1229,7 +1437,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(40);
+    expect(rows.rows[0]?.count).toBe(43);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

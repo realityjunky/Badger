@@ -38,10 +38,10 @@ The append-only record of every action with its actor, time, target, channel, an
 The person who confirms the desired workflow, its acceptable behavior, and its unresolved choices. They also assign the workflow's other roles, approve its exact evaluated package, and confirm publication. They may also accept Authoring outputs; package approval and publication share one capability.
 
 **Engineer**:
-The person who builds a workflow's package: they study its sources, ask and resolve its questions, confirm facts, and drive drafting, authoring, and evaluation.
+The person who builds a workflow's package: they study its sources, ask and resolve its questions, confirm facts, and drive drafting, authoring, and evaluation. Each workflow has at most one Engineer assignment, including pending invitations.
 
 **Field expert**:
-A person who holds the domain knowledge a workflow encodes, usually the author of its source Skills. They answer its questions and acknowledge or dispute the facts restated from their answers.
+A person who holds the domain knowledge a workflow encodes, usually the author of its source Skills. They answer its questions, edit and save shared drafting suggestions, and acknowledge or dispute the facts restated from their answers. The Engineer makes drafting decisions separately.
 
 **Operator**:
 A person who runs a workflow's published versions, answers the Run gates its Nodes leave to Operators, and recovers interrupted Runs.
@@ -88,6 +88,9 @@ The Engineer's recorded reading of one pinned Skill version before the questionn
 
 **Workflow version**:
 One iteration of a workflow: the Skill versions it pins, its questionnaire, and the dossier, plan, and package built from them. A new workflow version inherits the previous one's facts and resolutions with provenance to their earlier records, and its pending questionnaire work moves with them; flagged evidence stays open for re-verification, and approvals require a new review.
+
+**Workflow version label**:
+An optional, user-chosen `major.minor.patch` label, unique within a workflow. The automatic iteration number remains its place in history; an unlabelled version displays as `vN`. Editing the label does not create an iteration or change its identity, authoring revision, queued jobs, or approvals.
 
 **Workflow frame**:
 The workflow's name, goal, intent (a new Skill or an upgrade of an existing one), and language. Each workflow version keeps the frame it began with.
@@ -191,6 +194,9 @@ An evidence-backed statement that a lane has fulfilled one declared responsibili
 **Drafting job**:
 A bounded piece of drafting that a connected Agent claims, bound to the hashes of its inputs. Its result stays a draft until a person accepts it.
 _Avoid_: Agent job
+
+**Suggestion review**:
+The shared, revisioned edits that a workflow's Engineer or Field experts save against a submitted questionnaire Drafting job. Saving preserves the Agent's original result and does not accept it. The Engineer separately previews and confirms a decision using the latest saved result.
 
 **Gate**:
 A point where work waits for a person's explicit confirmation or answer, bound to exactly what they reviewed. Gates guard the steps of building a workflow version, such as approving its dossier, and every moment a Run waits for a person.

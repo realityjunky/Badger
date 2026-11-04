@@ -158,6 +158,18 @@ them into `dist/`, so the server image carries the build and none of them.
   and reason, and mark the ones a later change superseded, so a re-pin never
   hides an earlier approval.
 
+- **Start new version** offers an optional `major.minor.patch` label, manual
+  entry, and Patch / Minor / Major suggestions from the most recent labelled
+  iteration, skipping labels already used in this workflow. The first
+  suggestion is `0.1.0`. **Edit version label** labels an
+  existing iteration without creating another one. Labels are unique within
+  the workflow; leaving the field blank displays its automatic `vN` number.
+  The original iteration number stays visible beside a labelled version.
+  History, jobs, and approvals keep their existing identities when a label
+  changes. The workflow catalog, version selectors, inbox, and publication
+  history show the label when present. Both dialogs follow the workspace
+  language, including Chinese.
+
 - Every page has a URL. The root redirects to `/my-work`; deep links, refresh,
   and history all restore the page.
 - Edits and refreshes of the current record keep its panels mounted while
@@ -201,8 +213,8 @@ them into `dist/`, so the server image carries the build and none of them.
   channel, and reason, filtered by actor, action, target type, and channel.
   Auditors and Administrators read all of it.
 - Questionnaire has three tabs across the available content width:
-  **Rounds and questions**, **Drafting jobs and suggestions** (Engineers and
-  Administrators), and **Ledger and readiness**. Rounds can be hidden while
+  **Rounds and questions**, **Drafting jobs and suggestions** (Engineers, Field
+  experts, and Administrators), and **Ledger and readiness**. Rounds can be hidden while
   reading or answering a question; they start hidden on narrow screens.
   **Evidence and history** opens a drawer for the selected Question or Concern,
   with Evidence/History tabs and an expanded-width option. Switching main tabs
@@ -210,11 +222,13 @@ them into `dist/`, so the server image carries the build and none of them.
   position. Existing job, ledger, question, and concern links still work, and
   browser Back restores the tab.
 - Questionnaire's **Drafting jobs and suggestions** tab (#55) has a URL and
-  is open to Engineers and Administrators. They request Agent drafts of
+  is open to Engineers, Field experts, and Administrators. Engineers request Agent drafts of
   questions, or of follow-ups to a parent question, for a draft round, and
   see each job's state; a job whose inputs changed shows as cancelled. They
-  review a submitted result, edit or remove each suggested question, and
-  accept the rest into that round, which they still review and publish, or
+  edit shared results with Field experts in **Review suggestions** and **Save**.
+  Saving retains the Agent's original result and does not accept anything.
+  **Review decisions** opens the latest persisted result for the Engineer to
+  accept into that round, which they still review and publish, or
   discard the result with a reason; both decisions take a hash-bound
   confirmation. Each queued job offers **Copy Agent prompt**: a template with
   the deployment, workflow version, job identity, and selected pinned Skill.
@@ -224,13 +238,16 @@ them into `dist/`, so the server image carries the build and none of them.
   a dialog provides the prompt for manual copying.
 - Source drafting (#56) extends the job panel with source study, answer
   restatement, question translation, and numbered open-question imports.
-  Engineers review and edit each result before a hash-bound confirmation.
+  Engineers and Field experts edit and save each result before the Engineer's
+  separate hash-bound confirmation. Conflicting saves require reopening the
+  current review, and later edits invalidate an earlier decision preview.
   Restatements still await expert acknowledgement, and question history shows
   translation revisions and immutable import provenance. Source study links
   directly to the drafting panel.
-- Each panel on a Workflow's detail page has its own Collapse/Expand button
-  beside the title. Panels start expanded, preserve form edits while collapsed,
-  and reopen when a direct link targets their content.
+- Workflow detail panels are full-width tabs. Their existing hashes select the
+  corresponding tab, browser Back restores selection, and visited tabs retain
+  local edits. The Team tab allows one Engineer assignment, including a pending
+  invitation; remove the existing role before assigning a replacement.
 - Workflow versions include Source study (#45): per-pin progress, fact and
   interface editors, retirement confirmation, and immutable record history.
   Evidence links open the exact record revision's cited, numbered lines in

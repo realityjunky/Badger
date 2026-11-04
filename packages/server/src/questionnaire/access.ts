@@ -23,6 +23,9 @@ export async function questionnaireCapabilities(
       access.tokenScopes.includes("engineer"));
   return {
     compose,
+    reviewSuggestions:
+      access.tokenScopes === undefined &&
+      (administrator || roles.has("Engineer") || roles.has("Field expert")),
     answer:
       expertScope && (roles.has("Field expert") || roles.has("Workflow owner")),
     comment:

@@ -148,11 +148,14 @@ describe("question threads", () => {
       "Operator",
       "Observer",
     ]) {
-      const person = {
-        subject: role,
-        email: `matrix-${role.replaceAll(" ", "")}@example.com`,
-      };
-      await bind(workflowId, person, role);
+      const person =
+        role === "Engineer"
+          ? engineer
+          : {
+              subject: role,
+              email: `matrix-${role.replaceAll(" ", "")}@example.com`,
+            };
+      if (role !== "Engineer") await bind(workflowId, person, role);
       const allowed = role !== "Observer";
       const view = await call<{
         capabilities: {
@@ -813,35 +816,48 @@ describe("expert concerns", () => {
     }
   });
 
-  it("keeps an unprompted concern and delivers its own deep link to every Engineer, including invitations", async () => {
-    const { base, workflowId, versionId } = await setup();
-    const invited = { subject: "invited", email: "invited@example.com" };
-    await bind(workflowId, invited, "Engineer");
-    const { concern } = await call<{ concern: Concern }>(
-      "POST",
-      `${base}/concerns`,
-      expert,
-      { text: "What if the cold chain fails?" },
-      201,
-    );
-    expect(concern).toMatchObject({
-      state: "open",
-      revision: 1,
-      resolution: null,
-    });
-    const second = await call<{ concern: Concern }>(
-      "POST",
-      `${base}/concerns`,
-      expert,
-      { text: "The instrument may be offline." },
-      201,
-    );
-    const view = await call<{ concerns: Concern[] }>("GET", base, observer);
-    expect(view.concerns.map((c) => c.text).sort()).toEqual([
-      "The instrument may be offline.",
-      "What if the cold chain fails?",
-    ]);
-    for (const recipient of [engineer, invited]) {
+  it.each(["assigned", "invited"])(
+    "keeps an unprompted concern and delivers its own deep link to the %s Engineer",
+    async (assignment) => {
+      const { base, workflowId, versionId } = await setup();
+      const invited = { subject: "invited", email: "invited@example.com" };
+      if (assignment === "invited") {
+        const { bindings } = await call<{
+          bindings: { id: string; role: string; revision: number }[];
+        }>("GET", `/workflows/${workflowId}`, admin);
+        const currentEngineer = bindings.find(
+          (binding) => binding.role === "Engineer",
+        )!;
+        await call("DELETE", `/bindings/${currentEngineer.id}`, admin, {
+          revision: currentEngineer.revision,
+        });
+        await bind(workflowId, invited, "Engineer");
+      }
+      const { concern } = await call<{ concern: Concern }>(
+        "POST",
+        `${base}/concerns`,
+        expert,
+        { text: "What if the cold chain fails?" },
+        201,
+      );
+      expect(concern).toMatchObject({
+        state: "open",
+        revision: 1,
+        resolution: null,
+      });
+      const second = await call<{ concern: Concern }>(
+        "POST",
+        `${base}/concerns`,
+        expert,
+        { text: "The instrument may be offline." },
+        201,
+      );
+      const view = await call<{ concerns: Concern[] }>("GET", base, observer);
+      expect(view.concerns.map((c) => c.text).sort()).toEqual([
+        "The instrument may be offline.",
+        "What if the cold chain fails?",
+      ]);
+      const recipient = assignment === "invited" ? invited : engineer;
       const inbox = await call<{
         items: {
           kind: string;
@@ -864,17 +880,17 @@ describe("expert concerns", () => {
           expect.objectContaining({ concernId: second.concern.id }),
         ]),
       );
-    }
-    expect(
-      await call("GET", `/questionnaire/concerns/${concern.id}`, expert),
-    ).toEqual({ workflowId, versionId });
-    const expertInbox = await call<{ items: { kind: string }[] }>(
-      "GET",
-      "/me/inbox",
-      expert,
-    );
-    expect(expertInbox.items.some((i) => i.kind === "concern-raised")).toBe(
-      false,
-    );
-  });
+      expect(
+        await call("GET", `/questionnaire/concerns/${concern.id}`, expert),
+      ).toEqual({ workflowId, versionId });
+      const expertInbox = await call<{ items: { kind: string }[] }>(
+        "GET",
+        "/me/inbox",
+        expert,
+      );
+      expect(expertInbox.items.some((i) => i.kind === "concern-raised")).toBe(
+        false,
+      );
+    },
+  );
 });

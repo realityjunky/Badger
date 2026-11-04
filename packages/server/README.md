@@ -280,6 +280,21 @@ approve the portable dossier again, then save and approve its plan and proposal.
 
 ## Skill and workflow version changes
 
+Workflow versions retain their automatic iteration number and may also have a
+user-chosen `semanticVersion` label, such as `0.2.0`. Labels use exactly three
+non-negative integers with no leading zeroes, at most 64 characters, and are
+unique within a workflow. Versions without a label display as `vN`. Public
+workflow version read models include `semanticVersion` and `labelRevision`.
+`POST /workflows/:id/versions` accepts `{revision, semanticVersion?}`; omitting
+the label preserves the existing numbered-version behavior. A signed-in
+Administrator or workflow Engineer can send
+`PATCH /workflows/:id/versions/:versionId` with
+`{labelRevision, semanticVersion}` to label an existing iteration, or `null`
+to clear the label. Duplicate labels and stale label revisions return `409`;
+invalid labels return `400`. Label edits are audited separately and leave
+authoring revisions, immutable history, drafting contexts, and approvals
+unchanged. See [ADR 0042](../../docs/adr/0042-workflow-version-labels.md).
+
 Pinning a different Skill version compares the hashes of cited files. Changed,
 removed, or unpinned evidence reopens affected questions, including deferrals,
 and supersedes their facts. Source-study facts expose `stale` using the same
@@ -659,6 +674,27 @@ question accepts no new link or changed meaning, so new meaning cannot borrow
 an earlier sign-off. A stale draft write returns 409 with `currentRevision`.
 See ADR 0022 for the boundary between questionnaire readiness and dossier
 validation and approval.
+
+## Shared suggestion review
+
+Signed-in workflow Engineers, Field experts, and Administrators can read
+questionnaire drafting jobs and save shared suggestion edits with
+`POST V/drafting-jobs/:id/review` and `{revision, result}`. The public job's
+`review` holds the saved result, hash, editor, timestamp, and saved revision;
+`result` and `resultHash` retain the original Agent submission. Each save
+appends immutable history and advances the job revision. Concurrent or stale
+saves return 409. Saving never accepts records or completes the submission's
+inbox item. Field experts cannot request, claim, submit, or decide jobs, and
+their job lists exclude plan and Authoring jobs. Tokens cannot save reviews.
+
+Engineer acceptance previews use the saved review when present. A decision
+with different content or an older revision conflicts, including when a Field
+expert saves after the preview. The existing explicit hash-bound confirmation
+and canonical acceptance validation remain required. Migration `0042` enforces
+one Engineer binding per workflow, including pending invitations; it fails
+with a repair hint if legacy workflows have multiple Engineer assignments.
+Migration `0043` adds shared review storage and immutable revisions. See
+[ADR 0043](../../docs/adr/0043-shared-suggestion-review.md).
 
 ## Answer resolutions and acknowledgements
 

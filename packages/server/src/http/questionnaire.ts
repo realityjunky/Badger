@@ -9,7 +9,11 @@ import {
   acknowledgeFact,
 } from "../questionnaire/resolutions.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
-import { publicDraftingJob, reconcileDraftingJobs } from "../drafting/jobs.js";
+import {
+  isQuestionnaireDraftingJob,
+  publicDraftingJob,
+  reconcileDraftingJobs,
+} from "../drafting/jobs.js";
 import { isAdministrator } from "../authorization.js";
 import { readLedger, snapshotRoundLedger } from "../questionnaire/ledger.js";
 import { readDraft, readDrafts, saveDraft } from "../questionnaire/drafts.js";
@@ -54,6 +58,7 @@ import {
 } from "../questionnaire/answers.js";
 import { listWorkflowPins } from "../workflow-source.js";
 import { readComments, saveComment } from "../questionnaire/comments.js";
+import { withVersionLabels } from "../workflow-version-labels.js";
 import {
   raiseConcern,
   readConcerns,
@@ -136,12 +141,16 @@ export async function handleQuestionnaire(
   if (path === "/api/v1/questionnaire") {
     const versions = [];
     for (const workflow of await listWorkflows(database, access, person)) {
-      for (const version of await listWorkflowVersions(database, workflow.id))
+      for (const version of await withVersionLabels(
+        database,
+        await listWorkflowVersions(database, workflow.id),
+      ))
         versions.push({
           workflowId: workflow.id,
           workflowName: workflow.name,
           versionId: version.id,
           number: version.number,
+          semanticVersion: version.semanticVersion,
         });
     }
     return reply.json(200, { versions });
@@ -396,7 +405,7 @@ export async function handleQuestionnaire(
             personId: person.id,
             attachmentLimits: ATTACHMENT_LIMITS,
             workflow,
-            version,
+            version: (await withVersionLabels(tx, [version]))[0],
             capabilities,
             settings: await readSettings(tx, workflowId),
             pins: await listWorkflowPins(tx, versionId),
@@ -412,22 +421,27 @@ export async function handleQuestionnaire(
             facts: await readFacts(tx, versionId),
             comments: await readComments(tx, versionId, compose),
             concerns: await readConcerns(tx, versionId),
-            suggestions: compose
-              ? (
-                  await reconcileDraftingJobs(
-                    tx,
-                    deps,
-                    {
-                      ...context,
-                      agentHost,
-                    },
-                    workflowId,
-                    versionId,
-                  )
-                ).jobs
-                  .filter((job) => job.status === "submitted")
-                  .map(publicDraftingJob)
-              : [],
+            suggestions:
+              compose || capabilities.reviewSuggestions
+                ? (
+                    await reconcileDraftingJobs(
+                      tx,
+                      deps,
+                      {
+                        ...context,
+                        agentHost,
+                      },
+                      workflowId,
+                      versionId,
+                    )
+                  ).jobs
+                    .filter(
+                      (job) =>
+                        job.status === "submitted" &&
+                        (compose || isQuestionnaireDraftingJob(job)),
+                    )
+                    .map(publicDraftingJob)
+                : [],
           },
         };
       }

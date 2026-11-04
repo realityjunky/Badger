@@ -81,7 +81,10 @@ export function InboxPanel() {
                                               : item.gate === "proposal"
                                                 ? "inbox.proposalInvalidated"
                                                 : "inbox.gateInvalidated",
-                  { name: item.workflowName, number: item.versionNumber },
+                  {
+                    name: item.workflowName,
+                    number: item.semanticVersion ?? item.versionNumber,
+                  },
                 )}
                 {item.questionText !== null && ` · ${item.questionText}`}
                 {item.concernText !== null && ` · ${item.concernText}`}

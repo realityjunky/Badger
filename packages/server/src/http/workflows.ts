@@ -25,6 +25,11 @@ import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 import { readGateConfirmations } from "../gates.js";
 import { readSourceStudy } from "../source-study.js";
+import {
+  parseSemanticVersion,
+  updateWorkflowVersionLabel,
+  withVersionLabels,
+} from "../workflow-version-labels.js";
 
 const ROOT = "/api/v1/workflows";
 // A version's pins, one pin by its Skill, its latest source check, its jobs.
@@ -78,6 +83,7 @@ export function workflowMethods(path: string): string | null {
   if (route.resource === "pins") {
     return route.resourceId === null ? "GET, HEAD, POST" : "DELETE";
   }
+  if (route.resource === null) return "GET, HEAD, PATCH";
   return "GET, HEAD";
 }
 
@@ -143,7 +149,7 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
       );
     return reply.json(201, {
       workflow: created.workflow,
-      version: created.version,
+      version: (await withVersionLabels(database, [created.version]))[0],
     });
   }
   if (path === ROOT) {
@@ -160,7 +166,12 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
           workflow,
         ),
         latestVersion:
-          (await listWorkflowVersions(database, workflow.id))[0] ?? null,
+          (
+            await withVersionLabels(
+              database,
+              (await listWorkflowVersions(database, workflow.id)).slice(0, 1),
+            )
+          )[0] ?? null,
       });
     }
     const createGroups = [];
@@ -313,6 +324,68 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
       jobs: await listWorkflowJobs(database, version.id),
     });
   }
+  if (method === "PATCH" && route.versionId !== null) {
+    if (!capabilities.createVersion || access.tokenScopes !== undefined)
+      return reply.error(
+        403,
+        "denied",
+        "Only a signed-in Administrator or workflow Engineer edits a version label",
+      );
+    const body = await readJsonBody(request);
+    if (!body.ok) return reply.error(400, "invalid", body.message);
+    if (
+      typeof body.value !== "object" ||
+      body.value === null ||
+      Array.isArray(body.value)
+    )
+      return reply.error(
+        400,
+        "invalid",
+        "The request body must be a JSON object",
+      );
+    const values = body.value as Record<string, unknown>;
+    const unknown = Object.keys(values).find(
+      (key) => !["labelRevision", "semanticVersion"].includes(key),
+    );
+    if (unknown !== undefined)
+      return reply.error(400, "invalid", `Unknown field ${unknown}`);
+    const labelRevision = values["labelRevision"];
+    if (!Number.isSafeInteger(labelRevision) || (labelRevision as number) < 0)
+      return reply.error(
+        400,
+        "invalid",
+        "labelRevision must be a whole number from 0",
+      );
+    const label = parseSemanticVersion(values["semanticVersion"]);
+    if (!label.ok) return reply.error(400, "invalid", label.message);
+    const result = await updateWorkflowVersionLabel(
+      database,
+      dependencies,
+      context,
+      workflow.id,
+      route.versionId,
+      labelRevision as number,
+      label.value,
+    );
+    if (result.kind === "missing")
+      return reply.error(404, "invalid", "No such workflow version");
+    if (result.kind === "duplicate-label")
+      return reply.error(
+        409,
+        "conflict",
+        "That version label is already used in this workflow",
+      );
+    if (result.kind === "stale")
+      return reply.json(409, {
+        error: {
+          code: "conflict",
+          message: "The version label changed since you read it",
+        },
+        requestId: reply.requestId,
+        label: result.label,
+      });
+    return reply.json(200, { label: result.label });
+  }
   if (method === "PATCH" || method === "POST") {
     if (
       !(method === "PATCH"
@@ -343,7 +416,7 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
     const keys =
       method === "PATCH"
         ? ["revision", "name", "goal", "intent", "locale"]
-        : ["revision"];
+        : ["revision", "semanticVersion"];
     const unknown = Object.keys(values).find((key) => !keys.includes(key));
     if (unknown !== undefined)
       return reply.error(400, "invalid", `Unknown field ${unknown}`);
@@ -356,6 +429,8 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
       );
     const frame = parseWorkflowFrame({ ...workflow, ...values });
     if (!frame.ok) return reply.error(400, "invalid", frame.message);
+    const label = parseSemanticVersion(values["semanticVersion"] ?? null);
+    if (!label.ok) return reply.error(400, "invalid", label.message);
     const result =
       method === "PATCH"
         ? await updateWorkflow(
@@ -372,6 +447,7 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
             context,
             workflow.id,
             revision as number,
+            label.value,
           );
     if (result.kind === "missing")
       return reply.error(404, "invalid", "No such workflow");
@@ -390,11 +466,23 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
         "conflict",
         "A workflow with that name already belongs to this group",
       );
+    if (result.kind === "duplicate-label")
+      return reply.error(
+        409,
+        "conflict",
+        "That version label is already used in this workflow",
+      );
     return result.kind === "created"
-      ? reply.json(201, { workflow: result.workflow, version: result.version })
+      ? reply.json(201, {
+          workflow: result.workflow,
+          version: (await withVersionLabels(database, [result.version]))[0],
+        })
       : reply.json(200, { workflow: result.workflow });
   }
-  const versions = await listWorkflowVersions(database, workflow.id);
+  const versions = await withVersionLabels(
+    database,
+    await listWorkflowVersions(database, workflow.id),
+  );
   if (route.versions) {
     if (route.versionId === null) return reply.json(200, { versions });
     const version = versions.find((entry) => entry.id === route.versionId);
