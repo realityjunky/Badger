@@ -9,7 +9,7 @@ import {
   Space,
   Tag,
 } from "antd";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   questionnairePath,
@@ -39,8 +39,11 @@ import { AnswerTypeDetails } from "./questionnaire/AnswerTypeDetails.js";
 import { QuestionThread } from "./questionnaire/QuestionThread.js";
 import { ConcernPanel } from "./questionnaire/ConcernPanel.js";
 import { QuestionnaireLedger } from "./questionnaire/QuestionnaireLedger.js";
+import {
+  QuestionnaireTabs,
+  type QuestionnaireTab,
+} from "./questionnaire/QuestionnaireTabs.js";
 
-/** The three panes share the service's records and server-owned capabilities. */
 export function QuestionnairePage() {
   const { t, format, locale } = useI18n();
   const { connected, notice } = useLiveUpdates();
@@ -49,6 +52,8 @@ export function QuestionnairePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const query = new URLSearchParams(location.search);
+  const requestedWorkflowId = query.get("workflow");
+  const requestedVersionId = query.get("version");
   const [versions, setVersions] = useState<QuestionnaireVersion[]>([]);
   const [selection, setSelection] = useState<{
     workflowId: string;
@@ -57,6 +62,10 @@ export function QuestionnairePage() {
   const [view, setView] = useState<QuestionnaireView | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [roundsCollapsed, setRoundsCollapsed] = useState(
+    () => window.matchMedia("(max-width: 767px)").matches,
+  );
+  const roundsContentId = useId();
   const [busy, setBusy] = useState(false);
   const [newRound, setNewRound] = useState(false);
   const [roundTitle, setRoundTitle] = useState("");
@@ -82,7 +91,6 @@ export function QuestionnairePage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    const parameters = new URLSearchParams(location.search);
     void (async () => {
       try {
         const catalog = await questionnaireRequest<{
@@ -107,8 +115,8 @@ export function QuestionnairePage() {
           linked ??
           catalog.versions.find(
             (v) =>
-              v.workflowId === parameters.get("workflow") &&
-              v.versionId === parameters.get("version"),
+              v.workflowId === requestedWorkflowId &&
+              v.versionId === requestedVersionId,
           ) ??
           catalog.versions[0] ??
           null;
@@ -124,7 +132,13 @@ export function QuestionnairePage() {
       }
     })();
     return () => controller.abort();
-  }, [basePath, questionId, concernId, location.search]);
+  }, [
+    basePath,
+    questionId,
+    concernId,
+    requestedWorkflowId,
+    requestedVersionId,
+  ]);
 
   const reload = useCallback(async () => {
     if (path === null) return null;
@@ -190,7 +204,12 @@ export function QuestionnairePage() {
       : view?.questions.find((q) => q.roundId === roundId);
   const selectedConcern = view?.concerns.find((c) => c.id === concernId);
   const compose = view?.capabilities.compose === true;
-  const ledgerOpen = query.get("panel") === "ledger";
+  const activeTab: QuestionnaireTab =
+    query.get("panel") === "ledger"
+      ? "ledger"
+      : query.get("panel") === "suggestions" && compose
+        ? "suggestions"
+        : "questions";
   const ownAnswer = view?.answers.find(
     (a) => a.questionId === selected?.id && a.personId === view.personId,
   );
@@ -205,6 +224,16 @@ export function QuestionnairePage() {
   const versionQuery = selection
     ? `workflow=${encodeURIComponent(selection.workflowId)}&version=${encodeURIComponent(selection.versionId)}`
     : "";
+  const changePanel = (tab: QuestionnaireTab) => {
+    const parameters = new URLSearchParams(location.search);
+    if (selection) {
+      parameters.set("workflow", selection.workflowId);
+      parameters.set("version", selection.versionId);
+    }
+    if (tab === "questions") parameters.delete("panel");
+    else parameters.set("panel", tab);
+    navigate({ pathname: location.pathname, search: parameters.toString() });
+  };
   const run = async (action: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
@@ -302,13 +331,6 @@ export function QuestionnairePage() {
           {t(connected ? "questionnaire.live" : "questionnaire.polling")}
         </span>
         <Button onClick={() => void reload()}>{t("workflow.reload")}</Button>
-        {view && (
-          <Link
-            to={`/questionnaire?${versionQuery}${ledgerOpen ? "" : "&panel=ledger"}`}
-          >
-            {t(ledgerOpen ? "ledger.questions" : "ledger.title")}
-          </Link>
-        )}
         {view?.capabilities.raiseConcern && (
           <Button
             onClick={() => {
@@ -319,125 +341,14 @@ export function QuestionnairePage() {
             {t("questionnaire.raiseConcern")}
           </Button>
         )}
-        {compose && (
-          <Link to={`/questionnaire?${versionQuery}&panel=suggestions`}>
-            {t("drafting.title")}
-          </Link>
-        )}
       </div>
       {failure && <Alert type="error" showIcon message={failure} />}
-      <div
-        className={`three-pane${ledgerOpen ? " ledger-open" : ""}`}
-        data-testid="three-pane"
-      >
-        <section
-          className="pane explorer-pane"
-          data-testid="explorer-pane"
-          aria-label={t("questionnaire.explorer")}
-        >
-          <Input
-            allowClear
-            prefix={<SearchOutlined aria-hidden="true" />}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t("questionnaire.searchQuestions")}
-            aria-label={t("questionnaire.searchQuestions")}
-            data-testid="question-search"
-          />
-          <h2 className="pane-title">{t("questionnaire.rounds")}</h2>
-          {compose && (
-            <Space wrap>
-              <Button
-                onClick={() => {
-                  setNewRound(true);
-                  setRoundTitle("");
-                }}
-              >
-                {t("questionnaire.newRound")}
-              </Button>
-              <Button
-                onClick={() => {
-                  setRoundLimit(view?.settings.roundSizeLimit ?? null);
-                  setSettingsRevision(view?.settings.revision ?? 0);
-                  setSettings(true);
-                }}
-              >
-                {t("questionnaire.roundLimit")}
-              </Button>
-            </Space>
-          )}
-          {!view?.rounds.length && (
-            <p className="muted">{t("questionnaire.empty")}</p>
-          )}
-          <ol className="questionnaire-rounds">
-            {view?.rounds.map((r) => (
-              <li key={r.id}>
-                <Link
-                  className="questionnaire-round-link"
-                  to={`/questionnaire?${versionQuery}&round=${encodeURIComponent(r.id)}`}
-                  onClick={() => setEditing(null)}
-                  aria-current={round?.id === r.id ? "true" : undefined}
-                >
-                  {r.number}. {r.title}{" "}
-                  <Tag>{t(`questionnaire.state.${r.state}`)}</Tag>
-                </Link>
-                <ol className="questionnaire-questions">
-                  {view.questions
-                    .filter(
-                      (q) =>
-                        q.roundId === r.id &&
-                        (!search ||
-                          `${q.text} ${q.topic}`
-                            .toLowerCase()
-                            .includes(search.toLowerCase())),
-                    )
-                    .map((q) => (
-                      <li key={q.id}>
-                        <Link
-                          to={`/questionnaire/questions/${encodeURIComponent(q.id)}`}
-                          aria-current={
-                            selected?.id === q.id ? "page" : undefined
-                          }
-                          onClick={() => setEditing(null)}
-                        >
-                          {q.text}
-                        </Link>
-                        <span className="questionnaire-question-meta">
-                          {q.priority} · {t(`questionnaire.state.${q.state}`)}
-                        </span>
-                      </li>
-                    ))}
-                </ol>
-              </li>
-            ))}
-          </ol>
-          <h2 className="pane-title">{t("questionnaire.concerns")}</h2>
-          {!view?.concerns.length && (
-            <p className="muted">{t("questionnaire.noConcerns")}</p>
-          )}
-          <ul className="questionnaire-concerns">
-            {view?.concerns.map((concern) => (
-              <li key={concern.id}>
-                <Link
-                  to={`/questionnaire/concerns/${encodeURIComponent(concern.id)}`}
-                  aria-current={concern.id === concernId ? "page" : undefined}
-                  onClick={() => setEditing(null)}
-                >
-                  {concern.text}
-                </Link>
-                <span className="questionnaire-question-meta">
-                  {t(`questionnaire.concernState.${concern.state}`)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-        <section
-          className="pane main-pane"
-          data-testid="main-pane"
-          aria-label={t("questionnaire.thread")}
-        >
-          {view && path && compose && query.get("panel") === "suggestions" ? (
+      <QuestionnaireTabs
+        key={path ?? "unselected"}
+        activeTab={activeTab}
+        onChange={changePanel}
+        suggestions={
+          view && path && compose ? (
             <DraftingJobs
               key={path}
               basePath={basePath}
@@ -445,207 +356,344 @@ export function QuestionnairePage() {
               view={view}
               onChanged={() => void reload()}
             />
-          ) : view && path && ledgerOpen ? (
+          ) : undefined
+        }
+        ledger={
+          view && path ? (
             <QuestionnaireLedger
               basePath={basePath}
               path={path}
               view={view}
               sinceRound={query.get("sinceRound")}
-              onSinceRound={(id) =>
-                navigate(
-                  `/questionnaire?${versionQuery}&panel=ledger${id ? `&sinceRound=${encodeURIComponent(id)}` : ""}`,
-                )
-              }
+              onSinceRound={(id) => {
+                const parameters = new URLSearchParams(location.search);
+                if (id) parameters.set("sinceRound", id);
+                else parameters.delete("sinceRound");
+                navigate({
+                  pathname: location.pathname,
+                  search: parameters.toString(),
+                });
+              }}
               onChanged={reload}
             />
-          ) : view && path && editing ? (
-            <QuestionComposer
-              key={
-                editing.question?.id ??
-                editing.concern?.id ??
-                `new:${editing.roundId}`
-              }
-              basePath={basePath}
-              path={path}
-              roundId={editing.roundId}
-              question={editing.question}
-              concern={editing.concern}
-              view={view}
-              onSaved={openQuestion}
-              onCancel={() => setEditing(null)}
-            />
-          ) : selectedConcern && view && path ? (
-            <ConcernPanel
-              key={selectedConcern.id}
-              basePath={basePath}
-              path={path}
-              concern={selectedConcern}
-              view={view}
-              onChanged={() => void reload()}
-              onQuestion={(roundId) =>
-                setEditing({ roundId, concern: selectedConcern })
-              }
-            />
-          ) : (
-            <>
-              <h2 className="pane-title">
-                {round?.title ?? t("questionnaire.thread")}
-              </h2>
-              <Space wrap>
-                {compose && round?.state === "draft" && (
-                  <>
-                    <Button onClick={() => setEditing({ roundId: round.id })}>
-                      {t("questionnaire.newQuestion")}
-                    </Button>
-                    <Button
-                      disabled={
-                        busy ||
-                        !view?.questions.some((q) => q.roundId === round.id)
-                      }
-                      onClick={() =>
-                        void run(async () => {
-                          const result = await questionnaireRequest<{
-                            preview: RoundPreview;
-                          }>(
-                            basePath,
-                            `${path}/rounds/${encodeURIComponent(round.id)}/publish-preview`,
-                          );
-                          setPublication({ round, preview: result.preview });
-                        })
-                      }
-                    >
-                      {t("questionnaire.reviewRound")}
-                    </Button>
-                  </>
-                )}
-                {round?.state === "published" &&
-                  view?.questions.some(
-                    (q) => q.roundId === round.id && q.canAnswer,
-                  ) && (
-                    <Button
-                      loading={busy}
-                      onClick={() => void run(submitRound)}
-                    >
-                      {t("questionnaire.submitRound")}
-                    </Button>
-                  )}
-              </Space>
-              {selected ? (
-                <>
-                  <article className="questionnaire-record">
-                    <h3>{selected.text}</h3>
-                    <Tag>{t(`questionnaire.state.${selected.state}`)}</Tag>
-                    <p>{selected.rationale}</p>
-                    {compose &&
-                      (!selected.resolvedAt ||
-                        selected.state === "confirmed") && (
-                        <Button
-                          onClick={() =>
-                            setEditing({
-                              roundId: selected.roundId,
-                              question: selected,
-                            })
-                          }
-                        >
-                          {t("questionnaire.editQuestion")}
-                        </Button>
-                      )}
-                  </article>
-                  <div className="questionnaire-answers">
-                    {submitted.map((a) => (
-                      <article
-                        className="questionnaire-answer"
-                        key={a.personId}
-                      >
-                        <h3>
-                          {format("questionnaire.answerFrom", {
-                            name: a.personName,
-                          })}
-                        </h3>
-                        <p className="muted">
-                          {new Date(
-                            a.revisions.at(-1)!.createdAt,
-                          ).toLocaleString(locale)}{" "}
-                          ·{" "}
-                          {t(
-                            a.revisions.at(-1)!.channel === "mcp"
-                              ? "questionnaire.channel.agent"
-                              : "questionnaire.channel.web",
-                          )}
-                          {a.revisions.at(-1)!.agentHost
-                            ? ` (${a.revisions.at(-1)!.agentHost})`
-                            : ""}
-                        </p>
-                        <AnswerContent
-                          answer={a.revisions.at(-1)!}
-                          type={
-                            selected.revisions.find(
-                              (r) => r.revision === a.questionRevision,
-                            )?.answerType
-                          }
-                          basePath={basePath}
-                          path={path!}
-                        />
-                      </article>
-                    ))}
-                  </div>
-                  {path && view && (
-                    <QuestionResolution
-                      key={`${selected.id}:${selected.revision}:${selected.resolutionRevision}`}
-                      question={selected}
-                      view={view}
-                      path={path}
-                      basePath={basePath}
-                      reload={reload}
-                    />
-                  )}
-                  {selected.canAnswer && path && view && (
-                    <AnswerEditor
-                      key={`answer:${selected.id}`}
-                      ref={answerEditor}
-                      basePath={basePath}
-                      path={path}
-                      question={selected}
-                      answer={ownAnswer}
-                      personId={view.personId}
-                      attachmentLimits={view.attachmentLimits}
-                      disabled={busy}
-                      onSubmitted={() => void reload()}
-                    />
-                  )}
-                  {path && view && (
-                    <QuestionThread
-                      key={`thread:${selected.id}`}
-                      basePath={basePath}
-                      path={path}
-                      questionId={selected.id}
-                      view={view}
-                      onChanged={() => void reload()}
-                    />
-                  )}
-                </>
-              ) : (
-                <p className="empty-state">
-                  {t(
-                    view
-                      ? "questionnaire.selectQuestion"
-                      : "questionnaire.chooseVersion",
-                  )}
-                </p>
-              )}
-            </>
-          )}
-        </section>
-        {!ledgerOpen && (
+          ) : null
+        }
+      >
+        <div className="questionnaire-reading-toolbar">
+          <Button
+            aria-expanded={!roundsCollapsed}
+            aria-controls={roundsContentId}
+            onClick={() => setRoundsCollapsed((value) => !value)}
+          >
+            {t(
+              roundsCollapsed
+                ? "questionnaire.showRounds"
+                : "questionnaire.hideRounds",
+            )}
+          </Button>
           <QuestionInspector
             basePath={basePath}
             path={path}
             question={selected}
             concern={selectedConcern}
             view={view}
+            active={activeTab === "questions"}
           />
-        )}
-      </div>
+        </div>
+        <div
+          className="questionnaire-layout"
+          data-testid="questionnaire-layout"
+          data-rounds-collapsed={roundsCollapsed}
+        >
+          <section
+            className="pane explorer-pane"
+            data-testid="explorer-pane"
+            aria-label={t("questionnaire.explorer")}
+            id={roundsContentId}
+            hidden={roundsCollapsed}
+          >
+            <Input
+              allowClear
+              prefix={<SearchOutlined aria-hidden="true" />}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={t("questionnaire.searchQuestions")}
+              aria-label={t("questionnaire.searchQuestions")}
+              data-testid="question-search"
+            />
+            <h2 className="pane-title">{t("questionnaire.rounds")}</h2>
+            {compose && (
+              <Space wrap>
+                <Button
+                  onClick={() => {
+                    setNewRound(true);
+                    setRoundTitle("");
+                  }}
+                >
+                  {t("questionnaire.newRound")}
+                </Button>
+                <Button
+                  onClick={() => {
+                    setRoundLimit(view?.settings.roundSizeLimit ?? null);
+                    setSettingsRevision(view?.settings.revision ?? 0);
+                    setSettings(true);
+                  }}
+                >
+                  {t("questionnaire.roundLimit")}
+                </Button>
+              </Space>
+            )}
+            {!view?.rounds.length && (
+              <p className="muted">{t("questionnaire.empty")}</p>
+            )}
+            <ol className="questionnaire-rounds">
+              {view?.rounds.map((r) => (
+                <li key={r.id}>
+                  <Link
+                    className="questionnaire-round-link"
+                    to={`/questionnaire?${versionQuery}&round=${encodeURIComponent(r.id)}`}
+                    onClick={() => setEditing(null)}
+                    aria-current={round?.id === r.id ? "true" : undefined}
+                  >
+                    {r.number}. {r.title}{" "}
+                    <Tag>{t(`questionnaire.state.${r.state}`)}</Tag>
+                  </Link>
+                  <ol className="questionnaire-questions">
+                    {view.questions
+                      .filter(
+                        (q) =>
+                          q.roundId === r.id &&
+                          (!search ||
+                            `${q.text} ${q.topic}`
+                              .toLowerCase()
+                              .includes(search.toLowerCase())),
+                      )
+                      .map((q) => (
+                        <li key={q.id}>
+                          <Link
+                            to={`/questionnaire/questions/${encodeURIComponent(q.id)}`}
+                            aria-current={
+                              selected?.id === q.id ? "page" : undefined
+                            }
+                            onClick={() => setEditing(null)}
+                          >
+                            {q.text}
+                          </Link>
+                          <span className="questionnaire-question-meta">
+                            {q.priority} · {t(`questionnaire.state.${q.state}`)}
+                          </span>
+                        </li>
+                      ))}
+                  </ol>
+                </li>
+              ))}
+            </ol>
+            <h2 className="pane-title">{t("questionnaire.concerns")}</h2>
+            {!view?.concerns.length && (
+              <p className="muted">{t("questionnaire.noConcerns")}</p>
+            )}
+            <ul className="questionnaire-concerns">
+              {view?.concerns.map((concern) => (
+                <li key={concern.id}>
+                  <Link
+                    to={`/questionnaire/concerns/${encodeURIComponent(concern.id)}`}
+                    aria-current={concern.id === concernId ? "page" : undefined}
+                    onClick={() => setEditing(null)}
+                  >
+                    {concern.text}
+                  </Link>
+                  <span className="questionnaire-question-meta">
+                    {t(`questionnaire.concernState.${concern.state}`)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section
+            className="pane main-pane"
+            data-testid="main-pane"
+            aria-label={t("questionnaire.thread")}
+          >
+            {view && path && compose && editing ? (
+              <QuestionComposer
+                key={
+                  editing.question?.id ??
+                  editing.concern?.id ??
+                  `new:${editing.roundId}`
+                }
+                basePath={basePath}
+                path={path}
+                roundId={editing.roundId}
+                question={editing.question}
+                concern={editing.concern}
+                view={view}
+                onSaved={openQuestion}
+                onCancel={() => setEditing(null)}
+              />
+            ) : selectedConcern && view && path ? (
+              <ConcernPanel
+                key={selectedConcern.id}
+                basePath={basePath}
+                path={path}
+                concern={selectedConcern}
+                view={view}
+                onChanged={() => void reload()}
+                onQuestion={(roundId) =>
+                  setEditing({ roundId, concern: selectedConcern })
+                }
+              />
+            ) : (
+              <>
+                <h2 className="pane-title">
+                  {round?.title ?? t("questionnaire.thread")}
+                </h2>
+                <Space wrap>
+                  {compose && round?.state === "draft" && (
+                    <>
+                      <Button onClick={() => setEditing({ roundId: round.id })}>
+                        {t("questionnaire.newQuestion")}
+                      </Button>
+                      <Button
+                        disabled={
+                          busy ||
+                          !view?.questions.some((q) => q.roundId === round.id)
+                        }
+                        onClick={() =>
+                          void run(async () => {
+                            const result = await questionnaireRequest<{
+                              preview: RoundPreview;
+                            }>(
+                              basePath,
+                              `${path}/rounds/${encodeURIComponent(round.id)}/publish-preview`,
+                            );
+                            setPublication({ round, preview: result.preview });
+                          })
+                        }
+                      >
+                        {t("questionnaire.reviewRound")}
+                      </Button>
+                    </>
+                  )}
+                  {round?.state === "published" &&
+                    view?.questions.some(
+                      (q) => q.roundId === round.id && q.canAnswer,
+                    ) && (
+                      <Button
+                        loading={busy}
+                        onClick={() => void run(submitRound)}
+                      >
+                        {t("questionnaire.submitRound")}
+                      </Button>
+                    )}
+                </Space>
+                {selected ? (
+                  <>
+                    <article className="questionnaire-record">
+                      <h3>{selected.text}</h3>
+                      <Tag>{t(`questionnaire.state.${selected.state}`)}</Tag>
+                      <p>{selected.rationale}</p>
+                      {compose &&
+                        (!selected.resolvedAt ||
+                          selected.state === "confirmed") && (
+                          <Button
+                            onClick={() =>
+                              setEditing({
+                                roundId: selected.roundId,
+                                question: selected,
+                              })
+                            }
+                          >
+                            {t("questionnaire.editQuestion")}
+                          </Button>
+                        )}
+                    </article>
+                    <div className="questionnaire-answers">
+                      {submitted.map((a) => (
+                        <article
+                          className="questionnaire-answer"
+                          key={a.personId}
+                        >
+                          <h3>
+                            {format("questionnaire.answerFrom", {
+                              name: a.personName,
+                            })}
+                          </h3>
+                          <p className="muted">
+                            {new Date(
+                              a.revisions.at(-1)!.createdAt,
+                            ).toLocaleString(locale)}{" "}
+                            ·{" "}
+                            {t(
+                              a.revisions.at(-1)!.channel === "mcp"
+                                ? "questionnaire.channel.agent"
+                                : "questionnaire.channel.web",
+                            )}
+                            {a.revisions.at(-1)!.agentHost
+                              ? ` (${a.revisions.at(-1)!.agentHost})`
+                              : ""}
+                          </p>
+                          <AnswerContent
+                            answer={a.revisions.at(-1)!}
+                            type={
+                              selected.revisions.find(
+                                (r) => r.revision === a.questionRevision,
+                              )?.answerType
+                            }
+                            basePath={basePath}
+                            path={path!}
+                          />
+                        </article>
+                      ))}
+                    </div>
+                    {path && view && (
+                      <QuestionResolution
+                        key={`${selected.id}:${selected.revision}:${selected.resolutionRevision}`}
+                        question={selected}
+                        view={view}
+                        path={path}
+                        basePath={basePath}
+                        reload={reload}
+                      />
+                    )}
+                    {selected.canAnswer && path && view && (
+                      <AnswerEditor
+                        key={`answer:${selected.id}`}
+                        ref={answerEditor}
+                        basePath={basePath}
+                        path={path}
+                        question={selected}
+                        answer={ownAnswer}
+                        personId={view.personId}
+                        attachmentLimits={view.attachmentLimits}
+                        disabled={busy}
+                        onSubmitted={() => void reload()}
+                      />
+                    )}
+                    {path && view && (
+                      <QuestionThread
+                        key={`thread:${selected.id}`}
+                        basePath={basePath}
+                        path={path}
+                        questionId={selected.id}
+                        view={view}
+                        onChanged={() => void reload()}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <p className="empty-state">
+                    {t(
+                      view
+                        ? "questionnaire.selectQuestion"
+                        : "questionnaire.chooseVersion",
+                    )}
+                  </p>
+                )}
+              </>
+            )}
+          </section>
+        </div>
+      </QuestionnaireTabs>
       <Modal
         open={newConcern}
         title={t("questionnaire.raiseConcern")}

@@ -58,6 +58,270 @@ async function english(page: Page) {
   await page.getByRole("menuitem", { name: "English", exact: true }).click();
 }
 
+test("Questionnaire tabs preserve the selected question, drafts, filters, and scroll", async ({
+  browser,
+}, testInfo) => {
+  const engineer = {
+    subject: "navigation-engineer",
+    email: "navigation-engineer@example.com",
+    displayName: "Sam Engineer",
+  };
+  const expert = {
+    subject: "navigation-expert",
+    email: "navigation-expert@example.com",
+    displayName: "Dr Lin",
+  };
+  const { group } = await call<{ group: { id: string } }>("POST", "/groups", {
+    name: `Navigation ${Date.now()}`,
+  });
+  const { workflow, version } = await call<{
+    workflow: { id: string };
+    version: { id: string };
+  }>("POST", "/workflows", {
+    groupId: group.id,
+    name: `navigation-${Date.now()}`,
+    goal: "Preserve questionnaire context while reviewing jobs and readiness.",
+    intent: "new-skill",
+    locale: "en",
+  });
+  for (const [person, role] of [
+    [engineer, "Engineer"],
+    [expert, "Field expert"],
+  ] as const)
+    await call("POST", "/bindings", {
+      scopeType: "workflow",
+      scopeId: workflow.id,
+      email: person.email,
+      role,
+    });
+  const root = `/workflows/${workflow.id}/versions/${version.id}/questionnaire`;
+  const { round } = await call<{ round: { id: string } }>(
+    "POST",
+    `${root}/rounds`,
+    { title: "Sample handling" },
+    engineer,
+  );
+  const { question } = await call<{ question: { id: string } }>(
+    "POST",
+    `${root}/rounds/${round.id}/questions`,
+    {
+      text: "Which sample is accepted?",
+      topic: "scope",
+      targets: [{ kind: "workflow", id: workflow.id }],
+      rationale: Array.from(
+        { length: 50 },
+        (_, index) => `Sample requirement ${index + 1} needs expert review.`,
+      ).join("\n\n"),
+      evidence: [],
+      assignees: [{ kind: "role", role: "Field expert" }],
+      priority: 10,
+    },
+    engineer,
+  );
+  const { preview } = await call<{ preview: { confirmationHash: string } }>(
+    "GET",
+    `${root}/rounds/${round.id}/publish-preview`,
+    undefined,
+    engineer,
+  );
+  await call(
+    "POST",
+    `${root}/rounds/${round.id}/publish`,
+    { confirmed: true, confirmationHash: preview.confirmationHash },
+    engineer,
+  );
+  await call(
+    "POST",
+    `${root}/questions/${question.id}/comments`,
+    {
+      text: Array.from(
+        { length: 80 },
+        (_, index) => `Sample review note ${index + 1}.`,
+      ).join("\n"),
+    },
+    engineer,
+  );
+  const { round: draftRound } = await call<{ round: { id: string } }>(
+    "POST",
+    `${root}/rounds`,
+    { title: "Follow-up" },
+    engineer,
+  );
+  const authorContext = await browser.newContext({
+    extraHTTPHeaders: { "x-badger-test-person": JSON.stringify(engineer) },
+  });
+  const expertContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    extraHTTPHeaders: { "x-badger-test-person": JSON.stringify(expert) },
+  });
+  try {
+    const author = await authorContext.newPage();
+    const questionUrl = `${base}/questionnaire/questions/${question.id}`;
+    await author.goto(questionUrl);
+    await english(author);
+    const tabs = author.locator(".questionnaire-tabs > .ant-tabs-nav");
+    const questionsTab = tabs.getByRole("tab", {
+      name: "Rounds and questions",
+      exact: true,
+    });
+    const draftingTab = tabs.getByRole("tab", {
+      name: "Drafting jobs and suggestions",
+      exact: true,
+    });
+    const ledgerTab = tabs.getByRole("tab", {
+      name: "Ledger and readiness",
+      exact: true,
+    });
+    await author.getByTestId("question-search").fill("sample");
+    const comment = author.getByLabel("Comment text", { exact: true });
+    await comment.fill("Keep this comment until I finish checking readiness.");
+    await author.evaluate(() => window.scrollTo(0, 400));
+    await expect.poll(() => author.evaluate(() => window.scrollY)).toBe(400);
+    await draftingTab.click();
+    await expect(draftingTab).toHaveAttribute("aria-selected", "true");
+    await expect(author).toHaveURL(
+      new RegExp(`/questions/${question.id}\\?.*panel=suggestions`, "u"),
+    );
+    const contentWidth = (await author
+      .locator(".questionnaire-tabs")
+      .boundingBox())!.width;
+    expect(
+      (await author.getByRole("tabpanel").boundingBox())!.width,
+    ).toBeCloseTo(contentWidth, 0);
+    await ledgerTab.click();
+    await expect(ledgerTab).toHaveAttribute("aria-selected", "true");
+    const ledger = author.getByTestId("questionnaire-ledger");
+    await expect(ledger.getByRole("status")).toHaveText("Blocked");
+    expect(
+      (await author.getByRole("tabpanel").boundingBox())!.width,
+    ).toBeCloseTo(contentWidth, 0);
+    const baseline = ledger.getByRole("combobox", {
+      name: "Published round",
+      exact: true,
+    });
+    await baseline.click();
+    await author
+      .locator(".ant-select-dropdown")
+      .getByText("1. Sample handling", { exact: true })
+      .click();
+    await expect(author).toHaveURL(new RegExp(`sinceRound=${round.id}`, "u"));
+    await questionsTab.click();
+    await expect(questionsTab).toHaveAttribute("aria-selected", "true");
+    await expect.poll(() => author.evaluate(() => window.scrollY)).toBe(400);
+    await expect(comment).toHaveValue(
+      "Keep this comment until I finish checking readiness.",
+    );
+    await expect(author.getByTestId("question-search")).toHaveValue("sample");
+    await author.goBack();
+    await expect(ledgerTab).toHaveAttribute("aria-selected", "true");
+    await expect(baseline.locator("xpath=..")).toContainText(
+      "1. Sample handling",
+    );
+    await questionsTab.click();
+    await author
+      .getByRole("button", { name: "Hide rounds", exact: true })
+      .click();
+    await expect(author.getByTestId("explorer-pane")).toBeHidden();
+    await author
+      .getByRole("button", { name: "Show rounds", exact: true })
+      .click();
+    await expect(author.getByTestId("question-search")).toHaveValue("sample");
+    const inspectorButton = author.getByRole("button", {
+      name: "Evidence and history",
+      exact: true,
+    });
+    await inspectorButton.click();
+    const inspector = author.getByRole("dialog", {
+      name: "Evidence and history",
+      exact: true,
+    });
+    await expect(
+      inspector.getByRole("heading", {
+        name: "Which sample is accepted?",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await inspector.getByRole("tab", { name: "History", exact: true }).click();
+    await expect(
+      inspector.locator("summary").filter({ hasText: "Question revision 1" }),
+    ).toBeVisible();
+    await inspector
+      .getByRole("button", { name: "Expand view", exact: true })
+      .click();
+    await expect
+      .poll(async () => (await inspector.boundingBox())!.width)
+      .toBeCloseTo(author.viewportSize()!.width, 0);
+    await author.screenshot({
+      path: testInfo.outputPath("expanded-question-history.png"),
+      animations: "disabled",
+    });
+    await author.keyboard.press("Escape");
+    await expect(inspector).toBeHidden();
+    await expect(inspectorButton).toBeFocused();
+    await author.goto(
+      `${base}/questionnaire?workflow=${workflow.id}&version=${version.id}&round=${draftRound.id}`,
+    );
+    await author
+      .getByRole("button", { name: "New question", exact: true })
+      .click();
+    await author
+      .getByLabel("Question text", { exact: true })
+      .fill("An unfinished follow-up question");
+    await author
+      .getByLabel("Rationale", { exact: true })
+      .fill("Preserve the draft while looking at jobs.");
+    await draftingTab.click();
+    await ledgerTab.click();
+    await questionsTab.click();
+    await expect(
+      author.getByLabel("Question text", { exact: true }),
+    ).toHaveValue("An unfinished follow-up question");
+    await expect(author.getByLabel("Rationale", { exact: true })).toHaveValue(
+      "Preserve the draft while looking at jobs.",
+    );
+    await expect(author).toHaveURL(new RegExp(`round=${draftRound.id}`, "u"));
+    await author.evaluate(() => window.scrollTo(0, 0));
+    await author.screenshot({
+      path: testInfo.outputPath("questionnaire-tabs.png"),
+      fullPage: true,
+      animations: "disabled",
+    });
+
+    const respondent = await expertContext.newPage();
+    await respondent.goto(questionUrl);
+    await english(respondent);
+    await expect(
+      respondent.getByRole("tab", {
+        name: "Drafting jobs and suggestions",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await expect(respondent.getByTestId("explorer-pane")).toBeHidden();
+    await respondent
+      .getByRole("button", { name: "Show rounds", exact: true })
+      .click();
+    await expect(respondent.getByTestId("explorer-pane")).toBeVisible();
+    expect(
+      await respondent.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    await respondent
+      .getByRole("button", { name: "Evidence and history", exact: true })
+      .click();
+    expect(
+      (await respondent.getByRole("dialog").boundingBox())!.width,
+    ).toBeCloseTo(390, 0);
+    await respondent.screenshot({
+      path: testInfo.outputPath("question-evidence-mobile.png"),
+      animations: "disabled",
+    });
+  } finally {
+    await authorContext.close();
+    await expertContext.close();
+  }
+});
+
 test("question threads retain edits and expert concerns reach the Engineer for all three outcomes", async ({
   browser,
 }, testInfo) => {
@@ -312,6 +576,9 @@ test("question threads retain edits and expert concerns reach the Engineer for a
       .getByRole("link", { name: "Open question", exact: true })
       .click();
     await expect(respondent.getByTestId("answer-box")).toBeVisible();
+    await respondent
+      .getByRole("button", { name: "Evidence and history", exact: true })
+      .click();
     await expect(
       respondent
         .getByTestId("inspector-pane")

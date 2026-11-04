@@ -48,7 +48,7 @@ export const documentationEn = {
   "documentation.workflows.next":
     "Open the first incomplete stage and resolve its named blockers. Use Questionnaire for missing domain knowledge. After publication, use Install locally to preview the host command and confirm its separate commit on your computer.",
   "documentation.questionnaire.purpose":
-    "Questionnaire collects the workflow knowledge needed to build a package. Select a workflow and version, then use the explorer, main record, and inspector to follow a Question or Concern and its evidence.",
+    "Questionnaire collects the workflow knowledge needed to build a package. Select a workflow and version, then use the full-width Rounds and questions, Drafting jobs and suggestions, or Ledger and readiness tab. Drafting is available to Engineers and Administrators. In Rounds and questions, hide the rounds list when you need more reading space; Evidence and history opens a drawer for the selected Question or Concern, with an expanded-width option. Switching tabs keeps your selection, search, unfinished edits, and scroll position.",
   "documentation.questionnaire.roles":
     "Engineers compose and publish Questions and Rounds, resolve Answers, and confirm Facts. They also request drafting jobs and accept or discard the Agent's suggestions. Assigned people answer Questions; Field experts acknowledge or dispute Facts restated from their Answers and can raise Concerns. Workflow roles other than Observer can comment. Observers and Auditors read without changing records.",
   "documentation.questionnaire.answer":
@@ -203,7 +203,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.next":
     "打开第一个未完成阶段，处理列出的阻碍。缺少领域知识时使用“问卷”。发布后，通过“本地安装”预览主机命令，并在自己的计算机上单独确认提交。",
   "documentation.questionnaire.purpose":
-    "“问卷”收集构建软件包所需的工作流知识。选择工作流与版本，通过浏览区、主记录和检查区跟进问题、关注事项及其证据。",
+    "“问卷”收集构建软件包所需的工作流知识。选择工作流与版本，再使用占满内容区宽度的“轮次与问题”“起草任务与建议”或“台账与就绪状态”选项卡。起草功能仅供工程师与管理员使用。在“轮次与问题”中，可隐藏轮次列表以扩大阅读空间；“证据与历史”会打开当前问题或关注事项的抽屉，并可展开至全宽。切换选项卡会保留所选记录、搜索、未完成的编辑和滚动位置。",
   "documentation.questionnaire.roles":
     "工程师编写并发布问题和轮次、解决回答并确认事实，也可请求起草任务并接受或丢弃 Agent 的建议。被分配的人员回答问题；领域专家认可或质疑从其回答重述的事实，也可提出关注事项。除观察者外的工作流角色可评论。观察者和审计员只读，不更改记录。",
   "documentation.questionnaire.answer":

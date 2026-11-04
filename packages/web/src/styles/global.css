@@ -861,25 +861,44 @@ button.rail-link {
   );
 }
 
-/* The three-pane registry layout */
-.ledger-open .main-pane {
-  grid-column: 2 / -1;
+.questionnaire-tabs > .ant-tabs-nav {
+  position: sticky;
+  top: var(--badger-layout-top-bar-height);
+  z-index: 10;
+  background: var(--badger-color-background);
 }
 
-.three-pane {
+.questionnaire-tabs .ant-tabs-content-holder,
+.questionnaire-tabs .ant-tabs-tabpane {
+  min-width: 0;
+}
+
+.questionnaire-reading-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.questionnaire-layout {
   display: grid;
   grid-template-columns:
     minmax(
       var(--badger-layout-explorer-min-width),
       var(--badger-layout-explorer-max-width)
     )
-    minmax(0, 1fr)
-    minmax(
-      var(--badger-layout-inspector-min-width),
-      var(--badger-layout-inspector-max-width)
-    );
+    minmax(0, 1fr);
   gap: var(--badger-layout-gutter);
   align-items: start;
+}
+
+.questionnaire-layout[data-rounds-collapsed="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.questionnaire-inspector {
+  overflow-wrap: anywhere;
 }
 
 .pane {
@@ -1294,14 +1313,8 @@ button.rail-link {
   }
 }
 
-/* The panes stack below 1180px */
-
 @media (max-width: 1179px) {
-  .ledger-open .main-pane {
-    grid-column: auto;
-  }
-
-  .three-pane {
+  .questionnaire-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -1434,7 +1447,7 @@ button.rail-link {
   min-width: 100px;
   flex: 1;
 }
-.three-pane > .pane {
+.questionnaire-layout > .pane {
   min-width: 0;
   overflow-wrap: anywhere;
 }

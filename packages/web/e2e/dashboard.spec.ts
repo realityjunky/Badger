@@ -88,23 +88,24 @@ test("the rail collapses to 64px and remembers it", async ({ page }) => {
     .toBe(64);
 });
 
-test("the three panes sit in a row, then stack below 1180px", async ({
+test("rounds and the question thread share a row, collapse, and stack below 1180px", async ({
   page,
 }) => {
   await page.goto("/questionnaire/questions/q-1");
 
   const explorer = await page.getByTestId("explorer-pane").boundingBox();
   const main = await page.getByTestId("main-pane").boundingBox();
-  const inspector = await page.getByTestId("inspector-pane").boundingBox();
   expect(explorer).not.toBeNull();
   expect(main).not.toBeNull();
-  expect(inspector).not.toBeNull();
   expect(Math.abs((explorer?.y ?? 0) - (main?.y ?? 0))).toBeLessThan(2);
-  expect(Math.abs((main?.y ?? 0) - (inspector?.y ?? 0))).toBeLessThan(2);
   expect(explorer?.width).toBeGreaterThanOrEqual(260);
   expect(explorer?.width).toBeLessThanOrEqual(320);
-  expect(inspector?.width).toBeGreaterThanOrEqual(280);
-  expect(inspector?.width).toBeLessThanOrEqual(320);
+  await expect(page.getByTestId("inspector-pane")).toBeHidden();
+  await page.getByRole("button", { name: "Hide rounds", exact: true }).click();
+  await expect(page.getByTestId("explorer-pane")).toBeHidden();
+  const expandedMain = await page.getByTestId("main-pane").boundingBox();
+  expect(expandedMain!.width).toBeGreaterThan(main!.width + 250);
+  await page.getByRole("button", { name: "Show rounds", exact: true }).click();
 
   await page.setViewportSize({ width: 1100, height: 900 });
   const stackedExplorer = await page.getByTestId("explorer-pane").boundingBox();

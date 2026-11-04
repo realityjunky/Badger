@@ -200,7 +200,16 @@ them into `dist/`, so the server image carries the build and none of them.
   The Activity page shows every recorded action with its actor, time, target,
   channel, and reason, filtered by actor, action, target type, and channel.
   Auditors and Administrators read all of it.
-- Questionnaire's **Drafting jobs and suggestions** panel (#55) has a URL and
+- Questionnaire has three tabs across the available content width:
+  **Rounds and questions**, **Drafting jobs and suggestions** (Engineers and
+  Administrators), and **Ledger and readiness**. Rounds can be hidden while
+  reading or answering a question; they start hidden on narrow screens.
+  **Evidence and history** opens a drawer for the selected Question or Concern,
+  with Evidence/History tabs and an expanded-width option. Switching main tabs
+  preserves the selected record, search, local edits, and each tab's scroll
+  position. Existing job, ledger, question, and concern links still work, and
+  browser Back restores the tab.
+- Questionnaire's **Drafting jobs and suggestions** tab (#55) has a URL and
   is open to Engineers and Administrators. They request Agent drafts of
   questions, or of follow-ups to a parent question, for a draft round, and
   see each job's state; a job whose inputs changed shows as cancelled. They
@@ -229,7 +238,7 @@ them into `dist/`, so the server image carries the build and none of them.
   review and mark each pinned version studied through the shared gate
   protocol; the server advances stages and invalidates changed studies.
 - The rail is 228 px, or 64 px collapsed, and becomes a drawer below
-  1024 px. The three-pane registry layout stacks below 1180 px.
+  1024 px. The rounds navigator and question thread stack below 1180 px.
 - The Skills registry reads live group-owned entries, immutable versions,
   source inventories, and script side-effect declarations. Folder and zip
   selection starts a preview; effects stay pending while a person confirms
