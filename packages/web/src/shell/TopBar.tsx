@@ -154,7 +154,8 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
           content={
             inbox.failed ? (
               <p role="alert">{t("inbox.failed")}</p>
-            ) : inbox.page.items.length > 0 ||
+            ) : inbox.hasFilters ||
+              inbox.page.items.length > 0 ||
               inbox.page.unreadCount > 0 ||
               inbox.hasOlderPage ? (
               <Link to="/my-work#inbox" onClick={inbox.newest}>

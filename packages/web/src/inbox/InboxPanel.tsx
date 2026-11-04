@@ -1,22 +1,53 @@
-import { Alert, Button, Space, Tag } from "antd";
-import { useEffect, useRef } from "react";
+import { Alert, Button, Input, Select, Space, Tag } from "antd";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { EMPTY_INBOX_FILTERS } from "../api/inbox.js";
+import { loadWorkflows, type WorkflowCatalog } from "../api/workflows.js";
+import { readBasePath } from "../app/paths.js";
 import { useI18n } from "../i18n/I18nContext.js";
+import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import { useInbox } from "./InboxContext.js";
 import { useDemoMode } from "../app/DemoContext.js";
 
 export function InboxPanel() {
   const demoMode = useDemoMode();
-  const { page, failed, busy, mark, refresh, older, newest, hasOlderPage } =
-    useInbox();
+  const {
+    page,
+    failed,
+    busy,
+    loading,
+    filters,
+    hasFilters,
+    invalidDates,
+    setFilters,
+    mark,
+    refresh,
+    older,
+    newest,
+    hasOlderPage,
+  } = useInbox();
   const { t, format, locale } = useI18n();
+  const { notice } = useLiveUpdates();
   const location = useLocation();
   const section = useRef<HTMLElement>(null);
+  const basePath = readBasePath(document);
+  const [catalog, setCatalog] = useState<WorkflowCatalog | null>(null);
+  const [catalogFailed, setCatalogFailed] = useState(false);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadWorkflows(basePath, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setCatalog(result.kind === "ok" ? result.value : null);
+      setCatalogFailed(result.kind !== "ok");
+    });
+    return () => controller.abort();
+  }, [basePath, notice, reload]);
+
   useEffect(() => {
     if (location.hash === "#inbox")
       section.current?.scrollIntoView({ block: "start" });
   }, [location.key, location.hash, page.items.length]);
-  if (page.items.length === 0 && !failed && !hasOlderPage) return null;
   return (
     <section
       ref={section}
@@ -26,10 +57,124 @@ export function InboxPanel() {
     >
       <div className="workflow-card-heading">
         <h2 id="inbox-title">{t("inbox.title")}</h2>
-        <Button onClick={() => void refresh()}>{t("workflow.reload")}</Button>
+        <Button
+          loading={loading}
+          onClick={() => {
+            void refresh();
+            setReload((current) => current + 1);
+          }}
+        >
+          {t("workflow.reload")}
+        </Button>
       </div>
+      <div
+        className="inbox-filters"
+        role="group"
+        aria-label={t("inbox.filters.title")}
+      >
+        <div className="inbox-filter inbox-filter-workflows">
+          <label htmlFor="inbox-workflows">
+            {t("inbox.filters.workflows")}
+          </label>
+          <Select
+            id="inbox-workflows"
+            mode="multiple"
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder={t("inbox.filters.allWorkflows")}
+            value={filters.workflowIds}
+            loading={catalog === null && !catalogFailed}
+            options={(catalog?.workflows ?? []).map((workflow) => ({
+              value: workflow.id,
+              label: `${workflow.name} · ${workflow.groupName}`,
+            }))}
+            onChange={(workflowIds: string[]) =>
+              setFilters({ ...filters, workflowIds })
+            }
+          />
+        </div>
+        <div className="inbox-filter inbox-filter-status">
+          <label htmlFor="inbox-status">{t("inbox.filters.status")}</label>
+          <Select
+            id="inbox-status"
+            mode="multiple"
+            allowClear
+            placeholder={t("inbox.filters.allStatuses")}
+            value={filters.states}
+            options={(["unread", "read", "done"] as const).map((value) => ({
+              value,
+              label: t(`inbox.state.${value}`),
+            }))}
+            onChange={(states) => setFilters({ ...filters, states })}
+          />
+        </div>
+        <div className="inbox-filter">
+          <label htmlFor="inbox-from">{t("inbox.filters.from")}</label>
+          <Input
+            id="inbox-from"
+            type="date"
+            value={filters.from}
+            max={filters.to || undefined}
+            status={invalidDates ? "error" : undefined}
+            aria-invalid={invalidDates}
+            aria-describedby={invalidDates ? "inbox-date-error" : undefined}
+            onChange={(event) =>
+              setFilters({ ...filters, from: event.target.value })
+            }
+          />
+        </div>
+        <div className="inbox-filter">
+          <label htmlFor="inbox-to">{t("inbox.filters.to")}</label>
+          <Input
+            id="inbox-to"
+            type="date"
+            value={filters.to}
+            min={filters.from || undefined}
+            status={invalidDates ? "error" : undefined}
+            aria-invalid={invalidDates}
+            aria-describedby={invalidDates ? "inbox-date-error" : undefined}
+            onChange={(event) =>
+              setFilters({ ...filters, to: event.target.value })
+            }
+          />
+        </div>
+        <Button
+          disabled={!hasFilters}
+          onClick={() => setFilters(EMPTY_INBOX_FILTERS)}
+        >
+          {t("inbox.filters.clear")}
+        </Button>
+      </div>
+      <p className="muted">{t("inbox.filters.hint")}</p>
+      {invalidDates && (
+        <Alert
+          id="inbox-date-error"
+          type="error"
+          showIcon
+          message={t("inbox.filters.invalidDates")}
+        />
+      )}
+      {catalogFailed && (
+        <Alert
+          type="error"
+          showIcon
+          message={t("inbox.filters.workflowsFailed")}
+        />
+      )}
       {failed && <Alert type="error" showIcon message={t("inbox.failed")} />}
-      <ul className="inbox-items">
+      {page.items.length === 0 && !failed && !invalidDates && (
+        <p className="muted" role="status">
+          {t(
+            loading
+              ? "inbox.loading"
+              : hasFilters
+                ? "inbox.noMatches"
+                : "inbox.empty",
+          )}
+        </p>
+      )}
+      <ul className="inbox-items" aria-busy={loading}>
         {page.items.map((item) => (
           <li key={item.id} className={`inbox-item inbox-item-${item.state}`}>
             <div>
@@ -112,9 +257,15 @@ export function InboxPanel() {
         ))}
       </ul>
       <Space wrap>
-        {hasOlderPage && <Button onClick={newest}>{t("inbox.newest")}</Button>}
+        {hasOlderPage && (
+          <Button disabled={loading} onClick={newest}>
+            {t("inbox.newest")}
+          </Button>
+        )}
         {page.nextCursor !== null && (
-          <Button onClick={older}>{t("inbox.older")}</Button>
+          <Button disabled={loading} onClick={older}>
+            {t("inbox.older")}
+          </Button>
         )}
       </Space>
     </section>

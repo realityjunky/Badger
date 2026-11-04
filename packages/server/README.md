@@ -228,6 +228,12 @@ mark their own items read or unread; confirming the gate sets its items to
 done automatically. Invitations receive items before first sign-in, resolved
 through their role binding. Inbox reads recheck current workflow visibility.
 My work shows the items and deep links; the top bar shows the unread count.
+Inbox reads accept repeated `workflowId` and `state` (`unread`, `read`, `done`)
+query parameters, plus `createdFrom` (inclusive) and `createdBefore` (exclusive)
+ISO 8601 timestamps with time zones. Choices within one filter are alternatives;
+different filters combine. Filters apply before cursor pagination and preserve
+current workflow visibility and recipient checks. Aggregate counts always cover
+the person's whole authorized inbox, independent of filters or the current page.
 The dashboard receives per-person events, polls every ten seconds as a
 fallback, and refreshes on focus and navigation.
 

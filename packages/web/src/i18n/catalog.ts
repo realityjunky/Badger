@@ -1350,6 +1350,23 @@ const en = {
   "inbox.markUnread": "Mark unread",
   "inbox.older": "Older items",
   "inbox.newest": "Newest items",
+  "inbox.loading": "Loading inbox…",
+  "inbox.noMatches":
+    "No messages match these filters. Try changing or clearing them.",
+  "inbox.filters.title": "Inbox filters",
+  "inbox.filters.workflows": "Workflows",
+  "inbox.filters.allWorkflows": "All authorized workflows",
+  "inbox.filters.status": "Status",
+  "inbox.filters.allStatuses": "All statuses",
+  "inbox.filters.from": "From date",
+  "inbox.filters.to": "To date",
+  "inbox.filters.clear": "Clear filters",
+  "inbox.filters.hint":
+    "Combine filters to narrow messages. Dates include both days in your local time.",
+  "inbox.filters.invalidDates":
+    "The from date must be on or before the to date.",
+  "inbox.filters.workflowsFailed":
+    "Workflow choices could not be loaded. Reload to try again.",
   "gate.review": "Review Sources",
   "gate.confirm": "Confirm source set",
   "gate.effects":
@@ -2637,6 +2654,20 @@ const zh: Record<MessageId, string> = {
   "inbox.markUnread": "标为未读",
   "inbox.older": "更早的消息",
   "inbox.newest": "最新消息",
+  "inbox.loading": "正在加载收件箱…",
+  "inbox.noMatches": "没有符合筛选条件的消息，请修改或清除筛选条件。",
+  "inbox.filters.title": "收件箱筛选",
+  "inbox.filters.workflows": "工作流",
+  "inbox.filters.allWorkflows": "所有已授权的工作流",
+  "inbox.filters.status": "状态",
+  "inbox.filters.allStatuses": "所有状态",
+  "inbox.filters.from": "开始日期",
+  "inbox.filters.to": "结束日期",
+  "inbox.filters.clear": "清除筛选",
+  "inbox.filters.hint":
+    "可组合筛选条件缩小消息范围。日期按您的本地时间计算，包含开始和结束当天。",
+  "inbox.filters.invalidDates": "开始日期不能晚于结束日期。",
+  "inbox.filters.workflowsFailed": "无法加载工作流选项，请重新加载后再试。",
   "gate.review": "审阅来源",
   "gate.confirm": "确认来源集合",
   "gate.effects":

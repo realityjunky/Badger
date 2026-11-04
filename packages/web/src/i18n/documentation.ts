@@ -20,7 +20,7 @@ export const documentationEn = {
   "documentation.my-work.roles":
     "Each signed-in person sees their own inbox and the workflows their roles allow them to read. Opening an inbox item does not grant permission to act on its target.",
   "documentation.my-work.inbox":
-    "Open an inbox item to reach its Question, Workflow version, or Run. Mark items read or unread to keep track of what you have reviewed.",
+    "Open an inbox item to reach its Question, Workflow version, or Run. Mark items read or unread to keep track of what you have reviewed. Combine the inbox's authorized Workflow, date, and status filters; multiple choices within a filter include any selected value. Dates use the message's creation time, include both selected days in your local time, and apply across all pages. Done is set automatically when the related work closes. Clear filters to return to all messages; the bell and My work counts always cover your whole inbox.",
   "documentation.my-work.scope":
     "Use the Group, Workflow, and version selectors to narrow your work, or use Search to find a workflow, Question, or Skill. The bell opens your inbox from any page.",
   "documentation.my-work.next":
@@ -175,7 +175,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.my-work.roles":
     "每位已登录人员查看自己的收件箱，以及其角色允许读取的工作流。打开消息不会授予处理该事项的权限。",
   "documentation.my-work.inbox":
-    "打开收件箱消息可进入对应的问题、工作流版本或运行。使用已读和未读标记跟踪已审阅的内容。",
+    "打开收件箱消息可进入对应的问题、工作流版本或运行。使用已读和未读标记跟踪已审阅的内容。可组合收件箱的已授权工作流、日期和状态筛选；同一筛选中选择多项时，符合任意一项即可。日期按消息创建时间筛选，使用您的本地时间，包含开始和结束当天，并应用于所有分页。相关事项结束后会自动标为已完成。清除筛选可返回全部消息；铃铛和“我的工作”的计数始终涵盖整个收件箱。",
   "documentation.my-work.scope":
     "使用团队、工作流和版本选择器缩小范围，或通过搜索查找工作流、问题或 Skill。可从任意页面的铃铛打开收件箱。",
   "documentation.my-work.next":

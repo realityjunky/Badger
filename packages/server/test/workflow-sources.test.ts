@@ -155,7 +155,240 @@ async function setup(intent = "new-skill") {
   };
 }
 
+async function readyInboxWorkflow(
+  groupId: string,
+  skillId: string,
+  hash: string,
+  name: string,
+  recipient = engineer,
+) {
+  const response = await write("POST", "/workflows", admin, {
+    groupId,
+    name,
+    goal: "Review the source set.",
+    intent: "new-skill",
+    locale: "en",
+  });
+  expect(response.status).toBe(201);
+  const { workflow, version } = (await response.json()) as {
+    workflow: { id: string };
+    version: { id: string };
+  };
+  const assigned = await write("POST", "/bindings", admin, {
+    scopeType: "workflow",
+    scopeId: workflow.id,
+    role: "Engineer",
+    email: recipient.email,
+  });
+  expect(assigned.status).toBe(201);
+  const { binding } = (await assigned.json()) as {
+    binding: { id: string; revision: number };
+  };
+  const base = `/workflows/${workflow.id}/versions/${version.id}`;
+  expect(
+    (await write("POST", `${base}/pins`, admin, { skillId, hash })).status,
+  ).toBe(201);
+  await service.runSourceCheckJobs();
+  return { workflow, version, binding };
+}
+
 describe("workflow Skill pins and source checks", () => {
+  it("combines inbox workflow, creation-time and status filters before cursor pagination while keeping global counts", async () => {
+    const { groupId, workflow, skill, hash, base } = await setup();
+    await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });
+    await service.runSourceCheckJobs();
+    const previewed = await write(
+      "POST",
+      `${base}/gates/sources/preview`,
+      engineer,
+      {},
+    );
+    const { preview } = (await previewed.json()) as {
+      preview: { confirmationHash: string };
+    };
+    expect(
+      (
+        await write("POST", `${base}/gates/sources/commit`, engineer, {
+          confirmationHash: preview.confirmationHash,
+          requestId: "inbox-filters",
+        })
+      ).status,
+    ).toBe(200);
+
+    service.clock.advance(86_400_000);
+    const readWorkflow = await readyInboxWorkflow(
+      groupId,
+      skill.id,
+      hash,
+      "read-workflow",
+    );
+    const readResponse = await service.request("/api/v1/me/inbox", {
+      as: engineer,
+    });
+    const readPage = (await readResponse.json()) as {
+      items: { id: string; revision: number; workflowVersionId: string }[];
+    };
+    const readItem = readPage.items.find(
+      (item) => item.workflowVersionId === readWorkflow.version.id,
+    )!;
+    expect(
+      (
+        await write("PATCH", `/me/inbox/${readItem.id}`, engineer, {
+          revision: readItem.revision,
+          state: "read",
+        })
+      ).status,
+    ).toBe(200);
+    service.clock.advance(86_400_000);
+    const unreadWorkflow = await readyInboxWorkflow(
+      groupId,
+      skill.id,
+      hash,
+      "unread-workflow",
+    );
+
+    const inbox = async (query = "") => {
+      const response = await service.request(`/api/v1/me/inbox${query}`, {
+        as: engineer,
+      });
+      expect(response.status).toBe(200);
+      return (await response.json()) as {
+        items: { id: string; state: string; workflowVersionId: string }[];
+        unreadCount: number;
+        pendingCount: number;
+        pendingQuestionCount: number;
+        pendingGateCount: number;
+        nextCursor: string | null;
+      };
+    };
+    const all = await inbox();
+    expect(all.items).toHaveLength(3);
+    expect(
+      (
+        await inbox(
+          "?createdFrom=2026-10-28T08:00:00%2B08:00&createdBefore=2026-10-29T08:00:00%2B08:00",
+        )
+      ).items,
+    ).toMatchObject([{ id: readItem.id }]);
+    const counts = {
+      unreadCount: all.unreadCount,
+      pendingCount: all.pendingCount,
+      pendingQuestionCount: all.pendingQuestionCount,
+      pendingGateCount: all.pendingGateCount,
+    };
+    expect(counts).toMatchObject({
+      unreadCount: 1,
+      pendingCount: 2,
+      pendingGateCount: 2,
+    });
+    expect(
+      (await inbox(`?workflowId=${readWorkflow.workflow.id}`)).items,
+    ).toMatchObject([{ id: readItem.id, state: "read" }]);
+    expect(
+      (await inbox(`?workflowId=${workflow.id}&state=done`)).items,
+    ).toMatchObject([{ state: "done" }]);
+    expect((await inbox("?state=unread&state=read")).items).toHaveLength(2);
+    expect(
+      (
+        await inbox(
+          "?createdFrom=2026-10-28T00:00:00.000Z&createdBefore=2026-10-29T00:00:00.000Z",
+        )
+      ).items,
+    ).toMatchObject([{ id: readItem.id }]);
+    expect(
+      (await inbox("?createdFrom=2026-10-28T00:00:00.000Z")).items,
+    ).toHaveLength(2);
+    expect(
+      (await inbox("?createdBefore=2026-10-28T00:00:00.000Z")).items,
+    ).toHaveLength(1);
+    expect(
+      (await inbox(`?workflowId=${readWorkflow.workflow.id}&state=done`)).items,
+    ).toEqual([]);
+
+    const filters = `workflowId=${readWorkflow.workflow.id}&workflowId=${unreadWorkflow.workflow.id}&state=read&state=unread&createdFrom=2026-10-28T00:00:00.000Z&createdBefore=2026-10-30T00:00:00.000Z&limit=1`;
+    const first = await inbox(`?${filters}`);
+    expect(first.items).toMatchObject([
+      { workflowVersionId: unreadWorkflow.version.id },
+    ]);
+    expect(first.nextCursor).not.toBeNull();
+    expect(first).toMatchObject(counts);
+    const second = await inbox(
+      `?${filters}&cursor=${encodeURIComponent(first.nextCursor!)}`,
+    );
+    expect(second.items).toMatchObject([{ id: readItem.id }]);
+    expect(second.nextCursor).toBeNull();
+    expect(second).toMatchObject(counts);
+  });
+
+  it("rechecks workflow permission and recipient ownership even with explicit inbox filters", async () => {
+    const { groupId, skill, hash } = await setup();
+    const recipient: TestPerson = {
+      subject: "inbox-recipient",
+      email: "inbox-recipient@example.com",
+    };
+    const notified = await readyInboxWorkflow(
+      groupId,
+      skill.id,
+      hash,
+      "private-workflow",
+      recipient,
+    );
+    const query = `/api/v1/me/inbox?workflowId=${notified.workflow.id}&state=unread`;
+    const before = await service.request(query, { as: recipient });
+    expect(await before.json()).toMatchObject({
+      unreadCount: 1,
+      items: [{ state: "unread" }],
+    });
+    const otherPerson = await service.request(query, { as: lead });
+    expect(await otherPerson.json()).toMatchObject({
+      unreadCount: 0,
+      items: [],
+    });
+    const detail = await service.request(
+      `/api/v1/workflows/${notified.workflow.id}`,
+      { as: admin },
+    );
+    const { bindings } = (await detail.json()) as {
+      bindings: { id: string; revision: number }[];
+    };
+    const binding = bindings.find((entry) => entry.id === notified.binding.id)!;
+    expect(
+      (
+        await write("DELETE", `/bindings/${notified.binding.id}`, admin, {
+          revision: binding.revision,
+        })
+      ).status,
+    ).toBe(200);
+    const after = await service.request(query, { as: recipient });
+    expect(after.status).toBe(200);
+    expect(await after.json()).toMatchObject({ unreadCount: 0, items: [] });
+    const catalog = await service.request("/api/v1/workflows", {
+      as: recipient,
+    });
+    expect(await catalog.json()).toMatchObject({ workflows: [] });
+  });
+
+  it("rejects invalid inbox filter states, empty workflow IDs, malformed dates and reversed ranges", async () => {
+    service = await startTestService();
+    for (const query of [
+      "state=archived",
+      "state=unread&state=unknown",
+      "workflowId=",
+      "createdFrom=not-a-date",
+      "createdFrom=2026-02-30T00:00:00.000Z",
+      "createdFrom=0000-01-01T00:00:00.000Z",
+      "createdFrom=2026-10-28T00:00:00",
+      "createdBefore=",
+      "createdFrom=2026-10-29T00:00:00.000Z&createdBefore=2026-10-28T00:00:00.000Z",
+      "createdFrom=2026-10-28T00:00:00.000Z&createdBefore=2026-10-28T00:00:00.000Z",
+    ]) {
+      const response = await service.request(`/api/v1/me/inbox?${query}`, {
+        as: engineer,
+      });
+      expect(response.status, query).toBe(400);
+    }
+  });
+
   it("previews and confirms the exact source set and records the person's sign-off", async () => {
     const { skill, hash, base } = await setup();
     await write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash });

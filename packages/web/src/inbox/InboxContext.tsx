@@ -12,6 +12,8 @@ import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import {
   loadInbox,
   markInbox,
+  EMPTY_INBOX_FILTERS,
+  type InboxFilters,
   type InboxItem,
   type InboxPage,
 } from "../api/inbox.js";
@@ -20,6 +22,11 @@ interface InboxView {
   page: InboxPage;
   failed: boolean;
   busy: boolean;
+  loading: boolean;
+  filters: InboxFilters;
+  hasFilters: boolean;
+  invalidDates: boolean;
+  setFilters(filters: InboxFilters): void;
   hasOlderPage: boolean;
   refresh(): Promise<void>;
   mark(item: InboxItem): Promise<void>;
@@ -47,22 +54,54 @@ export function InboxProvider({
   const [page, setPage] = useState<InboxPage>(EMPTY);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [{ cursor, filters }, setQuery] = useState<{
+    cursor: string | null;
+    filters: InboxFilters;
+  }>({ cursor: null, filters: EMPTY_INBOX_FILTERS });
+  const invalidDates =
+    filters.from !== "" && filters.to !== "" && filters.from > filters.to;
+  const hasFilters =
+    filters.workflowIds.length > 0 ||
+    filters.states.length > 0 ||
+    filters.from !== "" ||
+    filters.to !== "";
   const sequence = useRef(0);
   const location = useLocation();
   const { notice } = useLiveUpdates();
   const refresh = useCallback(async () => {
     const request = ++sequence.current;
+    if (invalidDates) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     try {
-      const value = await loadInbox(basePath, cursor);
+      const value = await loadInbox(basePath, cursor, filters);
       if (request === sequence.current) {
         setPage(value);
         setFailed(false);
       }
     } catch {
       if (request === sequence.current) setFailed(true);
+    } finally {
+      if (request === sequence.current) setLoading(false);
     }
-  }, [basePath, cursor]);
+  }, [basePath, cursor, filters, invalidDates]);
+  const latestRefresh = useRef(refresh);
+  latestRefresh.current = refresh;
+
+  const changeQuery = (nextCursor: string | null, nextFilters = filters) => {
+    if (nextCursor === cursor && nextFilters === filters) {
+      void refresh();
+      return;
+    }
+    sequence.current++;
+    setPage((current) => ({ ...current, items: [], nextCursor: null }));
+    setFailed(false);
+    setLoading(true);
+    setQuery({ cursor: nextCursor, filters: nextFilters });
+  };
 
   useEffect(() => {
     if (notice.inbox) void refresh();
@@ -87,7 +126,7 @@ export function InboxProvider({
     setBusy(true);
     try {
       await markInbox(basePath, item);
-      await refresh();
+      await latestRefresh.current();
     } catch {
       setFailed(true);
     } finally {
@@ -100,13 +139,18 @@ export function InboxProvider({
         page,
         failed,
         busy,
+        loading,
+        filters,
+        hasFilters,
+        invalidDates,
+        setFilters: (value) => changeQuery(null, value),
         hasOlderPage: cursor !== null,
         refresh,
         mark,
         older: () => {
-          if (page.nextCursor !== null) setCursor(page.nextCursor);
+          if (page.nextCursor !== null) changeQuery(page.nextCursor);
         },
-        newest: () => setCursor(null),
+        newest: () => changeQuery(null),
       }}
     >
       {children}

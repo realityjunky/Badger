@@ -601,7 +601,18 @@ export function demoResponse(path: string, query: URLSearchParams): unknown {
           versionNumber: 1,
           href: `/runs/${run.id}`,
         },
-      ],
+      ].filter((item) => {
+        const workflowIds = query.getAll("workflowId");
+        const states = query.getAll("state");
+        const from = query.get("createdFrom");
+        const before = query.get("createdBefore");
+        return (
+          (workflowIds.length === 0 || workflowIds.includes(workflow.id)) &&
+          (states.length === 0 || states.includes(item.state)) &&
+          (from === null || Date.parse(item.createdAt) >= Date.parse(from)) &&
+          (before === null || Date.parse(item.createdAt) < Date.parse(before))
+        );
+      }),
       unreadCount: 2,
       pendingCount: 2,
       pendingQuestionCount: 1,

@@ -27,6 +27,38 @@
   padding: 0;
 }
 
+.inbox-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin-top: 16px;
+}
+.inbox-filter {
+  display: flex;
+  flex: 1 1 160px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.inbox-filter-workflows {
+  flex-basis: 260px;
+}
+.inbox-filter-status {
+  flex-basis: 200px;
+}
+.inbox-filter .ant-select {
+  width: 100%;
+}
+.inbox-filter .ant-select .ant-select-selection-item {
+  max-width: 100%;
+  height: auto;
+}
+.inbox-filter .ant-select .ant-select-selection-item-content {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 #sources,
 #package,
 #inbox {

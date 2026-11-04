@@ -25,6 +25,13 @@ them into `dist/`, so the server image carries the build and none of them.
 
 ## Behavior
 
+- My work's Inbox combines filters for authorized Workflows, message creation
+  dates, and Unread, Read, or Done status. Workflow and status selectors allow
+  multiple choices. Dates include both selected days in the viewer's local
+  time. Filtering runs on the server across all pages, and changing a filter
+  returns to the newest matching items. Clear filters restores all messages;
+  the bell and My work counts continue to describe the whole inbox.
+
 - **Documentation** (#94) sits in the left sidebar's System section on every
   page and opens the current section's guide. The nine stable `help` query values
   are `my-work`, `workflows`, `questionnaire`, `skills`, `runs`, `evaluations`, `activity`,

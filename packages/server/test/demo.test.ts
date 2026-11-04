@@ -112,6 +112,33 @@ describe("the read-only demo", () => {
     }
   });
 
+  it("filters the demo inbox by workflow, status and creation time while retaining global counts", async () => {
+    service = await startTestService();
+    await service.closeDatabase();
+    const read = async (query: string) => {
+      const response = await service!.request(`/demo/api/v1/me/inbox?${query}`);
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    const all = await read("");
+    const at = all.items[0].createdAt;
+    expect(
+      await read(
+        `workflowId=demo-workflow&state=unread&state=read&createdFrom=${at}`,
+      ),
+    ).toMatchObject({
+      items: all.items,
+      unreadCount: 2,
+    });
+    for (const query of [
+      "workflowId=real-workflow",
+      "state=read&state=done",
+      `createdBefore=${at}`,
+      "createdFrom=2099-01-01T00:00:00.000Z",
+    ])
+      expect(await read(query)).toMatchObject({ items: [], unreadCount: 2 });
+  });
+
   it("shows the released version's package, review, and publication that its evaluation and Run cite", async () => {
     service = await startTestService();
     await service.closeDatabase();

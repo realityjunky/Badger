@@ -1,5 +1,19 @@
 import { apiUrl } from "../app/paths.js";
 
+export type InboxState = "unread" | "read" | "done";
+export interface InboxFilters {
+  workflowIds: string[];
+  states: InboxState[];
+  from: string;
+  to: string;
+}
+export const EMPTY_INBOX_FILTERS: InboxFilters = {
+  workflowIds: [],
+  states: [],
+  from: "",
+  to: "",
+};
+
 export interface InboxItem {
   id: string;
   workflowVersionId: string;
@@ -22,7 +36,7 @@ export interface InboxItem {
   questionText: string | null;
   concernId: string | null;
   concernText: string | null;
-  state: "unread" | "read" | "done";
+  state: InboxState;
   revision: number;
   href: string;
   createdAt: string;
@@ -39,9 +53,24 @@ export interface InboxPage {
 export async function loadInbox(
   basePath: string,
   cursor: string | null,
+  filters: InboxFilters = EMPTY_INBOX_FILTERS,
 ): Promise<InboxPage> {
-  const query = cursor === null ? "" : `?cursor=${encodeURIComponent(cursor)}`;
-  const response = await fetch(apiUrl(basePath, `/me/inbox${query}`), {
+  const query = new URLSearchParams();
+  if (cursor !== null) query.set("cursor", cursor);
+  for (const id of filters.workflowIds) query.append("workflowId", id);
+  for (const state of filters.states) query.append("state", state);
+  if (filters.from !== "")
+    query.set(
+      "createdFrom",
+      new Date(`${filters.from}T00:00:00`).toISOString(),
+    );
+  if (filters.to !== "") {
+    const end = new Date(`${filters.to}T00:00:00`);
+    end.setDate(end.getDate() + 1);
+    query.set("createdBefore", end.toISOString());
+  }
+  const suffix = query.size > 0 ? `?${query}` : "";
+  const response = await fetch(apiUrl(basePath, `/me/inbox${suffix}`), {
     credentials: "same-origin",
   });
   if (!response.ok) throw new Error("inbox.failed");

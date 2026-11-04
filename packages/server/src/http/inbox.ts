@@ -1,10 +1,29 @@
-import { decodeInboxCursor, listInbox, markInboxItem } from "../inbox.js";
+import {
+  decodeInboxCursor,
+  listInbox,
+  markInboxItem,
+  type InboxState,
+} from "../inbox.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 import { objectInput } from "./errors.js";
 
 const ROOT = "/api/v1/me/inbox";
 const ITEM = /^\/api\/v1\/me\/inbox\/([^/]+)$/u;
+
+function validTimestamp(value: string): boolean {
+  return (
+    /^(?!0000)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u.test(
+      value,
+    ) &&
+    Number.isFinite(Date.parse(value)) &&
+    new Date(value).getUTCFullYear() > 0 &&
+    new Date(`${value.slice(0, 10)}T00:00:00.000Z`)
+      .toISOString()
+      .slice(0, 10) === value.slice(0, 10)
+  );
+}
+
 export function inboxMethods(path: string): string | null {
   return path === ROOT ? "GET, HEAD" : ITEM.test(path) ? "PATCH" : null;
 }
@@ -44,9 +63,35 @@ export async function handleInbox(input: AuthorizedRequest): Promise<void> {
         "invalid",
         "Use a limit from 1 to 200 and a cursor issued by this service",
       );
+    const workflowIds = url.searchParams.getAll("workflowId");
+    const states = url.searchParams.getAll("state");
+    const createdFrom = url.searchParams.get("createdFrom");
+    const createdBefore = url.searchParams.get("createdBefore");
+    if (
+      workflowIds.some((id) => id.trim().length === 0) ||
+      states.some((state) => !["unread", "read", "done"].includes(state)) ||
+      [createdFrom, createdBefore].some(
+        (date) => date !== null && !validTimestamp(date),
+      ) ||
+      (createdFrom !== null &&
+        createdBefore !== null &&
+        Date.parse(createdFrom) >= Date.parse(createdBefore))
+    )
+      return reply.error(
+        400,
+        "invalid",
+        "Use workflow IDs, states unread, read or done, and increasing ISO 8601 timestamps with time zones",
+      );
     return reply.json(
       200,
-      await listInbox(database, access, person, limit, after),
+      await listInbox(database, access, person, limit, after, {
+        workflowIds,
+        states: states as InboxState[],
+        createdFrom:
+          createdFrom === null ? null : new Date(createdFrom).toISOString(),
+        createdBefore:
+          createdBefore === null ? null : new Date(createdBefore).toISOString(),
+      }),
     );
   }
   const body = await readJsonBody(request);

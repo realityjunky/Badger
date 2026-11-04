@@ -7,6 +7,12 @@ import { toIsoString } from "./util.js";
 import type { WorkflowRole } from "./workflow-access.js";
 
 export type InboxState = "unread" | "read" | "done";
+export interface InboxFilters {
+  workflowIds: readonly string[];
+  states: readonly InboxState[];
+  createdFrom: string | null;
+  createdBefore: string | null;
+}
 export type InboxKind =
   | "gate-ready"
   | "gate-invalidated"
@@ -221,6 +227,7 @@ export async function listInbox(
   person: Person,
   limit: number,
   after: InboxPosition | null,
+  filters: InboxFilters,
 ) {
   const visibility = await visibleGroups(database, access, person);
   const params: unknown[] = [
@@ -240,14 +247,30 @@ export async function listInbox(
             count(distinct (i.workflow_version_id, i.gate)) filter (where i.state <> 'done' and i.question_id is null and i.concern_id is null)::int as gate_count from ${FROM} where ${VISIBLE}`,
     params,
   );
-  const older =
-    after === null
-      ? ""
-      : " and (i.created_at, i.id) < ($4::timestamptz, $5::text)";
-  if (after !== null) params.push(after.createdAt, after.id);
+  let filtered = "";
+  if (filters.workflowIds.length > 0) {
+    params.push(filters.workflowIds);
+    filtered += ` and w.id = any($${params.length}::text[])`;
+  }
+  if (filters.states.length > 0) {
+    params.push(filters.states);
+    filtered += ` and i.state = any($${params.length}::text[])`;
+  }
+  if (filters.createdFrom !== null) {
+    params.push(filters.createdFrom);
+    filtered += ` and i.created_at >= $${params.length}::timestamptz`;
+  }
+  if (filters.createdBefore !== null) {
+    params.push(filters.createdBefore);
+    filtered += ` and i.created_at < $${params.length}::timestamptz`;
+  }
+  if (after !== null) {
+    params.push(after.createdAt, after.id);
+    filtered += ` and (i.created_at, i.id) < ($${params.length - 1}::timestamptz, $${params.length}::text)`;
+  }
   params.push(limit + 1);
   const rows = await database.query<InboxRow>(
-    `select ${COLUMNS} from ${FROM} where ${VISIBLE}${older}
+    `select ${COLUMNS} from ${FROM} where ${VISIBLE}${filtered}
       order by i.created_at desc, i.id desc limit $${params.length}`,
     params,
   );
