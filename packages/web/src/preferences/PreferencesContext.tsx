@@ -15,9 +15,15 @@ import {
 } from "./api.js";
 import {
   DEFAULT_PREFERENCES,
+  type Language,
   type Preferences,
   type StoredPreferences,
 } from "./model.js";
+import {
+  readPortalLanguage,
+  subscribePortalLanguage,
+  writePortalLanguage,
+} from "./portalLanguage.js";
 import {
   createPreferencesSaver,
   type PreferencesView,
@@ -56,6 +62,11 @@ export function PreferencesProvider({
   });
   const [person, setPerson] = useState<Person | null>(null);
   const [status, setStatus] = useState<"loading" | "ready">("loading");
+  // The central workspace is the outer layer. Its language, when present,
+  // wins over the server preference for the life of this page.
+  const [portalLanguage, setPortalLanguage] = useState<Language | null>(() =>
+    readPortalLanguage(),
+  );
 
   const saver = useMemo(
     () =>
@@ -79,6 +90,12 @@ export function PreferencesProvider({
           return;
         }
         saver.adopt(loaded);
+        // Nothing above Badger has chosen yet: publish the saved preference so
+        // the workspace and the other same-origin surfaces agree on it.
+        if (readPortalLanguage() === null) {
+          writePortalLanguage(loaded.language);
+          setPortalLanguage(loaded.language);
+        }
         setPerson(signedIn);
       })
       .catch(() => {
@@ -95,8 +112,15 @@ export function PreferencesProvider({
     };
   }, [basePath, saver]);
 
+  useEffect(() => subscribePortalLanguage(setPortalLanguage), []);
+
   const update = useCallback(
     (patch: Partial<Preferences>) => {
+      if (patch.language !== undefined) {
+        // A choice made inside Badger is also made for every other surface.
+        writePortalLanguage(patch.language);
+        setPortalLanguage(patch.language);
+      }
       if (demoMode) {
         setView((current) => ({
           preferences: { ...current.preferences, ...patch },
@@ -109,15 +133,23 @@ export function PreferencesProvider({
     [saver, demoMode],
   );
 
+  const preferences = useMemo<StoredPreferences>(
+    () =>
+      portalLanguage === null
+        ? view.preferences
+        : { ...view.preferences, language: portalLanguage },
+    [view.preferences, portalLanguage],
+  );
+
   const value = useMemo<PreferencesContextValue>(
     () => ({
-      preferences: view.preferences,
+      preferences,
       person,
       status,
       saveState: view.saveState,
       update,
     }),
-    [view, person, status, update],
+    [preferences, person, status, update],
   );
 
   return (
