@@ -27,6 +27,9 @@ export const documentationSections = [
       "documentation.questionnaire.answer",
       "documentation.questionnaire.resolve",
       "documentation.questionnaire.ledger",
+      "documentation.questionnaire.drafting.scenario",
+      "documentation.questionnaire.drafting.work",
+      "documentation.questionnaire.drafting.review",
     ],
   },
   {

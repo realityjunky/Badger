@@ -50,13 +50,19 @@ export const documentationEn = {
   "documentation.questionnaire.purpose":
     "Questionnaire collects the workflow knowledge needed to build a package. Select a workflow and version, then use the explorer, main record, and inspector to follow a Question or Concern and its evidence.",
   "documentation.questionnaire.roles":
-    "Engineers compose and publish Questions and Rounds, resolve Answers, and confirm Facts. Assigned people answer Questions; Field experts acknowledge or dispute Facts restated from their Answers and can raise Concerns. Workflow roles other than Observer can comment. Observers and Auditors read without changing records.",
+    "Engineers compose and publish Questions and Rounds, resolve Answers, and confirm Facts. They also request drafting jobs and accept or discard the Agent's suggestions. Assigned people answer Questions; Field experts acknowledge or dispute Facts restated from their Answers and can raise Concerns. Workflow roles other than Observer can comment. Observers and Auditors read without changing records.",
   "documentation.questionnaire.answer":
     "Read the Question, its reason, requested answer format, and evidence before saving an Answer. Use the thread for discussion and attach synthetic examples when useful. Answer revisions retain their history.",
   "documentation.questionnaire.resolve":
     "The Engineer reviews an Answer and records a Resolution: confirm it, ask a follow-up, defer with a reason, or withdraw. A confirmed Fact restating an expert's Answer still needs that expert's acknowledgement; a dispute reopens the Question.",
   "documentation.questionnaire.ledger":
     "Inspect the Ledger's confirmed user Facts, source-derived Facts, Inferences, unresolved Assumptions, and remaining Questions. Review an Agent's drafting result before accepting it; an unaccepted draft is not an agreed Fact.",
+  "documentation.questionnaire.drafting.scenario":
+    "Drafting jobs and suggestions: use this panel when a draft round needs questions or follow-ups, or when a pinned Skill, an answered Question, or a translation needs an Agent's first pass. Your Agent drafts from the pinned evidence and submitted records, never from private drafts. Each job waits in the queue, is claimed by an Agent, and then waits for your review; a job is cancelled when the inputs its kind read change, such as the pins, the round, or the Questions.",
+  "documentation.questionnaire.drafting.work":
+    "Request drafting offers six kinds. Draft questions and Draft follow-ups write into a draft round you choose, and follow-ups may also name a parent Question. Study a source Skill drafts source-derived Facts and interfaces for one pinned Skill version. Restate an answer as facts drafts formal Facts from an answered Question. Translate a question takes the source Question and a target language such as zh-CN. Import a Skill's open questions takes a pinned Skill version and a draft round. Create a draft round first when the kind needs one; the request cannot be sent while a required field is empty.",
+  "documentation.questionnaire.drafting.review":
+    "Review suggestions: open a submitted result and inspect each suggestion's text, rationale, answer type, topic, and priority. Edit a suggestion in full, remove it from acceptance, or keep your edits for the rest of the review. Review decision previews the exact batch and its hash; only your hash-bound confirmation accepts it, and accepted questions are created in the chosen draft round, which you still review and publish separately. Discard suggestions requires a reason and takes the same hash-bound confirmation. Accepted restatements still need the answering expert's acknowledgement.",
   "documentation.questionnaire.next":
     "Clear the open Questions, acknowledgement requests, and readiness blockers. The Engineer can then compose the dossier in Workflows using the current Ledger evidence.",
   "documentation.skills.purpose":
@@ -199,13 +205,19 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.questionnaire.purpose":
     "“问卷”收集构建软件包所需的工作流知识。选择工作流与版本，通过浏览区、主记录和检查区跟进问题、关注事项及其证据。",
   "documentation.questionnaire.roles":
-    "工程师编写并发布问题和轮次、解决回答并确认事实。被分配的人员回答问题；领域专家认可或质疑从其回答重述的事实，也可提出关注事项。除观察者外的工作流角色可评论。观察者和审计员只读，不更改记录。",
+    "工程师编写并发布问题和轮次、解决回答并确认事实，也可请求起草任务并接受或丢弃 Agent 的建议。被分配的人员回答问题；领域专家认可或质疑从其回答重述的事实，也可提出关注事项。除观察者外的工作流角色可评论。观察者和审计员只读，不更改记录。",
   "documentation.questionnaire.answer":
     "保存回答前，阅读问题、提问原因、要求的回答格式与证据。通过讨论串交流，并在需要时附上合成示例。回答的每次修订都会保留历史。",
   "documentation.questionnaire.resolve":
     "工程师审阅回答并记录解决结果：确认、提出追问、说明原因后暂缓，或撤回。从专家回答重述的已确认事实仍需该专家认可；质疑会重新打开问题。",
   "documentation.questionnaire.ledger":
     "检查台账中的已确认用户事实、来源事实、推断、未决假设和剩余问题。接受 Agent 起草结果前先审阅；尚未接受的草稿不是已达成共识的事实。",
+  "documentation.questionnaire.drafting.scenario":
+    "起草任务与建议：当草稿轮次需要问题或追问，或固定的 Skill、已回答的问题、翻译需要 Agent 先行起草时，使用此面板。Agent 依据已固定的证据和已提交的记录起草，从不读取私有草稿。任务先排队，由 Agent 领取，再等待您审核；当该类别读取的输入（如固定版本、轮次或问题）发生变化时，任务会被取消。",
+  "documentation.questionnaire.drafting.work":
+    "“请求起草”提供六种类别。“起草问题”和“起草追问”写入您选择的草稿轮次，追问还可指定父问题；“研读来源 Skill”为一个固定的 Skill 版本起草来源事实和接口；“将回答重述为事实”从已回答的问题起草正式事实；“翻译问题”需要来源问题和目标语言（例如 zh-CN）；“导入 Skill 的开放问题”需要固定的 Skill 版本和草稿轮次。类别需要轮次时请先创建草稿轮次；必填项为空时无法发送请求。",
+  "documentation.questionnaire.drafting.review":
+    "审核建议：打开已提交的结果，检查每条建议的文本、理由、回答类型、主题和优先级。可完整编辑建议、将其从本次接受中移除，或保留修改继续审核。“审核决定”会预览确切批次及其哈希；只有经您确认的哈希绑定操作才会接受，接受的问题会创建在所选草稿轮次中，仍需您单独审核并发布。“丢弃建议”必须填写原因，并采用同样的哈希绑定确认。被接受的重述事实仍需作答专家认可。",
   "documentation.questionnaire.next":
     "处理未解决问题、待认可请求及就绪阻碍后，工程师可返回“工作流”，根据当前台账证据编写语义档案。",
   "documentation.skills.purpose":
