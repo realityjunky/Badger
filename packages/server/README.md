@@ -106,6 +106,8 @@ inbox and cancels queued personal posts. An Administrator may suspend a robot
 without seeing its Secret.
 
 **Notification routes** choose one destination for one Badger event and scope.
+The dashboard's **Add route** form can select several events at once and creates
+one stored route per event with that shared scope and destination.
 Events include questions assigned, answers submitted, concerns raised, gates
 ready, evaluations finished, drafts submitted, and similar inbox events. A
 workflow route overrides a Group route, and a Group route overrides an
@@ -145,6 +147,10 @@ and reminders** panel. Group leads set defaults in **Settings → Channel
 addresses**; the nearest ancestor Group default applies unless a workflow has
 its own robot. Saving explicitly queues a test post. The saved webhook is
 masked; a replacement is optional when editing its label or chat language.
+The channel editor also retains **Long connection · personal chat** for a
+direct personal destination on one Workflow or Group channel; it does not
+select a WeCom group chat. For reusable personal routes across all work,
+Groups, and Workflows, use **My WeCom robots** instead.
 Disconnecting cancels queued and retrying posts for that channel. Each post
 through a Group default records its Group: the Group's Delivery log, shown
 beside its robot settings, holds the default's test posts and every
@@ -153,11 +159,25 @@ key, an HMAC of the webhook under `BADGER_NOTIFICATION_KEY`, as the before
 and after hash: a label edit keeps the hash, and a different chat changes it,
 without the webhook entering the Activity log.
 
-People set their WeCom userid or mobile in **Settings → Channel addresses**
-and choose mention events in **Settings → Notifications**. A userid follows
+**Channel addresses** and **My WeCom robots** serve different delivery paths.
+The userid or mobile in **Settings → Channel addresses** supplies @mentions
+for shared webhook chats: userid takes precedence over mobile, with a plain
+name as the fallback. Group leads and Administrators also manage Group robot
+defaults on that tab. **My WeCom robots** registers personal long-connection
+robots and routes, using each robot's separately saved userid and verified
+personal chat. Channel addresses is optional for personal delivery; saving an
+address does not register, verify, or update a personal robot. Personal routes
+and shared channels operate independently, so both can send the same event.
+**Badger inbox only** suppresses the matching personal route's post; it does
+not disconnect a shared channel.
+
+People choose external notification events in **Settings → Notifications**.
+These choices apply to both personal robot delivery and shared chat mentions;
+opting out of an event suppresses both while its inbox items still arrive.
+A userid follows
 WeCom's rule: up to 64 letters, digits, and `_-@.`, starting with a letter or
 digit; `@all`, which would mention the whole chat, is refused in any letter
-case. Opting out affects chat mentions only; inbox items still arrive. Text
+case. Text
 messages support userid and mobile mentions; people with neither appear by
 name. A pending invitation appears as "Invited person", so posts never carry
 an email address. Posts carry only workflow names, curated waiting-event

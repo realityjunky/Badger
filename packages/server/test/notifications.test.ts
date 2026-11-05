@@ -286,7 +286,7 @@ describe("WeCom long-connection personal notifications", () => {
       {
         revision: 0,
         confirmed: true,
-        event: "question-assigned",
+        events: ["question-assigned", "answer-submitted"],
         scopeType: "all",
         scopeId: "",
         robotId: second.robot.id,
@@ -305,7 +305,12 @@ describe("WeCom long-connection personal notifications", () => {
     const routes = await call<{
       routes: { event: string; scopeType: string; robotId: string }[];
     }>("GET", "/me/robot-routes", undefined, owner);
-    expect(routes.routes).toHaveLength(2);
+    expect(routes.routes).toHaveLength(3);
+    expect(routes.routes.map((route) => route.event).sort()).toEqual([
+      "answer-submitted",
+      "gate-ready",
+      "question-assigned",
+    ]);
     await call(
       "POST",
       "/me/robots",

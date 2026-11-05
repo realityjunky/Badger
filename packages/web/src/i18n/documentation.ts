@@ -14,6 +14,9 @@ export const documentationEn = {
   "documentation.roles": "Who can act",
   "documentation.actions": "Important actions",
   "documentation.steps": "Setup steps",
+  "documentation.notifications.title": "Badger event items",
+  "documentation.notifications.purpose":
+    "These are the kinds of inbox items used by Notifications and Add route. An event describes what needs attention; it does not perform or approve the action. Open the item in Badger to review its evidence and act with your role. Approval requested includes confirmation and Run gates as well as approvals. Reading a notification does not complete the work.",
   "documentation.next": "Next step",
   "documentation.administration": "Administration",
   "documentation.my-work.purpose":
@@ -149,8 +152,12 @@ export const documentationEn = {
     "Choose Light, Dark, or System, adjust text size, or collapse navigation. Select English or 中文 here or with Language in the top bar. Check the saved or failed status; a failed save only applies locally until it succeeds. In demo mode only appearance and language are available for this visit.",
   "documentation.settings.tokens":
     "In Personal access tokens, select the scopes your Agent needs, review creation, and copy the secret when shown once. Keep it private and revoke unused tokens. Use the MCP setup instructions for your Agent host; a token can draft within its scopes but cannot approve or answer gates for you.",
+  "documentation.settings.chatModes":
+    "You can use personal and group chats together. For reusable personal delivery, create a long-connection robot in WeCom, register its Bot ID and Secret in My WeCom robots, verify your personal chat, and add routes. The workflow or Group channel editor also retains a direct Long connection · personal chat option for one channel; it does not target a group chat. For a shared WeCom group chat, create a group robot in that chat and copy its webhook URL. A Workflow owner connects it in the workflow's Notifications and reminders by choosing Group robot webhook; a Group lead or Administrator can instead set a Group robot default under Channel addresses. These are separate Badger connections. A Group scope in a personal route filters Badger work; its destination remains your personal chat.",
   "documentation.settings.notifications":
-    "Choose notification events, set your mention identity, and manage permitted Group robot channels. Use delivery history to investigate a failed notification without sharing webhook secrets.",
+    "In Notifications, choose which events may reach you through personal robot routes and shared chat mentions. Turning an event off suppresses both; your Badger inbox still receives the item. In My WeCom robots, register and verify a personal robot, then add routes choosing an event, scope, and destination. See Badger event items below for every event's meaning. Use delivery history to investigate failures.",
+  "documentation.settings.channels":
+    "Channel addresses supplies your WeCom userid or mobile for @mentions in shared webhook chats. Badger prefers userid, then mobile, and otherwise lists your name. Group leads and Administrators also manage Group robot defaults on this tab; a workflow's own channel overrides its inherited default. My WeCom robots uses each robot's separately saved and verified userid, so Channel addresses is optional for personal delivery and does not register or verify a robot. Personal routes and shared channels operate independently: both can send the same event. Badger inbox only stops that personal route's post; it does not disconnect a shared channel.",
   "documentation.settings.next":
     "Return to My work or your workflow. Confirm that your Agent uses the intended profile and that important requests reach your chosen notification channel.",
   "documentation.settings.robots.purpose":
@@ -164,7 +171,7 @@ export const documentationEn = {
   "documentation.settings.robots.step.verify":
     "4. On the robot card, choose Verify personal chat. Open a one-to-one chat with the robot in WeCom and send the exact one-time `link ...` command. Wait until the card says Chat verified and Connected.",
   "documentation.settings.robots.step.route":
-    "5. In Notification routes, choose Add route. Select the Badger event, scope (All my work, a Group, or a Workflow), and this robot as the destination. Choose Badger inbox only when the event should stay inside Badger.",
+    "5. In Notification routes, choose Add route. Select one or more Badger events, scope (All my work, a Group, or a Workflow), and this robot as the destination. Badger creates one route for each selected event. Scope filters Badger work; choosing Group does not send to a WeCom group chat. Choose Badger inbox only to suppress the matching personal posts; separately configured shared channels are unaffected.",
   "documentation.settings.robots.step.test":
     "6. Choose Test on the verified robot, confirm the message arrives in your personal WeCom chat, and then trigger a matching Badger event. Use the Delivery log when you need to inspect a queued, sent, retried, or failed post.",
   "documentation.settings.robots.next":
@@ -186,6 +193,9 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.roles": "谁可以操作",
   "documentation.actions": "主要操作",
   "documentation.steps": "设置步骤",
+  "documentation.notifications.title": "Badger 事件事项",
+  "documentation.notifications.purpose":
+    "这些是“通知”和“添加路由”所使用的收件箱事项类型。事件说明什么需要处理，不会代您执行或批准操作。请在 Badger 中打开事项、审阅证据，并按自己的角色处理。“等待审批”也包括确认关卡和运行关卡。阅读通知不等于完成待办。",
   "documentation.next": "下一步",
   "documentation.administration": "管理",
   "documentation.my-work.purpose":
@@ -321,8 +331,12 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
     "选择浅色、深色或跟随系统，调整字号或折叠导航。在此或顶部“语言”中选择 English 或中文。检查已保存或失败状态；保存失败时，更改仅在本地生效，直到保存成功。演示模式仅可在本次访问中调整外观与语言。",
   "documentation.settings.tokens":
     "在“个人访问令牌”中选择 Agent 所需权限，审阅创建操作，并复制仅展示一次的秘密值。妥善保管并撤销不用的令牌。按 MCP 配置说明连接 Agent 主机；令牌可在其权限内起草，但不能替您批准或回答关卡。",
+  "documentation.settings.chatModes":
+    "个人聊天和群聊可以同时使用。可复用的个人投递：在企业微信创建长连接机器人，在“我的企业微信机器人”中登记 Bot ID 和 Secret，验证个人聊天，再添加路由。工作流或团队的渠道编辑器还保留“长连接·个人聊天”选项，用于单个渠道；它不会指向群聊。共享企业微信群聊：在目标群中创建群机器人，复制其 webhook URL，由工作流负责人在工作流的“通知与提醒”中选择“群机器人 Webhook”并连接；团队负责人或管理员也可在“通知地址”中设置团队默认机器人。这是 Badger 中两个独立的连接。个人路由中的“团队”范围只筛选 Badger 工作，目的地仍是您的个人聊天。",
   "documentation.settings.notifications":
-    "选择通知事件、设置自己的提醒身份，并管理有权配置的群机器人渠道。通过投递历史调查通知失败，不要分享 webhook 秘密值。",
+    "在“通知”中选择哪些事件可以通过个人机器人路由发送消息，或在共享群聊中 @ 您。关闭某事件会同时停止这两种提醒；Badger 收件箱仍会收到事项。在“我的企业微信机器人”中登记并验证个人机器人，再添加路由，选择事件、范围和目的地。下方“Badger 事件事项”解释了每类事件的含义。通过投递历史调查失败原因。",
+  "documentation.settings.channels":
+    "“通知地址”提供企业微信 userid 或手机号，用于共享 webhook 群聊中的 @ 提及。Badger 优先使用 userid，其次使用手机号，均未填写则仅显示姓名。团队负责人和管理员还可在此选项卡管理团队默认机器人；工作流自己的渠道优先于继承的默认渠道。“我的企业微信机器人”使用每个机器人单独保存并验证的 userid，因此个人投递无需填写“通知地址”，填写地址也不会登记或验证机器人。个人路由和共享渠道各自独立，两者均配置时，同一事件可能在两处收到。“仅 Badger 收件箱”只停止该个人路由的消息，不会断开共享渠道。",
   "documentation.settings.next":
     "返回“我的工作”或工作流，确认 Agent 使用了预期的配置，重要请求能够送达您选择的通知渠道。",
   "documentation.settings.robots.purpose":
@@ -336,7 +350,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.settings.robots.step.verify":
     "4. 在机器人卡片中点击“验证个人聊天”。在企业微信中打开与机器人的单聊，并发送完整的一次性 `link ...` 命令。等待卡片显示“个人聊天已验证”和“已连接”。",
   "documentation.settings.robots.step.route":
-    "5. 在“通知路由”中点击“添加路由”。选择 Badger 事件、范围（我的全部工作、团队或工作流）以及这个机器人作为目的地。如果事件只应留在 Badger，请选择“仅 Badger 收件箱”。",
+    "5. 在“通知路由”中点击“添加路由”。选择一个或多个 Badger 事件、范围（我的全部工作、团队或工作流）以及这个机器人作为目的地。Badger 会为每个所选事件创建一条路由。范围只筛选 Badger 工作；选择“团队”不会向企业微信群聊发送消息。选择“仅 Badger 收件箱”可停止匹配的个人消息；单独配置的共享渠道不受影响。",
   "documentation.settings.robots.step.test":
     "6. 在已验证的机器人上点击“发送测试”，确认个人企业微信聊天收到消息，然后触发匹配的 Badger 事件。需要检查排队、已发送、重试或失败消息时，查看投递日志。",
   "documentation.settings.robots.next":

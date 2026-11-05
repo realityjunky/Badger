@@ -92,6 +92,13 @@ test("Documentation is in the sidebar, opens the current section, and links to e
     ).toBeVisible();
   }
   await expect(page).toHaveURL(/\/my-work\?help=settings$/);
+  await expect(guide).toContainText("Approval requested");
+  await expect(guide).toContainText(
+    "Channel addresses supplies your WeCom userid",
+  );
+  await expect(guide).toContainText(
+    "You can use personal and group chats together.",
+  );
   await page.keyboard.press("Escape");
   await expect(guide).toBeHidden();
   await expect(documentation).toBeFocused();

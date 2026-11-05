@@ -1,6 +1,7 @@
 import { Button, Modal } from "antd";
 import { useEffect, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { NOTIFICATION_EVENTS } from "../api/notifications.js";
 import { useDemoMode } from "../app/DemoContext.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import {
@@ -158,6 +159,25 @@ export function DocumentationDialog() {
                 </ol>
                 <h4>{t("documentation.next")}</h4>
                 <p>{t(subsection.next)}</p>
+              </section>
+            )}
+            {(section.id === "my-work" || section.id === "settings") && (
+              <section aria-labelledby="documentation-events-title">
+                <h3 id="documentation-events-title">
+                  {t("documentation.notifications.title")}
+                </h3>
+                <p>{t("documentation.notifications.purpose")}</p>
+                <dl className="documentation-effects">
+                  {NOTIFICATION_EVENTS.map((event) => (
+                    <div key={event}>
+                      <dt>
+                        <strong>{t(`notifications.event.${event}`)}</strong>{" "}
+                        <code>{event}</code>
+                      </dt>
+                      <dd>{t(`robots.eventHelp.${event}`)}</dd>
+                    </div>
+                  ))}
+                </dl>
               </section>
             )}
             {section.id === "skills" && (

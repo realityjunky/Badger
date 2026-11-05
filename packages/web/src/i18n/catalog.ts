@@ -257,14 +257,14 @@ const en = {
     "{name} · v{number}: answer submitted for resolution",
   "notifications.title": "Notifications and reminders",
   "notifications.channelHelp":
-    "Connect a WeCom robot. Posts contain only the workflow name, what is waiting, counts, and a link.",
+    "For a shared WeCom group chat, choose Group robot webhook and paste the URL of the robot created in that chat. For personal delivery, use My WeCom robots. Posts contain only the workflow name, what is waiting, counts, and a link.",
   "notifications.preferencesHelp":
-    "Choose which events mention you in the team chat. Your in-app inbox always stays active.",
+    "Choose which events reach your personal robot routes and mention you in shared chats. Turning an event off stops both; your Badger inbox always stays active.",
   "notifications.wecomUserId": "WeCom userid",
   "notifications.mobile": "Mobile number",
   "notifications.identityInvalid":
     "Enter a valid WeCom userid or mobile number, or leave it blank.",
-  "notifications.mentionEvents": "Mention me for",
+  "notifications.mentionEvents": "Notify me for",
   "notifications.save": "Save notification preferences",
   "notifications.saved": "Notification preferences saved.",
   "notifications.failed":
@@ -285,7 +285,7 @@ const en = {
   "notifications.recipientHelp":
     "Use your enterprise member userid, not the Bot ID or your mobile number. Open a personal chat with this robot first.",
   "notifications.longConnectionHelp":
-    "Use the Bot ID and Secret of your long-connection robot to receive notifications in your personal chat. Messages to the robot return a link to My work; sign in to Badger to act.",
+    "This connection type delivers to one personal chat with the Bot ID, Secret, and userid below. For reusable personal routes across all work, Groups, and Workflows, prefer My WeCom robots. For a shared group chat, choose Group robot webhook instead. Messages to a personal robot return a link to My work; sign in to Badger to act.",
   "notifications.replaceCredentials":
     "Saved fields are masked. Leave a field blank to keep it, or enter a replacement.",
   "notifications.webhookUrl": "Robot webhook URL",
@@ -307,7 +307,7 @@ const en = {
   "notifications.robotSettings": "Team chat robot",
   "robots.title": "My WeCom robots",
   "robots.help":
-    "Register personal WeCom robots here. Badger stores their credentials encrypted and uses the route rules below to choose one robot for each notification event.",
+    "Register personal WeCom robots here. Badger stores their credentials encrypted and uses the route rules below to choose one robot for each notification event. Each robot uses its own saved and verified userid; Channel addresses is optional for personal delivery.",
   "robots.cliHelp":
     "The installed wecom-cli is a separate assistant client. Badger does not depend on its terminal process or local credentials.",
   "robots.deploymentMissing": "The deployment is not ready for robot delivery",
@@ -334,7 +334,7 @@ const en = {
   "robots.testConfirm": "Queue a test message for this robot?",
   "robots.testQueued": "Test message queued.",
   "robots.credentialsHelp":
-    "Credentials are used only by Badger's worker. They are masked after saving and never shown in delivery logs.",
+    "This robot delivers to your verified personal chat. For a shared group chat, connect a Group robot webhook in the workflow's Notifications and reminders or Group robot defaults under Channel addresses. Credentials are used only by Badger's worker, masked after saving, and never shown in delivery logs.",
   "robots.enabled": "Use this robot for matching routes",
   "robots.repliesEnabled": "Allow replies with a My work link",
   "robots.repliesOn": "Replies enabled",
@@ -344,7 +344,7 @@ const en = {
   "robots.managePersonal": "Manage my personal WeCom robots",
   "robots.routes": "Notification routes",
   "robots.routesHelp":
-    "Choose one robot for an event and scope. Leave the destination as Inbox only to keep that event inside Badger.",
+    "Choose one personal robot for one or more events and a scope. Adding several events creates one route per event with the same scope and destination. All my work, Group, and Workflow filter your Badger work; every robot destination here is your personal chat. Badger inbox only stops this personal route's post; separately configured shared channels are unaffected.",
   "robots.eventsHelp": "What each Badger event means",
   "robots.eventHelp.gate-ready":
     "An approval or confirmation gate is waiting, such as a proposal, dossier, plan, source, package, publication, or Run gate.",
@@ -374,6 +374,8 @@ const en = {
     "Remove this route? Matching events will stay in the Badger inbox.",
   "robots.noRoutes": "No notification routes are configured.",
   "robots.event": "Badger event",
+  "robots.events": "Badger events",
+  "robots.eventsRequired": "Choose at least one event.",
   "robots.scope": "Scope",
   "robots.destination": "Destination robot",
   "robots.inboxOnly": "Badger inbox only",
@@ -1418,7 +1420,7 @@ const en = {
     "Copy is unavailable. Select and copy the secret yourself.",
   "settings.channels.title": "Channel addresses",
   "settings.channels.description":
-    "Your WeCom userid or mobile number, so posts can mention you.",
+    "Your identity for @mentions in shared WeCom webhook chats: userid first, then mobile, otherwise name only. For personal chat delivery, use My WeCom robots and verify the userid saved with each robot. These addresses do not register or verify a personal robot.",
   "settings.saved": "Saved",
   "settings.saving": "Saving…",
   "settings.failed":
@@ -1715,14 +1717,14 @@ const zh: Record<MessageId, string> = {
   "inbox.answerSubmitted": "{name} · v{number}：回答已提交，等待处理",
   "notifications.title": "通知与提醒",
   "notifications.channelHelp":
-    "连接企业微信机器人。消息仅包含工作流名称、待办类型、数量和链接。",
+    "如需向共享企业微信群聊发消息，请选择“群机器人 Webhook”，并粘贴在目标群创建的机器人 URL。个人投递请使用“我的企业微信机器人”。消息仅包含工作流名称、待办类型、数量和链接。",
   "notifications.preferencesHelp":
-    "选择哪些事件在团队群中提及你。站内收件箱始终保留全部待办。",
+    "选择哪些事件通过个人机器人路由通知你，并在共享群聊中 @ 你。关闭某事件会同时停止这两种提醒；Badger 收件箱始终保留全部待办。",
   "notifications.wecomUserId": "企业微信 userid",
   "notifications.mobile": "手机号码",
   "notifications.identityInvalid":
     "请输入有效的企业微信 userid 或手机号码，也可以留空。",
-  "notifications.mentionEvents": "这些事件在群中提及我",
+  "notifications.mentionEvents": "通知我的事件",
   "notifications.save": "保存通知偏好",
   "notifications.saved": "通知偏好已保存。",
   "notifications.failed":
@@ -1742,7 +1744,7 @@ const zh: Record<MessageId, string> = {
   "notifications.recipientHelp":
     "请使用企业成员 userid，不是 Bot ID 或手机号码。请先打开与此机器人的个人聊天。",
   "notifications.longConnectionHelp":
-    "填写长连接机器人的 Bot ID 和 Secret，在个人聊天中接收通知。向机器人发送消息会获得“我的工作”链接；请登录 Badger 处理待办。",
+    "此连接方式使用下面的 Bot ID、Secret 和 userid 向一个个人聊天投递。若要让个人路由覆盖全部工作、团队和工作流，建议使用“我的企业微信机器人”。若要向共享群聊发送消息，请改选“群机器人 Webhook”。向个人机器人发送消息会获得“我的工作”链接；请登录 Badger 处理待办。",
   "notifications.replaceCredentials":
     "已保存的字段已隐藏。留空则保留，或填写新的值。",
   "notifications.webhookUrl": "机器人 Webhook URL",
@@ -1764,7 +1766,7 @@ const zh: Record<MessageId, string> = {
   "notifications.robotSettings": "团队群机器人",
   "robots.title": "我的企业微信机器人",
   "robots.help":
-    "在此登记个人企业微信机器人。Badger 会加密保存凭据，并按下方路由规则为每类通知选择一个机器人。",
+    "在此登记个人企业微信机器人。Badger 会加密保存凭据，并按下方路由规则为每类通知选择一个机器人。每个机器人使用单独保存并验证的 userid；个人投递无需填写“通知地址”。",
   "robots.cliHelp":
     "已安装的 wecom-cli 是独立的个人助手客户端。Badger 不依赖终端进程或其本地凭据。",
   "robots.deploymentMissing": "部署尚未准备好发送机器人消息",
@@ -1790,7 +1792,7 @@ const zh: Record<MessageId, string> = {
   "robots.testConfirm": "为此机器人排队一条测试消息？",
   "robots.testQueued": "测试消息已排队。",
   "robots.credentialsHelp":
-    "凭据仅供 Badger worker 使用。保存后会隐藏，投递日志不会显示凭据。",
+    "此机器人向已验证的个人聊天投递消息。如需向共享群聊发消息，请在工作流的“通知与提醒”或“通知地址”中的“团队默认机器人”连接群机器人 Webhook。凭据仅供 Badger worker 使用，保存后会隐藏，投递日志不会显示凭据。",
   "robots.enabled": "将此机器人用于匹配的路由",
   "robots.repliesEnabled": "允许回复“我的工作”链接",
   "robots.repliesOn": "已启用回复",
@@ -1800,7 +1802,7 @@ const zh: Record<MessageId, string> = {
   "robots.managePersonal": "管理我的个人企业微信机器人",
   "robots.routes": "通知路由",
   "robots.routesHelp":
-    "为某类事件和范围选择一个机器人。目的地选择“仅 Badger 收件箱”即可不发送企业微信消息。",
+    "为一个或多个事件和范围选择一个个人机器人。一次添加多个事件会为每个事件创建相同范围和目的地的路由。“我的全部工作”“团队”和“工作流”只筛选 Badger 工作；这里的机器人目的地始终是个人聊天。“仅 Badger 收件箱”只停止此个人路由的消息；单独配置的共享渠道不受影响。",
   "robots.eventsHelp": "Badger 各事件的含义",
   "robots.eventHelp.gate-ready":
     "审批或确认门槛正在等待处理，例如提案、档案、计划、来源、软件包、发布或 Run 门槛。",
@@ -1822,6 +1824,8 @@ const zh: Record<MessageId, string> = {
   "robots.deleteRouteConfirm": "移除此路由？匹配的事件会保留在 Badger 收件箱。",
   "robots.noRoutes": "尚未配置通知路由。",
   "robots.event": "Badger 事件",
+  "robots.events": "Badger 事件",
+  "robots.eventsRequired": "至少选择一个事件。",
   "robots.scope": "范围",
   "robots.destination": "目的机器人",
   "robots.inboxOnly": "仅 Badger 收件箱",
@@ -2808,7 +2812,7 @@ const zh: Record<MessageId, string> = {
   "tokens.copyFailed": "无法自动复制，请自行选中并复制密钥。",
   "settings.channels.title": "通知地址",
   "settings.channels.description":
-    "填写企业微信账号或手机号，以便在消息中 @ 你。",
+    "此处身份用于共享企业微信 webhook 群聊中的 @ 提及：优先使用 userid，其次使用手机号，均未填写则仅显示姓名。个人聊天投递请使用“我的企业微信机器人”，并验证每个机器人单独保存的 userid。填写此处地址不会登记或验证个人机器人。",
   "settings.saved": "已保存",
   "settings.saving": "正在保存…",
   "settings.failed": "你的选择未能保存。重试前仅在当前页面生效。",

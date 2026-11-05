@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Form,
   Modal,
   Popconfirm,
@@ -10,6 +11,7 @@ import {
 } from "antd";
 import { useEffect, useState } from "react";
 import {
+  NOTIFICATION_EVENTS,
   notificationRequest,
   type NotificationEvent,
   type PersonalRobot,
@@ -25,18 +27,13 @@ interface RouteOptions {
   workflows: { id: string; name: string }[];
 }
 
-const EVENT_DESCRIPTIONS: readonly NotificationEvent[] = [
-  "gate-ready",
-  "gate-invalidated",
-  "question-assigned",
-  "answer-submitted",
-  "restatement-ready",
-  "question-reopened",
-  "concern-raised",
-  "job-submitted",
-  "evaluation-finished",
-  "script-effect-review",
-];
+interface RouteFormValues {
+  event?: NotificationEvent;
+  events?: NotificationEvent[];
+  scopeType: "all" | "group" | "workflow";
+  scopeId?: string;
+  robotId: string | null;
+}
 
 export function PersonalRobotRoutes({
   robots,
@@ -55,7 +52,7 @@ export function PersonalRobotRoutes({
   );
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
-  const [form] = Form.useForm<PersonalRobotRoute>();
+  const [form] = Form.useForm<RouteFormValues>();
   const scope = Form.useWatch("scopeType", form) ?? "all";
   useEffect(() => {
     const controller = new AbortController();
@@ -79,7 +76,7 @@ export function PersonalRobotRoutes({
       <details>
         <summary>{t("robots.eventsHelp")}</summary>
         <ul>
-          {EVENT_DESCRIPTIONS.map((event) => (
+          {NOTIFICATION_EVENTS.map((event) => (
             <li key={event}>
               <strong>{t(`notifications.event.${event}`)}:</strong>{" "}
               {t(`robots.eventHelp.${event}`)}
@@ -95,7 +92,12 @@ export function PersonalRobotRoutes({
         onClick={() => {
           setEditing(null);
           form.resetFields();
-          form.setFieldsValue({ scopeType: "all", scopeId: "", robotId: null });
+          form.setFieldsValue({
+            events: [],
+            scopeType: "all",
+            scopeId: "",
+            robotId: null,
+          });
         }}
       >
         {t("robots.addRoute")}
@@ -127,7 +129,12 @@ export function PersonalRobotRoutes({
                   onClick={() => {
                     setEditing(route);
                     form.resetFields();
-                    form.setFieldsValue(route);
+                    form.setFieldsValue({
+                      event: route.event,
+                      scopeType: route.scopeType,
+                      scopeId: route.scopeId,
+                      robotId: route.robotId,
+                    });
                   }}
                 >
                   {t("robots.editRoute")}
@@ -175,6 +182,7 @@ export function PersonalRobotRoutes({
           disabled={busy}
           onFinish={async (values) => {
             setBusy(true);
+            const events = editing ? [values.event] : values.events;
             const result = await notificationRequest(
               basePath,
               editing
@@ -182,7 +190,7 @@ export function PersonalRobotRoutes({
                 : "/me/robot-routes",
               editing ? "PUT" : "POST",
               {
-                event: values.event,
+                ...(editing ? { event: values.event } : { events }),
                 scopeType: values.scopeType,
                 scopeId: values.scopeType === "all" ? "" : values.scopeId,
                 robotId: values.robotId,
@@ -199,18 +207,35 @@ export function PersonalRobotRoutes({
             } else setReason(result.message || t("notifications.failed"));
           }}
         >
-          <Form.Item
-            name="event"
-            label={t("robots.event")}
-            rules={[{ required: true }]}
-          >
-            <Select
-              options={options?.events.map((event) => ({
-                value: event,
-                label: t(`notifications.event.${event}`),
-              }))}
-            />
-          </Form.Item>
+          {editing ? (
+            <Form.Item
+              name="event"
+              label={t("robots.event")}
+              rules={[{ required: true }]}
+            >
+              <Select
+                options={options?.events.map((event) => ({
+                  value: event,
+                  label: t(`notifications.event.${event}`),
+                }))}
+              />
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="events"
+              label={t("robots.events")}
+              rules={[
+                { type: "array", min: 1, message: t("robots.eventsRequired") },
+              ]}
+            >
+              <Checkbox.Group
+                options={options?.events.map((event) => ({
+                  value: event,
+                  label: t(`notifications.event.${event}`),
+                }))}
+              />
+            </Form.Item>
+          )}
           <Form.Item
             name="scopeType"
             label={t("robots.scope")}

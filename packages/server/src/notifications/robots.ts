@@ -406,15 +406,25 @@ export async function saveRobotRoute(
 ) {
   requireRobotSession(input);
   const body = objectInput(value);
+  const events = Array.isArray(body.events)
+    ? body.events
+    : body.event === undefined
+      ? []
+      : [body.event];
   if (
-    !NOTIFICATION_EVENTS.includes(body.event as NotificationEvent) ||
+    events.length === 0 ||
+    events.some(
+      (event) => !NOTIFICATION_EVENTS.includes(event as NotificationEvent),
+    ) ||
+    new Set(events).size !== events.length ||
+    (id !== null && events.length !== 1) ||
     !["all", "group", "workflow"].includes(body.scopeType as string) ||
     typeof body.scopeId !== "string" ||
     !(body.robotId === null || typeof body.robotId === "string")
   )
     throw new RequestError(
       400,
-      "Choose an event, a scope, and a personal robot or inbox only",
+      "Choose one or more distinct events, a scope, and a personal robot or inbox only",
     );
   const options = await robotRouteOptions(input);
   if (
@@ -443,41 +453,50 @@ export async function saveRobotRoute(
     confirmRevision(body, current?.revision ?? 0);
     if (body.robotId !== null)
       await ownedRobot(tx, input.person.id, body.robotId as string);
-    const duplicate = await tx.query(
-      "select 1 from personal_robot_routes where person_id=$1 and event=$2 and scope_type=$3 and scope_id=$4 and id<>$5",
-      [input.person.id, body.event, body.scopeType, body.scopeId, id ?? ""],
+    const duplicate = await tx.query<{ event: NotificationEvent }>(
+      "select event from personal_robot_routes where person_id=$1 and event=any($2::text[]) and scope_type=$3 and scope_id=$4 and id<>$5",
+      [input.person.id, events, body.scopeType, body.scopeId, id ?? ""],
     );
     if (duplicate.rows.length > 0)
       throw new RequestError(
         409,
-        "A route already exists for this event and scope; edit that route",
+        `A route already exists for ${duplicate.rows
+          .map(({ event }) => event)
+          .join(", ")} in this scope; edit that route`,
       );
-    const routeId = id ?? input.dependencies.ids.next();
-    const route = (
-      await tx.query<RobotRouteRow>(
-        `insert into personal_robot_routes (id,person_id,event,scope_type,scope_id,robot_id,revision) values ($1,$2,$3,$4,$5,$6,$7)
+    const routes: RobotRouteRow[] = [];
+    for (const event of events as NotificationEvent[]) {
+      const routeId = id ?? input.dependencies.ids.next();
+      const route = (
+        await tx.query<RobotRouteRow>(
+          `insert into personal_robot_routes (id,person_id,event,scope_type,scope_id,robot_id,revision) values ($1,$2,$3,$4,$5,$6,$7)
       on conflict (id) do update set event=excluded.event, scope_type=excluded.scope_type, scope_id=excluded.scope_id, robot_id=excluded.robot_id, revision=excluded.revision returning *`,
-        [
-          routeId,
-          input.person.id,
-          body.event,
-          body.scopeType,
-          body.scopeId,
-          body.robotId,
-          (current?.revision ?? 0) + 1,
-        ],
-      )
-    ).rows[0]!;
+          [
+            routeId,
+            input.person.id,
+            event,
+            body.scopeType,
+            body.scopeId,
+            body.robotId,
+            (current?.revision ?? 0) + 1,
+          ],
+        )
+      ).rows[0]!;
+      routes.push(route);
+    }
     await cancelPersonalPosts(tx, input.person.id);
-    await auditRobot(
-      input,
-      tx,
-      "personal_robot.route_saved",
-      routeId,
-      current?.revision ?? null,
-      route.revision,
-    );
-    return { route: publicRoute(route) };
+    for (const route of routes)
+      await auditRobot(
+        input,
+        tx,
+        "personal_robot.route_saved",
+        route.id,
+        current?.revision ?? null,
+        route.revision,
+      );
+    return id === null
+      ? { routes: routes.map(publicRoute) }
+      : { route: publicRoute(routes[0]!) };
   });
 }
 

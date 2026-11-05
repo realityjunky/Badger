@@ -314,6 +314,16 @@ them into `dist/`, so the server image carries the build and none of them.
   language from the parts Remind returns, with an absolute link from the
   page's origin and base path.
 
+- Dashboard **Documentation → My work** and **Personal settings** explain
+  all ten Badger event items, including **Approval requested** and its
+  confirmation and Run gates. The guide and route controls share the same
+  event list and translated definitions. **Channel addresses** provides
+  @mention identities for shared webhook chats and, for Group leads and
+  Administrators, Group robot defaults. **My WeCom robots** manages personal
+  delivery with independently saved and verified userids; Channel addresses
+  is optional for it. The guide explains that both delivery paths can post
+  the same event, and **Notifications** event preferences apply to both.
+
 - Workflow versions include **Package** (#60). After initialization, Engineers
   review and confirm generation against the exact proposal, plan, and Creator
   state hashes. The panel follows worker progress and lists the scaffold hash,

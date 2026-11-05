@@ -3,17 +3,19 @@ import { formatMessage, message } from "../i18n/catalog.js";
 import type { Language } from "../preferences/model.js";
 import { isRecord } from "../util/records.js";
 
-export type NotificationEvent =
-  | "gate-ready"
-  | "script-effect-review"
-  | "gate-invalidated"
-  | "question-assigned"
-  | "answer-submitted"
-  | "restatement-ready"
-  | "question-reopened"
-  | "concern-raised"
-  | "job-submitted"
-  | "evaluation-finished";
+export const NOTIFICATION_EVENTS = [
+  "gate-ready",
+  "gate-invalidated",
+  "question-assigned",
+  "answer-submitted",
+  "restatement-ready",
+  "question-reopened",
+  "concern-raised",
+  "job-submitted",
+  "evaluation-finished",
+  "script-effect-review",
+] as const;
+export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 export interface NotificationPreferences {
   revision: number;
   wecomUserId: string | null;

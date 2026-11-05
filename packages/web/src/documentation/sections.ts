@@ -76,7 +76,9 @@ export const documentationSections = [
     actions: [
       "documentation.settings.preferences",
       "documentation.settings.tokens",
+      "documentation.settings.chatModes",
       "documentation.settings.notifications",
+      "documentation.settings.channels",
     ],
     subsections: [
       {
