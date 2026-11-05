@@ -18,6 +18,7 @@ import {
 import { useI18n } from "../../i18n/I18nContext.js";
 import { StructuredAnswerControl } from "./StructuredAnswerControl.js";
 import { AnswerAttachments } from "./AnswerAttachments.js";
+import { AgentPromptButton } from "../../components/AgentPromptButton.js";
 
 export interface AnswerEditorHandle {
   flush(): Promise<Answer | null>;
@@ -225,6 +226,17 @@ export const AnswerEditor = forwardRef<
   };
   return (
     <div className="questionnaire-answer-editor">
+      <AgentPromptButton
+        basePath={basePath}
+        path={`${path}/questions/${encodeURIComponent(question.id)}/prompt`}
+        label={t("prompts.copyAnswer")}
+        disabled={disabled || stale || uploading || submitting}
+        beforeCopy={async () => {
+          const result = await flush();
+          if (pending.current !== null && !result)
+            throw new Error(t("questionnaire.failed"));
+        }}
+      />
       <label className="field-label" id="answer-label" htmlFor="answer-box">
         {t("questionnaire.answer")}
       </label>

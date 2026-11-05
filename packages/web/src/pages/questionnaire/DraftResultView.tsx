@@ -1,4 +1,4 @@
-import { Input } from "antd";
+import { Alert, Button, Input } from "antd";
 import { Link } from "react-router-dom";
 import type { DraftingResult } from "../../api/drafting-jobs.js";
 import type {
@@ -160,7 +160,17 @@ export function DraftResultView({
             <DraftEvidence evidence={fact.evidence} />
           </section>
         ))}
-        <h3>{t("study.interfaces")}</h3>
+        {result.interfaces.length > 0 && (
+          <>
+            <Alert type="warning" title={t("prompts.legacyInterfaces")} />
+            {onChange && (
+              <Button onClick={() => onChange({ ...result, interfaces: [] })}>
+                {t("prompts.removeInterfaces")}
+              </Button>
+            )}
+            <h3>{t("study.interfaces")}</h3>
+          </>
+        )}
         {result.interfaces.map((entry, index) => (
           <section className="drafting-suggestion" key={index}>
             <p>

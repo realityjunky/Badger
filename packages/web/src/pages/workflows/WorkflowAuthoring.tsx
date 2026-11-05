@@ -6,6 +6,7 @@ import type {
   AuthoringLaneOutput,
 } from "@realityjunky/badger";
 import { questionnaireRequest } from "../../api/questionnaire.js";
+import { AgentPromptButton } from "../../components/AgentPromptButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
 type LaneJob = {
@@ -228,6 +229,12 @@ export function WorkflowAuthoring({
                       : t("authoring.laneDraft")}
                   </Tag>
                   <Tag>{job.status}</Tag>
+                  {canManage && job.status === "queued" && (
+                    <AgentPromptButton
+                      basePath={basePath}
+                      path={`${path}/drafting-jobs/${job.id}/prompt`}
+                    />
+                  )}
                   {canManage && job.status === "submitted" && (
                     <Button
                       onClick={() => {

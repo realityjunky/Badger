@@ -1,12 +1,14 @@
 import type { Language } from "../preferences/model.js";
 import { documentationEn, documentationZh } from "./documentation.js";
 import { effectsEn, effectsZh } from "./effects.js";
+import { promptsEn, promptsZh } from "./prompts.js";
 
 /**
  * Every message the dashboard shows, keyed by a stable message ID. Records
  * keep the language they were written in; only the interface is translated.
  */
 const en = {
+  ...promptsEn,
   ...effectsEn,
   ...documentationEn,
   "demo.title": "Demo mode · read-only",
@@ -1484,6 +1486,7 @@ const en = {
 export type MessageId = keyof typeof en;
 
 const zh: Record<MessageId, string> = {
+  ...promptsZh,
   ...effectsZh,
   ...documentationZh,
   "demo.title": "演示模式 · 只读",

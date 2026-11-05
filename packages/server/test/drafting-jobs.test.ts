@@ -621,7 +621,7 @@ it("filters roles and scopes and lets only a person discard reviewed suggestions
     engineer,
     201,
   );
-  await request(base, "GET", undefined, expertScope, engineer, 403);
+  await request(base, "GET", undefined, expertScope, engineer, 200);
   const { job } = await request(
     base,
     "POST",
@@ -629,6 +629,14 @@ it("filters roles and scopes and lets only a person discard reviewed suggestions
     undefined,
     engineer,
     201,
+  );
+  await request(
+    `${base}/${job.id}/claim`,
+    "POST",
+    { revision: job.revision },
+    expertScope,
+    engineer,
+    403,
   );
   const claimed = (
     await request(

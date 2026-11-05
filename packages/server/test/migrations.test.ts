@@ -63,6 +63,34 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("preserves saved prompt template revisions while allowing the head to advance", async () => {
+    const test = await freshDatabase();
+    await applyMigrations(test.database, await loadBundledMigrations(), clock);
+    await insertPerson(test);
+    await test.database.query(
+      "insert into prompt_template_heads (template_id, revision) values ('source-study', 1)",
+    );
+    await test.database.query(
+      "insert into prompt_template_revisions (template_id, revision, body, content_hash, person_id, created_at) values ('source-study', 1, 'Read the target Skill.', $1, 'person-1', $2)",
+      ["a".repeat(64), clock.now()],
+    );
+    for (const statement of [
+      "update prompt_template_revisions set body = 'Changed history'",
+      "delete from prompt_template_revisions",
+      "truncate prompt_template_revisions",
+    ])
+      await expect(test.database.query(statement)).rejects.toThrow(
+        /immutable/u,
+      );
+    await test.database.query(
+      "update prompt_template_heads set revision = 2 where template_id = 'source-study'",
+    );
+    expect(
+      (await test.database.query("select body from prompt_template_revisions"))
+        .rows,
+    ).toEqual([{ body: "Read the target Skill." }]);
+  });
+
   it("requires resolving duplicate Engineer assignments before enforcing one assignment including pending invitations", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
@@ -1066,7 +1094,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0045");
+    expect(upgraded.applied.at(-1)).toBe("0046");
     expect(
       (
         await test.database.query(
@@ -1236,6 +1264,7 @@ describe("reviewed SQL migrations", () => {
       "0043",
       "0044",
       "0045",
+      "0046",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -1288,6 +1317,7 @@ describe("reviewed SQL migrations", () => {
         "0043",
         "0044",
         "0045",
+        "0046",
       ],
       pending: [],
       drifted: [],
@@ -1338,6 +1368,8 @@ describe("reviewed SQL migrations", () => {
       "personal_robots",
       "plan_heads",
       "plan_versions",
+      "prompt_template_heads",
+      "prompt_template_revisions",
       "published_packages",
       "question_answers",
       "question_comments",
@@ -1439,6 +1471,7 @@ describe("reviewed SQL migrations", () => {
         "0043",
         "0044",
         "0045",
+        "0046",
       ],
       pending: [],
       drifted: [],
@@ -1446,7 +1479,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(45);
+    expect(rows.rows[0]?.count).toBe(46);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

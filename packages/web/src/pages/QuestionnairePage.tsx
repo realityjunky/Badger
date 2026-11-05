@@ -2,6 +2,7 @@ import { SearchOutlined } from "@ant-design/icons";
 import {
   Alert,
   Button,
+  Checkbox,
   Input,
   InputNumber,
   Modal,
@@ -24,6 +25,7 @@ import {
 } from "../api/questionnaire.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
+import { StageReviewGuidance } from "../components/StageReviewGuidance.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import { workflowVersionLabel } from "../util/workflowVersion.js";
@@ -70,6 +72,7 @@ export function QuestionnairePage() {
   const [busy, setBusy] = useState(false);
   const [newRound, setNewRound] = useState(false);
   const [roundTitle, setRoundTitle] = useState("");
+  const [queueQuestions, setQueueQuestions] = useState(true);
   const [newConcern, setNewConcern] = useState(false);
   const [concernText, setConcernText] = useState("");
   const [editing, setEditing] = useState<{
@@ -345,6 +348,7 @@ export function QuestionnairePage() {
         )}
       </div>
       {failure && <Alert type="error" showIcon message={failure} />}
+      {view && <StageReviewGuidance stage="questionnaire" />}
       <QuestionnaireTabs
         key={path ?? "unselected"}
         activeTab={activeTab}
@@ -747,11 +751,11 @@ export function QuestionnairePage() {
               basePath,
               `${path}/rounds`,
               "POST",
-              { title: roundTitle },
+              { title: roundTitle, draftQuestions: queueQuestions },
             );
             setNewRound(false);
             navigate(
-              `/questionnaire?${versionQuery}&round=${encodeURIComponent(result.round.id)}`,
+              `/questionnaire?${versionQuery}&round=${encodeURIComponent(result.round.id)}${queueQuestions ? "&panel=suggestions" : ""}`,
             );
             await reload();
           })
@@ -766,6 +770,15 @@ export function QuestionnairePage() {
           maxLength={200}
           onChange={(event) => setRoundTitle(event.target.value)}
         />
+        <p>
+          <Checkbox
+            checked={queueQuestions}
+            onChange={(event) => setQueueQuestions(event.target.checked)}
+          >
+            {t("prompts.queueQuestions")}
+          </Checkbox>
+        </p>
+        <p className="muted">{t("prompts.roundHelp")}</p>
       </Modal>
       <Modal
         open={publication !== null}

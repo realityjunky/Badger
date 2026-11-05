@@ -156,9 +156,16 @@ export function parseStudyContent(
       400,
       "columns must be an array of at most 100 column names",
     );
+  const producer = skillRef(value.producer);
+  const consumer = skillRef(value.consumer);
+  if (producer.skillId === consumer.skillId)
+    throw new RequestError(
+      400,
+      "An interface between Skills requires distinct producer and consumer Skills",
+    );
   return {
-    producer: skillRef(value.producer),
-    consumer: skillRef(value.consumer),
+    producer,
+    consumer,
     artifact: text(value.artifact, "artifact"),
     columns: value.columns.map((v) => text(v, "column", 256)),
     naming: text(value.naming, "naming"),

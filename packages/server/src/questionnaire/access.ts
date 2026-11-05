@@ -16,7 +16,9 @@ export async function questionnaireCapabilities(
   const roles = new Set(grants.rows.map((grant) => grant.role));
   const administrator = isAdministrator(access);
   const expertScope =
-    access.tokenScopes === undefined || access.tokenScopes.includes("expert");
+    access.tokenScopes === undefined ||
+    access.tokenScopes.includes("expert") ||
+    access.tokenScopes.includes("engineer");
   const compose =
     (administrator || roles.has("Engineer")) &&
     (access.tokenScopes === undefined ||
@@ -24,10 +26,13 @@ export async function questionnaireCapabilities(
   return {
     compose,
     reviewSuggestions:
-      access.tokenScopes === undefined &&
+      expertScope &&
       (administrator || roles.has("Engineer") || roles.has("Field expert")),
     answer:
-      expertScope && (roles.has("Field expert") || roles.has("Workflow owner")),
+      expertScope &&
+      (roles.has("Field expert") ||
+        roles.has("Workflow owner") ||
+        roles.has("Engineer")),
     comment:
       (administrator || [...roles].some((role) => role !== "Observer")) &&
       (access.tokenScopes === undefined ||
@@ -38,6 +43,8 @@ export async function questionnaireCapabilities(
     resolve: compose && access.tokenScopes === undefined,
     acknowledge:
       access.tokenScopes === undefined &&
-      (roles.has("Field expert") || roles.has("Workflow owner")),
+      (roles.has("Field expert") ||
+        roles.has("Workflow owner") ||
+        roles.has("Engineer")),
   };
 }

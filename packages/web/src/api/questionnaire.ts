@@ -31,7 +31,7 @@ export interface QuestionContent {
   }[];
   assignees: (
     | { kind: "person"; personId: string }
-    | { kind: "role"; role: "Workflow owner" | "Field expert" }
+    | { kind: "role"; role: "Workflow owner" | "Field expert" | "Engineer" }
   )[];
   priority: number;
 }

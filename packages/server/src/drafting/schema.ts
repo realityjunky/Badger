@@ -94,7 +94,7 @@ const questionSchema = object({
         object({ kind: { const: "person" }, personId: text(200) }),
         object({
           kind: { const: "role" },
-          role: { enum: ["Workflow owner", "Field expert"] },
+          role: { enum: ["Workflow owner", "Field expert", "Engineer"] },
         }),
       ],
     },
@@ -168,7 +168,9 @@ const SOURCE_STUDY_SCHEMA = {
       },
       interfaces: {
         type: "array",
-        maxItems: 100,
+        maxItems: 0,
+        description:
+          "Legacy field: leave empty. Cross-Skill analysis belongs to workflow questionnaire discovery.",
         items: object({
           producer: skillRef,
           consumer: skillRef,
@@ -236,6 +238,7 @@ export function validateDraftResult(
   kind: DraftingKind,
   schema: object,
   result: unknown,
+  studyPin?: { skillId: string; hash: string },
 ): DraftResult {
   if (Buffer.byteLength(JSON.stringify(result) ?? "") > 1024 * 1024)
     throw new RequestError(413, "The job result exceeds 1 MiB");
@@ -282,20 +285,39 @@ export function validateDraftResult(
         facts: input.facts,
       }).facts!,
     };
-  if (kind === "source-study")
+  if (kind === "source-study") {
+    if ((input.interfaces as unknown[]).length > 0)
+      throw new RequestError(
+        400,
+        "Single-Skill studies cannot generate cross-Skill interfaces. Use workflow questionnaire discovery.",
+      );
+    const facts = (input.facts as unknown[]).map(
+      (fact) => parseStudyContent("fact", fact) as SourceFact,
+    );
+    if (
+      studyPin &&
+      facts.some((fact) =>
+        fact.evidence.some(
+          (citation) =>
+            citation.skillId !== studyPin.skillId ||
+            citation.hash !== studyPin.hash,
+        ),
+      )
+    )
+      throw new RequestError(
+        400,
+        "Study facts must cite only the job's exact pinned Skill version",
+      );
     return {
-      facts: (input.facts as unknown[]).map(
-        (f) => parseStudyContent("fact", f) as SourceFact,
-      ),
-      interfaces: (input.interfaces as unknown[]).map(
-        (f) => parseStudyContent("interface", f) as SkillInterface,
-      ),
+      facts,
+      interfaces: [],
       ...(input.scriptEffects === undefined
         ? {}
         : {
             scriptEffects: input.scriptEffects as ScriptEffectSuggestion[],
           }),
     };
+  }
   return {
     questions: (input.questions as unknown[]).map((q) =>
       parseQuestion(objectInput(q)),

@@ -43,8 +43,15 @@ import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
 import { GroupRoleDialog } from "./admin/GroupRoleDialog.js";
 import { IntegrationStatus } from "./admin/IntegrationStatus.js";
+import { PromptTemplates } from "./admin/PromptTemplates.js";
 
-const TABS = ["members", "groups", "invitations", "integrations"] as const;
+const TABS = [
+  "members",
+  "groups",
+  "invitations",
+  "integrations",
+  "prompt-templates",
+] as const;
 type TabKey = (typeof TABS)[number];
 
 function isTab(value: string | undefined): value is TabKey {
@@ -448,7 +455,7 @@ export function AdminPage() {
       )}
       {state.kind === "ready" && (
         <>
-          {active !== "integrations" && (
+          {active !== "integrations" && active !== "prompt-templates" && (
             <Space wrap style={{ marginBottom: 16 }}>
               {!selectedGroupId && (
                 <Select
@@ -599,8 +606,18 @@ export function AdminPage() {
                     <IntegrationStatus />
                   ) : null,
               },
+              {
+                key: "prompt-templates",
+                label: t("prompts.title"),
+                children:
+                  active === "prompt-templates" && administrator ? (
+                    <PromptTemplates />
+                  ) : null,
+              },
             ].filter(
-              (tab) => tab.key !== "integrations" || mayReadIntegrations,
+              (tab) =>
+                (tab.key !== "integrations" || mayReadIntegrations) &&
+                (tab.key !== "prompt-templates" || administrator),
             )}
           />
         </>

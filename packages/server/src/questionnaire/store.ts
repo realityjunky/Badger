@@ -177,7 +177,7 @@ async function recipients(
     role: string;
   }>(
     `select b.id, b.person_id, b.role from role_bindings b join workflow_versions v on v.workflow_id = b.workflow_id
-    where v.id = $1 and b.role in ('Workflow owner', 'Field expert') order by b.id`,
+    where v.id = $1 and b.role in ('Workflow owner', 'Field expert', 'Engineer') order by b.id`,
     [versionId],
   );
   const matches = bindings.rows.filter((b) =>
@@ -195,7 +195,7 @@ async function recipients(
   )
     throw new RequestError(
       400,
-      "Every assignee must hold an expert or owner role in this workflow",
+      "Every assignee must hold an Engineer, Field expert or Workflow owner role in this workflow",
     );
   // One binding per person (or pending address) is selected below by SQL when
   // creating inbox items. Keeping all grants here preserves additive roles.

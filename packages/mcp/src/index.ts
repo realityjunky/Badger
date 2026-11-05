@@ -85,7 +85,18 @@ export function createBadgerMcp(
           ]
         : [
             ...expert.filter(
-              (t) => profile === "auto" || common.has(t.definition.name),
+              (t) =>
+                profile === "auto" ||
+                common.has(t.definition.name) ||
+                [
+                  "answer_context",
+                  "save_answer",
+                  "submit_answer",
+                  "upload_attachment",
+                  "my_questions",
+                  "suggestion_review_context",
+                  "save_suggestion_review",
+                ].includes(t.definition.name),
             ),
             ...engineerTools(api),
             ...operatorTools(api, runs, options.agentHost),

@@ -1,4 +1,5 @@
 import { useId, type ComponentProps, type ReactNode } from "react";
+import { StageReviewGuidance } from "../../components/StageReviewGuidance.js";
 
 export function WorkflowPanel({
   title,
@@ -27,6 +28,11 @@ export function WorkflowPanel({
         </div>
         {actions}
       </div>
+      {id && (
+        <StageReviewGuidance
+          stage={id === "plan" || id === "proposal" ? "plan-proposal" : id}
+        />
+      )}
       {children}
     </section>
   );

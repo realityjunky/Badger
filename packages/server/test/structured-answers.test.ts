@@ -581,7 +581,7 @@ describe("structured answers", () => {
       call(
         "POST",
         "/me/tokens",
-        { name: "Engineer Agent", scopes: ["engineer"] },
+        { name: "Operator Agent", scopes: ["operator"] },
         engineer,
       ),
       201,

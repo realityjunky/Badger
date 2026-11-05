@@ -121,16 +121,31 @@ across MCP restarts so the Agent can resume with the same deployment, person,
 token, and host. Delete the folder when finished; it contains workflow
 evidence. General large-result files remain connection-local.
 
+New jobs include a server-owned template snapshot. Claim writes its assembled
+processing instructions to `instructions.md` beside the schema and context;
+read it before drafting. Administrators manage templates in the dashboard,
+and changes affect future jobs. No dedicated questionnaire Skill installation
+is required. See [Dashboard prompts](../../docs/dashboard-prompts.md).
+
+Assigned people use `answer_context` for server instructions, the current
+question and their own private answer draft. Engineers can answer when assigned,
+using their engineer token. `suggestion_review_context` and
+`save_suggestion_review` let workflow Engineers and Field experts review and
+save shared questionnaire suggestions with permission and a current job revision.
+Saving preserves the original submission and never accepts it. Approval,
+acknowledgement, publication and other sign-offs remain dashboard actions.
+
 Write `result.json` using the claimed job's `output-schema.json`. Question jobs
-use `{"questions":[…]}`; source study uses `{facts, interfaces}`; restatement uses
+use `{"questions":[…]}`; source study uses `{facts, interfaces: [], scriptEffects?}`; restatement uses
 `{facts: [{text, answers: [{personId, revision}]}]}`; translation uses
 `{text, rationale}`; imports use `{questions: [{number, source, question}]}`.
 Source citations bind the pinned Skill hash, file hash, path, and line range.
 Restatements use the Workflow version's locale and exact submitted answer
 revisions; acceptance still leaves expert acknowledgement outstanding.
 Each question needs text, topic, targets, rationale, evidence, assignees, and
-priority. A result is limited to 1 MiB and 20 questions (or 100 source facts,
-100 interfaces, or 100 restatement facts). Local reads refuse
+priority. A result is limited to 1 MiB and 20 questions (or 100 source facts
+or 100 restatement facts). Single-Skill studies cannot generate cross-Skill
+interfaces. Questionnaire discovery jobs receive both Skills for that comparison. Local reads refuse
 symbolic links and special files. The service validates the schema again.
 A claim's Skill files total at most twice the deployment's
 `BADGER_UPLOAD_MAX_BYTES`, so any two Skill versions within the upload limit
@@ -138,7 +153,9 @@ fit. Leases last 30 minutes and are bound to the claiming person, token, host,
 and lease ID. Expired leases return to the queue on the next job or Engineer
 questionnaire read. At the same boundaries, a change to a job's inputs, the
 part of the context its kind's result depends on, cancels it when queued,
-claimed, or submitted; other changes, such as a comment, leave it pending. The
+claimed, or submitted. Discovery jobs also depend on the current ledger,
+Source study, submitted answers, concerns, discussion and settings; narrower
+job kinds ignore changes they do not read. The
 old lease cannot submit after expiry, release, or re-claim.
 
 Plan drafting (#58) uses the same tools. The Engineer requests **Plan versions
@@ -177,7 +194,7 @@ For a `source-study` job, read `context.json`'s `scriptEffectContract` and the
 exact pinned files locally, including relevant helpers and configuration.
 Draft `scriptEffects` with each script's version/path, proposed labels,
 rationale, immutable citations, conditional behavior, and uncertainty using
-`output-schema.json`. Preserve useful facts and interfaces even when effects
+`output-schema.json`. Preserve useful per-Skill facts even when effects
 remain incomplete. Empty or omitted entries remain pending. The Engineer
 accepts findings and separately routes effects in Source study; the original
 uploader personally confirms them in the dashboard. The MCP cannot sign off.

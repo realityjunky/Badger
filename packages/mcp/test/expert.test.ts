@@ -169,6 +169,37 @@ afterEach(async () => {
     await fs.rm(folder, { recursive: true, force: true });
 });
 
+it("receives server answer instructions with the assignee's current revisions before saving their words", async () => {
+  const { workflowId, versionId } = await setup();
+  const context = { workflowId, versionId };
+  const question = await publishQuestion(context);
+  const { client } = await connect();
+  const response = await call(client, "answer_context", {
+    ...context,
+    questionId: question.questionId,
+  });
+  const assistance = response.localFile
+    ? JSON.parse(await fs.readFile(response.localFile, "utf8"))
+    : response;
+  expect(assistance).toMatchObject({
+    answerRevision: 0,
+    questionRevision: question.questionRevision,
+    answer: null,
+  });
+  expect(assistance.prompt).toContain("never infer their answer");
+  const saved = await call(client, "save_answer", {
+    ...context,
+    questionId: question.questionId,
+    questionRevision: assistance.questionRevision,
+    revision: assistance.answerRevision,
+    text: "The sample stays frozen.",
+  });
+  expect(saved.answer).toMatchObject({
+    state: "draft",
+    text: "The sample stays frozen.",
+  });
+});
+
 it("previews and uploads an immutable Skill version from a folder against the confirmed hash", async () => {
   const { groupId } = await setup();
   const { skill } = await write("POST", "/skills", {
@@ -569,10 +600,13 @@ it("filters the expert profile by current roles and token scopes", async () => {
       expert,
       ["expert"],
       [
+        "answer_context",
         "comment",
         "raise_concern",
         "save_answer",
+        "save_suggestion_review",
         "submit_answer",
+        "suggestion_review_context",
         "upload_attachment",
         "upload_skill_version",
       ],

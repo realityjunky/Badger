@@ -86,6 +86,11 @@ import { handleScriptEffects, scriptEffectMethods } from "./script-effects.js";
 import { handleQuestionnaire, questionnaireMethods } from "./questionnaire.js";
 import { handleEvents } from "./events.js";
 import { draftingJobMethods, handleDraftingJobs } from "./drafting-jobs.js";
+import {
+  handlePromptTemplates,
+  promptTemplateMethods,
+} from "./prompt-templates.js";
+import { handleTaskPrompts, taskPromptMethods } from "./task-prompts.js";
 import { tokenRequestAllowed } from "./token-access.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
 import { skillGroupPermissions } from "../skills/access.js";
@@ -198,7 +203,9 @@ function allowedMethods(path: string): string {
     robotMethods(path) ??
     notificationMethods(path) ??
     questionnaireMethods(path) ??
-    draftingJobMethods(path);
+    draftingJobMethods(path) ??
+    promptTemplateMethods(path) ??
+    taskPromptMethods(path);
   if (featureMethods !== null) return featureMethods;
   if (path === `${API}/me/preferences`) {
     return "GET, HEAD, PUT";
@@ -950,6 +957,10 @@ export function createService(options: ServiceOptions, port: number): Service {
       if (path === `${API}/search`) return await handleSearch(authorized);
       if (path === `${API}/admin/integrations`)
         return handleIntegrations(authorized);
+      if (promptTemplateMethods(path) !== null)
+        return await handlePromptTemplates(authorized);
+      if (taskPromptMethods(path) !== null)
+        return await handleTaskPrompts(authorized);
       if (method === "PATCH" && matchedId(BINDING_PATH, path) !== null)
         return await handleGroupRoleChange(authorized);
       if (path === `${API}/me/events`)

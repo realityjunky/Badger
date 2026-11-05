@@ -4,6 +4,7 @@ import {
   deriveFactoryPlan,
   type AuthoringPlan,
   type AuthoringHandoff,
+  type PromptTemplateSnapshot,
 } from "@realityjunky/badger";
 import { planInputs, readPlanHead } from "../plans.js";
 import type { Queryable } from "../database/database.js";
@@ -70,7 +71,7 @@ export async function draftingContext(
     [versionId],
   );
   const bindings = await tx.query(
-    "select id, person_id, email, role from role_bindings where workflow_id = $1 and role in ('Field expert', 'Workflow owner') order by id",
+    "select id, person_id, email, role from role_bindings where workflow_id = $1 and role in ('Field expert', 'Workflow owner', 'Engineer') order by id",
     [workflowId],
   );
   const planningInput = await planInputs(tx, versionId, personId);
@@ -103,6 +104,7 @@ export async function draftingContext(
 export type DraftingBundle = Awaited<
   ReturnType<typeof draftingContext>
 >["bundle"] & {
+  promptTemplate?: PromptTemplateSnapshot;
   authoring?: {
     packageId: string;
     lane: string;
@@ -233,6 +235,7 @@ export function draftingInputs(bundle: DraftingBundle, target: DraftingTarget) {
         round: draftRound,
         parent: question(target.parentQuestionId),
         answers: answerHeads(target.parentQuestionId),
+        discovery: discoveryInputs(bundle),
       };
     case "draft-questions":
       return {
@@ -243,6 +246,7 @@ export function draftingInputs(bundle: DraftingBundle, target: DraftingTarget) {
           revision,
           state,
         })),
+        discovery: discoveryInputs(bundle),
       };
     case "draft-plan":
       return {
@@ -252,6 +256,25 @@ export function draftingInputs(bundle: DraftingBundle, target: DraftingTarget) {
         },
       };
   }
+}
+
+function discoveryInputs(bundle: DraftingBundle) {
+  return {
+    workflow: bundle.workflow,
+    frame: {
+      name: bundle.version.name,
+      goal: bundle.version.goal,
+      intent: bundle.version.intent,
+      locale: bundle.version.locale,
+    },
+    ledger: bundle.ledger,
+    answers: bundle.answers,
+    concerns: bundle.concerns,
+    comments: bundle.comments,
+    settings: bundle.settings,
+    sourceStudy: bundle.sourceStudy,
+    assignees: bundle.assignees,
+  };
 }
 
 export function draftingInputHash(

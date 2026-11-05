@@ -14,6 +14,7 @@ import { sourceStudyMethods } from "./source-study.js";
 import { scriptEffectMethods } from "./script-effects.js";
 import { questionnaireMethods } from "./questionnaire.js";
 import { draftingJobMethods } from "./drafting-jobs.js";
+import { taskPromptMethods } from "./task-prompts.js";
 
 export function tokenRequestAllowed(
   scopes: readonly TokenScope[],
@@ -21,6 +22,12 @@ export function tokenRequestAllowed(
   method: string,
 ): boolean {
   const reads = method === "GET" || method === "HEAD";
+  if (taskPromptMethods(path) !== null)
+    return (
+      reads &&
+      /\/questions\/[^/]+\/prompt$/u.test(path) &&
+      (scopes.includes("expert") || scopes.includes("engineer"))
+    );
   if (scriptEffectMethods(path) !== null) return reads;
   if (/^\/api\/v1\/runs\/[^/]+\/gates(?:\/|$)/u.test(path))
     return (
@@ -30,8 +37,9 @@ export function tokenRequestAllowed(
     return scopes.includes("operator") || scopes.includes("engineer");
   if (draftingJobMethods(path) !== null)
     return (
-      scopes.includes("engineer") &&
-      (reads || /\/(claim|submit|release)$/u.test(path))
+      ((scopes.includes("engineer") || scopes.includes("expert")) &&
+        (reads || /\/review$/u.test(path))) ||
+      (scopes.includes("engineer") && /\/(claim|submit|release)$/u.test(path))
     );
   if (
     reads &&
@@ -63,10 +71,11 @@ export function tokenRequestAllowed(
     if (/\/comments(?:\/[^/]+)?$/u.test(path))
       return scopes.includes("expert") || scopes.includes("engineer");
     if (method === "POST" && /\/concerns$/u.test(path))
-      return scopes.includes("expert");
-    if (/\/(answer|submit)$/u.test(path)) return scopes.includes("expert");
+      return scopes.includes("expert") || scopes.includes("engineer");
+    if (/\/(answer|submit)$/u.test(path))
+      return scopes.includes("expert") || scopes.includes("engineer");
     if (method === "POST" && /\/questions\/[^/]+\/attachments$/u.test(path))
-      return scopes.includes("expert");
+      return scopes.includes("expert") || scopes.includes("engineer");
     // Questions enter records only through a person's acceptance of a job.
     // Inferences and assumptions stay explicitly provisional; retiring one
     // removes a readiness blocker, so it also stays with a signed-in person.

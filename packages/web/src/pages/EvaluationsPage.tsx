@@ -27,6 +27,7 @@ import {
 import { questionnaireRequest } from "../api/questionnaire.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
+import { StageReviewGuidance } from "../components/StageReviewGuidance.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { useDemoMode } from "../app/DemoContext.js";
@@ -197,6 +198,7 @@ export function EvaluationsPage() {
         className="workflow-panel evaluation-filters"
         aria-label={t("evaluation.selection")}
       >
+        <StageReviewGuidance stage="evaluation" />
         <label className="field">
           {t("evaluation.workflow")}
           <Select

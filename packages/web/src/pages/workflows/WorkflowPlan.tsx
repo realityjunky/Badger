@@ -17,6 +17,7 @@ import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { PlanContent } from "./PlanContent.js";
 import { PlanEditor } from "./PlanEditor.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
+import { AgentPromptButton } from "../../components/AgentPromptButton.js";
 
 export function WorkflowPlan({
   basePath,
@@ -308,6 +309,13 @@ export function WorkflowPlan({
                     <Space wrap>
                       <span>{t("plan.draft")}</span>
                       <Tag>{t(`drafting.state.${job.status}`)}</Tag>
+                      {job.status === "queued" &&
+                        detail.capabilities.editPlan && (
+                          <AgentPromptButton
+                            basePath={basePath}
+                            path={`${path}/drafting-jobs/${job.id}/prompt`}
+                          />
+                        )}
                       {job.status === "submitted" && (
                         <>
                           <Button

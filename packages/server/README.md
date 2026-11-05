@@ -4,6 +4,12 @@ The collaborative service's HTTP server. It uses reviewed SQL migrations on
 Postgres or PGlite, and the kernel supplies source inspection and identity.
 Build from the repository root so the kernel is built before the server.
 
+The dashboard's [stage prompts](../../docs/dashboard-prompts.md) use the
+kernel-owned catalog, revisioned Administrator edits, per-job instruction
+snapshots and MCP task context. Prompts guide drafting; server capability
+checks and manual sign-offs remain authoritative. See
+[ADR 0045](../../docs/adr/0045-server-managed-stage-prompts.md).
+
 Service deployments support platform sessions, OpenID Connect and trusted
 identity headers from configured proxy peers. See
 [identity adapter configuration](../../docs/identity-adapters.md) for OIDC
@@ -765,7 +771,9 @@ questionnaire drafting jobs and save shared suggestion edits with
 appends immutable history and advances the job revision. Concurrent or stale
 saves return 409. Saving never accepts records or completes the submission's
 inbox item. Field experts cannot request, claim, submit, or decide jobs, and
-their job lists exclude plan and Authoring jobs. Tokens cannot save reviews.
+their job lists exclude plan and Authoring jobs. Their scoped Agents can read
+`GET V/drafting-jobs/:id/review-context` and save shared reviews through MCP;
+acceptance remains a signed-in Engineer's dashboard action.
 
 Engineer acceptance previews use the saved review when present. A decision
 with different content or an older revision conflicts, including when a Field
@@ -1013,8 +1021,8 @@ reconcile jobs: an expired lease returns its job to the queue, and a queued,
 claimed, or submitted job is cancelled exactly when its inputs change. A job's
 inputs are the part of the context its kind's result depends on (below); the
 job stores their hash when it is requested. Other changes leave it pending: a
-comment never cancels a job, and an answer cancels only the jobs that read its
-question. The context bundle binds the workflow/version frame, pinned Skill
+comments and answers cancel questionnaire discovery jobs that read them.
+Other job kinds retain their narrower dependencies. The context bundle binds the workflow/version frame, pinned Skill
 versions and file inventories, source study, questionnaire records, submitted
 answers, assignees, and the kernel's ledger and readiness; `contextHash` guards
 the bundle the Agent receives. Private answer drafts never enter the context.
@@ -1029,9 +1037,9 @@ with 413 and its job stays queued.
 
 | Kind                    | Request target fields         | Result                                                                                                             | Inputs                                                                                                        |
 | ----------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `draft-questions`       | `roundId`                     | `{questions: [QuestionContent]}` (1–20).                                                                           | Every pin, the round's state, and each question's revision and state.                                         |
-| `draft-follow-ups`      | `roundId`, `parentQuestionId` | The same question schema, retaining the published parent.                                                          | Every pin, the round's state, the parent's revision, state, and resolution, and its latest submitted answers. |
-| `source-study`          | `skillId`                     | `{facts: [SourceFact], interfaces: [SkillInterface]}`; up to 100 of each, at least one record. No round is needed. | The Skill's pinned version and the revisions of the source-study records that cite it or name it an endpoint. |
+| `draft-questions`       | `roundId`                     | `{questions: [QuestionContent]}` (1–20).                                                                           | Every pin, draft round, workflow frame, Source study, submitted answers, questions, ledger, readiness, concerns, discussion, settings and assignees. |
+| `draft-follow-ups`      | `roundId`, `parentQuestionId` | The same question schema, retaining the published parent.                                                          | The same discovery dependencies, focused on the parent's current meaning and latest submitted answers. |
+| `source-study`          | `skillId`                     | `{facts: [SourceFact], interfaces: [], scriptEffects?: [...]}`; up to 100 facts. No round is needed. | The Skill's pinned version and the revisions of related source-study records; generated facts cite only that exact Skill version. |
 | `restate-answer`        | `questionId`                  | `{facts: [{text, answers: [{personId, revision}]}]}` (1–100).                                                      | The question's revision, state, and resolution, and its latest submitted answer from each person.             |
 | `translate-question`    | `questionId`, `locale`        | `{text, rationale}` in the requested BCP 47 locale.                                                                | The question's revision.                                                                                      |
 | `import-open-questions` | `skillId`, `roundId`          | `{questions: [{number, source: SourceEvidence, question: QuestionContent}]}` (1–20).                               | The Skill's pinned version, the round's state, and the questions already imported from that version.          |
@@ -1063,8 +1071,8 @@ acceptance preview that would import it again returns 409 with the existing
 `questionId`, and the schema refuses the duplicate too. Both kinds appear in
 question history, and every accepted record is audited.
 
-Only submitted jobs appear in the Engineer questionnaire's `suggestions`.
-Other roles receive no job output. Submission notifies the requester;
+Only submitted jobs appear in the questionnaire's `suggestions` for Engineers
+and Field experts authorized to review them. Other roles receive no job output. Submission notifies the requester;
 acceptance, rejection, and cancellation close that inbox item. Question acceptance
 validates assignees and pinned evidence through the existing questionnaire
 authority, then creates draft Questions atomically. Follow-ups keep their

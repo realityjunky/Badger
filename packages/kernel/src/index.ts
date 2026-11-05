@@ -43,3 +43,4 @@ export * from "./skill-runtime/index.js";
 export * from "./engine/index.js";
 export * from "./workflow-runtime/public.js";
 export * from "./authoring/index.js";
+export * from "./authoring/prompt-templates.js";

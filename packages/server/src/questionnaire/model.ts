@@ -20,7 +20,7 @@ export interface QuestionEvidence {
 }
 export type QuestionAssignee =
   | { kind: "person"; personId: string }
-  | { kind: "role"; role: "Workflow owner" | "Field expert" };
+  | { kind: "role"; role: "Workflow owner" | "Field expert" | "Engineer" };
 export interface QuestionContent {
   answerType?: AnswerType;
   text: string;
@@ -231,15 +231,17 @@ export function parseQuestion(input: Record<string, unknown>): QuestionContent {
       };
     if (
       assignee.kind !== "role" ||
-      !["Workflow owner", "Field expert"].includes(assignee.role as string)
+      !["Workflow owner", "Field expert", "Engineer"].includes(
+        assignee.role as string,
+      )
     )
       throw new RequestError(
         400,
-        "Assign a named expert, the Workflow owner, or Field experts",
+        "Assign a named workflow participant, the Engineer, the Workflow owner, or Field experts",
       );
     return {
       kind: "role" as const,
-      role: assignee.role as "Workflow owner" | "Field expert",
+      role: assignee.role as "Workflow owner" | "Field expert" | "Engineer",
     };
   });
   if (targets.length === 0 || assignees.length === 0)

@@ -51,6 +51,7 @@ import {
   refuseImportedAgain,
   saveImportedQuestion,
 } from "../questionnaire/imports.js";
+import { readPromptTemplate } from "../prompt-templates.js";
 
 export type DraftingActor = WriteContext & { agentHost: string | null };
 export interface DraftingJobRow {
@@ -101,6 +102,13 @@ export function publicDraftingJob(row: DraftingJobRow) {
     parentQuestionId: row.parent_question_id,
     requesterId: row.requester_id,
     contextHash: row.context_hash,
+    promptTemplate: row.context_bundle.promptTemplate
+      ? {
+          id: row.context_bundle.promptTemplate.id,
+          revision: row.context_bundle.promptTemplate.revision,
+          hash: row.context_bundle.promptTemplate.hash,
+        }
+      : null,
     outputSchema: row.output_schema,
     revision: row.revision,
     status: row.status,
@@ -310,6 +318,10 @@ export async function createDraftingJob(
       400,
       "Choose a question in this workflow version; restatements need submitted answers",
     );
+  const bundle = {
+    ...current.bundle,
+    promptTemplate: await readPromptTemplate(tx, input.kind),
+  };
   const job = (
     await tx.query<DraftingJobRow>(
       `insert into drafting_jobs (id, workflow_version_id, kind, round_id, parent_question_id, requester_id, context_bundle, context_hash, output_schema, created_at, updated_at, skill_id, question_id, locale, input_hash)
@@ -321,8 +333,8 @@ export async function createDraftingJob(
         input.roundId,
         input.parentQuestionId,
         actor.personId,
-        JSON.stringify(current.bundle),
-        current.hash,
+        JSON.stringify(bundle),
+        canonicalHash(bundle),
         JSON.stringify(
           input.kind === "draft-plan"
             ? factoryPlanDraftSchema(current.bundle.planning!.input)
@@ -393,7 +405,12 @@ export async function submitDraftingJob(
   result: unknown,
   blobs: BlobStore,
 ) {
-  const validated = validateDraftResult(job.kind, job.output_schema, result);
+  const validated = validateDraftResult(
+    job.kind,
+    job.output_schema,
+    result,
+    job.context_bundle.pins.find((pin) => pin.skillId === job.skill_id),
+  );
   if ("interfaces" in validated && validated.scriptEffects !== undefined) {
     const pin = job.context_bundle.pins.find(
       (entry) => entry.skillId === job.skill_id,
@@ -466,7 +483,12 @@ export async function jobDecisionPreview(
 ) {
   const decision =
     action === "accept"
-      ? validateDraftResult(job.kind, job.output_schema, result)
+      ? validateDraftResult(
+          job.kind,
+          job.output_schema,
+          result,
+          job.context_bundle.pins.find((pin) => pin.skillId === job.skill_id),
+        )
       : { reason };
   if ("interfaces" in decision && decision.scriptEffects !== undefined) {
     const pin = job.context_bundle.pins.find(

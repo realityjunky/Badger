@@ -33,6 +33,7 @@ describe("Badger npm workspace", () => {
       "./engine",
       "./workflow-runtime",
       "./skill-runtime",
+      "./prompts",
       "./cli",
     ]);
     expect(await readText("packages/kernel/LICENSE")).toBe(

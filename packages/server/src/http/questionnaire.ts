@@ -56,6 +56,8 @@ import {
   submitAnswers,
   type AnswerInput,
 } from "../questionnaire/answers.js";
+import { draftingContext } from "../drafting/context.js";
+import { createDraftingJob } from "../drafting/jobs.js";
 import { listWorkflowPins } from "../workflow-source.js";
 import { readComments, saveComment } from "../questionnaire/comments.js";
 import { withVersionLabels } from "../workflow-version-labels.js";
@@ -396,7 +398,7 @@ export async function handleQuestionnaire(
           email: string;
           role: string;
         }>(
-          `select b.person_id, p.display_name, b.email, b.role from role_bindings b left join people p on p.id = b.person_id where b.workflow_id = $1 and b.role in ('Field expert', 'Workflow owner') order by b.email, b.role`,
+          `select b.person_id, p.display_name, b.email, b.role from role_bindings b left join people p on p.id = b.person_id where b.workflow_id = $1 and b.role in ('Field expert', 'Workflow owner', 'Engineer') order by b.email, b.role`,
           [workflowId],
         );
         return {
@@ -712,17 +714,42 @@ export async function handleQuestionnaire(
         };
       }
       if (resource === "rounds" && id === null) {
-        fields(body, ["title"]);
+        fields(body, ["title", "draftQuestions"]);
+        if (
+          body.draftQuestions !== undefined &&
+          typeof body.draftQuestions !== "boolean"
+        )
+          throw new RequestError(400, "draftQuestions must be a boolean");
+        const round = await createRound(
+          tx,
+          deps,
+          context,
+          versionId,
+          textInput(body.title, "title", 200),
+        );
+        const job =
+          body.draftQuestions === true
+            ? await createDraftingJob(
+                tx,
+                deps,
+                { ...context, agentHost },
+                versionId,
+                {
+                  kind: "draft-questions",
+                  roundId: round.id,
+                  parentQuestionId: null,
+                  skillId: null,
+                  questionId: null,
+                  locale: null,
+                },
+                await draftingContext(tx, workflowId, versionId, person.id),
+              )
+            : null;
         return {
           status: 201,
           value: {
-            round: await createRound(
-              tx,
-              deps,
-              context,
-              versionId,
-              textInput(body.title, "title", 200),
-            ),
+            round,
+            ...(job ? { job: publicDraftingJob(job) } : {}),
           },
         };
       }

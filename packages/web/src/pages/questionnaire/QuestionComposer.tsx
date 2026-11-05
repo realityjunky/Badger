@@ -170,7 +170,8 @@ export function QuestionComposer({
             ? { kind: "person", personId: value.slice(7) }
             : {
                 kind: "role",
-                role: value.slice(5) as "Workflow owner" | "Field expert",
+                role: value.slice(5) as
+                  "Workflow owner" | "Field expert" | "Engineer",
               },
         ),
       };
@@ -351,6 +352,7 @@ export function QuestionComposer({
               label: t("questionnaire.allExperts"),
             },
             { value: "role:Workflow owner", label: t("questionnaire.owner") },
+            { value: "role:Engineer", label: "Engineer" },
             ...people.map((a) => ({
               value: `person:${a.personId}`,
               label: a.name,

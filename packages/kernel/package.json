@@ -32,6 +32,10 @@
       "types": "./dist/src/skill-runtime/index.d.ts",
       "import": "./dist/src/skill-runtime/index.js"
     },
+    "./prompts": {
+      "types": "./dist/src/authoring/prompt-templates.d.ts",
+      "import": "./dist/src/authoring/prompt-templates.js"
+    },
     "./cli": "./dist/src/cli.js"
   },
   "scripts": {

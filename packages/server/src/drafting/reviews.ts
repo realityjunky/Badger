@@ -15,7 +15,12 @@ export async function saveDraftingReview(
   result: unknown,
   blobs: BlobStore,
 ) {
-  const validated = validateDraftResult(job.kind, job.output_schema, result);
+  const validated = validateDraftResult(
+    job.kind,
+    job.output_schema,
+    result,
+    job.context_bundle.pins.find((pin) => pin.skillId === job.skill_id),
+  );
   if ("interfaces" in validated && validated.scriptEffects !== undefined) {
     const pin = job.context_bundle.pins.find(
       (entry) => entry.skillId === job.skill_id,

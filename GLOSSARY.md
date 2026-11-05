@@ -84,7 +84,7 @@ A directory outside the Project that the host lets source locations point into, 
 _Avoid_: allowed directory
 
 **Source study**:
-The Engineer's recorded reading of one pinned Skill version before the questionnaire. It yields source-derived facts with their evidence, the interfaces between Skills, the Skill's own open questions, and script-effect suggestions for the responsible uploader's separate review. Completion requires current confirmed script coverage when the version has scripts.
+The Engineer's recorded reading of one pinned Skill version before the questionnaire. It yields source-derived facts with their evidence, that Skill's input and output contracts, its own open questions, and script-effect suggestions for the responsible uploader's separate review. Cross-Skill comparison belongs to workflow questionnaire discovery. Completion requires current confirmed script coverage when the version has scripts.
 
 **Workflow version**:
 One iteration of a workflow: the Skill versions it pins, its questionnaire, and the dossier, plan, and package built from them. A new workflow version inherits the previous one's facts and resolutions with provenance to their earlier records, and its pending questionnaire work moves with them; flagged evidence stays open for re-verification, and approvals require a new review.
@@ -197,6 +197,12 @@ _Avoid_: Agent job
 
 **Suggestion review**:
 The shared, revisioned edits that a workflow's Engineer or Field experts save against a submitted questionnaire Drafting job. Saving preserves the Agent's original result and does not accept it. The Engineer separately previews and confirms a decision using the latest saved result.
+
+**Prompt template**:
+Versioned instructions for a workflow stage and scenario: Agent drafting, Agent assistance, or human review. Administrators manage the catalog; a new Drafting job snapshots its instructions and required context. A template never grants authority to sign off.
+
+**Task prompt**:
+A prompt template assembled with one authorized task's identifiers, current revisions, context and MCP instructions. It helps a person dispatch or complete that task without installing a dedicated Skill.
 
 **Gate**:
 A point where work waits for a person's explicit confirmation or answer, bound to exactly what they reviewed. Gates guard the steps of building a workflow version, such as approving its dossier, and every moment a Run waits for a person.

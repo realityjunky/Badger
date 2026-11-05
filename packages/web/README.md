@@ -25,6 +25,13 @@ them into `dist/`, so the server image carries the build and none of them.
 
 ## Behavior
 
+- **Admin → Prompt templates** lists instructions by all eight workflow stages
+  and by Agent drafting, Agent assistance and human review. Signed-in
+  Administrators review, confirm and save revisions with history. Creating a
+  question round can queue drafting; copied prompts and MCP claims receive
+  server instructions. Answer editors and shared suggestion reviews provide
+  assistance prompts. See [Dashboard prompts](../../docs/dashboard-prompts.md).
+
 - My work's Inbox combines filters for authorized Workflows, message creation
   dates, and Unread, Read, or Done status. Workflow and status selectors allow
   multiple choices. Dates include both selected days in the viewer's local
@@ -84,7 +91,7 @@ them into `dist/`, so the server image carries the build and none of them.
   evidence/history inspector. Engineers compose questions, retain revisions,
   and review a whole round before publishing it in priority order. Workflow
   versions have independent questionnaires; an optional workflow round limit
-  defaults to unlimited. Named experts, all Field experts, and Workflow owners
+  defaults to unlimited. Named participants, Engineers, all Field experts, and Workflow owners
   can be assigned, including pending invitations.
 - Assigned questions link from My work. Answers accept any language, autosave
   private drafts one request at a time, and submit per question or per round.

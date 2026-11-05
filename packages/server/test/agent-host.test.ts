@@ -368,7 +368,6 @@ it("records the Agent host when a token's questionnaire read requeues an expired
   // record the requeue without one.
   expect((await tokenRead(engineerToken.secret, base)).status).toBe(400);
   expect(await expiries()).toEqual([]);
-  // An expert's read reconciles no drafting job; an Engineer's does.
   expect((await tokenRead(token.secret, base, "lab-workbuddy")).status).toBe(
     200,
   );
@@ -377,9 +376,9 @@ it("records the Agent host when a token's questionnaire read requeues an expired
   expect(await expiries()).toEqual([
     expect.objectContaining({
       credentialKind: "token",
-      credentialId: engineerToken.token.id,
+      credentialId: token.token.id,
       channel: "mcp",
-      agentHost: "review-host",
+      agentHost: "lab-workbuddy",
     }),
   ]);
 });

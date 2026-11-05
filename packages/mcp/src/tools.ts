@@ -79,6 +79,45 @@ function currentAnswer({
 export function expertTools(api: BadgerApi, server: Server): ExpertTool[] {
   return [
     tool(
+      "answer_context",
+      "Read the server's answer-assistance prompt, an assigned question's current revision and this person's own answer draft. Never invent the person's answer.",
+      question,
+      (args) =>
+        api.request(
+          `${questionnairePath(args)}/questions/${args.questionId}/prompt`,
+        ),
+      "answer",
+      true,
+    ),
+    tool(
+      "suggestion_review_context",
+      "Read the server's review instructions, original task context, schema and latest shared suggestions. Reading never accepts results.",
+      { ...context, jobId: id },
+      (args) =>
+        api.request(
+          `${questionnairePath(args).replace(/\/questionnaire$/u, "/drafting-jobs")}/${args.jobId}/review-context`,
+        ),
+      "reviewSuggestions",
+      true,
+    ),
+    tool(
+      "save_suggestion_review",
+      "Save shared suggestion edits only when the user asks. Quote the current job revision from suggestion_review_context and submit the complete result using its schema. Saving invalidates old decision previews and does not accept suggestions.",
+      {
+        ...context,
+        jobId: id,
+        revision: z.number().int().min(1),
+        result: z.record(z.string(), z.unknown()),
+      },
+      (args) =>
+        api.request(
+          `${questionnairePath(args).replace(/\/questionnaire$/u, "/drafting-jobs")}/${args.jobId}/review`,
+          "POST",
+          { revision: args.revision, result: args.result },
+        ),
+      "reviewSuggestions",
+    ),
+    tool(
       "whoami",
       "Show whose personal access token this Agent uses.",
       {},

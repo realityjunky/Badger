@@ -3,6 +3,7 @@ import { invalidateGate } from "./gates.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { readPromptTemplate } from "./prompt-templates.js";
 import {
   authoringReadiness,
   authoringSessionGateway,
@@ -314,6 +315,10 @@ export async function requestLaneJobs(
       version: bundle.version,
       pins: bundle.pins,
       authoring,
+      promptTemplate: await readPromptTemplate(
+        tx,
+        lane === "skill-review" ? "review-vote" : "authoring-lane",
+      ),
     };
     const schema = {
       type: "object",

@@ -324,8 +324,8 @@ it("shares saved source-study edits with Field experts and binds Engineer decisi
   await request(
     `${jobs}/${job.id}/review`,
     "POST",
-    { revision: submitted.revision, result: original },
-    403,
+    { revision: submitted.revision - 1, result: original },
+    409,
     secret,
   );
   const expertToken = await request(
@@ -335,12 +335,12 @@ it("shares saved source-study edits with Field experts and binds Engineer decisi
     201,
     expert,
   );
-  await request(jobs, "GET", undefined, 403, expertToken.secret);
+  await request(jobs, "GET", undefined, 200, expertToken.secret);
   await request(
     `${jobs}/${job.id}/review`,
     "POST",
-    { revision: submitted.revision, result: original },
-    403,
+    { revision: submitted.revision - 1, result: original },
+    409,
     expertToken.secret,
   );
   await request(
@@ -515,7 +515,7 @@ it("limits suggestion editing to people assigned as Engineer or Field expert in 
   );
 });
 
-it("accepts a source study as revisioned facts and interfaces with evidence from the pinned files", async () => {
+it("accepts per-Skill facts and refuses cross-Skill interfaces and evidence outside the target Skill", async () => {
   const { base, jobs, pins, secret } = await setup();
   const { job } = await request(
     jobs,
@@ -528,19 +528,35 @@ it("accepts a source study as revisioned facts and interfaces with evidence from
   const evidence = [citation(pins[0])];
   const result = {
     facts: [{ statement: "The producer writes samples.tsv.", evidence }],
-    interfaces: [
-      {
-        producer: pins[0],
-        consumer: pins[1],
-        artifact: "samples.tsv",
-        columns: ["sample_id"],
-        naming: "samples.tsv",
-        validation: "A table with a sample_id column",
-        evidence,
-      },
-    ],
+    interfaces: [],
   };
   const submitted = await submit(jobs, job, secret, result, [
+    ...[pins[0], pins[1]].map((consumer): [unknown, number, RegExp] => [
+      {
+        ...result,
+        interfaces: [
+          {
+            producer: pins[0],
+            consumer,
+            artifact: "samples.tsv",
+            columns: ["sample_id"],
+            naming: "samples.tsv",
+            validation: "sample_id is required",
+            evidence,
+          },
+        ],
+      },
+      400,
+      /output schema/u,
+    ]),
+    [
+      {
+        ...result,
+        facts: [{ ...result.facts[0], evidence: [citation(pins[1])] }],
+      },
+      400,
+      /exact pinned Skill/u,
+    ],
     [
       {
         ...result,
@@ -567,7 +583,7 @@ it("accepts a source study as revisioned facts and interfaces with evidence from
   expect(accepted.status).toBe("accepted");
   const study = await request(`${base}/source-study`);
   expect(study.facts).toHaveLength(1);
-  expect(study.interfaces).toHaveLength(1);
+  expect(study.interfaces).toHaveLength(0);
   expect(study.facts[0]).toMatchObject({
     revision: 1,
     content: result.facts[0],
@@ -580,6 +596,262 @@ it("accepts a source study as revisioned facts and interfaces with evidence from
     evidence: evidence[0],
     lines: [{ number: 2, text: "Write samples.tsv." }],
   });
+});
+
+it("restricts the template catalog to signed-in Administrators and binds edits to reviewed revisions", async () => {
+  const { secret, base } = await setup();
+  expect(
+    await request(
+      `${base}/stage-prompts/questionnaire`,
+      "GET",
+      undefined,
+      200,
+      expert,
+    ),
+  ).toMatchObject({ guidance: [{ id: "questionnaire-signoff" }] });
+  await request(
+    `${base}/stage-prompts/source-study`,
+    "GET",
+    undefined,
+    403,
+    expert,
+  );
+  for (const actor of [engineer, expert, secret])
+    await request("/admin/prompt-templates", "GET", undefined, 403, actor);
+  const catalog = await request(
+    "/admin/prompt-templates",
+    "GET",
+    undefined,
+    200,
+    admin,
+  );
+  expect(
+    new Set(
+      catalog.templates.map((template: { stage: string }) => template.stage),
+    ).size,
+  ).toBe(8);
+  expect(
+    new Set(
+      catalog.templates.map(
+        (template: { scenario: string }) => template.scenario,
+      ),
+    ),
+  ).toEqual(new Set(["agent-draft", "agent-assist", "human-review"]));
+  const template = catalog.templates.find(
+    (entry: { id: string }) => entry.id === "draft-questions",
+  );
+  const path = `/admin/prompt-templates/${template.id}`;
+  const body = `${template.body}\n\nAsk for explicit units when relevant.`;
+  const draft = { revision: template.revision, body };
+  await request(
+    path,
+    "PUT",
+    { ...draft, confirmed: true, confirmationHash: "wrong" },
+    409,
+    admin,
+  );
+  const preview = await request(`${path}/preview`, "POST", draft, 200, admin);
+  await request(
+    path,
+    "PUT",
+    {
+      ...draft,
+      body: `${body} Changed.`,
+      confirmed: true,
+      confirmationHash: preview.confirmationHash,
+    },
+    409,
+    admin,
+  );
+  const saved = await request(
+    path,
+    "PUT",
+    { ...draft, confirmed: true, confirmationHash: preview.confirmationHash },
+    200,
+    admin,
+  );
+  expect(saved.template).toMatchObject({ revision: 1, body });
+  expect(saved.template.hash).not.toBe(template.hash);
+  await request(`${path}/preview`, "POST", draft, 409, admin);
+  const history = await request(
+    `${path}/history`,
+    "GET",
+    undefined,
+    200,
+    admin,
+  );
+  expect(history.history).toMatchObject([{ revision: 1, body }]);
+  await request(
+    path,
+    "PUT",
+    { ...draft, confirmed: true, confirmationHash: preview.confirmationHash },
+    403,
+    engineer,
+  );
+});
+
+it("delivers the queued template snapshot through dispatch and claim even after an Administrator edits the default", async () => {
+  const { jobs, pins, secret } = await setup();
+  const job = await create(jobs, {
+    kind: "source-study",
+    skillId: pins[0].skillId,
+  });
+  const before = await request(`${jobs}/${job.id}/prompt`);
+  expect(before.prompt).toContain("Do not generate interfaces between Skills");
+  const path = "/admin/prompt-templates/source-study";
+  const body = `${before.template.body}\n\nCheck whether columns have explicit units.`;
+  const preview = await request(
+    `${path}/preview`,
+    "POST",
+    { revision: 0, body },
+    200,
+    admin,
+  );
+  await request(
+    path,
+    "PUT",
+    {
+      revision: 0,
+      body,
+      confirmed: true,
+      confirmationHash: preview.confirmationHash,
+    },
+    200,
+    admin,
+  );
+  const claimed = await claim(jobs, job, secret);
+  expect(claimed.contextBundle.promptTemplate).toEqual(before.template);
+  expect(claimed.instructions).toContain("This job is already claimed");
+  expect(claimed.instructions).not.toContain(
+    "Check whether columns have explicit units.",
+  );
+  expect(claimed.instructions).toContain(
+    "Signed-in people accept or discard suggestions",
+  );
+  expect(claimed.skills).toHaveLength(1);
+  const next = await create(jobs, {
+    kind: "source-study",
+    skillId: pins[0].skillId,
+  });
+  expect(await request(`${jobs}/${next.id}/prompt`)).toMatchObject({
+    template: { revision: 1, body },
+  });
+});
+
+it("queues a context-bound questionnaire job with a new round and invalidates it when source evidence changes", async () => {
+  const { base, jobs, questionnaire, pins, secret } = await setup();
+  const study = await create(jobs, {
+    kind: "source-study",
+    skillId: pins[0].skillId,
+  });
+  const result = studyOf(pins[0]);
+  await accept(jobs, await submit(jobs, study, secret, result), result);
+  const { round, job } = await request(
+    `${questionnaire}/rounds`,
+    "POST",
+    { title: "Workflow interfaces", draftQuestions: true },
+    201,
+  );
+  expect(round.state).toBe("draft");
+  expect(job).toMatchObject({
+    kind: "draft-questions",
+    roundId: round.id,
+    status: "queued",
+  });
+  const claimed = await claim(jobs, job, secret);
+  expect(claimed.skills).toHaveLength(2);
+  expect(claimed.contextBundle.sourceStudy.facts).toHaveLength(1);
+  expect(claimed.instructions).toContain(
+    "Compare producer outputs against consumer inputs",
+  );
+  expect(claimed.instructions).toContain("citing both sides");
+  expect(claimed.contextBundle.questions).toEqual([]);
+  await request(
+    `${base}/source-study/facts`,
+    "POST",
+    { statement: "The target requires units.", evidence: [citation(pins[0])] },
+    201,
+  );
+  expect(await jobStatus(jobs, job)).toBe("cancelled");
+});
+
+it("lets an authorized Field expert's Agent edit shared suggestions without accepting records", async () => {
+  const { jobs, pins, secret, base, questionnaire } = await setup();
+  const { round } = await request(
+    `${questionnaire}/rounds`,
+    "POST",
+    { title: "Private draft" },
+    201,
+  );
+  await request(
+    `${questionnaire}/rounds/${round.id}/questions`,
+    "POST",
+    {
+      ...questionContent,
+      text: "Unpublished question that is outside this review",
+    },
+    201,
+  );
+  const job = await create(jobs, {
+    kind: "source-study",
+    skillId: pins[0].skillId,
+  });
+  const submitted = await submit(jobs, job, secret, studyOf(pins[0]));
+  const token = await request(
+    "/me/tokens",
+    "POST",
+    { name: "Review assistant", scopes: ["expert"] },
+    201,
+    expert,
+  );
+  const context = await request(
+    `${jobs}/${job.id}/review-context`,
+    "GET",
+    undefined,
+    200,
+    token.secret,
+  );
+  expect(context.prompt).toContain("save_suggestion_review");
+  expect(JSON.stringify(context)).not.toContain(
+    "Unpublished question that is outside this review",
+  );
+  expect(context.revision).toBe(submitted.revision);
+  const result = {
+    ...context.result,
+    facts: [
+      {
+        ...context.result.facts[0],
+        statement: "The output is a sample table.",
+      },
+    ],
+  };
+  const saved = await request(
+    `${jobs}/${job.id}/review`,
+    "POST",
+    { revision: context.revision, result },
+    200,
+    token.secret,
+  );
+  expect(saved.job).toMatchObject({
+    status: "submitted",
+    result: submitted.result,
+    review: { result },
+  });
+  await request(
+    `${jobs}/${job.id}/review`,
+    "POST",
+    { revision: context.revision, result },
+    409,
+    token.secret,
+  );
+  await request(
+    `${jobs}/${job.id}/accept-preview`,
+    "POST",
+    { revision: saved.job.revision, ...result },
+    403,
+    token.secret,
+  );
+  expect((await request(`${base}/source-study`)).facts).toEqual([]);
 });
 
 it("preserves source-study jobs and reviewed confirmation hashes across version label edits", async () => {
@@ -705,6 +977,115 @@ async function answeredQuestion(questionnaire: string) {
   await answer(questionnaire, question, 0, "需要样本编号。");
   return question;
 }
+
+it("provides answer prompts only to current assignees and includes only their own private draft", async () => {
+  const { workflowId, questionnaire, secret } = await setup();
+  const second = {
+    subject: "second-expert",
+    email: "second-expert@example.com",
+  };
+  await request(
+    "/bindings",
+    "POST",
+    {
+      scopeType: "workflow",
+      scopeId: workflowId,
+      email: second.email,
+      role: "Field expert",
+    },
+    201,
+    admin,
+  );
+  const [question] = await publishQuestions(questionnaire, [
+    "Which units are required?",
+  ]);
+  await request(
+    `${questionnaire}/questions/${question.id}/answer`,
+    "PUT",
+    {
+      revision: 0,
+      questionRevision: question.revision,
+      text: "Private units draft",
+    },
+    200,
+    expert,
+  );
+  const token = await request(
+    "/me/tokens",
+    "POST",
+    { name: "Answer assistant", scopes: ["expert"] },
+    201,
+    expert,
+  );
+  const path = `${questionnaire}/questions/${question.id}/prompt`;
+  const context = await request(path, "GET", undefined, 200, token.secret);
+  expect(context).toMatchObject({
+    questionRevision: question.revision,
+    answerRevision: 1,
+    answer: { state: "draft", text: "Private units draft" },
+  });
+  expect(context.prompt).toContain("never infer their answer");
+  const another = await request(path, "GET", undefined, 200, second);
+  expect(another.answer).toBeNull();
+  expect(JSON.stringify(another)).not.toContain("Private units draft");
+  await request(path, "GET", undefined, 403, secret);
+});
+
+it("allows an assigned Engineer to draft and send their own answer through MCP while sign-offs stay manual", async () => {
+  const { questionnaire, secret } = await setup();
+  const { round } = await request(
+    `${questionnaire}/rounds`,
+    "POST",
+    { title: "Engineering decisions" },
+    201,
+  );
+  const { question } = await request(
+    `${questionnaire}/rounds/${round.id}/questions`,
+    "POST",
+    { ...questionContent, assignees: [{ kind: "role", role: "Engineer" }] },
+    201,
+  );
+  const { preview } = await request(
+    `${questionnaire}/rounds/${round.id}/publish-preview`,
+  );
+  await request(`${questionnaire}/rounds/${round.id}/publish`, "POST", {
+    confirmed: true,
+    confirmationHash: preview.confirmationHash,
+  });
+  const context = await request(
+    `${questionnaire}/questions/${question.id}/prompt`,
+    "GET",
+    undefined,
+    200,
+    secret,
+  );
+  expect(context.answerRevision).toBe(0);
+  const { answer } = await request(
+    `${questionnaire}/questions/${question.id}/answer`,
+    "PUT",
+    {
+      revision: 0,
+      questionRevision: question.revision,
+      text: "Use the agreed table schema.",
+    },
+    200,
+    secret,
+  );
+  await request(
+    `${questionnaire}/questions/${question.id}/submit`,
+    "POST",
+    { revision: answer.revision, questionRevision: question.revision },
+    200,
+    secret,
+  );
+  await request(
+    `${questionnaire}/questions/${question.id}/resolve`,
+    "POST",
+    {},
+    403,
+    secret,
+  );
+});
 
 it("accepts a restatement in the workflow locale with exact answer links and waits for the answering expert's acknowledgement", async () => {
   const { jobs, questionnaire, secret, expertId } = await setup("zh-CN");

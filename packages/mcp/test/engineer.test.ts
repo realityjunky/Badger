@@ -136,7 +136,17 @@ it("uploads a scripted Skill without declarations and drafts effects from the ha
     "scheduler-submission",
     "installs",
   ]);
-  expect(claim.message).toMatch(/scriptEffectContract/u);
+  expect(claim.message).toMatch(/instructions.md/u);
+  const instructions = await fs.readFile(
+    path.join(claim.folder, "instructions.md"),
+    "utf8",
+  );
+  expect(instructions).toContain("scriptEffectContract");
+  expect(instructions).toContain("Do not generate interfaces between Skills");
+  expect(instructions).toContain("This job is already claimed");
+  expect(claim.instructionsFile).toBe(
+    path.join(claim.folder, "instructions.md"),
+  );
   expect(
     await fs.readFile(
       path.join(
@@ -178,6 +188,22 @@ it("uploads a scripted Skill without declarations and drafts effects from the ha
     requiresPerson: true,
     job: { status: "submitted", result: { scriptEffects: [suggestion] } },
   });
+  const reviewResponse = await call(
+    client,
+    "suggestion_review_context",
+    context,
+  );
+  const review = reviewResponse.localFile
+    ? JSON.parse(await fs.readFile(reviewResponse.localFile, "utf8"))
+    : reviewResponse;
+  expect(review.prompt).toContain("save_suggestion_review");
+  const saved = await call(client, "save_suggestion_review", {
+    ...context,
+    revision: review.revision,
+    result: review.result,
+  });
+  expect(saved.job.status).toBe("submitted");
+  expect(saved.job.review.result).toEqual(review.result);
   const panel = await request(
     `/skills/${skill.id}/versions/${preview.hash}/effects`,
   );
@@ -679,6 +705,7 @@ it("writes only the pinned Skills a claimed job's kind reads into its folder", a
       [
         "claim.json",
         "context.json",
+        "instructions.md",
         "job.json",
         "output-schema.json",
         ...(expected.length ? ["skills"] : []),
