@@ -114,6 +114,21 @@ explicit opt-out. If no enabled, verified robot matches, Badger keeps the
 notification in the in-app inbox and sends no WeCom post. One event is never
 silently fanned out to every robot.
 
+The dashboard's **Add route** event choices are the inbox item kinds that start
+delivery: **Approval requested** (`gate-ready`) means an approval or confirmation
+gate is waiting; **Stage invalidated** (`gate-invalidated`) means a change
+superseded an earlier stage approval; **Questions assigned** (`question-assigned`)
+means assigned questions await answers; **Answers submitted** (`answer-submitted`)
+means an answer awaits resolution; **Restatement to acknowledge**
+(`restatement-ready`) means a restated answer awaits acknowledgement; **Question
+reopened** (`question-reopened`) means a handled question needs attention again;
+**Expert concern raised** (`concern-raised`) means a concern awaits resolution;
+**Draft submitted** (`job-submitted`) means an Agent draft awaits acceptance;
+**Evaluation finished** (`evaluation-finished`) means an evaluation report is
+ready; and **Script effect review** (`script-effect-review`) means the uploader
+must review a Skill script's possible effects. Choose **Badger inbox only** to
+keep that event in Badger without a WeCom post.
+
 Robots never grant workflow access and cannot approve, publish, answer, or
 change Badger records. Those actions still require the same signed-in person,
 capability checks, and explicit confirmation used by the dashboard. Inbound
