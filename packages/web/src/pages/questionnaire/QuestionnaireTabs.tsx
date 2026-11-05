@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { Link } from "react-router-dom";
 import { useI18n } from "../../i18n/I18nContext.js";
 
 export type QuestionnaireTab = "questions" | "suggestions" | "ledger";
@@ -13,12 +14,14 @@ export type QuestionnaireTab = "questions" | "suggestions" | "ledger";
 export function QuestionnaireTabs({
   activeTab,
   onChange,
+  suggestionsHref,
   suggestions,
   ledger,
   children,
 }: {
   activeTab: QuestionnaireTab;
   onChange(tab: QuestionnaireTab): void;
+  suggestionsHref: string;
   suggestions?: ReactNode;
   ledger: ReactNode;
   children: ReactNode;
@@ -73,7 +76,31 @@ export function QuestionnaireTabs({
           ? [
               {
                 key: "suggestions",
-                label: t("drafting.title"),
+                label: (
+                  <Link
+                    className="questionnaire-tab-link"
+                    to={suggestionsHref}
+                    tabIndex={-1}
+                    title={t("drafting.linkHelp")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (
+                        event.button === 0 &&
+                        !event.ctrlKey &&
+                        !event.metaKey &&
+                        !event.shiftKey &&
+                        !event.altKey
+                      ) {
+                        event.preventDefault();
+                        if (activeTab !== "suggestions")
+                          onChange("suggestions");
+                      }
+                    }}
+                    onAuxClick={(event) => event.stopPropagation()}
+                  >
+                    {t("drafting.title")}
+                  </Link>
+                ),
                 children: <div className="pane">{suggestions}</div>,
               },
             ]

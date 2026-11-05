@@ -52,9 +52,9 @@ async function english(page: Page) {
   await page.getByRole("menuitem", { name: "English", exact: true }).click();
 }
 
-test("the Engineer edits and reviews a structured drafting suggestion before accepting it", async ({
+test("a shared drafting tab lets a Field expert edit suggestions before the Engineer accepts them", async ({
   browser,
-}) => {
+}, testInfo) => {
   const { group } = await call("POST", "/groups", {
     name: `Structured drafting ${Date.now()}`,
   });
@@ -75,12 +75,28 @@ test("the Engineer edits and reviews a structured drafting suggestion before acc
       email: person.email,
       role,
     });
+  await call("GET", "/me", undefined, expert);
   const root = `/workflows/${workflow.id}/versions/${version.id}/questionnaire`;
   const jobs = `/workflows/${workflow.id}/versions/${version.id}/drafting-jobs`;
   const { round } = await call(
     "POST",
     `${root}/rounds`,
     { title: "Drafted storage" },
+    engineer,
+  );
+  const { round: queuedRound } = await call(
+    "POST",
+    `${root}/rounds`,
+    {
+      title:
+        "Follow-up: specimen transport and storage requirements for samples collected outside the laboratory",
+    },
+    engineer,
+  );
+  await call(
+    "POST",
+    jobs,
+    { kind: "draft-questions", roundId: queuedRound.id, confirmed: true },
     engineer,
   );
   const { job } = await call(
@@ -132,14 +148,72 @@ test("the Engineer edits and reviews a structured drafting suggestion before acc
     },
   });
   const context = await browser.newContext({
+    viewport: testInfo.project.use.viewport,
     extraHTTPHeaders: { "x-badger-test-person": JSON.stringify(engineer) },
+  });
+  const expertContext = await browser.newContext({
+    viewport: testInfo.project.use.viewport,
+    extraHTTPHeaders: { "x-badger-test-person": JSON.stringify(expert) },
   });
   try {
     const page = await context.newPage();
     await page.goto(
-      `${base}/questionnaire?workflow=${workflow.id}&version=${version.id}&panel=suggestions`,
+      `${base}/questionnaire?workflow=${workflow.id}&version=${version.id}&group=${group.id}&round=${round.id}`,
     );
     await english(page);
+    const draftingTab = page.getByRole("tab", {
+      name: "Drafting jobs and suggestions",
+      exact: true,
+    });
+    const tabLink = draftingTab.getByRole("link", {
+      name: "Drafting jobs and suggestions",
+      exact: true,
+    });
+    const href = await tabLink.getAttribute("href");
+    expect(href).not.toBeNull();
+    const sharedUrl = new URL(href!, origin);
+    expect(sharedUrl.pathname).toBe("/team/questionnaire");
+    expect(Object.fromEntries(sharedUrl.searchParams)).toEqual({
+      workflow: workflow.id,
+      version: version.id,
+      group: group.id,
+      panel: "suggestions",
+    });
+    const [newTab] = await Promise.all([
+      context.waitForEvent("page"),
+      tabLink.click({ modifiers: ["ControlOrMeta"] }),
+    ]);
+    await expect(newTab).toHaveURL(sharedUrl.href);
+    await expect(
+      newTab.getByRole("tab", {
+        name: "Drafting jobs and suggestions",
+        exact: true,
+      }),
+    ).toHaveAttribute("aria-selected", "true");
+    await newTab.close();
+    await expect(draftingTab).toHaveAttribute("aria-selected", "false");
+    await tabLink.click({ button: "right" });
+    await expect(draftingTab).toHaveAttribute("aria-selected", "false");
+    await page.keyboard.press("Escape");
+    await tabLink.click();
+    await expect(draftingTab).toHaveAttribute("aria-selected", "true");
+    await expect(page).toHaveURL(new RegExp(`round=${round.id}`, "u"));
+    await page.goBack();
+    await expect(draftingTab).toHaveAttribute("aria-selected", "false");
+    await tabLink.click();
+    await expect(page.getByTestId("drafting-job")).toHaveCount(2);
+    const panel = page.getByRole("region", {
+      name: "Drafting jobs and suggestions",
+      exact: true,
+    });
+    for (const theme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await panel.screenshot({
+        path: testInfo.outputPath(`drafting-jobs-${theme}.png`),
+        animations: "disabled",
+      });
+    }
     await expect(
       page.getByRole("button", { name: "Copy review prompt", exact: true }),
     ).toHaveCount(0);
@@ -166,6 +240,74 @@ test("the Engineer edits and reviews a structured drafting suggestion before acc
       .getByRole("dialog", { name: "Review suggestions", exact: true })
       .getByRole("button", { name: "Save", exact: true })
       .click();
+    const respondent = await expertContext.newPage();
+    await respondent.goto(sharedUrl.href);
+    await english(respondent);
+    await expect(
+      respondent.getByRole("tab", {
+        name: "Drafting jobs and suggestions",
+        exact: true,
+      }),
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(respondent.getByTestId("scope-selector")).toContainText(
+      `Structured drafting`,
+    );
+    await expect(respondent.getByTestId("drafting-job")).toHaveCount(2);
+    for (const name of [
+      "Request drafting",
+      "Review decisions",
+      "Discard suggestions",
+    ])
+      await expect(
+        respondent.getByRole("button", { name, exact: true }),
+      ).toHaveCount(0);
+    await respondent
+      .getByRole("button", { name: "Review suggestions", exact: true })
+      .click();
+    await respondent
+      .getByRole("button", { name: "Edit suggestion", exact: true })
+      .click();
+    await expect(
+      respondent.getByLabel("Options (one per line)", { exact: true }),
+    ).toHaveValue("Cold\nFrozen");
+    await respondent
+      .getByLabel("Rationale", { exact: true })
+      .fill("Storage choices reviewed by the Field expert.");
+    await respondent
+      .getByRole("button", { name: "Keep edits", exact: true })
+      .click();
+    await respondent
+      .getByRole("dialog", { name: "Review suggestions", exact: true })
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+    await expect(
+      respondent.getByText("Review edits saved.", { exact: false }),
+    ).toBeVisible();
+    const saved = await call("GET", `${jobs}/${job.id}`, undefined, expert);
+    expect(saved.job.review.result.questions[0].rationale).toBe(
+      "Storage choices reviewed by the Field expert.",
+    );
+    await respondent.setViewportSize({ width: 375, height: 812 });
+    for (const theme of ["light", "dark"] as const) {
+      await respondent.emulateMedia({
+        colorScheme: theme,
+        reducedMotion: "reduce",
+      });
+      await expect(respondent.locator("html")).toHaveAttribute(
+        "data-theme",
+        theme,
+      );
+      expect(
+        await respondent.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
+      ).toBe(true);
+      await respondent.screenshot({
+        path: testInfo.outputPath(`drafting-jobs-expert-${theme}-mobile.png`),
+        fullPage: true,
+        animations: "disabled",
+      });
+    }
     await page
       .getByRole("button", { name: "Review decisions", exact: true })
       .click();
@@ -175,6 +317,9 @@ test("the Engineer edits and reviews a structured drafting suggestion before acc
     });
     await expect(preview).toContainText("Single choice");
     await expect(preview).toContainText("Frozen");
+    await expect(preview).toContainText(
+      "Storage choices reviewed by the Field expert.",
+    );
     await preview
       .getByRole("button", { name: "Accept reviewed result", exact: true })
       .click();
@@ -186,6 +331,7 @@ test("the Engineer edits and reviews a structured drafting suggestion before acc
     });
   } finally {
     await context.close();
+    await expertContext.close();
   }
 });
 

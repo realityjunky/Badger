@@ -473,6 +473,10 @@ const en = {
   "drafting.title": "Drafting jobs and suggestions",
   "drafting.help":
     "The workflow's Engineer and Field experts review and save shared edits. The Engineer then reviews decisions and accepts the saved result into the workflow's records.",
+  "drafting.summary": "Jobs: {total} · Awaiting review: {review}",
+  "drafting.linkHelp":
+    "Right-click to copy a link to all suggestions for this workflow version.",
+  "drafting.language": "Language",
   "drafting.kind": "Work to draft",
   "drafting.sourceStudy": "Study a source Skill",
   "drafting.restatement": "Restate an answer as facts",
@@ -1922,6 +1926,9 @@ const zh: Record<MessageId, string> = {
   "drafting.title": "起草任务与建议",
   "drafting.help":
     "工作流的工程师和领域专家可审核建议并保存共享修改。随后由工程师审核决定并接受已保存的结果，结果才会进入工作流记录。",
+  "drafting.summary": "任务：{total} · 待审核：{review}",
+  "drafting.linkHelp": "右键可复制此工作流版本全部建议的链接。",
+  "drafting.language": "语言",
   "drafting.kind": "起草内容",
   "drafting.sourceStudy": "研读来源 Skill",
   "drafting.restatement": "将回答重述为事实",

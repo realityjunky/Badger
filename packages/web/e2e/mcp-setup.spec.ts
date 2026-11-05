@@ -50,6 +50,61 @@ test("copies expert MCP configuration for each host under the deployment base pa
       config,
     );
   }
+  const generatedConfiguration = await field.inputValue();
+  await page
+    .getByRole("link", { name: "Badger MCP setup", exact: true })
+    .click();
+  const guide = page.getByRole("dialog", {
+    name: "Documentation",
+    exact: true,
+  });
+  await expect(page).toHaveURL(/\/badger\/settings\/tokens\?help=mcp$/u);
+  await expect(
+    guide.getByRole("heading", { name: "Badger MCP setup", exact: true }),
+  ).toBeFocused();
+  await expect(guide).toContainText("Fully quit WorkBuddy");
+  await expect(guide.locator("ol.documentation-actions > li")).toHaveCount(9);
+  await expect(
+    guide.getByRole("link", { name: "Connect your Agent", exact: true }),
+  ).toHaveAttribute("href", "/badger/settings/tokens");
+  await guide.screenshot({
+    path: testInfo.outputPath("badger-mcp-setup-guide.png"),
+    animations: "disabled",
+  });
+  await guide
+    .getByRole("navigation", { name: "Guide sections" })
+    .getByRole("link", { name: "WeCom CLI installation", exact: true })
+    .click();
+  await expect(
+    guide.getByRole("heading", { name: "WeCom CLI installation", exact: true }),
+  ).toBeFocused();
+  await expect(guide.locator("ol.documentation-actions > li")).toHaveCount(7);
+  await expect(guide.locator("pre")).toContainText([
+    "node --version",
+    "npm install -g @wecom/cli",
+    "npx skills add WeComTeam/wecom-cli -y -g",
+    "wecom-cli auth init",
+    "wecom-cli auth show --status",
+    "npx skills add WecomTeam/wecom-unified -y -g",
+  ]);
+  await expect(
+    guide.getByRole("link", {
+      name: "Official WeCom CLI installation guide",
+      exact: true,
+    }),
+  ).toHaveAttribute("href", "https://open.work.weixin.qq.com/help2/pc/21676");
+  await page.reload();
+  await expect(
+    guide.getByRole("heading", { name: "WeCom CLI installation", exact: true }),
+  ).toBeFocused();
+  await guide.screenshot({
+    path: testInfo.outputPath("wecom-cli-installation-guide.png"),
+    animations: "disabled",
+  });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Connect your Agent" }).click();
+  await page.getByRole("radio", { name: "WorkBuddy", exact: true }).check();
+  expect(await field.inputValue()).toBe(generatedConfiguration);
   for (const theme of ["Light", "Dark"]) {
     await page.goto(`${base}/settings/appearance`);
     await page.getByText(theme, { exact: true }).click();

@@ -1,6 +1,8 @@
 import { Alert, Button, Collapse, Input, Radio } from "antd";
 import { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { readBasePath } from "../../app/paths.js";
+import { documentationSearch } from "../../documentation/sections.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { hostSetupText } from "../../util/hostSetup.js";
 import {
@@ -11,6 +13,7 @@ import {
 
 export function McpSetup() {
   const { t } = useI18n();
+  const location = useLocation();
   const [host, setHost] = useState<AgentHost>("claude");
   const [profile, setProfile] = useState<McpProfile>("auto");
   const [command, setCommand] = useState("badger-mcp");
@@ -39,6 +42,14 @@ export function McpSetup() {
           children: (
             <section className="mcp-setup" aria-label={t("mcp.title")}>
               <p className="muted">{t("mcp.instructions")}</p>
+              <Link
+                to={{
+                  ...location,
+                  search: documentationSearch(location.search, "mcp"),
+                }}
+              >
+                {t("documentation.mcp.title")}
+              </Link>
               <div className="field">
                 <span className="field-label" id="mcp-profile-label">
                   {t("mcp.profile")}

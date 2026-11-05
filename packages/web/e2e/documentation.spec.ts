@@ -71,6 +71,8 @@ test("Documentation is in the sidebar, opens the current section, and links to e
   const sections = guide.getByRole("navigation", { name: "Guide sections" });
   for (const name of [
     "My work",
+    "WeCom CLI installation",
+    "Badger MCP setup",
     "Workflows",
     "Questionnaire",
     "Skills",

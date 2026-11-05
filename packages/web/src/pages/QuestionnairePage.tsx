@@ -229,6 +229,10 @@ export function QuestionnairePage() {
   const versionQuery = selection
     ? `workflow=${encodeURIComponent(selection.workflowId)}&version=${encodeURIComponent(selection.versionId)}`
     : "";
+  const suggestionsQuery = new URLSearchParams(versionQuery);
+  suggestionsQuery.set("panel", "suggestions");
+  const groupId = query.get("group");
+  if (groupId) suggestionsQuery.set("group", groupId);
   const changePanel = (tab: QuestionnaireTab) => {
     const parameters = new URLSearchParams(location.search);
     if (selection) {
@@ -353,6 +357,7 @@ export function QuestionnairePage() {
         key={path ?? "unselected"}
         activeTab={activeTab}
         onChange={changePanel}
+        suggestionsHref={`/questionnaire?${suggestionsQuery}`}
         suggestions={
           view && path && reviewSuggestions ? (
             <DraftingJobs

@@ -14,6 +14,60 @@ export const documentationEn = {
   "documentation.roles": "Who can act",
   "documentation.actions": "Important actions",
   "documentation.steps": "Setup steps",
+  "documentation.resources": "Related links",
+  "documentation.nodeDownload": "Download Node.js LTS",
+  "documentation.wecom-cli.title": "WeCom CLI installation",
+  "documentation.wecom-cli.purpose":
+    "Install WeCom CLI on your own macOS or Windows laptop to let an Agent work with your WeCom account. WorkBuddy also offers a built-in route: open Connectors, add WeCom, and scan the QR code to create and authorize a robot. For a terminal installation, follow the steps below. Badger notifications use the separately configured My WeCom robots connection.",
+  "documentation.wecom-cli.roles":
+    "Each person installs and authorizes their own client using their own WeCom account. Your organization's administrator may need to approve access to some WeCom capabilities.",
+  "documentation.wecom-cli.step.prepare":
+    "Prepare your laptop. Install Node.js LTS from the download link below if needed; it includes npm and npx. Open Terminal on macOS or PowerShell on Windows and check that all three commands work. Node.js 22 or newer also supports the Badger MCP setup guide.",
+  "documentation.wecom-cli.step.robot":
+    "For the terminal route, create an API-mode robot with a long connection in WeCom and keep its Bot ID and Secret available locally. The official guide below explains robot setup. Enter credentials only in the local authorization flow.",
+  "documentation.wecom-cli.step.install":
+    "Install the official CLI, then check its version. If it is already installed, check the version first and upgrade when needed. The current Agent skills require version 1.2.1 or newer.",
+  "documentation.wecom-cli.step.skills":
+    "Install the official CLI skills. Select your Agent host if prompted, then reopen the Agent so it discovers the skills. This is a required step in WeCom's terminal installation guide.",
+  "documentation.wecom-cli.step.authorize":
+    "Initialize authorization once. Follow the terminal prompts to configure the robot and complete the WeCom scan and authorization flow. Keep that terminal open until the command finishes.",
+  "documentation.wecom-cli.step.verify":
+    "Check authorization. Continue when the status is authorized, then ask your Agent to read your own profile as a first check. If the status is unauthorized, complete authorization again; requests needing administrator approval must wait for that approval.",
+  "documentation.wecom-cli.step.agent":
+    "Alternative to the terminal installation: give your Agent the command below and ask it to install the official WeCom integration. Continue the conversation so it installs the CLI and guides you through scanning and authorization. Choose this route or the terminal steps above.",
+  "documentation.wecom-cli.next":
+    "Use WeCom from your Agent, or open My WeCom robots in Badger to set up personal notifications. Installing WeCom CLI does not configure Badger MCP; use the separate Badger MCP setup guide to connect your Agent to Badger.",
+  "documentation.wecom-cli.official": "Official WeCom CLI installation guide",
+  "documentation.wecom-cli.overview":
+    "WeCom capabilities overview (original help link)",
+  "documentation.mcp.title": "Badger MCP setup",
+  "documentation.mcp.purpose":
+    "Connect WorkBuddy or a terminal Agent such as Claude Code or Codex to this Badger deployment. Install the local Badger MCP on the same computer as your Agent. The Agent starts it automatically over stdio; the setup panel generates the deployment-specific configuration.",
+  "documentation.mcp.roles":
+    "Each person creates their own personal access token. Choose expert for assigned questions, engineer for drafting jobs, or operator for published workflow Runs, according to your Badger roles. Token scopes and the selected work profile limit the Agent's tools; sign-offs stay in the dashboard.",
+  "documentation.mcp.step.prepare":
+    "Prepare the computer where WorkBuddy or your CLI Agent runs. Install Node.js 22 or newer and npm, and obtain a Badger repository checkout from your team. Check the commands below in Terminal or PowerShell.",
+  "documentation.mcp.step.install":
+    "Open the Badger checkout's root directory and run these commands in order. They install dependencies, build the local tools, and make badger-mcp available. Keep the checkout in place: the linked command uses its built files. On Windows, use the built cli.js path in the later configuration step.",
+  "documentation.mcp.step.token":
+    "In Badger, open Personal settings → Personal access tokens. Create a token with the scopes your work needs, review creation, and copy the secret shown once. Keep the secret locally for the next step.",
+  "documentation.mcp.step.posix":
+    "On macOS or Linux, use Bash or zsh. Run the first line below, paste your token while input is hidden, and press Enter; then run the second line. This sets BADGER_TOKEN for the current shell. Windows users use the next step instead.",
+  "documentation.mcp.step.windows":
+    "On Windows, use PowerShell and run the lines below. Paste your token at the masked prompt. This sets BADGER_TOKEN for the current shell. macOS and Linux users can skip this step.",
+  "documentation.mcp.step.configure":
+    "Return to Personal access tokens and expand Connect your Agent. Select your work profile, Agent host, and operating system, then Copy configuration. On macOS/Linux, choose badger-mcp or its absolute executable path. On Windows, enter the absolute path to packages/mcp/dist/src/cli.js inside your checkout; the generated entry starts node directly. Keep the generated deployment URL, including its base path, and token environment reference.",
+  "documentation.mcp.step.workbuddy":
+    "For WorkBuddy, select WorkBuddy in the setup panel and merge the generated JSON into .mcp.json at the root of the project you open in WorkBuddy, or ~/.codebuddy/.mcp.json for your user account. Preserve other MCP servers. Fully quit WorkBuddy, then start its installed executable from the terminal holding BADGER_TOKEN; an already running app or a desktop launcher may not inherit it. Open that project and enable or reload the Badger server in MCP settings.",
+  "documentation.mcp.step.cli":
+    "For a CLI Agent, select that exact host in the setup panel. Claude Code uses project .mcp.json or user ~/.claude.json; merge the generated mcpServers entry. Codex uses project .codex/config.toml or user ~/.codex/config.toml; merge its generated TOML, including env_vars forwarding BADGER_TOKEN, and trust the project when using project configuration. Start claude or codex from the terminal holding the token and open the intended project.",
+  "documentation.mcp.step.verify":
+    "In the Agent, ask: Use Badger whoami to check my identity and scopes, then read my Badger inbox. Confirm the expected person and deployment. If the MCP command is missing, check its absolute path and Node installation. For 401, check the token and deployment URL; for 403, check your workflow role, token scopes, and work profile. A terminal can remain silent when badger-mcp is started directly because it waits for the Agent's stdio protocol.",
+  "documentation.mcp.next":
+    "Keep the token available in the environment that launches your Agent on later visits. For an Engineer's drafting job, copy its Agent prompt from Questionnaire; for a Field expert, use the shared suggestions page to review and save edits. Confirming, approving, publishing, and answering Run gates happen in Badger.",
+  "documentation.mcp.workbuddyDocs": "CodeBuddy / WorkBuddy MCP configuration",
+  "documentation.mcp.claudeDocs": "Official Claude Code MCP documentation",
+  "documentation.mcp.codexDocs": "Official Codex MCP documentation",
   "documentation.notifications.title": "Badger event items",
   "documentation.notifications.purpose":
     "These are the kinds of inbox items used by Notifications and Add route. An event describes what needs attention; it does not perform or approve the action. Open the item in Badger to review its evidence and act with your role. Approval requested includes confirmation and Run gates as well as approvals. Reading a notification does not complete the work.",
@@ -163,7 +217,7 @@ export const documentationEn = {
   "documentation.settings.robots.purpose":
     "My WeCom robots are personal notification endpoints. Badger stores the Bot ID and Secret encrypted, keeps the long connection in its worker, and never gives a robot Badger permissions. The optional wecom-cli is a separate assistant client; install it only if you want to use WeCom from your own computer.",
   "documentation.settings.robots.step.wecom":
-    "1. Create a WeCom long-connection robot and copy its Bot ID and Secret. If you also want the optional WeCom CLI, use one of the two official installation paths in https://open.work.weixin.qq.com/help2/pc/21705: ask an Agent to install `npx skills add WecomTeam/wecom-unified -y -g` and then let it install the CLI, or use a terminal with Node.js/npm/npx: run `npm install -g @wecom/cli`, then `npx skills add WeComTeam/wecom-cli -y -g`, `wecom-cli auth init`, and `wecom-cli auth show`. These CLI credentials are separate from the credentials you enter in Badger.",
+    "1. Create a WeCom long-connection robot and copy its Bot ID and Secret. For the optional laptop client, open WeCom CLI installation in this guide's menu for numbered steps and the official help links. CLI authorization and the credentials you enter in Badger are configured separately.",
   "documentation.settings.robots.step.userid":
     "2. Find your WeCom userid before opening Badger. In WeCom, ask 智能助理大圆 (Smart Assistant Dayuan), “我的 userid 是什么？”, and copy the exact userid it returns. Use that userid, not your display name, mobile number, Bot ID, or Secret.",
   "documentation.settings.robots.step.register":
@@ -193,6 +247,59 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.roles": "谁可以操作",
   "documentation.actions": "主要操作",
   "documentation.steps": "设置步骤",
+  "documentation.resources": "相关链接",
+  "documentation.nodeDownload": "下载 Node.js LTS",
+  "documentation.wecom-cli.title": "企业微信 CLI 安装",
+  "documentation.wecom-cli.purpose":
+    "在自己的 macOS 或 Windows 笔记本上安装企业微信 CLI，让 Agent 使用您的企业微信账号。WorkBuddy 也提供内置入口：打开“连接器”，添加“企业微信”，扫码创建并授权机器人。终端安装请按以下步骤操作。Badger 通知通过单独配置的“我的企业微信机器人”连接发送。",
+  "documentation.wecom-cli.roles":
+    "每个人使用自己的企业微信账号安装并授权个人客户端。某些企业微信能力可能需要组织管理员批准后才能使用。",
+  "documentation.wecom-cli.step.prepare":
+    "准备笔记本环境。需要时通过下方链接安装 Node.js LTS，其中包含 npm 和 npx。macOS 打开终端，Windows 打开 PowerShell，检查以下三个命令均可运行。Node.js 22 或更新版本也适用于 Badger MCP 设置指南。",
+  "documentation.wecom-cli.step.robot":
+    "使用终端方式时，先在企业微信创建 API 模式的长连接机器人，并在本机备好 Bot ID 和 Secret。下方官方指南说明了创建方式。仅在本机授权流程中输入凭据。",
+  "documentation.wecom-cli.step.install":
+    "安装官方 CLI 并检查版本。已安装时先检查版本，需要时再升级。当前 Agent 技能要求版本不低于 1.2.1。",
+  "documentation.wecom-cli.step.skills":
+    "安装官方 CLI 技能。若提示选择宿主，请选中您的 Agent，随后重新打开 Agent 以加载技能。这是企业微信官方终端安装指南中的必需步骤。",
+  "documentation.wecom-cli.step.authorize":
+    "首次使用时初始化授权。按终端提示配置机器人，完成企业微信扫码及授权流程。命令结束前请保持该终端打开。",
+  "documentation.wecom-cli.step.verify":
+    "检查授权状态。显示 authorized 后继续，并先让 Agent 读取您自己的身份信息进行验证。显示 unauthorized 时请重新完成授权；需要管理员批准的能力须等待审批通过。",
+  "documentation.wecom-cli.step.agent":
+    "终端安装的替代方式：把下方命令提供给 Agent，让它安装官方企业微信集成。继续对话，由 Agent 安装 CLI 并引导扫码授权。选择此方式或上方终端步骤之一即可。",
+  "documentation.wecom-cli.next":
+    "在 Agent 中使用企业微信，或进入 Badger 的“我的企业微信机器人”配置个人通知。安装企业微信 CLI 不会配置 Badger MCP；连接 Agent 与 Badger 请参阅单独的“Badger MCP 设置”指南。",
+  "documentation.wecom-cli.official": "企业微信 CLI 官方安装指南",
+  "documentation.wecom-cli.overview": "企业微信开放能力总览（原帮助链接）",
+  "documentation.mcp.title": "Badger MCP 设置",
+  "documentation.mcp.purpose":
+    "将 WorkBuddy 或 Claude Code、Codex 等终端 Agent 连接到此 Badger 部署。在运行 Agent 的同一台电脑上安装本地 Badger MCP。Agent 会通过 stdio 自动启动它；设置面板会生成此部署专用的配置。",
+  "documentation.mcp.roles":
+    "每个人创建自己的个人访问令牌。按 Badger 角色选择范围：expert 用于已分配的问题，engineer 用于起草任务，operator 用于运行已发布工作流。令牌范围和工作配置限制 Agent 可使用的工具；签署确认在仪表盘中完成。",
+  "documentation.mcp.step.prepare":
+    "准备运行 WorkBuddy 或终端 Agent 的电脑。安装 Node.js 22 或更新版本及 npm，并从团队获取 Badger 仓库副本。在终端或 PowerShell 中检查以下命令。",
+  "documentation.mcp.step.install":
+    "进入 Badger 仓库根目录，依次执行以下命令以安装依赖、构建本地工具并注册 badger-mcp 命令。请保留仓库目录，链接命令会使用其中的构建文件。Windows 后续配置使用构建生成的 cli.js 路径。",
+  "documentation.mcp.step.token":
+    "在 Badger 打开“个人设置 → 个人访问令牌”，选择工作所需的范围，审阅后创建令牌，并复制仅显示一次的密钥。将密钥保留在本机，用于下一步。",
+  "documentation.mcp.step.posix":
+    "macOS 或 Linux 使用 Bash 或 zsh。先执行下方第一行，在隐藏输入时粘贴令牌并按回车，再执行第二行，将 BADGER_TOKEN 设置到当前 shell。Windows 用户改用下一步。",
+  "documentation.mcp.step.windows":
+    "Windows 使用 PowerShell 执行以下命令，在掩码提示中粘贴令牌，将 BADGER_TOKEN 设置到当前 shell。macOS 和 Linux 用户可跳过此步。",
+  "documentation.mcp.step.configure":
+    "回到“个人访问令牌”，展开“连接你的 Agent”，选择工作配置、Agent 宿主和操作系统，然后“复制配置”。macOS/Linux 选择 badger-mcp 或其可执行文件绝对路径；Windows 输入仓库内 packages/mcp/dist/src/cli.js 的绝对路径，生成的配置会直接启动 node。保留生成的完整部署地址（包括基础路径）和令牌环境变量引用。",
+  "documentation.mcp.step.workbuddy":
+    "WorkBuddy 用户在设置面板选择 WorkBuddy，将生成的 JSON 合并到 WorkBuddy 所打开项目根目录的 .mcp.json，或用户级 ~/.codebuddy/.mcp.json，保留其他 MCP 服务器。完全退出 WorkBuddy，再从设置了 BADGER_TOKEN 的终端启动其已安装的可执行程序；已运行的应用或桌面启动器可能不会继承该变量。打开对应项目，并在 MCP 设置中启用或重新加载 Badger 服务器。",
+  "documentation.mcp.step.cli":
+    "终端 Agent 用户在设置面板选择实际使用的宿主。Claude Code 使用项目级 .mcp.json 或用户级 ~/.claude.json，合并生成的 mcpServers 项；Codex 使用项目级 .codex/config.toml 或用户级 ~/.codex/config.toml，合并生成的 TOML（含转发 BADGER_TOKEN 的 env_vars），使用项目级配置时信任该项目。从设置了令牌的终端启动 claude 或 codex，并打开目标项目。",
+  "documentation.mcp.step.verify":
+    "在 Agent 中请求：使用 Badger whoami 检查我的身份和范围，然后读取我的 Badger 收件箱。核对身份与部署。找不到 MCP 命令时检查其绝对路径和 Node 安装；401 时检查令牌及部署地址；403 时检查工作流角色、令牌范围和工作配置。直接运行 badger-mcp 时终端可能保持安静，因为它在等待 Agent 的 stdio 协议。",
+  "documentation.mcp.next":
+    "后续每次使用时，确保启动 Agent 的环境中仍有令牌。工程师可从问卷复制起草任务的 Agent 提示词；领域专家可通过共享建议页面审核并保存修改。确认、批准、发布及回答运行关卡仍在 Badger 中完成。",
+  "documentation.mcp.workbuddyDocs": "CodeBuddy / WorkBuddy MCP 配置说明",
+  "documentation.mcp.claudeDocs": "Claude Code MCP 官方文档",
+  "documentation.mcp.codexDocs": "Codex MCP 官方文档",
   "documentation.notifications.title": "Badger 事件事项",
   "documentation.notifications.purpose":
     "这些是“通知”和“添加路由”所使用的收件箱事项类型。事件说明什么需要处理，不会代您执行或批准操作。请在 Badger 中打开事项、审阅证据，并按自己的角色处理。“等待审批”也包括确认关卡和运行关卡。阅读通知不等于完成待办。",
@@ -342,7 +449,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.settings.robots.purpose":
     "“我的企业微信机器人”是个人通知目的地。Badger 会加密保存 Bot ID 和 Secret，由 worker 维护长连接，机器人不会获得 Badger 权限。可选的 wecom-cli 是独立的个人助手客户端；只有希望在自己的电脑上使用企业微信时才需要安装。",
   "documentation.settings.robots.step.wecom":
-    "1. 在企业微信创建长连接方式机器人，并复制 Bot ID 和 Secret。如果还要使用可选的企业微信 CLI，请参考官方页面 https://open.work.weixin.qq.com/help2/pc/21705 提供的两种安装方式之一：让智能体执行 `npx skills add WecomTeam/wecom-unified -y -g` 并通过对话自动安装 CLI；或在已安装 Node.js/npm/npx 的系统终端中依次运行 `npm install -g @wecom/cli`、`npx skills add WeComTeam/wecom-cli -y -g`、`wecom-cli auth init` 和 `wecom-cli auth show`。CLI 的凭据与在 Badger 中填写的凭据相互独立。",
+    "1. 在企业微信创建长连接方式机器人，并复制 Bot ID 和 Secret。如需可选的笔记本客户端，请在本指南菜单打开“企业微信 CLI 安装”，查看逐步操作及官方帮助链接。CLI 授权与填入 Badger 的凭据分别配置。",
   "documentation.settings.robots.step.userid":
     "2. 在打开 Badger 前获取企业微信 userid。在企业微信中询问“智能助理大圆”：“我的 userid 是什么？”，复制它返回的确切 userid。请使用 userid，不要使用显示名称、手机号、Bot ID 或 Secret。",
   "documentation.settings.robots.step.register":

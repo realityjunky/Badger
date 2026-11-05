@@ -40,9 +40,16 @@ them into `dist/`, so the server image carries the build and none of them.
   the bell and My work counts continue to describe the whole inbox.
 
 - **Documentation** (#94) sits in the left sidebar's System section on every
-  page and opens the current section's guide. The nine stable `help` query values
-  are `my-work`, `workflows`, `questionnaire`, `skills`, `runs`, `evaluations`, `activity`,
-  `admin`, and `settings`; for example `/skills?help=skills`. The
+  page and opens the current section's guide. The stable `help` query values
+  are `my-work`, `wecom-cli`, `mcp`, `workflows`, `questionnaire`, `skills`, `runs`,
+  `evaluations`, `activity`, `admin`, and `settings`; for example `/skills?help=skills`.
+  **WeCom CLI installation** and **Badger MCP setup** are top-level guide entries
+  with numbered instructions, selectable command blocks, and official references.
+  `/settings/tokens?help=wecom-cli` opens the laptop installation guide, and
+  `/settings/tokens?help=mcp` opens WorkBuddy and CLI setup, including local builds,
+  masked token entry, host configuration locations, Windows launch paths,
+  environment inheritance, and connection checks. **Connect your Agent** links
+  directly to the MCP guide while retaining its current setup form. The
   `help=script-side-effects` guide contains definitions
   and synthetic examples for all five declarations. Links retain the current
   page, scope, filters, and anchor, including deployment and demo prefixes.
@@ -236,7 +243,15 @@ them into `dist/`, so the server image carries the build and none of them.
   position. Existing job, ledger, question, and concern links still work, and
   browser Back restores the tab.
 - Questionnaire's **Drafting jobs and suggestions** tab (#55) has a URL and
-  is open to Engineers, Field experts, and Administrators. Engineers request Agent drafts of
+  is open to Engineers, Field experts, and Administrators. Right-click the tab
+  and use the browser's **Copy link address** to share all suggestions for the
+  selected workflow version. The link opens Questionnaire directly at that tab,
+  restores the workflow's Group, and supports opening in a new tab. It does not
+  depend on a selected Question or grant additional access: colleagues sign in
+  with their own workflow role. The address bar also includes the selected tab
+  after switching to it. Jobs appear as separate cards with labeled context,
+  status, and a distinct action area; review is the primary action, with Engineer
+  decisions and discard actions grouped separately. Engineers request Agent drafts of
   questions, or of follow-ups to a parent question, for a draft round, and
   see each job's state; a job whose inputs changed shows as cancelled. They
   edit shared results with Field experts in **Review suggestions** and **Save**.

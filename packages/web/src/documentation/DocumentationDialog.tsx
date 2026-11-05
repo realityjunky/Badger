@@ -5,6 +5,7 @@ import { NOTIFICATION_EVENTS } from "../api/notifications.js";
 import { useDemoMode } from "../app/DemoContext.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import {
+  documentationCommands,
   documentationSearch,
   documentationSections,
   documentationSubsectionTopic,
@@ -41,6 +42,9 @@ export function DocumentationDialog() {
   const heading = useRef<HTMLHeadingElement>(null);
   const subsectionHeading = useRef<HTMLHeadingElement>(null);
   const effectsHeading = useRef<HTMLHeadingElement>(null);
+  const ordered =
+    section !== undefined && "ordered" in section && section.ordered;
+  const Actions = ordered ? "ol" : "ul";
 
   function focusTopic() {
     const target =
@@ -132,12 +136,43 @@ export function DocumentationDialog() {
             <p>{t(`documentation.${section.id}.purpose`)}</p>
             <h3>{t("documentation.roles")}</h3>
             <p>{t(`documentation.${section.id}.roles`)}</p>
-            <h3>{t("documentation.actions")}</h3>
-            <ul className="documentation-actions">
+            <h3>
+              {t(ordered ? "documentation.steps" : "documentation.actions")}
+            </h3>
+            <Actions className="documentation-actions">
               {section.actions.map((action) => (
-                <li key={action}>{t(action)}</li>
+                <li key={action}>
+                  {t(action)}
+                  {documentationCommands[action] && (
+                    <pre className="documentation-command">
+                      <code>{documentationCommands[action]}</code>
+                    </pre>
+                  )}
+                </li>
               ))}
-            </ul>
+            </Actions>
+            {"resources" in section && (
+              <>
+                <h3>{t("documentation.resources")}</h3>
+                <ul className="documentation-actions">
+                  {section.resources.map((resource) => (
+                    <li key={resource.href}>
+                      {resource.href.startsWith("https://") ? (
+                        <a
+                          href={resource.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {t(resource.label)}
+                        </a>
+                      ) : (
+                        <Link to={resource.href}>{t(resource.label)}</Link>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
             {subsection !== undefined && (
               <section
                 aria-labelledby="documentation-subsection-title"

@@ -435,6 +435,19 @@ button.rail-link {
   margin-top: 12px;
 }
 
+.documentation-command {
+  max-width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-control);
+  background: var(--badger-color-surface);
+  color: var(--badger-color-text);
+  font-size: 0.94em;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .documentation-subsection {
   margin-top: 28px;
   padding-top: 4px;
@@ -915,6 +928,13 @@ button.rail-link {
   top: var(--badger-layout-top-bar-height);
   z-index: 10;
   background: var(--badger-color-background);
+}
+
+.questionnaire-tab-link,
+.questionnaire-tab-link:hover {
+  display: block;
+  color: inherit;
+  text-decoration: none;
 }
 
 .workflow-tabs-navigation-shell {
@@ -1539,6 +1559,165 @@ button.rail-link {
 }
 .questionnaire-text {
   overflow-wrap: anywhere;
+}
+
+.drafting-panel {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
+.drafting-panel-header,
+.drafting-job-heading,
+.drafting-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.drafting-panel-header {
+  align-items: flex-start;
+}
+
+.drafting-panel-intro {
+  flex: 1 1 360px;
+  min-width: 0;
+}
+
+.drafting-panel-intro .pane-title {
+  margin: 0 0 8px;
+}
+
+.drafting-panel-intro p {
+  max-width: 75ch;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.drafting-summary {
+  margin: 0;
+  font-size: calc(var(--badger-font-size-xs) * var(--badger-font-scale, 1));
+  font-variant-numeric: tabular-nums;
+}
+
+.drafting-jobs-list {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.drafting-job {
+  min-width: 0;
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-panel);
+  background: var(--badger-color-background);
+  overflow-wrap: anywhere;
+}
+
+.drafting-job-body {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.drafting-job-heading {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.drafting-job-heading h3 {
+  flex: 1 1 200px;
+  min-width: 0;
+  margin: 0;
+  font-size: calc(var(--badger-font-size-md) * var(--badger-font-scale, 1));
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.drafting-job-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.drafting-job-status .status-pill {
+  gap: 6px;
+}
+
+.drafting-job-preview {
+  max-width: 75ch;
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.drafting-job-context {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.drafting-job-context:empty {
+  display: none;
+}
+
+.drafting-job-context > div {
+  display: grid;
+  grid-template-columns: minmax(0, 12em) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 20px;
+  line-height: 1.6;
+}
+
+.drafting-job-context dt {
+  color: var(--badger-color-text-secondary);
+}
+
+.drafting-job-context dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.drafting-job-actions {
+  padding: 12px 20px;
+  border-top: 1px solid var(--badger-color-border);
+  border-radius: 0 0 var(--badger-radius-panel) var(--badger-radius-panel);
+  background: var(--badger-color-surface);
+}
+
+.drafting-job-actions .ant-btn,
+.drafting-panel-header .ant-btn {
+  height: auto;
+  min-height: 36px;
+  padding-block: 7px;
+  white-space: normal;
+}
+
+.drafting-job-actions .ant-btn-dangerous:not(:disabled) {
+  color: var(--badger-color-danger-text);
+}
+
+.drafting-job-actions .ant-btn-dangerous:not(:disabled):hover {
+  background: var(--badger-color-danger-soft);
+}
+
+@media (max-width: 600px) {
+  .drafting-job-body {
+    padding: 16px;
+  }
+
+  .drafting-job-context > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .drafting-job-actions {
+    padding: 12px 16px;
+  }
 }
 
 .dossier-content {

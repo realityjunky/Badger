@@ -1,4 +1,10 @@
-import { Alert, Button, Input, Modal, Select, Space, Tag } from "antd";
+import {
+  CheckOutlined,
+  CopyOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+} from "@ant-design/icons";
+import { Alert, Button, Empty, Input, Modal, Select, Space } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   questionnaireRequest,
@@ -13,6 +19,7 @@ import type {
 } from "../../api/drafting-jobs.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { normalizeBasePath } from "../../app/paths.js";
+import { StatusPill, type PillTone } from "../../components/StatusPill.js";
 import { QuestionComposer } from "./QuestionComposer.js";
 import { AnswerTypeDetails } from "./AnswerTypeDetails.js";
 import type { MessageId } from "../../i18n/catalog.js";
@@ -33,6 +40,15 @@ const kindLabels: Record<DraftingKind, MessageId> = {
   "import-open-questions": "drafting.import",
 };
 
+const statusTones: Record<DraftingJob["status"], PillTone> = {
+  queued: "neutral",
+  claimed: "info",
+  submitted: "warning",
+  accepted: "success",
+  rejected: "neutral",
+  cancelled: "neutral",
+};
+
 export function DraftingJobs({
   basePath,
   path,
@@ -44,7 +60,7 @@ export function DraftingJobs({
   view: QuestionnaireView;
   onChanged(): void;
 }) {
-  const { t } = useI18n();
+  const { t, format } = useI18n();
   const jobsPath = path.replace(/\/questionnaire$/u, "/drafting-jobs");
   const [jobs, setJobs] = useState<DraftingJob[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
@@ -203,71 +219,147 @@ export function DraftingJobs({
       onChanged();
     });
   return (
-    <section aria-label={t("drafting.title")}>
-      <h2 className="pane-title">{t("drafting.title")}</h2>
-      <p className="muted">{t("drafting.help")}</p>
+    <section className="drafting-panel" aria-label={t("drafting.title")}>
+      <div className="drafting-panel-header">
+        <div className="drafting-panel-intro">
+          <h2 className="pane-title">{t("drafting.title")}</h2>
+          <p className="muted">{t("drafting.help")}</p>
+        </div>
+        <Space wrap>
+          {canDecide && (
+            <Button
+              icon={<PlusOutlined aria-hidden="true" />}
+              disabled={busy}
+              onClick={startRequest}
+            >
+              {t("drafting.request")}
+            </Button>
+          )}
+          <Button
+            type="text"
+            icon={<ReloadOutlined aria-hidden="true" />}
+            disabled={busy}
+            onClick={() => void refresh()}
+          >
+            {t("workflow.reload")}
+          </Button>
+        </Space>
+      </div>
       {failure && <Alert type="error" showIcon message={failure} />}
       {savedJobId && (
         <Alert type="success" showIcon message={t("drafting.reviewSaved")} />
       )}
-      <Space wrap>
-        {canDecide && (
-          <Button disabled={busy} onClick={startRequest}>
-            {t("drafting.request")}
-          </Button>
-        )}
-        <Button disabled={busy} onClick={() => void refresh()}>
-          {t("workflow.reload")}
-        </Button>
-      </Space>
-      {!jobs.length && <p className="muted">{t("drafting.empty")}</p>}
-      <ul className="questionnaire-concerns">
-        {jobs.map((job) => (
-          <li key={job.id}>
-            <Space wrap>
-              <span>{t(kindLabels[job.kind])}</span>
-              {job.skillId && (
-                <span>
-                  {view.pins.find((pin) => pin.skillId === job.skillId)
-                    ?.skillName ?? job.skillId}
-                </span>
-              )}
-              {job.questionId && (
-                <span>
-                  {view.questions.find((q) => q.id === job.questionId)?.text}
-                </span>
-              )}
-              {job.locale && <Tag>{job.locale}</Tag>}
-              <span>
-                {view.rounds.find((round) => round.id === job.roundId)?.title}
-              </span>
-              {job.parentQuestionId && (
-                <span>
-                  {
-                    view.questions.find(
-                      (question) => question.id === job.parentQuestionId,
-                    )?.text
-                  }
-                </span>
-              )}
-              <Tag>{t(`drafting.state.${job.status}`)}</Tag>
+      {!jobs.length ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={t("drafting.empty")}
+        />
+      ) : (
+        <p className="drafting-summary muted" role="status">
+          {format("drafting.summary", {
+            total: jobs.length,
+            review: jobs.filter((job) => job.status === "submitted").length,
+          })}
+        </p>
+      )}
+      <ul className="drafting-jobs-list">
+        {jobs.map((job) => {
+          const result = job.review?.result ?? job.result;
+          const summary = result
+            ? "questions" in result
+              ? draftQuestions(result)[0]?.text
+              : "interfaces" in result
+                ? result.facts[0]?.statement
+                : "facts" in result
+                  ? result.facts[0]?.text
+                  : result.text
+            : undefined;
+          const roundTitle = view.rounds.find(
+            (round) => round.id === job.roundId,
+          )?.title;
+          return (
+            <li
+              className="drafting-job"
+              key={job.id}
+              data-testid="drafting-job"
+            >
+              <div className="drafting-job-body">
+                <div className="drafting-job-heading">
+                  <h3>{t(kindLabels[job.kind])}</h3>
+                  <div className="drafting-job-status">
+                    {job.review && (
+                      <StatusPill tone="success">
+                        <CheckOutlined aria-hidden="true" />
+                        {t("drafting.savedEdits")}
+                      </StatusPill>
+                    )}
+                    <StatusPill tone={statusTones[job.status]}>
+                      {t(`drafting.state.${job.status}`)}
+                    </StatusPill>
+                  </div>
+                </div>
+                {summary && <p className="drafting-job-preview">{summary}</p>}
+                <dl className="drafting-job-context">
+                  {job.skillId && (
+                    <div>
+                      <dt>{t("drafting.skill")}</dt>
+                      <dd>
+                        {view.pins.find((pin) => pin.skillId === job.skillId)
+                          ?.skillName ?? job.skillId}
+                      </dd>
+                    </div>
+                  )}
+                  {roundTitle && (
+                    <div>
+                      <dt>{t("drafting.round")}</dt>
+                      <dd>{roundTitle}</dd>
+                    </div>
+                  )}
+                  {job.questionId && (
+                    <div>
+                      <dt>{t("drafting.question")}</dt>
+                      <dd>
+                        {view.questions.find((q) => q.id === job.questionId)
+                          ?.text ?? job.questionId}
+                      </dd>
+                    </div>
+                  )}
+                  {job.parentQuestionId && (
+                    <div>
+                      <dt>{t("drafting.parent")}</dt>
+                      <dd>
+                        {view.questions.find(
+                          (question) => question.id === job.parentQuestionId,
+                        )?.text ?? job.parentQuestionId}
+                      </dd>
+                    </div>
+                  )}
+                  {job.locale && (
+                    <div>
+                      <dt>{t("drafting.language")}</dt>
+                      <dd>{job.locale}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
               {job.status === "queued" && canDecide && (
-                <>
+                <div className="drafting-job-actions">
                   <Button
+                    icon={<CopyOutlined aria-hidden="true" />}
                     disabled={busy}
                     onClick={() => void copyAgentPrompt(job)}
                   >
                     {t("drafting.copyPrompt")}
                   </Button>
-                  <span role="status">
+                  <span className="muted" role="status">
                     {copiedJobId === job.id && t("drafting.promptCopied")}
                   </span>
-                </>
+                </div>
               )}
-              {job.review && <Tag>{t("drafting.savedEdits")}</Tag>}
               {job.status === "submitted" && (
-                <>
+                <div className="drafting-job-actions">
                   <Button
+                    type="primary"
                     disabled={busy}
                     onClick={() =>
                       void run(async () => {
@@ -293,7 +385,7 @@ export function DraftingJobs({
                     {t("drafting.review")}
                   </Button>
                   {canDecide && (
-                    <>
+                    <Space wrap>
                       <Button
                         disabled={busy}
                         onClick={() =>
@@ -313,6 +405,8 @@ export function DraftingJobs({
                         {t("drafting.reviewDecisions")}
                       </Button>
                       <Button
+                        type="text"
+                        danger
                         disabled={busy}
                         onClick={() => {
                           setFailure(null);
@@ -322,13 +416,13 @@ export function DraftingJobs({
                       >
                         {t("drafting.discard")}
                       </Button>
-                    </>
+                    </Space>
                   )}
-                </>
+                </div>
               )}
-            </Space>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
       <Modal
         open={manualPrompt !== null}
