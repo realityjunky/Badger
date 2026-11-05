@@ -345,6 +345,25 @@ const en = {
   "robots.routes": "Notification routes",
   "robots.routesHelp":
     "Choose one robot for an event and scope. Leave the destination as Inbox only to keep that event inside Badger.",
+  "robots.eventsHelp": "What each Badger event means",
+  "robots.eventHelp.gate-ready":
+    "An approval or confirmation gate is waiting, such as a proposal, dossier, plan, source, package, publication, or Run gate.",
+  "robots.eventHelp.gate-invalidated":
+    "A change superseded an earlier stage approval.",
+  "robots.eventHelp.question-assigned":
+    "Questions assigned to you are waiting for answers.",
+  "robots.eventHelp.answer-submitted":
+    "An answer is waiting for resolution or the next composition step.",
+  "robots.eventHelp.restatement-ready":
+    "A restated answer is waiting for acknowledgement.",
+  "robots.eventHelp.question-reopened":
+    "A previously handled question needs attention again.",
+  "robots.eventHelp.concern-raised":
+    "An expert concern is waiting for resolution.",
+  "robots.eventHelp.job-submitted": "An Agent draft is waiting for acceptance.",
+  "robots.eventHelp.evaluation-finished": "An evaluation report is ready.",
+  "robots.eventHelp.script-effect-review":
+    "The uploader must review a Skill script's possible effects.",
   "robots.precedence":
     "A workflow route overrides a group route, which overrides the all-work route.",
   "robots.noFallback":
@@ -1782,6 +1801,19 @@ const zh: Record<MessageId, string> = {
   "robots.routes": "通知路由",
   "robots.routesHelp":
     "为某类事件和范围选择一个机器人。目的地选择“仅 Badger 收件箱”即可不发送企业微信消息。",
+  "robots.eventsHelp": "Badger 各事件的含义",
+  "robots.eventHelp.gate-ready":
+    "审批或确认门槛正在等待处理，例如提案、档案、计划、来源、软件包、发布或 Run 门槛。",
+  "robots.eventHelp.gate-invalidated": "变更取代了先前的阶段审批。",
+  "robots.eventHelp.question-assigned": "分配给你的问题等待回答。",
+  "robots.eventHelp.answer-submitted": "回答等待处理或下一步编制。",
+  "robots.eventHelp.restatement-ready": "重述后的回答等待确认。",
+  "robots.eventHelp.question-reopened": "已经处理过的问题再次需要关注。",
+  "robots.eventHelp.concern-raised": "专家关切等待解决。",
+  "robots.eventHelp.job-submitted": "Agent 草稿等待验收。",
+  "robots.eventHelp.evaluation-finished": "评估报告已经就绪。",
+  "robots.eventHelp.script-effect-review":
+    "上传人需要审阅 Skill 脚本可能产生的影响。",
   "robots.precedence": "工作流路由优先于团队路由，团队路由优先于全部工作路由。",
   "robots.noFallback":
     "如果没有启用且已验证的匹配机器人，Badger 会保留站内待办，不发送企业微信消息。",

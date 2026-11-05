@@ -25,6 +25,19 @@ interface RouteOptions {
   workflows: { id: string; name: string }[];
 }
 
+const EVENT_DESCRIPTIONS: readonly NotificationEvent[] = [
+  "gate-ready",
+  "gate-invalidated",
+  "question-assigned",
+  "answer-submitted",
+  "restatement-ready",
+  "question-reopened",
+  "concern-raised",
+  "job-submitted",
+  "evaluation-finished",
+  "script-effect-review",
+];
+
 export function PersonalRobotRoutes({
   robots,
   refresh,
@@ -63,6 +76,17 @@ export function PersonalRobotRoutes({
     <section>
       <h3>{t("robots.routes")}</h3>
       <p>{t("robots.routesHelp")}</p>
+      <details>
+        <summary>{t("robots.eventsHelp")}</summary>
+        <ul>
+          {EVENT_DESCRIPTIONS.map((event) => (
+            <li key={event}>
+              <strong>{t(`notifications.event.${event}`)}:</strong>{" "}
+              {t(`robots.eventHelp.${event}`)}
+            </li>
+          ))}
+        </ul>
+      </details>
       <p className="muted">{t("robots.precedence")}</p>
       <p className="muted">{t("robots.noFallback")}</p>
       {reason && <Alert type="error" showIcon message={reason} />}

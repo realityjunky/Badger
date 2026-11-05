@@ -1178,10 +1178,46 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
       <p data-lang="zh" lang="zh-CN"><strong>个人机器人属于登记它的人员。</strong>企业微信负责创建机器人、轮换 Secret 以及控制企业微信账号的访问权限。工作站上安装的 <code>wecom-cli</code> 是可选的个人助手客户端，不是 Badger server，Badger 投递也不依赖终端进程。Badger 自己加密保存 Bot ID、Secret 和接收人的 userid，由 worker 维护长连接。</p>
       <p data-lang="en"><strong>Settings → My WeCom robots.</strong> A person can register several robots, give each a label, enable or pause it, allow or disallow link-only replies, test or rotate credentials, and remove it. Before delivery, the person opens a personal chat with the robot and sends Badger's one-time verification command. Credentials are masked after saving. An Administrator may suspend a robot but cannot read its Secret.</p>
       <p data-lang="zh" lang="zh-CN"><strong>设置 → 我的企业微信机器人。</strong>一个人可以登记多个机器人，为每个机器人命名、启用或暂停、允许或禁止仅链接回复、测试或轮换凭据，以及移除机器人。投递前，人员需要打开与机器人的个人聊天并发送 Badger 提供的一次性验证命令。凭据保存后会隐藏。管理员可以暂停机器人，但不能读取其 Secret。</p>
+      <p data-lang="en"><strong>Optional WeCom CLI installation.</strong> The CLI is a separate assistant client, not Badger's worker. Follow the official <a href="https://open.work.weixin.qq.com/help2/pc/21705">WeCom CLI help page</a> and choose one of these two paths:</p>
+      <ol class="steps" data-lang="en">
+        <li><div><b>Ask an Agent.</b><p>Give the Agent <code>npx skills add WecomTeam/wecom-unified -y -g</code>. Continue the conversation; it installs the CLI and guides the WeCom robot scan and authorization.</p></div></li>
+        <li><div><b>Use a system terminal.</b><p>With Node.js/npm/npx available, run <code>npm install -g @wecom/cli</code>, then <code>npx skills add WeComTeam/wecom-cli -y -g</code> (required), <code>wecom-cli auth init</code> once to configure the credentials, and <code>wecom-cli auth show</code> to inspect authorization.</p></div></li>
+      </ol>
+      <p data-lang="zh" lang="zh-CN"><strong>可选的企业微信 CLI 安装。</strong>CLI 是独立的个人助手客户端，不是 Badger 的 worker。请参考<a href="https://open.work.weixin.qq.com/help2/pc/21705">企业微信 CLI 官方帮助页面</a>，选择以下两种方式之一：</p>
+      <ol class="steps" data-lang="zh" lang="zh-CN">
+        <li><div><b>让智能体安装。</b><p>把 <code>npx skills add WecomTeam/wecom-unified -y -g</code> 提供给智能体，继续对话；它会安装 CLI，并引导你扫码创建和授权企业微信机器人。</p></div></li>
+        <li><div><b>在系统终端安装。</b><p>确认已安装 Node.js/npm/npx，然后依次运行 <code>npm install -g @wecom/cli</code>、（必需的）<code>npx skills add WecomTeam/wecom-cli -y -g</code>、首次配置凭据的 <code>wecom-cli auth init</code>，以及查看授权状态的 <code>wecom-cli auth show</code>。</p></div></li>
+      </ol>
+      <p data-lang="en"><strong>Find your WeCom userid.</strong> Before saving the robot in Badger, ask <strong>智能助理大圆</strong> in WeCom: <code>我的 userid 是什么？</code> Copy the exact userid it returns. Do not substitute your display name, mobile number, Bot ID, or Secret.</p>
+      <p data-lang="zh" lang="zh-CN"><strong>获取企业微信 userid。</strong>在 Badger 保存机器人前，在企业微信中询问<strong>智能助理大圆</strong>：“<code>我的 userid 是什么？</code>”复制它返回的确切 userid。不要用显示名称、手机号、Bot ID 或 Secret 代替 userid。</p>
       <p data-lang="en"><strong>Notification routes.</strong> A route chooses one robot, or the Badger inbox only, for one event and scope. Events include question assignments, submitted answers, concerns, approvals, evaluations, and drafts. Workflow scope wins over Group scope, and Group scope wins over all-my-work scope. With no enabled and verified match, the item stays in the inbox and no WeCom post is sent. Badger never fans one event out to every robot by default.</p>
       <p data-lang="zh" lang="zh-CN"><strong>通知路由。</strong>路由为某类事件和范围选择一个机器人，或选择仅保留在 Badger 收件箱。事件包括问题分配、回答提交、关切、审批、评估和草稿等。工作流范围优先于团队范围，团队范围优先于全部工作范围。如果没有启用且已验证的匹配机器人，事项会保留在收件箱，不发送企业微信消息。默认不会把一个事件静默发送给所有机器人。</p>
       <p data-lang="en"><strong>Events in “Add route”.</strong> The event is the kind of Badger inbox item that starts a post; it is not a free-form message. <code>Approval requested</code> (<code>gate-ready</code>) means an approval or confirmation gate is waiting, such as a proposal, dossier, plan, source, package, publication, or Run gate. <code>Stage invalidated</code> (<code>gate-invalidated</code>) means a change superseded an earlier stage approval. <code>Questions assigned</code> (<code>question-assigned</code>) means assigned questions are waiting for answers. <code>Answers submitted</code> (<code>answer-submitted</code>) means an answer is waiting for the next resolution or composition step. <code>Restatement to acknowledge</code> (<code>restatement-ready</code>) means a restated answer is waiting for acknowledgement. <code>Question reopened</code> (<code>question-reopened</code>) means a previously handled question needs attention again. <code>Expert concern raised</code> (<code>concern-raised</code>) means a concern is waiting for resolution. <code>Draft submitted</code> (<code>job-submitted</code>) means an Agent draft is waiting for acceptance. <code>Evaluation finished</code> (<code>evaluation-finished</code>) means an evaluation report is ready. <code>Script effect review</code> (<code>script-effect-review</code>) means the uploader must review a Skill script's possible effects. Choose a scope and destination for each event; choose <code>Badger inbox only</code> to keep matching items in Badger without a WeCom post.</p>
       <p data-lang="zh" lang="zh-CN"><strong>“添加路由”中的事件。</strong>这里的事件是触发消息的 Badger 收件箱事项类型，不是自定义消息。<code>等待审批</code>（<code>gate-ready</code>）表示提案、档案、计划、来源、软件包、发布或 Run 门槛等审批/确认门槛正在等待处理。<code>阶段审批已失效</code>（<code>gate-invalidated</code>）表示变更取代了先前的阶段审批。<code>问题等待回答</code>（<code>question-assigned</code>）表示分配给你的问题等待回答。<code>回答等待处理</code>（<code>answer-submitted</code>）表示回答已提交，等待下一步处理或编制。<code>重述等待确认</code>（<code>restatement-ready</code>）表示重述后的回答等待确认。<code>问题等待处理</code>（<code>question-reopened</code>）表示已经处理过的问题再次需要关注。<code>专家关切等待处理</code>（<code>concern-raised</code>）表示关切事项等待解决。<code>草稿等待验收</code>（<code>job-submitted</code>）表示 Agent 草稿等待验收。<code>评估已完成</code>（<code>evaluation-finished</code>）表示评估报告已经就绪。<code>等待上传人审阅脚本影响</code>（<code>script-effect-review</code>）表示上传人需要审阅 Skill 脚本可能产生的影响。每个事件都要选择范围和目的地；选择<code>仅 Badger 收件箱</code>即可让匹配事项留在 Badger，不发送企业微信消息。</p>
+      <ul class="plain-list" data-lang="en">
+        <li><code>gate-ready</code> · Approval requested: an approval or confirmation gate is waiting.</li>
+        <li><code>gate-invalidated</code> · Stage invalidated: a change superseded an earlier stage approval.</li>
+        <li><code>question-assigned</code> · Questions assigned: assigned questions are waiting for answers.</li>
+        <li><code>answer-submitted</code> · Answers submitted: an answer is waiting for resolution.</li>
+        <li><code>restatement-ready</code> · Restatement to acknowledge: a restated answer is waiting for acknowledgement.</li>
+        <li><code>question-reopened</code> · Question reopened: a handled question needs attention again.</li>
+        <li><code>concern-raised</code> · Expert concern raised: a concern is waiting for resolution.</li>
+        <li><code>job-submitted</code> · Draft submitted: an Agent draft is waiting for acceptance.</li>
+        <li><code>evaluation-finished</code> · Evaluation finished: an evaluation report is ready.</li>
+        <li><code>script-effect-review</code> · Script effect review: the uploader must review a Skill script's possible effects.</li>
+      </ul>
+      <ul class="plain-list" data-lang="zh" lang="zh-CN">
+        <li><code>gate-ready</code> · 等待审批：审批或确认门槛正在等待处理。</li>
+        <li><code>gate-invalidated</code> · 阶段审批已失效：变更取代了先前的阶段审批。</li>
+        <li><code>question-assigned</code> · 问题等待回答：分配的问题等待回答。</li>
+        <li><code>answer-submitted</code> · 回答等待处理：回答等待解决。</li>
+        <li><code>restatement-ready</code> · 重述等待确认：重述后的回答等待确认。</li>
+        <li><code>question-reopened</code> · 问题重新打开：已经处理的问题再次需要关注。</li>
+        <li><code>concern-raised</code> · 专家关切等待处理：关切事项等待解决。</li>
+        <li><code>job-submitted</code> · 草稿等待验收：Agent 草稿等待验收。</li>
+        <li><code>evaluation-finished</code> · 评估已完成：评估报告已经就绪。</li>
+        <li><code>script-effect-review</code> · 等待上传人审阅脚本影响：上传人需要审阅 Skill 脚本可能产生的影响。</li>
+      </ul>
       <p data-lang="en"><strong>Robot access is not Badger access.</strong> A robot cannot answer, approve, publish, or change a record. Those actions still require the signed-in person's Badger capability and explicit confirmation. An inbound personal-chat message initially receives only a My work link. The owner's personal delivery history is filtered by workflows that person can read; workflow owners and Administrators keep the workflow delivery log.</p>
       <p data-lang="zh" lang="zh-CN"><strong>机器人访问权不等于 Badger 访问权。</strong>机器人不能回答、审批、发布或修改记录。这些操作仍需人员登录 Badger、拥有相应能力并明确确认。个人聊天中的入站消息目前只返回“我的工作”链接。个人投递历史会按本人可读取的工作流过滤；工作流负责人和管理员仍可查看工作流投递日志。</p>
       <p data-lang="en">Everyone has an in-app inbox with unread, read, and done states and a deep link on each item. Items become done automatically when their question, acknowledgement, approval, or Run gate is handled. Assignments, answers, concerns, submitted drafts, evaluation results, and stage invalidations also create notifications. The same action produces the same notifications whether it came from the dashboard, the Badger MCP, or a Run.</p>

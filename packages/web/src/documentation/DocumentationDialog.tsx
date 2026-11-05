@@ -3,7 +3,12 @@ import { useEffect, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useDemoMode } from "../app/DemoContext.js";
 import { useI18n } from "../i18n/I18nContext.js";
-import { documentationSearch, documentationSections } from "./sections.js";
+import {
+  documentationSearch,
+  documentationSections,
+  documentationSubsectionTopic,
+  documentationSubsections,
+} from "./sections.js";
 
 const effects = [
   "none",
@@ -20,25 +25,36 @@ export function DocumentationDialog() {
   const location = useLocation();
   const navigate = useNavigate();
   const topic = new URLSearchParams(location.search).get("help");
+  const topicSection = topic?.split("/", 1)[0];
   const section = documentationSections.find(
     ({ id }) =>
-      id === topic || (id === "skills" && topic === "script-side-effects"),
+      id === topicSection ||
+      (id === "skills" && topic === "script-side-effects"),
   );
+  const subsection =
+    section === undefined || topic === "script-side-effects"
+      ? undefined
+      : documentationSubsections(section.id).find(
+          ({ id }) => topic === documentationSubsectionTopic(section.id, id),
+        );
   const heading = useRef<HTMLHeadingElement>(null);
+  const subsectionHeading = useRef<HTMLHeadingElement>(null);
   const effectsHeading = useRef<HTMLHeadingElement>(null);
 
   function focusTopic() {
     const target =
       topic === "script-side-effects"
         ? effectsHeading.current
-        : heading.current;
+        : subsection !== undefined
+          ? subsectionHeading.current
+          : heading.current;
     target?.scrollIntoView({ block: "start", behavior: "instant" });
     target?.focus({ preventScroll: true });
   }
 
   useEffect(() => {
     if (section) focusTopic();
-  }, [topic]);
+  }, [subsection, topic]);
 
   function close() {
     void navigate(
@@ -68,17 +84,41 @@ export function DocumentationDialog() {
             aria-label={t("documentation.sections")}
           >
             {documentationSections.map((entry) => (
-              <Link
-                key={entry.id}
-                to={{
-                  ...location,
-                  search: documentationSearch(location.search, entry.id),
-                }}
-                replace
-                aria-current={entry.id === section.id ? "page" : undefined}
-              >
-                {t(entry.title)}
-              </Link>
+              <div className="documentation-nav-group" key={entry.id}>
+                <Link
+                  to={{
+                    ...location,
+                    search: documentationSearch(location.search, entry.id),
+                  }}
+                  replace
+                  aria-current={topic === entry.id ? "page" : undefined}
+                >
+                  {t(entry.title)}
+                </Link>
+                {documentationSubsections(entry.id).map((child) => {
+                  const childTopic = documentationSubsectionTopic(
+                    entry.id,
+                    child.id,
+                  );
+                  return (
+                    <Link
+                      className="documentation-nav-subsection"
+                      key={childTopic}
+                      to={{
+                        ...location,
+                        search: documentationSearch(
+                          location.search,
+                          childTopic,
+                        ),
+                      }}
+                      replace
+                      aria-current={topic === childTopic ? "page" : undefined}
+                    >
+                      {t(child.title)}
+                    </Link>
+                  );
+                })}
+              </div>
             ))}
           </nav>
           <article
@@ -97,6 +137,29 @@ export function DocumentationDialog() {
                 <li key={action}>{t(action)}</li>
               ))}
             </ul>
+            {subsection !== undefined && (
+              <section
+                aria-labelledby="documentation-subsection-title"
+                className="documentation-subsection"
+              >
+                <h3
+                  ref={subsectionHeading}
+                  id="documentation-subsection-title"
+                  tabIndex={-1}
+                >
+                  {t(subsection.title)}
+                </h3>
+                <p>{t(subsection.purpose)}</p>
+                <h4>{t("documentation.steps")}</h4>
+                <ol className="documentation-actions">
+                  {subsection.actions.map((action) => (
+                    <li key={action}>{t(action)}</li>
+                  ))}
+                </ol>
+                <h4>{t("documentation.next")}</h4>
+                <p>{t(subsection.next)}</p>
+              </section>
+            )}
             {section.id === "skills" && (
               <section aria-labelledby="documentation-effects-title">
                 <h3

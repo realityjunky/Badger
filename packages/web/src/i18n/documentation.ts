@@ -13,6 +13,7 @@ export const documentationEn = {
     "In demo mode, records and examples are synthetic and read-only. Documentation remains available; appearance and language choices last only for this visit.",
   "documentation.roles": "Who can act",
   "documentation.actions": "Important actions",
+  "documentation.steps": "Setup steps",
   "documentation.next": "Next step",
   "documentation.administration": "Administration",
   "documentation.my-work.purpose":
@@ -152,6 +153,22 @@ export const documentationEn = {
     "Choose notification events, set your mention identity, and manage permitted Group robot channels. Use delivery history to investigate a failed notification without sharing webhook secrets.",
   "documentation.settings.next":
     "Return to My work or your workflow. Confirm that your Agent uses the intended profile and that important requests reach your chosen notification channel.",
+  "documentation.settings.robots.purpose":
+    "My WeCom robots are personal notification endpoints. Badger stores the Bot ID and Secret encrypted, keeps the long connection in its worker, and never gives a robot Badger permissions. The optional wecom-cli is a separate assistant client; install it only if you want to use WeCom from your own computer.",
+  "documentation.settings.robots.step.wecom":
+    "1. Create a WeCom long-connection robot and copy its Bot ID and Secret. If you also want the optional WeCom CLI, use one of the two official installation paths in https://open.work.weixin.qq.com/help2/pc/21705: ask an Agent to install `npx skills add WecomTeam/wecom-unified -y -g` and then let it install the CLI, or use a terminal with Node.js/npm/npx: run `npm install -g @wecom/cli`, then `npx skills add WeComTeam/wecom-cli -y -g`, `wecom-cli auth init`, and `wecom-cli auth show`. These CLI credentials are separate from the credentials you enter in Badger.",
+  "documentation.settings.robots.step.userid":
+    "2. Find your WeCom userid before opening Badger. In WeCom, ask 智能助理大圆 (Smart Assistant Dayuan), “我的 userid 是什么？”, and copy the exact userid it returns. Use that userid, not your display name, mobile number, Bot ID, or Secret.",
+  "documentation.settings.robots.step.register":
+    "3. Open Personal settings → My WeCom robots, choose Add personal robot, and enter a label, Bot ID, Secret, and the userid from the previous step. Save the robot. Badger masks the credentials after saving.",
+  "documentation.settings.robots.step.verify":
+    "4. On the robot card, choose Verify personal chat. Open a one-to-one chat with the robot in WeCom and send the exact one-time `link ...` command. Wait until the card says Chat verified and Connected.",
+  "documentation.settings.robots.step.route":
+    "5. In Notification routes, choose Add route. Select the Badger event, scope (All my work, a Group, or a Workflow), and this robot as the destination. Choose Badger inbox only when the event should stay inside Badger.",
+  "documentation.settings.robots.step.test":
+    "6. Choose Test on the verified robot, confirm the message arrives in your personal WeCom chat, and then trigger a matching Badger event. Use the Delivery log when you need to inspect a queued, sent, retried, or failed post.",
+  "documentation.settings.robots.next":
+    "Start with one low-risk event such as Approval requested for All my work. Confirm the test post and the first real notification before adding more routes. Workflow scope overrides Group scope, and Group scope overrides All my work.",
 } as const;
 
 export const documentationZh: Record<keyof typeof documentationEn, string> = {
@@ -168,6 +185,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
     "演示模式中的记录与示例均为合成内容且只读。仍可查看使用文档；外观与语言选择仅在本次访问期间生效。",
   "documentation.roles": "谁可以操作",
   "documentation.actions": "主要操作",
+  "documentation.steps": "设置步骤",
   "documentation.next": "下一步",
   "documentation.administration": "管理",
   "documentation.my-work.purpose":
@@ -307,4 +325,20 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
     "选择通知事件、设置自己的提醒身份，并管理有权配置的群机器人渠道。通过投递历史调查通知失败，不要分享 webhook 秘密值。",
   "documentation.settings.next":
     "返回“我的工作”或工作流，确认 Agent 使用了预期的配置，重要请求能够送达您选择的通知渠道。",
+  "documentation.settings.robots.purpose":
+    "“我的企业微信机器人”是个人通知目的地。Badger 会加密保存 Bot ID 和 Secret，由 worker 维护长连接，机器人不会获得 Badger 权限。可选的 wecom-cli 是独立的个人助手客户端；只有希望在自己的电脑上使用企业微信时才需要安装。",
+  "documentation.settings.robots.step.wecom":
+    "1. 在企业微信创建长连接方式机器人，并复制 Bot ID 和 Secret。如果还要使用可选的企业微信 CLI，请参考官方页面 https://open.work.weixin.qq.com/help2/pc/21705 提供的两种安装方式之一：让智能体执行 `npx skills add WecomTeam/wecom-unified -y -g` 并通过对话自动安装 CLI；或在已安装 Node.js/npm/npx 的系统终端中依次运行 `npm install -g @wecom/cli`、`npx skills add WeComTeam/wecom-cli -y -g`、`wecom-cli auth init` 和 `wecom-cli auth show`。CLI 的凭据与在 Badger 中填写的凭据相互独立。",
+  "documentation.settings.robots.step.userid":
+    "2. 在打开 Badger 前获取企业微信 userid。在企业微信中询问“智能助理大圆”：“我的 userid 是什么？”，复制它返回的确切 userid。请使用 userid，不要使用显示名称、手机号、Bot ID 或 Secret。",
+  "documentation.settings.robots.step.register":
+    "3. 打开“个人设置 → 我的企业微信机器人”，点击“添加个人机器人”，填写标签、Bot ID、Secret 和上一步获取的 userid。保存后，Badger 会隐藏凭据。",
+  "documentation.settings.robots.step.verify":
+    "4. 在机器人卡片中点击“验证个人聊天”。在企业微信中打开与机器人的单聊，并发送完整的一次性 `link ...` 命令。等待卡片显示“个人聊天已验证”和“已连接”。",
+  "documentation.settings.robots.step.route":
+    "5. 在“通知路由”中点击“添加路由”。选择 Badger 事件、范围（我的全部工作、团队或工作流）以及这个机器人作为目的地。如果事件只应留在 Badger，请选择“仅 Badger 收件箱”。",
+  "documentation.settings.robots.step.test":
+    "6. 在已验证的机器人上点击“发送测试”，确认个人企业微信聊天收到消息，然后触发匹配的 Badger 事件。需要检查排队、已发送、重试或失败消息时，查看投递日志。",
+  "documentation.settings.robots.next":
+    "先为“我的全部工作”配置一个低风险事件，例如“等待审批”。确认测试消息和第一条真实通知都能收到，再增加其他路由。工作流范围优先于团队范围，团队范围优先于我的全部工作。",
 };

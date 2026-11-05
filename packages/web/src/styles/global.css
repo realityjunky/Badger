@@ -398,6 +398,17 @@ button.rail-link {
   color: var(--badger-color-accent);
 }
 
+.documentation-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.documentation-nav-subsection {
+  margin-left: 12px;
+  font-size: 0.94em;
+}
+
 .documentation-article {
   min-width: 0;
   overflow: auto;
@@ -422,6 +433,16 @@ button.rail-link {
 
 .documentation-actions li + li {
   margin-top: 12px;
+}
+
+.documentation-subsection {
+  margin-top: 28px;
+  padding-top: 4px;
+  border-top: 1px solid var(--badger-color-border);
+}
+
+.documentation-subsection h4 {
+  margin: 18px 0 8px;
 }
 
 .documentation-effects > div {

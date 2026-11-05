@@ -78,15 +78,51 @@ export const documentationSections = [
       "documentation.settings.tokens",
       "documentation.settings.notifications",
     ],
+    subsections: [
+      {
+        id: "robots",
+        title: "robots.title",
+        purpose: "documentation.settings.robots.purpose",
+        next: "documentation.settings.robots.next",
+        actions: [
+          "documentation.settings.robots.step.wecom",
+          "documentation.settings.robots.step.userid",
+          "documentation.settings.robots.step.register",
+          "documentation.settings.robots.step.verify",
+          "documentation.settings.robots.step.route",
+          "documentation.settings.robots.step.test",
+        ],
+      },
+    ],
   },
 ] as const satisfies readonly {
   id: string;
   title: MessageId;
   actions: readonly MessageId[];
+  subsections?: readonly {
+    id: string;
+    title: MessageId;
+    purpose: MessageId;
+    next: MessageId;
+    actions: readonly MessageId[];
+  }[];
 }[];
 
 export type DocumentationSection = (typeof documentationSections)[number]["id"];
-export type DocumentationTopic = DocumentationSection | "script-side-effects";
+export type DocumentationTopic =
+  DocumentationSection | "settings/robots" | "script-side-effects";
+
+export function documentationSubsections(section: DocumentationSection) {
+  const entry = documentationSections.find(({ id }) => id === section);
+  return entry !== undefined && "subsections" in entry ? entry.subsections : [];
+}
+
+export function documentationSubsectionTopic(
+  section: DocumentationSection,
+  subsection: string,
+): DocumentationTopic {
+  return `${section}/${subsection}` as DocumentationTopic;
+}
 
 export function currentDocumentationSection(
   pathname: string,
