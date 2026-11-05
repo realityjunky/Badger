@@ -3,7 +3,9 @@ import {
   startTestService,
   startStubWeComRobot,
   startStubHttpsProxy,
+  startStubWeComLongConnection,
   type StubWeComRobot,
+  type StubWeComLongConnection,
   type TestPerson,
   type TestService,
 } from "../src/testing/index.js";
@@ -23,9 +25,12 @@ const webhookUrl =
   "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-secret";
 let service: TestService;
 let robot: StubWeComRobot;
+let longRobot: StubWeComLongConnection | undefined;
 afterEach(async () => {
   await service?.close();
   await robot?.close();
+  await longRobot?.close();
+  longRobot = undefined;
 });
 
 async function call<T = Record<string, unknown>>(
@@ -56,11 +61,13 @@ async function setup(
   options: {
     realChannel?: boolean;
     environment?: Record<string, string | undefined>;
+    wecomLongConnectionUrl?: string;
   } = {},
 ) {
   robot = await startStubWeComRobot();
   service = await startTestService({
     notificationChannel: options.realChannel ? undefined : robot.channel,
+    wecomLongConnectionUrl: options.wecomLongConnectionUrl,
     environment: {
       BADGER_BOOTSTRAP_ADMINISTRATORS: admin.email,
       BADGER_ALLOWED_ORIGINS: "http://localhost",
@@ -180,6 +187,504 @@ async function saveMentions(
     person,
   );
 }
+
+const personalTarget = {
+  transport: "long-connection",
+  botId: "aibot-badger-test",
+  botSecret: "long-connection-test-secret",
+  recipientUserId: "owner-wecom",
+};
+
+async function setupPersonalRobot() {
+  longRobot = await startStubWeComLongConnection();
+  const fixture = await setup({
+    realChannel: true,
+    wecomLongConnectionUrl: longRobot.url,
+  });
+  const route = `/workflows/${fixture.workflowId}/notifications/channel`;
+  const saved = await call<{
+    channel: { revision: number };
+    testDeliveryId: string;
+  }>(
+    "PUT",
+    route,
+    {
+      revision: 0,
+      label: "Personal robot",
+      language: "en",
+      confirmed: true,
+      ...personalTarget,
+    },
+    owner,
+  );
+  return { ...fixture, route, saved };
+}
+
+describe("WeCom long-connection personal notifications", () => {
+  it("registers several personal robots and routes one event to one destination", async () => {
+    const { workflowId } = await setup();
+    const created = await call<{
+      robot: { id: string; label: string; verified: boolean; botId: string };
+      linkCommand: string;
+    }>(
+      "POST",
+      "/me/robots",
+      {
+        revision: 0,
+        confirmed: true,
+        label: "Approvals",
+        language: "en",
+        enabled: true,
+        repliesEnabled: false,
+        botId: "personal-approvals",
+        botSecret: "personal-approvals-secret",
+        recipientUserId: "owner-wecom",
+      },
+      owner,
+      201,
+    );
+    expect(created.robot).toMatchObject({
+      label: "Approvals",
+      verified: false,
+      botId: "••••••••",
+    });
+    expect(created.linkCommand).toMatch(/^link [a-f0-9]{24}$/u);
+    const second = await call<{ robot: { id: string } }>(
+      "POST",
+      "/me/robots",
+      {
+        revision: 0,
+        confirmed: true,
+        label: "Questions",
+        language: "zh",
+        enabled: true,
+        repliesEnabled: true,
+        botId: "personal-questions",
+        botSecret: "personal-questions-secret",
+        recipientUserId: "owner-wecom",
+      },
+      owner,
+      201,
+    );
+    await call(
+      "POST",
+      "/me/robot-routes",
+      {
+        revision: 0,
+        confirmed: true,
+        event: "gate-ready",
+        scopeType: "workflow",
+        scopeId: workflowId,
+        robotId: created.robot.id,
+      },
+      owner,
+      201,
+    );
+    await call(
+      "POST",
+      "/me/robot-routes",
+      {
+        revision: 0,
+        confirmed: true,
+        event: "question-assigned",
+        scopeType: "all",
+        scopeId: "",
+        robotId: second.robot.id,
+      },
+      owner,
+      201,
+    );
+    const registry = await call<{
+      robots: { label: string; botSecret?: string }[];
+    }>("GET", "/me/robots", undefined, owner);
+    expect(registry.robots.map((robot) => robot.label)).toEqual([
+      "Approvals",
+      "Questions",
+    ]);
+    expect(JSON.stringify(registry)).not.toContain("personal-approvals-secret");
+    const routes = await call<{
+      routes: { event: string; scopeType: string; robotId: string }[];
+    }>("GET", "/me/robot-routes", undefined, owner);
+    expect(routes.routes).toHaveLength(2);
+    await call(
+      "POST",
+      "/me/robots",
+      {
+        revision: 0,
+        confirmed: true,
+        label: "Forbidden",
+        language: "en",
+        enabled: true,
+        repliesEnabled: false,
+        botId: "forbidden",
+        botSecret: "forbidden-secret",
+        recipientUserId: "owner-wecom",
+      },
+      expert,
+      201,
+    );
+  });
+
+  it("authenticates over WebSocket, sends grouped metadata to a personal chat, and masks credentials", async () => {
+    const { workflowId, versionId, route, saved } = await setupPersonalRobot();
+    expect(saved.channel).toMatchObject({
+      transport: "long-connection",
+      botId: "••••••••",
+      botSecret: "••••••••",
+      recipientUserId: "••••••••",
+    });
+    expect(await service.runNotificationJobs()).toBe(1);
+    const auth = longRobot!.requests.find(
+      (request) => request.cmd === "aibot_subscribe",
+    );
+    expect(auth?.body).toMatchObject({
+      bot_id: personalTarget.botId,
+      secret: personalTarget.botSecret,
+    });
+    await saveMentions(expert, "expert-user", null);
+    await publishRound(workflowId, versionId);
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs()).toBe(1);
+    const posts = longRobot!.requests.filter(
+      (request) => request.cmd === "aibot_send_msg",
+    );
+    expect(posts).toHaveLength(2);
+    expect(posts[1].body).toMatchObject({
+      chatid: personalTarget.recipientUserId,
+      msgtype: "markdown",
+    });
+    expect(JSON.stringify(posts[1].body)).toContain("Dr Lin: 2");
+    expect(JSON.stringify(posts[1].body)).toContain(
+      "https://badger.example.com/",
+    );
+    expect(JSON.stringify(posts[1].body)).not.toMatch(
+      /PRIVATE|expert-user|mentioned_list/u,
+    );
+    const deliveries = await call<{
+      deliveries: { status: string; recipients: { mention: string }[] }[];
+    }>(
+      "GET",
+      `/workflows/${workflowId}/notifications/deliveries`,
+      undefined,
+      owner,
+    );
+    expect(
+      deliveries.deliveries.every((delivery) => delivery.status === "sent"),
+    ).toBe(true);
+    expect(deliveries.deliveries[0].recipients[0].mention).toBe("name");
+    const visible = JSON.stringify([
+      await call("GET", route, undefined, owner),
+      deliveries,
+      await call("GET", "/audit-events?targetType=notification_channel"),
+      service.logs,
+    ]);
+    for (const secret of [
+      personalTarget.botId,
+      personalTarget.botSecret,
+      personalTarget.recipientUserId,
+      "expert-user",
+    ])
+      expect(visible).not.toContain(secret);
+  });
+
+  it("retains masked settings on edits, rotates the connection, and cancels posts to the replaced destination", async () => {
+    const { route } = await setupPersonalRobot();
+    expect(await service.runNotificationJobs()).toBe(1);
+    await call(
+      "PUT",
+      route,
+      {
+        revision: 1,
+        label: "Renamed personal robot",
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs()).toBe(1);
+    expect(
+      longRobot!.requests.filter(
+        (request) => request.cmd === "aibot_subscribe",
+      ),
+    ).toHaveLength(1);
+    await call(
+      "PUT",
+      route,
+      {
+        revision: 2,
+        label: "Rotated robot",
+        language: "en",
+        confirmed: true,
+        botSecret: "replacement-test-secret",
+      },
+      owner,
+    );
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs()).toBe(1);
+    expect(
+      longRobot!.requests.filter(
+        (request) => request.cmd === "aibot_subscribe",
+      ),
+    ).toHaveLength(2);
+    await call(
+      "PUT",
+      route,
+      {
+        revision: 3,
+        label: "Queued before switch",
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    await call(
+      "PUT",
+      route,
+      {
+        revision: 4,
+        label: "Webhook fallback",
+        language: "en",
+        confirmed: true,
+        transport: "webhook",
+        webhookUrl,
+      },
+      owner,
+    );
+    const log = await call<{
+      deliveries: { status: string; robotLabel: string }[];
+    }>("GET", route.replace("/channel", "/deliveries"), undefined, owner);
+    expect(
+      log.deliveries.find(
+        (delivery) => delivery.robotLabel === "Queued before switch",
+      )?.status,
+    ).toBe("cancelled");
+    await service.stopNotificationWorker();
+    await expect.poll(() => longRobot!.connections).toBe(0);
+  });
+
+  it("validates the recipient and credentials and preserves human-only channel permissions", async () => {
+    const { workflowId } = await setup();
+    const route = `/workflows/${workflowId}/notifications/channel`;
+    const body = {
+      revision: 0,
+      label: "Personal",
+      language: "en",
+      confirmed: true,
+      ...personalTarget,
+    };
+    await call("PUT", route, body, expert, 403);
+    for (const invalid of [
+      { confirmed: false },
+      { botSecret: "" },
+      { recipientUserId: "@all" },
+      { recipientUserId: "all" },
+      { botId: "wrong bot" },
+      { transport: "unknown" },
+    ])
+      await call("PUT", route, { ...body, ...invalid }, owner, 400);
+    expect(
+      (await call<{ channel: unknown }>("GET", route, undefined, owner))
+        .channel,
+    ).toBeNull();
+  });
+
+  it("replies only to the configured personal user, deduplicates callbacks, and leaves sign-offs in Badger", async () => {
+    const { route } = await setupPersonalRobot();
+    await service.runNotificationJobs();
+    const before = await call("GET", "/audit-events");
+    longRobot!.receive({
+      botId: personalTarget.botId,
+      userId: "somebody-else",
+      text: "approve everything",
+    });
+    longRobot!.receive({
+      botId: personalTarget.botId,
+      userId: personalTarget.recipientUserId,
+      text: "approve everything",
+      chatType: "group",
+    });
+    for (let count = 0; count < 2; count++)
+      longRobot!.receive({
+        botId: personalTarget.botId,
+        userId: personalTarget.recipientUserId,
+        text: "approve everything",
+        messageId: "same-message",
+      });
+    await expect
+      .poll(
+        () =>
+          longRobot!.requests.filter(
+            (request) => request.cmd === "aibot_respond_msg",
+          ).length,
+      )
+      .toBe(1);
+    const reply = longRobot!.requests.find(
+      (request) => request.cmd === "aibot_respond_msg",
+    )!;
+    expect(reply.body).toMatchObject({
+      msgtype: "stream",
+      stream: {
+        finish: true,
+        content: expect.stringContaining("https://badger.example.com/my-work"),
+      },
+    });
+    expect(JSON.stringify(reply.body)).toContain("Sign in to Badger");
+    expect(await call("GET", "/audit-events")).toEqual(before);
+    await call("DELETE", route, { revision: 1, confirmed: true }, owner);
+    await service.runNotificationJobs();
+    await expect.poll(() => longRobot!.connections).toBe(0);
+  });
+
+  it("records safe remote errors, waits out rate limiting, and retries through the same connection", async () => {
+    const { route } = await setupPersonalRobot();
+    longRobot!.setFailure(45009);
+    expect(await service.runNotificationJobs()).toBe(1);
+    const log = await call<{
+      deliveries: { status: string; attempts: number; error: string | null }[];
+    }>("GET", route.replace("/channel", "/deliveries"), undefined, owner);
+    expect(log.deliveries[0]).toMatchObject({
+      status: "retry",
+      attempts: 1,
+      error: "WeCom long-connection error 45009",
+    });
+    expect(JSON.stringify([log, service.logs])).not.toContain("remote-secret");
+    service.clock.advance(59_999);
+    expect(await service.runNotificationJobs()).toBe(0);
+    longRobot!.setFailure(null);
+    service.clock.advance(1);
+    expect(await service.runNotificationJobs()).toBe(1);
+    const delivered = await call<{
+      deliveries: { status: string; attempts: number }[];
+    }>("GET", route.replace("/channel", "/deliveries"), undefined, owner);
+    expect(delivered.deliveries[0]).toMatchObject({
+      status: "sent",
+      attempts: 2,
+    });
+    expect(
+      longRobot!.requests.filter(
+        (request) => request.cmd === "aibot_subscribe",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("reconnects after a socket loss without recreating channel settings", async () => {
+    const { route } = await setupPersonalRobot();
+    await service.runNotificationJobs();
+    longRobot!.disconnect();
+    await expect
+      .poll(
+        () =>
+          longRobot!.requests.filter(
+            (request) => request.cmd === "aibot_subscribe",
+          ).length,
+        { timeout: 6000 },
+      )
+      .toBe(2);
+    await call(
+      "PUT",
+      route,
+      {
+        revision: 1,
+        label: "After reconnect",
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs()).toBe(1);
+    const log = await call<{ deliveries: { status: string }[] }>(
+      "GET",
+      route.replace("/channel", "/deliveries"),
+      undefined,
+      owner,
+    );
+    expect(log.deliveries[0].status).toBe("sent");
+  });
+
+  it("keeps one bot connection across workers and hands it over after its owner stops", async () => {
+    const { route } = await setupPersonalRobot();
+    await service.runNotificationJobs();
+    await call(
+      "PUT",
+      route,
+      { revision: 1, label: "Next post", language: "en", confirmed: true },
+      owner,
+    );
+    service.clock.advance(3100);
+    expect(await service.runNotificationJobs({ workerId: "second" })).toBe(0);
+    expect(
+      longRobot!.requests.filter(
+        (request) => request.cmd === "aibot_subscribe",
+      ),
+    ).toHaveLength(1);
+    const queued = await call<{
+      deliveries: { status: string; attempts: number }[];
+    }>("GET", route.replace("/channel", "/deliveries"), undefined, owner);
+    expect(queued.deliveries[0]).toMatchObject({
+      status: "queued",
+      attempts: 0,
+    });
+    await service.stopNotificationWorker();
+    expect(await service.runNotificationJobs({ workerId: "second" })).toBe(1);
+    expect(
+      longRobot!.requests.filter(
+        (request) => request.cmd === "aibot_subscribe",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("recovers an expired bot lease without letting the previous worker send again", async () => {
+    const { route } = await setupPersonalRobot();
+    await service.runNotificationJobs();
+    await call(
+      "PUT",
+      route,
+      {
+        revision: 1,
+        label: "After owner loss",
+        language: "en",
+        confirmed: true,
+      },
+      owner,
+    );
+    service.clock.advance(31_000);
+    expect(await service.runNotificationJobs({ workerId: "replacement" })).toBe(
+      1,
+    );
+    expect(await service.runNotificationJobs()).toBe(0);
+    expect(
+      longRobot!.requests.filter(
+        (request) => request.cmd === "aibot_subscribe",
+      ),
+    ).toHaveLength(2);
+    expect(
+      longRobot!.requests.filter((request) => request.cmd === "aibot_send_msg"),
+    ).toHaveLength(2);
+  });
+
+  it.each([
+    { BADGER_NOTIFICATION_KEY: undefined },
+    { BADGER_PUBLIC_URL: undefined },
+    { BADGER_NOTIFICATION_KEY: "cd".repeat(32) },
+  ])(
+    "makes unusable worker settings visible in the delivery log: %j",
+    async (environment) => {
+      const { route } = await setupPersonalRobot();
+      expect(await service.runNotificationJobs({ environment })).toBe(1);
+      const log = await call<{
+        deliveries: { status: string; attempts: number; error: string }[];
+      }>("GET", route.replace("/channel", "/deliveries"), undefined, owner);
+      expect(log.deliveries[0]).toMatchObject({ status: "retry", attempts: 1 });
+      expect(log.deliveries[0].error).toContain("BADGER_");
+      expect(longRobot!.requests).toHaveLength(0);
+      expect(JSON.stringify([log, service.logs])).not.toContain(
+        personalTarget.botSecret,
+      );
+    },
+  );
+});
 
 describe("WeCom notification channels", () => {
   it("keeps mention identifiers and invitation addresses out of Remind, the delivery log, and posts", async () => {

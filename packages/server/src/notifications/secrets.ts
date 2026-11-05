@@ -5,6 +5,8 @@ import {
   randomBytes,
 } from "node:crypto";
 import { RequestError } from "../http/errors.js";
+import type { NotificationTarget } from "./port.js";
+import { isWeComUserId } from "./preferences.js";
 
 export function validateWebhook(value: unknown): string {
   if (typeof value !== "string" || value.length > 512)
@@ -64,4 +66,72 @@ export function robotKey(url: string, key: string): string {
   return createHmac("sha256", Buffer.from(key, "hex"))
     .update(url)
     .digest("hex");
+}
+
+export function validateLongConnection(value: {
+  botId?: unknown;
+  botSecret?: unknown;
+  recipientUserId?: unknown;
+}): Extract<NotificationTarget, { transport: "long-connection" }> {
+  if (
+    typeof value.botId !== "string" ||
+    !/^[a-zA-Z0-9_-]{1,128}$/u.test(value.botId) ||
+    typeof value.botSecret !== "string" ||
+    !/^[^\s\p{Cc}]{1,512}$/u.test(value.botSecret) ||
+    typeof value.recipientUserId !== "string" ||
+    !isWeComUserId(value.recipientUserId)
+  )
+    throw new RequestError(
+      400,
+      "Provide the robot Bot ID, Secret, and a valid recipient WeCom userid for a personal chat",
+    );
+  return {
+    transport: "long-connection",
+    botId: value.botId,
+    botSecret: value.botSecret,
+    recipientUserId: value.recipientUserId,
+  };
+}
+
+export function encryptTarget(target: NotificationTarget, key: string): string {
+  return encryptWebhook(
+    target.transport === "webhook" ? target.webhookUrl : JSON.stringify(target),
+    key,
+  );
+}
+
+export function decryptTarget(
+  ciphertext: string,
+  transport: NotificationTarget["transport"],
+  key: string,
+): NotificationTarget {
+  const plaintext = decryptWebhook(ciphertext, key);
+  if (transport === "webhook")
+    return { transport, webhookUrl: validateWebhook(plaintext) };
+  return validateLongConnection(JSON.parse(plaintext));
+}
+
+export function targetRobotKey(
+  target: NotificationTarget,
+  key: string,
+): string {
+  return robotKey(
+    target.transport === "webhook"
+      ? target.webhookUrl
+      : JSON.stringify([
+          target.transport,
+          target.botId,
+          target.recipientUserId,
+        ]),
+    key,
+  );
+}
+
+export function targetBotKey(
+  target: NotificationTarget,
+  key: string,
+): string | null {
+  return target.transport === "webhook"
+    ? null
+    : robotKey(JSON.stringify([target.transport, target.botId]), key);
 }

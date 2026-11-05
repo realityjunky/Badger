@@ -15,6 +15,15 @@ export interface RobotMessage {
   };
 }
 
+export type NotificationTarget =
+  | { transport: "webhook"; webhookUrl: string }
+  | {
+      transport: "long-connection";
+      botId: string;
+      botSecret: string;
+      recipientUserId: string;
+    };
+
 export type DeliveryResult =
   | { ok: true }
   | {
@@ -26,5 +35,8 @@ export type DeliveryResult =
 
 /** External channels implement this boundary; event producers never call a network. */
 export interface NotificationChannel {
-  post(webhookUrl: string, message: RobotMessage): Promise<DeliveryResult>;
+  post(
+    target: NotificationTarget,
+    message: RobotMessage,
+  ): Promise<DeliveryResult>;
 }

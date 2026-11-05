@@ -86,7 +86,46 @@ configuration; build arguments apply to commands inside the build.
 
 ## WeCom notifications and reminders
 
-Workflow owners connect a WeCom group robot from the workflow's **Notifications
+### Personal robots and routing
+
+Badger treats a WeCom robot as a personal delivery endpoint, not as a Badger
+permission or a second Badger server. WeCom remains authoritative for creating
+the robot, rotating its Secret, and controlling which WeCom account can reach
+it. The installed `wecom-cli` is an optional assistant client; Badger's worker
+stores its own encrypted credentials and keeps its own long connection, so
+notification delivery does not depend on a terminal or a running CLI command.
+
+In **Settings → My WeCom robots**, a signed-in person may register more than
+one robot. Each record has a label, Bot ID and Secret, the person's WeCom
+userid, language, enabled state, reply setting, verification state, and safe
+connection status. Credentials are masked after saving. The person must open a
+personal chat with the robot and send Badger's one-time verification command
+before the robot can receive notifications. A robot can be paused, tested,
+rotated, or removed. Removing or pausing it leaves matching work in Badger's
+inbox and cancels queued personal posts. An Administrator may suspend a robot
+without seeing its Secret.
+
+**Notification routes** choose one destination for one Badger event and scope.
+Events include questions assigned, answers submitted, concerns raised, gates
+ready, evaluations finished, drafts submitted, and similar inbox events. A
+workflow route overrides a Group route, and a Group route overrides an
+all-my-work route. A route whose destination is **Badger inbox only** is an
+explicit opt-out. If no enabled, verified robot matches, Badger keeps the
+notification in the in-app inbox and sends no WeCom post. One event is never
+silently fanned out to every robot.
+
+Robots never grant workflow access and cannot approve, publish, answer, or
+change Badger records. Those actions still require the same signed-in person,
+capability checks, and explicit confirmation used by the dashboard. Inbound
+personal-chat replies initially receive only a **My work** link; command
+execution can be added later behind the same authorization and confirmation
+rules. Personal delivery history is visible to the owner only for workflows
+they can read, while workflow owners and Administrators retain the existing
+workflow delivery log.
+
+The following Group-robot controls remain as a legacy compatibility path for
+deployments that already configured webhook channels. New personal delivery
+uses the registry and routes above. Workflow owners connect a WeCom group robot from the workflow's **Notifications
 and reminders** panel. Group leads set defaults in **Settings → Channel
 addresses**; the nearest ancestor Group default applies unless a workflow has
 its own robot. Saving explicitly queues a test post. The saved webhook is

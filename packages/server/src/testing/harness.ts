@@ -16,7 +16,7 @@ import { filesystemBlobStore } from "../skills/blobs.js";
 import { SourceCheckWorker } from "../workflow-source.js";
 import { NotificationWorker } from "../notifications/worker.js";
 import type { NotificationChannel } from "../notifications/port.js";
-import { WeComChannel } from "../notifications/wecom.js";
+import { WeComNotificationChannels } from "../notifications/long-connection.js";
 import { createFixedClock, type TestClock } from "./clock.js";
 import { openTestDatabase, type TestDatabase } from "./database.js";
 import { createSequentialIds } from "./ids.js";
@@ -40,6 +40,7 @@ export interface TestServiceOptions {
   /** A migration test may restore historical records before serving them. It owns cleanup. */
   database?: TestDatabase;
   notificationChannel?: NotificationChannel;
+  wecomLongConnectionUrl?: string;
   mode?: TestServiceMode;
   /**
    * Settings layered over the harness's own and read by the real config
@@ -113,7 +114,9 @@ export interface TestService {
    */
   runNotificationJobs(settings?: {
     environment?: Readonly<Record<string, string | undefined>>;
+    workerId?: string;
   }): Promise<number>;
+  stopNotificationWorker(workerId?: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -224,6 +227,10 @@ export async function startTestService(
     info: (fields) => logs.push({ level: "info", ...fields }),
     error: (fields) => logs.push({ level: "error", ...fields }),
   };
+  const notificationWorkers = new Map<
+    string,
+    { channels: WeComNotificationChannels; settingsKey: string }
+  >();
   // The next transaction to begin after failNextTransaction does its work,
   // then the database itself raises the chosen SQLSTATE.
   let failure: "40P01" | "40001" | null = null;
@@ -363,22 +370,41 @@ export async function startTestService(
       return processed;
     },
     runNotificationJobs: async (settings = {}) => {
+      const workerConfig =
+        settings.environment === undefined
+          ? config
+          : {
+              ...loadConfig({
+                ...harnessEnvironment(mode, root),
+                ...options.environment,
+                ...settings.environment,
+              }),
+              database: config.database,
+            };
+      const workerId = settings.workerId ?? "default";
+      const settingsKey = JSON.stringify(workerConfig.notifications);
+      let instance = notificationWorkers.get(workerId);
+      if (instance?.settingsKey !== settingsKey) {
+        await instance?.channels.close();
+        instance = {
+          channels: new WeComNotificationChannels({
+            database: connection.database,
+            config: workerConfig,
+            dependencies: { clock, ids },
+            logger,
+            longConnectionUrl: options.wecomLongConnectionUrl,
+          }),
+          settingsKey,
+        };
+        notificationWorkers.set(workerId, instance);
+      }
+      await instance.channels.refresh();
       const running = new NotificationWorker({
         database: connection.database,
         dependencies: { clock, ids },
-        config:
-          settings.environment === undefined
-            ? config
-            : {
-                ...loadConfig({
-                  ...harnessEnvironment(mode, root),
-                  ...options.environment,
-                  ...settings.environment,
-                }),
-                database: config.database,
-              },
-        channel:
-          options.notificationChannel ?? new WeComChannel(config.notifications),
+        config: workerConfig,
+        channel: options.notificationChannel ?? instance.channels,
+        connectionOwner: instance.channels.connectionOwner,
         logger,
       });
       await running.routePending();
@@ -386,11 +412,17 @@ export async function startTestService(
       while ((await running.runOnce()) !== null) processed += 1;
       return processed;
     },
+    stopNotificationWorker: async (workerId = "default") => {
+      await notificationWorkers.get(workerId)?.channels.close();
+      notificationWorkers.delete(workerId);
+    },
     close: async () => {
       if (closed) {
         return;
       }
       closed = true;
+      for (const instance of notificationWorkers.values())
+        await instance.channels.close();
       await server.close();
       await connection.release();
       await removeRoot();

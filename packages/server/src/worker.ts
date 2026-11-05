@@ -18,7 +18,7 @@ import { createJsonLogger, silentLogger, type Logger } from "./log.js";
 import { prepareStorage } from "./storage.js";
 import { SourceCheckWorker } from "./workflow-source.js";
 import { NotificationWorker } from "./notifications/worker.js";
-import { WeComChannel } from "./notifications/wecom.js";
+import { WeComNotificationChannels } from "./notifications/long-connection.js";
 import { setTimeout } from "node:timers/promises";
 
 export interface WorkerOptions {
@@ -80,27 +80,39 @@ export async function runNotificationWorker(
   options: WorkerOptions,
   signal?: AbortSignal,
 ): Promise<void> {
+  const channels = new WeComNotificationChannels({
+    database: options.database,
+    config: options.config,
+    dependencies: { clock: systemClock, ids: randomIdSource },
+    logger: options.logger,
+  });
   const worker = new NotificationWorker({
     database: options.database,
     config: options.config,
     dependencies: { clock: systemClock, ids: randomIdSource },
-    channel: new WeComChannel(options.config.notifications),
+    channel: channels,
+    connectionOwner: channels.connectionOwner,
     logger: options.logger,
   });
-  while (!signal?.aborted) {
-    try {
-      await worker.routePending();
-      while (!signal?.aborted && (await worker.runOnce()) !== null) {
-        /* Send currently eligible posts. */
+  try {
+    while (!signal?.aborted) {
+      try {
+        await channels.refresh();
+        await worker.routePending();
+        while (!signal?.aborted && (await worker.runOnce()) !== null) {
+          /* Send currently eligible posts. */
+        }
+      } catch {
+        // A channel URL must never reach a logger, including through exceptions.
+        options.logger?.error({
+          event: "worker.notifications-error",
+          error: "Notification processing failed; retrying",
+        });
       }
-    } catch {
-      // A channel URL must never reach a logger, including through exceptions.
-      options.logger?.error({
-        event: "worker.notifications-error",
-        error: "Notification processing failed; retrying",
-      });
+      await setTimeout(1000, undefined, { signal }).catch(() => undefined);
     }
-    await setTimeout(1000, undefined, { signal }).catch(() => undefined);
+  } finally {
+    await channels.close();
   }
 }
 

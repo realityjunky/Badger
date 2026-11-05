@@ -1066,7 +1066,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0043");
+    expect(upgraded.applied.at(-1)).toBe("0045");
     expect(
       (
         await test.database.query(
@@ -1234,6 +1234,8 @@ describe("reviewed SQL migrations", () => {
       "0041",
       "0042",
       "0043",
+      "0044",
+      "0045",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -1284,6 +1286,8 @@ describe("reviewed SQL migrations", () => {
         "0041",
         "0042",
         "0043",
+        "0044",
+        "0045",
       ],
       pending: [],
       drifted: [],
@@ -1318,6 +1322,7 @@ describe("reviewed SQL migrations", () => {
       "inbox_items",
       "inherited_answer_attachments",
       "notification_actions",
+      "notification_bot_leases",
       "notification_channels",
       "notification_deliveries",
       "notification_reminders",
@@ -1329,6 +1334,8 @@ describe("reviewed SQL migrations", () => {
       "person_notification_preferences",
       "person_preferences",
       "personal_access_tokens",
+      "personal_robot_routes",
+      "personal_robots",
       "plan_heads",
       "plan_versions",
       "published_packages",
@@ -1430,6 +1437,8 @@ describe("reviewed SQL migrations", () => {
         "0041",
         "0042",
         "0043",
+        "0044",
+        "0045",
       ],
       pending: [],
       drifted: [],
@@ -1437,7 +1446,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(43);
+    expect(rows.rows[0]?.count).toBe(45);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

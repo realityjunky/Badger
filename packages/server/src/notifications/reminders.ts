@@ -14,6 +14,7 @@ import {
 } from "./events.js";
 import { notificationMessage, recordedRecipients } from "./messages.js";
 import { eligibleNotificationItems } from "./eligibility.js";
+import { queuePersonalPosts } from "./personal-routing.js";
 
 function itemKey(item: NotificationItemRow): string {
   if (item.effect_skill_id !== null)
@@ -203,6 +204,14 @@ export async function remind(
         },
       );
     const robot = await workflowChannel(tx, workflowId);
+    const personal = await queuePersonalPosts(
+      tx,
+      deps,
+      config,
+      items,
+      null,
+      true,
+    );
     const waiting = notificationRecipients(items, false);
     const href = itemHref(items[0]!);
     // Copy reminder's parts. The dashboard writes the text in the viewer's
@@ -214,14 +223,25 @@ export async function remind(
       href,
     };
     const recipients =
-      robot === undefined ? waiting : notificationRecipients(items);
+      personal.ids.length > 0
+        ? notificationRecipients(
+            [...personal.batches.values()].flatMap((batch) => batch.items),
+            false,
+          )
+        : robot === undefined
+          ? waiting
+          : notificationRecipients(items);
     // A post that would mention or name nobody is no reminder: offer the text
     // to paste instead, and leave the hour for a reminder that reaches someone.
-    if (robot !== undefined && recipients.length === 0)
+    if (
+      robot !== undefined &&
+      recipients.length === 0 &&
+      personal.ids.length === 0
+    )
       return { reminder: null, copy, deliveryId: null, remindAfter: null };
     const id = deps.ids.next();
-    let deliveryId: string | null = null;
-    if (robot !== undefined) {
+    let deliveryId: string | null = personal.ids[0] ?? null;
+    if (robot !== undefined && personal.ids.length === 0) {
       const message = notificationMessage({
         workflowNames: [initial.workflow_name],
         events: [initial.kind],
@@ -232,8 +252,8 @@ export async function remind(
       });
       deliveryId = deps.ids.next();
       await tx.query(
-        `insert into notification_deliveries (id, workflow_id, group_id, channel_id, robot_key, robot_label, webhook_ciphertext,
-        recipients, content, available_at, created_at, item_ids, language, reminder) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,true)`,
+        `insert into notification_deliveries (id, workflow_id, group_id, channel_id, robot_key, robot_label, target_ciphertext,
+        recipients, content, available_at, created_at, item_ids, language, reminder, transport, bot_key) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,true,$13,$14)`,
         [
           deliveryId,
           workflowId,
@@ -241,12 +261,16 @@ export async function remind(
           robot.id,
           robot.robot_key,
           robot.label,
-          robot.webhook_ciphertext,
-          JSON.stringify(recordedRecipients(recipients)),
+          robot.target_ciphertext,
+          JSON.stringify(
+            recordedRecipients(recipients, robot.transport === "webhook"),
+          ),
           JSON.stringify(message),
           now,
           items.map((item) => item.id),
           robot.language,
+          robot.transport,
+          robot.bot_key,
         ],
       );
     }
@@ -285,8 +309,14 @@ export async function remind(
         recipients: reminded.map(({ name, count }) => ({ name, count })),
         createdAt: now.toISOString(),
       },
-      copy: robot === undefined ? copy : null,
+      copy: deliveryId === null ? copy : null,
       deliveryId,
+      deliveryIds:
+        personal.ids.length > 0
+          ? personal.ids
+          : deliveryId === null
+            ? []
+            : [deliveryId],
       remindAfter: new Date(now.getTime() + 3_600_000).toISOString(),
     };
   });

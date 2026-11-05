@@ -25,7 +25,7 @@ interface DeliveryRow {
 export async function readDeliveryLog(tx: Queryable, scope: ChannelScope) {
   const rows = await tx.query<DeliveryRow>(
     `select id, robot_label, recipients, content, status, attempts, error, created_at, sent_at
-    from notification_deliveries where ${scope.type === "group" ? "group_id" : "workflow_id"} = $1
+    from notification_deliveries where person_id is null and ${scope.type === "group" ? "group_id" : "workflow_id"} = $1
     order by created_at desc, id desc limit 100`,
     [scope.id],
   );

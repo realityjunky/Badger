@@ -49,12 +49,15 @@ export function recipientMention(
  * What a Delivery or reminder keeps about its recipients: how each was
  * mentioned, never the userid or mobile number the chat mentioned them by.
  */
-export function recordedRecipients(recipients: NotificationRecipient[]) {
+export function recordedRecipients(
+  recipients: NotificationRecipient[],
+  mentions = true,
+) {
   return recipients.map((recipient) => ({
     personId: recipient.personId,
     name: recipient.name,
     count: recipient.count,
-    mention: recipientMention(recipient),
+    mention: mentions ? recipientMention(recipient) : ("name" as const),
   }));
 }
 

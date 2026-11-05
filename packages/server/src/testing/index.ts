@@ -10,10 +10,13 @@ export type { TestPerson } from "./identity.js";
 export {
   startStubWeComRobot,
   startStubHttpsProxy,
+  startStubWeComLongConnection,
   type StubWeComRobot,
+  type StubWeComLongConnection,
 } from "./wecom.js";
 export type {
   NotificationChannel,
+  NotificationTarget,
   RobotMessage,
 } from "../notifications/port.js";
 export { startStubOidcProvider, type StubOidcProvider } from "./oidc.js";

@@ -4,7 +4,15 @@ import type { ServiceConfig } from "../config.js";
 import type { Queryable } from "../database/database.js";
 import type { AuthorizedRequest } from "../http/authorized-request.js";
 import { objectInput, RequestError } from "../http/errors.js";
-import { encryptWebhook, robotKey, validateWebhook } from "./secrets.js";
+import {
+  decryptTarget,
+  encryptTarget,
+  targetRobotKey,
+  targetBotKey,
+  validateLongConnection,
+  validateWebhook,
+} from "./secrets.js";
+import type { NotificationTarget } from "./port.js";
 
 export interface ChannelRow {
   id: string;
@@ -14,7 +22,9 @@ export interface ChannelRow {
   language: "en" | "zh";
   revision: number;
   robot_key: string;
-  webhook_ciphertext: string;
+  target_ciphertext: string;
+  transport: NotificationTarget["transport"];
+  bot_key: string | null;
 }
 export interface ChannelScope {
   type: "group" | "workflow";
@@ -39,7 +49,14 @@ export function maskedChannel(row: ChannelRow | undefined) {
         label: row.label,
         language: row.language,
         revision: row.revision,
-        webhookUrl: "••••••••",
+        transport: row.transport,
+        ...(row.transport === "webhook"
+          ? { webhookUrl: "••••••••" }
+          : {
+              botId: "••••••••",
+              botSecret: "••••••••",
+              recipientUserId: "••••••••",
+            }),
       };
 }
 
@@ -136,22 +153,64 @@ export async function saveChannel(
         409,
         "The robot settings changed; reload before saving",
       );
-    const url =
-      body.webhookUrl === undefined && current !== undefined
-        ? null
-        : validateWebhook(body.webhookUrl);
-    const encrypted =
-      url === null ? current!.webhook_ciphertext : encryptWebhook(url, key);
-    const robot = url === null ? current!.robot_key : robotKey(url, key);
+    const transport = body.transport ?? current?.transport ?? "webhook";
+    if (transport !== "webhook" && transport !== "long-connection")
+      throw new RequestError(
+        400,
+        "Choose webhook or long-connection transport",
+      );
+    const previous =
+      current === undefined || current.transport !== transport
+        ? undefined
+        : decryptTarget(current.target_ciphertext, current.transport, key);
+    const destination: NotificationTarget =
+      transport === "webhook"
+        ? {
+            transport,
+            webhookUrl:
+              body.webhookUrl === undefined && previous?.transport === "webhook"
+                ? previous.webhookUrl
+                : validateWebhook(body.webhookUrl),
+          }
+        : validateLongConnection({
+            botId:
+              body.botId ??
+              (previous?.transport === "long-connection"
+                ? previous.botId
+                : undefined),
+            botSecret:
+              body.botSecret ??
+              (previous?.transport === "long-connection"
+                ? previous.botSecret
+                : undefined),
+            recipientUserId:
+              body.recipientUserId ??
+              (previous?.transport === "long-connection"
+                ? previous.recipientUserId
+                : undefined),
+          });
+    const encrypted = encryptTarget(destination, key);
+    const robot = targetRobotKey(destination, key);
+    const bot = targetBotKey(destination, key);
+    if (
+      current !== undefined &&
+      (current.robot_key !== robot ||
+        JSON.stringify(previous) !== JSON.stringify(destination))
+    )
+      await tx.query(
+        "update notification_deliveries set status = 'cancelled' where channel_id = $1 and status in ('queued', 'retry')",
+        [current.id],
+      );
     const id = current?.id ?? deps.ids.next();
     const revision = (current?.revision ?? 0) + 1;
     const channel = (
       await tx.query<ChannelRow>(
         `insert into notification_channels
-      (id, scope_type, group_id, workflow_id, label, language, webhook_ciphertext, robot_key, revision, updated_at)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      (id, scope_type, group_id, workflow_id, label, language, target_ciphertext, robot_key, revision, updated_at, transport, bot_key)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       on conflict (id) do update set label = excluded.label, language = excluded.language,
-        webhook_ciphertext = excluded.webhook_ciphertext, robot_key = excluded.robot_key,
+        target_ciphertext = excluded.target_ciphertext, robot_key = excluded.robot_key,
+        transport = excluded.transport, bot_key = excluded.bot_key,
         revision = excluded.revision, updated_at = excluded.updated_at returning *`,
         [
           id,
@@ -164,6 +223,8 @@ export async function saveChannel(
           robot,
           revision,
           deps.clock.now(),
+          transport,
+          bot,
         ],
       )
     ).rows[0]!;
@@ -173,15 +234,19 @@ export async function saveChannel(
       text: {
         content:
           body.language === "zh"
-            ? "Badger：群机器人连接测试。"
-            : "Badger: group robot connection test.",
+            ? transport === "webhook"
+              ? "Badger：群机器人连接测试。"
+              : "Badger：个人聊天机器人连接测试。"
+            : transport === "webhook"
+              ? "Badger: group robot connection test."
+              : "Badger: personal chat robot connection test.",
         mentioned_list: [],
         mentioned_mobile_list: [],
       },
     };
     await tx.query(
       `insert into notification_deliveries (id, workflow_id, group_id, channel_id, robot_key, robot_label,
-      webhook_ciphertext, recipients, content, available_at, created_at) values ($1,$2,$3,$4,$5,$6,$7,'[]',$8,$9,$9)`,
+      target_ciphertext, recipients, content, available_at, created_at, transport, bot_key) values ($1,$2,$3,$4,$5,$6,$7,'[]',$8,$9,$9,$10,$11)`,
       [
         testDeliveryId,
         channel.workflow_id,
@@ -192,6 +257,8 @@ export async function saveChannel(
         encrypted,
         JSON.stringify(content),
         deps.clock.now(),
+        transport,
+        bot,
       ],
     );
     await recordAudit(tx, deps, {

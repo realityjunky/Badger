@@ -30,13 +30,20 @@ export function isWeComUserId(value: string): boolean {
     !["@all", "all"].includes(value.toLowerCase())
   );
 }
-export interface RobotChannel {
+export type RobotChannel = {
   id: string;
   label: string;
   language: "en" | "zh";
   revision: number;
-  webhookUrl: string;
-}
+} & (
+  | { transport: "webhook"; webhookUrl: string }
+  | {
+      transport: "long-connection";
+      botId: string;
+      botSecret: string;
+      recipientUserId: string;
+    }
+);
 export interface WaitingItem {
   id: string;
   kind: NotificationEvent;
@@ -44,6 +51,28 @@ export interface WaitingItem {
   recipients: { name: string; count: number }[];
   canRemind: boolean;
   remindAfter: string | null;
+}
+
+export interface PersonalRobot {
+  id: string;
+  label: string;
+  language: "en" | "zh";
+  enabled: boolean;
+  suspended: boolean;
+  repliesEnabled: boolean;
+  revision: number;
+  verified: boolean;
+  connectionState: "connecting" | "connected" | "disconnected" | "error";
+  connectionCheckedAt: string | null;
+}
+
+export interface PersonalRobotRoute {
+  id: string;
+  event: NotificationEvent;
+  scopeType: "all" | "group" | "workflow";
+  scopeId: string;
+  robotId: string | null;
+  revision: number;
 }
 /** What Remind returns for Copy reminder: the parts, not the text. */
 export interface CopyReminder {

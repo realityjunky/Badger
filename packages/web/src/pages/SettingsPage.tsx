@@ -5,6 +5,7 @@ import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
 import { TokenSettings } from "./settings/TokenSettings.js";
 import { NotificationSettings } from "./settings/NotificationSettings.js";
+import { PersonalRobotsSettings } from "./settings/PersonalRobotsSettings.js";
 import { GroupRobotSettings } from "./settings/GroupRobotSettings.js";
 import { useDemoMode } from "../app/DemoContext.js";
 import {
@@ -20,6 +21,7 @@ const TAB_KEYS = [
   "notifications",
   "tokens",
   "channels",
+  "robots",
 ] as const;
 
 type TabKey = (typeof TAB_KEYS)[number];
@@ -189,12 +191,19 @@ export function SettingsPage() {
           {
             key: "channels",
             label: t("settings.channels.title"),
-            children: (
-              <>
-                <NotificationSettings mode="identity" />
-                <GroupRobotSettings />
-              </>
-            ),
+            children:
+              activeTab === "channels" ? (
+                <>
+                  <NotificationSettings mode="identity" />
+                  <GroupRobotSettings />
+                </>
+              ) : null,
+          },
+          {
+            key: "robots",
+            label: t("robots.title"),
+            children:
+              activeTab === "robots" ? <PersonalRobotsSettings /> : null,
           },
         ].filter(
           (tab) =>

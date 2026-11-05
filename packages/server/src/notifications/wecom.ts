@@ -2,6 +2,7 @@ import { EnvHttpProxyAgent, fetch } from "undici";
 import type {
   DeliveryResult,
   NotificationChannel,
+  NotificationTarget,
   RobotMessage,
 } from "./port.js";
 
@@ -19,16 +20,18 @@ export class WeComChannel implements NotificationChannel {
   ) {}
 
   async post(
-    webhookUrl: string,
+    target: NotificationTarget,
     message: RobotMessage,
   ): Promise<DeliveryResult> {
+    if (target.transport !== "webhook")
+      return { ok: false, error: "Webhook adapter requires a webhook target" };
     const agent = new EnvHttpProxyAgent({
       httpsProxy: this.settings.httpsProxy,
       httpProxy: this.settings.httpProxy,
       noProxy: this.settings.noProxy,
     });
     try {
-      const url = new URL(webhookUrl);
+      const url = new URL(target.webhookUrl);
       const response = await fetch(
         this.endpoint === undefined
           ? url

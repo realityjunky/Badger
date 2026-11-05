@@ -79,6 +79,7 @@ import { packageMethods, handlePackage } from "./packages.js";
 import { proposalMethods, handleProposal } from "./proposals.js";
 import { handleInbox, inboxMethods } from "./inbox.js";
 import { handleNotifications, notificationMethods } from "./notifications.js";
+import { handleRobots, robotMethods } from "./robots.js";
 import { deliverInvitation } from "../invitation-delivery.js";
 import { handleSourceStudy, sourceStudyMethods } from "./source-study.js";
 import { handleScriptEffects, scriptEffectMethods } from "./script-effects.js";
@@ -194,6 +195,7 @@ function allowedMethods(path: string): string {
     packageMethods(path) ??
     sourceStudyMethods(path) ??
     inboxMethods(path) ??
+    robotMethods(path) ??
     notificationMethods(path) ??
     questionnaireMethods(path) ??
     draftingJobMethods(path);
@@ -977,6 +979,7 @@ export function createService(options: ServiceOptions, port: number): Service {
         return await handleEvaluations(authorized);
       if (packageMethods(path) !== null) return await handlePackage(authorized);
       if (inboxMethods(path) !== null) return await handleInbox(authorized);
+      if (robotMethods(path) !== null) return await handleRobots(authorized);
       if (notificationMethods(path) !== null)
         return await handleNotifications(authorized);
       if (sourceStudyMethods(path) !== null)

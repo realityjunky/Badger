@@ -117,11 +117,14 @@ export function WorkflowNotifications({
           }
         />
       )}
+      <p>
+        <Link to="/settings/robots">{t("robots.managePersonal")}</Link>
+      </p>
       {mayManage && (
         <Collapse
           items={[
             {
-              key: "robot",
+              key: "legacy-robot",
               label: t("notifications.robotSettings"),
               children: (
                 <RobotChannelSettings

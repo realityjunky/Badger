@@ -51,6 +51,7 @@ export const routes: readonly RouteDefinition[] = [
   { pattern: "/settings/notifications", title: "page.settings.title" },
   { pattern: "/settings/tokens", title: "page.settings.title" },
   { pattern: "/settings/channels", title: "page.settings.title" },
+  { pattern: "/settings/robots", title: "page.settings.title" },
   { pattern: "*", title: "page.notFound.title" },
 ];
 

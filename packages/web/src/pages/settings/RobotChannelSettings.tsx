@@ -11,6 +11,7 @@ import {
 import { useEffect, useState } from "react";
 import {
   notificationRequest,
+  isWeComUserId,
   type RobotChannel,
 } from "../../api/notifications.js";
 import { useI18n } from "../../i18n/I18nContext.js";
@@ -19,6 +20,10 @@ interface RobotValues {
   label: string;
   language: "en" | "zh";
   webhookUrl?: string;
+  transport: "webhook" | "long-connection";
+  botId?: string;
+  botSecret?: string;
+  recipientUserId?: string;
 }
 
 export function RobotChannelSettings({
@@ -48,6 +53,9 @@ export function RobotChannelSettings({
   };
   const [refresh, setRefresh] = useState(0);
   const [form] = Form.useForm<RobotValues>();
+  const transport =
+    Form.useWatch("transport", form) ?? channel?.transport ?? "long-connection";
+  const keepSaved = channel?.transport === transport;
   const route = `/${scope}/${encodeURIComponent(scopeId)}/notifications/channel`;
   useEffect(() => {
     setLoaded(false);
@@ -74,6 +82,10 @@ export function RobotChannelSettings({
           result.value.inheritedChannel?.language ??
           "en",
         webhookUrl: "",
+        transport: result.value.channel?.transport ?? "long-connection",
+        botId: "",
+        botSecret: "",
+        recipientUserId: "",
       });
     });
     return () => controller.abort();
@@ -127,9 +139,23 @@ export function RobotChannelSettings({
                 revision: channel?.revision ?? 0,
                 label: values.label,
                 language: values.language,
+                transport: values.transport,
                 confirmed: true,
-                ...(values.webhookUrl?.trim()
+                ...(values.transport === "webhook" && values.webhookUrl?.trim()
                   ? { webhookUrl: values.webhookUrl.trim() }
+                  : {}),
+                ...(values.transport === "long-connection"
+                  ? {
+                      ...(values.botId?.trim()
+                        ? { botId: values.botId.trim() }
+                        : {}),
+                      ...(values.botSecret
+                        ? { botSecret: values.botSecret }
+                        : {}),
+                      ...(values.recipientUserId?.trim()
+                        ? { recipientUserId: values.recipientUserId.trim() }
+                        : {}),
+                    }
                   : {}),
               },
             );
@@ -137,7 +163,12 @@ export function RobotChannelSettings({
             if (result.kind === "ok") {
               setChannel(result.value.channel);
               setInherited(null);
-              form.setFieldValue("webhookUrl", "");
+              form.setFieldsValue({
+                webhookUrl: "",
+                botId: "",
+                botSecret: "",
+                recipientUserId: "",
+              });
               setNotice("testQueued");
               onChanged?.();
             } else refused(result);
@@ -151,16 +182,96 @@ export function RobotChannelSettings({
             <Input maxLength={80} />
           </Form.Item>
           <Form.Item
-            name="webhookUrl"
-            label={t("notifications.webhookUrl")}
-            extra={channel ? t("notifications.replaceWebhook") : undefined}
-            rules={[{ required: channel === null }, { type: "url" }]}
+            name="transport"
+            label={t("notifications.transport")}
+            rules={[{ required: true }]}
           >
-            <Input.Password
-              autoComplete="off"
-              placeholder={channel?.webhookUrl}
+            <Select
+              options={[
+                {
+                  value: "long-connection",
+                  label: t("notifications.longConnection"),
+                },
+                { value: "webhook", label: t("notifications.webhook") },
+              ]}
             />
           </Form.Item>
+          {transport === "webhook" ? (
+            <Form.Item
+              name="webhookUrl"
+              label={t("notifications.webhookUrl")}
+              extra={keepSaved ? t("notifications.replaceWebhook") : undefined}
+              rules={[{ required: !keepSaved }, { type: "url" }]}
+              preserve={false}
+            >
+              <Input.Password
+                autoComplete="off"
+                placeholder={
+                  channel?.transport === "webhook"
+                    ? channel.webhookUrl
+                    : undefined
+                }
+              />
+            </Form.Item>
+          ) : (
+            <>
+              <p className="muted">{t("notifications.longConnectionHelp")}</p>
+              {keepSaved && (
+                <p className="muted">{t("notifications.replaceCredentials")}</p>
+              )}
+              <Form.Item
+                name="botId"
+                label={t("notifications.botId")}
+                rules={[
+                  { required: !keepSaved, whitespace: true },
+                  {
+                    pattern: /^[a-zA-Z0-9_-]{1,128}$/u,
+                    message: t("notifications.botIdInvalid"),
+                  },
+                ]}
+                preserve={false}
+              >
+                <Input
+                  autoComplete="off"
+                  maxLength={128}
+                  placeholder={keepSaved ? "••••••••" : undefined}
+                />
+              </Form.Item>
+              <Form.Item
+                name="botSecret"
+                label={t("notifications.botSecret")}
+                rules={[{ required: !keepSaved, whitespace: true, max: 512 }]}
+                preserve={false}
+              >
+                <Input.Password
+                  autoComplete="new-password"
+                  maxLength={512}
+                  placeholder={keepSaved ? "••••••••" : undefined}
+                />
+              </Form.Item>
+              <Form.Item
+                name="recipientUserId"
+                label={t("notifications.recipientUserId")}
+                extra={t("notifications.recipientHelp")}
+                rules={[
+                  { required: !keepSaved, whitespace: true },
+                  {
+                    validator: async (_rule, value: string | undefined) => {
+                      if (value?.trim() && !isWeComUserId(value.trim()))
+                        throw new Error(t("notifications.identityInvalid"));
+                    },
+                  },
+                ]}
+                preserve={false}
+              >
+                <Input
+                  autoComplete="off"
+                  maxLength={64}
+                  placeholder={keepSaved ? "••••••••" : undefined}
+                />
+              </Form.Item>
+            </>
+          )}
           <Form.Item name="language" label={t("notifications.chatLanguage")}>
             <Select
               options={[

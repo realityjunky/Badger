@@ -251,7 +251,13 @@ The checks and runtime certification run against one exact package hash. Its rep
 ## Notifications
 
 **Notification channel**:
-A route by which Badger tells people that something waits for them: the in-app inbox, or a team chat reached through a Group robot.
+A route by which Badger tells people that something waits for them: the in-app inbox, a personal WeCom robot, or a legacy team chat reached through a Group robot.
+
+**Personal robot**:
+A WeCom long-connection robot registered by one Badger person. Its encrypted credentials identify a delivery endpoint, but the robot has no Badger permission.
+
+**Notification route**:
+One person's choice of a Personal robot or the Badger inbox for one notification event and scope. Workflow scope overrides Group scope, which overrides all-my-work scope.
 
 **Group robot**:
 A WeCom group chat's webhook robot, through which Badger posts in a workflow team's chat and @mentions the people who need to act. Its group is the chat, not a Badger Group.
@@ -260,4 +266,4 @@ A WeCom group chat's webhook robot, through which Badger posts in a workflow tea
 A recorded nudge to whoever an item still waits on, posted as a fresh mention through the workflow's Group robot, or offered as ready-to-paste text when there is none.
 
 **Delivery**:
-The record of one post sent through a Notification channel, such as a Group robot, and whether it arrived.
+The record of one post sent through a Notification channel, such as a Personal robot or Group robot, and whether it arrived.
