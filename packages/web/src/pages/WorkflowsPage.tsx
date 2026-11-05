@@ -311,6 +311,7 @@ export function WorkflowsPage() {
           <p className="muted">{detail.groupName}</p>
           <WorkflowTabs
             key={`${detail.workflow.id}:${selectedVersion?.id ?? "missing"}`}
+            secondaryKeys={["team", "notifications"]}
             items={[
               {
                 key: "version",

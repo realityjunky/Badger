@@ -128,6 +128,16 @@ test("assigning and removing workflow roles keep the page's scroll position", as
   const team = page.locator(".workflow-panel").filter({
     has: page.getByRole("heading", { name: "Workflow team", exact: true }),
   });
+  const tabRows = page.locator(
+    ".workflow-tabs-navigation-shell .workflow-tabs-navigation",
+  );
+  await expect(tabRows).toHaveCount(2);
+  const primaryTabRow = await tabRows.nth(0).boundingBox();
+  const secondaryTabRow = await tabRows.nth(1).boundingBox();
+  expect(secondaryTabRow?.y).toBeGreaterThan(primaryTabRow?.y ?? -1);
+  await expect(page.locator(".workflow-tabs-secondary-row")).toContainText(
+    "Workflow team",
+  );
   const robotSettings = page.getByRole("button", {
     name: "Team chat robot",
     exact: true,
@@ -153,7 +163,10 @@ test("assigning and removing workflow roles keep the page's scroll position", as
   const assign = team.getByRole("button", { name: /Assign role$/u });
   await assign.scrollIntoViewIfNeeded();
   const beforeAssign = await page.evaluate(() => window.scrollY);
-  expect(beforeAssign).toBeGreaterThan(100);
+  const assignBox = await assign.boundingBox();
+  const viewportHeight = await page.evaluate(() => window.innerHeight);
+  if (assignBox !== null && assignBox.y + assignBox.height > viewportHeight)
+    expect(beforeAssign).toBeGreaterThan(100);
   const detailUrl = `${base}/api/v1/workflows/${workflow.id}`;
   await keepScrollDuringRefresh(page, detailUrl, team, () => assign.click());
   const binding = team

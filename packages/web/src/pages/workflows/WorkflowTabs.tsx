@@ -6,8 +6,10 @@ import { useI18n } from "../../i18n/I18nContext.js";
 
 export function WorkflowTabs({
   items,
+  secondaryKeys = [],
 }: {
   items: NonNullable<TabsProps["items"]>;
+  secondaryKeys?: readonly string[];
 }) {
   const { t } = useI18n();
   const location = useLocation();
@@ -16,6 +18,13 @@ export function WorkflowTabs({
   const requestedTab = anchor.startsWith("study-") ? "source-study" : anchor;
   const activeTab =
     items.find((item) => item.key === requestedTab)?.key ?? items[0]?.key;
+  const secondaryKeySet = new Set(secondaryKeys);
+  const primaryItems = items.filter(
+    (item) => !secondaryKeySet.has(String(item.key)),
+  );
+  const secondaryItems = items.filter((item) =>
+    secondaryKeySet.has(String(item.key)),
+  );
   const [topOffset, setTopOffset] = useState<number>();
   const scrollPositions = useRef(new Map<string, number>());
   const previousTab = useRef(activeTab);
@@ -46,10 +55,20 @@ export function WorkflowTabs({
     return () => window.removeEventListener("scroll", remember);
   }, [activeTab]);
 
-  return (
+  const navigationItems = (rowItems: NonNullable<TabsProps["items"]>) =>
+    rowItems.map((item) => ({ ...item, children: null }));
+  const more = {
+    trigger: "click" as const,
+    icon: <EllipsisOutlined aria-label={t("workflow.moreTabs")} />,
+  };
+  const navigation = (rowItems: NonNullable<TabsProps["items"]>) => (
     <Tabs
-      className="workflow-tabs underline-tabs"
-      activeKey={activeTab}
+      className="workflow-tabs workflow-tabs-navigation underline-tabs"
+      activeKey={
+        rowItems.some((item) => item.key === activeTab)
+          ? activeTab
+          : "__inactive__"
+      }
       onChange={(key) =>
         navigate({
           pathname: location.pathname,
@@ -59,12 +78,38 @@ export function WorkflowTabs({
       }
       animated={false}
       destroyOnHidden={false}
-      more={{
-        trigger: "click",
-        icon: <EllipsisOutlined aria-label={t("workflow.moreTabs")} />,
-      }}
-      tabBarStyle={{ top: topOffset }}
-      items={items}
+      more={more}
+      items={navigationItems(rowItems)}
     />
+  );
+
+  return (
+    <>
+      <div
+        className="workflow-tabs-navigation-shell"
+        style={{ top: topOffset }}
+      >
+        {primaryItems.length > 0 && navigation(primaryItems)}
+        {secondaryItems.length > 0 && (
+          <div className="workflow-tabs-secondary-row">
+            {navigation(secondaryItems)}
+          </div>
+        )}
+      </div>
+      <Tabs
+        className="workflow-tabs-content"
+        activeKey={activeTab}
+        onChange={(key) =>
+          navigate({
+            pathname: location.pathname,
+            search: location.search,
+            hash: key,
+          })
+        }
+        animated={false}
+        destroyOnHidden={false}
+        items={items}
+      />
+    </>
   );
 }

@@ -910,18 +910,44 @@ button.rail-link {
   );
 }
 
-.questionnaire-tabs > .ant-tabs-nav,
-.workflow-tabs > .ant-tabs-nav {
+.questionnaire-tabs > .ant-tabs-nav {
   position: sticky;
   top: var(--badger-layout-top-bar-height);
   z-index: 10;
   background: var(--badger-color-background);
 }
 
+.workflow-tabs-navigation-shell {
+  position: sticky;
+  z-index: 10;
+  background: var(--badger-color-background);
+}
+
+.workflow-tabs-navigation-shell .workflow-tabs-navigation > .ant-tabs-nav {
+  position: static;
+  margin-bottom: 0;
+  background: transparent;
+}
+
+.workflow-tabs-navigation-shell
+  .workflow-tabs-navigation
+  > .ant-tabs-content-holder {
+  display: none;
+}
+
+.workflow-tabs-secondary-row {
+  margin-top: 4px;
+  border-top: 1px solid var(--badger-color-border);
+}
+
+.workflow-tabs-content > .ant-tabs-nav {
+  display: none;
+}
+
 .questionnaire-tabs .ant-tabs-content-holder,
 .questionnaire-tabs .ant-tabs-tabpane,
-.workflow-tabs > .ant-tabs-body-holder,
-.workflow-tabs .ant-tabs-content {
+.workflow-tabs-content > .ant-tabs-body-holder,
+.workflow-tabs-content .ant-tabs-content {
   min-width: 0;
 }
 
