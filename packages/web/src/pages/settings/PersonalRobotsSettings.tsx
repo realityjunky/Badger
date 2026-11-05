@@ -258,7 +258,14 @@ export function PersonalRobotsSettings() {
                 {!robot.verified && (
                   <Button
                     disabled={busy || !robot.enabled || robot.suspended}
-                    onClick={() => void save(robot, robot)}
+                    onClick={() =>
+                      void save(robot, {
+                        label: robot.label,
+                        language: robot.language,
+                        enabled: robot.enabled,
+                        repliesEnabled: robot.repliesEnabled,
+                      })
+                    }
                   >
                     {t("robots.linkChat")}
                   </Button>

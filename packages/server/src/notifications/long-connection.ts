@@ -33,6 +33,7 @@ interface BotConnection {
   ready: Promise<boolean>;
   settleReady(value: boolean): void;
   authenticated: boolean;
+  state: PersonalRobotRow["connection_state"];
   expiresAt: number;
   seen: Map<string, number>;
 }
@@ -143,10 +144,7 @@ export class WeComNotificationChannels implements NotificationChannel {
       if (renewed.rows.length === 0) this.disconnect(key);
       else {
         connection.expiresAt = Date.now() + LOCAL_LEASE_MILLISECONDS;
-        await this.health(
-          key,
-          connection.authenticated ? "connected" : "connecting",
-        );
+        await this.health(key, connection.state);
       }
     }
   }
@@ -167,6 +165,8 @@ export class WeComNotificationChannels implements NotificationChannel {
     if (connection === undefined) return;
     this.connections.delete(key);
     connection.authenticated = false;
+    connection.state = "disconnected";
+    void this.health(key, connection.state).catch(() => undefined);
     connection.settleReady(false);
     connection.client.disconnect();
   }
@@ -264,10 +264,7 @@ export class WeComNotificationChannels implements NotificationChannel {
         this.connections.get(key) ?? this.connect(key, wanted.target);
       connection.expiresAt = Date.now() + LOCAL_LEASE_MILLISECONDS;
       connection.recipients = wanted.recipients;
-      await this.health(
-        key,
-        connection.authenticated ? "connected" : "connecting",
-      );
+      await this.health(key, connection.state);
     }
     for (const key of invalidBots) {
       if (desired.has(key)) continue;
@@ -319,28 +316,74 @@ export class WeComNotificationChannels implements NotificationChannel {
         resolveReady(value);
       },
       authenticated: false,
+      state: "connecting",
       expiresAt: Date.now() + LOCAL_LEASE_MILLISECONDS,
       seen: new Map(),
     };
     this.connections.set(key, connection);
+    client.on("connected", () => {
+      connection.state = "connecting";
+      this.options.logger?.info({
+        event: "worker.wecom-connection",
+        state: "connecting",
+      });
+      void this.health(key, connection.state).catch(() => undefined);
+    });
     client.on("authenticated", () => {
       connection.authenticated = true;
       connection.settleReady(true);
-      void this.health(key, "connected").catch(() => undefined);
+      connection.state = "connected";
+      this.options.logger?.info({
+        event: "worker.wecom-connection",
+        state: "connected",
+      });
+      void this.health(key, connection.state).catch(() => undefined);
+    });
+    client.on("reconnecting", () => {
+      connection.authenticated = false;
+      connection.state = "connecting";
+      this.options.logger?.info({
+        event: "worker.wecom-connection",
+        state: "reconnecting",
+      });
+      void this.health(key, connection.state).catch(() => undefined);
     });
     client.on("disconnected", () => {
       connection.authenticated = false;
-      void this.health(key, "disconnected").catch(() => undefined);
+      connection.state = "disconnected";
+      this.options.logger?.info({
+        event: "worker.wecom-connection",
+        state: "disconnected",
+      });
+      void this.health(key, connection.state).catch(() => undefined);
     });
     client.on("error", () => {
       connection.authenticated = false;
+      connection.state = "error";
       connection.settleReady(false);
-      void this.health(key, "error").catch(() => undefined);
+      this.options.logger?.error({
+        event: "worker.wecom-connection",
+        state: "error",
+        error: "WeCom long-connection client error",
+      });
+      void this.health(key, connection.state).catch(() => undefined);
     });
     client.on("message.text", (frame) => {
       void this.reply(key, connection, frame).catch(() => undefined);
     });
-    client.connect();
+    try {
+      client.connect();
+    } catch {
+      connection.authenticated = false;
+      connection.state = "error";
+      connection.settleReady(false);
+      this.options.logger?.error({
+        event: "worker.wecom-connection",
+        state: "error",
+        error: "WeCom long-connection client could not start",
+      });
+      void this.health(key, connection.state).catch(() => undefined);
+    }
     return connection;
   }
 
