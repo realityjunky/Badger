@@ -13,7 +13,6 @@ import type {
 } from "../../api/drafting-jobs.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { normalizeBasePath } from "../../app/paths.js";
-import { AgentPromptButton } from "../../components/AgentPromptButton.js";
 import { QuestionComposer } from "./QuestionComposer.js";
 import { AnswerTypeDetails } from "./AnswerTypeDetails.js";
 import type { MessageId } from "../../i18n/catalog.js";
@@ -268,12 +267,6 @@ export function DraftingJobs({
               {job.review && <Tag>{t("drafting.savedEdits")}</Tag>}
               {job.status === "submitted" && (
                 <>
-                  <AgentPromptButton
-                    basePath={basePath}
-                    path={`${jobsPath}/${job.id}/review-context`}
-                    label={t("prompts.copyReview")}
-                    disabled={busy}
-                  />
                   <Button
                     disabled={busy}
                     onClick={() =>

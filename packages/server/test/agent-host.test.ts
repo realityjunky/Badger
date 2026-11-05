@@ -371,14 +371,15 @@ it("records the Agent host when a token's questionnaire read requeues an expired
   expect((await tokenRead(token.secret, base, "lab-workbuddy")).status).toBe(
     200,
   );
+  expect(await expiries()).toEqual([]);
   const read = await tokenRead(engineerToken.secret, base, "review-host");
   expect(read.status).toBe(200);
   expect(await expiries()).toEqual([
     expect.objectContaining({
       credentialKind: "token",
-      credentialId: token.token.id,
+      credentialId: engineerToken.token.id,
       channel: "mcp",
-      agentHost: "lab-workbuddy",
+      agentHost: "review-host",
     }),
   ]);
 });

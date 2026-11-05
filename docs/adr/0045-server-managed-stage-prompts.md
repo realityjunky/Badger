@@ -21,9 +21,11 @@ rules independent of editable wording.
 
 New drafting jobs snapshot their template revision and hash inside their
 hash-bound input context. Template edits affect future jobs, not outstanding
-ones. Copying a dispatch prompt assembles that snapshot with the exact task and
-MCP transport instructions. Claiming supplies processing instructions from the
-same snapshot, written to `instructions.md` by the MCP alongside context,
+ones. A compact dispatch prompt identifies the exact job, claim arguments and
+expected context hash, with MCP transport steps. Full template instructions,
+schemas and task data travel on claim rather than in the copied prompt.
+Claiming supplies processing instructions from the snapshot, written to
+`instructions.md` by the MCP alongside context,
 schema and pinned files. Processing instructions do not dispatch another job.
 An existing pre-template job receives the packaged default as compatibility
 guidance, without claiming a historical template was used to produce its result.
@@ -61,6 +63,11 @@ the original submission, increment the shared review revision and invalidate
 older decision previews. Accepted records and approvals remain unchanged until
 the Engineer's separate dashboard decision. Unpublished questions unrelated to
 the review are excluded from Field-expert review context.
+
+This suggestion-review exception is superseded by
+[ADR 0046](0046-human-only-suggestion-review.md): review and editing of submitted
+questionnaire suggestions are manual dashboard work. The review prompt,
+Agent-assistance template, and MCP review tools are removed.
 
 Human-review templates provide stage guidance to authorized signed-in roles.
 The dashboard's current previews and capability checks remain authoritative

@@ -26,7 +26,7 @@ export async function questionnaireCapabilities(
   return {
     compose,
     reviewSuggestions:
-      expertScope &&
+      access.tokenScopes === undefined &&
       (administrator || roles.has("Engineer") || roles.has("Field expert")),
     answer:
       expertScope &&

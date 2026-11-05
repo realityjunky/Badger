@@ -129,11 +129,11 @@ is required. See [Dashboard prompts](../../docs/dashboard-prompts.md).
 
 Assigned people use `answer_context` for server instructions, the current
 question and their own private answer draft. Engineers can answer when assigned,
-using their engineer token. `suggestion_review_context` and
-`save_suggestion_review` let workflow Engineers and Field experts review and
-save shared questionnaire suggestions with permission and a current job revision.
-Saving preserves the original submission and never accepts it. Approval,
-acknowledgement, publication and other sign-offs remain dashboard actions.
+using their engineer token. Engineers and Field experts personally review and
+edit submitted questionnaire suggestions in the dashboard. MCP exposes no
+review tools, and personal access tokens cannot save shared review edits.
+Approval, acknowledgement, publication and other sign-offs remain dashboard
+actions.
 
 Write `result.json` using the claimed job's `output-schema.json`. Question jobs
 use `{"questions":[…]}`; source study uses `{facts, interfaces: [], scriptEffects?}`; restatement uses

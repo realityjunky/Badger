@@ -20,7 +20,6 @@ import {
 import { saveDraftingReview } from "../drafting/reviews.js";
 import { draftingSkills } from "../drafting/context.js";
 import { draftingJobPrompt } from "../drafting/prompts.js";
-import { assemblePrompt, readPromptTemplate } from "../prompt-templates.js";
 import { readVersion } from "../skills/library.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
 import { fields, revisionInput, textInput } from "../questionnaire/model.js";
@@ -36,7 +35,7 @@ import {
 } from "../drafting/schema.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(prompt|review-context|claim|submit|release|review|accept-preview|accept|reject-preview|reject))?)?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(prompt|claim|submit|release|review|accept-preview|accept|reject-preview|reject))?)?$/u;
 const REQUEST_FIELDS: Record<DraftingKind, string[]> = {
   "draft-questions": ["roundId"],
   "draft-follow-ups": ["roundId", "parentQuestionId"],
@@ -51,7 +50,7 @@ const REQUEST_FIELDS: Record<DraftingKind, string[]> = {
 export function draftingJobMethods(path: string): string | null {
   const match = PATH.exec(path);
   if (!match) return null;
-  return match[4] && !["prompt", "review-context"].includes(match[4])
+  return match[4] && match[4] !== "prompt"
     ? "POST"
     : match[3]
       ? "GET, HEAD"
@@ -73,6 +72,11 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
   const workflowId = decodeURIComponent(rawWorkflow!);
   const versionId = decodeURIComponent(rawVersion!);
   const id = rawId ? decodeURIComponent(rawId) : null;
+  if (action === "review" && context.credential.kind === "token")
+    throw new RequestError(
+      403,
+      "Only signed-in people review and edit suggestions in the dashboard",
+    );
   // The service refuses a token request without a valid Agent host.
   const actor: DraftingActor = {
     ...context,
@@ -129,8 +133,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       );
     if (
       (action === "review" && !capabilities.reviewSuggestions) ||
-      (((action && !["review", "review-context"].includes(action)) ||
-        (!id && method === "POST")) &&
+      (((action && action !== "review") || (!id && method === "POST")) &&
         !capabilities.compose)
     )
       throw new RequestError(
@@ -259,52 +262,6 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       if (job.status !== "queued")
         return conflict("Only queued jobs can be dispatched to an Agent");
       return { status: 200, value: draftingJobPrompt(job) };
-    }
-    if (action === "review-context") {
-      if (!isQuestionnaireDraftingJob(job) || !capabilities.reviewSuggestions)
-        throw new RequestError(
-          403,
-          "Only authorized questionnaire reviewers read this review context",
-        );
-      if (job.status !== "submitted")
-        return conflict("Only submitted suggestions can be reviewed");
-      const template = await readPromptTemplate(tx, "suggestion-review");
-      const task = {
-        workflowId,
-        versionId,
-        jobId: job.id,
-        revision: job.revision,
-        contextHash: job.context_hash,
-        originalResult: job.result,
-        result: job.review_result ?? job.result,
-        outputSchema: job.output_schema,
-      };
-      return {
-        status: 200,
-        value: {
-          ...task,
-          template,
-          prompt: assemblePrompt(
-            template,
-            task,
-            "The user asks for assistance reviewing this job. Start with suggestion_review_context; discuss corrections, then use save_suggestion_review only after the user authorizes saving the shared edits. Acceptance stays in the dashboard.",
-          ),
-          contextBundle: capabilities.compose
-            ? job.context_bundle
-            : {
-                workflow: job.context_bundle.workflow,
-                version: job.context_bundle.version,
-                pins: job.context_bundle.pins,
-                sourceStudy: job.context_bundle.sourceStudy,
-                scriptEffectContract: job.context_bundle.scriptEffectContract,
-                promptTemplate: job.context_bundle.promptTemplate,
-                questions: job.context_bundle.questions.filter(
-                  (question) => question.state !== "draft",
-                ),
-                answers: job.context_bundle.answers,
-              },
-        },
-      };
     }
     if (action === "review") {
       if (!isQuestionnaireDraftingJob(job))

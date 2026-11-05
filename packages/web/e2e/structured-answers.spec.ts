@@ -140,6 +140,9 @@ test("the Engineer edits and reviews a structured drafting suggestion before acc
       `${base}/questionnaire?workflow=${workflow.id}&version=${version.id}&panel=suggestions`,
     );
     await english(page);
+    await expect(
+      page.getByRole("button", { name: "Copy review prompt", exact: true }),
+    ).toHaveCount(0);
     await page
       .getByRole("button", { name: "Review suggestions", exact: true })
       .click();

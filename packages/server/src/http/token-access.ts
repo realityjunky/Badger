@@ -37,8 +37,7 @@ export function tokenRequestAllowed(
     return scopes.includes("operator") || scopes.includes("engineer");
   if (draftingJobMethods(path) !== null)
     return (
-      ((scopes.includes("engineer") || scopes.includes("expert")) &&
-        (reads || /\/review$/u.test(path))) ||
+      ((scopes.includes("engineer") || scopes.includes("expert")) && reads) ||
       (scopes.includes("engineer") && /\/(claim|submit|release)$/u.test(path))
     );
   if (

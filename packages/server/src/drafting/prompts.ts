@@ -8,6 +8,23 @@ export function draftingJobPrompt(
   const template =
     job.context_bundle.promptTemplate ?? packagedPromptTemplate(job.kind);
   const target = publicDraftingJob(job);
+  if (mode === "dispatch")
+    return {
+      template,
+      prompt: [
+        `Process this queued Badger ${job.kind} job using the connected Badger MCP.`,
+        `Call claim_job with these arguments:\n${JSON.stringify({
+          workflowId: job.context_bundle.workflow.id,
+          versionId: job.workflow_version_id,
+          jobId: job.id,
+          revision: job.revision,
+        })}`,
+        `Expected context hash: ${job.context_hash}.`,
+        "Read the returned instructions.md first, then job.json, context.json, output-schema.json, inputs/ when present, and pinned files under skills/. Follow those server instructions to write result.json in the claimed folder and call submit_job with workflowId, versionId, jobId and that folder.",
+        "If the job changed or cannot be claimed, stop and report it. Do not create or claim another job. Return the dashboard review link; people review, edit and decide on submitted suggestions in the dashboard.",
+      ].join("\n\n"),
+      job: target,
+    };
   return {
     template,
     prompt: assemblePrompt(
@@ -27,9 +44,7 @@ export function draftingJobPrompt(
         workflow: job.context_bundle.workflow,
         outputSchema: job.output_schema,
       },
-      mode === "claimed"
-        ? "This job is already claimed. Read job.json, context.json, output-schema.json, bounded inputs/ when present and the exact pinned files under skills/. Follow these server instructions to write result.json in the claimed folder, then submit_job with workflowId, versionId, jobId and that folder. Do not claim the job again. Return the dashboard review link."
-        : "The user authorizes claiming this exact queued job and submitting suggestions. Use list_jobs to read its current revision. Verify its kind and contextHash, then claim_job with workflowId, versionId, jobId and that revision. Read job.json, context.json, instructions.md, output-schema.json, inputs/ when present, and the supplied pinned files under skills/. Write result.json following the exact output schema and call submit_job with the returned folder. Do not create or claim another job. Return the dashboard review link; a signed-in person decides whether to accept.",
+      "This job is already claimed. Read job.json, context.json, output-schema.json, bounded inputs/ when present and the exact pinned files under skills/. Follow these server instructions to write result.json in the claimed folder, then submit_job with workflowId, versionId, jobId and that folder. Do not claim the job again. Return the dashboard review link.",
     ),
     job: target,
   };

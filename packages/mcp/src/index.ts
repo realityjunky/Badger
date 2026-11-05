@@ -94,8 +94,6 @@ export function createBadgerMcp(
                   "submit_answer",
                   "upload_attachment",
                   "my_questions",
-                  "suggestion_review_context",
-                  "save_suggestion_review",
                 ].includes(t.definition.name),
             ),
             ...engineerTools(api),

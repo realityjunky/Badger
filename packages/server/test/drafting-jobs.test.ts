@@ -621,7 +621,7 @@ it("filters roles and scopes and lets only a person discard reviewed suggestions
     engineer,
     201,
   );
-  await request(base, "GET", undefined, expertScope, engineer, 200);
+  await request(base, "GET", undefined, expertScope, engineer, 403);
   const { job } = await request(
     base,
     "POST",

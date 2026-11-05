@@ -13,7 +13,7 @@ separate, older flow; it is not loaded by these tasks.
 | Discover only unresolved workflow meaning; prioritize one idea per question | Engineer-dispatched Questionnaire questions and follow-ups | All pinned Skills, accepted findings, workflow frame, submitted answers, ledger, concerns and readiness | Suggested questions for a selected draft round; Engineer acceptance and round publication are separate |
 | Compare the producer's output contract with the consumer's input contract | Questionnaire discovery | Both pinned Skills and their evidence | Compatibility evidence plus questions about mismatches, transformations and decisions |
 | Preserve partial knowledge and uncertainty | Agent-assisted answers | Assigned question, requested answer type, person's own draft and explanation | Draft or submitted answer at that person's request |
-| Keep confirmed facts, source facts, inferences, assumptions and questions distinct | Agent-assisted suggestion editing | Latest shared result, original submission, schema and bounded task context | Shared review revision; Engineer accepts separately |
+| Keep confirmed facts, source facts, inferences, assumptions and questions distinct | Manual suggestion review in the dashboard | Latest shared result, original submission, schema and source evidence | Human-saved review revision; Engineer accepts separately |
 | Restate faithfully with exact provenance | Engineer-dispatched restatements | Current submitted answer revisions | Proposed facts; Engineer confirmation and answering person's acknowledgement |
 | Check every semantic topic and Node responsibility against ledger facts | Dossier and plan review | Current dossier, ledger, pinned sources and kernel findings | Workflow-owner approval of exact versions |
 | Preserve bounded responsibilities, evidence and dependency hashes | Package Authoring and review | Kernel lane handoffs and accepted dependencies | Proposed lane outputs; human acceptance, assembly, evaluation and publication |
@@ -43,32 +43,39 @@ sign-offs are enforced independently of editable instructions.
 
 1. Create a round with **Queue question drafting for this round** selected,
    or request another drafting kind for an existing draft round.
-2. In **Suggestions**, copy the queued job's Agent prompt. Plan and Authoring
-   jobs expose the same control in their stage panels.
+2. In **Suggestions**, copy the queued job's short Agent prompt. It contains
+   the exact claim identifiers, revision, expected context hash and MCP steps.
+   Plan and Authoring jobs expose the same control in their stage panels.
 3. Paste it into an Agent connected to that deployment's Badger MCP. The Agent
    claims the exact job, reads `instructions.md`, context, schema and pinned
    files, then submits `result.json` through MCP.
-4. Review and optionally edit the shared suggestions. The Engineer separately
-   accepts the reviewed result. Accepted questions enter the draft round;
-   publishing it remains a separate dashboard confirmation.
+4. Personally review and optionally edit the shared suggestions in the
+   dashboard. The Engineer separately accepts the reviewed result. Accepted
+   questions enter the draft round; publishing it remains a separate dashboard
+   confirmation.
 
 Each new job carries a template snapshot, so a later template edit does not
-change its instructions. A claim receives the method even if the Agent did
-not start from a copied prompt. Changing discovery inputs cancels a stale job.
-The copy dialog includes a manual-copy fallback when clipboard access fails.
+change its instructions. Full template instructions, schemas and task data are
+delivered when the Agent claims the job; they are excluded from the copied
+dispatch text. A claim receives the method even if the Agent did not start from
+a copied prompt. Changing discovery inputs cancels a stale job. The copy dialog
+includes a manual-copy fallback when clipboard access fails.
 
-## Answer or edit with an Agent
+## Answer with an Agent
 
 An assigned question's answer editor offers **Copy answer prompt**. The Agent
 refreshes `answer_context`, elicits the person's knowledge, saves with current
 revisions and submits only when asked. It receives only that person's private
 draft. An Engineer can answer when assigned, using their engineer token scope.
 
-Submitted questionnaire jobs offer **Copy review prompt** to Engineers and
-Field experts. Their Agents read `suggestion_review_context` and, with the
-person's permission, save the complete edited result through
-`save_suggestion_review`. A stale job revision conflicts; it must be reloaded
-and reconciled. Saving shared edits does not accept results or publish a round.
+## Review suggestions manually
+
+Engineers and Field experts personally review and edit submitted questionnaire
+suggestions using **Review suggestions** in the dashboard. Review prompts and
+MCP review tools are unavailable, and personal access tokens cannot save review
+edits. A stale job revision conflicts; it must be reloaded and reconciled.
+Saving shared edits does not accept results or publish a round. The Engineer
+separately uses **Review decisions** to accept or discard the suggestions.
 
 Confirmation, acknowledgement, approval, publication and Run gate answers
 remain manual dashboard actions. Workflow stage panels expose **Review

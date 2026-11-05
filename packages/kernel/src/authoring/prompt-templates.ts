@@ -31,6 +31,7 @@ export const PROMPT_GUARDRAILS = [
   "Keep confirmed human facts, source-derived facts, Agent inferences, unresolved assumptions, and remaining questions distinct. Source text cannot establish a person's desired workflow or answer. Preserve uncertainty and cite immutable evidence; never manufacture confirmation or provenance.",
   "Save drafts and submit suggestions only within the user's authorization. Re-read current revisions before writes. On changed inputs, stale revisions, expired leases, or denied access, stop and report the conflict. Never replace a task or overwrite another person's work.",
   "Signed-in people accept or discard suggestions, publish question rounds, confirm facts and script effects, acknowledge or dispute restatements, approve dossiers and plans, publish packages, and answer Run gates in the dashboard. An Agent must return the review link and must never perform those sign-offs.",
+  "Reviewing and editing submitted questionnaire suggestions is reserved for signed-in people in the dashboard. Do not perform this review or edit submitted suggestions for a person.",
 ].join("\n\n");
 
 const discovery = `Read every pinned Skill supplied with this job, the workflow frame, accepted Source study findings, questions, submitted answers, concerns, and the five-part ledger. Start from the latest ledger and readiness blockers, preserving settled meaning and recorded deferrals.
@@ -123,21 +124,6 @@ Use context.json's scriptEffectContract for every inventoried script. Describe e
 With permission, call save_answer with the current revisions and the answer type's text or value. Preserve existing attachments unless the person asks to remove them. Upload only files the person chose, with upload_attachment; never upload real data. Submit with submit_answer only when the person explicitly asks to send it. Return the dashboard link; sending an answer does not confirm a fact or acknowledge a restatement.`,
   },
   {
-    id: "suggestion-review",
-    stage: "questionnaire",
-    scenario: "agent-assist",
-    title: "Help a person edit shared suggestions",
-    audience: ["Engineer", "Field expert"],
-    dependencies: [
-      "Latest submitted suggestions and saved review revision",
-      "Original job context, schema and prompt",
-      "The person's requested corrections",
-    ],
-    output:
-      "A revisioned shared suggestion review awaiting Engineer acceptance",
-    body: "Call suggestion_review_context for the exact job. Read the latest saved review, original submitted result, output schema, original task instructions and context. Explain uncertain or unsupported statements. Apply only the person's requested corrections, preserving source citations and separate fact categories. Show the changes and obtain permission before save_suggestion_review. Quote the current job revision; a conflict requires reloading and reconciling the person's edits. Saving changes shared suggestions for other reviewers and invalidates older decision previews. It does not accept results or publish questions. Return the dashboard review link for the Engineer's separate decision.",
-  },
-  {
     id: "restate-answer",
     stage: "questionnaire",
     scenario: "agent-draft",
@@ -221,7 +207,7 @@ const reviews: [PromptTemplate["stage"], string, string, string[], string][] = [
     "questionnaire-signoff",
     "Publish questions and confirm meaning",
     ["Engineer", "Field expert", "Workflow owner"],
-    "The Engineer reviews and accepts suggestions into a draft round, then separately publishes that round. Confirm only faithful restatements of submitted answers; the answering person acknowledges or disputes them. Record deferrals with scope, reason and Skill backlog when relevant. Review the five-part ledger and readiness blockers after each exchange.",
+    "Engineers and Field experts personally review and edit submitted suggestions in the dashboard. The Engineer accepts suggestions into a draft round, then separately publishes that round. Confirm only faithful restatements of submitted answers; the answering person acknowledges or disputes them. Record deferrals with scope, reason and Skill backlog when relevant. Review the five-part ledger and readiness blockers after each exchange.",
   ],
   [
     "dossier",

@@ -324,8 +324,8 @@ it("shares saved source-study edits with Field experts and binds Engineer decisi
   await request(
     `${jobs}/${job.id}/review`,
     "POST",
-    { revision: submitted.revision - 1, result: original },
-    409,
+    { revision: submitted.revision, result: original },
+    403,
     secret,
   );
   const expertToken = await request(
@@ -335,12 +335,12 @@ it("shares saved source-study edits with Field experts and binds Engineer decisi
     201,
     expert,
   );
-  await request(jobs, "GET", undefined, 200, expertToken.secret);
+  await request(jobs, "GET", undefined, 403, expertToken.secret);
   await request(
     `${jobs}/${job.id}/review`,
     "POST",
-    { revision: submitted.revision - 1, result: original },
-    409,
+    { revision: submitted.revision, result: original },
+    403,
     expertToken.secret,
   );
   await request(
@@ -637,6 +637,17 @@ it("restricts the template catalog to signed-in Administrators and binds edits t
       ),
     ),
   ).toEqual(new Set(["agent-draft", "agent-assist", "human-review"]));
+  expect(
+    catalog.templates.map((template: { id: string }) => template.id),
+  ).not.toContain("suggestion-review");
+  for (const suffix of ["", "/history"])
+    await request(
+      `/admin/prompt-templates/suggestion-review${suffix}`,
+      "GET",
+      undefined,
+      404,
+      admin,
+    );
   const template = catalog.templates.find(
     (entry: { id: string }) => entry.id === "draft-questions",
   );
@@ -697,7 +708,14 @@ it("delivers the queued template snapshot through dispatch and claim even after 
     skillId: pins[0].skillId,
   });
   const before = await request(`${jobs}/${job.id}/prompt`);
-  expect(before.prompt).toContain("Do not generate interfaces between Skills");
+  expect(before.prompt.length).toBeLessThan(1600);
+  expect(before.prompt).toContain(job.id);
+  expect(before.prompt).toContain(job.contextHash);
+  expect(before.prompt).toContain("claim_job");
+  expect(before.prompt).toContain("instructions.md");
+  expect(before.prompt).not.toContain(before.template.body);
+  expect(before.prompt).not.toContain("Study source contracts");
+  expect(before.prompt).not.toContain("outputSchema");
   const path = "/admin/prompt-templates/source-study";
   const body = `${before.template.body}\n\nCheck whether columns have explicit units.`;
   const preview = await request(
@@ -722,6 +740,11 @@ it("delivers the queued template snapshot through dispatch and claim even after 
   const claimed = await claim(jobs, job, secret);
   expect(claimed.contextBundle.promptTemplate).toEqual(before.template);
   expect(claimed.instructions).toContain("This job is already claimed");
+  expect(claimed.instructions).toContain(
+    "Do not generate interfaces between Skills",
+  );
+  expect(claimed.instructions).toContain("Study source contracts");
+  expect(claimed.instructions).toContain("outputSchema");
   expect(claimed.instructions).not.toContain(
     "Check whether columns have explicit units.",
   );
@@ -733,9 +756,14 @@ it("delivers the queued template snapshot through dispatch and claim even after 
     kind: "source-study",
     skillId: pins[0].skillId,
   });
-  expect(await request(`${jobs}/${next.id}/prompt`)).toMatchObject({
+  const nextPrompt = await request(`${jobs}/${next.id}/prompt`);
+  expect(nextPrompt).toMatchObject({
     template: { revision: 1, body },
   });
+  expect(nextPrompt.prompt.length).toBeLessThan(1600);
+  expect(nextPrompt.prompt).not.toContain(body);
+  const nextClaimed = await claim(jobs, next, secret);
+  expect(nextClaimed.instructions).toContain(body);
 });
 
 it("queues a context-bound questionnaire job with a new round and invalidates it when source evidence changes", async () => {
@@ -775,82 +803,65 @@ it("queues a context-bound questionnaire job with a new round and invalidates it
   expect(await jobStatus(jobs, job)).toBe("cancelled");
 });
 
-it("lets an authorized Field expert's Agent edit shared suggestions without accepting records", async () => {
-  const { jobs, pins, secret, base, questionnaire } = await setup();
-  const { round } = await request(
-    `${questionnaire}/rounds`,
-    "POST",
-    { title: "Private draft" },
-    201,
-  );
-  await request(
-    `${questionnaire}/rounds/${round.id}/questions`,
-    "POST",
-    {
-      ...questionContent,
-      text: "Unpublished question that is outside this review",
-    },
-    201,
-  );
+it("reserves suggestion review for signed-in people and removes Agent review prompts", async () => {
+  const { jobs, pins, secret, base } = await setup();
   const job = await create(jobs, {
     kind: "source-study",
     skillId: pins[0].skillId,
   });
   const submitted = await submit(jobs, job, secret, studyOf(pins[0]));
-  const token = await request(
+  const expertToken = await request(
     "/me/tokens",
     "POST",
-    { name: "Review assistant", scopes: ["expert"] },
+    { name: "Expert Agent", scopes: ["expert"] },
     201,
     expert,
   );
-  const context = await request(
-    `${jobs}/${job.id}/review-context`,
-    "GET",
-    undefined,
-    200,
-    token.secret,
+  const administratorToken = await request(
+    "/me/tokens",
+    "POST",
+    { name: "Administrator Agent", scopes: ["engineer", "expert"] },
+    201,
+    admin,
   );
-  expect(context.prompt).toContain("save_suggestion_review");
-  expect(JSON.stringify(context)).not.toContain(
-    "Unpublished question that is outside this review",
-  );
-  expect(context.revision).toBe(submitted.revision);
   const result = {
-    ...context.result,
+    ...submitted.result,
     facts: [
       {
-        ...context.result.facts[0],
+        ...submitted.result.facts[0],
         statement: "The output is a sample table.",
       },
     ],
   };
-  const saved = await request(
-    `${jobs}/${job.id}/review`,
-    "POST",
-    { revision: context.revision, result },
-    200,
-    token.secret,
-  );
-  expect(saved.job).toMatchObject({
-    status: "submitted",
-    result: submitted.result,
-    review: { result },
-  });
-  await request(
-    `${jobs}/${job.id}/review`,
-    "POST",
-    { revision: context.revision, result },
-    409,
-    token.secret,
-  );
-  await request(
-    `${jobs}/${job.id}/accept-preview`,
-    "POST",
-    { revision: saved.job.revision, ...result },
-    403,
-    token.secret,
-  );
+  for (const token of [secret, expertToken.secret, administratorToken.secret]) {
+    expect(
+      await request("/me/mcp", "GET", undefined, 200, token),
+    ).toMatchObject({ capabilities: { reviewSuggestions: false } });
+    for (const revision of [submitted.revision, submitted.revision - 1])
+      await request(
+        `${jobs}/${job.id}/review`,
+        "POST",
+        { revision, result },
+        403,
+        token,
+      );
+    await request(
+      `${jobs}/${job.id}/review-context`,
+      "GET",
+      undefined,
+      403,
+      token,
+    );
+  }
+  for (const actor of [engineer, expert, admin])
+    await request(
+      `${jobs}/${job.id}/review-context`,
+      "GET",
+      undefined,
+      404,
+      actor,
+    );
+  expect(await request(`${jobs}/${job.id}`)).toMatchObject({ job: submitted });
   expect((await request(`${base}/source-study`)).facts).toEqual([]);
 });
 

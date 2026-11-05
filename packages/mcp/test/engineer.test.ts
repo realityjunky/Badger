@@ -188,22 +188,21 @@ it("uploads a scripted Skill without declarations and drafts effects from the ha
     requiresPerson: true,
     job: { status: "submitted", result: { scriptEffects: [suggestion] } },
   });
-  const reviewResponse = await call(
-    client,
-    "suggestion_review_context",
-    context,
-  );
-  const review = reviewResponse.localFile
-    ? JSON.parse(await fs.readFile(reviewResponse.localFile, "utf8"))
-    : reviewResponse;
-  expect(review.prompt).toContain("save_suggestion_review");
-  const saved = await call(client, "save_suggestion_review", {
-    ...context,
-    revision: review.revision,
-    result: review.result,
+  for (const name of ["suggestion_review_context", "save_suggestion_review"]) {
+    expect(tools.map((tool) => tool.name)).not.toContain(name);
+    const response = await client.callTool({
+      name,
+      arguments: {
+        ...context,
+        revision: submitted.job.revision,
+        result: submitted.job.result,
+      },
+    });
+    expect(response.isError).toBe(true);
+  }
+  expect(await request(`${base}/drafting-jobs/${job.id}`)).toMatchObject({
+    job: { status: "submitted", review: null },
   });
-  expect(saved.job.status).toBe("submitted");
-  expect(saved.job.review.result).toEqual(review.result);
   const panel = await request(
     `/skills/${skill.id}/versions/${preview.hash}/effects`,
   );

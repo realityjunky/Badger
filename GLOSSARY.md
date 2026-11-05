@@ -196,7 +196,7 @@ A bounded piece of drafting that a connected Agent claims, bound to the hashes o
 _Avoid_: Agent job
 
 **Suggestion review**:
-The shared, revisioned edits that a workflow's Engineer or Field experts save against a submitted questionnaire Drafting job. Saving preserves the Agent's original result and does not accept it. The Engineer separately previews and confirms a decision using the latest saved result.
+The shared, revisioned edits that a workflow's Engineer or Field experts personally save in the dashboard against a submitted questionnaire Drafting job. Agents cannot perform this review or save review edits. Saving preserves the Agent's original result and does not accept it. The Engineer separately previews and confirms a decision using the latest saved result.
 
 **Prompt template**:
 Versioned instructions for a workflow stage and scenario: Agent drafting, Agent assistance, or human review. Administrators manage the catalog; a new Drafting job snapshots its instructions and required context. A template never grants authority to sign off.

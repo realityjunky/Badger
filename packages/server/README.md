@@ -771,9 +771,10 @@ questionnaire drafting jobs and save shared suggestion edits with
 appends immutable history and advances the job revision. Concurrent or stale
 saves return 409. Saving never accepts records or completes the submission's
 inbox item. Field experts cannot request, claim, submit, or decide jobs, and
-their job lists exclude plan and Authoring jobs. Their scoped Agents can read
-`GET V/drafting-jobs/:id/review-context` and save shared reviews through MCP;
-acceptance remains a signed-in Engineer's dashboard action.
+their job lists exclude plan and Authoring jobs. Suggestion review and editing
+are manual dashboard work: no review-prompt endpoint or MCP review tools are
+available, and personal access tokens cannot save reviews. Acceptance remains
+a signed-in Engineer's separate dashboard action.
 
 Engineer acceptance previews use the saved review when present. A decision
 with different content or an older revision conflicts, including when a Field
