@@ -34,7 +34,7 @@ interface ClaimedJob {
   status: string;
   contextHash: string;
   outputSchema: object;
-  lease: { id: string; until: string };
+  lease: { id: string; until: string; claimHash?: string };
   result: unknown;
   resultHash: string | null;
   currentResultHash?: string | null;
@@ -246,11 +246,15 @@ export async function claimJob(
       leaseUntil: claimed.job.lease.until,
       resultFile: path.join(folder, "result.json"),
       hasPreviousSuggestions: previous !== null && previous !== undefined,
+      currentResultHash:
+        claimed.job.currentResultHash ??
+        claimed.job.review?.resultHash ??
+        claimed.job.resultHash,
       instructionsFile: claimed.instructions
         ? path.join(folder, "instructions.md")
         : null,
       message: claimed.instructions
-        ? "Read instructions.md for the server's task instructions and template revision, then context.json, output-schema.json and the supplied pinned files. Follow the exact output schema; submit suggestions for a person's review."
+        ? "This is a fresh editing session. Read the current result.json when present; it includes other people's saved changes since any previous claim. Do not replace it with an old claim folder's copy. Read instructions.md, context.json, output-schema.json and the pinned files, then submit suggestions for a person's review."
         : claimed.job.kind === "source-study"
           ? "Read context.json and its versioned scriptEffectContract, output-schema.json, and the exact target Skill files under skills/, including invoked helpers and configuration. Never execute source code. Draft facts and scriptEffects in result.json, leaving interfaces empty. Cross-Skill analysis belongs to questionnaire discovery. Preserve uncertainty and omitted coverage as pending, then submit_job. People sign off in the dashboard."
           : "Read context.json, any bounded Authoring files under inputs/, and the Skill files under skills/; `skills` lists the pinned versions this kind reads. Write result.json using output-schema.json, then submit_job. Results remain suggestions until a person accepts them.",
@@ -294,7 +298,7 @@ export async function finishJob(
   const session = claim as LocalClaim;
   if (!sessions.owns(session))
     throw new Error(
-      "This claim belongs to another MCP session; claim the job again after that session finishes",
+      "This claim belongs to another MCP session or has ended. List jobs, claim the latest revision and read its new folder before editing; an old folder may omit someone else's changes",
     );
   let result: unknown;
   let revision: number | undefined;
@@ -303,10 +307,17 @@ export async function finishJob(
     const { job } = await api.request<{ job: ClaimedJob }>(
       `${jobsPath(input)}/${input.jobId}`,
     );
-    if (job.status !== "claimed" || job.contextHash !== claim.contextHash)
+    if (
+      job.status !== "claimed" ||
+      job.contextHash !== claim.contextHash ||
+      (job.lease?.claimHash !== undefined &&
+        job.lease.claimHash !== canonicalHash(claim.leaseId))
+    ) {
+      sessions.forget(session);
       throw new Error(
-        "The job is no longer claimed or its inputs changed; list jobs again",
+        "The editing session ended or its inputs changed. List jobs, claim the latest revision and read the new result.json; other people may have changed it. Never resubmit an old folder's result without reconciling it",
       );
+    }
     revision = job.revision;
     if (action === "submit") {
       result = await readJson(input.folder, "result.json", 1024 * 1024);
@@ -332,6 +343,7 @@ export async function finishJob(
     contextHash: claim.contextHash,
     ...(revision === undefined ? {} : { revision }),
     ...(action === "submit" ? { result, keepClaim: true } : {}),
+    ...(action === "release" ? { reason: "requested" } : {}),
   });
   if (action !== "submit" || response.job.status !== "claimed")
     sessions.forget(session);

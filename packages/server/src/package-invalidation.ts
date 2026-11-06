@@ -56,7 +56,7 @@ export async function invalidateGeneratedPackage(
     [versionId, deps.clock.now(), reason],
   );
   const cancelledDrafts = await tx.query<{ id: string; revision: number }>(
-    `update drafting_jobs set status='cancelled', revision=revision+1, lease_id=null, lease_person_id=null, lease_token_id=null, lease_agent_host=null, lease_until=null, updated_at=$2 where workflow_version_id=$1 and kind in ('authoring-lane','review-vote') and status in ('queued','claimed','submitted') and id not in (select job_id from accepted_authoring_outputs) returning id,revision`,
+    `update drafting_jobs set status='cancelled', revision=revision+1, lease_id=null, lease_person_id=null, lease_token_id=null, lease_agent_host=null, lease_until=null, lease_kind=null, lease_activity_at=null, updated_at=$2 where workflow_version_id=$1 and kind in ('authoring-lane','review-vote') and status in ('queued','claimed','submitted') and id not in (select job_id from accepted_authoring_outputs) returning id,revision`,
     [versionId, deps.clock.now()],
   );
   for (const job of cancelledDrafts.rows) {

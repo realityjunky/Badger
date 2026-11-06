@@ -138,6 +138,240 @@ const question = (text = "How is the sample stored?") => ({
   priority: 10,
 });
 
+it("serializes competing browser and Agent claims of the same saved revision", async () => {
+  const { base, secret, job } = await submittedQuestions();
+  const responses = await Promise.all([
+    service.request(`/api/v1${base}/${job.id}/review-claim`, {
+      as: engineer,
+      method: "POST",
+      headers: {
+        origin: "http://localhost",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ revision: job.revision }),
+    }),
+    service.request(`/api/v1${base}/${job.id}/claim`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${secret}`,
+        "x-badger-agent-host": "Engineer Agent",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ revision: job.revision }),
+    }),
+  ]);
+  expect(responses.map((response) => response.status).sort()).toEqual([
+    200, 409,
+  ]);
+  const current = (await request(`${base}/${job.id}`)).job;
+  expect(current.status).toBe("claimed");
+  expect(current.revision).toBe(job.revision + 1);
+});
+
+async function submittedQuestions(reviewer?: TestPerson) {
+  const setupResult = await setup();
+  const { base, secret, round, workflow } = setupResult;
+  if (reviewer)
+    await request(
+      "/bindings",
+      "POST",
+      {
+        scopeType: "workflow",
+        scopeId: workflow.id,
+        email: reviewer.email,
+        role: "Field expert",
+      },
+      undefined,
+      admin,
+      201,
+    );
+  if (reviewer) await request("/me", "GET", undefined, undefined, reviewer);
+  const { job } = await request(
+    base,
+    "POST",
+    { kind: "draft-questions", roundId: round.id, confirmed: true },
+    undefined,
+    engineer,
+    201,
+  );
+  const claimed = await request(
+    `${base}/${job.id}/claim`,
+    "POST",
+    { revision: job.revision },
+    secret,
+  );
+  const submitted = await request(
+    `${base}/${job.id}/submit`,
+    "POST",
+    {
+      leaseId: claimed.job.lease.id,
+      contextHash: job.contextHash,
+      result: { questions: [question()] },
+    },
+    secret,
+  );
+  return { ...setupResult, job: submitted.job };
+}
+
+it("reserves a dashboard review across saves and hands the final draft to a fresh Agent claim", async () => {
+  const reviewer = { subject: "reviewer", email: "reviewer@example.com" };
+  const { base, secret, job } = await submittedQuestions(reviewer);
+  const claimed = await request(
+    `${base}/${job.id}/review-claim`,
+    "POST",
+    { revision: job.revision },
+    undefined,
+    reviewer,
+  );
+  expect(claimed.job).toMatchObject({
+    status: "claimed",
+    lease: { kind: "dashboard", agentHost: null },
+  });
+  expect((await request(`${base}/${job.id}`)).job.lease).not.toHaveProperty(
+    "id",
+  );
+  const lease = {
+    leaseId: claimed.job.lease.id,
+    contextHash: job.contextHash,
+  };
+  const result = { questions: [question("Final dashboard question")] };
+  for (const action of ["claim", "review-claim", "review", "accept-preview"])
+    await request(
+      `${base}/${job.id}/${action}`,
+      "POST",
+      action === "review"
+        ? { revision: claimed.job.revision, result }
+        : { revision: claimed.job.revision },
+      action === "claim" ? secret : undefined,
+      engineer,
+      409,
+    );
+  const [saved, duplicate] = await Promise.all(
+    [0, 1].map(() =>
+      request(
+        `${base}/${job.id}/review`,
+        "POST",
+        { ...lease, revision: claimed.job.revision, result },
+        undefined,
+        reviewer,
+      ),
+    ),
+  );
+  expect(duplicate.job.revision).toBe(saved.job.revision);
+  expect(saved.job.revision).toBe(claimed.job.revision + 1);
+  expect(saved.job).toMatchObject({ status: "claimed", review: { result } });
+  const retry = await request(
+    `${base}/${job.id}/review`,
+    "POST",
+    { ...lease, revision: claimed.job.revision, result },
+    undefined,
+    reviewer,
+  );
+  expect(retry.job.revision).toBe(saved.job.revision);
+  await request(
+    `${base}/${job.id}/review`,
+    "POST",
+    {
+      ...lease,
+      revision: saved.job.revision + 1,
+      result,
+    },
+    undefined,
+    reviewer,
+    409,
+  );
+  const finished = await request(
+    `${base}/${job.id}/finish`,
+    "POST",
+    { ...lease, revision: saved.job.revision },
+    undefined,
+    reviewer,
+  );
+  const next = await request(
+    `${base}/${job.id}/claim`,
+    "POST",
+    { revision: finished.job.revision },
+    secret,
+  );
+  expect(next.job).toMatchObject({
+    status: "claimed",
+    lease: { kind: "agent" },
+    review: { result },
+  });
+  for (const action of ["review", "renew", "finish", "release"])
+    await request(
+      `${base}/${job.id}/${action}`,
+      "POST",
+      {
+        ...lease,
+        ...(action === "review" ? { revision: next.job.revision, result } : {}),
+      },
+      undefined,
+      reviewer,
+      409,
+    );
+});
+
+it("expires idle dashboard claims despite background renewals and fences old browser copies", async () => {
+  const { base, secret, job } = await submittedQuestions();
+  const claimed = await request(`${base}/${job.id}/review-claim`, "POST", {
+    revision: job.revision,
+  });
+  const lease = {
+    leaseId: claimed.job.lease.id,
+    contextHash: job.contextHash,
+  };
+  service.clock.advance(25 * 60_000);
+  const renewed = await request(`${base}/${job.id}/renew`, "POST", {
+    ...lease,
+    active: false,
+  });
+  expect(renewed.job.lease.until).toBe(claimed.job.lease.until);
+  const active = await request(`${base}/${job.id}/renew`, "POST", {
+    ...lease,
+    active: true,
+  });
+  expect(new Date(active.job.lease.until).getTime()).toBeGreaterThan(
+    new Date(claimed.job.lease.until).getTime(),
+  );
+  service.clock.advance(30 * 60_000);
+  const expired = await request(`${base}/${job.id}`);
+  expect(expired.job).toMatchObject({ status: "submitted", lease: null });
+  const latest = { questions: [question("Another person's newer draft")] };
+  const edited = await request(`${base}/${job.id}/review`, "POST", {
+    revision: expired.job.revision,
+    result: latest,
+  });
+  await request(
+    `${base}/${job.id}/claim`,
+    "POST",
+    { revision: claimed.job.revision },
+    secret,
+    engineer,
+    409,
+  );
+  const reclaimed = await request(`${base}/${job.id}/review-claim`, "POST", {
+    revision: edited.job.revision,
+  });
+  expect(reclaimed.job.lease.id).not.toBe(lease.leaseId);
+  expect(reclaimed.job.review.result).toEqual(latest);
+  await request(
+    `${base}/${job.id}/review`,
+    "POST",
+    {
+      ...lease,
+      revision: reclaimed.job.revision,
+      result: { questions: [question("Stale local draft")] },
+    },
+    undefined,
+    engineer,
+    409,
+  );
+  expect((await request(`${base}/${job.id}`)).job.review.result).toEqual(
+    latest,
+  );
+});
+
 it("identifies the latest saved draft for legacy clients without replacing the original submission", async () => {
   const { base, questionnaire, secret, round } = await setup();
   const { job } = await request(
@@ -383,7 +617,7 @@ it("recovers saved suggestions after a renewed drafting lease expires without ac
     "POST",
     {
       ...payload,
-      result,
+      result: { questions: [question("A conflicting stale submission")] },
       keepClaim: true,
       revision: claimed.job.revision,
     },
@@ -415,7 +649,7 @@ it("recovers saved suggestions after a renewed drafting lease expires without ac
   const { job: renewed } = await request(
     `${base}/${job.id}/renew`,
     "POST",
-    payload,
+    { ...payload, active: true },
     secret,
   );
   expect(renewed.revision).toBe(saved.revision);

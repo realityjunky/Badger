@@ -73,11 +73,17 @@ not mutate that snapshot, the original Agent submission or its context hash.
    editing or another Agent claim. Only a person's separate acceptance enters
    them into records; finishing completes no human gate.
 
-The MCP renews claims while connected and releases them on disconnect. A crash
-or prolonged outage recovers through the thirty-minute lease without losing
-saved suggestions. While claimed, other dashboard edits, decisions and claims
-are blocked. An unclaimed suggestion's **Copy Agent prompt** starts another
-session from the latest saved edits. Accepted jobs require new drafting work.
+`finish_job` hands over saved suggestions; submit local changes first.
+`release_job` gives up ownership, preserving saved suggestions or returning an
+empty job to the queue. Disconnect also releases ownership. Claims expire after
+thirty minutes without job activity: submissions and explicit MCP job reads
+count, while background heartbeats and dashboard status polling do not.
+While claimed, other dashboard edits, decisions and claims are blocked, and
+the dashboard refreshes the **Claimed** status automatically.
+Every new claim receives the latest saved edits in a new folder, including
+when the same Agent resumes after expiry. Read that folder's `result.json`
+before editing; an old folder cannot submit or end the new claim. Accepted
+jobs require new drafting work.
 
 An already-running local MCP keeps its old behavior until it is updated and
 restarted. Confirm that `finish_job` appears before starting an iterative
@@ -119,9 +125,14 @@ it does not create additional Agent tools or bypass a current confirmation.
 
 Engineers and Field experts use **Review suggestions** in the dashboard. Source
 results have **Statements** and **Script effect review** main tabs, each with
-numbered item tabs. Saving shared edits retains the original submission and
-appends review history; it does not accept records, confirm declarations or
-publish a round.
+numbered item tabs. Opening reserves an exclusive editing session. **Save**
+keeps that reservation; **Finish editing** saves and releases it. Closing the
+editor or thirty idle minutes releases only saved changes. An expired editor
+keeps unsaved text for reference and requires reopening the latest saved
+version to continue. Saving changed content retains the original submission
+and appends review history; identical retries within the same claim do not
+create duplicate revisions. Saving does not accept records, confirm
+declarations or publish a round.
 
 A competing save returns a revision conflict. Reopen the current result and
 reconcile local edits. The Engineer separately uses **Review decisions** to

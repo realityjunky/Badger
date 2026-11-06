@@ -10,7 +10,8 @@ snapshots and MCP task context. Prompts guide drafting; server capability
 checks and manual sign-offs remain authoritative. See
 [ADR 0045](../../docs/adr/0045-server-managed-stage-prompts.md).
 Drafting sessions retain exclusive claims across follow-up submissions under
-[ADR 0047](../../docs/adr/0047-exclusive-drafting-sessions.md). The human review
+[ADR 0047](../../docs/adr/0047-exclusive-drafting-sessions.md), extended to
+dashboard review by [ADR 0048](../../docs/adr/0048-exclusive-dashboard-review-sessions.md). The human review
 endpoint and all sign-offs remain reserved for signed-in people.
 
 Service deployments support platform sessions, OpenID Connect and trusted
@@ -775,8 +776,10 @@ validation and approval.
 ## Shared suggestion review
 
 Signed-in workflow Engineers, Field experts, and Administrators can read
-questionnaire drafting jobs and save shared suggestion edits with
-`POST V/drafting-jobs/:id/review` and `{revision, result}`. The public job's
+questionnaire drafting jobs. `POST V/drafting-jobs/:id/review-claim` with
+`{revision}` reserves a browser editing session and returns its private lease.
+Save with `POST V/drafting-jobs/:id/review` and
+`{revision, result, leaseId, contextHash}`; saving retains the claim. The public job's
 `review` holds the saved result, hash, editor, timestamp, and saved revision;
 `result` and `resultHash` retain the original Agent submission. Every public job
 also exposes `currentResultHash` and `currentResultPath`.
@@ -788,13 +791,24 @@ without `keepClaim: true` is identified explicitly and instructs the caller to
 update/build and restart its local MCP for iterative drafting. Releasing a
 claim preserves all saved suggestions.
 
-Each save appends immutable history and advances the job revision. Concurrent or stale
-saves return 409. Saving never accepts records or completes the submission's
-inbox item. Field experts cannot request, claim, submit, or decide jobs, and
-their job lists exclude plan and Authoring jobs. Suggestion review and editing
-are available only while the job is unclaimed. An Engineer's Agent can instead
-claim submitted suggestions and append revisions through the drafting submit
-endpoint. While claimed, human saves and decisions conflict. No standalone
+Changed saves append immutable history and advance the job revision; identical
+retries within the same active claim are no-ops. Differing stale saves return 409. Saving never accepts records. Browser sessions call `finish` or `release`
+with their lease and context; dashboard **Finish editing** saves first.
+Only the owning session can save or end a claim. Field experts can reserve
+questionnaire review sessions, but cannot request Agent drafting, submit Agent
+results or decide jobs; their lists exclude plan and Authoring jobs.
+Legacy `{revision, result}` browser reviews remain atomic edits only while
+unclaimed. An Engineer's Agent can instead claim submitted suggestions and
+append revisions through the drafting submit endpoint. Competing claims,
+browser saves and decisions conflict while another session owns the job.
+Public lease metadata identifies Agent versus dashboard editing and includes
+a claim hash for recognizing ownership changes, without exposing the lease ID.
+Claims expire after thirty idle minutes. `renew` with `active: true` records
+editing activity; `active: false` or an omitted flag only checks the claim and
+cannot extend its idle deadline. Dashboard input and saves, and explicit MCP
+job reads and submissions, count as activity. Background polling does not.
+Release audit reasons distinguish disconnect, idle expiry, editor closure and
+explicit release. No standalone
 review-prompt endpoint or MCP review tools are available, and personal access
 tokens cannot write the human review endpoint. Acceptance remains a signed-in
 Engineer's separate dashboard action after the drafting session finishes.

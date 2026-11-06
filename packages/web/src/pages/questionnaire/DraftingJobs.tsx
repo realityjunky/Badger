@@ -9,6 +9,7 @@ import {
 import {
   Alert,
   Button,
+  ConfigProvider,
   Dropdown,
   Empty,
   Input,
@@ -29,7 +30,6 @@ import type {
   DraftingDecisionPreview,
   AnyDraftingJob,
   DraftingKind,
-  DraftingResult,
 } from "../../api/drafting-jobs.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { normalizeBasePath } from "../../app/paths.js";
@@ -37,6 +37,7 @@ import { StatusPill, type PillTone } from "../../components/StatusPill.js";
 import { QuestionComposer } from "./QuestionComposer.js";
 import { AnswerTypeDetails } from "./AnswerTypeDetails.js";
 import type { MessageId } from "../../i18n/catalog.js";
+import { useDraftingReview } from "./useDraftingReview.js";
 import {
   DraftEvidence,
   DraftResultView,
@@ -93,6 +94,7 @@ export function DraftingJobs({
   const [manualPrompt, setManualPrompt] = useState<string | null>(null);
   const [savedJobId, setSavedJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const actionPending = useRef(false);
   const [requesting, setRequesting] = useState(false);
   const [roundId, setRoundId] = useState<string>();
   const [parentId, setParentId] = useState<string>();
@@ -100,10 +102,6 @@ export function DraftingJobs({
   const [skillId, setSkillId] = useState<string>();
   const [questionId, setQuestionId] = useState<string>();
   const [targetLocale, setTargetLocale] = useState("zh-CN");
-  const [review, setReview] = useState<{
-    job: DraftingJob;
-    result: DraftingResult;
-  } | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [discard, setDiscard] = useState<DraftingJob | null>(null);
   const [reason, setReason] = useState("");
@@ -169,8 +167,33 @@ export function DraftingJobs({
       sequence.current++;
     };
   }, [refresh, view]);
+  useEffect(() => {
+    if (!isActive) return;
+    const update = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const timer = window.setInterval(update, 5_000);
+    window.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", update);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, [isActive, refresh]);
+  const reviewSession = useDraftingReview(
+    basePath,
+    jobsPath,
+    jobs,
+    async () => {
+      await refresh();
+      onChanged();
+    },
+  );
+  const { review, setReview } = reviewSession;
   const run = async (action: () => Promise<void>) => {
-    if (busy) return;
+    if (actionPending.current) return;
+    actionPending.current = true;
     setBusy(true);
     setFailure(null);
     try {
@@ -181,6 +204,7 @@ export function DraftingJobs({
         error instanceof Error ? error.message : t("questionnaire.failed"),
       );
     } finally {
+      actionPending.current = false;
       setBusy(false);
     }
   };
@@ -261,7 +285,6 @@ export function DraftingJobs({
       setPreview(null);
       setDecisionJob(null);
       setSavedJobId(null);
-      setReview(null);
       setDiscard(null);
       setEditing(null);
       await refresh();
@@ -450,9 +473,16 @@ export function DraftingJobs({
               </Link>
               {job.status === "claimed" && (
                 <p className="muted" role="status">
-                  {format("drafting.claimedHelp", {
-                    host: job.lease?.agentHost ?? t("drafting.agentPrompt"),
-                  })}
+                  {job.lease?.kind === "dashboard"
+                    ? format("drafting.dashboardClaimedHelp", {
+                        person:
+                          view.assignees.find(
+                            (person) => person.personId === job.lease?.personId,
+                          )?.name ?? t("drafting.dashboardReviewer"),
+                      })
+                    : format("drafting.claimedHelp", {
+                        host: job.lease?.agentHost ?? t("drafting.agentPrompt"),
+                      })}
                 </p>
               )}
               {job.status === "queued" && canDecide && (
@@ -476,22 +506,10 @@ export function DraftingJobs({
                     disabled={busy}
                     onClick={() =>
                       void run(async () => {
-                        const current = await questionnaireRequest<{
-                          job: DraftingJob;
-                        }>(basePath, `${jobsPath}/${job.id}`);
-                        if (current.job.status !== "submitted") {
-                          await refresh();
-                          return;
-                        }
                         setPreview(null);
                         setEditing(null);
                         setSavedJobId(null);
-                        setReview({
-                          job: current.job,
-                          result: structuredClone(
-                            current.job.review?.result ?? current.job.result!,
-                          ),
-                        });
+                        await reviewSession.open(job);
                       })
                     }
                   >
@@ -706,120 +724,178 @@ export function DraftingJobs({
         {failure && <Alert type="error" message={failure} />}
       </Modal>
       <Modal
-        open={review !== null && editing === null && preview === null}
-        title={t("drafting.review")}
-        width={800}
-        okText={t("drafting.saveReview")}
-        cancelText={t("common.cancel")}
-        confirmLoading={busy}
-        okButtonProps={{ disabled: !review || !hasDraftItems(review.result) }}
-        onCancel={() => {
-          if (!busy) setReview(null);
-        }}
-        onOk={() =>
-          void run(async () => {
-            if (!review) return;
-            await questionnaireRequest(
-              basePath,
-              `${jobsPath}/${review.job.id}/review`,
-              "POST",
-              {
-                revision: review.job.revision,
-                result: review.result,
-              },
-            );
-            setSavedJobId(review.job.id);
-            setReview(null);
-            await refresh();
-            onChanged();
-          })
+        open={review !== null && preview === null}
+        title={t(editing === null ? "drafting.review" : "drafting.edit")}
+        width={editing === null ? 800 : 900}
+        footer={
+          editing === null ? (
+            <Space wrap>
+              <Button
+                disabled={busy}
+                onClick={() => void run(() => reviewSession.close())}
+              >
+                {t("common.close")}
+              </Button>
+              <Button
+                disabled={
+                  busy ||
+                  !review ||
+                  review.ended ||
+                  !hasDraftItems(review.result)
+                }
+                onClick={() =>
+                  void run(async () => {
+                    await reviewSession.close(true);
+                    setEditing(null);
+                  })
+                }
+              >
+                {t("drafting.finishEditing")}
+              </Button>
+              <Button
+                type="primary"
+                loading={busy}
+                disabled={
+                  !review || review.ended || !hasDraftItems(review.result)
+                }
+                onClick={() =>
+                  void run(async () => {
+                    const saved = await reviewSession.save();
+                    if (saved) setSavedJobId(saved.job.id);
+                  })
+                }
+              >
+                {t("drafting.saveReview")}
+              </Button>
+            </Space>
+          ) : null
         }
+        onCancel={() => {
+          if (editing !== null) setEditing(null);
+          else if (!busy) void run(() => reviewSession.close());
+        }}
       >
-        <p className="muted">{t("drafting.reviewHelp")}</p>
-        {review?.job.questionId && (
-          <p>
-            {view.questions.find((q) => q.id === review.job.questionId)?.text} ·{" "}
-            {review.job.locale ?? view.version.locale}
-          </p>
-        )}
-        {review && (
-          <DraftResultView
-            result={review.result}
-            view={view}
-            effectLabels={draftingEffectLabels(review.job)}
-            questionId={review.job.questionId}
-            onChange={(result) => setReview({ ...review, result })}
-          />
-        )}
-        {review &&
-          "questions" in review.result &&
-          review.result.questions.map((item, index) => {
-            const q = "question" in item ? item.question : item;
-            return (
-              <section key={index} className="drafting-suggestion">
-                {"question" in item && (
-                  <>
-                    <p>
-                      {t("drafting.sourceNumber")} {item.number}
-                    </p>
-                    <DraftEvidence evidence={[item.source]} />
-                  </>
-                )}
-                <h3>{q.text}</h3>
-                <p className="questionnaire-text">{q.rationale}</p>
-                <AnswerTypeDetails type={q.answerType} />
-                <p>
-                  {t(`questionnaire.topic.${q.topic}` as MessageId)} ·{" "}
-                  {q.priority}
-                </p>
-                <Space wrap>
-                  <Button onClick={() => setEditing(index)}>
-                    {t("drafting.edit")}
-                  </Button>
-                  <Button
-                    onClick={() =>
-                      setReview({
-                        ...review,
-                        result: changeDraftQuestion(review.result, index, null),
-                      })
-                    }
-                  >
-                    {t("drafting.remove")}
-                  </Button>
-                </Space>
-              </section>
-            );
-          })}
-        {failure && <Alert type="error" message={failure} />}
-      </Modal>
-      {review && editing !== null && (
-        <Modal
-          open
-          title={t("drafting.edit")}
-          width={900}
-          footer={null}
-          onCancel={() => setEditing(null)}
-          destroyOnHidden
+        <div
+          onInputCapture={reviewSession.markActivity}
+          onPointerDownCapture={reviewSession.markActivity}
+          onKeyDownCapture={reviewSession.markActivity}
+          onWheelCapture={reviewSession.markActivity}
         >
-          <QuestionComposer
-            key={`${review.job.id}:${editing}`}
-            basePath={basePath}
-            path={path}
-            roundId={review.job.roundId!}
-            suggestion={draftQuestions(review.result)[editing]}
-            view={view}
-            onSaved={() => undefined}
-            onCancel={() => setEditing(null)}
-            onDraft={(content) => {
-              setReview({
-                ...review,
-                result: changeDraftQuestion(review.result, editing, content),
-              });
-              setEditing(null);
-            }}
-          />
-        </Modal>
-      )}
+          <ConfigProvider componentDisabled={busy || review?.ended}>
+            {review?.ended && (
+              <Alert
+                type="warning"
+                showIcon
+                message={t("drafting.sessionEnded")}
+              />
+            )}
+            {savedJobId === review?.job.id && (
+              <Alert
+                type="success"
+                showIcon
+                message={t("drafting.reviewSaved")}
+              />
+            )}
+            {review && editing !== null ? (
+              <QuestionComposer
+                key={`${review.job.id}:${editing}`}
+                basePath={basePath}
+                path={path}
+                roundId={review.job.roundId!}
+                suggestion={draftQuestions(review.result)[editing]}
+                view={view}
+                onSaved={() => undefined}
+                onCancel={() => setEditing(null)}
+                onDraft={(content) => {
+                  setReview({
+                    ...review,
+                    result: changeDraftQuestion(
+                      review.result,
+                      editing,
+                      content,
+                    ),
+                  });
+                  setEditing(null);
+                }}
+              />
+            ) : (
+              <>
+                <p className="muted">{t("drafting.reviewHelp")}</p>
+                {review?.job.questionId && (
+                  <p>
+                    {
+                      view.questions.find((q) => q.id === review.job.questionId)
+                        ?.text
+                    }{" "}
+                    · {review.job.locale ?? view.version.locale}
+                  </p>
+                )}
+                {review && (
+                  <DraftResultView
+                    result={review.result}
+                    view={view}
+                    effectLabels={draftingEffectLabels(review.job)}
+                    questionId={review.job.questionId}
+                    onChange={
+                      review.ended
+                        ? undefined
+                        : (result) => setReview({ ...review, result })
+                    }
+                  />
+                )}
+                {review &&
+                  "questions" in review.result &&
+                  review.result.questions.map((item, index) => {
+                    const q = "question" in item ? item.question : item;
+                    return (
+                      <section key={index} className="drafting-suggestion">
+                        {"question" in item && (
+                          <>
+                            <p>
+                              {t("drafting.sourceNumber")} {item.number}
+                            </p>
+                            <DraftEvidence evidence={[item.source]} />
+                          </>
+                        )}
+                        <h3>{q.text}</h3>
+                        <p className="questionnaire-text">{q.rationale}</p>
+                        <AnswerTypeDetails type={q.answerType} />
+                        <p>
+                          {t(`questionnaire.topic.${q.topic}` as MessageId)} ·{" "}
+                          {q.priority}
+                        </p>
+                        <Space wrap>
+                          <Button
+                            disabled={busy || review.ended}
+                            onClick={() => setEditing(index)}
+                          >
+                            {t("drafting.edit")}
+                          </Button>
+                          <Button
+                            disabled={busy || review.ended}
+                            onClick={() =>
+                              setReview({
+                                ...review,
+                                result: changeDraftQuestion(
+                                  review.result,
+                                  index,
+                                  null,
+                                ),
+                              })
+                            }
+                          >
+                            {t("drafting.remove")}
+                          </Button>
+                        </Space>
+                      </section>
+                    );
+                  })}
+              </>
+            )}
+            {failure && <Alert type="error" message={failure} />}
+          </ConfigProvider>
+        </div>
+      </Modal>
       <Modal
         open={discard !== null && preview === null}
         title={t("drafting.discard")}

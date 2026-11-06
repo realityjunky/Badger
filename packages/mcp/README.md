@@ -119,10 +119,13 @@ component in any letter case, as a folder or a file, including spellings that
 HFS+ or Windows file systems resolve to `.git`, so Git never finds a repository
 configuration it would run; a refused claim is released. Files
 never execute. Folders use mode `0700` and files `0600`. Claims belong to one
-MCP connection, which renews them every five minutes and releases them on
-disconnect. A crash or prolonged outage releases them through the thirty-minute
-lease. Local files persist for reference, but a new connection must claim the
-job again and use its new folder. Delete old folders when finished; they
+MCP connection, which checks them every five minutes and releases them on
+disconnect. Thirty minutes without a submission or an explicit `list_jobs`
+read expires the claim; background checks do not keep idle claims alive.
+Local files persist for reference, but after release, finish, expiry or a new
+connection, read the current job revision and claim it again. Read the new
+folder's `result.json`, which includes edits by people who worked in between;
+old folders cannot submit or end the new claim. Delete old folders when finished; they
 contain workflow evidence. General large-result files remain connection-local.
 
 `submit_job` keeps the dashboard status **Claimed**, including after the first
@@ -170,9 +173,10 @@ interfaces. Questionnaire discovery jobs receive both Skills for that comparison
 symbolic links and special files. The service validates the schema again.
 A claim's Skill files total at most twice the deployment's
 `BADGER_UPLOAD_MAX_BYTES`, so any two Skill versions within the upload limit
-fit. Leases last 30 minutes and are bound to the claiming person, token, host,
-and lease ID. Expired leases return to the queue on the next job or Engineer
-questionnaire read. At the same boundaries, a change to a job's inputs, the
+fit. Leases last 30 minutes of inactivity and are bound to the claiming person,
+token, host, claim kind, and lease ID. Expired leases make saved suggestions
+available for review, or return empty jobs to the queue, on the next job or
+Engineer questionnaire read. At the same boundaries, a change to a job's inputs, the
 part of the context its kind's result depends on, cancels it when queued,
 claimed, or submitted. Discovery jobs also depend on the current ledger,
 Source study, submitted answers, concerns, discussion and settings; narrower

@@ -307,13 +307,14 @@ it("shares saved source-study edits with Field experts and binds Engineer decisi
   for (const action of [
     "claim",
     "submit",
-    "release",
     "accept-preview",
     "accept",
     "reject-preview",
     "reject",
   ])
     await request(`${jobs}/${job.id}/${action}`, "POST", {}, 403, expert);
+  for (const action of ["release", "renew", "finish"])
+    await request(`${jobs}/${job.id}/${action}`, "POST", {}, 409, expert);
   await request(
     jobs,
     "POST",

@@ -56,7 +56,13 @@ export interface DraftingJob {
     "queued" | "claimed" | "submitted" | "accepted" | "rejected" | "cancelled";
   revision: number;
   contextHash: string;
-  lease?: { personId: string; agentHost: string | null; until: string } | null;
+  lease?: {
+    kind: "agent" | "dashboard";
+    claimHash: string;
+    personId: string;
+    agentHost: string | null;
+    until: string;
+  } | null;
   outputSchema?: object;
   result: DraftingResult | null;
   review: DraftingReview<DraftingResult> | null;

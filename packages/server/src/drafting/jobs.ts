@@ -79,6 +79,8 @@ export interface DraftingJobRow {
   lease_token_id: string | null;
   lease_agent_host: string | null;
   lease_until: string | Date | null;
+  lease_kind: "agent" | "dashboard" | null;
+  lease_activity_at: string | Date | null;
   result: DraftResult | null;
   result_hash: string | null;
   review_result: DraftResult | null;
@@ -125,6 +127,8 @@ export function publicDraftingJob(row: DraftingJobRow) {
       row.lease_id === null
         ? null
         : {
+            kind: row.lease_kind!,
+            claimHash: canonicalHash(row.lease_id),
             personId: row.lease_person_id,
             agentHost: row.lease_agent_host,
             until: toIsoString(row.lease_until!),
@@ -280,7 +284,8 @@ export async function reconcileDraftingJobs(
     const updated = (
       await tx.query<DraftingJobRow>(
         `update drafting_jobs set status = $2, revision = revision + 1, lease_id = null, lease_person_id = null,
-       lease_token_id = null, lease_agent_host = null, lease_until = null, updated_at = $3 where id = $1 returning *`,
+       lease_token_id = null, lease_agent_host = null, lease_until = null,
+       lease_kind = null, lease_activity_at = null, updated_at = $3 where id = $1 returning *`,
         [
           job.id,
           changed ? "cancelled" : job.result === null ? "queued" : "submitted",
@@ -395,11 +400,13 @@ export async function claimDraftingJob(
   deps: ServiceDependencies,
   actor: DraftingActor,
   job: DraftingJobRow,
+  kind: "agent" | "dashboard" = "agent",
 ) {
   const claimed = (
     await tx.query<DraftingJobRow>(
       `update drafting_jobs set status = 'claimed', revision = revision + 1, lease_id = $2, lease_person_id = $3,
-     lease_token_id = $4, lease_agent_host = $5, lease_until = $6, updated_at = $7 where id = $1 returning *`,
+     lease_token_id = $4, lease_agent_host = $5, lease_until = $6,
+     lease_kind = $8, lease_activity_at = $7, updated_at = $7 where id = $1 returning *`,
       [
         job.id,
         deps.ids.next(),
@@ -408,6 +415,7 @@ export async function claimDraftingJob(
         actor.agentHost,
         new Date(deps.clock.now().getTime() + 30 * 60_000),
         deps.clock.now(),
+        kind,
       ],
     )
   ).rows[0]!;
@@ -465,23 +473,28 @@ export async function submitDraftingJob(
     saved = await saveDraftingReview(tx, deps, actor, job, result, blobs);
   }
   return keepClaim
-    ? renewDraftingJob(tx, deps, saved)
-    : finishDraftingJob(tx, deps, actor, saved);
+    ? renewDraftingJob(tx, deps, saved, true)
+    : finishDraftingJob(
+        tx,
+        deps,
+        actor,
+        saved,
+        "A legacy submission saved suggestions and released the claim",
+      );
 }
 
 export async function renewDraftingJob(
   tx: Queryable,
   deps: ServiceDependencies,
   job: DraftingJobRow,
+  active = false,
 ) {
+  const now = deps.clock.now();
+  const activity = active ? now : new Date(job.lease_activity_at!);
   return (
     await tx.query<DraftingJobRow>(
-      "update drafting_jobs set lease_until = $2, updated_at = $3 where id = $1 returning *",
-      [
-        job.id,
-        new Date(deps.clock.now().getTime() + 30 * 60_000),
-        deps.clock.now(),
-      ],
+      "update drafting_jobs set lease_until = $2, updated_at = $3, lease_activity_at = $4 where id = $1 returning *",
+      [job.id, new Date(activity.getTime() + 30 * 60_000), now, activity],
     )
   ).rows[0]!;
 }
@@ -491,6 +504,7 @@ export async function finishDraftingJob(
   deps: ServiceDependencies,
   actor: DraftingActor,
   job: DraftingJobRow,
+  reason = "The editor finished the drafting session",
 ) {
   if (job.result === null)
     throw new RequestError(
@@ -501,12 +515,13 @@ export async function finishDraftingJob(
     await tx.query<DraftingJobRow>(
       `update drafting_jobs set status = 'submitted', revision = revision + 1,
        lease_id = null, lease_person_id = null, lease_token_id = null, lease_agent_host = null,
-       lease_until = null, updated_at = $2 where id = $1 returning *`,
+       lease_until = null, lease_kind = null, lease_activity_at = null,
+       updated_at = $2 where id = $1 returning *`,
       [job.id, deps.clock.now()],
     )
   ).rows[0]!;
   await openDraftingInbox(tx, deps, submitted);
-  await auditJob(tx, deps, actor, submitted, "submitted", job.revision);
+  await auditJob(tx, deps, actor, submitted, "submitted", job.revision, reason);
   return submitted;
 }
 
@@ -515,16 +530,19 @@ export async function releaseDraftingJob(
   deps: ServiceDependencies,
   actor: DraftingActor,
   job: DraftingJobRow,
+  reason = "The claim was released; saved suggestions were preserved",
 ) {
-  if (job.result !== null) return finishDraftingJob(tx, deps, actor, job);
+  if (job.result !== null)
+    return finishDraftingJob(tx, deps, actor, job, reason);
   const released = (
     await tx.query<DraftingJobRow>(
       `update drafting_jobs set status = 'queued', revision = revision + 1, lease_id = null, lease_person_id = null,
-     lease_token_id = null, lease_agent_host = null, lease_until = null, updated_at = $2 where id = $1 returning *`,
+     lease_token_id = null, lease_agent_host = null, lease_until = null,
+     lease_kind = null, lease_activity_at = null, updated_at = $2 where id = $1 returning *`,
       [job.id, deps.clock.now()],
     )
   ).rows[0]!;
-  await auditJob(tx, deps, actor, released, "released", job.revision);
+  await auditJob(tx, deps, actor, released, "released", job.revision, reason);
   return released;
 }
 

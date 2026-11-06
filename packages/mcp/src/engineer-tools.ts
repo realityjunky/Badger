@@ -25,13 +25,16 @@ export function engineerTools(api: BadgerApi, sessions: LocalDraftingSessions) {
       "list_jobs",
       "List drafting jobs and their current suggestions. Read currentResultHash and currentResultPath for the latest saved draft. result and resultHash preserve the immutable first submission; later edits are in review.result and review.resultHash. Never diagnose a failed update by comparing only the original resultHash.",
       context,
-      (args) => api.request(jobsPath(args)),
+      async (args) => {
+        await sessions.touchWorkflow(args);
+        return api.request(jobsPath(args));
+      },
       "compose",
       true,
     ),
     tool(
       "claim_job",
-      "Claim a queued job or unclaimed suggestions when the user asks. Write its hash-bound context, schema, pinned files, and any existing suggestions to a private local folder. This MCP session keeps the exclusive claim until finish_job, release_job, or disconnect.",
+      "Claim a queued job or unclaimed suggestions when the user asks. Always read the latest revision first. Write the latest saved suggestions, context, schema and pinned files to a new private folder. After finish, release, disconnect or 30 minutes without job activity, claim again and read the new folder; never reuse an old result.json as the current draft.",
       { ...job, revision: z.number().int().min(1) },
       (args) => claimJob(api, args, sessions),
       "compose",

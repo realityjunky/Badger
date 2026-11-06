@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import type { ScriptEffectSuggestion } from "@realityjunky/badger";
 
-const base = "http://127.0.0.1:4320/badger";
+const base = `http://127.0.0.1:${process.env["BADGER_E2E_BASE_PATH_PORT"] ?? "4320"}/badger`;
 
 async function call(
   page: Page,
@@ -569,6 +569,10 @@ test("source-study suggestions keep edits across numbered tabs without confirmin
     ),
   ).toBe(true);
   await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await dialog
+    .getByRole("button", { name: "Finish editing", exact: true })
+    .click();
   await expect(dialog).toBeHidden();
   const saved = (await call(page, "GET", `${jobs}/${job.id}`)).job;
   expect(saved.result).toEqual(result);

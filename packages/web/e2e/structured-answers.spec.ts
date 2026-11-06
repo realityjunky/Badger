@@ -6,7 +6,8 @@ import {
   type TestService,
 } from "@realityjunky/badger-server/testing";
 
-const origin = "http://127.0.0.1:4327";
+const port = process.env["BADGER_E2E_STRUCTURED_PORT"] ?? "4327";
+const origin = `http://127.0.0.1:${port}`;
 const base = `${origin}/team`;
 const admin = { subject: "admin", email: "admin@example.com" };
 const engineer = {
@@ -24,7 +25,7 @@ test.use({ actionTimeout: 10_000 });
 test.beforeAll(async () => {
   service = await startTestService({
     environment: {
-      BADGER_PORT: "4327",
+      BADGER_PORT: port,
       BADGER_BASE_PATH: "/team",
       BADGER_WEB_DIR: path.resolve(
         path.dirname(fileURLToPath(import.meta.url)),
@@ -55,6 +56,7 @@ async function english(page: Page) {
 test("a shared drafting job link lets a Field expert edit suggestions before the Engineer accepts them", async ({
   browser,
 }, testInfo) => {
+  test.setTimeout(90_000);
   const { group } = await call("POST", "/groups", {
     name: `Structured drafting ${Date.now()}`,
   });
@@ -237,6 +239,32 @@ test("a shared drafting job link lets a Field expert edit suggestions before the
     await expect(
       page.getByRole("button", { name: "Copy review prompt", exact: true }),
     ).toHaveCount(0);
+    const currentJob = (
+      await call("GET", `${jobs}/${job.id}`, undefined, engineer)
+    ).job;
+    const agentSession = await agent("claim", {
+      revision: currentJob.revision,
+    });
+    await expect(jobCard.getByText("Claimed", { exact: true })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(
+      jobCard.getByRole("button", { name: "Review suggestions", exact: true }),
+    ).toHaveCount(0);
+    await agent("submit", {
+      leaseId: agentSession.job.lease.id,
+      contextHash: currentJob.contextHash,
+      result: currentJob.result,
+      keepClaim: true,
+    });
+    await expect(jobCard.getByText("Claimed", { exact: true })).toBeVisible();
+    await agent("finish", {
+      leaseId: agentSession.job.lease.id,
+      contextHash: currentJob.contextHash,
+    });
+    await expect(
+      jobCard.getByText("Awaiting your review", { exact: true }),
+    ).toBeVisible({ timeout: 12_000 });
     await page
       .getByRole("button", { name: "Review suggestions", exact: true })
       .click();
@@ -263,6 +291,23 @@ test("a shared drafting job link lets a Field expert edit suggestions before the
     const respondent = await expertContext.newPage();
     await respondent.goto(sharedUrl.href);
     await english(respondent);
+    const expertCard = respondent.locator(`#drafting-job-${job.id}`);
+    await expect(
+      expertCard.getByText("Claimed", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      expertCard.getByRole("button", {
+        name: "Review suggestions",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("dialog", { name: "Review suggestions", exact: true })
+      .getByRole("button", { name: "Finish editing", exact: true })
+      .click();
+    await expect(
+      expertCard.getByText("Awaiting your review", { exact: true }),
+    ).toBeVisible({ timeout: 12_000 });
     await expect(
       respondent.getByRole("tab", {
         name: "Drafting jobs and suggestions",
@@ -302,11 +347,91 @@ test("a shared drafting job link lets a Field expert edit suggestions before the
       .click();
     await expect(
       respondent.getByText("Review edits saved.", { exact: false }),
-    ).toBeVisible();
+    ).not.toHaveCount(0);
+    await respondent
+      .getByRole("dialog", { name: "Review suggestions", exact: true })
+      .getByRole("button", { name: "Finish editing", exact: true })
+      .click();
     const saved = await call("GET", `${jobs}/${job.id}`, undefined, expert);
     expect(saved.job.review.result.questions[0].rationale).toBe(
       "Storage choices reviewed by the Field expert.",
     );
+    await respondent
+      .getByRole("button", { name: "Review suggestions", exact: true })
+      .click();
+    await respondent
+      .getByRole("button", { name: "Edit suggestion", exact: true })
+      .click();
+    await respondent
+      .getByLabel("Rationale", { exact: true })
+      .fill("Unsaved text from the previous session.");
+    service.clock.advance(30 * 60_000);
+    const expired = (
+      await call("GET", `${jobs}/${job.id}`, undefined, engineer)
+    ).job;
+    expect(expired).toMatchObject({ status: "submitted", lease: null });
+    const later = await agent("claim", { revision: expired.revision });
+    const updatedDraft = structuredClone(expired.review.result);
+    updatedDraft.questions[0].rationale = "Updated by a later Agent session.";
+    await agent("submit", {
+      leaseId: later.job.lease.id,
+      contextHash: later.job.contextHash,
+      keepClaim: true,
+      result: updatedDraft,
+    });
+    const staleEditor = respondent.getByRole("dialog", {
+      name: "Edit suggestion",
+      exact: true,
+    });
+    await expect(staleEditor).toContainText("This editing session ended.", {
+      timeout: 12_000,
+    });
+    await expect(
+      respondent.getByLabel("Rationale", { exact: true }),
+    ).toHaveValue("Unsaved text from the previous session.");
+    await expect(
+      respondent.getByLabel("Rationale", { exact: true }),
+    ).toBeDisabled();
+    await staleEditor
+      .getByRole("button", { name: "Close", exact: true })
+      .click();
+    await respondent
+      .getByRole("dialog", { name: "Review suggestions", exact: true })
+      .getByRole("button", { name: "Close", exact: true })
+      .last()
+      .click();
+    expect(
+      (await call("GET", `${jobs}/${job.id}`, undefined, engineer)).job,
+    ).toMatchObject({ status: "claimed", review: { result: updatedDraft } });
+    await agent("finish", {
+      leaseId: later.job.lease.id,
+      contextHash: later.job.contextHash,
+    });
+    await expect(
+      expertCard.getByRole("button", {
+        name: "Review suggestions",
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 12_000 });
+    await expertCard
+      .getByRole("button", { name: "Review suggestions", exact: true })
+      .click();
+    await respondent
+      .getByRole("button", { name: "Edit suggestion", exact: true })
+      .click();
+    await expect(
+      respondent.getByLabel("Rationale", { exact: true }),
+    ).toHaveValue("Updated by a later Agent session.");
+    await respondent
+      .getByLabel("Rationale", { exact: true })
+      .fill("Storage choices reviewed by the Field expert.");
+    await respondent
+      .getByRole("button", { name: "Keep edits", exact: true })
+      .click();
+    await respondent
+      .getByRole("dialog", { name: "Review suggestions", exact: true })
+      .getByRole("button", { name: "Finish editing", exact: true })
+      .click();
     await respondent.setViewportSize({ width: 375, height: 812 });
     for (const theme of ["light", "dark"] as const) {
       await respondent.emulateMedia({

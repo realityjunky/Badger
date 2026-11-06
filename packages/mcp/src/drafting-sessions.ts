@@ -40,9 +40,15 @@ export class LocalDraftingSessions {
     if (this.owns(session)) this.active.delete(this.path(session));
   }
 
-  private renew(session: DraftingSession) {
+  private renew(session: DraftingSession, active = false): Promise<void> {
     const route = this.path(session);
-    if (this.pending.has(route)) return;
+    const pending = this.pending.get(route);
+    if (pending)
+      return active
+        ? pending.then(() =>
+            this.owns(session) ? this.renew(session, true) : undefined,
+          )
+        : pending;
     const renewal = this.api
       .request(
         `${route}/renew`,
@@ -50,6 +56,7 @@ export class LocalDraftingSessions {
         {
           leaseId: session.leaseId,
           contextHash: session.contextHash,
+          active,
         },
         1,
       )
@@ -63,6 +70,19 @@ export class LocalDraftingSessions {
       })
       .finally(() => this.pending.delete(route));
     this.pending.set(route, renewal);
+    return renewal;
+  }
+
+  async touchWorkflow(workflow: { workflowId: string; versionId: string }) {
+    await Promise.allSettled(
+      [...this.active.values()]
+        .filter(
+          (session) =>
+            session.workflowId === workflow.workflowId &&
+            session.versionId === workflow.versionId,
+        )
+        .map((session) => this.renew(session, true)),
+    );
   }
 
   close(): Promise<void> {
@@ -78,6 +98,7 @@ export class LocalDraftingSessions {
             {
               leaseId: session.leaseId,
               contextHash: session.contextHash,
+              reason: "disconnect",
             },
             1,
           ),

@@ -196,10 +196,10 @@ A bounded piece of drafting that a connected Agent claims, bound to the hashes o
 _Avoid_: Agent job
 
 **Drafting session**:
-One Agent connection's exclusive claim on a Drafting job. It may repeatedly save suggestions while the job stays claimed. Finishing releases the suggestions for dashboard editing or another claim; it never accepts them.
+One Agent connection's or browser review editor's exclusive claim on a Drafting job. It may repeatedly save suggestions while the job stays claimed. Finishing hands over saved suggestions; releasing gives up ownership while preserving saved work. Thirty minutes without editing activity expires the claim. Every new session starts from the latest saved suggestions under a fresh lease; it never accepts them.
 
 **Suggestion review**:
-The shared, revisioned edits to a Drafting job's suggestions. A workflow's Engineer or Field experts save questionnaire edits in the dashboard while the job is unclaimed; an authorized Agent saves follow-up drafts only within its exclusive Drafting session. Saving preserves the original result and does not accept it. The Engineer separately previews and confirms a decision using the latest saved result after the session finishes.
+The shared, revisioned edits to a Drafting job's suggestions. A workflow's Engineer or Field experts reserve a dashboard editing session; an authorized Agent saves follow-up drafts within its exclusive Drafting session. Saving retains the claim, preserves the original result and does not accept it. The Engineer separately previews and confirms a decision using the latest saved result after the session finishes.
 
 **Prompt template**:
 Versioned instructions for a workflow stage and scenario: Agent drafting, Agent assistance, or human review. Administrators manage the catalog; a new Drafting job snapshots its instructions and required context. A template never grants authority to sign off.

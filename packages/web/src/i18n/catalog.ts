@@ -473,9 +473,15 @@ const en = {
   "drafting.title": "Drafting jobs and suggestions",
   "drafting.about": "About drafting jobs and suggestions",
   "drafting.help":
-    "A claimed job stays with its Agent session for follow-up changes. When that session finishes, the Engineer and Field experts can edit the suggestions here, or the Engineer can dispatch them to an Agent again. The Engineer accepts the saved result separately into the workflow's records.",
+    "Each Agent or dashboard editing session reserves the job for its editor. Others can edit only after it finishes, disconnects, or becomes idle. The workflow's Engineer and Field experts review and save shared edits. The Engineer accepts the saved result separately into the workflow's records.",
   "drafting.claimedHelp":
-    "{host} is editing this job. Suggestions stay locked until that Agent session finishes.",
+    "{host} is editing this job. Suggestions stay locked until the session finishes, disconnects, or is idle for 30 minutes.",
+  "drafting.dashboardClaimedHelp":
+    "{person} is editing this job in the dashboard. Suggestions stay locked until they finish editing, close the editor, or are idle for 30 minutes.",
+  "drafting.dashboardReviewer": "A dashboard reviewer",
+  "drafting.finishEditing": "Finish editing",
+  "drafting.sessionEnded":
+    "This editing session ended. Your unsaved text is kept here for reference. Close the editor and reopen Review suggestions to load the latest saved version before continuing.",
   "drafting.summary": "Jobs: {total} · Awaiting review: {review}",
   "drafting.linkHelp": "Right-click this job card to copy a link to this job.",
   "drafting.language": "Language",
@@ -511,9 +517,8 @@ const en = {
   "drafting.reviewDecisions": "Review decisions",
   "drafting.saveReview": "Save",
   "drafting.reviewHelp":
-    "Save your edits to share them with the workflow's Engineer and Field experts. The Engineer accepts results separately in Review decisions.",
-  "drafting.reviewSaved":
-    "Review edits saved. The Engineer can now review decisions using the saved result.",
+    "This editing session reserves the job for you. Save keeps it reserved. Finish editing saves your changes and releases it. Closing or 30 minutes of inactivity releases only saved changes. The Engineer accepts results separately in Review decisions.",
+  "drafting.reviewSaved": "Review edits saved.",
   "drafting.savedEdits": "Saved review edits",
   "drafting.discard": "Discard suggestions",
   "drafting.edit": "Edit suggestion",
@@ -1931,9 +1936,15 @@ const zh: Record<MessageId, string> = {
   "drafting.title": "起草任务与建议",
   "drafting.about": "关于起草任务与建议",
   "drafting.help":
-    "任务被领取后，由该 Agent 会话持续修改。会话结束后，工程师和领域专家可在此编辑建议，工程师也可再次交给 Agent。工程师须单独接受已保存的结果，结果才会进入工作流记录。",
+    "Agent 会话和仪表盘编辑会话均会独占任务，完成、断开连接或闲置超时后，其他人才能接手。工作流的工程师和领域专家可审核并保存共享修改。工程师须单独接受已保存的结果，结果才会进入工作流记录。",
   "drafting.claimedHelp":
-    "{host} 正在编辑此任务。该 Agent 会话结束后，其他人才能编辑或再次领取。",
+    "{host} 正在编辑此任务。会话完成、连接断开或闲置 30 分钟后，其他人才能编辑或再次领取。",
+  "drafting.dashboardClaimedHelp":
+    "{person} 正在仪表盘中编辑此任务。完成编辑、关闭编辑器或闲置 30 分钟后，其他人才能编辑或再次领取。",
+  "drafting.dashboardReviewer": "一位审核人",
+  "drafting.finishEditing": "完成编辑",
+  "drafting.sessionEnded":
+    "本次编辑会话已结束。未保存的文字仍保留在此供参考。请关闭编辑器并重新打开“审核建议”，从最新保存的版本继续。",
   "drafting.summary": "任务：{total} · 待审核：{review}",
   "drafting.linkHelp": "右键此任务卡片可复制该任务的链接。",
   "drafting.language": "语言",
@@ -1969,9 +1980,8 @@ const zh: Record<MessageId, string> = {
   "drafting.reviewDecisions": "审核决定",
   "drafting.saveReview": "保存",
   "drafting.reviewHelp":
-    "保存修改后，工作流的工程师和领域专家均可查看。工程师须通过“审核决定”单独接受结果。",
-  "drafting.reviewSaved":
-    "审核修改已保存。工程师现在可通过“审核决定”审阅已保存的结果。",
+    "本次编辑会话由你独占任务。保存后继续独占；“完成编辑”会保存修改并释放任务。关闭编辑器或闲置 30 分钟时，仅保留已保存的修改并释放任务。工程师须通过“审核决定”单独接受结果。",
+  "drafting.reviewSaved": "审核修改已保存。",
   "drafting.savedEdits": "已保存审核修改",
   "drafting.discard": "丢弃建议",
   "drafting.edit": "编辑建议",

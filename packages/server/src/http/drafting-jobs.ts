@@ -37,7 +37,7 @@ import {
 } from "../drafting/schema.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(prompt|claim|submit|finish|renew|release|review|accept-preview|accept|reject-preview|reject))?)?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(prompt|claim|submit|finish|renew|release|review|review-claim|accept-preview|accept|reject-preview|reject))?)?$/u;
 const REQUEST_FIELDS: Record<DraftingKind, string[]> = {
   "draft-questions": ["roundId"],
   "draft-follow-ups": ["roundId", "parentQuestionId"],
@@ -74,7 +74,10 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
   const workflowId = decodeURIComponent(rawWorkflow!);
   const versionId = decodeURIComponent(rawVersion!);
   const id = rawId ? decodeURIComponent(rawId) : null;
-  if (action === "review" && context.credential.kind === "token")
+  if (
+    (action === "review" || action === "review-claim") &&
+    context.credential.kind === "token"
+  )
     throw new RequestError(
       403,
       "Only signed-in people review and edit suggestions in the dashboard",
@@ -133,9 +136,14 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         403,
         "Only this workflow's Engineer and Field experts review drafting suggestions",
       );
+    const browserReviewAction =
+      action === "review" ||
+      action === "review-claim" ||
+      (["finish", "renew", "release"].includes(action ?? "") &&
+        context.credential.kind !== "token");
     if (
-      (action === "review" && !capabilities.reviewSuggestions) ||
-      (((action && action !== "review") || (!id && method === "POST")) &&
+      (browserReviewAction && !capabilities.reviewSuggestions) ||
+      (((action && !browserReviewAction) || (!id && method === "POST")) &&
         !capabilities.compose)
     )
       throw new RequestError(
@@ -273,10 +281,22 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
           400,
           "Review edits are for questionnaire suggestions",
         );
-      fields(body, ["revision", "result"]);
-      if (job.status !== "submitted")
-        return conflict("Only submitted suggestions can be edited");
-      if (revisionInput(body.revision) !== job.revision)
+      fields(body, ["revision", "result", "leaseId", "contextHash"]);
+      if (job.status === "claimed" && job.lease_kind === "dashboard")
+        requireLease(actor, job, body.leaseId, body.contextHash);
+      else if (job.status !== "submitted" || body.leaseId !== undefined)
+        return conflict(
+          "This editing session ended or another editor holds the claim. Reopen the latest suggestions.",
+        );
+      if (
+        revisionInput(body.revision) !== job.revision &&
+        !(
+          job.status === "claimed" &&
+          revisionInput(body.revision) < job.revision &&
+          body.result !== undefined &&
+          canonicalHash(body.result) === (job.review_hash ?? job.result_hash)
+        )
+      )
         return conflict(
           "The suggestions changed. Reopen the review before saving your edits.",
         );
@@ -288,7 +308,38 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         body.result,
         input.blobs,
       );
-      return { status: 200, value: { job: publicDraftingJob(saved) } };
+      return {
+        status: 200,
+        value: {
+          job: publicDraftingJob(
+            saved.status === "claimed"
+              ? await renewDraftingJob(tx, deps, saved, true)
+              : saved,
+          ),
+        },
+      };
+    }
+    if (action === "review-claim") {
+      fields(body, ["revision"]);
+      if (
+        !isQuestionnaireDraftingJob(job) ||
+        job.status !== "submitted" ||
+        revisionInput(body.revision) !== job.revision
+      )
+        return conflict(
+          "Read the latest unclaimed suggestions before starting an editing session",
+        );
+      const claimed = await claimDraftingJob(tx, deps, actor, job, "dashboard");
+      const publicJob = publicDraftingJob(claimed);
+      return {
+        status: 200,
+        value: {
+          job: {
+            ...publicJob,
+            lease: { ...publicJob.lease, id: claimed.lease_id! },
+          },
+        },
+      };
     }
     if (action === "claim") {
       fields(body, ["revision"]);
@@ -357,20 +408,53 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         "leaseId",
         "contextHash",
         "revision",
+        ...(action === "renew" ? ["active"] : []),
+        ...(action === "release" ? ["reason"] : []),
         ...(action === "submit" ? ["result", "keepClaim"] : []),
       ]);
       if (job.status !== "claimed")
         return conflict("This lease expired or the job is no longer claimed");
       requireLease(actor, job, body.leaseId, body.contextHash);
       if (
+        browserReviewAction &&
+        job.lease_kind !== "dashboard" &&
+        !capabilities.compose
+      )
+        return conflict("This browser does not own the editing session");
+      if (action === "submit" && job.lease_kind !== "agent")
+        return conflict("Save dashboard edits through the review endpoint");
+      if (
         body.revision !== undefined &&
-        revisionInput(body.revision) !== job.revision
+        revisionInput(body.revision) !== job.revision &&
+        !(
+          action === "submit" &&
+          revisionInput(body.revision) < job.revision &&
+          body.result !== undefined &&
+          canonicalHash(body.result) === (job.review_hash ?? job.result_hash)
+        )
       )
         return conflict(
           "The suggestions changed; read the current job before saving",
         );
       if (body.keepClaim !== undefined && typeof body.keepClaim !== "boolean")
         throw new RequestError(400, "keepClaim must be a boolean");
+      if (body.active !== undefined && typeof body.active !== "boolean")
+        throw new RequestError(400, "active must be a boolean");
+      const releaseReasons: Record<string, string> = {
+        disconnect:
+          "The MCP connection disconnected; saved suggestions were preserved",
+        idle: "The editor was idle for 30 minutes; saved suggestions were preserved",
+        "editor-closed":
+          "The browser editor closed; saved suggestions were preserved",
+        requested:
+          "The editor requested release; saved suggestions were preserved",
+      };
+      if (
+        body.reason !== undefined &&
+        (typeof body.reason !== "string" ||
+          !Object.hasOwn(releaseReasons, body.reason))
+      )
+        throw new RequestError(400, "Choose a supported release reason");
       const updated =
         action === "submit"
           ? await submitDraftingJob(
@@ -385,8 +469,16 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
           : action === "finish"
             ? await finishDraftingJob(tx, deps, actor, job)
             : action === "renew"
-              ? await renewDraftingJob(tx, deps, job)
-              : await releaseDraftingJob(tx, deps, actor, job);
+              ? await renewDraftingJob(tx, deps, job, body.active === true)
+              : await releaseDraftingJob(
+                  tx,
+                  deps,
+                  actor,
+                  job,
+                  typeof body.reason === "string"
+                    ? releaseReasons[body.reason]
+                    : undefined,
+                );
       const publicJob = publicDraftingJob(updated);
       if (action === "submit") {
         const resultPath = `job.${publicJob.currentResultPath}`;

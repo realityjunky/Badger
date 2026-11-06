@@ -63,6 +63,54 @@ async function insertAuditEvent(
 }
 
 describe("reviewed SQL migrations", () => {
+  it("preserves active Agent claims while adding bounded dashboard session ownership", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((migration) => migration.version < "0047"),
+      clock,
+    );
+    await insertPerson(test);
+    await test.database.query(
+      "insert into groups (id, name, created_at, updated_at) values ('session-group', 'Research', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into workflows (id, group_id, name, goal, intent, locale, created_at, updated_at) values ('session-workflow', 'session-group', 'Sessions', 'Study', 'new-skill', 'en', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into workflow_versions (id, workflow_id, number, name, goal, intent, locale, stages, created_at, updated_at) values ('session-version', 'session-workflow', 1, 'Sessions', 'Study', 'new-skill', 'en', '{}', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into drafting_jobs (id, workflow_version_id, kind, requester_id, context_bundle, context_hash, input_hash, output_schema, status, revision, lease_id, lease_person_id, lease_agent_host, lease_until, created_at, updated_at) values ('session-job', 'session-version', 'draft-plan', 'person-1', '{}', $1, $1, '{}', 'claimed', 2, 'old-lease', 'person-1', 'old-host', $2, $3, $3)",
+      [
+        "a".repeat(64),
+        new Date(clock.now().getTime() + 30 * 60_000),
+        clock.now(),
+      ],
+    );
+    const before = (await test.database.query("select * from drafting_jobs"))
+      .rows[0];
+    await applyMigrations(test.database, migrations, clock);
+    const after = (
+      await test.database.query<Record<string, unknown>>(
+        "select * from drafting_jobs",
+      )
+    ).rows[0]!;
+    const { lease_kind, lease_activity_at, ...original } = after;
+    expect(original).toEqual(before);
+    expect(lease_kind).toBe("agent");
+    expect(new Date(lease_activity_at as string).getTime()).toBe(
+      clock.now().getTime(),
+    );
+    await expect(
+      test.database.query("update drafting_jobs set lease_kind = null"),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+
   it("preserves saved prompt template revisions while allowing the head to advance", async () => {
     const test = await freshDatabase();
     await applyMigrations(test.database, await loadBundledMigrations(), clock);
@@ -182,9 +230,12 @@ describe("reviewed SQL migrations", () => {
       review_person_id,
       review_updated_at,
       review_revision,
+      lease_kind,
+      lease_activity_at,
       ...original
     } = after;
     expect(original).toEqual(before);
+    expect([lease_kind, lease_activity_at]).toEqual([null, null]);
     expect([
       review_result,
       review_hash,
@@ -1097,7 +1148,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0046");
+    expect(upgraded.applied.at(-1)).toBe("0047");
     expect(
       (
         await test.database.query(
@@ -1268,6 +1319,7 @@ describe("reviewed SQL migrations", () => {
       "0044",
       "0045",
       "0046",
+      "0047",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -1321,6 +1373,7 @@ describe("reviewed SQL migrations", () => {
         "0044",
         "0045",
         "0046",
+        "0047",
       ],
       pending: [],
       drifted: [],
@@ -1475,6 +1528,7 @@ describe("reviewed SQL migrations", () => {
         "0044",
         "0045",
         "0046",
+        "0047",
       ],
       pending: [],
       drifted: [],
@@ -1482,7 +1536,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(46);
+    expect(rows.rows[0]?.count).toBe(47);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

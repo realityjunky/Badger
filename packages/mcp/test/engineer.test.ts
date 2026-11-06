@@ -129,6 +129,10 @@ it("renews a session's exclusive claim and hands saved questions back on disconn
   });
   expect(busy.isError).toBe(true);
   service.clock.advance(25 * 60_000);
+  await call(client, "list_jobs", {
+    workflowId: workflow.id,
+    versionId: version.id,
+  });
   await vi.advanceTimersByTimeAsync(5 * 60_000);
   const renewed = await request(`${base}/drafting-jobs/${job.id}`);
   expect(new Date(renewed.job.lease.until).getTime()).toBeGreaterThan(
@@ -156,6 +160,41 @@ it("renews a session's exclusive claim and hands saved questions back on disconn
       await fs.readFile(path.join(next.folder, "result.json"), "utf8"),
     ),
   ).toEqual(result);
+  service.clock.advance(30 * 60_000);
+  const expired = await request(`${base}/drafting-jobs/${job.id}`);
+  expect(expired.job).toMatchObject({ status: "submitted", lease: null });
+  const updated = {
+    questions: [{ ...result.questions[0], text: "A later dashboard edit" }],
+  };
+  const edited = await request(
+    `${base}/drafting-jobs/${job.id}/review`,
+    "POST",
+    {
+      revision: expired.job.revision,
+      result: updated,
+    },
+  );
+  const fresh = await call(other, "claim_job", {
+    ...context,
+    revision: edited.job.revision,
+  });
+  folders.push(fresh.folder);
+  expect(fresh.folder).not.toBe(next.folder);
+  expect(
+    JSON.parse(
+      await fs.readFile(path.join(fresh.folder, "result.json"), "utf8"),
+    ),
+  ).toEqual(updated);
+  for (const name of ["submit_job", "finish_job", "release_job"]) {
+    const stale = await other.callTool({
+      name,
+      arguments: { ...context, folder: next.folder },
+    });
+    expect(stale.isError).toBe(true);
+  }
+  expect(
+    (await request(`${base}/drafting-jobs/${job.id}`)).job.review.result,
+  ).toEqual(updated);
 });
 
 it("uploads a scripted Skill without declarations and drafts effects from the hash-verified local Source study files", async () => {

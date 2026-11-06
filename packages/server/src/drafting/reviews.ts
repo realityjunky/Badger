@@ -46,6 +46,7 @@ export async function saveDraftingReview(
   const validated = await validateDraftingSubmission(tx, job, result, blobs);
   const now = deps.clock.now();
   const resultHash = canonicalHash(validated);
+  if (resultHash === (job.review_hash ?? job.result_hash)) return job;
   const saved = (
     await tx.query<DraftingJobRow>(
       `update drafting_jobs set revision = revision + 1, review_revision = revision + 1,

@@ -177,7 +177,7 @@ export async function reconcileAuthoringJobs(
       continue;
     const updated = (
       await tx.query<DraftingJobRow>(
-        "update drafting_jobs set status = 'cancelled', revision = revision + 1, lease_id = null, lease_person_id = null, lease_token_id = null, lease_agent_host = null, lease_until = null, updated_at = $2 where id = $1 returning *",
+        "update drafting_jobs set status = 'cancelled', revision = revision + 1, lease_id = null, lease_person_id = null, lease_token_id = null, lease_agent_host = null, lease_until = null, lease_kind = null, lease_activity_at = null, updated_at = $2 where id = $1 returning *",
         [job.id, deps.clock.now()],
       )
     ).rows[0]!;
