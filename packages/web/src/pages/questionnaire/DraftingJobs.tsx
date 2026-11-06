@@ -448,6 +448,13 @@ export function DraftingJobs({
                   )}
                 </dl>
               </Link>
+              {job.status === "claimed" && (
+                <p className="muted" role="status">
+                  {format("drafting.claimedHelp", {
+                    host: job.lease?.agentHost ?? t("drafting.agentPrompt"),
+                  })}
+                </p>
+              )}
               {job.status === "queued" && canDecide && (
                 <div className="drafting-job-actions">
                   <Button
@@ -492,6 +499,18 @@ export function DraftingJobs({
                   </Button>
                   {canDecide && (
                     <Space wrap>
+                      <Button
+                        icon={<CopyOutlined aria-hidden="true" />}
+                        disabled={busy}
+                        onClick={() => void copyAgentPrompt(job)}
+                      >
+                        {t("drafting.copyPrompt")}
+                      </Button>
+                      {copiedJobId === job.id && (
+                        <span className="muted" role="status">
+                          {t("drafting.promptCopied")}
+                        </span>
+                      )}
                       <Button
                         disabled={busy}
                         onClick={() =>

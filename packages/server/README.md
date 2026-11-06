@@ -9,9 +9,9 @@ kernel-owned catalog, revisioned Administrator edits, per-job instruction
 snapshots and MCP task context. Prompts guide drafting; server capability
 checks and manual sign-offs remain authoritative. See
 [ADR 0045](../../docs/adr/0045-server-managed-stage-prompts.md).
-Submitted suggestion review is manual dashboard work under
-[ADR 0046](../../docs/adr/0046-human-only-suggestion-review.md); personal access
-tokens cannot save shared review edits.
+Drafting sessions retain exclusive claims across follow-up submissions under
+[ADR 0047](../../docs/adr/0047-exclusive-drafting-sessions.md). The human review
+endpoint and all sign-offs remain reserved for signed-in people.
 
 Service deployments support platform sessions, OpenID Connect and trusted
 identity headers from configured proxy peers. See
@@ -783,11 +783,14 @@ appends immutable history and advances the job revision. Concurrent or stale
 saves return 409. Saving never accepts records or completes the submission's
 inbox item. Field experts cannot request, claim, submit, or decide jobs, and
 their job lists exclude plan and Authoring jobs. Suggestion review and editing
-are manual dashboard work: no review-prompt endpoint or MCP review tools are
-available, and personal access tokens cannot save reviews. Acceptance remains
-a signed-in Engineer's separate dashboard action.
+are available only while the job is unclaimed. An Engineer's Agent can instead
+claim submitted suggestions and append revisions through the drafting submit
+endpoint. While claimed, human saves and decisions conflict. No standalone
+review-prompt endpoint or MCP review tools are available, and personal access
+tokens cannot write the human review endpoint. Acceptance remains a signed-in
+Engineer's separate dashboard action after the drafting session finishes.
 
-Engineer acceptance previews use the saved review when present. A decision
+Questionnaire acceptance previews use the saved review when present. A decision
 with different content or an older revision conflicts, including when a Field
 expert saves after the preview. The existing explicit hash-bound confirmation
 and canonical acceptance validation remain required. Migration `0042` enforces
@@ -958,7 +961,7 @@ Every request made with a token, reads included, also requires
 `X-Badger-Agent-Host`: a nonblank label of 1 to 200 printable ASCII
 characters, as the Badger MCP sends on every request. Reads need it because
 some record audit events: an Engineer's questionnaire or drafting-job read
-returns an expired lease to the queue, or cancels a job whose inputs changed.
+releases an expired drafting lease, or cancels a job whose inputs changed.
 Audit events of token requests record the person's identity, token ID, Agent
 host, and `mcp` channel; the Activity page shows the host beside that
 channel. This applies to `token.used`, comments, concerns, Skill version
@@ -1010,26 +1013,32 @@ token's validity, scopes, and current roles. Sign-offs remain session-only.
 
 Under `/api/v1/workflows/:workflowId/versions/:versionId/drafting-jobs`, the
 workflow's Engineer or an Administrator can request and review
-drafting. An `engineer` token may read, claim, submit, and release jobs within
+drafting. An `engineer` token may read, claim, submit, renew, finish and release jobs within
 its person's current workflow roles. Every job action records its person,
 credential, channel, Agent host, request ID, revision, and hashes in the
 append-only Activity log. Reads that discover expiry or changed inputs
 commit the transition even when the attempted write returns a conflict.
 
-| Method and suffix               | Behavior                                                                                                                   |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `GET /`                         | List jobs, reconciling leases and input hashes.                                                                            |
-| `POST /`                        | A signed-in person requests a kind with its target fields (below) and `confirmed: true`.                                   |
-| `GET /:id`                      | Read one job within this workflow version.                                                                                 |
-| `POST /:id/claim`               | Claim a queued job with `{revision}`; return its context, schema, lease, and the pinned Skill files its kind reads.        |
-| `POST /:id/submit`              | Submit `{leaseId, contextHash, result}` against the stored schema.                                                         |
-| `POST /:id/release`             | Release `{leaseId, contextHash}` from the claiming person, token, and Agent host.                                          |
-| `POST /:id/accept-preview`      | Preview `{revision, ...result}` after the person edits or removes suggestions, using the result fields for that kind.      |
-| `POST /:id/reject-preview`      | Preview `{revision, reason}`.                                                                                              |
-| `POST /:id/accept` or `/reject` | Repeat the preview's decision with `confirmed: true`, `confirmationHash`, and a client `requestId`, as a signed-in person. |
+| Method and suffix               | Behavior                                                                                                                                                                            |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /`                         | List jobs, reconciling leases and input hashes.                                                                                                                                     |
+| `POST /`                        | A signed-in person requests a kind with its target fields (below) and `confirmed: true`.                                                                                            |
+| `GET /:id`                      | Read one job within this workflow version.                                                                                                                                          |
+| `POST /:id/claim`               | Claim a queued or submitted job with `{revision}`; return context, schema, private lease identifier, existing suggestions, and pinned files.                                        |
+| `POST /:id/submit`              | Validate `{leaseId, contextHash, revision?, result, keepClaim?}`. `keepClaim: true` saves while retaining the exclusive claim; omission preserves submit-and-release compatibility. |
+| `POST /:id/finish`              | Release `{leaseId, contextHash, revision?}` with the latest saved suggestions, without accepting them.                                                                              |
+| `POST /:id/renew`               | Renew `{leaseId, contextHash}` from the same person, token and Agent host.                                                                                                          |
+| `POST /:id/release`             | Release `{leaseId, contextHash}` from the claiming person, token, and Agent host.                                                                                                   |
+| `POST /:id/accept-preview`      | Preview `{revision, ...result}` after the person edits or removes suggestions, using the result fields for that kind.                                                               |
+| `POST /:id/reject-preview`      | Preview `{revision, reason}`.                                                                                                                                                       |
+| `POST /:id/accept` or `/reject` | Repeat the preview's decision with `confirmed: true`, `confirmationHash`, and a client `requestId`, as a signed-in person.                                                          |
 
-Claim leases last 30 minutes. Job reads and an Engineer's questionnaire view
-reconcile jobs: an expired lease returns its job to the queue, and a queued,
+Claim leases last 30 minutes. MCP renews active claims every five minutes and
+releases them on disconnect. Ordinary reads expose claim ownership and expiry
+without the lease identifier. Finishing, releasing or expiring a claim with
+saved suggestions makes the job submitted and reopens its single review inbox
+item; an empty job returns to the queue. Job reads and an Engineer's questionnaire view
+reconcile jobs, and a queued,
 claimed, or submitted job is cancelled exactly when its inputs change. A job's
 inputs are the part of the context its kind's result depends on (below); the
 job stores their hash when it is requested. Other changes leave it pending: a

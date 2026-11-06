@@ -251,6 +251,50 @@ async function studyDraft(
   return accepted.job;
 }
 
+it("keeps a reclaimed Source study editable after routing its own effect suggestions", async () => {
+  const fixture = await setup();
+  const job = await studyDraft(fixture, [fixture.suggestion], false);
+  await call(`${fixture.effects}/route`, "POST", {
+    workflowVersionId: fixture.version.id,
+    jobId: job.id,
+    jobRevision: job.revision,
+    revision: 0,
+  });
+  const jobs = `${fixture.base}/drafting-jobs`;
+  const { job: claimed } = await call(
+    `${jobs}/${job.id}/claim`,
+    "POST",
+    {
+      revision: job.revision,
+    },
+    200,
+    fixture.secret,
+  );
+  const result = {
+    ...job.result,
+    facts: [
+      {
+        statement: "Follow-up: the script creates output.txt locally.",
+        evidence: fixture.suggestion.evidence,
+      },
+    ],
+  };
+  const { job: saved } = await call(
+    `${jobs}/${job.id}/submit`,
+    "POST",
+    {
+      leaseId: claimed.lease.id,
+      contextHash: job.contextHash,
+      revision: claimed.revision,
+      keepClaim: true,
+      result,
+    },
+    200,
+    fixture.secret,
+  );
+  expect(saved).toMatchObject({ status: "claimed", review: { result } });
+});
+
 it.each(["submitted", "accepted"] as const)(
   "refuses routing a %s Source study draft after its study inputs change",
   async (status) => {

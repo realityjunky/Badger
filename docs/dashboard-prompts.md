@@ -66,8 +66,18 @@ not mutate that snapshot, the original Agent submission or its context hash.
    pinned files. It reads source code as evidence and never executes it.
 5. The Agent writes `result.json`, checks the complete result's schema, target
    IDs, citations, language and scope, then calls `submit_job` for that claim.
-6. The Agent returns the dashboard review link. People edit and decide on the
-   submitted suggestions; submission itself completes no human gate.
+6. Submission keeps the job **Claimed**. Continue follow-up changes through
+   the same Agent session, editing `result.json` and calling `submit_job` again.
+7. When the person says the drafting session is finished, the Agent calls
+   `finish_job`. The latest saved suggestions become available for dashboard
+   editing or another Agent claim. Only a person's separate acceptance enters
+   them into records; finishing completes no human gate.
+
+The MCP renews claims while connected and releases them on disconnect. A crash
+or prolonged outage recovers through the thirty-minute lease without losing
+saved suggestions. While claimed, other dashboard edits, decisions and claims
+are blocked. An unclaimed suggestion's **Copy Agent prompt** starts another
+session from the latest saved edits. Accepted jobs require new drafting work.
 
 A claim carries the same method when an Agent starts directly through MCP
 without a copied prompt. Claiming creates the private local evidence folder;
@@ -109,9 +119,10 @@ reconcile local edits. The Engineer separately uses **Review decisions** to
 preview the latest saved batch, then accepts it or discards it with a reason.
 A later save invalidates an earlier decision preview.
 
-Agent-assistance prompts and MCP tools for editing submitted suggestions are
-unavailable. Personal access tokens cannot save shared review edits. Agents may
-assist with a person's own assigned answer, but submitted suggestion review and
+Standalone Agent-assistance review tools remain unavailable. To continue with
+an Agent, copy the unclaimed job's prompt and claim it again. The new session
+receives the latest saved suggestions and retains the exclusive claim across
+submissions. Personal access tokens cannot write the human review endpoint;
 all sign-offs remain dashboard work.
 
 ## Source study, effects and interfaces

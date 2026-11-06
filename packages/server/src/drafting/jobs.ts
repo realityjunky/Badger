@@ -52,6 +52,7 @@ import {
   saveImportedQuestion,
 } from "../questionnaire/imports.js";
 import { readPromptTemplate } from "../prompt-templates.js";
+import { saveDraftingReview, validateDraftingSubmission } from "./reviews.js";
 
 export type DraftingActor = WriteContext & { agentHost: string | null };
 export interface DraftingJobRow {
@@ -117,7 +118,6 @@ export function publicDraftingJob(row: DraftingJobRow) {
       row.lease_id === null
         ? null
         : {
-            id: row.lease_id,
             personId: row.lease_person_id,
             agentHost: row.lease_agent_host,
             until: toIsoString(row.lease_until!),
@@ -200,6 +200,31 @@ async function finishInbox(
   );
 }
 
+async function openDraftingInbox(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  job: DraftingJobRow,
+) {
+  await tx.query(
+    `insert into inbox_items (id, person_id, workflow_version_id, gate, kind, event_id, drafting_job_id, created_at, updated_at)
+     values ($1,$2,$3,$6,'job-submitted',$4,$4,$5,$5)
+     on conflict (person_id, workflow_version_id, gate, kind, event_id)
+     do update set state = 'unread', revision = inbox_items.revision + 1, updated_at = excluded.updated_at`,
+    [
+      deps.ids.next(),
+      job.requester_id,
+      job.workflow_version_id,
+      job.id,
+      deps.clock.now(),
+      isAuthoringJob(job)
+        ? "package"
+        : job.kind === "draft-plan"
+          ? "plan"
+          : "questionnaire",
+    ],
+  );
+}
+
 /**
  * Called under the workflow/version locks before reading or changing jobs.
  * A job is cancelled only when the inputs its kind reads change.
@@ -221,7 +246,7 @@ export async function reconcileDraftingJobs(
   for (const job of jobs) {
     if (!["queued", "claimed", "submitted"].includes(job.status)) continue;
     let inputs = current.bundle;
-    if (job.kind === "source-study" && job.status === "submitted") {
+    if (job.kind === "source-study" && job.result !== null) {
       const pin = job.context_bundle.pins.find(
         (entry) => entry.skillId === job.skill_id,
       );
@@ -249,11 +274,16 @@ export async function reconcileDraftingJobs(
       await tx.query<DraftingJobRow>(
         `update drafting_jobs set status = $2, revision = revision + 1, lease_id = null, lease_person_id = null,
        lease_token_id = null, lease_agent_host = null, lease_until = null, updated_at = $3 where id = $1 returning *`,
-        [job.id, changed ? "cancelled" : "queued", deps.clock.now()],
+        [
+          job.id,
+          changed ? "cancelled" : job.result === null ? "queued" : "submitted",
+          deps.clock.now(),
+        ],
       )
     ).rows[0]!;
     Object.assign(job, updated);
     if (changed) await finishInbox(tx, deps, job.id);
+    else if (job.result !== null) await openDraftingInbox(tx, deps, job);
     await auditJob(
       tx,
       deps,
@@ -374,6 +404,7 @@ export async function claimDraftingJob(
       ],
     )
   ).rows[0]!;
+  await finishInbox(tx, deps, job.id);
   await auditJob(tx, deps, actor, claimed, "claimed", job.revision);
   return claimed;
 }
@@ -405,53 +436,69 @@ export async function submitDraftingJob(
   job: DraftingJobRow,
   result: unknown,
   blobs: BlobStore,
+  keepClaim = false,
 ) {
-  const validated = validateDraftResult(
-    job.kind,
-    job.output_schema,
-    result,
-    job.context_bundle.pins.find((pin) => pin.skillId === job.skill_id),
-  );
-  if ("interfaces" in validated && validated.scriptEffects !== undefined) {
-    const pin = job.context_bundle.pins.find(
-      (entry) => entry.skillId === job.skill_id,
-    )!;
-    validated.scriptEffects = await validateEffectDraft(
-      tx,
-      blobs,
-      await readVersion(tx, pin.skillId, pin.hash),
-      validated.scriptEffects,
-    );
+  let saved: DraftingJobRow;
+  if (job.result === null) {
+    const validated = await validateDraftingSubmission(tx, job, result, blobs);
+    saved = (
+      await tx.query<DraftingJobRow>(
+        `update drafting_jobs set revision = revision + 1, result = $2, result_hash = $3,
+         updated_at = $4 where id = $1 returning *`,
+        [
+          job.id,
+          JSON.stringify(validated),
+          canonicalHash(validated),
+          deps.clock.now(),
+        ],
+      )
+    ).rows[0]!;
+    await auditJob(tx, deps, actor, saved, "draft-saved", job.revision);
+  } else {
+    saved = await saveDraftingReview(tx, deps, actor, job, result, blobs);
   }
-  if (isAuthoringJob(job)) validateLaneResult(job, validated);
-  const submitted = (
+  return keepClaim
+    ? renewDraftingJob(tx, deps, saved)
+    : finishDraftingJob(tx, deps, actor, saved);
+}
+
+export async function renewDraftingJob(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  job: DraftingJobRow,
+) {
+  return (
     await tx.query<DraftingJobRow>(
-      `update drafting_jobs set status = 'submitted', revision = revision + 1, result = $2, result_hash = $3,
-     lease_id = null, lease_person_id = null, lease_token_id = null, lease_agent_host = null, lease_until = null, updated_at = $4 where id = $1 returning *`,
+      "update drafting_jobs set lease_until = $2, updated_at = $3 where id = $1 returning *",
       [
         job.id,
-        JSON.stringify(validated),
-        canonicalHash(validated),
+        new Date(deps.clock.now().getTime() + 30 * 60_000),
         deps.clock.now(),
       ],
     )
   ).rows[0]!;
-  await tx.query(
-    `insert into inbox_items (id, person_id, workflow_version_id, gate, kind, event_id, drafting_job_id, created_at, updated_at)
-     values ($1,$2,$3,$6,'job-submitted',$4,$4,$5,$5)`,
-    [
-      deps.ids.next(),
-      job.requester_id,
-      job.workflow_version_id,
-      job.id,
-      deps.clock.now(),
-      isAuthoringJob(job)
-        ? "package"
-        : job.kind === "draft-plan"
-          ? "plan"
-          : "questionnaire",
-    ],
-  );
+}
+
+export async function finishDraftingJob(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  actor: DraftingActor,
+  job: DraftingJobRow,
+) {
+  if (job.result === null)
+    throw new RequestError(
+      409,
+      "Submit suggestions before finishing this session",
+    );
+  const submitted = (
+    await tx.query<DraftingJobRow>(
+      `update drafting_jobs set status = 'submitted', revision = revision + 1,
+       lease_id = null, lease_person_id = null, lease_token_id = null, lease_agent_host = null,
+       lease_until = null, updated_at = $2 where id = $1 returning *`,
+      [job.id, deps.clock.now()],
+    )
+  ).rows[0]!;
+  await openDraftingInbox(tx, deps, submitted);
   await auditJob(tx, deps, actor, submitted, "submitted", job.revision);
   return submitted;
 }
@@ -462,6 +509,7 @@ export async function releaseDraftingJob(
   actor: DraftingActor,
   job: DraftingJobRow,
 ) {
+  if (job.result !== null) return finishDraftingJob(tx, deps, actor, job);
   const released = (
     await tx.query<DraftingJobRow>(
       `update drafting_jobs set status = 'queued', revision = revision + 1, lease_id = null, lease_person_id = null,

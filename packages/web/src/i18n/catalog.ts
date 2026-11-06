@@ -473,7 +473,9 @@ const en = {
   "drafting.title": "Drafting jobs and suggestions",
   "drafting.about": "About drafting jobs and suggestions",
   "drafting.help":
-    "The workflow's Engineer and Field experts review and save shared edits. The Engineer then reviews decisions and accepts the saved result into the workflow's records.",
+    "A claimed job stays with its Agent session for follow-up changes. When that session finishes, the Engineer and Field experts can edit the suggestions here, or the Engineer can dispatch them to an Agent again. The Engineer accepts the saved result separately into the workflow's records.",
+  "drafting.claimedHelp":
+    "{host} is editing this job. Suggestions stay locked until that Agent session finishes.",
   "drafting.summary": "Jobs: {total} · Awaiting review: {review}",
   "drafting.linkHelp": "Right-click this job card to copy a link to this job.",
   "drafting.language": "Language",
@@ -1929,7 +1931,9 @@ const zh: Record<MessageId, string> = {
   "drafting.title": "起草任务与建议",
   "drafting.about": "关于起草任务与建议",
   "drafting.help":
-    "工作流的工程师和领域专家可审核建议并保存共享修改。随后由工程师审核决定并接受已保存的结果，结果才会进入工作流记录。",
+    "任务被领取后，由该 Agent 会话持续修改。会话结束后，工程师和领域专家可在此编辑建议，工程师也可再次交给 Agent。工程师须单独接受已保存的结果，结果才会进入工作流记录。",
+  "drafting.claimedHelp":
+    "{host} 正在编辑此任务。该 Agent 会话结束后，其他人才能编辑或再次领取。",
   "drafting.summary": "任务：{total} · 待审核：{review}",
   "drafting.linkHelp": "右键此任务卡片可复制该任务的链接。",
   "drafting.language": "语言",

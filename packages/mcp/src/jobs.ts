@@ -6,6 +6,7 @@ import { Ajv } from "ajv";
 import { canonicalHash } from "@realityjunky/badger";
 import type { BadgerApi } from "./api.js";
 import { gitMetadata } from "./upload.js";
+import type { LocalDraftingSessions } from "./drafting-sessions.js";
 
 interface JobInput {
   workflowId: string;
@@ -34,6 +35,8 @@ interface ClaimedJob {
   contextHash: string;
   outputSchema: object;
   lease: { id: string; until: string };
+  result: unknown;
+  review: { result: unknown } | null;
 }
 interface LocalClaim extends JobInput {
   url: string;
@@ -117,6 +120,7 @@ async function readJson(
 export async function claimJob(
   api: BadgerApi,
   input: JobInput & { revision: number },
+  sessions: LocalDraftingSessions,
 ) {
   const claimed = await api.request<{
     job: ClaimedJob;
@@ -210,12 +214,20 @@ export async function claimJob(
         JSON.stringify(value, null, 2),
         { mode: 0o600, flag: "wx" },
       );
+    const previous = claimed.job.review?.result ?? claimed.job.result;
+    if (previous !== null && previous !== undefined)
+      await fs.writeFile(
+        path.join(folder, "result.json"),
+        JSON.stringify(previous, null, 2),
+        { mode: 0o600, flag: "wx" },
+      );
     if (claimed.instructions)
       await fs.writeFile(
         path.join(folder, "instructions.md"),
         claimed.instructions,
         { mode: 0o600, flag: "wx" },
       );
+    sessions.remember(claim);
     return {
       folder,
       jobId: input.jobId,
@@ -230,6 +242,7 @@ export async function claimJob(
       contextHash: claimed.job.contextHash,
       leaseUntil: claimed.job.lease.until,
       resultFile: path.join(folder, "result.json"),
+      hasPreviousSuggestions: previous !== null && previous !== undefined,
       instructionsFile: claimed.instructions
         ? path.join(folder, "instructions.md")
         : null,
@@ -257,7 +270,8 @@ export async function claimJob(
 export async function finishJob(
   api: BadgerApi,
   input: JobInput & { folder: string },
-  action: "submit" | "release",
+  action: "submit" | "finish" | "release",
+  sessions: LocalDraftingSessions,
 ) {
   const claim = (await readJson(
     input.folder,
@@ -274,8 +288,14 @@ export async function finishJob(
     typeof claim.contextHash !== "string"
   )
     throw new Error("This folder belongs to another job or deployment");
+  const session = claim as LocalClaim;
+  if (!sessions.owns(session))
+    throw new Error(
+      "This claim belongs to another MCP session; claim the job again after that session finishes",
+    );
   let result: unknown;
-  if (action === "submit") {
+  let revision: number | undefined;
+  if (action !== "release") {
     // Reload the authoritative schema; an edited local schema grants nothing.
     const { job } = await api.request<{ job: ClaimedJob }>(
       `${jobsPath(input)}/${input.jobId}`,
@@ -284,13 +304,16 @@ export async function finishJob(
       throw new Error(
         "The job is no longer claimed or its inputs changed; list jobs again",
       );
-    result = await readJson(input.folder, "result.json", 1024 * 1024);
-    const ajv = new Ajv({ strict: false });
-    const valid = ajv.compile(job.outputSchema);
-    if (!valid(result))
-      throw new Error(
-        `The result does not match the job's output schema: ${ajv.errorsText(valid.errors)}`,
-      );
+    revision = job.revision;
+    if (action === "submit") {
+      result = await readJson(input.folder, "result.json", 1024 * 1024);
+      const ajv = new Ajv({ strict: false });
+      const valid = ajv.compile(job.outputSchema);
+      if (!valid(result))
+        throw new Error(
+          `The result does not match the job's output schema: ${ajv.errorsText(valid.errors)}`,
+        );
+    }
   }
   const response = await api.request<{ job: ClaimedJob }>(
     `${jobsPath(input)}/${input.jobId}/${action}`,
@@ -298,13 +321,15 @@ export async function finishJob(
     {
       leaseId: claim.leaseId,
       contextHash: claim.contextHash,
-      ...(action === "submit" ? { result } : {}),
+      ...(revision === undefined ? {} : { revision }),
+      ...(action === "submit" ? { result, keepClaim: true } : {}),
     },
   );
-  return action === "submit"
+  if (action !== "submit") sessions.forget(session);
+  return action !== "release"
     ? {
         ...(response as object),
-        requiresPerson: true,
+        requiresPerson: action === "finish",
         dashboardUrl:
           response.job.kind === "authoring-lane" ||
           response.job.kind === "review-vote"
@@ -313,7 +338,9 @@ export async function finishJob(
               ? `${api.url}/workflows/${encodeURIComponent(input.workflowId)}/versions/${encodeURIComponent(input.versionId)}#plan`
               : `${api.url}/questionnaire?workflow=${encodeURIComponent(input.workflowId)}&version=${encodeURIComponent(input.versionId)}&panel=suggestions`,
         message:
-          "The result is a suggestion. Ask the person to review, edit, accept, or discard it in the dashboard.",
+          action === "submit"
+            ? "Suggestions saved. This MCP session keeps the job claimed for follow-up changes. Edit result.json and call submit_job again as needed. Call finish_job only when the person says the drafting session is finished; then dashboard editing and other claims become available."
+            : "The drafting session is finished. A person can review and edit the suggestions in the dashboard, or claim the job again with an Agent. Only a person can accept or discard them.",
       }
     : response;
 }

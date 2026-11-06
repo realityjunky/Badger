@@ -8,11 +8,13 @@ import {
   createDraftingJob,
   decideDraftingJob,
   draftingTarget,
+  finishDraftingJob,
   isQuestionnaireDraftingJob,
   jobDecisionPreview,
   publicDraftingJob,
   reconcileDraftingJobs,
   releaseDraftingJob,
+  renewDraftingJob,
   requireLease,
   submitDraftingJob,
   type DraftingActor,
@@ -35,7 +37,7 @@ import {
 } from "../drafting/schema.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(prompt|claim|submit|release|review|accept-preview|accept|reject-preview|reject))?)?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(prompt|claim|submit|finish|renew|release|review|accept-preview|accept|reject-preview|reject))?)?$/u;
 const REQUEST_FIELDS: Record<DraftingKind, string[]> = {
   "draft-questions": ["roundId"],
   "draft-follow-ups": ["roundId", "parentQuestionId"],
@@ -259,8 +261,10 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
     if (job.status === "cancelled")
       return conflict("The job's inputs changed; request a new job");
     if (action === "prompt") {
-      if (job.status !== "queued")
-        return conflict("Only queued jobs can be dispatched to an Agent");
+      if (!["queued", "submitted"].includes(job.status))
+        return conflict(
+          "Only queued jobs or unclaimed suggestions can be dispatched to an Agent",
+        );
       return { status: 200, value: draftingJobPrompt(job) };
     }
     if (action === "review") {
@@ -289,10 +293,12 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
     if (action === "claim") {
       fields(body, ["revision"]);
       if (
-        job.status !== "queued" ||
+        !["queued", "submitted"].includes(job.status) ||
         revisionInput(body.revision) !== job.revision
       )
-        return conflict("Read the current queued job before claiming");
+        return conflict(
+          "Read the current queued job or unclaimed suggestions before claiming",
+        );
       if (isAuthoringJob(job) && !job.context_bundle.authoring)
         throw new RequestError(409, "The Authoring job has no bounded inputs");
       // Only the Skills this kind reads travel. Any two Skill versions within
@@ -329,7 +335,13 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       return {
         status: 200,
         value: {
-          job: publicDraftingJob(claimed),
+          job: {
+            ...publicDraftingJob(claimed),
+            lease: {
+              ...publicDraftingJob(claimed).lease,
+              id: claimed.lease_id!,
+            },
+          },
           contextBundle: job.context_bundle,
           skills: skills.map((pin) => ({
             skillId: pin.skillId,
@@ -340,15 +352,25 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         },
       };
     }
-    if (action === "submit" || action === "release") {
+    if (["submit", "finish", "renew", "release"].includes(action)) {
       fields(body, [
         "leaseId",
         "contextHash",
-        ...(action === "submit" ? ["result"] : []),
+        "revision",
+        ...(action === "submit" ? ["result", "keepClaim"] : []),
       ]);
       if (job.status !== "claimed")
         return conflict("This lease expired or the job is no longer claimed");
       requireLease(actor, job, body.leaseId, body.contextHash);
+      if (
+        body.revision !== undefined &&
+        revisionInput(body.revision) !== job.revision
+      )
+        return conflict(
+          "The suggestions changed; read the current job before saving",
+        );
+      if (body.keepClaim !== undefined && typeof body.keepClaim !== "boolean")
+        throw new RequestError(400, "keepClaim must be a boolean");
       const updated =
         action === "submit"
           ? await submitDraftingJob(
@@ -358,8 +380,13 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
               job,
               body.result,
               input.blobs,
+              body.keepClaim === true,
             )
-          : await releaseDraftingJob(tx, deps, actor, job);
+          : action === "finish"
+            ? await finishDraftingJob(tx, deps, actor, job)
+            : action === "renew"
+              ? await renewDraftingJob(tx, deps, job)
+              : await releaseDraftingJob(tx, deps, actor, job);
       return { status: 200, value: { job: publicDraftingJob(updated) } };
     }
     if (context.credential.kind === "token")
@@ -410,6 +437,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       return conflict("The job changed; review it again");
     if (
       accept &&
+      job.kind !== "draft-plan" &&
       job.review_hash !== null &&
       canonicalHash(
         Object.fromEntries(

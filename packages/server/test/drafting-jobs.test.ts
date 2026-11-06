@@ -137,6 +137,232 @@ const question = (text = "How is the sample stored?") => ({
   priority: 10,
 });
 
+it("keeps the remote session's claim across successive suggestion submissions", async () => {
+  const { base, secret, round } = await setup();
+  const { job } = await request(
+    base,
+    "POST",
+    { kind: "draft-questions", roundId: round.id, confirmed: true },
+    undefined,
+    engineer,
+    201,
+  );
+  const claimed = await request(
+    `${base}/${job.id}/claim`,
+    "POST",
+    { revision: job.revision },
+    secret,
+  );
+  const payload = {
+    leaseId: claimed.job.lease.id,
+    contextHash: job.contextHash,
+    keepClaim: true,
+  };
+  const { job: first } = await request(
+    `${base}/${job.id}/submit`,
+    "POST",
+    { ...payload, result: { questions: [question()] } },
+    secret,
+  );
+  expect(first.status).toBe("claimed");
+  expect(first.lease).not.toHaveProperty("id");
+  const result = { questions: [question("Which storage temperature?")] };
+  const { job: revised } = await request(
+    `${base}/${job.id}/submit`,
+    "POST",
+    { ...payload, result },
+    secret,
+  );
+  expect(revised).toMatchObject({
+    status: "claimed",
+    result: { questions: [question()] },
+    review: { result },
+  });
+  expect(revised.revision).toBeGreaterThan(first.revision);
+  for (const action of ["claim", "review", "accept-preview", "reject-preview"])
+    await request(
+      `${base}/${job.id}/${action}`,
+      "POST",
+      action === "review"
+        ? { revision: revised.revision, result }
+        : action === "claim"
+          ? { revision: revised.revision }
+          : action === "reject-preview"
+            ? { revision: revised.revision, reason: "Busy" }
+            : { revision: revised.revision, ...result },
+      undefined,
+      engineer,
+      409,
+    );
+  const { job: finished } = await request(
+    `${base}/${job.id}/finish`,
+    "POST",
+    {
+      leaseId: payload.leaseId,
+      contextHash: payload.contextHash,
+      revision: revised.revision,
+    },
+    secret,
+  );
+  expect(finished).toMatchObject({
+    status: "submitted",
+    lease: null,
+    review: { result },
+  });
+  const { job: edited } = await request(`${base}/${job.id}/review`, "POST", {
+    revision: finished.revision,
+    result: { questions: [question("A person's follow-up edit")] },
+  });
+  const reclaimed = await request(
+    `${base}/${job.id}/claim`,
+    "POST",
+    { revision: edited.revision },
+    secret,
+  );
+  expect(reclaimed.job).toMatchObject({
+    status: "claimed",
+    review: edited.review,
+  });
+  expect(reclaimed.job.lease.id).not.toBe(payload.leaseId);
+  await request(
+    `${base}/${job.id}/submit`,
+    "POST",
+    { ...payload, result },
+    secret,
+    engineer,
+    409,
+  );
+  await request(
+    `${base}/${job.id}/review`,
+    "POST",
+    { revision: edited.revision, result },
+    undefined,
+    engineer,
+    409,
+  );
+  await request(
+    `${base}/${job.id}/release`,
+    "POST",
+    {
+      leaseId: reclaimed.job.lease.id,
+      contextHash: job.contextHash,
+    },
+    secret,
+  );
+  const inbox = await request("/me/inbox");
+  expect(
+    inbox.items.filter(
+      (item: { kind: string }) => item.kind === "job-submitted",
+    ),
+  ).toHaveLength(1);
+});
+
+it("recovers saved suggestions after a renewed drafting lease expires without accepting them", async () => {
+  const { base, questionnaire, secret, round } = await setup();
+  const { job } = await request(
+    base,
+    "POST",
+    { kind: "draft-questions", roundId: round.id, confirmed: true },
+    undefined,
+    engineer,
+    201,
+  );
+  const claimed = await request(
+    `${base}/${job.id}/claim`,
+    "POST",
+    { revision: job.revision },
+    secret,
+  );
+  const payload = {
+    leaseId: claimed.job.lease.id,
+    contextHash: job.contextHash,
+  };
+  await request(
+    `${base}/${job.id}/finish`,
+    "POST",
+    payload,
+    secret,
+    engineer,
+    409,
+  );
+  const result = { questions: [question()] };
+  const { job: saved } = await request(
+    `${base}/${job.id}/submit`,
+    "POST",
+    {
+      ...payload,
+      result,
+      keepClaim: true,
+      revision: claimed.job.revision,
+    },
+    secret,
+  );
+  await request(
+    `${base}/${job.id}/submit`,
+    "POST",
+    {
+      ...payload,
+      result,
+      keepClaim: true,
+      revision: claimed.job.revision,
+    },
+    secret,
+    engineer,
+    409,
+  );
+  const { secret: another } = await request(
+    "/me/tokens",
+    "POST",
+    {
+      name: "Other session",
+      scopes: ["engineer"],
+    },
+    undefined,
+    engineer,
+    201,
+  );
+  for (const action of ["renew", "finish", "release", "submit"])
+    await request(
+      `${base}/${job.id}/${action}`,
+      "POST",
+      action === "submit" ? { ...payload, result, keepClaim: true } : payload,
+      another,
+      engineer,
+      409,
+    );
+  service.clock.advance(25 * 60_000);
+  const { job: renewed } = await request(
+    `${base}/${job.id}/renew`,
+    "POST",
+    payload,
+    secret,
+  );
+  expect(renewed.revision).toBe(saved.revision);
+  service.clock.advance(10 * 60_000);
+  expect((await request(`${base}/${job.id}`)).job.status).toBe("claimed");
+  service.clock.advance(20 * 60_000);
+  const { job: expired } = await request(`${base}/${job.id}`);
+  expect(expired).toMatchObject({ status: "submitted", result, lease: null });
+  await request(
+    `${base}/${job.id}/submit`,
+    "POST",
+    { ...payload, result, keepClaim: true },
+    secret,
+    engineer,
+    409,
+  );
+  const view = await request(questionnaire);
+  expect(view.questions).toEqual([]);
+  expect(view.suggestions).toEqual([
+    expect.objectContaining({ id: job.id, result }),
+  ]);
+  expect((await request("/me/inbox")).items).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ kind: "job-submitted", state: "unread" }),
+    ]),
+  );
+});
+
 it("keeps a drafted structured question and its submitted evidence through the drafting handoff", async () => {
   const { base, questionnaire, secret, round } = await setup();
   const { job } = await request(

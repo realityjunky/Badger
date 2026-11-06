@@ -3,6 +3,10 @@
 Status: accepted. Supersedes ADR 0045's Agent-assisted suggestion-review
 exception and restores ADR 0043's browser-only editing boundary.
 
+[ADR 0047](0047-exclusive-drafting-sessions.md) supersedes the Agent-editing
+restriction for an explicitly claimed drafting session. The standalone review
+endpoint and sign-offs remain reserved for signed-in people.
+
 Agents draft questionnaire suggestions from dispatched jobs. Once submitted,
 those suggestions are reviewed and edited personally by authorized Engineers
 and Field experts in the dashboard. This review is human work even before the

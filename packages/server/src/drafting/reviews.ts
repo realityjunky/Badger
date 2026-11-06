@@ -6,11 +6,10 @@ import { readVersion } from "../skills/library.js";
 import { validateEffectDraft } from "../script-effects.js";
 import { auditJob, type DraftingActor, type DraftingJobRow } from "./jobs.js";
 import { validateDraftResult } from "./schema.js";
+import { isAuthoringJob, validateLaneResult } from "../authoring.js";
 
-export async function saveDraftingReview(
+export async function validateDraftingSubmission(
   tx: Queryable,
-  deps: ServiceDependencies,
-  actor: DraftingActor,
   job: DraftingJobRow,
   result: unknown,
   blobs: BlobStore,
@@ -32,6 +31,19 @@ export async function saveDraftingReview(
       validated.scriptEffects,
     );
   }
+  if (isAuthoringJob(job)) validateLaneResult(job, validated);
+  return validated;
+}
+
+export async function saveDraftingReview(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  actor: DraftingActor,
+  job: DraftingJobRow,
+  result: unknown,
+  blobs: BlobStore,
+) {
+  const validated = await validateDraftingSubmission(tx, job, result, blobs);
   const now = deps.clock.now();
   const resultHash = canonicalHash(validated);
   const saved = (

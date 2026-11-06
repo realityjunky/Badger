@@ -16,6 +16,7 @@ import { expertTools, questionnairePath } from "./tools.js";
 import { ResultResources } from "./resources.js";
 import { engineerTools } from "./engineer-tools.js";
 import { jobsPath } from "./jobs.js";
+import { LocalDraftingSessions } from "./drafting-sessions.js";
 import { hostTools, LocalHostPreviews } from "./host-tools.js";
 import { LocalRuns, operatorTools } from "./operator-tools.js";
 export type { ExpertMcpOptions } from "./api.js";
@@ -25,6 +26,7 @@ class BadgerMcpServer extends Server {
     private readonly results: ResultResources,
     private readonly hostPreviews: LocalHostPreviews,
     private readonly runs: LocalRuns,
+    private readonly drafting: LocalDraftingSessions,
     profile: string,
   ) {
     super(
@@ -39,6 +41,7 @@ class BadgerMcpServer extends Server {
       void results.close().catch(() => undefined);
       void hostPreviews.close().catch(() => undefined);
       void runs.close().catch(() => undefined);
+      void drafting.close().catch(() => undefined);
     };
   }
 
@@ -49,6 +52,7 @@ class BadgerMcpServer extends Server {
       await this.results.close();
       await this.hostPreviews.close();
       await this.runs.close();
+      await this.drafting.close();
     }
   }
 }
@@ -71,7 +75,14 @@ export function createBadgerMcp(
   const profile = options.profile ?? "auto";
   const hostPreviews = new LocalHostPreviews();
   const runs = new LocalRuns(api, options.agentHost);
-  const server = new BadgerMcpServer(resources, hostPreviews, runs, profile);
+  const drafting = new LocalDraftingSessions(api);
+  const server = new BadgerMcpServer(
+    resources,
+    hostPreviews,
+    runs,
+    drafting,
+    profile,
+  );
   const expert = expertTools(api, server);
   const common = new Set(["whoami", "inbox", "open_dashboard"]);
   const tools =
@@ -96,7 +107,7 @@ export function createBadgerMcp(
                   "my_questions",
                 ].includes(t.definition.name),
             ),
-            ...engineerTools(api),
+            ...engineerTools(api, drafting),
             ...operatorTools(api, runs, options.agentHost),
             ...(profile === "auto" ? hostTools(api, hostPreviews) : []),
           ];

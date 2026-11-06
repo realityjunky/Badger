@@ -16,6 +16,7 @@ type LaneJob = {
   status: string;
   revision: number;
   result: { laneOutput: AuthoringLaneOutput } | null;
+  review?: { result: { laneOutput: AuthoringLaneOutput } } | null;
   decision: {
     decision?: { reason?: string };
     authoringRevision?: number;
@@ -106,7 +107,7 @@ export function WorkflowAuthoring({
   async function preview(job: LaneJob, action: "accept" | "reject") {
     const body =
       action === "accept"
-        ? { revision: job.revision, ...job.result }
+        ? { revision: job.revision, ...(job.review?.result ?? job.result) }
         : { revision: job.revision, reason };
     const { preview } = await request<{
       preview: { confirmationHash: string };
@@ -229,16 +230,20 @@ export function WorkflowAuthoring({
                       : t("authoring.laneDraft")}
                   </Tag>
                   <Tag>{job.status}</Tag>
-                  {canManage && job.status === "queued" && (
-                    <AgentPromptButton
-                      basePath={basePath}
-                      path={`${path}/drafting-jobs/${job.id}/prompt`}
-                    />
-                  )}
+                  {canManage &&
+                    ["queued", "submitted"].includes(job.status) && (
+                      <AgentPromptButton
+                        basePath={basePath}
+                        path={`${path}/drafting-jobs/${job.id}/prompt`}
+                      />
+                    )}
                   {canManage && job.status === "submitted" && (
                     <Button
                       onClick={() => {
-                        setReview(job);
+                        setReview({
+                          ...job,
+                          result: job.review?.result ?? job.result,
+                        });
                         setReason("");
                       }}
                     >

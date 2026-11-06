@@ -91,15 +91,16 @@ Administrator). The engineer profile keeps `whoami`, `inbox`, and
 `open_dashboard`, and adds these tools. All version tools take `workflowId`
 and `versionId`; job tools also take `jobId`.
 
-| Tool            | Behavior                                                                                                                                                                                   |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `list_jobs`     | Read jobs, leases, and suggestions for one workflow version.                                                                                                                               |
-| `claim_job`     | Quote the queued job's `revision`; claim it and return a private local folder with `context.json`, `job.json`, `output-schema.json`, `claim.json`, and `skills/<skillId>/<versionHash>/…`. |
-| `submit_job`    | Supply the claimed `folder`. Read its `result.json`, validate against the schema reloaded from the service, then submit suggestions.                                                       |
-| `release_job`   | Supply the claimed `folder` to return this token and Agent host's lease to the queue.                                                                                                      |
-| `questionnaire` | Read the workflow version's questionnaire, including draft questions and submitted suggestions.                                                                                            |
-| `ledger`        | Read the kernel's five-part ledger and optional `sinceRound` changes.                                                                                                                      |
-| `readiness`     | Read the kernel's blockers by dossier topic.                                                                                                                                               |
+| Tool            | Behavior                                                                                                                                                                                     |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_jobs`     | Read jobs, leases, and suggestions for one workflow version.                                                                                                                                 |
+| `claim_job`     | Quote a queued or submitted job's `revision`; claim it and return a private local folder with context, schema, pinned files, and the latest saved suggestions in `result.json` when present. |
+| `submit_job`    | Supply the claimed `folder`. Validate and save `result.json` while retaining this session's exclusive claim for repeated follow-up changes.                                                  |
+| `finish_job`    | When the person says the drafting session is finished, hand the latest saved suggestions to the dashboard and release the claim for editing or another Agent.                                |
+| `release_job`   | End this session's claim. Saved suggestions become available for review; a job without suggestions returns to the queue.                                                                     |
+| `questionnaire` | Read the workflow version's questionnaire, including draft questions and submitted suggestions.                                                                                              |
+| `ledger`        | Read the kernel's five-part ledger and optional `sinceRound` changes.                                                                                                                        |
+| `readiness`     | Read the kernel's blockers by dossier topic.                                                                                                                                                 |
 
 A signed-in Engineer requests drafting from
 **Questionnaire → Drafting jobs and suggestions**. Source study also links there
@@ -116,10 +117,21 @@ every file against its pin's inventory, and refuses any path with a `.git`
 component in any letter case, as a folder or a file, including spellings that
 HFS+ or Windows file systems resolve to `.git`, so Git never finds a repository
 configuration it would run; a refused claim is released. Files
-never execute. Folders use mode `0700`, files `0600`, and the files persist
-across MCP restarts so the Agent can resume with the same deployment, person,
-token, and host. Delete the folder when finished; it contains workflow
-evidence. General large-result files remain connection-local.
+never execute. Folders use mode `0700` and files `0600`. Claims belong to one
+MCP connection, which renews them every five minutes and releases them on
+disconnect. A crash or prolonged outage releases them through the thirty-minute
+lease. Local files persist for reference, but a new connection must claim the
+job again and use its new folder. Delete old folders when finished; they
+contain workflow evidence. General large-result files remain connection-local.
+
+`submit_job` keeps the dashboard status **Claimed**, including after the first
+valid result. The same session can edit `result.json` and submit again. Other
+people cannot edit, accept, discard or claim that job while the claim is active.
+Call `finish_job` only when the person says the drafting session is finished;
+do not finish automatically after submitting. It releases the latest saved
+result without accepting it. The Engineer can copy the job's Agent prompt
+again to continue from all saved edits, or authorized people can edit in the
+dashboard. Original submissions and later review revisions remain preserved.
 
 New jobs include a server-owned template snapshot. Claim writes its assembled
 processing instructions to `instructions.md` beside the schema and context;
@@ -136,9 +148,10 @@ is required. See [Dashboard prompts](../../docs/dashboard-prompts.md).
 
 Assigned people use `answer_context` for server instructions, the current
 question and their own private answer draft. Engineers can answer when assigned,
-using their engineer token. Engineers and Field experts personally review and
-edit submitted questionnaire suggestions in the dashboard. MCP exposes no
-review tools, and personal access tokens cannot save shared review edits.
+using their engineer token. Engineers and Field experts review and edit
+unclaimed questionnaire suggestions in the dashboard. Agents revise them
+only after claiming the job through MCP. Standalone review tools and token
+writes to the human review endpoint remain unavailable.
 Approval, acknowledgement, publication and other sign-offs remain dashboard
 actions.
 
@@ -176,7 +189,7 @@ version; the Workflow owner then approves it separately. Agents cannot save,
 accept, or approve plans. A changed planning input or a newer Plan version
 cancels pending drafts.
 
-The claimed `job.json` identifies the job kind, selected draft round, and parent question, if any. Submission returns a dashboard review link and creates suggestions and an inbox item for the requester. Use `open_dashboard` with `action: "review_suggestions"` to offer that link through URL elicitation when the host supports it. It
+The claimed `job.json` identifies the job kind, selected draft round, and parent question, if any. Submission saves suggestions and returns a dashboard link while keeping the claim. Finishing opens the requester's review inbox item. Use `open_dashboard` with `action: "review_suggestions"` to offer that link through URL elicitation when the host supports it. It
 creates no Question, Fact, resolution, or publication. The Engineer reviews,
 edits, removes suggestions from the batch, or discards the batch with a
 reason in the dashboard. Acceptance creates draft questions in the selected

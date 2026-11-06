@@ -2,8 +2,9 @@ import { z } from "zod";
 import type { BadgerApi } from "./api.js";
 import { context, id, questionnairePath, tool } from "./tools.js";
 import { claimJob, finishJob, jobsPath } from "./jobs.js";
+import type { LocalDraftingSessions } from "./drafting-sessions.js";
 
-export function engineerTools(api: BadgerApi) {
+export function engineerTools(api: BadgerApi, sessions: LocalDraftingSessions) {
   const job = { ...context, jobId: id };
   const folder = { ...job, folder: z.string().min(1).max(4096) };
   return [
@@ -30,23 +31,30 @@ export function engineerTools(api: BadgerApi) {
     ),
     tool(
       "claim_job",
-      "Claim a queued drafting job when the user asks; write its hash-bound context, schema, and exact pinned Skill files to a private local folder. Returns that folder.",
+      "Claim a queued job or unclaimed suggestions when the user asks. Write its hash-bound context, schema, pinned files, and any existing suggestions to a private local folder. This MCP session keeps the exclusive claim until finish_job, release_job, or disconnect.",
       { ...job, revision: z.number().int().min(1) },
-      (args) => claimJob(api, args),
+      (args) => claimJob(api, args, sessions),
       "compose",
     ),
     tool(
       "submit_job",
-      "Validate result.json in the claimed folder against the job's current schema and submit it as suggestions. A person must accept suggestions in the dashboard.",
+      "Validate and save result.json as suggestions while keeping this session's exclusive claim. Repeat for follow-up changes. Do not finish automatically after submitting; wait until the user says the drafting session is finished. A person accepts suggestions separately in the dashboard.",
       folder,
-      (args) => finishJob(api, args, "submit"),
+      (args) => finishJob(api, args, "submit", sessions),
+      "compose",
+    ),
+    tool(
+      "finish_job",
+      "When the user says this drafting session is finished, release its exclusive claim and hand the latest saved suggestions to the dashboard. Other people can then edit or claim the job again. This never accepts suggestions. Submit unsaved result.json changes first.",
+      folder,
+      (args) => finishJob(api, args, "finish", sessions),
       "compose",
     ),
     tool(
       "release_job",
-      "Release this Agent's claim back to the queue when the user asks. Supply the local folder returned by claim_job.",
+      "End this session's claim when the user asks. Saved suggestions become available for review and another claim; a job without suggestions returns to the queue. Supply the local folder returned by claim_job.",
       folder,
-      (args) => finishJob(api, args, "release"),
+      (args) => finishJob(api, args, "release", sessions),
       "compose",
     ),
     tool(

@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -18,6 +18,7 @@ const clients: Client[] = [];
 const folders: string[] = [];
 afterEach(async () => {
   for (const client of clients.splice(0)) await client.close();
+  vi.useRealTimers();
   for (const folder of folders.splice(0))
     await fs.rm(folder, { recursive: true, force: true });
   await service?.close();
@@ -62,6 +63,100 @@ async function call(
   expect(response.isError, JSON.stringify(response)).not.toBe(true);
   return JSON.parse((response.content as { text: string }[])[0].text);
 }
+
+it("renews a session's exclusive claim and hands saved questions back on disconnect", async () => {
+  service = await startTestService({ mode: "local" });
+  const { group } = await request("/groups", "POST", { name: "Sessions" });
+  const { workflow, version } = await request("/workflows", "POST", {
+    groupId: group.id,
+    name: "session-questions",
+    goal: "Iterate on questions",
+    intent: "new-skill",
+    locale: "en",
+  });
+  const base = `/workflows/${workflow.id}/versions/${version.id}`;
+  const { round } = await request(`${base}/questionnaire/rounds`, "POST", {
+    title: "Discovery",
+  });
+  const { job } = await request(`${base}/drafting-jobs`, "POST", {
+    kind: "draft-questions",
+    roundId: round.id,
+    confirmed: true,
+  });
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const client = await connect();
+  const context = {
+    workflowId: workflow.id,
+    versionId: version.id,
+    jobId: job.id,
+  };
+  const claimed = await call(client, "claim_job", {
+    ...context,
+    revision: job.revision,
+  });
+  folders.push(claimed.folder);
+  const result = {
+    questions: [
+      {
+        text: "Which sample is used?",
+        topic: "scope",
+        targets: [{ kind: "workflow", id: workflow.id }],
+        rationale: "Define the inputs.",
+        evidence: [],
+        assignees: [{ kind: "role", role: "Field expert" }],
+        priority: 90,
+      },
+    ],
+  };
+  await fs.writeFile(
+    path.join(claimed.folder, "result.json"),
+    JSON.stringify(result),
+  );
+  const saved = await call(client, "submit_job", {
+    ...context,
+    folder: claimed.folder,
+  });
+  const other = await connect();
+  const refused = await other.callTool({
+    name: "submit_job",
+    arguments: { ...context, folder: claimed.folder },
+  });
+  expect(refused.isError).toBe(true);
+  expect(JSON.stringify(refused.content)).toContain("another MCP session");
+  const busy = await other.callTool({
+    name: "claim_job",
+    arguments: { ...context, revision: saved.job.revision },
+  });
+  expect(busy.isError).toBe(true);
+  service.clock.advance(25 * 60_000);
+  await vi.advanceTimersByTimeAsync(5 * 60_000);
+  const renewed = await request(`${base}/drafting-jobs/${job.id}`);
+  expect(new Date(renewed.job.lease.until).getTime()).toBeGreaterThan(
+    new Date(claimed.leaseUntil).getTime(),
+  );
+  service.clock.advance(10 * 60_000);
+  expect((await request(`${base}/drafting-jobs/${job.id}`)).job.status).toBe(
+    "claimed",
+  );
+  await client.close();
+  await expect
+    .poll(
+      async () => (await request(`${base}/drafting-jobs/${job.id}`)).job.status,
+    )
+    .toBe("submitted");
+  const released = await request(`${base}/drafting-jobs/${job.id}`);
+  expect(released.job).toMatchObject({ result, lease: null });
+  const next = await call(other, "claim_job", {
+    ...context,
+    revision: released.job.revision,
+  });
+  folders.push(next.folder);
+  expect(
+    JSON.parse(
+      await fs.readFile(path.join(next.folder, "result.json"), "utf8"),
+    ),
+  ).toEqual(result);
+});
 
 it("uploads a scripted Skill without declarations and drafts effects from the hash-verified local Source study files", async () => {
   service = await startTestService({ mode: "local" });
@@ -185,8 +280,39 @@ it("uploads a scripted Skill without declarations and drafts effects from the ha
     folder: claim.folder,
   });
   expect(submitted).toMatchObject({
+    requiresPerson: false,
+    job: { status: "claimed", result: { scriptEffects: [suggestion] } },
+  });
+  const revisedResult = {
+    facts: [],
+    interfaces: [],
+    scriptEffects: [
+      { ...suggestion, rationale: "Follow-up: creates output.txt locally." },
+    ],
+  };
+  await fs.writeFile(
+    path.join(claim.folder, "result.json"),
+    JSON.stringify(revisedResult),
+  );
+  const revised = await call(client, "submit_job", {
+    ...context,
+    folder: claim.folder,
+  });
+  expect(revised).toMatchObject({
+    requiresPerson: false,
+    job: {
+      status: "claimed",
+      result: submitted.job.result,
+      review: { result: revisedResult },
+    },
+  });
+  const finished = await call(client, "finish_job", {
+    ...context,
+    folder: claim.folder,
+  });
+  expect(finished).toMatchObject({
     requiresPerson: true,
-    job: { status: "submitted", result: { scriptEffects: [suggestion] } },
+    job: { status: "submitted", lease: null },
   });
   for (const name of ["suggestion_review_context", "save_suggestion_review"]) {
     expect(tools.map((tool) => tool.name)).not.toContain(name);
@@ -201,8 +327,25 @@ it("uploads a scripted Skill without declarations and drafts effects from the ha
     expect(response.isError).toBe(true);
   }
   expect(await request(`${base}/drafting-jobs/${job.id}`)).toMatchObject({
-    job: { status: "submitted", review: null },
+    job: { status: "submitted", review: { result: revisedResult } },
   });
+  const reclaimed = await call(client, "claim_job", {
+    ...context,
+    revision: finished.job.revision,
+  });
+  folders.push(reclaimed.folder);
+  expect(reclaimed.hasPreviousSuggestions).toBe(true);
+  expect(
+    JSON.parse(
+      await fs.readFile(path.join(reclaimed.folder, "result.json"), "utf8"),
+    ),
+  ).toEqual(revisedResult);
+  const oldSession = await client.callTool({
+    name: "submit_job",
+    arguments: { ...context, folder: claim.folder },
+  });
+  expect(oldSession.isError).toBe(true);
+  await call(client, "release_job", { ...context, folder: reclaimed.folder });
   const panel = await request(
     `/skills/${skill.id}/versions/${preview.hash}/effects`,
   );
@@ -268,6 +411,7 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
       "list_jobs",
       "claim_job",
       "submit_job",
+      "finish_job",
       "release_job",
       "questionnaire",
       "ledger",
@@ -366,10 +510,15 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
     jobId: job.id,
     folder: next.folder,
   });
-  expect(submitted.job.status).toBe("submitted");
+  expect(submitted.job.status).toBe("claimed");
   expect(submitted).toMatchObject({
-    requiresPerson: true,
+    requiresPerson: false,
     dashboardUrl: `${service.baseUrl}/questionnaire?workflow=${workflow.id}&version=${version.id}&panel=suggestions`,
+  });
+  await call(client, "finish_job", {
+    ...context,
+    jobId: job.id,
+    folder: next.folder,
   });
   const dashboard = await call(client, "open_dashboard", {
     ...context,
@@ -431,8 +580,13 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
     folder: studyClaim.folder,
   });
   expect(studySubmission).toMatchObject({
-    requiresPerson: true,
-    job: { status: "submitted", result: studyResult },
+    requiresPerson: false,
+    job: { status: "claimed", result: studyResult },
+  });
+  await call(client, "finish_job", {
+    ...context,
+    jobId: studyJob.id,
+    folder: studyClaim.folder,
   });
   expect((await request(`${base}/source-study`)).facts).toEqual([]);
   await service.runSourceCheckJobs();
@@ -510,13 +664,35 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
     jobId: planJob.id,
     folder: planClaim.folder,
   });
-  expect(submittedPlan.job.status).toBe("submitted");
+  expect(submittedPlan.job.status).toBe("claimed");
   expect(submittedPlan).toMatchObject({
-    requiresPerson: true,
+    requiresPerson: false,
     dashboardUrl: `${service.baseUrl}/workflows/${workflow.id}/versions/${version.id}#plan`,
   });
   expect((await request(`${base}/plan`)).versions).toEqual([]);
-  const planDecision = { revision: submittedPlan.job.revision, plan };
+  plan.workflow.customNodes[0]!.label = "Store samples with reviewed handling";
+  await fs.writeFile(
+    path.join(planClaim.folder, "result.json"),
+    JSON.stringify({ plan }),
+  );
+  await call(client, "submit_job", {
+    ...context,
+    jobId: planJob.id,
+    folder: planClaim.folder,
+  });
+  const revisedPlan = await request(`${base}/drafting-jobs/${planJob.id}`);
+  expect(revisedPlan.job).toMatchObject({
+    status: "claimed",
+    review: { result: { plan } },
+  });
+  await call(client, "finish_job", {
+    ...context,
+    jobId: planJob.id,
+    folder: planClaim.folder,
+  });
+  const finishedPlan = await request(`${base}/drafting-jobs/${planJob.id}`);
+  plan.workflow.customNodes[0]!.label = "Human-reviewed sample storage";
+  const planDecision = { revision: finishedPlan.job.revision, plan };
   const acceptedPlan = await request(
     `${base}/drafting-jobs/${planJob.id}/accept-preview`,
     "POST",
@@ -598,9 +774,9 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
     folder: laneClaim.folder,
   });
   expect(submittedLane).toMatchObject({
-    requiresPerson: true,
+    requiresPerson: false,
     dashboardUrl: `${service.baseUrl}/workflows/${workflow.id}/versions/${version.id}#package`,
-    job: { status: "submitted" },
+    job: { status: "claimed" },
   });
   expect(
     (await request(`${base}/package/authoring`)).readiness.records.script,

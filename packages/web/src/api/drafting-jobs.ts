@@ -36,6 +36,13 @@ export type DraftingResult =
       }[];
     }
   | { text: string; rationale: string };
+export interface DraftingReview<Result> {
+  result: Result;
+  resultHash: string;
+  revision: number;
+  personId: string;
+  updatedAt: string;
+}
 export interface DraftingJob {
   id: string;
   kind: DraftingKind;
@@ -49,15 +56,10 @@ export interface DraftingJob {
     "queued" | "claimed" | "submitted" | "accepted" | "rejected" | "cancelled";
   revision: number;
   contextHash: string;
+  lease?: { personId: string; agentHost: string | null; until: string } | null;
   outputSchema?: object;
   result: DraftingResult | null;
-  review: {
-    result: DraftingResult;
-    resultHash: string;
-    revision: number;
-    personId: string;
-    updatedAt: string;
-  } | null;
+  review: DraftingReview<DraftingResult> | null;
 }
 export interface DraftingDecisionPreview {
   jobId: string;
@@ -68,21 +70,25 @@ export interface DraftingDecisionPreview {
 }
 export interface PlanDraftingJob extends Omit<
   DraftingJob,
-  "kind" | "roundId" | "result"
+  "kind" | "roundId" | "result" | "review"
 > {
   kind: "draft-plan";
   roundId: null;
   result: { plan: FactoryPlan } | null;
+  review: DraftingReview<{ plan: FactoryPlan }> | null;
 }
 export interface AuthoringDraftingJob extends Omit<
   DraftingJob,
-  "kind" | "result"
+  "kind" | "result" | "review"
 > {
   kind: "authoring-lane" | "review-vote";
   laneId: string;
   result: {
     laneOutput: import("@realityjunky/badger").AuthoringLaneOutput;
   } | null;
+  review: DraftingReview<{
+    laneOutput: import("@realityjunky/badger").AuthoringLaneOutput;
+  }> | null;
 }
 export type AnyDraftingJob =
   DraftingJob | PlanDraftingJob | AuthoringDraftingJob;

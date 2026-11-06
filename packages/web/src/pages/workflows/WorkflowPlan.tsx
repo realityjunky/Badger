@@ -309,7 +309,7 @@ export function WorkflowPlan({
                     <Space wrap>
                       <span>{t("plan.draft")}</span>
                       <Tag>{t(`drafting.state.${job.status}`)}</Tag>
-                      {job.status === "queued" &&
+                      {["queued", "submitted"].includes(job.status) &&
                         detail.capabilities.editPlan && (
                           <AgentPromptButton
                             basePath={basePath}
@@ -322,7 +322,9 @@ export function WorkflowPlan({
                             disabled={busy || !view.skeleton}
                             onClick={() =>
                               setEditing({
-                                plan: structuredClone(job.result!.plan),
+                                plan: structuredClone(
+                                  (job.review?.result ?? job.result!).plan,
+                                ),
                                 job,
                               })
                             }
