@@ -7,12 +7,14 @@ import type {
   Resource,
 } from "@modelcontextprotocol/sdk/types.js";
 
-const MAX_INLINE_BYTES = 8192;
+const MAX_INLINE_BYTES = 128 * 1024;
+const MIN_INLINE_BYTES = 1024;
 const MAX_STORED_BYTES = 16 * 1024 * 1024;
 const MAX_RESOURCES = 32;
 
 /** Bounded, connection-local results; each read checks current service access. */
 export class ResultResources {
+  private readonly maxInlineBytes: number;
   private readonly entries = new Map<
     string,
     {
@@ -28,6 +30,18 @@ export class ResultResources {
   private closed = false;
   private closing: Promise<void> | undefined;
 
+  constructor(maxInlineBytes = MAX_INLINE_BYTES) {
+    if (
+      !Number.isSafeInteger(maxInlineBytes) ||
+      maxInlineBytes < MIN_INLINE_BYTES ||
+      maxInlineBytes > MAX_STORED_BYTES
+    )
+      throw new Error(
+        `maxInlineBytes must be an integer between ${MIN_INLINE_BYTES} and ${MAX_STORED_BYTES}`,
+      );
+    this.maxInlineBytes = maxInlineBytes;
+  }
+
   async result(
     value: unknown,
     read: () => Promise<unknown>,
@@ -36,7 +50,7 @@ export class ResultResources {
     const text = JSON.stringify(value);
     const bytes = Buffer.byteLength(text);
     const inline: CallToolResult = { content: [{ type: "text", text }] };
-    if (Buffer.byteLength(JSON.stringify(inline)) <= MAX_INLINE_BYTES)
+    if (Buffer.byteLength(JSON.stringify(inline)) <= this.maxInlineBytes)
       return inline;
     if (bytes > MAX_STORED_BYTES)
       throw new Error(

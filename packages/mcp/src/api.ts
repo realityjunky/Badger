@@ -16,6 +16,8 @@ export interface ExpertMcpOptions {
   url: string;
   token: string;
   agentHost: string;
+  /** Bytes allowed before a tool result spills to a private local file. */
+  maxInlineBytes?: number;
   /** Host-owned HTTP transport; certification uses Node HTTP under --jitless. */
   fetch?: BadgerHttpTransport;
 }

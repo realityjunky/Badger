@@ -71,7 +71,7 @@ export function createBadgerMcp(
   },
 ): Server {
   const api = new BadgerApi(options);
-  const resources = new ResultResources();
+  const resources = new ResultResources(options.maxInlineBytes);
   const profile = options.profile ?? "auto";
   const hostPreviews = new LocalHostPreviews();
   const runs = new LocalRuns(api, options.agentHost);

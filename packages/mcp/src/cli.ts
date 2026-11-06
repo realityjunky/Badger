@@ -13,6 +13,22 @@ function defaultAgentHost(): string {
   return validAgentHost(ascii) ? ascii : "unnamed-host";
 }
 
+/** An optional limit on bytes returned inline before spilling to a file. */
+function maxInlineBytes(): number | undefined {
+  const raw = process.env["BADGER_MCP_MAX_INLINE_BYTES"];
+  if (raw === undefined || raw === "") return undefined;
+  if (!/^\d+$/u.test(raw))
+    throw new ConfigurationError(
+      "BADGER_MCP_MAX_INLINE_BYTES must be a whole number of bytes",
+    );
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1024 || value > 16 * 1024 * 1024)
+    throw new ConfigurationError(
+      "BADGER_MCP_MAX_INLINE_BYTES must be between 1024 and 16777216",
+    );
+  return value;
+}
+
 try {
   const profile = process.env["BADGER_MCP_PROFILE"] ?? "auto";
   if (
@@ -29,6 +45,7 @@ try {
     url: process.env["BADGER_URL"] ?? "",
     token: process.env["BADGER_TOKEN"] ?? "",
     agentHost: process.env["BADGER_AGENT_HOST"] ?? defaultAgentHost(),
+    maxInlineBytes: maxInlineBytes(),
   });
   let stopping = false;
   const shutdown = () => {

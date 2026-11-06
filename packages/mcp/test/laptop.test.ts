@@ -82,6 +82,7 @@ it.skipIf(process.platform !== "linux")(
           ...entry.env,
           BADGER_TOKEN: f.operatorToken,
           BADGER_AGENT_HOST: "WorkBuddy",
+          BADGER_MCP_MAX_INLINE_BYTES: "8192",
         },
       }),
     );

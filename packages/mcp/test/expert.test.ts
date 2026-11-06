@@ -78,7 +78,12 @@ async function setup() {
   };
 }
 
-async function connect(as = expert, scopes = ["expert"], capabilities = {}) {
+async function connect(
+  as = expert,
+  scopes = ["expert"],
+  capabilities = {},
+  maxInlineBytes?: number,
+) {
   const { secret, token } = await write(
     "POST",
     "/me/tokens",
@@ -89,6 +94,7 @@ async function connect(as = expert, scopes = ["expert"], capabilities = {}) {
     url: service.baseUrl,
     token: secret,
     agentHost: "Test Agent",
+    ...(maxInlineBytes === undefined ? {} : { maxInlineBytes }),
   });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(b);
@@ -364,7 +370,7 @@ it("keeps large question content in resources and rechecks access before reading
   const { workflowId, versionId } = await setup();
   const text = "Detailed storage requirements. ".repeat(400);
   await publishQuestion({ workflowId, versionId }, text);
-  const { client, token } = await connect();
+  const { client, token } = await connect(expert, ["expert"], {}, 8192);
   const result = await client.callTool({
     name: "my_questions",
     arguments: { workflowId, versionId },
@@ -409,6 +415,24 @@ it("keeps large question content in resources and rechecks access before reading
       ),
     )
     .toBe(false);
+});
+
+it("keeps a result below the default 128 KiB inline limit", async () => {
+  const { workflowId, versionId } = await setup();
+  const text = "Detailed storage requirements. ".repeat(400);
+  await publishQuestion({ workflowId, versionId }, text);
+  const { client } = await connect();
+  const result = await client.callTool({
+    name: "my_questions",
+    arguments: { workflowId, versionId },
+  });
+  expect(result.isError).not.toBe(true);
+  const content = result.content as { type: string; text?: string }[];
+  expect(content.some((item) => item.type === "resource_link")).toBe(false);
+  const value = JSON.parse(content[0]!.text!);
+  expect(value).toMatchObject({
+    questions: [expect.objectContaining({ text })],
+  });
 });
 
 it("refuses stale answers, unassigned writes, and tools hidden after a role is removed", async () => {
@@ -527,6 +551,7 @@ it("starts the real stdio entry point using environment settings under a deploym
         BADGER_URL: `${service.baseUrl}/badger`,
         BADGER_TOKEN: secret,
         BADGER_AGENT_HOST: "CLI fixture",
+        BADGER_MCP_MAX_INLINE_BYTES: "8192",
       },
     }),
   );

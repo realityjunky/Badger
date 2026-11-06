@@ -18,12 +18,13 @@ Alternatively launch `node /absolute/path/to/Badger/packages/mcp/dist/src/cli.js
 The dashboard's **Settings → Personal access tokens → Connect your Agent**
 offers configuration for Claude Code, Codex, and WorkBuddy. Set:
 
-| Environment variable | Meaning                                                                                                                                                                                                                                                                            |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BADGER_URL`         | The deployment URL, including its base path, such as `https://badger.example/team`. HTTPS is required except on loopback HTTP addresses.                                                                                                                                           |
-| `BADGER_TOKEN`       | A personal access token created in the dashboard, normally with the `expert` scope.                                                                                                                                                                                                |
-| `BADGER_AGENT_HOST`  | The Agent host, 1 to 200 printable ASCII characters. The MCP sends it with every request, and the service requires it and records it in the audit of each one. Defaults to this machine's hostname, in IDNA form if it is not ASCII, or `unnamed-host` when neither form is valid. |
-| `BADGER_MCP_PROFILE` | `auto` (default), `engineer`, `expert`, or `operator`. Profile selection only narrows the tools allowed by current roles and token scopes.                                                                                                                                         |
+| Environment variable          | Meaning                                                                                                                                                                                                                                                                            |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BADGER_URL`                  | The deployment URL, including its base path, such as `https://badger.example/team`. HTTPS is required except on loopback HTTP addresses.                                                                                                                                           |
+| `BADGER_TOKEN`                | A personal access token created in the dashboard, normally with the `expert` scope.                                                                                                                                                                                                |
+| `BADGER_AGENT_HOST`           | The Agent host, 1 to 200 printable ASCII characters. The MCP sends it with every request, and the service requires it and records it in the audit of each one. Defaults to this machine's hostname, in IDNA form if it is not ASCII, or `unnamed-host` when neither form is valid. |
+| `BADGER_MCP_PROFILE`          | `auto` (default), `engineer`, `expert`, or `operator`. Profile selection only narrows the tools allowed by current roles and token scopes.                                                                                                                                         |
+| `BADGER_MCP_MAX_INLINE_BYTES` | Bytes allowed inline before a tool result spills to a private local file, as a whole number from 1024 to 16777216. Defaults to 131072 (128 KiB). Set it in the MCP server's `env` block; the new value applies when that MCP process restarts.                                     |
 
 The MCP never prints configuration or credentials. Stdout carries only MCP;
 startup failures go to stderr and name the setting at fault, never its value.
@@ -220,16 +221,26 @@ accepts findings and separately routes effects in Source study; the original
 uploader personally confirms them in the dashboard. The MCP cannot sign off.
 See [the complete review flow](../../docs/script-effect-review.md).
 
-Tool results, including their MCP envelopes, stay within 8 KiB. Larger results
-return a private local JSON file path and a `badger://results/…` resource link.
-Read the file with the host's file tools, or use `resources/read`;
-read operations reload current records, and mutation responses check current
-target access without repeating the mutation. Resources last for the connection,
-with at most 32 retained results and a 16 MiB retention budget. Narrow requests
-whose content exceeds 16 MiB. Temporary result directories use mode `0700`
-and files use `0600`; normal connection closure removes them. A local file
-is the snapshot already delivered to the person; resource reads recheck access
-and reload current records. Resources, prompts, and elicitation are optional.
+Tool results, including their MCP envelopes, stay within 128 KiB by default;
+`BADGER_MCP_MAX_INLINE_BYTES` changes that threshold in the MCP configuration.
+Larger results return a private local JSON file path and a
+`badger://results/…` resource link. Read the file with the host's file tools, or
+use `resources/read`; read operations reload current records, and mutation
+responses check current target access without repeating the mutation. Resources
+last for the connection, with at most 32 retained results and a 16 MiB retention
+budget. Narrow requests whose content exceeds 16 MiB. Temporary result
+directories use mode `0700` and files use `0600`; normal connection closure
+removes them. A local file is the snapshot already delivered to the person;
+resource reads recheck access and reload current records. Resources, prompts,
+and elicitation are optional.
+
+The inline threshold is client-side tuning, not a service policy, and there is
+no dashboard setting for it: the value is enforced in the MCP process, so a
+change applies only after that process restarts. A value above a host's
+per-result ceiling may be rejected or truncated by that host; lower it in the
+configuration file for such hosts. Badger also has no per-turn cap, because MCP
+sees tool calls on a connection, not an Agent's turns. A host that wants a
+per-turn budget enforces it on its side.
 
 ## Host compatibility
 
