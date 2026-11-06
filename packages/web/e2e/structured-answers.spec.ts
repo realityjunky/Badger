@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 import {
   startTestService,
   type TestService,
@@ -250,12 +250,56 @@ test("a shared drafting job link lets a Field expert edit suggestions before the
     });
     await expect(
       jobCard.getByRole("button", { name: "Review suggestions", exact: true }),
-    ).toHaveCount(0);
-    await agent("submit", {
+    ).toBeVisible();
+    const viewerWrites: string[] = [];
+    const recordViewerWrite = (request: Request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().includes(`${jobs}/${job.id}/`)
+      )
+        viewerWrites.push(request.url());
+    };
+    page.on("request", recordViewerWrite);
+    await jobCard
+      .getByRole("button", { name: "Review suggestions", exact: true })
+      .click();
+    const agentView = page.getByRole("dialog", {
+      name: "Review suggestions",
+      exact: true,
+    });
+    for (const name of [
+      "Save",
+      "Finish editing",
+      "Edit suggestion",
+      "Remove from acceptance",
+    ])
+      await expect(
+        agentView.getByRole("button", { name, exact: true }),
+      ).toBeDisabled();
+    const progress = structuredClone(currentJob.result);
+    progress.questions[0].rationale = "The Agent's latest saved update.";
+    const progressing = await agent("submit", {
       leaseId: agentSession.job.lease.id,
       contextHash: currentJob.contextHash,
-      result: currentJob.result,
+      result: progress,
       keepClaim: true,
+    });
+    await expect(agentView).toContainText(progress.questions[0].rationale, {
+      timeout: 12_000,
+    });
+    await agentView
+      .getByRole("button", { name: "Close", exact: true })
+      .last()
+      .click();
+    await expect(agentView).toBeHidden();
+    page.off("request", recordViewerWrite);
+    expect(viewerWrites).toEqual([]);
+    expect(
+      (await call("GET", `${jobs}/${job.id}`, undefined, engineer)).job,
+    ).toMatchObject({
+      status: "claimed",
+      revision: progressing.job.revision,
+      lease: { claimHash: agentSession.job.lease.claimHash },
     });
     await expect(jobCard.getByText("Claimed", { exact: true })).toBeVisible();
     await agent("finish", {
@@ -300,7 +344,34 @@ test("a shared drafting job link lets a Field expert edit suggestions before the
         name: "Review suggestions",
         exact: true,
       }),
-    ).toHaveCount(0);
+    ).toBeVisible();
+    respondent.on("request", recordViewerWrite);
+    await expertCard
+      .getByRole("button", { name: "Review suggestions", exact: true })
+      .click();
+    const browserView = respondent.getByRole("dialog", {
+      name: "Review suggestions",
+      exact: true,
+    });
+    await expect(browserView).toContainText("Cold");
+    await expect(browserView).toContainText("Frozen");
+    for (const name of [
+      "Save",
+      "Finish editing",
+      "Edit suggestion",
+      "Remove from acceptance",
+    ])
+      await expect(
+        browserView.getByRole("button", { name, exact: true }),
+      ).toBeDisabled();
+    await expect(browserView.getByRole("textbox")).toHaveCount(0);
+    await browserView
+      .getByRole("button", { name: "Close", exact: true })
+      .last()
+      .click();
+    await expect(browserView).toBeHidden();
+    respondent.off("request", recordViewerWrite);
+    expect(viewerWrites).toEqual([]);
     await page
       .getByRole("dialog", { name: "Review suggestions", exact: true })
       .getByRole("button", { name: "Finish editing", exact: true })
@@ -408,10 +479,7 @@ test("a shared drafting job link lets a Field expert edit suggestions before the
       contextHash: later.job.contextHash,
     });
     await expect(
-      expertCard.getByRole("button", {
-        name: "Review suggestions",
-        exact: true,
-      }),
+      expertCard.getByText("Awaiting your review", { exact: true }),
     ).toBeVisible({ timeout: 12_000 });
     await expertCard
       .getByRole("button", { name: "Review suggestions", exact: true })

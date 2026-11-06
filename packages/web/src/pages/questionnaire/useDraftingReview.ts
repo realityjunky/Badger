@@ -8,8 +8,8 @@ import { apiUrl } from "../../app/paths.js";
 
 interface DraftingReviewSession {
   job: DraftingJob;
-  result: DraftingResult;
-  leaseId: string;
+  result: DraftingResult | null;
+  leaseId: string | null;
   ended: boolean;
 }
 
@@ -32,7 +32,11 @@ export function useDraftingReview(
     const observedActivity = Date.now();
     activity.current = observedActivity;
     const session = current.current;
-    if (!session || session.ended || observedActivity - previous < 15_000)
+    if (
+      !session?.leaseId ||
+      session.ended ||
+      observedActivity - previous < 15_000
+    )
       return;
     void questionnaireRequest(
       basePath,
@@ -70,6 +74,19 @@ export function useDraftingReview(
   useEffect(() => {
     if (!review || review.ended) return;
     const job = jobs.find((entry) => entry.id === review.job.id);
+    if (!review.leaseId) {
+      if (job && job.revision > review.job.revision)
+        setReview((latest) =>
+          latest?.leaseId === null && latest.job.id === job.id
+            ? {
+                ...latest,
+                job,
+                result: structuredClone(job.review?.result ?? job.result),
+              }
+            : latest,
+        );
+      return;
+    }
     if (
       job &&
       job.revision >= review.job.revision &&
@@ -77,14 +94,14 @@ export function useDraftingReview(
         job.lease?.claimHash !== review.job.lease?.claimHash)
     )
       end(review);
-  }, [jobs, review?.leaseId]);
+  }, [jobs, review?.job.id, review?.leaseId]);
 
   useEffect(() => {
     current.current = null;
     setReview(null);
     const releaseOnExit = () => {
       const session = current.current;
-      if (!session || session.ended) return;
+      if (!session?.leaseId || session.ended) return;
       void fetch(apiUrl(basePath, `${jobsPath}/${session.job.id}/release`), {
         method: "POST",
         credentials: "same-origin",
@@ -107,7 +124,8 @@ export function useDraftingReview(
     let renewing = false;
     const timer = window.setInterval(() => {
       const session = current.current;
-      if (!session || session.ended || pending.current || renewing) return;
+      if (!session?.leaseId || session.ended || pending.current || renewing)
+        return;
       renewing = true;
       const idle = Date.now() - activity.current >= 30 * 60_000;
       const observedActivity = activity.current;
@@ -150,6 +168,18 @@ export function useDraftingReview(
       basePath,
       `${jobsPath}/${job.id}`,
     );
+    if (job.status === "claimed" || latest.status === "claimed") {
+      const session: DraftingReviewSession = {
+        job: latest,
+        result: structuredClone(latest.review?.result ?? latest.result),
+        leaseId: null,
+        ended: false,
+      };
+      current.current = session;
+      setReview(session);
+      await changed.current();
+      return;
+    }
     const claimed = await questionnaireRequest<{
       job: DraftingJob & {
         lease: NonNullable<DraftingJob["lease"]> & { id: string };
@@ -173,7 +203,7 @@ export function useDraftingReview(
 
   async function save() {
     const session = current.current;
-    if (!session || session.ended) return null;
+    if (!session?.leaseId || !session.result || session.ended) return null;
     pending.current = true;
     try {
       const { job } = await questionnaireRequest<{ job: DraftingJob }>(
@@ -209,7 +239,7 @@ export function useDraftingReview(
     if (!session) return;
     pending.current = true;
     try {
-      if (!session.ended) {
+      if (session.leaseId && !session.ended) {
         try {
           await questionnaireRequest(
             basePath,
@@ -227,7 +257,7 @@ export function useDraftingReview(
       }
       current.current = null;
       setReview(null);
-      await changed.current();
+      if (session.leaseId) await changed.current();
     } finally {
       pending.current = false;
     }

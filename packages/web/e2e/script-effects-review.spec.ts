@@ -457,13 +457,6 @@ test("source-study suggestions keep edits across numbered tabs without confirmin
       uncertainty: "Which conditions apply?",
     })),
   };
-  const { job: submitted } = await call(
-    page,
-    "POST",
-    `${jobs}/${job.id}/submit`,
-    { leaseId: claim.job.lease.id, contextHash: job.contextHash, result },
-    secret,
-  );
   await page.goto(
     `${base}/questionnaire?workflow=${workflow.id}&version=${version.id}&group=${group.id}&panel=suggestions&job=${job.id}`,
   );
@@ -475,6 +468,66 @@ test("source-study suggestions keep edits across numbered tabs without confirmin
     name: "Review suggestions",
     exact: true,
   });
+  await expect(dialog).toContainText("No saved suggestions yet.");
+  for (const name of ["Save", "Finish editing"])
+    await expect(
+      dialog.getByRole("button", { name, exact: true }),
+    ).toBeDisabled();
+  const { job: submitted } = await call(
+    page,
+    "POST",
+    `${jobs}/${job.id}/submit`,
+    {
+      leaseId: claim.job.lease.id,
+      contextHash: job.contextHash,
+      result,
+      keepClaim: true,
+    },
+    secret,
+  );
+  await expect(dialog).toContainText(result.facts[0]!.statement, {
+    timeout: 12_000,
+  });
+  await expect(dialog.getByRole("textbox")).toHaveCount(0);
+  await dialog.getByRole("tab", { name: "2", exact: true }).click();
+  await expect(dialog).toContainText(result.facts[1]!.statement);
+  await dialog
+    .getByRole("tab", { name: "Script effect review", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("heading", { name: scripts[0]!.path }),
+  ).toBeVisible();
+  await dialog.getByRole("tab", { name: "2", exact: true }).click();
+  await expect(
+    dialog.getByRole("heading", { name: scripts[1]!.path }),
+  ).toBeVisible();
+  await expect(dialog.getByRole("combobox")).toHaveCount(0);
+  await dialog
+    .getByRole("button", { name: "Close", exact: true })
+    .last()
+    .click();
+  const viewed = (await call(page, "GET", `${jobs}/${job.id}`)).job;
+  expect(viewed).toMatchObject({
+    status: "claimed",
+    revision: submitted.revision,
+    lease: { claimHash: claim.job.lease.claimHash },
+  });
+  await call(
+    page,
+    "POST",
+    `${jobs}/${job.id}/finish`,
+    {
+      leaseId: claim.job.lease.id,
+      contextHash: job.contextHash,
+    },
+    secret,
+  );
+  await expect(
+    card.getByText("Awaiting your review", { exact: true }),
+  ).toBeVisible({ timeout: 12_000 });
+  await card
+    .getByRole("button", { name: "Review suggestions", exact: true })
+    .click();
   await expect(
     dialog.getByRole("tab", { name: "Statements", exact: true }),
   ).toHaveAttribute("aria-selected", "true");

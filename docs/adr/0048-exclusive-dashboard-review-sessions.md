@@ -1,12 +1,18 @@
 # Reserve suggestion editing until its session hands over
 
 Status: accepted. Extends ADR 0047 to dashboard questionnaire reviews. Opening
-Review suggestions claims the latest job revision for that browser editor.
+Review suggestions on an unclaimed job claims the latest revision for that browser editor.
 Saving keeps the exclusive claim; Finish editing saves and releases it. Closing
 the editor releases only saved work. Other browser editors and Agents cannot
 start editing, save, accept, or discard while another session owns the job.
 Legacy browser review requests remain single revision-checked atomic edits
 when the job is unclaimed.
+
+Authorized people can open claimed jobs to view the latest saved suggestions
+without reserving, renewing or releasing a claim. This view follows saved
+updates and allows navigation through statements, script effects and questions,
+while editing, Save and Finish editing remain disabled. It stays read-only
+after the owner finishes; close and reopen to start a fresh editing session.
 
 Finish requires saved suggestions and hands them over for review. Release
 relinquishes ownership, preserving saved suggestions or returning an empty job

@@ -473,7 +473,10 @@ const en = {
   "drafting.title": "Drafting jobs and suggestions",
   "drafting.about": "About drafting jobs and suggestions",
   "drafting.help":
-    "Each Agent or dashboard editing session reserves the job for its editor. Others can edit only after it finishes, disconnects, or becomes idle. The workflow's Engineer and Field experts review and save shared edits. The Engineer accepts the saved result separately into the workflow's records.",
+    "Each Agent or dashboard editing session reserves the job for its editor. Others can view the latest saved suggestions, and edit only after it finishes, disconnects, or becomes idle. The workflow's Engineer and Field experts review and save shared edits. The Engineer accepts the saved result separately into the workflow's records.",
+  "drafting.viewOnlyHelp":
+    "Read-only view of the latest saved suggestions. Only the current editor can change or finish the job. To edit after the claim ends, close and reopen Review suggestions.",
+  "drafting.noSavedSuggestions": "No saved suggestions yet.",
   "drafting.claimedHelp":
     "{host} is editing this job. Suggestions stay locked until the session finishes, disconnects, or is idle for 30 minutes.",
   "drafting.dashboardClaimedHelp":
@@ -1936,7 +1939,10 @@ const zh: Record<MessageId, string> = {
   "drafting.title": "起草任务与建议",
   "drafting.about": "关于起草任务与建议",
   "drafting.help":
-    "Agent 会话和仪表盘编辑会话均会独占任务，完成、断开连接或闲置超时后，其他人才能接手。工作流的工程师和领域专家可审核并保存共享修改。工程师须单独接受已保存的结果，结果才会进入工作流记录。",
+    "Agent 会话和仪表盘编辑会话均会独占编辑任务。其他人仍可查看最新保存的建议，完成、断开连接或闲置超时后才能接手编辑。工作流的工程师和领域专家可审核并保存共享修改。工程师须单独接受已保存的结果，结果才会进入工作流记录。",
+  "drafting.viewOnlyHelp":
+    "当前以只读方式显示最新保存的建议。只有正在编辑的人可以修改或完成任务。领取结束后，请关闭并重新打开“审核建议”以开始编辑。",
+  "drafting.noSavedSuggestions": "尚无已保存的建议。",
   "drafting.claimedHelp":
     "{host} 正在编辑此任务。会话完成、连接断开或闲置 30 分钟后，其他人才能编辑或再次领取。",
   "drafting.dashboardClaimedHelp":

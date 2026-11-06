@@ -191,6 +191,8 @@ export function DraftingJobs({
     },
   );
   const { review, setReview } = reviewSession;
+  const readOnly = review?.leaseId === null;
+  const reviewResult = review?.result ?? null;
   const run = async (action: () => Promise<void>) => {
     if (actionPending.current) return;
     actionPending.current = true;
@@ -499,7 +501,7 @@ export function DraftingJobs({
                   </span>
                 </div>
               )}
-              {job.status === "submitted" && (
+              {(job.status === "submitted" || job.status === "claimed") && (
                 <div className="drafting-job-actions">
                   <Button
                     type="primary"
@@ -515,7 +517,7 @@ export function DraftingJobs({
                   >
                     {t("drafting.review")}
                   </Button>
-                  {canDecide && (
+                  {job.status === "submitted" && canDecide && (
                     <Space wrap>
                       <Button
                         icon={<CopyOutlined aria-hidden="true" />}
@@ -740,8 +742,10 @@ export function DraftingJobs({
                 disabled={
                   busy ||
                   !review ||
+                  readOnly ||
+                  !reviewResult ||
                   review.ended ||
-                  !hasDraftItems(review.result)
+                  !hasDraftItems(reviewResult)
                 }
                 onClick={() =>
                   void run(async () => {
@@ -754,9 +758,15 @@ export function DraftingJobs({
               </Button>
               <Button
                 type="primary"
+                aria-label={t("drafting.saveReview")}
+                aria-busy={busy}
                 loading={busy}
                 disabled={
-                  !review || review.ended || !hasDraftItems(review.result)
+                  !review ||
+                  readOnly ||
+                  !reviewResult ||
+                  review.ended ||
+                  !hasDraftItems(reviewResult)
                 }
                 onClick={() =>
                   void run(async () => {
@@ -796,31 +806,35 @@ export function DraftingJobs({
                 message={t("drafting.reviewSaved")}
               />
             )}
-            {review && editing !== null ? (
+            {review && reviewResult && editing !== null && !readOnly ? (
               <QuestionComposer
                 key={`${review.job.id}:${editing}`}
                 basePath={basePath}
                 path={path}
                 roundId={review.job.roundId!}
-                suggestion={draftQuestions(review.result)[editing]}
+                suggestion={draftQuestions(reviewResult)[editing]}
                 view={view}
                 onSaved={() => undefined}
                 onCancel={() => setEditing(null)}
                 onDraft={(content) => {
                   setReview({
                     ...review,
-                    result: changeDraftQuestion(
-                      review.result,
-                      editing,
-                      content,
-                    ),
+                    result: changeDraftQuestion(reviewResult, editing, content),
                   });
                   setEditing(null);
                 }}
               />
             ) : (
               <>
-                <p className="muted">{t("drafting.reviewHelp")}</p>
+                {readOnly ? (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message={t("drafting.viewOnlyHelp")}
+                  />
+                ) : (
+                  <p className="muted">{t("drafting.reviewHelp")}</p>
+                )}
                 {review?.job.questionId && (
                   <p>
                     {
@@ -830,22 +844,30 @@ export function DraftingJobs({
                     · {review.job.locale ?? view.version.locale}
                   </p>
                 )}
-                {review && (
+                {review && reviewResult && (
                   <DraftResultView
-                    result={review.result}
+                    key={`${review.job.id}:${review.leaseId ?? "view"}`}
+                    result={reviewResult}
                     view={view}
                     effectLabels={draftingEffectLabels(review.job)}
                     questionId={review.job.questionId}
                     onChange={
-                      review.ended
+                      readOnly || review.ended
                         ? undefined
                         : (result) => setReview({ ...review, result })
                     }
                   />
                 )}
+                {review && !reviewResult && (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={t("drafting.noSavedSuggestions")}
+                  />
+                )}
                 {review &&
-                  "questions" in review.result &&
-                  review.result.questions.map((item, index) => {
+                  reviewResult &&
+                  "questions" in reviewResult &&
+                  reviewResult.questions.map((item, index) => {
                     const q = "question" in item ? item.question : item;
                     return (
                       <section key={index} className="drafting-suggestion">
@@ -866,18 +888,18 @@ export function DraftingJobs({
                         </p>
                         <Space wrap>
                           <Button
-                            disabled={busy || review.ended}
+                            disabled={busy || readOnly || review.ended}
                             onClick={() => setEditing(index)}
                           >
                             {t("drafting.edit")}
                           </Button>
                           <Button
-                            disabled={busy || review.ended}
+                            disabled={busy || readOnly || review.ended}
                             onClick={() =>
                               setReview({
                                 ...review,
                                 result: changeDraftQuestion(
-                                  review.result,
+                                  reviewResult,
                                   index,
                                   null,
                                 ),

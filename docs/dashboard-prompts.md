@@ -125,7 +125,11 @@ it does not create additional Agent tools or bypass a current confirmation.
 
 Engineers and Field experts use **Review suggestions** in the dashboard. Source
 results have **Statements** and **Script effect review** main tabs, each with
-numbered item tabs. Opening reserves an exclusive editing session. **Save**
+numbered item tabs. Claimed jobs can be opened to view their latest saved
+suggestions while the owner continues editing. This read-only view updates
+automatically; Save and Finish editing are disabled, and viewing never claims,
+renews or releases ownership. Close and reopen after the claim ends to edit.
+Opening an unclaimed job reserves an exclusive editing session. **Save**
 keeps that reservation; **Finish editing** saves and releases it. Closing the
 editor or thirty idle minutes releases only saved changes. An expired editor
 keeps unsaved text for reference and requires reopening the latest saved
