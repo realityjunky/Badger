@@ -143,7 +143,7 @@ p{max-width:79ch;margin:0 0 15px}
     <h1><span data-lang="en">From Markdown Skills to durable workflow systems</span><span data-lang="zh" lang="zh-CN">从 Markdown Skill 到持久化工作流系统</span></h1>
     <p class="hero-lede" data-lang="en">How Badger builds a workflow package from your Skills, runs it one checked step at a time, and proves what happened.</p>
     <p class="hero-lede" data-lang="zh" lang="zh-CN">Badger 如何用你的 Skill 构建工作流软件包，一步一校验地运行它，并证明每一步发生了什么。</p>
-    <div class="hero-meta"><span class="pill"><span data-lang="en">Integrated authoring delivered</span><span data-lang="zh" lang="zh-CN">集成式创作已交付</span></span><span class="pill"><span data-lang="en">Collaborative service available</span><span data-lang="zh" lang="zh-CN">协作服务已提供</span></span><span class="pill"><span data-lang="en">Updated 2026-11-02</span><span data-lang="zh" lang="zh-CN">更新于 2026-11-02</span></span></div>
+    <div class="hero-meta"><span class="pill"><span data-lang="en">Integrated authoring delivered</span><span data-lang="zh" lang="zh-CN">集成式创作已交付</span></span><span class="pill"><span data-lang="en">Collaborative service available</span><span data-lang="zh" lang="zh-CN">协作服务已提供</span></span><span class="pill"><span data-lang="en">Updated 2026-11-06</span><span data-lang="zh" lang="zh-CN">更新于 2026-11-06</span></span></div>
     <div class="language-status" id="language-status" role="status" aria-live="polite"></div>
   </div>
 </header>
@@ -230,6 +230,21 @@ p{max-width:79ch;margin:0 0 15px}
       </div>
       <div class="toc-group">
         <div class="toc-group-head"><a href="#sources"><span data-lang="en">8 · Sources</span><span data-lang="zh" lang="zh-CN">8 · 资料来源</span></a></div>
+      </div>
+      <div class="toc-group">
+        <div class="toc-group-head"><button type="button" class="toc-group-toggle" aria-expanded="true" aria-controls="toc-group-9" aria-labelledby="toc-link-9"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button><a id="toc-link-9" href="#appendix-a"><span data-lang="en">A · Badger MCP mechanisms</span><span data-lang="zh" lang="zh-CN">A · Badger MCP 机制</span></a></div>
+        <div class="toc-group-items" id="toc-group-9">
+          <a class="sub" href="#appendix-topology"><span data-lang="en">A.1 Five parties</span><span data-lang="zh" lang="zh-CN">A.1 五个角色</span></a>
+          <a class="sub" href="#appendix-stdio"><span data-lang="en">A.2 Agent to MCP</span><span data-lang="zh" lang="zh-CN">A.2 Agent 到 MCP</span></a>
+          <a class="sub" href="#appendix-http"><span data-lang="en">A.3 MCP to service</span><span data-lang="zh" lang="zh-CN">A.3 MCP 到服务</span></a>
+          <a class="sub" href="#appendix-dashboard-worker"><span data-lang="en">A.4 Dashboard and worker</span><span data-lang="zh" lang="zh-CN">A.4 仪表盘与 worker</span></a>
+          <a class="sub" href="#appendix-runs"><span data-lang="en">A.5 Runs and gate delivery</span><span data-lang="zh" lang="zh-CN">A.5 Run 与门槛回传</span></a>
+          <a class="sub" href="#appendix-bounds"><span data-lang="en">A.6 The 8 KiB result cap</span><span data-lang="zh" lang="zh-CN">A.6 8 KiB 结果上限</span></a>
+          <a class="sub" href="#appendix-url"><span data-lang="en">A.7 BADGER_URL and loopback</span><span data-lang="zh" lang="zh-CN">A.7 BADGER_URL 与回环地址</span></a>
+          <a class="sub" href="#appendix-credentials"><span data-lang="en">A.8 PAT, JWT, and sessions</span><span data-lang="zh" lang="zh-CN">A.8 PAT、JWT 与会话</span></a>
+          <a class="sub" href="#appendix-transports"><span data-lang="en">A.9 stdio, SSE, and HTTP</span><span data-lang="zh" lang="zh-CN">A.9 stdio、SSE 与 HTTP</span></a>
+          <a class="sub" href="#appendix-examples"><span data-lang="en">A.10 Worked examples</span><span data-lang="zh" lang="zh-CN">A.10 完整示例</span></a>
+        </div>
       </div>
     </div>
   </nav>
@@ -1312,6 +1327,257 @@ badger distribute example-workflow --destination ./install-preview --confirm --p
       <p class="note" data-lang="zh" lang="zh-CN">本手册未使用受保护的 <code>primer_designer_harness/raw_data/</code> 目录；Primer Designer 部分只依据工作流契约和 Skill 元数据。</p>
       <p class="footer" data-lang="en">A living manual. Define each term where it is first needed, and label future work separately from delivered behavior.</p>
       <p class="footer" data-lang="zh" lang="zh-CN">这是一份持续更新的手册。每个术语在首次需要时定义；未来工作与已交付行为分开标注。</p>
+    </section>
+
+    <section class="section" id="appendix-a">
+      <p class="section-number"><span data-lang="en">APPENDIX A</span><span data-lang="zh" lang="zh-CN">附录 A</span></p>
+      <h2><span data-lang="en">Badger MCP mechanisms</span><span data-lang="zh" lang="zh-CN">Badger MCP 机制</span></h2>
+      <p class="lede" data-lang="en">This appendix follows one request from an Agent on a laptop to the service, shows where the dashboard and worker sit, and answers the implementation questions that come up when a team operates Badger MCP together. It describes delivered behavior, not a plan.</p>
+      <p class="lede" data-lang="zh" lang="zh-CN">本附录追踪一个请求从笔记本上的 Agent 到服务的全过程，说明仪表盘与 worker 所处的位置，并回答团队共同使用 Badger MCP 时常见的实现问题。它描述的是已交付行为，不是计划。</p>
+
+      <h3 id="appendix-topology"><span data-lang="en">A.1 Five parties, one central service</span><span data-lang="zh" lang="zh-CN">A.1 五个角色，一个中心服务</span></h3>
+      <p data-lang="en">Badger ships exactly one MCP implementation, and it is a local stdio process. There is no hosted or HTTP MCP endpoint in <code>badger-server</code>. A laptop and a workstation therefore run independent MCP processes; they never talk to each other. The service is the only shared state between them.</p>
+      <p data-lang="zh" lang="zh-CN">Badger 只提供一套 MCP 实现，而且它是本地 stdio 进程。<code>badger-server</code> 中没有托管的或 HTTP 的 MCP 端点。因此笔记本和工作站各自运行独立的 MCP 进程，两者从不直接通信；它们之间唯一共享的是服务。</p>
+      <pre class="code-block"><span data-lang="en">LAPTOP                                    WORKSTATION (the service host)
+┌──────────────────────────────┐          ┌──────────────────────────────────────┐
+│ Agent (Claude Code / Codex / │  stdio   │  nginx :27876/badger                 │
+│ WorkBuddy / desktop app)     │◄────────►│        │                             │
+│         │ child process      │ JSON-RPC │        ▼                             │
+│         ▼                    │          │  badger-server ── badger-postgres    │
+│ Badger MCP (node cli.js)     │  HTTPS   │        ▲              ▲              │
+│  · BADGER_TOKEN in env       │─────────►│        │              │              │
+└──────────────────────────────┘  /api/v1 │  browser dashboard   badger-worker   │
+                                          │  (session cookie)    (DB jobs)       │
+┌──────────────────────────────┐  HTTPS   │                                      │
+│ workstation Agent + its own  │─────────►│                                      │
+│ local Badger MCP (same code) │  /api/v1 │                                      │
+└──────────────────────────────┘          └──────────────────────────────────────┘</span><span data-lang="zh" lang="zh-CN">笔记本电脑                                  工作站（服务宿主）
+┌──────────────────────────────┐          ┌──────────────────────────────────────┐
+│ Agent（Claude Code / Codex / │  stdio   │  nginx :27876/badger                 │
+│ WorkBuddy / 桌面应用）        │◄────────►│        │                             │
+│         │ 子进程             │ JSON-RPC │        ▼                             │
+│         ▼                    │          │  badger-server ── badger-postgres    │
+│ Badger MCP（node cli.js）    │  HTTPS   │        ▲              ▲              │
+│  · BADGER_TOKEN 在环境中      │─────────►│        │              │              │
+└──────────────────────────────┘  /api/v1 │  浏览器仪表盘        badger-worker    │
+                                          │  （会话 Cookie）     （数据库作业）    │
+┌──────────────────────────────┐  HTTPS   │                                      │
+│ 工作站 Agent 及其本地         │─────────►│                                      │
+│ Badger MCP（同一份代码）      │  /api/v1 │                                      │
+└──────────────────────────────┘          └──────────────────────────────────────┘</span></pre>
+      <div class="table-wrap fit"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Party</span><span data-lang="zh" lang="zh-CN">角色</span></th><th><span data-lang="en">Runs on</span><span data-lang="zh" lang="zh-CN">运行位置</span></th><th><span data-lang="en">Owns</span><span data-lang="zh" lang="zh-CN">拥有的状态</span></th></tr></thead>
+        <tbody>
+          <tr><td><span data-lang="en">Agent host</span><span data-lang="zh" lang="zh-CN">Agent 宿主</span></td><td><span data-lang="en">Each person's machine or desktop app</span><span data-lang="zh" lang="zh-CN">每个人的机器或桌面应用</span></td><td><span data-lang="en">Conversation, tool calls, local files the person points it at</span><span data-lang="zh" lang="zh-CN">对话、工具调用、用户指定的本地文件</span></td></tr>
+          <tr><td><span data-lang="en">Badger MCP</span><span data-lang="zh" lang="zh-CN">Badger MCP</span></td><td><span data-lang="en">A stdio child process of that Agent</span><span data-lang="zh" lang="zh-CN">该 Agent 的 stdio 子进程</span></td><td><span data-lang="en">Token, capability cache, private result files, claim folders, local Run state</span><span data-lang="zh" lang="zh-CN">令牌、能力缓存、私有结果文件、认领目录、本地 Run 状态</span></td></tr>
+          <tr><td><span data-lang="en">Dashboard and server</span><span data-lang="zh" lang="zh-CN">仪表盘与 server</span></td><td><span data-lang="en">Workstation container behind nginx</span><span data-lang="zh" lang="zh-CN">工作站上位于 nginx 后的容器</span></td><td><span data-lang="en">People, roles, records, revisions, tokens, gates, publications</span><span data-lang="zh" lang="zh-CN">人员、角色、记录、修订、令牌、门槛、发布</span></td></tr>
+          <tr><td><span data-lang="en">Postgres</span><span data-lang="zh" lang="zh-CN">Postgres</span></td><td><span data-lang="en">Workstation, private network</span><span data-lang="zh" lang="zh-CN">工作站，私有网络</span></td><td><span data-lang="en">Durable records and the job queue</span><span data-lang="zh" lang="zh-CN">持久记录与作业队列</span></td></tr>
+          <tr><td><span data-lang="en">Worker</span><span data-lang="zh" lang="zh-CN">Worker</span></td><td><span data-lang="en">Workstation, same image as the server</span><span data-lang="zh" lang="zh-CN">工作站，与 server 同一镜像</span></td><td><span data-lang="en">Source checks, initialization, generation, evaluations, notifications, attachment cleanup</span><span data-lang="zh" lang="zh-CN">来源检查、初始化、生成、评估、通知、附件清理</span></td></tr>
+        </tbody>
+      </table></div>
+      <p data-lang="en">A Run is the exception to this picture: its execution authority is the local <code>WorkflowRuntime</code> inside the Operator's MCP process, not the workstation server. The service observes and records it.</p>
+      <p data-lang="zh" lang="zh-CN">Run 是这幅图里的例外：它的执行权威是 Operator 的 MCP 进程内本地 <code>WorkflowRuntime</code>，而不是工作站 server。服务只观察并记录它。</p>
+
+      <h3 id="appendix-stdio"><span data-lang="en">A.2 Agent to MCP: stdio</span><span data-lang="zh" lang="zh-CN">A.2 Agent 到 MCP：stdio</span></h3>
+      <p data-lang="en">The Agent launches <code>badger-mcp</code> (or <code>node .../packages/mcp/dist/src/cli.js</code>) as a child process and speaks MCP JSON-RPC over stdin and stdout. Stdout carries only MCP; diagnostics and startup failures go to stderr and name the setting at fault, never its value.</p>
+      <p data-lang="zh" lang="zh-CN">Agent 把 <code>badger-mcp</code>（或 <code>node .../packages/mcp/dist/src/cli.js</code>）作为子进程启动，通过 stdin 与 stdout 传输 MCP JSON-RPC。stdout 只承载 MCP；诊断和启动失败写入 stderr，只指出出错的设置名，不输出其值。</p>
+      <ul class="plain-list" data-lang="en">
+        <li><b>Profiles.</b> <code>BADGER_MCP_PROFILE</code> selects <code>auto</code>, <code>expert</code>, <code>engineer</code>, or <code>operator</code>. A profile only narrows the tools the current roles and token scopes allow; it never grants access.</li>
+        <li><b>Credentials.</b> <code>BADGER_TOKEN</code> lives in the environment that starts the Agent. Claude Code and WorkBuddy expand <code>${BADGER_TOKEN}</code> from <code>.mcp.json</code>; Codex forwards it with <code>env_vars = ["BADGER_TOKEN"]</code>. The configuration file never contains the secret.</li>
+        <li><b>Discovery.</b> The MCP reads capabilities from the service, caches the result for 30 seconds, and sends <code>notifications/tools/list_changed</code> when a fresh read changes the permitted set.</li>
+        <li><b>Results.</b> Each tool result, including its MCP envelope, is capped at 8 KiB. Larger payloads become a private local file plus a <code>badger://results/…</code> resource link.</li>
+      </ul>
+      <ul class="plain-list" data-lang="zh" lang="zh-CN">
+        <li><b>配置档。</b><code>BADGER_MCP_PROFILE</code> 选择 <code>auto</code>、<code>expert</code>、<code>engineer</code> 或 <code>operator</code>。配置档只会收窄当前角色与令牌作用域允许的工具，绝不授予权限。</li>
+        <li><b>凭据。</b><code>BADGER_TOKEN</code> 位于启动 Agent 的环境中。Claude Code 与 WorkBuddy 从 <code>.mcp.json</code> 展开 <code>${BADGER_TOKEN}</code>；Codex 用 <code>env_vars = ["BADGER_TOKEN"]</code> 转发。配置文件本身永远不含密钥。</li>
+        <li><b>发现。</b>MCP 从服务读取能力，缓存 30 秒；重新读取后发现允许集合变化时，发送 <code>notifications/tools/list_changed</code>。</li>
+        <li><b>结果。</b>每个工具结果（含 MCP 信封）上限 8 KiB。更大的载荷会写成私有本地文件，并返回 <code>badger://results/…</code> 资源链接。</li>
+      </ul>
+
+      <h3 id="appendix-http"><span data-lang="en">A.3 MCP to service: HTTPS and headers</span><span data-lang="zh" lang="zh-CN">A.3 MCP 到服务：HTTPS 与请求头</span></h3>
+      <p data-lang="en">Every service call goes to <code>{BADGER_URL}/api/v1/…</code> on the laptop's own network connection. The MCP never proxies through another MCP or through the dashboard.</p>
+      <p data-lang="zh" lang="zh-CN">每个服务调用都从笔记本自身的网络连接发往 <code>{BADGER_URL}/api/v1/…</code>。MCP 从不经由另一个 MCP 或仪表盘代理。</p>
+      <pre class="code-block">GET|POST {BADGER_URL}/api/v1/…
+Authorization: Bearer bdg_&lt;prefix&gt;_&lt;secret&gt;
+X-Badger-Agent-Host: &lt;laptop hostname&gt;
+Content-Type: application/json</pre>
+      <ul class="plain-list" data-lang="en">
+        <li><b>Two independent checks.</b> The token must be valid, unexpired, unrevoked, and scoped for the operation; the person must currently hold the role and target permission. Scopes narrow roles; they never add one.</li>
+        <li><b>Agent host.</b> <code>X-Badger-Agent-Host</code> is mandatory on token requests, including reads, because a read can return an expired job lease or cancel a job whose inputs changed. Audit entries record the person, token ID, host, and the <code>mcp</code> channel.</li>
+        <li><b>Limits.</b> Requests time out after 30 seconds, redirects are refused so a bearer token cannot follow to another deployment, and each token is limited to 60 requests in a rolling 60-second window.</li>
+        <li><b>Revisions.</b> Writes quote the revision just read. A stale write returns a conflict with the current revision; a timed-out write may still have landed, so the tool says to read before repeating.</li>
+      </ul>
+      <ul class="plain-list" data-lang="zh" lang="zh-CN">
+        <li><b>两道独立检查。</b>令牌必须有效、未过期、未撤销，并且其作用域覆盖该操作；人员必须当前持有相应角色与目标权限。作用域只收窄角色，绝不增加角色。</li>
+        <li><b>Agent 宿主。</b><code>X-Badger-Agent-Host</code> 在令牌请求（包括读取）中必填，因为一次读取可能把过期的作业租约退回队列，或取消输入已变化的作业。审计记录人员、令牌 ID、宿主和 <code>mcp</code> 渠道。</li>
+        <li><b>限制。</b>请求 30 秒超时；拒绝重定向，避免 bearer 令牌跟随到其他部署；每个令牌在滚动 60 秒窗口内限 60 次请求。</li>
+        <li><b>修订。</b>写入需引用刚读到的修订号。过时写入返回冲突及当前修订；超时的写入可能已经保存，因此工具会提示先读取再重试。</li>
+      </ul>
+      <div class="table-wrap fit"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Tool family</span><span data-lang="zh" lang="zh-CN">工具族</span></th><th><span data-lang="en">Service path</span><span data-lang="zh" lang="zh-CN">服务路径</span></th></tr></thead>
+        <tbody>
+          <tr><td><code>whoami</code>, <code>inbox</code>, <code>my_questions</code></td><td><code>/me</code>, <code>/inbox</code>, <code>/me/questions</code></td></tr>
+          <tr><td><code>save_answer</code>, <code>submit_answer</code>, <code>comment</code>, <code>raise_concern</code></td><td><span data-lang="en">Questionnaire, answer, and thread endpoints</span><span data-lang="zh" lang="zh-CN">问卷、回答与讨论端点</span></td></tr>
+          <tr><td><code>claim_job</code>, <code>submit_job</code>, <code>release_job</code></td><td><code>/workflows/:w/versions/:v/drafting-jobs/:id/{claim,submit,release}</code></td></tr>
+          <tr><td><code>upload_skill_version</code></td><td><span data-lang="en">Skill version preview and upload</span><span data-lang="zh" lang="zh-CN">Skill 版本预览与上传</span></td></tr>
+          <tr><td><code>install_workflow</code>, <code>uninstall_workflow</code></td><td><span data-lang="en">Publication API plus the local filesystem</span><span data-lang="zh" lang="zh-CN">发布 API 加本地文件系统</span></td></tr>
+          <tr><td><code>start</code>, <code>next</code>, <code>submit</code>, <code>status</code>, <code>recover</code></td><td><span data-lang="en">Local WorkflowRuntime, mirrored to <code>/runs/…</code></span><span data-lang="zh" lang="zh-CN">本地 WorkflowRuntime，并同步到 <code>/runs/…</code></span></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 id="appendix-dashboard-worker"><span data-lang="en">A.4 Dashboard and worker</span><span data-lang="zh" lang="zh-CN">A.4 仪表盘与 worker</span></h3>
+      <p data-lang="en">The dashboard is a browser UI served by <code>badger-server</code>. It uses the same <code>/api/v1</code> but authenticates with the platform session cookie, not a personal access token. Updates arrive over <code>GET /api/v1/me/events</code> (Server-Sent Events) with polling fallback; Run pages also poll every 5 seconds.</p>
+      <p data-lang="zh" lang="zh-CN">仪表盘是由 <code>badger-server</code> 提供的浏览器界面。它使用同一个 <code>/api/v1</code>，但用平台会话 Cookie 认证，而不是个人访问令牌。更新通过 <code>GET /api/v1/me/events</code>（Server-Sent Events）到达，失败时轮询兜底；Run 页面每 5 秒轮询一次。</p>
+      <div class="table-wrap fit"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Path</span><span data-lang="zh" lang="zh-CN">路径</span></th><th><span data-lang="en">Mechanism</span><span data-lang="zh" lang="zh-CN">机制</span></th></tr></thead>
+        <tbody>
+          <tr><td><span data-lang="en">Agent work</span><span data-lang="zh" lang="zh-CN">Agent 工作</span></td><td><span data-lang="en">MCP to HTTPS API. The Agent drafts and answers only what the person said.</span><span data-lang="zh" lang="zh-CN">MCP 到 HTTPS API。Agent 只起草和提交用户说过的内容。</span></td></tr>
+          <tr><td><span data-lang="en">Server-side work</span><span data-lang="zh" lang="zh-CN">服务端工作</span></td><td><span data-lang="en">Server writes a job row and sends a Postgres notification; the worker claims it with a row lock and a renewable lease, one job per workflow version, and also polls every 15 seconds.</span><span data-lang="zh" lang="zh-CN">server 写入作业行并发出 Postgres 通知；worker 用行锁和可续租约认领，每个工作流版本一次一个作业，并且每 15 秒轮询一次。</span></td></tr>
+          <tr><td><span data-lang="en">Dashboard work</span><span data-lang="zh" lang="zh-CN">仪表盘工作</span></td><td><span data-lang="en">People sign in, review, edit, accept, approve, publish, and answer gates. These actions are session-only and have no MCP tool.</span><span data-lang="zh" lang="zh-CN">人员登录、审阅、编辑、接受、批准、发布并回答门槛。这些操作只接受会话，没有 MCP 工具。</span></td></tr>
+        </tbody>
+      </table></div>
+      <p data-lang="en">The worker is a database peer, not an HTTP peer of the MCP. It shares Postgres, the storage volumes, and the server's settings, publishes no port, and never executes a Run. Agent-side drafting and server-side checking meet only in the database.</p>
+      <p data-lang="zh" lang="zh-CN">worker 是数据库层面的同伴，不是 MCP 的 HTTP 同伴。它共享 Postgres、存储卷和 server 的设置，不发布端口，也从不执行 Run。Agent 侧起草与服务端检查只在数据库中交汇。</p>
+
+      <h3 id="appendix-runs"><span data-lang="en">A.5 Runs and gate delivery</span><span data-lang="zh" lang="zh-CN">A.5 Run 与门槛回传</span></h3>
+      <ol class="steps" data-lang="en">
+        <li><b>Install and bind.</b> The MCP verifies the published package by snapshot hash and installs it under <code>&lt;project&gt;/.badger/packages/&lt;hash&gt;</code>. A private binding fixes the deployment, person, machine, Agent host, publication, and package hash.</li>
+        <li><b>Start locally.</b> WorkflowRuntime creates <code>&lt;project&gt;/.badger/runs/&lt;runId&gt;</code> and persists the first pending action.</li>
+        <li><b>Work one Node.</b> <code>next</code> returns the local <code>skillPath</code>, the Completion plan, and a <code>runUrl</code>. The Agent performs the Node on the machine.</li>
+        <li><b>Submit to the runtime.</b> <code>submit</code> hands machine evidence to WorkflowRuntime, which enforces legal transitions and Completion.</li>
+        <li><b>Mirror to the service.</b> Events and snapshots are sent in the background, at most 64 events or about 768 KiB per report, from a durable queue with 1–30 second retry backoff. Reporting never changes runtime authority.</li>
+        <li><b>Human gate.</b> The service records the gate; a person answers it in the dashboard; the MCP fetches the attested answer on the next <code>next</code> or <code>status</code>, only if the Run revision and pending action still match.</li>
+      </ol>
+      <ol class="steps" data-lang="zh" lang="zh-CN">
+        <li><b>安装并绑定。</b>MCP 按快照哈希校验已发布软件包，并安装到 <code>&lt;project&gt;/.badger/packages/&lt;hash&gt;</code>。私有绑定固定部署、人员、机器、Agent 宿主、发布与包哈希。</li>
+        <li><b>本地启动。</b>WorkflowRuntime 创建 <code>&lt;project&gt;/.badger/runs/&lt;runId&gt;</code>，并持久化第一个待处理动作。</li>
+        <li><b>处理一个 Node。</b><code>next</code> 返回本地 <code>skillPath</code>、Completion 计划和 <code>runUrl</code>。Agent 在本机执行该 Node。</li>
+        <li><b>提交给运行时。</b><code>submit</code> 把机器证据交给 WorkflowRuntime，由它校验合法迁移与 Completion。</li>
+        <li><b>同步到服务。</b>事件与快照在后台发送，每次最多 64 个事件或约 768 KiB，来自持久队列并以 1–30 秒退避重试。同步从不改变运行时权威。</li>
+        <li><b>人工门槛。</b>服务记录门槛；人员在仪表盘回答；MCP 在下一次 <code>next</code> 或 <code>status</code> 时取回已认证的回答，前提是 Run 修订与待处理动作仍然匹配。</li>
+      </ol>
+      <p data-lang="en">Because the binding is local, recovery happens only on the Run's own computer. A workstation MCP cannot recover a Run started on a laptop.</p>
+      <p data-lang="zh" lang="zh-CN">由于绑定是本地私有的，恢复只能在 Run 所在的那台电脑上进行。工作站上的 MCP 无法恢复笔记本启动的 Run。</p>
+
+      <h3 id="appendix-bounds"><span data-lang="en">A.6 Where the 8 KiB result cap is controlled</span><span data-lang="zh" lang="zh-CN">A.6 8 KiB 结果上限在哪里控制</span></h3>
+      <p data-lang="en">The cap is MCP-side, not server-side. It is the constant <code>MAX_INLINE_BYTES = 8192</code> in <code>packages/mcp/src/resources.ts</code>, applied by <code>ResultResources.result()</code>. The comparison measures the serialized <em>whole</em> <code>CallToolResult</code> envelope, not just the payload, so framing and metadata count.</p>
+      <p data-lang="zh" lang="zh-CN">该上限位于 MCP 侧，而不是服务端。它就是 <code>packages/mcp/src/resources.ts</code> 中的常量 <code>MAX_INLINE_BYTES = 8192</code>，由 <code>ResultResources.result()</code> 执行。比较对象是序列化后的<em>整个</em> <code>CallToolResult</code> 信封，而不仅是载荷，因此框架与元数据也计入。</p>
+      <div class="table-wrap fit"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Bound</span><span data-lang="zh" lang="zh-CN">上限</span></th><th><span data-lang="en">Value</span><span data-lang="zh" lang="zh-CN">值</span></th><th><span data-lang="en">Behavior</span><span data-lang="zh" lang="zh-CN">行为</span></th></tr></thead>
+        <tbody>
+          <tr><td><code>MAX_INLINE_BYTES</code></td><td>8192</td><td><span data-lang="en">At or below: inline text result. Above: private file plus resource link.</span><span data-lang="zh" lang="zh-CN">不超过：内联文本结果。超过：私有文件加资源链接。</span></td></tr>
+          <tr><td><code>MAX_STORED_BYTES</code></td><td>16 MiB</td><td><span data-lang="en">A single result larger than this is refused with a narrowing instruction.</span><span data-lang="zh" lang="zh-CN">单个结果超过此值时拒绝，并提示收窄请求。</span></td></tr>
+          <tr><td><code>MAX_RESOURCES</code></td><td>32</td><td><span data-lang="en">Oldest retained results are evicted to stay within 32 entries and the 16 MiB retention budget.</span><span data-lang="zh" lang="zh-CN">为保持在 32 条和 16 MiB 保留预算内，最旧的结果会被淘汰。</span></td></tr>
+          <tr><td><span data-lang="en">File modes</span><span data-lang="zh" lang="zh-CN">文件权限</span></td><td>0700 / 0600</td><td><span data-lang="en">Private temporary directory and files, removed on normal connection close.</span><span data-lang="zh" lang="zh-CN">私有临时目录与文件，正常关闭连接时删除。</span></td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout" data-lang="en"><b>Resource reads recheck access.</b> A stored file is the snapshot already delivered. Reading the <code>badger://results/…</code> resource reloads current records and rechecks the person's permissions, so a revoked role cannot be bypassed through an old link.</div>
+      <div class="callout" data-lang="zh" lang="zh-CN"><b>资源读取会重新检查权限。</b>已保存的文件是当时已交付的快照。读取 <code>badger://results/…</code> 资源会重新加载当前记录并重新检查人员权限，因此被撤销的角色无法通过旧链接绕过。</div>
+      <p class="note" data-lang="en">Separate bounds apply to service payloads, such as the 1 MiB drafting result, 18 MiB per Run report, and 256 KiB per Run event. Those are not the MCP envelope cap.</p>
+      <p class="note" data-lang="zh" lang="zh-CN">服务端载荷另有上限，例如起草结果 1 MiB、每次 Run 同步 18 MiB、每个 Run 事件 256 KiB。它们不是 MCP 信封上限。</p>
+
+      <h3 id="appendix-url"><span data-lang="en">A.7 What non-HTTPS on loopback means</span><span data-lang="zh" lang="zh-CN">A.7 回环地址上允许非 HTTPS 的含义</span></h3>
+      <p data-lang="en"><code>deploymentUrl()</code> in <code>packages/hosts/src/configuration.ts</code> accepts <code>https:</code> for any host, but <code>http:</code> only when the hostname is exactly <code>localhost</code>, <code>127.0.0.1</code>, or <code>[::1]</code>. Credentials in the URL, a query, or a fragment are always refused, and the MCP refuses redirects.</p>
+      <p data-lang="zh" lang="zh-CN"><code>packages/hosts/src/configuration.ts</code> 中的 <code>deploymentUrl()</code> 对任何主机接受 <code>https:</code>，但仅当主机名恰好是 <code>localhost</code>、<code>127.0.0.1</code> 或 <code>[::1]</code> 时才接受 <code>http:</code>。URL 中的凭据、查询串或片段一律拒绝，MCP 也拒绝重定向。</p>
+      <div class="table-wrap fit"><table class="data-table">
+        <thead><tr><th><span data-lang="en">URL</span><span data-lang="zh" lang="zh-CN">URL</span></th><th><span data-lang="en">Result</span><span data-lang="zh" lang="zh-CN">结果</span></th></tr></thead>
+        <tbody>
+          <tr><td><code>https://badger.example/team</code></td><td><span data-lang="en">Accepted</span><span data-lang="zh" lang="zh-CN">接受</span></td></tr>
+          <tr><td><code>http://localhost:8790</code></td><td><span data-lang="en">Accepted: loopback traffic never leaves the machine</span><span data-lang="zh" lang="zh-CN">接受：回环流量不离开本机</span></td></tr>
+          <tr><td><code>http://127.0.0.1:8790</code>, <code>http://[::1]:8790</code></td><td><span data-lang="en">Accepted</span><span data-lang="zh" lang="zh-CN">接受</span></td></tr>
+          <tr><td><code>http://192.168.1.10:8790</code></td><td><span data-lang="en">Refused: a network address needs TLS</span><span data-lang="zh" lang="zh-CN">拒绝：网络地址需要 TLS</span></td></tr>
+          <tr><td><code>https://user:pass@host</code></td><td><span data-lang="en">Refused: no credentials in the URL</span><span data-lang="zh" lang="zh-CN">拒绝：URL 中不得包含凭据</span></td></tr>
+        </tbody>
+      </table></div>
+      <p data-lang="en">The exception exists for local single-user mode and local test harnesses, where TLS adds no protection against network interception and would only require a certificate. It does <em>not</em> make loopback HTTP safe on a shared or compromised machine: the bearer token is still readable by anything running as that user, and the MCP process still holds it in its environment. HTTPS is required for every non-loopback deployment because the token and questionnaire content travel over the network. Browsers also treat <code>localhost</code> as a secure context, so <code>Secure</code> cookies still work there.</p>
+      <p data-lang="zh" lang="zh-CN">该例外服务于本地单用户模式和本地测试装置：TLS 在那里不能防止网络窃听，只会额外要求证书。它<em>并不</em>意味着在共享或被入侵的机器上回环 HTTP 是安全的：以该用户身份运行的任何程序仍能读取 bearer 令牌，MCP 进程也仍在环境中持有它。所有非回环部署都必须使用 HTTPS，因为令牌和问卷内容会经过网络。浏览器还把 <code>localhost</code> 视为安全上下文，因此 <code>Secure</code> Cookie 在那里仍然工作。</p>
+
+      <h3 id="appendix-credentials"><span data-lang="en">A.8 PAT, JWT, sessions, and related terms</span><span data-lang="zh" lang="zh-CN">A.8 PAT、JWT、会话及相关概念</span></h3>
+      <div class="table-wrap fit"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Term</span><span data-lang="zh" lang="zh-CN">术语</span></th><th><span data-lang="en">Definition in Badger</span><span data-lang="zh" lang="zh-CN">Badger 中的定义</span></th></tr></thead>
+        <tbody>
+          <tr><td><span data-lang="en">Principal</span><span data-lang="zh" lang="zh-CN">主体</span></td><td><span data-lang="en">The person a request acts as: issuer, subject, email, display name, verified flag, status. It grants no permission by itself.</span><span data-lang="zh" lang="zh-CN">请求所代表的人：issuer、subject、邮箱、显示名、验证标志、状态。它本身不授予权限。</span></td></tr>
+          <tr><td><span data-lang="en">Role binding</span><span data-lang="zh" lang="zh-CN">角色绑定</span></td><td><span data-lang="en">A durable grant on a Group or Workflow, such as Engineer or Field expert. Badger rechecks it on every request.</span><span data-lang="zh" lang="zh-CN">在 Group 或工作流上的持久授权，例如 Engineer 或 Field expert。Badger 每次请求都重新检查。</span></td></tr>
+          <tr><td><span data-lang="en">Scope</span><span data-lang="zh" lang="zh-CN">作用域</span></td><td><span data-lang="en">A PAT label, one or more of <code>engineer</code>, <code>expert</code>, <code>operator</code>. It narrows the token; it never adds a role.</span><span data-lang="zh" lang="zh-CN">PAT 的标签，取 <code>engineer</code>、<code>expert</code>、<code>operator</code> 之一或多个。它收窄令牌，绝不增加角色。</span></td></tr>
+          <tr><td><span data-lang="en">Capability</span><span data-lang="zh" lang="zh-CN">能力</span></td><td><span data-lang="en">A computed boolean set at <code>GET /api/v1/me/mcp</code>, used for MCP tool discovery. It is the intersection of roles and token scopes at read time.</span><span data-lang="zh" lang="zh-CN">在 <code>GET /api/v1/me/mcp</code> 计算的布尔集合，用于 MCP 工具发现。它是读取时角色与令牌作用域的交集。</span></td></tr>
+          <tr><td><span data-lang="en">PAT</span><span data-lang="zh" lang="zh-CN">PAT（个人访问令牌）</span></td><td><span data-lang="en">An opaque secret shaped <code>bdg_&lt;16 hex&gt;_&lt;43 base64url&gt;</code>. Only its SHA-256 hash is stored. Default lifetime 90 days, revocable, audited, 60 requests per minute.</span><span data-lang="zh" lang="zh-CN">形如 <code>bdg_&lt;16 hex&gt;_&lt;43 base64url&gt;</code> 的不透明密钥，只存 SHA-256 哈希。默认 90 天，可撤销、可审计，每分钟 60 次请求。</span></td></tr>
+          <tr><td><span data-lang="en">JWT</span><span data-lang="zh" lang="zh-CN">JWT</span></td><td><span data-lang="en">A signed claim set. The portal issues an HS256 token with <code>sub</code>, <code>email</code>, <code>jti</code>, <code>session_version</code>, and <code>exp</code>, defaulting to 480 minutes.</span><span data-lang="zh" lang="zh-CN">带签名的声明集合。门户签发 HS256 令牌，含 <code>sub</code>、<code>email</code>、<code>jti</code>、<code>session_version</code> 和 <code>exp</code>，默认 480 分钟。</span></td></tr>
+          <tr><td><span data-lang="en">Portal session</span><span data-lang="zh" lang="zh-CN">门户会话</span></td><td><span data-lang="en">The JWT in the <code>portal_auth_session</code> cookie: HttpOnly, Secure, SameSite=Strict. Its <code>jti</code> is checked against a central session row, so the portal can revoke it despite the stateless format.</span><span data-lang="zh" lang="zh-CN"><code>portal_auth_session</code> Cookie 中的 JWT：HttpOnly、Secure、SameSite=Strict。其 <code>jti</code> 会与中央会话行核对，因此尽管格式是无状态的，门户仍可撤销它。</span></td></tr>
+          <tr><td><span data-lang="en">Badger session</span><span data-lang="zh" lang="zh-CN">Badger 会话</span></td><td><span data-lang="en">Badger's own opaque session for local or OpenID Connect sign-in: 32 random bytes, stored hashed in <code>identity_sessions</code>, in the <code>badger_session</code> cookie, 8 hours by default.</span><span data-lang="zh" lang="zh-CN">Badger 自有的不透明会话，用于本地或 OpenID Connect 登录：32 个随机字节，以哈希形式存入 <code>identity_sessions</code>，放在 <code>badger_session</code> Cookie 中，默认 8 小时。</span></td></tr>
+          <tr><td><span data-lang="en">Bearer</span><span data-lang="zh" lang="zh-CN">Bearer</span></td><td><span data-lang="en">An HTTP authorization scheme, not a token type. Both a PAT and a portal JWT can be sent as a bearer.</span><span data-lang="zh" lang="zh-CN">HTTP 授权方案，不是令牌类型。PAT 与门户 JWT 都可以作为 bearer 发送。</span></td></tr>
+          <tr><td><span data-lang="en">Cookie</span><span data-lang="zh" lang="zh-CN">Cookie</span></td><td><span data-lang="en">A browser transport, not a credential type. It carries the portal JWT or Badger's opaque session.</span><span data-lang="zh" lang="zh-CN">浏览器传输方式，不是凭据类型。它承载门户 JWT 或 Badger 的不透明会话。</span></td></tr>
+          <tr><td><span data-lang="en">Agent host</span><span data-lang="zh" lang="zh-CN">Agent 宿主</span></td><td><span data-lang="en">A 1–200 character printable-ASCII label sent with every token request. It is audit and lease context, never a credential.</span><span data-lang="zh" lang="zh-CN">随每个令牌请求发送的 1–200 个可打印 ASCII 字符标签。它是审计与租约上下文，绝不是凭据。</span></td></tr>
+        </tbody>
+      </table></div>
+      <p data-lang="en"><b>PAT versus JWT.</b> A PAT is a <em>stateful credential</em>: the server looks up its hash and reads the person, scopes, expiry, revocation, and rate window from the database. A JWT is a <em>signed claim set</em>: identity can be verified from the signature, but the portal still consults a central session row and the user's session version, so revocation and forced re-login work. In this deployment's platform-session adapter, Badger does not trust portal JWT claims directly; it presents the cookie value to the platform's <code>/auth/me</code> and uses the answer to build a principal. An OpenID Connect adapter verifies the provider's token instead.</p>
+      <p data-lang="zh" lang="zh-CN"><b>PAT 与 JWT。</b>PAT 是<em>有状态凭据</em>：服务端查询其哈希，并从数据库读取人员、作用域、过期、撤销和速率窗口。JWT 是<em>带签名的声明集合</em>：身份可由签名验证，但门户仍会查询中央会话行和用户的 session version，因此撤销与强制重新登录仍然有效。在本部署的 platform-session 适配器中，Badger 不直接信任门户 JWT 的声明；它把 Cookie 值提交给平台的 <code>/auth/me</code>，再用返回结果构建主体。OpenID Connect 适配器则改为校验提供方的令牌。</p>
+      <p data-lang="en"><b>Why the MCP uses a PAT.</b> A non-browser Agent cannot complete an interactive sign-in, needs a credential a person can revoke per Agent, benefits from least-privilege scopes, and must be attributed in audits by token and host. A PAT provides all four. It deliberately cannot manage tokens, groups, or role bindings, and it cannot sign off; approval, acknowledgement, publication, and gate answers require a session-authenticated person.</p>
+      <p data-lang="zh" lang="zh-CN"><b>MCP 为什么使用 PAT。</b>非浏览器的 Agent 无法完成交互式登录；它需要一种可由人员按 Agent 撤销的凭据，需要最小权限作用域，并且必须在审计中按令牌和宿主归属。PAT 同时提供这四点。它被刻意限制为不能管理令牌、组或角色绑定，也不能签字；批准、确认、发布和门槛回答必须由会话认证的人员完成。</p>
+      <div class="callout" data-lang="en"><b>Effective permission = role ∩ scope.</b> A token with <code>engineer</code> scope held by a person without the Engineer role on that Workflow can read what the role allows, but cannot claim or submit that Workflow's jobs. Capabilities only describe this intersection; the server rechecks it on every call.</div>
+      <div class="callout" data-lang="zh" lang="zh-CN"><b>有效权限 = 角色 ∩ 作用域。</b>某人持有 <code>engineer</code> 作用域的令牌，但在该工作流上没有 Engineer 角色时，只能读取角色允许的内容，不能认领或提交该工作流的作业。能力只描述这个交集；服务端每次调用都会重新检查。</div>
+
+      <h3 id="appendix-transports"><span data-lang="en">A.9 stdio, SSE, and HTTP: trade-offs</span><span data-lang="zh" lang="zh-CN">A.9 stdio、SSE 与 HTTP：权衡</span></h3>
+      <p data-lang="en">The MCP specification has three common transports. Badger uses stdio only. The SDK it depends on (<code>@modelcontextprotocol/sdk</code> 1.32.2) also provides legacy HTTP+SSE and the current Streamable HTTP transport; Badger wires neither.</p>
+      <p data-lang="zh" lang="zh-CN">MCP 规范中有三种常见传输。Badger 只使用 stdio。它依赖的 SDK（<code>@modelcontextprotocol/sdk</code> 1.32.2）也提供旧的 HTTP+SSE 与当前的 Streamable HTTP 传输；Badger 都没有接入。</p>
+      <div class="table-wrap fit"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Transport</span><span data-lang="zh" lang="zh-CN">传输</span></th><th><span data-lang="en">How it works</span><span data-lang="zh" lang="zh-CN">工作方式</span></th><th><span data-lang="en">Strengths</span><span data-lang="zh" lang="zh-CN">优势</span></th><th><span data-lang="en">Costs</span><span data-lang="zh" lang="zh-CN">代价</span></th></tr></thead>
+        <tbody>
+          <tr><td><span data-lang="en">stdio (current)</span><span data-lang="zh" lang="zh-CN">stdio（当前）</span></td><td><span data-lang="en">The Agent spawns the MCP as a child process; JSON-RPC over stdin and stdout.</span><span data-lang="zh" lang="zh-CN">Agent 把 MCP 作为子进程启动；JSON-RPC 走 stdin 与 stdout。</span></td><td><span data-lang="en">No network listener; OS user isolation; direct local filesystem access; process lifetime tied to the Agent; works offline for local Run state.</span><span data-lang="zh" lang="zh-CN">无网络监听；操作系统用户隔离；可直接访问本地文件；进程生命周期与 Agent 绑定；本地 Run 状态可离线工作。</span></td><td><span data-lang="en">One process per Agent; Node must be installed and upgraded on every machine; unavailable to browser Agents; no cross-device sharing.</span><span data-lang="zh" lang="zh-CN">每个 Agent 一个进程；每台机器都要安装并升级 Node；浏览器 Agent 无法使用；不能跨设备共享。</span></td></tr>
+          <tr><td><span data-lang="en">HTTP+SSE (legacy)</span><span data-lang="zh" lang="zh-CN">HTTP+SSE（旧版）</span></td><td><span data-lang="en">A long-lived GET event stream plus a separate POST endpoint for client messages.</span><span data-lang="zh" lang="zh-CN">一个长期 GET 事件流，加上单独的客户端消息 POST 端点。</span></td><td><span data-lang="en">Central deployment; many clients; browser reachable; one upgrade point.</span><span data-lang="zh" lang="zh-CN">集中部署；多客户端；浏览器可达；单点升级。</span></td><td><span data-lang="en">Deprecated by the current spec; stateful connections; proxy buffering and reconnect problems; sticky sessions; per-user session mapping; a new internet-facing credential service.</span><span data-lang="zh" lang="zh-CN">已被当前规范弃用；有状态连接；代理缓冲与重连问题；粘性会话；需按用户映射会话；新增面向互联网的凭据服务。</span></td></tr>
+          <tr><td><span data-lang="en">Streamable HTTP (current)</span><span data-lang="zh" lang="zh-CN">Streamable HTTP（当前）</span></td><td><span data-lang="en">One endpoint accepting POST JSON-RPC, optionally upgrading to an SSE stream, stateful or stateless.</span><span data-lang="zh" lang="zh-CN">单一端点接收 POST JSON-RPC，可选升级为 SSE 流，可有状态或无状态。</span></td><td><span data-lang="en">Proxy-friendly; stateless mode possible; central deployment and upgrade; works for browser and remote Agents.</span><span data-lang="zh" lang="zh-CN">对代理友好；可无状态；集中部署与升级；适用于浏览器和远程 Agent。</span></td><td><span data-lang="en">Still a network service with per-user auth, tenant isolation, TLS, rate limits, and resource cleanup; latency and a new failure domain.</span><span data-lang="zh" lang="zh-CN">仍是网络服务，需要按用户认证、租户隔离、TLS、速率限制和资源清理；有额外延迟和新的故障域。</span></td></tr>
+        </tbody>
+      </table></div>
+      <p data-lang="en"><b>What does not change.</b> Badger's collaboration semantics live in server records, revisions, and person-only sign-offs. Questionnaire exchanges, suggestion review, approvals, publication, and gate answers would behave the same over any MCP transport. The transport changes only where the MCP process runs, and therefore where credentials, results, local files, and Run authority live.</p>
+      <p data-lang="zh" lang="zh-CN"><b>不变的部分。</b>Badger 的协作语义存在于服务端记录、修订和仅限人员的签字中。问卷往来、建议审阅、批准、发布和门槛回答在任何 MCP 传输下行为都相同。传输只改变 MCP 进程运行的位置，因而改变凭据、结果、本地文件和 Run 权威所在的位置。</p>
+      <p data-lang="en"><b>The hard blocker is local execution.</b> Drafting claims write a private folder with <code>context.json</code>, <code>job.json</code>, <code>instructions.md</code>, and pinned Skill files; uploads read a local folder; installation writes <code>~/.claude.json</code> or a project's <code>.mcp.json</code>; Runs read local Skills and write <code>.badger/runs/&lt;runId&gt;</code>. A shared SSE or HTTP MCP runs on the workstation and cannot see those laptop files. Moving those tools server-side would either remove them or require a local companion process, which recreates the stdio deployment in a more complex form.</p>
+      <p data-lang="zh" lang="zh-CN"><b>真正的硬约束是本地执行。</b>起草认领会写入包含 <code>context.json</code>、<code>job.json</code>、<code>instructions.md</code> 和固定 Skill 文件的私有目录；上传读取本地目录；安装写入 <code>~/.claude.json</code> 或项目的 <code>.mcp.json</code>；Run 读取本地 Skill 并写入 <code>.badger/runs/&lt;runId&gt;</code>。共享的 SSE 或 HTTP MCP 运行在工作站上，看不到这些笔记本文件。把这些工具移到服务端，要么删除它们，要么需要一个本地伴随进程，而后者只是以更复杂的形式重建了 stdio 部署。</p>
+      <p data-lang="en"><b>Credential custody and isolation.</b> stdio gives each person a separate process holding only that person's token. A shared HTTP MCP would hold many tokens or require per-request token passthrough (the MCP authorization model expects each client to present its own credential). It would need per-user session isolation, timeouts, memory and file quotas, and a way to keep one person's 8 KiB result files and Run state from leaking to another. The current <code>X-Badger-Agent-Host</code> label would identify the server rather than the person unless the real host were forwarded.</p>
+      <p data-lang="zh" lang="zh-CN"><b>凭据保管与隔离。</b>stdio 为每个人提供独立进程，只持有该人的令牌。共享 HTTP MCP 会持有许多令牌，或要求逐请求传递令牌（MCP 授权模型期望每个客户端出示自己的凭据）。它需要按用户隔离会话、超时、内存与文件配额，并防止一个人的 8 KiB 结果文件和 Run 状态泄露给另一个人。如果不转发真实宿主，现有的 <code>X-Badger-Agent-Host</code> 标签只会标识服务器，而不是人员。</p>
+      <p data-lang="en"><b>Availability and operations.</b> stdio keeps a Run recoverable during a service outage after one successful authorization check, because WorkflowRuntime is local. A remote MCP disappears with the service. Conversely, stdio requires Node, a built checkout, and a per-machine configuration on every laptop, which is awkward on Windows; a central transport removes that setup and allows browser-based Agents. SSE adds connection-state and proxy complexity that the current Streamable HTTP transport was designed to reduce.</p>
+      <p data-lang="zh" lang="zh-CN"><b>可用性与运维。</b>在一次成功的授权检查之后，stdio 能在服务中断期间继续本地恢复 Run，因为 WorkflowRuntime 在本地。远程 MCP 会随服务一起消失。反过来，stdio 要求每台笔记本都有 Node、构建产物和逐机配置，在 Windows 上尤其麻烦；集中传输免去这些设置，并支持浏览器 Agent。SSE 带来连接状态与代理复杂性，而当前的 Streamable HTTP 正是为减少这些复杂性而设计的。</p>
+      <div class="callout" data-lang="en"><b>Practical conclusion.</b> Keep stdio for person-local work, because the file, installer, and Run tools must execute next to the person's project. If a centrally reachable MCP is required, use the current Streamable HTTP transport with per-user credential passthrough and strict tenant isolation, keep a local companion for filesystem and WorkflowRuntime tools, and do not build new work on legacy HTTP+SSE.</div>
+      <div class="callout" data-lang="zh" lang="zh-CN"><b>实践结论。</b>面向个人的工作应保留 stdio，因为文件、安装器和 Run 工具必须执行在用户项目旁边。若确实需要集中可达的 MCP，应使用当前的 Streamable HTTP 传输，逐用户传递凭据并严格隔离租户，同时保留一个本地伴随进程负责文件系统与 WorkflowRuntime 工具；不要在新的工作中使用旧版 HTTP+SSE。</div>
+
+      <h4 id="appendix-streamable-http"><span data-lang="en">A.9.1 Streamable HTTP in plain English</span><span data-lang="zh" lang="zh-CN">A.9.1 用大白话解释 Streamable HTTP</span></h4>
+      <p data-lang="en">Think of stdio as a calculator on your desk: it starts when your Agent starts, lives in your user account, and can open files in your project. Streamable HTTP is a calculator website: one address that many people visit, run by someone else.</p>
+      <p data-lang="zh" lang="zh-CN">把 stdio 想成你桌上的计算器：Agent 启动时它才启动，活在你的用户账户里，能打开你项目里的文件。Streamable HTTP 则像一个计算器网站：一个地址，很多人访问，由别人运行。</p>
+      <p data-lang="en">Mechanically it is one URL, such as <code>https://badger.example/mcp</code>. The Agent sends each tool call there as an HTTP POST. The server may answer at once as normal JSON, or hold the response open as an event stream when it needs to send progress or ask the client something. In <em>stateful</em> mode the server gives the client a session ID and remembers it between calls; in <em>stateless</em> mode every request stands alone, which is simpler to scale but cannot push messages back to the client.</p>
+      <p data-lang="zh" lang="zh-CN">具体机制是一个 URL，例如 <code>https://badger.example/mcp</code>。Agent 把每次工具调用作为 HTTP POST 发过去。服务器可以立即用普通 JSON 回答，也可以在需要发送进度或反向询问客户端时，把响应保持为事件流。在<em>有状态</em>模式下，服务器给客户端一个会话 ID 并在调用之间记住它；在<em>无状态</em>模式下，每个请求彼此独立，扩展更简单，但无法向客户端推送消息。</p>
+      <div class="table-wrap fit"><table class="data-table">
+        <thead><tr><th><span data-lang="en">Benefit</span><span data-lang="zh" lang="zh-CN">好处</span></th><th><span data-lang="en">Concrete Badger example</span><span data-lang="zh" lang="zh-CN">具体的 Badger 例子</span></th><th><span data-lang="en">What it costs</span><span data-lang="zh" lang="zh-CN">代价</span></th></tr></thead>
+        <tbody>
+          <tr><td><span data-lang="en">One place to upgrade</span><span data-lang="zh" lang="zh-CN">单点升级</span></td><td><span data-lang="en">You fix a tool bug once on the server; every laptop gets it at the next connection. With stdio, each person must rebuild, relink, and fix their Windows path.</span><span data-lang="zh" lang="zh-CN">在服务器上修一次工具缺陷，所有笔记本下次连接就生效。用 stdio 则每个人都要重新构建、重新 link，并修 Windows 路径。</span></td><td><span data-lang="en">The MCP becomes another service to deploy, monitor, and keep available.</span><span data-lang="zh" lang="zh-CN">MCP 变成又一个要部署、监控、保持可用的服务。</span></td></tr>
+          <tr><td><span data-lang="en">No install on each laptop</span><span data-lang="zh" lang="zh-CN">笔记本无需安装</span></td><td><span data-lang="en">A managed Windows machine that cannot install Node just adds a URL and a token; a browser-based Agent can connect too.</span><span data-lang="zh" lang="zh-CN">不能安装 Node 的受管 Windows 机器只需填 URL 和令牌；浏览器 Agent 也能连接。</span></td><td><span data-lang="en">The server must authenticate every person and keep their sessions apart.</span><span data-lang="zh" lang="zh-CN">服务器必须认证每个人，并把他们的会话隔离开。</span></td></tr>
+          <tr><td><span data-lang="en">Central logging and policy</span><span data-lang="zh" lang="zh-CN">集中日志与策略</span></td><td><span data-lang="en">One place can log every tool call and apply a uniform tool allowlist.</span><span data-lang="zh" lang="zh-CN">一个地方可以记录每次工具调用，并统一执行工具白名单。</span></td><td><span data-lang="en">Credentials collect there too: see the token-custody risk below.</span><span data-lang="zh" lang="zh-CN">凭据也会汇集到那里：见下面的令牌保管风险。</span></td></tr>
+          <tr><td><span data-lang="en">Stable connections through proxies</span><span data-lang="zh" lang="zh-CN">更容易穿过代理</span></td><td><span data-lang="en">It is designed as one endpoint, so ordinary HTTP proxies and load balancers handle it better than the old two-endpoint SSE design.</span><span data-lang="zh" lang="zh-CN">它被设计成单一端点，普通 HTTP 代理和负载均衡器比旧的两端点 SSE 设计更容易处理。</span></td><td><span data-lang="en">Streaming responses can still be buffered or cut by proxies; sessions need affinity unless you go stateless.</span><span data-lang="zh" lang="zh-CN">流式响应仍可能被代理缓冲或截断；除非使用无状态模式，否则会话需要会话亲和。</span></td></tr>
+        </tbody>
+      </table></div>
+      <p data-lang="en"><b>Example 1: the token problem.</b> Suppose twenty engineers use Badger. With stdio, twenty processes each hold one person's PAT. If one laptop is compromised, one person's token leaks. With one shared MCP server, either the server stores all twenty tokens — one break-in leaks every token — or it forwards each caller's own <code>Authorization</code> header on every request, in which case each person still needs their own PAT configuration, and the server must be careful never to reuse one caller's token for another.</p>
+      <p data-lang="zh" lang="zh-CN"><b>例子一：令牌问题。</b>假设二十位工程师使用 Badger。用 stdio，二十个进程各自持有一个人的 PAT；一台笔记本被入侵，只泄露一个人的令牌。用一个共享 MCP 服务器时，要么服务器保存全部二十个令牌——一次入侵泄露所有令牌——要么把每个调用者自己的 <code>Authorization</code> 头逐请求转发；后者仍需每个人配置自己的 PAT，而且服务器必须确保绝不把一个人的令牌用于另一个人。</p>
+      <p data-lang="en"><b>Example 2: whose laptop claimed the job?</b> Job leases are bound to the person, token, Agent host, and lease ID. Over stdio, the service sees <code>X-Badger-Agent-Host: alice-laptop</code>. Behind one shared MCP, every claim looks like it came from <code>badger-mcp-1</code> unless the real device label is forwarded, so the Activity log and lease binding become less informative.</p>
+      <p data-lang="zh" lang="zh-CN"><b>例子二：作业是谁的笔记本认领的？</b>作业租约绑定人员、令牌、Agent 宿主和租约 ID。用 stdio，服务看到 <code>X-Badger-Agent-Host: alice-laptop</code>。在一个共享 MCP 后面，除非转发真实设备标签，否则每次认领看起来都来自 <code>badger-mcp-1</code>，活动日志和租约绑定的信息量随之下降。</p>
+      <p data-lang="en"><b>Example 3: files that are not on the server.</b> <code>claim_job</code> writes <code>context.json</code>, <code>instructions.md</code>, and the pinned Skills into a private folder on the machine running the MCP. The Agent then reads them with local file tools. If the MCP runs on a central server, the folder is on that server, and the laptop Agent cannot open it without a download step. The same applies to <code>upload_attachment</code> reading <code>~/Documents/answer.pdf</code>, <code>install_workflow</code> writing the laptop's <code>.mcp.json</code>, and <code>start</code>/<code>next</code>/<code>submit</code> working with a local project's Skill files and <code>.badger/runs/&lt;runId&gt;</code>.</p>
+      <p data-lang="zh" lang="zh-CN"><b>例子三：文件不在服务器上。</b><code>claim_job</code> 把 <code>context.json</code>、<code>instructions.md</code> 和固定的 Skill 写入运行 MCP 的那台机器上的私有目录，Agent 再用本地文件工具读取。如果 MCP 跑在中央服务器上，目录就在服务器上，笔记本 Agent 不经过下载步骤就打不开。同理：<code>upload_attachment</code> 读的是 <code>~/Documents/answer.pdf</code>，<code>install_workflow</code> 写的是笔记本的 <code>.mcp.json</code>，<code>start</code>/<code>next</code>/<code>submit</code> 用的是本地项目的 Skill 文件和 <code>.badger/runs/&lt;runId&gt;</code>。</p>
+      <p data-lang="en"><b>Example 4: the Run cannot move.</b> A Run executes in the local WorkflowRuntime, and that runtime is the only authority for recovery. A central MCP could drive a Run whose project files also live centrally, but it cannot drive Alice's Run in Alice's project. If the central server is down, nobody can even list tools; with stdio, a Run can keep going through a service outage after one successful authorization check, queuing events locally.</p>
+      <p data-lang="zh" lang="zh-CN"><b>例子四：Run 搬不走。</b>Run 在本地 WorkflowRuntime 中执行，而该运行时是恢复的唯一权威。中央 MCP 可以驱动项目文件也在中央的 Run，但无法驱动 Alice 项目里的 Alice 的 Run。中央服务器一旦宕机，连工具列表都拿不到；用 stdio，则在一次成功授权检查之后，Run 能在服务中断期间继续，并把事件排队在本地。</p>
+      <p data-lang="en"><b>Example 5: two people, one process.</b> One shared server handles Alice and Bob at the same time. A bug that mixes their session state could show Bob Alice's questionnaire draft, or leave Alice's 8 KiB result file where Bob can read it. stdio avoids this class of bug because the operating system already separates two users' processes. A shared server must implement that separation itself, plus per-user timeouts, quotas, and cleanup.</p>
+      <p data-lang="zh" lang="zh-CN"><b>例子五：两个人，一个进程。</b>一个共享服务器同时服务 Alice 和 Bob。若会话状态串了，Bob 可能看到 Alice 的问卷草稿，或读到 Alice 的 8 KiB 结果文件。stdio 天然避免这类缺陷，因为操作系统已经分隔了两个用户的进程。共享服务器必须自己实现这种隔离，以及按用户的超时、配额和清理。</p>
+      <p data-lang="en"><b>Example 6: an extra hop for big payloads.</b> A 50 MB Skill upload from a laptop to a central MCP then to the Badger service crosses the network twice. With stdio it goes straight from the laptop to the service. Streaming also keeps a response open, so a proxy with a short idle timeout can cut a long-running tool call.</p>
+      <p data-lang="zh" lang="zh-CN"><b>例子六：大载荷多一跳。</b>从笔记本上传 50 MB 的 Skill 到中央 MCP，再转到 Badger 服务，网络要传两遍。用 stdio 则从笔记本直接到服务。流式响应还会保持连接打开，空闲超时较短的代理可能中断长时间运行的工具调用。</p>
+      <div class="callout" data-lang="en"><b>Where it fits.</b> Streamable HTTP is a good fit for read-only or API-only tools that need no local files: <code>whoami</code>, <code>inbox</code>, <code>my_questions</code>, questionnaire answers typed in the chat, and read-only Run status. It is a poor fit for claiming jobs, uploading local files, installing into local Agent configuration, and driving a Run in a local project. Those need a process next to the person's files, which is exactly what stdio provides.</div>
+      <div class="callout" data-lang="zh" lang="zh-CN"><b>适用边界。</b>Streamable HTTP 适合不需要本地文件的只读或纯 API 工具：<code>whoami</code>、<code>inbox</code>、<code>my_questions</code>、在对话中直接输入的问卷回答，以及只读的 Run 状态。它不适合认领作业、上传本地文件、写入本地 Agent 配置，以及在本地项目中驱动 Run。这些都需要一个紧挨着用户文件的进程，而这正是 stdio 提供的。</div>
+
+      <h3 id="appendix-examples"><span data-lang="en">A.10 Worked examples and the boundaries</span><span data-lang="zh" lang="zh-CN">A.10 完整示例与边界</span></h3>
+      <div class="two-col">
+        <article class="card"><h4><span data-lang="en">Expert answers a question</span><span data-lang="zh" lang="zh-CN">专家回答问题</span></h4><p data-lang="en"><code>my_questions</code> reads assigned questions, own drafts, and comments. The Agent drafts only from what the expert said. <code>save_answer</code> writes a private draft with the revision just read; <code>submit_answer</code> validates it against the current question revision and records the Agent host. Resolution and acknowledgement stay with people.</p><p data-lang="zh" lang="zh-CN"><code>my_questions</code> 读取指派的问题、自己的草稿和评论。Agent 只根据专家说的内容起草。<code>save_answer</code> 用刚读到的修订写入私有草稿；<code>submit_answer</code> 按当前问题修订校验，并记录 Agent 宿主。解析与确认仍由人员完成。</p></article>
+        <article class="card"><h4><span data-lang="en">Engineer drafts suggestions</span><span data-lang="zh" lang="zh-CN">工程师起草建议</span></h4><p data-lang="en">A person requests drafting in the dashboard. <code>claim_job</code> leases the exact job for 30 minutes and writes the private folder. The Agent writes <code>result.json</code> against the reloaded schema; <code>submit_job</code> stores suggestions. A person reviews edits and accepts; the MCP has no accept tool.</p><p data-lang="zh" lang="zh-CN">人员在仪表盘请求起草。<code>claim_job</code> 精确租用该作业 30 分钟并写入私有目录。Agent 按重新加载的 schema 写 <code>result.json</code>；<code>submit_job</code> 保存建议。人员审阅修改后接受；MCP 没有接受工具。</p></article>
+        <article class="card"><h4><span data-lang="en">Operator runs a package</span><span data-lang="zh" lang="zh-CN">Operator 运行软件包</span></h4><p data-lang="en"><code>status</code> returns external-root requirements; the person confirms them. <code>start</code> installs the verified publication and starts the local runtime. <code>next</code> and <code>submit</code> advance Nodes. Events mirror to the service; a human gate is answered in the dashboard and pulled back on the next <code>status</code>.</p><p data-lang="zh" lang="zh-CN"><code>status</code> 返回外部根目录要求；人员确认后，<code>start</code> 安装已校验的发布并启动本地运行时。<code>next</code> 与 <code>submit</code> 推进 Node。事件同步到服务；人工门槛在仪表盘回答，并在下一次 <code>status</code> 时取回。</p></article>
+        <article class="card"><h4><span data-lang="en">Two machines, one service</span><span data-lang="zh" lang="zh-CN">两台机器，一个服务</span></h4><p data-lang="en">The laptop MCP and workstation MCP share records through the service and nothing else. Each holds its own token and writes its own audit host. Neither can recover the other's Run.</p><p data-lang="zh" lang="zh-CN">笔记本 MCP 与工作站 MCP 只通过服务共享记录，除此之外没有联系。各自持有自己的令牌并写入自己的审计宿主。任何一方都无法恢复另一方的 Run。</p></article>
+      </div>
+      <div class="callout" data-lang="en"><b>What never crosses.</b> A token never enters a configuration value, command argument, preview, or source control. An Agent never invents an expert's answer and never signs off. Approval, acknowledgement, publication, and gate answers are session-only. Real or patient data is never uploaded as an example or attachment. The service never executes a Run, and the MCP never decides runtime legality by itself. Drawings, fixtures, and attachments stay synthetic.</div>
+      <div class="callout" data-lang="zh" lang="zh-CN"><b>永不跨越的边界。</b>令牌绝不进入配置值、命令参数、预览或版本控制。Agent 绝不编造专家回答，也绝不签字。批准、确认、发布与门槛回答只接受会话。真实或患者数据绝不作为示例或附件上传。服务从不执行 Run，MCP 也从不自行决定运行时合法性。图表、测试夹具与附件保持合成数据。</div>
+      <p class="note" data-lang="en">The compatibility table for Claude Code, Codex, and WorkBuddy remains separate in <code>packages/mcp/README.md</code>; an SDK client proves protocol behavior, not an application's support.</p>
+      <p class="note" data-lang="zh" lang="zh-CN">Claude Code、Codex 与 WorkBuddy 的兼容性表仍单独维护在 <code>packages/mcp/README.md</code>；SDK 客户端证明的是协议行为，不是具体应用的支持情况。</p>
     </section>
   </main>
 </div>
