@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from "vitest";
+import { canonicalHash } from "@realityjunky/badger";
 import {
   startTestService,
   type TestService,
@@ -135,6 +136,86 @@ const question = (text = "How is the sample stored?") => ({
   evidence: [],
   assignees: [{ kind: "role", role: "Field expert" }],
   priority: 10,
+});
+
+it("identifies the latest saved draft for legacy clients without replacing the original submission", async () => {
+  const { base, questionnaire, secret, round } = await setup();
+  const { job } = await request(
+    base,
+    "POST",
+    {
+      kind: "draft-questions",
+      roundId: round.id,
+      confirmed: true,
+    },
+    undefined,
+    engineer,
+    201,
+  );
+  const original = { questions: [question("Original question")] };
+  const revised = {
+    questions: [question("Revised question from result.json")],
+  };
+  const firstClaim = await request(
+    `${base}/${job.id}/claim`,
+    "POST",
+    {
+      revision: job.revision,
+    },
+    secret,
+  );
+  const first = await request(
+    `${base}/${job.id}/submit`,
+    "POST",
+    {
+      leaseId: firstClaim.job.lease.id,
+      contextHash: job.contextHash,
+      result: original,
+    },
+    secret,
+  );
+  const nextClaim = await request(
+    `${base}/${job.id}/claim`,
+    "POST",
+    {
+      revision: first.job.revision,
+    },
+    secret,
+  );
+  const saved = await request(
+    `${base}/${job.id}/submit`,
+    "POST",
+    {
+      leaseId: nextClaim.job.lease.id,
+      contextHash: job.contextHash,
+      result: revised,
+    },
+    secret,
+  );
+  expect(saved.savedDraft).toMatchObject({
+    resultHash: canonicalHash(revised),
+    resultPath: "job.review.result",
+    revision: saved.job.revision,
+    claimRetained: false,
+    legacySubmission: true,
+  });
+  expect(saved.message).toMatch(/update.*MCP/iu);
+  expect(saved.job).toMatchObject({
+    status: "submitted",
+    result: original,
+    resultHash: canonicalHash(original),
+    currentResultHash: canonicalHash(revised),
+    currentResultPath: "review.result",
+    review: { result: revised, resultHash: canonicalHash(revised) },
+  });
+  const listed = await request(base, "GET", undefined, secret);
+  const current = await request(`${base}/${job.id}`, "GET", undefined, secret);
+  for (const read of [listed.jobs[0], current.job])
+    expect(read).toMatchObject({
+      currentResultHash: canonicalHash(revised),
+      currentResultPath: "review.result",
+    });
+  expect((await request(questionnaire)).questions).toEqual([]);
 });
 
 it("keeps the remote session's claim across successive suggestion submissions", async () => {

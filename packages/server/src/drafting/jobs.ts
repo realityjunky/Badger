@@ -104,6 +104,13 @@ export function publicDraftingJob(row: DraftingJobRow) {
     parentQuestionId: row.parent_question_id,
     requesterId: row.requester_id,
     contextHash: row.context_hash,
+    currentResultHash: row.review_hash ?? row.result_hash,
+    currentResultPath:
+      row.review_result !== null
+        ? "review.result"
+        : row.result !== null
+          ? "result"
+          : null,
     promptTemplate: row.context_bundle.promptTemplate
       ? {
           id: row.context_bundle.promptTemplate.id,

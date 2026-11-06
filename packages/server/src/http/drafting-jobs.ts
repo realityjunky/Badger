@@ -387,7 +387,32 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
             : action === "renew"
               ? await renewDraftingJob(tx, deps, job)
               : await releaseDraftingJob(tx, deps, actor, job);
-      return { status: 200, value: { job: publicDraftingJob(updated) } };
+      const publicJob = publicDraftingJob(updated);
+      if (action === "submit") {
+        const resultPath = `job.${publicJob.currentResultPath}`;
+        const legacySubmission = body.keepClaim !== true;
+        return {
+          status: 200,
+          value: {
+            savedDraft: {
+              resultHash: publicJob.currentResultHash,
+              resultPath,
+              revision: updated.revision,
+              claimRetained: updated.status === "claimed",
+              legacySubmission,
+            },
+            message: [
+              `The latest draft was saved at ${resultPath}, with hash ${publicJob.currentResultHash}.`,
+              "job.result and job.resultHash preserve the first submission. Use job.currentResultHash and job.currentResultPath to verify later drafts.",
+              legacySubmission
+                ? "This request omitted keepClaim: true and released the claim. Update and restart the local Badger MCP to retain claims across submissions and use finish_job. Releasing a saved draft keeps its suggestions available for review."
+                : "The claim remains active for follow-up changes. Call finish_job only when the person says the drafting session is finished.",
+            ].join(" "),
+            job: publicJob,
+          },
+        };
+      }
+      return { status: 200, value: { job: publicJob } };
     }
     if (context.credential.kind === "token")
       throw new RequestError(

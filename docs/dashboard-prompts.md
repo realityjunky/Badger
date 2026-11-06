@@ -79,6 +79,15 @@ saved suggestions. While claimed, other dashboard edits, decisions and claims
 are blocked. An unclaimed suggestion's **Copy Agent prompt** starts another
 session from the latest saved edits. Accepted jobs require new drafting work.
 
+An already-running local MCP keeps its old behavior until it is updated and
+restarted. Confirm that `finish_job` appears before starting an iterative
+session. A submit receipt identifies legacy submit-and-release requests.
+Check `savedDraft.resultHash` and `job.currentResultHash`, and read the content
+at `job.currentResultPath` (`review.result` for revisions). The original
+`job.result` and `job.resultHash` remain unchanged intentionally. Releasing a
+saved claim keeps the suggestions available; never submit probes to a real
+job to test whether a save worked.
+
 A claim carries the same method when an Agent starts directly through MCP
 without a copied prompt. Claiming creates the private local evidence folder;
 it does not authorize host-wide Skill discovery or writes to service-host paths.

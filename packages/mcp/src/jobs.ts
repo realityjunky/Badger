@@ -36,7 +36,10 @@ interface ClaimedJob {
   outputSchema: object;
   lease: { id: string; until: string };
   result: unknown;
-  review: { result: unknown } | null;
+  resultHash: string | null;
+  currentResultHash?: string | null;
+  currentResultPath?: string | null;
+  review: { result: unknown; resultHash: string } | null;
 }
 interface LocalClaim extends JobInput {
   url: string;
@@ -315,21 +318,45 @@ export async function finishJob(
         );
     }
   }
-  const response = await api.request<{ job: ClaimedJob }>(
-    `${jobsPath(input)}/${input.jobId}/${action}`,
-    "POST",
-    {
-      leaseId: claim.leaseId,
-      contextHash: claim.contextHash,
-      ...(revision === undefined ? {} : { revision }),
-      ...(action === "submit" ? { result, keepClaim: true } : {}),
-    },
-  );
-  if (action !== "submit") sessions.forget(session);
+  const response = await api.request<{
+    job: ClaimedJob;
+    savedDraft?: {
+      resultHash: string | null;
+      resultPath: string;
+      revision: number;
+      claimRetained: boolean;
+      legacySubmission: boolean;
+    };
+  }>(`${jobsPath(input)}/${input.jobId}/${action}`, "POST", {
+    leaseId: claim.leaseId,
+    contextHash: claim.contextHash,
+    ...(revision === undefined ? {} : { revision }),
+    ...(action === "submit" ? { result, keepClaim: true } : {}),
+  });
+  if (action !== "submit" || response.job.status !== "claimed")
+    sessions.forget(session);
+  const { savedDraft: serverSavedDraft, ...jobResponse } = response;
+  const savedDraft =
+    action === "submit"
+      ? {
+          ...(serverSavedDraft ?? {
+            resultHash:
+              response.job.currentResultHash ??
+              response.job.review?.resultHash ??
+              response.job.resultHash,
+            resultPath: `job.${response.job.currentResultPath ?? (response.job.review ? "review.result" : "result")}`,
+            revision: response.job.revision,
+            claimRetained: response.job.status === "claimed",
+            legacySubmission: false,
+          }),
+          submittedResultHash: canonicalHash(result),
+        }
+      : undefined;
   return action !== "release"
     ? {
-        ...(response as object),
-        requiresPerson: action === "finish",
+        ...(savedDraft ? { savedDraft } : {}),
+        ...jobResponse,
+        requiresPerson: response.job.status === "submitted",
         dashboardUrl:
           response.job.kind === "authoring-lane" ||
           response.job.kind === "review-vote"
@@ -339,7 +366,7 @@ export async function finishJob(
               : `${api.url}/questionnaire?workflow=${encodeURIComponent(input.workflowId)}&version=${encodeURIComponent(input.versionId)}&panel=suggestions`,
         message:
           action === "submit"
-            ? "Suggestions saved. This MCP session keeps the job claimed for follow-up changes. Edit result.json and call submit_job again as needed. Call finish_job only when the person says the drafting session is finished; then dashboard editing and other claims become available."
+            ? `The latest draft was saved with hash ${savedDraft!.resultHash} at ${savedDraft!.resultPath}. job.result and job.resultHash preserve the first submission; use job.currentResultHash and job.currentResultPath for the current draft. ${savedDraft!.claimRetained ? "This MCP session keeps the job claimed for follow-up changes. Edit result.json and call submit_job again as needed. Call finish_job only when the person says the drafting session is finished." : "The claim was released. Update and restart the local Badger MCP before continuing an iterative drafting session."}`
             : "The drafting session is finished. A person can review and edit the suggestions in the dashboard, or claim the job again with an Agent. Only a person can accept or discard them.",
       }
     : response;

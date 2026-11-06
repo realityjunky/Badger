@@ -23,7 +23,7 @@ export function engineerTools(api: BadgerApi, sessions: LocalDraftingSessions) {
     ),
     tool(
       "list_jobs",
-      "List drafting jobs for a workflow version, including queued work and submitted suggestions.",
+      "List drafting jobs and their current suggestions. Read currentResultHash and currentResultPath for the latest saved draft. result and resultHash preserve the immutable first submission; later edits are in review.result and review.resultHash. Never diagnose a failed update by comparing only the original resultHash.",
       context,
       (args) => api.request(jobsPath(args)),
       "compose",
@@ -38,7 +38,7 @@ export function engineerTools(api: BadgerApi, sessions: LocalDraftingSessions) {
     ),
     tool(
       "submit_job",
-      "Validate and save result.json as suggestions while keeping this session's exclusive claim. Repeat for follow-up changes. Do not finish automatically after submitting; wait until the user says the drafting session is finished. A person accepts suggestions separately in the dashboard.",
+      "Read, validate and save result.json while keeping this session's claim. savedDraft reports the stored hash, content path and claim state; submittedResultHash identifies the parsed file sent. Original result/resultHash stay unchanged; later drafts are in job.review.result with job.currentResultHash. Repeat for follow-up changes and wait for the user before finish_job. A person accepts separately in the dashboard.",
       folder,
       (args) => finishJob(api, args, "submit", sessions),
       "compose",

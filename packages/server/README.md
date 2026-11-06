@@ -778,8 +778,17 @@ Signed-in workflow Engineers, Field experts, and Administrators can read
 questionnaire drafting jobs and save shared suggestion edits with
 `POST V/drafting-jobs/:id/review` and `{revision, result}`. The public job's
 `review` holds the saved result, hash, editor, timestamp, and saved revision;
-`result` and `resultHash` retain the original Agent submission. Each save
-appends immutable history and advances the job revision. Concurrent or stale
+`result` and `resultHash` retain the original Agent submission. Every public job
+also exposes `currentResultHash` and `currentResultPath`.
+Follow that path (`review.result` after an edit, otherwise `result`) to inspect
+the current suggestions; a stable original `resultHash` does not imply a failed
+save. The submit response's `savedDraft` receipt gives the saved hash, result
+path, job revision and whether the claim remains active. A legacy submission
+without `keepClaim: true` is identified explicitly and instructs the caller to
+update/build and restart its local MCP for iterative drafting. Releasing a
+claim preserves all saved suggestions.
+
+Each save appends immutable history and advances the job revision. Concurrent or stale
 saves return 409. Saving never accepts records or completes the submission's
 inbox item. Field experts cannot request, claim, submit, or decide jobs, and
 their job lists exclude plan and Authoring jobs. Suggestion review and editing

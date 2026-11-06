@@ -300,11 +300,28 @@ it("uploads a scripted Skill without declarations and drafts effects from the ha
   });
   expect(revised).toMatchObject({
     requiresPerson: false,
+    savedDraft: {
+      resultHash: canonicalHash(revisedResult),
+      submittedResultHash: canonicalHash(revisedResult),
+      resultPath: "job.review.result",
+      claimRetained: true,
+      legacySubmission: false,
+    },
     job: {
       status: "claimed",
       result: submitted.job.result,
       review: { result: revisedResult },
     },
+  });
+  const listed = await call(client, "list_jobs", {
+    workflowId: workflow.id,
+    versionId: version.id,
+  });
+  expect(
+    listed.jobs.find((entry: { id: string }) => entry.id === job.id),
+  ).toMatchObject({
+    currentResultHash: canonicalHash(revisedResult),
+    currentResultPath: "review.result",
   });
   const finished = await call(client, "finish_job", {
     ...context,
