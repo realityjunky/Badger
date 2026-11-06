@@ -1,95 +1,152 @@
-# Dashboard prompts and questionnaire discovery
+# Dashboard prompts
 
-Badger's dashboard supplies stage instructions through the server and Badger
-MCP. A person needs their Agent and a configured MCP connection, without
-installing a dedicated questionnaire Skill. The existing CLI Skill remains a
-separate, older flow; it is not loaded by these tasks.
+Badger supplies stage instructions through its server and the connected Badger
+MCP. A person needs an Agent host and an authorized MCP connection; dashboard
+jobs do not require installing a separate questionnaire Skill or configuring a
+server-side model provider. The CLI questionnaire Skill remains a separate flow.
 
-## From the questionnaire Skill to staged work
+For the human workflow, start with the [dashboard guide](dashboard-guide.md).
+For tool names, claim folders and profiles, use the [MCP reference](../packages/mcp/README.md).
 
-| Essential method | Scenario and stage | Available context | Result and sign-off |
-| --- | --- | --- | --- |
-| Read inventoried evidence before interpreting a Skill | Engineer-dispatched Source study | One complete pinned Skill, existing findings, script-effect contract | Source facts and effect suggestions; Engineer acceptance and uploader confirmation remain distinct |
-| Discover only unresolved workflow meaning; prioritize one idea per question | Engineer-dispatched Questionnaire questions and follow-ups | All pinned Skills, accepted findings, workflow frame, submitted answers, ledger, concerns and readiness | Suggested questions for a selected draft round; Engineer acceptance and round publication are separate |
-| Compare the producer's output contract with the consumer's input contract | Questionnaire discovery | Both pinned Skills and their evidence | Compatibility evidence plus questions about mismatches, transformations and decisions |
-| Preserve partial knowledge and uncertainty | Agent-assisted answers | Assigned question, requested answer type, person's own draft and explanation | Draft or submitted answer at that person's request |
-| Keep confirmed facts, source facts, inferences, assumptions and questions distinct | Manual suggestion review in the dashboard | Latest shared result, original submission, schema and source evidence | Human-saved review revision; Engineer accepts separately |
-| Restate faithfully with exact provenance | Engineer-dispatched restatements | Current submitted answer revisions | Proposed facts; Engineer confirmation and answering person's acknowledgement |
-| Check every semantic topic and Node responsibility against ledger facts | Dossier and plan review | Current dossier, ledger, pinned sources and kernel findings | Workflow-owner approval of exact versions |
-| Preserve bounded responsibilities, evidence and dependency hashes | Package Authoring and review | Kernel lane handoffs and accepted dependencies | Proposed lane outputs; human acceptance, assembly, evaluation and publication |
+## Instruction and data boundaries
 
-The first three methods come from `SKILL.md`'s evidence, exchange and
-completeness sections. `reference/source-study.md` contributes incremental
-source reading, per-script coverage, uncertainty and separate uploader review.
-`reference/semantic-dossier.md` contributes the five categories, topic coverage,
-fact provenance, Node responsibilities, explicit deferrals and consistent goals.
-The CLI's project search, filesystem handoff and automatic first-use behavior
-are intentionally absent from dashboard prompts.
+Every Agent job combines three inputs:
+
+1. **Kernel rules** establish evidence handling, bounded scope, output-language
+   instructions, conflict handling and the people-only review/sign-off boundary.
+2. **A template snapshot** describes the stage's method, audience, dependencies,
+   output and completion criteria. Administrators can revise template bodies.
+3. **Bound task data** identifies the workflow/version, target, revisions,
+   context hash, output schema and supplied evidence. Names, source files,
+   answers and comments are data, not instructions to override the task.
+
+Prompts do not grant permissions. The server still checks roles, token scopes,
+leases, revisions, evidence, schemas and confirmation hashes. The kernel remains
+the authoring and runtime authority.
+
+## Output language
+
+The copied dispatch prompt, claim's `instructions.md`, and job metadata expose
+`outputLocale`. Ordinary drafting uses the job's bound Workflow version locale;
+`translate-question` uses its explicit target locale. A later edit to the
+workflow's future frame, another person's interface language, or English source
+files does not change that target.
+
+For `zh-CN`, generated statements, questions, rationales, conditional behavior,
+uncertainty and review summaries use Simplified Chinese. Schema keys and enum
+values, identifiers, file paths, hashes, code, commands and verbatim citations
+retain their exact forms. Check the language of every item before submission.
+An answer-assistance task preserves the person's requested language and words.
+Formal Skills, their references, tests and package documentation retain their
+required English language; the locale applies to review narrative and workflow
+records around those artifacts.
+
+Templates themselves are English processing instructions. Their language does
+not select the language of generated records. Changing a personal interface
+setting also does not translate stored suggestions or accepted records. An
+incorrect-language draft needs a new Agent draft or an authorized person's
+manual edits; the service does not silently rewrite it.
+
+The per-task language instruction is derived from the already-bound task,
+including when an older template snapshot omits language guidance. This does
+not mutate that snapshot, the original Agent submission or its context hash.
+
+## Dispatch, claim and submit
+
+1. Select the intended Workflow version and confirm its locale and pinned
+   sources. Create a draft round first when the drafting kind requires one.
+2. Request drafting, or create a round with **Queue question drafting for this
+   round** selected. Plan and Authoring jobs use their own stage panels.
+3. Copy the queued job's **Copy Agent prompt** text into the Agent connected to
+   this deployment. The short text carries exact claim identifiers, revision,
+   context hash, output locale and MCP steps. A copy failure opens a manual-copy
+   dialog.
+4. The Agent claims that exact job and reads `instructions.md`, `job.json`,
+   `context.json`, `output-schema.json`, any bounded `inputs/`, and the supplied
+   pinned files. It reads source code as evidence and never executes it.
+5. The Agent writes `result.json`, checks the complete result's schema, target
+   IDs, citations, language and scope, then calls `submit_job` for that claim.
+6. The Agent returns the dashboard review link. People edit and decide on the
+   submitted suggestions; submission itself completes no human gate.
+
+A claim carries the same method when an Agent starts directly through MCP
+without a copied prompt. Claiming creates the private local evidence folder;
+it does not authorize host-wide Skill discovery or writes to service-host paths.
+
+On a changed revision, cancelled job, expired lease or denied access, read the
+current record and report the conflict. Preserve any useful local draft for
+human reconciliation. Do not silently claim a replacement job, overwrite a
+newer result or repeat a confirmation with different contents.
+
+## Stage methods and completion
+
+| Task                     | Read first                                                                                                        | Draft and check                                                                                                                   | Human handoff                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Source study             | One pinned Skill's complete inventory, scripts and invoked helpers, existing findings, and script-effect contract | Independently reviewable facts; per-script effects with evidence, conditional modes and explicit uncertainty; `interfaces: []`    | Engineer accepts useful facts; original uploader separately confirms declarations            |
+| Questions and follow-ups | All supplied Skills, current Ledger/readiness, prior questions, submitted answers, concerns and selected round    | High-value unresolved questions, one decision per question, existing target/assignee IDs, suitable answer types and no duplicates | Engineer reviews, accepts into the draft round, then separately publishes it                 |
+| Open-question import     | Target Skill's explicit questions and original numbers, previous imports and selected round                       | Relevant existing questions with immutable provenance, translated faithfully into the target locale                               | Engineer accepts unpublished draft Questions                                                 |
+| Answer assistance        | Current assigned Question, answer format and this person's private draft                                          | Elicit the person's knowledge; preserve partial answers, uncertainty, values and attachments                                      | Save or submit only at that person's request; acknowledgement stays separate                 |
+| Restatement              | Selected Question and exact latest submitted answer revisions                                                     | Faithful, attributed facts; preserve qualifications and disagreements                                                             | Engineer confirms; answering people acknowledge or dispute                                   |
+| Translation              | Exact source Question revision and explicit target locale                                                         | Question and rationale with unchanged meaning, technical values and uncertainty                                                   | Engineer accepts a translation without replacing canonical text                              |
+| Plan                     | Approved dossier, supporting Ledger facts, kernel planning input, skeleton and schema                             | Complete candidate with bounded Nodes, contracts, routes, guardrails and recovery; named gaps remain unresolved                   | Plan/proposal approvals, initialization and generation remain separate                       |
+| Authoring lane           | Kernel handoff, approved inputs and exact accepted dependencies                                                   | Only assigned claims and owned leaves; inline artifacts, required evidence and schema checks                                      | Engineer accepts the exact output; missing context and blockers are resolved before assembly |
+| Review vote              | Accepted lane records, assembled package, dossier, plan and review handoff                                        | Specific, evidenced findings and blockers with current dependency hashes                                                          | A person accepts the proposed review; an Agent vote grants no approval                       |
+
+Sources, Dossier, Evaluation and Review/publication also have human-review
+templates. Their **Review guidance** explains what the authorized person checks;
+it does not create additional Agent tools or bypass a current confirmation.
+
+## Review submitted suggestions personally
+
+Engineers and Field experts use **Review suggestions** in the dashboard. Source
+results have **Statements** and **Script effect review** main tabs, each with
+numbered item tabs. Saving shared edits retains the original submission and
+appends review history; it does not accept records, confirm declarations or
+publish a round.
+
+A competing save returns a revision conflict. Reopen the current result and
+reconcile local edits. The Engineer separately uses **Review decisions** to
+preview the latest saved batch, then accepts it or discards it with a reason.
+A later save invalidates an earlier decision preview.
+
+Agent-assistance prompts and MCP tools for editing submitted suggestions are
+unavailable. Personal access tokens cannot save shared review edits. Agents may
+assist with a person's own assigned answer, but submitted suggestion review and
+all sign-offs remain dashboard work.
+
+## Source study, effects and interfaces
+
+Source study records one Skill's existing behavior and input/output contracts.
+Its legacy `interfaces` compatibility field must be empty. Questionnaire
+discovery can read both producer and consumer Skills and ask about mismatches,
+transformations and decisions. Choosing an adapter or a connection remains
+workflow meaning for people to confirm.
+
+Historical submitted suggestions may contain legacy interfaces. Reviewers can
+remove that section before saving and accepting useful facts. Previously
+accepted records retain their history and can be corrected or retired through
+Source study controls.
+
+The initial effect proposal sent to the original uploader uses saved review
+edits. An existing routed review is preserved on repeated sends; clarification
+and correction retain their own history. See [Script effect review](script-effect-review.md).
 
 ## Manage templates
 
 Administrators open **Admin → Prompt templates**. Eight stage tabs list Agent
-drafting, Agent assistance and human-review templates with their roles, required
-context, expected output and revision. Edit, review the exact proposed text,
-then confirm and save. History retains earlier saved revisions. Conflicting
-edits require reloading. Templates are English instructions; the dashboard
-controls follow the person's selected language.
+drafting, answer-assistance and human-review templates, including their audience,
+dependencies, expected output and revision. Edit, inspect the proposed text, then
+confirm and save. Conflicting edits require reloading; history retains saved
+revisions.
 
-Template access never grants workflow access. Other roles receive only prompts
-for tasks they may perform. Required authorization, schema checks and personal
-sign-offs are enforced independently of editable instructions.
+Each new job freezes its selected template snapshot. Editing a default or an
+Administrator's saved body affects future jobs, while already-queued jobs keep
+their template body and hash. Published application updates do not overwrite an
+Administrator's saved template revisions. Compare customized bodies with the
+current catalog and deliberately review any changes you want to adopt.
 
-## Dispatch and claim
-
-1. Create a round with **Queue question drafting for this round** selected,
-   or request another drafting kind for an existing draft round.
-2. In **Suggestions**, copy the queued job's short Agent prompt. It contains
-   the exact claim identifiers, revision, expected context hash and MCP steps.
-   Plan and Authoring jobs expose the same control in their stage panels.
-3. Paste it into an Agent connected to that deployment's Badger MCP. The Agent
-   claims the exact job, reads `instructions.md`, context, schema and pinned
-   files, then submits `result.json` through MCP.
-4. Personally review and optionally edit the shared suggestions in the
-   dashboard. The Engineer separately accepts the reviewed result. Accepted
-   questions enter the draft round; publishing it remains a separate dashboard
-   confirmation.
-
-Each new job carries a template snapshot, so a later template edit does not
-change its instructions. Full template instructions, schemas and task data are
-delivered when the Agent claims the job; they are excluded from the copied
-dispatch text. A claim receives the method even if the Agent did not start from
-a copied prompt. Changing discovery inputs cancels a stale job. The copy dialog
-includes a manual-copy fallback when clipboard access fails.
-
-## Answer with an Agent
-
-An assigned question's answer editor offers **Copy answer prompt**. The Agent
-refreshes `answer_context`, elicits the person's knowledge, saves with current
-revisions and submits only when asked. It receives only that person's private
-draft. An Engineer can answer when assigned, using their engineer token scope.
-
-## Review suggestions manually
-
-Engineers and Field experts personally review and edit submitted questionnaire
-suggestions using **Review suggestions** in the dashboard. Review prompts and
-MCP review tools are unavailable, and personal access tokens cannot save review
-edits. A stale job revision conflicts; it must be reloaded and reconciled.
-Saving shared edits does not accept results or publish a round. The Engineer
-separately uses **Review decisions** to accept or discard the suggestions.
-
-Confirmation, acknowledgement, approval, publication and Run gate answers
-remain manual dashboard actions. Workflow stage panels expose **Review
-guidance** drawn from the corresponding human-review templates.
-
-## Source study and interfaces
-
-A source study establishes one Skill's existing inputs, outputs and constraints.
-Its `interfaces` compatibility field must be empty. Cross-Skill questions are
-generated by Questionnaire jobs that can read both sides. A proposed adapter,
-new column mapping or changed validation rule stays an inference or question
-until confirmed by the appropriate people.
-
-Historical submitted single-Skill suggestions may still display invalid
-interfaces. Reviewers can remove that section before saving and accepting
-the remaining facts. Previously accepted records retain their history and
-can be corrected or retired through the existing Source study controls.
+When revising a template, preserve its task, scope and output schema; make the
+read-first inputs, drafting method, final checks and human handoff explicit.
+Use the supplied `outputLocale` for generated prose. Keep source identity,
+uncertainty and immutable citations intact. Test the claim path as well as the
+copied prompt, since the claim delivers the actual processing instructions.

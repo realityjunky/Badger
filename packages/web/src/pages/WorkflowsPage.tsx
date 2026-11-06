@@ -270,37 +270,33 @@ export function WorkflowsPage() {
             .filter((entry) => !groupId || entry.groupId === groupId)
             .map((entry) => (
               <article className="workflow-card" key={entry.id}>
-                <div className="workflow-card-heading">
-                  <div>
-                    <h2>
-                      <Link to={`/workflows/${encodeURIComponent(entry.id)}`}>
-                        {entry.name}
-                      </Link>
-                    </h2>
-                    <p className="muted">{entry.groupName}</p>
-                  </div>
-                  <Space wrap>
-                    <Tag>
-                      {t(
-                        entry.intent === "new-skill"
-                          ? "workflow.intent.new"
-                          : "workflow.intent.upgrade",
-                      )}
-                    </Tag>
-                    <Tag>{entry.locale}</Tag>
-                  </Space>
-                </div>
-                <p>{entry.goal}</p>
-                {entry.latestVersion !== null && (
-                  <>
+                <h2>
+                  <Link to={`/workflows/${encodeURIComponent(entry.id)}`}>
+                    {entry.name}
+                  </Link>
+                </h2>
+                <div className="workflow-card-meta">
+                  <span className="muted">{entry.groupName}</span>
+                  <span className="workflow-card-goal">{entry.goal}</span>
+                  {entry.latestVersion !== null && (
                     <Link
                       className="workflow-version-link"
                       to={`/workflows/${encodeURIComponent(entry.id)}/versions/${encodeURIComponent(entry.latestVersion.id)}`}
                     >
                       {workflowVersionLabel(entry.latestVersion)}
                     </Link>
-                    <StageTrack stages={entry.latestVersion.stages} />
-                  </>
+                  )}
+                  <Tag>
+                    {t(
+                      entry.intent === "new-skill"
+                        ? "workflow.intent.new"
+                        : "workflow.intent.upgrade",
+                    )}
+                  </Tag>
+                  <Tag>{entry.locale}</Tag>
+                </div>
+                {entry.latestVersion !== null && (
+                  <StageTrack stages={entry.latestVersion.stages} />
                 )}
               </article>
             ))}

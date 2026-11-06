@@ -1,11 +1,25 @@
 import {
   CheckOutlined,
   CopyOutlined,
+  FilterOutlined,
+  InfoCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { Alert, Button, Empty, Input, Modal, Select, Space } from "antd";
+import {
+  Alert,
+  Button,
+  Dropdown,
+  Empty,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Tooltip,
+} from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { draftingEffectLabels } from "../../api/drafting-jobs.js";
 import {
   questionnaireRequest,
   type QuestionnaireView,
@@ -52,17 +66,28 @@ const statusTones: Record<DraftingJob["status"], PillTone> = {
 export function DraftingJobs({
   basePath,
   path,
+  jobsHref,
   view,
   onChanged,
 }: {
   basePath: string;
   path: string;
+  jobsHref: string;
   view: QuestionnaireView;
   onChanged(): void;
 }) {
   const { t, format } = useI18n();
+  const location = useLocation();
+  const parameters = new URLSearchParams(location.search);
+  const linkedJobId = parameters.get("job");
+  const isActive = parameters.get("panel") === "suggestions";
   const jobsPath = path.replace(/\/questionnaire$/u, "/drafting-jobs");
   const [jobs, setJobs] = useState<DraftingJob[]>([]);
+  const [statuses, setStatuses] = useState<DraftingJob["status"][]>([
+    "queued",
+    "claimed",
+    "submitted",
+  ]);
   const [failure, setFailure] = useState<string | null>(null);
   const [copiedJobId, setCopiedJobId] = useState<string | null>(null);
   const [manualPrompt, setManualPrompt] = useState<string | null>(null);
@@ -85,6 +110,30 @@ export function DraftingJobs({
   const [preview, setPreview] = useState<DraftingDecisionPreview | null>(null);
   const [decisionJob, setDecisionJob] = useState<DraftingJob | null>(null);
   const canDecide = view.capabilities.compose;
+  const visibleJobs = jobs.filter((job) => statuses.includes(job.status));
+  const linkedJob = jobs.find((job) => job.id === linkedJobId);
+  const revealedVisit = useRef<string | null>(null);
+  const scrolledVisit = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isActive || !linkedJob) return;
+    const visit = `${location.key}:${linkedJob.id}`;
+    if (revealedVisit.current === visit) return;
+    revealedVisit.current = visit;
+    setStatuses((current) =>
+      current.includes(linkedJob.status)
+        ? current
+        : [...current, linkedJob.status],
+    );
+  }, [isActive, location.key, linkedJob?.id, linkedJob?.status]);
+  useEffect(() => {
+    if (!isActive || !linkedJob || !statuses.includes(linkedJob.status)) return;
+    const visit = `${location.key}:${linkedJob.id}`;
+    if (scrolledVisit.current === visit) return;
+    const card = document.getElementById(`drafting-job-${linkedJob.id}`);
+    if (!card) return;
+    card.scrollIntoView({ block: "center", behavior: "instant" });
+    scrolledVisit.current = visit;
+  }, [isActive, location.key, linkedJob?.id, linkedJob?.status, statuses]);
   const confirmationRequestId = useRef("");
   const sequence = useRef(0);
   const refresh = useCallback(async () => {
@@ -223,7 +272,19 @@ export function DraftingJobs({
       <div className="drafting-panel-header">
         <div className="drafting-panel-intro">
           <h2 className="pane-title">{t("drafting.title")}</h2>
-          <p className="muted">{t("drafting.help")}</p>
+          <Tooltip
+            title={t("drafting.help")}
+            trigger={["hover", "focus"]}
+            placement="bottomLeft"
+          >
+            <Button
+              type="text"
+              size="small"
+              className="drafting-help"
+              aria-label={t("drafting.about")}
+              icon={<InfoCircleOutlined aria-hidden="true" />}
+            />
+          </Tooltip>
         </div>
         <Space wrap>
           {canDecide && (
@@ -243,13 +304,51 @@ export function DraftingJobs({
           >
             {t("workflow.reload")}
           </Button>
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              selectable: true,
+              multiple: true,
+              selectedKeys: statuses,
+              items: (Object.keys(statusTones) as DraftingJob["status"][]).map(
+                (status) => ({
+                  key: status,
+                  label: t(`drafting.state.${status}`),
+                  icon: (
+                    <CheckOutlined
+                      aria-hidden="true"
+                      style={{
+                        visibility: statuses.includes(status)
+                          ? "visible"
+                          : "hidden",
+                      }}
+                    />
+                  ),
+                  role: "menuitemcheckbox",
+                  "aria-checked": statuses.includes(status),
+                }),
+              ),
+              onSelect: ({ selectedKeys }) =>
+                setStatuses(selectedKeys as DraftingJob["status"][]),
+              onDeselect: ({ selectedKeys }) =>
+                setStatuses(selectedKeys as DraftingJob["status"][]),
+            }}
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<FilterOutlined aria-hidden="true" />}
+            >
+              {t("drafting.filterStatus")}
+            </Button>
+          </Dropdown>
         </Space>
       </div>
       {failure && <Alert type="error" showIcon message={failure} />}
       {savedJobId && (
         <Alert type="success" showIcon message={t("drafting.reviewSaved")} />
       )}
-      {!jobs.length ? (
+      {!visibleJobs.length ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={t("drafting.empty")}
@@ -257,13 +356,14 @@ export function DraftingJobs({
       ) : (
         <p className="drafting-summary muted" role="status">
           {format("drafting.summary", {
-            total: jobs.length,
-            review: jobs.filter((job) => job.status === "submitted").length,
+            total: visibleJobs.length,
+            review: visibleJobs.filter((job) => job.status === "submitted")
+              .length,
           })}
         </p>
       )}
       <ul className="drafting-jobs-list">
-        {jobs.map((job) => {
+        {visibleJobs.map((job) => {
           const result = job.review?.result ?? job.result;
           const summary = result
             ? "questions" in result
@@ -279,11 +379,17 @@ export function DraftingJobs({
           )?.title;
           return (
             <li
-              className="drafting-job"
+              className={`drafting-job${job.id === linkedJobId ? " drafting-job-linked" : ""}`}
+              id={`drafting-job-${job.id}`}
               key={job.id}
               data-testid="drafting-job"
             >
-              <div className="drafting-job-body">
+              <Link
+                className="drafting-job-body"
+                to={`${jobsHref}&job=${encodeURIComponent(job.id)}`}
+                title={t("drafting.linkHelp")}
+                aria-current={job.id === linkedJobId ? "location" : undefined}
+              >
                 <div className="drafting-job-heading">
                   <h3>{t(kindLabels[job.kind])}</h3>
                   <div className="drafting-job-status">
@@ -341,7 +447,7 @@ export function DraftingJobs({
                     </div>
                   )}
                 </dl>
-              </div>
+              </Link>
               {job.status === "queued" && canDecide && (
                 <div className="drafting-job-actions">
                   <Button
@@ -621,6 +727,7 @@ export function DraftingJobs({
           <DraftResultView
             result={review.result}
             view={view}
+            effectLabels={draftingEffectLabels(review.job)}
             questionId={review.job.questionId}
             onChange={(result) => setReview({ ...review, result })}
           />

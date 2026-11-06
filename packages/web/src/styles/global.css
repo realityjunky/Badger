@@ -637,6 +637,24 @@ button.rail-link {
   margin-bottom: 12px;
 }
 
+.workflow-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.workflow-card-goal {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.workflow-card-meta .workflow-version-link,
+.workflow-card-meta .ant-tag {
+  margin: 0;
+}
+
 .workflow-version-meta {
   margin-bottom: 16px;
 }
@@ -894,9 +912,10 @@ button.rail-link {
 
 .summary-card {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 16px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 16px;
   border: 1px solid var(--badger-color-border);
   border-radius: var(--badger-radius-panel);
   background: var(--badger-color-surface);
@@ -928,13 +947,6 @@ button.rail-link {
   top: var(--badger-layout-top-bar-height);
   z-index: 10;
   background: var(--badger-color-background);
-}
-
-.questionnaire-tab-link,
-.questionnaire-tab-link:hover {
-  display: block;
-  color: inherit;
-  text-decoration: none;
 }
 
 .workflow-tabs-navigation-shell {
@@ -1582,24 +1594,34 @@ button.rail-link {
 }
 
 .drafting-panel-intro {
+  display: flex;
   flex: 1 1 360px;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
 .drafting-panel-intro .pane-title {
-  margin: 0 0 8px;
+  margin: 0;
 }
 
-.drafting-panel-intro p {
-  max-width: 75ch;
-  margin: 0;
-  line-height: 1.6;
+.drafting-help {
+  flex: none;
 }
 
 .drafting-summary {
   margin: 0;
   font-size: calc(var(--badger-font-size-xs) * var(--badger-font-scale, 1));
   font-variant-numeric: tabular-nums;
+}
+
+.drafting-result-tabs,
+.drafting-item-tabs {
+  min-width: 0;
+}
+
+.drafting-effect-labels {
+  width: 100%;
 }
 
 .drafting-jobs-list {
@@ -1622,6 +1644,21 @@ button.rail-link {
   display: grid;
   gap: 16px;
   padding: 20px;
+}
+
+.drafting-job-linked {
+  border-color: var(--badger-color-accent);
+}
+
+.drafting-job-body,
+.drafting-job-body:hover {
+  color: inherit;
+  text-decoration: none;
+}
+
+.drafting-job-body:hover h3 {
+  color: var(--badger-color-accent);
+  text-decoration: underline;
 }
 
 .drafting-job-heading {
@@ -1691,7 +1728,7 @@ button.rail-link {
 }
 
 .drafting-job-actions .ant-btn,
-.drafting-panel-header .ant-btn {
+.drafting-panel-header > .ant-space .ant-btn:not(.ant-btn-sm) {
   height: auto;
   min-height: 36px;
   padding-block: 7px;

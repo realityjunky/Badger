@@ -1,5 +1,9 @@
-import { Alert, Button, Input } from "antd";
+import { Alert, Button, Empty, Input, Select, Tabs } from "antd";
 import { Link } from "react-router-dom";
+import type {
+  ScriptEffectSuggestion,
+  SkillScriptSideEffect,
+} from "@realityjunky/badger";
 import type { DraftingResult } from "../../api/drafting-jobs.js";
 import type {
   QuestionnaireView,
@@ -68,11 +72,13 @@ export function DraftResultView({
   result,
   view,
   questionId,
+  effectLabels = [],
   onChange,
 }: {
   result: DraftingResult;
   view: QuestionnaireView;
   questionId?: string | null;
+  effectLabels?: readonly SkillScriptSideEffect[];
   onChange?(result: DraftingResult): void;
 }) {
   const { t } = useI18n();
@@ -119,47 +125,163 @@ export function DraftResultView({
         )}
       </>
     );
-  if ("interfaces" in result)
+  if ("interfaces" in result) {
+    const changeEffect = (
+      index: number,
+      changes: Partial<ScriptEffectSuggestion>,
+    ): DraftingResult => ({
+      ...result,
+      scriptEffects: result.scriptEffects?.map((row, position) =>
+        position === index ? { ...row, ...changes } : row,
+      ),
+    });
     return (
       <>
-        <h3>{t("study.facts")}</h3>
-        {!!result.scriptEffects?.length && (
-          <section>
-            <h3>{t("effects.title")}</h3>
-            <p>{t("effects.routingHelp")}</p>
-            {result.scriptEffects.map((row) => (
-              <article className="drafting-suggestion" key={row.path}>
-                <code>{row.path}</code>
-                <p>
-                  {row.effects
-                    .map((effect) => t(`skills.effect.${effect}`))
-                    .join(", ") || t("effects.pending")}
-                </p>
-                <p>{row.rationale}</p>
-                <p>{row.conditionalBehavior}</p>
-                {row.uncertainty && <p>{row.uncertainty}</p>}
-                <DraftEvidence evidence={row.evidence} />
-              </article>
-            ))}
-          </section>
-        )}
-        {result.facts.map((fact, index) => (
-          <section className="drafting-suggestion" key={index}>
-            {text(
-              `draft-source-fact-${index}`,
-              t("study.statement"),
-              fact.statement,
-              (value) => ({
-                ...result,
-                facts: result.facts.map((f, i) =>
-                  i === index ? { ...f, statement: value } : f,
-                ),
-              }),
-              8000,
-            )}
-            <DraftEvidence evidence={fact.evidence} />
-          </section>
-        ))}
+        <Tabs
+          className="drafting-result-tabs"
+          defaultActiveKey={result.facts.length ? "statements" : "effects"}
+          items={[
+            {
+              key: "statements",
+              label: t("drafting.statements"),
+              children: result.facts.length ? (
+                <Tabs
+                  className="drafting-item-tabs"
+                  type="card"
+                  size="small"
+                  tabBarGutter={4}
+                  items={result.facts.map((fact, index) => ({
+                    key: String(index),
+                    label: String(index + 1),
+                    children: (
+                      <section className="drafting-suggestion">
+                        {text(
+                          `draft-source-fact-${index}`,
+                          t("study.statement"),
+                          fact.statement,
+                          (value) => ({
+                            ...result,
+                            facts: result.facts.map((current, position) =>
+                              position === index
+                                ? { ...current, statement: value }
+                                : current,
+                            ),
+                          }),
+                          8000,
+                        )}
+                        <DraftEvidence evidence={fact.evidence} />
+                      </section>
+                    ),
+                  }))}
+                />
+              ) : (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={t("drafting.emptyStatements")}
+                />
+              ),
+            },
+            {
+              key: "effects",
+              label: t("effects.title"),
+              children: (
+                <>
+                  <p className="muted">{t("effects.draftHelp")}</p>
+                  {result.scriptEffects?.length ? (
+                    <Tabs
+                      className="drafting-item-tabs"
+                      type="card"
+                      size="small"
+                      tabBarGutter={4}
+                      items={result.scriptEffects.map((row, index) => ({
+                        key: row.path,
+                        label: String(index + 1),
+                        children: (
+                          <article className="drafting-suggestion">
+                            <h3 className="questionnaire-text">
+                              <code>{row.path}</code>
+                            </h3>
+                            <label
+                              className="field-label"
+                              htmlFor={`draft-effect-labels-${index}`}
+                            >
+                              {t("skills.effects")}
+                            </label>
+                            {onChange && effectLabels.length ? (
+                              <Select
+                                id={`draft-effect-labels-${index}`}
+                                className="drafting-effect-labels"
+                                mode="multiple"
+                                value={row.effects}
+                                placeholder={t("effects.pending")}
+                                options={effectLabels.map((effect) => ({
+                                  value: effect,
+                                  label: t(`skills.effect.${effect}`),
+                                }))}
+                                onChange={(effects: SkillScriptSideEffect[]) =>
+                                  onChange(
+                                    changeEffect(index, {
+                                      effects:
+                                        effects.at(-1) === "none"
+                                          ? ["none"]
+                                          : effects.filter(
+                                              (effect) => effect !== "none",
+                                            ),
+                                    }),
+                                  )
+                                }
+                              />
+                            ) : (
+                              <p>
+                                {row.effects
+                                  .map((effect) => t(`skills.effect.${effect}`))
+                                  .join(", ") || t("effects.pending")}
+                              </p>
+                            )}
+                            {text(
+                              `draft-effect-rationale-${index}`,
+                              t("effects.rationale"),
+                              row.rationale,
+                              (value) =>
+                                changeEffect(index, { rationale: value }),
+                              8000,
+                            )}
+                            {text(
+                              `draft-effect-conditional-${index}`,
+                              t("effects.conditional"),
+                              row.conditionalBehavior,
+                              (value) =>
+                                changeEffect(index, {
+                                  conditionalBehavior: value,
+                                }),
+                              8000,
+                            )}
+                            {text(
+                              `draft-effect-uncertainty-${index}`,
+                              t("effects.uncertainty"),
+                              row.uncertainty ?? "",
+                              (value) =>
+                                changeEffect(index, {
+                                  uncertainty: value.trim() ? value : null,
+                                }),
+                              8000,
+                            )}
+                            <DraftEvidence evidence={row.evidence} />
+                          </article>
+                        ),
+                      }))}
+                    />
+                  ) : (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={t("effects.emptySuggestions")}
+                    />
+                  )}
+                </>
+              ),
+            },
+          ]}
+        />
         {result.interfaces.length > 0 && (
           <>
             <Alert type="warning" title={t("prompts.legacyInterfaces")} />
@@ -223,6 +345,7 @@ export function DraftResultView({
         ))}
       </>
     );
+  }
   return (
     <>
       <p>

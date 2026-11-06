@@ -779,7 +779,10 @@ describe("reviewed SQL migrations", () => {
         409,
         secret,
       );
-      expect(claim.job.status).toBe("cancelled");
+      expect(claim.job).toMatchObject({
+        status: "cancelled",
+        outputLocale: null,
+      });
       expect(claim).not.toHaveProperty("contextBundle");
       expect(JSON.stringify(claim)).not.toContain("/previous-server");
       const rejected = await call(

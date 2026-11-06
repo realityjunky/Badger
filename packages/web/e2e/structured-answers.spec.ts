@@ -52,7 +52,7 @@ async function english(page: Page) {
   await page.getByRole("menuitem", { name: "English", exact: true }).click();
 }
 
-test("a shared drafting tab lets a Field expert edit suggestions before the Engineer accepts them", async ({
+test("a shared drafting job link lets a Field expert edit suggestions before the Engineer accepts them", async ({
   browser,
 }, testInfo) => {
   const { group } = await call("POST", "/groups", {
@@ -165,11 +165,17 @@ test("a shared drafting tab lets a Field expert edit suggestions before the Engi
       name: "Drafting jobs and suggestions",
       exact: true,
     });
-    const tabLink = draftingTab.getByRole("link", {
-      name: "Drafting jobs and suggestions",
-      exact: true,
-    });
-    const href = await tabLink.getAttribute("href");
+    await expect(draftingTab.getByRole("link")).toHaveCount(0);
+    await draftingTab.click();
+    await expect(draftingTab).toHaveAttribute("aria-selected", "true");
+    await expect(page).toHaveURL(new RegExp(`round=${round.id}`, "u"));
+    await page.goBack();
+    await expect(draftingTab).toHaveAttribute("aria-selected", "false");
+    await draftingTab.click();
+    await expect(page.getByTestId("drafting-job")).toHaveCount(2);
+    const jobCard = page.locator(`#drafting-job-${job.id}`);
+    const jobLink = jobCard.getByRole("link");
+    const href = await jobLink.getAttribute("href");
     expect(href).not.toBeNull();
     const sharedUrl = new URL(href!, origin);
     expect(sharedUrl.pathname).toBe("/team/questionnaire");
@@ -178,10 +184,11 @@ test("a shared drafting tab lets a Field expert edit suggestions before the Engi
       version: version.id,
       group: group.id,
       panel: "suggestions",
+      job: job.id,
     });
     const [newTab] = await Promise.all([
       context.waitForEvent("page"),
-      tabLink.click({ modifiers: ["ControlOrMeta"] }),
+      jobLink.click({ modifiers: ["ControlOrMeta"] }),
     ]);
     await expect(newTab).toHaveURL(sharedUrl.href);
     await expect(
@@ -190,22 +197,35 @@ test("a shared drafting tab lets a Field expert edit suggestions before the Engi
         exact: true,
       }),
     ).toHaveAttribute("aria-selected", "true");
+    await expect(
+      newTab.locator(`#drafting-job-${job.id}`).getByRole("link"),
+    ).toHaveAttribute("aria-current", "location");
     await newTab.close();
-    await expect(draftingTab).toHaveAttribute("aria-selected", "false");
-    await tabLink.click({ button: "right" });
-    await expect(draftingTab).toHaveAttribute("aria-selected", "false");
-    await page.keyboard.press("Escape");
-    await tabLink.click();
-    await expect(draftingTab).toHaveAttribute("aria-selected", "true");
+    await jobLink.click({ button: "right" });
     await expect(page).toHaveURL(new RegExp(`round=${round.id}`, "u"));
-    await page.goBack();
-    await expect(draftingTab).toHaveAttribute("aria-selected", "false");
-    await tabLink.click();
-    await expect(page.getByTestId("drafting-job")).toHaveCount(2);
+    await page.keyboard.press("Escape");
+    await jobLink.click();
+    await expect(page).toHaveURL(sharedUrl.href);
+    await expect(jobLink).toHaveAttribute("aria-current", "location");
     const panel = page.getByRole("region", {
       name: "Drafting jobs and suggestions",
       exact: true,
     });
+    const help = panel.getByRole("button", {
+      name: "About drafting jobs and suggestions",
+      exact: true,
+    });
+    await expect(page.getByRole("tooltip")).toBeHidden();
+    await help.hover();
+    await expect(page.getByRole("tooltip")).toContainText(
+      "The workflow's Engineer and Field experts review and save shared edits.",
+    );
+    await page.mouse.move(0, 0);
+    await expect(page.getByRole("tooltip")).toBeHidden();
+    await help.focus();
+    await expect(page.getByRole("tooltip")).toBeVisible();
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("tooltip")).toBeHidden();
     for (const theme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: theme });
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
@@ -323,7 +343,34 @@ test("a shared drafting tab lets a Field expert edit suggestions before the Engi
     await preview
       .getByRole("button", { name: "Accept reviewed result", exact: true })
       .click();
-    await expect(page.getByText("Accepted", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("drafting-job")).toHaveCount(0);
+    await expect(page.getByText("Accepted", { exact: true })).toHaveCount(0);
+    await panel.getByRole("button", { name: "Filter by status" }).click();
+    for (const [name, checked] of [
+      ["Queued", true],
+      ["Claimed", true],
+      ["Awaiting your review", true],
+      ["Accepted", false],
+      ["Discarded", false],
+      ["Cancelled: inputs changed", false],
+    ] as const)
+      await expect(
+        page.getByRole("menuitemcheckbox", { name, exact: true }),
+      ).toHaveAttribute("aria-checked", String(checked));
+    await page
+      .getByRole("menuitemcheckbox", { name: "Accepted", exact: true })
+      .click();
+    await page.keyboard.press("Escape");
+    await expect(jobCard.getByText("Accepted", { exact: true })).toBeVisible();
+    await respondent.reload();
+    await expect(
+      respondent.locator(`#drafting-job-${job.id}`).getByRole("link"),
+    ).toHaveAttribute("aria-current", "location");
+    await expect(
+      respondent
+        .locator(`#drafting-job-${job.id}`)
+        .getByText("Accepted", { exact: true }),
+    ).toBeVisible();
     const accepted = await call("GET", root, undefined, engineer);
     expect(accepted.questions[0].answerType).toEqual({
       kind: "single-choice",

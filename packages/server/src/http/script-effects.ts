@@ -314,9 +314,10 @@ export async function handleScriptEffects(input: AuthorizedRequest) {
           409,
           "The Source study inputs changed after this draft; request a current draft",
         );
+      const reviewedResult = job.review_result ?? job.result;
       const result =
-        job.result && "interfaces" in job.result
-          ? job.result.scriptEffects
+        reviewedResult && "interfaces" in reviewedResult
+          ? reviewedResult.scriptEffects
           : undefined;
       const suggestions = await validateEffectDraft(
         tx,

@@ -99,6 +99,7 @@ export function publicDraftingJob(row: DraftingJobRow) {
     skillId: row.skill_id,
     questionId: row.question_id,
     locale: row.locale,
+    outputLocale: row.locale ?? row.context_bundle.version?.locale ?? null,
     parentQuestionId: row.parent_question_id,
     requesterId: row.requester_id,
     contextHash: row.context_hash,

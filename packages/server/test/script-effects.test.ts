@@ -284,6 +284,74 @@ it.each(["submitted", "accepted"] as const)(
   },
 );
 
+it.each(["submitted", "accepted"] as const)(
+  "routes the latest saved effect suggestions from a %s job to the uploader",
+  async (status) => {
+    const fixture = await setup();
+    const original = await studyDraft(fixture, [fixture.suggestion], false);
+    const path = `${fixture.base}/drafting-jobs/${original.id}`;
+    const result = {
+      ...original.result,
+      scriptEffects: [
+        {
+          ...fixture.suggestion,
+          rationale: "The Engineer reviewed the output.txt write.",
+          conditionalBehavior: "Creates output.txt on every invocation.",
+          uncertainty: null,
+        },
+      ],
+    };
+    const { job: saved } = await call(`${path}/review`, "POST", {
+      revision: original.revision,
+      result,
+    });
+    let current = saved;
+    if (status === "accepted") {
+      const { preview } = await call(`${path}/accept-preview`, "POST", {
+        revision: saved.revision,
+        ...result,
+      });
+      const accepted = await call(`${path}/accept`, "POST", {
+        revision: saved.revision,
+        ...result,
+        confirmed: true,
+        confirmationHash: preview.confirmationHash,
+        requestId: "accept-saved-effect-suggestions",
+      });
+      current = accepted.job;
+    }
+    await call(
+      `${fixture.effects}/route`,
+      "POST",
+      {
+        workflowVersionId: fixture.version.id,
+        jobId: original.id,
+        jobRevision: original.revision,
+        revision: 0,
+      },
+      409,
+    );
+    const routed = await call(`${fixture.effects}/route`, "POST", {
+      workflowVersionId: fixture.version.id,
+      jobId: current.id,
+      jobRevision: current.revision,
+      revision: 0,
+    });
+    expect(routed.review.kind).toBe("proposal");
+    expect(routed.review.content.scripts).toEqual([
+      {
+        ...result.scriptEffects[0],
+        reviewed: false,
+        uncertaintyAnswer: "",
+      },
+    ]);
+    const after = (await call(path)).job;
+    expect(after.result).toEqual(original.result);
+    expect(after.review.result).toEqual(result);
+    expect((await call(fixture.effects)).findings).not.toEqual([]);
+  },
+);
+
 it("keeps useful facts acceptable after routing that job's effect section", async () => {
   const fixture = await setup();
   const job = await studyDraft(fixture, [fixture.suggestion], false);

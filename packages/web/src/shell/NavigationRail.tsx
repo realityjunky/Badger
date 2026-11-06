@@ -78,29 +78,31 @@ export function NavigationRail({
         {navigationSections
           .filter(
             (section) =>
-              !demoMode || section.title !== "nav.section.administration",
+              !demoMode || section.items.some((item) => item.path !== "/admin"),
           )
           .map((section) => (
             <div className="rail-section" key={section.title}>
               <p className="rail-section-title">{t(section.title)}</p>
               <ul>
-                {section.items.map((item) => (
-                  <li key={item.path}>
-                    <NavLink
-                      to={item.path}
-                      className={({ isActive }) =>
-                        isActive ? "rail-link rail-link-active" : "rail-link"
-                      }
-                      aria-label={t(item.title)}
-                      onClick={onNavigate}
-                    >
-                      <span className="rail-icon" aria-hidden="true">
-                        {ICONS[item.icon]}
-                      </span>
-                      <span className="rail-label">{t(item.title)}</span>
-                    </NavLink>
-                  </li>
-                ))}
+                {section.items
+                  .filter((item) => !demoMode || item.path !== "/admin")
+                  .map((item) => (
+                    <li key={item.path}>
+                      <NavLink
+                        to={item.path}
+                        className={({ isActive }) =>
+                          isActive ? "rail-link rail-link-active" : "rail-link"
+                        }
+                        aria-label={t(item.title)}
+                        onClick={onNavigate}
+                      >
+                        <span className="rail-icon" aria-hidden="true">
+                          {ICONS[item.icon]}
+                        </span>
+                        <span className="rail-label">{t(item.title)}</span>
+                      </NavLink>
+                    </li>
+                  ))}
                 {section.title === "nav.section.system" && (
                   <li>
                     <Tooltip

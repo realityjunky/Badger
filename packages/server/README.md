@@ -9,6 +9,9 @@ kernel-owned catalog, revisioned Administrator edits, per-job instruction
 snapshots and MCP task context. Prompts guide drafting; server capability
 checks and manual sign-offs remain authoritative. See
 [ADR 0045](../../docs/adr/0045-server-managed-stage-prompts.md).
+Submitted suggestion review is manual dashboard work under
+[ADR 0046](../../docs/adr/0046-human-only-suggestion-review.md); personal access
+tokens cannot save shared review edits.
 
 Service deployments support platform sessions, OpenID Connect and trusted
 identity headers from configured proxy peers. See
@@ -527,6 +530,12 @@ workflow readers, including Observers and tokens, read their history and
 evidence. Every write keeps a revision and an Activity entry. The API uses
 migration `0010` and never changes previously shipped migrations.
 
+The interface endpoints retain compatibility with existing records. Current
+Agent Source study jobs draft only a single Skill's facts and effect
+suggestions, with an empty `interfaces` array. Questionnaire discovery compares
+producer and consumer contracts across Skills and asks people to resolve the
+workflow choices. See [Dashboard prompts](../../docs/dashboard-prompts.md).
+
 Using the `V` prefix above:
 
 | Method and path                                           | Behavior                                                                                                                       |
@@ -557,6 +566,8 @@ adding, or retiring a record invalidates completions of the Skills it
 references and any later stage that had progressed.
 
 Study completion reuses gate replay and conflict behavior. It requires
+the original uploader's complete declaration confirmation for script-bearing
+sources; saved effect suggestions remain proposals. It also requires
 confirmed Sources and current evidence: rejected previews report
 `SOURCE_SET_NOT_CONFIRMED`, `SKILL_VERSION_NOT_PINNED`, or
 `SOURCE_STUDY_EVIDENCE_STALE`. A version's completion checks the records that
@@ -1029,6 +1040,15 @@ answers, assignees, and the kernel's ledger and readiness; `contextHash` guards
 the bundle the Agent receives. Private answer drafts never enter the context.
 The output schema is stored with the job; results contain at most 1 MiB.
 
+Public job metadata and claimed instructions expose `outputLocale`, derived
+from the job's bound Workflow version locale or its explicit translation
+target. Generated narrative fields use that language; schema tokens, paths,
+hashes, identifiers, code and verbatim evidence remain exact. The claim adds
+the kernel's language instruction even for an older template snapshot, without
+changing the stored snapshot or context hash. Personal interface language and
+later edits to the workflow's future frame do not override the bound locale.
+Stored suggestions are never automatically translated.
+
 A claim's `skills` names the pinned Skill versions its kind reads and `files`
 carries their exact bytes: the job's Skill for source study and imports, every
 pin for question, follow-up, and plan drafting, and none for restatement and
@@ -1036,15 +1056,15 @@ translation. A claim's files total at most twice `BADGER_UPLOAD_MAX_BYTES`, so
 any two Skill versions within the upload limit fit; a larger claim is refused
 with 413 and its job stays queued.
 
-| Kind                    | Request target fields         | Result                                                                                                             | Inputs                                                                                                        |
-| ----------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `draft-questions`       | `roundId`                     | `{questions: [QuestionContent]}` (1–20).                                                                           | Every pin, draft round, workflow frame, Source study, submitted answers, questions, ledger, readiness, concerns, discussion, settings and assignees. |
-| `draft-follow-ups`      | `roundId`, `parentQuestionId` | The same question schema, retaining the published parent.                                                          | The same discovery dependencies, focused on the parent's current meaning and latest submitted answers. |
-| `source-study`          | `skillId`                     | `{facts: [SourceFact], interfaces: [], scriptEffects?: [...]}`; up to 100 facts. No round is needed. | The Skill's pinned version and the revisions of related source-study records; generated facts cite only that exact Skill version. |
-| `restate-answer`        | `questionId`                  | `{facts: [{text, answers: [{personId, revision}]}]}` (1–100).                                                      | The question's revision, state, and resolution, and its latest submitted answer from each person.             |
-| `translate-question`    | `questionId`, `locale`        | `{text, rationale}` in the requested BCP 47 locale.                                                                | The question's revision.                                                                                      |
-| `import-open-questions` | `skillId`, `roundId`          | `{questions: [{number, source: SourceEvidence, question: QuestionContent}]}` (1–20).                               | The Skill's pinned version, the round's state, and the questions already imported from that version.          |
-| `draft-plan`            | None                          | `{plan}` (see [Plan versions](#plan-versions)).                                                                    | The approved planning input and the plan version it builds on.                                                |
+| Kind                    | Request target fields         | Result                                                                                               | Inputs                                                                                                                                               |
+| ----------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `draft-questions`       | `roundId`                     | `{questions: [QuestionContent]}` (1–20).                                                             | Every pin, draft round, workflow frame, Source study, submitted answers, questions, ledger, readiness, concerns, discussion, settings and assignees. |
+| `draft-follow-ups`      | `roundId`, `parentQuestionId` | The same question schema, retaining the published parent.                                            | The same discovery dependencies, focused on the parent's current meaning and latest submitted answers.                                               |
+| `source-study`          | `skillId`                     | `{facts: [SourceFact], interfaces: [], scriptEffects?: [...]}`; up to 100 facts. No round is needed. | The Skill's pinned version and the revisions of related source-study records; generated facts cite only that exact Skill version.                    |
+| `restate-answer`        | `questionId`                  | `{facts: [{text, answers: [{personId, revision}]}]}` (1–100).                                        | The question's revision, state, and resolution, and its latest submitted answer from each person.                                                    |
+| `translate-question`    | `questionId`, `locale`        | `{text, rationale}` in the requested BCP 47 locale.                                                  | The question's revision.                                                                                                                             |
+| `import-open-questions` | `skillId`, `roundId`          | `{questions: [{number, source: SourceEvidence, question: QuestionContent}]}` (1–20).                 | The Skill's pinned version, the round's state, and the questions already imported from that version.                                                 |
+| `draft-plan`            | None                          | `{plan}` (see [Plan versions](#plan-versions)).                                                      | The approved planning input and the plan version it builds on.                                                                                       |
 
 Targets must belong to this Workflow version. A Skill target names its current
 pin; a restatement targets an answered question or one needing re-confirmation.

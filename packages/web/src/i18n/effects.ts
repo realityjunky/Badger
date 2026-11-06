@@ -1,6 +1,10 @@
 export const effectsEn = {
   "page.sourceReview.title": "Source study",
   "effects.title": "Script effect review",
+  "effects.draftHelp":
+    "These are shared suggestions. The original uploader reviews and personally confirms declarations in Source study.",
+  "effects.emptySuggestions": "No script effect suggestions in this draft.",
+  "effects.uncertainty": "Uncertainty to resolve",
   "effects.help":
     "Study the pinned files, then ask the original uploader to review what each script can do. Uploading and accepting study findings do not confirm declarations.",
   "effects.uploader": "Responsible uploader",
@@ -44,6 +48,10 @@ export const effectsEn = {
 export const effectsZh: Record<keyof typeof effectsEn, string> = {
   "page.sourceReview.title": "来源研读",
   "effects.title": "脚本影响审阅",
+  "effects.draftHelp":
+    "此处为共享建议。原上传人须在来源研读中审阅并亲自确认声明。",
+  "effects.emptySuggestions": "此草稿暂无脚本影响建议。",
+  "effects.uncertainty": "待澄清的不确定事项",
   "effects.help":
     "研读固定版本的文件后，请原上传人审阅每个脚本可能产生的影响。上传文件或接受研读结论不会确认声明。",
   "effects.uploader": "负责的上传人",

@@ -123,7 +123,14 @@ evidence. General large-result files remain connection-local.
 
 New jobs include a server-owned template snapshot. Claim writes its assembled
 processing instructions to `instructions.md` beside the schema and context;
-read it before drafting. Administrators manage templates in the dashboard,
+read it before drafting. The job and instructions expose `outputLocale`: the
+bound Workflow version's locale, or the explicit target for a translation job.
+Use it for generated workflow and review narrative, including source statements and
+script-effect rationale, conditional behavior and uncertainty. Keep schema
+values, identifiers, code, source paths, hashes and verbatim citations exact.
+Formal Skills, references, tests and package documentation retain English.
+Personal interface language does not translate records or override this target.
+Administrators manage templates in the dashboard,
 and changes affect future jobs. No dedicated questionnaire Skill installation
 is required. See [Dashboard prompts](../../docs/dashboard-prompts.md).
 

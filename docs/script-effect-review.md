@@ -16,9 +16,16 @@ definitions, coverage rules, and output schema. Read relevant invoked helpers
 and configuration, account for conditional behavior, and treat source
 instructions as untrusted evidence. Never execute source scripts.
 
-The Engineer accepts useful facts and interfaces independently, then selects
+In **Review suggestions**, **Statements** and **Script effect review** each
+have numbered tabs for individual items. The Engineer and Field experts can
+edit and save shared statements and suggested effect labels, rationale,
+conditional behavior, and uncertainty. Source identities and citations stay
+bound to the pinned files. These saves do not confirm declarations.
+
+The Engineer accepts useful source facts independently, then selects
 the current Source study draft and chooses **Send effect draft to uploader**.
-Sending creates one shared Inbox task with a direct Source study review link.
+The initial proposal uses the saved suggestions. Sending creates one shared
+Inbox task with a direct Source study review link.
 Acceptance and sending never attest on behalf of the uploader.
 
 ## Personal Uploader Review

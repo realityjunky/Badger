@@ -95,12 +95,14 @@ export const navigationSections: readonly NavigationSection[] = [
     items: [
       { path: "/runs", title: "nav.runs", icon: "runs" },
       { path: "/evaluations", title: "nav.evaluations", icon: "evaluations" },
-      { path: "/activity", title: "nav.activity", icon: "activity" },
     ],
   },
   {
     title: "nav.section.administration",
-    items: [{ path: "/admin", title: "nav.admin", icon: "admin" }],
+    items: [
+      { path: "/admin", title: "nav.admin", icon: "admin" },
+      { path: "/activity", title: "nav.activity", icon: "activity" },
+    ],
   },
   {
     title: "nav.section.system",

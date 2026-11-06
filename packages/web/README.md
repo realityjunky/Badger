@@ -25,12 +25,19 @@ them into `dist/`, so the server image carries the build and none of them.
 
 ## Behavior
 
+Activity sits under Administration in the sidebar. My work uses compact
+summary cards with each value and label side by side. Workflow cards keep
+their Group, goal, version, intent, and locale in one metadata row, wrapping
+as needed on narrow screens.
+
 - **Admin → Prompt templates** lists instructions by all eight workflow stages
   and by Agent drafting, Agent assistance and human review. Signed-in
   Administrators review, confirm and save revisions with history. Creating a
   question round can queue drafting; copied prompts and MCP claims receive
-  server instructions. Answer editors and shared suggestion reviews provide
-  assistance prompts. See [Dashboard prompts](../../docs/dashboard-prompts.md).
+  server instructions. Answer editors provide prompts for assistance with the
+  person's own assigned answer. Submitted suggestion review is manual dashboard
+  work. See [Dashboard prompts](../../docs/dashboard-prompts.md) and the
+  [dashboard guide](../../docs/dashboard-guide.md).
 
 - My work's Inbox combines filters for authorized Workflows, message creation
   dates, and Unread, Read, or Done status. Workflow and status selectors allow
@@ -242,15 +249,20 @@ them into `dist/`, so the server image carries the build and none of them.
   preserves the selected record, search, local edits, and each tab's scroll
   position. Existing job, ledger, question, and concern links still work, and
   browser Back restores the tab.
-- Questionnaire's **Drafting jobs and suggestions** tab (#55) has a URL and
-  is open to Engineers, Field experts, and Administrators. Right-click the tab
-  and use the browser's **Copy link address** to share all suggestions for the
-  selected workflow version. The link opens Questionnaire directly at that tab,
-  restores the workflow's Group, and supports opening in a new tab. It does not
+- Questionnaire's **Drafting jobs and suggestions** tab (#55) is open to
+  Engineers, Field experts, and Administrators. Each job card's body is a link:
+  right-click it and use the browser's **Copy link address** to share that job,
+  or open it in a new tab. The link opens Questionnaire at the suggestions tab,
+  restores the workflow's Group, and reveals, highlights, and scrolls to the
+  selected job, including when its status is normally filtered out. It does not
   depend on a selected Question or grant additional access: colleagues sign in
   with their own workflow role. The address bar also includes the selected tab
   after switching to it. Jobs appear as separate cards with labeled context,
-  status, and a distinct action area; review is the primary action, with Engineer
+  status, and a distinct action area. By default, only queued, claimed, and
+  awaiting-review jobs are shown. The small **Filter by status** dropdown beside
+  **Reload records** lets you select any combination of the six job statuses,
+  including accepted, discarded, and cancelled. The information icon beside the heading explains
+  shared review on hover or keyboard focus. Review is the primary action, with Engineer
   decisions and discard actions grouped separately. Engineers request Agent drafts of
   questions, or of follow-ups to a parent question, for a draft round, and
   see each job's state; a job whose inputs changed shows as cancelled. They
@@ -270,6 +282,11 @@ them into `dist/`, so the server image carries the build and none of them.
   Engineers and Field experts edit and save each result before the Engineer's
   separate hash-bound confirmation. Conflicting saves require reopening the
   current review, and later edits invalidate an earlier decision preview.
+  Source-study results have **Statements** and **Script effect review** tabs,
+  with numbered tabs for individual items. Both sections support shared edits;
+  suggested effect labels, rationale, conditional behavior, and uncertainty
+  can be saved without confirming the uploader's declarations. The initial
+  effect proposal sent to the uploader uses the saved suggestions.
   Restatements still await expert acknowledgement, and question history shows
   translation revisions and immutable import provenance. Source study links
   directly to the drafting panel.

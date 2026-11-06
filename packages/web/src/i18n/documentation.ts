@@ -90,7 +90,7 @@ export const documentationEn = {
   "documentation.workflows.sources":
     "1. Sources: choose a Skill from the workflow's Group library and pin one immutable version hash. Review the source check and explicitly confirm the source set. Changing pins invalidates this confirmation and requires a fresh check.",
   "documentation.workflows.study":
-    "2. Source study: the Engineer reads each pinned Skill, records source-derived Facts with line evidence, interfaces, and open questions, then reviews and confirms that exact version as studied. A library upload or source pin does not complete this reading.",
+    "2. Source study: study each pinned Skill's purpose, inputs, outputs, limitations, and open questions as source-derived Facts with immutable line evidence. Review suggested script effects with the original uploader, who personally confirms the declarations. The Engineer confirms that exact version as studied when its current requirements are complete. Compare interfaces between Skills later in Questionnaire; an upload or pin alone does not complete study.",
   "documentation.workflows.questionnaire":
     "3. Questionnaire: publish Questions to assigned people, collect Answers, resolve Questions, and review the Ledger. Engineers confirm Facts restated from Answers; answering Field experts acknowledge or dispute those restatements. These are separate actions from Source study.",
   "documentation.workflows.dossier":
@@ -116,11 +116,11 @@ export const documentationEn = {
   "documentation.questionnaire.ledger":
     "Inspect the Ledger's confirmed user Facts, source-derived Facts, Inferences, unresolved Assumptions, and remaining Questions. Review an Agent's drafting result before accepting it; an unaccepted draft is not an agreed Fact.",
   "documentation.questionnaire.drafting.scenario":
-    "Drafting jobs and suggestions: use this panel when a draft round needs questions or follow-ups, or when a pinned Skill, an answered Question, or a translation needs an Agent's first pass. Your Agent drafts from the pinned evidence and submitted records, never from private drafts. Each job waits in the queue, is claimed by an Agent, and then waits for your review; a job is cancelled when the inputs its kind read change, such as the pins, the round, or the Questions.",
+    "Drafting jobs and suggestions: request an Agent's first pass from pinned evidence and submitted records. By default, the status filter shows Queued, Claimed, and Awaiting your review; choose other statuses beside Reload records to find accepted, discarded, or cancelled jobs. Right-click a job card's body to copy its link; opening it reveals that job for an authorized reader. The info icon beside the panel title explains the review handoff. Changed inputs cancel affected jobs.",
   "documentation.questionnaire.drafting.work":
-    "Request drafting offers six kinds. Draft questions and Draft follow-ups write into a draft round you choose, and follow-ups may also name a parent Question. Study a source Skill drafts source-derived Facts and interfaces for one pinned Skill version. Restate an answer as facts drafts formal Facts from an answered Question. Translate a question takes the source Question and a target language such as zh-CN. Import a Skill's open questions takes a pinned Skill version and a draft round. Create a draft round first when the kind needs one; the request cannot be sent while a required field is empty.",
+    "Request drafting offers six kinds. Draft questions and Draft follow-ups propose questions for a selected draft round; follow-ups may name a parent Question. Study a source Skill drafts source-derived Facts and script-effect suggestions for one pinned Skill. Restate an answer as facts uses submitted Answers. Translate a question uses the selected Question and explicit target language. Import a Skill's open questions needs a pinned Skill and draft round. Create the round first when required. Generated narrative uses the selected Workflow version's locale, or the translation target; your interface language does not translate stored drafts.",
   "documentation.questionnaire.drafting.review":
-    "Review suggestions: the workflow's Engineer and Field experts inspect and edit the submitted statements, then Save to share their changes. Reopening loads the latest saved edits; saving does not accept results. If someone saved a newer review, reopen it before saving again. The Engineer separately opens Review decisions to preview the latest persisted batch and explicitly Accept reviewed result. A later save invalidates that preview. Accepted questions enter the chosen draft round, which still requires separate publication. Discard suggestions requires a reason and hash-bound confirmation. Accepted restatements still need the answering expert's acknowledgement.",
+    "Review suggestions: Engineers and Field experts edit shared drafts, then Save. Source studies have Statements and Script effect review tabs, each with numbered item tabs. Edit statements, effect labels, rationale, conditional behavior, and uncertainty; paths and citations remain fixed. Save retains the original submission and advances the revision. Concurrent stale saves conflict: preserve your local text, reopen, and reconcile. Saving does not accept records or confirm script declarations. The Engineer separately uses Review decisions for the latest saved result; another save invalidates an older preview. Accepted questions still need round publication, restatements need the answering person's acknowledgement, and effects need the original uploader's confirmation. Discarding requires a reason and confirmation.",
   "documentation.questionnaire.next":
     "Clear the open Questions, acknowledgement requests, and readiness blockers. The Engineer can then compose the dossier in Workflows using the current Ledger evidence.",
   "documentation.skills.purpose":
@@ -136,7 +136,7 @@ export const documentationEn = {
   "documentation.skills.inventory":
     "Review the source inventory's file count and source hash in the upload preview. After upload, use the file tree, Inventory tab (paths, sizes, and file hashes), read-only file previews, and version comparison to inspect stored versions. Uploading, importing, and previewing never execute uploaded scripts.",
   "documentation.skills.confirm":
-    "Review the inventory and exact hash, then use Confirm immutable upload (or Confirm immutable import). Effects stay pending without a model connection. In Source study, the Engineer's Agent drafts effects and the original uploader corrects rows, answers uncertainties, and personally confirms the complete set. The same entry/version's confirmation is reusable; corrections append history and reopen dependent work without changing files.",
+    "Review the inventory and exact hash, then use Confirm immutable upload (or Confirm immutable import). Uploads need no declarations or model connection. For versions with scripts, the Engineer's Agent drafts effects during Source study; the original uploader corrects rows, answers uncertainties, and personally confirms the complete set. The same entry/version's confirmation is reusable; corrections append history and reopen dependent work without changing files.",
   "documentation.skills.next":
     "Open the target Workflow version, pin the immutable Skill hash, and confirm Sources. Read-only study and ordinary Questionnaire work remain available while effect review is pending. Final study completion requires complete uploader-confirmed script coverage.",
   "documentation.effects.link": "Understand script side-effect declarations",
@@ -155,7 +155,7 @@ export const documentationEn = {
   "documentation.effects.installs":
     "Installing or changing tools, dependencies, or environments. Examples: pip install, npm install, conda create, or a wrapper that updates an environment. Also declare local-writes or network when those effects are possible.",
   "documentation.effects.noScripts":
-    "If the source inventory contains no scripts, there is nothing to declare. Review the files and confirm the upload without adding artificial declarations.",
+    "If the source inventory contains no scripts, there is nothing to declare. No uploader effect task is required; confirm the immutable upload and complete Source study's other checks without adding artificial declarations.",
   "documentation.runs.purpose":
     "Runs shows durable executions of published packages: status, current Node, pending action, computer, and recovery state. Open a Run to inspect its publication, package hash, Attempts, artifact receipts, findings, and Events.",
   "documentation.runs.roles":
@@ -177,7 +177,7 @@ export const documentationEn = {
   "documentation.evaluations.next":
     "With a passing report for the current hash, return to Workflows → Review and publication for the Workflow owner's explicit approval and publication confirmations.",
   "documentation.activity.purpose":
-    "Activity is the append-only record of who acted, when, on what target, through which channel, and with what reason. It supports review and investigation rather than editing history.",
+    "Open Activity under Administration in the sidebar. It is the append-only record of who acted, when, on what target, through which channel, and with what reason. Use it for review and investigation; its navigation location does not change access permissions.",
   "documentation.activity.roles":
     "Administrators and Auditors can read the Organization's full Activity log. Access to other work is controlled by its own roles; reading an event does not authorize a change.",
   "documentation.activity.filter":
@@ -203,7 +203,7 @@ export const documentationEn = {
   "documentation.settings.roles":
     "Each signed-in person manages their own preferences and tokens. Tokens are limited by the person's roles and selected MCP profiles. Workflow notification channels also require the management authority shown by the dashboard.",
   "documentation.settings.preferences":
-    "Choose Light, Dark, or System, adjust text size, or collapse navigation. Select English or 中文 here or with Language in the top bar. Check the saved or failed status; a failed save only applies locally until it succeeds. In demo mode only appearance and language are available for this visit.",
+    "Choose Light, Dark, or System, adjust text size, or collapse navigation. Select English or 中文 here or with Language in the top bar. This changes menus and built-in help; drafted records use their Workflow version's locale, and saved text keeps its language. Check the saved or failed status; a failed save only applies locally until it succeeds. In demo mode only appearance and language are available for this visit.",
   "documentation.settings.tokens":
     "In Personal access tokens, select the scopes your Agent needs, review creation, and copy the secret when shown once. Keep it private and revoke unused tokens. Use the MCP setup instructions for your Agent host; a token can draft within its scopes but cannot approve or answer gates for you.",
   "documentation.settings.chatModes":
@@ -322,7 +322,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.sources":
     "1. 来源：从工作流所属团队的库中选择 Skill，固定一个不可变版本的哈希。审阅来源检查并明确确认来源集合。更改固定版本会使本次确认失效，必须重新检查。",
   "documentation.workflows.study":
-    "2. 来源研读：工程师阅读每个固定的 Skill，记录带有行号证据的来源事实、接口和未决问题，然后审阅并确认该确切版本已研读。上传到库或固定来源都不等于完成阅读。",
+    "2. 来源研读：逐个研读固定 Skill 的用途、输入、输出、限制与未决问题，记录带有不可变行号证据的来源事实。与原上传者审核脚本副作用建议，由原上传者亲自确认声明。当前要求全部完成后，工程师确认该确切版本已研读。Skill 之间的接口比较放在后续问卷阶段；仅上传或固定版本不等于完成研读。",
   "documentation.workflows.questionnaire":
     "3. 问卷：向指定人员发布问题、收集回答、解决问题并审阅台账。工程师确认从回答重述的事实；作答的领域专家认可或质疑这些重述。这些操作与来源研读相互独立。",
   "documentation.workflows.dossier":
@@ -348,11 +348,11 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.questionnaire.ledger":
     "检查台账中的已确认用户事实、来源事实、推断、未决假设和剩余问题。接受 Agent 起草结果前先审阅；尚未接受的草稿不是已达成共识的事实。",
   "documentation.questionnaire.drafting.scenario":
-    "起草任务与建议：当草稿轮次需要问题或追问，或固定的 Skill、已回答的问题、翻译需要 Agent 先行起草时，使用此面板。Agent 依据已固定的证据和已提交的记录起草，从不读取私有草稿。任务先排队，由 Agent 领取，再等待您审核；当该类别读取的输入（如固定版本、轮次或问题）发生变化时，任务会被取消。",
+    "起草任务与建议：让 Agent 依据固定证据和已提交的记录先行起草。状态筛选默认显示“排队中”“已领取”和“等待您审核”；通过“重新加载记录”旁的筛选可查找已接受、已丢弃或已取消的任务。右键点击任务卡片正文可复制链接；有权访问的人打开链接时会显示该任务。标题旁的信息图标说明审核交接流程。输入变更会取消受影响的任务。",
   "documentation.questionnaire.drafting.work":
-    "“请求起草”提供六种类别。“起草问题”和“起草追问”写入您选择的草稿轮次，追问还可指定父问题；“研读来源 Skill”为一个固定的 Skill 版本起草来源事实和接口；“将回答重述为事实”从已回答的问题起草正式事实；“翻译问题”需要来源问题和目标语言（例如 zh-CN）；“导入 Skill 的开放问题”需要固定的 Skill 版本和草稿轮次。类别需要轮次时请先创建草稿轮次；必填项为空时无法发送请求。",
+    "“请求起草”提供六种类别。“起草问题”和“起草追问”为所选草稿轮次提出问题，追问可指定父问题；“研读来源 Skill”为单个固定的 Skill 起草来源事实和脚本副作用建议；“将回答重述为事实”使用已提交的回答；“翻译问题”使用所选问题及明确指定的目标语言；“导入 Skill 的开放问题”需要固定的 Skill 和草稿轮次。需要轮次时请先创建。生成文字使用所选工作流版本的语言或翻译目标语言；界面语言不会翻译已保存的草稿。",
   "documentation.questionnaire.drafting.review":
-    "审核建议：工作流的工程师和领域专家检查并编辑已提交的陈述，再点击“保存”共享修改。重新打开时会载入最新保存内容；保存不会接受结果。如果他人已保存更新，请重新打开后再编辑保存。工程师通过单独的“审核决定”按钮预览最新保存的批次，并明确点击“接受已审核结果”；后续保存会使旧预览失效。接受的问题进入所选草稿轮次，仍需单独发布。“丢弃建议”必须填写原因并确认哈希绑定操作。被接受的重述事实仍需作答专家认可。",
+    "审核建议：工程师和领域专家编辑共享草稿后点击“保存”。来源研读分为“陈述”和“脚本副作用审核”两个主选项卡，各自包含编号子选项卡。可编辑陈述、副作用标签、理由、条件行为和不确定性；路径与引用保持固定。保存会保留原始提交并推进修订号；并发的过期保存会被拒绝，请保留本地文字、重新打开最新内容后协调修改。保存不等于接受记录或确认脚本声明。工程师另行通过“审核决定”处理最新保存结果；后续保存会使旧预览失效。接受的问题仍需发布轮次，重述事实仍需作答者认可，副作用仍需原上传者确认。丢弃必须说明原因并确认。",
   "documentation.questionnaire.next":
     "处理未解决问题、待认可请求及就绪阻碍后，工程师可返回“工作流”，根据当前台账证据编写语义档案。",
   "documentation.skills.purpose":
@@ -368,7 +368,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.skills.inventory":
     "审阅上传预览中的来源清单文件数与来源哈希。上传后，通过文件树、清单标签页（路径、大小和文件哈希）、只读文件预览与版本比较检查已存储版本。上传、导入和预览绝不执行上传的脚本。",
   "documentation.skills.confirm":
-    "审阅清单与精确哈希，再确认上传或导入不可变版本。无需模型连接，脚本影响保持待审阅。来源研读时，由工程师的 Agent 起草，原上传人更正各行、回答不确定事项并亲自确认完整声明。同一条目和版本可复用确认；更正会追加历史并重新开启依赖工作，不改动文件。",
+    "审阅清单与精确哈希，再确认上传或导入不可变版本。上传无需声明或模型连接。对于含脚本的版本，工程师的 Agent 在来源研读时起草副作用，原上传者更正各行、回答不确定事项并亲自确认完整声明。同一条目和版本可复用确认；更正会追加历史并重新开启依赖工作，不改动文件。",
   "documentation.skills.next":
     "打开目标工作流版本，固定 Skill 的不可变哈希并确认来源。脚本影响待审阅时，仍可只读研读及开展普通问卷工作。最终完成研读需要上传人确认完整的脚本声明。",
   "documentation.effects.link": "了解脚本副作用声明",
@@ -387,7 +387,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.effects.installs":
     "安装或更改工具、依赖项或环境。例如 pip install、npm install、conda create，或通过包装脚本更新环境。可能写入本地或访问网络时，也需声明 local-writes 或 network。",
   "documentation.effects.noScripts":
-    "如果来源清单中没有脚本，就无需声明副作用。审阅文件后即可确认上传，不需要人为添加声明。",
+    "如果来源清单中没有脚本，就无需声明副作用，也不需要上传者副作用审核任务。确认不可变上传并完成来源研读的其他检查即可，不需要人为添加声明。",
   "documentation.runs.purpose":
     "“运行”显示已发布软件包的持久执行状态：当前节点、待处理操作、计算机及恢复状态。打开运行可查看发布版本、软件包哈希、尝试、产物凭据、发现和事件。",
   "documentation.runs.roles":
@@ -409,7 +409,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.evaluations.next":
     "当前哈希评估通过后，返回“工作流 → 审核与发布”，由工作流负责人明确确认批准和发布。",
   "documentation.activity.purpose":
-    "“活动”以仅追加方式记录谁在何时，通过何种渠道，针对哪个目标，出于什么原因执行了操作。用于审核与调查，不用于编辑历史。",
+    "从侧栏“管理”下打开“活动”。它以仅追加方式记录谁在何时，通过何种渠道，针对哪个目标，出于什么原因执行了操作，用于审核与调查；导航位置不会改变访问权限。",
   "documentation.activity.roles":
     "管理员和审计员可查看组织的完整活动日志。其他工作的访问仍由各自角色控制；阅读事件不会授予修改权限。",
   "documentation.activity.filter":
@@ -435,7 +435,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.settings.roles":
     "每位已登录人员管理自己的偏好与令牌。令牌受本人角色与所选 MCP 配置限制。工作流通知渠道还需仪表盘所示的管理权限。",
   "documentation.settings.preferences":
-    "选择浅色、深色或跟随系统，调整字号或折叠导航。在此或顶部“语言”中选择 English 或中文。检查已保存或失败状态；保存失败时，更改仅在本地生效，直到保存成功。演示模式仅可在本次访问中调整外观与语言。",
+    "选择浅色、深色或跟随系统，调整字号或折叠导航。在此或顶部“语言”中选择 English 或中文，影响菜单与内置帮助；起草记录使用工作流版本的语言，已保存文字保持原有语言。检查已保存或失败状态；保存失败时，更改仅在本地生效，直到保存成功。演示模式仅可在本次访问中调整外观与语言。",
   "documentation.settings.tokens":
     "在“个人访问令牌”中选择 Agent 所需权限，审阅创建操作，并复制仅展示一次的秘密值。妥善保管并撤销不用的令牌。按 MCP 配置说明连接 Agent 主机；令牌可在其权限内起草，但不能替您批准或回答关卡。",
   "documentation.settings.chatModes":

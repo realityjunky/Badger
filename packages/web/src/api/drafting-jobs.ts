@@ -1,6 +1,10 @@
 import type { QuestionContent } from "./questionnaire.js";
 import type { FactoryPlan } from "./plans.js";
-import type { ScriptEffectSuggestion } from "@realityjunky/badger";
+import type {
+  ScriptEffectSuggestion,
+  SkillScriptSideEffect,
+} from "@realityjunky/badger";
+import { isRecord } from "../util/records.js";
 import type {
   SourceEvidence,
   SourceFact,
@@ -39,11 +43,13 @@ export interface DraftingJob {
   skillId: string | null;
   questionId: string | null;
   locale: string | null;
+  outputLocale?: string | null;
   parentQuestionId: string | null;
   status:
     "queued" | "claimed" | "submitted" | "accepted" | "rejected" | "cancelled";
   revision: number;
   contextHash: string;
+  outputSchema?: object;
   result: DraftingResult | null;
   review: {
     result: DraftingResult;
@@ -80,3 +86,25 @@ export interface AuthoringDraftingJob extends Omit<
 }
 export type AnyDraftingJob =
   DraftingJob | PlanDraftingJob | AuthoringDraftingJob;
+
+export function draftingEffectLabels(
+  job: DraftingJob,
+): SkillScriptSideEffect[] {
+  let value: unknown = job.outputSchema;
+  for (const key of [
+    "properties",
+    "scriptEffects",
+    "items",
+    "properties",
+    "effects",
+    "items",
+    "enum",
+  ]) {
+    if (!isRecord(value)) return [];
+    value = value[key];
+  }
+  return Array.isArray(value) &&
+    value.every((label) => typeof label === "string")
+    ? (value as SkillScriptSideEffect[])
+    : [];
+}

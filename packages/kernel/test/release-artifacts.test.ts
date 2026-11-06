@@ -599,8 +599,10 @@ describe("Badger release artifacts", () => {
 
     expect(delivered).toContain("workflow-access.ts");
     expect(delivered).toContain("src/skills/");
-    expect(delivered).toContain("The Workflows page lists the catalog");
-    expect(delivered).toContain("工作流页面列出工作流目录");
+    expect(delivered).toContain("Workflows lists the catalog");
+    expect(delivered).toContain(
+      "“工作流”卡片将团队、说明、版本、意图和语言放在同一行",
+    );
     expect(planned).not.toContain("the table adds the workflow roles");
     expect(planned).not.toContain("下表补充工作流角色");
     expect(ledger).toContain(
@@ -856,14 +858,14 @@ describe("Badger release artifacts", () => {
       "Git LFS 内容会被拒绝",
       "A server process runs at most two fetches at once and refuses another with 503 and <code>Retry-After</code>",
       // The dashboard.
-      "Retire asks first, naming the draft's kind and saying that a retired draft cannot be revised and leaves the ledger and readiness (#76)",
-      "“停用”会先请求确认",
-      "list every approval, marking the superseded ones (#52)",
-      "并标出已被取代的批准（#52）",
-      "whose text it writes in the viewer's language with an absolute link",
-      "复制的文字使用查看者的语言，并带有绝对链接",
-      "shown with the Group's own Delivery log (#57)",
-      "并查看该组自己的投递日志（#57）",
+      "Retiring a Ledger draft requires confirmation; retired drafts cannot be revised and leave the Ledger and readiness",
+      "停用台账草稿前需要确认；停用后不能再修订，并从台账及就绪状态中移除",
+      "stage histories retain approvals and mark superseded ones",
+      "阶段历史保留批准记录并标明被取代的批准",
+      "Remind and Copy reminder use the viewer's language and an absolute link",
+      "“提醒”和“复制提醒”使用查看者的语言及绝对链接",
+      "Delivery logs are available at the workflow and owning Group",
+      "工作流和所属团队均可查看对应的投递日志",
       // The Badger MCP.
       "<code>upload_attachment</code> reads a local file and checks the person's assignment, the question revision, and the service's type and size limits before sending it (#51)",
       "A folder that holds a <code>.git</code> folder is refused before any file is read (#80)",
@@ -996,8 +998,8 @@ describe("Badger release artifacts", () => {
       // #67 moved out of §7.5 into §5.4–§5.6.
       "The service flags a decision with no matching gate answer, a gap in the event sequence, and an execution that differs from the published package as findings on the Run",
       "若出现没有对应门槛回答的决策、事件序列有缺口，或执行与已发布软件包不同，服务都会把它作为 finding 标记在 Run 上",
-      "A Run that needs recovery (#67) is marked in the Runs list and on its page",
-      "需要恢复的 Run（#67）在 Run 列表和其详情页上都有标记",
+      "Operators recover interrupted Runs through the local WorkflowRuntime on the Run's computer",
+      "操作员在 Run 所在计算机通过本地 WorkflowRuntime 恢复中断运行",
       "<code>.badger/mcp-recovery.json</code>",
       "its operator profile installs published workflows (#64) and runs them (#65, #66)",
       "其运行者 profile 安装已发布的工作流（#64）并运行它们（#65、#66）",

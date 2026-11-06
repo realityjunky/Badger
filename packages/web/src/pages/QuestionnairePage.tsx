@@ -357,13 +357,13 @@ export function QuestionnairePage() {
         key={path ?? "unselected"}
         activeTab={activeTab}
         onChange={changePanel}
-        suggestionsHref={`/questionnaire?${suggestionsQuery}`}
         suggestions={
           view && path && reviewSuggestions ? (
             <DraftingJobs
               key={path}
               basePath={basePath}
               path={path}
+              jobsHref={`/questionnaire?${suggestionsQuery}`}
               view={view}
               onChanged={() => void reload()}
             />

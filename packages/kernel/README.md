@@ -72,6 +72,14 @@ fixture, workflow manual, and release gate aligned. Architecture decisions,
 including the service's scope, identity boundary, storage, and sign-off
 rules, are recorded in `docs/adr/`; the domain language is in `GLOSSARY.md`.
 
+For dashboard operation, use the repository's
+[dashboard guide](../../docs/dashboard-guide.md). The
+[prompt guide](../../docs/dashboard-prompts.md) explains the stage templates
+owned by `src/authoring/prompt-templates.ts`, their immutable job snapshots,
+per-task output language, and the boundary between Agent drafts and personal
+review. The service projects these kernel instructions and validation rules;
+it does not define a second authoring protocol.
+
 The collaborative service also delivers the Skills library (#42): immutable
 folder and zip uploads, source checks through this kernel, full inventories,
 script side-effect declarations, bounded file previews, and version diffs.

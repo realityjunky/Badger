@@ -701,6 +701,102 @@ it("restricts the template catalog to signed-in Administrators and binds edits t
   );
 });
 
+it.each(["en", "zh-CN"])(
+  "uses the frozen %s workflow locale for both source-study jobs independently of interface and future-frame settings",
+  async (locale) => {
+    const { workflowId, jobs, pins, secret } = await setup(locale);
+    const { preferences } = await request("/me/preferences");
+    await request("/me/preferences", "PUT", {
+      revision: preferences.revision,
+      language: locale === "zh-CN" ? "en" : "zh",
+      theme: preferences.theme,
+      fontScale: preferences.fontScale,
+      railCollapsed: preferences.railCollapsed,
+    });
+    const { workflow } = await request(`/workflows/${workflowId}`);
+    await request(
+      `/workflows/${workflowId}`,
+      "PATCH",
+      {
+        name: workflow.name,
+        goal: workflow.goal,
+        intent: workflow.intent,
+        locale: locale === "zh-CN" ? "en" : "zh-CN",
+        revision: workflow.revision,
+      },
+      200,
+      admin,
+    );
+    for (const pin of pins) {
+      const job = await create(jobs, {
+        kind: "source-study",
+        skillId: pin.skillId,
+      });
+      const dispatch = await request(`${jobs}/${job.id}/prompt`);
+      expect(dispatch.job.outputLocale).toBe(locale);
+      expect(dispatch.prompt).toContain(`Output locale: "${locale}"`);
+      const claimed = await claim(jobs, job, secret);
+      expect(claimed.contextBundle.version.locale).toBe(locale);
+      expect(claimed.job.outputLocale).toBe(locale);
+      expect(claimed.instructions).toContain(`"outputLocale": "${locale}"`);
+      expect(claimed.instructions).toContain(
+        "Write every generated user-facing narrative field in this language",
+      );
+      expect(claimed.instructions).toContain(
+        "Preserve exact schema keys and enum values",
+      );
+    }
+  },
+);
+
+it("keeps an explicit translation target separate from the workflow locale", async () => {
+  const { jobs, questionnaire, secret } = await setup("zh-CN");
+  const question = await answeredQuestion(questionnaire);
+  const job = await create(jobs, {
+    kind: "translate-question",
+    questionId: question.id,
+    locale: "en",
+  });
+  const dispatch = await request(`${jobs}/${job.id}/prompt`);
+  expect(dispatch.job.outputLocale).toBe("en");
+  expect(dispatch.prompt).toContain('Output locale: "en"');
+  const claimed = await claim(jobs, job, secret);
+  expect(claimed.contextBundle.version.locale).toBe("zh-CN");
+  expect(claimed.instructions).toContain('"outputLocale": "en"');
+});
+
+it("provides the bound output-language instruction without changing a saved template snapshot", async () => {
+  const { jobs, pins, secret } = await setup("zh-CN");
+  const path = "/admin/prompt-templates/source-study";
+  const body =
+    "Read the supplied Skill files and submit evidence-backed facts.";
+  const { confirmationHash } = await request(
+    `${path}/preview`,
+    "POST",
+    { revision: 0, body },
+    200,
+    admin,
+  );
+  await request(
+    path,
+    "PUT",
+    { revision: 0, body, confirmed: true, confirmationHash },
+    200,
+    admin,
+  );
+  const job = await create(jobs, {
+    kind: "source-study",
+    skillId: pins[0].skillId,
+  });
+  const before = await request(`${jobs}/${job.id}/prompt`);
+  const claimed = await claim(jobs, job, secret);
+  expect(claimed.contextBundle.promptTemplate).toEqual(before.template);
+  expect(claimed.contextBundle.promptTemplate.body).toBe(body);
+  expect(claimed.job.contextHash).toBe(job.contextHash);
+  expect(claimed.instructions).toContain('Output locale: "zh-CN"');
+  expect(claimed.instructions).toContain("For zh-CN, use Simplified Chinese");
+});
+
 it("delivers the queued template snapshot through dispatch and claim even after an Administrator edits the default", async () => {
   const { jobs, pins, secret } = await setup();
   const job = await create(jobs, {
