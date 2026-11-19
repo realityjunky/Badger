@@ -80,10 +80,12 @@ export function DraftingJobs({
   const { t, format } = useI18n();
   const location = useLocation();
   const parameters = new URLSearchParams(location.search);
-  const linkedJobId = parameters.get("job");
+  const requestedJobId = parameters.get("job");
+  const studySkillId = parameters.get("studySkill");
+  const studyHash = parameters.get("studyHash");
   const isActive = parameters.get("panel") === "suggestions";
   const jobsPath = path.replace(/\/questionnaire$/u, "/drafting-jobs");
-  const [jobs, setJobs] = useState<DraftingJob[]>([]);
+  const [loadedJobs, setJobs] = useState<DraftingJob[] | null>(null);
   const [statuses, setStatuses] = useState<DraftingJob["status"][]>([
     "queued",
     "claimed",
@@ -108,8 +110,25 @@ export function DraftingJobs({
   const [preview, setPreview] = useState<DraftingDecisionPreview | null>(null);
   const [decisionJob, setDecisionJob] = useState<DraftingJob | null>(null);
   const canDecide = view.capabilities.compose;
+  const jobs = loadedJobs ?? [];
   const visibleJobs = jobs.filter((job) => statuses.includes(job.status));
-  const linkedJob = jobs.find((job) => job.id === linkedJobId);
+  const studyPin =
+    requestedJobId === null
+      ? view.pins.find(
+          (pin) => pin.skillId === studySkillId && pin.hash === studyHash,
+        )
+      : undefined;
+  const linkedJob = studyPin
+    ? jobs
+        .filter(
+          (job) =>
+            job.kind === "source-study" &&
+            job.skillId === studyPin.skillId &&
+            job.skillHash === studyPin.hash,
+        )
+        .at(-1)
+    : jobs.find((job) => job.id === requestedJobId);
+  const linkedJobId = linkedJob?.id;
   const revealedVisit = useRef<string | null>(null);
   const scrolledVisit = useRef<string | null>(null);
   useEffect(() => {
@@ -154,7 +173,7 @@ export function DraftingJobs({
       }
     } catch (error) {
       if (request === sequence.current) {
-        setJobs([]);
+        setJobs(null);
         setFailure(
           error instanceof Error ? error.message : t("questionnaire.failed"),
         );
@@ -228,8 +247,8 @@ export function DraftingJobs({
   const startRequest = () => {
     setRoundId(draftRounds[0]?.id);
     setParentId(undefined);
-    setKind("draft-questions");
-    setSkillId(view.pins[0]?.skillId);
+    setKind(studyPin ? "source-study" : "draft-questions");
+    setSkillId(studyPin?.skillId ?? view.pins[0]?.skillId);
     setQuestionId(undefined);
     setRequesting(true);
   };
@@ -370,6 +389,12 @@ export function DraftingJobs({
         </Space>
       </div>
       {failure && <Alert type="error" showIcon message={failure} />}
+      {studyPin && loadedJobs !== null && !linkedJob && (
+        <Alert
+          type="info"
+          message={format("drafting.noStudyJob", { name: studyPin.skillName })}
+        />
+      )}
       {savedJobId && (
         <Alert type="success" showIcon message={t("drafting.reviewSaved")} />
       )}

@@ -100,6 +100,9 @@ export function publicDraftingJob(row: DraftingJobRow) {
     laneId: row.lane_id,
     roundId: row.round_id,
     skillId: row.skill_id,
+    skillHash:
+      row.context_bundle.pins?.find((pin) => pin.skillId === row.skill_id)
+        ?.hash ?? null,
     questionId: row.question_id,
     locale: row.locale,
     outputLocale: row.locale ?? row.context_bundle.version?.locale ?? null,

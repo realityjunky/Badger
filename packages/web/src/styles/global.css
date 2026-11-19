@@ -723,8 +723,7 @@ button.rail-link {
   }
 }
 
-.workflow-pins,
-.workflow-source-inventory {
+.workflow-pins {
   display: grid;
   gap: 8px;
   list-style: none;
@@ -732,42 +731,91 @@ button.rail-link {
   padding: 0;
 }
 
-.workflow-pins li,
-.workflow-source-inventory article {
-  align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  padding: 10px 12px;
+.workflow-pin-card {
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-control);
+  min-width: 0;
 }
 
-.workflow-pins li > div {
+.workflow-pin-header {
+  align-items: center;
+  display: flex;
+}
+
+.workflow-pin-unpin {
+  flex: none;
+  margin-inline-end: 12px;
+}
+
+.workflow-pin-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--badger-radius-control);
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  font: inherit;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  text-align: start;
+}
+
+.workflow-pin-toggle:hover {
+  background: var(--badger-color-accent-soft);
+}
+
+.workflow-pin-toggle[aria-expanded="true"] .workflow-pin-chevron {
+  transform: rotate(90deg);
+}
+
+.workflow-pin-label,
+.workflow-pin-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.workflow-pin-label {
+  flex: 1;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.workflow-pin-version {
   display: grid;
   gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workflow-pin-meta .ant-tag {
+  margin-inline-end: 0;
+}
+
+.workflow-pin-inventory {
+  border-top: 1px solid var(--badger-color-border);
+  overflow-wrap: anywhere;
+  padding: 12px;
+}
+
+.workflow-pin-inventory > :first-child {
+  margin-block-start: 0;
+}
+
+.workflow-pin-inventory > :last-child {
+  margin-block-end: 0;
+}
+
+.workflow-pin-inventory ul {
+  padding-inline-start: 20px;
 }
 
 .workflow-pin-form {
   margin-bottom: 16px;
-}
-
-.workflow-source-inventory {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
-
-.workflow-source-inventory article {
-  align-items: stretch;
-  display: grid;
-}
-
-.workflow-source-inventory ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
-.workflow-source-inventory code {
-  overflow-wrap: anywhere;
 }
 
 .source-study-panel,
@@ -806,6 +854,20 @@ button.rail-link {
 
 .study-pin > div {
   min-width: 0;
+}
+
+.study-draft-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding-inline: 12px;
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-control);
+  text-decoration: none;
+}
+
+.study-draft-link:hover {
+  border-color: var(--badger-color-accent);
 }
 
 .study-hash {

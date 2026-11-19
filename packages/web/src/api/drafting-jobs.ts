@@ -48,6 +48,7 @@ export interface DraftingJob {
   kind: DraftingKind;
   roundId: string | null;
   skillId: string | null;
+  skillHash?: string | null;
   questionId: string | null;
   locale: string | null;
   outputLocale?: string | null;

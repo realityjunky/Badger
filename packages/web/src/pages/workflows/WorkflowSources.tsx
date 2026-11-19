@@ -1,5 +1,6 @@
+import { RightOutlined } from "@ant-design/icons";
 import { Alert, Button, Select, Space, Tag } from "antd";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
   loadSkills,
@@ -10,6 +11,7 @@ import {
 import {
   pinSkillVersion,
   unpinSkillVersion,
+  type SourceCheckSource,
   type Workflow,
   type WorkflowSkillPin,
   type WorkflowVersion,
@@ -46,8 +48,12 @@ export function WorkflowSources({
   const location = useLocation();
   const section = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (location.hash === "#sources")
+    if (location.hash !== "#sources") return;
+    // Let the new tab layout settle before measuring the panel's position.
+    const frame = requestAnimationFrame(() => {
       section.current?.scrollIntoView({ block: "start" });
+    });
+    return () => cancelAnimationFrame(frame);
   }, [location.key, location.hash, workflow.id, version.id]);
   const [options, setOptions] = useState<SkillOption[]>([]);
   const [skillId, setSkillId] = useState<string>();
@@ -139,6 +145,9 @@ export function WorkflowSources({
   };
 
   const check = detail.sourceCheck;
+  const sources = new Map(
+    check?.sources.map((source) => [source.name, source]),
+  );
   const job = detail.jobs.find((entry) => entry.id === check?.jobId);
   const when = (value: string) => new Date(value).toLocaleString(locale);
   return (
@@ -165,59 +174,6 @@ export function WorkflowSources({
       }
     >
       <p className="muted">{t("workflow.sourcesDescription")}</p>
-      <SourcesGate
-        key={detail.version.id}
-        basePath={basePath}
-        detail={detail}
-        onChanged={onChanged}
-      />
-      {check !== null && (
-        <p className="muted">
-          {check.finishedAt === null
-            ? format("workflow.checkRequested", {
-                time: when(check.requestedAt),
-              })
-            : format("workflow.checkFinished", {
-                time: when(check.finishedAt),
-              })}
-        </p>
-      )}
-      {check?.status === "failed" && (
-        <Alert
-          type="error"
-          showIcon
-          message={t("workflow.checkFailed")}
-          description={job?.error ?? undefined}
-        />
-      )}
-      {failure !== null && <Alert type="error" showIcon message={failure} />}
-      {detail.pins.length === 0 ? (
-        <p className="empty-state">{t("workflow.noPins")}</p>
-      ) : (
-        <ul className="workflow-pins">
-          {detail.pins.map((pinRecord) => (
-            <li key={pinRecord.skillId}>
-              <div>
-                <strong>{pinRecord.skillName}</strong>
-                <code className="skills-hash">{pinRecord.hash}</code>
-              </div>
-              <Space wrap>
-                <Tag>{t(`workflow.pinPurpose.${pinRecord.purpose}`)}</Tag>
-                {canManage && (
-                  <Button
-                    danger
-                    size="small"
-                    disabled={busy}
-                    onClick={() => void unpin(pinRecord)}
-                  >
-                    {t("workflow.unpin")}
-                  </Button>
-                )}
-              </Space>
-            </li>
-          ))}
-        </ul>
-      )}
       {canManage && options.length > 0 && (
         <Space wrap className="workflow-pin-form">
           <Select
@@ -275,6 +231,47 @@ export function WorkflowSources({
           </Button>
         </Space>
       )}
+      <SourcesGate
+        key={detail.version.id}
+        basePath={basePath}
+        detail={detail}
+        onChanged={onChanged}
+      />
+      {check !== null && (
+        <p className="muted">
+          {check.finishedAt === null
+            ? format("workflow.checkRequested", {
+                time: when(check.requestedAt),
+              })
+            : format("workflow.checkFinished", {
+                time: when(check.finishedAt),
+              })}
+        </p>
+      )}
+      {check?.status === "failed" && (
+        <Alert
+          type="error"
+          showIcon
+          message={t("workflow.checkFailed")}
+          description={job?.error ?? undefined}
+        />
+      )}
+      {failure !== null && <Alert type="error" showIcon message={failure} />}
+      {detail.pins.length === 0 ? (
+        <p className="empty-state">{t("workflow.noPins")}</p>
+      ) : (
+        <ul className="workflow-pins">
+          {detail.pins.map((pinRecord) => (
+            <PinnedSourceCard
+              key={`${pinRecord.skillId}:${pinRecord.hash}`}
+              pin={pinRecord}
+              source={sources.get(pinRecord.skillName)}
+              unpin={canManage ? () => void unpin(pinRecord) : undefined}
+              busy={busy}
+            />
+          ))}
+        </ul>
+      )}
       {check !== null && check.blockers.length > 0 && (
         <Alert
           type="warning"
@@ -289,16 +286,49 @@ export function WorkflowSources({
           }
         />
       )}
-      {check !== null && check.sources.length > 0 && (
-        <div className="workflow-source-inventory">
-          {check.sources.map((source) => (
-            <article key={source.name}>
-              <div className="workflow-card-heading">
-                <strong>{source.name}</strong>
-                <Space wrap>
-                  {source.purpose === "upgrade-source" && (
-                    <Tag>{t("workflow.pinPurpose.upgrade-source")}</Tag>
-                  )}
+    </WorkflowPanel>
+  );
+}
+
+function PinnedSourceCard({
+  pin,
+  source,
+  unpin,
+  busy,
+}: {
+  pin: WorkflowSkillPin;
+  source: SourceCheckSource | undefined;
+  unpin: (() => void) | undefined;
+  busy: boolean;
+}) {
+  const { t } = useI18n();
+  const inventoryId = useId();
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <li className="workflow-pin-card">
+      <div className="workflow-pin-header">
+        <button
+          type="button"
+          className="workflow-pin-toggle"
+          aria-label={pin.skillName}
+          aria-expanded={expanded}
+          aria-controls={inventoryId}
+          aria-describedby={`${inventoryId}-version ${inventoryId}-status`}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          <RightOutlined className="workflow-pin-chevron" aria-hidden="true" />
+          <span className="workflow-pin-label">
+            <span className="workflow-pin-version">
+              <strong>{pin.skillName}</strong>
+              <code id={`${inventoryId}-version`} className="skills-hash">
+                {pin.hash}
+              </code>
+            </span>
+            <span id={`${inventoryId}-status`} className="workflow-pin-meta">
+              <Tag>{t(`workflow.pinPurpose.${pin.purpose}`)}</Tag>
+              {source && (
+                <>
                   <StatusPill
                     tone={source.status === "available" ? "success" : "danger"}
                   >
@@ -307,15 +337,40 @@ export function WorkflowSources({
                   <Tag>
                     {source.inventory.length} {t("workflow.files")}
                   </Tag>
-                </Space>
-              </div>
-              <ul>
-                {source.inventory.map((file) => (
-                  <li key={file.path}>
-                    <code>{file.path}</code>
-                  </li>
-                ))}
-              </ul>
+                </>
+              )}
+            </span>
+          </span>
+        </button>
+        {unpin && (
+          <Button
+            className="workflow-pin-unpin"
+            danger
+            size="small"
+            disabled={busy}
+            onClick={unpin}
+          >
+            {t("workflow.unpin")}
+          </Button>
+        )}
+      </div>
+      <div
+        id={inventoryId}
+        className="workflow-pin-inventory"
+        hidden={!expanded}
+      >
+        {expanded &&
+          (source ? (
+            <>
+              {source.inventory.length > 0 && (
+                <ul>
+                  {source.inventory.map((file) => (
+                    <li key={file.path}>
+                      <code>{file.path}</code>
+                    </li>
+                  ))}
+                </ul>
+              )}
               {source.ignored.length > 0 && (
                 <p className="muted">
                   {t("workflow.ignored")}: {source.ignored.join(", ")}
@@ -324,7 +379,7 @@ export function WorkflowSources({
               {source.scripts.length > 0 && (
                 <>
                   <p className="muted">{t("workflow.scripts")}</p>
-                  <ul className="workflow-source-scripts">
+                  <ul>
                     {source.scripts.map((script) => (
                       <li key={script.path}>
                         <code>{script.path}</code>{" "}
@@ -339,16 +394,17 @@ export function WorkflowSources({
                 </>
               )}
               {source.blockers.length > 0 && (
-                <ul className="workflow-source-blockers">
+                <ul>
                   {source.blockers.map((blocker) => (
                     <li key={blocker}>{blocker}</li>
                   ))}
                 </ul>
               )}
-            </article>
+            </>
+          ) : (
+            <p className="muted">{t("workflow.inventoryUnavailable")}</p>
           ))}
-        </div>
-      )}
-    </WorkflowPanel>
+      </div>
+    </li>
   );
 }

@@ -52,6 +52,11 @@ export function WorkflowSourceStudy({
   const ready =
     detail.version.stages.find((s) => s.id === "sources")?.state === "done";
   const base = studyPath(detail.workflow.id, detail.version.id);
+  const jobsQuery = {
+    workflow: detail.workflow.id,
+    version: detail.version.id,
+    panel: "suggestions",
+  };
 
   async function openReview(skillId: string) {
     if (busy) return;
@@ -208,9 +213,7 @@ export function WorkflowSourceStudy({
       )}
       {canManage && (
         <p>
-          <Link
-            to={`/questionnaire?${new URLSearchParams({ workflow: detail.workflow.id, version: detail.version.id, panel: "suggestions" })}`}
-          >
+          <Link to={`/questionnaire?${new URLSearchParams(jobsQuery)}`}>
             {t("drafting.openJobs")}
           </Link>
         </p>
@@ -248,6 +251,18 @@ export function WorkflowSourceStudy({
               <Tag color={pin.studied ? "success" : "default"}>
                 {t(pin.studied ? "study.studied" : "study.remaining")}
               </Tag>
+              {canManage && (
+                <Link
+                  className="study-draft-link"
+                  to={`/questionnaire?${new URLSearchParams({
+                    ...jobsQuery,
+                    studySkill: pin.skillId,
+                    studyHash: pin.hash,
+                  })}`}
+                >
+                  {t("study.openDraft")}
+                </Link>
+              )}
               {canManage && !pin.studied && (
                 <Button
                   disabled={!ready || busy}
