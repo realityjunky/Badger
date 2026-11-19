@@ -132,7 +132,7 @@ test("a person confirms Sources, and the inbox announces its invalidation under 
   await expect(item.locator(".ant-tag")).toHaveText("Unread");
   await item
     .getByRole("link", {
-      name: `${name} · v1: Sources confirmation invalidated`,
+      name: `${name} · 0.1.0: Sources confirmation invalidated`,
     })
     .click();
   await expect(page).toHaveURL(`${base}${versionPath}#sources`);

@@ -191,8 +191,8 @@ async function recordVersion(
   context: WriteContext,
   workflow: Workflow,
   number: number,
-  inheritedFromVersionId: string | null = null,
-  semanticVersion: string | null = null,
+  inheritedFromVersionId: string | null,
+  semanticVersion: string | null,
 ): Promise<WorkflowVersion> {
   const stages = Object.fromEntries(
     WORKFLOW_STAGES.map((id, index) => [id, index === 0 ? "active" : "todo"]),
@@ -296,7 +296,15 @@ export async function createWorkflow(
     return {
       kind: "created",
       workflow,
-      version: await recordVersion(tx, dependencies, context, workflow, 1),
+      version: await recordVersion(
+        tx,
+        dependencies,
+        context,
+        workflow,
+        1,
+        null,
+        "0.1.0",
+      ),
     };
   });
 }
@@ -452,7 +460,7 @@ export async function createWorkflowVersion(
         target: {
           type: "workflow_version",
           id: version.id,
-          label: `${workflow.name} · v${version.number}`,
+          label: `${workflow.name} · ${semanticVersion ?? `v${version.number}`}`,
         },
         before: null,
         after: { revision: version.revision, hash: inherited.hash },

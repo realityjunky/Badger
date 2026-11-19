@@ -971,10 +971,10 @@ it("preserves source-study jobs and reviewed confirmation hashes across version 
     {},
   );
   const before = (await request(base)).version;
-  await request(base, "PATCH", { labelRevision: 0, semanticVersion: "0.1.0" });
+  await request(base, "PATCH", { labelRevision: 0, semanticVersion: "0.1.1" });
   expect((await request(base)).version).toEqual({
     ...before,
-    semanticVersion: "0.1.0",
+    semanticVersion: "0.1.1",
     labelRevision: 1,
   });
   await request(`${base}/gates/sources/commit`, "POST", {

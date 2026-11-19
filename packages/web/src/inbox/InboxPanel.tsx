@@ -8,6 +8,7 @@ import { useI18n } from "../i18n/I18nContext.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import { useInbox } from "./InboxContext.js";
 import { useDemoMode } from "../app/DemoContext.js";
+import { workflowVersionLabel } from "../util/workflowVersion.js";
 
 export function InboxPanel() {
   const demoMode = useDemoMode();
@@ -228,7 +229,10 @@ export function InboxPanel() {
                                                 : "inbox.gateInvalidated",
                   {
                     name: item.workflowName,
-                    number: item.semanticVersion ?? item.versionNumber,
+                    version: workflowVersionLabel({
+                      number: item.versionNumber,
+                      semanticVersion: item.semanticVersion,
+                    }),
                   },
                 )}
                 {item.questionText !== null && ` · ${item.questionText}`}

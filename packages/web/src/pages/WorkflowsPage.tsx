@@ -367,9 +367,6 @@ export function WorkflowsPage() {
                         </p>
                       )}
                       <Space wrap className="workflow-version-meta">
-                        {selectedVersion.semanticVersion && (
-                          <Tag>{`v${selectedVersion.number}`}</Tag>
-                        )}
                         <Tag>{selectedVersion.name}</Tag>
                         <Tag>
                           {t(

@@ -153,7 +153,13 @@ describe("workflows and versions", () => {
       ...frame,
       revision: 1,
     });
-    expect(version).toMatchObject({ number: 1, revision: 1, ...frame });
+    expect(version).toMatchObject({
+      ...frame,
+      number: 1,
+      revision: 1,
+      semanticVersion: "0.1.0",
+      labelRevision: 0,
+    });
     expect(version.stages).toEqual([
       { id: "sources", state: "active" },
       { id: "source-study", state: "todo" },
@@ -168,7 +174,12 @@ describe("workflows and versions", () => {
     const catalog = await service.request("/api/v1/workflows", { as: lead });
     expect(catalog.status).toBe(200);
     expect(await catalog.json()).toMatchObject({
-      workflows: [{ id: workflow.id }],
+      workflows: [
+        {
+          id: workflow.id,
+          latestVersion: { id: version.id, semanticVersion: "0.1.0" },
+        },
+      ],
     });
     const read = await service.request(
       `/api/v1/workflows/${workflow.id}/versions/${version.id}`,
@@ -286,24 +297,23 @@ describe("workflows and versions", () => {
 });
 
 describe("workflow version labels", () => {
-  it("labels existing iterations and creates chosen labels without renumbering history", async () => {
+  it("edits and creates labels without renumbering history", async () => {
     const group = await setup();
     const { workflow, version } = await createWorkflow(group.id);
     const base = `/workflows/${workflow.id}`;
     const first = `${base}/versions/${version.id}`;
-    expect(version).toMatchObject({ semanticVersion: null, labelRevision: 0 });
     expect(
       (
         await write("PATCH", first, admin, {
           labelRevision: 0,
-          semanticVersion: "0.1.0",
+          semanticVersion: "0.1.1",
         })
       ).status,
     ).toBe(200);
     const labelled = await service.request(`/api/v1${first}`, { as: lead });
     expect(await labelled.json()).toMatchObject({
       workflow,
-      version: { ...version, semanticVersion: "0.1.0", labelRevision: 1 },
+      version: { ...version, semanticVersion: "0.1.1", labelRevision: 1 },
     });
     const created = await write("POST", `${base}/versions`, admin, {
       revision: 1,
@@ -325,7 +335,7 @@ describe("workflow version labels", () => {
       expect(await response.json()).toMatchObject({
         versions: [
           { id: next.version.id, number: 2, semanticVersion: "0.2.0" },
-          { id: version.id, number: 1, semanticVersion: "0.1.0" },
+          { id: version.id, number: 1, semanticVersion: "0.1.1" },
         ],
       });
     }
@@ -341,7 +351,7 @@ describe("workflow version labels", () => {
     expect(await questionnaire.json()).toMatchObject({
       versions: [
         { versionId: next.version.id, semanticVersion: "0.2.0" },
-        { versionId: version.id, semanticVersion: "0.1.0" },
+        { versionId: version.id, semanticVersion: "0.1.1" },
       ],
     });
     expect(
@@ -368,7 +378,7 @@ describe("workflow version labels", () => {
           targetType: "workflow_version_label",
           before: { revision: 1, hash: null },
           after: { revision: 2, hash: null },
-          reason: "Version label changed from 0.1.0 to v1",
+          reason: "Version label changed from 0.1.1 to v1",
         }),
       ]),
     );
@@ -423,7 +433,7 @@ describe("workflow version labels", () => {
       (
         await write("PATCH", first, admin, {
           labelRevision: 0,
-          semanticVersion: "0.1.0",
+          semanticVersion: "0.1.1",
         })
       ).status,
     ).toBe(200);
@@ -433,13 +443,13 @@ describe("workflow version labels", () => {
     });
     expect(stale.status).toBe(409);
     expect(await stale.json()).toMatchObject({
-      label: { semanticVersion: "0.1.0", labelRevision: 1 },
+      label: { semanticVersion: "0.1.1", labelRevision: 1 },
     });
     expect(
       (
         await write("POST", `${base}/versions`, admin, {
           revision: 1,
-          semanticVersion: "0.1.0",
+          semanticVersion: "0.1.1",
         })
       ).status,
     ).toBe(409);

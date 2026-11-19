@@ -700,7 +700,7 @@ for (const theme of ["light", "dark"] as const) {
       await page.goto(`${base}/my-work`);
       await expect(
         page.getByRole("link", {
-          name: `${workflow.name} · v1: dossier approval superseded`,
+          name: `${workflow.name} · 0.1.0: dossier approval superseded`,
           exact: true,
         }),
       ).toBeVisible();
