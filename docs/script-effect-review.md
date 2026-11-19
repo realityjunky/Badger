@@ -35,21 +35,24 @@ panel. Current account and Skill library access are required, including when
 their only role is Engineer on another workflow in the same Group. This link
 grants no access to unrelated Questionnaire records.
 
-For every inventoried script, review and correct effects, rationale, immutable
-source citations, conditional behavior, and uncertainty answers. The panel's
+In the workflow, open **Script effect review** and select a numbered Skill
+tab. Use the numbered script tabs to review and correct every script's
+effects, rationale, immutable source citations, conditional behavior, and
+uncertainty answers. The panel's
 choices come from the kernel contract: `none`, `local-writes`, `network`,
 `scheduler-submission`, and `installs`. `none` is exclusive. Empty effects,
-missing scripts, missing evidence, unreviewed rows, and unanswered uncertainty
-remain pending. Uncertainty and `undeclared` are review states.
+missing scripts, missing evidence, and unanswered uncertainty remain pending.
+Uncertainty and `undeclared` are review states.
 
-Use a clarification note and **Request clarification** to ask the Engineer
-and Agent to investigate. Save partial work as needed. Mark each row reviewed,
-choose **Review complete declaration set**, inspect the complete preview, and
-choose **Personally confirm declarations**. The hash binds the exact source,
-proposal/review revision, chosen rows and evidence, uploader, review time, and
-contract. Concurrent edits require a fresh preview; retrying the same request
-returns the original receipt. Agents and tokens cannot confirm. An
-Administrator can confirm only when they are that version's uploader.
+Use the Skill's clarification note and **Request clarification** to ask the
+Engineer and Agent to investigate. Choose **Save review draft** to save partial
+work. Choose **Review complete declaration set**, inspect the preview, and
+choose **Personally confirm declarations** to attest to every script in the set.
+The hash binds the exact source, proposal/review revision, chosen rows and
+evidence, uploader, review time, and contract. Concurrent edits require a fresh
+preview. Retrying the same request returns the original receipt. Agents and
+tokens cannot confirm. An Administrator can confirm only when they are that
+version's uploader.
 
 Final study completion needs this complete current confirmation in addition
 to the usual study requirements. Script-free versions need no effect task.

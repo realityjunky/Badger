@@ -1,6 +1,16 @@
-import { Alert, Button, Modal, Popconfirm, Space, Switch, Tag } from "antd";
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import {
+  Alert,
+  Button,
+  Empty,
+  Modal,
+  Popconfirm,
+  Space,
+  Switch,
+  Tabs,
+  Tag,
+} from "antd";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import {
   confirmStudy,
   previewStudy,
@@ -35,6 +45,9 @@ export function WorkflowSourceStudy({
   onChanged(): void;
 }) {
   const { t, format, locale } = useI18n();
+  const { hash, search } = useLocation();
+  const [section, setSection] = useState("overview");
+  const [selectedFact, setSelectedFact] = useState<string>();
   const [editor, setEditor] = useState<{
     kind: StudyRecord["kind"];
     previous?: StudyRecord;
@@ -48,6 +61,31 @@ export function WorkflowSourceStudy({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<WriteFailure | null>(null);
   const study = detail.sourceStudy;
+  const linkedId =
+    new URLSearchParams(search).get("studyRecord") ??
+    (hash.startsWith("#study-") ? hash.slice("#study-".length) : null);
+  const linkedRecord = [...study.facts, ...study.interfaces].find(
+    (record) => record.id === linkedId,
+  );
+  const linkedKind = linkedRecord?.kind;
+  const linkedStatus = linkedRecord?.status;
+  useEffect(() => {
+    if (linkedKind === undefined) return;
+    setSection(linkedKind === "fact" ? "facts" : "interfaces");
+    if (linkedKind === "fact" && linkedId !== null) setSelectedFact(linkedId);
+    if (linkedStatus === "retired") setRetired(true);
+  }, [linkedId, linkedKind, linkedStatus]);
+
+  const effectPins = study.studies.filter(
+    (pin) =>
+      !detail.sourceCheck?.sources.some(
+        (source) =>
+          source.name === pin.skillName &&
+          source.hash === pin.hash &&
+          source.status === "available" &&
+          source.scripts.length === 0,
+      ),
+  );
   const canManage = detail.capabilities.manageSourceStudy;
   const ready =
     detail.version.stages.find((s) => s.id === "sources")?.state === "done";
@@ -114,13 +152,67 @@ export function WorkflowSourceStudy({
     const visible = entries.filter(
       (record) => retired || record.status === "active",
     );
+    const recordCard = (record: StudyRecord) => (
+      <article
+        className="study-record"
+        key={record.id}
+        id={`study-${record.id}`}
+      >
+        <Space wrap>
+          <Tag>{format("study.revision", { revision: record.revision })}</Tag>
+          {record.status === "retired" && <Tag>{t("study.retired")}</Tag>}
+          {record.stale && record.status === "active" && (
+            <Tag color="warning">{t("study.stale")}</Tag>
+          )}
+        </Space>
+        <StudyContentView content={record.content} detail={detail} />
+        <StudyEvidenceLinks record={record} />
+        <RecordOriginLink
+          origin={record.origin}
+          workflowId={detail.workflow.id}
+          kind="source-study"
+        />
+        <EvidenceChanges changes={record.evidenceChanges} />
+        <Space wrap>
+          <Link
+            to={{
+              search: `?studyRecord=${encodeURIComponent(record.id)}`,
+              hash: "#source-study",
+            }}
+          >
+            {t("study.history")}
+          </Link>
+          {canManage && record.status === "active" && (
+            <>
+              <Button
+                size="small"
+                onClick={() => setEditor({ kind, previous: record })}
+              >
+                {t("study.edit")}
+              </Button>
+              <Popconfirm
+                title={t("study.retireConfirm")}
+                okText={t("study.retire")}
+                cancelText={t("workflow.cancel")}
+                onConfirm={() => retire(record)}
+              >
+                <Button size="small" danger disabled={busy}>
+                  {t("study.retire")}
+                </Button>
+              </Popconfirm>
+            </>
+          )}
+        </Space>
+      </article>
+    );
+    const activeFact =
+      visible.find((record) => record.id === selectedFact) ?? visible[0];
     return (
       <section
         className="study-record-list"
         aria-label={t(kind === "fact" ? "study.facts" : "study.interfaces")}
       >
         <div className="workflow-card-heading">
-          <h3>{t(kind === "fact" ? "study.facts" : "study.interfaces")}</h3>
           {canManage && (
             <Button
               disabled={
@@ -132,85 +224,35 @@ export function WorkflowSourceStudy({
               {t(kind === "fact" ? "study.addFact" : "study.addInterface")}
             </Button>
           )}
+          <label className="study-retired-toggle">
+            <Switch checked={retired} onChange={setRetired} />{" "}
+            {t("study.showRetired")}
+          </label>
         </div>
-        {visible.length === 0 && (
+        {visible.length === 0 ? (
           <p className="muted">{t("study.noRecords")}</p>
+        ) : kind === "fact" ? (
+          <Tabs
+            type="card"
+            size="small"
+            tabBarGutter={4}
+            activeKey={activeFact?.id}
+            onChange={setSelectedFact}
+            items={visible.map((record, index) => ({
+              key: record.id,
+              label: String(index + 1),
+              children: recordCard(record),
+            }))}
+          />
+        ) : (
+          visible.map(recordCard)
         )}
-        {visible.map((record) => (
-          <article
-            className="study-record"
-            key={record.id}
-            id={`study-${record.id}`}
-          >
-            <Space wrap>
-              <Tag>
-                {format("study.revision", { revision: record.revision })}
-              </Tag>
-              {record.status === "retired" && <Tag>{t("study.retired")}</Tag>}
-              {record.stale && record.status === "active" && (
-                <Tag color="warning">{t("study.stale")}</Tag>
-              )}
-            </Space>
-            <StudyContentView content={record.content} detail={detail} />
-            <StudyEvidenceLinks record={record} />
-            <RecordOriginLink
-              origin={record.origin}
-              workflowId={detail.workflow.id}
-              kind="source-study"
-            />
-            <EvidenceChanges changes={record.evidenceChanges} />
-            <Space wrap>
-              <Link
-                to={{
-                  search: `?studyRecord=${encodeURIComponent(record.id)}`,
-                  hash: "#source-study",
-                }}
-              >
-                {t("study.history")}
-              </Link>
-              {canManage && record.status === "active" && (
-                <>
-                  <Button
-                    size="small"
-                    onClick={() => setEditor({ kind, previous: record })}
-                  >
-                    {t("study.edit")}
-                  </Button>
-                  <Popconfirm
-                    title={t("study.retireConfirm")}
-                    okText={t("study.retire")}
-                    cancelText={t("workflow.cancel")}
-                    onConfirm={() => retire(record)}
-                  >
-                    <Button size="small" danger disabled={busy}>
-                      {t("study.retire")}
-                    </Button>
-                  </Popconfirm>
-                </>
-              )}
-            </Space>
-          </article>
-        ))}
       </section>
     );
   }
-  return (
-    <WorkflowPanel
-      title={t("stage.sourceStudy")}
-      className="source-study-panel"
-      id="source-study"
-      aria-labelledby="source-study-title"
-      actions={
-        <label className="study-retired-toggle">
-          <Switch checked={retired} onChange={setRetired} />{" "}
-          {t("study.showRetired")}
-        </label>
-      }
-    >
+  const overview = (
+    <>
       <p className="muted">{t("study.description")}</p>
-      {failure !== null && (
-        <WorkflowNotice failure={failure} onReload={onChanged} />
-      )}
       {canManage && (
         <p>
           <Link to={`/questionnaire?${new URLSearchParams(jobsQuery)}`}>
@@ -275,19 +317,77 @@ export function WorkflowSourceStudy({
           </article>
         ))}
       </div>
-      {records("fact", study.facts)}
-      {study.studies.map((pin) => (
-        <ScriptEffectsPanel
-          key={`${pin.skillId}:${pin.hash}`}
-          basePath={basePath}
-          skillId={pin.skillId}
-          hash={pin.hash}
-          workflowBase={base}
-          canManage={canManage}
-          onChanged={onChanged}
-        />
-      ))}
-      {records("interface", study.interfaces)}
+    </>
+  );
+  return (
+    <WorkflowPanel
+      title={t("stage.sourceStudy")}
+      className="source-study-panel"
+      id="source-study"
+      aria-labelledby="source-study-title"
+    >
+      {failure !== null && (
+        <WorkflowNotice failure={failure} onReload={onChanged} />
+      )}
+      <Tabs
+        activeKey={section}
+        onChange={setSection}
+        items={[
+          {
+            key: "overview",
+            label: t("stage.sourceStudy"),
+            children: overview,
+          },
+          {
+            key: "facts",
+            label: t("study.facts"),
+            children: records("fact", study.facts),
+          },
+          {
+            key: "interfaces",
+            label: t("study.interfaces"),
+            children: records("interface", study.interfaces),
+          },
+          {
+            key: "effects",
+            label: t("effects.title"),
+            children: effectPins.length ? (
+              <Tabs
+                type="card"
+                size="small"
+                tabBarGutter={4}
+                items={effectPins.map((pin, index) => ({
+                  key: pin.skillId,
+                  label: (
+                    <span
+                      className="study-skill-tab-label"
+                      title={pin.skillName}
+                    >
+                      {index + 1}. {pin.skillName}
+                    </span>
+                  ),
+                  children: (
+                    <ScriptEffectsPanel
+                      key={pin.hash}
+                      basePath={basePath}
+                      skillId={pin.skillId}
+                      hash={pin.hash}
+                      workflowBase={base}
+                      canManage={canManage}
+                      onChanged={onChanged}
+                    />
+                  ),
+                }))}
+              />
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t("effects.noScripts")}
+              />
+            ),
+          },
+        ]}
+      />
       {editor !== null && (
         <StudyRecordDialog
           basePath={basePath}
@@ -295,7 +395,10 @@ export function WorkflowSourceStudy({
           kind={editor.kind}
           previous={editor.previous}
           onCancel={() => setEditor(null)}
-          onChanged={onChanged}
+          onChanged={(record) => {
+            if (record?.kind === "fact") setSelectedFact(record.id);
+            onChanged();
+          }}
         />
       )}
       <StudyRecordInspector basePath={basePath} detail={detail} />

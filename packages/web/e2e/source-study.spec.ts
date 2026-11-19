@@ -115,6 +115,7 @@ test("an Engineer records a cited fact, opens its lines, and marks the pinned ve
   await page.goto(`${base}${versionPath}#source-study`);
 
   // A fact cites lines of a file in the pinned version's inventory.
+  await study.getByRole("tab", { name: "Source-derived facts" }).click();
   await study.getByRole("button", { name: "Add fact" }).click();
   const editor = page.getByRole("dialog").filter({ hasText: "Statement" });
   await editor
@@ -129,6 +130,9 @@ test("an Engineer records a cited fact, opens its lines, and marks the pinned ve
   await editor.getByLabel("Last line").fill("3");
   await editor.getByRole("button", { name: "Save changes" }).click();
   await expect(editor).toBeHidden();
+  await expect(
+    study.getByRole("tab", { name: "1", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
 
   // Its evidence link opens exactly the cited lines.
   await study.getByRole("link", { name: "reference/guide.md:2–3" }).click();
@@ -143,8 +147,12 @@ test("an Engineer records a cited fact, opens its lines, and marks the pinned ve
   await expect(inspector).toContainText("Revision 1");
   await inspector.getByRole("button", { name: "Close" }).click();
   await expect(inspector).toBeHidden();
+  await expect(
+    study.getByRole("tab", { name: "Source-derived facts" }),
+  ).toHaveAttribute("aria-selected", "true");
 
   // Marking the only pinned version studied completes Source study.
+  await study.getByRole("tab", { name: "Source study", exact: true }).click();
   await study.getByRole("button", { name: "Review study" }).click();
   const review = page
     .getByRole("dialog")

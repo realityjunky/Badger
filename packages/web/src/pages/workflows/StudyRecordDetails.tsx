@@ -1,6 +1,11 @@
 import { Alert, Descriptions, Drawer, Spin, Tag } from "antd";
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 import {
   loadEvidence,
   loadRecord,
@@ -94,7 +99,9 @@ export function StudyRecordInspector({
   detail: WorkflowVersionDetail;
 }) {
   const { t, format, locale } = useI18n();
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
+  const { hash } = useLocation();
+  const navigate = useNavigate();
   const id = params.get("studyRecord");
   const revision = params.get("studyRevision");
   const index = params.get("studyEvidence");
@@ -141,7 +148,7 @@ export function StudyRecordInspector({
     const next = new URLSearchParams(params);
     for (const key of ["studyRecord", "studyRevision", "studyEvidence"])
       next.delete(key);
-    setParams(next);
+    navigate({ search: next.toString(), hash });
   }
   if (id === null) return null;
   return (

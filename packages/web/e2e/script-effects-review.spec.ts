@@ -95,9 +95,8 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
   const effects = `/skills/${skill.id}/versions/${upload.hash}/effects`;
   const pin = { skillId: skill.id, hash: upload.hash };
   await call(page, "POST", `${path}/pins`, pin);
-  await page.goto(`${base}${path}#source-study`);
+  await page.goto(`${base}${path}#sources`);
   const study = page.locator("#source-study");
-  await expect(study).toContainText("Effect review pending");
   const reviewSources = page.getByRole("button", {
     name: "Review Sources",
     exact: true,
@@ -109,10 +108,18 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
     .getByRole("button", { name: "Confirm source set" })
     .click();
   await expect(page.getByText(/^Sources confirmed /u)).toBeVisible();
+  await page.goto(`${base}${path}#source-study`);
+  await study
+    .getByRole("tab", { name: "Script effect review", exact: true })
+    .click();
+  await expect(
+    study.getByRole("tab", { name: `1. ${name}`, exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
   const panel = study.getByRole("region", {
     name: `Script effect review · ${name}`,
     exact: true,
   });
+  await expect(panel).toContainText("Effect review pending");
   await panel
     .getByRole("button", { name: "Request Source study draft", exact: true })
     .click();
@@ -268,9 +275,10 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
   await expect(
     row.locator(".ant-select-selection-item").first(),
   ).toHaveAttribute("title", "Local writes");
-  await row
-    .getByRole("checkbox", { name: "I reviewed this script's declaration" })
-    .check();
+  await expect(
+    review.getByRole("tab", { name: "1. scripts/run.sh", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(row.getByRole("checkbox")).toHaveCount(0);
   await review
     .getByRole("button", {
       name: "Review complete declaration set",
@@ -284,6 +292,9 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
   await expect(confirmation).toContainText(upload.hash);
   await expect(confirmation).toContainText("No remote service is contacted");
   await expect(review).toContainText("Effect review pending");
+  expect(
+    (await call(page, "GET", effects)).review.content.scripts[0].reviewed,
+  ).toBe(false);
   await confirmation
     .getByRole("button", {
       name: "Personally confirm declarations",

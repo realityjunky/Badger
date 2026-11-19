@@ -48,7 +48,7 @@ export function StudyRecordDialog({
   kind: StudyRecord["kind"];
   previous?: StudyRecord;
   onCancel(): void;
-  onChanged(): void;
+  onChanged(record?: StudyRecord): void;
 }) {
   const { t } = useI18n();
   const [form] = Form.useForm<Values>();
@@ -137,7 +137,7 @@ export function StudyRecordDialog({
       );
       if (result.kind === "ok") {
         onCancel();
-        onChanged();
+        onChanged(result.value.record);
       } else setFailure(result);
     } catch {
       setFailure({ kind: "failed", message: t("study.inventoryChanged") });

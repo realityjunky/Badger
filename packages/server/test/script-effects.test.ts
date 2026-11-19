@@ -466,7 +466,7 @@ it("routes a Source study draft to its non-expert uploader, confirms the correct
   const current = await call(fixture.effects, "GET", undefined, 200, uploader);
   const rows = current.review.content.scripts.map((row: object) => ({
     ...row,
-    reviewed: true,
+    reviewed: false,
     uncertaintyAnswer: "No; only output.txt is created.",
   }));
   const { review } = await call(
@@ -486,6 +486,12 @@ it("routes a Source study draft to its non-expert uploader, confirms the correct
     200,
     uploader,
   );
+  expect(preview.scripts).toEqual(
+    rows.map((row: object) => ({ ...row, reviewed: true })),
+  );
+  expect(
+    (await call(fixture.effects, "GET", undefined, 200, uploader)).review,
+  ).toEqual(review);
   await call(
     `${fixture.effects}/confirm`,
     "POST",
@@ -508,6 +514,7 @@ it("routes a Source study draft to its non-expert uploader, confirms the correct
     uploader,
   );
   expect(confirmed.review.kind).toBe("confirmation");
+  expect(confirmed.review.content.scripts).toEqual(preview.scripts);
   expect(
     await call(`${fixture.effects}/confirm`, "POST", body, 200, uploader),
   ).toEqual(confirmed);

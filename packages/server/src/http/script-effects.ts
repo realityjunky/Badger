@@ -188,7 +188,11 @@ export async function handleScriptEffects(input: AuthorizedRequest) {
         version,
         review,
         "confirmation",
-        { ...review.content, confirmationHash: preview.confirmationHash },
+        {
+          ...review.content,
+          scripts: preview.scripts,
+          confirmationHash: preview.confirmationHash,
+        },
       );
       const result = { review: confirmed };
       await tx.query(

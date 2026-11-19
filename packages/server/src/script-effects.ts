@@ -80,13 +80,21 @@ export async function effectHead(tx: Queryable, skillId: string, hash: string) {
   return result.rows[0] ? publicRevision(result.rows[0]) : null;
 }
 
+function confirmationRows(review: EffectRevision | null) {
+  const rows = review?.content.scripts ?? [];
+  // The uploader attests to a saved review as a set when confirming its hash.
+  return review?.kind === "review"
+    ? rows.map((row) => ({ ...row, reviewed: true }))
+    : rows;
+}
+
 export function effectFindings(
   version: SkillVersion,
   review: EffectRevision | null,
 ) {
   return scriptEffectReviewFindings(
     version,
-    review?.content.scripts ?? [],
+    confirmationRows(review),
     review?.kind === "confirmation",
   );
 }
@@ -125,11 +133,8 @@ export function effectConfirmationPreview(
   review: EffectRevision,
   actorId: string,
 ) {
-  const findings = scriptEffectReviewFindings(
-    version,
-    review.content.scripts,
-    true,
-  );
+  const scripts = confirmationRows(review);
+  const findings = scriptEffectReviewFindings(version, scripts, true);
   if (
     findings.length ||
     review.kind === "legacy" ||
@@ -146,7 +151,7 @@ export function effectConfirmationPreview(
     revision: review.revision,
     reviewHash: review.hash,
     proposalRevision: review.content.proposalRevision,
-    scripts: review.content.scripts,
+    scripts,
     actorId,
     reviewedAt: review.recordedAt,
     contract: scriptEffectContract(),

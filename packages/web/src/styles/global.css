@@ -876,6 +876,14 @@ button.rail-link {
   font-size: 12px;
 }
 
+.study-skill-tab-label {
+  display: block;
+  max-inline-size: min(42vw, 26rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .effect-review-panel,
 .effect-review-row,
 .effect-review-actions,
@@ -883,6 +891,18 @@ button.rail-link {
   display: grid;
   gap: 16px;
   min-width: 0;
+}
+
+.effect-review-heading > div:first-child,
+.effect-review-context {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.effect-review-heading h3,
+.effect-review-context p {
+  margin: 0;
 }
 
 .effect-review-panel .field,

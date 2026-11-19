@@ -23,19 +23,20 @@ and uploaded instructions remain untrusted evidence.
 The Engineer explicitly sends the effect section to the original uploader.
 Accepting facts and interfaces is a separate decision. A shared typed Source
 study panel and deduplicated Inbox task let that uploader correct labels,
-inspect bounded immutable citations, answer uncertainties, mark rows reviewed,
-or request clarification. Narrow review access uses current Skill library
-access and does not grant access to the referring workflow's Questionnaire.
+inspect bounded immutable citations, answer uncertainties, or request
+clarification. Narrow review access uses current Skill library access
+and does not grant access to the referring workflow's Questionnaire.
 Administrators cannot substitute for the uploader, and tokens cannot sign off.
 An unavailable or unauthorized uploader leaves a clear pending blocker;
 responsibility transfer is outside this decision.
 
-The uploader previews the complete set and personally confirms its hash. The
-hash binds source identity, review and proposal revision, complete rows,
-evidence, actor, review time, and contract. Revision checks serialize edits;
-confirmation receipts make identical retries idempotent. Only a complete,
-current confirmation permits study completion. Script-free versions need no
-review task. Questionnaire work remains independently available.
+The uploader previews the set and attests to every script by personally
+confirming its hash. The hash binds source identity, review and proposal
+revision, complete rows, evidence, actor, review time, and contract.
+Revision checks serialize edits, and confirmation receipts make identical
+retries idempotent. Only a complete, current confirmation permits study
+completion. Script-free versions need no review task. Questionnaire work
+remains independently available.
 
 Reviews belong to a Skill entry and immutable version, within that entry's
 Group access boundary. Workflows reuse the same confirmation; a different
