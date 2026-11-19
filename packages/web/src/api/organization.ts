@@ -337,6 +337,15 @@ export async function createGroup(
   return send("POST", basePath, "/groups", { name, parentId });
 }
 
+export function deleteGroup(
+  basePath: string,
+  group: Pick<Group, "id" | "revision">,
+): Promise<WriteOutcome> {
+  return send("DELETE", basePath, `/groups/${encodeURIComponent(group.id)}`, {
+    revision: group.revision,
+  });
+}
+
 export async function inviteByEmail(
   basePath: string,
   input: {

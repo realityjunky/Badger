@@ -152,9 +152,10 @@ export function parseUpdateGroupInput(
 async function readGroupRow(
   database: Queryable,
   id: string,
+  forUpdate = false,
 ): Promise<GroupRow | null> {
   const rows = await database.query<GroupRow>(
-    `select ${GROUP_COLUMNS} from groups where id = $1`,
+    `select ${GROUP_COLUMNS} from groups where id = $1${forUpdate ? " for update" : ""}`,
     [id],
   );
   return rows.rows[0] ?? null;
@@ -351,6 +352,65 @@ export async function updateGroup(
     });
     return { kind: "updated", group: toGroup(row) };
   });
+}
+
+export type DeleteGroupResult =
+  | { kind: "deleted" }
+  | { kind: "missing" }
+  | { kind: "stale"; group: Group }
+  | { kind: "in-use" };
+
+export async function deleteGroup(
+  database: Database,
+  dependencies: ServiceDependencies,
+  context: WriteContext,
+  id: string,
+  revision: number,
+): Promise<DeleteGroupResult> {
+  try {
+    return await database.transaction<DeleteGroupResult>(async (tx) => {
+      const current = await readGroupRow(tx, id, true);
+      if (current === null) return { kind: "missing" };
+      if (current.revision !== revision) {
+        return { kind: "stale", group: toGroup(current) };
+      }
+
+      await tx.query(
+        "delete from role_bindings where scope_type = 'group' and scope_id = $1",
+        [id],
+      );
+      await tx.query(
+        "delete from personal_robot_routes where scope_type = 'group' and scope_id = $1",
+        [id],
+      );
+      await tx.query("delete from groups where id = $1", [id]);
+      await recordAudit(tx, dependencies, {
+        actor: {
+          personId: context.personId,
+          credential: context.credential,
+        },
+        channel: context.channel,
+        action: "group.deleted",
+        target: { type: "group", id, label: current.name },
+        before: { revision, hash: null },
+        after: null,
+        reason: "Group deleted",
+        requestId: context.requestId,
+      });
+      return { kind: "deleted" };
+    });
+  } catch (error) {
+    // A dependent record prevents deletion and rolls back the scoped cleanup.
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "23503"
+    ) {
+      return { kind: "in-use" };
+    }
+    throw error;
+  }
 }
 
 export interface MemberBinding {

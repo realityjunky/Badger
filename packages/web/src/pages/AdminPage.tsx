@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   Input,
+  Modal,
   Popconfirm,
   Select,
   Space,
@@ -21,6 +22,7 @@ import {
 } from "react-router-dom";
 import {
   createGroup,
+  deleteGroup,
   inviteByEmail,
   ledGroupIds,
   loadOrganization,
@@ -69,7 +71,7 @@ const GROUP_ROLES = ["Group lead", "Member"];
 
 /** Members, groups, and pending invitations, each on its own URL. */
 export function AdminPage() {
-  const { t } = useI18n();
+  const { t, format } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
   const [parameters, setParameters] = useSearchParams();
@@ -93,6 +95,8 @@ export function AdminPage() {
     member: Member;
     binding: MemberBinding;
   } | null>(null);
+  const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
+  const [deletingGroup, setDeletingGroup] = useState(false);
 
   const [state, setState] = useState<State>({ kind: "loading" });
   const [notice, setNotice] = useState<string | null>(null);
@@ -145,8 +149,8 @@ export function AdminPage() {
     return names;
   }, [state]);
 
-  // A "rejected" write is left to the form that made it: only an invitation
-  // can be refused that way, and its panel asks for an override reason.
+  // The invitation form handles a refused self-grant and asks for the
+  // override reason.
   const reportWrite = useCallback(
     async (
       written: WriteOutcome | Promise<WriteOutcome>,
@@ -171,6 +175,33 @@ export function AdminPage() {
     },
     [reload, t],
   );
+
+  const confirmGroupDeletion = async () => {
+    if (groupToDelete === null || deletingGroup) return;
+    setDeletingGroup(true);
+    const result = await deleteGroup(basePath, groupToDelete).catch(
+      () => ({ kind: "failed" }) as const,
+    );
+    if (result.kind !== "denied" && result.kind !== "rejected") {
+      await reload().catch(() => setState({ kind: "failed" }));
+    }
+    setGroupToDelete(null);
+    setDeletingGroup(false);
+    if (result.kind === "ok") {
+      setNoticeType("success");
+      setNotice(format("admin.groups.deleted", { name: groupToDelete.name }));
+      navigate("/admin/groups", { replace: true });
+    } else {
+      setNoticeType("warning");
+      const message = {
+        denied: "admin.denied",
+        rejected: "admin.groups.inUse",
+        conflict: "admin.groups.deleteConflict",
+        failed: "admin.groups.deleteFailed",
+      } as const;
+      setNotice(t(message[result.kind]));
+    }
+  };
 
   const resend = async (invitation: {
     id: string;
@@ -518,6 +549,14 @@ export function AdminPage() {
                             {t("admin.invite.submit")}
                           </Link>
                         )}
+                        {administrator && (
+                          <Button
+                            danger
+                            onClick={() => setGroupToDelete(selectedGroup)}
+                          >
+                            {t("admin.groups.delete")}
+                          </Button>
+                        )}
                       </Space>
                       <p className="muted">{t("admin.role.inheritance")}</p>
                       <Table<Member>
@@ -635,6 +674,28 @@ export function AdminPage() {
           onClose={() => setEditingRole(null)}
         />
       )}
+      <Modal
+        open={groupToDelete !== null}
+        title={t("admin.groups.delete")}
+        okText={t("admin.groups.delete")}
+        cancelText={t("common.cancel")}
+        okButtonProps={{ danger: true }}
+        cancelButtonProps={{ autoFocus: true, disabled: deletingGroup }}
+        confirmLoading={deletingGroup}
+        closable={!deletingGroup}
+        keyboard={!deletingGroup}
+        mask={{ closable: false }}
+        onCancel={() => {
+          if (!deletingGroup) setGroupToDelete(null);
+        }}
+        onOk={() => void confirmGroupDeletion()}
+      >
+        {groupToDelete !== null && (
+          <p>
+            {format("admin.groups.deleteConfirm", { name: groupToDelete.name })}
+          </p>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -39,6 +39,7 @@ import {
 import type { IdSource } from "../ids.js";
 import {
   createGroup,
+  deleteGroup,
   listGroups,
   listMembers,
   parseCreateGroupInput,
@@ -221,7 +222,7 @@ function allowedMethods(path: string): string {
     return "GET, HEAD, POST";
   }
   if (matchedId(GROUP_PATH, path) !== null) {
-    return "PATCH";
+    return "PATCH, DELETE";
   }
   return "GET, HEAD";
 }
@@ -715,6 +716,72 @@ export function createService(options: ServiceOptions, port: number): Service {
     return reply.json(200, { group: updated.group });
   }
 
+  async function handleDeleteGroup(
+    request: IncomingMessage,
+    reply: Reply,
+    person: Person,
+    principal: Principal,
+    access: Access,
+    groupId: string,
+  ): Promise<void> {
+    if (!isAdministrator(access)) {
+      return reply.error(
+        403,
+        "denied",
+        "Only an Administrator deletes a group",
+      );
+    }
+    const body = await readJsonBody(request);
+    if (!body.ok) {
+      return reply.error(400, "invalid", body.message);
+    }
+    const input = body.value;
+    const revision =
+      typeof input === "object" && input !== null && "revision" in input
+        ? input.revision
+        : undefined;
+    if (
+      typeof revision !== "number" ||
+      !Number.isInteger(revision) ||
+      revision < 1
+    ) {
+      return reply.error(
+        400,
+        "invalid",
+        "revision must be a whole number from 1",
+      );
+    }
+
+    const deleted = await deleteGroup(
+      database,
+      serviceDependencies,
+      writeContextFor(person, principal, reply),
+      groupId,
+      revision,
+    );
+    if (deleted.kind === "missing") {
+      return reply.error(404, "invalid", "No such group");
+    }
+    if (deleted.kind === "stale") {
+      return reply.json(409, {
+        error: {
+          code: "conflict",
+          message: "The group changed since you read it",
+        },
+        requestId: reply.requestId,
+        group: deleted.group,
+      });
+    }
+    if (deleted.kind === "in-use") {
+      return reply.error(
+        409,
+        "rejected",
+        "The group still has dependent records",
+      );
+    }
+    return reply.json(200, { deleted: true });
+  }
+
   async function handlePreferences(
     request: IncomingMessage,
     reply: Reply,
@@ -1195,6 +1262,16 @@ export function createService(options: ServiceOptions, port: number): Service {
     const groupId = matchedId(GROUP_PATH, path);
     if (groupId !== null && method === "PATCH") {
       return handleUpdateGroup(
+        request,
+        reply,
+        person,
+        principal,
+        access,
+        groupId,
+      );
+    }
+    if (groupId !== null && method === "DELETE") {
+      return handleDeleteGroup(
         request,
         reply,
         person,

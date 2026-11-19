@@ -1002,6 +1002,128 @@ function remove(
   });
 }
 
+describe("deleting groups", () => {
+  it("requires an Administrator and the current revision, then removes scoped access and records the deletion", async () => {
+    service = await startTestService(robinAdministers);
+    const research = await createdGroup({ name: "Research" });
+    const path = `/api/v1/groups/${research.id}`;
+    await bound(robin, {
+      email: alice.email!,
+      role: "Group lead",
+      scopeType: "group",
+      scopeId: research.id,
+    });
+    await me(alice);
+    await bound(robin, {
+      email: bob.email!,
+      role: "Member",
+      scopeType: "group",
+      scopeId: research.id,
+    });
+    const routePath = "/api/v1/me/robot-routes";
+    const route = await write("POST", routePath, alice, {
+      event: "gate-ready",
+      scopeType: "group",
+      scopeId: research.id,
+      robotId: null,
+      confirmed: true,
+      revision: 0,
+    });
+    expect(route.status).toBe(201);
+
+    expect((await write("DELETE", path, alice, { revision: 1 })).status).toBe(
+      403,
+    );
+    expect((await write("DELETE", path, robin, {})).status).toBe(400);
+    expect(
+      (await write("PATCH", path, robin, { name: "Assays", revision: 1 }))
+        .status,
+    ).toBe(200);
+    const stale = await write("DELETE", path, robin, { revision: 1 });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({
+      error: { code: "conflict" },
+      group: { id: research.id, name: "Assays", revision: 2 },
+    });
+
+    const removed = await write("DELETE", path, robin, { revision: 2 });
+    expect(removed.status).toBe(200);
+    expect(await groups(robin)).toEqual([]);
+    expect((await me(alice)).person.groups).toEqual([]);
+    expect(
+      await (await service.request(routePath, { as: alice })).json(),
+    ).toMatchObject({ routes: [] });
+    expect(
+      await (
+        await service.request("/api/v1/invitations", { as: robin })
+      ).json(),
+    ).toEqual({ invitations: [] });
+    expect((await write("DELETE", path, robin, { revision: 2 })).status).toBe(
+      404,
+    );
+    const activity = await service.request(
+      "/api/v1/audit-events?action=group.deleted",
+      { as: robin },
+    );
+    expect(await activity.json()).toMatchObject({
+      events: [
+        {
+          action: "group.deleted",
+          targetType: "group",
+          targetId: research.id,
+          targetLabel: "Assays",
+          actorDisplayName: robin.displayName,
+        },
+      ],
+    });
+  });
+
+  it("keeps groups and role bindings intact when a group is still in use", async () => {
+    service = await startTestService(robinAdministers);
+    const research = await createdGroup({ name: "Research" });
+    const assays = await createdGroup({
+      name: "Assays",
+      parentId: research.id,
+    });
+    await bound(robin, {
+      email: alice.email!,
+      role: "Group lead",
+      scopeType: "group",
+      scopeId: research.id,
+    });
+    expect(
+      (
+        await write("POST", "/api/v1/workflows", robin, {
+          groupId: assays.id,
+          name: "assay-review",
+          goal: "Review an assay",
+          intent: "new-skill",
+          locale: "en",
+        })
+      ).status,
+    ).toBe(201);
+
+    for (const group of [research, assays]) {
+      const blocked = await write(
+        "DELETE",
+        `/api/v1/groups/${group.id}`,
+        robin,
+        {
+          revision: group.revision,
+        },
+      );
+      expect(blocked.status).toBe(409);
+      expect(await blocked.json()).toMatchObject({
+        error: { code: "rejected" },
+      });
+    }
+    expect(await groups(robin)).toMatchObject([assays, research]);
+    expect((await me(alice)).person.groups).toMatchObject([
+      { id: research.id, role: "Group lead" },
+    ]);
+  });
+});
+
 describe("removing role bindings", () => {
   it("lets a Group lead remove bindings in and below their group, and records it", async () => {
     service = await startTestService(robinAdministers);

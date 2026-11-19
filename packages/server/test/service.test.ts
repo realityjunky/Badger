@@ -138,7 +138,7 @@ describe("the service's web page", () => {
       headers: { origin: "http://localhost" },
     });
     expect(one.status).toBe(405);
-    expect(one.headers.get("allow")).toBe("PATCH");
+    expect(one.headers.get("allow")).toBe("PATCH, DELETE");
   });
 
   it("serves the API under its version only", async () => {

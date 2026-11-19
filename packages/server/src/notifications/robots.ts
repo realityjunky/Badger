@@ -436,6 +436,15 @@ export async function saveRobotRoute(
   )
     throw new RequestError(403, "Choose a scope you can currently access");
   return input.database.transaction(async (tx) => {
+    if (body.scopeType === "group") {
+      // A polymorphic route has no foreign key to hold the group in place.
+      const group = await tx.query<{ id: string }>(
+        "select id from groups where id = $1 for key share",
+        [body.scopeId],
+      );
+      if (group.rows.length === 0)
+        throw new RequestError(403, "Choose a scope you can currently access");
+    }
     await tx.query("select id from people where id = $1 for update", [
       input.person.id,
     ]);

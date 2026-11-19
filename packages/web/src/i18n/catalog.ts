@@ -1243,6 +1243,15 @@ const en = {
   "admin.filter.search": "Search people, groups, and roles",
   "admin.groups.back": "All groups",
   "admin.groups.missing": "This group is unavailable.",
+  "admin.groups.delete": "Delete group",
+  "admin.groups.deleteConfirm":
+    "Permanently delete “{name}” and remove its role assignments, pending invitations, and personal notification rules?",
+  "admin.groups.deleted": "Group “{name}” deleted.",
+  "admin.groups.inUse":
+    "This group still has nested groups, workflows, Skills, or notification records.",
+  "admin.groups.deleteConflict":
+    "The group changed. Review its details and try again.",
+  "admin.groups.deleteFailed": "The group could not be deleted.",
   "admin.role.manage": "Manage roles",
   "admin.removeRole": "Remove role",
   "admin.role.change": "Change group role",
@@ -2663,6 +2672,13 @@ const zh: Record<MessageId, string> = {
   "admin.filter.search": "搜索人员、组与角色",
   "admin.groups.back": "所有组",
   "admin.groups.missing": "此组不可用。",
+  "admin.groups.delete": "删除组",
+  "admin.groups.deleteConfirm":
+    "永久删除“{name}”，并移除该组的角色分配、待处理邀请和个人通知规则？",
+  "admin.groups.deleted": "已删除组“{name}”。",
+  "admin.groups.inUse": "此组仍有子组、工作流、Skill 或通知记录。",
+  "admin.groups.deleteConflict": "此组已发生变化。请核对详情后重试。",
+  "admin.groups.deleteFailed": "未能删除此组。",
   "admin.role.manage": "管理角色",
   "admin.removeRole": "移除角色",
   "admin.role.change": "更改组角色",
