@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { ScriptEffectSuggestion } from "@realityjunky/badger";
 
 const base = `http://127.0.0.1:${process.env["BADGER_E2E_BASE_PATH_PORT"] ?? "4320"}/badger`;
@@ -353,7 +353,29 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
   expect(problems).toEqual([]);
 });
 
-test("source-study suggestions keep edits across numbered tabs without confirming uploader declarations", async ({
+async function expectWrappedTabs(tabList: Locator, count: number) {
+  await expect(tabList.getByRole("tab")).toHaveCount(count);
+  const layout = await tabList.evaluate((list) => {
+    const { left, right } = list.getBoundingClientRect();
+    const bounds = Array.from(list.querySelectorAll('[role="tab"]'), (tab) =>
+      tab.getBoundingClientRect(),
+    );
+    return {
+      rows: new Set(bounds.map((tab) => tab.top)).size,
+      fits: bounds.every(
+        (tab) =>
+          tab.width > 0 &&
+          tab.left >= left - 1 &&
+          tab.right <= right + 1 &&
+          tab.right <= window.innerWidth + 1,
+      ),
+    };
+  });
+  expect(layout.rows).toBeGreaterThan(1);
+  expect(layout.fits).toBe(true);
+}
+
+test("source-study suggestions wrap numbered tabs and keep edits without confirming uploader declarations", async ({
   page,
 }, info) => {
   test.setTimeout(90_000);
@@ -388,12 +410,16 @@ test("source-study suggestions keep edits across numbered tabs without confirmin
         '#!/bin/sh\nprintf example > output.txt\nif [ "$FETCH_REMOTE" = 1 ]; then curl https://example.test/input; fi\n',
     },
     { path: "scripts/inspect.sh", content: "#!/bin/sh\nprintf example\n" },
+    ...Array.from({ length: 22 }, (_, index) => ({
+      path: `scripts/inspect-${index + 1}.sh`,
+      content: "#!/bin/sh\nprintf example\n",
+    })),
   ];
   const files = [
     {
       path: "SKILL.md",
       content: Buffer.from(
-        `---\nname: ${name}\ndescription: Source review example\n---\nInspect the two scripts.\n`,
+        `---\nname: ${name}\ndescription: Source review example\n---\nInspect the example scripts.\n`,
       ).toString("base64"),
     },
     ...scripts.map((script) => ({
@@ -456,6 +482,10 @@ test("source-study suggestions keep edits across numbered tabs without confirmin
         statement: "The second script prints a value.",
         evidence: [evidence[1]],
       },
+      ...Array.from({ length: 94 }, (_, index) => ({
+        statement: `Output observation ${index + 3}.`,
+        evidence: [evidence[1]],
+      })),
     ],
     interfaces: [],
     scriptEffects: scripts.map((script, index) => ({
@@ -627,6 +657,21 @@ test("source-study suggestions keep edits across numbered tabs without confirmin
     });
   }
   await page.setViewportSize({ width: 375, height: 812 });
+  const scriptTabs = dialog.getByRole("tablist", {
+    name: "Script effect review",
+  });
+  await expectWrappedTabs(scriptTabs, scripts.length);
+  await scriptTabs.getByRole("tab", { name: "1", exact: true }).press("End");
+  await expect(
+    dialog.getByRole("heading", { name: scripts.at(-1)!.path, exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole("tab", { name: "Statements", exact: true }).click();
+  const statementTabs = dialog.getByRole("tablist", { name: "Statements" });
+  await expectWrappedTabs(statementTabs, result.facts.length);
+  await statementTabs
+    .getByRole("tab", { name: String(result.facts.length), exact: true })
+    .click();
+  await expect(statement).toHaveValue(result.facts.at(-1)!.statement);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -648,6 +693,7 @@ test("source-study suggestions keep edits across numbered tabs without confirmin
   ).toEqual([
     "The first script writes output.txt.",
     "The second script prints only to standard output.",
+    ...result.facts.slice(2).map((fact) => fact.statement),
   ]);
   expect(saved.review.result.scriptEffects).toEqual([
     {
@@ -664,6 +710,7 @@ test("source-study suggestions keep edits across numbered tabs without confirmin
       conditionalBehavior: "Prints on every invocation.",
       uncertainty: null,
     },
+    ...result.scriptEffects.slice(2),
   ]);
   expect((await call(page, "GET", effects)).review).toBeNull();
   await card
@@ -696,4 +743,29 @@ test("source-study suggestions keep edits across numbered tabs without confirmin
       uncertaintyAnswer: "",
     })),
   );
+
+  const resultToAccept = { revision: saved.revision, ...saved.review.result };
+  const { preview } = await call(
+    page,
+    "POST",
+    `${jobs}/${job.id}/accept-preview`,
+    resultToAccept,
+  );
+  await call(page, "POST", `${jobs}/${job.id}/accept`, {
+    ...resultToAccept,
+    confirmed: true,
+    confirmationHash: preview.confirmationHash,
+    requestId: `accept-${job.id}`,
+  });
+  await page.goto(`${base}${path}#source-study`);
+  const study = page.locator("#source-study");
+  await study.getByRole("tab", { name: "Source-derived facts" }).click();
+  const factTabs = study.getByRole("tablist", { name: "Source-derived facts" });
+  await expectWrappedTabs(factTabs, result.facts.length);
+  const lastTab = factTabs.getByRole("tab", {
+    name: String(result.facts.length),
+    exact: true,
+  });
+  await lastTab.click();
+  await expect(lastTab).toHaveAttribute("aria-selected", "true");
 });

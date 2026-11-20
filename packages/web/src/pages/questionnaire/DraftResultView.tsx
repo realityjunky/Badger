@@ -10,6 +10,7 @@ import type {
   QuestionContent,
 } from "../../api/questionnaire.js";
 import type { SourceEvidence } from "../../api/source-study.js";
+import { NumberedTabs } from "../../components/NumberedTabs.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
 export function draftQuestions(result: DraftingResult): QuestionContent[] {
@@ -145,14 +146,10 @@ export function DraftResultView({
               key: "statements",
               label: t("drafting.statements"),
               children: result.facts.length ? (
-                <Tabs
-                  className="drafting-item-tabs"
-                  type="card"
-                  size="small"
-                  tabBarGutter={4}
+                <NumberedTabs
+                  label={t("drafting.statements")}
                   items={result.facts.map((fact, index) => ({
                     key: String(index),
-                    label: String(index + 1),
                     children: (
                       <section className="drafting-suggestion">
                         {text(
@@ -188,14 +185,10 @@ export function DraftResultView({
                 <>
                   <p className="muted">{t("effects.draftHelp")}</p>
                   {result.scriptEffects?.length ? (
-                    <Tabs
-                      className="drafting-item-tabs"
-                      type="card"
-                      size="small"
-                      tabBarGutter={4}
+                    <NumberedTabs
+                      label={t("effects.title")}
                       items={result.scriptEffects.map((row, index) => ({
                         key: row.path,
-                        label: String(index + 1),
                         children: (
                           <article className="drafting-suggestion">
                             <h3 className="questionnaire-text">

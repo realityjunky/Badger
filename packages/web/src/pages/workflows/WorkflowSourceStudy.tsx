@@ -31,6 +31,7 @@ import {
 } from "./StudyRecordDetails.js";
 import { WorkflowNotice, type WriteFailure } from "./WorkflowDialog.js";
 import { EvidenceChanges } from "../../components/EvidenceChanges.js";
+import { NumberedTabs } from "../../components/NumberedTabs.js";
 import { RecordOriginLink } from "../../components/RecordOriginLink.js";
 import { ScriptEffectsPanel } from "./ScriptEffectsPanel.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
@@ -232,15 +233,12 @@ export function WorkflowSourceStudy({
         {visible.length === 0 ? (
           <p className="muted">{t("study.noRecords")}</p>
         ) : kind === "fact" ? (
-          <Tabs
-            type="card"
-            size="small"
-            tabBarGutter={4}
+          <NumberedTabs
+            label={t("study.facts")}
             activeKey={activeFact?.id}
             onChange={setSelectedFact}
-            items={visible.map((record, index) => ({
+            items={visible.map((record) => ({
               key: record.id,
-              label: String(index + 1),
               children: recordCard(record),
             }))}
           />

@@ -1698,8 +1698,21 @@ button.rail-link {
 }
 
 .drafting-result-tabs,
-.drafting-item-tabs {
-  min-width: 0;
+.numbered-tabs {
+  min-inline-size: 0;
+}
+
+.numbered-tabs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-block-end: 12px;
+}
+
+.numbered-tabs-list > button {
+  min-inline-size: 2.25rem;
+  min-block-size: 32px;
+  font-variant-numeric: tabular-nums;
 }
 
 .drafting-effect-labels {
