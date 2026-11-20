@@ -11,7 +11,6 @@ import {
   Tag,
 } from "antd";
 import { useCallback, useEffect, useId, useState } from "react";
-import { Link } from "react-router-dom";
 import type {
   SkillScriptSideEffect,
   ScriptEffectEvidence,
@@ -83,6 +82,8 @@ export function ScriptEffectsPanel({
   const review = status?.review ?? null;
   const revision = review?.revision ?? 0;
   const confirmed = review?.kind === "confirmation";
+  const findings = confirmed ? [] : (status?.findings ?? []);
+  const reviewNote = review?.content.note;
   const editable =
     role === "uploader" &&
     panel?.canReview &&
@@ -696,27 +697,16 @@ export function ScriptEffectsPanel({
           ),
         }))}
       />
-      <div className="effect-review-context">
-        {workflowBase && (
-          <>
-            <Link
-              to={`/source-reviews/${encodeURIComponent(skillId)}/${encodeURIComponent(hash)}#source-study`}
-            >
-              {t("effects.directLink")}
-            </Link>
-            <p className="muted">{t("effects.help")}</p>
-          </>
-        )}
-        {!confirmed &&
-          status?.findings.map((finding) => (
+      {(findings.length > 0 || reviewNote) && (
+        <div className="effect-review-context">
+          {findings.map((finding) => (
             <p role="status" key={finding.code}>
               {finding.message}
             </p>
           ))}
-        {review?.content.note && (
-          <p className="questionnaire-text">{review.content.note}</p>
-        )}
-      </div>
+          {reviewNote && <p className="questionnaire-text">{reviewNote}</p>}
+        </div>
+      )}
       <details>
         <summary>{t("effects.history")}</summary>
         {history.map((entry) => (

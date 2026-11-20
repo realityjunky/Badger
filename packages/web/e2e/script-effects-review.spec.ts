@@ -343,9 +343,15 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
     .click();
   for (const tab of [studyTab, effectsTab, skillTab, verifyTab])
     await expect(marker(tab)).toHaveCount(0);
-  await panel
-    .getByRole("link", { name: "Open this Source study review" })
+  await expect(panel.locator('a[href*="/source-reviews/"]')).toHaveCount(0);
+  await page.goto(`${base}/my-work#inbox`);
+  await page
+    .locator("#inbox")
+    .getByRole("link", { name: `${name} · Script effect review`, exact: true })
     .click();
+  await expect(page).toHaveURL(
+    `${base}/source-reviews/${skill.id}/${upload.hash}#source-study`,
+  );
   await expect(answer).toHaveValue(answerText);
   await review
     .getByRole("button", {
