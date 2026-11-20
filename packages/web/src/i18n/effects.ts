@@ -1,6 +1,8 @@
 export const effectsEn = {
   "page.sourceReview.title": "Source study",
   "effects.title": "Script effect review",
+  "effects.skills": "Skills to review",
+  "effects.scripts": "Scripts to review",
   "effects.draftHelp":
     "These are shared suggestions. The original uploader reviews and personally confirms declarations in Source study.",
   "effects.emptySuggestions": "No script effect suggestions in this draft.",
@@ -9,6 +11,11 @@ export const effectsEn = {
   "effects.help":
     "Study the pinned files, then ask the original uploader to review what each script can do. Uploading and accepting study findings do not confirm declarations.",
   "effects.uploader": "Responsible uploader",
+  "effects.role": "Source study role",
+  "effects.reviewerRole": "Upload reviewer",
+  "effects.uploaderOnly":
+    "The responsible uploader can edit this Skill’s review.",
+  "effects.waitingForDraft": "Ask the Engineer to send the draft for review.",
   "effects.pending": "Effect review pending",
   "effects.confirmed": "Uploader confirmed",
   "effects.directLink": "Open this Source study review",
@@ -21,11 +28,16 @@ export const effectsEn = {
   "effects.rationale": "Why these effects apply",
   "effects.conditional": "Conditional behavior and invoked tools",
   "effects.answer": "Answer the uncertainty",
+  "effects.unanswered": "Unanswered uncertainty",
+  "effects.answerHelp":
+    "Save the review draft to keep your edits and answers for this Skill version.",
   "effects.sourcePath": "Citation source path",
   "effects.addCitation": "Add source citation",
   "effects.removeCitation": "Remove citation",
   "effects.note": "Clarification or correction note",
   "effects.save": "Save review draft",
+  "effects.unsaved": "Unsaved edits",
+  "effects.saved": "Review draft saved",
   "effects.clarify": "Request clarification",
   "effects.preview": "Review complete declaration set",
   "effects.confirm": "Personally confirm declarations",
@@ -48,6 +60,8 @@ export const effectsEn = {
 export const effectsZh: Record<keyof typeof effectsEn, string> = {
   "page.sourceReview.title": "来源研读",
   "effects.title": "脚本影响审阅",
+  "effects.skills": "待审阅的 Skill",
+  "effects.scripts": "待审阅的脚本",
   "effects.draftHelp":
     "此处为共享建议。原上传人须在来源研读中审阅并亲自确认声明。",
   "effects.emptySuggestions": "此草稿暂无脚本影响建议。",
@@ -56,6 +70,10 @@ export const effectsZh: Record<keyof typeof effectsEn, string> = {
   "effects.help":
     "研读固定版本的文件后，请原上传人审阅每个脚本可能产生的影响。上传文件或接受研读结论不会确认声明。",
   "effects.uploader": "负责的上传人",
+  "effects.role": "来源研读角色",
+  "effects.reviewerRole": "上传审阅人",
+  "effects.uploaderOnly": "此 Skill 的审阅由负责的上传人编辑。",
+  "effects.waitingForDraft": "请工程师发送草稿以开始审阅。",
   "effects.pending": "待审阅脚本影响",
   "effects.confirmed": "上传人已确认",
   "effects.directLink": "打开此来源研读审阅",
@@ -68,11 +86,15 @@ export const effectsZh: Record<keyof typeof effectsEn, string> = {
   "effects.rationale": "影响判定依据",
   "effects.conditional": "条件行为与调用工具",
   "effects.answer": "回答不确定事项",
+  "effects.unanswered": "尚未回答的不确定事项",
+  "effects.answerHelp": "保存审阅草稿可为此 Skill 版本保留修改和回答。",
   "effects.sourcePath": "引用来源路径",
   "effects.addCitation": "添加来源引用",
   "effects.removeCitation": "移除引用",
   "effects.note": "澄清或更正说明",
   "effects.save": "保存审阅草稿",
+  "effects.unsaved": "有未保存的修改",
+  "effects.saved": "审阅草稿已保存",
   "effects.clarify": "请求澄清",
   "effects.preview": "审阅完整声明集",
   "effects.confirm": "由本人确认声明",

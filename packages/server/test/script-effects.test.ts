@@ -442,6 +442,15 @@ it("routes a Source study draft to its non-expert uploader, confirms the correct
     revision: 0,
   });
   expect(routed.review.kind).toBe("proposal");
+  const engineerDetail = await call(fixture.base);
+  expect(engineerDetail.capabilities.manageSourceStudy).toBe(true);
+  expect(engineerDetail.sourceStudy.effects).toEqual([
+    expect.objectContaining({
+      ...fixture.pin,
+      canReview: false,
+      review: routed.review,
+    }),
+  ]);
   const waiting = await call(
     `/workflows/${fixture.workflow.id}/notifications/waiting`,
   );
@@ -454,6 +463,33 @@ it("routes a Source study draft to its non-expert uploader, confirms the correct
     ]),
   );
   await call(fixture.base, "GET", undefined, 403, uploader);
+  await call(
+    "/bindings",
+    "POST",
+    {
+      scopeType: "workflow",
+      scopeId: fixture.workflow.id,
+      role: "Observer",
+      email: uploader.email,
+    },
+    201,
+    admin,
+  );
+  const uploaderDetail = await call(
+    fixture.base,
+    "GET",
+    undefined,
+    200,
+    uploader,
+  );
+  expect(uploaderDetail.capabilities.manageSourceStudy).toBe(false);
+  expect(uploaderDetail.sourceStudy.effects).toEqual([
+    expect.objectContaining({
+      ...fixture.pin,
+      canReview: true,
+      review: routed.review,
+    }),
+  ]);
   const inbox = await call("/me/inbox", "GET", undefined, 200, uploader);
   expect(inbox.items).toEqual(
     expect.arrayContaining([

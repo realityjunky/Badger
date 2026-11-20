@@ -233,7 +233,11 @@ export async function studyRecords(
     ),
   );
 }
-export async function readSourceStudy(database: Queryable, versionId: string) {
+export async function readSourceStudy(
+  database: Queryable,
+  versionId: string,
+  viewerId?: string,
+) {
   const records = await studyRecords(database, versionId);
   const pins = await listWorkflowPins(database, versionId);
   const effects = await Promise.all(
@@ -245,6 +249,12 @@ export async function readSourceStudy(database: Queryable, versionId: string) {
         hash: pin.hash,
         review,
         findings: effectFindings(version, review),
+        ...(viewerId === undefined
+          ? {}
+          : {
+              canReview:
+                version.scripts.length > 0 && version.uploadedBy === viewerId,
+            }),
       };
     }),
   );

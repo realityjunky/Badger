@@ -496,7 +496,12 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
           sourceCheck: await readSourceCheck(database, version.id),
           jobs: await listWorkflowJobs(database, version.id),
           ...(await sourceGateHistory(database, version.id)),
-          sourceStudy: await readSourceStudy(database, version.id),
+          // Workflow readers have library access in the Group that owns its pins.
+          sourceStudy: await readSourceStudy(
+            database,
+            version.id,
+            context.credential.kind === "token" ? undefined : person.id,
+          ),
         });
   }
   return reply.json(200, {

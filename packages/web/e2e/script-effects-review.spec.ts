@@ -76,6 +76,10 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
       ).toString("base64"),
     },
     { path: "scripts/run.sh", content: Buffer.from(script).toString("base64") },
+    {
+      path: "scripts/verify.sh",
+      content: Buffer.from(script).toString("base64"),
+    },
   ];
   const { preview: upload } = await call(
     page,
@@ -85,6 +89,7 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
   );
   expect(upload.scripts).toEqual([
     { path: "scripts/run.sh", sideEffects: "undeclared" },
+    { path: "scripts/verify.sh", sideEffects: "undeclared" },
   ]);
   await call(page, "POST", `/skills/${skill.id}/versions`, {
     files,
@@ -109,9 +114,21 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
     .click();
   await expect(page.getByText(/^Sources confirmed /u)).toBeVisible();
   await page.goto(`${base}${path}#source-study`);
-  await study
-    .getByRole("tab", { name: "Script effect review", exact: true })
-    .click();
+  const roles = study.getByRole("radiogroup", { name: "Source study role" });
+  const engineer = roles.getByRole("radio", { name: "Engineer", exact: true });
+  const uploader = roles.getByRole("radio", {
+    name: "Upload reviewer",
+    exact: true,
+  });
+  await expect(engineer).toBeChecked();
+  await expect(uploader).toBeEnabled();
+  const studyTab = page
+    .locator(".workflow-tabs-navigation")
+    .getByRole("tab", { name: /^Source study/u });
+  const effectsTab = study.getByRole("tab", { name: /^Script effect review/u });
+  const skillTab = study.getByRole("tab", { name: `1. ${name}` });
+  const marker = (tab: Locator) => tab.locator(".uncertainty-tab-marker");
+  await effectsTab.click();
   await expect(
     study.getByRole("tab", { name: `1. ${name}`, exact: true }),
   ).toHaveAttribute("aria-selected", "true");
@@ -119,6 +136,12 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
     name: `Script effect review · ${name}`,
     exact: true,
   });
+  const runTab = panel.getByRole("tab", { name: /^1\. scripts\/run\.sh/u });
+  const verifyTab = panel.getByRole("tab", {
+    name: /^2\. scripts\/verify\.sh/u,
+  });
+  for (const tab of [studyTab, effectsTab, skillTab, runTab, verifyTab])
+    await expect(marker(tab)).toHaveCount(0);
   await expect(panel).toContainText("Effect review pending");
   await panel
     .getByRole("button", { name: "Request Source study draft", exact: true })
@@ -155,25 +178,23 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
       },
     ],
     interfaces: [],
-    scriptEffects: [
-      {
-        ...pin,
-        path: "scripts/run.sh",
-        effects: ["local-writes"],
-        rationale: "The script writes output.txt.",
-        evidence: [
-          {
-            ...pin,
-            path: "scripts/run.sh",
-            fileHash: createHash("sha256").update(script).digest("hex"),
-            startLine: 2,
-            endLine: 2,
-          },
-        ],
-        conditionalBehavior: "Writes on every invocation.",
-        uncertainty: "Does this also contact a remote service?",
-      },
-    ],
+    scriptEffects: ["scripts/run.sh", "scripts/verify.sh"].map((path) => ({
+      ...pin,
+      path,
+      effects: ["local-writes"],
+      rationale: "The script writes output.txt.",
+      evidence: [
+        {
+          ...pin,
+          path,
+          fileHash: createHash("sha256").update(script).digest("hex"),
+          startLine: 2,
+          endLine: 2,
+        },
+      ],
+      conditionalBehavior: "Writes on every invocation.",
+      uncertainty: "Does this also contact a remote service?",
+    })),
   };
   const { job: submitted } = await call(
     page,
@@ -210,14 +231,20 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
     .getByRole("button", { name: "Send effect draft to uploader" })
     .click();
   await expect(panel).toContainText("Does this also contact a remote service?");
-  await panel
-    .getByRole("link", { name: "Open this Source study review" })
-    .click();
   const review = page.getByRole("region", {
     name: `Script effect review · ${name}`,
     exact: true,
   });
-  await expect(review).toBeVisible();
+  for (const tab of [studyTab, effectsTab, skillTab, runTab, verifyTab])
+    await expect(marker(tab)).toBeVisible();
+  await expect(
+    panel.getByRole("textbox", { name: /^Answer the uncertainty/u }),
+  ).toHaveCount(0);
+  await roles.getByText("Upload reviewer", { exact: true }).click();
+  await expect(uploader).toBeChecked();
+  await expect(
+    panel.getByRole("button", { name: "Send effect draft to uploader" }),
+  ).toHaveCount(0);
   await review
     .getByRole("button", { name: "scripts/run.sh:2–2", exact: true })
     .click();
@@ -250,11 +277,18 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
     name: "scripts/run.sh",
     exact: true,
   });
-  await row
-    .getByLabel("Answer the uncertainty scripts/run.sh", { exact: true })
-    .fill(
-      "No remote service is contacted; this version writes only output.txt.",
-    );
+  const answer = row.getByLabel("Answer the uncertainty scripts/run.sh", {
+    exact: true,
+  });
+  const answerText =
+    "No remote service is contacted. This version writes only output.txt.";
+  await answer.fill(answerText);
+  await expect(row.getByRole("status")).toHaveText("Unsaved edits");
+  await expect(marker(runTab)).toBeVisible();
+  await roles.getByText("Engineer", { exact: true }).click();
+  await expect(answer).toHaveCount(0);
+  await roles.getByText("Upload reviewer", { exact: true }).click();
+  await expect(answer).toHaveValue(answerText);
   const labels = row.getByRole("combobox", {
     name: "Script side effects scripts/run.sh",
     exact: true,
@@ -275,10 +309,44 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
   await expect(
     row.locator(".ant-select-selection-item").first(),
   ).toHaveAttribute("title", "Local writes");
-  await expect(
-    review.getByRole("tab", { name: "1. scripts/run.sh", exact: true }),
-  ).toHaveAttribute("aria-selected", "true");
+  await expect(runTab).toHaveAttribute("aria-selected", "true");
   await expect(row.getByRole("checkbox")).toHaveCount(0);
+  await row
+    .getByRole("button", { name: "Save review draft", exact: true })
+    .click();
+  await expect(row.getByRole("status")).toHaveText("Review draft saved");
+  await expect(marker(runTab)).toHaveCount(0);
+  for (const tab of [studyTab, effectsTab, skillTab, verifyTab])
+    await expect(marker(tab)).toBeVisible();
+  expect((await call(page, "GET", effects)).review).toMatchObject({
+    kind: "review",
+    content: {
+      scripts: [{ uncertaintyAnswer: answerText }, { uncertaintyAnswer: "" }],
+    },
+  });
+  await page.goto(`${base}${path}#version`);
+  await expect(marker(studyTab)).toBeVisible();
+  await studyTab.click();
+  await roles.getByText("Upload reviewer", { exact: true }).click();
+  await expect(answer).toHaveValue(answerText);
+  await expect(marker(runTab)).toHaveCount(0);
+  await verifyTab.click();
+  const verifyRow = panel.getByRole("article", {
+    name: "scripts/verify.sh",
+    exact: true,
+  });
+  await verifyRow
+    .getByLabel("Answer the uncertainty scripts/verify.sh", { exact: true })
+    .fill("This script also only writes output.txt.");
+  await verifyRow
+    .getByRole("button", { name: "Save review draft", exact: true })
+    .click();
+  for (const tab of [studyTab, effectsTab, skillTab, verifyTab])
+    await expect(marker(tab)).toHaveCount(0);
+  await panel
+    .getByRole("link", { name: "Open this Source study review" })
+    .click();
+  await expect(answer).toHaveValue(answerText);
   await review
     .getByRole("button", {
       name: "Review complete declaration set",
@@ -355,24 +423,27 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
 
 async function expectWrappedTabs(tabList: Locator, count: number) {
   await expect(tabList.getByRole("tab")).toHaveCount(count);
-  const layout = await tabList.evaluate((list) => {
-    const { left, right } = list.getBoundingClientRect();
-    const bounds = Array.from(list.querySelectorAll('[role="tab"]'), (tab) =>
-      tab.getBoundingClientRect(),
-    );
-    return {
-      rows: new Set(bounds.map((tab) => tab.top)).size,
-      fits: bounds.every(
-        (tab) =>
-          tab.width > 0 &&
-          tab.left >= left - 1 &&
-          tab.right <= right + 1 &&
-          tab.right <= window.innerWidth + 1,
-      ),
-    };
-  });
-  expect(layout.rows).toBeGreaterThan(1);
-  expect(layout.fits).toBe(true);
+  await expect
+    .poll(() =>
+      tabList.evaluate((list) => {
+        const { left, right } = list.getBoundingClientRect();
+        const bounds = Array.from(
+          list.querySelectorAll('[role="tab"]'),
+          (tab) => tab.getBoundingClientRect(),
+        );
+        return {
+          wrapped: new Set(bounds.map((tab) => tab.top)).size > 1,
+          fits: bounds.every(
+            (tab) =>
+              tab.width > 0 &&
+              tab.left >= left - 1 &&
+              tab.right <= right + 1 &&
+              tab.right <= window.innerWidth + 1,
+          ),
+        };
+      }),
+    )
+    .toEqual({ wrapped: true, fits: true });
 }
 
 test("source-study suggestions wrap numbered tabs and keep edits without confirming uploader declarations", async ({

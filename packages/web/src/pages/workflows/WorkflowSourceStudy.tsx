@@ -4,6 +4,7 @@ import {
   Empty,
   Modal,
   Popconfirm,
+  Segmented,
   Space,
   Switch,
   Tabs,
@@ -18,6 +19,7 @@ import {
   studyPath,
   type StudyRecord,
 } from "../../api/source-study.js";
+import { unansweredScriptPaths } from "../../api/script-effects.js";
 import type {
   GatePreview,
   WorkflowVersionDetail,
@@ -33,7 +35,8 @@ import { WorkflowNotice, type WriteFailure } from "./WorkflowDialog.js";
 import { EvidenceChanges } from "../../components/EvidenceChanges.js";
 import { NumberedTabs } from "../../components/NumberedTabs.js";
 import { RecordOriginLink } from "../../components/RecordOriginLink.js";
-import { ScriptEffectsPanel } from "./ScriptEffectsPanel.js";
+import { UncertaintyTabLabel } from "../../components/UncertaintyTabLabel.js";
+import { ScriptEffectsPanel, type StudyRole } from "./ScriptEffectsPanel.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
 
 export function WorkflowSourceStudy({
@@ -47,7 +50,8 @@ export function WorkflowSourceStudy({
 }) {
   const { t, format, locale } = useI18n();
   const { hash, search } = useLocation();
-  const [section, setSection] = useState("overview");
+  const [section, setSection] = useState<string>();
+  const [selectedRole, setSelectedRole] = useState<StudyRole>();
   const [selectedFact, setSelectedFact] = useState<string>();
   const [editor, setEditor] = useState<{
     kind: StudyRecord["kind"];
@@ -77,17 +81,38 @@ export function WorkflowSourceStudy({
     if (linkedStatus === "retired") setRetired(true);
   }, [linkedId, linkedKind, linkedStatus]);
 
-  const effectPins = study.studies.filter(
-    (pin) =>
-      !detail.sourceCheck?.sources.some(
-        (source) =>
-          source.name === pin.skillName &&
-          source.hash === pin.hash &&
-          source.status === "available" &&
-          source.scripts.length === 0,
-      ),
-  );
-  const canManage = detail.capabilities.manageSourceStudy;
+  const effectPins = study.studies
+    .filter(
+      (pin) =>
+        !detail.sourceCheck?.sources.some(
+          (source) =>
+            source.name === pin.skillName &&
+            source.hash === pin.hash &&
+            source.status === "available" &&
+            source.scripts.length === 0,
+        ),
+    )
+    .map((pin) => {
+      const status = study.effects?.find(
+        (entry) => entry.skillId === pin.skillId && entry.hash === pin.hash,
+      );
+      return {
+        ...pin,
+        status,
+        pending: unansweredScriptPaths(status?.review).length > 0,
+      };
+    });
+  const engineerAvailable = detail.capabilities.manageSourceStudy;
+  const uploaderAvailable = effectPins.some((pin) => pin.status?.canReview);
+  const role =
+    engineerAvailable && uploaderAvailable
+      ? (selectedRole ?? "engineer")
+      : engineerAvailable
+        ? "engineer"
+        : uploaderAvailable
+          ? "uploader"
+          : null;
+  const canManage = role === "engineer";
   const ready =
     detail.version.stages.find((s) => s.id === "sources")?.state === "done";
   const base = studyPath(detail.workflow.id, detail.version.id);
@@ -323,12 +348,37 @@ export function WorkflowSourceStudy({
       className="source-study-panel"
       id="source-study"
       aria-labelledby="source-study-title"
+      actions={
+        role !== null && (
+          <Segmented<StudyRole>
+            className="study-role-switch"
+            aria-label={t("effects.role")}
+            value={role}
+            options={[
+              {
+                value: "engineer",
+                label: t("workflow.role.engineer"),
+                disabled: !engineerAvailable,
+              },
+              {
+                value: "uploader",
+                label: t("effects.reviewerRole"),
+                disabled: !uploaderAvailable,
+              },
+            ]}
+            onChange={(value) => {
+              setSelectedRole(value);
+              if (value === "uploader") setSection("effects");
+            }}
+          />
+        )
+      }
     >
       {failure !== null && (
         <WorkflowNotice failure={failure} onReload={onChanged} />
       )}
       <Tabs
-        activeKey={section}
+        activeKey={section ?? (role === "uploader" ? "effects" : "overview")}
         onChange={setSection}
         items={[
           {
@@ -348,21 +398,27 @@ export function WorkflowSourceStudy({
           },
           {
             key: "effects",
-            label: t("effects.title"),
+            label: (
+              <UncertaintyTabLabel
+                pending={effectPins.some((pin) => pin.pending)}
+              >
+                {t("effects.title")}
+              </UncertaintyTabLabel>
+            ),
             children: effectPins.length ? (
-              <Tabs
-                type="card"
-                size="small"
-                tabBarGutter={4}
+              <NumberedTabs
+                label={t("effects.skills")}
                 items={effectPins.map((pin, index) => ({
                   key: pin.skillId,
                   label: (
-                    <span
-                      className="study-skill-tab-label"
-                      title={pin.skillName}
-                    >
-                      {index + 1}. {pin.skillName}
-                    </span>
+                    <UncertaintyTabLabel pending={pin.pending}>
+                      <span
+                        className="study-skill-tab-label"
+                        title={pin.skillName}
+                      >
+                        {index + 1}. {pin.skillName}
+                      </span>
+                    </UncertaintyTabLabel>
                   ),
                   children: (
                     <ScriptEffectsPanel
@@ -371,7 +427,8 @@ export function WorkflowSourceStudy({
                       skillId={pin.skillId}
                       hash={pin.hash}
                       workflowBase={base}
-                      canManage={canManage}
+                      workflowStatus={pin.status}
+                      role={role}
                       onChanged={onChanged}
                     />
                   ),

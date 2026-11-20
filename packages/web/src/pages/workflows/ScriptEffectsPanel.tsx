@@ -8,10 +8,9 @@ import {
   Select,
   Space,
   Spin,
-  Tabs,
   Tag,
 } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   SkillScriptSideEffect,
@@ -20,35 +19,51 @@ import type {
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import {
   effectsPath,
+  unansweredScriptPaths,
+  type EffectRevision,
   type ScriptEffectPanel,
   type ScriptEffectReviewRow,
+  type ScriptEffectStatus,
 } from "../../api/script-effects.js";
 import type { DraftingJob } from "../../api/drafting-jobs.js";
+import { NumberedTabs } from "../../components/NumberedTabs.js";
+import { UncertaintyTabLabel } from "../../components/UncertaintyTabLabel.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+
+export type StudyRole = "engineer" | "uploader";
+
+interface DraftEdits {
+  revision: number;
+  scripts: ScriptEffectReviewRow[];
+  note: string;
+}
 
 export function ScriptEffectsPanel({
   basePath,
   skillId,
   hash,
   workflowBase,
-  canManage = false,
+  workflowStatus,
+  role = "uploader",
   onChanged,
 }: {
   basePath: string;
   skillId: string;
   hash: string;
   workflowBase?: string;
-  canManage?: boolean;
+  workflowStatus?: ScriptEffectStatus;
+  role?: StudyRole | null;
   onChanged?(): void;
 }) {
   const { t, format, locale } = useI18n();
+  const fieldId = useId();
   const [panel, setPanel] = useState<ScriptEffectPanel | null>(null);
-  const [rows, setRows] = useState<ScriptEffectReviewRow[]>([]);
+  const [draft, setDraft] = useState<DraftEdits>();
+  const [savedRevision, setSavedRevision] = useState<number>();
   const [jobs, setJobs] = useState<DraftingJob[]>([]);
   const [jobId, setJobId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [note, setNote] = useState("");
   const [correction, setCorrection] = useState(false);
   const [preview, setPreview] = useState<{
     confirmationHash: string;
@@ -60,33 +75,73 @@ export function ScriptEffectsPanel({
     text: string;
   } | null>(null);
   const path = effectsPath(skillId, hash);
-  const refresh = useCallback(async () => {
-    const value = await questionnaireRequest<ScriptEffectPanel>(basePath, path);
-    setPanel(value);
-    setRows(
-      value.scripts.map(
-        (script) =>
-          value.review?.content.scripts.find(
-            (row) => row.path === script.path,
-          ) ?? {
-            skillId,
-            hash,
-            path: script.path,
-            effects: [],
-            rationale: "",
-            evidence: [],
-            conditionalBehavior: "",
-            uncertainty: null,
-            reviewed: false,
-            uncertaintyAnswer: "",
-          },
-      ),
-    );
-    if (canManage && workflowBase) {
+  const status =
+    workflowStatus &&
+    (workflowStatus.review?.revision ?? 0) >= (panel?.review?.revision ?? 0)
+      ? workflowStatus
+      : panel;
+  const review = status?.review ?? null;
+  const revision = review?.revision ?? 0;
+  const confirmed = review?.kind === "confirmation";
+  const editable =
+    role === "uploader" &&
+    panel?.canReview &&
+    panel.uploaderAvailable &&
+    review !== null &&
+    (!confirmed || correction);
+  const savedRows = new Map(
+    review?.content.scripts.map((row) => [row.path, row]),
+  );
+  const rows =
+    (editable ? draft?.scripts : undefined) ??
+    panel?.scripts.map(
+      (script): ScriptEffectReviewRow =>
+        savedRows.get(script.path) ?? {
+          skillId,
+          hash,
+          path: script.path,
+          effects: [],
+          rationale: "",
+          evidence: [],
+          conditionalBehavior: "",
+          uncertainty: null,
+          reviewed: false,
+          uncertaintyAnswer: "",
+        },
+    ) ??
+    [];
+  const note = draft?.note ?? "";
+  const unanswered = new Set(unansweredScriptPaths(review));
+
+  const refreshReview = useCallback(
+    async (signal?: AbortSignal) => {
+      const value = await questionnaireRequest<ScriptEffectPanel>(
+        basePath,
+        path,
+        "GET",
+        undefined,
+        signal,
+      );
+      if (!signal?.aborted)
+        setPanel((current) =>
+          (current?.review?.revision ?? 0) > (value.review?.revision ?? 0)
+            ? current
+            : value,
+        );
+    },
+    [basePath, path],
+  );
+  const refreshJobs = useCallback(
+    async (signal?: AbortSignal) => {
+      if (role !== "engineer" || !workflowBase) return;
       const result = await questionnaireRequest<{ jobs: DraftingJob[] }>(
         basePath,
         `${workflowBase}/drafting-jobs`,
+        "GET",
+        undefined,
+        signal,
       );
+      if (signal?.aborted) return;
       const available = result.jobs.filter(
         (job) =>
           job.kind === "source-study" &&
@@ -95,23 +150,33 @@ export function ScriptEffectsPanel({
       );
       setJobs(available);
       setJobId(available.at(-1)?.id);
-    }
-  }, [basePath, path, skillId, hash, workflowBase, canManage]);
+    },
+    [basePath, skillId, workflowBase, role],
+  );
 
   useEffect(() => {
-    let active = true;
-    void refresh().catch((error: unknown) => {
-      if (active)
+    const controller = new AbortController();
+    void refreshReview(controller.signal).catch((error: unknown) => {
+      if (!controller.signal.aborted)
         setFailure(
           error instanceof Error ? error.message : t("effects.failed"),
         );
     });
-    return () => {
-      active = false;
-    };
-  }, [refresh, t]);
+    return () => controller.abort();
+  }, [refreshReview, t]);
 
-  async function perform(action: () => Promise<void>) {
+  useEffect(() => {
+    const controller = new AbortController();
+    void refreshJobs(controller.signal).catch((error: unknown) => {
+      if (!controller.signal.aborted)
+        setFailure(
+          error instanceof Error ? error.message : t("effects.failed"),
+        );
+    });
+    return () => controller.abort();
+  }, [refreshJobs, t]);
+
+  async function perform(action: () => Promise<unknown>) {
     if (busy) return;
     setBusy(true);
     setFailure(null);
@@ -124,21 +189,43 @@ export function ScriptEffectsPanel({
     }
   }
   async function change(action: string, body: unknown) {
-    await questionnaireRequest(
+    const result = await questionnaireRequest<{ review: EffectRevision }>(
       basePath,
       `${path}${action ? `/${action}` : ""}`,
       "POST",
       body,
     );
-    await refresh();
+    const saved = result.review;
+    setPanel((current) =>
+      current && (current.review?.revision ?? 0) <= saved.revision
+        ? { ...current, review: saved }
+        : current,
+    );
+    setDraft(undefined);
+    setSavedRevision(action === "" ? saved.revision : undefined);
     onChanged?.();
+    await refreshReview();
+    return saved;
+  }
+  function saveDraft() {
+    return change("", {
+      revision: draft?.revision ?? revision,
+      scripts: rows,
+      note,
+    });
+  }
+  function editDraft(update: (value: DraftEdits) => DraftEdits) {
+    setDraft((current) =>
+      update(current ?? { revision, scripts: rows, note: "" }),
+    );
   }
   function update(index: number, value: Partial<ScriptEffectReviewRow>) {
-    setRows((current) =>
-      current.map((row, position) =>
+    editDraft((current) => ({
+      ...current,
+      scripts: current.scripts.map((row, position) =>
         position === index ? { ...row, reviewed: false, ...value } : row,
       ),
-    );
+    }));
   }
   async function openCitation(evidence: ScriptEffectEvidence) {
     const query = new URLSearchParams({
@@ -158,10 +245,6 @@ export function ScriptEffectsPanel({
         .join("\n"),
     });
   }
-  const confirmed = panel?.review?.kind === "confirmation";
-  const editable =
-    panel?.canReview && panel.review !== null && (!confirmed || correction);
-
   if (!panel)
     return failure ? <Alert type="error" title={failure} /> : <Spin />;
   if (!panel.scripts.length)
@@ -172,7 +255,25 @@ export function ScriptEffectsPanel({
       />
     );
 
-  const draftControls = canManage && workflowBase && !confirmed && (
+  const history =
+    review && revision > (panel.history[0]?.revision ?? 0)
+      ? [review, ...panel.history]
+      : panel.history;
+  const saveDraftAction = editable && (
+    <Space wrap>
+      <Button disabled={busy} onClick={() => void perform(saveDraft)}>
+        {t("effects.save")}
+      </Button>
+      <span className="muted" role="status">
+        {draft
+          ? t("effects.unsaved")
+          : savedRevision === revision
+            ? t("effects.saved")
+            : null}
+      </span>
+    </Space>
+  );
+  const draftControls = role === "engineer" && workflowBase && !confirmed && (
     <div className="effect-review-actions">
       <label className="field">
         {t("effects.agentDraft")}
@@ -198,7 +299,7 @@ export function ScriptEffectsPanel({
                 "POST",
                 { kind: "source-study", skillId, confirmed: true },
               );
-              await refresh();
+              await refreshJobs();
               onChanged?.();
             })
           }
@@ -214,7 +315,7 @@ export function ScriptEffectsPanel({
                 workflowVersionId: workflowBase.split("/").at(-1),
                 jobId,
                 jobRevision: job.revision,
-                revision: panel.review?.revision ?? 0,
+                revision,
               });
             })
           }
@@ -248,7 +349,18 @@ export function ScriptEffectsPanel({
           <Tag color={confirmed ? "success" : "warning"}>
             {t(confirmed ? "effects.confirmed" : "effects.pending")}
           </Tag>
-          <Button disabled={busy} onClick={() => void perform(refresh)}>
+          <Button
+            disabled={busy}
+            onClick={() =>
+              void perform(async () => {
+                await refreshReview();
+                setDraft(undefined);
+                setSavedRevision(undefined);
+                await refreshJobs();
+                onChanged?.();
+              })
+            }
+          >
             {t("workflow.reload")}
           </Button>
         </Space>
@@ -256,6 +368,13 @@ export function ScriptEffectsPanel({
       {panel.pendingReason && (
         <Alert type="warning" title={panel.pendingReason} />
       )}
+      {role === "uploader" &&
+        panel.uploaderAvailable &&
+        (!panel.canReview ? (
+          <Alert type="info" title={t("effects.uploaderOnly")} />
+        ) : review === null ? (
+          <Alert type="info" title={t("effects.waitingForDraft")} />
+        ) : null)}
       {failure && <Alert type="error" showIcon title={failure} />}
       {editable && (
         <div className="effect-review-actions">
@@ -267,29 +386,21 @@ export function ScriptEffectsPanel({
               maxLength={8000}
               autoSize={{ minRows: 2, maxRows: 5 }}
               disabled={busy}
-              onChange={(event) => setNote(event.target.value)}
+              onChange={(event) => {
+                const note = event.target.value;
+                editDraft((current) => ({ ...current, note }));
+              }}
             />
           </label>
           <Space wrap>
             <Button
-              disabled={busy}
-              onClick={() =>
-                void perform(() =>
-                  change("", {
-                    revision: panel.review!.revision,
-                    scripts: rows,
-                    note,
-                  }),
-                )
-              }
-            >
-              {t("effects.save")}
-            </Button>
-            <Button
               disabled={busy || !note.trim()}
               onClick={() =>
                 void perform(() =>
-                  change("clarify", { revision: panel.review!.revision, note }),
+                  change("clarify", {
+                    revision: draft?.revision ?? revision,
+                    note,
+                  }),
                 )
               }
             >
@@ -300,22 +411,14 @@ export function ScriptEffectsPanel({
               disabled={busy}
               onClick={() =>
                 void perform(async () => {
-                  const saved = await questionnaireRequest<{
-                    review: NonNullable<ScriptEffectPanel["review"]>;
-                  }>(basePath, path, "POST", {
-                    revision: panel.review!.revision,
-                    scripts: rows,
-                    note,
-                  });
-                  await refresh();
-                  onChanged?.();
+                  const saved = await saveDraft();
                   const result = await questionnaireRequest<{
                     preview: {
                       confirmationHash: string;
                       scripts: ScriptEffectReviewRow[];
                     };
                   }>(basePath, `${path}/preview`, "POST", {
-                    revision: saved.review.revision,
+                    revision: saved.revision,
                   });
                   setPreview({
                     ...result.preview,
@@ -329,7 +432,7 @@ export function ScriptEffectsPanel({
           </Space>
         </div>
       )}
-      {confirmed && panel.canReview && !correction && (
+      {role === "uploader" && confirmed && panel.canReview && !correction && (
         <Button disabled={busy} onClick={() => setCorrection(true)}>
           {t("effects.correct")}
         </Button>
@@ -345,20 +448,20 @@ export function ScriptEffectsPanel({
           ))}
         </dl>
       </details>
-      {!editable && draftControls}
-      <Tabs
-        type="card"
-        size="small"
-        tabBarGutter={4}
+      {draftControls}
+      <NumberedTabs
+        label={t("effects.scripts")}
         items={rows.map((row, index) => ({
           key: row.path,
           label: (
-            <span title={row.path}>
-              <span aria-hidden="true">{index + 1}</span>
-              <span className="sr-only">
-                {index + 1}. {row.path}
+            <UncertaintyTabLabel pending={unanswered.has(row.path)}>
+              <span title={row.path}>
+                <span aria-hidden="true">{index + 1}</span>
+                <span className="sr-only">
+                  {index + 1}. {row.path}
+                </span>
               </span>
-            </span>
+            </UncertaintyTabLabel>
           ),
           children: (
             <article
@@ -369,73 +472,114 @@ export function ScriptEffectsPanel({
               <h4>
                 <code>{row.path}</code>
               </h4>
-              <label className="field">
-                {t("skills.effects")}
-                <Select
-                  mode="multiple"
-                  aria-label={`${t("skills.effects")} ${row.path}`}
-                  value={row.effects}
-                  disabled={!editable || busy}
-                  placeholder={t("effects.pending")}
-                  options={panel.contract.labels.map((label) => ({
-                    value: label.value,
-                    label: t(`skills.effect.${label.value}`),
-                  }))}
-                  onChange={(effects: SkillScriptSideEffect[]) =>
-                    update(index, {
-                      effects:
-                        effects.at(-1) === "none"
-                          ? ["none"]
-                          : effects.filter((effect) => effect !== "none"),
-                    })
-                  }
-                />
-              </label>
-              <label className="field">
-                {t("effects.rationale")}
-                <Input.TextArea
-                  aria-label={`${t("effects.rationale")} ${row.path}`}
-                  value={row.rationale}
-                  readOnly={!editable}
-                  disabled={busy}
-                  autoSize={{ minRows: 2, maxRows: 8 }}
-                  onChange={(event) =>
-                    update(index, { rationale: event.target.value })
-                  }
-                  maxLength={8000}
-                />
-              </label>
-              <label className="field">
-                {t("effects.conditional")}
-                <Input.TextArea
-                  aria-label={`${t("effects.conditional")} ${row.path}`}
-                  value={row.conditionalBehavior}
-                  readOnly={!editable}
-                  disabled={busy}
-                  autoSize={{ minRows: 1, maxRows: 5 }}
-                  onChange={(event) =>
-                    update(index, { conditionalBehavior: event.target.value })
-                  }
-                  maxLength={8000}
-                />
-              </label>
-              {row.uncertainty && (
+              {editable ? (
                 <>
-                  <Alert type="warning" title={row.uncertainty} />
                   <label className="field">
-                    {t("effects.answer")}
-                    <Input.TextArea
-                      aria-label={`${t("effects.answer")} ${row.path}`}
-                      value={row.uncertaintyAnswer}
-                      readOnly={!editable}
+                    {t("skills.effects")}
+                    <Select
+                      mode="multiple"
+                      aria-label={`${t("skills.effects")} ${row.path}`}
+                      value={row.effects}
                       disabled={busy}
-                      autoSize={{ minRows: 2, maxRows: 5 }}
+                      placeholder={t("effects.pending")}
+                      options={panel.contract.labels.map((label) => ({
+                        value: label.value,
+                        label: t(`skills.effect.${label.value}`),
+                      }))}
+                      onChange={(effects: SkillScriptSideEffect[]) =>
+                        update(index, {
+                          effects:
+                            effects.at(-1) === "none"
+                              ? ["none"]
+                              : effects.filter((effect) => effect !== "none"),
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    {t("effects.rationale")}
+                    <Input.TextArea
+                      aria-label={`${t("effects.rationale")} ${row.path}`}
+                      value={row.rationale}
+                      disabled={busy}
+                      autoSize={{ minRows: 2, maxRows: 8 }}
                       onChange={(event) =>
-                        update(index, { uncertaintyAnswer: event.target.value })
+                        update(index, { rationale: event.target.value })
                       }
                       maxLength={8000}
                     />
                   </label>
+                  <label className="field">
+                    {t("effects.conditional")}
+                    <Input.TextArea
+                      aria-label={`${t("effects.conditional")} ${row.path}`}
+                      value={row.conditionalBehavior}
+                      disabled={busy}
+                      autoSize={{ minRows: 1, maxRows: 5 }}
+                      onChange={(event) =>
+                        update(index, {
+                          conditionalBehavior: event.target.value,
+                        })
+                      }
+                      maxLength={8000}
+                    />
+                  </label>
+                </>
+              ) : (
+                <dl className="effect-review-summary">
+                  <dt>{t("skills.effects")}</dt>
+                  <dd>
+                    {row.effects.length
+                      ? row.effects
+                          .map((effect) => t(`skills.effect.${effect}`))
+                          .join(", ")
+                      : t("effects.pending")}
+                  </dd>
+                  {row.rationale && (
+                    <>
+                      <dt>{t("effects.rationale")}</dt>
+                      <dd>{row.rationale}</dd>
+                    </>
+                  )}
+                  {row.conditionalBehavior && (
+                    <>
+                      <dt>{t("effects.conditional")}</dt>
+                      <dd>{row.conditionalBehavior}</dd>
+                    </>
+                  )}
+                </dl>
+              )}
+              {row.uncertainty && (
+                <>
+                  <Alert type="warning" title={row.uncertainty} />
+                  {editable ? (
+                    <div className="effect-answer">
+                      <label className="field">
+                        {t("effects.answer")}
+                        <Input.TextArea
+                          aria-label={`${t("effects.answer")} ${row.path}`}
+                          aria-describedby={`${fieldId}-${index}-save-help`}
+                          value={row.uncertaintyAnswer}
+                          disabled={busy}
+                          autoSize={{ minRows: 2, maxRows: 5 }}
+                          onChange={(event) =>
+                            update(index, {
+                              uncertaintyAnswer: event.target.value,
+                            })
+                          }
+                          maxLength={8000}
+                        />
+                      </label>
+                      <p id={`${fieldId}-${index}-save-help`} className="muted">
+                        {t("effects.answerHelp")}
+                      </p>
+                      {saveDraftAction}
+                    </div>
+                  ) : (
+                    <p className="questionnaire-text">
+                      {row.uncertaintyAnswer || t("effects.unanswered")}
+                    </p>
+                  )}
                 </>
               )}
               <div className="effect-citations">
@@ -547,6 +691,7 @@ export function ScriptEffectsPanel({
                   </Button>
                 )}
               </div>
+              {!row.uncertainty && saveDraftAction}
             </article>
           ),
         }))}
@@ -563,19 +708,18 @@ export function ScriptEffectsPanel({
           </>
         )}
         {!confirmed &&
-          panel.findings.map((finding) => (
+          status?.findings.map((finding) => (
             <p role="status" key={finding.code}>
               {finding.message}
             </p>
           ))}
-        {panel.review?.content.note && (
-          <p className="questionnaire-text">{panel.review.content.note}</p>
+        {review?.content.note && (
+          <p className="questionnaire-text">{review.content.note}</p>
         )}
       </div>
-      {editable && draftControls}
       <details>
         <summary>{t("effects.history")}</summary>
-        {panel.history.map((entry) => (
+        {history.map((entry) => (
           <article className="study-record" key={entry.revision}>
             <p>
               {format("study.revision", { revision: entry.revision })} ·{" "}

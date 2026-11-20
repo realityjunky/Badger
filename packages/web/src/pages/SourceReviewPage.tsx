@@ -16,6 +16,7 @@ export function SourceReviewPage() {
       <section id="source-study" className="workflow-panel">
         {skillId && hash && (
           <ScriptEffectsPanel
+            key={`${skillId}:${hash}`}
             basePath={readBasePath(document)}
             skillId={skillId}
             hash={hash}

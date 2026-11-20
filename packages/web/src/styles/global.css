@@ -884,6 +884,38 @@ button.rail-link {
   white-space: nowrap;
 }
 
+.study-role-switch {
+  max-inline-size: 100%;
+}
+
+.study-role-switch .ant-segmented-item-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.uncertainty-tab-label {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 4px;
+  max-inline-size: 100%;
+}
+
+.uncertainty-tab-marker {
+  position: static;
+  display: grid;
+  place-items: center;
+  flex: none;
+  inline-size: 14px;
+  block-size: 14px;
+  margin-block-start: -2px;
+  border-radius: 50%;
+  background: var(--badger-color-danger-soft);
+  color: var(--badger-color-danger-text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .effect-review-panel,
 .effect-review-row,
 .effect-review-actions,
@@ -903,6 +935,29 @@ button.rail-link {
 .effect-review-heading h3,
 .effect-review-context p {
   margin: 0;
+}
+
+.effect-answer {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  min-width: 0;
+}
+
+.effect-answer p {
+  margin: 0;
+}
+
+.effect-review-summary {
+  margin: 0;
+}
+
+.effect-review-summary dt {
+  font-weight: 600;
+}
+
+.effect-review-summary dd {
+  white-space: pre-wrap;
 }
 
 .effect-review-panel .field,

@@ -20,9 +20,11 @@ import {
   type WorkflowVersionDetail,
   type WorkflowVersion,
 } from "../api/workflows.js";
+import { unansweredScriptPaths } from "../api/script-effects.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { StageTrack } from "../components/StageTrack.js";
+import { UncertaintyTabLabel } from "../components/UncertaintyTabLabel.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { WorkflowDialog } from "./workflows/WorkflowDialog.js";
 import { WorkflowVersionDialog } from "./workflows/WorkflowVersionDialog.js";
@@ -388,7 +390,7 @@ export function WorkflowsPage() {
                   ),
               },
               ...(versionResources !== null &&
-              selectedVersion !== undefined &&
+              versionResources.version.id === selectedVersion?.id &&
               workflow !== undefined
                 ? [
                     {
@@ -408,7 +410,18 @@ export function WorkflowsPage() {
                     },
                     {
                       key: "source-study",
-                      label: t("stage.sourceStudy"),
+                      label: (
+                        <UncertaintyTabLabel
+                          pending={
+                            versionResources.sourceStudy.effects?.some(
+                              (effect) =>
+                                unansweredScriptPaths(effect.review).length > 0,
+                            ) ?? false
+                          }
+                        >
+                          {t("stage.sourceStudy")}
+                        </UncertaintyTabLabel>
+                      ),
                       children: (
                         <WorkflowSourceStudy
                           key={selectedVersion.id}

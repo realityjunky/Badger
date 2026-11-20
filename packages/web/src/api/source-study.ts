@@ -5,6 +5,7 @@ import {
   type GatePreview,
   type WorkflowSkillPin,
 } from "./workflows.js";
+import type { ScriptEffectStatus } from "./script-effects.js";
 import type { EvidenceChange, RecordOrigin } from "./version-changes.js";
 
 export interface StudySkill {
@@ -57,6 +58,7 @@ export interface SourceStudy {
     studied: boolean;
     confirmation: GateConfirmation | null;
   })[];
+  effects?: (StudySkill & ScriptEffectStatus & { canReview?: boolean })[];
 }
 export interface EvidencePreview {
   evidence: SourceEvidence;

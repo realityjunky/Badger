@@ -8,14 +8,14 @@ export function NumberedTabs({
   onChange,
 }: {
   label: string;
-  items: { key: string; children: ReactNode }[];
+  items: { key: string; label?: ReactNode; children: ReactNode }[];
   activeKey?: string;
   onChange?(key: string): void;
 }) {
   const id = useId();
   const tabs = items.map((item, index) => ({
     ...item,
-    label: String(index + 1),
+    label: item.label ?? String(index + 1),
   }));
 
   return (

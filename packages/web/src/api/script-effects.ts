@@ -6,7 +6,12 @@ import type { EffectRevision } from "@realityjunky/badger-server";
 import type { SkillFile, ScriptEffects } from "./skills.js";
 export type { EffectRevision, ScriptEffectReviewRow };
 
-export interface ScriptEffectPanel {
+export interface ScriptEffectStatus {
+  review: EffectRevision | null;
+  findings: { code: string; message: string }[];
+}
+
+export interface ScriptEffectPanel extends ScriptEffectStatus {
   skillId: string;
   hash: string;
   skillName: string;
@@ -18,9 +23,19 @@ export interface ScriptEffectPanel {
   contract: ReturnType<typeof scriptEffectContract>;
   scripts: { path: string; sideEffects: ScriptEffects }[];
   inventory: SkillFile[];
-  review: EffectRevision | null;
   history: EffectRevision[];
-  findings: { code: string; message: string }[];
+}
+
+export function unansweredScriptPaths(
+  review: EffectRevision | null | undefined,
+) {
+  return (
+    review?.content.scripts
+      .filter(
+        (row) => row.uncertainty !== null && !row.uncertaintyAnswer.trim(),
+      )
+      .map((row) => row.path) ?? []
+  );
 }
 
 export function effectsPath(skillId: string, hash: string) {
