@@ -2,6 +2,7 @@ import { readLedger } from "../questionnaire/ledger.js";
 import { composeSemanticDossier } from "@realityjunky/badger";
 import { publicAuthoringVersion } from "../authoring-history.js";
 import {
+  dossierGateState,
   dossierInputs,
   readDossierHead,
   readDossierVersions,
@@ -14,6 +15,7 @@ import { listWorkflowVersions, readWorkflow } from "../workflows.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 import { objectInput, RequestError } from "./errors.js";
+import { readWorkingRevision } from "../working-dossier-store.js";
 
 const PATH =
   /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/dossier(?:\/(preview|compose))?$/u;
@@ -86,10 +88,16 @@ export async function handleDossier(input: AuthorizedRequest): Promise<void> {
         caps.composeDossier,
       );
       const head = await readDossierHead(tx, versionId);
+      const workingGate = head?.snapshot.dossier.workingDossier
+        ? await dossierGateState(tx, versionId, person.id)
+        : null;
       const currentVersionId =
         head &&
         !publicAuthoringVersion(head).requiresRecomposition &&
-        canonicalHash(head.snapshot.ledger) === canonicalHash(handoff)
+        (workingGate
+          ? !workingGate.findings.length &&
+            workingGate.preview.boundHashes.dossier === head.hash
+          : canonicalHash(head.snapshot.ledger) === canonicalHash(handoff))
           ? head.id
           : null;
       const confirmations = await readGateConfirmations(
@@ -109,6 +117,8 @@ export async function handleDossier(input: AuthorizedRequest): Promise<void> {
         },
       };
     }
+    if (await readWorkingRevision(tx, versionId))
+      throw new RequestError(409, "Approve the saved working dossier directly");
     const { handoff } = await readLedger(tx, versionId, person.id, true);
     if (handoff.status !== "complete")
       throw new RequestError(

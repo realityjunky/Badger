@@ -69,12 +69,14 @@ export function DraftingJobs({
   path,
   jobsHref,
   view,
+  showSourceStudy = true,
   onChanged,
 }: {
   basePath: string;
   path: string;
   jobsHref: string;
   view: QuestionnaireView;
+  showSourceStudy?: boolean;
   onChanged(): void;
 }) {
   const { t, format } = useI18n();
@@ -110,10 +112,12 @@ export function DraftingJobs({
   const [preview, setPreview] = useState<DraftingDecisionPreview | null>(null);
   const [decisionJob, setDecisionJob] = useState<DraftingJob | null>(null);
   const canDecide = view.capabilities.compose;
-  const jobs = loadedJobs ?? [];
+  const jobs = (loadedJobs ?? []).filter(
+    (job) => showSourceStudy || job.kind !== "source-study",
+  );
   const visibleJobs = jobs.filter((job) => statuses.includes(job.status));
   const studyPin =
-    requestedJobId === null
+    showSourceStudy && requestedJobId === null
       ? view.pins.find(
           (pin) => pin.skillId === studySkillId && pin.hash === studyHash,
         )
@@ -619,6 +623,7 @@ export function DraftingJobs({
         confirmLoading={busy}
         okButtonProps={{
           disabled:
+            (kind === "source-study" && !showSourceStudy) ||
             (needsRound && !roundId) ||
             (needsSkill && !skillId) ||
             (needsQuestion && !questionId) ||
@@ -659,10 +664,9 @@ export function DraftingJobs({
             setKind(value);
             setQuestionId(undefined);
           }}
-          options={(Object.keys(kindLabels) as DraftingKind[]).map((value) => ({
-            value,
-            label: t(kindLabels[value]),
-          }))}
+          options={(Object.keys(kindLabels) as DraftingKind[])
+            .filter((value) => showSourceStudy || value !== "source-study")
+            .map((value) => ({ value, label: t(kindLabels[value]) }))}
         />
         {needsSkill && (
           <>

@@ -31,6 +31,7 @@ export interface WorkflowCapabilities {
   confirmSources: boolean;
   manageSourceStudy: boolean;
   composeDossier: boolean;
+  editWorkingDossier: boolean;
   approveDossier: boolean;
   editPlan: boolean;
   approvePlan: boolean;
@@ -78,6 +79,10 @@ export async function workflowCapabilities(
     confirmSources: access.tokenScopes === undefined && engineer,
     manageSourceStudy: access.tokenScopes === undefined && engineer,
     composeDossier: access.tokenScopes === undefined && engineer,
+    editWorkingDossier:
+      (access.tokenScopes === undefined ||
+        access.tokenScopes.includes("engineer")) &&
+      engineer,
     editPlan: access.tokenScopes === undefined && engineer,
     approvePlan:
       access.tokenScopes === undefined && (isAdministrator(access) || owner),

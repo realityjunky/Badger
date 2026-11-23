@@ -30,7 +30,10 @@ async function call(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const value = await response.json();
-  expect(response.status, JSON.stringify(value)).toBe(status);
+  expect(
+    response.status,
+    JSON.stringify(response.status === 500 ? service.logs.slice(-3) : value),
+  ).toBe(status);
   return value;
 }
 
@@ -177,6 +180,85 @@ async function confirmedFact(base: string) {
     content,
   };
 }
+
+it("keeps one saved partial dossier across retries and refuses stale edits", async () => {
+  const { base, group } = await setup();
+  const { skill } = await call(
+    "/skills",
+    "POST",
+    { groupId: group.id, name: "report-source" },
+    admin,
+    201,
+  );
+  const files = [
+    {
+      path: "SKILL.md",
+      content: Buffer.from(
+        "---\nname: report-source\ndescription: Report test\n---\n\nRead the report title.\n",
+      ).toString("base64"),
+    },
+  ];
+  const { preview } = await call(`/skills/${skill.id}/upload-preview`, "POST", {
+    files,
+  });
+  await call(
+    `/skills/${skill.id}/versions`,
+    "POST",
+    { files, confirmed: true, expectedHash: preview.hash },
+    engineer,
+    201,
+  );
+  await call(
+    `${base}/pins`,
+    "POST",
+    { skillId: skill.id, hash: preview.hash },
+    engineer,
+    201,
+  );
+  await service.runSourceCheckJobs();
+  const path = `${base}/working-dossier`;
+  const first = await call(path);
+  expect(first.available).toBe(true);
+  expect(first.revision).toBe(0);
+  const id = `skill/${skill.id}/inputs`;
+  const edit = {
+    editId: "first-source-edit",
+    revision: first.revision,
+    pinsHash: first.pinsHash,
+    fields: {
+      [id]: { state: "missing", reason: "Which title should be used?" },
+    },
+  };
+  expect((await call(path, "PATCH", edit)).revision).toBe(1);
+  expect((await call(path, "PATCH", edit)).revision).toBe(1);
+  await call(path, "PATCH", { ...edit, editId: "stale-edit" }, engineer, 409);
+  await call(path, "PATCH", { ...edit, revision: 1 }, engineer, 409);
+  await call(
+    path,
+    "PATCH",
+    { ...edit, revision: 1, editId: "expert-edit" },
+    expert,
+    403,
+  );
+  const read = await call(path, "GET", undefined, expert);
+  expect(
+    read.projection.fields.find((field: { id: string }) => field.id === id),
+  ).toMatchObject({
+    blocker: "Which title should be used?",
+  });
+  const blocked = await call(
+    `${base}/gates/dossier/preview`,
+    "POST",
+    {},
+    owner,
+    409,
+  );
+  expect(blocked.findings).toContainEqual(
+    expect.objectContaining({
+      message: expect.stringContaining("Which title should be used?"),
+    }),
+  );
+});
 
 function semantics(factId: string) {
   const topic = {

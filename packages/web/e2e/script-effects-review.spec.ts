@@ -113,6 +113,21 @@ test("the uploader clarifies uncertainty, corrects exclusive none, personally co
     .getByRole("button", { name: "Confirm source set" })
     .click();
   await expect(page.getByText(/^Sources confirmed /u)).toBeVisible();
+  const { record } = await call(page, "POST", `${path}/source-study/facts`, {
+    statement: "The source includes an example review script.",
+    evidence: [
+      {
+        ...pin,
+        path: "scripts/verify.sh",
+        fileHash: createHash("sha256").update(script).digest("hex"),
+        startLine: 1,
+        endLine: 1,
+      },
+    ],
+  });
+  await call(page, "DELETE", `${path}/source-study/facts/${record.id}`, {
+    revision: record.revision,
+  });
   await page.goto(`${base}${path}#source-study`);
   const roles = study.getByRole("radiogroup", { name: "Source study role" });
   const engineer = roles.getByRole("radio", { name: "Engineer", exact: true });
@@ -529,6 +544,23 @@ test("source-study suggestions wrap numbered tabs and keep edits without confirm
     .getByRole("button", { name: "Confirm source set" })
     .click();
   await expect(page.getByText(/^Sources confirmed /u)).toBeVisible();
+  const { record } = await call(page, "POST", `${path}/source-study/facts`, {
+    statement: "The inspected example script prints a value.",
+    evidence: [
+      {
+        ...pin,
+        path: scripts[1]!.path,
+        fileHash: createHash("sha256")
+          .update(scripts[1]!.content)
+          .digest("hex"),
+        startLine: 2,
+        endLine: 2,
+      },
+    ],
+  });
+  await call(page, "DELETE", `${path}/source-study/facts/${record.id}`, {
+    revision: record.revision,
+  });
   const { job } = await call(page, "POST", jobs, {
     kind: "source-study",
     skillId: skill.id,

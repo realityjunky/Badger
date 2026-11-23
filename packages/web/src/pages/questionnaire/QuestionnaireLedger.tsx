@@ -23,6 +23,7 @@ export function QuestionnaireLedger({
   sinceRound,
   onSinceRound,
   onChanged,
+  showReadiness = true,
 }: {
   basePath: string;
   path: string;
@@ -30,6 +31,7 @@ export function QuestionnaireLedger({
   sinceRound: string | null;
   onSinceRound(id: string | null): void;
   onChanged(): Promise<unknown>;
+  showReadiness?: boolean;
 }) {
   const { t, format } = useI18n();
   const [ledger, setLedger] = useState<LedgerView | null>(null);
@@ -190,9 +192,18 @@ export function QuestionnaireLedger({
     "remainingQuestions",
   ] as const;
   return (
-    <section aria-label={t("ledger.title")} data-testid="questionnaire-ledger">
-      <h2 className="pane-title">{t("ledger.title")}</h2>
-      <p className="muted">{t("ledger.description")}</p>
+    <section
+      aria-label={t(
+        showReadiness ? "ledger.title" : "workingDossier.questionHistory",
+      )}
+      data-testid="questionnaire-ledger"
+    >
+      {showReadiness && (
+        <>
+          <h2 className="pane-title">{t("ledger.title")}</h2>
+          <p className="muted">{t("ledger.description")}</p>
+        </>
+      )}
       {failure && <Alert type="error" showIcon title={failure} />}
       {view.capabilities.compose && (
         <Space wrap>
@@ -208,57 +219,61 @@ export function QuestionnaireLedger({
         !failure && <Spin aria-label={t("common.loading")} />
       ) : (
         <>
-          <h3>{t("ledger.readiness")}</h3>
-          <p role="status">
-            {t(
-              ledger.handoff.status === "complete"
-                ? "ledger.ready"
-                : "ledger.blocked",
-            )}
-          </p>
-          <Collapse
-            items={ledger.handoff.readiness.map((readiness) => ({
-              key: readiness.topic,
-              label: (
-                <Space wrap>
-                  {t(`questionnaire.topic.${readiness.topic}`)}
-                  <Tag color={readiness.ready ? "success" : "warning"}>
-                    {t(readiness.ready ? "ledger.ready" : "ledger.blocked")}
-                  </Tag>
-                </Space>
-              ),
-              children: readiness.ready ? (
-                <p>{t("ledger.noBlockers")}</p>
-              ) : (
-                <ul>
-                  {readiness.blockers.map((blocker, index) => {
-                    const record = blocker.record;
-                    return (
-                      <li
-                        key={`${blocker.code}:${record?.type ?? "private"}:${record?.id ?? index}`}
-                      >
-                        {t(`ledger.blocker.${blocker.code}`)} ·{" "}
-                        {record ? (
-                          <>
-                            {
-                              ledger.handoff.items.find(
-                                (item) =>
-                                  item.record.id === record.id &&
-                                  item.record.type === record.type,
-                              )?.statement
-                            }{" "}
-                            {recordLink(record)}
-                          </>
-                        ) : (
-                          t("ledger.privateQuestion")
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              ),
-            }))}
-          />
+          {showReadiness && (
+            <>
+              <h3>{t("ledger.readiness")}</h3>
+              <p role="status">
+                {t(
+                  ledger.handoff.status === "complete"
+                    ? "ledger.ready"
+                    : "ledger.blocked",
+                )}
+              </p>
+              <Collapse
+                items={ledger.handoff.readiness.map((readiness) => ({
+                  key: readiness.topic,
+                  label: (
+                    <Space wrap>
+                      {t(`questionnaire.topic.${readiness.topic}`)}
+                      <Tag color={readiness.ready ? "success" : "warning"}>
+                        {t(readiness.ready ? "ledger.ready" : "ledger.blocked")}
+                      </Tag>
+                    </Space>
+                  ),
+                  children: readiness.ready ? (
+                    <p>{t("ledger.noBlockers")}</p>
+                  ) : (
+                    <ul>
+                      {readiness.blockers.map((blocker, index) => {
+                        const record = blocker.record;
+                        return (
+                          <li
+                            key={`${blocker.code}:${record?.type ?? "private"}:${record?.id ?? index}`}
+                          >
+                            {t(`ledger.blocker.${blocker.code}`)} ·{" "}
+                            {record ? (
+                              <>
+                                {
+                                  ledger.handoff.items.find(
+                                    (item) =>
+                                      item.record.id === record.id &&
+                                      item.record.type === record.type,
+                                  )?.statement
+                                }{" "}
+                                {recordLink(record)}
+                              </>
+                            ) : (
+                              t("ledger.privateQuestion")
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ),
+                }))}
+              />
+            </>
+          )}
           <h3>{t("ledger.parts")}</h3>
           <Collapse
             defaultActiveKey={[...parts]}

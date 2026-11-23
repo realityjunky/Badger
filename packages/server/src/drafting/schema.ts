@@ -69,7 +69,7 @@ const questionSchema = object({
     minItems: 1,
     maxItems: 100,
     items: object({
-      kind: { enum: ["workflow", "node", "skill", "interface"] },
+      kind: { enum: ["workflow", "node", "skill", "interface", "field"] },
       id: text(200),
     }),
   },

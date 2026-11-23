@@ -6,6 +6,7 @@ import {
   Popconfirm,
   Segmented,
   Space,
+  Spin,
   Switch,
   Tabs,
   Tag,
@@ -24,6 +25,7 @@ import type {
   GatePreview,
   WorkflowVersionDetail,
 } from "../../api/workflows.js";
+import { workingDossierPath } from "../../api/working-dossier.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { StudyRecordDialog } from "./StudyRecordDialog.js";
 import {
@@ -38,6 +40,9 @@ import { RecordOriginLink } from "../../components/RecordOriginLink.js";
 import { UncertaintyTabLabel } from "../../components/UncertaintyTabLabel.js";
 import { ScriptEffectsPanel, type StudyRole } from "./ScriptEffectsPanel.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
+import { selectedWorkflowTab } from "./WorkflowTabs.js";
+import { useWorkingDossier } from "../working-dossier/useWorkingDossier.js";
+import { WorkingDossierStudy } from "../working-dossier/WorkingDossierStudy.js";
 
 export function WorkflowSourceStudy({
   basePath,
@@ -66,6 +71,17 @@ export function WorkflowSourceStudy({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<WriteFailure | null>(null);
   const study = detail.sourceStudy;
+  const dossierPath = workingDossierPath(detail.workflow.id, detail.version.id);
+  const {
+    dossier,
+    failure: dossierFailure,
+    reload,
+  } = useWorkingDossier(
+    basePath,
+    dossierPath,
+    detail.version.id,
+    selectedWorkflowTab({ hash, search }) === "source-study",
+  );
   const linkedId =
     new URLSearchParams(search).get("studyRecord") ??
     (hash.startsWith("#study-") ? hash.slice("#study-".length) : null);
@@ -113,6 +129,7 @@ export function WorkflowSourceStudy({
           ? "uploader"
           : null;
   const canManage = role === "engineer";
+  const legacy = dossier?.legacy === true;
   const ready =
     detail.version.stages.find((s) => s.id === "sources")?.state === "done";
   const base = studyPath(detail.workflow.id, detail.version.id);
@@ -273,7 +290,7 @@ export function WorkflowSourceStudy({
       </section>
     );
   }
-  const overview = (
+  const legacyOverview = (
     <>
       <p className="muted">{t("study.description")}</p>
       {canManage && (
@@ -377,25 +394,69 @@ export function WorkflowSourceStudy({
       {failure !== null && (
         <WorkflowNotice failure={failure} onReload={onChanged} />
       )}
+      {dossierFailure && (
+        <Alert
+          type="error"
+          showIcon
+          title={dossierFailure}
+          action={
+            <Button onClick={() => void reload()}>
+              {t("workflow.reload")}
+            </Button>
+          }
+        />
+      )}
       <Tabs
-        activeKey={section ?? (role === "uploader" ? "effects" : "overview")}
+        activeKey={
+          section === "effects" || (legacy && section)
+            ? section
+            : role === "uploader" && section === undefined
+              ? "effects"
+              : "overview"
+        }
         onChange={setSection}
         items={[
           {
             key: "overview",
             label: t("stage.sourceStudy"),
-            children: overview,
+            children: legacy ? (
+              legacyOverview
+            ) : (
+              <>
+                {dossier && !dossier.available && (
+                  <Alert type="info" title={t("workingDossier.waitForCheck")} />
+                )}
+                {dossier && (dossier.available || dossier.revision > 0) && (
+                  <WorkingDossierStudy
+                    dossier={dossier}
+                    context={{
+                      basePath,
+                      path: dossierPath,
+                      revision: dossier.revision,
+                      pins: dossier.pins,
+                    }}
+                  />
+                )}
+                {!dossier && !dossierFailure && (
+                  <Spin aria-label={t("common.loading")} />
+                )}
+              </>
+            ),
           },
-          {
-            key: "facts",
-            label: t("study.facts"),
-            children: records("fact", study.facts),
-          },
-          {
-            key: "interfaces",
-            label: t("study.interfaces"),
-            children: records("interface", study.interfaces),
-          },
+          ...(legacy
+            ? [
+                {
+                  key: "facts",
+                  label: t("study.facts"),
+                  children: records("fact", study.facts),
+                },
+                {
+                  key: "interfaces",
+                  label: t("study.interfaces"),
+                  children: records("interface", study.interfaces),
+                },
+              ]
+            : []),
           {
             key: "effects",
             label: (
@@ -443,7 +504,7 @@ export function WorkflowSourceStudy({
           },
         ]}
       />
-      {editor !== null && (
+      {legacy && editor !== null && (
         <StudyRecordDialog
           basePath={basePath}
           detail={detail}

@@ -15,6 +15,7 @@ import { scriptEffectMethods } from "./script-effects.js";
 import { questionnaireMethods } from "./questionnaire.js";
 import { draftingJobMethods } from "./drafting-jobs.js";
 import { taskPromptMethods } from "./task-prompts.js";
+import { workingDossierMethods } from "./working-dossier.js";
 
 export function tokenRequestAllowed(
   scopes: readonly TokenScope[],
@@ -22,6 +23,7 @@ export function tokenRequestAllowed(
   method: string,
 ): boolean {
   const reads = method === "GET" || method === "HEAD";
+  if (workingDossierMethods(path) !== null) return scopes.includes("engineer");
   if (taskPromptMethods(path) !== null)
     return (
       reads &&

@@ -8,7 +8,8 @@ import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 import { objectInput, RequestError } from "./errors.js";
 import type { Queryable } from "../database/database.js";
-import { dossierGateState } from "../dossier.js";
+import { dossierGateState, storeApprovedWorkingDossier } from "../dossier.js";
+import type { DossierComposition } from "@realityjunky/badger";
 import { planGateState } from "../plans.js";
 import { generationGateState } from "../packages.js";
 import { invalidateGate } from "../gates.js";
@@ -55,18 +56,23 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
   const skillId =
     match[4] === undefined ? undefined : decodeURIComponent(match[4]);
   const gate = skillId === undefined ? match[3] : studyGateName(skillId);
-  const loadState = (tx: Queryable) =>
-    gate === "generation"
+  let dossierComposition: DossierComposition | undefined;
+  const loadState = async (tx: Queryable) => {
+    if (gate === "dossier") {
+      const state = await dossierGateState(tx, versionId, person.id);
+      dossierComposition = state.composition;
+      return state;
+    }
+    return gate === "generation"
       ? generationGateState(tx, input.config, versionId, person.id)
       : gate === "proposal"
         ? proposalGateState(tx, input.config, versionId, person.id)
         : gate === "plan"
           ? planGateState(tx, versionId, person.id)
-          : gate === "dossier"
-            ? dossierGateState(tx, versionId, person.id)
-            : skillId === undefined
-              ? sourcesGateState(tx, versionId)
-              : sourceStudyGateState(tx, versionId, skillId);
+          : skillId === undefined
+            ? sourcesGateState(tx, versionId)
+            : sourceStudyGateState(tx, versionId, skillId);
+  };
   if (
     !(await listWorkflowVersions(database, workflow.id)).some(
       (version) => version.id === versionId,
@@ -176,6 +182,18 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
               state,
             )
         : undefined,
+    gate === "dossier"
+      ? async (tx) => {
+          if (dossierComposition)
+            await storeApprovedWorkingDossier(
+              tx,
+              dependencies,
+              context,
+              versionId,
+              dossierComposition,
+            );
+        }
+      : undefined,
   );
   if (result.kind === "conflict")
     return reply.error(

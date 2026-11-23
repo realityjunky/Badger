@@ -13,6 +13,7 @@ import { readFacts, readResolutions } from "./resolutions.js";
 import { readSourceStudy } from "../source-study.js";
 import { RequestError } from "../http/errors.js";
 import { readAnswers } from "./answers.js";
+import { readWorkingRevision } from "../working-dossier-store.js";
 
 function visibleItems(items: QuestionnaireLedgerItem[], compose: boolean) {
   if (compose) return items;
@@ -79,11 +80,12 @@ function visibleHandoff(
  * round publication. The lock below restates the precondition: a caller that
  * holds it waits for nothing, and one that does not still reads one state.
  */
-export async function readQuestionnaireRecords(
+export async function readQuestionnaireInputs(
   tx: Queryable,
   versionId: string,
   personId: string,
-): Promise<QuestionnaireRecords> {
+  includeStudy = true,
+) {
   await tx.query(
     "select id from workflow_versions where id = $1 for no key update",
     [versionId],
@@ -91,8 +93,8 @@ export async function readQuestionnaireRecords(
   const questions = await readQuestions(tx, versionId, personId, true);
   const resolutions = await readResolutions(tx, versionId);
   const answers = await readAnswers(tx, versionId, personId);
-  const study = await readSourceStudy(tx, versionId);
-  return {
+  const study = includeStudy ? await readSourceStudy(tx, versionId) : null;
+  const records: QuestionnaireRecords = {
     questions: questions.map((q) => ({
       ...q,
       topic: q.topic as QuestionnaireTopic,
@@ -125,13 +127,28 @@ export async function readQuestionnaireRecords(
           questions.find((q) => q.id === f.questionId)!.resolutionRevision ===
           resolutions.find((r) => r.id === f.resolutionId)!.revision,
       })),
-    sourceRecords: [...study.facts, ...study.interfaces].map((r) => ({
-      ...r,
-      statement:
-        "statement" in r.content ? r.content.statement : r.content.artifact,
-    })),
-    pins: study.studies,
+    ...(study
+      ? {
+          sourceRecords: [...study.facts, ...study.interfaces].map((r) => ({
+            ...r,
+            statement:
+              "statement" in r.content
+                ? r.content.statement
+                : r.content.artifact,
+          })),
+          pins: study.studies,
+        }
+      : {}),
   };
+  return { records, questions, answers };
+}
+
+export async function readQuestionnaireRecords(
+  tx: Queryable,
+  versionId: string,
+  personId: string,
+) {
+  return (await readQuestionnaireInputs(tx, versionId, personId)).records;
 }
 
 async function recordHandoff(
@@ -142,7 +159,14 @@ async function recordHandoff(
 ) {
   return visibleHandoff(
     createQuestionnaireHandoff({
-      records: await readQuestionnaireRecords(tx, versionId, personId),
+      records: (
+        await readQuestionnaireInputs(
+          tx,
+          versionId,
+          personId,
+          !(await readWorkingRevision(tx, versionId)),
+        )
+      ).records,
     }),
     compose,
   );

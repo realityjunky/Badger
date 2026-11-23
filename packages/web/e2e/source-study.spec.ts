@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 
 // The base-path server keeps this journey's records out of the main server's
@@ -36,7 +37,7 @@ function file(path: string, text: string) {
   return { path, content: Buffer.from(text).toString("base64") };
 }
 
-test("an Engineer records a cited fact, opens its lines, and marks the pinned version studied", async ({
+test("an Engineer can continue a legacy source study, inspect its evidence, and complete the pin", async ({
   page,
 }) => {
   const name = `study-journey-${Date.now()}`;
@@ -67,16 +68,15 @@ test("an Engineer records a cited fact, opens its lines, and marks the pinned ve
     "/skills",
     { groupId: group.id, name: `${name}-source` },
   );
+  const guide =
+    "# Output contract\nWrite samples.tsv.\nColumns: sample_id, sequence.\n";
   const upload = {
     files: [
       file(
         "SKILL.md",
         `---\nname: ${name}-source\ndescription: Example source\n---\n\nRead reference/guide.md.\n`,
       ),
-      file(
-        "reference/guide.md",
-        "# Output contract\nWrite samples.tsv.\nColumns: sample_id, sequence.\n",
-      ),
+      file("reference/guide.md", guide),
     ],
   };
   const { preview } = await call<{ preview: { hash: string } }>(
@@ -96,13 +96,6 @@ test("an Engineer records a cited fact, opens its lines, and marks the pinned ve
     hash: preview.hash,
   });
 
-  // Study waits for the confirmed source set.
-  await page.goto(`${base}${versionPath}#source-study`);
-  const study = page.locator("#source-study");
-  await expect(study).toContainText(
-    "Confirm the current Sources gate before marking versions studied",
-  );
-  await expect(study).toContainText("0 of 1 pinned versions studied");
   await page.goto(`${base}${versionPath}#sources`);
   const reviewSources = page.getByRole("button", { name: "Review Sources" });
   await expect(reviewSources).toBeVisible({ timeout: 20_000 });
@@ -112,7 +105,31 @@ test("an Engineer records a cited fact, opens its lines, and marks the pinned ve
     .getByRole("button", { name: "Confirm source set" })
     .click();
   await expect(page.getByText(/^Sources confirmed /u)).toBeVisible();
+
+  const { record } = await call<{ record: { id: string; revision: number } }>(
+    page,
+    "POST",
+    `${versionPath}/source-study/facts`,
+    {
+      statement: "The guide defines an output contract.",
+      evidence: [
+        {
+          skillId: skill.id,
+          hash: preview.hash,
+          path: "reference/guide.md",
+          fileHash: createHash("sha256").update(guide).digest("hex"),
+          startLine: 1,
+          endLine: 1,
+        },
+      ],
+    },
+  );
+  await call(page, "DELETE", `${versionPath}/source-study/facts/${record.id}`, {
+    revision: record.revision,
+  });
   await page.goto(`${base}${versionPath}#source-study`);
+  const study = page.locator("#source-study");
+  await expect(study).toContainText("0 of 1 pinned versions studied");
 
   // A fact cites lines of a file in the pinned version's inventory.
   await study.getByRole("tab", { name: "Source-derived facts" }).click();

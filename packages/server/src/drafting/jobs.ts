@@ -53,6 +53,7 @@ import {
 } from "../questionnaire/imports.js";
 import { readPromptTemplate } from "../prompt-templates.js";
 import { saveDraftingReview, validateDraftingSubmission } from "./reviews.js";
+import { workingDossierBasis } from "../working-dossier.js";
 
 export type DraftingActor = WriteContext & { agentHost: string | null };
 export interface DraftingJobRow {
@@ -567,6 +568,14 @@ export async function jobDecisionPreview(
           job.context_bundle.pins.find((pin) => pin.skillId === job.skill_id),
         )
       : { reason };
+  if ("interfaces" in decision && decision.facts.length) {
+    const basis = await workingDossierBasis(tx, job.workflow_version_id);
+    if (!basis.legacy && (basis.available || basis.revision))
+      throw new RequestError(
+        409,
+        "Apply source evidence in the workflow's working dossier",
+      );
+  }
   if ("interfaces" in decision && decision.scriptEffects !== undefined) {
     const pin = job.context_bundle.pins.find(
       (entry) => entry.skillId === job.skill_id,
