@@ -84,7 +84,7 @@ async function workflow(
   };
 }
 
-async function setup() {
+async function setup(legacy = false) {
   service = await startTestService({
     environment: {
       BADGER_BOOTSTRAP_ADMINISTRATORS: admin.email,
@@ -172,6 +172,20 @@ async function setup() {
     conditionalBehavior: "",
     uncertainty: "Are temporary files also written?",
   };
+  if (legacy) {
+    const { record } = await call(
+      `${target.base}/source-study/facts`,
+      "POST",
+      {
+        statement: "The earlier study recorded the output file.",
+        evidence: suggestion.evidence,
+      },
+      201,
+    );
+    await call(`${target.base}/source-study/facts/${record.id}`, "DELETE", {
+      revision: record.revision,
+    });
+  }
   return {
     ...target,
     groupId: group.id,
@@ -298,7 +312,7 @@ it("keeps a reclaimed Source study editable after routing its own effect suggest
 it.each(["submitted", "accepted"] as const)(
   "refuses routing a %s Source study draft after its study inputs change",
   async (status) => {
-    const fixture = await setup();
+    const fixture = await setup(status === "accepted");
     const job = await studyDraft(
       fixture,
       [fixture.suggestion],
@@ -331,7 +345,7 @@ it.each(["submitted", "accepted"] as const)(
 it.each(["submitted", "accepted"] as const)(
   "routes the latest saved effect suggestions from a %s job to the uploader",
   async (status) => {
-    const fixture = await setup();
+    const fixture = await setup(status === "accepted");
     const original = await studyDraft(fixture, [fixture.suggestion], false);
     const path = `${fixture.base}/drafting-jobs/${original.id}`;
     const result = {
@@ -397,7 +411,7 @@ it.each(["submitted", "accepted"] as const)(
 );
 
 it("keeps useful facts acceptable after routing that job's effect section", async () => {
-  const fixture = await setup();
+  const fixture = await setup(true);
   const job = await studyDraft(fixture, [fixture.suggestion], false);
   const routed = await call(`${fixture.effects}/route`, "POST", {
     workflowVersionId: fixture.version.id,
@@ -420,14 +434,20 @@ it("keeps useful facts acceptable after routing that job's effect section", asyn
     requestId: "facts-after-effects-routed",
   });
   expect(accepted.job.status).toBe("accepted");
-  expect((await call(`${fixture.base}/source-study`)).facts).toHaveLength(1);
+  expect((await call(`${fixture.base}/source-study`)).facts).toEqual([
+    expect.objectContaining({ status: "retired" }),
+    expect.objectContaining({ status: "active" }),
+  ]);
   expect((await call(fixture.effects)).review).toEqual(routed.review);
 });
 
 it("routes a Source study draft to its non-expert uploader, confirms the corrected set, and reuses the version", async () => {
-  const fixture = await setup();
+  const fixture = await setup(true);
   const job = await studyDraft(fixture);
-  expect((await call(`${fixture.base}/source-study`)).facts).toHaveLength(1);
+  expect((await call(`${fixture.base}/source-study`)).facts).toEqual([
+    expect.objectContaining({ status: "retired" }),
+    expect.objectContaining({ status: "active" }),
+  ]);
   await call(
     `${fixture.base}/gates/source-study/${fixture.skill.id}/preview`,
     "POST",
@@ -583,7 +603,7 @@ it("routes a Source study draft to its non-expert uploader, confirms the correct
 });
 
 it("leaves an unavailable uploader's review pending and exposes no retired provider endpoints", async () => {
-  const fixture = await setup();
+  const fixture = await setup(true);
   const job = await studyDraft(fixture);
   await call(`${fixture.effects}/route`, "POST", {
     workflowVersionId: fixture.version.id,
@@ -642,7 +662,7 @@ it("leaves an unavailable uploader's review pending and exposes no retired provi
 });
 
 it("keeps partial and uncertain drafts pending, refuses unsupported declarations, and conflicts on stale previews", async () => {
-  const fixture = await setup();
+  const fixture = await setup(true);
   const job = await studyDraft(fixture, []);
   await call(`${fixture.effects}/route`, "POST", {
     workflowVersionId: fixture.version.id,
@@ -828,7 +848,7 @@ it("keeps partial and uncertain drafts pending, refuses unsupported declarations
 });
 
 it("binds plans and packages to confirmed revisions, invalidates corrections, and keeps new versions and other entries pending", async () => {
-  const fixture = await setup();
+  const fixture = await setup(true);
   const job = await studyDraft(fixture);
   await call(`${fixture.effects}/route`, "POST", {
     workflowVersionId: fixture.version.id,
@@ -891,7 +911,10 @@ it("binds plans and packages to confirmed revisions, invalidates corrections, an
   const { handoff } = await call(`${fixture.base}/questionnaire/ledger`);
   const topic = {
     summary: "Create output.txt from the example source.",
-    factIds: [study.facts[0].id],
+    factIds: [
+      study.facts.find((fact: { status: string }) => fact.status === "active")
+        .id,
+    ],
   };
   const semantics = {
     nodes: [{ id: "example", order: 0, responsibility: topic }],
