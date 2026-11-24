@@ -618,7 +618,7 @@ export async function pinSkillVersion(
         target: {
           type: "workflow_skill_pin",
           id: `${versionId}:${value.skillId}`,
-          label: `${skillName} · ${value.hash}`,
+          label: `${pin.skillName} · ${value.hash}`,
         },
         before:
           previous === null
