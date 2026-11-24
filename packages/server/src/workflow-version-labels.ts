@@ -8,6 +8,13 @@ export interface WorkflowVersionLabel {
   labelRevision: number;
 }
 
+export function workflowVersionLabel(version: {
+  number: number;
+  semanticVersion?: string | null;
+}): string {
+  return version.semanticVersion ?? `v${version.number}`;
+}
+
 interface LabelRow {
   id: string;
   number: number;

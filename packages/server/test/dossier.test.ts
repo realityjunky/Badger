@@ -182,7 +182,7 @@ async function confirmedFact(base: string) {
 }
 
 it("keeps one saved partial dossier across retries and refuses stale edits", async () => {
-  const { base, group } = await setup();
+  const { base, group, version } = await setup();
   const { skill } = await call(
     "/skills",
     "POST",
@@ -220,6 +220,9 @@ it("keeps one saved partial dossier across retries and refuses stale edits", asy
   const first = await call(path);
   expect(first.available).toBe(true);
   expect(first.revision).toBe(0);
+  expect(first.prompt.split("\n")[0]).toBe(
+    "Study the pinned Skills for report version 0.1.0.",
+  );
   const id = `skill/${skill.id}/inputs`;
   const edit = {
     editId: "first-source-edit",
@@ -230,7 +233,36 @@ it("keeps one saved partial dossier across retries and refuses stale edits", asy
     },
   };
   expect((await call(path, "PATCH", edit)).revision).toBe(1);
-  expect((await call(path, "PATCH", edit)).revision).toBe(1);
+  const { label } = await call(base, "PATCH", {
+    labelRevision: version.labelRevision,
+    semanticVersion: "0.1.1",
+  });
+  const current = await call(path);
+  expect(current.revision).toBe(1);
+  expect(current.prompt.split("\n")[0]).toBe(
+    "Study the pinned Skills for report version 0.1.1.",
+  );
+  expect(current.prompt).toContain("Omit both local path options by default.");
+  expect(current.prompt).toContain(
+    "Read the returned localPath for each file.",
+  );
+  expect((await call(`${path}/job`)).workflow).toMatchObject({
+    number: version.number,
+    versionId: version.id,
+    versionLabel: "0.1.1",
+  });
+  expect(await call(path, "PATCH", edit)).toMatchObject({
+    revision: 1,
+    prompt: current.prompt,
+  });
+  await call(base, "PATCH", {
+    labelRevision: label.labelRevision,
+    semanticVersion: null,
+  });
+  const unlabelled = await call(path);
+  expect(unlabelled.prompt.split("\n")[0]).toBe(
+    "Study the pinned Skills for report version v1.",
+  );
   await call(path, "PATCH", { ...edit, editId: "stale-edit" }, engineer, 409);
   await call(path, "PATCH", { ...edit, revision: 1 }, engineer, 409);
   await call(

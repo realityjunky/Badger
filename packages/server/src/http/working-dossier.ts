@@ -1,5 +1,6 @@
 import { workflowCapabilities } from "../workflow-access.js";
 import { listWorkflowVersions, readWorkflow } from "../workflows.js";
+import { withVersionLabels } from "../workflow-version-labels.js";
 import { parseSourceEvidence } from "../source-study.js";
 import { invalidateDossierApproval } from "../dossier.js";
 import {
@@ -81,8 +82,6 @@ export async function handleWorkingDossier(input: AuthorizedRequest) {
         "Only the workflow's Engineer can draft the working dossier",
       );
     switch (action) {
-      case "job":
-        return workingDossierJob(tx, version, person.id);
       case "files":
         return workingDossierFiles(tx, blobs, version, body);
       case "evidence": {
@@ -110,13 +109,16 @@ export async function handleWorkingDossier(input: AuthorizedRequest) {
         );
       }
     }
+    const [labeledVersion] = await withVersionLabels(tx, [version]);
+    if (action === "job")
+      return workingDossierJob(tx, labeledVersion, person.id);
     if (method === "PATCH") {
       const value = await saveWorkingDossier(
         tx,
         dependencies,
         context,
         blobs,
-        version,
+        labeledVersion,
         body,
       );
       if (value.newRevision) {
@@ -137,7 +139,12 @@ export async function handleWorkingDossier(input: AuthorizedRequest) {
       const { newRevision: _newRevision, ...view } = value;
       return view;
     }
-    return readWorkingDossier(tx, version, person.id, caps.editWorkingDossier);
+    return readWorkingDossier(
+      tx,
+      labeledVersion,
+      person.id,
+      caps.editWorkingDossier,
+    );
   });
   reply.json(200, result);
 }

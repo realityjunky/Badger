@@ -172,6 +172,7 @@ export interface WorkingDossierJob {
     id: string;
     versionId: string;
     number: number;
+    versionLabel: string;
     name: string;
     goal: string;
   };

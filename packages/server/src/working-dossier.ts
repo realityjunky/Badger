@@ -33,6 +33,12 @@ import { readQuestionnaireInputs } from "./questionnaire/ledger.js";
 import type { QuestionContent, QuestionTarget } from "./questionnaire/model.js";
 import { objectInput, RequestError } from "./http/errors.js";
 import type { WorkflowVersion } from "./workflows.js";
+import {
+  workflowVersionLabel,
+  type WorkflowVersionLabel,
+} from "./workflow-version-labels.js";
+
+type LabeledWorkflowVersion = WorkflowVersion & WorkflowVersionLabel;
 
 const validateEdit = new Ajv().compile<WorkingDossierEdit>(
   WORKING_DOSSIER_EDIT_SCHEMA,
@@ -136,7 +142,7 @@ function reviewedDossierAnswers({
 
 export async function readWorkingDossier(
   tx: Queryable,
-  version: WorkflowVersion,
+  version: WorkflowVersion & Partial<WorkflowVersionLabel>,
   personId: string,
   editable: boolean,
 ): Promise<WorkingDossierView> {
@@ -203,7 +209,15 @@ export async function readWorkingDossier(
     })),
     prompt:
       editable && basis.available && !basis.legacy
-        ? `Study the pinned Skills for ${version.name}, Workflow version ${version.number}.\n\nCall Badger MCP working_dossier_job with ${ids}. Read its current revision, complete pin inventory, field definitions and edit schema. Call working_dossier_sources with those IDs and the job's dossier.pinsHash. Supply localSourceRoot or localSkillRoots if the workstation has source copies. Read the returned verified files.\n\n${WORKING_DOSSIER_INSTRUCTIONS}\n\nUse save_working_dossier with those IDs and an edit matching the job schema. Quote its revision and pinsHash and choose a stable editId for each edit. For an unchanged retry reuse the same editId and body. If the revision conflicts, reload the job and reconcile the edits with the current dossier.`
+        ? `Study the pinned Skills for ${version.name} version ${workflowVersionLabel(version)}.
+
+Call Badger MCP working_dossier_job with ${ids}. Read its current revision, complete pin inventory, field definitions and edit schema.
+
+Call working_dossier_sources with those IDs and the job's dossier.pinsHash. Omit both local path options by default. Badger MCP will fetch the exact pinned files from Badger. If the user gives you local Skill paths accessible to Badger MCP, use localSourceRoot for a parent folder with subfolders named after the Skills, or use localSkillRoots to map each Skill ID to its folder. Badger MCP reuses files that match the pins and downloads the rest. Read the returned localPath for each file.
+
+${WORKING_DOSSIER_INSTRUCTIONS}
+
+Use save_working_dossier with those IDs and an edit matching the job schema. Quote its revision and pinsHash and choose a stable editId for each edit. For an unchanged retry reuse the same editId and body. If the revision conflicts, reload the job and reconcile the edits with the current dossier.`
         : null,
   };
 }
@@ -245,7 +259,7 @@ export async function validateDossierQuestionTargets(
 
 export async function workingDossierJob(
   tx: Queryable,
-  version: WorkflowVersion,
+  version: LabeledWorkflowVersion,
   personId: string,
 ): Promise<WorkingDossierJob> {
   const view = await readWorkingDossier(tx, version, personId, true);
@@ -257,6 +271,7 @@ export async function workingDossierJob(
       id: version.workflowId,
       versionId: version.id,
       number: version.number,
+      versionLabel: workflowVersionLabel(version),
       name: version.name,
       goal: version.goal,
     },
@@ -293,7 +308,7 @@ export async function saveWorkingDossier(
   deps: ServiceDependencies,
   context: WriteContext,
   blobs: BlobStore,
-  version: WorkflowVersion,
+  version: LabeledWorkflowVersion,
   input: unknown,
 ) {
   if (!validateEdit(input)) {
