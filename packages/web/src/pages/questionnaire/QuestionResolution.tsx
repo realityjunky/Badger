@@ -743,7 +743,8 @@ export function QuestionResolution({
         {review && (
           <>
             <p>
-              {review.preview.resolutionRevision !== undefined
+              {review.path.endsWith("/link-successor") &&
+              review.preview.resolutionRevision !== undefined
                 ? format("resolution.reviewedRevision", {
                     number: review.preview.resolutionRevision,
                   })
