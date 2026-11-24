@@ -13,7 +13,11 @@ import {
   type SkillSourceFile,
 } from "@realityjunky/badger";
 import { recordAudit, type WriteContext } from "./audit.js";
-import type { Database, Queryable } from "./database/database.js";
+import {
+  isTransactionConflict,
+  type Database,
+  type Queryable,
+} from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import { expireAnswerAttachments } from "./questionnaire/attachment-expiry.js";
 import type { ServiceConfig } from "./config.js";
@@ -41,6 +45,8 @@ export interface WorkflowSkillPin {
   skillId: string;
   skillName: string;
   hash: string;
+  label: string | null;
+  retiredAt: string | null;
   purpose: SkillPinPurpose;
   revision: number;
   pinnedBy: string;
@@ -125,6 +131,8 @@ interface PinRow {
   skill_id: string;
   skill_name: string;
   skill_version_hash: string;
+  label: string | null;
+  retired_at: Date | string | null;
   purpose: SkillPinPurpose;
   revision: number;
   pinned_by: string;
@@ -177,8 +185,10 @@ interface JobRow {
 }
 
 const PIN_COLUMNS = `p.workflow_version_id, p.skill_id, s.name as skill_name,
-  p.skill_version_hash, p.purpose, p.revision, p.pinned_by,
+  p.skill_version_hash, sv.label, sv.retired_at, p.purpose, p.revision, p.pinned_by,
   p.created_at, p.updated_at`;
+const PIN_SOURCE = `workflow_skill_pins p join skills s on s.id = p.skill_id
+  join skill_versions sv on sv.skill_id = p.skill_id and sv.hash = p.skill_version_hash`;
 const JOB_COLUMNS = `id, kind, workflow_version_id, requester_id, status,
   requested_at, started_at, finished_at, lease_until, worker_id, pins_hash,
   outcome - 'sources' as outcome, error, revision, plan_version_hash,
@@ -195,6 +205,8 @@ function toPin(row: PinRow): WorkflowSkillPin {
     skillId: row.skill_id,
     skillName: row.skill_name,
     hash: row.skill_version_hash,
+    label: row.label,
+    retiredAt: row.retired_at === null ? null : toIsoString(row.retired_at),
     purpose: row.purpose,
     revision: row.revision,
     pinnedBy: row.pinned_by,
@@ -264,7 +276,7 @@ export async function listWorkflowPins(
 ): Promise<WorkflowSkillPin[]> {
   const result = await database.query<PinRow>(
     `select ${PIN_COLUMNS}
-       from workflow_skill_pins p join skills s on s.id = p.skill_id
+       from ${PIN_SOURCE}
       where p.workflow_version_id = $1
       order by p.purpose, s.name, p.skill_id`,
     [workflowVersionId],
@@ -315,7 +327,7 @@ async function pinsForHash(
 ): Promise<string> {
   const result = await database.query<PinRow>(
     `select ${PIN_COLUMNS}
-       from workflow_skill_pins p join skills s on s.id = p.skill_id
+       from ${PIN_SOURCE}
       where p.workflow_version_id = $1
       order by p.purpose, p.skill_id`,
     [workflowVersionId],
@@ -458,6 +470,7 @@ export type PinResult =
     }
   | { kind: "missing-version" }
   | { kind: "missing-skill-version" }
+  | { kind: "retired-skill-version" }
   | { kind: "unchanged"; pin: WorkflowSkillPin }
   | { kind: "stale"; pin: WorkflowSkillPin | null }
   | { kind: "upgrade-source-taken"; pin: WorkflowSkillPin }
@@ -484,15 +497,14 @@ export async function pinSkillVersion(
           message: "An upgrade source is only valid for an upgrade workflow",
         };
       }
-      const skill = await tx.query<{ name: string }>(
-        `select s.name from skills s join skill_versions v on v.skill_id = s.id
-          where s.id = $1 and s.group_id = $2 and v.hash = $3`,
+      const skill = await tx.query<{ retired_at: Date | string | null }>(
+        `select v.retired_at from skills s join skill_versions v on v.skill_id = s.id
+          where s.id = $1 and s.group_id = $2 and v.hash = $3 for update of v`,
         [value.skillId, version.groupId, value.hash],
       );
-      const skillName = skill.rows[0]?.name;
-      if (skillName === undefined) return { kind: "missing-skill-version" };
+      if (!skill.rows[0]) return { kind: "missing-skill-version" };
       const existing = await tx.query<PinRow>(
-        `select ${PIN_COLUMNS} from workflow_skill_pins p join skills s on s.id = p.skill_id
+        `select ${PIN_COLUMNS} from ${PIN_SOURCE}
           where p.workflow_version_id = $1 and p.skill_id = $2 for update of p`,
         [versionId, value.skillId],
       );
@@ -508,9 +520,11 @@ export async function pinSkillVersion(
         return { kind: "stale", pin: previous };
       if (previous?.hash === value.hash && previous.purpose === value.purpose)
         return { kind: "unchanged", pin: previous };
+      if (skill.rows[0].retired_at !== null)
+        return { kind: "retired-skill-version" };
       if (value.purpose === "upgrade-source") {
         const upgrade = await tx.query<PinRow>(
-          `select ${PIN_COLUMNS} from workflow_skill_pins p join skills s on s.id = p.skill_id
+          `select ${PIN_COLUMNS} from ${PIN_SOURCE}
             where p.workflow_version_id = $1 and p.purpose = 'upgrade-source'
               and p.skill_id <> $2`,
           [versionId, value.skillId],
@@ -549,8 +563,14 @@ export async function pinSkillVersion(
             now,
           ],
         );
+      await tx.query(
+        `insert into workflow_skill_pin_history
+           (workflow_version_id, skill_id, skill_version_hash)
+         values ($1, $2, $3) on conflict do nothing`,
+        [versionId, value.skillId, value.hash],
+      );
       const pinRow = await tx.query<PinRow>(
-        `select ${PIN_COLUMNS} from workflow_skill_pins p join skills s on s.id = p.skill_id
+        `select ${PIN_COLUMNS} from ${PIN_SOURCE}
           where p.workflow_version_id = $1 and p.skill_id = $2`,
         [versionId, value.skillId],
       );
@@ -620,7 +640,8 @@ export async function pinSkillVersion(
     })
     .catch((error: unknown): PinResult => {
       // Two people pinned the same Skill, or two upgrade sources, at once.
-      if (isUniqueViolation(error)) return { kind: "conflict" };
+      if (isUniqueViolation(error) || isTransactionConflict(error))
+        return { kind: "conflict" };
       throw error;
     });
 }
@@ -642,7 +663,7 @@ export async function unpinSkillVersion(
     if ((await versionGroup(tx, versionId, true)) === null)
       return { kind: "missing-version" };
     const current = await tx.query<PinRow>(
-      `select ${PIN_COLUMNS} from workflow_skill_pins p join skills s on s.id = p.skill_id
+      `select ${PIN_COLUMNS} from ${PIN_SOURCE}
        where p.workflow_version_id = $1 and p.skill_id = $2 for update of p`,
       [versionId, skillId],
     );
@@ -949,8 +970,7 @@ export class SourceCheckWorker {
     if (version === null) throw new Error("The workflow version is missing");
     const pins = await database.query<PinRow>(
       `select ${PIN_COLUMNS}, sv.inventory, sv.scripts
-         from workflow_skill_pins p join skills s on s.id = p.skill_id
-         join skill_versions sv on sv.skill_id = p.skill_id and sv.hash = p.skill_version_hash
+         from ${PIN_SOURCE}
         where p.workflow_version_id = $1 order by p.purpose, p.skill_id`,
       [job.workflowVersionId],
     );

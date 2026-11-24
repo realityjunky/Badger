@@ -3,6 +3,7 @@ import { canonicalHash } from "@realityjunky/badger";
 import { accessFor, visibleGroups } from "../authorization.js";
 import type { Principal } from "../identity/identity.js";
 import { inboxFingerprint } from "../inbox.js";
+import { skillGroupPermissions } from "../skills/access.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 
 /**
@@ -35,7 +36,12 @@ export async function handleEvents(
       settings_revision: number;
     }>(
       `select v.id, v.revision, v.label_revision, coalesce(q.revision, 0) as questionnaire_revision, coalesce(s.revision, 0) as settings_revision,
-      coalesce((select sum(j.revision) from drafting_jobs j where j.workflow_version_id = v.id), 0)::text as drafting_revision
+      coalesce((select sum(j.revision) from drafting_jobs j where j.workflow_version_id = v.id), 0)::text as drafting_revision,
+      coalesce((select sum(sq.revision) from skill_questionnaires sq
+        join workflow_skill_pins p on p.skill_id = sq.skill_id where p.workflow_version_id = v.id), 0)::text as skill_questionnaire_revision,
+      (select jsonb_agg(jsonb_build_array(sv.skill_id, sv.label_revision, sv.retired_at) order by sv.skill_id)
+        from workflow_skill_pins p join skill_versions sv on sv.skill_id = p.skill_id and sv.hash = p.skill_version_hash
+        where p.workflow_version_id = v.id) as skill_pin_metadata
       from workflow_versions v join workflows w on w.id = v.workflow_id
       left join questionnaires q on q.workflow_version_id = v.id
       left join questionnaire_settings s on s.workflow_id = w.id
@@ -47,8 +53,21 @@ export async function handleEvents(
         visibility.everything ? [] : [...visibility.groupIds],
       ],
     );
+    const skillGroups = await skillGroupPermissions(database, access, person);
+    const questionnaires = await database.query<{
+      id: string;
+      revision: number;
+      label_revision: number;
+    }>(
+      `select q.id, q.revision, v.label_revision
+       from skill_questionnaires q
+       join skill_versions v on v.skill_id = q.skill_id and v.hash = q.version_hash
+       join skills s on s.id = q.skill_id
+       where s.group_id = any($1::text[]) order by q.id`,
+      [skillGroups.map(({ id }) => id)],
+    );
     return {
-      versions: versions.rows,
+      versions: [...versions.rows, ...questionnaires.rows],
       inbox: await inboxFingerprint(database, access, person),
     };
   };

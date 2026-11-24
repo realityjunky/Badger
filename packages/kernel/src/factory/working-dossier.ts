@@ -78,6 +78,15 @@ export interface DossierEvidence {
   startLine: number;
   endLine: number;
 }
+export interface DossierEvidenceChange {
+  skillId: string;
+  path: string;
+  fromVersionHash: string;
+  toVersionHash: string | null;
+  beforeHash: string | null;
+  afterHash: string | null;
+  status: "changed" | "removed" | "unpinned";
+}
 export interface ReviewedDossierAnswer {
   questionId: string;
   resolutionRevision: number;
@@ -152,6 +161,7 @@ export interface WorkingDossierEdit {
 export interface DossierAnswerChoice extends ReviewedDossierAnswer {
   fields: string[];
   text: string;
+  skill?: { name: string; versionHash: string };
 }
 
 export interface WorkingDossierView extends WorkingDossierRevision {
@@ -569,6 +579,7 @@ export function projectWorkingDossier(
   content: WorkingDossierContent,
   pins: DossierPin[],
   answers: DossierAnswerChoice[],
+  evidenceChanges?: DossierEvidenceChange[],
 ) {
   const pinHashes = new Map(pins.map(({ skillId, hash }) => [skillId, hash]));
   const reviewed = new Map(
@@ -576,6 +587,20 @@ export function projectWorkingDossier(
   );
   const stale = (ref: { skillId: string; hash: string }) =>
     pinHashes.get(ref.skillId) !== ref.hash;
+  const fileKey = (skillId: string, hash: string, path: string) =>
+    JSON.stringify([skillId, hash, path]);
+  const changes = new Map(
+    evidenceChanges?.map((change) => [
+      fileKey(change.skillId, change.fromVersionHash, change.path),
+      change,
+    ]),
+  );
+  const citationKey = ({ skillId, hash, path }: DossierEvidence) =>
+    fileKey(skillId, hash, path);
+  const citationChanged = (citation: DossierEvidence) =>
+    evidenceChanges === undefined
+      ? stale(citation)
+      : changes.has(citationKey(citation));
   const staleNodes = new Set(
     Object.entries(content.nodes)
       .filter(([, node]) => stale(node))
@@ -593,7 +618,9 @@ export function projectWorkingDossier(
             content.nodes[edge.producer],
             content.nodes[edge.consumer],
           ) ||
-          [...edge.producerEvidence, ...edge.consumerEvidence].some(stale),
+          [...edge.producerEvidence, ...edge.consumerEvidence].some(
+            citationChanged,
+          ),
       )
       .map(([id]) => id),
   );
@@ -602,9 +629,20 @@ export function projectWorkingDossier(
       WORKING_DOSSIER_FIELDS[scope].map((definition) => {
         const id = dossierFieldId(scope, owner, definition.key);
         const value = content.fields[id] ?? null;
+        const edge = scope === "interface" ? content.interfaces[owner] : null;
+        const citations = [
+          ...(value?.evidence ?? []),
+          ...(edge ? [...edge.producerEvidence, ...edge.consumerEvidence] : []),
+        ];
+        const changedFiles = [...new Set(citations.map(citationKey))].flatMap(
+          (key) => {
+            const change = changes.get(key);
+            return change ? [change] : [];
+          },
+        );
         let blocker: string | null = null;
         if (
-          value?.evidence?.some(stale) ||
+          value?.evidence?.some(citationChanged) ||
           (scope === "node" &&
             value?.state === "source" &&
             !value.evidence?.some((citation) =>
@@ -638,6 +676,7 @@ export function projectWorkingDossier(
           ownerLabel: label,
           content: value,
           blocker,
+          evidenceChanges: changedFiles,
         };
       }),
   );
@@ -650,7 +689,7 @@ export function projectWorkingDossier(
     staleFindings: Object.entries(content.findings)
       .filter(
         ([, finding]) =>
-          finding.evidence.some(stale) ||
+          finding.evidence.some(citationChanged) ||
           finding.fields.some((field) => !currentFields.has(field)),
       )
       .map(([id]) => id),

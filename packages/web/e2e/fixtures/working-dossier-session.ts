@@ -74,7 +74,7 @@ export async function startDossierService() {
   }
 }
 
-async function signIn(
+export async function signIn(
   browser: Browser,
   provider: StubOidcProvider,
   person: (typeof people)[keyof typeof people],

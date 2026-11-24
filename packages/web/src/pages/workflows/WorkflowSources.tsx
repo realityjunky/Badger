@@ -1,7 +1,7 @@
 import { RightOutlined } from "@ant-design/icons";
 import { Alert, Button, Select, Space, Tag } from "antd";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import {
   loadSkills,
   loadVersions,
@@ -19,6 +19,10 @@ import {
 } from "../../api/workflows.js";
 import { StatusPill } from "../../components/StatusPill.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import {
+  skillVersionOption,
+  skillVersionPath,
+} from "../skills/versionDisplay.js";
 import { SourcesGate } from "./SourcesGate.js";
 import { useInbox } from "../../inbox/InboxContext.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
@@ -43,7 +47,8 @@ export function WorkflowSources({
   canManage: boolean;
   onChanged(): void;
 }) {
-  const { t, format, locale } = useI18n();
+  const i18n = useI18n();
+  const { t, format, locale } = i18n;
   const inbox = useInbox();
   const location = useLocation();
   const section = useRef<HTMLElement>(null);
@@ -95,9 +100,21 @@ export function WorkflowSources({
   }, [basePath, workflow.groupId, t]);
 
   const selectedVersions = useMemo(
-    () => options.find((entry) => entry.skill.id === skillId)?.versions ?? [],
+    () =>
+      options
+        .find((entry) => entry.skill.id === skillId)
+        ?.versions.filter((entry) => entry.retiredAt === null) ?? [],
     [options, skillId],
   );
+  const currentPin = detail.pins.find((entry) => entry.skillId === skillId);
+  const comparison =
+    currentPin && hash && currentPin.hash !== hash
+      ? `${skillVersionPath(currentPin.skillId, hash)}?${new URLSearchParams({
+          tab: "compare",
+          from: currentPin.hash,
+          to: hash,
+        })}`
+      : null;
 
   const pin = async () => {
     if (skillId === undefined || hash === undefined || busy) return;
@@ -112,7 +129,7 @@ export function WorkflowSources({
         hash,
         workflow.intent === "upgrade-existing" ? purpose : "source",
         // Replacing a pin quotes the revision this page read.
-        detail.pins.find((entry) => entry.skillId === skillId),
+        currentPin,
       );
       if (result.kind === "ok") {
         setHash(undefined);
@@ -196,13 +213,9 @@ export function WorkflowSources({
             value={hash}
             onChange={setHash}
             disabled={skillId === undefined}
-            options={selectedVersions.map((entry) => ({
-              value: entry.hash,
-              label: format("workflow.skillVersion", {
-                hash: entry.hash.slice(0, 12),
-                date: new Date(entry.createdAt).toLocaleDateString(),
-              }),
-            }))}
+            options={selectedVersions.map((entry) =>
+              skillVersionOption(entry, i18n),
+            )}
           />
           {workflow.intent === "upgrade-existing" && (
             <Select
@@ -221,13 +234,14 @@ export function WorkflowSources({
               ]}
             />
           )}
+          {comparison && <Link to={comparison}>{t("skills.compare")}</Link>}
           <Button
             type="primary"
             disabled={hash === undefined}
             loading={busy}
             onClick={() => void pin()}
           >
-            {t("workflow.pin")}
+            {t(currentPin ? "workflow.replacePin" : "workflow.pin")}
           </Button>
         </Space>
       )}
@@ -321,12 +335,14 @@ function PinnedSourceCard({
           <span className="workflow-pin-label">
             <span className="workflow-pin-version">
               <strong>{pin.skillName}</strong>
+              {pin.label && <Tag>{pin.label}</Tag>}
               <code id={`${inventoryId}-version`} className="skills-hash">
                 {pin.hash}
               </code>
             </span>
             <span id={`${inventoryId}-status`} className="workflow-pin-meta">
               <Tag>{t(`workflow.pinPurpose.${pin.purpose}`)}</Tag>
+              {pin.retiredAt && <Tag>{t("workflow.retiredPin")}</Tag>}
               {source && (
                 <>
                   <StatusPill
@@ -359,6 +375,13 @@ function PinnedSourceCard({
         className="workflow-pin-inventory"
         hidden={!expanded}
       >
+        {expanded && (
+          <p>
+            <Link to={skillVersionPath(pin.skillId, pin.hash)}>
+              {t("workflow.openPin")}
+            </Link>
+          </p>
+        )}
         {expanded &&
           (source ? (
             <>

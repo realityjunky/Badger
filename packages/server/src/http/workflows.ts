@@ -282,6 +282,12 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
             "invalid",
             "No such Skill version in this group",
           );
+        if (pinned.kind === "retired-skill-version")
+          return reply.error(
+            409,
+            "conflict",
+            "That Skill version was retired. Select a Skill version available for new pins.",
+          );
         if (pinned.kind === "invalid")
           return reply.error(400, "invalid", pinned.message);
         if (pinned.kind === "conflict")

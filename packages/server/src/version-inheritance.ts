@@ -120,6 +120,13 @@ export async function inheritVersionRecords(
     values,
   );
   await tx.query(
+    `insert into workflow_skill_pin_history
+      (workflow_version_id, skill_id, skill_version_hash)
+     select workflow_version_id, skill_id, skill_version_hash
+     from workflow_skill_pins where workflow_version_id = $1`,
+    [versionId],
+  );
+  await tx.query(
     `insert into questionnaires (workflow_version_id, revision)
     select $2, revision from questionnaires where workflow_version_id = $1`,
     values,

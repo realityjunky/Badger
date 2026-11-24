@@ -10,6 +10,7 @@ import type {
 import { type WorkingDossierField } from "../../api/working-dossier.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import type { I18n } from "../../i18n/I18nContext.js";
+import { EvidenceChanges } from "../../components/EvidenceChanges.js";
 import {
   DossierEvidenceLinks,
   type EvidenceContext,
@@ -86,6 +87,7 @@ export function DossierFieldValue({
         evidence={value?.evidence ?? []}
         context={context}
       />
+      <EvidenceChanges changes={field.evidenceChanges} />
       {questions.length > 0 && (
         <ul className="working-dossier-links">
           {questions.map(({ id, text, state }) => (
@@ -106,7 +108,7 @@ export function DossierFieldValue({
           {value.answers.map((answer) => (
             <li key={dossierAnswerId(answer)}>
               <Link
-                to={`/questionnaire/questions/${encodeURIComponent(answer.questionId)}?${new URLSearchParams({ answerPerson: answer.personId, answerRevision: String(answer.revision) })}`}
+                to={`/questionnaire/questions/${encodeURIComponent(answer.questionId)}?${new URLSearchParams({ answerPerson: answer.personId, answerRevision: String(answer.revision), resolutionRevision: String(answer.resolutionRevision) })}`}
               >
                 {format("questionnaire.answerRevision", {
                   number: answer.revision,

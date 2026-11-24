@@ -276,7 +276,16 @@ export function DossierEditor({
             optionFilterProp="label"
             options={answers.map((answer) => ({
               value: dossierAnswerId(answer),
-              label: `${answer.text} · ${format("questionnaire.answerRevision", { number: answer.revision })}`,
+              label: [
+                answer.skill &&
+                  `${answer.skill.name} · ${answer.skill.versionHash.slice(0, 12)}`,
+                answer.text,
+                format("questionnaire.answerRevision", {
+                  number: answer.revision,
+                }),
+              ]
+                .filter(Boolean)
+                .join(" · "),
             }))}
           />
         </Form.Item>

@@ -143,6 +143,52 @@ describe("working dossier readiness", () => {
       );
   });
 
+  it("identifies the changed file for fields and handoffs while retaining unaffected citations", () => {
+    const successor = { ...report, hash: "e".repeat(64) };
+    const stableField = "skill/report/inputs";
+    const changedFile = {
+      skillId: report.skillId,
+      path: evidence.path,
+      fromVersionHash: report.hash,
+      toVersionHash: successor.hash,
+      beforeHash: evidence.fileHash,
+      afterHash: "f".repeat(64),
+      status: "changed" as const,
+    };
+    const content: WorkingDossierContent = {
+      ...reportContent,
+      fields: {
+        ...reportContent.fields,
+        [stableField]: {
+          state: "source",
+          value: "A report title",
+          evidence: [{ ...evidence, path: "references/forms.md" }],
+        },
+      },
+    };
+    const { fields } = projectWorkingDossier(
+      content,
+      [successor, renderer],
+      [],
+      [changedFile],
+    );
+    expect(fields.find(({ id }) => id === stableField)).toMatchObject({
+      blocker: null,
+      content: {
+        evidence: [{ hash: report.hash, path: "references/forms.md" }],
+      },
+      evidenceChanges: [],
+    });
+    for (const id of [
+      "node/write/responsibility",
+      "interface/report-transfer/artifact",
+    ])
+      expect(fields.find((field) => field.id === id)).toMatchObject({
+        blocker: expect.stringContaining("changed"),
+        evidenceChanges: [changedFile],
+      });
+  });
+
   it("validates the same approved meaning after canonical serialization", () => {
     const pins = [report, renderer];
     const composition = composeSemanticDossier({

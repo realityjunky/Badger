@@ -685,6 +685,69 @@ describe("workflow Skill pins and source checks", () => {
     });
   });
 
+  it("keeps the selected hash and pin revision through labelling, retirement and explicit adoption", async () => {
+    const { groupId, skill, hash, base } = await setup();
+    const other = await readyInboxWorkflow(groupId, skill.id, hash, "other");
+    const otherBase = `/workflows/${other.workflow.id}/versions/${other.version.id}`;
+    expect(
+      (
+        await write("POST", `${base}/pins`, engineer, {
+          skillId: skill.id,
+          hash,
+        })
+      ).status,
+    ).toBe(201);
+    const next = await uploadVersion(skill.id, "primer-skill", "Guide 2\n");
+    const original = `/skills/${skill.id}/versions/${hash}`;
+    expect(
+      (
+        await write("PATCH", `${original}/label`, engineer, {
+          label: "1.0.0",
+          revision: 0,
+        })
+      ).status,
+    ).toBe(200);
+    for (const path of [base, otherBase])
+      expect(await view(path, { as: engineer })).toMatchObject({
+        pins: [{ hash, label: "1.0.0", revision: 1, retiredAt: null }],
+      });
+    expect(
+      (
+        await write("POST", `${base}/pins`, engineer, {
+          skillId: skill.id,
+          hash: next,
+          revision: 1,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await write("DELETE", original, lead, { action: "delete" })).status,
+    ).toBe(409);
+    expect(
+      (await write("DELETE", original, lead, { action: "retire" })).status,
+    ).toBe(200);
+    expect(await view(otherBase, { as: engineer })).toMatchObject({
+      pins: [
+        { hash, label: "1.0.0", revision: 1, retiredAt: expect.any(String) },
+      ],
+    });
+    const rejected = await write("POST", `${base}/pins`, engineer, {
+      skillId: skill.id,
+      hash,
+      revision: 2,
+    });
+    expect(rejected.status).toBe(409);
+    expect(await rejected.json()).toMatchObject({
+      error: { message: expect.stringContaining("retired") },
+    });
+    expect(await view(base, { as: engineer })).toMatchObject({
+      pins: [{ hash: next, revision: 2 }],
+    });
+    expect(
+      (await service.request(`/api/v1${original}`, { as: engineer })).status,
+    ).toBe(200);
+  });
+
   it("replaces a pin only with the revision it read", async () => {
     const { skill, hash, base } = await setup();
     expect(
@@ -755,6 +818,41 @@ describe("workflow Skill pins and source checks", () => {
         },
       ],
     });
+    const historical = `/skills/${skill.id}/versions/${hash}`;
+    expect(
+      await (
+        await service.request(`/api/v1${historical}/removal`, { as: lead })
+      ).json(),
+    ).toMatchObject({ action: "retire", referenced: true });
+    expect(
+      (await write("DELETE", historical, lead, { action: "delete" })).status,
+    ).toBe(409);
+    expect(
+      (await write("DELETE", historical, lead, { action: "retire" })).status,
+    ).toBe(200);
+  });
+
+  it("serializes deletion of an unused version against a new pin", async () => {
+    const { skill, hash, base } = await setup();
+    const version = `/skills/${skill.id}/versions/${hash}`;
+    const [pin, removal] = await Promise.all([
+      write("POST", `${base}/pins`, engineer, { skillId: skill.id, hash }),
+      write("DELETE", version, lead, { action: "delete" }),
+    ]);
+    const workflow = await view(base, { as: engineer });
+    const retained = await service.request(`/api/v1${version}`, {
+      as: engineer,
+    });
+    if (pin.status === 201) {
+      expect(removal.status).toBe(409);
+      expect(workflow.pins).toMatchObject([{ hash }]);
+      expect(retained.status).toBe(200);
+    } else {
+      expect(removal.status).toBe(200);
+      expect(pin.status).toBe(404);
+      expect(workflow.pins).toEqual([]);
+      expect(retained.status).toBe(404);
+    }
   });
 
   it("rejects a source check that has not passed and conflicts on previews made before a pin change", async () => {

@@ -43,6 +43,8 @@ export interface WorkflowSkillPin {
   skillId: string;
   skillName: string;
   hash: string;
+  label: string | null;
+  retiredAt: string | null;
   purpose: SkillPinPurpose;
   revision: number;
   pinnedBy: string;

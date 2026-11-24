@@ -3,6 +3,7 @@ import {
   canonicalHash,
   createQuestionnaireHandoff,
   dossierFieldId,
+  dossierFieldOwners,
   emptyWorkingDossier,
   projectWorkingDossier,
   workingDossierCitations,
@@ -30,9 +31,11 @@ import { readVersion } from "./skills/library.js";
 import { evidenceLines, parseSourceEvidence } from "./source-study.js";
 import type { BlobStore } from "./skills/blobs.js";
 import { readQuestionnaireInputs } from "./questionnaire/ledger.js";
+import { listReviewedSkillAnswers } from "./questionnaire/skill-decisions.js";
 import type { QuestionContent, QuestionTarget } from "./questionnaire/model.js";
+import { evidenceComparison } from "./evidence-changes.js";
 import { objectInput, RequestError } from "./http/errors.js";
-import type { WorkflowVersion } from "./workflows.js";
+import { readWorkflow, type WorkflowVersion } from "./workflows.js";
 import {
   workflowVersionLabel,
   type WorkflowVersionLabel,
@@ -150,10 +153,64 @@ export async function readWorkingDossier(
   const content = basis.revision?.content ?? emptyWorkingDossier();
   const inputs = await readQuestionnaireInputs(tx, version.id, personId, false);
   const reviewedAnswers = reviewedDossierAnswers(inputs);
+  const workflow = basis.pins.length
+    ? await readWorkflow(tx, version.workflowId)
+    : null;
+  if (workflow) {
+    // Every workflow reader has library access in its Group. Pins and
+    // reusable decisions both resolve in that exact Group.
+    const decisions = await listReviewedSkillAnswers(
+      tx,
+      workflow.groupId,
+      basis.pins,
+    );
+    const fields = dossierFieldOwners(content, basis.pins).flatMap(
+      ({ scope, id }) =>
+        WORKING_DOSSIER_FIELDS[scope].map(({ key }) =>
+          dossierFieldId(scope, id, key),
+        ),
+    );
+    reviewedAnswers.push(
+      ...decisions.map(
+        ({
+          questionId,
+          resolutionRevision,
+          personId,
+          revision,
+          text,
+          skillId,
+          versionHash,
+        }) => ({
+          questionId,
+          resolutionRevision,
+          personId,
+          revision,
+          text,
+          fields,
+          skill: {
+            name: basis.pins.find((pin) => pin.skillId === skillId)!.name,
+            versionHash,
+          },
+        }),
+      ),
+    );
+  }
+  const compare = await evidenceComparison(tx, version.id);
+  const changes = await compare(
+    workingDossierCitations(content).map(
+      ({ skillId, hash, path, fileHash }) => ({
+        skillId,
+        versionHash: hash,
+        path,
+        fileHash,
+      }),
+    ),
+  );
   const projection = projectWorkingDossier(
     content,
     basis.pins,
     reviewedAnswers,
+    changes,
   );
   const reviewUrl = workingDossierReviewUrl(version.workflowId, version.id);
   const handoff = createQuestionnaireHandoff({ records: inputs.records });
