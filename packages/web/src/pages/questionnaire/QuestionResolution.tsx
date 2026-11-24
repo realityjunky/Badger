@@ -1,12 +1,15 @@
 import { Alert, Button, Input, Modal, Select, Space, Tag } from "antd";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   questionnaireRequest,
+  skillVersionCaption,
+  skillVersionHref,
   type Question,
   type QuestionnaireView,
   type AnswerRevision,
   type AnswerType,
+  type SkillQuestionnaireOption,
 } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { AttachmentLinks } from "./AnswerAttachments.js";
@@ -49,15 +52,25 @@ export function QuestionResolution({
   path,
   basePath,
   reload,
+  skillVersions = [],
 }: {
   question: Question;
   view: QuestionnaireView;
   path: string;
   basePath: string;
   reload: () => Promise<unknown>;
+  skillVersions?: SkillQuestionnaireOption[];
 }) {
   const { t, format, locale } = useI18n();
+  const [parameters] = useSearchParams();
+  const linkedRevision = Number(parameters.get("resolutionRevision"));
+  const skillView = "subject" in view ? view : null;
+  const workflowView = "workflow" in view ? view : null;
   const [kind, setKind] = useState<Kind>("confirmed");
+  const [skillOutcome, setSkillOutcome] = useState<"clarification" | "change">(
+    "clarification",
+  );
+  const [successor, setSuccessor] = useState<string>();
   const [reason, setReason] = useState("");
   const [deferredKind, setDeferredKind] = useState("out-of-scope");
   const [skillId, setSkillId] = useState<string>();
@@ -94,6 +107,15 @@ export function QuestionResolution({
   const facts = view.facts.filter((f) => f.questionId === question.id);
   const resolutions = view.resolutions.filter(
     (r) => r.questionId === question.id,
+  );
+  const successorVersions = skillVersions.filter(
+    (version) =>
+      version.skillId === skillView?.skill.id &&
+      version.baseHashes.includes(skillView.subject.versionHash) &&
+      !version.retiredAt,
+  );
+  const selectedSuccessor = successorVersions.find(
+    (version) => version.versionHash === successor,
   );
   const canResolve =
     view.capabilities.resolve &&
@@ -136,7 +158,7 @@ export function QuestionResolution({
       kind,
     };
     if (reason.trim()) input.reason = reason;
-    if (kind === "confirmed")
+    if (kind === "confirmed") {
       input.facts = drafts.map((d) => ({
         text: d.text,
         answers: d.people.map((personId) => ({
@@ -144,6 +166,12 @@ export function QuestionResolution({
           revision: submitted.find((a) => a.personId === personId)!.revision,
         })),
       }));
+      if (skillView)
+        input.skillOutcome =
+          skillOutcome === "clarification"
+            ? { kind: skillOutcome }
+            : { kind: skillOutcome, successorVersionHash: successor };
+    }
     if (kind === "deferred")
       Object.assign(input, {
         reason,
@@ -170,7 +198,10 @@ export function QuestionResolution({
   };
   const ready =
     kind === "confirmed"
-      ? drafts.every((d) => d.text.trim() && d.people.length)
+      ? drafts.every((d) => d.text.trim() && d.people.length) &&
+        (!skillView ||
+          skillOutcome === "clarification" ||
+          selectedSuccessor !== undefined)
       : kind === "followed-up"
         ? followUp.trim()
         : kind === "deferred"
@@ -217,14 +248,18 @@ export function QuestionResolution({
                   : "resolution.superseded",
               )}
             </Tag>
-            <span className="muted">{fact.locale}</span>
+            {fact.locale !== "und" && (
+              <span className="muted">{fact.locale}</span>
+            )}
             <p className="questionnaire-text" lang={fact.locale}>
               {fact.text}
             </p>
-            <RecordOriginLink
-              origin={fact.origin}
-              workflowId={view.workflow.id}
-            />
+            {workflowView && (
+              <RecordOriginLink
+                origin={fact.origin}
+                workflowId={workflowView.workflow.id}
+              />
+            )}
             <EvidenceChanges changes={fact.evidenceChanges} />
             <p className="muted">
               {t("resolution.confirmedBy")}: {fact.actorName} ·{" "}
@@ -233,8 +268,11 @@ export function QuestionResolution({
             <ul>
               {fact.answers.map((answer) => (
                 <li key={answer.personId}>
-                  {view.assignees.find((a) => a.personId === answer.personId)
-                    ?.name ?? answer.personId}{" "}
+                  {view.answers.find(
+                    (a) =>
+                      a.questionId === question.id &&
+                      a.personId === answer.personId,
+                  )?.personName ?? answer.personId}{" "}
                   ·{" "}
                   {format("questionnaire.answerRevision", {
                     number: answer.revision,
@@ -318,11 +356,47 @@ export function QuestionResolution({
           </label>
           {kind === "confirmed" && (
             <>
-              <p>
-                {format("resolution.localeHint", {
-                  locale: view.version.locale,
-                })}
-              </p>
+              {workflowView && (
+                <p>
+                  {format("resolution.localeHint", {
+                    locale: workflowView.version.locale,
+                  })}
+                </p>
+              )}
+              {skillView && (
+                <>
+                  <label className="field">
+                    {t("resolution.skillOutcome")}
+                    <Select
+                      virtual={false}
+                      aria-label={t("resolution.skillOutcome")}
+                      value={skillOutcome}
+                      onChange={setSkillOutcome}
+                      options={(["clarification", "change"] as const).map(
+                        (value) => ({
+                          value,
+                          label: t(`resolution.${value}`),
+                        }),
+                      )}
+                    />
+                  </label>
+                  {skillOutcome === "change" && (
+                    <label className="field">
+                      {t("resolution.successorVersion")}
+                      <Select
+                        virtual={false}
+                        aria-label={t("resolution.successorVersion")}
+                        value={successor}
+                        onChange={setSuccessor}
+                        options={successorVersions.map((version) => ({
+                          value: version.versionHash,
+                          label: `${skillVersionCaption(version.versionHash, version.label)} · ${new Date(version.createdAt).toLocaleDateString(locale)}`,
+                        }))}
+                      />
+                    </label>
+                  )}
+                </>
+              )}
               {drafts.map((draft, index) => (
                 <div key={index}>
                   <label className="field">
@@ -426,7 +500,7 @@ export function QuestionResolution({
                     aria-label={t("resolution.skill")}
                     value={skillId}
                     onChange={setSkillId}
-                    options={view.pins.map((p) => ({
+                    options={(workflowView?.pins ?? []).map((p) => ({
                       value: p.skillId,
                       label: p.skillName,
                     }))}
@@ -456,12 +530,50 @@ export function QuestionResolution({
         </form>
       )}
       {resolutions.length > 0 && (
-        <details className="questionnaire-history">
+        <details
+          className="questionnaire-history"
+          open={linkedRevision > 0 || undefined}
+        >
           <summary>{t("resolution.history")}</summary>
           {resolutions.map((r) => (
-            <div key={r.id}>
+            <div key={r.id} id={`resolution-${r.revision}`}>
               <Tag>{t(`questionnaire.state.${r.kind}`)}</Tag>
+              {skillView && (
+                <Tag>
+                  {format("resolution.reviewedRevision", {
+                    number: r.revision,
+                  })}
+                </Tag>
+              )}
               <p>{r.reason}</p>
+              {skillView && r.skillOutcome && (
+                <p>
+                  {t(`resolution.${r.skillOutcome.kind}`)} ·{" "}
+                  {t("resolution.discussedVersion")}{" "}
+                  <Link
+                    to={skillVersionHref(
+                      skillView.skill.id,
+                      r.skillOutcome.versionHash,
+                    )}
+                  >
+                    {r.skillOutcome.versionHash.slice(0, 12)}
+                  </Link>
+                  {r.skillOutcome.successorVersionHash && (
+                    <>
+                      {" · "}
+                      {t("resolution.successorVersion")}{" "}
+                      <Link
+                        to={skillVersionHref(
+                          skillView.skill.id,
+                          r.skillOutcome.successorVersionHash,
+                        )}
+                      >
+                        {r.skillOutcome.successorVersionHash.slice(0, 12)}
+                      </Link>
+                    </>
+                  )}
+                </p>
+              )}
               <p className="muted">
                 {r.actorName} · {new Date(r.createdAt).toLocaleString(locale)}
               </p>
@@ -549,6 +661,36 @@ export function QuestionResolution({
                 {text}
               </p>
             ))}
+            {skillView && review.input.skillOutcome !== undefined && (
+              <p>
+                {t(
+                  `resolution.${(review.input.skillOutcome as { kind: "clarification" | "change" }).kind}`,
+                )}{" "}
+                · {t("resolution.discussedVersion")}{" "}
+                <Link
+                  to={skillVersionHref(
+                    skillView.skill.id,
+                    skillView.subject.versionHash,
+                  )}
+                >
+                  {skillView.subject.versionHash}
+                </Link>
+                {selectedSuccessor && skillOutcome === "change" && (
+                  <>
+                    {" · "}
+                    {t("resolution.successorVersion")}{" "}
+                    <Link
+                      to={skillVersionHref(
+                        skillView.skill.id,
+                        selectedSuccessor.versionHash,
+                      )}
+                    >
+                      {selectedSuccessor.versionHash}
+                    </Link>
+                  </>
+                )}
+              </p>
+            )}
             {review.input.kind === "confirmed" &&
               !!review.preview.drafts?.length && (
                 <>
@@ -562,7 +704,7 @@ export function QuestionResolution({
                   ))}
                 </>
               )}
-            <p>{review.preview.locale}</p>
+            {review.preview.locale !== "und" && <p>{review.preview.locale}</p>}
             <h3>{t("resolution.answers")}</h3>
             <ul>
               {review.preview.answers.map((answer) => (

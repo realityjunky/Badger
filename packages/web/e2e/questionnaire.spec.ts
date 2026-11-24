@@ -1054,3 +1054,126 @@ test("the Engineer confirms formal facts and the answering expert acknowledges o
     await expertContext.close();
   }
 });
+
+test("a Skill round publishes directly from Questionnaire and a named Member responds", async ({
+  browser,
+}) => {
+  const lead = { subject: "parcel-lead", email: "parcel-lead@example.com" };
+  const respondent = {
+    subject: "parcel-member",
+    email: "parcel-member@example.com",
+    displayName: "Parcel specialist",
+  };
+  const { group } = await call<{ group: { id: string } }>("POST", "/groups", {
+    name: `Parcel Group ${Date.now()}`,
+  });
+  for (const [person, role] of [
+    [lead, "Group lead"],
+    [respondent, "Member"],
+  ] as const)
+    await call("POST", "/bindings", {
+      scopeType: "group",
+      scopeId: group.id,
+      email: person.email,
+      role,
+    });
+  await call("GET", "/me", undefined, respondent);
+  const { skill } = await call<{ skill: { id: string } }>("POST", "/skills", {
+    groupId: group.id,
+    name: "parcel-rules",
+  });
+  const upload = {
+    files: [
+      {
+        path: "SKILL.md",
+        content: Buffer.from(
+          "---\nname: parcel-rules\ndescription: Explain parcel rules\n---\n\n# Parcel Rules\n",
+        ).toString("base64"),
+      },
+    ],
+  };
+  const { preview } = await call<{ preview: { hash: string } }>(
+    "POST",
+    `/skills/${skill.id}/upload-preview`,
+    upload,
+  );
+  await call("POST", `/skills/${skill.id}/versions`, {
+    ...upload,
+    confirmed: true,
+    expectedHash: preview.hash,
+  });
+  const authorContext = await browser.newContext({
+    extraHTTPHeaders: { "x-badger-test-person": JSON.stringify(lead) },
+  });
+  const respondentContext = await browser.newContext({
+    extraHTTPHeaders: { "x-badger-test-person": JSON.stringify(respondent) },
+  });
+  try {
+    const author = await authorContext.newPage();
+    await author.goto(`${base}/questionnaire`);
+    await english(author);
+    await author
+      .getByRole("combobox", { name: "Questionnaire subject" })
+      .click();
+    await author.getByRole("option", { name: /parcel-rules/u }).click();
+    await expect(
+      author.getByRole("link", { name: preview.hash }),
+    ).toBeVisible();
+    await author
+      .getByRole("button", { name: "New round", exact: true })
+      .click();
+    await author
+      .getByLabel("Round title", { exact: true })
+      .fill("Parcel handling");
+    await author
+      .getByRole("button", { name: "Create round", exact: true })
+      .click();
+    await author
+      .getByRole("button", { name: "New question", exact: true })
+      .click();
+    await author
+      .getByLabel("Question text", { exact: true })
+      .fill("Which parcel labels are accepted?");
+    await author
+      .getByLabel("Rationale", { exact: true })
+      .fill("Clarify the requirement for new parcels.");
+    await author.getByRole("combobox", { name: /Assignees/u }).click();
+    await author
+      .getByRole("option", { name: "Parcel specialist", exact: true })
+      .click();
+    await author
+      .getByRole("button", { name: "Save question", exact: true })
+      .click();
+    await author
+      .getByRole("button", { name: "Review round", exact: true })
+      .click();
+    await author
+      .getByRole("dialog")
+      .getByRole("button", { name: "Publish round", exact: true })
+      .click();
+
+    const reader = await respondentContext.newPage();
+    await reader.goto(`${base}/my-work`);
+    await english(reader);
+    await reader
+      .getByRole("link", { name: /Which parcel labels are accepted/u })
+      .click();
+    await expect(
+      reader.getByRole("link", { name: preview.hash }),
+    ).toBeVisible();
+    await reader
+      .getByTestId("answer-box")
+      .fill("Use the delivery label printed by the desk.");
+    await reader
+      .getByRole("button", { name: "Submit answer", exact: true })
+      .click();
+    await expect(
+      author.getByText("Use the delivery label printed by the desk.", {
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 15000 });
+  } finally {
+    await authorContext.close();
+    await respondentContext.close();
+  }
+});

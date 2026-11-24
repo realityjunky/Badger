@@ -145,7 +145,7 @@ export interface ConcernResolutionResult {
   concern: Concern;
   question: Question | null;
 }
-export interface QuestionnaireView {
+interface QuestionnaireRecordsView {
   attachmentLimits: {
     maxFileBytes: number;
     maxAnswerBytes: number;
@@ -153,13 +153,6 @@ export interface QuestionnaireView {
     mediaTypes: string[];
   };
   personId: string;
-  workflow: { id: string; name: string };
-  version: {
-    id: string;
-    number: number;
-    locale: string;
-    semanticVersion?: string | null;
-  };
   capabilities: {
     compose: boolean;
     reviewSuggestions: boolean;
@@ -169,9 +162,7 @@ export interface QuestionnaireView {
     raiseConcern: boolean;
     resolveConcern: boolean;
   };
-  settings: { revision: number; roundSizeLimit: number | null };
-  assignees: { personId: string | null; name: string; role: string }[];
-  pins: { skillId: string; skillName: string; hash: string }[];
+  assignees: { personId: string | null; name: string; role: string | null }[];
   rounds: Round[];
   questions: Question[];
   answers: Answer[];
@@ -180,6 +171,51 @@ export interface QuestionnaireView {
   comments: QuestionComment[];
   concerns: Concern[];
 }
+export interface WorkflowQuestionnaireView extends QuestionnaireRecordsView {
+  workflow: { id: string; name: string };
+  version: {
+    id: string;
+    number: number;
+    locale: string;
+    semanticVersion?: string | null;
+  };
+  settings: { revision: number; roundSizeLimit: number | null };
+  pins: { skillId: string; skillName: string; hash: string }[];
+}
+export interface SkillQuestionnaireVersion {
+  skillId: string;
+  versionHash: string;
+  label: string | null;
+  createdAt: string;
+  retiredAt: string | null;
+}
+export interface SkillQuestionnaireOption extends SkillQuestionnaireVersion {
+  skillName: string;
+  groupName: string;
+  baseHashes: string[];
+}
+export interface SkillQuestionnaireView extends QuestionnaireRecordsView {
+  subject: SkillQuestionnaireVersion & { kind: "skill"; id: string };
+  skill: { id: string; name: string; groupId: string };
+  groupName: string;
+}
+export type QuestionnaireView =
+  WorkflowQuestionnaireView | SkillQuestionnaireView;
+export type QuestionnaireSubject =
+  | { workflowId: string; versionId: string }
+  | { kind: "skill"; skillId: string; versionHash: string };
+
+export function skillVersionCaption(
+  hash: string,
+  label: string | null | undefined,
+) {
+  return [label, hash.slice(0, 12)].filter(Boolean).join(" · ");
+}
+
+export function skillVersionHref(skillId: string, hash: string) {
+  return `/skills/${encodeURIComponent(skillId)}/versions/${encodeURIComponent(hash)}`;
+}
+
 export interface QuestionnaireVersion {
   workflowId: string;
   workflowName: string;
@@ -248,6 +284,12 @@ export interface Resolution {
   childQuestionId: string | null;
   createdAt: string;
   revision: number;
+  skillOutcome?: {
+    kind: "clarification" | "change";
+    versionHash: string;
+    successorVersionHash: string | null;
+    applicabilityVersionHash: string;
+  };
 }
 export interface ConfirmedFact {
   origin?: RecordOrigin | null;

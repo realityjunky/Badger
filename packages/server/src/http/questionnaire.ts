@@ -10,6 +10,13 @@ import {
 } from "../questionnaire/resolutions.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
 import {
+  listSkillQuestionnaireAssignees,
+  listSkillQuestionnaireVersions,
+  readSkillQuestionnaireSubject,
+} from "../questionnaire/skill-subject.js";
+import { questionnaireScopeId } from "../questionnaire/subject.js";
+import { lockBlobStore } from "../skills/blobs.js";
+import {
   isQuestionnaireDraftingJob,
   publicDraftingJob,
   reconcileDraftingJobs,
@@ -69,7 +76,7 @@ import {
 } from "../questionnaire/concerns.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/questionnaire(?:\/(rounds|questions|settings|facts|comments|concerns|ledger|inferences|assumptions|attachments)(?:\/([^/]+)(?:\/(questions|publish-preview|publish|answer|submit|resolution-preview|resolve|acknowledgement-preview|acknowledge|comments|resolve-preview|attachments))?)?)?$/u;
+  /^\/api\/v1\/(workflows|skills)\/([^/]+)\/versions\/([^/]+)\/questionnaire(?:\/(rounds|questions|settings|facts|comments|concerns|ledger|inferences|assumptions|attachments)(?:\/([^/]+)(?:\/(questions|publish-preview|publish|answer|submit|resolution-preview|resolve|acknowledgement-preview|acknowledge|comments|resolve-preview|attachments))?)?)?$/u;
 const RECORD_CONTEXT =
   /^\/api\/v1\/questionnaire\/(questions|concerns)\/([^/]+)$/u;
 
@@ -78,7 +85,14 @@ export function questionnaireMethods(path: string): string | null {
     return "GET, HEAD";
   const match = PATH.exec(path);
   if (!match) return null;
-  const [, , , resource, id, action] = match;
+  const [, subject, , , resource, id, action] = match;
+  if (
+    subject === "skills" &&
+    ["settings", "ledger", "inferences", "assumptions", "concerns"].includes(
+      resource ?? "",
+    )
+  )
+    return null;
   if (!resource) return "GET, HEAD";
   if (resource === "ledger" && !id) return "GET, HEAD";
   if (resource === "attachments" && id && !action) return "GET, HEAD";
@@ -120,7 +134,7 @@ export function questionnaireMethods(path: string): string | null {
   return null;
 }
 
-/** Every questionnaire mutation locks its workflow and version before reading. */
+/** Mutations serialize against the current Questionnaire subject. */
 export async function handleQuestionnaire(
   input: AuthorizedRequest,
 ): Promise<void> {
@@ -155,10 +169,48 @@ export async function handleQuestionnaire(
           semanticVersion: version.semanticVersion,
         });
     }
-    return reply.json(200, { versions });
+    return reply.json(200, {
+      versions,
+      skillVersions: await listSkillQuestionnaireVersions(
+        database,
+        access,
+        person,
+      ),
+    });
   }
   const linked = RECORD_CONTEXT.exec(path);
   if (linked) {
+    const recordId = decodeURIComponent(linked[2]);
+    if (linked[1] === "questions") {
+      const skillQuestion = (
+        await database.query<{
+          skill_id: string;
+          version_hash: string;
+          state: string;
+        }>(
+          `select sq.skill_id, sq.version_hash, q.state from questions q
+             join skill_questionnaires sq on sq.id = q.skill_questionnaire_id where q.id = $1`,
+          [recordId],
+        )
+      ).rows[0];
+      if (skillQuestion) {
+        const view = await readSkillQuestionnaireSubject(
+          database,
+          access,
+          person,
+          skillQuestion.skill_id,
+          skillQuestion.version_hash,
+          { subject: false, versions: [] },
+        );
+        if (skillQuestion.state === "draft" && !view.capabilities.compose)
+          throw new RequestError(403, "This question is outside your roles");
+        return reply.json(200, {
+          kind: "skill",
+          skillId: skillQuestion.skill_id,
+          versionHash: skillQuestion.version_hash,
+        });
+      }
+    }
     const row = (
       await database.query<{
         workflow_id: string;
@@ -168,7 +220,7 @@ export async function handleQuestionnaire(
         linked[1] === "questions"
           ? `select v.workflow_id, q.workflow_version_id, q.state from questions q join workflow_versions v on v.id = q.workflow_version_id where q.id = $1`
           : `select v.workflow_id, c.workflow_version_id, 'open' as state from questionnaire_concerns c join workflow_versions v on v.id = c.workflow_version_id where c.id = $1`,
-        [decodeURIComponent(linked[2])],
+        [recordId],
       )
     ).rows[0];
     const workflow = row && (await readWorkflow(database, row.workflow_id));
@@ -192,8 +244,9 @@ export async function handleQuestionnaire(
     });
   }
   const match = PATH.exec(path)!;
-  const [, rawWorkflow, rawVersion, resource, rawId, action] = match;
-  const workflowId = decodeURIComponent(rawWorkflow);
+  const [, subject, rawOwner, rawVersion, resource, rawId, action] = match;
+  const skillRequest = subject === "skills";
+  const ownerId = decodeURIComponent(rawOwner);
   const versionId = decodeURIComponent(rawVersion);
   const id = rawId === undefined ? null : decodeURIComponent(rawId);
   const methods = questionnaireMethods(path)!;
@@ -218,12 +271,46 @@ export async function handleQuestionnaire(
   }
   const result = await database
     .transaction(async (tx) => {
+      if (skillRequest && action === "attachments") await lockBlobStore(tx);
+      const newRound = resource === "rounds" && id === null;
+      const resolution =
+        skillRequest &&
+        resource === "questions" &&
+        id &&
+        (action === "resolve" || action === "resolution-preview")
+          ? parseResolution(body)
+          : null;
+      const successor =
+        resolution?.skillOutcome?.kind === "change"
+          ? resolution.skillOutcome.successorVersionHash
+          : null;
+      const versionLocks = newRound
+        ? [versionId]
+        : action === "resolve" && successor
+          ? [versionId, successor]
+          : [];
+      const skillView = skillRequest
+        ? await readSkillQuestionnaireSubject(
+            tx,
+            access,
+            person,
+            ownerId,
+            versionId,
+            {
+              subject: !reads || !resource,
+              versions: versionLocks,
+            },
+          )
+        : null;
+      const scope = skillView?.scope ?? versionId;
+      const workflowId = ownerId;
       if (
-        !reads ||
-        !resource ||
-        ["ledger", "inferences", "assumptions", "attachments"].includes(
-          resource ?? "",
-        )
+        !skillRequest &&
+        (!reads ||
+          !resource ||
+          ["ledger", "inferences", "assumptions", "attachments"].includes(
+            resource ?? "",
+          ))
       ) {
         await tx.query(
           "select id from workflows where id = $1 for no key update",
@@ -234,25 +321,24 @@ export async function handleQuestionnaire(
           [versionId, workflowId],
         );
       }
-      const workflow = await readWorkflow(tx, workflowId);
+      const workflow = skillRequest ? null : await readWorkflow(tx, workflowId);
       const version =
         workflow &&
         (await listWorkflowVersions(tx, workflowId)).find(
           (v) => v.id === versionId,
         );
-      if (!workflow || !version)
-        throw new RequestError(404, "No such workflow version");
-      const caps = await workflowCapabilities(tx, access, person, workflow);
-      if (!caps.read)
-        throw new RequestError(403, "This workflow is outside your roles");
-      const capabilities = await questionnaireCapabilities(
-        tx,
-        access,
-        person,
-        workflowId,
-      );
+      if (!skillRequest) {
+        if (!workflow || !version)
+          throw new RequestError(404, "No such workflow version");
+        const caps = await workflowCapabilities(tx, access, person, workflow);
+        if (!caps.read)
+          throw new RequestError(403, "This workflow is outside your roles");
+      }
+      const capabilities =
+        skillView?.capabilities ??
+        (await questionnaireCapabilities(tx, access, person, workflowId));
       if (resource === "attachments" && id) {
-        const attachment = await readAttachment(tx, versionId, person.id, id);
+        const attachment = await readAttachment(tx, scope, person.id, id);
         return {
           status: 200,
           value: attachment,
@@ -268,7 +354,7 @@ export async function handleQuestionnaire(
               deps,
               input.blobs,
               context,
-              versionId,
+              scope,
               id,
               body,
             ),
@@ -284,10 +370,14 @@ export async function handleQuestionnaire(
       } = capabilities;
       const answering = action === "answer" || action === "submit";
       const commenting = resource === "comments" || action === "comments";
+      if (skillView && answering && !capabilities.answer)
+        throw new RequestError(403, "An answer requires a current assignment");
       if (commenting && !comment)
         throw new RequestError(
           403,
-          "A workflow role other than Observer is required to comment",
+          skillRequest
+            ? "This Skill role cannot comment"
+            : "A workflow role other than Observer is required to comment",
         );
       if (resource === "ledger")
         return {
@@ -373,7 +463,9 @@ export async function handleQuestionnaire(
       if (acknowledging && !canAcknowledge)
         throw new RequestError(
           403,
-          "A current Field expert or Workflow owner role is required to acknowledge an answer",
+          skillRequest
+            ? "Sign in to acknowledge a restatement of your answer"
+            : "A current Field expert or Workflow owner role is required to acknowledge an answer",
         );
       if (
         resource &&
@@ -385,13 +477,44 @@ export async function handleQuestionnaire(
       )
         throw new RequestError(
           403,
-          "Only an Engineer drafts and publishes questions",
+          skillRequest
+            ? "Coordinating Skill rounds requires an Administrator, Group lead, or contributor with upload rights"
+            : "Only an Engineer drafts and publishes questions",
         );
       if (!resource) {
         const rounds = await tx.query<RoundRow>(
-          "select * from question_rounds where workflow_version_id = $1 and ($2::boolean or state = 'published') order by number",
-          [versionId, compose],
+          "select * from question_rounds where subject_id = $1 and ($2::boolean or state = 'published') order by number",
+          [questionnaireScopeId(scope), compose],
         );
+        const records = {
+          personId: person.id,
+          attachmentLimits: ATTACHMENT_LIMITS,
+          capabilities,
+          rounds: rounds.rows.map(toRound),
+          questions: await readQuestions(tx, scope, person.id, compose),
+          answers: await readAnswers(tx, scope, person.id),
+          resolutions: await readResolutions(tx, scope),
+          facts: await readFacts(tx, scope),
+          comments: await readComments(tx, scope, compose),
+        };
+        if (skillView)
+          return {
+            status: 200,
+            value: {
+              ...records,
+              subject: skillView.subject,
+              skill: skillView.skill,
+              groupName: skillView.groupName,
+              assignees: compose
+                ? await listSkillQuestionnaireAssignees(
+                    tx,
+                    skillView.scope.groupId,
+                  )
+                : [],
+              concerns: [],
+              suggestions: [],
+            },
+          };
         const assignees = await tx.query<{
           person_id: string | null;
           display_name: string | null;
@@ -404,11 +527,9 @@ export async function handleQuestionnaire(
         return {
           status: 200,
           value: {
-            personId: person.id,
-            attachmentLimits: ATTACHMENT_LIMITS,
+            ...records,
             workflow,
-            version: (await withVersionLabels(tx, [version]))[0],
-            capabilities,
+            version: (await withVersionLabels(tx, [version!]))[0],
             settings: await readSettings(tx, workflowId),
             pins: await listWorkflowPins(tx, versionId),
             assignees: assignees.rows.map((a) => ({
@@ -416,12 +537,6 @@ export async function handleQuestionnaire(
               name: a.display_name ?? a.email,
               role: a.role,
             })),
-            rounds: rounds.rows.map(toRound),
-            questions: await readQuestions(tx, versionId, person.id, compose),
-            answers: await readAnswers(tx, versionId, person.id),
-            resolutions: await readResolutions(tx, versionId),
-            facts: await readFacts(tx, versionId),
-            comments: await readComments(tx, versionId, compose),
             concerns: await readConcerns(tx, versionId),
             suggestions:
               compose || capabilities.reviewSuggestions
@@ -503,7 +618,7 @@ export async function handleQuestionnaire(
               tx,
               deps,
               context,
-              versionId,
+              scope,
               compose,
               textInput(body.text, "text", 20000),
               resource === "comments"
@@ -537,7 +652,7 @@ export async function handleQuestionnaire(
           ? textInput(body.requestId, "requestId", 200)
           : "";
         if (resource === "questions") {
-          const input = parseResolution(body);
+          const input = resolution ?? parseResolution(body);
           // A replayed request returns its first response; only a new
           // follow-up round gets a publication baseline.
           const replay =
@@ -553,7 +668,7 @@ export async function handleQuestionnaire(
                 tx,
                 deps,
                 context,
-                versionId,
+                scope,
                 id,
                 input,
                 hash,
@@ -562,7 +677,7 @@ export async function handleQuestionnaire(
             : {
                 preview: await resolutionPreview(
                   tx,
-                  versionId,
+                  scope,
                   id,
                   person.id,
                   input,
@@ -577,12 +692,7 @@ export async function handleQuestionnaire(
               )
             ).rows[0];
             if (child)
-              await snapshotRoundLedger(
-                tx,
-                versionId,
-                child.round_id,
-                person.id,
-              );
+              await snapshotRoundLedger(tx, scope, child.round_id, person.id);
           }
           return { status: 200, value };
         }
@@ -594,7 +704,7 @@ export async function handleQuestionnaire(
                 tx,
                 deps,
                 context,
-                versionId,
+                scope,
                 id,
                 input,
                 hash,
@@ -603,7 +713,7 @@ export async function handleQuestionnaire(
             : {
                 preview: await acknowledgementPreview(
                   tx,
-                  versionId,
+                  scope,
                   id,
                   person.id,
                   input,
@@ -660,7 +770,7 @@ export async function handleQuestionnaire(
                 tx,
                 deps,
                 context,
-                versionId,
+                scope,
                 answerInput(body, id),
                 body,
                 agentHost,
@@ -677,7 +787,7 @@ export async function handleQuestionnaire(
                 tx,
                 deps,
                 context,
-                versionId,
+                scope,
                 [answerInput(body, id)],
                 agentHost,
               ),
@@ -705,7 +815,7 @@ export async function handleQuestionnaire(
               tx,
               deps,
               context,
-              versionId,
+              scope,
               inputs,
               agentHost,
               id,
@@ -715,6 +825,11 @@ export async function handleQuestionnaire(
       }
       if (resource === "rounds" && id === null) {
         fields(body, ["title", "draftQuestions"]);
+        if (skillRequest && body.draftQuestions === true)
+          throw new RequestError(
+            400,
+            "Draft Skill questions in the Questionnaire",
+          );
         if (
           body.draftQuestions !== undefined &&
           typeof body.draftQuestions !== "boolean"
@@ -724,7 +839,7 @@ export async function handleQuestionnaire(
           tx,
           deps,
           context,
-          versionId,
+          scope,
           textInput(body.title, "title", 200),
         );
         const job =
@@ -761,7 +876,7 @@ export async function handleQuestionnaire(
               tx,
               deps,
               context,
-              versionId,
+              scope,
               id,
               parseQuestion(body),
             ),
@@ -769,9 +884,9 @@ export async function handleQuestionnaire(
         };
       }
       if (resource === "questions" && id && !action) {
-        const question = (
-          await readQuestions(tx, versionId, person.id, true)
-        ).find((q) => q.id === id);
+        const question = (await readQuestions(tx, scope, person.id, true)).find(
+          (q) => q.id === id,
+        );
         if (!question) throw new RequestError(404, "No such question");
         if (access.tokenScopes !== undefined && question.state !== "draft")
           throw new RequestError(
@@ -785,7 +900,7 @@ export async function handleQuestionnaire(
               tx,
               deps,
               context,
-              versionId,
+              scope,
               question.roundId,
               parseQuestion(body),
               { id, revision: revisionInput(body.revision) },
@@ -797,7 +912,7 @@ export async function handleQuestionnaire(
         return {
           status: 200,
           value: {
-            preview: await publicationPreview(tx, versionId, id, person.id),
+            preview: await publicationPreview(tx, scope, id, person.id),
           },
         };
       }
@@ -813,20 +928,19 @@ export async function handleQuestionnaire(
         const wasPublished =
           (
             await tx.query<{ state: string }>(
-              "select state from question_rounds where id = $1 and workflow_version_id = $2",
-              [id, versionId],
+              "select state from question_rounds where id = $1 and subject_id = $2",
+              [id, questionnaireScopeId(scope)],
             )
           ).rows[0]?.state === "published";
         const round = await publishRound(
           tx,
           deps,
           context,
-          versionId,
+          scope,
           id,
           textInput(body.confirmationHash, "confirmationHash", 64),
         );
-        if (!wasPublished)
-          await snapshotRoundLedger(tx, versionId, id, person.id);
+        if (!wasPublished) await snapshotRoundLedger(tx, scope, id, person.id);
         return { status: 200, value: { round } };
       }
       throw new RequestError(404, "No such questionnaire resource");

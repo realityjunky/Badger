@@ -1,0 +1,9 @@
+# Anchor Skill-owned Questionnaire Rounds to an Immutable Version
+
+Status: accepted. [PrimEvo decision 33](https://github.com/realityjunky/PrimEvo/blob/cfd6005554560acf0785df836a1663e912b0473e/docs/semantic-layer/authoring/competency-questions.md#skill-versions-and-skill-owned-questionnaire-rounds) adds a second subject to the collaborative service's Questionnaire. Rounds and Questions share publication, answer revision, resolution, and acknowledgement records across both subjects. A Skill-owned round retains the Skill entry and version hash even if the owner retires the version or a Workflow adopts a successor.
+
+A Group lead with jurisdiction, a contributor with upload rights in the Group, or an Administrator can coordinate its Skill rounds. The coordinator assigns named people who have Skill access through current Group and workflow roles. Reading a Question, accepting an assignment, and opening a historical link each use the owning subject's current access rules. Assignment uses the person's identity, so a change of role retains the assignment when a different role still supplies access.
+
+A confirmed clarification applies to the version under discussion. A confirmed change identifies the saved successor derived from that exact version. Its receipt and the restated Answer revisions are bound by the resolution preview. The Workflow can cite one exact Answer revision after the resolution's restatements are acknowledged and the Workflow pins the applicable version. Answer corrections, disputes and replacement resolutions preserve the cited record and change its current applicability.
+
+Creating a round and binding a successor serialize with removal of the library version. Each reference preserves the bytes for authorized historical reads. Workflow-owned rounds and readiness continue to use the Workflow version and its specific dependencies.

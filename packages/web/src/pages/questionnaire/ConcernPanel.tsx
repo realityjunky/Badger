@@ -7,7 +7,7 @@ import {
   type ConcernDecision,
   type ConcernOutcome,
   type ConcernResolutionPreview,
-  type QuestionnaireView,
+  type WorkflowQuestionnaireView,
 } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { ConcernResolutionDialog } from "./ConcernResolutionDialog.js";
@@ -23,7 +23,7 @@ export function ConcernPanel({
   basePath: string;
   path: string;
   concern: Concern;
-  view: QuestionnaireView;
+  view: WorkflowQuestionnaireView;
   onQuestion(roundId: string): void;
   onChanged(): void;
 }) {

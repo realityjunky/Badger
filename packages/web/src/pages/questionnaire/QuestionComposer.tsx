@@ -2,6 +2,7 @@ import { Alert, Button, Form, Input, InputNumber, Select, Space } from "antd";
 import { useRef, useState } from "react";
 import {
   questionnaireRequest,
+  skillVersionCaption,
   type Question,
   type Concern,
   type ConcernResolutionPreview,
@@ -90,6 +91,18 @@ export function QuestionComposer({
   );
   const required = [{ required: true, message: t("questionnaire.required") }];
   const draft = question ?? suggestion ?? seed;
+  const skill = "subject" in view ? view.subject : null;
+  const pins =
+    "pins" in view
+      ? view.pins
+      : [
+          {
+            skillId: view.skill.id,
+            skillName: view.skill.name,
+            hash: view.subject.versionHash,
+          },
+        ];
+  const workflowId = "workflow" in view ? view.workflow.id : "";
   const initial: Values = draft
     ? {
         ...draft,
@@ -119,12 +132,16 @@ export function QuestionComposer({
         priority: 10,
         rationale: "",
         evidence: [],
-        targets: [{ kind: "workflow", id: view.workflow.id }],
-        assignees: [
-          view.assignees.some((a) => a.role === "Field expert")
-            ? "role:Field expert"
-            : "role:Workflow owner",
-        ],
+        targets: skill
+          ? [{ kind: "skill", id: skill.skillId }]
+          : [{ kind: "workflow", id: workflowId }],
+        assignees: skill
+          ? []
+          : [
+              view.assignees.some((a) => a.role === "Field expert")
+                ? "role:Field expert"
+                : "role:Workflow owner",
+            ],
       };
   const save = async (values: Values) => {
     setBusy(true);
@@ -152,6 +169,9 @@ export function QuestionComposer({
               : { kind: answerKind };
       const content: QuestionContent = {
         ...questionValues,
+        ...(skill
+          ? { targets: [{ kind: "skill" as const, id: skill.skillId }] }
+          : {}),
         ...(suggestion &&
         suggestion.answerType === undefined &&
         answerKind === "free-text"
@@ -351,13 +371,21 @@ export function QuestionComposer({
       >
         <Select
           mode="multiple"
+          virtual={false}
           options={[
-            {
-              value: "role:Field expert",
-              label: t("questionnaire.allExperts"),
-            },
-            { value: "role:Workflow owner", label: t("questionnaire.owner") },
-            { value: "role:Engineer", label: "Engineer" },
+            ...(skill
+              ? []
+              : [
+                  {
+                    value: "role:Field expert",
+                    label: t("questionnaire.allExperts"),
+                  },
+                  {
+                    value: "role:Workflow owner",
+                    label: t("questionnaire.owner"),
+                  },
+                  { value: "role:Engineer", label: "Engineer" },
+                ]),
             ...people.map((a) => ({
               value: `person:${a.personId}`,
               label: a.name,
@@ -365,98 +393,102 @@ export function QuestionComposer({
           ]}
         />
       </Form.Item>
-      <h3>{t("questionnaire.targets")}</h3>
-      <Form.List name="targets">
-        {(entries, { add, remove }) => (
-          <>
-            {entries.map((entry) => (
-              <div className="questionnaire-fields" key={entry.key}>
-                <Form.Item
-                  name={[entry.name, "kind"]}
-                  label={t("questionnaire.targetKind")}
-                  rules={required}
-                >
-                  <Select
-                    onChange={(kind) =>
-                      form.setFieldValue(
-                        ["targets", entry.name, "id"],
-                        kind === "workflow" ? view.workflow.id : "",
-                      )
-                    }
-                    options={(
-                      [
-                        "workflow",
-                        "node",
-                        "skill",
-                        "interface",
-                        "field",
-                      ] as const
-                    )
-                      .filter(
-                        (value) =>
-                          value !== "field" ||
-                          dossierFields.length > 0 ||
-                          draft?.targets.some(
-                            (target) => target.kind === "field",
-                          ),
-                      )
-                      .map((value) => ({
-                        value,
-                        label: t(`questionnaire.target.${value}`),
-                      }))}
-                  />
-                </Form.Item>
-                <Form.Item noStyle shouldUpdate>
-                  {() => {
-                    const kind = form.getFieldValue([
-                      "targets",
-                      entry.name,
-                      "kind",
-                    ]);
-                    return (
-                      <Form.Item
-                        name={[entry.name, "id"]}
-                        hidden={kind === "workflow"}
-                        label={t("questionnaire.targetId")}
-                        rules={required}
-                      >
-                        {kind === "field" && dossierFields.length ? (
-                          <Select
-                            showSearch
-                            optionFilterProp="label"
-                            options={dossierFields.map((field) => ({
-                              value: field.id,
-                              label: `${field.ownerLabel} · ${field.label}`,
-                            }))}
-                          />
-                        ) : kind === "skill" ? (
-                          <Select
-                            options={view.pins.map((pin) => ({
-                              value: pin.skillId,
-                              label: pin.skillName,
-                            }))}
-                          />
-                        ) : (
-                          <Input />
-                        )}
-                      </Form.Item>
-                    );
-                  }}
-                </Form.Item>
-                <Button
-                  onClick={() => remove(entry.name)}
-                  disabled={entries.length === 1}
-                >
-                  {t("questionnaire.remove")}
+      {!skill && (
+        <>
+          <h3>{t("questionnaire.targets")}</h3>
+          <Form.List name="targets">
+            {(entries, { add, remove }) => (
+              <>
+                {entries.map((entry) => (
+                  <div className="questionnaire-fields" key={entry.key}>
+                    <Form.Item
+                      name={[entry.name, "kind"]}
+                      label={t("questionnaire.targetKind")}
+                      rules={required}
+                    >
+                      <Select
+                        onChange={(kind) =>
+                          form.setFieldValue(
+                            ["targets", entry.name, "id"],
+                            kind === "workflow" ? workflowId : "",
+                          )
+                        }
+                        options={(
+                          [
+                            "workflow",
+                            "node",
+                            "skill",
+                            "interface",
+                            "field",
+                          ] as const
+                        )
+                          .filter(
+                            (value) =>
+                              value !== "field" ||
+                              dossierFields.length > 0 ||
+                              draft?.targets.some(
+                                (target) => target.kind === "field",
+                              ),
+                          )
+                          .map((value) => ({
+                            value,
+                            label: t(`questionnaire.target.${value}`),
+                          }))}
+                      />
+                    </Form.Item>
+                    <Form.Item noStyle shouldUpdate>
+                      {() => {
+                        const kind = form.getFieldValue([
+                          "targets",
+                          entry.name,
+                          "kind",
+                        ]);
+                        return (
+                          <Form.Item
+                            name={[entry.name, "id"]}
+                            hidden={kind === "workflow"}
+                            label={t("questionnaire.targetId")}
+                            rules={required}
+                          >
+                            {kind === "field" && dossierFields.length ? (
+                              <Select
+                                showSearch
+                                optionFilterProp="label"
+                                options={dossierFields.map((field) => ({
+                                  value: field.id,
+                                  label: `${field.ownerLabel} · ${field.label}`,
+                                }))}
+                              />
+                            ) : kind === "skill" ? (
+                              <Select
+                                options={pins.map((pin) => ({
+                                  value: pin.skillId,
+                                  label: pin.skillName,
+                                }))}
+                              />
+                            ) : (
+                              <Input />
+                            )}
+                          </Form.Item>
+                        );
+                      }}
+                    </Form.Item>
+                    <Button
+                      onClick={() => remove(entry.name)}
+                      disabled={entries.length === 1}
+                    >
+                      {t("questionnaire.remove")}
+                    </Button>
+                  </div>
+                ))}
+                <Button onClick={() => add({ kind: "node", id: "" })}>
+                  {t("questionnaire.addTarget")}
                 </Button>
-              </div>
-            ))}
-            <Button onClick={() => add({ kind: "node", id: "" })}>
-              {t("questionnaire.addTarget")}
-            </Button>
-          </>
-        )}
-      </Form.List>
+              </>
+            )}
+          </Form.List>
+        </>
+      )}
       <h3>{t("questionnaire.evidence")}</h3>
       <Form.List name="evidence">
         {(entries, { add, remove }) => (
@@ -470,9 +502,9 @@ export function QuestionComposer({
                   rules={required}
                 >
                   <Select
-                    options={view.pins.map((p) => ({
+                    options={pins.map((p) => ({
                       value: JSON.stringify([p.skillId, p.hash]),
-                      label: `${p.skillName} · ${p.hash.slice(0, 12)}`,
+                      label: `${p.skillName} · ${skillVersionCaption(p.hash, skill?.label)}`,
                     }))}
                   />
                 </Form.Item>
@@ -505,8 +537,21 @@ export function QuestionComposer({
               </fieldset>
             ))}
             <Button
-              disabled={view.pins.length === 0}
-              onClick={() => add({ startLine: 1, endLine: 1 })}
+              disabled={pins.length === 0}
+              onClick={() =>
+                add({
+                  startLine: 1,
+                  endLine: 1,
+                  ...(skill
+                    ? {
+                        version: JSON.stringify([
+                          skill.skillId,
+                          skill.versionHash,
+                        ]),
+                      }
+                    : {}),
+                })
+              }
             >
               {t("questionnaire.addEvidence")}
             </Button>

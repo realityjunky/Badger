@@ -1,3 +1,4 @@
+import { questionnaireScopeId, type QuestionnaireScope } from "./subject.js";
 import type { WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
@@ -87,13 +88,13 @@ export async function uploadAttachment(
   deps: ServiceDependencies,
   blobs: BlobStore,
   context: WriteContext,
-  versionId: string,
+  scope: QuestionnaireScope,
   questionId: string,
   input: Record<string, unknown>,
 ) {
   fields(input, ["questionRevision", "name", "mediaType", "contentBase64"]);
   const question = (
-    await readQuestions(tx, versionId, context.personId, false)
+    await readQuestions(tx, scope, context.personId, false)
   ).find((q) => q.id === questionId);
   if (!question?.canAnswer)
     throw new RequestError(
@@ -212,7 +213,7 @@ export async function answerAttachments(
 /** Workflow readers see only uploads used by a submitted revision. Drafts stay private. */
 export async function readAttachment(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   personId: string,
   id: string,
 ) {
@@ -220,10 +221,10 @@ export async function readAttachment(
     await tx.query<AttachmentRow>(
       `select a.* from answer_attachments a join questions q on q.id = a.question_id or exists (
         select 1 from inherited_answer_attachments i where i.question_id = q.id and i.attachment_id = a.id)
-    where a.id = $1 and q.workflow_version_id = $2 and (a.person_id = $3 or exists (
+    where a.id = $1 and q.subject_id = $2 and (a.person_id = $3 or exists (
       select 1 from answer_revisions r where r.question_id = q.id and r.person_id = a.person_id and r.state = 'submitted'
       and r.attachments @> jsonb_build_array(jsonb_build_object('id', a.id))))`,
-      [id, versionId, personId],
+      [id, questionnaireScopeId(scope), personId],
     )
   ).rows[0];
   if (!row) throw new RequestError(404, "No such visible attachment");
