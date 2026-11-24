@@ -277,10 +277,27 @@ test("the Admin page lists members and creates a group", async ({ page }) => {
 
   const name = `Research ${Date.now()}`;
   await page.getByRole("tab", { name: "Groups" }).click();
-  await page.getByRole("textbox", { name: "Group" }).fill(name);
-  await page.getByRole("button", { name: "Create group" }).click();
+  const search = page.getByRole("textbox", {
+    name: "Search people, groups, and roles",
+  });
+  await search.fill("Other groups");
+  await page.getByRole("button", { name: "Create group", exact: true }).click();
 
-  await expect(page.getByRole("cell", { name })).toBeVisible();
+  const dialog = page.getByRole("dialog", { name: "Create group" });
+  await expect(dialog).toBeVisible();
+  const nameInput = dialog.getByRole("textbox", { name: "Group name" });
+  const submit = dialog.getByRole("button", { name: "Create group" });
+  await nameInput.fill("   ");
+  await submit.click();
+  await expect(dialog.getByText("Enter a group name.")).toBeVisible();
+
+  await nameInput.fill(` ${name} `);
+  await submit.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText(`Group “${name}” created.`)).toBeVisible();
+  await expect(search).toHaveValue("Other groups");
+  await search.clear();
+  await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
 });
 
 test("an Administrator overrides a refused self-grant with a recorded reason", async ({
