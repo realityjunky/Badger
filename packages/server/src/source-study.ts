@@ -12,6 +12,7 @@ import { readRecordOrigins, type RecordOrigin } from "./version-inheritance.js";
 import { listWorkflowPins, type WorkflowSkillPin } from "./workflow-source.js";
 import { readGateConfirmations } from "./gates.js";
 import { effectHead, effectFindings } from "./script-effects.js";
+import { readWorkingRevision } from "./working-dossier-store.js";
 import {
   invalidateStudyGates,
   studyGateName,
@@ -103,6 +104,7 @@ export function parseSourceEvidence(input: unknown): SourceEvidence {
   ]);
   const start = citation.startLine;
   const end = citation.endLine;
+  const path = citation.path;
   if (
     !Number.isSafeInteger(start) ||
     !Number.isSafeInteger(end) ||
@@ -114,10 +116,12 @@ export function parseSourceEvidence(input: unknown): SourceEvidence {
       400,
       "Cite a range of 1 to 1000 lines starting at line 1 or later",
     );
+  if (typeof path !== "string" || !path.trim() || path.length > 1024)
+    throw new RequestError(400, "Cite the exact pinned file path");
   return {
     skillId: text(citation.skillId, "skillId", 200),
     hash: hash(citation.hash, "hash"),
-    path: text(citation.path, "path", 1000),
+    path,
     fileHash: hash(citation.fileHash, "fileHash"),
     startLine: start as number,
     endLine: end as number,
@@ -382,6 +386,11 @@ export async function saveStudyRecordInTransaction(
     "select id from workflow_versions where id = $1 for no key update",
     [versionId],
   );
+  if (await readWorkingRevision(tx, versionId))
+    throw new RequestError(
+      409,
+      "Edit fields and handoffs in the working dossier",
+    );
   const pins = await listWorkflowPins(tx, versionId);
   const previous =
     change.id === undefined

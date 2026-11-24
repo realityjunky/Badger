@@ -92,16 +92,33 @@ Administrator). The engineer profile keeps `whoami`, `inbox`, and
 `open_dashboard`, and adds these tools. All version tools take `workflowId`
 and `versionId`; job tools also take `jobId`.
 
-| Tool            | Behavior                                                                                                                                                                                     |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list_jobs`     | Read jobs, leases, and suggestions for one workflow version.                                                                                                                                 |
-| `claim_job`     | Quote a queued or submitted job's `revision`; claim it and return a private local folder with context, schema, pinned files, and the latest saved suggestions in `result.json` when present. |
-| `submit_job`    | Supply the claimed `folder`. Validate and save `result.json` while retaining this session's exclusive claim for repeated follow-up changes.                                                  |
-| `finish_job`    | When the person says the drafting session is finished, hand the latest saved suggestions to the dashboard and release the claim for editing or another Agent.                                |
-| `release_job`   | End this session's claim. Saved suggestions become available for review; a job without suggestions returns to the queue.                                                                     |
-| `questionnaire` | Read the workflow version's questionnaire, including draft questions and submitted suggestions.                                                                                              |
-| `ledger`        | Read the kernel's five-part ledger and optional `sinceRound` changes.                                                                                                                        |
-| `readiness`     | Read the kernel's blockers by dossier topic.                                                                                                                                                 |
+| Tool                      | Behavior                                                                                                                                                                                     |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_jobs`               | Read jobs, leases, and suggestions for one workflow version.                                                                                                                                 |
+| `working_dossier_job`     | Read the working Semantic dossier revision, exact checked pins and file hashes, edit schema, reviewed answers, and review link.                                                              |
+| `working_dossier_sources` | Quote the job's `dossier.pinsHash` to prepare verified copies of the pinned files in a private local folder.                                                                                 |
+| `save_working_dossier`    | Save an edit against the job's `revision` and `pinsHash`. Returns the revision that saved the edit, the current revision, and the dashboard review link.                                     |
+| `claim_job`               | Quote a queued or submitted job's `revision`; claim it and return a private local folder with context, schema, pinned files, and the latest saved suggestions in `result.json` when present. |
+| `submit_job`              | Supply the claimed `folder`. Validate and save `result.json` while retaining this session's exclusive claim for repeated follow-up changes.                                                  |
+| `finish_job`              | When the person says the drafting session is finished, hand the latest saved suggestions to the dashboard and release the claim for editing or another Agent.                                |
+| `release_job`             | End this session's claim. Saved suggestions become available for review; a job without suggestions returns to the queue.                                                                     |
+| `questionnaire`           | Read the workflow version's questionnaire, including draft questions and submitted suggestions.                                                                                              |
+| `ledger`                  | Read the kernel's five-part ledger and optional `sinceRound` changes.                                                                                                                        |
+| `readiness`               | Read the kernel's blockers by dossier topic.                                                                                                                                                 |
+
+Copy the working dossier prompt from the Workflow version's **Source study**
+tab. For an installed Skill, pass `localSkillRoots` with its Skill ID and
+folder, or pass `localSourceRoot` for a parent directory with folders named
+after the Skills. The MCP copies files whose hashes match the inventory and
+fetches the rest from Badger. Read the `localPath` for each file in the
+returned manifest. On a rate limit, repeat the same request after the given
+delay to resume. The verified copies stay private for this MCP connection.
+
+Send the edit inline or write `edit.json` in the returned folder and pass
+`folder`. Reuse the edit ID and body on a retry. If another save or pin change
+causes a conflict, open the current job and reconcile the edit before
+submitting again. A working dossier save is visible in the dashboard. The
+Workflow owner approves a revision there.
 
 A signed-in Engineer requests drafting from
 **Questionnaire → Drafting jobs and suggestions**. Source study also links there

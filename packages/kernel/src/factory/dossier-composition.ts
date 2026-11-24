@@ -9,6 +9,10 @@ import {
   type FactProvenance,
   type SemanticDossier,
 } from "./questionnaire.js";
+import {
+  workingDossierSemantics,
+  type ApprovedWorkingDossier,
+} from "./working-dossier.js";
 
 export type DossierSemantics = Pick<
   SemanticDossier,
@@ -28,10 +32,15 @@ export interface DossierCompositionInput {
   records: QuestionnaireRecords;
   sourceEvidence: Record<string, { sourceId: string; evidencePath: string }>;
   semantics: Record<string, unknown>;
+  workingDossier?: ApprovedWorkingDossier;
 }
 
 /** Compose a candidate; findings must be empty before it can be stored or approved. */
 export function composeSemanticDossier(input: DossierCompositionInput) {
+  const working =
+    input.workingDossier &&
+    workingDossierSemantics(input.workingDossier, input.sources);
+  const semantics = working?.semantics ?? input.semantics;
   const ledger = questionnaireRecordHandoff(input.records);
   const confirmed = new Set(
     ledger.ledger.confirmedUserFacts.map((f) => f.record.id),
@@ -58,24 +67,26 @@ export function composeSemanticDossier(input: DossierCompositionInput) {
     confirmed: true,
     workflow: input.workflow,
     sources: input.sources,
-    nodes: input.semantics.nodes ?? [],
-    topics: input.semantics.topics ?? {},
+    nodes: semantics.nodes ?? [],
+    topics: semantics.topics ?? {},
     confirmedUserFacts: facts.map((f) => ({
       id: f.id,
       statement: f.statement,
       provenance: provenance(f),
     })),
-    sourceDerivedFacts: ledger.items
-      .filter(
-        (f) =>
-          ["source-fact", "source-interface"].includes(f.record.type) &&
-          f.state === "source",
-      )
-      .map((f) => ({
-        id: f.record.id,
-        statement: f.statement,
-        ...input.sourceEvidence[f.record.id],
-      })),
+    sourceDerivedFacts:
+      working?.sourceFacts ??
+      ledger.items
+        .filter(
+          (f) =>
+            ["source-fact", "source-interface"].includes(f.record.type) &&
+            f.state === "source",
+        )
+        .map((f) => ({
+          id: f.record.id,
+          statement: f.statement,
+          ...input.sourceEvidence[f.record.id],
+        })),
     agentInferences: ledger.ledger.agentInferences.map((f) => ({
       id: f.record.id,
       statement: f.statement,
@@ -117,9 +128,10 @@ export function composeSemanticDossier(input: DossierCompositionInput) {
         reason: q.resolution?.reason,
       },
     })),
-    ...(input.semantics.upgradeSource === undefined
+    ...(semantics.upgradeSource === undefined
       ? {}
-      : { upgradeSource: input.semantics.upgradeSource }),
+      : { upgradeSource: semantics.upgradeSource }),
+    ...(input.workingDossier ? { workingDossier: input.workingDossier } : {}),
   };
   const findings = validateSemanticDossier(dossier);
   const snapshot: DossierSnapshot = {

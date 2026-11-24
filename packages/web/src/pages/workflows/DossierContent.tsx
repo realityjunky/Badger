@@ -1,7 +1,12 @@
 import { Collapse, Tag } from "antd";
 import { Link } from "react-router-dom";
 import type { DossierSnapshot } from "../../api/dossier.js";
+import {
+  workingDossierPath,
+  type WorkingDossierField,
+} from "../../api/working-dossier.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { WorkingDossierStudy } from "../working-dossier/WorkingDossierStudy.js";
 
 /** Show the immutable document and the record revisions the owner is approving. */
 export function DossierContent({
@@ -9,11 +14,13 @@ export function DossierContent({
   hash,
   canonicalJson,
   workflowId,
+  basePath = "/",
 }: {
   snapshot: DossierSnapshot;
   hash: string;
   canonicalJson: string | null;
   workflowId: string;
+  basePath?: string;
 }) {
   const { t, format } = useI18n();
   const dossier = snapshot.dossier;
@@ -23,6 +30,65 @@ export function DossierContent({
     ...dossier.agentInferences,
   ];
   const base = `/workflows/${encodeURIComponent(workflowId)}/versions/${encodeURIComponent(snapshot.workflowVersionId)}`;
+  const workingDossier = dossier.workingDossier;
+  if (workingDossier) {
+    const { content, pins, revision } = workingDossier;
+    const owners = [
+      { scope: "workflow", owner: "workflow", ownerLabel: "Workflow" } as const,
+      ...pins.map(({ skillId, name }) => ({
+        scope: "skill" as const,
+        owner: skillId,
+        ownerLabel: name,
+      })),
+      ...Object.entries(content.nodes).map(([owner, node]) => ({
+        scope: "node" as const,
+        owner,
+        ownerLabel: node.label,
+      })),
+      ...Object.entries(content.interfaces).map(([owner, edge]) => ({
+        scope: "interface" as const,
+        owner,
+        ownerLabel: `${content.nodes[edge.producer]?.label ?? edge.producer} → ${content.nodes[edge.consumer]?.label ?? edge.consumer}`,
+      })),
+    ];
+    const fields: WorkingDossierField[] = owners.flatMap((owner) =>
+      workingDossier.fields[owner.scope].map((definition) => {
+        const id = `${owner.scope}/${owner.owner}/${definition.key}`;
+        return {
+          ...owner,
+          ...definition,
+          id,
+          content: content.fields[id] ?? null,
+          blocker: null,
+        };
+      }),
+    );
+    return (
+      <div className="dossier-content">
+        <p>{dossier.workflow.goal}</p>
+        <p className="field-label">{t("dossier.hash")}</p>
+        <code className="dossier-hash">{hash}</code>
+        <WorkingDossierStudy
+          dossier={{
+            ...workingDossier,
+            projection: { fields, removedFields: [], staleFindings: [] },
+          }}
+          context={{
+            basePath,
+            path: workingDossierPath(workflowId, snapshot.workflowVersionId),
+            revision,
+            pins,
+          }}
+        />
+        {canonicalJson !== null && (
+          <details>
+            <summary>{t("dossier.canonical")}</summary>
+            <pre className="dossier-json">{canonicalJson}</pre>
+          </details>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="dossier-content">
       <p>{dossier.workflow.goal}</p>

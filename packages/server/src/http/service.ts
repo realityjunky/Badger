@@ -72,6 +72,10 @@ import { handleSearch } from "./search.js";
 import { handleIntegrations } from "./integrations.js";
 import { gateMethods, handleGate } from "./gates.js";
 import { dossierMethods, handleDossier } from "./dossier.js";
+import {
+  handleWorkingDossier,
+  workingDossierMethods,
+} from "./working-dossier.js";
 import { planMethods, handlePlan } from "./plans.js";
 import { publicationMethods, handlePublications } from "./publications.js";
 import { runMethods, handleRuns } from "./runs.js";
@@ -193,6 +197,7 @@ function allowedMethods(path: string): string {
     tokenMethods(path) ??
     gateMethods(path) ??
     dossierMethods(path) ??
+    workingDossierMethods(path) ??
     planMethods(path) ??
     proposalMethods(path) ??
     publicationMethods(path) ??
@@ -1047,6 +1052,8 @@ export function createService(options: ServiceOptions, port: number): Service {
       if (tokenMethods(path) !== null) return await handleTokens(authorized);
       if (gateMethods(path) !== null) return await handleGate(authorized);
       if (dossierMethods(path) !== null) return await handleDossier(authorized);
+      if (workingDossierMethods(path) !== null)
+        return await handleWorkingDossier(authorized);
       if (planMethods(path) !== null) return await handlePlan(authorized);
       if (proposalMethods(path) !== null)
         return await handleProposal(authorized);

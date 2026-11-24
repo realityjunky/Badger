@@ -964,6 +964,18 @@ it("reserves suggestion review for signed-in people and removes Agent review pro
 
 it("preserves source-study jobs and reviewed confirmation hashes across version label edits", async () => {
   const { base, jobs, pins, secret } = await setup();
+  const { record } = await request(
+    `${base}/source-study/facts`,
+    "POST",
+    {
+      statement: "The prior source study recorded the producer contract.",
+      evidence: [citation(pins[0])],
+    },
+    201,
+  );
+  await request(`${base}/source-study/facts/${record.id}`, "DELETE", {
+    revision: record.revision,
+  });
   await service.runSourceCheckJobs();
   const { preview: sources } = await request(
     `${base}/gates/sources/preview`,
@@ -1009,10 +1021,39 @@ it("preserves source-study jobs and reviewed confirmation hashes across version 
     requestId: crypto.randomUUID(),
   });
   expect(accepted.status).toBe("accepted");
-  expect((await request(`${base}/source-study`)).facts).toHaveLength(1);
+  expect(
+    (await request(`${base}/source-study`)).facts.filter(
+      (fact: { status: string }) => fact.status === "active",
+    ),
+  ).toHaveLength(1);
   expect((await request(base)).sourceGate).toMatchObject({
     confirmationHash: sources.confirmationHash,
     invalidatedAt: null,
+  });
+});
+
+it("keeps a checked working dossier open when a legacy job suggests facts", async () => {
+  const { base, jobs, pins, secret } = await setup();
+  await service.runSourceCheckJobs();
+  const job = await create(jobs, {
+    kind: "source-study",
+    skillId: pins[0].skillId,
+  });
+  const result = studyOf(pins[0]);
+  const submitted = await submit(jobs, job, secret, result);
+  await request(
+    `${jobs}/${job.id}/accept-preview`,
+    "POST",
+    {
+      revision: submitted.revision,
+      ...result,
+    },
+    409,
+  );
+  expect(await request(`${base}/working-dossier`)).toMatchObject({
+    available: true,
+    legacy: false,
+    revision: 0,
   });
 });
 

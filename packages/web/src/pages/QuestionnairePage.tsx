@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Checkbox,
+  Collapse,
   Input,
   InputNumber,
   Modal,
@@ -17,12 +18,17 @@ import {
   questionnaireRequest,
   QuestionnaireError,
   type Question,
+  type QuestionContent,
   type Concern,
   type QuestionnaireVersion,
   type QuestionnaireView,
   type Round,
   type RoundPreview,
 } from "../api/questionnaire.js";
+import {
+  workingDossierPath,
+  type WorkingDossierField,
+} from "../api/working-dossier.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { StageReviewGuidance } from "../components/StageReviewGuidance.js";
@@ -42,6 +48,9 @@ import { AnswerTypeDetails } from "./questionnaire/AnswerTypeDetails.js";
 import { QuestionThread } from "./questionnaire/QuestionThread.js";
 import { ConcernPanel } from "./questionnaire/ConcernPanel.js";
 import { QuestionnaireLedger } from "./questionnaire/QuestionnaireLedger.js";
+import { WorkingDossierLedger } from "./working-dossier/WorkingDossierLedger.js";
+import { DossierFieldValue } from "./working-dossier/DossierFields.js";
+import { useWorkingDossier } from "./working-dossier/useWorkingDossier.js";
 import {
   QuestionnaireTabs,
   type QuestionnaireTab,
@@ -72,6 +81,7 @@ export function QuestionnairePage() {
   const [busy, setBusy] = useState(false);
   const [newRound, setNewRound] = useState(false);
   const [roundTitle, setRoundTitle] = useState("");
+  const [questionSeed, setQuestionSeed] = useState<QuestionContent>();
   const [queueQuestions, setQueueQuestions] = useState(true);
   const [newConcern, setNewConcern] = useState(false);
   const [concernText, setConcernText] = useState("");
@@ -79,6 +89,7 @@ export function QuestionnairePage() {
     roundId: string;
     question?: Question;
     concern?: Concern;
+    seed?: QuestionContent;
   } | null>(null);
   const [publication, setPublication] = useState<{
     round: Round;
@@ -215,6 +226,46 @@ export function QuestionnairePage() {
       : query.get("panel") === "suggestions" && reviewSuggestions
         ? "suggestions"
         : "questions";
+  const dossierPath =
+    selection && workingDossierPath(selection.workflowId, selection.versionId);
+  const hasDossierTarget = selected?.targets.some(
+    (target) => target.kind === "field" || target.kind === "interface",
+  );
+  const {
+    dossier: workingDossier,
+    failure: dossierFailure,
+    accept: acceptDossier,
+    reload: reloadDossier,
+  } = useWorkingDossier(
+    basePath,
+    dossierPath,
+    selection?.versionId,
+    activeTab !== "questions" || Boolean(hasDossierTarget || editing?.seed),
+  );
+  const dossierFields = workingDossier?.projection.fields;
+  const dossierContext =
+    dossierPath && workingDossier
+      ? {
+          basePath,
+          path: dossierPath,
+          revision: workingDossier.revision,
+          pins: workingDossier.pins,
+        }
+      : undefined;
+  const questionFields =
+    dossierFields?.filter((field) =>
+      selected?.targets.some(
+        (target) =>
+          (target.kind === "field" && target.id === field.id) ||
+          (target.kind === "interface" &&
+            field.scope === "interface" &&
+            target.id === field.owner),
+      ),
+    ) ?? [];
+  const showWorkingDossier =
+    workingDossier &&
+    !workingDossier.legacy &&
+    (workingDossier.available || workingDossier.revision > 0);
   const ownAnswer = view?.answers.find(
     (a) => a.questionId === selected?.id && a.personId === view.personId,
   );
@@ -297,6 +348,83 @@ export function QuestionnairePage() {
     navigate(`/questionnaire/questions/${encodeURIComponent(question.id)}`);
     void reload();
   };
+  function startDossierQuestion(
+    field: WorkingDossierField,
+    handoffId?: string,
+  ) {
+    if (!selection || !compose) return;
+    const assignee = view.assignees.some(
+      (person) => person.role === "Field expert",
+    )
+      ? "Field expert"
+      : "Workflow owner";
+    const handoff = handoffId
+      ? workingDossier?.content.interfaces[handoffId]
+      : undefined;
+    const citations = handoff
+      ? [
+          ...handoff.producerEvidence,
+          ...handoff.consumerEvidence,
+          ...(field.content?.evidence ?? []),
+        ]
+      : (field.content?.evidence ?? []);
+    const seed: QuestionContent = {
+      text: "",
+      topic: field.topic,
+      rationale: field.blocker ?? field.content?.reason ?? "",
+      targets: handoffId
+        ? [{ kind: "interface", id: handoffId }]
+        : [{ kind: "field", id: field.id }],
+      assignees: [{ kind: "role", role: assignee }],
+      evidence: citations
+        .filter((locator) =>
+          workingDossier?.pins.some(
+            (pin) =>
+              pin.skillId === locator.skillId && pin.hash === locator.hash,
+          ),
+        )
+        .map(({ skillId, hash, path, startLine, endLine }) => ({
+          skillId,
+          versionHash: hash,
+          path,
+          startLine,
+          endLine,
+        })),
+      priority: 10,
+    };
+    const draft = view.rounds.find((round) => round.state === "draft");
+    if (!draft) {
+      setQuestionSeed(seed);
+      setRoundTitle(t("workingDossier.questionRound"));
+      setNewRound(true);
+      return;
+    }
+    setEditing({ roundId: draft.id, seed });
+    navigate(
+      `/questionnaire?${versionQuery}&round=${encodeURIComponent(draft.id)}`,
+    );
+  }
+
+  const ledgerHistory =
+    view && path ? (
+      <QuestionnaireLedger
+        basePath={basePath}
+        path={path}
+        view={view}
+        sinceRound={query.get("sinceRound")}
+        showReadiness={!showWorkingDossier}
+        onSinceRound={(id) => {
+          const parameters = new URLSearchParams(location.search);
+          if (id) parameters.set("sinceRound", id);
+          else parameters.delete("sinceRound");
+          navigate({
+            pathname: location.pathname,
+            search: parameters.toString(),
+          });
+        }}
+        onChanged={reload}
+      />
+    ) : null;
 
   return (
     <div className="page page-registry" data-testid="page-questionnaire">
@@ -339,7 +467,14 @@ export function QuestionnairePage() {
         <span className="muted" role="status">
           {t(connected ? "questionnaire.live" : "questionnaire.polling")}
         </span>
-        <Button onClick={() => void reload()}>{t("workflow.reload")}</Button>
+        <Button
+          onClick={() => {
+            void reload();
+            void reloadDossier();
+          }}
+        >
+          {t("workflow.reload")}
+        </Button>
         {view?.capabilities.raiseConcern && (
           <Button
             onClick={() => {
@@ -365,28 +500,59 @@ export function QuestionnairePage() {
               path={path}
               jobsHref={`/questionnaire?${suggestionsQuery}`}
               view={view}
+              showSourceStudy={workingDossier?.legacy ?? false}
               onChanged={() => void reload()}
             />
           ) : undefined
         }
         ledger={
           view && path ? (
-            <QuestionnaireLedger
-              basePath={basePath}
-              path={path}
-              view={view}
-              sinceRound={query.get("sinceRound")}
-              onSinceRound={(id) => {
-                const parameters = new URLSearchParams(location.search);
-                if (id) parameters.set("sinceRound", id);
-                else parameters.delete("sinceRound");
-                navigate({
-                  pathname: location.pathname,
-                  search: parameters.toString(),
-                });
-              }}
-              onChanged={reload}
-            />
+            <>
+              {dossierFailure && (
+                <Alert
+                  type="error"
+                  showIcon
+                  title={dossierFailure}
+                  action={
+                    <Button onClick={() => void reloadDossier()}>
+                      {t("workflow.reload")}
+                    </Button>
+                  }
+                />
+              )}
+              {workingDossier && dossierContext && showWorkingDossier ? (
+                <div className="working-dossier-ledger">
+                  <WorkingDossierLedger
+                    key={`${path}:${query.get("dossierField") ?? ""}`}
+                    dossier={workingDossier}
+                    context={dossierContext}
+                    linkedField={query.get("dossierField")}
+                    onAsk={startDossierQuestion}
+                    onSaved={(dossier) => {
+                      acceptDossier(dossier);
+                      void reload();
+                    }}
+                    onReload={reloadDossier}
+                  />
+                  <Collapse
+                    defaultActiveKey={
+                      query.has("sinceRound") ? ["history"] : []
+                    }
+                    items={[
+                      {
+                        key: "history",
+                        label: t("workingDossier.questionHistory"),
+                        children: ledgerHistory,
+                      },
+                    ]}
+                  />
+                </div>
+              ) : workingDossier ? (
+                ledgerHistory
+              ) : (
+                !dossierFailure && <p role="status">{t("common.loading")}</p>
+              )}
+            </>
           ) : null
         }
       >
@@ -439,6 +605,7 @@ export function QuestionnairePage() {
                   onClick={() => {
                     setNewRound(true);
                     setRoundTitle("");
+                    setQuestionSeed(undefined);
                   }}
                 >
                   {t("questionnaire.newRound")}
@@ -537,7 +704,9 @@ export function QuestionnairePage() {
                 roundId={editing.roundId}
                 question={editing.question}
                 concern={editing.concern}
+                seed={editing.seed}
                 view={view}
+                dossierFields={dossierFields}
                 onSaved={openQuestion}
                 onCancel={() => setEditing(null)}
               />
@@ -603,6 +772,29 @@ export function QuestionnairePage() {
                       <h3>{selected.text}</h3>
                       <Tag>{t(`questionnaire.state.${selected.state}`)}</Tag>
                       <p>{selected.rationale}</p>
+                      {dossierContext && questionFields.length > 0 && (
+                        <div className="working-dossier-field-list">
+                          {questionFields.map((field) => (
+                            <section
+                              className="working-dossier-field"
+                              key={field.id}
+                            >
+                              <h4>
+                                {field.ownerLabel} · {field.label}
+                              </h4>
+                              <DossierFieldValue
+                                field={field}
+                                context={dossierContext}
+                              />
+                              <Link
+                                to={`/questionnaire?${versionQuery}&panel=ledger&dossierField=${encodeURIComponent(field.id)}`}
+                              >
+                                {t("workingDossier.openField")}
+                              </Link>
+                            </section>
+                          ))}
+                        </div>
+                      )}
                       {compose &&
                         (!selected.resolvedAt ||
                           selected.state === "confirmed") && (
@@ -745,7 +937,10 @@ export function QuestionnairePage() {
       <Modal
         open={newRound}
         title={t("questionnaire.newRound")}
-        onCancel={() => setNewRound(false)}
+        onCancel={() => {
+          setNewRound(false);
+          setQuestionSeed(undefined);
+        }}
         confirmLoading={busy}
         okText={t("questionnaire.createRound")}
         cancelText={t("common.cancel")}
@@ -756,11 +951,17 @@ export function QuestionnairePage() {
               basePath,
               `${path}/rounds`,
               "POST",
-              { title: roundTitle, draftQuestions: queueQuestions },
+              {
+                title: roundTitle,
+                draftQuestions: !questionSeed && queueQuestions,
+              },
             );
             setNewRound(false);
+            if (questionSeed)
+              setEditing({ roundId: result.round.id, seed: questionSeed });
+            setQuestionSeed(undefined);
             navigate(
-              `/questionnaire?${versionQuery}&round=${encodeURIComponent(result.round.id)}${queueQuestions ? "&panel=suggestions" : ""}`,
+              `/questionnaire?${versionQuery}&round=${encodeURIComponent(result.round.id)}${!questionSeed && queueQuestions ? "&panel=suggestions" : ""}`,
             );
             await reload();
           })
@@ -775,15 +976,19 @@ export function QuestionnairePage() {
           maxLength={200}
           onChange={(event) => setRoundTitle(event.target.value)}
         />
-        <p>
-          <Checkbox
-            checked={queueQuestions}
-            onChange={(event) => setQueueQuestions(event.target.checked)}
-          >
-            {t("prompts.queueQuestions")}
-          </Checkbox>
-        </p>
-        <p className="muted">{t("prompts.roundHelp")}</p>
+        {!questionSeed && (
+          <>
+            <p>
+              <Checkbox
+                checked={queueQuestions}
+                onChange={(event) => setQueueQuestions(event.target.checked)}
+              >
+                {t("prompts.queueQuestions")}
+              </Checkbox>
+            </p>
+            <p className="muted">{t("prompts.roundHelp")}</p>
+          </>
+        )}
       </Modal>
       <Modal
         open={publication !== null}

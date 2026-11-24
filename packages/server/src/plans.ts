@@ -77,11 +77,9 @@ export async function planInputs(
   const approval = (await readGateConfirmations(tx, versionId, "dossier")).find(
     (c) => c.invalidatedAt === null,
   );
-  if (
-    !dossier ||
-    approval?.boundHashes.dossier !== dossier.hash ||
-    (await dossierGateState(tx, versionId, personId)).findings.length
-  )
+  if (!dossier || approval?.boundHashes.dossier !== dossier.hash) return null;
+  const gate = await dossierGateState(tx, versionId, personId);
+  if (gate.findings.length || gate.preview.boundHashes.dossier !== dossier.hash)
     return null;
   const pins = await listWorkflowPins(tx, versionId);
   const skillSources: SkillSourceDeclaration[] = [];

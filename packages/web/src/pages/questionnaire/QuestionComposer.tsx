@@ -10,6 +10,7 @@ import {
   type AnswerType,
 } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import type { WorkingDossierField } from "../../api/working-dossier.js";
 import { ConcernResolutionDialog } from "./ConcernResolutionDialog.js";
 
 const TOPICS = [
@@ -55,8 +56,10 @@ export function QuestionComposer({
   question,
   concern,
   suggestion,
+  seed,
   onDraft,
   view,
+  dossierFields = [],
   onSaved,
   onCancel,
 }: {
@@ -66,8 +69,10 @@ export function QuestionComposer({
   question?: Question;
   concern?: Concern;
   suggestion?: QuestionContent;
+  seed?: QuestionContent;
   onDraft?(question: QuestionContent): void;
   view: QuestionnaireView;
+  dossierFields?: WorkingDossierField[];
   onSaved(question: Question): void;
   onCancel(): void;
 }) {
@@ -75,7 +80,7 @@ export function QuestionComposer({
   const [form] = Form.useForm<Values>();
   const answerKind =
     Form.useWatch("answerKind", form) ??
-    (question ?? suggestion)?.answerType?.kind ??
+    (question ?? suggestion ?? seed)?.answerType?.kind ??
     "free-text";
   const revision = useRef(question?.revision);
   const [busy, setBusy] = useState(false);
@@ -84,7 +89,7 @@ export function QuestionComposer({
     null,
   );
   const required = [{ required: true, message: t("questionnaire.required") }];
-  const draft = question ?? suggestion;
+  const draft = question ?? suggestion ?? seed;
   const initial: Values = draft
     ? {
         ...draft,
@@ -379,11 +384,26 @@ export function QuestionComposer({
                       )
                     }
                     options={(
-                      ["workflow", "node", "skill", "interface"] as const
-                    ).map((value) => ({
-                      value,
-                      label: t(`questionnaire.target.${value}`),
-                    }))}
+                      [
+                        "workflow",
+                        "node",
+                        "skill",
+                        "interface",
+                        "field",
+                      ] as const
+                    )
+                      .filter(
+                        (value) =>
+                          value !== "field" ||
+                          dossierFields.length > 0 ||
+                          draft?.targets.some(
+                            (target) => target.kind === "field",
+                          ),
+                      )
+                      .map((value) => ({
+                        value,
+                        label: t(`questionnaire.target.${value}`),
+                      }))}
                   />
                 </Form.Item>
                 <Form.Item noStyle shouldUpdate>
@@ -400,7 +420,16 @@ export function QuestionComposer({
                         label={t("questionnaire.targetId")}
                         rules={required}
                       >
-                        {kind === "skill" ? (
+                        {kind === "field" && dossierFields.length ? (
+                          <Select
+                            showSearch
+                            optionFilterProp="label"
+                            options={dossierFields.map((field) => ({
+                              value: field.id,
+                              label: `${field.ownerLabel} · ${field.label}`,
+                            }))}
+                          />
+                        ) : kind === "skill" ? (
                           <Select
                             options={view.pins.map((pin) => ({
                               value: pin.skillId,

@@ -3,6 +3,7 @@ import type { Queryable } from "./database/database.js";
 import { gatePreview, type GateFinding, type GateState } from "./gates.js";
 import { readSourceStudy, studyReferences } from "./source-study.js";
 import { studyGateName } from "./source-study-invalidation.js";
+import { readWorkingRevision } from "./working-dossier-store.js";
 
 /** Study completion is a human gate over one pin and its exact record revisions. */
 export async function sourceStudyGateState(
@@ -31,6 +32,8 @@ export async function sourceStudyGateState(
       requiredAction: "repair",
     });
   }
+  if (await readWorkingRevision(database, versionId))
+    reject("WORKING_DOSSIER_ACTIVE", "Review the workflow's saved dossier");
   if (version.rows[0]?.stages.sources !== "done")
     reject(
       "SOURCE_SET_NOT_CONFIRMED",

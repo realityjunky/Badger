@@ -2,7 +2,12 @@ import { Alert, Button, Modal, Select, Space, Spin, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { DossierView } from "../../api/dossier.js";
-import { questionnaireRequest } from "../../api/questionnaire.js";
+import {
+  QuestionnaireError,
+  questionnaireRequest,
+} from "../../api/questionnaire.js";
+import { workingDossierPath } from "../../api/working-dossier.js";
+import type { WorkingDossierView } from "@realityjunky/badger";
 import type {
   GatePreview,
   WorkflowVersionDetail,
@@ -13,6 +18,13 @@ import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { DossierComposer } from "./DossierComposer.js";
 import { DossierContent } from "./DossierContent.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
+import { selectedWorkflowTab } from "./WorkflowTabs.js";
+import {
+  DossierReadiness,
+  RemovedDossierFields,
+} from "../working-dossier/DossierReadiness.js";
+import { WorkingDossierStudy } from "../working-dossier/WorkingDossierStudy.js";
+import { useWorkingDossier } from "../working-dossier/useWorkingDossier.js";
 
 export function WorkflowDossier({
   basePath,
@@ -30,15 +42,25 @@ export function WorkflowDossier({
   const section = useRef<HTMLElement>(null);
   const [view, setView] = useState<DossierView | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [findings, setFindings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [review, setReview] = useState<{
     preview: GatePreview;
     requestId: string;
-    versionId: string;
+    versionId?: string;
+    dossier?: WorkingDossierView;
   } | null>(null);
   const path = `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(detail.version.id)}`;
+  const dossierPath = workingDossierPath(detail.workflow.id, detail.version.id);
+  const active = selectedWorkflowTab(location) === "dossier";
+  const {
+    dossier,
+    failure: dossierFailure,
+    reload,
+  } = useWorkingDossier(basePath, dossierPath, detail.version.id, active);
+  const working = dossier && !dossier.legacy;
   const selectedId = new URLSearchParams(location.search).get("dossierVersion");
   const selected =
     view?.versions.find((v) => v.id === selectedId) ??
@@ -49,8 +71,18 @@ export function WorkflowDossier({
     selected !== undefined &&
     view?.confirmation?.invalidatedAt === null &&
     view.confirmation.boundHashes.dossier === selected.hash;
+  const currentVersion = view?.versions.find(
+    ({ id }) => id === view?.currentVersionId,
+  );
+  const approvedRevision =
+    currentVersion &&
+    view?.confirmation?.invalidatedAt === null &&
+    view.confirmation.boundHashes.dossier === currentVersion.hash &&
+    currentVersion.snapshot.dossier.workingDossier?.revision ===
+      dossier?.revision;
 
   useEffect(() => {
+    if (!active) return;
     const controller = new AbortController();
     void questionnaireRequest<DossierView>(
       basePath,
@@ -70,7 +102,7 @@ export function WorkflowDossier({
       },
     );
     return () => controller.abort();
-  }, [basePath, path, detail.version.revision, refresh]);
+  }, [active, basePath, path, detail.version.revision, dossier, refresh]);
   useEffect(() => {
     if (location.hash === "#dossier" && view)
       section.current?.scrollIntoView({ block: "start" });
@@ -79,10 +111,13 @@ export function WorkflowDossier({
   async function run(action: () => Promise<void>) {
     setBusy(true);
     setFailure(null);
+    setFindings([]);
     try {
       await action();
     } catch (error) {
       setFailure(error instanceof Error ? error.message : t("dossier.failed"));
+      if (error instanceof QuestionnaireError)
+        setFindings(error.findings.map(({ message }) => message));
       setReview(null);
       setRefresh((r) => r + 1);
     } finally {
@@ -90,21 +125,31 @@ export function WorkflowDossier({
     }
   }
   async function preview() {
-    if (!selected) return;
+    if (!working && !selected) return;
     const { preview } = await questionnaireRequest<{ preview: GatePreview }>(
       basePath,
       `${path}/gates/dossier/preview`,
       "POST",
       {},
     );
-    // The selected historical artifact is never substituted by a newer preview.
-    if (preview.boundHashes.dossier !== selected.hash) {
+    if (
+      working &&
+      !preview.records.some(
+        ({ type, id }) =>
+          type === "working-dossier-revision" &&
+          id === String(dossier.revision),
+      )
+    ) {
+      void reload();
+      throw new Error(t("workingDossier.approvalChanged"));
+    }
+    if (!working && preview.boundHashes.dossier !== selected?.hash) {
       setRefresh((r) => r + 1);
       throw new Error(t("dossier.supersededHelp"));
     }
     setReview({
       preview,
-      versionId: selected.id,
+      ...(working ? { dossier } : { versionId: selected?.id }),
       requestId: crypto.randomUUID(),
     });
   }
@@ -120,10 +165,16 @@ export function WorkflowDossier({
       },
     );
     setReview(null);
+    setRefresh((r) => r + 1);
     await inbox.refresh();
     onChanged();
   }
   const reviewed = view?.versions.find((v) => v.id === review?.versionId);
+  const reviewDossier = review?.dossier;
+  const reviewChanged =
+    reviewDossier &&
+    (reviewDossier.revision !== dossier?.revision ||
+      reviewDossier.pinsHash !== dossier?.pinsHash);
 
   return (
     <WorkflowPanel
@@ -134,6 +185,7 @@ export function WorkflowDossier({
       aria-labelledby="dossier-title"
       actions={
         view &&
+        dossier?.legacy &&
         detail.capabilities.composeDossier && (
           <Button
             type="primary"
@@ -145,16 +197,47 @@ export function WorkflowDossier({
         )
       }
     >
-      <p className="muted">{t("dossier.description")}</p>
+      {dossier && (
+        <p className="muted">
+          {t(
+            working
+              ? "workingDossier.approvalDescription"
+              : "dossier.description",
+          )}
+        </p>
+      )}
+      {dossierFailure && (
+        <Alert
+          type="error"
+          showIcon
+          title={dossierFailure}
+          action={
+            <Button onClick={() => void reload()}>
+              {t("workflow.reload")}
+            </Button>
+          }
+        />
+      )}
       {failure && (
         <Alert
           type="error"
           showIcon
           title={failure}
+          description={
+            findings.length > 1 && (
+              <ul>
+                {findings.map((message, index) => (
+                  <li key={index}>{message}</li>
+                ))}
+              </ul>
+            )
+          }
           action={
             <Button
               onClick={() => {
                 setFailure(null);
+                setFindings([]);
+                void reload();
                 setRefresh((r) => r + 1);
               }}
             >
@@ -163,7 +246,9 @@ export function WorkflowDossier({
           }
         />
       )}
-      {!view && !failure && <Spin aria-label={t("common.loading")} />}
+      {(!view || !dossier) && !failure && !dossierFailure && (
+        <Spin aria-label={t("common.loading")} />
+      )}
       {view && (
         <>
           <p>
@@ -173,7 +258,46 @@ export function WorkflowDossier({
               {t("ledger.title")}
             </Link>
           </p>
-          {view.handoff.status !== "complete" && (
+          {working && (
+            <section
+              className="working-dossier-approval"
+              aria-label={t("workingDossier.title")}
+            >
+              <div className="working-dossier-toolbar">
+                <h3>
+                  {format("workingDossier.revision", {
+                    revision: dossier.revision,
+                  })}
+                </h3>
+                <Space wrap>
+                  {approvedRevision && (
+                    <Tag color="success">{t("dossier.approved")}</Tag>
+                  )}
+                  {!approvedRevision &&
+                    detail.capabilities.approveDossier &&
+                    dossier.available && (
+                      <Button
+                        type="primary"
+                        loading={busy}
+                        onClick={() => void run(preview)}
+                      >
+                        {t("dossier.reviewApproval")}
+                      </Button>
+                    )}
+                </Space>
+              </div>
+              {!dossier.available && (
+                <Alert
+                  type="info"
+                  showIcon
+                  title={t("workingDossier.waitForCheck")}
+                />
+              )}
+              <DossierReadiness dossier={dossier} />
+              <RemovedDossierFields dossier={dossier} />
+            </section>
+          )}
+          {dossier?.legacy && view.handoff.status !== "complete" && (
             <Alert
               className="dossier-readiness"
               type="warning"
@@ -196,7 +320,11 @@ export function WorkflowDossier({
             />
           )}
           {!selected ? (
-            <p className="empty-state">{t("dossier.empty")}</p>
+            dossier && (
+              <p className="empty-state">
+                {t(working ? "workingDossier.noApprovals" : "dossier.empty")}
+              </p>
+            )
           ) : (
             <>
               <Space wrap className="dossier-version-heading">
@@ -228,7 +356,8 @@ export function WorkflowDossier({
                         : "dossier.awaiting",
                   )}
                 </Tag>
-                {detail.capabilities.approveDossier &&
+                {dossier?.legacy &&
+                  detail.capabilities.approveDossier &&
                   !superseded &&
                   !approved && (
                     <Button
@@ -252,14 +381,16 @@ export function WorkflowDossier({
                 bound={{ name: "dossier", hash: selected.hash }}
               />
               <DossierContent
+                key={selected.id}
                 snapshot={selected.snapshot}
                 hash={selected.hash}
                 canonicalJson={selected.canonicalJson}
                 workflowId={detail.workflow.id}
+                basePath={basePath}
               />
             </>
           )}
-          {editing && (
+          {dossier?.legacy && editing && (
             <DossierComposer
               basePath={basePath}
               path={`${path}/dossier`}
@@ -281,6 +412,7 @@ export function WorkflowDossier({
         okText={t("dossier.approve")}
         cancelText={t("common.cancel")}
         confirmLoading={busy}
+        okButtonProps={{ disabled: Boolean(reviewChanged) }}
         closable={!busy}
         maskClosable={!busy}
         onCancel={() => {
@@ -289,12 +421,31 @@ export function WorkflowDossier({
         onOk={() => void run(approve)}
       >
         <p>{t("dossier.approvalHelp")}</p>
+        {reviewChanged && (
+          <Alert
+            type="warning"
+            showIcon
+            title={t("workingDossier.approvalChanged")}
+          />
+        )}
+        {reviewDossier && (
+          <WorkingDossierStudy
+            dossier={{ ...reviewDossier, prompt: null }}
+            context={{
+              basePath,
+              path: dossierPath,
+              revision: reviewDossier.revision,
+              pins: reviewDossier.pins,
+            }}
+          />
+        )}
         {reviewed && (
           <DossierContent
             snapshot={reviewed.snapshot}
             hash={reviewed.hash}
             canonicalJson={reviewed.canonicalJson}
             workflowId={detail.workflow.id}
+            basePath={basePath}
           />
         )}
       </Modal>

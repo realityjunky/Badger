@@ -50,7 +50,7 @@ export function jobsPath(input: { workflowId: string; versionId: string }) {
   return `/workflows/${encodeURIComponent(input.workflowId)}/versions/${encodeURIComponent(input.versionId)}/drafting-jobs`;
 }
 
-function safePath(value: string) {
+export function safePath(value: string) {
   if (
     !value ||
     value.includes("\\") ||
@@ -63,6 +63,11 @@ function safePath(value: string) {
       "A pinned Skill contains a .git path; the MCP refuses to write Git metadata into a job folder",
     );
   return value;
+}
+
+export async function writePrivateSourceFile(target: string, bytes: Buffer) {
+  await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+  await fs.writeFile(target, bytes, { mode: 0o600, flag: "wx" });
 }
 
 /** A bounded descriptor read refuses links, special files, and replacements. */
@@ -183,9 +188,10 @@ export async function claimJob(
     folder = await fs.mkdtemp(path.join(os.tmpdir(), "badger-drafting-"));
     await fs.chmod(folder, 0o700);
     for (const { relative, bytes } of writes) {
-      const target = path.join(folder, "skills", relative);
-      await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-      await fs.writeFile(target, bytes, { mode: 0o600, flag: "wx" });
+      await writePrivateSourceFile(
+        path.join(folder, "skills", relative),
+        bytes,
+      );
     }
     for (const file of claimed.contextBundle.authoring?.files ?? []) {
       const relative = safePath(file.path);

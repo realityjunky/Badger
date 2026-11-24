@@ -3,6 +3,12 @@ import path from "node:path";
 import { sha256, stableValue } from "../util.js";
 import { normalizeWorkflow } from "../workflow/contract.js";
 import {
+  WORKING_DOSSIER_FIELDS,
+  workingDossierSemantics,
+  type ApprovedWorkingDossier,
+} from "./working-dossier.js";
+import { canonicalHash } from "../util.js";
+import {
   questionnaireRecordHandoff,
   type QuestionnaireRecords,
   type QuestionnaireRecordHandoff,
@@ -97,6 +103,7 @@ export interface SemanticDossier {
   remainingQuestions: QuestionBase[];
   deferredQuestions: DeferredQuestion[];
   upgradeSource?: { sourceId: string; recovery: string };
+  workingDossier?: ApprovedWorkingDossier;
 }
 
 export interface QuestionnaireDiagnostic {
@@ -110,6 +117,49 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isText(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function matchesWorkingDossier(
+  value: Record<string, unknown>,
+  sources: Record<string, unknown>[],
+) {
+  const basis = value.workingDossier as ApprovedWorkingDossier;
+  if (
+    !isRecord(basis) ||
+    !Number.isSafeInteger(basis.revision) ||
+    basis.revision < 1 ||
+    typeof basis.pinsHash !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(basis.pinsHash) ||
+    !Array.isArray(basis.pins) ||
+    !Array.isArray(basis.scriptEffects) ||
+    canonicalHash(basis.pins) !==
+      canonicalHash(
+        sources.map((source) => ({
+          skillId: source.id,
+          name: source.name,
+          hash: source.contentHash,
+        })),
+      ) ||
+    canonicalHash(basis.fields ?? null) !==
+      canonicalHash(WORKING_DOSSIER_FIELDS)
+  )
+    return false;
+  try {
+    const { semantics, sourceFacts } = workingDossierSemantics(
+      basis,
+      sources as SemanticDossier["sources"],
+    );
+    return (
+      canonicalHash(value.nodes ?? null) === canonicalHash(semantics.nodes) &&
+      canonicalHash(value.topics ?? null) === canonicalHash(semantics.topics) &&
+      canonicalHash(value.sourceDerivedFacts ?? null) ===
+        canonicalHash(sourceFacts) &&
+      canonicalHash(value.upgradeSource ?? null) ===
+        canonicalHash(semantics.upgradeSource ?? null)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function validateSemanticDossier(
@@ -210,6 +260,13 @@ export function validateSemanticDossier(
   }
   const sourceIds = new Set(sources.map((source) => source.id));
   const sourceNames = new Set(sources.map((source) => source.name));
+  const working =
+    value.workingDossier !== undefined && matchesWorkingDossier(value, sources);
+  if (value.workingDossier !== undefined && !working)
+    report(
+      "workingDossier",
+      "The approved working dossier must match the pinned sources and projected dossier fields",
+    );
   const ledgerIds = new Map<string, string>();
   const factIds = new Set<string>();
   const registerId = (
@@ -325,7 +382,7 @@ export function validateSemanticDossier(
     }
     if (
       !Array.isArray(entry.factIds) ||
-      !entry.factIds.length ||
+      (!working && !entry.factIds.length) ||
       !entry.factIds.every((id) => isText(id) && factIds.has(id))
     )
       report(`${field}.factIds`, "Required references to the fact ledger");

@@ -53,6 +53,7 @@ export function WorkflowsPage() {
   const { notice } = useLiveUpdates();
   const { workflowId, versionId } = useParams();
   const [parameters] = useSearchParams();
+  const requestedVersionId = versionId ?? parameters.get("version");
   const groupId = parameters.get("group");
   const navigate = useNavigate();
   const basePath = readBasePath(document);
@@ -71,9 +72,9 @@ export function WorkflowsPage() {
   const detail = state.kind === "detail" ? state.value : null;
   const workflow = detail?.workflow;
   const selectedVersion =
-    versionId === undefined
+    requestedVersionId === null
       ? detail?.versions[0]
-      : detail?.versions.find((entry) => entry.id === versionId);
+      : detail?.versions.find((entry) => entry.id === requestedVersionId);
 
   useEffect(() => {
     setState({ kind: "loading" });

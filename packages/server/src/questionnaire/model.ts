@@ -8,7 +8,7 @@ import {
 } from "./answer-types.js";
 
 export interface QuestionTarget {
-  kind: "workflow" | "node" | "skill" | "interface";
+  kind: "workflow" | "node" | "skill" | "interface" | "field";
   id: string;
 }
 export interface QuestionEvidence {
@@ -208,13 +208,13 @@ export function parseQuestion(input: Record<string, unknown>): QuestionContent {
     const target = objectInput(raw);
     fields(target, ["kind", "id"]);
     if (
-      !["workflow", "node", "skill", "interface"].includes(
+      !["workflow", "node", "skill", "interface", "field"].includes(
         target.kind as string,
       )
     )
       throw new RequestError(
         400,
-        "Use a workflow, node, skill, or interface target",
+        "Use a workflow, node, skill, interface, or field target",
       );
     return {
       kind: target.kind as QuestionTarget["kind"],

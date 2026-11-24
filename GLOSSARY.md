@@ -84,7 +84,7 @@ A directory outside the Project that the host lets source locations point into, 
 _Avoid_: allowed directory
 
 **Source study**:
-The Engineer's recorded reading of one pinned Skill version before the questionnaire. It yields source-derived facts with their evidence, that Skill's input and output contracts, its own open questions, and script-effect suggestions for the responsible uploader's separate review. Cross-Skill comparison belongs to workflow questionnaire discovery. Completion requires current confirmed script coverage when the version has scripts.
+The Engineer and Agent's reading of a Workflow version's pinned Skills. It starts the working dossier with Skill fields, occurrences, handoffs, and evidence from the pinned files. The responsible uploader separately reviews and confirms each Skill version's script effects.
 
 **Workflow version**:
 One iteration of a workflow: the Skill versions it pins, its questionnaire, and the dossier, plan, and package built from them. A new workflow version inherits the previous one's facts and resolutions with provenance to their earlier records, and its pending questionnaire work moves with them; flagged evidence stays open for re-verification, and approvals require a new review.
@@ -103,8 +103,11 @@ The states of a workflow version's eight authoring stages: sources, source study
 **Semantic dossier**:
 A structured account of the workflow's meaning, including Node responsibilities, inputs, completion evidence, bindings, outputs, decisions, routes, and recovery expectations.
 
+**Working dossier**:
+The editable Semantic dossier of a Workflow version. Source study and the Questionnaire Ledger read the same saved revision. A field can cite pinned lines or a reviewed Answer revision. Each occurrence of a Skill has its own identity and trigger, and a handoff connects a producer occurrence to a consumer occurrence.
+
 **Dossier version**:
-An immutable snapshot of a Semantic dossier and the ledger records it relies on. The Engineer composes it, and the Workflow owner approves its exact identity. A change to those records supersedes approval while preserving the original version. The current version is the one most recently composed; composing an earlier version's content again makes that version current again, and it needs a new approval.
+An immutable Semantic dossier and the Ledger records it relies on. Approving a working dossier captures its exact revision and the current sign-offs. Earlier composed Dossier versions retain their original identities and approval history. Changes to the approved basis supersede approval and preserve the original snapshot.
 
 **Plan version**:
 An immutable FactoryPlan bound to one approved Dossier version. The Engineer saves it or accepts an Agent's draft as a version, and the Workflow owner approves its exact identity. As with a Dossier version, the current version is the one most recently saved, which may be an earlier version saved again.

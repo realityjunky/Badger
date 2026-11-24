@@ -20,7 +20,10 @@ export interface QuestionContent {
   answerType?: AnswerType;
   text: string;
   topic: string;
-  targets: { kind: "workflow" | "node" | "skill" | "interface"; id: string }[];
+  targets: {
+    kind: "workflow" | "node" | "skill" | "interface" | "field";
+    id: string;
+  }[];
   rationale: string;
   evidence: {
     skillId: string;
@@ -197,6 +200,7 @@ export class QuestionnaireError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly findings: { message: string }[] = [],
   ) {
     super(message);
   }
@@ -226,6 +230,7 @@ export async function questionnaireRequest<T>(
     throw new QuestionnaireError(
       response.status,
       value.error?.message ?? "The request failed",
+      Array.isArray(value.findings) ? value.findings : undefined,
     );
   return value as T;
 }

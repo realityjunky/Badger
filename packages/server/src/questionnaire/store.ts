@@ -2,6 +2,7 @@ import { invalidateQuestionFacts } from "./resolutions.js";
 import { readTranslations } from "./translations.js";
 import { readImportedSources } from "./imports.js";
 import { reconcileDossier } from "../dossier.js";
+import { validateDossierQuestionTargets } from "../working-dossier.js";
 import { canonicalHash } from "@realityjunky/badger";
 import { recordAudit, type WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
@@ -212,6 +213,7 @@ async function validateEvidence(
   versionId: string,
   content: QuestionContent,
 ) {
+  await validateDossierQuestionTargets(tx, versionId, content);
   const changes = await (
     await evidenceComparison(tx, versionId)
   )(content.evidence);

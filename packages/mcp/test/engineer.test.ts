@@ -64,6 +64,280 @@ async function call(
   return JSON.parse((response.content as { text: string }[])[0].text);
 }
 
+const catalogInstruction =
+  "---\nname: describe-inventory\ndescription: Describe one catalog item\n---\nRead a catalog row. Write an item notice.\n";
+
+async function pinCatalog(files: Record<string, string | Buffer> = {}) {
+  service = await startTestService({ mode: "local" });
+  const { group } = await request("/groups", "POST", { name: "Catalog team" });
+  const { workflow, version } = await request("/workflows", "POST", {
+    groupId: group.id,
+    name: "catalog-notices",
+    goal: "Prepare catalog notices",
+    intent: "new-skill",
+    locale: "en",
+  });
+  const { skill } = await request("/skills", "POST", {
+    groupId: group.id,
+    name: "describe-inventory",
+  });
+  const upload = {
+    files: Object.entries({ "SKILL.md": catalogInstruction, ...files }).map(
+      ([path, content]) => ({
+        path,
+        content: Buffer.from(content).toString("base64"),
+      }),
+    ),
+  };
+  const skillPath = `/skills/${skill.id}`;
+  const { preview } = await request(
+    `${skillPath}/upload-preview`,
+    "POST",
+    upload,
+  );
+  await request(`${skillPath}/versions`, "POST", {
+    ...upload,
+    confirmed: true,
+    expectedHash: preview.hash,
+  });
+  const context = { workflowId: workflow.id, versionId: version.id };
+  const base = `/workflows/${workflow.id}/versions/${version.id}`;
+  await request(`${base}/pins`, "POST", {
+    skillId: skill.id,
+    hash: preview.hash,
+  });
+  await service.runSourceCheckJobs();
+  return { workflow, version, skill, preview, context, base };
+}
+
+it("opens an Engineer's working dossier job for the exact checked pins", async () => {
+  const { workflow, version, skill, preview, context } = await pinCatalog();
+  const job = await call(await connect(), "working_dossier_job", context);
+  expect(job).toMatchObject({
+    workflow: {
+      id: workflow.id,
+      versionId: version.id,
+      goal: "Prepare catalog notices",
+    },
+    dossier: { revision: 0, content: { interfaces: {} } },
+    pins: [
+      {
+        skillId: skill.id,
+        name: "describe-inventory",
+        hash: preview.hash,
+        inventory: [
+          {
+            path: "SKILL.md",
+            hash: createHash("sha256").update(catalogInstruction).digest("hex"),
+          },
+        ],
+      },
+    ],
+    schema: {
+      required: expect.arrayContaining(["revision", "pinsHash", "editId"]),
+    },
+    instructions: expect.stringContaining(
+      "A single-Skill workflow can have zero cross-Skill interfaces",
+    ),
+  });
+  expect(job.reviewUrl).toContain(service.baseUrl);
+  const expert = await connect(["expert"]);
+  const names = (await expert.listTools()).tools.map(({ name }) => name);
+  expect(names.filter((name) => name.includes("working_dossier"))).toEqual([]);
+});
+
+it("uses exact pinned bytes for matching, modified, missing, and empty Skill files", async () => {
+  const longPath = `references/${"x".repeat(251)}.txt`;
+  const bundled = {
+    "references/record.txt": "An inventory entry has a stable catalog ID.\n",
+    "references/examples.dat": Buffer.from("catalog\0".repeat(155_000)),
+    "references/empty.bin": "",
+    [longPath]: "A note with a long file name.\n",
+  };
+  const { skill, context } = await pinCatalog(bundled);
+  const client = await connect();
+  const job = await call(client, "working_dossier_job", context);
+  const localSourceRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), "badger-local-catalog-"),
+  );
+  folders.push(localSourceRoot);
+  const skillFolder = path.join(localSourceRoot, "describe-inventory");
+  await fs.mkdir(path.join(skillFolder, "references"), { recursive: true });
+  await fs.writeFile(path.join(skillFolder, "SKILL.md"), catalogInstruction);
+  await fs.writeFile(
+    path.join(skillFolder, "references/record.txt"),
+    "A local edit.\n",
+  );
+  if (process.platform !== "win32") {
+    const outside = path.join(localSourceRoot, "outside.txt");
+    await fs.writeFile(outside, bundled[longPath]);
+    await fs.symlink(outside, path.join(skillFolder, longPath));
+  }
+  const coordinates = { ...context, pinsHash: job.dossier.pinsHash };
+  const expected: Record<string, string | Buffer> = {
+    "SKILL.md": catalogInstruction,
+    ...bundled,
+  };
+  for (const [sourceOptions, local] of [
+    [{ localSourceRoot }, true],
+    [{ localSkillRoots: { [skill.id]: skillFolder } }, true],
+    [{}, false],
+  ] as const) {
+    const sources = await call(client, "working_dossier_sources", {
+      ...coordinates,
+      ...sourceOptions,
+    });
+    folders.push(sources.folder);
+    expect(sources.pinsHash).toBe(coordinates.pinsHash);
+    expect(sources.files).toHaveLength(Object.keys(expected).length);
+    if (process.platform !== "win32")
+      expect((await fs.stat(sources.folder)).mode & 0o777).toBe(0o700);
+    for (const file of sources.files) {
+      expect(file.skillId).toBe(skill.id);
+      expect(file.source).toBe(
+        local && file.path === "SKILL.md" ? "local" : "badger",
+      );
+      expect(
+        (await fs.readFile(file.localPath)).equals(
+          Buffer.from(expected[file.path]),
+        ),
+        file.path,
+      ).toBe(true);
+    }
+  }
+});
+
+it("resumes pinned source retrieval after the token's request limit resets", async () => {
+  const content = Buffer.alloc(1024 * 1024 + 1, "r");
+  const { skill, context } = await pinCatalog({
+    "references/bulk.dat": content,
+  });
+  const localCopy = await fs.mkdtemp(
+    path.join(os.tmpdir(), "badger-catalog-resume-"),
+  );
+  folders.push(localCopy);
+  const entry = path.join(localCopy, "SKILL.md");
+  await fs.writeFile(entry, catalogInstruction);
+  const client = await connect();
+  const job = await call(client, "working_dossier_job", context);
+  const args = {
+    ...context,
+    pinsHash: job.dossier.pinsHash,
+    localSkillRoots: { [skill.id]: localCopy },
+  };
+  for (let count = 0; count < 56; count++) await call(client, "whoami");
+  const limited = await client.callTool({
+    name: "working_dossier_sources",
+    arguments: args,
+  });
+  expect(limited.isError).toBe(true);
+  expect(JSON.stringify(limited.content)).toContain(
+    "Retry the same source request to resume",
+  );
+
+  await fs.rm(entry);
+  service.clock.advance(60_000);
+  const sources = await call(client, "working_dossier_sources", args);
+  folders.push(sources.folder);
+  expect(sources.files).toContainEqual(
+    expect.objectContaining({ path: "SKILL.md", source: "local" }),
+  );
+  const remote = sources.files.find(
+    ({ path }: { path: string }) => path === "references/bulk.dat",
+  );
+  expect((await fs.readFile(remote.localPath)).equals(content)).toBe(true);
+});
+
+it("saves a partial dossier from the MCP, replays its edit, and refuses a stale change", async () => {
+  const { skill, preview, context, base } = await pinCatalog();
+  const client = await connect();
+  const job = await call(client, "working_dossier_job", context);
+  const { pinsHash, revision } = job.dossier;
+  const sources = await call(client, "working_dossier_sources", {
+    ...context,
+    pinsHash,
+  });
+  folders.push(sources.folder);
+  const fieldId = `skill/${skill.id}/inputs`;
+  const fields = {
+    [fieldId]: {
+      state: "source",
+      value: "One catalog row",
+      evidence: [
+        {
+          skillId: skill.id,
+          hash: preview.hash,
+          path: "SKILL.md",
+          fileHash: job.pins[0].inventory[0].hash,
+          startLine: 5,
+          endLine: 5,
+        },
+      ],
+    },
+  };
+  const edit = { revision, pinsHash, editId: "describe-input", fields };
+  await fs.writeFile(
+    path.join(sources.folder, "edit.json"),
+    JSON.stringify(edit),
+  );
+  const anotherClient = await connect();
+  const foreignFolder = await anotherClient.callTool({
+    name: "save_working_dossier",
+    arguments: { ...context, folder: sources.folder },
+  });
+  expect(foreignFolder.isError).toBe(true);
+  expect(JSON.stringify(foreignFolder.content)).toContain(
+    "this MCP connection",
+  );
+  const saved = await call(client, "save_working_dossier", {
+    ...context,
+    folder: sources.folder,
+  });
+  expect(saved).toEqual({
+    revision: 1,
+    savedRevision: 1,
+    pinsHash,
+    reviewUrl: job.reviewUrl,
+  });
+
+  const dashboardEdit = {
+    revision: 1,
+    pinsHash,
+    editId: "identify-role",
+    fields: {
+      "workflow/workflow/roles": {
+        state: "missing",
+        reason: "Which team prepares notices?",
+      },
+    },
+  };
+  await request(`${base}/working-dossier`, "PATCH", dashboardEdit);
+  const replay = await call(client, "save_working_dossier", {
+    ...context,
+    edit,
+  });
+  expect(replay).toEqual({ ...saved, revision: 2 });
+  const stale = await client.callTool({
+    name: "save_working_dossier",
+    arguments: { ...context, edit: { ...edit, editId: "stale-edit" } },
+  });
+  expect(stale.isError).toBe(true);
+  expect(JSON.stringify(stale.content)).toContain("currentRevision: 2");
+  const reopened = await call(anotherClient, "working_dossier_job", context);
+  expect(reopened.dossier).toMatchObject({
+    revision: 2,
+    content: { fields: { ...fields, ...dashboardEdit.fields } },
+  });
+  const { readiness } = await call(client, "readiness", context);
+  expect(
+    readiness.find(({ topic }: { topic: string }) => topic === "scope")
+      .blockers,
+  ).toContainEqual({
+    id: "workflow/workflow/roles",
+    message: expect.stringContaining("Which team prepares notices?"),
+  });
+});
+
 it("renews a session's exclusive claim and hands saved questions back on disconnect", async () => {
   service = await startTestService({ mode: "local" });
   const { group } = await request("/groups", "POST", { name: "Sessions" });

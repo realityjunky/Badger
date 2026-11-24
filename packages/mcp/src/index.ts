@@ -19,6 +19,10 @@ import { jobsPath } from "./jobs.js";
 import { LocalDraftingSessions } from "./drafting-sessions.js";
 import { hostTools, LocalHostPreviews } from "./host-tools.js";
 import { LocalRuns, operatorTools } from "./operator-tools.js";
+import {
+  LocalWorkingDossiers,
+  readWorkingDossierJob,
+} from "./working-dossier.js";
 export type { ExpertMcpOptions } from "./api.js";
 
 class BadgerMcpServer extends Server {
@@ -27,6 +31,7 @@ class BadgerMcpServer extends Server {
     private readonly hostPreviews: LocalHostPreviews,
     private readonly runs: LocalRuns,
     private readonly drafting: LocalDraftingSessions,
+    private readonly dossiers: LocalWorkingDossiers,
     profile: string,
   ) {
     super(
@@ -34,7 +39,7 @@ class BadgerMcpServer extends Server {
       {
         capabilities: { tools: { listChanged: true }, resources: {} },
         instructions:
-          "Submit only what the user said. Never infer an expert's answers or sign off for a person. Save and submit only with the user's instruction. Engineers' Agents may draft suggestions from a claimed job's pinned evidence; those suggestions never become records until a person accepts them. People sign off in the dashboard. Read large results from the returned private local file or MCP resource.",
+          "Submit only what the user said when recording their answer. Save and submit only with the user's instruction. An Engineer's Agent can save working dossier drafts from checked pins and can draft suggestions from a claimed job's pinned evidence. Drafting job suggestions enter the workflow records when a person accepts them. People sign off in the dashboard. Read large results from the returned private local file or MCP resource.",
       },
     );
     this.onclose = () => {
@@ -42,6 +47,7 @@ class BadgerMcpServer extends Server {
       void hostPreviews.close().catch(() => undefined);
       void runs.close().catch(() => undefined);
       void drafting.close().catch(() => undefined);
+      void dossiers.close().catch(() => undefined);
     };
   }
 
@@ -53,6 +59,7 @@ class BadgerMcpServer extends Server {
       await this.hostPreviews.close();
       await this.runs.close();
       await this.drafting.close();
+      await this.dossiers.close();
     }
   }
 }
@@ -76,11 +83,13 @@ export function createBadgerMcp(
   const hostPreviews = new LocalHostPreviews();
   const runs = new LocalRuns(api, options.agentHost);
   const drafting = new LocalDraftingSessions(api);
+  const dossiers = new LocalWorkingDossiers(api);
   const server = new BadgerMcpServer(
     resources,
     hostPreviews,
     runs,
     drafting,
+    dossiers,
     profile,
   );
   const expert = expertTools(api, server);
@@ -107,7 +116,7 @@ export function createBadgerMcp(
                   "my_questions",
                 ].includes(t.definition.name),
             ),
-            ...engineerTools(api, drafting),
+            ...engineerTools(api, drafting, dossiers),
             ...operatorTools(api, runs, options.agentHost),
             ...(profile === "auto" ? hostTools(api, hostPreviews) : []),
           ];
@@ -208,16 +217,23 @@ export function createBadgerMcp(
           typeof args.workflowId === "string" &&
           typeof args.versionId === "string"
         ) {
+          const workflow = {
+            workflowId: args.workflowId,
+            versionId: args.versionId,
+          };
+          if (tool.definition.name === "working_dossier_sources") {
+            const job = await readWorkingDossierJob(api, workflow);
+            if (job.dossier.pinsHash !== args.pinsHash)
+              throw new Error(
+                "The pin set changed. Read the current working dossier job.",
+              );
+            return value;
+          }
           if (typeof args.jobId === "string")
             await api.request(
               `${jobsPath({ workflowId: args.workflowId, versionId: args.versionId })}/${encodeURIComponent(args.jobId)}`,
             );
-          await api.request(
-            questionnairePath({
-              workflowId: args.workflowId,
-              versionId: args.versionId,
-            }),
-          );
+          await api.request(questionnairePath(workflow));
         } else if (typeof args.skillId === "string") {
           await api.request(`/skills/${encodeURIComponent(args.skillId)}`);
         }

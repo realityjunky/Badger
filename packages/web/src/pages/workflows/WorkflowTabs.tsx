@@ -14,8 +14,7 @@ export function WorkflowTabs({
   const { t } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
-  const anchor = location.hash.slice(1);
-  const requestedTab = anchor.startsWith("study-") ? "source-study" : anchor;
+  const requestedTab = selectedWorkflowTab(location);
   const activeTab =
     items.find((item) => item.key === requestedTab)?.key ?? items[0]?.key;
   const secondaryKeySet = new Set(secondaryKeys);
@@ -112,4 +111,16 @@ export function WorkflowTabs({
       />
     </>
   );
+}
+
+export function selectedWorkflowTab({
+  hash,
+  search,
+}: {
+  hash: string;
+  search: string;
+}) {
+  const anchor =
+    hash.slice(1) || new URLSearchParams(search).get("stage") || "";
+  return anchor.startsWith("study-") ? "source-study" : anchor;
 }

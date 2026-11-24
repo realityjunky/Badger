@@ -3,11 +3,52 @@ import type { BadgerApi } from "./api.js";
 import { context, id, questionnairePath, tool } from "./tools.js";
 import { claimJob, finishJob, jobsPath } from "./jobs.js";
 import type { LocalDraftingSessions } from "./drafting-sessions.js";
+import {
+  readDossierReadiness,
+  readWorkingDossierJob,
+  type LocalWorkingDossiers,
+} from "./working-dossier.js";
 
-export function engineerTools(api: BadgerApi, sessions: LocalDraftingSessions) {
+export function engineerTools(
+  api: BadgerApi,
+  sessions: LocalDraftingSessions,
+  dossiers: LocalWorkingDossiers,
+) {
   const job = { ...context, jobId: id };
-  const folder = { ...job, folder: z.string().min(1).max(4096) };
+  const localFolder = z.string().min(1).max(4096);
+  const folder = { ...job, folder: localFolder };
   return [
+    tool(
+      "working_dossier_job",
+      "Read the current working Semantic dossier job for an exact workflow version, including checked Skill pins, the edit schema, reviewed answers, instructions, and the dashboard review link.",
+      context,
+      (args) => readWorkingDossierJob(api, args),
+      "compose",
+      true,
+    ),
+    tool(
+      "working_dossier_sources",
+      "Prepare a private folder with the job's exact pinned files. Quote dossier.pinsHash from working_dossier_job. An optional localSourceRoot holds folders named for each Skill. Supply localSkillRoots keyed by Skill ID for specific folders. Locally verified files and pinned files fetched from Badger are returned with their hashes. Read the returned localPath values without executing the files.",
+      {
+        ...context,
+        pinsHash: z.string().regex(/^[a-f0-9]{64}$/u),
+        localSourceRoot: localFolder.optional(),
+        localSkillRoots: z.record(id, localFolder).optional(),
+      },
+      (args) => dossiers.sources(args),
+      "compose",
+    ),
+    tool(
+      "save_working_dossier",
+      "Save a partial working Semantic dossier edit. Use the job's schema, current revision and pinsHash. Supply the edit inline or write it to edit.json in your working_dossier_sources folder. Keep the same editId and body for retries. On a revision conflict, read the latest job and reconcile the edit. Return the dashboard review link to the Engineer.",
+      {
+        ...context,
+        edit: z.record(z.string(), z.unknown()).optional(),
+        folder: localFolder.optional(),
+      },
+      (args) => dossiers.save(args),
+      "compose",
+    ),
     tool(
       "evaluation_status",
       "Read evaluation jobs, progress, immutable report history, and kernel publication readiness for a workflow version. Starting an evaluation requires the person to confirm in the dashboard.",
@@ -81,14 +122,9 @@ export function engineerTools(api: BadgerApi, sessions: LocalDraftingSessions) {
     ),
     tool(
       "readiness",
-      "Read the kernel's readiness blockers by dossier topic. This never confirms facts or approves a dossier.",
+      "Read readiness blockers by topic for the current Semantic dossier revision.",
       context,
-      async (args) => {
-        const { handoff } = await api.request<{
-          handoff: { readiness: unknown };
-        }>(`${questionnairePath(args)}/ledger`);
-        return { readiness: handoff.readiness };
-      },
+      (args) => readDossierReadiness(api, args),
       "compose",
       true,
     ),

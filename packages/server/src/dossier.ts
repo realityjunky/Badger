@@ -1,7 +1,9 @@
 import {
   canonicalHash,
+  composeSemanticDossier,
   createQuestionnaireHandoff,
   validateSemanticDossier,
+  WORKING_DOSSIER_FIELDS,
   type DossierComposition,
   type DossierSnapshot,
   type SemanticDossier,
@@ -13,10 +15,19 @@ import { readQuestionnaireRecords } from "./questionnaire/ledger.js";
 import { readSourceStudy } from "./source-study.js";
 import { listWorkflowPins } from "./workflow-source.js";
 import { toIsoString } from "./util.js";
-import type { WorkflowVersion } from "./workflows.js";
-import { gatePreview, invalidateGate, type GateState } from "./gates.js";
+import { listWorkflowVersions, type WorkflowVersion } from "./workflows.js";
+import {
+  gatePreview,
+  invalidateGate,
+  readGateConfirmations,
+  type GateState,
+} from "./gates.js";
 import { invalidateProposal } from "./proposal-invalidation.js";
 import { closeGateInbox, notifyWorkflowRoles } from "./inbox.js";
+import { readWorkingDossier, workingDossierBasis } from "./working-dossier.js";
+import { readWorkingRevision } from "./working-dossier-store.js";
+import { effectFindings, effectHead } from "./script-effects.js";
+import { readVersion } from "./skills/library.js";
 
 export interface DossierVersion {
   id: string;
@@ -107,13 +118,7 @@ export async function dossierInputs(
   };
 }
 
-/**
- * Content identical to the current version returns it unchanged. Any other
- * composition appends a head: to a new version, or to the earlier version
- * with identical content, which is selected again and needs the same new
- * approval as a new version.
- */
-export async function storeDossier(
+async function selectDossierArtifact(
   tx: Queryable,
   deps: ServiceDependencies,
   context: WriteContext,
@@ -121,7 +126,8 @@ export async function storeDossier(
   composition: DossierComposition,
 ) {
   const head = await readDossierHead(tx, versionId);
-  if (head?.hash === composition.hash) return { version: head, changed: false };
+  if (head?.hash === composition.hash)
+    return { head, version: head, changed: false as const };
   const versions = await readDossierVersions(tx, versionId);
   const earlier = versions.find((v) => v.hash === composition.hash);
   const version =
@@ -149,6 +155,35 @@ export async function storeDossier(
     select $1, $2, coalesce(max(sequence), 0) + 1, $3, $4, $5 from dossier_heads where workflow_version_id = $2`,
     [headId, versionId, version.hash, context.personId, deps.clock.now()],
   );
+  return { head, headId, earlier, version, changed: true as const };
+}
+
+export async function storeApprovedWorkingDossier(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  context: WriteContext,
+  versionId: string,
+  composition: DossierComposition,
+) {
+  return selectDossierArtifact(tx, deps, context, versionId, composition);
+}
+
+export async function storeDossier(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  context: WriteContext,
+  versionId: string,
+  composition: DossierComposition,
+) {
+  const stored = await selectDossierArtifact(
+    tx,
+    deps,
+    context,
+    versionId,
+    composition,
+  );
+  if (!stored.changed) return stored;
+  const { head, headId, earlier, version } = stored;
   const change = earlier
     ? "Selecting an earlier dossier version again"
     : "A new dossier version";
@@ -250,43 +285,60 @@ export async function reconcileDossier(
 ) {
   const head = await readDossierHead(tx, versionId);
   if (!head) return;
-  const ledger = createQuestionnaireHandoff({
-    records: await readQuestionnaireRecords(tx, versionId, context.personId),
-  });
-  if (canonicalHash(ledger) === canonicalHash(head.snapshot.ledger)) return;
-  await invalidateGate(
+  if (head.snapshot.dossier.workingDossier) {
+    const gate = await dossierGateState(tx, versionId, context.personId);
+    if (!gate.findings.length && gate.preview.boundHashes.dossier === head.hash)
+      return;
+  } else {
+    const ledger = createQuestionnaireHandoff({
+      records: await readQuestionnaireRecords(tx, versionId, context.personId),
+    });
+    if (canonicalHash(ledger) === canonicalHash(head.snapshot.ledger)) return;
+  }
+  await invalidateDossierApproval(
     tx,
     deps,
     context,
     versionId,
-    "dossier",
     "The dossier's questionnaire or source records changed",
-    ["Engineer", "Workflow owner"],
   );
+}
+
+export async function invalidateDossierApproval(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  context: WriteContext,
+  versionId: string,
+  reason: string,
+) {
+  await invalidateGate(tx, deps, context, versionId, "dossier", reason, [
+    "Engineer",
+    "Workflow owner",
+  ]);
   await updateDossierStages(tx, deps, versionId, false);
-  await invalidateGate(
-    tx,
-    deps,
-    context,
-    versionId,
-    "plan",
-    "The plan's dossier records changed",
-    ["Engineer", "Workflow owner"],
-  );
-  await invalidateProposal(
-    tx,
-    deps,
-    context,
-    versionId,
-    "The proposal's plan and dossier records changed",
-  );
+  await invalidateGate(tx, deps, context, versionId, "plan", reason, [
+    "Engineer",
+    "Workflow owner",
+  ]);
+  await invalidateProposal(tx, deps, context, versionId, reason);
 }
 
 export async function dossierGateState(
   tx: Queryable,
   versionId: string,
   personId: string,
-): Promise<GateState> {
+): Promise<GateState & { composition?: DossierComposition }> {
+  const basis = await workingDossierBasis(tx, versionId);
+  if (!basis.legacy && (basis.available || basis.revision)) {
+    const versions = await tx.query<{ workflow_id: string }>(
+      "select workflow_id from workflow_versions where id = $1",
+      [versionId],
+    );
+    const version = (
+      await listWorkflowVersions(tx, versions.rows[0]!.workflow_id)
+    ).find((entry) => entry.id === versionId)!;
+    return workingDossierGateState(tx, version, personId);
+  }
   const dossier = await readDossierHead(tx, versionId);
   const ledger = createQuestionnaireHandoff({
     records: await readQuestionnaireRecords(tx, versionId, personId),
@@ -339,6 +391,116 @@ export async function dossierGateState(
           ]
         : [],
       effects: [
+        { id: "questionnaire", state: "done" },
+        { id: "dossier", state: "done" },
+        { id: "plan-proposal", state: "active" },
+      ],
+    }),
+  };
+}
+
+async function workingDossierGateState(
+  tx: Queryable,
+  version: WorkflowVersion,
+  personId: string,
+): Promise<GateState & { composition?: DossierComposition }> {
+  const view = await readWorkingDossier(tx, version, personId, false);
+  const revision = await readWorkingRevision(tx, version.id);
+  const findings: GateState["findings"] = [];
+  const reject = (code: string, message: string) =>
+    findings.push({
+      code,
+      message,
+      severity: "error",
+      requiresUserDecision: false,
+      requiredAction: "repair",
+    });
+  if (!view.available)
+    reject(
+      "SOURCE_CHECK_NOT_PASSED",
+      "Wait for the current pin set to pass its source check",
+    );
+  const sources = (await readGateConfirmations(tx, version.id, "sources")).find(
+    (confirmation) => confirmation.invalidatedAt === null,
+  );
+  if (sources?.boundHashes.pins !== view.pinsHash)
+    reject("SOURCE_SET_NOT_CONFIRMED", "Confirm the current Sources gate");
+  if (!revision || revision.pinsHash !== view.pinsHash)
+    reject(
+      "DOSSIER_REVISION_REQUIRED",
+      "Save a dossier revision for the current pin set",
+    );
+  if (!Object.values(view.content.nodes).some((node) => node.kind === "node"))
+    reject("DOSSIER_NODE_REQUIRED", "Record at least one Node occurrence");
+  for (const { blockers } of view.readiness)
+    for (const blocker of blockers)
+      reject("DOSSIER_NOT_READY", blocker.message);
+  for (const id of view.projection.removedFields)
+    reject(
+      "DOSSIER_PIN_REMOVED",
+      `Remove or replace the field ${id} from a removed pin`,
+    );
+  for (const id of view.projection.staleFindings)
+    reject(
+      "DOSSIER_STALE_FINDING",
+      `Review the changed evidence for finding ${id}`,
+    );
+  const scriptEffects = [];
+  for (const pin of view.pins) {
+    const skill = await readVersion(tx, pin.skillId, pin.hash);
+    if (!skill.scripts.length) continue;
+    const effects = await effectHead(tx, pin.skillId, pin.hash);
+    for (const finding of effectFindings(skill, effects))
+      reject(finding.code, `${pin.name} — ${finding.message}`);
+    if (effects?.kind === "confirmation")
+      scriptEffects.push({
+        skillId: pin.skillId,
+        sourceHash: pin.hash,
+        revision: effects.revision,
+        hash: effects.hash,
+      });
+  }
+  const workingDossier =
+    !findings.length && revision
+      ? { ...revision, fields: WORKING_DOSSIER_FIELDS, scriptEffects }
+      : undefined;
+  let composition: DossierComposition | undefined;
+  if (workingDossier) {
+    const inputs = await dossierInputs(tx, version, personId);
+    composition = composeSemanticDossier({
+      ...inputs,
+      semantics: {},
+      records: { ...inputs.records, pins: undefined, sourceRecords: undefined },
+      workingDossier,
+    });
+    for (const finding of composition.findings)
+      reject("DOSSIER_INVALID", `${finding.path} — ${finding.message}`);
+  }
+  return {
+    findings,
+    composition,
+    preview: gatePreview({
+      gate: "dossier",
+      workflowVersionId: version.id,
+      boundHashes: {
+        dossier: composition?.hash ?? canonicalHash(null),
+        workingDossier: canonicalHash(workingDossier ?? null),
+        ...(composition
+          ? { ledger: canonicalHash(composition.snapshot.ledger) }
+          : {}),
+      },
+      records: revision
+        ? [
+            {
+              type: "working-dossier-revision",
+              id: String(revision.revision),
+              label: `Working dossier revision ${revision.revision}`,
+              hash: canonicalHash(revision),
+            },
+          ]
+        : [],
+      effects: [
+        { id: "source-study", state: "done" },
         { id: "questionnaire", state: "done" },
         { id: "dossier", state: "done" },
         { id: "plan-proposal", state: "active" },

@@ -1,6 +1,6 @@
 import { Button, Drawer, Tabs } from "antd";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type {
   Concern,
   Question,
@@ -30,6 +30,12 @@ export function QuestionInspector({
   active: boolean;
 }) {
   const { t, format, locale } = useI18n();
+  const [parameters, setParameters] = useSearchParams();
+  const answerPerson = parameters.get("answerPerson");
+  const answerRevision = Number(parameters.get("answerRevision"));
+  const openForRevision = Boolean(
+    question && answerPerson && answerRevision > 0,
+  );
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const sourceConcern =
@@ -40,15 +46,23 @@ export function QuestionInspector({
       <Button
         disabled={!question && !concern}
         aria-haspopup="dialog"
-        aria-expanded={open && active}
+        aria-expanded={(open || openForRevision) && active}
         onClick={() => setOpen(true)}
       >
         {t("questionnaire.inspector")}
       </Button>
       <Drawer
         title={t("questionnaire.inspector")}
-        open={open && active}
-        onClose={() => setOpen(false)}
+        open={(open || openForRevision) && active}
+        onClose={() => {
+          setOpen(false);
+          if (openForRevision) {
+            const query = new URLSearchParams(parameters);
+            query.delete("answerPerson");
+            query.delete("answerRevision");
+            setParameters(query, { replace: true });
+          }
+        }}
         size={expanded ? "100vw" : "min(600px, 100vw)"}
         className="questionnaire-inspector-drawer"
         extra={
@@ -147,6 +161,12 @@ export function QuestionInspector({
           )}
           {!concern && (
             <Tabs
+              key={
+                openForRevision
+                  ? `${answerPerson}/${answerRevision}`
+                  : "inspector"
+              }
+              defaultActiveKey={openForRevision ? "history" : "evidence"}
               className="underline-tabs"
               items={[
                 {
@@ -226,6 +246,12 @@ export function QuestionInspector({
                               <details
                                 className="questionnaire-history"
                                 key={r.revision}
+                                open={
+                                  a.personId === answerPerson &&
+                                  r.revision === answerRevision
+                                    ? true
+                                    : undefined
+                                }
                               >
                                 <summary>
                                   {format("questionnaire.answerRevision", {
