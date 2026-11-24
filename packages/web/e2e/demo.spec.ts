@@ -60,7 +60,8 @@ test("browse all seven demo pages and follow fixture records without live reques
     page.getByText("Release evidence", { exact: false }).first(),
   ).toBeVisible();
   await nav.getByRole("link", { name: "Skills", exact: true }).click();
-  await page.getByRole("link", { name: /Sample review Skill/ }).click();
+  await page.getByRole("combobox", { name: "Skill", exact: true }).click();
+  await page.getByRole("option", { name: /Sample review Skill/ }).click();
   await expect(page.locator(".skills-file-preview")).toContainText(
     "Use synthetic examples only.",
   );
@@ -97,7 +98,7 @@ test("browse all seven demo pages and follow fixture records without live reques
   await page.getByRole("menuitem", { name: "中文" }).click();
   await expect(page.getByTestId("demo-banner")).toContainText("只读");
   await page.reload();
-  await expect(page.getByTestId("demo-banner")).toContainText("read-only");
+  await expect(page.getByTestId("demo-banner")).toContainText("只读");
   expect(problems).toEqual([]);
 });
 

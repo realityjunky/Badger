@@ -119,7 +119,23 @@ test("filter the library by workflow and open the exact pinned Skill version", a
     },
   );
   await page.reload();
-  const library = page.getByRole("complementary", { name: "Skill library" });
+  const topBar = page.getByTestId("top-bar");
+  await expect(
+    topBar.getByRole("heading", { name: "Skills", level: 1 }),
+  ).toBeVisible();
+  await expect(topBar.getByTestId("scope-selector")).toHaveCount(0);
+  await expect(topBar.getByTestId("search-input")).toHaveCount(0);
+  await expect(
+    page.getByText("Immutable Skill versions and their inventories.", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("complementary", { name: "Skill library" }),
+  ).toHaveCount(0);
+  const files = page.getByRole("complementary", { name: "Files", exact: true });
+  await expect(files).toHaveCount(0);
+
   const workflowSelect = page.getByRole("combobox", {
     name: "Workflow",
     exact: true,
@@ -128,16 +144,17 @@ test("filter the library by workflow and open the exact pinned Skill version", a
     name: "Skill",
     exact: true,
   });
-  await expect(
-    library.getByRole("link", { name: new RegExp(other) }),
-  ).toBeVisible();
+  const otherOption = page.getByRole("option", { name: `${other} · ${name}` });
+  await skillSelect.click();
+  await skillSelect.fill(other);
+  await expect(otherOption).toBeVisible();
+  await skillSelect.press("Escape");
+
   await workflowSelect.click();
   await workflowSelect.fill(workflowName);
   await page.getByRole("option", { name: `${workflowName} · ${name}` }).click();
-  await expect(
-    library.getByRole("link", { name: new RegExp(other) }),
-  ).toHaveCount(0);
   await skillSelect.click();
+  await expect(otherOption).toHaveCount(0);
   await page.getByRole("option", { name: `${name} · ${name}` }).click();
   const query = `?workflow=${workflow.id}`;
   await expect(page).toHaveURL(location(first.hash) + query);
@@ -152,11 +169,15 @@ test("filter the library by workflow and open the exact pinned Skill version", a
   await page.goBack();
   await expect(versions).toContainText(first.hash);
 
+  await files.getByText("notes.md", { exact: true }).click();
+  await expect(versions).toContainText("Keep the original note.");
+
   await workflowSelect.click();
   await page.getByRole("option", { name: "All workflows" }).click();
-  await expect(
-    library.getByRole("link", { name: new RegExp(other) }),
-  ).toBeVisible();
+  await expect(files).toHaveCount(0);
+  await skillSelect.click();
+  await skillSelect.fill(other);
+  await expect(otherOption).toBeVisible();
 });
 
 test("select and download an unlabelled Skill snapshot and label it by hash", async ({

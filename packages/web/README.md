@@ -229,9 +229,9 @@ as needed on narrow screens.
   `/admin/tokens` URL redirects to `/settings/tokens`.
   The Admin header identifies organization administration and uses these local
   filters instead of workflow controls.
-  The top bar's Group selector filters the workflow catalog or Skill library;
+  The top bar's Group selector filters the workflow catalog.
   Workflow and Version open the corresponding record and preserve Questionnaire
-  or Evaluations context. Runs select a workflow, and Skills select a group.
+  or Evaluations context. Runs select a workflow.
   Selection restores from deep links and browser history. Search returns
   permitted workflows, questions, and Skills in that context, including draft
   questions only for their Engineers and Administrators, and links to each
@@ -303,7 +303,9 @@ as needed on narrow screens.
 - The rail is 228 px, or 64 px collapsed, and becomes a drawer below
   1024 px. The rounds navigator and question thread stack below 1180 px.
 - The Skills registry reads live group-owned entries, immutable versions,
-  source inventories, and script side-effect declarations. Folder and zip
+  source inventories, and script side-effect declarations. The Skill picker
+  searches entries by name or group. The Workflow picker narrows it to pinned
+  Skills and opens the pinned version when a Skill is selected. Folder and zip
   selection starts a preview; effects stay pending while a person confirms
   before the version is stored. A selected folder that holds a `.git` folder,
   by the server's rule, is refused before anything is read or sent, with the

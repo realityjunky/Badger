@@ -14,6 +14,7 @@ import {
 } from "antd";
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { pageTitleKey } from "../app/navigation.js";
 import { readBasePath } from "../app/paths.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
@@ -28,13 +29,14 @@ export interface TopBarProps {
   onOpenRail(): void;
 }
 
-/** The sticky bar: scope, search, inbox, language, and account. */
+/** The sticky bar shows page context and shared dashboard actions. */
 export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
   const demoMode = useDemoMode();
   const { t, format } = useI18n();
   const { preferences, person, update } = usePreferences();
   const navigate = useNavigate();
   const location = useLocation();
+  const pageTitle = pageTitleKey(location.pathname);
   const administration =
     location.pathname === "/admin" || location.pathname.startsWith("/admin/");
   const contextual =
@@ -137,7 +139,9 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
         />
       )}
 
-      {administration ? (
+      {pageTitle === "page.skills.title" ? (
+        <h1 className="top-bar-title">{t(pageTitle)}</h1>
+      ) : administration ? (
         <Typography.Text>{t("admin.context")}</Typography.Text>
       ) : (
         <>

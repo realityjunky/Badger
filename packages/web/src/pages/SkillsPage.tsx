@@ -13,12 +13,7 @@ import {
 } from "antd";
 import type { DataNode } from "antd/es/tree";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Link,
-  useNavigate,
-  useParams,
-  useSearchParams,
-} from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   createSkill,
   loadSkills,
@@ -35,7 +30,6 @@ import {
   type WorkflowSkillPin,
 } from "../api/workflows.js";
 import { readBasePath } from "../app/paths.js";
-import { PageHeader } from "../components/PageHeader.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { SkillBacklog } from "./skills/SkillBacklog.js";
 import { UploadSkillModal } from "./skills/UploadSkillModal.js";
@@ -296,30 +290,7 @@ export function SkillsPage() {
 
   return (
     <>
-      <PageHeader
-        title={t("page.skills.title")}
-        description={t("page.skills.description")}
-        actions={
-          <Space wrap>
-            {createGroups.length > 0 && (
-              <Button onClick={() => setCreating(true)}>
-                {t("skills.create")}
-              </Button>
-            )}
-            {selectedSkill?.canUpload && (
-              <>
-                <Button onClick={() => setUploading("git")}>
-                  {t("skills.importGit")}
-                </Button>
-                <Button type="primary" onClick={() => setUploading("upload")}>
-                  {t("skills.upload")}
-                </Button>
-              </>
-            )}
-          </Space>
-        }
-      />
-      <div className="skills-library-filters">
+      <div className="skills-toolbar">
         <label className="field">
           {t("scope.workflow")}
           <Select
@@ -369,6 +340,25 @@ export function SkillsPage() {
             }
           />
         </label>
+        {(createGroups.length > 0 || selectedSkill?.canUpload) && (
+          <Space className="skills-actions" wrap>
+            {createGroups.length > 0 && (
+              <Button onClick={() => setCreating(true)}>
+                {t("skills.create")}
+              </Button>
+            )}
+            {selectedSkill?.canUpload && (
+              <>
+                <Button onClick={() => setUploading("git")}>
+                  {t("skills.importGit")}
+                </Button>
+                <Button type="primary" onClick={() => setUploading("upload")}>
+                  {t("skills.upload")}
+                </Button>
+              </>
+            )}
+          </Space>
+        )}
       </div>
       {workflowFailed && (
         <Alert
@@ -408,208 +398,175 @@ export function SkillsPage() {
       )}
       {catalog === null ? (
         <Skeleton active />
+      ) : selectedSkill === null ? (
+        librarySkills.length === 0 &&
+        !loadingPins &&
+        !(workflowId && workflowFailed) && (
+          <p className="muted">
+            {t(workflowId ? "skills.workflowEmpty" : "skills.empty")}
+          </p>
+        )
       ) : (
-        <div className="three-pane skills-registry">
-          <aside className="pane" aria-label={t("skills.library")}>
-            <h2 className="pane-title">{t("skills.library")}</h2>
-            {librarySkills.length === 0 &&
-              !loadingPins &&
-              !(workflowId && workflowFailed) && (
-                <p className="muted">
-                  {t(workflowId ? "skills.workflowEmpty" : "skills.empty")}
-                </p>
-              )}
-            <ul className="skills-list">
-              {librarySkills.map((skill) => (
-                <li key={skill.id}>
-                  <Link
-                    className={
-                      skill.id === skillId
-                        ? "skills-link selected"
-                        : "skills-link"
-                    }
-                    aria-current={skill.id === skillId ? "page" : undefined}
-                    to={skillLocation(skill.id, pinHashes.get(skill.id))}
-                  >
-                    <strong>{skill.name}</strong>
-                    <span className="muted">
-                      {groupNames.get(skill.groupId)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-            {version !== null && (
-              <>
-                <h2 className="pane-title">{t("skills.files")}</h2>
-                <Tree.DirectoryTree
-                  key={version.hash}
-                  defaultExpandAll
-                  treeData={tree}
-                  selectedKeys={path === null ? [] : [path]}
-                  onSelect={(_, info) => {
-                    if (info.node.isLeaf) {
-                      selectFile(String(info.node.key));
-                    }
-                  }}
-                />
-              </>
-            )}
-          </aside>
+        <div className="skills-registry">
+          {version !== null && (
+            <aside className="pane" aria-label={t("skills.files")}>
+              <h2 className="pane-title">{t("skills.files")}</h2>
+              <Tree.DirectoryTree
+                key={version.hash}
+                defaultExpandAll
+                treeData={tree}
+                selectedKeys={path === null ? [] : [path]}
+                onSelect={(_, info) => {
+                  if (info.node.isLeaf) {
+                    selectFile(String(info.node.key));
+                  }
+                }}
+              />
+            </aside>
+          )}
           <section className="pane main-pane" aria-label={t("skills.versions")}>
-            {selectedSkill === null ? (
-              <p className="muted">{t("skills.selectSkill")}</p>
+            <h2 className="pane-title">{selectedSkill.name}</h2>
+            <SkillBacklog key={selectedSkill.id} skillId={selectedSkill.id} />
+            {versions === null ? (
+              <Skeleton active />
+            ) : versions.length === 0 && versionId === undefined ? (
+              <p>{t("skills.noVersions")}</p>
             ) : (
               <>
-                <h2 className="pane-title">{selectedSkill.name}</h2>
-                <SkillBacklog
-                  key={selectedSkill.id}
-                  skillId={selectedSkill.id}
-                />
-                {versions === null ? (
-                  <Skeleton active />
-                ) : versions.length === 0 && versionId === undefined ? (
-                  <p>{t("skills.noVersions")}</p>
+                <label className="field">
+                  {t("skills.versions")}
+                  <Select
+                    aria-label={t("skills.versions")}
+                    value={version?.hash ?? versionId}
+                    options={versions.map((entry) =>
+                      skillVersionOption(entry, i18n),
+                    )}
+                    onChange={(hash) =>
+                      navigate(skillLocation(selectedSkill.id, hash))
+                    }
+                  />
+                </label>
+                {version === null ? (
+                  <Alert type="error" title={t("skills.versionMissing")} />
                 ) : (
                   <>
-                    <label className="field">
-                      {t("skills.versions")}
-                      <Select
-                        aria-label={t("skills.versions")}
-                        value={version?.hash ?? versionId}
-                        options={versions.map((entry) =>
-                          skillVersionOption(entry, i18n),
-                        )}
-                        onChange={(hash) =>
-                          navigate(skillLocation(selectedSkill.id, hash))
-                        }
-                      />
-                    </label>
-                    {version === null ? (
-                      <Alert type="error" title={t("skills.versionMissing")} />
-                    ) : (
-                      <>
-                        <VersionDetails
-                          key={`${selectedSkill.id}:${version.hash}`}
-                          skill={selectedSkill}
-                          version={version}
-                          path={path}
-                          librarySearch={librarySearch}
-                          limits={catalog.limits}
-                          onUpdated={updateVersion}
-                          onSaved={selectSavedVersion}
-                          onDeleted={() => deleteSelection(version)}
-                        />
-                        <Tabs
-                          activeKey={tab}
-                          onChange={(key) => changeParameter("tab", key)}
-                          items={[
-                            {
-                              key: "preview",
-                              label: t("skills.preview"),
-                              children: (
-                                <>
-                                  <h3 className="skills-hash">{path}</h3>
-                                  <VersionFile
-                                    skillId={selectedSkill.id}
-                                    hash={version.hash}
-                                    path={path}
-                                  />
-                                </>
-                              ),
-                            },
-                            {
-                              key: "inventory",
-                              label: t("skills.inventory"),
-                              children: (
-                                <Table
-                                  size="small"
-                                  rowKey="path"
-                                  dataSource={version.inventory}
-                                  pagination={{ pageSize: 15 }}
-                                  columns={[
-                                    {
-                                      title: t("skills.path"),
-                                      dataIndex: "path",
-                                      render: (relative: string) => (
-                                        <Button
-                                          type="link"
-                                          className="skills-path-button"
-                                          onClick={() => {
-                                            selectFile(relative);
-                                          }}
-                                        >
-                                          {relative}
-                                        </Button>
-                                      ),
-                                    },
-                                    {
-                                      title: t("skills.bytes"),
-                                      dataIndex: "bytes",
-                                    },
-                                    {
-                                      title: t("skills.hash"),
-                                      dataIndex: "hash",
-                                      render: (hash: string) => (
-                                        <code title={hash}>
-                                          {hash.slice(0, 12)}
-                                        </code>
-                                      ),
-                                    },
-                                  ]}
-                                />
-                              ),
-                            },
-                            {
-                              key: "compare",
-                              label: t("skills.compare"),
-                              children: (
-                                <VersionComparison
-                                  skillId={selectedSkill.id}
-                                  versions={versions}
-                                  selected={version}
-                                />
-                              ),
-                            },
-                          ]}
-                        />
-                      </>
-                    )}
+                    <VersionDetails
+                      key={`${selectedSkill.id}:${version.hash}`}
+                      skill={selectedSkill}
+                      version={version}
+                      path={path}
+                      librarySearch={librarySearch}
+                      limits={catalog.limits}
+                      onUpdated={updateVersion}
+                      onSaved={selectSavedVersion}
+                      onDeleted={() => deleteSelection(version)}
+                    />
+                    <Tabs
+                      activeKey={tab}
+                      onChange={(key) => changeParameter("tab", key)}
+                      items={[
+                        {
+                          key: "preview",
+                          label: t("skills.preview"),
+                          children: (
+                            <>
+                              <h3 className="skills-hash">{path}</h3>
+                              <VersionFile
+                                skillId={selectedSkill.id}
+                                hash={version.hash}
+                                path={path}
+                              />
+                            </>
+                          ),
+                        },
+                        {
+                          key: "inventory",
+                          label: t("skills.inventory"),
+                          children: (
+                            <Table
+                              size="small"
+                              rowKey="path"
+                              dataSource={version.inventory}
+                              pagination={{ pageSize: 15 }}
+                              columns={[
+                                {
+                                  title: t("skills.path"),
+                                  dataIndex: "path",
+                                  render: (relative: string) => (
+                                    <Button
+                                      type="link"
+                                      className="skills-path-button"
+                                      onClick={() => {
+                                        selectFile(relative);
+                                      }}
+                                    >
+                                      {relative}
+                                    </Button>
+                                  ),
+                                },
+                                {
+                                  title: t("skills.bytes"),
+                                  dataIndex: "bytes",
+                                },
+                                {
+                                  title: t("skills.hash"),
+                                  dataIndex: "hash",
+                                  render: (hash: string) => (
+                                    <code title={hash}>
+                                      {hash.slice(0, 12)}
+                                    </code>
+                                  ),
+                                },
+                              ]}
+                            />
+                          ),
+                        },
+                        {
+                          key: "compare",
+                          label: t("skills.compare"),
+                          children: (
+                            <VersionComparison
+                              skillId={selectedSkill.id}
+                              versions={versions}
+                              selected={version}
+                            />
+                          ),
+                        },
+                      ]}
+                    />
                   </>
                 )}
               </>
             )}
           </section>
-          <aside className="pane" aria-label={t("skills.details")}>
-            <h2 className="pane-title">{t("skills.details")}</h2>
-            {version !== null && (
-              <>
-                <p>
-                  {format("skills.previewCount", {
-                    count: version.inventory.length,
-                  })}
-                </p>
-                <h3>{t("skills.effects")}</h3>
-                {version.scripts.length === 0 ? (
-                  <p className="muted">{t("skills.noScripts")}</p>
-                ) : (
-                  version.scripts.map((script) => (
-                    <div key={script.path} className="skills-script">
-                      <code className="skills-hash">{script.path}</code>
-                      <p>
-                        {script.sideEffects === "undeclared"
-                          ? t("skills.undeclared")
-                          : script.sideEffects
-                              .map((effect) => t(`skills.effect.${effect}`))
-                              .join(", ")}
-                      </p>
-                    </div>
-                  ))
-                )}
-                <p className="muted">{t("skills.immutableHint")}</p>
-              </>
-            )}
-          </aside>
+          {version !== null && (
+            <aside className="pane" aria-label={t("skills.details")}>
+              <h2 className="pane-title">{t("skills.details")}</h2>
+              <p>
+                {format("skills.previewCount", {
+                  count: version.inventory.length,
+                })}
+              </p>
+              <h3>{t("skills.effects")}</h3>
+              {version.scripts.length === 0 ? (
+                <p className="muted">{t("skills.noScripts")}</p>
+              ) : (
+                version.scripts.map((script) => (
+                  <div key={script.path} className="skills-script">
+                    <code className="skills-hash">{script.path}</code>
+                    <p>
+                      {script.sideEffects === "undeclared"
+                        ? t("skills.undeclared")
+                        : script.sideEffects
+                            .map((effect) => t(`skills.effect.${effect}`))
+                            .join(", ")}
+                    </p>
+                  </div>
+                ))
+              )}
+              <p className="muted">{t("skills.immutableHint")}</p>
+            </aside>
+          )}
         </div>
       )}
       <Modal
