@@ -16,9 +16,15 @@ export const EMPTY_INBOX_FILTERS: InboxFilters = {
 
 export interface InboxItem {
   id: string;
-  workflowVersionId: string;
-  workflowName: string;
-  versionNumber: number;
+  workflowVersionId: string | null;
+  workflowName: string | null;
+  versionNumber: number | null;
+  skillSubject?: {
+    skillId: string;
+    skillName: string;
+    versionHash: string;
+    label: string | null;
+  };
   semanticVersion?: string | null;
   gate: string;
   kind:

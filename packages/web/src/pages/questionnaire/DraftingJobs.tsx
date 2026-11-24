@@ -23,7 +23,7 @@ import { Link, useLocation } from "react-router-dom";
 import { draftingEffectLabels } from "../../api/drafting-jobs.js";
 import {
   questionnaireRequest,
-  type QuestionnaireView,
+  type WorkflowQuestionnaireView,
 } from "../../api/questionnaire.js";
 import type {
   DraftingJob,
@@ -75,7 +75,7 @@ export function DraftingJobs({
   basePath: string;
   path: string;
   jobsHref: string;
-  view: QuestionnaireView;
+  view: WorkflowQuestionnaireView;
   showSourceStudy?: boolean;
   onChanged(): void;
 }) {

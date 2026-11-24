@@ -15,12 +15,16 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   questionnairePath,
+  skillVersionHref,
+  skillVersionCaption,
   questionnaireRequest,
   QuestionnaireError,
   type Question,
   type QuestionContent,
   type Concern,
   type QuestionnaireVersion,
+  type QuestionnaireSubject,
+  type SkillQuestionnaireOption,
   type QuestionnaireView,
   type Round,
   type RoundPreview,
@@ -56,6 +60,17 @@ import {
   type QuestionnaireTab,
 } from "./questionnaire/QuestionnaireTabs.js";
 
+function subjectQuery(subject: QuestionnaireSubject) {
+  return new URLSearchParams(
+    "skillId" in subject
+      ? {
+          skill: subject.skillId,
+          skillVersion: subject.versionHash,
+        }
+      : { workflow: subject.workflowId, version: subject.versionId },
+  ).toString();
+}
+
 export function QuestionnairePage() {
   const { t, format, locale } = useI18n();
   const { connected, notice } = useLiveUpdates();
@@ -66,11 +81,13 @@ export function QuestionnairePage() {
   const query = new URLSearchParams(location.search);
   const requestedWorkflowId = query.get("workflow");
   const requestedVersionId = query.get("version");
+  const requestedSkillId = query.get("skill");
+  const requestedSkillVersion = query.get("skillVersion");
   const [versions, setVersions] = useState<QuestionnaireVersion[]>([]);
-  const [selection, setSelection] = useState<{
-    workflowId: string;
-    versionId: string;
-  } | null>(null);
+  const [skillVersions, setSkillVersions] = useState<
+    SkillQuestionnaireOption[]
+  >([]);
+  const [selection, setSelection] = useState<QuestionnaireSubject | null>(null);
   const [view, setView] = useState<QuestionnaireView | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -100,9 +117,20 @@ export function QuestionnairePage() {
   const [settingsRevision, setSettingsRevision] = useState(0);
   const answerEditor = useRef<AnswerEditorHandle>(null);
   const requestSequence = useRef(0);
-  const path = selection
-    ? questionnairePath(selection.workflowId, selection.versionId)
-    : null;
+  const workflowSelection =
+    selection && "workflowId" in selection ? selection : null;
+  const skillSelection = selection && "skillId" in selection ? selection : null;
+  const workflowView = view && "workflow" in view ? view : null;
+  const skillView = view && "subject" in view ? view : null;
+  const activeSubjectId = workflowSelection?.versionId ?? skillView?.subject.id;
+  const path = workflowSelection
+    ? questionnairePath(
+        workflowSelection.workflowId,
+        workflowSelection.versionId,
+      )
+    : skillSelection
+      ? `${skillVersionHref(skillSelection.skillId, skillSelection.versionHash)}/questionnaire`
+      : null;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -110,13 +138,11 @@ export function QuestionnairePage() {
       try {
         const catalog = await questionnaireRequest<{
           versions: QuestionnaireVersion[];
+          skillVersions?: SkillQuestionnaireOption[];
         }>(basePath, "/questionnaire", "GET", undefined, controller.signal);
         const recordId = questionId ?? concernId;
         const linked = recordId
-          ? await questionnaireRequest<{
-              workflowId: string;
-              versionId: string;
-            }>(
+          ? await questionnaireRequest<QuestionnaireSubject>(
               basePath,
               `/questionnaire/${questionId ? "questions" : "concerns"}/${encodeURIComponent(recordId)}`,
               "GET",
@@ -126,15 +152,30 @@ export function QuestionnairePage() {
           : null;
         if (controller.signal.aborted) return;
         setVersions(catalog.versions);
+        const skills = catalog.skillVersions ?? [];
+        setSkillVersions(skills);
+        const defaultSkill = skills[0];
         const selected =
           linked ??
-          catalog.versions.find(
-            (v) =>
-              v.workflowId === requestedWorkflowId &&
-              v.versionId === requestedVersionId,
-          ) ??
-          catalog.versions[0] ??
-          null;
+          (requestedSkillId && requestedSkillVersion
+            ? {
+                kind: "skill" as const,
+                skillId: requestedSkillId,
+                versionHash: requestedSkillVersion,
+              }
+            : (catalog.versions.find(
+                (v) =>
+                  v.workflowId === requestedWorkflowId &&
+                  v.versionId === requestedVersionId,
+              ) ??
+              catalog.versions[0] ??
+              (defaultSkill
+                ? {
+                    kind: "skill" as const,
+                    skillId: defaultSkill.skillId,
+                    versionHash: defaultSkill.versionHash,
+                  }
+                : null)));
         setSelection(selected);
       } catch (error) {
         if (!controller.signal.aborted) {
@@ -153,6 +194,8 @@ export function QuestionnairePage() {
     concernId,
     requestedWorkflowId,
     requestedVersionId,
+    requestedSkillId,
+    requestedSkillVersion,
   ]);
 
   const reload = useCallback(async () => {
@@ -193,9 +236,9 @@ export function QuestionnairePage() {
     };
   }, [reload]);
   useEffect(() => {
-    if (selection && notice.versionIds.includes(selection.versionId))
+    if (activeSubjectId && notice.versionIds.includes(activeSubjectId))
       void reload();
-  }, [notice, selection?.versionId, reload]);
+  }, [notice, activeSubjectId, reload]);
   useEffect(() => {
     const timer = setInterval(() => {
       if (!document.hidden) void reload();
@@ -221,13 +264,17 @@ export function QuestionnairePage() {
   const compose = view?.capabilities.compose === true;
   const reviewSuggestions = view?.capabilities.reviewSuggestions === true;
   const activeTab: QuestionnaireTab =
-    query.get("panel") === "ledger"
+    !skillSelection && query.get("panel") === "ledger"
       ? "ledger"
       : query.get("panel") === "suggestions" && reviewSuggestions
         ? "suggestions"
         : "questions";
   const dossierPath =
-    selection && workingDossierPath(selection.workflowId, selection.versionId);
+    workflowSelection &&
+    workingDossierPath(
+      workflowSelection.workflowId,
+      workflowSelection.versionId,
+    );
   const hasDossierTarget = selected?.targets.some(
     (target) => target.kind === "field" || target.kind === "interface",
   );
@@ -239,7 +286,7 @@ export function QuestionnairePage() {
   } = useWorkingDossier(
     basePath,
     dossierPath,
-    selection?.versionId,
+    workflowSelection?.versionId,
     activeTab !== "questions" || Boolean(hasDossierTarget || editing?.seed),
   );
   const dossierFields = workingDossier?.projection.fields;
@@ -277,19 +324,16 @@ export function QuestionnairePage() {
         revisions: a.revisions.filter((r) => r.state === "submitted"),
       }))
       .filter((a) => a.revisions.length > 0) ?? [];
-  const versionQuery = selection
-    ? `workflow=${encodeURIComponent(selection.workflowId)}&version=${encodeURIComponent(selection.versionId)}`
-    : "";
+  const versionQuery = selection ? subjectQuery(selection) : "";
+  const queueRoundDraft = !skillSelection && !questionSeed && queueQuestions;
   const suggestionsQuery = new URLSearchParams(versionQuery);
   suggestionsQuery.set("panel", "suggestions");
   const groupId = query.get("group");
   if (groupId) suggestionsQuery.set("group", groupId);
   const changePanel = (tab: QuestionnaireTab) => {
     const parameters = new URLSearchParams(location.search);
-    if (selection) {
-      parameters.set("workflow", selection.workflowId);
-      parameters.set("version", selection.versionId);
-    }
+    for (const [key, value] of new URLSearchParams(versionQuery))
+      parameters.set(key, value);
     if (tab === "questions") parameters.delete("panel");
     else parameters.set("panel", tab);
     navigate({ pathname: location.pathname, search: parameters.toString() });
@@ -406,11 +450,11 @@ export function QuestionnairePage() {
   }
 
   const ledgerHistory =
-    view && path ? (
+    workflowView && path ? (
       <QuestionnaireLedger
         basePath={basePath}
         path={path}
-        view={view}
+        view={workflowView}
         sinceRound={query.get("sinceRound")}
         showReadiness={!showWorkingDossier}
         onSinceRound={(id) => {
@@ -435,25 +479,36 @@ export function QuestionnairePage() {
       <div className="questionnaire-toolbar">
         <Select
           className="questionnaire-version"
-          aria-label={t("questionnaire.workflowVersion")}
+          aria-label={t("questionnaire.subject")}
           placeholder={t("questionnaire.chooseVersion")}
-          value={
-            selection
-              ? `${selection.workflowId}/${selection.versionId}`
-              : undefined
-          }
-          options={versions.map((v) => ({
-            value: `${v.workflowId}/${v.versionId}`,
-            label: `${v.workflowName} · ${workflowVersionLabel(v)}`,
-          }))}
-          onChange={(value) => {
-            const chosen = versions.find(
-              (v) => `${v.workflowId}/${v.versionId}` === value,
-            )!;
-            navigate(
-              `/questionnaire?workflow=${encodeURIComponent(chosen.workflowId)}&version=${encodeURIComponent(chosen.versionId)}`,
-            );
-          }}
+          value={versionQuery || undefined}
+          showSearch={{ optionFilterProp: "label" }}
+          virtual={false}
+          options={[
+            ...(versions.length
+              ? [
+                  {
+                    label: t("questionnaire.workflowVersions"),
+                    options: versions.map((version) => ({
+                      value: subjectQuery(version),
+                      label: `${version.workflowName} · ${workflowVersionLabel(version)}`,
+                    })),
+                  },
+                ]
+              : []),
+            ...(skillVersions.length
+              ? [
+                  {
+                    label: t("questionnaire.skillVersions"),
+                    options: skillVersions.map((version) => ({
+                      value: subjectQuery({ kind: "skill", ...version }),
+                      label: `${version.skillName} · ${skillVersionCaption(version.versionHash, version.label)} · ${version.groupName}${version.retiredAt ? ` · ${t("questionnaire.retiredSkillVersion")}` : ""}`,
+                    })),
+                  },
+                ]
+              : []),
+          ]}
+          onChange={(value) => navigate(`/questionnaire?${value}`)}
         />
         {view && (
           <Tag>
@@ -487,26 +542,42 @@ export function QuestionnairePage() {
         )}
       </div>
       {failure && <Alert type="error" showIcon message={failure} />}
-      {view && <StageReviewGuidance stage="questionnaire" />}
+      {workflowView && <StageReviewGuidance stage="questionnaire" />}
+      {skillView && (
+        <p className="muted">
+          {skillView.groupName} · {skillView.skill.name} ·{" "}
+          {skillView.subject.label && `${skillView.subject.label} · `}
+          {skillView.subject.retiredAt &&
+            `${t("questionnaire.retiredSkillVersion")} · `}
+          <Link
+            to={skillVersionHref(
+              skillView.skill.id,
+              skillView.subject.versionHash,
+            )}
+          >
+            {skillView.subject.versionHash}
+          </Link>
+        </p>
+      )}
       <QuestionnaireTabs
         key={path ?? "unselected"}
         activeTab={activeTab}
         onChange={changePanel}
         suggestions={
-          view && path && reviewSuggestions ? (
+          workflowView && path && reviewSuggestions ? (
             <DraftingJobs
               key={path}
               basePath={basePath}
               path={path}
               jobsHref={`/questionnaire?${suggestionsQuery}`}
-              view={view}
+              view={workflowView}
               showSourceStudy={workingDossier?.legacy ?? false}
               onChanged={() => void reload()}
             />
           ) : undefined
         }
         ledger={
-          view && path ? (
+          workflowView && path ? (
             <>
               {dossierFailure && (
                 <Alert
@@ -610,15 +681,17 @@ export function QuestionnairePage() {
                 >
                   {t("questionnaire.newRound")}
                 </Button>
-                <Button
-                  onClick={() => {
-                    setRoundLimit(view?.settings.roundSizeLimit ?? null);
-                    setSettingsRevision(view?.settings.revision ?? 0);
-                    setSettings(true);
-                  }}
-                >
-                  {t("questionnaire.roundLimit")}
-                </Button>
+                {workflowView && (
+                  <Button
+                    onClick={() => {
+                      setRoundLimit(workflowView.settings.roundSizeLimit);
+                      setSettingsRevision(workflowView.settings.revision);
+                      setSettings(true);
+                    }}
+                  >
+                    {t("questionnaire.roundLimit")}
+                  </Button>
+                )}
               </Space>
             )}
             {!view?.rounds.length && (
@@ -666,26 +739,32 @@ export function QuestionnairePage() {
                 </li>
               ))}
             </ol>
-            <h2 className="pane-title">{t("questionnaire.concerns")}</h2>
-            {!view?.concerns.length && (
-              <p className="muted">{t("questionnaire.noConcerns")}</p>
+            {!skillSelection && (
+              <>
+                <h2 className="pane-title">{t("questionnaire.concerns")}</h2>
+                {!view?.concerns.length && (
+                  <p className="muted">{t("questionnaire.noConcerns")}</p>
+                )}
+                <ul className="questionnaire-concerns">
+                  {view?.concerns.map((concern) => (
+                    <li key={concern.id}>
+                      <Link
+                        to={`/questionnaire/concerns/${encodeURIComponent(concern.id)}`}
+                        aria-current={
+                          concern.id === concernId ? "page" : undefined
+                        }
+                        onClick={() => setEditing(null)}
+                      >
+                        {concern.text}
+                      </Link>
+                      <span className="questionnaire-question-meta">
+                        {t(`questionnaire.concernState.${concern.state}`)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
-            <ul className="questionnaire-concerns">
-              {view?.concerns.map((concern) => (
-                <li key={concern.id}>
-                  <Link
-                    to={`/questionnaire/concerns/${encodeURIComponent(concern.id)}`}
-                    aria-current={concern.id === concernId ? "page" : undefined}
-                    onClick={() => setEditing(null)}
-                  >
-                    {concern.text}
-                  </Link>
-                  <span className="questionnaire-question-meta">
-                    {t(`questionnaire.concernState.${concern.state}`)}
-                  </span>
-                </li>
-              ))}
-            </ul>
           </section>
           <section
             className="pane main-pane"
@@ -710,13 +789,13 @@ export function QuestionnairePage() {
                 onSaved={openQuestion}
                 onCancel={() => setEditing(null)}
               />
-            ) : selectedConcern && view && path ? (
+            ) : selectedConcern && workflowView && path ? (
               <ConcernPanel
                 key={selectedConcern.id}
                 basePath={basePath}
                 path={path}
                 concern={selectedConcern}
-                view={view}
+                view={workflowView}
                 onChanged={() => void reload()}
                 onQuestion={(roundId) =>
                   setEditing({ roundId, concern: selectedConcern })
@@ -856,6 +935,7 @@ export function QuestionnairePage() {
                         path={path}
                         basePath={basePath}
                         reload={reload}
+                        skillVersions={skillVersions}
                       />
                     )}
                     {selected.canAnswer && path && view && (
@@ -953,7 +1033,7 @@ export function QuestionnairePage() {
               "POST",
               {
                 title: roundTitle,
-                draftQuestions: !questionSeed && queueQuestions,
+                draftQuestions: queueRoundDraft,
               },
             );
             setNewRound(false);
@@ -961,7 +1041,7 @@ export function QuestionnairePage() {
               setEditing({ roundId: result.round.id, seed: questionSeed });
             setQuestionSeed(undefined);
             navigate(
-              `/questionnaire?${versionQuery}&round=${encodeURIComponent(result.round.id)}${!questionSeed && queueQuestions ? "&panel=suggestions" : ""}`,
+              `/questionnaire?${versionQuery}&round=${encodeURIComponent(result.round.id)}${queueRoundDraft ? "&panel=suggestions" : ""}`,
             );
             await reload();
           })
@@ -976,7 +1056,7 @@ export function QuestionnairePage() {
           maxLength={200}
           onChange={(event) => setRoundTitle(event.target.value)}
         />
-        {!questionSeed && (
+        {!skillSelection && !questionSeed && (
           <>
             <p>
               <Checkbox

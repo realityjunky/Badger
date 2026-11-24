@@ -1,6 +1,9 @@
 import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
-import { notifyQuestionEngineers, notifyRestatement } from "./resolutions.js";
+import {
+  notifyQuestionCoordinators,
+  notifyRestatement,
+} from "./resolutions.js";
 import { notifyQuestion } from "./store.js";
 
 type EngineerKind = "answer-submitted" | "question-reopened";
@@ -76,7 +79,7 @@ export async function moveOpenWork(
     await notifyQuestion(tx, deps, versionId, questionId, revision, audience);
   for (const [questionId, kinds] of engineers)
     for (const kind of kinds)
-      await notifyQuestionEngineers(
+      await notifyQuestionCoordinators(
         tx,
         deps,
         versionId,

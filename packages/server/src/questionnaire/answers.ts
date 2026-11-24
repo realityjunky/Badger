@@ -1,6 +1,7 @@
+import { questionnaireScopeId, type QuestionnaireScope } from "./subject.js";
 import {
   invalidateQuestionFacts,
-  notifyQuestionEngineers,
+  notifyQuestionCoordinators,
 } from "./resolutions.js";
 import type { WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
@@ -53,18 +54,18 @@ function toRevision(row: AnswerRow): AnswerRevision {
 /** Drafts belong only to their author; everyone else sees submitted history. */
 export async function readAnswers(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   personId: string,
 ): Promise<Answer[]> {
   const rows = await tx.query<AnswerRow>(
     `select r.*, p.display_name,
       (r.state = 'submitted' and r.question_revision = q.revision
         and exists (select 1 from question_answers head where head.question_id = r.question_id and head.person_id = r.person_id and head.revision = r.revision)
-        and exists (select 1 from question_recipients recipient join role_bindings binding on binding.id = recipient.binding_id where recipient.question_id = r.question_id and binding.person_id = r.person_id)) as eligible_for_resolution
+        and exists (select 1 from current_question_recipients recipient where recipient.question_id = r.question_id and recipient.person_id = r.person_id)) as eligible_for_resolution
       from answer_revisions r join questions q on q.id = r.question_id
-    join people p on p.id = r.person_id where q.workflow_version_id = $1 and q.state <> 'draft'
+    join people p on p.id = r.person_id where q.subject_id = $1 and q.state <> 'draft'
       and (r.person_id = $2 or r.state = 'submitted') order by r.question_id, r.person_id, r.revision`,
-    [versionId, personId],
+    [questionnaireScopeId(scope), personId],
   );
   const answers = new Map<string, Answer>();
   for (const row of rows.rows) {
@@ -92,7 +93,7 @@ export interface AnswerInput {
 /** Called under the version lock, also serializing first drafts on two devices. */
 async function answerForWrite(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   personId: string,
   input: AnswerInput,
 ) {
@@ -107,11 +108,11 @@ async function answerForWrite(
       content: { answerType?: AnswerType };
     }>(
       `select q.id, q.round_id, q.revision, q.resolved_at, q.state, qr.content,
-    exists (select 1 from question_recipients r join role_bindings b on b.id = r.binding_id
-      where r.question_id = q.id and b.person_id = $3) as assigned
+    exists (select 1 from current_question_recipients r
+      where r.question_id = q.id and r.person_id = $3) as assigned
     from questions q join question_revisions qr on qr.question_id = q.id and qr.revision = q.revision
-    where q.workflow_version_id = $1 and q.id = $2 and q.state <> 'draft'`,
-      [versionId, input.questionId, personId],
+    where q.subject_id = $1 and q.id = $2 and q.state <> 'draft'`,
+      [questionnaireScopeId(scope), input.questionId, personId],
     )
   ).rows[0];
   const question =
@@ -159,7 +160,7 @@ async function appendAnswer(
   tx: Queryable,
   deps: ServiceDependencies,
   context: WriteContext,
-  versionId: string,
+  scope: QuestionnaireScope,
   input: AnswerInput,
   content: {
     text: string;
@@ -173,7 +174,7 @@ async function appendAnswer(
     tx,
     deps,
     context,
-    versionId,
+    scope,
     input.questionId,
     "The confirmed answer changed",
   );
@@ -200,16 +201,16 @@ async function appendAnswer(
       JSON.stringify(content.attachments),
     ],
   );
-  await advanceQuestionnaireRevision(tx, versionId, deps, context);
+  await advanceQuestionnaireRevision(tx, scope, deps, context);
   if (state === "submitted") {
     await tx.query(
       "update inbox_items set state = 'done', revision = revision + 1, updated_at = $2 where question_id = $1 and kind = 'answer-submitted' and state <> 'done'",
       [input.questionId, deps.clock.now()],
     );
-    await notifyQuestionEngineers(
+    await notifyQuestionCoordinators(
       tx,
       deps,
-      versionId,
+      scope,
       input.questionId,
       `${input.questionId}:${context.personId}:${revision}`,
       "answer-submitted",
@@ -231,17 +232,12 @@ export async function saveAnswer(
   tx: Queryable,
   deps: ServiceDependencies,
   context: WriteContext,
-  versionId: string,
+  scope: QuestionnaireScope,
   input: AnswerInput,
   payload: { text?: unknown; value?: unknown; attachments?: unknown },
   agentHost: string | null,
 ) {
-  const { question } = await answerForWrite(
-    tx,
-    versionId,
-    context.personId,
-    input,
-  );
+  const { question } = await answerForWrite(tx, scope, context.personId, input);
   const attachments = await answerAttachments(
     tx,
     input.questionId,
@@ -259,13 +255,13 @@ export async function saveAnswer(
     tx,
     deps,
     context,
-    versionId,
+    scope,
     input,
     { ...content, attachments },
     "draft",
     agentHost,
   );
-  return (await readAnswers(tx, versionId, context.personId)).find(
+  return (await readAnswers(tx, scope, context.personId)).find(
     (a) => a.questionId === input.questionId && a.personId === context.personId,
   )!;
 }
@@ -275,7 +271,7 @@ export async function submitAnswers(
   tx: Queryable,
   deps: ServiceDependencies,
   context: WriteContext,
-  versionId: string,
+  scope: QuestionnaireScope,
   inputs: AnswerInput[],
   agentHost: string | null,
   roundId?: string,
@@ -290,9 +286,9 @@ export async function submitAnswers(
     );
   if (roundId !== undefined) {
     const assigned = (
-      await readQuestions(tx, versionId, context.personId, false)
+      await readQuestions(tx, scope, context.personId, false)
     ).filter((question) => question.roundId === roundId && question.canAnswer);
-    const answers = await readAnswers(tx, versionId, context.personId);
+    const answers = await readAnswers(tx, scope, context.personId);
     const missing = assigned.some((question) => {
       const answer = answers.find(
         (a) => a.questionId === question.id && a.personId === context.personId,
@@ -314,7 +310,7 @@ export async function submitAnswers(
   for (const input of inputs) {
     const { question, answer } = await answerForWrite(
       tx,
-      versionId,
+      scope,
       context.personId,
       input,
     );
@@ -345,7 +341,7 @@ export async function submitAnswers(
       tx,
       deps,
       context,
-      versionId,
+      scope,
       input,
       content,
       "submitted",
@@ -359,14 +355,14 @@ export async function submitAnswers(
     );
     await tx.query(
       `update questions q set state = case when q.state = 'needs-reconfirmation' then q.state when not exists (
-      select 1 from question_recipients a join role_bindings b on b.id = a.binding_id where a.question_id = q.id
-        and (b.person_id is null or not exists (select 1 from answer_revisions r where r.question_id = q.id
-          and r.person_id = b.person_id and r.question_revision = q.revision and r.state = 'submitted'))
+      select 1 from current_question_recipients a where a.question_id = q.id
+        and (a.person_id is null or not exists (select 1 from answer_revisions r where r.question_id = q.id
+          and r.person_id = a.person_id and r.question_revision = q.revision and r.state = 'submitted'))
       ) then 'answered' else 'open' end where q.id = $1`,
       [input.questionId],
     );
   }
-  return (await readAnswers(tx, versionId, context.personId)).filter(
+  return (await readAnswers(tx, scope, context.personId)).filter(
     (a) =>
       a.personId === context.personId &&
       inputs.some((i) => i.questionId === a.questionId),

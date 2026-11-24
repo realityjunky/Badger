@@ -1,3 +1,4 @@
+import { questionnaireScopeId, type QuestionnaireScope } from "./subject.js";
 import type { WriteContext } from "../audit.js";
 import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
@@ -11,7 +12,7 @@ import {
 
 export async function readComments(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   compose: boolean,
 ): Promise<QuestionComment[]> {
   const rows = await tx.query<{
@@ -28,9 +29,9 @@ export async function readComments(
     `select c.id, c.question_id, c.person_id, p.display_name, c.revision as current_revision, r.*
     from question_comments c join questions q on q.id = c.question_id
     join people p on p.id = c.person_id join comment_revisions r on r.comment_id = c.id
-    where q.workflow_version_id = $1 and ($2::boolean or q.state <> 'draft')
+    where q.subject_id = $1 and ($2::boolean or q.state <> 'draft')
     order by q.id, c.position, r.revision`,
-    [versionId, compose],
+    [questionnaireScopeId(scope), compose],
   );
   const comments = new Map<string, QuestionComment>();
   for (const row of rows.rows) {
@@ -63,14 +64,14 @@ export async function saveComment(
   tx: Queryable,
   deps: ServiceDependencies,
   context: WriteContext,
-  versionId: string,
+  scope: QuestionnaireScope,
   compose: boolean,
   text: string,
   target: { questionId: string } | { commentId: string; revision: number },
 ) {
   const previous =
     "commentId" in target
-      ? (await readComments(tx, versionId, compose)).find(
+      ? (await readComments(tx, scope, compose)).find(
           (c) => c.id === target.commentId,
         )
       : undefined;
@@ -84,8 +85,8 @@ export async function saveComment(
       });
   } else {
     const question = await tx.query(
-      "select id from questions where id = $1 and workflow_version_id = $2 and ($3::boolean or state <> 'draft')",
-      [target.questionId, versionId, compose],
+      "select id from questions where id = $1 and subject_id = $2 and ($3::boolean or state <> 'draft')",
+      [target.questionId, questionnaireScopeId(scope), compose],
     );
     if (!question.rows[0]) throw new RequestError(404, "No such question");
   }
@@ -107,7 +108,7 @@ export async function saveComment(
     "insert into comment_revisions (comment_id, revision, text, actor_id, created_at) values ($1, $2, $3, $4, $5)",
     [id, revision, text, context.personId, deps.clock.now()],
   );
-  await advanceQuestionnaireRevision(tx, versionId, deps, context);
+  await advanceQuestionnaireRevision(tx, scope, deps, context);
   await recordQuestionnaireAudit(
     tx,
     deps,
@@ -118,5 +119,5 @@ export async function saveComment(
     revision,
     previous?.revision ?? null,
   );
-  return (await readComments(tx, versionId, compose)).find((c) => c.id === id)!;
+  return (await readComments(tx, scope, compose)).find((c) => c.id === id)!;
 }

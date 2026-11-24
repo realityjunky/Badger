@@ -10,6 +10,11 @@ import type { ServiceDependencies } from "../dependencies.js";
 import { RequestError } from "../http/errors.js";
 import { toIsoString } from "../util.js";
 import { evidenceComparison } from "../evidence-changes.js";
+import {
+  questionnaireOwners,
+  questionnaireScopeId,
+  type QuestionnaireScope,
+} from "./subject.js";
 import { readRecordOrigins } from "../version-inheritance.js";
 import type {
   Question,
@@ -51,16 +56,23 @@ export function toRound(row: RoundRow): QuestionRound {
 }
 export async function advanceQuestionnaireRevision(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   deps: ServiceDependencies,
   context: WriteContext,
 ) {
+  if (typeof scope !== "string") {
+    await tx.query(
+      "update skill_questionnaires set revision = revision + 1 where id = $1",
+      [scope.id],
+    );
+    return;
+  }
   await tx.query(
     `insert into questionnaires (workflow_version_id) values ($1)
     on conflict (workflow_version_id) do update set revision = questionnaires.revision + 1`,
-    [versionId],
+    [scope],
   );
-  await reconcileDossier(tx, deps, context, versionId);
+  await reconcileDossier(tx, deps, context, scope);
 }
 /** `hash` names the content an immutable record stores, such as an upload's blob. */
 export async function recordQuestionnaireAudit(
@@ -85,26 +97,31 @@ export async function recordQuestionnaireAudit(
     requestId: context.requestId,
   });
 }
-export async function readRound(tx: Queryable, versionId: string, id: string) {
+export async function readRound(
+  tx: Queryable,
+  scope: QuestionnaireScope,
+  id: string,
+) {
   const result = await tx.query<RoundRow>(
-    "select * from question_rounds where id = $1 and workflow_version_id = $2",
-    [id, versionId],
+    "select * from question_rounds where id = $1 and subject_id = $2",
+    [id, questionnaireScopeId(scope)],
   );
   if (!result.rows[0])
-    throw new RequestError(404, "No such round in this workflow version");
+    throw new RequestError(404, "No such round in this Questionnaire");
   return result.rows[0];
 }
 export async function readQuestions(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   personId: string,
   compose: boolean,
 ): Promise<Question[]> {
+  const versionId = questionnaireScopeId(scope);
   const result = await tx.query<QuestionRow>(
     `select q.*, r.content from questions q
     join question_revisions r on r.question_id = q.id and r.revision = q.revision
     join question_rounds b on b.id = q.round_id
-    where q.workflow_version_id = $1 and ($2::boolean or q.state <> 'draft')
+    where q.subject_id = $1 and ($2::boolean or q.state <> 'draft')
     order by b.number, q.position nulls last, (r.content->>'priority')::integer desc, q.created_at, q.id`,
     [versionId, compose],
   );
@@ -116,12 +133,12 @@ export async function readQuestions(
     created_at: Date | string;
   }>(
     `select r.* from question_revisions r join questions q on q.id = r.question_id
-    where q.workflow_version_id = $1 and ($2::boolean or q.state <> 'draft') order by r.revision`,
+    where q.subject_id = $1 and ($2::boolean or q.state <> 'draft') order by r.revision`,
     [versionId, compose],
   );
   const assigned = await tx.query<{ question_id: string }>(
-    `select distinct a.question_id from question_recipients a join role_bindings b on b.id = a.binding_id
-    join questions q on q.id = a.question_id where q.workflow_version_id = $1 and b.person_id = $2`,
+    `select distinct a.question_id from current_question_recipients a
+    join questions q on q.id = a.question_id where q.subject_id = $1 and a.person_id = $2`,
     [versionId, personId],
   );
   const history = new Map<string, QuestionRevision[]>();
@@ -136,10 +153,15 @@ export async function readQuestions(
     history.set(row.question_id, entries);
   }
   const assignedIds = new Set(assigned.rows.map((row) => row.question_id));
-  const translations = await readTranslations(tx, versionId);
-  const sources = await readImportedSources(tx, versionId);
-  const compareEvidence = await evidenceComparison(tx, versionId);
-  const origins = await readRecordOrigins(tx, versionId, "question");
+  const workflow = typeof scope === "string";
+  const translations = workflow ? await readTranslations(tx, scope) : [];
+  const sources = workflow ? await readImportedSources(tx, scope) : new Map();
+  const compareEvidence = workflow
+    ? await evidenceComparison(tx, scope)
+    : () => [];
+  const origins = workflow
+    ? await readRecordOrigins(tx, scope, "question")
+    : new Map();
   return Promise.all(
     result.rows.map(async (row) => ({
       ...row.content,
@@ -167,11 +189,29 @@ export async function readQuestions(
   );
 }
 
-async function recipients(
+export async function questionRecipients(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   content: QuestionContent,
 ) {
+  if (typeof scope !== "string") {
+    const ids = content.assignees.flatMap((a) =>
+      a.kind === "person" ? [a.personId] : [],
+    );
+    if (ids.length !== content.assignees.length)
+      throw new RequestError(400, "Assign named people to a Skill question");
+    const active = await tx.query<{ person_id: string }>(
+      `select person_id from skill_questionnaire_participants
+       where group_id = $1 and person_id = any($2::text[]) order by person_id`,
+      [scope.groupId, ids],
+    );
+    if (active.rows.length !== new Set(ids).size)
+      throw new RequestError(
+        400,
+        "Every assignee must have access to this Skill",
+      );
+    return active.rows.map((row) => ({ id: null, person_id: row.person_id }));
+  }
   const bindings = await tx.query<{
     id: string;
     person_id: string | null;
@@ -179,7 +219,7 @@ async function recipients(
   }>(
     `select b.id, b.person_id, b.role from role_bindings b join workflow_versions v on v.workflow_id = b.workflow_id
     where v.id = $1 and b.role in ('Workflow owner', 'Field expert', 'Engineer') order by b.id`,
-    [versionId],
+    [scope],
   );
   const matches = bindings.rows.filter((b) =>
     content.assignees.some((a) =>
@@ -210,13 +250,40 @@ async function recipients(
  */
 async function validateEvidence(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   content: QuestionContent,
 ) {
-  await validateDossierQuestionTargets(tx, versionId, content);
-  const changes = await (
-    await evidenceComparison(tx, versionId)
-  )(content.evidence);
+  if (typeof scope !== "string") {
+    if (
+      content.targets.some(
+        (target) => target.kind !== "skill" || target.id !== scope.skillId,
+      )
+    )
+      throw new RequestError(400, "A Skill question must target its own Skill");
+    if (content.evidence.length > 0) {
+      const files = await tx.query<{ path: string }>(
+        `select f->>'path' as path from skill_versions v, jsonb_array_elements(v.inventory) f
+         where v.skill_id = $1 and v.hash = $2`,
+        [scope.skillId, scope.versionHash],
+      );
+      const paths = new Set(files.rows.map((row) => row.path));
+      if (
+        content.evidence.some(
+          (link) =>
+            link.skillId !== scope.skillId ||
+            link.versionHash !== scope.versionHash ||
+            !paths.has(link.path),
+        )
+      )
+        throw new RequestError(
+          400,
+          "Evidence must name a file in the selected Skill version",
+        );
+    }
+    return;
+  }
+  await validateDossierQuestionTargets(tx, scope, content);
+  const changes = await (await evidenceComparison(tx, scope))(content.evidence);
   if (changes.length > 0)
     throw new RequestError(
       400,
@@ -227,27 +294,40 @@ async function validateEvidence(
 /** saveQuestion's checks, for a preview that creates the question only on sign-off. */
 export async function validateQuestionContent(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   content: QuestionContent,
 ) {
-  await validateEvidence(tx, versionId, content);
-  await recipients(tx, versionId, content);
+  await validateEvidence(tx, scope, content);
+  await questionRecipients(tx, scope, content);
 }
 
 export async function createRound(
   tx: Queryable,
   deps: ServiceDependencies,
   context: WriteContext,
-  versionId: string,
+  scope: QuestionnaireScope,
   title: string,
 ) {
+  if (typeof scope !== "string")
+    await tx.query(
+      `insert into skill_questionnaires (id, skill_id, version_hash) values ($1, $2, $3)
+       on conflict (skill_id, version_hash) do nothing`,
+      [scope.id, scope.skillId, scope.versionHash],
+    );
   const id = deps.ids.next();
   const result = await tx.query<RoundRow>(
-    `insert into question_rounds (id, workflow_version_id, number, title, created_by, created_at)
-    select $1, $2, coalesce(max(number), 0) + 1, $3, $4, $5 from question_rounds where workflow_version_id = $2 returning *`,
-    [id, versionId, title, context.personId, deps.clock.now()],
+    `insert into question_rounds (id, workflow_version_id, skill_questionnaire_id, number, title, created_by, created_at)
+    select $1, $2, $3, coalesce(max(number), 0) + 1, $4, $5, $6 from question_rounds where subject_id = $7 returning *`,
+    [
+      id,
+      ...questionnaireOwners(scope),
+      title,
+      context.personId,
+      deps.clock.now(),
+      questionnaireScopeId(scope),
+    ],
   );
-  await advanceQuestionnaireRevision(tx, versionId, deps, context);
+  await advanceQuestionnaireRevision(tx, scope, deps, context);
   await recordQuestionnaireAudit(
     tx,
     deps,
@@ -265,16 +345,16 @@ export async function saveQuestion(
   tx: Queryable,
   deps: ServiceDependencies,
   context: WriteContext,
-  versionId: string,
+  scope: QuestionnaireScope,
   roundId: string,
   content: QuestionContent,
   previous?: { id: string; revision: number },
 ) {
-  const round = await readRound(tx, versionId, roundId);
+  const round = await readRound(tx, scope, roundId);
   const existing =
     previous === undefined
       ? undefined
-      : (await readQuestions(tx, versionId, context.personId, true)).find(
+      : (await readQuestions(tx, scope, context.personId, true)).find(
           (q) => q.id === previous.id,
         );
   if (previous !== undefined && existing === undefined)
@@ -290,8 +370,8 @@ export async function saveQuestion(
     );
   if (previous === undefined && round.state !== "draft")
     throw new RequestError(409, "Add new questions to a draft round");
-  await validateEvidence(tx, versionId, content);
-  const bindings = await recipients(tx, versionId, content);
+  await validateEvidence(tx, scope, content);
+  const bindings = await questionRecipients(tx, scope, content);
   const id = existing?.id ?? deps.ids.next();
   const revision = (existing?.revision ?? 0) + 1;
   if (existing) {
@@ -299,7 +379,7 @@ export async function saveQuestion(
       tx,
       deps,
       context,
-      versionId,
+      scope,
       id,
       "The confirmed question or its evidence changed",
     );
@@ -307,35 +387,28 @@ export async function saveQuestion(
       "update questions set revision = $2, state = case when state = 'draft' then 'draft' when state = 'needs-reconfirmation' then state else 'open' end where id = $1",
       [id, revision],
     );
-    await tx.query("delete from question_recipients where question_id = $1", [
-      id,
-    ]);
     await tx.query(
       "update inbox_items set state = 'done', revision = revision + 1 where question_id = $1 and state <> 'done'",
       [id],
     );
   } else {
     await tx.query(
-      "insert into questions (id, workflow_version_id, round_id, created_at) values ($1, $2, $3, $4)",
-      [id, versionId, roundId, deps.clock.now()],
+      "insert into questions (id, workflow_version_id, skill_questionnaire_id, round_id, created_at) values ($1, $2, $3, $4, $5)",
+      [id, ...questionnaireOwners(scope), roundId, deps.clock.now()],
     );
   }
   await tx.query(
     "insert into question_revisions (question_id, revision, content, actor_id, created_at) values ($1, $2, $3, $4, $5)",
     [id, revision, JSON.stringify(content), context.personId, deps.clock.now()],
   );
-  for (const binding of bindings)
-    await tx.query(
-      "insert into question_recipients (question_id, binding_id) values ($1, $2)",
-      [id, binding.id],
-    );
+  await saveQuestionRecipients(tx, scope, id, bindings);
   if (existing?.state !== undefined && existing.state !== "draft")
-    await notifyQuestion(tx, deps, versionId, id, revision);
+    await notifyQuestion(tx, deps, scope, id, revision);
   await tx.query(
     "update question_rounds set revision = revision + 1 where id = $1",
     [roundId],
   );
-  await advanceQuestionnaireRevision(tx, versionId, deps, context);
+  await advanceQuestionnaireRevision(tx, scope, deps, context);
   await recordQuestionnaireAudit(
     tx,
     deps,
@@ -346,30 +419,59 @@ export async function saveQuestion(
     revision,
     existing?.revision ?? null,
   );
-  return (await readQuestions(tx, versionId, context.personId, true)).find(
+  return (await readQuestions(tx, scope, context.personId, true)).find(
     (q) => q.id === id,
   )!;
+}
+
+async function saveQuestionRecipients(
+  tx: Queryable,
+  scope: QuestionnaireScope,
+  questionId: string,
+  recipients: Awaited<ReturnType<typeof questionRecipients>>,
+) {
+  if (typeof scope !== "string") {
+    await tx.query(
+      "delete from skill_question_recipients where question_id = $1",
+      [questionId],
+    );
+    for (const recipient of recipients)
+      await tx.query(
+        "insert into skill_question_recipients (question_id, skill_questionnaire_id, person_id) values ($1, $2, $3)",
+        [questionId, scope.id, recipient.person_id],
+      );
+    return;
+  }
+  await tx.query("delete from question_recipients where question_id = $1", [
+    questionId,
+  ]);
+  for (const recipient of recipients)
+    await tx.query(
+      "insert into question_recipients (question_id, binding_id) values ($1, $2)",
+      [questionId, recipient.id],
+    );
 }
 
 /** An audience limits the items to those people and pending invitations' bindings. */
 export async function notifyQuestion(
   tx: Queryable,
   deps: ServiceDependencies,
-  versionId: string,
+  scope: QuestionnaireScope,
   questionId: string,
   revision: number | string,
   audience?: { personIds: string[]; bindingIds: string[] },
 ) {
   await tx.query(
-    `insert into inbox_items (id, person_id, binding_id, workflow_version_id, gate, kind, event_id, question_id, created_at, updated_at)
-    select $1 || '-' || min(b.id), b.person_id, case when b.person_id is null then min(b.id) else null end,
-      $2, 'questionnaire', 'question-assigned', $3, $4, $5, $5
-    from question_recipients a join role_bindings b on b.id = a.binding_id where a.question_id = $4
-      and ($6::text[] is null or b.person_id = any($6::text[]) or b.id = any($7::text[]))
-    group by b.person_id, case when b.person_id is null then lower(b.email) else '' end on conflict do nothing`,
+    `insert into inbox_items (id, person_id, binding_id, workflow_version_id, skill_questionnaire_id, gate, kind, event_id, question_id, created_at, updated_at)
+    select $1 || '-' || coalesce(min(r.binding_id), r.person_id), r.person_id,
+      case when r.person_id is null then min(r.binding_id) else null end,
+      $2, $3, 'questionnaire', 'question-assigned', $4, $5, $6, $6
+    from current_question_recipients r where r.question_id = $5
+      and ($7::text[] is null or r.person_id = any($7::text[]) or r.binding_id = any($8::text[]))
+    group by r.person_id, case when r.person_id is null then lower(r.email) else '' end on conflict do nothing`,
     [
       deps.ids.next(),
-      versionId,
+      ...questionnaireOwners(scope),
       `${questionId}:${revision}`,
       questionId,
       deps.clock.now(),
@@ -381,12 +483,12 @@ export async function notifyQuestion(
 
 export async function publicationPreview(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   roundId: string,
   personId: string,
 ) {
-  const round = await readRound(tx, versionId, roundId);
-  const questions = (await readQuestions(tx, versionId, personId, true)).filter(
+  const round = await readRound(tx, scope, roundId);
+  const questions = (await readQuestions(tx, scope, personId, true)).filter(
     (q) => q.roundId === roundId,
   );
   if (questions.length === 0)
@@ -396,7 +498,7 @@ export async function publicationPreview(
     revision: number;
   }>(
     "select s.* from questionnaire_settings s join workflow_versions v on v.workflow_id = s.workflow_id where v.id = $1",
-    [versionId],
+    [typeof scope === "string" ? scope : null],
   );
   const roundSizeLimit = settings.rows[0]?.round_size_limit ?? null;
   if (roundSizeLimit !== null && questions.length > roundSizeLimit)
@@ -408,7 +510,7 @@ export async function publicationPreview(
   for (const q of questions)
     bindings.push({
       questionId: q.id,
-      recipients: await recipients(tx, versionId, q),
+      recipients: await questionRecipients(tx, scope, q),
     });
   const records = questions.map((q) => ({
     id: q.id,
@@ -419,7 +521,7 @@ export async function publicationPreview(
     hash: canonicalHash(q.revisions.at(-1)!),
   }));
   const bound = {
-    versionId,
+    versionId: questionnaireScopeId(scope),
     round: toRound(round),
     questions: records,
     bindings,
@@ -437,18 +539,18 @@ export async function publishRound(
   tx: Queryable,
   deps: ServiceDependencies,
   context: WriteContext,
-  versionId: string,
+  scope: QuestionnaireScope,
   roundId: string,
   hash: string,
 ) {
-  const round = await readRound(tx, versionId, roundId);
+  const round = await readRound(tx, scope, roundId);
   if (round.state === "published") {
     if (round.publication_hash === hash) return toRound(round);
     throw new RequestError(409, "This round has already been published");
   }
   const preview = await publicationPreview(
     tx,
-    versionId,
+    scope,
     roundId,
     context.personId,
   );
@@ -458,33 +560,32 @@ export async function publishRound(
       "The round changed; review it again before publishing",
     );
   const questions = new Map(
-    (await readQuestions(tx, versionId, context.personId, true)).map(
-      (question) => [question.id, question],
-    ),
+    (await readQuestions(tx, scope, context.personId, true)).map((question) => [
+      question.id,
+      question,
+    ]),
   );
   for (const [index, q] of preview.questions.entries()) {
     // Role selectors are resolved again at publication, so the reviewed
     // recipients include people invited after the draft was first saved.
     const question = questions.get(q.id)!;
-    await tx.query("delete from question_recipients where question_id = $1", [
+    await saveQuestionRecipients(
+      tx,
+      scope,
       q.id,
-    ]);
-    for (const binding of await recipients(tx, versionId, question))
-      await tx.query(
-        "insert into question_recipients (question_id, binding_id) values ($1, $2)",
-        [q.id, binding.id],
-      );
+      await questionRecipients(tx, scope, question),
+    );
     await tx.query(
       "update questions set state = 'open', position = $2 where id = $1",
       [q.id, index + 1],
     );
-    await notifyQuestion(tx, deps, versionId, q.id, q.revision);
+    await notifyQuestion(tx, deps, scope, q.id, q.revision);
   }
   const result = await tx.query<RoundRow>(
     "update question_rounds set state = 'published', revision = revision + 1, published_at = $2, publication_hash = $3 where id = $1 returning *",
     [roundId, deps.clock.now(), hash],
   );
-  await advanceQuestionnaireRevision(tx, versionId, deps, context);
+  await advanceQuestionnaireRevision(tx, scope, deps, context);
   await recordQuestionnaireAudit(
     tx,
     deps,

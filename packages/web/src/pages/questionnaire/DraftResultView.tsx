@@ -6,7 +6,7 @@ import type {
 } from "@realityjunky/badger";
 import type { DraftingResult } from "../../api/drafting-jobs.js";
 import type {
-  QuestionnaireView,
+  WorkflowQuestionnaireView,
   QuestionContent,
 } from "../../api/questionnaire.js";
 import type { SourceEvidence } from "../../api/source-study.js";
@@ -77,7 +77,7 @@ export function DraftResultView({
   onChange,
 }: {
   result: DraftingResult;
-  view: QuestionnaireView;
+  view: WorkflowQuestionnaireView;
   questionId?: string | null;
   effectLabels?: readonly SkillScriptSideEffect[];
   onChange?(result: DraftingResult): void;

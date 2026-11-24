@@ -138,8 +138,11 @@ A transfer of bounded work or evidence to a person or agent without implying tha
 
 ## Questionnaire
 
+**Questionnaire subject**:
+The Workflow version or exact Skill version that owns a Round and its Questions and governs access to them.
+
 **Question**:
-A request for workflow knowledge that the Engineer publishes to the people who can answer it, with its reason and evidence. A follow-up is a child Question that keeps its parent's thread.
+A request for knowledge about its Questionnaire subject, published to the people who can answer it with its reason and evidence. A follow-up is a child Question that keeps its parent's thread.
 
 **Round**:
 An ordered batch of Questions published together, highest priority first.
@@ -154,7 +157,7 @@ The ordered Comments under a Question. Anyone holding a workflow role other than
 Unprompted workflow knowledge or a question raised by a Field expert. The Engineer turns it into a Question, accepts it as a Fact source, or declines it with a reason. Accepting a source preserves the expert's words; it does not confirm a Fact.
 
 **Resolution**:
-The Engineer's recorded outcome for an answered Question: confirmed, followed up, deferred with a reason, or withdrawn.
+The coordinator's recorded outcome for an answered Question: confirmed, followed up, deferred with a reason, or withdrawn. A confirmed Skill resolution identifies a clarification of the discussed version or a change implemented by a saved successor.
 _Avoid_: disposition
 
 **Fact**:

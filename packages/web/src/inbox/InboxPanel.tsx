@@ -5,6 +5,7 @@ import { EMPTY_INBOX_FILTERS } from "../api/inbox.js";
 import { loadWorkflows, type WorkflowCatalog } from "../api/workflows.js";
 import { readBasePath } from "../app/paths.js";
 import { useI18n } from "../i18n/I18nContext.js";
+import { skillVersionCaption } from "../api/questionnaire.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import { useInbox } from "./InboxContext.js";
 import { useDemoMode } from "../app/DemoContext.js";
@@ -228,11 +229,16 @@ export function InboxPanel() {
                                                 ? "inbox.proposalInvalidated"
                                                 : "inbox.gateInvalidated",
                   {
-                    name: item.workflowName,
-                    version: workflowVersionLabel({
-                      number: item.versionNumber,
-                      semanticVersion: item.semanticVersion,
-                    }),
+                    name: item.skillSubject?.skillName ?? item.workflowName!,
+                    version: item.skillSubject
+                      ? skillVersionCaption(
+                          item.skillSubject.versionHash,
+                          item.skillSubject.label,
+                        )
+                      : workflowVersionLabel({
+                          number: item.versionNumber!,
+                          semanticVersion: item.semanticVersion,
+                        }),
                   },
                 )}
                 {item.questionText !== null && ` · ${item.questionText}`}

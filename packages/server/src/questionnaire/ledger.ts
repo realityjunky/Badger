@@ -13,6 +13,7 @@ import { readFacts, readResolutions } from "./resolutions.js";
 import { readSourceStudy } from "../source-study.js";
 import { RequestError } from "../http/errors.js";
 import { readAnswers } from "./answers.js";
+import type { QuestionnaireScope } from "./subject.js";
 import { readWorkingRevision } from "../working-dossier-store.js";
 
 function visibleItems(items: QuestionnaireLedgerItem[], compose: boolean) {
@@ -82,18 +83,21 @@ function visibleHandoff(
  */
 export async function readQuestionnaireInputs(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   personId: string,
   includeStudy = true,
 ) {
-  await tx.query(
-    "select id from workflow_versions where id = $1 for no key update",
-    [versionId],
-  );
-  const questions = await readQuestions(tx, versionId, personId, true);
-  const resolutions = await readResolutions(tx, versionId);
-  const answers = await readAnswers(tx, versionId, personId);
-  const study = includeStudy ? await readSourceStudy(tx, versionId) : null;
+  const workflow = typeof scope === "string";
+  if (workflow)
+    await tx.query(
+      "select id from workflow_versions where id = $1 for no key update",
+      [scope],
+    );
+  const questions = await readQuestions(tx, scope, personId, true);
+  const resolutions = await readResolutions(tx, scope);
+  const answers = await readAnswers(tx, scope, personId);
+  const study =
+    workflow && includeStudy ? await readSourceStudy(tx, scope) : null;
   const records: QuestionnaireRecords = {
     questions: questions.map((q) => ({
       ...q,
@@ -113,8 +117,8 @@ export async function readQuestionnaireInputs(
         })
         .sort((a, b) => a.personId.localeCompare(b.personId)),
     })),
-    drafts: await readDrafts(tx, versionId),
-    facts: (await readFacts(tx, versionId))
+    drafts: workflow ? await readDrafts(tx, scope) : [],
+    facts: (await readFacts(tx, scope))
       .filter((f) => questions.some((q) => q.id === f.questionId))
       .map((f) => ({
         ...f,
@@ -153,7 +157,7 @@ export async function readQuestionnaireRecords(
 
 async function recordHandoff(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   personId: string,
   compose: boolean,
 ) {
@@ -162,9 +166,9 @@ async function recordHandoff(
       records: (
         await readQuestionnaireInputs(
           tx,
-          versionId,
+          scope,
           personId,
-          !(await readWorkingRevision(tx, versionId)),
+          typeof scope === "string" && !(await readWorkingRevision(tx, scope)),
         )
       ).records,
     }),
@@ -214,7 +218,7 @@ export async function readLedger(
 
 export async function snapshotRoundLedger(
   tx: Queryable,
-  versionId: string,
+  scope: QuestionnaireScope,
   roundId: string,
   personId: string,
 ) {
@@ -223,7 +227,7 @@ export async function snapshotRoundLedger(
     [roundId],
   );
   if (existing.rows.length) return;
-  const handoff = await recordHandoff(tx, versionId, personId, true);
+  const handoff = await recordHandoff(tx, scope, personId, true);
   await tx.query(
     "insert into questionnaire_round_snapshots (round_id, items) values ($1, $2::jsonb)",
     [roundId, JSON.stringify(handoff.items)],

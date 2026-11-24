@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   questionnaireRequest,
-  type QuestionnaireView,
+  type WorkflowQuestionnaireView,
 } from "../../api/questionnaire.js";
 import type {
   LedgerDraft,
@@ -27,7 +27,7 @@ export function QuestionnaireLedger({
 }: {
   basePath: string;
   path: string;
-  view: QuestionnaireView;
+  view: WorkflowQuestionnaireView;
   sinceRound: string | null;
   onSinceRound(id: string | null): void;
   onChanged(): Promise<unknown>;

@@ -1,3 +1,4 @@
+import { skillVersionHref } from "../../api/questionnaire.js";
 import { Button, Drawer, Tabs } from "antd";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -86,11 +87,13 @@ export function QuestionInspector({
           <h2 className="pane-title">{question?.text ?? concern?.text}</h2>
           {question && view && (
             <>
-              <RecordOriginLink
-                origin={question.origin}
-                workflowId={view.workflow.id}
-                kind="question"
-              />
+              {"workflow" in view && (
+                <RecordOriginLink
+                  origin={question.origin}
+                  workflowId={view.workflow.id}
+                  kind="question"
+                />
+              )}
               <EvidenceChanges changes={question.evidenceChanges} />
             </>
           )}
@@ -186,9 +189,15 @@ export function QuestionInspector({
                         {question.targets.map((target, index) => (
                           <li key={index}>
                             {t(`questionnaire.target.${target.kind}`)}:{" "}
-                            {target.id === view?.workflow.id
+                            {view &&
+                            "workflow" in view &&
+                            target.id === view.workflow.id
                               ? view.workflow.name
-                              : target.id}
+                              : view &&
+                                  "skill" in view &&
+                                  target.id === view.skill.id
+                                ? view.skill.name
+                                : target.id}
                           </li>
                         ))}
                       </ul>
@@ -198,7 +207,7 @@ export function QuestionInspector({
                           {question.evidence.map((link, index) => (
                             <li key={index}>
                               <Link
-                                to={`/skills/${encodeURIComponent(link.skillId)}/versions/${encodeURIComponent(link.versionHash)}`}
+                                to={`${skillVersionHref(link.skillId, link.versionHash)}?${new URLSearchParams({ path: link.path })}`}
                               >
                                 {link.path}:{link.startLine}–{link.endLine}
                               </Link>
