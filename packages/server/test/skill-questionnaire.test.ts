@@ -51,17 +51,19 @@ async function upload(
       },
     ],
   };
-  const { preview } = await api<{ preview: { hash: string } }>(
-    "POST",
-    `/skills/${skillId}/upload-preview`,
-    admin,
-    content,
-  );
+  const { preview } = await api<{
+    preview: { hash: string; confirmationHash?: string };
+  }>("POST", `/skills/${skillId}/upload-preview`, admin, content);
   const { version } = await api<{ version: { hash: string } }>(
     "POST",
     `/skills/${skillId}/versions`,
     admin,
-    { ...content, confirmed: true, expectedHash: preview.hash },
+    {
+      ...content,
+      confirmed: true,
+      expectedHash: preview.hash,
+      confirmationHash: preview.confirmationHash,
+    },
     201,
   );
   return version.hash;

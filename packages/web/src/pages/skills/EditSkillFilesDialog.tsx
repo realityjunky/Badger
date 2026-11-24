@@ -43,6 +43,7 @@ export function EditSkillFilesDialog({
   const [review, setReview] = useState<{
     diff: VersionDiff;
     content: BrowserEditContent;
+    confirmationHash: string;
   } | null>(null);
   const [diffPath, setDiffPath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -117,10 +118,15 @@ export function EditSkillFilesDialog({
         })),
       );
       const content = { baseHash: base.hash, changes };
-      const { diff } = await previewUpload(basePath, base.skillId, content);
-      if (!diff) throw new Error(t("skills.failed"));
+      const { preview, diff } = await previewUpload(
+        basePath,
+        base.skillId,
+        content,
+      );
+      if (!diff || !preview.confirmationHash)
+        throw new Error(t("skills.failed"));
       setDiffPath(null);
-      setReview({ diff, content });
+      setReview({ diff, content, confirmationHash: preview.confirmationHash });
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : t("skills.failed"));
     } finally {
@@ -138,6 +144,7 @@ export function EditSkillFilesDialog({
         base.skillId,
         review.content,
         review.diff.to,
+        review.confirmationHash,
       );
       onSaved(version);
     } catch (failure) {

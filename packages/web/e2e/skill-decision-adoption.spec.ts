@@ -21,11 +21,17 @@ const fieldId = "workflow/workflow/guardrails";
 
 async function selectOption(
   page: Page,
-  label: string,
+  label: string | RegExp,
   option: RegExp | string,
 ) {
-  await page.getByRole("combobox", { name: label, exact: true }).click();
-  await page.getByRole("option", { name: option }).click();
+  const select = page.getByRole("combobox", { name: label, exact: true });
+  await select.click();
+  await page
+    .locator(".ant-select-dropdown:visible")
+    .getByRole("option", { name: option })
+    .first()
+    .click();
+  await select.press("Escape");
 }
 
 async function readWorkflow(page: Page, path: string) {
@@ -41,6 +47,7 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
   try {
     for (const person of [people.admin, people.engineer, people.expert])
       pages.push(await signIn(browser, provider, person));
+    for (const page of pages) page.setDefaultTimeout(8_000);
     const [admin, engineer, expert] = pages as [Page, Page, Page];
     const { group } = await api<{ group: { id: string } }>(
       admin,
@@ -113,7 +120,7 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     await engineer
       .getByLabel("Rationale", { exact: true })
       .fill("Make the format explicit in the source.");
-    await selectOption(engineer, "Assignees", people.expert.name);
+    await selectOption(engineer, /Assignees/u, people.expert.name);
     await engineer
       .getByRole("button", { name: "Save question", exact: true })
       .click();
@@ -347,7 +354,7 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
       contentType: "image/png",
     });
   } finally {
-    await Promise.all(pages.map((page) => page.context().close()));
+    await Promise.allSettled(pages.map((page) => page.context().close()));
     await service.close();
     await provider.stop();
   }

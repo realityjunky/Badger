@@ -6,6 +6,7 @@ import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
 import { objectInput, RequestError } from "../http/errors.js";
 import { toIsoString } from "../util.js";
+import { invalidateDossiersCitingSkillQuestion } from "../dossier.js";
 import { evidenceComparison } from "../evidence-changes.js";
 import {
   questionnaireOwners,
@@ -634,6 +635,8 @@ export async function invalidateQuestionFacts(
     [questionId, questionnaireScopeId(scope), evidenceChanged],
   );
   if (changed.rows.length === 0) return;
+  if (typeof scope !== "string")
+    await invalidateDossiersCitingSkillQuestion(tx, deps, context, questionId);
   await closeQuestionInbox(tx, deps, questionId);
   await notifyQuestionCoordinators(
     tx,

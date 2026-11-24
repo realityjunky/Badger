@@ -125,6 +125,7 @@ export function UploadSkillModal({
         skill.id,
         content,
         preview.hash,
+        preview.confirmationHash,
       );
       onUploaded(result.version);
     } catch (failure) {

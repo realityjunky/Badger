@@ -6,7 +6,7 @@ optimistic revision and does not change the content identity. A retained
 version may be selected by hash, label, or date, downloaded as an inventory
 ZIP, and used as an explicit edit base. Browser edits name individual changed
 files, while local edits can send a complete folder or ZIP with the base hash.
-The previewed hash remains the confirmation boundary.
+The preview binds the Skill, base hash, edit method, and resulting content hash.
 
 An unused version can be deleted after the service rechecks references while
 holding the version row lock. A referenced version can be retired. Retirement

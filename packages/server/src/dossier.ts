@@ -25,7 +25,11 @@ import {
 import { invalidateProposal } from "./proposal-invalidation.js";
 import { closeGateInbox, notifyWorkflowRoles } from "./inbox.js";
 import { readWorkingDossier, workingDossierBasis } from "./working-dossier.js";
-import { readWorkingRevision } from "./working-dossier-store.js";
+import {
+  lockDossierSkillAnswers,
+  lockDossiersCitingSkillQuestion,
+  readWorkingRevision,
+} from "./working-dossier-store.js";
 import { effectFindings, effectHead } from "./script-effects.js";
 import { readVersion } from "./skills/library.js";
 
@@ -323,6 +327,30 @@ export async function invalidateDossierApproval(
   await invalidateProposal(tx, deps, context, versionId, reason);
 }
 
+export async function invalidateDossiersCitingSkillQuestion(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  context: WriteContext,
+  questionId: string,
+) {
+  for (const versionId of await lockDossiersCitingSkillQuestion(
+    tx,
+    questionId,
+  )) {
+    const confirmations = await readGateConfirmations(tx, versionId, "dossier");
+    if (
+      confirmations.some((confirmation) => confirmation.invalidatedAt === null)
+    )
+      await invalidateDossierApproval(
+        tx,
+        deps,
+        context,
+        versionId,
+        "A linked reviewed Skill answer changed",
+      );
+  }
+}
+
 export async function dossierGateState(
   tx: Queryable,
   versionId: string,
@@ -404,8 +432,10 @@ async function workingDossierGateState(
   version: WorkflowVersion,
   personId: string,
 ): Promise<GateState & { composition?: DossierComposition }> {
-  const view = await readWorkingDossier(tx, version, personId, false);
   const revision = await readWorkingRevision(tx, version.id);
+  if (revision)
+    await lockDossierSkillAnswers(tx, version.id, revision.content.fields);
+  const view = await readWorkingDossier(tx, version, personId, false);
   const findings: GateState["findings"] = [];
   const reject = (code: string, message: string) =>
     findings.push({

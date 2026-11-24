@@ -28,7 +28,12 @@ export async function inspectVersionUpload(
   skill: Skill,
   value: unknown,
 ): Promise<InspectedVersionUpload> {
-  const { baseHash, changes, ...upload } = objectInput(value);
+  const {
+    baseHash,
+    changes,
+    confirmationHash: _confirmationHash,
+    ...upload
+  } = objectInput(value);
   if (baseHash === undefined && changes === undefined)
     return inspectUpload(config, skill.name, upload);
   if (typeof baseHash !== "string" || !/^[a-f0-9]{64}$/u.test(baseHash))

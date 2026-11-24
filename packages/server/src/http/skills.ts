@@ -1,3 +1,4 @@
+import { canonicalHash } from "@realityjunky/badger";
 import { readSkillBacklog } from "../questionnaire/resolutions.js";
 import { listWorkflows } from "../workflows.js";
 import {
@@ -27,7 +28,7 @@ import {
 import { skillGroupPermissions } from "../skills/access.js";
 import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
-import { objectInput } from "./errors.js";
+import { objectInput, RequestError } from "./errors.js";
 
 const API = "/api/v1";
 
@@ -216,22 +217,33 @@ export async function handleSkillsRequest(
     );
     if (!body.ok)
       return reply.error(body.status ?? 400, "invalid", body.message);
+    const payload = objectInput(body.value);
     const git =
-      match[2] === "git-preview" ||
-      objectInput(body.value)["repositoryId"] !== undefined;
-    const inspect = () =>
-      git
-        ? inspectRepository(database, config, skill, body.value)
-        : inspectVersionUpload(database, config, blobs, skill, body.value);
-    if (match[2] === "upload-preview" || match[2] === "git-preview") {
-      const inspected = await inspect();
-      const { source } = inspected;
+      match[2] === "git-preview" || payload.repositoryId !== undefined;
+    const previewing =
+      match[2] === "upload-preview" || match[2] === "git-preview";
+    const expectedHash = previewing ? null : versionConfirmation(payload);
+    const inspected = git
+      ? await inspectRepository(database, config, skill, payload)
+      : await inspectVersionUpload(database, config, blobs, skill, payload);
+    const { source } = inspected;
+    const editOrigin =
+      "editOrigin" in inspected ? inspected.editOrigin : undefined;
+    const confirmationHash =
+      editOrigin &&
+      canonicalHash({
+        skillId: skill.id,
+        ...editOrigin,
+        hash: source.hash,
+      });
+    if (expectedHash === null) {
       return reply.json(200, {
         preview: {
           hash: source.hash,
           inventory: source.inventory,
           scripts: source.scripts,
           description: source.description,
+          ...(confirmationHash ? { confirmationHash } : {}),
         },
         ...("base" in inspected && inspected.base !== undefined
           ? {
@@ -243,7 +255,14 @@ export async function handleSkillsRequest(
           : {}),
       });
     }
-    const expectedHash = versionConfirmation(body.value);
+    if (
+      confirmationHash !== undefined &&
+      payload.confirmationHash !== confirmationHash
+    )
+      throw new RequestError(
+        409,
+        "The edit differs from the reviewed base, files or method. Preview it again.",
+      );
     const uploaded = await createVersion(
       database,
       dependencies,
@@ -251,7 +270,7 @@ export async function handleSkillsRequest(
       blobs,
       skill,
       expectedHash,
-      await inspect(),
+      inspected,
     );
     return reply.json(uploaded.created ? 201 : 200, {
       version: uploaded.version,

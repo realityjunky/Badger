@@ -1,4 +1,8 @@
-import type { DossierPin, WorkingDossierRevision } from "@realityjunky/badger";
+import type {
+  DossierFieldValue,
+  DossierPin,
+  WorkingDossierRevision,
+} from "@realityjunky/badger";
 import type { Queryable } from "./database/database.js";
 
 interface WorkingRow {
@@ -6,6 +10,49 @@ interface WorkingRow {
   pins_hash: string;
   pins: DossierPin[];
   content: WorkingDossierRevision["content"];
+}
+
+export async function lockDossierSkillAnswers(
+  tx: Queryable,
+  versionId: string,
+  fields: Record<string, DossierFieldValue | null>,
+) {
+  const questionIds = [
+    ...new Set(
+      Object.values(fields).flatMap(
+        (field) => field?.answers?.map(({ questionId }) => questionId) ?? [],
+      ),
+    ),
+  ];
+  if (!questionIds.length) return;
+  await tx.query(
+    `select sq.id from skill_questionnaires sq where exists (
+       select 1 from questions q
+       join workflow_skill_pins p on p.skill_id = sq.skill_id and p.workflow_version_id = $1
+       where q.skill_questionnaire_id = sq.id and q.id = any($2::text[])
+     ) order by sq.id for share`,
+    [versionId, questionIds],
+  );
+}
+
+export async function lockDossiersCitingSkillQuestion(
+  tx: Queryable,
+  questionId: string,
+) {
+  const versions = await tx.query<{ id: string }>(
+    `select v.id from workflow_versions v
+     join lateral (
+       select content from working_dossier_revisions
+       where workflow_version_id = v.id order by revision desc limit 1
+     ) dossier on true
+     where exists (
+       select 1 from jsonb_each(dossier.content->'fields') field
+       where field.value->'answers' @> jsonb_build_array(jsonb_build_object('questionId', $1::text))
+     )
+     order by v.id for no key update of v`,
+    [questionId],
+  );
+  return versions.rows.map(({ id }) => id);
 }
 
 export async function readWorkingRevision(
