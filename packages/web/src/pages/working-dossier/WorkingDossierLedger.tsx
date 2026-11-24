@@ -75,21 +75,12 @@ export function WorkingDossierLedger({
         className="working-dossier-field"
         aria-label={`${field.ownerLabel} · ${field.label}`}
       >
-        <div className="working-dossier-toolbar">
-          <h4>
-            {field.ownerLabel} · {field.label}
-          </h4>
-          {canEdit && (
-            <Space wrap>
-              <Button onClick={() => setEdit({ kind: "field", field })}>
-                {t("workingDossier.editField")}
-              </Button>
-              <Button onClick={() => onAsk(field)}>
-                {t("workingDossier.ask")}
-              </Button>
-            </Space>
-          )}
-        </div>
+        <h4>
+          <span className="working-dossier-field-owner">
+            {field.ownerLabel}
+          </span>
+          {field.label}
+        </h4>
         <DossierFieldValue
           field={field}
           context={context}
@@ -97,6 +88,16 @@ export function WorkingDossierLedger({
             fields.includes(field.id),
           )}
         />
+        {canEdit && (
+          <Space className="working-dossier-field-actions" wrap>
+            <Button onClick={() => setEdit({ kind: "field", field })}>
+              {t("workingDossier.editField")}
+            </Button>
+            <Button onClick={() => onAsk(field)}>
+              {t("workingDossier.ask")}
+            </Button>
+          </Space>
+        )}
       </article>
     );
   }
@@ -231,12 +232,14 @@ export function WorkingDossierLedger({
       <section aria-label={t("ledger.readiness")}>
         <h3>{t("ledger.readiness")}</h3>
         <Collapse
+          bordered={false}
+          className="ledger-readiness-topics"
           activeKey={openTopics ?? [field?.topic ?? defaultTopic]}
           onChange={setOpenTopics}
           items={dossier.readiness.map(({ topic, blockers }) => ({
             key: topic,
             label: (
-              <Space wrap>
+              <div className="ledger-topic-heading">
                 <strong>{t(`questionnaire.topic.${topic}`)}</strong>
                 <Tag color={blockers.length ? "warning" : "success"}>
                   {blockers.length
@@ -245,18 +248,18 @@ export function WorkingDossierLedger({
                       })
                     : t("ledger.ready")}
                 </Tag>
-              </Space>
+              </div>
             ),
             children: (
-              <div className="working-dossier-field-list">
+              <>
                 {!!blockers.length && (
-                  <ul className="working-dossier-blocker">
+                  <ul className="working-dossier-readiness-blockers">
                     {blockers.map(({ id, message }, index) => (
                       <li key={`${id}/${index}`}>
                         {fields.some((field) => field.id === id) ? (
-                          <Button type="link" onClick={() => setSelected(id)}>
+                          <button type="button" onClick={() => setSelected(id)}>
                             {message}
-                          </Button>
+                          </button>
                         ) : (
                           message
                         )}
@@ -264,11 +267,13 @@ export function WorkingDossierLedger({
                     ))}
                   </ul>
                 )}
-                {fieldsByTopic
-                  .get(topic)
-                  ?.filter(({ id }) => id !== field?.id)
-                  .map(renderField)}
-              </div>
+                <div className="working-dossier-field-list">
+                  {fieldsByTopic
+                    .get(topic)
+                    ?.filter(({ id }) => id !== field?.id)
+                    .map(renderField)}
+                </div>
+              </>
             ),
           }))}
         />

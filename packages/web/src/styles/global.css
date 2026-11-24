@@ -148,6 +148,7 @@ body {
 }
 
 .working-dossier-study,
+.working-dossier-ledger,
 .working-dossier-study-tab,
 .working-dossier-study-picker {
   grid-template-columns: minmax(0, 1fr);
@@ -172,6 +173,8 @@ body {
 }
 
 .working-dossier-diagram-canvas {
+  width: fit-content;
+  max-width: 100%;
   max-height: 480px;
   overflow: auto;
   border: 1px solid var(--badger-color-border);
@@ -232,6 +235,10 @@ body {
   opacity: 0.4;
 }
 
+.working-dossier-diagram-layout g:hover .working-dossier-edge {
+  opacity: 1;
+}
+
 .working-dossier-edge-target {
   fill: none;
   stroke: transparent;
@@ -256,6 +263,12 @@ body {
   gap: 6px;
 }
 
+.working-dossier-node-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+}
+
 .working-dossier-node,
 .working-dossier-selection {
   min-height: 36px;
@@ -273,21 +286,35 @@ body {
 .working-dossier-node {
   position: absolute;
   display: grid;
-  grid-template-rows: 1fr auto;
-  padding-block: 4px;
-  background: var(--badger-color-background);
-  line-height: 1.2;
+  place-items: center;
+  padding: 8px 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.working-dossier-node,
+.working-dossier-node-swatch {
+  border: 1px solid var(--badger-color-info-text);
+  border-radius: var(--badger-radius-control);
+  background: var(--badger-color-info-soft);
+}
+
+.working-dossier-node[data-kind="required-skill-call"],
+.working-dossier-node-swatch[data-kind="required-skill-call"] {
+  border-color: var(--badger-color-text-muted);
+  border-style: dashed;
+  border-radius: var(--badger-radius-pill);
+  background: var(--badger-color-surface);
 }
 
 .working-dossier-node span {
   display: -webkit-box;
+  min-width: 0;
   overflow: hidden;
+  text-wrap: balance;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.working-dossier-node small {
-  color: var(--badger-color-text-secondary);
+  -webkit-line-clamp: 3;
 }
 
 .working-dossier-node:hover,
@@ -332,6 +359,7 @@ body {
 .working-dossier-workflow-details,
 .working-dossier-field,
 .working-dossier-endpoints > section {
+  min-width: 0;
   padding: 12px;
   border: 1px solid var(--badger-color-border);
   border-radius: var(--badger-radius-control);
@@ -377,7 +405,108 @@ body {
 }
 
 .working-dossier-value {
+  grid-template-columns: minmax(0, 1fr);
   margin-top: 6px;
+}
+
+.ant-collapse.ledger-readiness-topics {
+  background: transparent;
+  overflow-wrap: anywhere;
+}
+
+.ledger-readiness-topics > .ant-collapse-item {
+  margin-bottom: 8px;
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-control);
+  background: var(--badger-color-background);
+}
+
+.ledger-readiness-topics > .ant-collapse-item:last-child {
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-control);
+}
+
+.ledger-topic-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.ledger-topic-heading .ant-tag {
+  margin-inline-end: 0;
+}
+
+.ledger-readiness-topics .working-dossier-field-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+}
+
+.working-dossier-ledger .working-dossier-field {
+  padding: 14px;
+  background: var(--badger-color-surface);
+}
+
+.working-dossier-field-owner {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--badger-color-text-secondary);
+  font-size: 0.85em;
+  font-weight: 400;
+}
+
+.working-dossier-field-actions {
+  margin-top: 12px;
+}
+
+.working-dossier-readiness-blockers {
+  padding: 10px 14px 10px 2rem;
+  margin: 0;
+  border-inline-start: 3px solid var(--badger-color-warning);
+  border-radius: var(--badger-radius-control);
+  background: var(--badger-color-warning-soft);
+}
+
+.working-dossier-readiness-blockers li + li {
+  margin-top: 6px;
+}
+
+.working-dossier-readiness-blockers li::marker {
+  color: var(--badger-color-warning-text);
+}
+
+.working-dossier-readiness-blockers button {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--badger-color-accent);
+  cursor: pointer;
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  overflow-wrap: anywhere;
+}
+
+.working-dossier-value .ant-space,
+.working-dossier-value .ant-space-item {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.working-dossier-value .ant-tag,
+.working-dossier-evidence-links .ant-btn {
+  max-width: 100%;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.working-dossier-evidence-links .ant-btn {
+  height: auto;
+  min-height: 32px;
 }
 
 .working-dossier-value p,

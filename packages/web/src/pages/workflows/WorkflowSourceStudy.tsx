@@ -393,6 +393,7 @@ export function WorkflowSourceStudy({
   return (
     <WorkflowPanel
       title={t("stage.sourceStudy")}
+      hideHeading
       className="source-study-panel"
       id="source-study"
       aria-labelledby="source-study-title"

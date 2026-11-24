@@ -230,15 +230,19 @@ export function QuestionnaireLedger({
                 )}
               </p>
               <Collapse
+                bordered={false}
+                className="ledger-readiness-topics"
                 items={ledger.handoff.readiness.map((readiness) => ({
                   key: readiness.topic,
                   label: (
-                    <Space wrap>
-                      {t(`questionnaire.topic.${readiness.topic}`)}
+                    <div className="ledger-topic-heading">
+                      <strong>
+                        {t(`questionnaire.topic.${readiness.topic}`)}
+                      </strong>
                       <Tag color={readiness.ready ? "success" : "warning"}>
                         {t(readiness.ready ? "ledger.ready" : "ledger.blocked")}
                       </Tag>
-                    </Space>
+                    </div>
                   ),
                   children: readiness.ready ? (
                     <p>{t("ledger.noBlockers")}</p>

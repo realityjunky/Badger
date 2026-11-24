@@ -74,7 +74,7 @@ export function DossierEvidenceLinks({
     labelCounts.set(text, (labelCounts.get(text) ?? 0) + 1);
   }
   const links = (
-    <Space wrap size={[8, 4]}>
+    <Space className="working-dossier-evidence-links" wrap size={[8, 4]}>
       {[...references].map(([id, locator]) => {
         const text = label(locator);
         const name =

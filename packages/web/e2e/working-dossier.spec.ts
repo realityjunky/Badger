@@ -251,6 +251,20 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
   );
   const content = textContent([dates, renderer]);
   const handoffId = `${dates.name}-to-${renderer.name}`;
+  const renderLabel = "Render the calendar notice";
+  const augmentationReason = `Confirm which checks the workflow adds before rendering a calendar notice. Review ${"CalendarNoticeValidationPolicy".repeat(5)}.`;
+  content.nodes[renderer.name].label = renderLabel;
+  content.fields[`node/${renderer.name}/augmentations`] = {
+    state: "missing",
+    reason: augmentationReason,
+  };
+  content.routes!["return-for-correction"] = {
+    from: renderer.name,
+    to: dates.name,
+    kind: "rework",
+    condition: "The chosen dates need correction.",
+    maxVisits: 2,
+  };
   content.nodes["check-dates"] = {
     label: "Check dates",
     order: 2,
@@ -274,11 +288,25 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
   await save(team, second.ids, firstEdit(second.job, content));
 
   const page = team.expert;
+  await expect(page.locator("#source-study-title")).toHaveClass("sr-only");
   const diagram = page.getByRole("region", { name: "Workflow diagram" });
   const producer = diagram.getByRole("button", { name: dates.name });
-  const consumer = diagram.getByRole("button", { name: renderer.name });
+  const consumer = diagram.getByRole("button", { name: renderLabel });
   const requiredCall = diagram.getByRole("button", { name: "Check dates" });
-  await expect(requiredCall).toContainText("Required Skill call");
+  await expect(requiredCall).toHaveText("Check dates");
+  await expect(requiredCall).toHaveAccessibleDescription("Required Skill call");
+  await expect(
+    diagram.getByText("Required Skill call", { exact: true }),
+  ).toBeVisible();
+  expect(
+    await consumer
+      .locator("span")
+      .evaluate(
+        (label) =>
+          label.clientHeight >
+          Number.parseFloat(getComputedStyle(label).lineHeight),
+      ),
+  ).toBe(true);
   const [startBox, endBox, callBox] = await Promise.all([
     producer.boundingBox(),
     consumer.boundingBox(),
@@ -332,6 +360,7 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
   for (const [variant, tab] of [
     ["next", "Routes"],
     ["documented", "Handoffs"],
+    ["rework", "Routes"],
   ]) {
     const arrow = diagram.locator(
       `path[data-variant="${variant}"] + .working-dossier-edge-target`,
@@ -346,6 +375,9 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
       page.getByRole("tab", { name: tab, exact: true }),
     ).toHaveAttribute("aria-selected", "true");
   }
+  await expect(
+    page.getByRole("combobox", { name: "Route", exact: true }),
+  ).toHaveValue("return-for-correction");
 
   await page.getByRole("tab", { name: "Material findings" }).click();
   await page
@@ -366,7 +398,7 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
   await expect(requiredCall).toHaveAttribute("data-highlighted", "true");
   await expect(consumer).toHaveAttribute("data-highlighted", "false");
   await requiredCall.click();
-  await expect(detail).toContainText(`Parent Node · ${renderer.name}`);
+  await expect(detail).toContainText(`Parent Node · ${renderLabel}`);
   await pins.getByRole("button", { name: archive.name }).click();
   await expect(detail).toContainText(
     "This Skill has no recorded use in the diagram.",
@@ -393,4 +425,35 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
       (element) => element.scrollWidth > element.clientWidth,
     ),
   ).toBe(true);
+
+  const ledger = team.engineer;
+  await openQuestionnaire(ledger, second.ids);
+  const readiness = ledger.getByRole("region", { name: "Readiness by topic" });
+  await readiness.getByRole("button", { name: /^Augmentations\b/u }).click();
+  const blocker = readiness.getByRole("button", {
+    name: /Confirm which checks/u,
+  });
+  const augmentationName = `${renderLabel} · Augmentations`;
+  const augmentation = readiness.getByRole("article", {
+    name: augmentationName,
+  });
+  await expect(blocker).toBeVisible();
+  await expect(augmentation.getByText(augmentationReason)).toBeVisible();
+  for (const width of [1280, 390]) {
+    await ledger.setViewportSize({ width, height: 844 });
+    for (const item of [blocker, augmentation]) {
+      await expect
+        .poll(() =>
+          item.evaluate(
+            (element) => element.scrollWidth <= element.clientWidth + 1,
+          ),
+        )
+        .toBe(true);
+    }
+  }
+  await blocker.click();
+  await expect(
+    ledger.getByRole("article", { name: augmentationName }),
+  ).toBeVisible();
+  await expect(augmentation).toHaveCount(0);
 });
