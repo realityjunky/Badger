@@ -1144,6 +1144,7 @@ test("a Skill round publishes directly from Questionnaire and a named Member res
     await author
       .getByRole("option", { name: "Parcel specialist", exact: true })
       .click();
+    await author.getByRole("combobox", { name: /Assignees/u }).press("Escape");
     await author
       .getByRole("button", { name: "Save question", exact: true })
       .click();
