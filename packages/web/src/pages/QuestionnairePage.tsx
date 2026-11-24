@@ -786,6 +786,18 @@ export function QuestionnairePage() {
                 seed={editing.seed}
                 view={view}
                 dossierFields={dossierFields}
+                relatedWorkflows={
+                  skillView
+                    ? [
+                        ...new Map(
+                          versions.map(({ workflowId, workflowName }) => [
+                            workflowId,
+                            workflowName,
+                          ]),
+                        ),
+                      ].map(([value, label]) => ({ value, label }))
+                    : undefined
+                }
                 onSaved={openQuestion}
                 onCancel={() => setEditing(null)}
               />

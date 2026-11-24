@@ -1361,12 +1361,11 @@ access and exact uploader identity are checked server-side.
 To edit, include `baseHash` and either a complete replacement folder or
 `changes: [{"path":"file", "content":"BASE64"|null}]` in the
 preview and confirmation body. The response includes the exact diff from the
-base. Send the content to `upload-preview` first, then post the same content to
-`versions` with `"confirmed": true` and `"expectedHash": "HASH_FROM_PREVIEW"`.
-Both are required, and the hash must be the preview's 64 lowercase hex
-digits. If the content no longer has that hash, the service answers 409 with
-the computed `hash` beside the error; preview the content again before
-confirming it.
+base. Send the content to `upload-preview` first. Confirm the same content
+through `versions` with `confirmed: true` and the preview's `hash` as
+`expectedHash`. For an edit, also quote the preview's `confirmationHash`.
+It binds the Skill, base, edit method and resulting content. A mismatch
+returns 409 and calls for another preview before confirmation.
 
 ### Upload permissions
 

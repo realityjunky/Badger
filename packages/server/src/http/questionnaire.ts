@@ -45,6 +45,7 @@ import {
   parseConcernDecision,
   revisionInput,
   textInput,
+  type QuestionContent,
 } from "../questionnaire/model.js";
 import {
   createRound,
@@ -303,6 +304,24 @@ export async function handleQuestionnaire(
           )
         : null;
       const scope = skillView?.scope ?? versionId;
+      const validateQuestion = async (content: QuestionContent) => {
+        if (skillRequest) {
+          for (const target of content.targets.filter(
+            ({ kind }) => kind === "workflow",
+          )) {
+            const related = await readWorkflow(tx, target.id);
+            if (
+              !related ||
+              !(await workflowCapabilities(tx, access, person, related)).read
+            )
+              throw new RequestError(
+                403,
+                "Choose a related workflow you can read",
+              );
+          }
+        }
+        return content;
+      };
       const workflowId = ownerId;
       if (
         !skillRequest &&
@@ -653,6 +672,7 @@ export async function handleQuestionnaire(
           : "";
         if (resource === "questions") {
           const input = resolution ?? parseResolution(body);
+          if (input.followUp) await validateQuestion(input.followUp);
           // A replayed request returns its first response; only a new
           // follow-up round gets a publication baseline.
           const replay =
@@ -878,7 +898,7 @@ export async function handleQuestionnaire(
               context,
               scope,
               id,
-              parseQuestion(body),
+              await validateQuestion(parseQuestion(body)),
             ),
           },
         };
@@ -902,7 +922,7 @@ export async function handleQuestionnaire(
               context,
               scope,
               question.roundId,
-              parseQuestion(body),
+              await validateQuestion(parseQuestion(body)),
               { id, revision: revisionInput(body.revision) },
             ),
           },

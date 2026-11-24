@@ -28,8 +28,8 @@ async function selectOption(
   await select.click();
   await page
     .locator(".ant-select-dropdown:visible")
-    .getByRole("option", { name: option })
-    .first()
+    .locator(".ant-select-item-option-content")
+    .filter({ hasText: option })
     .click();
   await select.press("Escape");
 }

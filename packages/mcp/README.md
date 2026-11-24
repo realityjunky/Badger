@@ -223,8 +223,9 @@ acceptance, rejection, or sign-off tool.
 For an upload or edit, provide the existing `skillId` and local `folder`. An
 edit may also quote the exact retained `baseHash` it starts from. No effect
 declarations or model credentials are needed. The preview creates no immutable version.
-After the user reviews it, repeat with its hash and confirmation. Changed
-files fail the service's hash check. A metadata-only inspection of the entire
+After the user reviews it, repeat with `confirmed: true` and the preview hash as
+`expectedHash`. Also quote the preview's `confirmationHash` for an edit. A
+metadata-only inspection of the entire
 folder refuses any path segment that names Git metadata, by the rule claimed job
 folders use and the service applies to uploads: `.git` in any letter case,
 including spellings that HFS+ or Windows file systems resolve to `.git`, and

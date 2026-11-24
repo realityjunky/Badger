@@ -190,14 +190,24 @@ export function QuestionInspector({
                           <li key={index}>
                             {t(`questionnaire.target.${target.kind}`)}:{" "}
                             {view &&
-                            "workflow" in view &&
-                            target.id === view.workflow.id
-                              ? view.workflow.name
-                              : view &&
-                                  "skill" in view &&
-                                  target.id === view.skill.id
-                                ? view.skill.name
-                                : target.id}
+                            "skill" in view &&
+                            target.kind === "workflow" ? (
+                              <Link
+                                to={`/workflows/${encodeURIComponent(target.id)}`}
+                              >
+                                {t("questionnaire.openRelatedWorkflow")}
+                              </Link>
+                            ) : view &&
+                              "workflow" in view &&
+                              target.id === view.workflow.id ? (
+                              view.workflow.name
+                            ) : view &&
+                              "skill" in view &&
+                              target.id === view.skill.id ? (
+                              view.skill.name
+                            ) : (
+                              target.id
+                            )}
                           </li>
                         ))}
                       </ul>

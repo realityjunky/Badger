@@ -41,6 +41,7 @@ interface Values extends Omit<
   answerOptions?: string;
   answerUnit?: string;
   answerColumns?: string;
+  relatedWorkflows?: string[];
   assignees: string[];
   evidence: {
     version: string;
@@ -61,6 +62,7 @@ export function QuestionComposer({
   onDraft,
   view,
   dossierFields = [],
+  relatedWorkflows = [],
   onSaved,
   onCancel,
 }: {
@@ -73,6 +75,7 @@ export function QuestionComposer({
   seed?: QuestionContent;
   onDraft?(question: QuestionContent): void;
   view: QuestionnaireView;
+  relatedWorkflows?: { value: string; label: string }[];
   dossierFields?: WorkingDossierField[];
   onSaved(question: Question): void;
   onCancel(): void;
@@ -106,6 +109,13 @@ export function QuestionComposer({
   const initial: Values = draft
     ? {
         ...draft,
+        ...(skill
+          ? {
+              relatedWorkflows: draft.targets
+                .filter(({ kind }) => kind === "workflow")
+                .map(({ id }) => id),
+            }
+          : {}),
         answerKind: draft.answerType?.kind ?? "free-text",
         answerOptions:
           draft.answerType && "options" in draft.answerType
@@ -152,6 +162,7 @@ export function QuestionComposer({
         answerOptions,
         answerUnit,
         answerColumns,
+        relatedWorkflows: selectedWorkflows,
         ...questionValues
       } = values;
       const lines = (value: string | undefined) =>
@@ -170,7 +181,15 @@ export function QuestionComposer({
       const content: QuestionContent = {
         ...questionValues,
         ...(skill
-          ? { targets: [{ kind: "skill" as const, id: skill.skillId }] }
+          ? {
+              targets: [
+                { kind: "skill" as const, id: skill.skillId },
+                ...(selectedWorkflows ?? []).map((id) => ({
+                  kind: "workflow" as const,
+                  id,
+                })),
+              ],
+            }
           : {}),
         ...(suggestion &&
         suggestion.answerType === undefined &&
@@ -393,6 +412,18 @@ export function QuestionComposer({
           ]}
         />
       </Form.Item>
+      {skill && relatedWorkflows.length > 0 && (
+        <Form.Item
+          name="relatedWorkflows"
+          label={t("questionnaire.relatedWorkflows")}
+        >
+          <Select
+            mode="multiple"
+            options={relatedWorkflows}
+            optionFilterProp="label"
+          />
+        </Form.Item>
+      )}
       {!skill && (
         <>
           <h3>{t("questionnaire.targets")}</h3>

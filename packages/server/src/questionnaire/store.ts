@@ -256,10 +256,15 @@ async function validateEvidence(
   if (typeof scope !== "string") {
     if (
       content.targets.some(
-        (target) => target.kind !== "skill" || target.id !== scope.skillId,
+        (target) =>
+          target.kind !== "workflow" &&
+          (target.kind !== "skill" || target.id !== scope.skillId),
       )
     )
-      throw new RequestError(400, "A Skill question must target its own Skill");
+      throw new RequestError(
+        400,
+        "A Skill question can reference its own Skill and related workflows",
+      );
     if (content.evidence.length > 0) {
       const files = await tx.query<{ path: string }>(
         `select f->>'path' as path from skill_versions v, jsonb_array_elements(v.inventory) f
