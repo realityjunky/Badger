@@ -82,8 +82,82 @@ async function createFixture(page: Page) {
   const first = await upload(page, skill.id, original);
   const location = (hash: string) =>
     `${base}/skills/${skill.id}/versions/${hash}`;
-  return { skill, group, original, first, location };
+  return { skill, group, name, original, first, location };
 }
+
+test("filter the library by workflow and open the exact pinned Skill version", async ({
+  page,
+}) => {
+  const { skill, group, name, original, first, location } =
+    await createFixture(page);
+  const later = await upload(
+    page,
+    skill.id,
+    new Map(original).set("references/notes.md", Buffer.from("Newer note.\n")),
+  );
+  const other = `other-${randomUUID()}`;
+  await api(page, "/skills", "POST", { groupId: group.id, name: other });
+  const workflowName = `workflow-${randomUUID()}`;
+  const { workflow, version } = await api<{
+    workflow: { id: string };
+    version: { id: string };
+  }>(page, "/workflows", "POST", {
+    groupId: group.id,
+    name: workflowName,
+    goal: "Browse a reviewed Skill.",
+    intent: "new-skill",
+    locale: "en",
+  });
+  await api(
+    page,
+    `/workflows/${workflow.id}/versions/${version.id}/pins`,
+    "POST",
+    {
+      skillId: skill.id,
+      hash: first.hash,
+      purpose: "source",
+    },
+  );
+  await page.reload();
+  const library = page.getByRole("complementary", { name: "Skill library" });
+  const workflowSelect = page.getByRole("combobox", {
+    name: "Workflow",
+    exact: true,
+  });
+  const skillSelect = page.getByRole("combobox", {
+    name: "Skill",
+    exact: true,
+  });
+  await expect(
+    library.getByRole("link", { name: new RegExp(other) }),
+  ).toBeVisible();
+  await workflowSelect.click();
+  await workflowSelect.fill(workflowName);
+  await page.getByRole("option", { name: `${workflowName} · ${name}` }).click();
+  await expect(
+    library.getByRole("link", { name: new RegExp(other) }),
+  ).toHaveCount(0);
+  await skillSelect.click();
+  await page.getByRole("option", { name: `${name} · ${name}` }).click();
+  const query = `?workflow=${workflow.id}`;
+  await expect(page).toHaveURL(location(first.hash) + query);
+  const versions = page.getByRole("region", { name: "Versions" });
+  await expect(versions).toContainText(first.hash);
+  await page.reload();
+  await expect(versions).toContainText(first.hash);
+
+  await versions.getByRole("combobox", { name: "Versions" }).click();
+  await page.getByText(new RegExp(`${later.hash.slice(0, 12)}$`)).click();
+  await expect(page).toHaveURL(location(later.hash) + query);
+  await page.goBack();
+  await expect(versions).toContainText(first.hash);
+
+  await workflowSelect.click();
+  await page.getByRole("option", { name: "All workflows" }).click();
+  await expect(
+    library.getByRole("link", { name: new RegExp(other) }),
+  ).toBeVisible();
+});
 
 test("select and download an unlabelled Skill snapshot and label it by hash", async ({
   page,

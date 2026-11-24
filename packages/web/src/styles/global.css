@@ -1660,6 +1660,17 @@ button.rail-link {
   width: 100%;
 }
 
+.skills-library-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+  max-width: 720px;
+}
+
+.skills-library-filters .field {
+  min-width: 0;
+}
+
 .skills-registry > *,
 .skills-compare-files > * {
   min-width: 0;

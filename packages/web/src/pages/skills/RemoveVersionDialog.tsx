@@ -30,6 +30,13 @@ export function RemoveVersionDialog({
   const [writeError, setWriteError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const action = removal?.action;
+  const actionLabel = t(
+    action === "delete"
+      ? "skills.deleteVersion"
+      : action === "retire"
+        ? "skills.retireVersion"
+        : "skills.removeVersion",
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -84,16 +91,11 @@ export function RemoveVersionDialog({
       cancelButtonProps={{ disabled: busy }}
       confirmLoading={busy}
       okButtonProps={{
+        "aria-label": actionLabel,
         danger: true,
         disabled: action === undefined || action === "none",
       }}
-      okText={t(
-        action === "delete"
-          ? "skills.deleteVersion"
-          : action === "retire"
-            ? "skills.retireVersion"
-            : "skills.removeVersion",
-      )}
+      okText={actionLabel}
       onOk={() => void confirm()}
       cancelText={t("common.cancel")}
     >

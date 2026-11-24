@@ -27,6 +27,13 @@ import {
   type SkillFile,
   type SkillVersion,
 } from "../api/skills.js";
+import {
+  loadWorkflows,
+  loadWorkflowVersion,
+  type ReadResult,
+  type WorkflowCatalog,
+  type WorkflowSkillPin,
+} from "../api/workflows.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { useI18n } from "../i18n/I18nContext.js";
@@ -74,7 +81,15 @@ export function SkillsPage() {
   const { skillId, versionId } = useParams();
   const [parameters, setParameters] = useSearchParams();
   const groupId = parameters.get("group");
+  const workflowId = parameters.get("workflow") || null;
   const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
+  const [workflows, setWorkflows] =
+    useState<ReadResult<WorkflowCatalog> | null>(null);
+  const [pinnedSkills, setPinnedSkills] = useState<{
+    versionId: string;
+    pins: WorkflowSkillPin[] | null;
+  }>();
+  const [workflowRetry, setWorkflowRetry] = useState(0);
   const [versionList, setVersionList] = useState<{
     skillId: string;
     versions: SkillVersion[];
@@ -84,6 +99,36 @@ export function SkillsPage() {
   const [uploading, setUploading] = useState<"upload" | "git" | null>(null);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<{ groupId: string; name: string }>();
+  const workflowOptions =
+    workflows?.kind === "ok"
+      ? workflows.value.workflows.filter(
+          (workflow) => !groupId || workflow.groupId === groupId,
+        )
+      : [];
+  const workflow = workflowOptions.find((entry) => entry.id === workflowId);
+  const workflowVersionId = workflow?.latestVersion?.id;
+  const pins =
+    pinnedSkills?.versionId === workflowVersionId
+      ? pinnedSkills?.pins
+      : undefined;
+  const loadingPins =
+    workflowId !== null &&
+    (workflows === null ||
+      (workflowVersionId !== undefined && pins === undefined));
+  const workflowFailed =
+    (workflows !== null && workflows.kind !== "ok") ||
+    pins === null ||
+    (workflowId !== null && workflows?.kind === "ok" && workflow === undefined);
+  const pinHashes = new Map(pins?.map((pin) => [pin.skillId, pin.hash]));
+  const groupNames = new Map(
+    catalog?.groups.map((group) => [group.id, group.name]),
+  );
+  const librarySkills =
+    catalog?.skills.filter(
+      (skill) =>
+        (!groupId || skill.groupId === groupId) &&
+        (!workflowId || pinHashes.has(skill.id)),
+    ) ?? [];
   const selectedSkill =
     catalog?.skills.find((skill) => skill.id === skillId) ?? null;
   const versions =
@@ -98,6 +143,10 @@ export function SkillsPage() {
   const tree = useMemo(() => fileTree(version?.inventory ?? []), [version]);
   const createGroups =
     catalog?.groups.filter((group) => group.canCreateSkill) ?? [];
+  const filters = new URLSearchParams();
+  if (groupId) filters.set("group", groupId);
+  if (workflowId) filters.set("workflow", workflowId);
+  const librarySearch = filters.toString();
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
@@ -114,6 +163,32 @@ export function SkillsPage() {
     });
     return () => controller.abort();
   }, [reload, t]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadWorkflows(basePath, controller.signal).then((result) => {
+      if (!controller.signal.aborted) setWorkflows(result);
+    });
+    return () => controller.abort();
+  }, [basePath, workflowRetry]);
+
+  useEffect(() => {
+    if (!workflowId || !workflowVersionId) return;
+    const controller = new AbortController();
+    void loadWorkflowVersion(
+      basePath,
+      workflowId,
+      workflowVersionId,
+      controller.signal,
+    ).then((result) => {
+      if (!controller.signal.aborted)
+        setPinnedSkills({
+          versionId: workflowVersionId,
+          pins: result.kind === "ok" ? result.value.pins : null,
+        });
+    });
+    return () => controller.abort();
+  }, [basePath, workflowId, workflowVersionId, workflowRetry]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -138,6 +213,22 @@ export function SkillsPage() {
       next.set(key, value);
       return next;
     });
+  }
+
+  function selectWorkflow(nextWorkflowId: string) {
+    const next = new URLSearchParams(librarySearch);
+    if (nextWorkflowId) next.set("workflow", nextWorkflowId);
+    else next.delete("workflow");
+    navigate({ pathname: "/skills", search: next.toString() });
+  }
+
+  function skillLocation(id: string, hash?: string) {
+    return {
+      pathname: hash
+        ? skillVersionPath(id, hash)
+        : `/skills/${encodeURIComponent(id)}`,
+      search: librarySearch,
+    };
   }
 
   function selectFile(relative: string) {
@@ -191,7 +282,7 @@ export function SkillsPage() {
       }
       return { skillId: saved.skillId, versions: [saved, ...entries] };
     });
-    navigate(skillVersionPath(saved.skillId, saved.hash));
+    navigate(skillLocation(saved.skillId, saved.hash));
   }
 
   function deleteSelection(deleted: SkillVersion) {
@@ -200,12 +291,7 @@ export function SkillsPage() {
     );
     setVersionList({ skillId: deleted.skillId, versions: remaining });
     const next = latestSkillVersion(remaining);
-    navigate(
-      next
-        ? skillVersionPath(deleted.skillId, next.hash)
-        : `/skills/${encodeURIComponent(deleted.skillId)}`,
-      { replace: true },
-    );
+    navigate(skillLocation(deleted.skillId, next?.hash), { replace: true });
   }
 
   return (
@@ -233,6 +319,76 @@ export function SkillsPage() {
           </Space>
         }
       />
+      <div className="skills-library-filters">
+        <label className="field">
+          {t("scope.workflow")}
+          <Select
+            aria-label={t("scope.workflow")}
+            value={workflowId ?? ""}
+            loading={workflows === null}
+            options={[
+              { value: "", label: t("skills.allWorkflows") },
+              ...workflowOptions.map((entry) => ({
+                value: entry.id,
+                label: `${entry.name} · ${entry.groupName}`,
+              })),
+            ]}
+            showSearch={{ optionFilterProp: "label" }}
+            virtual={false}
+            onChange={selectWorkflow}
+          />
+        </label>
+        <label className="field">
+          {t("skills.skill")}
+          <Select
+            aria-label={t("skills.skill")}
+            value={
+              librarySkills.some((skill) => skill.id === skillId)
+                ? skillId
+                : undefined
+            }
+            placeholder={t("skills.chooseSkill")}
+            loading={catalog === null || loadingPins}
+            disabled={catalog === null || loadingPins}
+            allowClear
+            options={librarySkills.map((skill) => {
+              const groupName = groupNames.get(skill.groupId);
+              return {
+                value: skill.id,
+                label: groupName ? `${skill.name} · ${groupName}` : skill.name,
+              };
+            })}
+            showSearch={{ optionFilterProp: "label" }}
+            virtual={false}
+            onChange={(id: string | undefined) =>
+              navigate(
+                id
+                  ? skillLocation(id, pinHashes.get(id))
+                  : { pathname: "/skills", search: librarySearch },
+              )
+            }
+          />
+        </label>
+      </div>
+      {workflowFailed && (
+        <Alert
+          type="warning"
+          showIcon
+          title={t("skills.workflowFailed")}
+          action={
+            <Button
+              size="small"
+              onClick={() => {
+                setWorkflows(null);
+                setPinnedSkills(undefined);
+                setWorkflowRetry((attempt) => attempt + 1);
+              }}
+            >
+              {t("common.retry")}
+            </Button>
+          }
+        />
+      )}
       {failure !== null && (
         <Alert
           type="error"
@@ -256,34 +412,32 @@ export function SkillsPage() {
         <div className="three-pane skills-registry">
           <aside className="pane" aria-label={t("skills.library")}>
             <h2 className="pane-title">{t("skills.library")}</h2>
-            {catalog.skills.filter(
-              (skill) => !groupId || skill.groupId === groupId,
-            ).length === 0 && <p className="muted">{t("skills.empty")}</p>}
+            {librarySkills.length === 0 &&
+              !loadingPins &&
+              !(workflowId && workflowFailed) && (
+                <p className="muted">
+                  {t(workflowId ? "skills.workflowEmpty" : "skills.empty")}
+                </p>
+              )}
             <ul className="skills-list">
-              {catalog.skills
-                .filter((skill) => !groupId || skill.groupId === groupId)
-                .map((skill) => (
-                  <li key={skill.id}>
-                    <Link
-                      className={
-                        skill.id === skillId
-                          ? "skills-link selected"
-                          : "skills-link"
-                      }
-                      aria-current={skill.id === skillId ? "page" : undefined}
-                      to={`/skills/${encodeURIComponent(skill.id)}`}
-                    >
-                      <strong>{skill.name}</strong>
-                      <span className="muted">
-                        {
-                          catalog.groups.find(
-                            (group) => group.id === skill.groupId,
-                          )?.name
-                        }
-                      </span>
-                    </Link>
-                  </li>
-                ))}
+              {librarySkills.map((skill) => (
+                <li key={skill.id}>
+                  <Link
+                    className={
+                      skill.id === skillId
+                        ? "skills-link selected"
+                        : "skills-link"
+                    }
+                    aria-current={skill.id === skillId ? "page" : undefined}
+                    to={skillLocation(skill.id, pinHashes.get(skill.id))}
+                  >
+                    <strong>{skill.name}</strong>
+                    <span className="muted">
+                      {groupNames.get(skill.groupId)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
             </ul>
             {version !== null && (
               <>
@@ -327,7 +481,7 @@ export function SkillsPage() {
                           skillVersionOption(entry, i18n),
                         )}
                         onChange={(hash) =>
-                          navigate(skillVersionPath(selectedSkill.id, hash))
+                          navigate(skillLocation(selectedSkill.id, hash))
                         }
                       />
                     </label>
@@ -340,6 +494,7 @@ export function SkillsPage() {
                           skill={selectedSkill}
                           version={version}
                           path={path}
+                          librarySearch={librarySearch}
                           limits={catalog.limits}
                           onUpdated={updateVersion}
                           onSaved={selectSavedVersion}

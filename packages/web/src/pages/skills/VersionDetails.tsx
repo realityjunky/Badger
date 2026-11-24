@@ -20,6 +20,7 @@ export function VersionDetails({
   skill,
   version,
   path,
+  librarySearch,
   limits,
   onUpdated,
   onSaved,
@@ -28,6 +29,7 @@ export function VersionDetails({
   skill: Skill;
   version: SkillVersion;
   path: string | null;
+  librarySearch: string;
   limits: UploadLimits;
   onUpdated(version: SkillVersion): void;
   onSaved(version: SkillVersion): void;
@@ -110,7 +112,10 @@ export function VersionDetails({
         >
           {t(`skills.editOrigin.${origin.method}`)}{" "}
           <Link
-            to={skillVersionPath(skill.id, origin.baseHash)}
+            to={{
+              pathname: skillVersionPath(skill.id, origin.baseHash),
+              search: librarySearch,
+            }}
             title={origin.baseHash}
           >
             <code>{origin.baseHash.slice(0, 12)}</code>
