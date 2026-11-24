@@ -1487,7 +1487,6 @@ describe("reviewed SQL migrations", () => {
       "comment_revisions",
       "concern_resolutions",
       "confirmed_facts",
-      "current_question_recipients",
       "dossier_heads",
       "dossier_versions",
       "drafting_job_decisions",

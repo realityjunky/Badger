@@ -9,6 +9,7 @@ import { toIsoString } from "../util.js";
 import { invalidateDossiersCitingSkillQuestion } from "../dossier.js";
 import { evidenceComparison } from "../evidence-changes.js";
 import {
+  questionnaireAdministratorIds,
   questionnaireOwners,
   questionnaireScopeId,
   type QuestionnaireScope,
@@ -373,15 +374,15 @@ export async function resolutionPreview(
       attachments: AnswerAttachment[];
     }>(
       `select r.* from question_answers a join answer_revisions r on r.question_id = a.question_id and r.person_id = a.person_id and r.revision = a.revision where a.question_id = $1 and exists (
-      select 1 from current_question_recipients recipient
+      select 1 from current_question_recipients($2::text[]) recipient
       where recipient.question_id = a.question_id and recipient.person_id = a.person_id) order by a.person_id`,
-      [questionId],
+      [questionId, questionnaireAdministratorIds(scope)],
     )
   ).rows;
   const recipients = (
     await tx.query<{ person_id: string | null }>(
-      `select distinct r.person_id from current_question_recipients r where r.question_id = $1`,
-      [questionId],
+      `select distinct r.person_id from current_question_recipients($2::text[]) r where r.question_id = $1`,
+      [questionId, questionnaireAdministratorIds(scope)],
     )
   ).rows;
   if (
@@ -574,9 +575,9 @@ export async function notifyQuestionCoordinators(
       `insert into inbox_items (id, person_id, skill_questionnaire_id, gate, kind, event_id, question_id, created_at, updated_at)
        select $1 || '-' || p.id, p.id, $2, 'questionnaire', $6, $3, q.id, $5, $5
        from questions q join question_rounds r on r.id = q.round_id
-       join people p on p.id = r.created_by or exists (
+       join people p on p.status = 'active' and (p.id = r.created_by or p.id = any($8::text[]) or exists (
          select 1 from skill_questionnaire_participants a
-         where a.group_id = $7 and a.person_id = p.id and a.can_coordinate)
+         where a.group_id = $7 and a.person_id = p.id and a.can_coordinate))
        where q.id = $4 and q.skill_questionnaire_id = $2 on conflict do nothing`,
       [
         deps.ids.next(),
@@ -586,6 +587,7 @@ export async function notifyQuestionCoordinators(
         deps.clock.now(),
         kind,
         scope.groupId,
+        scope.configuredAdministratorIds,
       ],
     );
     return;

@@ -1,5 +1,4 @@
 import type { Queryable } from "../database/database.js";
-export { mayReadSkillQuestionnaire } from "./skill-subject.js";
 
 export interface ReviewedSkillAnswerReference {
   questionId: string;
@@ -47,23 +46,6 @@ const REVIEWED_ANSWERS = `
   join fact_answer_revisions used on used.fact_id = f.id and used.question_id = q.id
   join answer_revisions a on a.question_id = used.question_id and a.person_id = used.person_id and a.revision = used.revision
   where r.kind = 'confirmed' and a.state = 'submitted'`;
-
-/** Check subject read access before projecting the returned text to a person. */
-export async function readReviewedSkillAnswer(
-  database: Queryable,
-  reference: ReviewedSkillAnswerReference,
-): Promise<ReviewedSkillAnswer | null> {
-  const result = await database.query<ReviewedSkillAnswer>(
-    `${REVIEWED_ANSWERS} and q.id = $1 and r.revision = $2 and a.person_id = $3 and a.revision = $4`,
-    [
-      reference.questionId,
-      reference.resolutionRevision,
-      reference.personId,
-      reference.revision,
-    ],
-  );
-  return result.rows[0] ?? null;
-}
 
 /** The caller supplies a Group the reader can access and its actual pins. */
 export async function listReviewedSkillAnswers(

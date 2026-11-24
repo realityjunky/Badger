@@ -11,6 +11,7 @@ import { RequestError } from "../http/errors.js";
 import { toIsoString } from "../util.js";
 import { evidenceComparison } from "../evidence-changes.js";
 import {
+  questionnaireAdministratorIds,
   questionnaireOwners,
   questionnaireScopeId,
   type QuestionnaireScope,
@@ -137,9 +138,9 @@ export async function readQuestions(
     [versionId, compose],
   );
   const assigned = await tx.query<{ question_id: string }>(
-    `select distinct a.question_id from current_question_recipients a
+    `select distinct a.question_id from current_question_recipients($3::text[]) a
     join questions q on q.id = a.question_id where q.subject_id = $1 and a.person_id = $2`,
-    [versionId, personId],
+    [versionId, personId, questionnaireAdministratorIds(scope)],
   );
   const history = new Map<string, QuestionRevision[]>();
   for (const row of revisions.rows) {
@@ -201,9 +202,11 @@ export async function questionRecipients(
     if (ids.length !== content.assignees.length)
       throw new RequestError(400, "Assign named people to a Skill question");
     const active = await tx.query<{ person_id: string }>(
-      `select person_id from skill_questionnaire_participants
-       where group_id = $1 and person_id = any($2::text[]) order by person_id`,
-      [scope.groupId, ids],
+      `select p.id as person_id from people p where p.status = 'active' and p.id = any($2::text[])
+        and (p.id = any($3::text[]) or exists (
+          select 1 from skill_questionnaire_participants a where a.group_id = $1 and a.person_id = p.id
+        )) order by p.id`,
+      [scope.groupId, ids, scope.configuredAdministratorIds],
     );
     if (active.rows.length !== new Set(ids).size)
       throw new RequestError(
@@ -471,7 +474,7 @@ export async function notifyQuestion(
     select $1 || '-' || coalesce(min(r.binding_id), r.person_id), r.person_id,
       case when r.person_id is null then min(r.binding_id) else null end,
       $2, $3, 'questionnaire', 'question-assigned', $4, $5, $6, $6
-    from current_question_recipients r where r.question_id = $5
+    from current_question_recipients($9::text[]) r where r.question_id = $5
       and ($7::text[] is null or r.person_id = any($7::text[]) or r.binding_id = any($8::text[]))
     group by r.person_id, case when r.person_id is null then lower(r.email) else '' end on conflict do nothing`,
     [
@@ -482,6 +485,7 @@ export async function notifyQuestion(
       deps.clock.now(),
       audience?.personIds ?? null,
       audience?.bindingIds ?? null,
+      questionnaireAdministratorIds(scope),
     ],
   );
 }

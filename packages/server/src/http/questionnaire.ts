@@ -214,6 +214,7 @@ export async function handleQuestionnaire(
           skillQuestion.skill_id,
           skillQuestion.version_hash,
           { subject: false, versions: [] },
+          input.config,
         );
         if (skillQuestion.state === "draft" && !view.capabilities.compose)
           throw new RequestError(403, "This question is outside your roles");
@@ -321,6 +322,7 @@ export async function handleQuestionnaire(
               subject: !reads || !resource,
               versions: versionLocks,
             },
+            input.config,
           )
         : null;
       const scope = skillView?.scope ?? versionId;
@@ -545,10 +547,7 @@ export async function handleQuestionnaire(
               skill: skillView.skill,
               groupName: skillView.groupName,
               assignees: compose
-                ? await listSkillQuestionnaireAssignees(
-                    tx,
-                    skillView.scope.groupId,
-                  )
+                ? await listSkillQuestionnaireAssignees(tx, skillView.scope)
                 : [],
               concerns: [],
               suggestions: [],

@@ -1,8 +1,10 @@
 import { canonicalHash } from "@realityjunky/badger";
 import type { Access } from "../authorization.js";
+import type { ServiceConfig } from "../config.js";
 import type { Queryable } from "../database/database.js";
 import { RequestError } from "../http/errors.js";
 import type { Person } from "../people.js";
+import { LOCAL_IDENTITY_ISSUER } from "../identity/local.js";
 import { skillGroupPermissions } from "../skills/access.js";
 import { readSkill } from "../skills/library.js";
 import { toIsoString } from "../util.js";
@@ -36,15 +38,6 @@ async function visibleSkill(
     await skillGroupPermissions(database, access, person)
   ).find((grant) => grant.id === skill.groupId);
   return permission ? { skill, permission } : null;
-}
-
-export async function mayReadSkillQuestionnaire(
-  database: Queryable,
-  access: Access,
-  person: Person,
-  skillId: string,
-) {
-  return (await visibleSkill(database, access, person, skillId)) !== null;
 }
 
 export async function listSkillQuestionnaireVersions(
@@ -84,6 +77,7 @@ export async function readSkillQuestionnaireSubject(
   skillId: string,
   versionHash: string,
   lock: { subject: boolean; versions: string[] },
+  config: ServiceConfig,
 ) {
   const visible = await visibleSkill(database, access, person, skillId);
   if (!visible) throw new RequestError(404, "No such Skill version");
@@ -105,14 +99,28 @@ export async function readSkillQuestionnaireSubject(
       "select id from skill_questionnaires where skill_id = $1 and version_hash = $2 for no key update",
       [skillId, versionHash],
     );
+  const localAdministrator =
+    config.identity.kind === "local" ? config.identity.administrator : null;
+  const administrators = await database.query<{ id: string }>(
+    `select id from people where status = 'active' and
+     ((email_verified and lower(email) = any($1::text[])) or
+       (issuer = $2 and subject = $3)) order by id`,
+    [
+      config.bootstrapAdministrators,
+      LOCAL_IDENTITY_ISSUER,
+      localAdministrator?.subject ?? null,
+    ],
+  );
   const scope: SkillQuestionnaireScope = {
     id: `skill:${canonicalHash({ skillId, versionHash })}`,
     skillId,
     versionHash,
     groupId: skill.groupId,
+    configuredAdministratorIds: administrators.rows.map(({ id }) => id),
   };
   const compose = access.tokenScopes === undefined && permission.canCreateSkill;
   const participant =
+    scope.configuredAdministratorIds.includes(person.id) ||
     (
       await database.query(
         "select 1 from skill_questionnaire_participants where group_id = $1 and person_id = $2",
@@ -149,16 +157,17 @@ export async function readSkillQuestionnaireSubject(
 
 export async function listSkillQuestionnaireAssignees(
   database: Queryable,
-  groupId: string,
+  scope: SkillQuestionnaireScope,
 ) {
   const list = await database.query<{
     person_id: string;
     display_name: string;
   }>(
     `select p.id as person_id, p.display_name from people p
-    join skill_questionnaire_participants a on a.person_id = p.id
-    where a.group_id = $1 order by p.display_name, p.id`,
-    [groupId],
+    where p.status = 'active' and (p.id = any($2::text[]) or exists (
+      select 1 from skill_questionnaire_participants a where a.person_id = p.id and a.group_id = $1
+    )) order by p.display_name, p.id`,
+    [scope.groupId, scope.configuredAdministratorIds],
   );
   return list.rows.map((row) => ({
     personId: row.person_id,

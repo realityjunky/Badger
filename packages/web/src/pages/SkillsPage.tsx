@@ -93,10 +93,7 @@ export function SkillsPage() {
     (versionId === undefined ? latestSkillVersion(versions) : null) ??
     null;
   const requestedPath = parameters.get("path");
-  const path =
-    version?.inventory.find((file) => file.path === requestedPath)?.path ??
-    version?.inventory[0]?.path ??
-    null;
+  const path = requestedPath ?? version?.inventory[0]?.path ?? null;
   const tab = parameters.get("tab") ?? "preview";
   const tree = useMemo(() => fileTree(version?.inventory ?? []), [version]);
   const createGroups =

@@ -1,4 +1,8 @@
-import { questionnaireScopeId, type QuestionnaireScope } from "./subject.js";
+import {
+  questionnaireAdministratorIds,
+  questionnaireScopeId,
+  type QuestionnaireScope,
+} from "./subject.js";
 import {
   invalidateQuestionFacts,
   notifyQuestionCoordinators,
@@ -61,11 +65,15 @@ export async function readAnswers(
     `select r.*, p.display_name,
       (r.state = 'submitted' and r.question_revision = q.revision
         and exists (select 1 from question_answers head where head.question_id = r.question_id and head.person_id = r.person_id and head.revision = r.revision)
-        and exists (select 1 from current_question_recipients recipient where recipient.question_id = r.question_id and recipient.person_id = r.person_id)) as eligible_for_resolution
+        and exists (select 1 from current_question_recipients($3::text[]) recipient where recipient.question_id = r.question_id and recipient.person_id = r.person_id)) as eligible_for_resolution
       from answer_revisions r join questions q on q.id = r.question_id
     join people p on p.id = r.person_id where q.subject_id = $1 and q.state <> 'draft'
       and (r.person_id = $2 or r.state = 'submitted') order by r.question_id, r.person_id, r.revision`,
-    [questionnaireScopeId(scope), personId],
+    [
+      questionnaireScopeId(scope),
+      personId,
+      questionnaireAdministratorIds(scope),
+    ],
   );
   const answers = new Map<string, Answer>();
   for (const row of rows.rows) {
@@ -108,11 +116,16 @@ async function answerForWrite(
       content: { answerType?: AnswerType };
     }>(
       `select q.id, q.round_id, q.revision, q.resolved_at, q.state, qr.content,
-    exists (select 1 from current_question_recipients r
+    exists (select 1 from current_question_recipients($4::text[]) r
       where r.question_id = q.id and r.person_id = $3) as assigned
     from questions q join question_revisions qr on qr.question_id = q.id and qr.revision = q.revision
     where q.subject_id = $1 and q.id = $2 and q.state <> 'draft'`,
-      [questionnaireScopeId(scope), input.questionId, personId],
+      [
+        questionnaireScopeId(scope),
+        input.questionId,
+        personId,
+        questionnaireAdministratorIds(scope),
+      ],
     )
   ).rows[0];
   const question =
@@ -355,11 +368,11 @@ export async function submitAnswers(
     );
     await tx.query(
       `update questions q set state = case when q.state = 'needs-reconfirmation' then q.state when not exists (
-      select 1 from current_question_recipients a where a.question_id = q.id
+      select 1 from current_question_recipients($2::text[]) a where a.question_id = q.id
         and (a.person_id is null or not exists (select 1 from answer_revisions r where r.question_id = q.id
           and r.person_id = a.person_id and r.question_revision = q.revision and r.state = 'submitted'))
       ) then 'answered' else 'open' end where q.id = $1`,
-      [input.questionId],
+      [input.questionId, questionnaireAdministratorIds(scope)],
     );
   }
   return (await readAnswers(tx, scope, context.personId)).filter(

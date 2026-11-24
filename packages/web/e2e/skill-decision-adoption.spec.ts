@@ -37,7 +37,8 @@ async function selectOption(
     .locator(".ant-select-item-option-content")
     .filter({ hasText: option })
     .click();
-  await select.press("Escape");
+  if ((await select.getAttribute("aria-expanded")) === "true")
+    await select.press("Escape");
 }
 
 async function readWorkflow(page: Page, path: string) {
@@ -453,9 +454,10 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     await expert
       .getByTestId("answer-box")
       .fill("The format also requires a schema.");
-    await expert
-      .getByRole("button", { name: "Submit answer", exact: true })
-      .click();
+    await expert.getByTestId("answer-save-state").waitFor({ state: "visible" });
+    await expect(expert.getByTestId("answer-save-state")).toHaveText(
+      "Draft saved",
+    );
     await expect(
       field.getByText("A linked reviewed answer changed"),
     ).toBeVisible();

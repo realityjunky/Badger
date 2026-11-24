@@ -66,6 +66,12 @@ The directory in which a workflow is built and run locally. Badger's records of 
 **Skill version**:
 An immutable snapshot of one Skill's files, identified by a hash of their content; changed content makes a new version.
 
+**Skill version label**:
+An optional `major.minor.patch` name unique within a Skill. Label edits have their own history and preserve the snapshot hash.
+
+**Retired Skill version**:
+A retained snapshot excluded from new Skill pin selections. Existing pins and citations still open its exact files.
+
 **Responsible uploader**:
 The person who first uploaded an immutable version within its Skill entry. Deduplicating the same version preserves this responsibility. Only this person, with current access, may confirm its script-effect declarations.
 

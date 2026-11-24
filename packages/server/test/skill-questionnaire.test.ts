@@ -156,6 +156,68 @@ async function signOff<T>(
 }
 
 describe("Skill-owned Questionnaire", () => {
+  it("uses the configured Administrator's library access for a named assignment", async () => {
+    const { base, skillId } = await setup();
+    const { person } = await api<{ person: { id: string } }>(
+      "GET",
+      "/me",
+      admin,
+    );
+    const view = await api<{ assignees: { personId: string }[] }>(
+      "GET",
+      base,
+      lead,
+    );
+    expect(view.assignees).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ personId: person.id }),
+      ]),
+    );
+    const { round } = await api<{ round: { id: string } }>(
+      "POST",
+      `${base}/rounds`,
+      lead,
+      { title: "Check the report" },
+      201,
+    );
+    const roundPath = `${base}/rounds/${round.id}`;
+    const { question } = await api<{ question: { id: string } }>(
+      "POST",
+      `${roundPath}/questions`,
+      lead,
+      {
+        text: "Which report layout do we use?",
+        topic: "scope",
+        targets: [{ kind: "skill", id: skillId }],
+        rationale: "Document the layout",
+        evidence: [],
+        assignees: [{ kind: "person", personId: person.id }],
+        priority: 10,
+      },
+      201,
+    );
+    const { preview } = await api<{ preview: { confirmationHash: string } }>(
+      "GET",
+      `${roundPath}/publish-preview`,
+      lead,
+    );
+    await api("POST", `${roundPath}/publish`, lead, {
+      confirmed: true,
+      confirmationHash: preview.confirmationHash,
+    });
+    const response = await api<{
+      questions: { id: string; canAnswer: boolean }[];
+    }>("GET", base, admin);
+    expect(response.questions).toMatchObject([
+      { id: question.id, canAnswer: true },
+    ]);
+    await api("PUT", `${base}/questions/${question.id}/answer`, admin, {
+      revision: 0,
+      questionRevision: 1,
+      text: "Use the compact layout.",
+    });
+  });
+
   it("opens a round on an exact Skill version with no Workflow and hides drafts from readers", async () => {
     const { base, skillId, versionHash } = await setup();
     await api("GET", base, outsider, undefined, 404);

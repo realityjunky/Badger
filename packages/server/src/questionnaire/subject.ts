@@ -6,6 +6,7 @@ export interface SkillQuestionnaireScope {
   skillId: string;
   versionHash: string;
   groupId: string;
+  configuredAdministratorIds: string[];
 }
 
 export function questionnaireScopeId(scope: QuestionnaireScope) {
@@ -14,4 +15,8 @@ export function questionnaireScopeId(scope: QuestionnaireScope) {
 
 export function questionnaireOwners(scope: QuestionnaireScope) {
   return typeof scope === "string" ? [scope, null] : [null, scope.id];
+}
+
+export function questionnaireAdministratorIds(scope: QuestionnaireScope) {
+  return typeof scope === "string" ? [] : scope.configuredAdministratorIds;
 }

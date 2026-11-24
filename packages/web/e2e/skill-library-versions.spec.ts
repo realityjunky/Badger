@@ -146,6 +146,10 @@ test("select and download an unlabelled Skill snapshot and label it by hash", as
   await expect(
     page.getByRole("combobox", { name: "Versions" }).locator(".."),
   ).toContainText(`1.2.3 ·`);
+  await page.goto(`${location(first.hash)}?path=references%2Fmissing.md`);
+  await expect(
+    page.getByText("This file is absent from this version.", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Skill Questionnaire" }),
   ).toHaveAttribute(

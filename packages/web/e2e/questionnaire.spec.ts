@@ -295,7 +295,7 @@ test("Questionnaire tabs preserve the selected question, drafts, filters, and sc
         name: "Drafting jobs and suggestions",
         exact: true,
       }),
-    ).toHaveCount(0);
+    ).toBeVisible();
     await expect(respondent.getByTestId("explorer-pane")).toBeHidden();
     await respondent
       .getByRole("button", { name: "Show rounds", exact: true })
@@ -639,6 +639,9 @@ test("an expert answers a round and the Engineer sees the submitted revisions ar
     await author
       .getByLabel("Round title", { exact: true })
       .fill("Sample handling");
+    await author
+      .getByRole("checkbox", { name: "Queue question drafting for this round" })
+      .uncheck();
     await author
       .getByRole("button", { name: "Create round", exact: true })
       .click();

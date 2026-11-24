@@ -58,7 +58,9 @@ create view skill_questionnaire_participants as
     bool_or(role in ('Group lead', 'Administrator', 'Engineer', 'Field expert')) as can_coordinate
   from grants where person_id is not null group by group_id, person_id;
 
-create view current_question_recipients as
+create function current_question_recipients(configured_administrators text[])
+returns table(question_id text, person_id text, binding_id text, email text)
+language sql stable as $$
   select r.question_id, b.person_id, b.id as binding_id, b.email
   from question_recipients r join role_bindings b on b.id = r.binding_id
   union all
@@ -66,8 +68,11 @@ create view current_question_recipients as
   from skill_question_recipients r
   join skill_questionnaires sq on sq.id = r.skill_questionnaire_id
   join skills s on s.id = sq.skill_id
-  join skill_questionnaire_participants g on g.group_id = s.group_id and g.person_id = r.person_id
-  join people p on p.id = r.person_id;
+  join people p on p.id = r.person_id
+  where p.status = 'active' and (p.id = any($1) or exists (
+    select 1 from skill_questionnaire_participants g where g.group_id = s.group_id and g.person_id = r.person_id
+  ));
+$$;
 
 alter table inbox_items alter column workflow_version_id drop not null;
 alter table inbox_items add column skill_questionnaire_id text references skill_questionnaires(id);
