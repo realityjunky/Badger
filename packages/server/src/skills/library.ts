@@ -4,6 +4,7 @@ import type { ServiceDependencies } from "../dependencies.js";
 import { toIsoString } from "../util.js";
 import { type SkillSourceFile, type SkillSource } from "@realityjunky/badger";
 import { lockBlobStore, type BlobStore } from "./blobs.js";
+import type { InspectedUpload } from "./upload.js";
 import { objectInput, RequestError } from "../http/errors.js";
 
 export interface Skill {
@@ -19,10 +20,14 @@ export interface SkillVersion {
   description: string;
   inventory: SkillSourceFile[];
   scripts: SkillSource["scripts"];
-  origin: "upload" | "git";
+  origin: "upload" | "git" | "edit";
   gitOrigins: GitOrigin[];
+  editOrigins: EditOrigin[];
   uploadedBy: string;
   createdAt: string;
+  label: string | null;
+  labelRevision: number;
+  retiredAt: string | null;
 }
 
 export interface GitOrigin {
@@ -30,6 +35,13 @@ export interface GitOrigin {
   repository: string;
   commit: string;
   ref: string | null;
+}
+
+export interface EditOrigin {
+  baseHash: string;
+  method: "browser" | "upload";
+  editedBy: string;
+  createdAt: string;
 }
 
 interface SkillRow {
@@ -45,10 +57,16 @@ interface VersionRow {
   description: string;
   inventory: SkillSourceFile[];
   scripts: SkillSource["scripts"];
-  origin: "upload" | "git";
+  origin: SkillVersion["origin"];
   git_origins?: GitOrigin[];
+  edit_origins?: (Omit<EditOrigin, "createdAt"> & {
+    createdAt: string | Date;
+  })[];
   uploaded_by: string;
   created_at: string | Date;
+  label: string | null;
+  label_revision: number;
+  retired_at: string | Date | null;
 }
 
 function toSkill(row: SkillRow): Skill {
@@ -69,8 +87,15 @@ function toVersion(row: VersionRow): SkillVersion {
     scripts: row.scripts,
     origin: row.origin,
     gitOrigins: row.git_origins ?? [],
+    editOrigins: (row.edit_origins ?? []).map((origin) => ({
+      ...origin,
+      createdAt: toIsoString(origin.createdAt),
+    })),
     uploadedBy: row.uploaded_by,
     createdAt: toIsoString(row.created_at),
+    label: row.label,
+    labelRevision: row.label_revision,
+    retiredAt: row.retired_at === null ? null : toIsoString(row.retired_at),
   };
 }
 
@@ -154,7 +179,12 @@ const VERSION_SELECT = `select v.*, coalesce((
     'repositoryId', o.repository_id, 'repository', o.repository, 'commit', o.commit_hash, 'ref', o.published_ref
   ) order by o.created_at, o.repository_id, o.commit_hash)
   from skill_version_git_origins o where o.skill_id = v.skill_id and o.hash = v.hash
-), '[]'::jsonb) as git_origins from skill_versions v`;
+), '[]'::jsonb) as git_origins, coalesce((
+  select jsonb_agg(jsonb_build_object(
+    'baseHash', o.base_hash, 'method', o.method, 'editedBy', o.edited_by, 'createdAt', o.created_at
+  ) order by o.created_at, o.base_hash, o.method, o.edited_by)
+  from skill_version_edit_origins o where o.skill_id = v.skill_id and o.hash = v.hash
+), '[]'::jsonb) as edit_origins from skill_versions v`;
 
 export async function listVersions(
   database: Queryable,
@@ -204,13 +234,12 @@ export async function createVersion(
   blobs: BlobStore,
   skill: Skill,
   expectedHash: string,
-  inspected: {
-    source: SkillSource;
-    files: Map<string, Buffer>;
+  inspected: InspectedUpload & {
     gitOrigin?: GitOrigin;
+    editOrigin?: Pick<EditOrigin, "baseHash" | "method">;
   },
 ) {
-  const { source, files, gitOrigin } = inspected;
+  const { source, files, gitOrigin, editOrigin } = inspected;
   if (expectedHash !== source.hash)
     throw new RequestError(
       409,
@@ -219,6 +248,22 @@ export async function createVersion(
     );
   return database.transaction(async (tx) => {
     await lockBlobStore(tx);
+    if (editOrigin !== undefined) {
+      const base = await tx.query(
+        "select hash from skill_versions where skill_id = $1 and hash = $2 for key share",
+        [skill.id, editOrigin.baseHash],
+      );
+      if (base.rows.length === 0)
+        throw new RequestError(
+          409,
+          "The base version was removed; choose another version and preview again",
+        );
+      if (editOrigin.baseHash === source.hash)
+        return {
+          created: false,
+          version: await readVersion(tx, skill.id, source.hash),
+        };
+    }
     for (const file of source.inventory) {
       const content = files.get(file.path);
       if (content === undefined || (await blobs.put(content)) !== file.hash)
@@ -232,7 +277,11 @@ export async function createVersion(
         source.description,
         JSON.stringify(source.inventory),
         JSON.stringify(source.scripts),
-        gitOrigin === undefined ? "upload" : "git",
+        editOrigin !== undefined
+          ? "edit"
+          : gitOrigin === undefined
+            ? "upload"
+            : "git",
         context.personId,
         dependencies.clock.now(),
       ],
@@ -256,6 +305,21 @@ export async function createVersion(
       );
       originAdded = receipt.rows.length > 0;
     }
+    if (editOrigin !== undefined) {
+      const receipt = await tx.query(
+        `insert into skill_version_edit_origins (skill_id, hash, base_hash, method, edited_by, created_at)
+         values ($1, $2, $3, $4, $5, $6) on conflict do nothing returning hash`,
+        [
+          skill.id,
+          source.hash,
+          editOrigin.baseHash,
+          editOrigin.method,
+          context.personId,
+          dependencies.clock.now(),
+        ],
+      );
+      originAdded = receipt.rows.length > 0;
+    }
     if (row === undefined && !originAdded)
       return {
         created: false,
@@ -265,20 +329,29 @@ export async function createVersion(
       actor: { personId: context.personId, credential: context.credential },
       channel: context.channel,
       action:
-        gitOrigin === undefined
-          ? "skill_version.uploaded"
-          : "skill_version.imported",
+        editOrigin !== undefined
+          ? "skill_version.edited"
+          : gitOrigin === undefined
+            ? "skill_version.uploaded"
+            : "skill_version.imported",
       target: {
         type: "skill_version",
         id: `${skill.id}:${source.hash}`,
         label: `${skill.name} · ${source.hash}`,
       },
-      before: null,
+      before:
+        editOrigin === undefined
+          ? null
+          : { revision: null, hash: editOrigin.baseHash },
       after: { revision: null, hash: source.hash },
       reason:
-        gitOrigin === undefined
-          ? "Confirmed Skill upload"
-          : `Confirmed Git import from ${gitOrigin.repository} at ${gitOrigin.commit}`,
+        editOrigin !== undefined
+          ? editOrigin.method === "browser"
+            ? "Confirmed library edit"
+            : "Confirmed local edit uploaded against a selected version"
+          : gitOrigin === undefined
+            ? "Confirmed Skill upload"
+            : `Confirmed Git import from ${gitOrigin.repository} at ${gitOrigin.commit}`,
       requestId: context.requestId,
     });
     return {
@@ -292,11 +365,11 @@ export async function previewFile(
   blobs: BlobStore,
   version: SkillVersion,
   relative: string | null,
+  limit = 256 * 1024,
 ) {
   const file = version.inventory.find((entry) => entry.path === relative);
   if (file === undefined)
     throw new RequestError(404, "No such file in this version");
-  const limit = 256 * 1024;
   if (file.bytes > limit)
     return {
       path: file.path,
@@ -311,7 +384,9 @@ export async function previewFile(
   try {
     text = content.includes(0)
       ? null
-      : new TextDecoder("utf-8", { fatal: true }).decode(content);
+      : new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+          content,
+        );
   } catch {
     text = null;
   }
@@ -325,7 +400,9 @@ export async function previewFile(
   };
 }
 
-export function diffVersions(before: SkillVersion, after: SkillVersion) {
+type VersionContent = Pick<SkillVersion, "hash" | "inventory" | "scripts">;
+
+export function diffVersions(before: VersionContent, after: VersionContent) {
   const previous = new Map(before.inventory.map((file) => [file.path, file]));
   const current = new Map(after.inventory.map((file) => [file.path, file]));
   const paths = [...new Set([...previous.keys(), ...current.keys()])].sort();

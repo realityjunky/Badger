@@ -1,8 +1,15 @@
 import { crc32 } from "node:zlib";
 import { fromBufferPromise, type Entry, type ZipFile } from "yauzl";
+import { ZipFile as ZipWriter } from "yazl";
 import type { ServiceConfig } from "../config.js";
 import { RequestError } from "../http/errors.js";
-import { normalizeSkillPath, type UploadFile } from "./paths.js";
+import type { BlobStore } from "./blobs.js";
+import type { SkillVersion } from "./library.js";
+import {
+  MAX_PATH_BYTES,
+  normalizeSkillPath,
+  type UploadFile,
+} from "./paths.js";
 
 /** General-purpose flag bit 11: the entry's name and comment are UTF-8. */
 const UTF8_NAME_FLAG = 0x800;
@@ -10,6 +17,10 @@ const UTF8_NAME_FLAG = 0x800;
 const UNICODE_PATH_FIELD = 0x7075;
 /** The folder macOS Archive Utility adds for resource forks and metadata. */
 const MACOS_METADATA = Buffer.from("__MACOSX/");
+
+export function maxZipBytes(limits: ServiceConfig["uploads"]): number {
+  return limits.maxBytes + limits.maxFiles * (2 * MAX_PATH_BYTES + 128) + 22;
+}
 
 /**
  * An entry's name exactly as its bytes spell it in UTF-8. A non-ASCII name
@@ -47,7 +58,7 @@ export async function readZipUpload(
   content: Buffer,
   limits: ServiceConfig["uploads"],
 ): Promise<UploadFile[]> {
-  if (content.length > limits.maxBytes)
+  if (content.length > maxZipBytes(limits))
     throw new RequestError(413, "Zip exceeds the upload byte limit");
   let archive: ZipFile | undefined;
   try {
@@ -123,4 +134,28 @@ export async function readZipUpload(
   } finally {
     archive?.close();
   }
+}
+
+/** Writes each inventory path and its verified bytes at the archive root. */
+export async function archiveVersion(
+  blobs: BlobStore,
+  version: SkillVersion,
+): Promise<Buffer> {
+  const archive = new ZipWriter();
+  for (const file of version.inventory) {
+    if (normalizeSkillPath(file.path) !== file.path)
+      throw new Error("Skill inventory contains a noncanonical path");
+    const content = await blobs.get(file.hash);
+    if (content.byteLength !== file.bytes)
+      throw new Error("Skill inventory size differs from its blob");
+    archive.addBuffer(content, file.path, {
+      mtime: new Date(version.createdAt),
+      compress: false,
+    });
+  }
+  archive.end();
+  const chunks: Buffer[] = [];
+  for await (const chunk of archive.outputStream)
+    chunks.push(Buffer.from(chunk as Uint8Array));
+  return Buffer.concat(chunks);
 }

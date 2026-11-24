@@ -259,6 +259,30 @@ it("previews and uploads an immutable Skill version from a folder against the co
   expect(await versions.json()).toMatchObject({
     versions: [{ hash: current.preview.hash, origin: "upload" }],
   });
+  await fs.appendFile(path.join(folder, "SKILL.md"), "Reviewed change.\n");
+  const editedArgs = { ...args, baseHash: current.preview.hash };
+  const edited = await call(client, "upload_skill_version", editedArgs);
+  expect(edited.diff).toMatchObject({
+    from: current.preview.hash,
+    to: edited.preview.hash,
+    files: [{ path: "SKILL.md", status: "modified" }],
+  });
+  const successor = await call(client, "upload_skill_version", {
+    ...editedArgs,
+    confirmed: true,
+    expectedHash: edited.preview.hash,
+  });
+  expect(successor.version.hash).toBe(edited.preview.hash);
+  const receipt = await service.request(
+    `/api/v1/skills/${skill.id}/versions/${successor.version.hash}`,
+    { as: expert },
+  );
+  expect(await receipt.json()).toMatchObject({
+    version: {
+      origin: "edit",
+      editOrigins: [{ baseHash: current.preview.hash, method: "upload" }],
+    },
+  });
 });
 
 it("refuses a nested .git folder in every spelling the service refuses, before opening any local file or making an upload request", async () => {

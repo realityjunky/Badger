@@ -13,17 +13,25 @@ import {
   normalizeSkillPath,
   type UploadFile,
 } from "./paths.js";
-import { readZipUpload } from "./zip.js";
+import { maxZipBytes, readZipUpload } from "./zip.js";
+
+export interface InspectedUpload {
+  source: SkillSource;
+  files: Map<string, Buffer>;
+}
 
 /**
- * The largest JSON body an upload needs: every file byte as base64, and for
- * each file its path, written once in `files` and once in `scripts`, with
- * JSON keys, punctuation, base64 padding, and effect names. A small constant
- * covers the confirmation fields.
+ * Bounded JSON for either the base64 ZIP or the individual paths and files.
+ * Browser edits can supply both removed paths and added or modified files.
  */
 export function uploadEnvelopeBytes(limits: ServiceConfig["uploads"]): number {
-  const perFile = 2 * MAX_PATH_BYTES + 128;
-  return Math.ceil(limits.maxBytes / 3) * 4 + limits.maxFiles * perFile + 4096;
+  return (
+    Math.max(
+      Math.ceil(maxZipBytes(limits) / 3) * 4,
+      Math.ceil(limits.maxBytes / 3) * 4 +
+        limits.maxFiles * (2 * MAX_PATH_BYTES + 128),
+    ) + 4096
+  );
 }
 
 export function decodeUploadContent(value: unknown): Buffer {
@@ -103,7 +111,7 @@ export async function inspectUpload(
   config: ServiceConfig,
   name: string,
   value: unknown,
-): Promise<{ source: SkillSource; files: Map<string, Buffer> }> {
+): Promise<InspectedUpload> {
   const input = objectInput(value);
   if (
     Object.keys(input).some(
@@ -121,29 +129,43 @@ export async function inspectUpload(
     throw new RequestError(400, "files must be an array");
   if (Array.isArray(folder) && folder.length > config.uploads.maxFiles)
     throw new RequestError(413, "Upload exceeds the file count limit");
-  const files = normalizeUploadFiles(
-    Array.isArray(folder)
-      ? folder.map((entry: unknown) => {
-          const file = objectInput(entry);
-          if (
-            Object.keys(file).some((key) => !["path", "content"].includes(key))
-          ) {
-            throw new RequestError(
-              400,
-              "Only regular files may be uploaded; links are refused",
-            );
-          }
-          return {
-            path: normalizeSkillPath(file["path"]),
-            content: decodeUploadContent(file["content"]),
-          };
-        })
-      : await readZipUpload(
-          decodeUploadContent(input["archive"]),
-          config.uploads,
-        ),
-    config.uploads,
-  );
+  if (
+    input["scripts"] !== undefined &&
+    Object.keys(objectInput(input["scripts"])).length
+  )
+    throw new RequestError(
+      400,
+      "Declare script effects in Source study after upload",
+    );
+  const files = Array.isArray(folder)
+    ? folder.map((entry: unknown) => {
+        const file = objectInput(entry);
+        if (
+          Object.keys(file).some((key) => !["path", "content"].includes(key))
+        ) {
+          throw new RequestError(
+            400,
+            "Only regular files may be uploaded; links are refused",
+          );
+        }
+        return {
+          path: normalizeSkillPath(file["path"]),
+          content: decodeUploadContent(file["content"]),
+        };
+      })
+    : await readZipUpload(
+        decodeUploadContent(input["archive"]),
+        config.uploads,
+      );
+  return inspectUploadFiles(config, name, files);
+}
+
+export async function inspectUploadFiles(
+  config: ServiceConfig,
+  name: string,
+  input: UploadFile[],
+): Promise<InspectedUpload> {
+  const files = normalizeUploadFiles(input, config.uploads);
   const workspace = await fs.mkdtemp(
     path.join(config.storage.workspaceDirectory, "skill-upload-"),
   );
@@ -157,14 +179,6 @@ export async function inspectUpload(
       });
     }
     const declaration: SkillSourceDeclaration = { name, location: "source" };
-    if (
-      input["scripts"] !== undefined &&
-      Object.keys(objectInput(input["scripts"])).length
-    )
-      throw new RequestError(
-        400,
-        "Declare script effects in Source study after upload",
-      );
     const [candidate] = await checkSkillSources({
       projectRoot: workspace,
       sources: [declaration],
