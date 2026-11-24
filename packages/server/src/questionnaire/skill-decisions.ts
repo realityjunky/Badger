@@ -17,7 +17,7 @@ export interface ReviewedSkillAnswer extends ReviewedSkillAnswerReference {
   questionText: string;
   text: string;
   kind: "clarification" | "change";
-  applicabilityVersionHash: string;
+  applicabilityVersionHash: string | null;
   state: "acknowledged" | "pending-acknowledgement" | "stale";
 }
 
@@ -25,7 +25,7 @@ export interface ReviewedSkillAnswer extends ReviewedSkillAnswerReference {
 // acknowledged. The selected Answer must be one the decision restates.
 const REVIEWED_ANSWERS = `
   select distinct s.group_id as "groupId", o.skill_id as "skillId", o.version_hash as "versionHash",
-    coalesce(o.successor_version_hash, o.version_hash) as "applicabilityVersionHash", o.kind,
+    o.applicability_version_hash as "applicabilityVersionHash", o.kind,
     r.id as "resolutionId", r.revision as "resolutionRevision", q.id as "questionId",
     a.person_id as "personId", a.revision, a.text, qr.content->>'topic' as topic,
     qr.content->>'text' as "questionText",
@@ -38,7 +38,7 @@ const REVIEWED_ANSWERS = `
           and acknowledgement.person_id = answered.person_id and acknowledgement.decision = 'acknowledged'
       )
     ) then 'pending-acknowledgement' else 'acknowledged' end as state
-  from skill_question_resolution_outcomes o
+  from effective_skill_question_outcomes o
   join skills s on s.id = o.skill_id
   join question_resolutions r on r.id = o.resolution_id
   join questions q on q.id = r.question_id
@@ -77,7 +77,7 @@ export async function listReviewedSkillAnswers(
       and s.group_id = $1 and q.state = 'confirmed' and q.resolution_revision = r.revision
       and exists (
         select 1 from jsonb_to_recordset($2::jsonb) as pin("skillId" text, hash text)
-        where pin."skillId" = o.skill_id and pin.hash = coalesce(o.successor_version_hash, o.version_hash)
+        where pin."skillId" = o.skill_id and pin.hash = o.applicability_version_hash
       )) answer
      where answer.state = 'acknowledged' order by "skillId", "questionId", "personId", revision`,
     [groupId, JSON.stringify(pins)],

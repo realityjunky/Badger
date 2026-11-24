@@ -10,8 +10,9 @@ The previewed hash remains the confirmation boundary.
 
 An unused version can be deleted after the service rechecks references while
 holding the version row lock. A referenced version can be retired. Retirement
-removes it from new pin, round, or successor choices while preserving its
-files, links, and review history. Content-addressed blobs are queued through
+removes it from new pin choices while preserving its files, links, and
+review history. A retained version remains available as an edit base and
+as the subject of a Questionnaire round. Content-addressed blobs are queued through
 the existing cleanup worker and removed only after the database commit and a
 second reference check under the blob-store lock.
 

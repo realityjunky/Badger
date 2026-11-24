@@ -157,7 +157,7 @@ The ordered Comments under a Question. Anyone holding a workflow role other than
 Unprompted workflow knowledge or a question raised by a Field expert. The Engineer turns it into a Question, accepts it as a Fact source, or declines it with a reason. Accepting a source preserves the expert's words; it does not confirm a Fact.
 
 **Resolution**:
-The coordinator's recorded outcome for an answered Question: confirmed, followed up, deferred with a reason, or withdrawn. A confirmed Skill resolution identifies a clarification of the discussed version or a change implemented by a saved successor.
+The coordinator's recorded outcome for an answered Question: confirmed, followed up, deferred with a reason, or withdrawn. A confirmed Skill resolution either clarifies the discussed version or records a change. The coordinator can link the saved successor when it exists.
 _Avoid_: disposition
 
 **Fact**:
