@@ -1,4 +1,4 @@
-import { Alert, Button, Select, Space, Table } from "antd";
+import { Alert, Select, Space } from "antd";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -8,7 +8,9 @@ import {
 } from "../../api/skills.js";
 import { readBasePath } from "../../app/paths.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { VersionChanges } from "./VersionChanges.js";
 import { VersionFile } from "./VersionFile.js";
+import { skillVersionOption } from "./versionDisplay.js";
 
 export function VersionComparison({
   skillId,
@@ -19,7 +21,8 @@ export function VersionComparison({
   versions: SkillVersion[];
   selected: SkillVersion;
 }) {
-  const { t } = useI18n();
+  const i18n = useI18n();
+  const { t } = i18n;
   const [parameters, setParameters] = useSearchParams();
   const basePath = readBasePath(document);
   const from =
@@ -31,10 +34,7 @@ export function VersionComparison({
   const [failed, setFailed] = useState(false);
   const path = parameters.get("diffPath");
   const entry = diff?.files.find((file) => file.path === path);
-  const options = versions.map((version) => ({
-    value: version.hash,
-    label: `${version.hash.slice(0, 12)} · ${new Date(version.createdAt).toLocaleString()}`,
-  }));
+  const options = versions.map((version) => skillVersionOption(version, i18n));
   function change(key: string, value: string) {
     setParameters((previous) => {
       const next = new URLSearchParams(previous);
@@ -78,60 +78,11 @@ export function VersionComparison({
         </label>
       </div>
       {failed && <Alert type="error" title={t("skills.failed")} />}
-      <Table
-        size="small"
-        rowKey="path"
+      <VersionChanges
+        diff={diff}
         loading={diff === null && !failed}
-        dataSource={diff?.files ?? []}
-        pagination={{ pageSize: 10 }}
-        locale={{ emptyText: t("skills.noDifferences") }}
-        columns={[
-          {
-            title: t("skills.path"),
-            dataIndex: "path",
-            render: (relative: string) => (
-              <Button
-                type="link"
-                className="skills-path-button"
-                onClick={() => change("diffPath", relative)}
-              >
-                {relative}
-              </Button>
-            ),
-          },
-          {
-            title: t("skills.change"),
-            dataIndex: "status",
-            render: (status: "added" | "removed" | "modified") =>
-              t(`skills.${status}`),
-          },
-        ]}
+        onSelectFile={(relative) => change("diffPath", relative)}
       />
-      {(diff?.scripts.length ?? 0) > 0 && (
-        <section>
-          <h3>{t("skills.effects")}</h3>
-          {diff?.scripts.map((script) => (
-            <p key={script.path}>
-              <code>{script.path}</code>:{" "}
-              {script.before === null
-                ? "—"
-                : script.before === "undeclared"
-                  ? t("skills.undeclared")
-                  : script.before
-                      .map((effect) => t(`skills.effect.${effect}`))
-                      .join(", ")}{" "}
-              →{" "}
-              {script.after === null
-                ? "—"
-                : script.after === "undeclared"
-                  ? t("skills.undeclared")
-                  : script.after
-                      .map((effect) => t(`skills.effect.${effect}`))
-                      .join(", ")}
-            </p>
-          ))}
-        </section>
-      )}
       {entry !== undefined && (
         <section>
           <h3 className="skills-hash">{entry.path}</h3>

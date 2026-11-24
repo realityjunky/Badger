@@ -16,6 +16,7 @@ export interface Skill {
   groupId: string;
   name: string;
   canUpload: boolean;
+  canRemoveVersion: boolean;
 }
 
 export interface SkillGroup {
@@ -23,6 +24,7 @@ export interface SkillGroup {
   name: string;
   canUpload: boolean;
   canCreateSkill: boolean;
+  canRemoveVersion: boolean;
 }
 
 export interface UploadLimits {
@@ -48,12 +50,21 @@ export interface SkillVersion extends VersionPreview {
   skillId: string;
   uploadedBy: string;
   createdAt: string;
-  origin: "upload" | "git";
+  label: string | null;
+  labelRevision: number;
+  retiredAt: string | null;
+  origin: "upload" | "git" | "edit";
   gitOrigins: {
     repositoryId: string;
     repository: string;
     commit: string;
     ref: string | null;
+  }[];
+  editOrigins: {
+    baseHash: string;
+    method: "browser" | "upload";
+    editedBy: string;
+    createdAt: string;
   }[];
 }
 
@@ -95,6 +106,32 @@ export interface GitContent {
 export interface UploadContent {
   files?: { path: string; content: string }[];
   archive?: string;
+  baseHash?: string;
+}
+
+export interface BrowserEditContent {
+  baseHash: string;
+  changes: { path: string; content: string | null }[];
+}
+
+export interface UploadPreview {
+  preview: VersionPreview;
+  diff?: VersionDiff;
+}
+
+export interface SkillVersionRemoval {
+  action: "delete" | "retire" | "none";
+  referenced: boolean;
+}
+
+export class SkillRequestError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly payload: unknown,
+  ) {
+    super(message);
+  }
 }
 
 async function request<T>(
@@ -115,18 +152,26 @@ async function request<T>(
   });
   const body: unknown = await response.json();
   if (!response.ok) {
-    throw new Error(
+    throw new SkillRequestError(
+      response.status,
       isRecord(body) &&
         isRecord(body["error"]) &&
         typeof body["error"]["message"] === "string"
         ? body["error"]["message"]
         : `HTTP ${response.status}`,
+      body,
     );
   }
   return body as T;
 }
 
 const skillPath = (id: string) => `/skills/${encodeURIComponent(id)}`;
+const versionPath = (id: string, hash: string) =>
+  `${skillPath(id)}/versions/${encodeURIComponent(hash)}`;
+
+export function versionDownloadUrl(basePath: string, id: string, hash: string) {
+  return apiUrl(basePath, `${versionPath(id, hash)}/download`);
+}
 
 export function loadSkills(basePath: string, signal?: AbortSignal) {
   return request<SkillCatalog>(basePath, "/skills", { signal });
@@ -157,10 +202,11 @@ export function loadFilePreview(
   hash: string,
   path: string,
   signal?: AbortSignal,
+  mode?: "edit",
 ) {
   return request<FilePreview>(
     basePath,
-    `${skillPath(id)}/versions/${encodeURIComponent(hash)}/files?${new URLSearchParams({ path })}`,
+    `${versionPath(id, hash)}/files?${new URLSearchParams(mode ? { path, mode } : { path })}`,
     { signal },
   );
 }
@@ -182,14 +228,14 @@ export function loadDiff(
 export function previewUpload(
   basePath: string,
   id: string,
-  content: UploadContent,
+  content: UploadContent | BrowserEditContent,
   signal?: AbortSignal,
 ) {
-  return request<{ preview: VersionPreview }>(
-    basePath,
-    `${skillPath(id)}/upload-preview`,
-    { method: "POST", body: JSON.stringify(content), signal },
-  );
+  return request<UploadPreview>(basePath, `${skillPath(id)}/upload-preview`, {
+    method: "POST",
+    body: JSON.stringify(content),
+    signal,
+  });
 }
 
 /**
@@ -212,7 +258,7 @@ export function gitFolderPath(paths: readonly string[]): string | null {
 export function uploadVersion(
   basePath: string,
   id: string,
-  content: UploadContent | GitContent,
+  content: UploadContent | GitContent | BrowserEditContent,
   expectedHash: string,
 ) {
   return request<{ version: SkillVersion }>(
@@ -229,7 +275,47 @@ export function uploadVersion(
   );
 }
 
-export function readUploadFile(file: File): Promise<string> {
+export function saveSkillVersionLabel(
+  basePath: string,
+  id: string,
+  hash: string,
+  label: string | null,
+  revision: number,
+) {
+  return request<{ version: SkillVersion }>(
+    basePath,
+    `${versionPath(id, hash)}/label`,
+    { method: "PATCH", body: JSON.stringify({ label, revision }) },
+  );
+}
+
+export function loadRemoval(
+  basePath: string,
+  id: string,
+  hash: string,
+  signal?: AbortSignal,
+) {
+  return request<SkillVersionRemoval>(
+    basePath,
+    `${versionPath(id, hash)}/removal`,
+    { signal },
+  );
+}
+
+export function removeVersion(
+  basePath: string,
+  id: string,
+  hash: string,
+  action: "delete" | "retire",
+) {
+  return request<{ action: "delete" | "retire"; version: SkillVersion | null }>(
+    basePath,
+    versionPath(id, hash),
+    { method: "DELETE", body: JSON.stringify({ action }) },
+  );
+}
+
+export function readUploadFile(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");

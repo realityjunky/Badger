@@ -33,7 +33,13 @@ import { useI18n } from "../i18n/I18nContext.js";
 import { SkillBacklog } from "./skills/SkillBacklog.js";
 import { UploadSkillModal } from "./skills/UploadSkillModal.js";
 import { VersionComparison } from "./skills/VersionComparison.js";
+import { VersionDetails } from "./skills/VersionDetails.js";
 import { VersionFile } from "./skills/VersionFile.js";
+import {
+  latestSkillVersion,
+  skillVersionOption,
+  skillVersionPath,
+} from "./skills/versionDisplay.js";
 
 function fileTree(files: SkillFile[]): DataNode[] {
   const roots: DataNode[] = [];
@@ -61,14 +67,18 @@ function fileTree(files: SkillFile[]): DataNode[] {
 }
 
 export function SkillsPage() {
-  const { t, format } = useI18n();
+  const i18n = useI18n();
+  const { t, format } = i18n;
   const basePath = readBasePath(document);
   const navigate = useNavigate();
   const { skillId, versionId } = useParams();
   const [parameters, setParameters] = useSearchParams();
   const groupId = parameters.get("group");
   const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
-  const [versions, setVersions] = useState<SkillVersion[] | null>(null);
+  const [versionList, setVersionList] = useState<{
+    skillId: string;
+    versions: SkillVersion[];
+  } | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState<"upload" | "git" | null>(null);
@@ -76,11 +86,17 @@ export function SkillsPage() {
   const [form] = Form.useForm<{ groupId: string; name: string }>();
   const selectedSkill =
     catalog?.skills.find((skill) => skill.id === skillId) ?? null;
+  const versions =
+    versionList?.skillId === skillId ? (versionList?.versions ?? null) : null;
   const version =
     versions?.find((entry) => entry.hash === versionId) ??
-    (versionId === undefined ? versions?.[0] : null) ??
+    (versionId === undefined ? latestSkillVersion(versions) : null) ??
     null;
-  const path = parameters.get("path") ?? version?.inventory[0]?.path ?? null;
+  const requestedPath = parameters.get("path");
+  const path =
+    version?.inventory.find((file) => file.path === requestedPath)?.path ??
+    version?.inventory[0]?.path ??
+    null;
   const tab = parameters.get("tab") ?? "preview";
   const tree = useMemo(() => fileTree(version?.inventory ?? []), [version]);
   const createGroups =
@@ -104,12 +120,11 @@ export function SkillsPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    setVersions(null);
     if (skillId !== undefined) {
       void loadVersions(basePath, skillId, controller.signal)
         .then((result) => {
           if (!controller.signal.aborted) {
-            setVersions(result.versions);
+            setVersionList({ skillId, versions: result.versions });
             setFailure(null);
           }
         })
@@ -150,6 +165,50 @@ export function SkillsPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function updateVersion(updated: SkillVersion) {
+    setVersionList((current) =>
+      current?.skillId === updated.skillId
+        ? {
+            skillId: updated.skillId,
+            versions: current.versions.map((entry) =>
+              entry.hash === updated.hash ? updated : entry,
+            ),
+          }
+        : current,
+    );
+  }
+
+  function selectSavedVersion(saved: SkillVersion) {
+    setVersionList((current) => {
+      const entries =
+        current?.skillId === saved.skillId ? current.versions : [];
+      if (entries.some((entry) => entry.hash === saved.hash)) {
+        return {
+          skillId: saved.skillId,
+          versions: entries.map((entry) =>
+            entry.hash === saved.hash ? saved : entry,
+          ),
+        };
+      }
+      return { skillId: saved.skillId, versions: [saved, ...entries] };
+    });
+    navigate(skillVersionPath(saved.skillId, saved.hash));
+  }
+
+  function deleteSelection(deleted: SkillVersion) {
+    const remaining = (versions ?? []).filter(
+      (entry) => entry.hash !== deleted.hash,
+    );
+    setVersionList({ skillId: deleted.skillId, versions: remaining });
+    const next = latestSkillVersion(remaining);
+    navigate(
+      next
+        ? skillVersionPath(deleted.skillId, next.hash)
+        : `/skills/${encodeURIComponent(deleted.skillId)}`,
+      { replace: true },
+    );
   }
 
   return (
@@ -258,7 +317,7 @@ export function SkillsPage() {
                 />
                 {versions === null ? (
                   <Skeleton active />
-                ) : versions.length === 0 ? (
+                ) : versions.length === 0 && versionId === undefined ? (
                   <p>{t("skills.noVersions")}</p>
                 ) : (
                   <>
@@ -267,32 +326,28 @@ export function SkillsPage() {
                       <Select
                         aria-label={t("skills.versions")}
                         value={version?.hash ?? versionId}
-                        options={versions.map((entry) => ({
-                          value: entry.hash,
-                          label: `${entry.hash.slice(0, 12)} · ${new Date(entry.createdAt).toLocaleString()}`,
-                        }))}
+                        options={versions.map((entry) =>
+                          skillVersionOption(entry, i18n),
+                        )}
                         onChange={(hash) =>
-                          navigate(
-                            `/skills/${encodeURIComponent(selectedSkill.id)}/versions/${hash}`,
-                          )
+                          navigate(skillVersionPath(selectedSkill.id, hash))
                         }
                       />
                     </label>
                     {version === null ? (
-                      <Alert type="error" title={t("skills.failed")} />
+                      <Alert type="error" title={t("skills.versionMissing")} />
                     ) : (
                       <>
-                        <p>{version.description}</p>
-                        {version.gitOrigins?.map((origin) => (
-                          <p
-                            className="skills-hash"
-                            key={`${origin.repositoryId}:${origin.commit}`}
-                          >
-                            {origin.repository} · {origin.commit}
-                            {origin.ref && <> · {origin.ref}</>}
-                          </p>
-                        ))}
-                        <code className="skills-hash">{version.hash}</code>
+                        <VersionDetails
+                          key={`${selectedSkill.id}:${version.hash}`}
+                          skill={selectedSkill}
+                          version={version}
+                          path={path}
+                          limits={catalog.limits}
+                          onUpdated={updateVersion}
+                          onSaved={selectSavedVersion}
+                          onDeleted={() => deleteSelection(version)}
+                        />
                         <Tabs
                           activeKey={tab}
                           onChange={(key) => changeParameter("tab", key)}
@@ -455,15 +510,7 @@ export function SkillsPage() {
           onClose={() => setUploading(null)}
           onUploaded={(uploaded) => {
             setUploading(null);
-            setVersions((current) => [
-              uploaded,
-              ...(current ?? []).filter(
-                (entry) => entry.hash !== uploaded.hash,
-              ),
-            ]);
-            navigate(
-              `/skills/${encodeURIComponent(selectedSkill.id)}/versions/${uploaded.hash}`,
-            );
+            selectSavedVersion(uploaded);
           }}
         />
       )}

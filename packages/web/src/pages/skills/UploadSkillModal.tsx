@@ -11,33 +11,40 @@ import {
   type SkillVersion,
   type UploadContent,
   type UploadLimits,
+  type VersionDiff,
   type VersionPreview,
 } from "../../api/skills.js";
 import { readBasePath } from "../../app/paths.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { documentationSearch } from "../../documentation/sections.js";
 import { GitSourceFields } from "./GitSourceFields.js";
+import { VersionChanges } from "./VersionChanges.js";
+import { skillVersionOption } from "./versionDisplay.js";
 
 export function UploadSkillModal({
   skill,
   limits,
   source = "upload",
+  base,
   onClose,
   onUploaded,
 }: {
   skill: Skill;
   source?: "upload" | "git";
+  base?: SkillVersion;
   limits: UploadLimits;
   onClose(): void;
   onUploaded(version: SkillVersion): void;
 }) {
-  const { t, format } = useI18n();
+  const i18n = useI18n();
+  const { t, format } = i18n;
   const location = useLocation();
   const basePath = readBasePath(document);
   const [content, setContent] = useState<UploadContent | GitContent | null>(
     null,
   );
   const [preview, setPreview] = useState<VersionPreview | null>(null);
+  const [diff, setDiff] = useState<VersionDiff | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
@@ -57,6 +64,7 @@ export function UploadSkillModal({
     const signal = controller.current.signal;
     setContent(null);
     setPreview(null);
+    setDiff(null);
     setError(null);
     const files = Array.from(selected ?? []);
     if (!files.length) return;
@@ -89,11 +97,13 @@ export function UploadSkillModal({
               })),
             ),
           };
+      if (base) uploaded.baseHash = base.hash;
       if (generation !== selection.current) return;
       const result = await previewUpload(basePath, skill.id, uploaded, signal);
       if (generation !== selection.current) return;
       setContent(uploaded);
       setPreview(result.preview);
+      setDiff(result.diff ?? null);
     } catch (failure) {
       if (!signal.aborted)
         setError(
@@ -105,7 +115,7 @@ export function UploadSkillModal({
   }
 
   async function confirm() {
-    if (!content || !preview) return;
+    if (!content || !preview || (base && !diff?.files.length)) return;
     selection.current += 1;
     setBusy(true);
     setError(null);
@@ -126,9 +136,10 @@ export function UploadSkillModal({
   return (
     <Modal
       open
-      title={`${t(source === "git" ? "skills.importGit" : "skills.upload")} · ${skill.name}`}
+      title={`${t(source === "git" ? "skills.importGit" : base ? "skills.uploadLocalChanges" : "skills.upload")} · ${skill.name}`}
       onCancel={busy ? undefined : onClose}
       closable={!busy}
+      keyboard={!busy}
       maskClosable={!busy}
       width={720}
       footer={
@@ -140,18 +151,27 @@ export function UploadSkillModal({
             type="primary"
             onClick={() => void confirm()}
             loading={busy}
-            disabled={!preview}
+            disabled={!preview || (base !== undefined && !diff?.files.length)}
           >
             {t(
               source === "git"
                 ? "skills.confirmImport"
-                : "skills.confirmUpload",
+                : base
+                  ? "skills.saveSuccessor"
+                  : "skills.confirmUpload",
             )}
           </Button>
         </Space>
       }
     >
       <Space orientation="vertical" size="middle" className="skills-full-width">
+        {base && (
+          <p className="skills-hash">
+            {t("skills.baseVersion")} · {skillVersionOption(base, i18n).label}
+            <br />
+            <code>{base.hash}</code>
+          </p>
+        )}
         <Alert
           type="warning"
           showIcon
@@ -216,6 +236,7 @@ export function UploadSkillModal({
         {busy && <Spin aria-label={t("common.loading")} />}
         {preview && (
           <>
+            {diff && <VersionChanges diff={diff} />}
             <Typography.Paragraph>
               {format("skills.previewCount", {
                 count: preview.inventory.length,
