@@ -1408,6 +1408,7 @@ describe("reviewed SQL migrations", () => {
       "0048",
       "0049",
       "0050",
+      "0051",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -1465,6 +1466,7 @@ describe("reviewed SQL migrations", () => {
         "0048",
         "0049",
         "0050",
+        "0051",
       ],
       pending: [],
       drifted: [],
@@ -1491,6 +1493,7 @@ describe("reviewed SQL migrations", () => {
       "drafting_job_decisions",
       "drafting_job_review_revisions",
       "drafting_jobs",
+      "effective_skill_question_outcomes",
       "evaluation_reports",
       "fact_acknowledgements",
       "fact_answer_revisions",
@@ -1547,6 +1550,7 @@ describe("reviewed SQL migrations", () => {
       "script_effect_revisions",
       "skill_question_recipients",
       "skill_question_resolution_outcomes",
+      "skill_question_successor_links",
       "skill_questionnaire_participants",
       "skill_questionnaires",
       "skill_repositories",
@@ -1631,6 +1635,7 @@ describe("reviewed SQL migrations", () => {
         "0048",
         "0049",
         "0050",
+        "0051",
       ],
       pending: [],
       drifted: [],

@@ -15,6 +15,10 @@ import {
 } from "./subject.js";
 import { readRecordOrigins } from "../version-inheritance.js";
 import {
+  successorHashInput,
+  validateSkillSuccessor,
+} from "./skill-successors.js";
+import {
   fields,
   parseQuestion,
   revisionInput,
@@ -41,7 +45,7 @@ interface FactDraft {
   answers: AnswerLink[];
 }
 export type SkillResolutionOutcome =
-  { kind: "clarification" } | { kind: "change"; successorVersionHash: string };
+  { kind: "clarification" } | { kind: "change"; successorVersionHash?: string };
 
 export interface ResolutionInput {
   revision: number;
@@ -127,14 +131,16 @@ export function parseResolution(
       input.skillOutcome = { kind: "clarification" };
     } else if (outcome.kind === "change") {
       fields(outcome, ["kind", "successorVersionHash"]);
-      const hash = textInput(
-        outcome.successorVersionHash,
-        "successorVersionHash",
-        64,
-      );
-      if (!/^[a-f0-9]{64}$/u.test(hash))
-        throw new RequestError(400, "A change requires a saved successor hash");
-      input.skillOutcome = { kind: "change", successorVersionHash: hash };
+      input.skillOutcome = {
+        kind: "change",
+        ...(outcome.successorVersionHash === undefined
+          ? {}
+          : {
+              successorVersionHash: successorHashInput(
+                outcome.successorVersionHash,
+              ),
+            }),
+      };
     } else
       throw new RequestError(
         400,
@@ -180,6 +186,9 @@ interface ResolutionRow {
   discussed_version_hash?: string | null;
   skill_outcome?: SkillResolutionOutcome["kind"] | null;
   successor_version_hash?: string | null;
+  successor_link_id?: string | null;
+  successor_link_actor_name?: string | null;
+  successor_link_created_at?: Date | string | null;
 }
 function toResolution(row: ResolutionRow) {
   return {
@@ -202,7 +211,18 @@ function toResolution(row: ResolutionRow) {
             versionHash: row.discussed_version_hash,
             successorVersionHash: row.successor_version_hash ?? null,
             applicabilityVersionHash:
-              row.successor_version_hash ?? row.discussed_version_hash,
+              row.skill_outcome === "clarification"
+                ? row.discussed_version_hash
+                : (row.successor_version_hash ?? null),
+            ...(row.successor_link_id && row.successor_link_created_at
+              ? {
+                  successorLink: {
+                    id: row.successor_link_id,
+                    actorName: row.successor_link_actor_name,
+                    createdAt: toIsoString(row.successor_link_created_at),
+                  },
+                }
+              : {}),
           },
         }
       : {}),
@@ -219,9 +239,13 @@ export async function readResolutions(
   return (
     await tx.query<ResolutionRow>(
       `select r.*, p.display_name as actor_name, o.kind as skill_outcome,
-        o.version_hash as discussed_version_hash, o.successor_version_hash
+        o.version_hash as discussed_version_hash, o.successor_version_hash,
+        l.id as successor_link_id, lp.display_name as successor_link_actor_name,
+        l.created_at as successor_link_created_at
        from question_resolutions r join questions q on q.id = r.question_id join people p on p.id = r.actor_id
-       left join skill_question_resolution_outcomes o on o.resolution_id = r.id
+       left join effective_skill_question_outcomes o on o.resolution_id = r.id
+       left join skill_question_successor_links l on l.id = o.successor_link_id
+       left join people lp on lp.id = l.actor_id
        where q.subject_id = $1 order by r.created_at, r.id`,
       [questionnaireScopeId(scope)],
     )
@@ -397,34 +421,12 @@ export async function resolutionPreview(
         400,
         "Choose whether the Skill answer clarifies this version or records a change",
       );
-    if (skillOutcome?.kind === "change") {
-      if (skillOutcome.successorVersionHash === scope.versionHash)
-        throw new RequestError(
-          400,
-          "A successor must be a different version of this Skill",
-        );
-      const successor = (
-        await tx.query<{
-          retired_at: Date | string | null;
-          base_hash: string | null;
-        }>(
-          `select v.retired_at, e.base_hash from skill_versions v
-           left join skill_version_edit_origins e on e.skill_id = v.skill_id and e.hash = v.hash
-             and e.base_hash = $2
-           where v.skill_id = $1 and v.hash = $3`,
-          [scope.skillId, scope.versionHash, skillOutcome.successorVersionHash],
-        )
-      ).rows[0];
-      if (!successor)
-        throw new RequestError(400, "Choose a saved successor of this Skill");
-      if (successor.base_hash !== scope.versionHash)
-        throw new RequestError(
-          400,
-          "The successor must be derived from the Skill version under review",
-        );
-      if (successor.retired_at !== null)
-        throw new RequestError(409, "Choose an active successor of this Skill");
-    }
+    if (skillOutcome?.kind === "change" && skillOutcome.successorVersionHash)
+      await validateSkillSuccessor(
+        tx,
+        scope,
+        skillOutcome.successorVersionHash,
+      );
   }
   const evidence: FactContent["evidence"] = [];
   if (question.evidenceChanges.length > 0)
@@ -776,7 +778,7 @@ export async function resolveQuestion(
   if (typeof scope !== "string" && input.skillOutcome) {
     const outcome = input.skillOutcome;
     const successor =
-      outcome.kind === "change" ? outcome.successorVersionHash : null;
+      outcome.kind === "change" ? (outcome.successorVersionHash ?? null) : null;
     await tx.query(
       `insert into skill_question_resolution_outcomes (resolution_id, question_id, skill_questionnaire_id, skill_id, version_hash, kind, successor_version_hash)
        values ($1,$2,$3,$4,$5,$6,$7)`,

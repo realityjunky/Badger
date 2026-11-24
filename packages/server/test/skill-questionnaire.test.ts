@@ -197,7 +197,7 @@ describe("Skill-owned Questionnaire", () => {
   });
 
   it("keeps reviewed answers on the discussed version and binds a change to its saved successor", async () => {
-    const { base, skillId, versionHash, respondentId } = await setup();
+    const { base, groupId, skillId, versionHash, respondentId } = await setup();
     const { round } = await api<{ round: { id: string } }>(
       "POST",
       `${base}/rounds`,
@@ -362,11 +362,6 @@ describe("Skill-owned Questionnaire", () => {
         questionRevision: question.revision,
       },
     );
-    const successor = await upload(
-      skillId,
-      "Parcel rules for remote deliveries",
-      versionHash,
-    );
     const change = {
       revision: question.revision,
       kind: "confirmed",
@@ -376,7 +371,7 @@ describe("Skill-owned Questionnaire", () => {
           answers: [{ personId: respondentId, revision: resubmitted.revision }],
         },
       ],
-      skillOutcome: { kind: "change", successorVersionHash: successor },
+      skillOutcome: { kind: "change" },
     };
     await api(
       "POST",
@@ -399,21 +394,20 @@ describe("Skill-owned Questionnaire", () => {
       },
       400,
     );
-    expect(
-      await signOff(
-        questionPath,
-        "resolution-preview",
-        "resolve",
-        lead,
-        change,
-      ),
-    ).toMatchObject({
+    const reviewedChange = await signOff<{ resolution: { id: string } }>(
+      questionPath,
+      "resolution-preview",
+      "resolve",
+      lead,
+      change,
+    );
+    expect(reviewedChange).toMatchObject({
       resolution: {
         skillOutcome: {
           kind: "change",
           versionHash,
-          successorVersionHash: successor,
-          applicabilityVersionHash: successor,
+          successorVersionHash: null,
+          applicabilityVersionHash: null,
         },
       },
     });
@@ -441,6 +435,146 @@ describe("Skill-owned Questionnaire", () => {
             expect.objectContaining({ decision: "acknowledged" }),
           ],
         }),
+      ]),
+    });
+    const successor = await upload(
+      skillId,
+      "Parcel rules for remote deliveries",
+      versionHash,
+    );
+    const pinForDossier = async (name: string, hash: string) => {
+      const { workflow, version } = await api<{
+        workflow: { id: string };
+        version: { id: string };
+      }>(
+        "POST",
+        "/workflows",
+        admin,
+        {
+          groupId,
+          name,
+          goal: "Deliver parcels",
+          intent: "new-skill",
+          locale: "en",
+        },
+        201,
+      );
+      const workflowPath = `/workflows/${workflow.id}/versions/${version.id}`;
+      await api("POST", `${workflowPath}/pins`, admin, { skillId, hash }, 201);
+      return `${workflowPath}/working-dossier`;
+    };
+    const originalDossier = await pinForDossier(
+      "original-parcel-process",
+      versionHash,
+    );
+    const successorDossier = await pinForDossier(
+      "remote-parcel-process",
+      successor,
+    );
+    for (const dossier of [originalDossier, successorDossier])
+      expect(await api("GET", dossier, admin)).toMatchObject({
+        reviewedAnswers: [],
+      });
+    const linkInput = {
+      resolutionId: reviewedChange.resolution.id,
+      successorVersionHash: successor,
+    };
+    const linkPreview = `${questionPath}/link-successor-preview`;
+    const linkCommit = `${questionPath}/link-successor`;
+    await api("POST", linkPreview, outsider, linkInput, 404);
+    await api("POST", linkPreview, respondent, linkInput, 403);
+    await api(
+      "POST",
+      linkPreview,
+      lead,
+      { ...linkInput, successorVersionHash: unrelated },
+      400,
+    );
+    const prepared = await api<{ preview: { confirmationHash: string } }>(
+      "POST",
+      linkPreview,
+      lead,
+      linkInput,
+    );
+    expect(prepared).toMatchObject({
+      preview: {
+        resolutionId: reviewedChange.resolution.id,
+        versionHash,
+        successorVersionHash: successor,
+        answers: [{ personId: respondentId, revision: resubmitted.revision }],
+      },
+    });
+    const link = {
+      ...linkInput,
+      confirmed: true,
+      confirmationHash: prepared.preview.confirmationHash,
+      requestId: randomUUID(),
+    };
+    await api(
+      "POST",
+      linkCommit,
+      lead,
+      { ...link, confirmationHash: "a".repeat(64) },
+      409,
+    );
+    await api("POST", linkCommit, respondent, link, 403);
+    const [linked, replayed] = await Promise.all([
+      api<{ successorLink: { id: string } }>("POST", linkCommit, lead, link),
+      api("POST", linkCommit, lead, link),
+    ]);
+    expect(replayed).toEqual(linked);
+    await api(
+      "POST",
+      linkCommit,
+      lead,
+      { ...link, successorVersionHash: unrelated },
+      409,
+    );
+    await api("POST", linkPreview, lead, linkInput, 409);
+    await api(
+      "POST",
+      `/skills/${skillId}/versions/${successor}/questionnaire/questions/${question.id}/link-successor-preview`,
+      lead,
+      linkInput,
+      404,
+    );
+    expect(
+      await api("GET", "/audit-events?action=question.successor_linked", admin),
+    ).toMatchObject({
+      events: [
+        {
+          channel: "web",
+          targetId: question.id,
+          after: { hash: prepared.preview.confirmationHash },
+        },
+      ],
+    });
+    expect(await api("GET", originalDossier, admin)).toMatchObject({
+      reviewedAnswers: [],
+    });
+    expect(await api("GET", successorDossier, admin)).toMatchObject({
+      reviewedAnswers: [
+        {
+          questionId: question.id,
+          personId: respondentId,
+          revision: resubmitted.revision,
+        },
+      ],
+    });
+    expect(await api("GET", base, respondent)).toMatchObject({
+      resolutions: expect.arrayContaining([
+        expect.objectContaining({
+          id: reviewedChange.resolution.id,
+          skillOutcome: expect.objectContaining({
+            applicabilityVersionHash: successor,
+            successorLink: expect.objectContaining({
+              id: linked.successorLink.id,
+            }),
+          }),
+        }),
+      ]),
+      facts: expect.arrayContaining([
+        expect.objectContaining({ id: currentFact.id, active: true }),
       ]),
     });
     const successorPath = `/skills/${skillId}/versions/${successor}/questionnaire`;

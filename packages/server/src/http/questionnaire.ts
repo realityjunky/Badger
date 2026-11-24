@@ -10,6 +10,11 @@ import {
 } from "../questionnaire/resolutions.js";
 import { questionnaireCapabilities } from "../questionnaire/access.js";
 import {
+  linkSkillSuccessor,
+  parseSuccessorLink,
+  successorLinkPreview,
+} from "../questionnaire/skill-successors.js";
+import {
   listSkillQuestionnaireAssignees,
   listSkillQuestionnaireVersions,
   readSkillQuestionnaireSubject,
@@ -77,7 +82,7 @@ import {
 } from "../questionnaire/concerns.js";
 
 const PATH =
-  /^\/api\/v1\/(workflows|skills)\/([^/]+)\/versions\/([^/]+)\/questionnaire(?:\/(rounds|questions|settings|facts|comments|concerns|ledger|inferences|assumptions|attachments)(?:\/([^/]+)(?:\/(questions|publish-preview|publish|answer|submit|resolution-preview|resolve|acknowledgement-preview|acknowledge|comments|resolve-preview|attachments))?)?)?$/u;
+  /^\/api\/v1\/(workflows|skills)\/([^/]+)\/versions\/([^/]+)\/questionnaire(?:\/(rounds|questions|settings|facts|comments|concerns|ledger|inferences|assumptions|attachments)(?:\/([^/]+)(?:\/(questions|publish-preview|publish|answer|submit|resolution-preview|resolve|link-successor-preview|link-successor|acknowledgement-preview|acknowledge|comments|resolve-preview|attachments))?)?)?$/u;
 const RECORD_CONTEXT =
   /^\/api\/v1\/questionnaire\/(questions|concerns)\/([^/]+)$/u;
 
@@ -115,6 +120,13 @@ export function questionnaireMethods(path: string): string | null {
     resource === "questions" &&
     id &&
     ["resolution-preview", "resolve"].includes(action ?? "")
+  )
+    return "POST";
+  if (
+    subject === "skills" &&
+    resource === "questions" &&
+    id &&
+    (action === "link-successor-preview" || action === "link-successor")
   )
     return "POST";
   if (
@@ -281,13 +293,21 @@ export async function handleQuestionnaire(
         (action === "resolve" || action === "resolution-preview")
           ? parseResolution(body)
           : null;
-      const successor =
-        resolution?.skillOutcome?.kind === "change"
-          ? resolution.skillOutcome.successorVersionHash
+      const successorLink =
+        skillRequest &&
+        resource === "questions" &&
+        id &&
+        (action === "link-successor-preview" || action === "link-successor")
+          ? parseSuccessorLink(body)
           : null;
+      const successor =
+        successorLink?.successorVersionHash ??
+        (resolution?.skillOutcome?.kind === "change"
+          ? resolution.skillOutcome.successorVersionHash
+          : null);
       const versionLocks = newRound
         ? [versionId]
-        : action === "resolve" && successor
+        : (action === "resolve" || action === "link-successor") && successor
           ? [versionId, successor]
           : [];
       const skillView = skillRequest
@@ -652,6 +672,8 @@ export async function handleQuestionnaire(
         [
           "resolution-preview",
           "resolve",
+          "link-successor-preview",
+          "link-successor",
           "acknowledgement-preview",
           "acknowledge",
         ].includes(action ?? "")
@@ -661,7 +683,10 @@ export async function handleQuestionnaire(
             403,
             "Sign off in the dashboard as a signed-in person",
           );
-        const commit = action === "resolve" || action === "acknowledge";
+        const commit =
+          action === "resolve" ||
+          action === "acknowledge" ||
+          action === "link-successor";
         if (commit && body.confirmed !== true)
           throw new RequestError(400, "Confirm the reviewed sign-off");
         const hash = commit
@@ -670,6 +695,29 @@ export async function handleQuestionnaire(
         const requestId = commit
           ? textInput(body.requestId, "requestId", 200)
           : "";
+        if (skillView && successorLink)
+          return {
+            status: 200,
+            value: commit
+              ? await linkSkillSuccessor(
+                  tx,
+                  deps,
+                  context,
+                  skillView.scope,
+                  id,
+                  successorLink,
+                  hash,
+                  requestId,
+                )
+              : {
+                  preview: await successorLinkPreview(
+                    tx,
+                    skillView.scope,
+                    id,
+                    successorLink,
+                  ),
+                },
+          };
         if (resource === "questions") {
           const input = resolution ?? parseResolution(body);
           if (input.followUp) await validateQuestion(input.followUp);

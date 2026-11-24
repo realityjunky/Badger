@@ -288,7 +288,8 @@ export interface Resolution {
     kind: "clarification" | "change";
     versionHash: string;
     successorVersionHash: string | null;
-    applicabilityVersionHash: string;
+    applicabilityVersionHash: string | null;
+    successorLink?: { id: string; actorName: string; createdAt: string };
   };
 }
 export interface ConfirmedFact {
