@@ -60,6 +60,7 @@ export function DossierContent({
           id,
           content: content.fields[id] ?? null,
           blocker: null,
+          evidenceChanges: [],
         };
       }),
     );

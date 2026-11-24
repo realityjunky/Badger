@@ -67,8 +67,8 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
       });
       return { workflowId: workflow.id, versionId: version.id };
     };
-    const workflow = await makeWorkflow("Parcel report");
-    const otherWorkflow = await makeWorkflow("Parcel comparison");
+    const workflow = await makeWorkflow("parcel-report");
+    const otherWorkflow = await makeWorkflow("parcel-comparison");
     await api(admin, "POST", "/bindings", {
       scopeType: "group",
       scopeId: group.id,

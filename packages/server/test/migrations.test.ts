@@ -1407,6 +1407,7 @@ describe("reviewed SQL migrations", () => {
       "0047",
       "0048",
       "0049",
+      "0050",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -1463,6 +1464,7 @@ describe("reviewed SQL migrations", () => {
         "0047",
         "0048",
         "0049",
+        "0050",
       ],
       pending: [],
       drifted: [],
@@ -1623,6 +1625,7 @@ describe("reviewed SQL migrations", () => {
         "0047",
         "0048",
         "0049",
+        "0050",
       ],
       pending: [],
       drifted: [],
