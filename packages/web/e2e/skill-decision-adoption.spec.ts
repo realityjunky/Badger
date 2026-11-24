@@ -1,12 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import type { WorkingDossierView } from "@realityjunky/badger";
+import {
+  WORKING_DOSSIER_FIELDS,
+  type DossierFieldValue,
+  type WorkingDossierView,
+} from "@realityjunky/badger";
+import type { DossierView } from "../src/api/dossier.js";
 import type { SkillVersion } from "../src/api/skills.js";
 import type { WorkflowVersionDetail } from "../src/api/workflows.js";
 import {
   api,
   base,
   cite,
+  confirmSources,
   people,
   signIn,
   startDossierService,
@@ -55,12 +61,12 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
       "/groups",
       { name: "Parcel reports" },
     );
-    const makeWorkflow = async (name: string) => {
+    const makeWorkflow = async (name: string, groupId = group.id) => {
       const { workflow, version } = await api<{
         workflow: { id: string };
         version: { id: string };
       }>(admin, "POST", "/workflows", {
-        groupId: group.id,
+        groupId,
         name,
         goal: "Generate a report for a parcel.",
         intent: "new-skill",
@@ -76,6 +82,13 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     };
     const workflow = await makeWorkflow("parcel-report");
     const otherWorkflow = await makeWorkflow("parcel-comparison");
+    const { group: privateGroup } = await api<{ group: { id: string } }>(
+      admin,
+      "POST",
+      "/groups",
+      { name: "Restricted reports" },
+    );
+    const restricted = await makeWorkflow("restricted-report", privateGroup.id);
     await api(admin, "POST", "/bindings", {
       scopeType: "group",
       scopeId: group.id,
@@ -121,6 +134,13 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
       .getByLabel("Rationale", { exact: true })
       .fill("Make the format explicit in the source.");
     await selectOption(engineer, /Assignees/u, people.expert.name);
+    await selectOption(engineer, /Related workflows/u, "restricted-report");
+    await engineer
+      .getByRole("button", { name: "Add evidence", exact: true })
+      .click();
+    await engineer
+      .getByLabel("File path", { exact: true })
+      .fill("references/format.md");
     await engineer
       .getByRole("button", { name: "Save question", exact: true })
       .click();
@@ -142,11 +162,45 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     await expect(
       expert.getByRole("heading", { name: questionText, exact: true }),
     ).toBeVisible();
+    await expert
+      .getByRole("button", { name: "Evidence and history", exact: true })
+      .click();
+    await expect(
+      expert.getByRole("link", { name: /references\/format\.md/ }),
+    ).toHaveAttribute("href", `/team${library}?path=references%2Fformat.md`);
+    await expert
+      .getByRole("link", { name: "Open related workflow", exact: true })
+      .click();
+    await expect(expert).toHaveURL(
+      `${base}/workflows/${restricted.workflowId}`,
+    );
+    await expect(
+      expert.getByText("This workflow is unavailable or outside your roles."),
+    ).toBeVisible();
+    await expert.goto(questionUrl);
     await expert.getByTestId("answer-box").fill(submittedAnswer);
     await expert
       .getByRole("button", { name: "Submit answer", exact: true })
       .click();
     await expect((await readWorkflow(engineer, path)).pins).toEqual([]);
+
+    const review = await engineer.context().newPage();
+    review.setDefaultTimeout(8_000);
+    await review.goto(questionUrl);
+    await review
+      .getByLabel("Formal fact 1", { exact: true })
+      .fill(reviewedFact);
+    await selectOption(review, "Skill outcome", "Change requested");
+    await review
+      .getByRole("button", { name: "Review resolution", exact: true })
+      .click();
+    await review
+      .getByRole("dialog")
+      .getByRole("button", { name: "Sign off", exact: true })
+      .click();
+    await expect(
+      review.getByText("Awaiting a saved successor", { exact: true }),
+    ).toBeVisible();
 
     const pin = async (
       workflowPathname: string,
@@ -233,7 +287,7 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     await expect(
       editor.getByRole("row", { name: /references\/format\.md Modified/u }),
     ).toBeVisible();
-    await editor
+    await engineer
       .getByRole("button", { name: "Save successor", exact: true })
       .click();
     await expect(editor).toBeHidden();
@@ -253,16 +307,19 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     await label.getByRole("textbox", { name: "Version label" }).fill("1.1.0");
     await label.getByRole("button", { name: "Save label" }).click();
     await expect(label).toBeHidden();
-    await engineer.goto(questionUrl);
+    const download = engineer.waitForEvent("download");
     await engineer
-      .getByLabel("Formal fact 1", { exact: true })
-      .fill(reviewedFact);
-    await selectOption(engineer, "Skill outcome", "Implemented in a successor");
-    await selectOption(engineer, "Successor version", /1\.1\.0/u);
-    await engineer
-      .getByRole("button", { name: "Review resolution", exact: true })
+      .getByRole("link", { name: "Download ZIP", exact: true })
       .click();
-    await engineer
+    expect((await download).suggestedFilename()).toMatch(/\.zip$/u);
+    await review
+      .getByRole("button", { name: "Refresh successor versions", exact: true })
+      .click();
+    await selectOption(review, "Successor version", /1\.1\.0/u);
+    await review
+      .getByRole("button", { name: "Review successor link", exact: true })
+      .click();
+    await review
       .getByRole("dialog")
       .getByRole("button", { name: "Sign off", exact: true })
       .click();
@@ -277,7 +334,16 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
       .getByRole("button", { name: "Sign off", exact: true })
       .click();
     await expect(
-      expert.getByText("Acknowledged", { exact: true }),
+      expert
+        .getByTestId("confirmed-fact")
+        .getByText("Acknowledged", { exact: true }),
+    ).toBeVisible();
+    await review.getByText("Resolution history", { exact: true }).click();
+    await expect(
+      review.getByRole("link", { name: successor.hash.slice(0, 12) }),
+    ).toBeVisible();
+    await expect(
+      review.getByRole("link", { name: skill.hash, exact: true }),
     ).toBeVisible();
     for (const root of [path, otherPath])
       expect((await readWorkflow(engineer, root)).pins[0]?.hash).toBe(
@@ -313,9 +379,7 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
       name: "Workflow · Workflow guardrails",
     });
     await selectOption(engineer, "State", "Recorded decision");
-    await fieldEditor
-      .getByRole("textbox", { name: "Value", exact: true })
-      .fill(reviewedFact);
+    await fieldEditor.getByLabel("Value", { exact: true }).fill(reviewedFact);
     await selectOption(
       engineer,
       "Reviewed answers",
@@ -323,9 +387,11 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     );
     // The old citation remains inspectable in the previous dossier revision.
     await fieldEditor
-      .getByLabel("Evidence", { exact: true })
-      .locator("..")
-      .getByLabel("close")
+      .locator(".ant-form-item")
+      .filter({
+        has: engineer.locator("label").filter({ hasText: /^Evidence$/u }),
+      })
+      .locator(".ant-select-selection-item-remove")
       .click();
     await fieldEditor
       .getByRole("button", { name: "Save field", exact: true })
@@ -340,6 +406,50 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
       updated.projection.fields.find(({ id }) => id === fieldId)?.blocker,
     ).toBeNull();
 
+    await confirmSources(service, engineer, workflow);
+    const supportingFields: Record<string, DossierFieldValue> = {};
+    for (const [scope, id] of [
+      ["workflow", "workflow"],
+      ["skill", skill.skillId],
+      ["node", "render"],
+    ] as const)
+      for (const field of WORKING_DOSSIER_FIELDS[scope].filter(
+        ({ required }) => required,
+      ))
+        supportingFields[`${scope}/${id}/${field.key}`] = {
+          state: "decision",
+          value: field.label,
+          reason: "Agreed for this example workflow.",
+        };
+    await api(engineer, "PATCH", dossierPath, {
+      revision: updated.revision,
+      pinsHash: updated.pinsHash,
+      editId: randomUUID(),
+      fields: supportingFields,
+      nodes: {
+        render: {
+          kind: "node",
+          label: "Render report",
+          order: 0,
+          skillId: skill.skillId,
+          hash: successor.hash,
+        },
+      },
+    });
+    const gate = `${path}/gates/dossier`;
+    const { preview } = await api<{ preview: { confirmationHash: string } }>(
+      admin,
+      "POST",
+      `${gate}/preview`,
+      {},
+    );
+    await api(admin, "POST", `${gate}/commit`, {
+      confirmationHash: preview.confirmationHash,
+      requestId: randomUUID(),
+    });
+    const approved = await api<DossierView>(admin, "GET", `${path}/dossier`);
+    expect(approved.confirmation?.invalidatedAt).toBeNull();
+    await engineer.goto(`${base}/questionnaire?${query}`);
     await expert
       .getByTestId("answer-box")
       .fill("The format also requires a schema.");
@@ -349,6 +459,12 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     await expect(
       field.getByText("A linked reviewed answer changed"),
     ).toBeVisible();
+    const stale = await api<DossierView>(admin, "GET", `${path}/dossier`);
+    expect(stale.confirmation?.invalidatedAt).toEqual(expect.any(String));
+    expect(stale.currentVersionId).toBeNull();
+    expect(stale.versions.map(({ hash }) => hash)).toEqual(
+      approved.versions.map(({ hash }) => hash),
+    );
     await testInfo.attach("workflow-decision-readiness", {
       body: await engineer.screenshot({ fullPage: true }),
       contentType: "image/png",
