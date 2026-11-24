@@ -77,6 +77,7 @@ test("an Engineer can continue a legacy source study, inspect its evidence, and 
         `---\nname: ${name}-source\ndescription: Example source\n---\n\nRead reference/guide.md.\n`,
       ),
       file("reference/guide.md", guide),
+      file("scripts/report.sh", "#!/bin/sh\nprintf example\n"),
     ],
   };
   const { preview } = await call<{ preview: { hash: string } }>(
@@ -130,6 +131,7 @@ test("an Engineer can continue a legacy source study, inspect its evidence, and 
   await page.goto(`${base}${versionPath}#source-study`);
   const study = page.locator("#source-study");
   await expect(study).toContainText("0 of 1 pinned versions studied");
+  await expect(study.getByText(preview.hash, { exact: true })).toBeHidden();
 
   // A fact cites lines of a file in the pinned version's inventory.
   await study.getByRole("tab", { name: "Source-derived facts" }).click();
@@ -152,7 +154,10 @@ test("an Engineer can continue a legacy source study, inspect its evidence, and 
   ).toHaveAttribute("aria-selected", "true");
 
   // Its evidence link opens exactly the cited lines.
-  await study.getByRole("link", { name: "reference/guide.md:2–3" }).click();
+  const evidence = study.getByRole("link", { name: "reference/guide.md:2–3" });
+  await expect(evidence).toBeHidden();
+  await study.getByText("Source evidence", { exact: true }).click();
+  await evidence.click();
   const inspector = page
     .getByRole("dialog")
     .filter({ hasText: "Record history" });
@@ -170,14 +175,30 @@ test("an Engineer can continue a legacy source study, inspect its evidence, and 
 
   // Marking the only pinned version studied completes Source study.
   await study.getByRole("tab", { name: "Source study", exact: true }).click();
-  await study.getByRole("button", { name: "Review study" }).click();
-  const review = page
-    .getByRole("dialog")
-    .filter({ hasText: "Mark version studied" });
-  await expect(review).toContainText(
+  const reviewStudy = study.getByRole("button", { name: "Review study" });
+  await reviewStudy.click();
+  const review = page.getByRole("dialog", { name: "Review study" });
+  const fact = review.getByText(
     "The source writes samples.tsv with two columns.",
+    { exact: true },
   );
-  await review.getByRole("button", { name: "Mark version studied" }).click();
+  const cancel = review.getByRole("button", { name: "Cancel", exact: true });
+  const markStudied = review.getByRole("button", {
+    name: "Mark version studied",
+  });
+  await expect(fact).toBeVisible();
+  for (const button of [cancel, markStudied]) {
+    await expect(button).toBeVisible();
+    const buttonBox = (await button.boundingBox())!;
+    expect(buttonBox.y + buttonBox.height).toBeLessThan(
+      (await fact.boundingBox())!.y,
+    );
+  }
+  await cancel.click();
+  await expect(review).toBeHidden();
+  await expect(study).toContainText("0 of 1 pinned versions studied");
+  await reviewStudy.click();
+  await markStudied.click();
   await expect(review).toBeHidden();
   await expect(study).toContainText("1 of 1 pinned versions studied");
   await expect(study.locator(".study-pin")).toContainText("Studied");
@@ -190,4 +211,10 @@ test("an Engineer can continue a legacy source study, inspect its evidence, and 
       { id: "questionnaire", state: "active" },
     ]),
   );
+
+  await page.goto(
+    `${base}/questionnaire?workflow=${workflow.id}&version=${version.id}&panel=ledger`,
+  );
+  const ledger = page.getByTestId("questionnaire-ledger");
+  await expect(ledger.getByRole("status")).toHaveText("Ready");
 });

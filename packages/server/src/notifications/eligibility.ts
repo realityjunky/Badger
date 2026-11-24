@@ -78,11 +78,16 @@ export async function eligibleNotificationItems(
       const groups = await once(["skill-access", personId], () =>
         skillGroupPermissions(tx, access, person),
       );
-      if (
-        version.uploadedBy === person.id &&
-        groups.some((group) => group.id === skill?.groupId)
-      )
-        eligible.push(item);
+      if (!groups.some((group) => group.id === skill?.groupId)) continue;
+      const canReview =
+        item.gate === "script-effect-clarification"
+          ? (
+              await once(["capabilities", personId, workflow.id], () =>
+                workflowCapabilities(tx, access, person, workflow),
+              )
+            ).manageSourceStudy
+          : version.uploadedBy === person.id;
+      if (canReview) eligible.push(item);
       continue;
     }
     const capabilities = await once(

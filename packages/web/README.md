@@ -319,14 +319,11 @@ as needed on narrow screens.
   the committed tree like an upload: the person confirms its exact hash
   before the version is stored. Fetched content never runs, and a
   version lists each repository and commit it was imported from.
-- Script effects are reviewed inside Source study. The Engineer requests the
-  existing per-Skill Agent job and separately sends its effect draft to the
-  original uploader. The typed shared panel and `/source-reviews/:skillId/:hash`
-  Inbox link offer narrow review access, citations, corrections, uncertainty
-  answers, clarification, history, and explicit personal hash confirmation.
-  Complete confirmed coverage gates study completion. Other workflows reuse
-  the same entry/version's confirmation; corrections reopen dependent work.
-  See [the review flow](../../docs/script-effect-review.md).
+- Script effect review is optional on an exact Skill version in Skills.
+  The responsible uploader can start a review or open an Engineer's shared
+  draft. The review retains citations, corrections, answers, and personal
+  confirmations. The working dossier records effects relevant to workflow
+  decisions. See [the review flow](../../docs/script-effect-review.md).
 - One token source feeds both the CSS variables and Ant Design's theme.
   Contrast is checked at AA in both themes; reduced motion stops the stage
   marker's animation.

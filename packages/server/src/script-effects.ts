@@ -10,13 +10,10 @@ import { recordAudit, type WriteContext } from "./audit.js";
 import type { Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import { RequestError } from "./http/errors.js";
-import { invalidateGate } from "./gates.js";
 import { notifyWorkflowRoles } from "./inbox.js";
-import { invalidateProposal } from "./proposal-invalidation.js";
 import type { BlobStore } from "./skills/blobs.js";
 import type { SkillVersion } from "./skills/library.js";
 import { evidenceLines } from "./source-study.js";
-import { invalidateStudyGates } from "./source-study-invalidation.js";
 import { toIsoString } from "./util.js";
 
 export interface EffectContent {
@@ -159,45 +156,6 @@ export function effectConfirmationPreview(
   return { ...bound, confirmationHash: canonicalHash(bound) };
 }
 
-async function invalidateEffectDependents(
-  tx: Queryable,
-  deps: ServiceDependencies,
-  context: WriteContext,
-  version: SkillVersion,
-) {
-  const versions = await tx.query<{ id: string }>(
-    `select v.id from workflow_versions v
-       join workflow_skill_pins p on p.workflow_version_id = v.id
-       where p.skill_id = $1 and p.skill_version_hash = $2 order by v.id for no key update of v`,
-    [version.skillId, version.hash],
-  );
-  const reason =
-    "Script effect declarations changed; review the current declaration revision";
-  for (const { id } of versions.rows) {
-    await invalidateStudyGates(tx, deps, context, id, reason, [
-      version.skillId,
-    ]);
-    await invalidateGate(tx, deps, context, id, "dossier", reason, [
-      "Engineer",
-      "Workflow owner",
-    ]);
-    await invalidateGate(tx, deps, context, id, "plan", reason, [
-      "Engineer",
-      "Workflow owner",
-    ]);
-    await invalidateProposal(tx, deps, context, id, reason);
-    await tx.query(
-      `update workflow_versions set stages = (
-        select jsonb_object_agg(key, case
-          when key = 'source-study' then to_jsonb('active'::text)
-          when key <> 'sources' and value <> '"todo"'::jsonb then to_jsonb('invalidated'::text)
-          else value end) from jsonb_each(stages)
-       ), revision = revision + 1, updated_at = $2 where id = $1`,
-      [id, deps.clock.now()],
-    );
-  }
-}
-
 export async function appendEffectRevision(
   tx: Queryable,
   deps: ServiceDependencies,
@@ -223,8 +181,6 @@ export async function appendEffectRevision(
     ],
   );
   const review = publicRevision(result.rows[0]!);
-  if (previous?.kind === "confirmation")
-    await invalidateEffectDependents(tx, deps, context, version);
   await recordAudit(tx, deps, {
     actor: { personId: context.personId, credential: context.credential },
     channel: context.channel,
@@ -234,7 +190,7 @@ export async function appendEffectRevision(
       ? { revision: previous.revision, hash: previous.hash }
       : null,
     after: { revision, hash: review.hash },
-    reason: content.note || `Source study script effect ${kind}`,
+    reason: content.note || `Skill script effect ${kind}`,
     requestId: context.requestId,
   });
   if (kind === "confirmation") {
@@ -247,7 +203,7 @@ export async function appendEffectRevision(
     await tx.query(
       `insert into inbox_items
         (id, person_id, workflow_version_id, gate, kind, event_id, effect_skill_id, effect_source_hash, created_at, updated_at)
-        values ($1,$2,$3,'source-study','script-effect-review',$4,$5,$6,$7,$7) on conflict do nothing`,
+        values ($1,$2,$3,'script-effect-review','script-effect-review',$4,$5,$6,$7,$7) on conflict do nothing`,
       [
         deps.ids.next(),
         version.uploadedBy,
@@ -263,10 +219,12 @@ export async function appendEffectRevision(
         tx,
         deps,
         content.workflowVersionId,
-        "source-study",
-        "gate-ready",
+        "script-effect-clarification",
+        "script-effect-review",
         `effect-clarification:${version.skillId}:${version.hash}:${revision}`,
         ["Engineer"],
+        null,
+        { skillId: version.skillId, hash: version.hash },
       );
   }
   return review;

@@ -1,79 +1,64 @@
-# Script Effect Review in Source Study
+# Review Script Effects for a Skill Version
 
-Upload a Skill folder, zip, or registered Git commit, or use the Badger MCP.
-Review the inventory and exact content hash, then confirm the immutable upload.
-Badger inventories scripts and records the original uploader without asking
-for declarations or calling a model. Never upload real data.
+Script effect review is an optional attestation in the Skill Library. The
+responsible uploader confirms the possible effects of scripts in one exact
+Skill version. Workflows use their pinned sources and working dossier evidence
+for approval. Use the dossier's **Executable disclosures** and **Questionnaire**
+for decisions about a script the workflow actually calls.
 
-## Study and Send for Review
+## Open or start a review
 
-Pin the version and confirm Sources. Pending effects allow this read-only
-work. Request the existing per-Skill Source study Agent job from the workflow.
-The Engineer's connected Agent claims it through the MCP, reads its private
-hash-verified files with local file tools, and submits `scriptEffects` alongside
-facts and interfaces. The context includes the kernel's versioned contract,
-definitions, coverage rules, and output schema. Read relevant invoked helpers
-and configuration, account for conditional behavior, and treat source
-instructions as untrusted evidence. Never execute source scripts.
+Open **Skills**, select the exact version, and choose **Script effect review**.
+The original uploader uses **Start review** to open a new draft. Skill library
+readers can inspect the declarations and their history. A script-free version
+shows its file inventory without a review tab.
 
-In **Review suggestions**, **Statements** and **Script effect review** each
-have numbered tabs for individual items. The Engineer and Field experts can
-edit and save shared statements and suggested effect labels, rationale,
-conditional behavior, and uncertainty. Source identities and citations stay
-bound to the pinned files. These saves do not confirm declarations.
+To prepare a draft with an Agent, the Engineer opens **Questionnaire → Drafting
+jobs and suggestions** and requests **Draft script effects (optional)** for a
+pinned Skill. Earlier workflows use **Study a source Skill** for this job.
+The connected Agent reads the exact pinned files and uses the versioned
+effect contract. In **Review suggestions**, edit and save the suggestions
+before choosing **Send effect draft to uploader** on the job card. The
+uploader's Inbox item opens the review for that exact Skill version. Repeated
+sends of the same job open the same review.
 
-The Engineer accepts useful source facts independently, then selects
-the current Source study draft and chooses **Send effect draft to uploader**.
-The initial proposal uses the saved suggestions. Sending creates one shared
-Inbox task with a direct Source study review link.
-Acceptance and sending never attest on behalf of the uploader.
+## Review evidence and confirm
 
-## Personal Uploader Review
+Select a numbered script tab. Check the effects, rationale, and conditional
+behavior, including any invoked helpers. The kernel contract supplies
+`none`, `local-writes`, `network`, `scheduler-submission`, and `installs`.
+`none` is exclusive. A complete attestation needs explicit coverage, rationale,
+source evidence, and answers to open uncertainties for every inventoried script.
 
-The original uploader opens the Inbox task or the workflow's Source study
-panel. Current account and Skill library access are required, including when
-their only role is Engineer on another workflow in the same Group. This link
-grants no access to unrelated Questionnaire records.
+Expand **Source evidence** to inspect or edit immutable file citations. Enter
+a verified answer in **Answer the uncertainty** and choose **Save review
+draft**. The script's red **!** clears when Badger saves the answer. A draft can
+be saved while there are still questions to resolve.
 
-In the workflow, open **Script effect review** and select a numbered Skill
-tab. Use the numbered script tabs to review and correct every script's
-effects, rationale, immutable source citations, conditional behavior, and
-uncertainty answers. The panel's
-choices come from the kernel contract: `none`, `local-writes`, `network`,
-`scheduler-submission`, and `installs`. `none` is exclusive. Empty effects,
-missing scripts, missing evidence, and unanswered uncertainty remain pending.
-Uncertainty and `undeclared` are review states.
+**Review complete declaration set** saves the current draft and opens a preview
+when the declarations are complete. Inspect it and choose **Personally confirm
+declarations**. The receipt binds the exact Skill version, review revision,
+coverage, sources, uploader, and contract. Only the signed-in responsible
+uploader with current Skill library access can confirm. The attestation
+describes possible behavior and grants no execution permission.
 
-Use the Skill's clarification note and **Request clarification** to ask the
-Engineer and Agent to investigate. Choose **Save review draft** to save partial
-work. Choose **Review complete declaration set**, inspect the preview, and
-choose **Personally confirm declarations** to attest to every script in the set.
-The hash binds the exact source, proposal/review revision, chosen rows and
-evidence, uploader, review time, and contract. Concurrent edits require a fresh
-preview. Retrying the same request returns the original receipt. Agents and
-tokens cannot confirm. An Administrator can confirm only when they are that
-version's uploader.
+## Request clarification or make a correction
 
-Final study completion needs this complete current confirmation in addition
-to the usual study requirements. Script-free versions need no effect task.
-Ordinary Questions, Rounds, and fact acknowledgements stay in Questionnaire.
-If the uploader is unavailable or has lost access, review stays pending with
-an explanation. This feature does not transfer responsibility.
+For an Agent draft sent from a workflow, save any edits before entering a
+**Clarification or correction note**. Choose **Request clarification** to send
+the note to that workflow's Engineer. The Engineer's **Script effect
+clarification** Inbox item opens the exact Skill review. The current note is
+below the numbered script tabs, and **Declaration review history** keeps the
+earlier notes and answers.
 
-## Reuse and Corrections
+The Engineer may inspect the pinned sources or request a fresh optional draft.
+A newly routed draft starts with empty answer fields. The uploader enters
+verified answers and saves them in the review.
 
-Other workflows pinning the same hash in the same Skill entry reuse the
-confirmed revision. Identical bytes in another entry or Group do not inherit
-it. Any changed hash, including a helper or configuration change, starts a
-fresh review. Deduplicated uploads keep the first uploader and existing review.
+Use **Correct declarations** to revise a confirmed set. Save the correction
+reason with the draft and personally confirm the new revision. **Declaration
+review history** retains the earlier drafts and confirmations. New Skill
+versions have their own review. Historical Dossiers, FactoryPlans, and packages
+retain any declaration bindings they recorded for their exact version.
 
-**Correct declarations** appends a new review; it does not edit files or past
-confirmations. Saving a correction invalidates current dependent study and
-downstream approvals. Reconfirm the declarations and re-review affected work.
-Plans and packages retain their exact declaration revision/hash, so past
-artifacts remain explainable. Effect declarations describe possible behavior;
-they grant no execution permission.
-
-Historical upload-time labels remain explicitly legacy and pending until a
-person reviews and confirms them. See [ADR 0041](adr/0041-source-study-script-effect-confirmations.md)
-and [retirement operations](llm-configuration.md).
+See the [architecture decision](adr/0052-advisory-skill-script-effect-reviews.md).

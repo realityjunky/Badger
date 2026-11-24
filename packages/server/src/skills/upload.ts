@@ -135,7 +135,7 @@ export async function inspectUpload(
   )
     throw new RequestError(
       400,
-      "Declare script effects in Source study after upload",
+      "Upload the files first. The original uploader can review script effects on the Skill version.",
     );
   const files = Array.isArray(folder)
     ? folder.map((entry: unknown) => {

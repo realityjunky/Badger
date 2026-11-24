@@ -147,16 +147,28 @@ body {
   margin: 0;
 }
 
-.working-dossier-study-layout {
+.working-dossier-study,
+.working-dossier-study-tab,
+.working-dossier-study-picker {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.working-dossier-study-tab {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
+  gap: 12px;
+}
+
+.working-dossier-study-tab > .muted {
+  margin: 0;
 }
 
 .working-dossier-diagram,
 .working-dossier-inspector {
   min-width: 0;
+}
+
+.working-dossier-diagram h3 {
+  margin: 0 0 8px;
 }
 
 .working-dossier-diagram-canvas {
@@ -165,6 +177,11 @@ body {
   border: 1px solid var(--badger-color-border);
   border-radius: var(--badger-radius-control);
   background: var(--badger-color-background);
+  background-image: radial-gradient(
+    var(--badger-color-border) 1px,
+    transparent 1px
+  );
+  background-size: 16px 16px;
 }
 
 .working-dossier-diagram-layout {
@@ -176,8 +193,7 @@ body {
   inset: 0;
 }
 
-.working-dossier-edge,
-.working-dossier-parent-edge {
+.working-dossier-edge {
   stroke: var(--badger-color-text-muted);
   stroke-width: 1.5;
   fill: none;
@@ -203,21 +219,41 @@ body {
   stroke-dasharray: 2 4 10 4;
 }
 
-.working-dossier-parent-edge {
+.working-dossier-edge[data-variant="parent"] {
   stroke-dasharray: 2 5;
+  stroke-linecap: round;
 }
 
-.working-dossier-edge[data-selected="true"] {
-  stroke: var(--badger-color-accent);
+.working-dossier-edge[data-highlighted="true"] {
   stroke-width: 3;
+}
+
+.working-dossier-edge[data-muted="true"] {
+  opacity: 0.4;
 }
 
 .working-dossier-edge-target {
   fill: none;
   stroke: transparent;
-  stroke-width: 20;
   pointer-events: stroke;
   cursor: pointer;
+}
+
+.working-dossier-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--badger-color-text-secondary);
+  font-size: 0.9em;
+}
+
+.working-dossier-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .working-dossier-node,
@@ -238,8 +274,8 @@ body {
   position: absolute;
   display: grid;
   grid-template-rows: 1fr auto;
-  height: 60px;
   padding-block: 4px;
+  background: var(--badger-color-background);
   line-height: 1.2;
 }
 
@@ -256,35 +292,44 @@ body {
 
 .working-dossier-node:hover,
 .working-dossier-selection:hover,
-.working-dossier-node[aria-pressed="true"],
+.working-dossier-node[data-highlighted="true"],
 .working-dossier-selection[aria-pressed="true"] {
   border-color: var(--badger-color-accent);
   background: var(--badger-color-accent-soft);
 }
 
-.working-dossier-node[aria-pressed="true"],
+.working-dossier-node[data-highlighted="true"],
 .working-dossier-selection[aria-pressed="true"] {
   box-shadow: inset 0 0 0 1px var(--badger-color-accent);
 }
 
-.working-dossier-route-selection[data-variant="optional"] {
-  border-style: dashed;
+.working-dossier-study-tabs > .ant-tabs-nav {
+  margin-bottom: 12px;
 }
 
-.working-dossier-route-selection[data-variant="rework"] {
-  border-style: double;
-  border-width: 3px;
+.working-dossier-study-picker {
+  display: grid;
+  gap: 4px;
+  width: min(100%, 36rem);
+  font-weight: 600;
 }
 
-.working-dossier-handoff-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  padding: 0;
-  list-style: none;
+.working-dossier-study-picker select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-control);
+  background: var(--badger-color-background);
+  color: var(--badger-color-text);
+  font: inherit;
+  font-weight: 400;
+  text-overflow: ellipsis;
 }
 
 .working-dossier-inspector,
+.working-dossier-workflow-details,
 .working-dossier-field,
 .working-dossier-endpoints > section {
   padding: 12px;
@@ -298,6 +343,21 @@ body {
   margin-top: 0;
 }
 
+.working-dossier-inspector,
+.working-dossier-workflow-details {
+  background: var(--badger-color-background);
+}
+
+.working-dossier-endpoints p {
+  margin-block: 4px;
+}
+
+.working-dossier-workflow-details > summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 600;
+}
+
 .working-dossier-field-list,
 .working-dossier-value {
   display: grid;
@@ -305,11 +365,13 @@ body {
 }
 
 .working-dossier-field-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   margin-top: 10px;
 }
 
 .working-dossier-endpoints {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
   gap: 8px;
   margin-top: 8px;
 }
@@ -326,6 +388,47 @@ body {
 
 .working-dossier-blocker {
   font-weight: 600;
+}
+
+.source-evidence-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  min-height: 28px;
+  padding: 2px 4px;
+  border-radius: var(--badger-radius-control);
+  color: var(--badger-color-accent);
+  font-size: 0.9em;
+  cursor: pointer;
+  list-style: none;
+}
+
+.source-evidence-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.source-evidence-disclosure > summary .anticon {
+  font-size: 10px;
+}
+
+.source-evidence-disclosure[open] > summary .anticon {
+  transform: rotate(90deg);
+}
+
+.source-evidence-disclosure > .ant-space {
+  display: flex;
+}
+
+.source-evidence-disclosure > .ant-space > .ant-space-item {
+  min-width: 0;
+}
+
+.source-evidence-disclosure > .ant-space .ant-btn {
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .working-dossier-removal-list {
@@ -371,12 +474,6 @@ body {
   color: var(--badger-color-text-muted);
   text-align: end;
   user-select: none;
-}
-
-@media (max-width: 880px) {
-  .working-dossier-study-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 .skip-link {
@@ -721,6 +818,33 @@ button.rail-link {
   margin: 18px 0 8px;
 }
 
+.documentation-workflow-topics {
+  display: grid;
+  gap: 8px;
+  margin-block: 24px;
+}
+
+.documentation-workflow-topics details {
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-control);
+}
+
+.documentation-workflow-topics summary {
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: var(--badger-radius-control);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.documentation-workflow-topics summary:hover {
+  background: var(--badger-color-accent-soft);
+}
+
+.documentation-workflow-topics .documentation-actions {
+  margin: 0 12px 12px;
+}
+
 .documentation-effects > div {
   padding-block: 12px;
   border-bottom: 1px solid var(--badger-color-border);
@@ -753,6 +877,11 @@ button.rail-link {
     flex-direction: row;
     flex-wrap: wrap;
     max-height: 24dvh;
+  }
+
+  .documentation-nav-group[data-section="workflows"]
+    .documentation-nav-subsection {
+    display: none;
   }
 }
 
@@ -1145,15 +1274,6 @@ button.rail-link {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.study-role-switch {
-  max-inline-size: 100%;
-}
-
-.study-role-switch .ant-segmented-item-label {
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
 
 .uncertainty-tab-label {
@@ -1699,8 +1819,7 @@ button.rail-link {
   min-width: 0;
 }
 
-.skills-hash,
-.skills-script {
+.skills-hash {
   overflow-wrap: anywhere;
 }
 

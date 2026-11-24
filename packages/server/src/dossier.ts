@@ -12,7 +12,7 @@ import type { Queryable } from "./database/database.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import { recordAudit, type WriteContext } from "./audit.js";
 import { readQuestionnaireRecords } from "./questionnaire/ledger.js";
-import { readSourceStudy } from "./source-study.js";
+import { studyRecords } from "./source-study.js";
 import { listWorkflowPins } from "./workflow-source.js";
 import { toIsoString } from "./util.js";
 import { listWorkflowVersions, type WorkflowVersion } from "./workflows.js";
@@ -30,8 +30,6 @@ import {
   lockDossiersCitingSkillQuestion,
   readWorkingRevision,
 } from "./working-dossier-store.js";
-import { effectFindings, effectHead } from "./script-effects.js";
-import { readVersion } from "./skills/library.js";
 
 export interface DossierVersion {
   id: string;
@@ -92,7 +90,7 @@ export async function dossierInputs(
   personId: string,
 ) {
   const pins = await listWorkflowPins(tx, version.id);
-  const study = await readSourceStudy(tx, version.id);
+  const study = await studyRecords(tx, version.id);
   const sources: SemanticDossier["sources"] = pins.map((p) => ({
     id: p.skillId,
     name: p.skillName,
@@ -111,7 +109,7 @@ export async function dossierInputs(
     sources,
     records: await readQuestionnaireRecords(tx, version.id, personId),
     sourceEvidence: Object.fromEntries(
-      [...study.facts, ...study.interfaces].map((r) => [
+      study.map((r) => [
         r.id,
         {
           sourceId: r.content.evidence[0]?.skillId ?? "",
@@ -475,21 +473,15 @@ async function workingDossierGateState(
       "DOSSIER_STALE_FINDING",
       `Review the changed evidence for finding ${id}`,
     );
-  const scriptEffects = [];
-  for (const pin of view.pins) {
-    const skill = await readVersion(tx, pin.skillId, pin.hash);
-    if (!skill.scripts.length) continue;
-    const effects = await effectHead(tx, pin.skillId, pin.hash);
-    for (const finding of effectFindings(skill, effects))
-      reject(finding.code, `${pin.name} — ${finding.message}`);
-    if (effects?.kind === "confirmation")
-      scriptEffects.push({
-        skillId: pin.skillId,
-        sourceHash: pin.hash,
-        revision: effects.revision,
-        hash: effects.hash,
-      });
-  }
+  const head = (await readDossierHead(tx, version.id))?.snapshot.dossier
+    .workingDossier;
+  // Recomputing an existing approval must reproduce its exact stored evidence.
+  const scriptEffects =
+    head &&
+    head.revision === revision?.revision &&
+    head.pinsHash === view.pinsHash
+      ? head.scriptEffects
+      : [];
   const workingDossier =
     !findings.length && revision
       ? { ...revision, fields: WORKING_DOSSIER_FIELDS, scriptEffects }

@@ -262,7 +262,7 @@ export async function claimJob(
       message: claimed.instructions
         ? "This is a fresh editing session. Read the current result.json when present; it includes other people's saved changes since any previous claim. Do not replace it with an old claim folder's copy. Read instructions.md, context.json, output-schema.json and the pinned files, then submit suggestions for a person's review."
         : claimed.job.kind === "source-study"
-          ? "Read context.json and its versioned scriptEffectContract, output-schema.json, and the exact target Skill files under skills/, including invoked helpers and configuration. Never execute source code. Draft facts and scriptEffects in result.json, leaving interfaces empty. Cross-Skill analysis belongs to questionnaire discovery. Preserve uncertainty and omitted coverage as pending, then submit_job. People sign off in the dashboard."
+          ? "Read context.json and its versioned scriptEffectContract, output-schema.json, and the exact target Skill files under skills/, including invoked helpers and configuration. Never execute source code. Draft facts and scriptEffects in result.json, leaving interfaces empty. Cross-Skill analysis belongs to questionnaire discovery. Preserve uncertainty and omitted coverage as pending, then submit_job. The original uploader can optionally confirm the declarations on the Skill version in the library."
           : "Read context.json, any bounded Authoring files under inputs/, and the Skill files under skills/; `skills` lists the pinned versions this kind reads. Write result.json using output-schema.json, then submit_job. Results remain suggestions until a person accepts them.",
     };
   } catch (error) {

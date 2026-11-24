@@ -571,7 +571,7 @@ export function QuestionnairePage() {
               path={path}
               jobsHref={`/questionnaire?${suggestionsQuery}`}
               view={workflowView}
-              showSourceStudy={workingDossier?.legacy ?? false}
+              acceptStudyRecords={workingDossier?.legacy ?? false}
               onChanged={() => void reload()}
             />
           ) : undefined

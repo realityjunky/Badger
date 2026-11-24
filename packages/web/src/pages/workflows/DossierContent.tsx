@@ -70,6 +70,7 @@ export function DossierContent({
         <p className="field-label">{t("dossier.hash")}</p>
         <code className="dossier-hash">{hash}</code>
         <WorkingDossierStudy
+          showPinnedHashes
           dossier={{
             ...workingDossier,
             projection: { fields, removedFields: [], staleFindings: [] },

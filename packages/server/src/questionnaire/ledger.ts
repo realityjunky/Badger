@@ -10,7 +10,7 @@ import type { Queryable } from "../database/database.js";
 import { readQuestions } from "./store.js";
 import { readDrafts } from "./drafts.js";
 import { readFacts, readResolutions } from "./resolutions.js";
-import { readSourceStudy } from "../source-study.js";
+import { readStudyProgress } from "../source-study.js";
 import { RequestError } from "../http/errors.js";
 import { readAnswers } from "./answers.js";
 import type { QuestionnaireScope } from "./subject.js";
@@ -97,7 +97,7 @@ export async function readQuestionnaireInputs(
   const resolutions = await readResolutions(tx, scope);
   const answers = await readAnswers(tx, scope, personId);
   const study =
-    workflow && includeStudy ? await readSourceStudy(tx, scope) : null;
+    workflow && includeStudy ? await readStudyProgress(tx, scope) : null;
   const records: QuestionnaireRecords = {
     questions: questions.map((q) => ({
       ...q,

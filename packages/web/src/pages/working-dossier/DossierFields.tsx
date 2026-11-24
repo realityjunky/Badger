@@ -63,10 +63,12 @@ export function DossierFieldValue({
   field,
   context,
   questions = [],
+  collapseEvidence = false,
 }: {
   field: WorkingDossierField;
   context: EvidenceContext;
   questions?: WorkingDossierView["questions"];
+  collapseEvidence?: boolean;
 }) {
   const { t, format } = useI18n();
   const value = field.content;
@@ -86,6 +88,7 @@ export function DossierFieldValue({
       <DossierEvidenceLinks
         evidence={value?.evidence ?? []}
         context={context}
+        collapsible={collapseEvidence}
       />
       <EvidenceChanges changes={field.evidenceChanges} />
       {questions.length > 0 && (
@@ -142,7 +145,7 @@ export function DossierFieldList({
           aria-label={field.label}
         >
           <h4>{field.label}</h4>
-          <DossierFieldValue field={field} context={context} />
+          <DossierFieldValue field={field} context={context} collapseEvidence />
         </section>
       ))}
     </div>

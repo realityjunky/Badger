@@ -1,6 +1,8 @@
 # Review Script Effects During Source Study with the Original Uploader
 
 Status: accepted. Implements [#96](https://github.com/realityjunky/Badger/issues/96).
+[ADR 0052](0052-advisory-skill-script-effect-reviews.md) makes declarations
+optional and puts their review in the Skill Library.
 Supersedes ADR 0013's immutable upload-time declaration requirement and
 ADR 0040's dedicated server-side model task and configuration. Source identity,
 upload safety, and ADR 0005's Agents-draft/people-sign-off boundary continue.

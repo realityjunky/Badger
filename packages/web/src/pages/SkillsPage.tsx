@@ -32,6 +32,7 @@ import {
 import { readBasePath } from "../app/paths.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { SkillBacklog } from "./skills/SkillBacklog.js";
+import { ScriptEffectsPanel } from "./skills/ScriptEffectsPanel.js";
 import { UploadSkillModal } from "./skills/UploadSkillModal.js";
 import { VersionComparison } from "./skills/VersionComparison.js";
 import { VersionDetails } from "./skills/VersionDetails.js";
@@ -462,7 +463,11 @@ export function SkillsPage() {
                       onDeleted={() => deleteSelection(version)}
                     />
                     <Tabs
-                      activeKey={tab}
+                      activeKey={
+                        tab === "effects" && !version.scripts.length
+                          ? "preview"
+                          : tab
+                      }
                       onChange={(key) => changeParameter("tab", key)}
                       items={[
                         {
@@ -532,6 +537,22 @@ export function SkillsPage() {
                             />
                           ),
                         },
+                        ...(version.scripts.length
+                          ? [
+                              {
+                                key: "effects",
+                                label: t("effects.title"),
+                                children: (
+                                  <ScriptEffectsPanel
+                                    key={`${selectedSkill.id}:${version.hash}`}
+                                    basePath={basePath}
+                                    skillId={selectedSkill.id}
+                                    hash={version.hash}
+                                  />
+                                ),
+                              },
+                            ]
+                          : []),
                       ]}
                     />
                   </>
@@ -547,21 +568,19 @@ export function SkillsPage() {
                   count: version.inventory.length,
                 })}
               </p>
-              <h3>{t("skills.effects")}</h3>
+              <h3>{t("skills.scripts")}</h3>
               {version.scripts.length === 0 ? (
                 <p className="muted">{t("skills.noScripts")}</p>
               ) : (
                 version.scripts.map((script) => (
-                  <div key={script.path} className="skills-script">
+                  <Button
+                    key={script.path}
+                    type="link"
+                    className="skills-path-button"
+                    onClick={() => selectFile(script.path)}
+                  >
                     <code className="skills-hash">{script.path}</code>
-                    <p>
-                      {script.sideEffects === "undeclared"
-                        ? t("skills.undeclared")
-                        : script.sideEffects
-                            .map((effect) => t(`skills.effect.${effect}`))
-                            .join(", ")}
-                    </p>
-                  </div>
+                  </Button>
                 ))
               )}
               <p className="muted">{t("skills.immutableHint")}</p>

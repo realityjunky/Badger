@@ -5,9 +5,12 @@ a reviewed, published package. Agents draft from the supplied evidence;
 signed-in people review meaning and perform confirmations.
 
 Open **Documentation** in the sidebar for guidance alongside the current page.
-**My work** shows personal counts and the Inbox. **Workflows** opens the
-workflow catalog and its versioned stages. **Activity** sits under
-**Administration**; its location grants no additional permission.
+Expand a topic under **Workflows** to see what to do in a stage. Find the
+optional **Script effect review** and **Request clarification** guides under
+**Skills**. **My work** shows
+personal counts and the Inbox. The dashboard's **Workflows** page opens the
+workflow catalog and its versioned stages. Find **Activity** under
+**Administration**.
 
 ## Choose the workflow version and language
 
@@ -37,7 +40,7 @@ language alone does not rewrite that draft.
 | Engineer                | Pin sources, request drafting, edit shared suggestions, accept or discard results, publish question rounds, compose dossier and plan versions, manage package Authoring and evaluation |
 | Field expert            | Answer assigned Questions, edit shared suggestions, acknowledge or dispute restated answers, and raise domain concerns                                                                 |
 | Workflow owner          | Approve exact dossier, plan, and proposal versions; review and publish the evaluated package                                                                                           |
-| Original Skill uploader | Review and personally confirm that exact Skill version's script-effect declarations                                                                                                    |
+| Original Skill uploader | Optionally review and personally confirm script effects for that exact Skill version in the Skill Library                                                                              |
 | Operator                | Install published packages, start Runs, and perform authorized recovery on the Run's computer                                                                                          |
 | Observer or Auditor     | Read the records their current scope permits; Auditors can inspect Activity                                                                                                            |
 
@@ -48,16 +51,16 @@ shared suggestion reviews or perform human sign-offs.
 
 ## Follow the eight stages
 
-| Stage                  | Work and completion                                                                                                                                                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Sources                | An Engineer pins exact Skill versions, waits for the source check, reviews the current set, and confirms Sources. Pending script effects allow this read-only stage.                                                                       |
-| Source study           | Copy the prompt for the checked pin set. Inspect the working dossier's Skills, occurrences, handoffs and pinned evidence. The original uploader reviews script effects for each scripted version. |
-| Questionnaire          | Edit working dossier fields and handoffs in the Ledger. Raise assigned Questions, publish reviewed rounds, and link edited fields to reviewed Answers. |
-| Dossier                | The Workflow owner reviews readiness and approves the exact working dossier revision. |
-| Plan and proposal      | Draft or compose the plan from the approved dossier, review its findings, obtain plan and proposal approvals, then explicitly initialize the project.                                                                                      |
-| Package                | Confirm generation, request the kernel's ready Authoring lanes, review their submitted results, and confirm assembly when all required outputs are current.                                                                                |
-| Evaluation             | Request an evaluation of the assembled package's exact hash and inspect its retained report. Source scripts are not executed by this evaluation.                                                                                           |
-| Review and publication | The Workflow owner or Administrator reviews the current package and passing evidence, approves it, then separately confirms publication. Installation has its own local preview and confirmation.                                          |
+| Stage                  | Work and completion                                                                                                                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sources                | An Engineer pins exact Skill versions, waits for the source check, reviews the current set, and confirms Sources.                                                                                 |
+| Source study           | Copy the prompt for the checked pin set. Inspect the Skill uses, handoffs, routes, and evidence. Record effects that matter to workflow decisions in Executable disclosures.                      |
+| Questionnaire          | Edit working dossier fields and handoffs in the Ledger. Raise assigned Questions, publish reviewed rounds, and link edited fields to reviewed Answers.                                            |
+| Dossier                | The Workflow owner reviews readiness and approves the exact working dossier revision.                                                                                                             |
+| Plan and proposal      | Draft or compose the plan from the approved dossier, review its findings, obtain plan and proposal approvals, then explicitly initialize the project.                                             |
+| Package                | Confirm generation, request the kernel's ready Authoring lanes, review their submitted results, and confirm assembly when all required outputs are current.                                       |
+| Evaluation             | Request an evaluation of the assembled package's exact hash and inspect its retained report. Source scripts are not executed by this evaluation.                                                  |
+| Review and publication | The Workflow owner or Administrator reviews the current package and passing evidence, approves it, then separately confirms publication. Installation has its own local preview and confirmation. |
 
 Open the first incomplete stage and follow its named blockers. Changes to pins,
 evidence, or accepted meaning can invalidate dependent work; earlier versions
@@ -70,14 +73,47 @@ After the source check passes, open **Source study** and copy the prompt for the
 selected Workflow version. Paste it into an Agent connected to this deployment's
 Engineer MCP. It can use hash-matching workstation files or retrieve the pinned
 bytes. Its submitted changes appear in the diagram and in **Questionnaire →
-Ledger**. Select a Skill, occurrence or handoff to inspect its fields and
-citations. The Ledger shows missing values and open decisions by topic.
+Ledger and readiness**. The Ledger shows missing values and open decisions by
+topic.
+
+In **Executable disclosures**, record effects that matter to the workflow's
+use of a script. If a Node uploads a report, record what it sends, its
+destination, and any approval the workflow needs. Ask about unresolved
+conditions or approvals in **Questionnaire**.
 
 Use **Ask a Question** on a field to start an assigned draft. Review the submitted
 Answer through the round, then apply it to the field and select its reviewed
 revision. Use **Dossier** to preview readiness and approve the saved revision.
 After an edit conflict, reload the team's save and reconcile your changes.
 Earlier workflows with Source study records use their original composition route.
+
+## Inspect the Source study diagram
+
+The diagram lays out Nodes from left to right, with Required Skill calls below
+their parent Nodes. Dotted lines show the parent relationships. Select a box
+or arrow in the diagram, or use the tabs and selectors below it. The selected
+details appear below the diagram.
+
+- **Handoffs** groups Documented and Proposed records in a dropdown. Muted
+  solid arrows show Documented handoffs, and muted dashed arrows show
+  Proposed ones. Select one to see the producer, consumer, artifact, format,
+  and any recorded conditions.
+- **Routes** shows control flow. Next and Optional routes use the accent color.
+  Bounded rework uses the warning color. A pair of Nodes can have both a route
+  and a handoff. Select a route to see its condition and visit limit when recorded.
+- **Material findings** explains why a finding matters and lists its linked
+  fields. Selecting a finding highlights the corresponding occurrences,
+  handoffs, or routes when those fields appear in the diagram.
+- **Pinned Skills** highlights every box that uses the selected pinned
+  version. A Skill without any recorded uses is still listed.
+
+Expand **Workflow details** for fields such as Scope and Roles.
+
+## Open pinned source evidence
+
+Expand **Source evidence** using the chevron on a detail card. Choose a file
+and line range to read the cited excerpt. See **Sources → Pinned sources** for
+each current Skill version's full hash.
 
 ## Request and share a drafting job
 
@@ -136,24 +172,17 @@ the original Agent submission, appends review history, and invalidates an older
 decision preview. Accept/discard confirmations have replay keys so retrying the
 same confirmed request does not duplicate its result.
 
-## Complete script-effect review
+## Review a Skill's script effects
 
-A statement records what a source says. An effect suggestion describes what an
-inventoried script can do. The two have separate review and completion rules.
-
-After saving useful suggestions, the Engineer chooses the current Source study
-draft and **Send effect draft to uploader**. The initial proposal uses the
-saved suggestions and creates one shared task. Sending the same job again
-returns its existing review; use the clarification/correction workflow for
-later investigation rather than overwriting the uploader's work.
-
-The original uploader checks every script's labels, rationale, immutable
-citations, conditional behavior, and uncertainty answers; marks rows reviewed;
-previews the complete set; and personally confirms it. An Engineer accepting
-statements or saving draft effects does not perform this confirmation.
+The responsible uploader can record an optional attestation under **Skills →
+Script effect review** for an exact version. To use Agent assistance, the
+Engineer requests **Draft script effects (optional)** in **Questionnaire →
+Drafting jobs and suggestions**. Send the reviewed draft from the job card.
+The uploader opens it in Skills, checks evidence and answers uncertainties,
+then previews and personally confirms the declaration set.
 
 See [Script effect review](script-effect-review.md) for coverage, clarification,
-reuse, corrections, and invalidation.
+corrections, and review history.
 
 ## Resolve common problems
 

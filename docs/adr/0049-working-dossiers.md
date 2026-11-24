@@ -1,6 +1,7 @@
 # Approve a Workflow Version's Working Dossier
 
-Status: accepted.
+Status: accepted. [ADR 0052](0052-advisory-skill-script-effect-reviews.md)
+updates the approval requirements for script effect declarations.
 
 The kernel defines fields for the Workflow, pins, occurrences, and handoffs. The service opens a working dossier for the exact checked pin set. Source study reads its graph and pinned evidence. Questionnaire edits the same revision and uses its existing Questions, reviews, and acknowledgements. A Required Skill Call contributes evidence to its parent Node. An independently resumable action has its own Node or a visit in a bounded Cycle.
 

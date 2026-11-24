@@ -188,7 +188,9 @@ export function InboxPanel() {
               >
                 {format(
                   item.kind === "script-effect-review"
-                    ? "inbox.scriptEffectReview"
+                    ? item.gate === "script-effect-clarification"
+                      ? "inbox.scriptEffectClarification"
+                      : "inbox.scriptEffectReview"
                     : item.kind === "evaluation-finished"
                       ? "inbox.evaluationFinished"
                       : item.kind === "answer-submitted"

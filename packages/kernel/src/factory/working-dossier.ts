@@ -340,7 +340,9 @@ export const WORKING_DOSSIER_INSTRUCTIONS =
   "Derive the participating Skills and their relationships from that inventory and their evidence. " +
   "Use these field IDs: workflow/workflow/<key>, skill/<skillId>/<key>, node/<occurrenceId>/<key>, interface/<interfaceId>/<key>. " +
   "Inspect each Skill's instructions, relevant references and scripts without executing them. " +
-  "Fill the fields that affect authoring and cite the pinned file and lines. Trace each handoff from a producer's output to a consumer's input. " +
+  "Fill the fields that affect authoring and cite the pinned file and lines. " +
+  "Use Executable disclosures for script effects that matter to a recorded use of a Skill. Identify the action, what it affects, and any condition or approval the workflow must handle. Record uncertainties that need a Questionnaire decision as material findings. " +
+  "Trace each handoff from a producer's output to a consumer's input. " +
   "Check formats, required values and conditions at both ends. Identify each distinct use of a Skill, including a review triggered by another stage, and the evidence needed to resume it. " +
   "Use a Node for independently resumable actions or describe its visit in a bounded Cycle. Use a Required Skill Call for work that contributes evidence at its parent Node's completion. " +
   "Use routes to show control transitions. Record optional route conditions and positive visit limits for bounded rework, with evidence or open decisions in Routes and Bounded cycles. " +

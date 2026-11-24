@@ -430,6 +430,7 @@ export function WorkflowDossier({
         )}
         {reviewDossier && (
           <WorkingDossierStudy
+            showPinnedHashes
             dossier={{ ...reviewDossier, prompt: null }}
             context={{
               basePath,

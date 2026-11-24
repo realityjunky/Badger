@@ -210,14 +210,14 @@ const reviews: [PromptTemplate["stage"], string, string, string[], string][] = [
     "sources-review",
     "Review pinned sources",
     ["Engineer"],
-    "Check the intended Skill entries, exact version hashes, inventories, source-check findings and upgrade source against the workflow's goal and intent. Confirm Sources only against the current preview. This confirms the source set; script-effect declarations and each Skill's study completion are reviewed separately.",
+    "Check the intended Skill entries, exact version hashes, inventories, source-check findings and upgrade source against the workflow's goal and intent. Confirm Sources only against the current preview.",
   ],
   [
     "source-study",
     "source-study-signoff",
-    "Confirm source evidence and script coverage",
-    ["Engineer", "Skill uploader"],
-    "Review per-Skill findings and immutable citations against the pinned files. In Review suggestions, use Statements and Script effect review with their numbered item tabs; save shared edits before the Engineer reviews decisions. Accept useful statements independently of sending the effect draft. The original uploader checks every script, resolves uncertainties and personally confirms the complete declaration set; an Engineer's acceptance cannot replace that confirmation. Confirm the Skill studied only when Sources, current coverage and study findings are complete.",
+    "Review workflow source evidence",
+    ["Engineer"],
+    "Review the recorded Skill uses, handoffs, routes and material findings against the pinned files. Record effects of scripts used by the workflow in Executable disclosures and ask Questions about unresolved conditions or approvals. For earlier workflows using source-derived facts, review and confirm each pin after Sources are confirmed and study evidence is current. An original uploader can record an optional attestation on the exact Skill version in Skills.",
   ],
   [
     "questionnaire",

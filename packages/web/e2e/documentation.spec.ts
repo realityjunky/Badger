@@ -92,6 +92,26 @@ test("Documentation is in the sidebar, opens the current section, and links to e
     await expect(
       guide.getByRole("heading", { name: "Next step", exact: true }),
     ).toBeVisible();
+    if (name === "Workflows") {
+      await sections.getByRole("link", { name: "Workflow diagram" }).click();
+      await expect(
+        guide.getByText(/Dotted lines connect Required Skill calls/u),
+      ).toBeVisible();
+      await sections
+        .getByRole("link", { name: "Pinned Skills and source evidence" })
+        .click();
+      await expect(
+        guide.getByText(/Expand Source evidence with the chevron/u),
+      ).toBeVisible();
+    }
+    if (name === "Skills") {
+      await sections
+        .getByRole("link", { name: "Script effect review", exact: true })
+        .click();
+      await expect(
+        guide.getByText(/For an optional Skill attestation/u),
+      ).toBeVisible();
+    }
   }
   await expect(page).toHaveURL(/\/my-work\?help=settings$/);
   await expect(guide).toContainText("Approval requested");
@@ -252,7 +272,7 @@ test("a Skill without inventoried scripts can return from help without artificia
     name: "Documentation",
     exact: true,
   });
-  await expect(guide).toContainText("without adding artificial declarations");
+  await expect(guide).toContainText("Versions with scripts offer an optional");
   await guide
     .getByRole("button", { name: "Close documentation", exact: true })
     .click();

@@ -1,7 +1,7 @@
 import { canonicalHash } from "@realityjunky/badger";
 import type { Queryable } from "./database/database.js";
 import { gatePreview, type GateFinding, type GateState } from "./gates.js";
-import { readSourceStudy, studyReferences } from "./source-study.js";
+import { readStudyProgress, studyReferences } from "./source-study.js";
 import { studyGateName } from "./source-study-invalidation.js";
 import { readWorkingRevision } from "./working-dossier-store.js";
 
@@ -11,7 +11,7 @@ export async function sourceStudyGateState(
   versionId: string,
   skillId: string,
 ): Promise<GateState> {
-  const study = await readSourceStudy(database, versionId);
+  const study = await readStudyProgress(database, versionId);
   const pin = study.studies.find((entry) => entry.skillId === skillId);
   const records = [...study.facts, ...study.interfaces]
     .filter((r) =>
@@ -44,9 +44,6 @@ export async function sourceStudyGateState(
       "SKILL_VERSION_NOT_PINNED",
       "Select a currently pinned Skill version",
     );
-  const effectReview = study.effects.find((entry) => entry.skillId === skillId);
-  for (const finding of effectReview?.findings ?? [])
-    reject(finding.code, finding.message);
   const complete = study.studies.every(
     (entry) => entry.skillId === skillId || entry.studied,
   );
@@ -86,14 +83,6 @@ export async function sourceStudyGateState(
         })),
       ],
       boundHashes: {
-        scriptEffects: canonicalHash(
-          effectReview?.review
-            ? {
-                revision: effectReview.review.revision,
-                hash: effectReview.review.hash,
-              }
-            : null,
-        ),
         pin: canonicalHash(
           pin === undefined
             ? null

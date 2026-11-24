@@ -19,12 +19,10 @@ import {
   type GateState,
 } from "./gates.js";
 import { closeGateInbox, notifyWorkflowRoles } from "./inbox.js";
-import { readVersion } from "./skills/library.js";
 import { listWorkflowPins } from "./workflow-source.js";
 import { RequestError } from "./http/errors.js";
 import { toIsoString } from "./util.js";
 import { invalidateProposal } from "./proposal-invalidation.js";
-import { effectHead, effectFindings } from "./script-effects.js";
 
 interface PlanRow {
   id: string;
@@ -88,38 +86,28 @@ export async function planInputs(
       (pin) => pin.skillId === source.id && pin.hash === source.contentHash,
     );
     if (!pin) return null;
-    const version = await readVersion(tx, pin.skillId, pin.hash);
-    const effects = await effectHead(tx, pin.skillId, pin.hash);
-    if (effectFindings(version, effects).length) return null;
-    const scripts = Object.fromEntries(
-      (effects?.content.scripts ?? []).map((script) => [
-        script.path,
-        script.effects,
-      ]),
-    );
-    skillSources.push({
-      name: source.name,
-      location: source.location,
-      ...(version.scripts.length && effects
-        ? {
-            effectDeclaration: {
-              skillId: pin.skillId,
-              sourceHash: pin.hash,
-              revision: effects.revision,
-              hash: effects.hash,
-            },
-          }
-        : {}),
-      ...(Object.keys(scripts).length
-        ? { scripts: scripts as SkillSourceDeclaration["scripts"] }
-        : {}),
-    });
+    skillSources.push({ name: source.name, location: source.location });
   }
+  const head = await readPlanHead(tx, versionId);
+  // Retain declarations already bound to this approved dossier by a saved plan.
+  const historicalSources =
+    head?.snapshot.dossierHash === dossier.hash
+      ? head.snapshot.plan.skillSources
+      : undefined;
+  const sourceKeys = (sources: SkillSourceDeclaration[]) =>
+    sources
+      .map(({ name, location }) => ({ name, location }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   return {
     workflowVersionId: versionId,
     dossierHash: dossier.hash,
     dossier: dossier.snapshot.dossier,
-    skillSources,
+    skillSources:
+      historicalSources &&
+      canonicalHash(sourceKeys(historicalSources)) ===
+        canonicalHash(sourceKeys(skillSources))
+        ? historicalSources
+        : skillSources,
   };
 }
 
@@ -298,8 +286,8 @@ export async function planGateState(
       canonicalHash(inputs.skillSources)
     )
       reject(
-        "SCRIPT_EFFECT_DECLARATIONS_SUPERSEDED",
-        "Save and review a plan bound to the current confirmed script effect declaration revision",
+        "PLAN_SOURCES_SUPERSEDED",
+        "Save and review a plan bound to the approved dossier's pinned sources",
       );
     if (plan.snapshot.dossierHash !== inputs.dossierHash)
       reject(

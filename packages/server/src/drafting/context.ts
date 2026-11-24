@@ -259,6 +259,7 @@ export function draftingInputs(bundle: DraftingBundle, target: DraftingTarget) {
 }
 
 function discoveryInputs(bundle: DraftingBundle) {
+  const { effects: _effects, ...sourceStudy } = bundle.sourceStudy;
   return {
     workflow: bundle.workflow,
     frame: {
@@ -272,7 +273,7 @@ function discoveryInputs(bundle: DraftingBundle) {
     concerns: bundle.concerns,
     comments: bundle.comments,
     settings: bundle.settings,
-    sourceStudy: bundle.sourceStudy,
+    sourceStudy,
     assignees: bundle.assignees,
   };
 }

@@ -84,27 +84,82 @@ export const documentationEn = {
   "documentation.my-work.next":
     "Follow the item to its evidence, review what changed, and use the action offered for your role. Return to My work to find the next item.",
   "documentation.workflows.purpose":
-    "Workflows holds the workflow frame, team, and version history. Select a Workflow version, then use full-width tabs for its sources, Source study, dossier, plan, proposal, package, review and publication, team, and notifications. Existing links and browser Back select the appropriate tab; visited tabs keep local edits. Uploading a Skill to a Group's library only makes a source available; it does not pin it, study it, answer a Question, or confirm any stage.",
+    "Choose a Group, Workflow, and version before working on a stage. Use the version's tabs to work through its stages. Use Workflow team to review assignments and Notifications to review routing. Visited tabs keep your local edits as you switch between them.",
   "documentation.workflows.roles":
-    "Group leads and Administrators create workflows; Workflow owners also edit their workflow and assign its team. Each workflow can have one Engineer, including a pending invitation; remove the existing assignment before replacing it. Engineers pin sources, confirm Sources, complete Source study, and build and evaluate packages. Workflow owners approve dossiers, plans, proposals, and packages and confirm publication. Administrators can perform these actions. Other readers inspect the records their roles permit.",
+    "Group leads and Administrators create Workflows. The Workflow owner manages the team and approves and publishes its work. A Workflow can have one Engineer, including a pending invitation. Remove the current assignment before replacing it. The Engineer pins and studies sources and builds and evaluates the package. Administrators can also perform Engineer and Workflow owner actions.",
   "documentation.workflows.sources":
-    "1. Sources: choose a Skill from the workflow's Group library and pin one immutable version hash. Review the source check and explicitly confirm the source set. Changing pins invalidates this confirmation and requires a fresh check.",
+    "The Engineer chooses Skills from the Group library and pins one exact version hash per Skill. The source check verifies the pinned files.",
+  "documentation.workflows.sources.confirm":
+    "Review the source check for the current pins and confirm the source set. If a pin changes, review the new check and reconfirm the set.",
   "documentation.workflows.study":
-    "2. Source study: study each pinned Skill's purpose, inputs, outputs, limitations, and open questions as source-derived Facts with immutable line evidence. Review suggested script effects with the original uploader, who personally confirms the declarations. The Engineer confirms that exact version as studied when its current requirements are complete. Compare interfaces between Skills later in Questionnaire; an upload or pin alone does not complete study.",
+    "After the source check passes, the Engineer opens Source study and uses Copy prompt with the connected Badger MCP. The Agent saves a working dossier with the Skills’ recorded uses, handoffs, routes, material findings, and exact evidence.",
+  "documentation.workflows.study.suggestions":
+    "Use Executable disclosures to record what the workflow's scripts do and any approval those actions require. In Questionnaire → Ledger and readiness, edit fields, ask Questions about unresolved decisions, and apply reviewed Answers. Expand Workflow details below the diagram for fields that apply to the whole workflow.",
+  "documentation.workflows.study.complete":
+    "The Workflow owner approves the working dossier after Sources are confirmed and readiness checks pass. In earlier workflow versions that use source-derived fact records, the Engineer reviews each pin and chooses Mark version studied.",
+  "documentation.workflows.study.diagram":
+    "The same left-to-right diagram stays visible across Handoffs, Routes, Material findings, and Pinned Skills. Select a box or arrow in the diagram, or choose an item below it, to highlight the relevant elements and open their details. Dotted lines connect Required Skill calls to their parent Nodes.",
+  "documentation.workflows.study.handoffs":
+    "Choose a handoff from the Handoff list or click its muted arrow. The list groups Documented and Proposed handoffs. Documented arrows are solid and Proposed arrows are dashed. Details show the producer, consumer, exchanged artifact, and recorded format and conditions.",
+  "documentation.workflows.study.routes":
+    "Choose a route from the Route list or click its arrow. Next and Optional arrows use the accent color. Bounded rework uses the warning color. The route details show its condition and visit limit when recorded. A handoff and a route can connect the same two Nodes.",
+  "documentation.workflows.study.findings":
+    "Choose a material finding to read why it matters and see which dossier fields it cites. Links to occurrences, handoffs, or routes highlight the corresponding parts of the diagram.",
+  "documentation.workflows.study.evidence.title":
+    "Pinned Skills and source evidence",
+  "documentation.workflows.study.pins":
+    "Select a Skill in Pinned Skills to highlight every Node and Required Skill call that uses that exact pinned version. A Skill with no recorded use is available in the list. Open Sources → Pinned sources to check the version hashes.",
+  "documentation.workflows.study.evidence":
+    "Expand Source evidence with the chevron on a card to see its citations. Select a file and line range to read the exact lines from the pinned version.",
+  "documentation.skills.effects.source":
+    "For an optional Skill attestation, open Skills, select the exact version, and choose Script effect review. The original uploader can choose Start review.",
+  "documentation.skills.effects.route":
+    "For Agent assistance, the Engineer requests Draft script effects (optional) in Questionnaire → Drafting jobs and suggestions. After reviewing the result, choose Send effect draft to uploader on the job card. The uploader can open the exact Skill review from the Inbox.",
+  "documentation.skills.effects.roles":
+    "The responsible uploader edits and personally confirms the declarations. Skill library readers can inspect the review. A red ! on a numbered script tab identifies an unanswered uncertainty.",
+  "documentation.skills.effects.answer":
+    "Check each script's effect labels, rationale, and conditional behavior. Expand Source evidence to inspect or edit citations. Enter the verified response in that script's Answer the uncertainty field and choose Save review draft. Declaration review history keeps the answer with that script for the exact Skill version. The script's red ! clears when Badger saves the answer.",
+  "documentation.skills.effects.confirm":
+    "Review complete declaration set first saves the draft, then opens a preview when the required effect labels, rationale, evidence, and answers are complete. The uploader uses Personally confirm declarations to sign off on that exact set.",
+  "documentation.skills.effects.correct":
+    "Use Correct declarations to revise a confirmed set. Each correction adds a revision to Declaration review history for that Skill version.",
+  "documentation.skills.clarify.request":
+    "For a draft sent from a workflow, the original uploader can use Request clarification. In Clarification or correction note, name the script and explain what needs checking.",
+  "documentation.skills.clarify.save":
+    "Save any script edits and answers before entering and submitting the note. Request clarification submits only the note, carries forward the last saved script details and answers, and marks the script rows for review again. A successful request clears unsaved edits in the form.",
+  "documentation.skills.clarify.find":
+    "The Engineer's Script effect clarification Inbox item opens the exact Skill version's review. The current note appears below the script tabs, and Declaration review history retains earlier notes.",
+  "documentation.skills.clarify.investigate":
+    "The Engineer can inspect the source or request a fresh optional draft and give the note to the Agent. A newly routed draft opens a review with empty answer fields. Earlier answers remain in Declaration review history. The uploader records the verified result in Answer the uncertainty.",
+  "documentation.skills.clarify.correction":
+    "Enter a correction reason in the same note box, then choose Save review draft or Review complete declaration set to save it alongside the edited declarations.",
+  "documentation.workflows.questionnaire.title": "Questionnaire and readiness",
   "documentation.workflows.questionnaire":
-    "3. Questionnaire: publish Questions to assigned people, collect Answers, resolve Questions, and review the Ledger. Engineers confirm Facts restated from Answers; answering Field experts acknowledge or dispute those restatements. These are separate actions from Source study.",
+    "The Engineer drafts and publishes rounds for assigned people to answer. Review their answers and resolve each question. The person who answered can acknowledge or dispute a Fact that restates their answer.",
+  "documentation.workflows.questionnaire.readiness":
+    "Use Ledger and readiness to check accepted facts, source evidence, inferences, and open assumptions or questions. Resolve the blockers before composing the dossier.",
   "documentation.workflows.dossier":
-    "4. Dossier: the Engineer composes the Semantic dossier from current evidence, Node responsibilities, and topic summaries. The Workflow owner reviews and approves its exact immutable version.",
+    "The Engineer composes the Semantic dossier from the current Ledger, including evidence, Node responsibilities, and topic summaries. Review the findings and resolve gaps in the evidence or workflow definition.",
+  "documentation.workflows.dossier.approve":
+    "The Workflow owner approves the exact dossier version used to draft or compose the plan.",
   "documentation.workflows.plan":
-    "5. Plan and proposal: the Engineer saves the FactoryPlan; the Workflow owner approves the plan and the kernel's exact Proposal. The Engineer then confirms Project initialization.",
+    "The Engineer saves a FactoryPlan based on the approved dossier. Review the plan's findings, then have the Workflow owner approve the current plan and the exact Proposal produced from it.",
+  "documentation.workflows.plan.initialize":
+    "After proposal approval, the Engineer uses Initialize project and confirms the preview to create the project used for package generation.",
   "documentation.workflows.package":
-    "6. Package: the Engineer previews and confirms generation, requests ready Authoring lanes, reviews their claims and content, confirms acceptance or rejection, and confirms assembly once all required lanes are current.",
+    "The Engineer previews and confirms generation, then requests the Authoring lanes that the kernel reports as ready. Review each lane's submitted claims and content and confirm acceptance or rejection.",
+  "documentation.workflows.package.assemble":
+    "Once the required lane results are accepted and current, preview and confirm assembly of the package. Use its exact hash for evaluation.",
   "documentation.workflows.evaluation":
-    "7. Evaluation: the Engineer confirms a certification job for the assembled package's exact hash and inspects its retained report. Domain scripts never run during this evaluation.",
+    "The Engineer confirms a certification job for the assembled package's exact hash. Certification checks the package and its evidence without executing its domain scripts.",
+  "documentation.workflows.evaluation.report":
+    "Open Evaluations to inspect the retained report and its findings. If the package changes after that run, evaluate the new hash before approval.",
   "documentation.workflows.publication":
-    "8. Review and publication: the Workflow owner reviews the passing evaluation, confirms package approval, then separately confirms publication of those exact bytes. Later changes require current evidence and a new review; existing publications remain available.",
+    "The Workflow owner reviews the passing evaluation for the current package and confirms its approval. Confirm publication separately to publish those exact bytes. Later revisions need their own evaluation and approval.",
+  "documentation.workflows.publication.install":
+    "After publication, use Install locally to preview the command for your host. Confirm the installation separately on your computer.",
   "documentation.workflows.next":
-    "Open the first incomplete stage and resolve its named blockers. Use Questionnaire for missing domain knowledge. After publication, use Install locally to preview the host command and confirm its separate commit on your computer.",
+    "Open the first incomplete stage and resolve the blockers shown there. Earlier versions and sign-offs remain in the workflow's history.",
   "documentation.questionnaire.purpose":
     "Questionnaire collects the workflow knowledge needed to build a package. Select a workflow and version, then use the full-width Rounds and questions, Drafting jobs and suggestions, or Ledger and readiness tab. Suggestion review is available to Engineers, Field experts, and Administrators. In Rounds and questions, hide the rounds list when you need more reading space; Evidence and history opens a drawer for the selected Question or Concern, with an expanded-width option. Switching tabs keeps your selection, search, unfinished edits, and scroll position.",
   "documentation.questionnaire.roles":
@@ -118,9 +173,9 @@ export const documentationEn = {
   "documentation.questionnaire.drafting.scenario":
     "Drafting jobs and suggestions: request an Agent's first pass from pinned evidence and submitted records. By default, the status filter shows Queued, Claimed, and Awaiting your review; choose other statuses beside Reload records to find accepted, discarded, or cancelled jobs. Right-click a job card's body to copy its link; opening it reveals that job for an authorized reader. The info icon beside the panel title explains the review handoff. Changed inputs cancel affected jobs.",
   "documentation.questionnaire.drafting.work":
-    "Request drafting offers six kinds. Draft questions and Draft follow-ups propose questions for a selected draft round; follow-ups may name a parent Question. Study a source Skill drafts source-derived Facts and script-effect suggestions for one pinned Skill. Restate an answer as facts uses submitted Answers. Translate a question uses the selected Question and explicit target language. Import a Skill's open questions needs a pinned Skill and draft round. Create the round first when required. Generated narrative uses the selected Workflow version's locale, or the translation target; your interface language does not translate stored drafts.",
+    "Request drafting offers six kinds. Draft questions and Draft follow-ups propose questions for a selected draft round; follow-ups may name a parent Question. Draft script effects (optional) requests suggestions for one pinned Skill. Earlier workflows use Study a source Skill for source-derived Facts and effect suggestions. Restate an answer as facts uses submitted Answers. Translate a question uses the selected Question and explicit target language. Import a Skill's open questions needs a pinned Skill and draft round. Create the round first when required. Generated narrative uses the selected Workflow version's locale, or the translation target; your interface language does not translate stored drafts.",
   "documentation.questionnaire.drafting.review":
-    "Review suggestions: claimed jobs open a read-only view of the latest saved suggestions, updating as the owner saves. Save and Finish editing stay disabled; viewing does not claim, renew or release the job. Close and reopen after the claim ends to edit. Opening an unclaimed job reserves editing for that Engineer or Field expert. Save retains the claim; Finish editing saves and releases it. Closing or 30 idle minutes releases only saved changes. Claimed cards identify the active Agent or dashboard reviewer and refresh automatically. After a session ends, reopen or claim again to load the latest saved version; old copies cannot overwrite a later session. Source studies have Statements and Script effect review tabs, each with numbered item tabs. Edit statements, effect labels, rationale, conditional behavior, and uncertainty; paths and citations remain fixed. Changed saves preserve the original submission and advance the revision; identical retries do not add revisions. Preserve expired unsaved text for reference and reconcile with the latest version. Saving does not accept records or confirm script declarations. The Engineer separately uses Review decisions for the latest saved result; another save invalidates an older preview. Accepted questions still need round publication, restatements need the answering person's acknowledgement, and effects need the original uploader's confirmation. Discarding requires a reason and confirmation.",
+    "Review suggestions: claimed jobs open a read-only view of the latest saved suggestions, updating as the owner saves. Save and Finish editing stay disabled; viewing does not claim, renew or release the job. Close and reopen after the claim ends to edit. Opening an unclaimed job reserves editing for that Engineer or Field expert. Save retains the claim; Finish editing saves and releases it. Closing or 30 idle minutes releases only saved changes. Claimed cards identify the active Agent or dashboard reviewer and refresh automatically. After a session ends, reopen or claim again to load the latest saved version; old copies cannot overwrite a later session. Source studies have Statements and Script effect review tabs, each with numbered item tabs. Edit statements, effect labels, rationale, conditional behavior, and uncertainty; paths and citations remain fixed. Changed saves preserve the original submission and advance the revision; identical retries do not add revisions. Preserve expired unsaved text for reference and reconcile with the latest version. Saving does not accept records or confirm script declarations. The Engineer separately uses Review decisions for the latest saved result; another save invalidates an older preview. Accepted questions still need round publication, restatements need the answering person's acknowledgement, and the original uploader can confirm an optional declaration in Skills. Discarding requires a reason and confirmation.",
   "documentation.questionnaire.next":
     "Clear the open Questions, acknowledgement requests, and readiness blockers. The Engineer can then compose the dossier in Workflows using the current Ledger evidence.",
   "documentation.skills.purpose":
@@ -136,9 +191,9 @@ export const documentationEn = {
   "documentation.skills.inventory":
     "Review the source inventory's file count and source hash in the upload preview. After upload, use the file tree, Inventory tab (paths, sizes, and file hashes), read-only file previews, and version comparison to inspect stored versions. Uploading, importing, and previewing never execute uploaded scripts.",
   "documentation.skills.confirm":
-    "Review the inventory and exact hash, then use Confirm immutable upload (or Confirm immutable import). Uploads need no declarations or model connection. For versions with scripts, the Engineer's Agent drafts effects during Source study; the original uploader corrects rows, answers uncertainties, and personally confirms the complete set. The same entry/version's confirmation is reusable; corrections append history and reopen dependent work without changing files.",
+    "Review the inventory and exact hash, then use Confirm immutable upload or Confirm immutable import. Open Script effect review on the chosen Skill version to record or inspect an optional attestation.",
   "documentation.skills.next":
-    "Open the target Workflow version, pin the immutable Skill hash, and confirm Sources. Read-only study and ordinary Questionnaire work remain available while effect review is pending. Final study completion requires complete uploader-confirmed script coverage.",
+    "Open the target Workflow version, pin the immutable Skill hash, and confirm Sources. Record workflow-relevant effects in the working dossier.",
   "documentation.effects.link": "Understand script side-effect declarations",
   "documentation.effects.intro":
     "A declaration describes what a script could do when executed later. It does not run the script or grant it permission. Inspect the script, subprocesses, wrappers, and supported optional execution modes; declare possible behavior across those paths, not only one selected run. If you are unsure, inspect the source or ask its author before confirming; do not default to none.",
@@ -155,7 +210,7 @@ export const documentationEn = {
   "documentation.effects.installs":
     "Installing or changing tools, dependencies, or environments. Examples: pip install, npm install, conda create, or a wrapper that updates an environment. Also declare local-writes or network when those effects are possible.",
   "documentation.effects.noScripts":
-    "If the source inventory contains no scripts, there is nothing to declare. No uploader effect task is required; confirm the immutable upload and complete Source study's other checks without adding artificial declarations.",
+    "Versions with scripts offer an optional Script effect review tab in the Skill Library.",
   "documentation.runs.purpose":
     "Runs shows durable executions of published packages: status, current Node, pending action, computer, and recovery state. Open a Run to inspect its publication, package hash, Attempts, artifact receipts, findings, and Events.",
   "documentation.runs.roles":
@@ -316,27 +371,81 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.my-work.next":
     "跟随消息查看证据，审阅变更，并使用您的角色可执行的操作。返回“我的工作”继续处理下一项。",
   "documentation.workflows.purpose":
-    "“工作流”管理工作流框架、团队和版本历史。选择工作流版本后，可通过全宽选项卡查看来源、来源研读、档案、计划、提案、软件包、审核与发布、团队和通知。原有链接和浏览器后退会切换至相应选项卡，已访问的选项卡会保留本地编辑。将 Skill 上传到团队库仅使来源可用，不会自动固定版本、完成研读、回答问题或确认任何阶段。",
+    "先选择团队、工作流和版本，再通过版本的选项卡逐步处理各阶段。通过“工作流团队”查看角色分配，通过“通知”查看路由。切换选项卡时，已访问的选项卡会保留本地编辑。",
   "documentation.workflows.roles":
-    "团队负责人和管理员创建工作流；工作流负责人也可编辑自己的工作流并分配团队角色。每个工作流只能分配一名工程师，待接受的邀请也占用名额；替换前请先移除现有分配。工程师固定来源、确认来源、完成来源研读，并构建和评估软件包。工作流负责人批准语义档案、计划、提案和软件包，并确认发布。管理员可以执行这些操作。其他读者查看其角色允许访问的记录。",
+    "团队负责人和管理员可创建工作流。工作流负责人管理团队、批准各阶段成果并确认发布。每个工作流可分配一名工程师，待接受的邀请也占用此名额。更换工程师前，请先移除当前分配。工程师负责固定并研读来源，以及构建和评估工作流包。管理员也可执行工程师和工作流负责人的操作。",
   "documentation.workflows.sources":
-    "1. 来源：从工作流所属团队的库中选择 Skill，固定一个不可变版本的哈希。审阅来源检查并明确确认来源集合。更改固定版本会使本次确认失效，必须重新检查。",
+    "工程师从团队库选择 Skill，并为每个 Skill 固定一个确切的版本哈希。来源检查会验证固定的文件。",
+  "documentation.workflows.sources.confirm":
+    "审阅当前固定版本的来源检查结果，然后确认来源集合。更换固定版本后，请审阅新的检查结果并重新确认。",
   "documentation.workflows.study":
-    "2. 来源研读：逐个研读固定 Skill 的用途、输入、输出、限制与未决问题，记录带有不可变行号证据的来源事实。与原上传者审核脚本副作用建议，由原上传者亲自确认声明。当前要求全部完成后，工程师确认该确切版本已研读。Skill 之间的接口比较放在后续问卷阶段；仅上传或固定版本不等于完成研读。",
+    "来源检查通过后，工程师打开“来源研读”，选择“复制提示词”，并交给连接了 Badger MCP 的 Agent。Agent 保存工作档案，记录 Skill 的各项用法、交接、路线、重要发现和确切的证据。",
+  "documentation.workflows.study.suggestions":
+    "在“可执行操作披露”中记录工作流实际使用的脚本行为及所需批准。在“问卷 → 台账与就绪状态”中编辑字段、针对未决事项提问并应用已审阅的回答。展开图下方的“工作流详情”，可查看适用于整个工作流的字段。",
+  "documentation.workflows.study.complete":
+    "确认来源并通过就绪检查后，由工作流负责人批准工作档案。使用来源事实记录的早期工作流版本中，工程师逐一审阅固定版本并选择“标记版本为已研读”。",
+  "documentation.workflows.study.diagram":
+    "“交接”“路线”“重要发现”和“固定版本的 Skill”共用一张从左到右的工作流图。点击图中的方框或箭头，或在图下方选择项目，即可突出相关元素并查看详情。点线将必需的 Skill 调用连接至上级节点。",
+  "documentation.workflows.study.handoffs":
+    "在“交接”列表中选择项目，或点击图中的灰色箭头。列表按“有来源依据”和“待确认”分组，分别以实线和虚线表示。详情显示产出方、接收方、交换产物及已记录的格式和条件。",
+  "documentation.workflows.study.routes":
+    "在“路线”列表中选择路线，或点击图中对应的箭头。后续路线和可选路线使用强调色，有界返工使用警示色。详情显示已记录的条件和访问次数上限。交接与路线可以连接同一对节点。",
+  "documentation.workflows.study.findings":
+    "选择一条重要发现，查看它的影响及关联的档案字段。若字段对应 Skill 调用、交接或路线，图中会突出显示相关元素。",
+  "documentation.workflows.study.evidence.title": "固定版本的 Skill 与来源证据",
+  "documentation.workflows.study.pins":
+    "在“固定版本的 Skill”中选择一项，即可突出显示使用该确切版本的所有节点和必需的 Skill 调用。尚未记录用法的 Skill 也会列出。可在“来源”中的固定来源列表查看版本哈希。",
+  "documentation.workflows.study.evidence":
+    "点击卡片上“来源证据”旁的折叠箭头以显示引用，然后选择文件和行号范围，查看固定版本中的确切原文。",
+  "documentation.skills.effects.source":
+    "如需记录可选的 Skill 声明，请在 Skill 库中选择确切版本，再打开“脚本影响审阅”。原上传人可选择“开始审阅”。",
+  "documentation.skills.effects.route":
+    "如需 Agent 协助，工程师可在“问卷 → 起草任务与建议”中请求“起草脚本影响（可选）”。审核结果后，在任务卡片上选择“发送影响草稿给上传人”。上传人可从收件箱打开确切 Skill 版本的审阅。",
+  "documentation.skills.effects.roles":
+    "负责的上传人可编辑并亲自确认声明。拥有 Skill 库查看权限的人员可查阅审阅。脚本编号选项卡上的红色感叹号表示有未回答的不确定事项。",
+  "documentation.skills.effects.answer":
+    "检查每个脚本的影响标签、判定依据和条件行为。展开“来源证据”以查看或编辑引用。在该脚本的“回答不确定事项”中填写核实后的结果，再选择“保存审阅草稿”。回答与确切的 Skill 版本及脚本一同保存在“声明审阅历史”中。保存回答后，该脚本的红色感叹号会消失。",
+  "documentation.skills.effects.confirm":
+    "“审阅完整声明集”先保存草稿。所需的影响标签、依据、证据和回答齐全时，系统会打开预览。原上传人选择“由本人确认声明”，确认预览中的确切声明集。",
+  "documentation.skills.effects.correct":
+    "通过“更正声明”修改已确认的声明。每次更正都会在该 Skill 版本的“声明审阅历史”中追加一条修订。",
+  "documentation.skills.clarify.request":
+    "对于从工作流发送的草稿，原上传人可选择“请求澄清”。在“澄清或更正说明”中写明脚本及待核实事项。",
+  "documentation.skills.clarify.save":
+    "请先保存对脚本的修改和回答，再填写并提交说明。“请求澄清”只提交说明，保留上一修订中已保存的脚本及回答，并将脚本标记为待复核。请求成功后，表单中未保存的修改会被清除。",
+  "documentation.skills.clarify.find":
+    "工程师可从收件箱中的“脚本影响澄清”事项打开确切 Skill 版本的审阅。当前说明位于脚本选项卡下方，早先的说明保存在“声明审阅历史”中。",
+  "documentation.skills.clarify.investigate":
+    "工程师可检查来源，也可请求新的可选草稿并将说明交给 Agent。新发送的草稿会打开一份回答框为空的审阅。此前的回答保留在“声明审阅历史”中。上传人在“回答不确定事项”中填写核实结果。",
+  "documentation.skills.clarify.correction":
+    "在同一说明框填写更正原因，然后选择“保存审阅草稿”或“审阅完整声明集”，将原因与修改后的声明一同保存。",
+  "documentation.workflows.questionnaire.title": "问卷与就绪状态",
   "documentation.workflows.questionnaire":
-    "3. 问卷：向指定人员发布问题、收集回答、解决问题并审阅台账。工程师确认从回答重述的事实；作答的领域专家认可或质疑这些重述。这些操作与来源研读相互独立。",
+    "工程师起草并发布轮次，由指定人员作答。审阅回答并解决各个问题。作答人可认可或质疑根据其回答重述的事实。",
+  "documentation.workflows.questionnaire.readiness":
+    "在“台账与就绪状态”中检查已接受的事实、来源证据、推断以及未决假设或问题，然后在编写语义档案前处理所列阻碍。",
   "documentation.workflows.dossier":
-    "4. 语义档案：工程师根据当前证据、节点职责和主题摘要编写语义档案。工作流负责人审阅并批准其确切的不可变版本。",
+    "工程师根据当前台账编写语义档案，纳入证据、节点职责和主题摘要。审阅检查结果，补齐证据或工作流定义缺口。",
+  "documentation.workflows.dossier.approve":
+    "工作流负责人批准用于起草或编写计划的确切档案版本。",
   "documentation.workflows.plan":
-    "5. 计划与提案：工程师保存 FactoryPlan；工作流负责人批准计划和内核生成的确切提案，之后由工程师确认项目初始化。",
+    "工程师根据已批准的档案保存 FactoryPlan。审阅计划检查结果后，由工作流负责人批准当前计划及由此生成的确切提案。",
+  "documentation.workflows.plan.initialize":
+    "提案获批后，工程师选择“初始化项目”并确认预览，为生成工作流包创建项目。",
   "documentation.workflows.package":
-    "6. 软件包：工程师预览并确认生成，请求已就绪的创作通道，审阅声明和内容，确认接受或拒绝，并在所有必需通道都为最新状态时确认组装。",
+    "工程师预览并确认生成，然后请求内核标记为就绪的创作通道。逐个审阅提交的声明及内容，再确认接受或拒绝。",
+  "documentation.workflows.package.assemble":
+    "所需通道的当前结果全部获接受后，预览并确认组装工作流包。使用组装后工作流包的确切哈希进行评估。",
   "documentation.workflows.evaluation":
-    "7. 评估：工程师针对组装后软件包的确切哈希确认认证任务，并检查保留的报告。评估期间绝不执行领域脚本。",
+    "工程师针对组装后工作流包的确切哈希确认认证任务。认证会检查工作流包及其证据，期间不执行其领域脚本。",
+  "documentation.workflows.evaluation.report":
+    "在“评估”中查看保留的报告及检查结果。工作流包如有变更，需评估新的哈希后再批准。",
   "documentation.workflows.publication":
-    "8. 审核与发布：工作流负责人审阅通过的评估，确认批准软件包，再单独确认发布这些确切字节。后续变更需要当前证据和重新审核；已有发布版本仍然可用。",
+    "工作流负责人审阅当前工作流包的通过报告并确认批准，再单独确认发布该版本。后续修订需要对应的评估和批准。",
+  "documentation.workflows.publication.install":
+    "发布后，选择“本地安装”预览适合当前宿主的命令，再在自己的计算机上单独确认安装。",
   "documentation.workflows.next":
-    "打开第一个未完成阶段，处理列出的阻碍。缺少领域知识时使用“问卷”。发布后，通过“本地安装”预览主机命令，并在自己的计算机上单独确认提交。",
+    "打开第一个未完成的阶段，处理其中显示的阻碍。早期版本及确认记录会保留在工作流历史中。",
   "documentation.questionnaire.purpose":
     "“问卷”收集构建软件包所需的工作流知识。选择工作流与版本，再使用占满内容区宽度的“轮次与问题”“起草任务与建议”或“台账与就绪状态”选项卡。工程师、领域专家和管理员均可审核建议。在“轮次与问题”中，可隐藏轮次列表以扩大阅读空间；“证据与历史”会打开当前问题或关注事项的抽屉，并可展开至全宽。切换选项卡会保留所选记录、搜索、未完成的编辑和滚动位置。",
   "documentation.questionnaire.roles":
@@ -350,9 +459,9 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.questionnaire.drafting.scenario":
     "起草任务与建议：让 Agent 依据固定证据和已提交的记录先行起草。状态筛选默认显示“排队中”“已领取”和“等待您审核”；通过“重新加载记录”旁的筛选可查找已接受、已丢弃或已取消的任务。右键点击任务卡片正文可复制链接；有权访问的人打开链接时会显示该任务。标题旁的信息图标说明审核交接流程。输入变更会取消受影响的任务。",
   "documentation.questionnaire.drafting.work":
-    "“请求起草”提供六种类别。“起草问题”和“起草追问”为所选草稿轮次提出问题，追问可指定父问题；“研读来源 Skill”为单个固定的 Skill 起草来源事实和脚本副作用建议；“将回答重述为事实”使用已提交的回答；“翻译问题”使用所选问题及明确指定的目标语言；“导入 Skill 的开放问题”需要固定的 Skill 和草稿轮次。需要轮次时请先创建。生成文字使用所选工作流版本的语言或翻译目标语言；界面语言不会翻译已保存的草稿。",
+    "“请求起草”提供六种类别。“起草问题”和“起草追问”为所选草稿轮次提出问题，追问可指定父问题；“起草脚本影响（可选）”为一个固定的 Skill 提出建议；早期工作流通过“研读来源 Skill”起草来源事实及脚本影响；“将回答重述为事实”使用已提交的回答；“翻译问题”使用所选问题及明确指定的目标语言；“导入 Skill 的开放问题”需要固定的 Skill 和草稿轮次。需要轮次时请先创建。生成文字使用所选工作流版本的语言或翻译目标语言；界面语言不会翻译已保存的草稿。",
   "documentation.questionnaire.drafting.review":
-    "审核建议：已领取的任务会以只读方式显示最新保存的建议，并随当前编辑者的保存自动更新。“保存”和“完成编辑”保持禁用，查看不会领取、续期或释放任务。领取结束后，请关闭并重新打开以开始编辑。打开未领取的任务后，由该工程师或领域专家独占编辑。保存后继续独占；“完成编辑”会保存并释放任务。关闭编辑器或闲置 30 分钟时，仅保留已保存的修改并释放任务。已领取的卡片会显示当前 Agent 或仪表盘审核人，并自动刷新。会话结束后，必须重新打开或重新领取，从最新保存的版本继续；旧副本不能覆盖后续会话。来源研读分为“陈述”和“脚本副作用审核”两个主选项卡，各自包含编号子选项卡。可编辑陈述、副作用标签、理由、条件行为和不确定性；路径与引用保持固定。保存修改会保留原始提交并推进修订号；相同内容的重试不增加修订号。过期的未保存文字仍可参考，请与最新版本协调修改。保存不等于接受记录或确认脚本声明。工程师另行通过“审核决定”处理最新保存结果；后续保存会使旧预览失效。接受的问题仍需发布轮次，重述事实仍需作答者认可，副作用仍需原上传者确认。丢弃必须说明原因并确认。",
+    "审核建议：已领取的任务会以只读方式显示最新保存的建议，并随当前编辑者的保存自动更新。“保存”和“完成编辑”保持禁用，查看不会领取、续期或释放任务。领取结束后，请关闭并重新打开以开始编辑。打开未领取的任务后，由该工程师或领域专家独占编辑。保存后继续独占；“完成编辑”会保存并释放任务。关闭编辑器或闲置 30 分钟时，仅保留已保存的修改并释放任务。已领取的卡片会显示当前 Agent 或仪表盘审核人，并自动刷新。会话结束后，必须重新打开或重新领取，从最新保存的版本继续；旧副本不能覆盖后续会话。来源研读分为“陈述”和“脚本副作用审核”两个主选项卡，各自包含编号子选项卡。可编辑陈述、副作用标签、理由、条件行为和不确定性；路径与引用保持固定。保存修改会保留原始提交并推进修订号；相同内容的重试不增加修订号。过期的未保存文字仍可参考，请与最新版本协调修改。保存不等于接受记录或确认脚本声明。工程师另行通过“审核决定”处理最新保存结果；后续保存会使旧预览失效。接受的问题仍需发布轮次，重述事实仍需作答者认可，原上传人可在 Skill 库中确认可选声明。丢弃必须说明原因并确认。",
   "documentation.questionnaire.next":
     "处理未解决问题、待认可请求及就绪阻碍后，工程师可返回“工作流”，根据当前台账证据编写语义档案。",
   "documentation.skills.purpose":
@@ -368,9 +477,9 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.skills.inventory":
     "审阅上传预览中的来源清单文件数与来源哈希。上传后，通过文件树、清单标签页（路径、大小和文件哈希）、只读文件预览与版本比较检查已存储版本。上传、导入和预览绝不执行上传的脚本。",
   "documentation.skills.confirm":
-    "审阅清单与精确哈希，再确认上传或导入不可变版本。上传无需声明或模型连接。对于含脚本的版本，工程师的 Agent 在来源研读时起草副作用，原上传者更正各行、回答不确定事项并亲自确认完整声明。同一条目和版本可复用确认；更正会追加历史并重新开启依赖工作，不改动文件。",
+    "审阅清单与确切哈希，再确认上传或导入不可变版本。打开所选 Skill 版本的“脚本影响审阅”，可记录或查阅可选声明。",
   "documentation.skills.next":
-    "打开目标工作流版本，固定 Skill 的不可变哈希并确认来源。脚本影响待审阅时，仍可只读研读及开展普通问卷工作。最终完成研读需要上传人确认完整的脚本声明。",
+    "打开目标工作流版本，固定 Skill 的不可变哈希并确认来源。在工作档案中记录与工作流有关的脚本影响。",
   "documentation.effects.link": "了解脚本副作用声明",
   "documentation.effects.intro":
     "声明描述脚本以后执行时可能做什么，不会运行脚本或授予权限。请检查脚本、子进程、包装脚本，以及支持的可选执行模式；声明应覆盖这些路径的可能行为，而非仅针对某一次运行。不确定时，请先检查来源或询问作者，不要默认选择 none。",
@@ -387,7 +496,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.effects.installs":
     "安装或更改工具、依赖项或环境。例如 pip install、npm install、conda create，或通过包装脚本更新环境。可能写入本地或访问网络时，也需声明 local-writes 或 network。",
   "documentation.effects.noScripts":
-    "如果来源清单中没有脚本，就无需声明副作用，也不需要上传者副作用审核任务。确认不可变上传并完成来源研读的其他检查即可，不需要人为添加声明。",
+    "包含脚本的版本在 Skill 库中提供可选的“脚本影响审阅”选项卡。",
   "documentation.runs.purpose":
     "“运行”显示已发布软件包的持久执行状态：当前节点、待处理操作、计算机及恢复状态。打开运行可查看发布版本、软件包哈希、尝试、产物凭据、发现和事件。",
   "documentation.runs.roles":

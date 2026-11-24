@@ -76,7 +76,7 @@ A retained snapshot excluded from new Skill pin selections. Existing pins and ci
 The person who first uploaded an immutable version within its Skill entry. Deduplicating the same version preserves this responsibility. Only this person, with current access, may confirm its script-effect declarations.
 
 **Script effect review**:
-The original uploader's review of what every script in one immutable Skill version can do, based on an Engineer-routed Source study draft. Proposals, clarification, corrections, and personal confirmations retain separate revisions. The confirmed revision is reusable by workflows within that Skill entry and access boundary; it describes behavior without granting execution permission.
+The responsible uploader's optional attestation of what the scripts in one immutable Skill version can do. The Skill Library retains its proposals, clarifications, corrections, and personal confirmations as evidence.
 
 **Skill pin**:
 A revisioned reference from a Workflow version to one immutable Skill version, used as a source or, in an upgrade, as the upgrade source. Pin changes invalidate the Sources stage and queue a source check.
@@ -90,7 +90,7 @@ A directory outside the Project that the host lets source locations point into, 
 _Avoid_: allowed directory
 
 **Source study**:
-The Engineer and Agent's reading of a Workflow version's pinned Skills. It starts the working dossier with Skill fields, occurrences, handoffs, and evidence from the pinned files. The responsible uploader separately reviews and confirms each Skill version's script effects.
+The Engineer and Agent's reading of a Workflow version's pinned Skills. It starts the working dossier with Skill fields, occurrences, handoffs, and evidence from the pinned files, including executable effects that matter to the workflow.
 
 **Workflow version**:
 One iteration of a workflow: the Skill versions it pins, its questionnaire, and the dossier, plan, and package built from them. A new workflow version inherits the previous one's facts and resolutions with provenance to their earlier records, and its pending questionnaire work moves with them; flagged evidence stays open for re-verification, and approvals require a new review.

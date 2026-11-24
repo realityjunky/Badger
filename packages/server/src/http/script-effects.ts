@@ -350,13 +350,11 @@ export async function handleScriptEffects(input: AuthorizedRequest) {
       );
       return { review: routed };
     }
-    if (!review)
-      throw new RequestError(
-        409,
-        "Ask the Engineer to route a Source study effect draft first",
-      );
-    if (action === "preview")
+    if (action === "preview") {
+      if (!review)
+        throw new RequestError(409, "Save the Skill's review draft first");
       return { preview: effectConfirmationPreview(version, review, person.id) };
+    }
     const note = body.note ?? "";
     if (
       typeof note !== "string" ||
@@ -367,7 +365,12 @@ export async function handleScriptEffects(input: AuthorizedRequest) {
         400,
         "Provide a clarification or correction note of at most 8000 characters",
       );
-    if (action === "clarify")
+    if (action === "clarify") {
+      if (!review?.content.workflowVersionId)
+        throw new RequestError(
+          409,
+          "Save a note with this Skill's review draft",
+        );
       return {
         review: await appendEffectRevision(
           tx,
@@ -386,6 +389,7 @@ export async function handleScriptEffects(input: AuthorizedRequest) {
           },
         ),
       };
+    }
     let rows: ScriptEffectReviewRow[];
     try {
       rows = validateScriptEffectSuggestions(version, body.scripts, true);
@@ -404,7 +408,14 @@ export async function handleScriptEffects(input: AuthorizedRequest) {
         version,
         review,
         "review",
-        { ...review.content, scripts: rows, note },
+        {
+          proposalRevision: null,
+          sourceJobId: null,
+          workflowVersionId: null,
+          ...review?.content,
+          scripts: rows,
+          note,
+        },
       ),
     };
   });

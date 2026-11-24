@@ -151,7 +151,10 @@ all sign-offs remain dashboard work.
 
 ## Source study, effects and interfaces
 
-Source study records one Skill's existing behavior and input/output contracts.
+The Workflows **Copy prompt** saves the working dossier, including the effects
+that matter to recorded Skill uses. **Draft script effects (optional)** in
+Questionnaire prepares an attestation draft for one Skill version. Earlier
+workflows use **Study a source Skill** to capture source-derived facts as well.
 Its legacy `interfaces` compatibility field must be empty. Questionnaire
 discovery can read both producer and consumer Skills and ask about mismatches,
 transformations and decisions. Choosing an adapter or a connection remains
@@ -162,8 +165,8 @@ remove that section before saving and accepting useful facts. Previously
 accepted records retain their history and can be corrected or retired through
 Source study controls.
 
-The initial effect proposal sent to the original uploader uses saved review
-edits. An existing routed review is preserved on repeated sends; clarification
+The optional effect proposal sent to the original uploader uses saved review
+edits. The uploader opens the version's review in Skills. An existing routed review is preserved on repeated sends; clarification
 and correction retain their own history. See [Script effect review](script-effect-review.md).
 
 ## Manage templates

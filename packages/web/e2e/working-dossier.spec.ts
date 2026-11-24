@@ -5,6 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 import type { WorkingDossierJob } from "@realityjunky/badger";
 import {
   base,
+  cite,
   createWorkflow,
   firstEdit,
   mcp,
@@ -173,6 +174,7 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
     { ...first.ids },
   );
   expect(current.dossier.content.interfaces).toEqual({});
+  await team.expert.getByText("Workflow details", { exact: true }).click();
   await expect(team.expert.getByText(rolesGap, { exact: true })).toBeVisible();
   await expect(
     team.expert
@@ -225,8 +227,19 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
       "dates.json as a JSON array of ISO calendar dates.",
     ),
   );
+  const archive = await uploadSource(
+    team.engineer,
+    multi.groupId,
+    textSkill(
+      "archive-notice",
+      "Archive a calendar notice.",
+      "notice.txt in UTF-8.",
+      "archive.zip containing the notice.",
+    ),
+  );
   const second = await openPinSet(deployment.service, team, multi, [
     renderer,
+    archive,
     dates,
   ]);
   expect(second.ids.workflowId).not.toBe(first.ids.workflowId);
@@ -236,25 +249,148 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
   expect(second.prompt.split(first.job.instructions)[1]).toBe(
     first.prompt.split(first.job.instructions)[1],
   );
-  await save(
-    team,
-    second.ids,
-    firstEdit(second.job, textContent([dates, renderer])),
-  );
+  const content = textContent([dates, renderer]);
+  const handoffId = `${dates.name}-to-${renderer.name}`;
+  content.nodes["check-dates"] = {
+    label: "Check dates",
+    order: 2,
+    kind: "required-skill-call",
+    parent: renderer.name,
+    skillId: dates.skillId,
+    hash: dates.hash,
+  };
+  content.interfaces["dates-to-check"] = {
+    producer: dates.name,
+    consumer: "check-dates",
+    status: "proposed",
+    producerEvidence: [cite(dates, "references/contract.md", "Output")],
+    consumerEvidence: [],
+  };
+  content.findings["date-format"] = {
+    fields: [`interface/${handoffId}/shape`],
+    evidence: [cite(dates, "references/contract.md", "Output")],
+    consequence: "The date format is required for rendering.",
+  };
+  await save(team, second.ids, firstEdit(second.job, content));
+
+  const page = team.expert;
+  const diagram = page.getByRole("region", { name: "Workflow diagram" });
+  const producer = diagram.getByRole("button", { name: dates.name });
+  const consumer = diagram.getByRole("button", { name: renderer.name });
+  const requiredCall = diagram.getByRole("button", { name: "Check dates" });
+  await expect(requiredCall).toContainText("Required Skill call");
+  const [startBox, endBox, callBox] = await Promise.all([
+    producer.boundingBox(),
+    consumer.boundingBox(),
+    requiredCall.boundingBox(),
+  ]);
+  expect(startBox!.x).toBeLessThan(endBox!.x);
+  expect(startBox!.y).toBe(endBox!.y);
+  expect(callBox!.x).toBe(endBox!.x);
+  expect(callBox!.y).toBeGreaterThan(endBox!.y);
+
+  await page.getByRole("tab", { name: "Handoffs", exact: true }).click();
+  const detail = page.getByRole("region", { name: "Dossier details" });
+  const handoff = page.getByRole("combobox", { name: "Handoff" });
+  await expect(detail).toBeHidden();
   await expect(
-    team.expert.getByRole("button", {
-      name: "Next route from prepare-dates to render-notice",
-      exact: true,
-    }),
-  ).toBeVisible();
-  const edge = team.expert.getByRole("button", {
-    name: /prepare-dates → render-notice/u,
-  });
-  await expect(edge).toBeVisible();
-  await edge.click();
-  const detail = team.expert.getByRole("region", { name: "Dossier details" });
+    handoff.locator("optgroup[label=Documented] option"),
+  ).toHaveCount(1);
+  await expect(handoff.locator("optgroup[label=Proposed] option")).toHaveCount(
+    1,
+  );
+  await handoff.selectOption(handoffId);
   await expect(detail).toContainText("dates.json");
   await expect(detail).toContainText("Documented");
-  await expect(detail).toContainText(renderer.hash);
-  await expect(detail).toContainText(dates.hash);
+  await expect(detail).not.toContainText(renderer.hash);
+  await expect(detail).not.toContainText(dates.hash);
+  expect((await detail.boundingBox())!.y).toBeGreaterThan(
+    (await diagram.boundingBox())!.y + (await diagram.boundingBox())!.height,
+  );
+  const endpoint = detail.locator(".working-dossier-endpoints section").filter({
+    has: page.getByRole("heading", { name: "Producer" }),
+  });
+  const evidence = endpoint.getByRole("button", {
+    name: "references/contract.md:L4",
+  });
+  await expect(evidence).toBeHidden();
+  await endpoint.getByText("Source evidence", { exact: true }).click();
+  await evidence.click();
+  const excerpt = page.getByRole("dialog", {
+    name: "references/contract.md:L4",
+  });
+  await expect(excerpt).toContainText(
+    "Output dates.json as a JSON array of ISO calendar dates.",
+  );
+  await excerpt.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(excerpt).toBeHidden();
+
+  // Both arrows between these Nodes remain clickable where they run in parallel.
+  await diagram.evaluate((region) =>
+    region.scrollIntoView({ block: "center", behavior: "instant" }),
+  );
+  for (const [variant, tab] of [
+    ["next", "Routes"],
+    ["documented", "Handoffs"],
+  ]) {
+    const arrow = diagram.locator(
+      `path[data-variant="${variant}"] + .working-dossier-edge-target`,
+    );
+    const point = await arrow.evaluate((path: SVGPathElement) => {
+      const center = path.getPointAtLength(path.getTotalLength() / 2);
+      const result = center.matrixTransform(path.getScreenCTM()!);
+      return { x: result.x, y: result.y };
+    });
+    await page.mouse.click(point.x, point.y);
+    await expect(
+      page.getByRole("tab", { name: tab, exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+  }
+
+  await page.getByRole("tab", { name: "Material findings" }).click();
+  await page
+    .getByRole("combobox", { name: "Material finding", exact: true })
+    .selectOption("date-format");
+  await expect(detail).toContainText(
+    "The date format is required for rendering.",
+  );
+  await expect(detail).toContainText("Format and shape");
+  await expect(
+    diagram.locator('path[data-variant="documented"][data-highlighted="true"]'),
+  ).toHaveCount(1);
+
+  await page.getByRole("tab", { name: "Pinned Skills" }).click();
+  const pins = page.getByRole("region", { name: "Pinned Skills" });
+  await pins.getByRole("button", { name: dates.name }).click();
+  await expect(producer).toHaveAttribute("data-highlighted", "true");
+  await expect(requiredCall).toHaveAttribute("data-highlighted", "true");
+  await expect(consumer).toHaveAttribute("data-highlighted", "false");
+  await requiredCall.click();
+  await expect(detail).toContainText(`Parent Node · ${renderer.name}`);
+  await pins.getByRole("button", { name: archive.name }).click();
+  await expect(detail).toContainText(
+    "This Skill has no recorded use in the diagram.",
+  );
+  await expect(diagram.getByRole("button", { name: archive.name })).toHaveCount(
+    0,
+  );
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page
+    .getByRole("button", { name: "More study tabs" })
+    .click({ timeout: 5_000 });
+  await page
+    .getByRole("listbox", { name: "More study tabs" })
+    .getByRole("option", { name: "Handoffs", exact: true })
+    .click({ timeout: 5_000 });
+  await expect(handoff).toHaveValue(handoffId);
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(390);
+  const canvas = diagram.getByRole("group", { name: "Skill occurrences" });
+  expect(
+    await canvas.evaluate(
+      (element) => element.scrollWidth > element.clientWidth,
+    ),
+  ).toBe(true);
 });

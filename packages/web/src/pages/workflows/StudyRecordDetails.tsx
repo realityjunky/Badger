@@ -18,6 +18,7 @@ import {
 } from "../../api/source-study.js";
 import type { WorkflowVersionDetail } from "../../api/workflows.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { SourceEvidenceDisclosure } from "../../components/SourceEvidenceDisclosure.js";
 
 export function StudyContentView({
   content,
@@ -28,8 +29,12 @@ export function StudyContentView({
 }) {
   const { t } = useI18n();
   if ("statement" in content) return <p>{content.statement}</p>;
-  const name = (skillId: string) =>
-    detail.pins.find((pin) => pin.skillId === skillId)?.skillName ?? skillId;
+  const sourceLabel = ({ skillId, hash }: SkillInterface["producer"]) => {
+    const pin = detail.pins.find((pin) => pin.skillId === skillId);
+    return pin?.hash === hash
+      ? pin.skillName
+      : `${pin?.skillName ?? skillId} · ${hash.slice(0, 12)}`;
+  };
   return (
     <Descriptions
       size="small"
@@ -38,12 +43,12 @@ export function StudyContentView({
         {
           key: "producer",
           label: t("study.producer"),
-          children: `${name(content.producer.skillId)} · ${content.producer.hash.slice(0, 12)}`,
+          children: sourceLabel(content.producer),
         },
         {
           key: "consumer",
           label: t("study.consumer"),
-          children: `${name(content.consumer.skillId)} · ${content.consumer.hash.slice(0, 12)}`,
+          children: sourceLabel(content.consumer),
         },
         {
           key: "artifact",
@@ -74,21 +79,24 @@ export function StudyEvidenceLinks({
   content?: SourceFact | SkillInterface;
   revision?: number;
 }) {
+  if (content.evidence.length === 0) return null;
   return (
-    <ul className="study-evidence-links">
-      {content.evidence.map((citation, index) => (
-        <li key={index}>
-          <Link
-            to={{
-              search: `?${new URLSearchParams({ studyRecord: record.id, studyRevision: String(revision), studyEvidence: String(index) })}`,
-              hash: "#source-study",
-            }}
-          >
-            {citation.path}:{citation.startLine}–{citation.endLine}
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <SourceEvidenceDisclosure>
+      <ul className="study-evidence-links">
+        {content.evidence.map((citation, index) => (
+          <li key={index}>
+            <Link
+              to={{
+                search: `?${new URLSearchParams({ studyRecord: record.id, studyRevision: String(revision), studyEvidence: String(index) })}`,
+                hash: "#source-study",
+              }}
+            >
+              {citation.path}:{citation.startLine}–{citation.endLine}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </SourceEvidenceDisclosure>
   );
 }
 export function StudyRecordInspector({

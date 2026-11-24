@@ -303,6 +303,7 @@ export async function openPinSet(
   await pinSources(service, team.engineer, workflow, sources);
   const study = `${base}${workflowPath(workflow)}#source-study`;
   await Promise.all([team.engineer.goto(study), team.expert.goto(study)]);
+  await team.expert.getByRole("tab", { name: "Pinned Skills" }).click();
   await expect(
     team.expert
       .getByRole("region", { name: "Pinned Skills" })

@@ -22,6 +22,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { draftingEffectLabels } from "../../api/drafting-jobs.js";
 import {
+  effectsPath,
+  type ScriptEffectPanel,
+} from "../../api/script-effects.js";
+import {
   questionnaireRequest,
   type WorkflowQuestionnaireView,
 } from "../../api/questionnaire.js";
@@ -38,6 +42,7 @@ import { QuestionComposer } from "./QuestionComposer.js";
 import { AnswerTypeDetails } from "./AnswerTypeDetails.js";
 import type { MessageId } from "../../i18n/catalog.js";
 import { useDraftingReview } from "./useDraftingReview.js";
+import { skillVersionPath } from "../skills/versionDisplay.js";
 import {
   DraftEvidence,
   DraftResultView,
@@ -69,14 +74,14 @@ export function DraftingJobs({
   path,
   jobsHref,
   view,
-  showSourceStudy = true,
+  acceptStudyRecords,
   onChanged,
 }: {
   basePath: string;
   path: string;
   jobsHref: string;
   view: WorkflowQuestionnaireView;
-  showSourceStudy?: boolean;
+  acceptStudyRecords: boolean;
   onChanged(): void;
 }) {
   const { t, format } = useI18n();
@@ -97,6 +102,7 @@ export function DraftingJobs({
   const [copiedJobId, setCopiedJobId] = useState<string | null>(null);
   const [manualPrompt, setManualPrompt] = useState<string | null>(null);
   const [savedJobId, setSavedJobId] = useState<string | null>(null);
+  const [sharedReview, setSharedReview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const actionPending = useRef(false);
   const [requesting, setRequesting] = useState(false);
@@ -112,12 +118,16 @@ export function DraftingJobs({
   const [preview, setPreview] = useState<DraftingDecisionPreview | null>(null);
   const [decisionJob, setDecisionJob] = useState<DraftingJob | null>(null);
   const canDecide = view.capabilities.compose;
-  const jobs = (loadedJobs ?? []).filter(
-    (job) => showSourceStudy || job.kind !== "source-study",
-  );
+  const jobs = loadedJobs ?? [];
+  const kindLabel = (kind: DraftingKind) =>
+    t(
+      kind === "source-study" && !acceptStudyRecords
+        ? "effects.draftTitle"
+        : kindLabels[kind],
+    );
   const visibleJobs = jobs.filter((job) => statuses.includes(job.status));
   const studyPin =
-    showSourceStudy && requestedJobId === null
+    requestedJobId === null
       ? view.pins.find(
           (pin) => pin.skillId === studySkillId && pin.hash === studyHash,
         )
@@ -292,6 +302,21 @@ export function DraftingJobs({
     setPreview(result.preview);
     confirmationRequestId.current = crypto.randomUUID();
   };
+  async function shareEffectDraft(
+    job: DraftingJob,
+    skillId: string,
+    hash: string,
+  ) {
+    const path = effectsPath(skillId, hash);
+    const panel = await questionnaireRequest<ScriptEffectPanel>(basePath, path);
+    await questionnaireRequest(basePath, `${path}/route`, "POST", {
+      workflowVersionId: view.version.id,
+      jobId: job.id,
+      jobRevision: job.revision,
+      revision: panel.review?.revision ?? 0,
+    });
+    setSharedReview(`${skillVersionPath(skillId, hash)}?tab=effects`);
+  }
   const commit = () =>
     run(async () => {
       if (!preview) return;
@@ -402,6 +427,14 @@ export function DraftingJobs({
       {savedJobId && (
         <Alert type="success" showIcon message={t("drafting.reviewSaved")} />
       )}
+      {sharedReview && (
+        <Alert
+          type="success"
+          showIcon
+          title={t("effects.reviewAvailable")}
+          action={<Link to={sharedReview}>{t("effects.title")}</Link>}
+        />
+      )}
       {!visibleJobs.length ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -419,6 +452,18 @@ export function DraftingJobs({
       <ul className="drafting-jobs-list">
         {visibleJobs.map((job) => {
           const result = job.review?.result ?? job.result;
+          const effectPin =
+            canDecide &&
+            job.kind === "source-study" &&
+            (job.status === "submitted" || job.status === "accepted") &&
+            result &&
+            "interfaces" in result &&
+            result.scriptEffects?.length
+              ? view.pins.find(
+                  (pin) =>
+                    pin.skillId === job.skillId && pin.hash === job.skillHash,
+                )
+              : undefined;
           const summary = result
             ? "questions" in result
               ? draftQuestions(result)[0]?.text
@@ -445,7 +490,7 @@ export function DraftingJobs({
                 aria-current={job.id === linkedJobId ? "location" : undefined}
               >
                 <div className="drafting-job-heading">
-                  <h3>{t(kindLabels[job.kind])}</h3>
+                  <h3>{kindLabel(job.kind)}</h3>
                   <div className="drafting-job-status">
                     {job.review && (
                       <StatusPill tone="success">
@@ -560,24 +605,27 @@ export function DraftingJobs({
                           {t("drafting.promptCopied")}
                         </span>
                       )}
-                      <Button
-                        disabled={busy}
-                        onClick={() =>
-                          void run(async () => {
-                            const current = await questionnaireRequest<{
-                              job: DraftingJob;
-                            }>(basePath, `${jobsPath}/${job.id}`);
-                            setDecisionJob(current.job);
-                            await previewDecision(
-                              current.job,
-                              "accept",
-                              current.job.review?.result ?? current.job.result!,
-                            );
-                          })
-                        }
-                      >
-                        {t("drafting.reviewDecisions")}
-                      </Button>
+                      {(job.kind !== "source-study" || acceptStudyRecords) && (
+                        <Button
+                          disabled={busy}
+                          onClick={() =>
+                            void run(async () => {
+                              const current = await questionnaireRequest<{
+                                job: DraftingJob;
+                              }>(basePath, `${jobsPath}/${job.id}`);
+                              setDecisionJob(current.job);
+                              await previewDecision(
+                                current.job,
+                                "accept",
+                                current.job.review?.result ??
+                                  current.job.result!,
+                              );
+                            })
+                          }
+                        >
+                          {t("drafting.reviewDecisions")}
+                        </Button>
+                      )}
                       <Button
                         type="text"
                         danger
@@ -592,6 +640,24 @@ export function DraftingJobs({
                       </Button>
                     </Space>
                   )}
+                </div>
+              )}
+              {effectPin && (
+                <div className="drafting-job-actions">
+                  <Button
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() =>
+                        shareEffectDraft(
+                          job,
+                          effectPin.skillId,
+                          effectPin.hash,
+                        ),
+                      )
+                    }
+                  >
+                    {t("effects.route")}
+                  </Button>
                 </div>
               )}
             </li>
@@ -623,7 +689,6 @@ export function DraftingJobs({
         confirmLoading={busy}
         okButtonProps={{
           disabled:
-            (kind === "source-study" && !showSourceStudy) ||
             (needsRound && !roundId) ||
             (needsSkill && !skillId) ||
             (needsQuestion && !questionId) ||
@@ -664,9 +729,10 @@ export function DraftingJobs({
             setKind(value);
             setQuestionId(undefined);
           }}
-          options={(Object.keys(kindLabels) as DraftingKind[])
-            .filter((value) => showSourceStudy || value !== "source-study")
-            .map((value) => ({ value, label: t(kindLabels[value]) }))}
+          options={(Object.keys(kindLabels) as DraftingKind[]).map((value) => ({
+            value,
+            label: kindLabel(value),
+          }))}
         />
         {needsSkill && (
           <>

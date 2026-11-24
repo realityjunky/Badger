@@ -165,12 +165,13 @@ test("an Engineer edits bounded rework and removes dependent or stale dossier re
   await page.getByRole("button", { name: "Save route", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
   await page.goto(`${base}${root}#source-study`);
+  await page.getByRole("tab", { name: "Routes", exact: true }).click();
   await page
-    .getByRole("button", {
-      name: "Bounded rework from render-notice to prepare-dates",
-      exact: true,
-    })
-    .click();
+    .getByRole("combobox", { name: "Route", exact: true })
+    .selectOption({
+      label:
+        "Bounded rework from render-notice to prepare-dates · Retry if a date cannot be rendered.",
+    });
   const detail = page.getByRole("region", {
     name: "Dossier details",
     exact: true,

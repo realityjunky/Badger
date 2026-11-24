@@ -448,11 +448,10 @@ it("routes a Source study draft to its non-expert uploader, confirms the correct
     expect.objectContaining({ status: "retired" }),
     expect.objectContaining({ status: "active" }),
   ]);
-  await call(
+  const { preview: beforeReview } = await call(
     `${fixture.base}/gates/source-study/${fixture.skill.id}/preview`,
     "POST",
     {},
-    409,
   );
   expect((await call(fixture.effects)).review).toBeNull();
   const routed = await call(`${fixture.effects}/route`, "POST", {
@@ -511,6 +510,7 @@ it("routes a Source study draft to its non-expert uploader, confirms the correct
     }),
   ]);
   const inbox = await call("/me/inbox", "GET", undefined, 200, uploader);
+  expect(inbox.pendingGateCount).toBe(0);
   expect(inbox.items).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
@@ -518,6 +518,23 @@ it("routes a Source study draft to its non-expert uploader, confirms the correct
         href: expect.stringContaining("/source-reviews/"),
       }),
     ]),
+  );
+  await call(
+    `${fixture.effects}/clarify`,
+    "POST",
+    { revision: routed.review.revision, note: "Check the exact output path." },
+    200,
+    uploader,
+  );
+  const engineerInbox = await call("/me/inbox");
+  expect(engineerInbox.items).toContainEqual(
+    expect.objectContaining({
+      kind: "script-effect-review",
+      gate: "script-effect-clarification",
+      href: expect.stringContaining(
+        `/source-reviews/${fixture.skill.id}/${fixture.pin.hash}`,
+      ),
+    }),
   );
   const current = await call(fixture.effects, "GET", undefined, 200, uploader);
   const rows = current.review.content.scripts.map((row: object) => ({
@@ -582,6 +599,7 @@ it("routes a Source study draft to its non-expert uploader, confirms the correct
     "POST",
     {},
   );
+  expect(completion.confirmationHash).toBe(beforeReview.confirmationHash);
   await call(
     `${fixture.base}/gates/source-study/${fixture.skill.id}/commit`,
     "POST",
@@ -634,6 +652,11 @@ it("leaves an unavailable uploader's review pending and exposes no retired provi
     /original uploader.*unavailable|no longer authorized/iu,
   );
   await call(fixture.effects, "GET", undefined, 404, uploader);
+  await call(
+    `${fixture.base}/gates/source-study/${fixture.skill.id}/preview`,
+    "POST",
+    {},
+  );
   await call(
     `${fixture.effects}/confirm`,
     "POST",
@@ -847,46 +870,53 @@ it("keeps partial and uncertain drafts pending, refuses unsupported declarations
   ).toHaveLength(1);
 });
 
-it("binds plans and packages to confirmed revisions, invalidates corrections, and keeps new versions and other entries pending", async () => {
-  const fixture = await setup(true);
-  const job = await studyDraft(fixture);
-  await call(`${fixture.effects}/route`, "POST", {
-    workflowVersionId: fixture.version.id,
-    jobId: job.id,
-    jobRevision: job.revision,
-    revision: 0,
+it("forms and generates a workflow before any attestation and keeps its approvals current after a Skill review", async () => {
+  const fixture = await setup();
+  const { revision, pinsHash } = await call(`${fixture.base}/working-dossier`);
+  const source = (value: string) => ({
+    state: "source",
+    value,
+    evidence: fixture.suggestion.evidence,
   });
-  const rows = [
-    {
-      ...fixture.suggestion,
-      reviewed: true,
-      uncertaintyAnswer: "Only output.txt is written.",
+  const scriptFields = {
+    responsibility: source("Create output.txt."),
+    inputs: source("The script reads no input parameters."),
+    outputSchemas: source("A file named output.txt."),
+    executableDisclosures: source(
+      "Writes output.txt in the working directory.",
+    ),
+  };
+  await call(`${fixture.base}/working-dossier`, "PATCH", {
+    editId: "document-script-use",
+    revision,
+    pinsHash,
+    nodes: {
+      example: {
+        ...fixture.pin,
+        order: 0,
+        kind: "node",
+        label: "Create report",
+      },
     },
-  ];
-  const { review } = await call(
-    fixture.effects,
-    "POST",
-    { revision: 1, scripts: rows },
-    200,
-    uploader,
-  );
-  const { preview } = await call(
-    `${fixture.effects}/preview`,
-    "POST",
-    { revision: review.revision },
-    200,
-    uploader,
-  );
-  const { review: confirmed } = await call(
-    `${fixture.effects}/confirm`,
-    "POST",
-    {
-      confirmationHash: preview.confirmationHash,
-      requestId: "original-effects",
+    fields: {
+      "workflow/workflow/scope": source("Create the example output file."),
+      "workflow/workflow/roles": {
+        state: "decision",
+        value: "The Engineer prepares the workflow.",
+        reason: "The workflow team assigned this work.",
+      },
+      "node/example/trigger": source(
+        "Run when the example output is requested.",
+      ),
+      ...Object.fromEntries(
+        Object.entries(scriptFields).flatMap(([key, value]) => [
+          [`skill/${fixture.skill.id}/${key}`, value],
+          [`node/example/${key}`, value],
+        ]),
+      ),
     },
-    200,
-    uploader,
-  );
+  });
+  expect((await call(fixture.effects)).review).toBeNull();
   const approve = async (gate: string, as = engineer) => {
     const { preview: gatePreview } = await call(
       `${fixture.base}/gates/${gate}/preview`,
@@ -906,44 +936,14 @@ it("binds plans and packages to confirmed revisions, invalidates corrections, an
       as,
     );
   };
-  await approve(`source-study/${fixture.skill.id}`);
-  const study = await call(`${fixture.base}/source-study`);
-  const { handoff } = await call(`${fixture.base}/questionnaire/ledger`);
-  const topic = {
-    summary: "Create output.txt from the example source.",
-    factIds: [
-      study.facts.find((fact: { status: string }) => fact.status === "active")
-        .id,
-    ],
-  };
-  const semantics = {
-    nodes: [{ id: "example", order: 0, responsibility: topic }],
-    topics: Object.fromEntries(
-      handoff.readiness
-        .filter((entry: { topic: string }) => entry.topic !== "scope")
-        .map((entry: { topic: string }) => [entry.topic, topic]),
-    ),
-  };
-  const { composition: dossier } = await call(
-    `${fixture.base}/dossier/preview`,
-    "POST",
-    semantics,
-  );
-  await call(
-    `${fixture.base}/dossier/compose`,
-    "POST",
-    { ...semantics, confirmationHash: dossier.hash },
-    201,
-  );
   await approve("dossier", admin);
   const { skeleton: plan, dossierHash } = await call(`${fixture.base}/plan`);
-  const binding = {
-    skillId: fixture.skill.id,
-    sourceHash: fixture.pin.hash,
-    revision: confirmed.revision,
-    hash: confirmed.hash,
-  };
-  expect(plan.skillSources[0].effectDeclaration).toEqual(binding);
+  expect(plan.skillSources).toEqual([
+    { name: "example", location: "skills/example" },
+  ]);
+  expect(plan.semanticDossier.topics.executableDisclosures.summary).toContain(
+    "Writes output.txt in the working directory.",
+  );
   plan.workflow.customNodes[0].implementation.skill = "example";
   const { composition } = await call(`${fixture.base}/plan/preview`, "POST", {
     plan,
@@ -991,8 +991,58 @@ it("binds plans and packages to confirmed revisions, invalidates corrections, an
   const packaged = await call(
     `${fixture.base}/package/file?path=reference%2Fresolved-skills.json`,
   );
-  expect(JSON.parse(packaged.text)[0].sources[0].effectDeclaration).toEqual(
-    binding,
+  expect(
+    JSON.parse(packaged.text)[0].sources[0].effectDeclaration,
+  ).toBeUndefined();
+  const { round } = await call(
+    `${fixture.base}/questionnaire/rounds`,
+    "POST",
+    { title: "Future decisions" },
+    201,
+  );
+  const { job: discovery } = await call(
+    `${fixture.base}/drafting-jobs`,
+    "POST",
+    { kind: "draft-questions", roundId: round.id, confirmed: true },
+    201,
+  );
+
+  const rows = [
+    {
+      ...fixture.suggestion,
+      reviewed: false,
+      uncertaintyAnswer: "Only output.txt is written.",
+    },
+  ];
+  const manualReview = { revision: 0, scripts: rows };
+  await call(fixture.effects, "POST", manualReview, 403);
+  const { review } = await call(
+    fixture.effects,
+    "POST",
+    manualReview,
+    200,
+    uploader,
+  );
+  expect(review.content).toMatchObject({
+    sourceJobId: null,
+    workflowVersionId: null,
+  });
+  const { preview } = await call(
+    `${fixture.effects}/preview`,
+    "POST",
+    { revision: review.revision },
+    200,
+    uploader,
+  );
+  const { review: confirmed } = await call(
+    `${fixture.effects}/confirm`,
+    "POST",
+    {
+      confirmationHash: preview.confirmationHash,
+      requestId: "optional-effects",
+    },
+    200,
+    uploader,
   );
   const { version: dedup } = await call(
     `/skills/${fixture.skill.id}/versions`,
@@ -1082,26 +1132,33 @@ it("binds plans and packages to confirmed revisions, invalidates corrections, an
     200,
     uploader,
   );
-  expect((await call(`${fixture.base}/source-study`)).studies[0].studied).toBe(
-    false,
-  );
+  const current = await call(fixture.base);
+  expect(current.version.stages).toContainEqual({
+    id: "source-study",
+    state: "done",
+  });
+  const dossierGate = await call(`${fixture.base}/gates/dossier`);
+  expect(dossierGate.confirmation.invalidatedAt).toBeNull();
+  expect(dossierGate.confirmation.boundHashes.dossier).toBe(dossierHash);
   expect(
     (await call(`${fixture.base}/gates/plan`)).confirmation.invalidatedAt,
-  ).not.toBeNull();
+  ).toBeNull();
   const plans = await call(`${fixture.base}/plan`);
-  expect(plans.currentVersionId).toBeNull();
+  expect(plans.currentVersionId).toBe(planVersion.id);
   expect(plans.versions[0].canonicalJson).toBe(planVersion.canonicalJson);
+  expect(
+    await call(
+      `${fixture.base}/package/file?path=reference%2Fresolved-skills.json`,
+    ),
+  ).toEqual(packaged);
+  expect(
+    (await call(`${fixture.base}/drafting-jobs/${discovery.id}`)).job.status,
+  ).toBe("queued");
   const history = (await call(fixture.effects)).history;
   expect(
     history.find(
       (entry: { revision: number }) => entry.revision === confirmed.revision,
     ),
   ).toEqual(confirmed);
-  await call(
-    `${fixture.base}/gates/source-study/${fixture.skill.id}/preview`,
-    "POST",
-    {},
-    409,
-  );
-  await call(`${fixture.base}/gates/plan/preview`, "POST", {}, 409, admin);
+  await call(`${fixture.base}/gates/plan/preview`, "POST", {}, 200, admin);
 });

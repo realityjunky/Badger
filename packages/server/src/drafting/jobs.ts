@@ -276,10 +276,17 @@ export async function reconcileDraftingJobs(
           ),
         };
     }
+    const target = draftingTarget(job);
+    // Reproject saved discovery inputs so jobs queued before optional reviews
+    // compare the same workflow evidence as new jobs.
+    const inputHash =
+      (job.kind === "draft-questions" || job.kind === "draft-follow-ups") &&
+      job.context_bundle.sourceStudy
+        ? draftingInputHash(job.context_bundle, target)
+        : job.input_hash;
     const changed =
       portableAuthoringHistory(job.context_bundle).legacy ||
-      (!isAuthoringJob(job) &&
-        job.input_hash !== draftingInputHash(inputs, draftingTarget(job)));
+      (!isAuthoringJob(job) && inputHash !== draftingInputHash(inputs, target));
     const expired =
       job.status === "claimed" &&
       new Date(job.lease_until!).getTime() <= deps.clock.now().getTime();

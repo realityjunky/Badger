@@ -237,15 +237,42 @@ export async function studyRecords(
     ),
   );
 }
+export async function readStudyProgress(
+  database: Queryable,
+  versionId: string,
+) {
+  const records = await studyRecords(database, versionId);
+  const pins = await listWorkflowPins(database, versionId);
+  const studies = await Promise.all(
+    pins.map(async (pin) => {
+      const confirmations = await readGateConfirmations(
+        database,
+        versionId,
+        studyGateName(pin.skillId),
+      );
+      const confirmation = confirmations[0] ?? null;
+      return {
+        ...pin,
+        studied: confirmation !== null && confirmation.invalidatedAt === null,
+        confirmation,
+      };
+    }),
+  );
+  return {
+    facts: records.filter((r) => r.kind === "fact"),
+    interfaces: records.filter((r) => r.kind === "interface"),
+    studies,
+  };
+}
+
 export async function readSourceStudy(
   database: Queryable,
   versionId: string,
   viewerId?: string,
 ) {
-  const records = await studyRecords(database, versionId);
-  const pins = await listWorkflowPins(database, versionId);
+  const study = await readStudyProgress(database, versionId);
   const effects = await Promise.all(
-    pins.map(async (pin) => {
+    study.studies.map(async (pin) => {
       const version = await readVersion(database, pin.skillId, pin.hash);
       const review = await effectHead(database, pin.skillId, pin.hash);
       return {
@@ -262,31 +289,7 @@ export async function readSourceStudy(
       };
     }),
   );
-  const studies = await Promise.all(
-    pins.map(async (pin) => {
-      const confirmations = await readGateConfirmations(
-        database,
-        versionId,
-        studyGateName(pin.skillId),
-      );
-      const confirmation = confirmations[0] ?? null;
-      return {
-        ...pin,
-        studied:
-          confirmation !== null &&
-          confirmation.invalidatedAt === null &&
-          effects.find((entry) => entry.skillId === pin.skillId)!.findings
-            .length === 0,
-        confirmation,
-      };
-    }),
-  );
-  return {
-    facts: records.filter((r) => r.kind === "fact"),
-    interfaces: records.filter((r) => r.kind === "interface"),
-    studies,
-    effects,
-  };
+  return { ...study, effects };
 }
 export async function evidenceLines(
   database: Queryable,

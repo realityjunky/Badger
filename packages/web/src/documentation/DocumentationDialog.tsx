@@ -26,7 +26,12 @@ export function DocumentationDialog() {
   const demoMode = useDemoMode();
   const location = useLocation();
   const navigate = useNavigate();
-  const topic = new URLSearchParams(location.search).get("help");
+  const topic = new URLSearchParams(location.search)
+    .get("help")
+    ?.replace(
+      /^workflows\/(script-effect-review|request-clarification)$/u,
+      "skills/$1",
+    );
   const topicSection = topic?.split("/", 1)[0];
   const section = documentationSections.find(
     ({ id }) =>
@@ -41,6 +46,7 @@ export function DocumentationDialog() {
         );
   const heading = useRef<HTMLHeadingElement>(null);
   const subsectionHeading = useRef<HTMLHeadingElement>(null);
+  const subsectionSummary = useRef<HTMLElement>(null);
   const effectsHeading = useRef<HTMLHeadingElement>(null);
   const ordered =
     section !== undefined && "ordered" in section && section.ordered;
@@ -51,8 +57,10 @@ export function DocumentationDialog() {
       topic === "script-side-effects"
         ? effectsHeading.current
         : subsection !== undefined
-          ? subsectionHeading.current
+          ? (subsectionSummary.current ?? subsectionHeading.current)
           : heading.current;
+    if (target?.parentElement instanceof HTMLDetailsElement)
+      target.parentElement.open = true;
     target?.scrollIntoView({ block: "start", behavior: "instant" });
     target?.focus({ preventScroll: true });
   }
@@ -89,7 +97,11 @@ export function DocumentationDialog() {
             aria-label={t("documentation.sections")}
           >
             {documentationSections.map((entry) => (
-              <div className="documentation-nav-group" key={entry.id}>
+              <div
+                className="documentation-nav-group"
+                data-section={entry.id}
+                key={entry.id}
+              >
                 <Link
                   to={{
                     ...location,
@@ -100,29 +112,32 @@ export function DocumentationDialog() {
                 >
                   {t(entry.title)}
                 </Link>
-                {documentationSubsections(entry.id).map((child) => {
-                  const childTopic = documentationSubsectionTopic(
-                    entry.id,
-                    child.id,
-                  );
-                  return (
-                    <Link
-                      className="documentation-nav-subsection"
-                      key={childTopic}
-                      to={{
-                        ...location,
-                        search: documentationSearch(
-                          location.search,
-                          childTopic,
-                        ),
-                      }}
-                      replace
-                      aria-current={topic === childTopic ? "page" : undefined}
-                    >
-                      {t(child.title)}
-                    </Link>
-                  );
-                })}
+                {((entry.id !== "workflows" && entry.id !== "skills") ||
+                  section.id === entry.id) &&
+                  documentationSubsections(entry.id).map((child) => {
+                    const childTopic = documentationSubsectionTopic(
+                      entry.id,
+                      child.id,
+                    );
+                    return (
+                      <Link
+                        className="documentation-nav-subsection"
+                        key={childTopic}
+                        to={{
+                          ...location,
+                          search: documentationSearch(
+                            location.search,
+                            childTopic,
+                          ),
+                        }}
+                        replace
+                        onClick={topic === childTopic ? focusTopic : undefined}
+                        aria-current={topic === childTopic ? "page" : undefined}
+                      >
+                        {t(child.title)}
+                      </Link>
+                    );
+                  })}
               </div>
             ))}
           </nav>
@@ -136,21 +151,25 @@ export function DocumentationDialog() {
             <p>{t(`documentation.${section.id}.purpose`)}</p>
             <h3>{t("documentation.roles")}</h3>
             <p>{t(`documentation.${section.id}.roles`)}</p>
-            <h3>
-              {t(ordered ? "documentation.steps" : "documentation.actions")}
-            </h3>
-            <Actions className="documentation-actions">
-              {section.actions.map((action) => (
-                <li key={action}>
-                  {t(action)}
-                  {documentationCommands[action] && (
-                    <pre className="documentation-command">
-                      <code>{documentationCommands[action]}</code>
-                    </pre>
-                  )}
-                </li>
-              ))}
-            </Actions>
+            {section.actions.length > 0 && (
+              <>
+                <h3>
+                  {t(ordered ? "documentation.steps" : "documentation.actions")}
+                </h3>
+                <Actions className="documentation-actions">
+                  {section.actions.map((action) => (
+                    <li key={action}>
+                      {t(action)}
+                      {documentationCommands[action] && (
+                        <pre className="documentation-command">
+                          <code>{documentationCommands[action]}</code>
+                        </pre>
+                      )}
+                    </li>
+                  ))}
+                </Actions>
+              </>
+            )}
             {"resources" in section && (
               <>
                 <h3>{t("documentation.resources")}</h3>
@@ -173,7 +192,25 @@ export function DocumentationDialog() {
                 </ul>
               </>
             )}
-            {subsection !== undefined && (
+            {(section.id === "workflows" || section.id === "skills") && (
+              <div className="documentation-workflow-topics">
+                {section.subsections.map((child) => (
+                  <details key={child.id}>
+                    <summary
+                      ref={subsection === child ? subsectionSummary : undefined}
+                    >
+                      {t(child.title)}
+                    </summary>
+                    <ul className="documentation-actions">
+                      {child.actions.map((action) => (
+                        <li key={action}>{t(action)}</li>
+                      ))}
+                    </ul>
+                  </details>
+                ))}
+              </div>
+            )}
+            {subsection !== undefined && "purpose" in subsection && (
               <section
                 aria-labelledby="documentation-subsection-title"
                 className="documentation-subsection"

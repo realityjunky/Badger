@@ -182,6 +182,7 @@ export async function notifyWorkflowRoles(
   eventId: string,
   roles: readonly WorkflowRole[],
   concernId: string | null = null,
+  effectPin?: { skillId: string; hash: string },
 ): Promise<void> {
   const people = await database.query<{
     person_id: string | null;
@@ -195,8 +196,8 @@ export async function notifyWorkflowRoles(
   );
   for (const { person_id: personId, binding_id: bindingId } of people.rows) {
     await database.query(
-      `insert into inbox_items (id, person_id, workflow_version_id, gate, kind, event_id, created_at, updated_at, binding_id, concern_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9) on conflict do nothing`,
+      `insert into inbox_items (id, person_id, workflow_version_id, gate, kind, event_id, created_at, updated_at, binding_id, concern_id, effect_skill_id, effect_source_hash)
+       values ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10, $11) on conflict do nothing`,
       [
         dependencies.ids.next(),
         personId,
@@ -207,6 +208,8 @@ export async function notifyWorkflowRoles(
         dependencies.clock.now(),
         bindingId,
         concernId,
+        effectPin?.skillId ?? null,
+        effectPin?.hash ?? null,
       ],
     );
   }
@@ -272,7 +275,7 @@ export async function listInbox(
     `select count(*) filter (where i.state = 'unread')::int as unread_count,
             count(distinct (i.workflow_version_id, i.gate, i.question_id, i.concern_id)) filter (where i.state <> 'done')::int as pending_count,
             count(distinct i.question_id) filter (where i.state <> 'done')::int as question_count,
-            count(distinct (i.workflow_version_id, i.gate)) filter (where i.state <> 'done' and i.question_id is null and i.concern_id is null)::int as gate_count from ${FROM} where ${VISIBLE}`,
+            count(distinct (i.workflow_version_id, i.gate)) filter (where i.state <> 'done' and i.question_id is null and i.concern_id is null and i.kind <> 'script-effect-review')::int as gate_count from ${FROM} where ${VISIBLE}`,
     params,
   );
   let filtered = "";

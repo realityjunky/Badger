@@ -1,5 +1,117 @@
 import type { MessageId } from "../i18n/catalog.js";
 
+const workflowSubsections = [
+  {
+    id: "sources",
+    title: "stage.sources",
+    actions: [
+      "documentation.workflows.sources",
+      "documentation.workflows.sources.confirm",
+    ],
+  },
+  {
+    id: "source-study",
+    title: "stage.sourceStudy",
+    actions: [
+      "documentation.workflows.study",
+      "documentation.workflows.study.suggestions",
+      "documentation.workflows.study.complete",
+    ],
+  },
+  {
+    id: "source-study-diagram",
+    title: "workingDossier.diagram",
+    actions: [
+      "documentation.workflows.study.diagram",
+      "documentation.workflows.study.handoffs",
+      "documentation.workflows.study.routes",
+      "documentation.workflows.study.findings",
+    ],
+  },
+  {
+    id: "source-study-evidence",
+    title: "documentation.workflows.study.evidence.title",
+    actions: [
+      "documentation.workflows.study.pins",
+      "documentation.workflows.study.evidence",
+    ],
+  },
+  {
+    id: "questionnaire",
+    title: "documentation.workflows.questionnaire.title",
+    actions: [
+      "documentation.workflows.questionnaire",
+      "documentation.workflows.questionnaire.readiness",
+    ],
+  },
+  {
+    id: "dossier",
+    title: "stage.dossier",
+    actions: [
+      "documentation.workflows.dossier",
+      "documentation.workflows.dossier.approve",
+    ],
+  },
+  {
+    id: "plan-proposal",
+    title: "stage.planProposal",
+    actions: [
+      "documentation.workflows.plan",
+      "documentation.workflows.plan.initialize",
+    ],
+  },
+  {
+    id: "package",
+    title: "stage.package",
+    actions: [
+      "documentation.workflows.package",
+      "documentation.workflows.package.assemble",
+    ],
+  },
+  {
+    id: "evaluation",
+    title: "stage.evaluation",
+    actions: [
+      "documentation.workflows.evaluation",
+      "documentation.workflows.evaluation.report",
+    ],
+  },
+  {
+    id: "review-publication",
+    title: "stage.reviewPublication",
+    actions: [
+      "documentation.workflows.publication",
+      "documentation.workflows.publication.install",
+    ],
+  },
+] as const;
+
+const skillSubsections = [
+  {
+    id: "script-effect-review",
+    title: "effects.title",
+    actions: [
+      "documentation.skills.effects.source",
+      "documentation.skills.effects.route",
+      "documentation.skills.effects.roles",
+      "documentation.skills.effects.answer",
+      "documentation.skills.effects.confirm",
+      "documentation.skills.effects.correct",
+    ],
+  },
+  {
+    id: "request-clarification",
+    title: "effects.clarify",
+    actions: [
+      "documentation.skills.clarify.request",
+      "documentation.skills.clarify.save",
+      "documentation.skills.clarify.find",
+      "documentation.skills.clarify.investigate",
+      "documentation.skills.clarify.correction",
+    ],
+  },
+] as const;
+
 export const documentationSections = [
   {
     id: "my-work",
@@ -68,16 +180,8 @@ export const documentationSections = [
   {
     id: "workflows",
     title: "nav.workflows",
-    actions: [
-      "documentation.workflows.sources",
-      "documentation.workflows.study",
-      "documentation.workflows.questionnaire",
-      "documentation.workflows.dossier",
-      "documentation.workflows.plan",
-      "documentation.workflows.package",
-      "documentation.workflows.evaluation",
-      "documentation.workflows.publication",
-    ],
+    actions: [],
+    subsections: workflowSubsections,
   },
   {
     id: "questionnaire",
@@ -101,6 +205,7 @@ export const documentationSections = [
       "documentation.skills.inventory",
       "documentation.skills.confirm",
     ],
+    subsections: skillSubsections,
   },
   {
     id: "runs",
@@ -165,8 +270,8 @@ export const documentationSections = [
   subsections?: readonly {
     id: string;
     title: MessageId;
-    purpose: MessageId;
-    next: MessageId;
+    purpose?: MessageId;
+    next?: MessageId;
     actions: readonly MessageId[];
   }[];
 }[];
@@ -193,7 +298,11 @@ export const documentationCommands: Partial<Record<MessageId, string>> = {
 
 export type DocumentationSection = (typeof documentationSections)[number]["id"];
 export type DocumentationTopic =
-  DocumentationSection | "settings/robots" | "script-side-effects";
+  | DocumentationSection
+  | `workflows/${(typeof workflowSubsections)[number]["id"]}`
+  | `skills/${(typeof skillSubsections)[number]["id"]}`
+  | "settings/robots"
+  | "script-side-effects";
 
 export function documentationSubsections(section: DocumentationSection) {
   const entry = documentationSections.find(({ id }) => id === section);

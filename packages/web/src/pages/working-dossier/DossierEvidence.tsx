@@ -8,6 +8,7 @@ import {
 } from "../../api/working-dossier.js";
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { SourceEvidenceDisclosure } from "../../components/SourceEvidenceDisclosure.js";
 
 export interface EvidenceContext {
   basePath: string;
@@ -19,9 +20,11 @@ export interface EvidenceContext {
 export function DossierEvidenceLinks({
   evidence,
   context,
+  collapsible = false,
 }: {
   evidence: DossierEvidence[];
   context: EvidenceContext;
+  collapsible?: boolean;
 }) {
   const { t } = useI18n();
   const [citation, setCitation] = useState<{
@@ -65,10 +68,20 @@ export function DossierEvidenceLinks({
   const pin = pins.find((pin) => pin.skillId === locator?.skillId);
   const label = ({ path, startLine, endLine }: DossierEvidence) =>
     `${path}:L${startLine}${endLine === startLine ? "" : `–L${endLine}`}`;
-  return (
-    <>
-      <Space wrap size={[8, 4]}>
-        {[...references].map(([id, locator]) => (
+  const labelCounts = new Map<string, number>();
+  for (const reference of references.values()) {
+    const text = label(reference);
+    labelCounts.set(text, (labelCounts.get(text) ?? 0) + 1);
+  }
+  const links = (
+    <Space wrap size={[8, 4]}>
+      {[...references].map(([id, locator]) => {
+        const text = label(locator);
+        const name =
+          (labelCounts.get(text) ?? 0) > 1
+            ? pins.find(({ skillId }) => skillId === locator.skillId)?.name
+            : undefined;
+        return (
           <Button
             key={id}
             onClick={() => {
@@ -77,10 +90,20 @@ export function DossierEvidenceLinks({
               setCitation({ locator, revision });
             }}
           >
-            {label(locator)}
+            {name ? `${name} · ${text}` : text}
           </Button>
+        );
+      })}
+    </Space>
+  );
+  return (
+    <>
+      {references.size > 0 &&
+        (collapsible ? (
+          <SourceEvidenceDisclosure>{links}</SourceEvidenceDisclosure>
+        ) : (
+          links
         ))}
-      </Space>
       {locator && (
         <Modal
           open

@@ -1,17 +1,15 @@
 import {
   Alert,
   Button,
-  Empty,
   Modal,
   Popconfirm,
-  Segmented,
   Space,
   Spin,
   Switch,
   Tabs,
   Tag,
 } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   confirmStudy,
@@ -20,7 +18,6 @@ import {
   studyPath,
   type StudyRecord,
 } from "../../api/source-study.js";
-import { unansweredScriptPaths } from "../../api/script-effects.js";
 import type {
   GatePreview,
   WorkflowVersionDetail,
@@ -37,8 +34,6 @@ import { WorkflowNotice, type WriteFailure } from "./WorkflowDialog.js";
 import { EvidenceChanges } from "../../components/EvidenceChanges.js";
 import { NumberedTabs } from "../../components/NumberedTabs.js";
 import { RecordOriginLink } from "../../components/RecordOriginLink.js";
-import { UncertaintyTabLabel } from "../../components/UncertaintyTabLabel.js";
-import { ScriptEffectsPanel, type StudyRole } from "./ScriptEffectsPanel.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
 import { selectedWorkflowTab } from "./WorkflowTabs.js";
 import { useWorkingDossier } from "../working-dossier/useWorkingDossier.js";
@@ -56,8 +51,10 @@ export function WorkflowSourceStudy({
   const { t, format, locale } = useI18n();
   const { hash, search } = useLocation();
   const [section, setSection] = useState<string>();
-  const [selectedRole, setSelectedRole] = useState<StudyRole>();
-  const [selectedFact, setSelectedFact] = useState<string>();
+  const [factSelection, setFactSelection] = useState<{
+    group?: string;
+    recordId?: string;
+  }>({});
   const [editor, setEditor] = useState<{
     kind: StudyRecord["kind"];
     previous?: StudyRecord;
@@ -93,42 +90,13 @@ export function WorkflowSourceStudy({
   useEffect(() => {
     if (linkedKind === undefined) return;
     setSection(linkedKind === "fact" ? "facts" : "interfaces");
-    if (linkedKind === "fact" && linkedId !== null) setSelectedFact(linkedId);
+    if (linkedKind === "fact" && linkedId !== null) {
+      setFactSelection((selection) => ({ ...selection, recordId: linkedId }));
+    }
     if (linkedStatus === "retired") setRetired(true);
   }, [linkedId, linkedKind, linkedStatus]);
 
-  const effectPins = study.studies
-    .filter(
-      (pin) =>
-        !detail.sourceCheck?.sources.some(
-          (source) =>
-            source.name === pin.skillName &&
-            source.hash === pin.hash &&
-            source.status === "available" &&
-            source.scripts.length === 0,
-        ),
-    )
-    .map((pin) => {
-      const status = study.effects?.find(
-        (entry) => entry.skillId === pin.skillId && entry.hash === pin.hash,
-      );
-      return {
-        ...pin,
-        status,
-        pending: unansweredScriptPaths(status?.review).length > 0,
-      };
-    });
-  const engineerAvailable = detail.capabilities.manageSourceStudy;
-  const uploaderAvailable = effectPins.some((pin) => pin.status?.canReview);
-  const role =
-    engineerAvailable && uploaderAvailable
-      ? (selectedRole ?? "engineer")
-      : engineerAvailable
-        ? "engineer"
-        : uploaderAvailable
-          ? "uploader"
-          : null;
-  const canManage = role === "engineer";
+  const canManage = detail.capabilities.manageSourceStudy;
   const legacy = dossier?.legacy === true;
   const ready =
     detail.version.stages.find((s) => s.id === "sources")?.state === "done";
@@ -179,6 +147,9 @@ export function WorkflowSourceStudy({
       setBusy(false);
     }
   }
+  function closeReview() {
+    if (!busy) setReview(null);
+  }
   async function retire(record: StudyRecord) {
     if (busy) return;
     setBusy(true);
@@ -190,6 +161,79 @@ export function WorkflowSourceStudy({
     } finally {
       setBusy(false);
     }
+  }
+  function factTabs(
+    entries: StudyRecord[],
+    recordCard: (record: StudyRecord) => ReactNode,
+  ) {
+    const groups = study.studies.map((pin) => ({
+      key: pin.skillId,
+      name: pin.skillName,
+      records: entries.filter((record) =>
+        record.content.evidence.some(({ skillId }) => skillId === pin.skillId),
+      ),
+    }));
+    const pinnedIds = new Set(groups.map(({ key }) => key));
+    const unpinned = entries.filter((record) =>
+      record.content.evidence.every(({ skillId }) => !pinnedIds.has(skillId)),
+    );
+    if (unpinned.length > 0) {
+      groups.push({
+        key: "unpinned",
+        name: t("study.unpinned"),
+        records: unpinned,
+      });
+    }
+
+    const noRecords = <p className="muted">{t("study.noRecords")}</p>;
+    const matchesSelection = (record: StudyRecord) =>
+      record.id === factSelection.recordId;
+    const preferredGroup = groups.find(
+      ({ key }) => key === factSelection.group,
+    );
+    const activeGroup =
+      (preferredGroup?.records.some(matchesSelection)
+        ? preferredGroup
+        : groups.find(({ records }) => records.some(matchesSelection))) ??
+      preferredGroup ??
+      groups.find(({ records }) => records.length > 0) ??
+      groups[0];
+    if (activeGroup === undefined) return noRecords;
+
+    const activeFact =
+      activeGroup.records.find(matchesSelection) ?? activeGroup.records[0];
+    const activeContent =
+      activeFact === undefined ? (
+        noRecords
+      ) : (
+        <NumberedTabs
+          label={t("study.facts")}
+          activeKey={activeFact.id}
+          onChange={(recordId) =>
+            setFactSelection({ group: activeGroup.key, recordId })
+          }
+          items={activeGroup.records.map((record) => ({
+            key: record.id,
+            children: recordCard(record),
+          }))}
+        />
+      );
+    return (
+      <NumberedTabs
+        label={t("study.factSkills")}
+        activeKey={activeGroup.key}
+        onChange={(group) => setFactSelection({ group })}
+        items={groups.map(({ key, name }, index) => ({
+          key,
+          label: (
+            <span className="study-skill-tab-label" title={name}>
+              {index + 1}. {name}
+            </span>
+          ),
+          children: key === activeGroup.key ? activeContent : null,
+        }))}
+      />
+    );
   }
   function records(kind: StudyRecord["kind"], entries: StudyRecord[]) {
     const visible = entries.filter(
@@ -248,8 +292,6 @@ export function WorkflowSourceStudy({
         </Space>
       </article>
     );
-    const activeFact =
-      visible.find((record) => record.id === selectedFact) ?? visible[0];
     return (
       <section
         className="study-record-list"
@@ -272,18 +314,10 @@ export function WorkflowSourceStudy({
             {t("study.showRetired")}
           </label>
         </div>
-        {visible.length === 0 ? (
+        {kind === "fact" ? (
+          factTabs(visible, recordCard)
+        ) : visible.length === 0 ? (
           <p className="muted">{t("study.noRecords")}</p>
-        ) : kind === "fact" ? (
-          <NumberedTabs
-            label={t("study.facts")}
-            activeKey={activeFact?.id}
-            onChange={setSelectedFact}
-            items={visible.map((record) => ({
-              key: record.id,
-              children: recordCard(record),
-            }))}
-          />
         ) : (
           visible.map(recordCard)
         )}
@@ -316,9 +350,6 @@ export function WorkflowSourceStudy({
           >
             <div>
               <strong>{pin.skillName}</strong>
-              <p className="study-hash">
-                <code>{pin.hash}</code>
-              </p>
               {pin.studied && pin.confirmation !== null && (
                 <p className="muted">
                   {pin.confirmation.actorId} ·{" "}
@@ -365,31 +396,6 @@ export function WorkflowSourceStudy({
       className="source-study-panel"
       id="source-study"
       aria-labelledby="source-study-title"
-      actions={
-        role !== null && (
-          <Segmented<StudyRole>
-            className="study-role-switch"
-            aria-label={t("effects.role")}
-            value={role}
-            options={[
-              {
-                value: "engineer",
-                label: t("workflow.role.engineer"),
-                disabled: !engineerAvailable,
-              },
-              {
-                value: "uploader",
-                label: t("effects.reviewerRole"),
-                disabled: !uploaderAvailable,
-              },
-            ]}
-            onChange={(value) => {
-              setSelectedRole(value);
-              if (value === "uploader") setSection("effects");
-            }}
-          />
-        )
-      }
     >
       {failure !== null && (
         <WorkflowNotice failure={failure} onReload={onChanged} />
@@ -406,104 +412,49 @@ export function WorkflowSourceStudy({
           }
         />
       )}
-      <Tabs
-        activeKey={
-          section === "effects" || (legacy && section)
-            ? section
-            : role === "uploader" && section === undefined
-              ? "effects"
-              : "overview"
-        }
-        onChange={setSection}
-        items={[
-          {
-            key: "overview",
-            label: t("stage.sourceStudy"),
-            children: legacy ? (
-              legacyOverview
-            ) : (
-              <>
-                {dossier && !dossier.available && (
-                  <Alert type="info" title={t("workingDossier.waitForCheck")} />
-                )}
-                {dossier && (dossier.available || dossier.revision > 0) && (
-                  <WorkingDossierStudy
-                    dossier={dossier}
-                    context={{
-                      basePath,
-                      path: dossierPath,
-                      revision: dossier.revision,
-                      pins: dossier.pins,
-                    }}
-                  />
-                )}
-                {!dossier && !dossierFailure && (
-                  <Spin aria-label={t("common.loading")} />
-                )}
-              </>
-            ),
-          },
-          ...(legacy
-            ? [
-                {
-                  key: "facts",
-                  label: t("study.facts"),
-                  children: records("fact", study.facts),
-                },
-                {
-                  key: "interfaces",
-                  label: t("study.interfaces"),
-                  children: records("interface", study.interfaces),
-                },
-              ]
-            : []),
-          {
-            key: "effects",
-            label: (
-              <UncertaintyTabLabel
-                pending={effectPins.some((pin) => pin.pending)}
-              >
-                {t("effects.title")}
-              </UncertaintyTabLabel>
-            ),
-            children: effectPins.length ? (
-              <NumberedTabs
-                label={t("effects.skills")}
-                items={effectPins.map((pin, index) => ({
-                  key: pin.skillId,
-                  label: (
-                    <UncertaintyTabLabel pending={pin.pending}>
-                      <span
-                        className="study-skill-tab-label"
-                        title={pin.skillName}
-                      >
-                        {index + 1}. {pin.skillName}
-                      </span>
-                    </UncertaintyTabLabel>
-                  ),
-                  children: (
-                    <ScriptEffectsPanel
-                      key={pin.hash}
-                      basePath={basePath}
-                      skillId={pin.skillId}
-                      hash={pin.hash}
-                      workflowBase={base}
-                      workflowStatus={pin.status}
-                      role={role}
-                      onChanged={onChanged}
-                    />
-                  ),
-                }))}
-              />
-            ) : (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={t("effects.noScripts")}
-              />
-            ),
-          },
-        ]}
-      />
+      {legacy ? (
+        <Tabs
+          activeKey={section ?? "overview"}
+          onChange={setSection}
+          items={[
+            {
+              key: "overview",
+              label: t("stage.sourceStudy"),
+              children: legacyOverview,
+            },
+            {
+              key: "facts",
+              label: t("study.facts"),
+              children: records("fact", study.facts),
+            },
+            {
+              key: "interfaces",
+              label: t("study.interfaces"),
+              children: records("interface", study.interfaces),
+            },
+          ]}
+        />
+      ) : (
+        <>
+          {dossier && !dossier.available && (
+            <Alert type="info" title={t("workingDossier.waitForCheck")} />
+          )}
+          {dossier && (dossier.available || dossier.revision > 0) && (
+            <WorkingDossierStudy
+              dossier={dossier}
+              context={{
+                basePath,
+                path: dossierPath,
+                revision: dossier.revision,
+                pins: dossier.pins,
+              }}
+            />
+          )}
+          {!dossier && !dossierFailure && (
+            <Spin aria-label={t("common.loading")} />
+          )}
+        </>
+      )}
       {legacy && editor !== null && (
         <StudyRecordDialog
           basePath={basePath}
@@ -512,7 +463,12 @@ export function WorkflowSourceStudy({
           previous={editor.previous}
           onCancel={() => setEditor(null)}
           onChanged={(record) => {
-            if (record?.kind === "fact") setSelectedFact(record.id);
+            if (record?.kind === "fact") {
+              setFactSelection((selection) => ({
+                ...selection,
+                recordId: record.id,
+              }));
+            }
             onChanged();
           }}
         />
@@ -522,15 +478,19 @@ export function WorkflowSourceStudy({
         open={review !== null}
         width={720}
         title={t("study.review")}
-        okText={t("study.confirm")}
-        cancelText={t("workflow.cancel")}
-        confirmLoading={busy}
-        onCancel={() => setReview(null)}
-        onOk={() => void confirm()}
+        footer={null}
+        onCancel={closeReview}
         maskClosable={false}
         closable={!busy}
-        cancelButtonProps={{ disabled: busy }}
       >
+        <Space wrap>
+          <Button disabled={busy} onClick={closeReview}>
+            {t("workflow.cancel")}
+          </Button>
+          <Button type="primary" loading={busy} onClick={() => void confirm()}>
+            {t("study.confirm")}
+          </Button>
+        </Space>
         <p>{t("study.confirmHint")}</p>
         {review !== null && (
           <>
