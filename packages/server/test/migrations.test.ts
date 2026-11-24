@@ -395,7 +395,11 @@ describe("reviewed SQL migrations", () => {
     ).rows;
     await applyMigrations(test.database, migrations, clock);
     expect(
-      (await test.database.query("select * from skill_versions")).rows,
+      (
+        await test.database.query(
+          "select skill_id, hash, description, inventory, scripts, origin, uploaded_by, created_at from skill_versions",
+        )
+      ).rows,
     ).toEqual(original);
     const history = (
       await test.database.query<{
@@ -1042,11 +1046,7 @@ describe("reviewed SQL migrations", () => {
         ["a".repeat(64), "c".repeat(40), clock.now()],
       ),
     ).rejects.toThrow(/published_ref/u);
-    for (const table of [
-      "skill_versions",
-      "skill_repositories",
-      "skill_version_git_origins",
-    ]) {
+    for (const table of ["skill_repositories", "skill_version_git_origins"]) {
       for (const statement of [
         `delete from ${table}`,
         `truncate ${table} cascade`,
@@ -1061,6 +1061,13 @@ describe("reviewed SQL migrations", () => {
         ["c".repeat(40)],
       ),
     ).rejects.toThrow(/immutable/u);
+    await test.database.query(
+      "delete from skill_versions where skill_id = 'skill-1'",
+    );
+    expect(
+      (await test.database.query("select * from skill_version_git_origins"))
+        .rows,
+    ).toEqual([]);
     await expect(
       test.database.query(
         "update skill_repositories set url = 'https://other.example/repo' ",
@@ -1148,7 +1155,7 @@ describe("reviewed SQL migrations", () => {
 
     const upgraded = await applyMigrations(test.database, migrations, clock);
 
-    expect(upgraded.applied.at(-1)).toBe("0048");
+    expect(upgraded.applied.at(-1)).toBe(migrations.at(-1)?.version);
     expect(
       (
         await test.database.query(
@@ -1269,6 +1276,84 @@ describe("reviewed SQL migrations", () => {
         /immutable/u,
       );
   });
+  it("retains a historical pin and protects Skill content while adding lifecycle metadata", async () => {
+    const test = await freshDatabase();
+    const migrations = await loadBundledMigrations();
+    await applyMigrations(
+      test.database,
+      migrations.filter((m) => m.version < "0049"),
+      clock,
+    );
+    await insertPerson(test);
+    await test.database.query(
+      "insert into groups (id, name, created_at, updated_at) values ('pinned-group', 'Research', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into skills (id, group_id, name, created_by, created_at) values ('pinned-skill', 'pinned-group', 'example', 'person-1', $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into workflows (id, group_id, name, goal, intent, locale, created_at, updated_at) values ('historical-workflow', 'pinned-group', 'Example', 'Study', 'new-skill', 'en', $1, $1)",
+      [clock.now()],
+    );
+    await test.database.query(
+      "insert into workflow_versions (id, workflow_id, number, name, goal, intent, locale, stages, created_at, updated_at) values ('historical-version', 'historical-workflow', 1, 'Example', 'Study', 'new-skill', 'en', '{}', $1, $1)",
+      [clock.now()],
+    );
+    const original = "a".repeat(64);
+    const current = "b".repeat(64);
+    const unused = "c".repeat(64);
+    for (const hash of [original, current, unused]) {
+      await test.database.query(
+        "insert into skill_versions (skill_id, hash, description, inventory, scripts, origin, uploaded_by, created_at) values ('pinned-skill', $1, 'Example Skill', '[]', '[]', 'upload', 'person-1', $2)",
+        [hash, clock.now()],
+      );
+    }
+    await test.database.query(
+      "insert into workflow_skill_pins (workflow_version_id, skill_id, skill_version_hash, pinned_by, created_at, updated_at) values ('historical-version', 'pinned-skill', $1, 'person-1', $2, $2)",
+      [current, clock.now()],
+    );
+    await test.database.query(
+      `insert into audit_events (id, occurred_at, actor_person_id, credential_kind, channel,
+         action, target_type, target_id, hash_before, hash_after, request_id)
+       values ('repin', $1, 'person-1', 'session', 'web', 'workflow_skill_pin.updated',
+         'workflow_skill_pin', 'historical-version:pinned-skill', $2, $3, 'request-1')`,
+      [clock.now(), original, current],
+    );
+    await applyMigrations(test.database, migrations, clock);
+    expect(
+      (
+        await test.database.query(
+          "select hash, label, label_revision, retired_at from skill_versions order by hash",
+        )
+      ).rows,
+    ).toEqual(
+      [original, current, unused].map((hash) => ({
+        hash,
+        label: null,
+        label_revision: 0,
+        retired_at: null,
+      })),
+    );
+    await expect(
+      test.database.query(
+        "update skill_versions set description = 'Different'",
+      ),
+    ).rejects.toThrow(/immutable/u);
+    await expect(
+      test.database.query("delete from skill_versions where hash = $1", [
+        original,
+      ]),
+    ).rejects.toMatchObject({ code: "23503" });
+    await expect(
+      test.database.query("truncate skill_versions cascade"),
+    ).rejects.toThrow(/immutable/u);
+    await test.database.query("delete from skill_versions where hash = $1", [
+      unused,
+    ]);
+  });
+
   it("applies the bundled reviewed SQL and reports what ran", async () => {
     const test = await freshDatabase();
     const migrations = await loadBundledMigrations();
@@ -1321,6 +1406,7 @@ describe("reviewed SQL migrations", () => {
       "0046",
       "0047",
       "0048",
+      "0049",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -1376,6 +1462,7 @@ describe("reviewed SQL migrations", () => {
         "0046",
         "0047",
         "0048",
+        "0049",
       ],
       pending: [],
       drifted: [],
@@ -1456,6 +1543,7 @@ describe("reviewed SQL migrations", () => {
       "script_effect_confirmations",
       "script_effect_revisions",
       "skill_repositories",
+      "skill_version_edit_origins",
       "skill_version_git_origins",
       "skill_versions",
       "skills",
@@ -1467,6 +1555,7 @@ describe("reviewed SQL migrations", () => {
       "workflow_record_origins",
       "workflow_run_events",
       "workflow_runs",
+      "workflow_skill_pin_history",
       "workflow_skill_pins",
       "workflow_source_checks",
       "workflow_versions",
@@ -1533,6 +1622,7 @@ describe("reviewed SQL migrations", () => {
         "0046",
         "0047",
         "0048",
+        "0049",
       ],
       pending: [],
       drifted: [],
@@ -1540,7 +1630,7 @@ describe("reviewed SQL migrations", () => {
     const rows = await test.database.query<{ count: number }>(
       "select count(*)::int as count from schema_migrations",
     );
-    expect(rows.rows[0]?.count).toBe(48);
+    expect(rows.rows[0]?.count).toBe(migrations.length);
   });
 
   it("adds workflow scopes without changing existing Group bindings", async () => {

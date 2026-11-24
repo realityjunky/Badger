@@ -1263,18 +1263,19 @@ to that address; otherwise it is replaced atomically. The database records
 each immutable tree as its ordered inventory of paths, sizes, and blob
 hashes. A failed upload creates no version or upload audit event. A blob
 written before a database failure may remain unreferenced; blob garbage
-collection is not part of this change.
+collection handles blobs from explicitly deleted versions. The cleanup worker
+checks retained versions and answer attachments before removing each blob.
 
 ### Limits and paths
 
-| Setting                        | Default  | Meaning                                                        |
-| ------------------------------ | -------- | -------------------------------------------------------------- |
-| `BADGER_UPLOAD_MAX_BYTES`      | 20971520 | Maximum combined file bytes, and maximum compressed zip bytes. |
-| `BADGER_UPLOAD_MAX_FILE_BYTES` | 5242880  | Maximum bytes in one expanded file.                            |
-| `BADGER_UPLOAD_MAX_FILES`      | 1000     | Maximum uploaded files, or zip entries including directories.  |
+| Setting                        | Default  | Meaning                                                                  |
+| ------------------------------ | -------- | ------------------------------------------------------------------------ |
+| `BADGER_UPLOAD_MAX_BYTES`      | 20971520 | Maximum combined file bytes. Zip uploads allow bounded archive overhead. |
+| `BADGER_UPLOAD_MAX_FILE_BYTES` | 5242880  | Maximum bytes in one expanded file.                                      |
+| `BADGER_UPLOAD_MAX_FILES`      | 1000     | Maximum uploaded files, or zip entries including directories.            |
 
-The JSON body may hold the base64 of `BADGER_UPLOAD_MAX_BYTES`, plus 2,176
-bytes per allowed file for paths, JSON keys, and padding, plus 4 KiB. A larger body is refused with
+The JSON body allows base64 for the upload and a bounded per-file allowance
+for archive or JSON overhead. A larger body is refused with
 413 while it is read. Zip entry sizes are checked before expansion, actual
 streamed bytes are capped, and each expanded file's checksum is checked.
 Encrypted archives, links, special files, duplicates, and file/directory
@@ -1304,24 +1305,28 @@ version.
 ### HTTP API
 
 Every route is under the configured base path followed by `/api/v1`.
-Cookie-authenticated writes require an allowed `Origin`. Read responses and
-errors are JSON. Upload limit errors and oversized bodies return 413; empty
+Cookie-authenticated writes require an allowed `Origin`. The download returns
+a ZIP and other read responses and errors use JSON. Upload limit errors and oversized bodies return 413; empty
 uploads, invalid paths, and upload-time declarations return 400;
 changed confirmations return 409. A method a
 route does not serve returns 405 with an `Allow` header. Unauthorized reads do
 not reveal the Skill's existence.
 
-| Method and path                                 | Behavior                                                                                                      |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `GET /skills`                                   | Visible entries, per-group create/upload capabilities, and upload limits.                                     |
-| `POST /skills`                                  | Create `{groupId, name}`; the name must match the uploaded `SKILL.md`.                                        |
-| `GET /skills/:id`                               | Read one visible entry.                                                                                       |
-| `POST /skills/:id/upload-preview`               | Inspect a folder or zip without recording a version or storing blobs.                                         |
-| `POST /skills/:id/versions`                     | Confirm a previewed source by its hash and create a version (201), or return its identical predecessor (200). |
-| `GET /skills/:id/versions`                      | List versions with their inventories and script effects.                                                      |
-| `GET /skills/:id/versions/:hash`                | Read an immutable version.                                                                                    |
-| `GET /skills/:id/versions/:hash/files?path=...` | Preview a UTF-8 text file up to 256 KiB; binary and larger files retain size/hash metadata.                   |
-| `GET /skills/:id/diff?from=...&to=...`          | Compare any two versions of that entry, with added, removed, and modified files and changed script effects.   |
+| Method and path                                 | Behavior                                                                                                                |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `GET /skills`                                   | Visible entries, per-group create/upload capabilities, and upload limits.                                               |
+| `POST /skills`                                  | Create `{groupId, name}`; the name must match the uploaded `SKILL.md`.                                                  |
+| `GET /skills/:id`                               | Read one visible entry.                                                                                                 |
+| `POST /skills/:id/upload-preview`               | Inspect a folder or zip without recording a version or storing blobs.                                                   |
+| `POST /skills/:id/versions`                     | Confirm a previewed source by its hash and create a version (201), or return its identical predecessor (200).           |
+| `GET /skills/:id/versions`                      | List versions with their inventories and script effects.                                                                |
+| `GET /skills/:id/versions/:hash`                | Read an immutable version.                                                                                              |
+| `GET /skills/:id/versions/:hash/files?path=...` | Preview UTF-8 up to 256 KiB. Contributors may add `mode=edit` to read up to the configured file limit, capped at 5 MiB. |
+| `GET /skills/:id/versions/:hash/download`       | Download the selected version as a ZIP containing its full inventory.                                                   |
+| `PATCH /skills/:id/versions/:hash/label`        | Set or clear `{label, revision}` with a unique `major.minor.patch` label.                                               |
+| `GET /skills/:id/versions/:hash/removal`        | Preview whether removal will delete or retire the version.                                                              |
+| `DELETE /skills/:id/versions/:hash`             | Confirm removal with an `action` of `delete` or `retire`.                                                               |
+| `GET /skills/:id/diff?from=...&to=...`          | Compare any two versions of that entry, with added, removed, and modified files and changed script effects.             |
 
 Folder content is encoded as base64:
 
@@ -1353,7 +1358,10 @@ numbered lines from this immutable version. Tokens can read and draft through
 Source study jobs but cannot route or confirm reviews. Current Skill library
 access and exact uploader identity are checked server-side.
 
-Send the content to `upload-preview` first, then post the same content to
+To edit, include `baseHash` and either a complete replacement folder or
+`changes: [{"path":"file", "content":"BASE64"|null}]` in the
+preview and confirmation body. The response includes the exact diff from the
+base. Send the content to `upload-preview` first, then post the same content to
 `versions` with `"confirmed": true` and `"expectedHash": "HASH_FROM_PREVIEW"`.
 Both are required, and the hash must be the preview's 64 lowercase hex
 digits. If the content no longer has that hash, the service answers 409 with
@@ -1369,6 +1377,10 @@ expert on a workflow creates Skill entries and uploads versions in that
 workflow's exact Group. Every other workflow role reads that Group's library.
 Group bindings keep their inherited reads, and Group leads create entries.
 Administrators create entries and upload everywhere; Auditors only read.
+Upload rights also allow version edits and labels. A signed-in Group lead or
+Administrator may delete or retire a version in their jurisdiction. Removal
+checks references again when it commits. A retired version remains available
+by its original hash and is excluded from new pins.
 Removing a binding withdraws the right at the person's next request.
 
 ## Workflow Skill pins and source checks

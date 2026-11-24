@@ -45,7 +45,7 @@ Code instead of holding it.
 | `submit_answer`        | Submit a saved answer with its current revisions. The service marks it as sent through an Agent and records the Agent host.                                                                        |
 | `comment`              | Add the user's words to a question's thread.                                                                                                                                                       |
 | `raise_concern`        | Send volunteered workflow knowledge to the Engineer.                                                                                                                                               |
-| `upload_skill_version` | Preview a local folder; upload only with `confirmed: true` and the preview's `expectedHash`.                                                                                                       |
+| `upload_skill_version` | Preview a local folder or an edit against `baseHash`. Upload with `confirmed: true` and the preview's `expectedHash`.                                                                              |
 | `open_dashboard`       | Return a dashboard link for a person to confirm, acknowledge, dispute, approve, publish, or answer a gate. Offer URL-mode elicitation when the host supports it. Opening the link never signs off. |
 
 Tool discovery reads the service's current role and scope capabilities, and
@@ -220,7 +220,8 @@ resolving its parent remain separate people-only actions. Review decisions
 bind the exact result, edits, and current input hashes. The MCP has no
 acceptance, rejection, or sign-off tool.
 
-For an upload, provide the existing `skillId` and local `folder`. No effect
+For an upload or edit, provide the existing `skillId` and local `folder`. An
+edit may also quote the exact retained `baseHash` it starts from. No effect
 declarations or model credentials are needed. The preview creates no immutable version.
 After the user reviews it, repeat with its hash and confirmation. Changed
 files fail the service's hash check. A metadata-only inspection of the entire

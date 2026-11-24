@@ -11,7 +11,14 @@ import {
   createVersion,
   versionConfirmation,
 } from "../skills/library.js";
-import { inspectUpload, uploadEnvelopeBytes } from "../skills/upload.js";
+import { uploadEnvelopeBytes } from "../skills/upload.js";
+import { inspectVersionUpload } from "../skills/version-edit.js";
+import {
+  removeSkillVersion,
+  updateSkillVersionLabel,
+  versionRemoval,
+} from "../skills/version-lifecycle.js";
+import { archiveVersion } from "../skills/zip.js";
 import {
   inspectRepository,
   listRepositories,
@@ -32,7 +39,12 @@ const SKILL_ROUTES: readonly [RegExp, string][] = [
   [/^\/api\/v1\/skills\/[^/]+\/repositories$/u, "GET, HEAD, POST"],
   [/^\/api\/v1\/skills\/[^/]+\/backlog$/u, "GET, HEAD"],
   [/^\/api\/v1\/skills\/[^/]+\/diff$/u, "GET, HEAD"],
-  [/^\/api\/v1\/skills\/[^/]+\/versions\/[^/]+(?:\/files)?$/u, "GET, HEAD"],
+  [/^\/api\/v1\/skills\/[^/]+\/versions\/[^/]+$/u, "GET, HEAD, DELETE"],
+  [
+    /^\/api\/v1\/skills\/[^/]+\/versions\/[^/]+\/(?:files|download|removal)$/u,
+    "GET, HEAD",
+  ],
+  [/^\/api\/v1\/skills\/[^/]+\/versions\/[^/]+\/label$/u, "PATCH"],
 ];
 export function skillMethods(path: string): string | null {
   return SKILL_ROUTES.find(([pattern]) => pattern.test(path))?.[1] ?? null;
@@ -72,12 +84,16 @@ export async function handleSkillsRequest(
             database,
             skillGroups.map((group) => group.id),
           )
-        ).map((skill) => ({
-          ...skill,
-          canUpload:
-            skillGroups.find((group) => group.id === skill.groupId)
-              ?.canUpload ?? false,
-        })),
+        ).map((skill) => {
+          const permission = skillGroups.find(
+            (group) => group.id === skill.groupId,
+          );
+          return {
+            ...skill,
+            canUpload: permission?.canUpload ?? false,
+            canRemoveVersion: permission?.canRemoveVersion ?? false,
+          };
+        }),
         groups: skillGroups,
         limits: config.uploads,
       });
@@ -101,7 +117,7 @@ export async function handleSkillsRequest(
     });
   }
   const match = new RegExp(
-    `^${API}/skills/([^/]+)(?:/(versions|diff|upload-preview|git-preview|repositories|backlog)(?:/([^/]+)(?:/(files))?)?)?$`,
+    `^${API}/skills/([^/]+)(?:/(versions|diff|upload-preview|git-preview|repositories|backlog)(?:/([^/]+)(?:/(files|label|download|removal))?)?)?$`,
     "u",
   ).exec(path);
   if (match?.[1] === undefined) return reply.error(404, "invalid", "Not found");
@@ -110,6 +126,59 @@ export async function handleSkillsRequest(
   const permission = skillGroups.find((group) => group.id === skill.groupId);
   if (permission === undefined)
     return reply.error(404, "invalid", "No such Skill");
+  const hash =
+    match[3] === undefined ? undefined : decodeURIComponent(match[3]);
+  if (hash !== undefined && (method === "DELETE" || match[4] === "removal")) {
+    if (!permission.canRemoveVersion)
+      return reply.error(
+        403,
+        "denied",
+        "Removing a version requires a Group lead or Administrator",
+      );
+    if (reads)
+      return reply.json(
+        200,
+        await versionRemoval(
+          database,
+          await readVersion(database, skill.id, hash),
+        ),
+      );
+    const body = await readJsonBody(request);
+    if (!body.ok)
+      return reply.error(body.status ?? 400, "invalid", body.message);
+    return reply.json(
+      200,
+      await removeSkillVersion(
+        database,
+        dependencies,
+        context,
+        skill,
+        hash,
+        body.value,
+      ),
+    );
+  }
+  if (method === "PATCH" && hash !== undefined) {
+    if (!permission.canUpload)
+      return reply.error(
+        403,
+        "denied",
+        "Editing version labels requires upload rights",
+      );
+    const body = await readJsonBody(request);
+    if (!body.ok)
+      return reply.error(body.status ?? 400, "invalid", body.message);
+    return reply.json(200, {
+      version: await updateSkillVersionLabel(
+        database,
+        dependencies,
+        context,
+        skill,
+        hash,
+        body.value,
+      ),
+    });
+  }
   if (match[2] === "backlog")
     return reply.json(200, {
       items: await readSkillBacklog(
@@ -153,7 +222,7 @@ export async function handleSkillsRequest(
     const inspect = () =>
       git
         ? inspectRepository(database, config, skill, body.value)
-        : inspectUpload(config, skill.name, body.value);
+        : inspectVersionUpload(database, config, blobs, skill, body.value);
     if (match[2] === "upload-preview" || match[2] === "git-preview") {
       const inspected = await inspect();
       const { source } = inspected;
@@ -164,6 +233,14 @@ export async function handleSkillsRequest(
           scripts: source.scripts,
           description: source.description,
         },
+        ...("base" in inspected && inspected.base !== undefined
+          ? {
+              diff: diffVersions(
+                inspected.base,
+                source.hash === inspected.base.hash ? inspected.base : source,
+              ),
+            }
+          : {}),
       });
     }
     const expectedHash = versionConfirmation(body.value);
@@ -201,23 +278,65 @@ export async function handleSkillsRequest(
       ),
     );
   }
-  if (match[3] === undefined) {
+  if (hash === undefined) {
     return reply.json(
       200,
       path.endsWith("/versions")
         ? { versions: await listVersions(database, skill.id) }
-        : { skill },
+        : {
+            skill: {
+              ...skill,
+              canUpload: permission.canUpload,
+              canRemoveVersion: permission.canRemoveVersion,
+            },
+          },
     );
   }
-  const version = await readVersion(
-    database,
-    skill.id,
-    decodeURIComponent(match[3]),
-  );
-  return reply.json(
-    200,
-    match[4] === "files"
-      ? await previewFile(blobs, version, url.searchParams.get("path"))
-      : { version },
-  );
+  if (match[4] === "download") {
+    const archive = await database.transaction(async (tx) => {
+      await tx.query(
+        "select hash from skill_versions where skill_id = $1 and hash = $2 for key share",
+        [skill.id, hash],
+      );
+      return archiveVersion(blobs, await readVersion(tx, skill.id, hash));
+    });
+    return reply.send({
+      status: 200,
+      contentType: "application/zip",
+      body: archive,
+      headers: {
+        "content-disposition": `attachment; filename="${skill.name}-${hash}.zip"`,
+        "content-length": String(archive.byteLength),
+      },
+    });
+  }
+  if (match[4] === "files") {
+    const editing = url.searchParams.get("mode") === "edit";
+    if (editing && !permission.canUpload)
+      return reply.error(
+        403,
+        "denied",
+        "Reading an editable file requires upload rights",
+      );
+    return reply.json(
+      200,
+      await database.transaction(async (tx) => {
+        await tx.query(
+          "select hash from skill_versions where skill_id = $1 and hash = $2 for key share",
+          [skill.id, hash],
+        );
+        return previewFile(
+          blobs,
+          await readVersion(tx, skill.id, hash),
+          url.searchParams.get("path"),
+          editing
+            ? Math.min(config.uploads.maxFileBytes, 5 * 1024 * 1024)
+            : undefined,
+        );
+      }),
+    );
+  }
+  return reply.json(200, {
+    version: await readVersion(database, skill.id, hash),
+  });
 }

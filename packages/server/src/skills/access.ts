@@ -13,6 +13,7 @@ export interface SkillGroupPermission {
   name: string;
   canUpload: boolean;
   canCreateSkill: boolean;
+  canRemoveVersion: boolean;
 }
 
 /**
@@ -67,14 +68,15 @@ export async function skillGroupPermissions(
     rows.rows.map(async (row) => {
       const canUpload =
         (administrator && contributorRoles.length > 0) || row.may_upload;
+      const canManage =
+        access.tokenScopes === undefined &&
+        (await mayManageGroup(database, access, person, row.id));
       return {
         id: row.id,
         name: row.name,
         canUpload,
-        canCreateSkill:
-          canUpload ||
-          (access.tokenScopes === undefined &&
-            (await mayManageGroup(database, access, person, row.id))),
+        canCreateSkill: canUpload || canManage,
+        canRemoveVersion: canManage,
       };
     }),
   );
