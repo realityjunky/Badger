@@ -113,7 +113,8 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     await engineer
       .getByLabel("Rationale", { exact: true })
       .fill("Make the format explicit in the source.");
-    await selectOption(engineer, "Assignees", people.expert.name);
+    await engineer.getByRole("combobox", { name: /Assignees/u }).click();
+    await engineer.getByRole("option", { name: people.expert.name, exact: true }).click();
     await engineer
       .getByRole("button", { name: "Save question", exact: true })
       .click();
