@@ -271,6 +271,7 @@ it("previews and uploads an immutable Skill version from a folder against the co
     ...editedArgs,
     confirmed: true,
     expectedHash: edited.preview.hash,
+    confirmationHash: edited.preview.confirmationHash,
   });
   expect(successor.version.hash).toBe(edited.preview.hash);
   const receipt = await service.request(

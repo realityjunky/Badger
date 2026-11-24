@@ -214,7 +214,7 @@ export function expertTools(api: BadgerApi, server: Server): ExpertTool[] {
     ),
     tool(
       "upload_skill_version",
-      "Preview a local Skill folder. To preview an edit, include its starting version's baseHash. Upload the same folder and baseHash with the reviewed hash after the user confirms. Never upload real data. Script effects remain pending for Source study and personal uploader confirmation.",
+      "Preview a local Skill folder. To preview an edit, include its starting version's baseHash. Upload the same folder and baseHash with the previewed expectedHash and confirmationHash after the user confirms. Never upload real data. Script effects remain pending for Source study and personal uploader confirmation.",
       {
         skillId: id,
         folder: z.string().min(1).max(4096),
@@ -224,6 +224,10 @@ export function expertTools(api: BadgerApi, server: Server): ExpertTool[] {
           .optional(),
         confirmed: z.boolean().optional(),
         expectedHash: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/u)
+          .optional(),
+        confirmationHash: z
           .string()
           .regex(/^[a-f0-9]{64}$/u)
           .optional(),

@@ -377,6 +377,7 @@ test("delete an unused version and retire a snapshot used as a base", async ({
     ...changes,
     confirmed: true,
     expectedHash: preview.hash,
+    confirmationHash: preview.confirmationHash,
   });
   await dialog
     .getByRole("button", { name: "Delete version", exact: true })

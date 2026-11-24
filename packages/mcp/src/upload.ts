@@ -176,11 +176,16 @@ export async function uploadSkillVersion(
     baseHash?: string;
     confirmed?: boolean;
     expectedHash?: string;
+    confirmationHash?: string;
   },
 ) {
   if (input.confirmed && !input.expectedHash)
     throw new Error(
       "Preview the folder and quote its expectedHash after the user confirms",
+    );
+  if (input.confirmed && input.baseHash && !input.confirmationHash)
+    throw new Error(
+      "Preview the edit and quote its confirmationHash after the user confirms",
     );
   const folder = await inspectFolder(input.folder);
   const { skills, limits } = await api.request<{
@@ -207,7 +212,11 @@ export async function uploadSkillVersion(
         files,
         ...(input.baseHash === undefined ? {} : { baseHash: input.baseHash }),
         ...(input.confirmed
-          ? { confirmed: true, expectedHash: input.expectedHash }
+          ? {
+              confirmed: true,
+              expectedHash: input.expectedHash,
+              confirmationHash: input.confirmationHash,
+            }
           : {}),
       },
       uploadTimeoutSeconds(

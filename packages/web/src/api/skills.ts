@@ -41,6 +41,7 @@ export interface SkillCatalog {
 
 export interface VersionPreview {
   hash: string;
+  confirmationHash?: string;
   description: string;
   inventory: SkillFile[];
   scripts: { path: string; sideEffects: ScriptEffects }[];
@@ -260,6 +261,7 @@ export function uploadVersion(
   id: string,
   content: UploadContent | GitContent | BrowserEditContent,
   expectedHash: string,
+  confirmationHash?: string,
 ) {
   return request<{ version: SkillVersion }>(
     basePath,
@@ -270,6 +272,7 @@ export function uploadVersion(
         ...content,
         confirmed: true,
         expectedHash,
+        confirmationHash,
       }),
     },
   );

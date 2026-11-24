@@ -70,6 +70,7 @@ function versionsPath(skillId: string) {
 
 interface Preview {
   hash: string;
+  confirmationHash?: string;
   inventory: { path: string }[];
 }
 
@@ -92,8 +93,8 @@ async function confirmation(
   skillId: string,
   content: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const { hash } = await previewOf(skillId, content);
-  return { ...content, confirmed: true, expectedHash: hash };
+  const { hash, confirmationHash } = await previewOf(skillId, content);
+  return { ...content, confirmed: true, expectedHash: hash, confirmationHash };
 }
 
 async function upload(
@@ -215,6 +216,45 @@ function removeBinding(binding: { id: string; revision: number }) {
 }
 
 describe("Skill versions by upload", () => {
+  it("confirms the previewed edit base even when the uploaded bytes are unchanged", async () => {
+    const { skillId } = await startLibrary();
+    const versions = versionsPath(skillId);
+    const first = await previewOf(skillId, {
+      files: [file("SKILL.md", SKILL_MD)],
+    });
+    const second = await previewOf(skillId, {
+      files: [file("SKILL.md", SKILL_MD + "\nAnother base.\n")],
+    });
+    for (const [preview, content] of [
+      [first, SKILL_MD],
+      [second, SKILL_MD + "\nAnother base.\n"],
+    ] as const)
+      expect(
+        (
+          await write(versions, {
+            files: [file("SKILL.md", content)],
+            confirmed: true,
+            expectedHash: preview.hash,
+          })
+        ).status,
+      ).toBe(201);
+    const edit = {
+      baseHash: first.hash,
+      files: [file("SKILL.md", SKILL_MD), file("guide.md", "Reviewed")],
+    };
+    const preview = await previewOf(skillId, edit);
+    const confirmed = {
+      ...edit,
+      confirmed: true,
+      expectedHash: preview.hash,
+      confirmationHash: preview.confirmationHash,
+    };
+    expect(
+      (await write(versions, { ...confirmed, baseHash: second.hash })).status,
+    ).toBe(409);
+    expect((await write(versions, confirmed)).status).toBe(201);
+  });
+
   it("requires a Group lead for removal and preserves referenced versions and shared blobs", async () => {
     const { skillId, groupId } = await startLibrary();
     const lead = { subject: "lead", email: "lead@example.com" };
@@ -380,6 +420,7 @@ describe("Skill versions by upload", () => {
       ...browserEdit,
       confirmed: true,
       expectedHash: preview.hash,
+      confirmationHash: preview.confirmationHash,
     };
     expect(
       (await write(versions, { ...confirmation, expectedHash: newer.hash }))
@@ -412,7 +453,8 @@ describe("Skill versions by upload", () => {
     };
     const localPreview = await write(previewPath, localEdit);
     expect(localPreview.status).toBe(200);
-    expect(await localPreview.json()).toMatchObject({
+    const local = await localPreview.json();
+    expect(local).toMatchObject({
       preview: { hash: version.hash },
       diff,
     });
@@ -420,6 +462,7 @@ describe("Skill versions by upload", () => {
       ...localEdit,
       confirmed: true,
       expectedHash: version.hash,
+      confirmationHash: local.preview.confirmationHash,
     });
     expect(confirmedLocally.status).toBe(200);
     expect(await confirmedLocally.json()).toMatchObject({

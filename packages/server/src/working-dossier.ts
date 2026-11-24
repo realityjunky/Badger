@@ -24,6 +24,7 @@ import type { ServiceDependencies } from "./dependencies.js";
 import { recordAudit, type WriteContext } from "./audit.js";
 import {
   hasLegacyAuthoring,
+  lockDossierSkillAnswers,
   readWorkingRevision,
 } from "./working-dossier-store.js";
 import { listWorkflowPins, readSourceCheck } from "./workflow-source.js";
@@ -384,6 +385,7 @@ export async function saveWorkingDossier(
   }
   const edit = input;
   const editHash = canonicalHash(edit);
+  if (edit.fields) await lockDossierSkillAnswers(tx, version.id, edit.fields);
   const view = await readWorkingDossier(tx, version, context.personId, true);
   const replay = (
     await tx.query<{ revision: number; edit_hash: string }>(
