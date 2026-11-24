@@ -8,6 +8,7 @@ import {
 import type { DossierView } from "../src/api/dossier.js";
 import type { SkillVersion } from "../src/api/skills.js";
 import type { WorkflowVersionDetail } from "../src/api/workflows.js";
+import { readSkillArchive } from "./fixtures/skill-archive.js";
 import {
   api,
   base,
@@ -312,7 +313,14 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     await engineer
       .getByRole("link", { name: "Download ZIP", exact: true })
       .click();
-    expect((await download).suggestedFilename()).toMatch(/\.zip$/u);
+    const successorArchive = testInfo.outputPath("reviewed-successor.zip");
+    await (await download).saveAs(successorArchive);
+    expect(await readSkillArchive(successorArchive)).toEqual(
+      new Map(skill.files).set(
+        "references/format.md",
+        Buffer.from(`${submittedAnswer}\n`),
+      ),
+    );
     await review
       .getByRole("button", { name: "Refresh successor versions", exact: true })
       .click();
@@ -467,6 +475,30 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     expect(stale.versions.map(({ hash }) => hash)).toEqual(
       approved.versions.map(({ hash }) => hash),
     );
+    await admin.goto(`${base}${library}`);
+    await admin
+      .getByRole("button", { name: "Remove version", exact: true })
+      .click();
+    await admin
+      .getByRole("dialog")
+      .getByRole("button", { name: "Retire version", exact: true })
+      .click();
+    await expect(admin.getByRole("dialog")).toBeHidden();
+    const historicalPin = await readWorkflow(engineer, otherPath);
+    expect(historicalPin.pins[0]).toMatchObject({
+      hash: skill.hash,
+      retiredAt: expect.any(String),
+    });
+    await expert.getByRole("link", { name: skill.hash, exact: true }).click();
+    await expect(expert).toHaveURL(`${base}${library}`);
+    await expect(
+      expert
+        .getByRole("combobox", { name: "Versions", exact: true })
+        .locator(".."),
+    ).toContainText("Retired");
+    await expect(
+      expert.getByRole("link", { name: "Download ZIP", exact: true }),
+    ).toBeVisible();
     await testInfo.attach("workflow-decision-readiness", {
       body: await engineer.screenshot({ fullPage: true }),
       contentType: "image/png",

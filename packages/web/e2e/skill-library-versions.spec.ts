@@ -2,8 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { openPromise } from "yauzl";
 import type { SkillVersion, VersionPreview } from "../src/api/skills.js";
+import { readSkillArchive } from "./fixtures/skill-archive.js";
 
 const origin = `http://127.0.0.1:${process.env["BADGER_E2E_BASE_PATH_PORT"] ?? "4320"}`;
 const base = `${origin}/badger`;
@@ -45,22 +45,6 @@ async function upload(
     { files, expectedHash: preview.hash, confirmed: true },
   );
   return version;
-}
-
-async function unzip(file: string) {
-  const zip = await openPromise(file, { autoClose: false });
-  const files = new Map<string, Buffer>();
-  try {
-    for await (const entry of zip.eachEntry()) {
-      const chunks: Buffer[] = [];
-      for await (const chunk of await zip.openReadStreamPromise(entry))
-        chunks.push(Buffer.from(chunk));
-      files.set(entry.fileName, Buffer.concat(chunks));
-    }
-  } finally {
-    zip.close();
-  }
-  return files;
 }
 
 async function createFixture(page: Page) {
@@ -119,7 +103,7 @@ test("select and download an unlabelled Skill snapshot and label it by hash", as
   const zip = info.outputPath("original.zip");
   await download.saveAs(zip);
   expect(await fs.stat(zip).then((entry) => entry.size)).toBeGreaterThan(0);
-  const extracted = await unzip(zip);
+  const extracted = await readSkillArchive(zip);
   expect(extracted).toEqual(original);
   expect(first.inventory.map(({ path, hash }) => [path, hash]).sort()).toEqual(
     [...extracted]
@@ -265,7 +249,7 @@ test("review browser changes against an older Skill version before saving a succ
   await page.getByRole("link", { name: "Download ZIP" }).click();
   const archive = info.outputPath("successor.zip");
   await (await downloading).saveAs(archive);
-  expect(await unzip(archive)).toEqual(
+  expect(await readSkillArchive(archive)).toEqual(
     new Map([
       ["SKILL.md", Buffer.from(revised)],
       ["references/decision.md", Buffer.from("This is a reviewed decision.\n")],
@@ -291,7 +275,7 @@ test("review a local upload against the explicit starting Skill version", async 
   await page.getByRole("link", { name: "Download ZIP" }).click();
   const zip = info.outputPath("workstation.zip");
   await (await downloading).saveAs(zip);
-  const files = await unzip(zip);
+  const files = await readSkillArchive(zip);
   const workspace = info.outputPath("workstation");
   for (const [name, content] of files) {
     const destination = path.join(workspace, name);
@@ -407,5 +391,5 @@ test("delete an unused version and retire a snapshot used as a base", async ({
   await page.getByRole("link", { name: "Download ZIP" }).click();
   const zip = info.outputPath("retired.zip");
   await (await downloading).saveAs(zip);
-  expect(await unzip(zip)).toEqual(original);
+  expect(await readSkillArchive(zip)).toEqual(original);
 });
