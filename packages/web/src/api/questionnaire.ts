@@ -266,7 +266,19 @@ export async function questionnaireRequest<T>(
     throw new QuestionnaireError(
       response.status,
       value.error?.message ?? "The request failed",
-      Array.isArray(value.findings) ? value.findings : undefined,
+      Array.isArray(value.findings)
+        ? value.findings.flatMap((finding: unknown) => {
+            if (typeof finding === "string") return [{ message: finding }];
+            if (
+              finding &&
+              typeof finding === "object" &&
+              "message" in finding &&
+              typeof finding.message === "string"
+            )
+              return [{ ...finding, message: finding.message }];
+            return [];
+          })
+        : undefined,
     );
   return value as T;
 }

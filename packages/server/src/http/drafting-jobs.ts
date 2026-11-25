@@ -1,4 +1,8 @@
-import { isAuthoringJob, reconcileAuthoringJobs } from "../authoring.js";
+import {
+  isAuthoringJob,
+  reconcileAuthoringJobs,
+  validateLaneResult,
+} from "../authoring.js";
 import { portableAuthoringHistory } from "../authoring-history.js";
 import { createHash } from "node:crypto";
 import { canonicalHash } from "@realityjunky/badger";
@@ -455,6 +459,8 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
           !Object.hasOwn(releaseReasons, body.reason))
       )
         throw new RequestError(400, "Choose a supported release reason");
+      if (action === "finish" && isAuthoringJob(job) && job.result !== null)
+        validateLaneResult(job, job.review_result ?? job.result);
       const updated =
         action === "submit"
           ? await submitDraftingJob(

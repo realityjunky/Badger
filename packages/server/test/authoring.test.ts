@@ -74,6 +74,94 @@ async function acceptLane(
   });
 }
 
+it("reports Markdown findings for both pause-points leaves before handoff and review", async () => {
+  const { call, base } = await generated();
+  const { jobs } = await call(
+    `${base}/package/authoring-jobs`,
+    "POST",
+    { confirmed: true },
+    engineer,
+    201,
+  );
+  const pausePoints = jobs.find((job: any) => job.laneId === "pause-points");
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "pause-points author", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  const route = `${base}/drafting-jobs/${pausePoints.id}`;
+  const claim = await call(
+    `${route}/claim`,
+    "POST",
+    { revision: pausePoints.revision },
+    engineer,
+    200,
+    secret,
+  );
+  const valid = reportLaneOutput(claim.contextBundle);
+  const invalid = {
+    ...valid,
+    artifacts: valid.artifacts.map(
+      (artifact: { path: string; content: string }) => ({
+        ...artifact,
+        content: artifact.content
+          .replace("## Classification", "## Categories")
+          .replace("## Drift Handling", "## Recover stale evidence"),
+      }),
+    ),
+  };
+  const lease = {
+    leaseId: claim.job.lease.id,
+    contextHash: claim.job.contextHash,
+  };
+  const findings = [
+    "authored content missing substantive section Classification: reference/decision-points.md",
+    "authored content missing substantive section Drift Handling: reference/recovery.md",
+  ];
+  const rejected = await call(
+    `${route}/submit`,
+    "POST",
+    { ...lease, result: { laneOutput: invalid }, keepClaim: true },
+    engineer,
+    400,
+    secret,
+  );
+  expect(rejected.findings).toEqual(findings);
+  const { job: saved } = await call(
+    `${route}/submit`,
+    "POST",
+    { ...lease, result: { laneOutput: valid }, keepClaim: true },
+    engineer,
+    200,
+    secret,
+  );
+  expect(saved.status).toBe("claimed");
+  const { job: submitted } = await call(
+    `${route}/finish`,
+    "POST",
+    { ...lease, revision: saved.revision },
+    engineer,
+    200,
+    secret,
+  );
+  const rejectedPreview = await call(
+    `${route}/accept-preview`,
+    "POST",
+    { revision: submitted.revision, laneOutput: invalid },
+    engineer,
+    400,
+  );
+  expect(rejectedPreview.findings).toEqual(findings);
+  await call(`${route}/accept-preview`, "POST", {
+    revision: submitted.revision,
+    laneOutput: valid,
+  });
+  expect(claim.instructions).toContain("## Classification");
+  expect(claim.instructions).toContain("## Drift Handling");
+});
+
 it("offers only current Wave lanes as bounded Agent jobs and keeps submitted output out of the authoring session until acceptance", async () => {
   const { call, base } = await generated();
   const { jobs } = await call(

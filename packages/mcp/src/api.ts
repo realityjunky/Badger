@@ -34,6 +34,7 @@ export class BadgerApiError extends Error {
     message: string,
     /** Seconds the service asked the caller to wait, from `Retry-After`. */
     readonly retryAfter: number | null = null,
+    readonly findings: readonly string[] = [],
   ) {
     super(message);
   }
@@ -164,11 +165,19 @@ export class BadgerApi {
         .join(" ")
         .replaceAll(this.options.token, "[redacted]")
         .slice(0, 500);
+      const findings = Array.isArray(failure?.findings)
+        ? failure.findings
+            .filter((finding): finding is string => typeof finding === "string")
+            .map((finding) =>
+              finding.replaceAll(this.options.token, "[redacted]"),
+            )
+        : [];
       throw new BadgerApiError(
         response.status,
         code,
         `Badger ${response.status}${code ? ` ${code}` : ""}: ${detail}`,
         retryAfter,
+        findings,
       );
     }
     return response.json() as Promise<T>;

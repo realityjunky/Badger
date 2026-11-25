@@ -1,4 +1,5 @@
 import { assemblePrompt, packagedPromptTemplate } from "../prompt-templates.js";
+import { authoringContentScaffold } from "@realityjunky/badger";
 import { draftingLanguageInstructions } from "@realityjunky/badger/prompts";
 import { publicDraftingJob, type DraftingJobRow } from "./jobs.js";
 import { RequestError } from "../http/errors.js";
@@ -38,6 +39,15 @@ export function draftingJobPrompt(
       ].join("\n\n"),
       job: target,
     };
+  const authoring = job.context_bundle.authoring;
+  const lane = authoring?.plan.lanes.find(({ id }) => id === job.lane_id);
+  const scaffolds =
+    lane?.contentLeaves.flatMap((artifactPath) => {
+      const markdown = authoringContentScaffold(artifactPath);
+      return markdown
+        ? [`### \`${artifactPath}\`\n\n\`\`\`markdown\n${markdown}\n\`\`\``]
+        : [];
+    }) ?? [];
   return {
     template,
     prompt: assemblePrompt(
@@ -63,6 +73,17 @@ export function draftingJobPrompt(
         "Current drafting-session rules supersede older suggestion-editing or completion wording in this template snapshot. Saving suggestions keeps the session open. The person's copied dispatch prompt can authorize finish_job after the final verified save. If the person has authorized only drafting, wait for their instruction to finish. Only people accept or discard suggestions in the dashboard.",
         "Your MCP must expose finish_job for an iterative drafting session. If it is missing, release_job preserves the saved suggestions while ending this claim; update/build the local Badger MCP and restart its connection before reclaiming. After each submit, verify savedDraft.resultHash and job.currentResultHash, and follow job.currentResultPath to the latest content. job.result and job.resultHash always preserve the first submission; a stable original hash does not mean a later save failed. Never submit probe content to a real job to test persistence.",
         "This job is already claimed. Read job.json, context.json, output-schema.json, bounded inputs/ when present and the exact pinned files under skills/. Read result.json when present: it contains the latest saved suggestions, including changes made since any previous session. Never start from an old folder's copy. Write result.json in this new folder, then submit_job with workflowId, versionId, jobId and that folder. Keep this claim for follow-up changes and submit again as needed. When authorized to hand off the final saved draft, call finish_job with the same arguments. release_job and disconnect give up ownership while preserving saved work. Thirty minutes without job activity expires the claim; background checks do not keep it alive. After any handover or expiry, list the current job and claim its latest revision into a new folder before continuing. Return the dashboard link.",
+        ...(authoring
+          ? [
+              "If submit_job returns validation findings, correct the named artifacts and retry in this claim before finishing. For a repair job, read the requirement in context.json before repeating the earlier work.",
+            ]
+          : []),
+        ...(scaffolds.length
+          ? [
+              "Use these scaffolds for the inline Markdown artifacts. Keep the section headings as written and use the pinned evidence to fill each section. In recovery, explain how a fresh process reads persisted state, finds the current Node and next step, and preserves the blocked reason.",
+              ...scaffolds,
+            ]
+          : []),
       ].join("\n\n"),
     ),
     job: target,

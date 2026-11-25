@@ -255,6 +255,16 @@ export function createBadgerMcp(
                   : error.message.slice(0, 1000)
                 : "Badger request failed",
           },
+          ...(error instanceof BadgerApiError && error.findings.length
+            ? [
+                {
+                  type: "text" as const,
+                  text: error.findings
+                    .map((finding) => `- ${finding}`)
+                    .join("\n"),
+                },
+              ]
+            : []),
         ],
       };
     }

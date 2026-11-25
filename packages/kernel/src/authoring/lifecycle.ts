@@ -508,9 +508,45 @@ function authoredHeading(artifactPath: string): string | undefined {
 }
 
 type AuthoredContentTarget =
-  "entry" | "node" | "decision-points" | "recovery" | "review" | undefined;
+  "entry" | "node" | "decision-points" | "recovery" | "review";
 
-function authoredContentTarget(artifactPath: string): AuthoredContentTarget {
+const REQUIRED_AUTHORED_SECTIONS: Record<
+  AuthoredContentTarget,
+  readonly (readonly string[])[]
+> = {
+  entry: [
+    ["Automatic Node Detection"],
+    ["Resume And Drift", "Resume Rules", "Error Handling And Resume Rules"],
+    ["Decision Classification And Decision Points", "Decision Points"],
+    ["Red Flags"],
+  ],
+  node: [
+    ["Prerequisites"],
+    ["Steps"],
+    ["Required Skill Calls", "Required Bindings"],
+    ["Evidence"],
+    ["Completion Reasoning"],
+    ["Red Flags"],
+    ["Recovery"],
+  ],
+  "decision-points": [
+    ["Classification"],
+    ["Genuine User Decisions"],
+    ["Automatic Handling"],
+    ["Stop Conditions"],
+    ["Manual Handoffs"],
+  ],
+  recovery: [
+    ["State First", "State"],
+    ["Resume Procedure", "Resume"],
+    ["Drift Handling", "Drift"],
+  ],
+  review: [["Contract Fit"], ["Usability"], ["Strengths"], ["Findings"]],
+};
+
+function authoredContentTarget(
+  artifactPath: string,
+): AuthoredContentTarget | undefined {
   if (artifactPath === "SKILL.md") return "entry";
   if (artifactPath.endsWith("/SKILL.md")) return "node";
   if (artifactPath === "reference/decision-points.md") {
@@ -519,6 +555,19 @@ function authoredContentTarget(artifactPath: string): AuthoredContentTarget {
   if (artifactPath === "reference/recovery.md") return "recovery";
   if (artifactPath === "reference/skill-review.md") return "review";
   return undefined;
+}
+
+/** A drafting scaffold for each reference leaf owned by the pause-points lane. */
+export function authoringContentScaffold(
+  artifactPath: string,
+): string | undefined {
+  const target = authoredContentTarget(artifactPath);
+  if (target !== "decision-points" && target !== "recovery") return undefined;
+  const title = target === "decision-points" ? "Decision Points" : "Recovery";
+  return [
+    `# ${title}`,
+    ...REQUIRED_AUTHORED_SECTIONS[target].map(([heading]) => `## ${heading}`),
+  ].join("\n\n");
 }
 
 function normalizedHeadingTitle(title: string): string {
@@ -730,40 +779,7 @@ function substantiveContentFindings(
   if (wordCount < minimumWords) {
     findings.push(`authored content is not substantive: ${artifactPath}`);
   }
-  const requiredHeadings: Record<
-    Exclude<AuthoredContentTarget, undefined>,
-    readonly (readonly string[])[]
-  > = {
-    entry: [
-      ["Automatic Node Detection"],
-      ["Resume And Drift", "Resume Rules", "Error Handling And Resume Rules"],
-      ["Decision Classification And Decision Points", "Decision Points"],
-      ["Red Flags"],
-    ],
-    node: [
-      ["Prerequisites"],
-      ["Steps"],
-      ["Required Skill Calls", "Required Bindings"],
-      ["Evidence"],
-      ["Completion Reasoning"],
-      ["Red Flags"],
-      ["Recovery"],
-    ],
-    "decision-points": [
-      ["Classification"],
-      ["Genuine User Decisions"],
-      ["Automatic Handling"],
-      ["Stop Conditions"],
-      ["Manual Handoffs"],
-    ],
-    recovery: [
-      ["State First", "State"],
-      ["Resume Procedure", "Resume"],
-      ["Drift Handling", "Drift"],
-    ],
-    review: [["Contract Fit"], ["Usability"], ["Strengths"], ["Findings"]],
-  };
-  for (const aliases of requiredHeadings[target]) {
+  for (const aliases of REQUIRED_AUTHORED_SECTIONS[target]) {
     if (!hasHeading(headings, aliases)) {
       findings.push(
         `authored content missing substantive section ${aliases[0]}: ${artifactPath}`,
@@ -2054,6 +2070,7 @@ export function validateAuthoringLaneOutput(
   value: unknown,
   plan: AuthoringPlan,
   expectedLane: AuthoringLaneId,
+  workflow?: WorkflowProtocol,
 ): string[] {
   if (!isRecord(value) || typeof value.lane !== "string")
     return ["Authoring lane output lane is required"];
@@ -2075,6 +2092,12 @@ export function validateAuthoringLaneOutput(
     ] as const) {
       if (normalized[field] !== undefined && normalized[field] !== expected)
         findings.push(`Authoring lane output ${field} is stale`);
+    }
+    for (const { path: artifactPath, content } of normalized.artifacts ?? []) {
+      if (content !== undefined)
+        findings.push(
+          ...authoredContentFindings(content, artifactPath, workflow),
+        );
     }
     return findings;
   } catch (error) {

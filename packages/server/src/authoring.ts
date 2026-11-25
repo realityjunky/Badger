@@ -374,15 +374,23 @@ export function validateLaneResult(job: DraftingJobRow, result: unknown) {
   const output = (result as { laneOutput: AuthoringLaneOutput }).laneOutput;
   if (Buffer.byteLength(JSON.stringify(output)) > 256 * 1024)
     throw new RequestError(413, "Authoring lane output exceeds 256 KiB");
-  if (output.artifacts?.some((a) => a.contentPath !== undefined))
+  const artifacts = Array.isArray(output.artifacts) ? output.artifacts : [];
+  if (artifacts.some((artifact) => artifact?.contentPath !== undefined))
     throw new RequestError(
       400,
       "Submit authored content inline; host file paths grant no service access",
     );
+  const authoring = job.context_bundle.authoring!;
+  const proposal = artifacts.some((artifact) => artifact?.content !== undefined)
+    ? authoring.files.find(
+        (file) => file.path === authoring.handoff.confirmedProposal?.path,
+      )
+    : undefined;
   const findings = validateAuthoringLaneOutput(
     output,
-    job.context_bundle.authoring!.plan,
+    authoring.plan,
     job.lane_id!,
+    proposal ? JSON.parse(proposal.text).workflow : undefined,
   );
   if (findings.length)
     throw new RequestError(

@@ -138,6 +138,9 @@ const en = {
   "authoring.followUps": "Follow-up work",
   "authoring.question": "Open follow-up question",
   "authoring.repair": "Repair job",
+  "authoring.repairNeedsDispatch": "Repair job needs dispatch",
+  "authoring.dispatchRepairHelp":
+    "When the repair inputs are ready, use Copy Agent prompt and paste it into your Agent session.",
   "authoring.accept": "Preview acceptance",
   "authoring.reject": "Preview rejection",
   "authoring.reason": "Reason for rejection",
@@ -1831,6 +1834,9 @@ const zh: Record<MessageId, string> = {
   "authoring.followUps": "后续工作",
   "authoring.question": "打开后续问题",
   "authoring.repair": "修复任务",
+  "authoring.repairNeedsDispatch": "修复任务等待派发",
+  "authoring.dispatchRepairHelp":
+    "修复所需的输入就绪后，使用「复制 Agent 提示词」，并将提示词粘贴到您的 Agent 会话中。",
   "authoring.accept": "预览接受",
   "authoring.reject": "预览拒绝",
   "authoring.reason": "拒绝原因",

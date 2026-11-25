@@ -3,7 +3,10 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AuthoringReadiness } from "@realityjunky/badger";
 import type { AuthoringDraftingJob } from "../../api/drafting-jobs.js";
-import { questionnaireRequest } from "../../api/questionnaire.js";
+import {
+  QuestionnaireError,
+  questionnaireRequest,
+} from "../../api/questionnaire.js";
 import { AgentPromptButton } from "../../components/AgentPromptButton.js";
 import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
@@ -38,6 +41,10 @@ export function WorkflowAuthoring({
   const { t, format, locale } = useI18n();
   const [view, setView] = useState<View | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [dialogFailure, setDialogFailure] = useState<{
+    message: string;
+    findings: { message: string }[];
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
   const [review, setReview] = useState<LaneJob | null>(null);
@@ -82,14 +89,22 @@ export function WorkflowAuthoring({
     const timer = setInterval(() => setReload((r) => r + 1), 5000);
     return () => clearInterval(timer);
   }, []);
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<void>, inDialog = false) {
     if (busy) return;
     setBusy(true);
     setFailure(null);
+    setDialogFailure(null);
     try {
       await action();
     } catch (error) {
-      setFailure(error instanceof Error ? error.message : t("package.failed"));
+      const message =
+        error instanceof Error ? error.message : t("package.failed");
+      if (inDialog)
+        setDialogFailure({
+          message,
+          findings: error instanceof QuestionnaireError ? error.findings : [],
+        });
+      else setFailure(message);
     } finally {
       setBusy(false);
     }
@@ -127,11 +142,16 @@ export function WorkflowAuthoring({
           jobs.find(({ status }) =>
             ["queued", "claimed", "submitted"].includes(status),
           ) ?? jobs[0];
+        const record = view.readiness.records[lane.id];
         return {
           ...lane,
           job,
           earlierJobs: jobs.filter((entry) => entry.id !== job?.id),
-          sessionRevision: view.readiness.records[lane.id]?.revision,
+          sessionRevision: record?.revision,
+          queuedRepair:
+            job?.status === "queued" &&
+            view.followUps.some(({ repairJobId }) => repairJobId === job.id),
+          repairRequirement: record?.action?.requirement,
         };
       })
     : [];
@@ -139,6 +159,22 @@ export function WorkflowAuthoring({
     status === "submitted"
       ? t("authoring.submitted")
       : t(`drafting.state.${status}`);
+  const dialogAlert = dialogFailure && (
+    <Alert
+      type="error"
+      showIcon
+      title={dialogFailure.message}
+      description={
+        dialogFailure.findings.length > 0 && (
+          <ul>
+            {dialogFailure.findings.map(({ message }, index) => (
+              <li key={index}>{message}</li>
+            ))}
+          </ul>
+        )
+      }
+    />
+  );
   return (
     <section
       className="authoring-panel"
@@ -267,7 +303,7 @@ export function WorkflowAuthoring({
               },
               {
                 title: t("authoring.jobStatus"),
-                render: (_, { job }) => {
+                render: (_, { job, queuedRepair, repairRequirement }) => {
                   if (!job)
                     return (
                       <span className="muted">{t("authoring.noJob")}</span>
@@ -292,11 +328,27 @@ export function WorkflowAuthoring({
                             </span>
                           )}
                       </Space>
+                      {canManage && queuedRepair && (
+                        <Alert
+                          type="info"
+                          showIcon
+                          title={t("authoring.repairNeedsDispatch")}
+                          description={
+                            <>
+                              {repairRequirement && (
+                                <div>{repairRequirement}</div>
+                              )}
+                              <div>{t("authoring.dispatchRepairHelp")}</div>
+                            </>
+                          }
+                        />
+                      )}
                       {canCopy && (
                         <Space wrap>
                           {canReview && (
                             <Button
                               onClick={() => {
+                                setDialogFailure(null);
                                 setReview({ ...job, result });
                                 setReason("");
                               }}
@@ -345,13 +397,17 @@ export function WorkflowAuthoring({
       <Modal
         open={!!review}
         title={`${review?.laneId ?? ""} — ${t("authoring.inspect")}`}
-        onCancel={() => !busy && setReview(null)}
+        onCancel={() => {
+          if (busy) return;
+          setReview(null);
+          setDialogFailure(null);
+        }}
         footer={
           <Space>
             <Button
               disabled={busy || !reason.trim()}
               onClick={() =>
-                review && void run(() => preview(review, "reject"))
+                review && void run(() => preview(review, "reject"), true)
               }
             >
               {t("authoring.reject")}
@@ -360,7 +416,7 @@ export function WorkflowAuthoring({
               type="primary"
               disabled={busy}
               onClick={() =>
-                review && void run(() => preview(review, "accept"))
+                review && void run(() => preview(review, "accept"), true)
               }
             >
               {t("authoring.accept")}
@@ -369,6 +425,7 @@ export function WorkflowAuthoring({
         }
         width={860}
       >
+        {!decision && dialogAlert}
         <Tag>{review?.result?.laneOutput.status}</Tag>
         <p>{review?.result?.laneOutput.summary}</p>
         <Collapse
@@ -434,7 +491,11 @@ export function WorkflowAuthoring({
         title={t("authoring.confirmDecision")}
         confirmLoading={busy}
         okText={t("authoring.confirm")}
-        onCancel={() => !busy && setDecision(null)}
+        onCancel={() => {
+          if (busy) return;
+          setDecision(null);
+          setDialogFailure(null);
+        }}
         onOk={() =>
           decision &&
           void run(async () => {
@@ -451,9 +512,10 @@ export function WorkflowAuthoring({
             setDecision(null);
             setReview(null);
             refresh();
-          })
+          }, true)
         }
       >
+        {dialogAlert}
         <p>
           {decision?.job.laneId} ·{" "}
           {decision?.action === "accept"
@@ -467,7 +529,11 @@ export function WorkflowAuthoring({
         title={t("authoring.confirmAssembly")}
         confirmLoading={busy}
         okText={t("authoring.confirm")}
-        onCancel={() => !busy && setAssembly(null)}
+        onCancel={() => {
+          if (busy) return;
+          setAssembly(null);
+          setDialogFailure(null);
+        }}
         onOk={() =>
           assembly &&
           void run(async () => {
@@ -478,9 +544,10 @@ export function WorkflowAuthoring({
             });
             setAssembly(null);
             refresh();
-          })
+          }, true)
         }
       >
+        {dialogAlert}
         <p>{t("authoring.assemblyHelp")}</p>
         <dl className="gate-hashes">
           <dt>{t("authoring.revision")}</dt>

@@ -1112,6 +1112,59 @@ it("offers the engineer profile and hands a claimed job's context and exact pinn
     (await request(`${base}/package/authoring`)).readiness.records.script,
   ).toBeUndefined();
 
+  const pausePoints = laneJobs.jobs.find(
+    (job: { laneId: string }) => job.laneId === "pause-points",
+  );
+  const pauseClaim = await call(client, "claim_job", {
+    ...context,
+    jobId: pausePoints.id,
+    revision: pausePoints.revision,
+  });
+  folders.push(pauseClaim.folder);
+  await fs.writeFile(
+    path.join(pauseClaim.folder, "result.json"),
+    JSON.stringify({
+      laneOutput: {
+        lane: "pause-points",
+        status: "BLOCKED",
+        semanticDossierHash: laneContext.authoring.plan.semanticDossierHash,
+        summary:
+          "The schedule requires evidence before the report can advance.",
+        action: {
+          kind: "repair",
+          prompt: "Reconcile the report evidence with the approved schedule.",
+          requirement: "Confirm the exact report evidence.",
+        },
+        artifacts: [
+          {
+            path: "reference/decision-points.md",
+            content: "# Decision Points",
+          },
+          { path: "reference/recovery.md", content: "# Recovery" },
+        ],
+      },
+    }),
+  );
+  const invalidDraft = await client.callTool({
+    name: "submit_job",
+    arguments: { ...context, jobId: pausePoints.id, folder: pauseClaim.folder },
+  });
+  expect(invalidDraft.isError).toBe(true);
+  expect(invalidDraft.content).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        text: expect.stringContaining(
+          "authored content missing substantive section Classification: reference/decision-points.md",
+        ),
+      }),
+      expect.objectContaining({
+        text: expect.stringContaining(
+          "authored content missing substantive section Drift Handling: reference/recovery.md",
+        ),
+      }),
+    ]),
+  );
+
   await request(`${base}/pins/${skill.id}`, "DELETE", { revision: 1 });
   const cancelled = await request(`${base}/drafting-jobs/${job.id}`);
   expect(cancelled.job.status).toBe("cancelled");
