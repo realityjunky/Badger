@@ -171,7 +171,7 @@ export const documentationEn = {
   "documentation.questionnaire.ledger":
     "Inspect the Ledger's confirmed user Facts, source-derived Facts, Inferences, unresolved Assumptions, and remaining Questions. Review an Agent's drafting result before accepting it; an unaccepted draft is not an agreed Fact.",
   "documentation.questionnaire.drafting.scenario":
-    "Drafting jobs and suggestions: request an Agent's first pass from pinned evidence and submitted records. By default, the status filter shows Queued, Claimed, and Awaiting your review; choose other statuses beside Reload records to find accepted, discarded, or cancelled jobs. Right-click a job card's body to copy its link; opening it reveals that job for an authorized reader. The info icon beside the panel title explains the review handoff. Changed inputs cancel affected jobs.",
+    "Drafting jobs and suggestions: request an Agent's first pass from pinned evidence and submitted records. By default, the status filter shows Queued, Claimed, and Awaiting your review; choose other statuses beside the Reload records icon to find accepted, discarded, or cancelled jobs. Right-click a job card's body to copy its link; opening it reveals that job for an authorized reader. The info icon beside the panel title explains the review handoff. Changed inputs cancel affected jobs.",
   "documentation.questionnaire.drafting.work":
     "Request drafting offers six kinds. Draft questions and Draft follow-ups propose questions for a selected draft round; follow-ups may name a parent Question. Draft script effects (optional) requests suggestions for one pinned Skill. Earlier workflows use Study a source Skill for source-derived Facts and effect suggestions. Restate an answer as facts uses submitted Answers. Translate a question uses the selected Question and explicit target language. Import a Skill's open questions needs a pinned Skill and draft round. Create the round first when required. Generated narrative uses the selected Workflow version's locale, or the translation target; your interface language does not translate stored drafts.",
   "documentation.questionnaire.drafting.review":
@@ -457,7 +457,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.questionnaire.ledger":
     "检查台账中的已确认用户事实、来源事实、推断、未决假设和剩余问题。接受 Agent 起草结果前先审阅；尚未接受的草稿不是已达成共识的事实。",
   "documentation.questionnaire.drafting.scenario":
-    "起草任务与建议：让 Agent 依据固定证据和已提交的记录先行起草。状态筛选默认显示“排队中”“已领取”和“等待您审核”；通过“重新加载记录”旁的筛选可查找已接受、已丢弃或已取消的任务。右键点击任务卡片正文可复制链接；有权访问的人打开链接时会显示该任务。标题旁的信息图标说明审核交接流程。输入变更会取消受影响的任务。",
+    "起草任务与建议：让 Agent 依据固定证据和已提交的记录先行起草。状态筛选默认显示“排队中”“已领取”和“等待您审核”；通过“重新加载记录”图标旁的筛选可查找已接受、已丢弃或已取消的任务。右键点击任务卡片正文可复制链接；有权访问的人打开链接时会显示该任务。标题旁的信息图标说明审核交接流程。输入变更会取消受影响的任务。",
   "documentation.questionnaire.drafting.work":
     "“请求起草”提供六种类别。“起草问题”和“起草追问”为所选草稿轮次提出问题，追问可指定父问题；“起草脚本影响（可选）”为一个固定的 Skill 提出建议；早期工作流通过“研读来源 Skill”起草来源事实及脚本影响；“将回答重述为事实”使用已提交的回答；“翻译问题”使用所选问题及明确指定的目标语言；“导入 Skill 的开放问题”需要固定的 Skill 和草稿轮次。需要轮次时请先创建。生成文字使用所选工作流版本的语言或翻译目标语言；界面语言不会翻译已保存的草稿。",
   "documentation.questionnaire.drafting.review":

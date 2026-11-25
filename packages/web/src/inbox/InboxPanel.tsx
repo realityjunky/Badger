@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router-dom";
 import { EMPTY_INBOX_FILTERS } from "../api/inbox.js";
 import { loadWorkflows, type WorkflowCatalog } from "../api/workflows.js";
 import { readBasePath } from "../app/paths.js";
+import { ReloadRecordsButton } from "../components/ReloadRecordsButton.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { skillVersionCaption } from "../api/questionnaire.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
@@ -59,15 +60,13 @@ export function InboxPanel() {
     >
       <div className="workflow-card-heading">
         <h2 id="inbox-title">{t("inbox.title")}</h2>
-        <Button
+        <ReloadRecordsButton
           loading={loading}
           onClick={() => {
             void refresh();
             setReload((current) => current + 1);
           }}
-        >
-          {t("workflow.reload")}
-        </Button>
+        />
       </div>
       <div
         className="inbox-filters"

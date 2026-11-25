@@ -9,6 +9,7 @@ import {
   type ReminderResult,
   type WaitingItem,
 } from "../../api/notifications.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { useLiveUpdates } from "../../live/LiveUpdatesContext.js";
 import { DeliveryLog } from "../settings/DeliveryLog.js";
@@ -94,9 +95,7 @@ export function WorkflowNotifications({
       id="notifications"
       aria-labelledby="workflow-notifications-title"
       actions={
-        <Button onClick={() => setRefresh((value) => value + 1)}>
-          {t("workflow.reload")}
-        </Button>
+        <ReloadRecordsButton onClick={() => setRefresh((value) => value + 1)} />
       }
     >
       {notice && (

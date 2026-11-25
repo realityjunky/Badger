@@ -22,12 +22,15 @@ import type {
   GatePreview,
   WorkflowVersionDetail,
 } from "../../api/workflows.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { useInbox } from "../../inbox/InboxContext.js";
+import { useLiveUpdates } from "../../live/LiveUpdatesContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { PlanContent } from "./PlanContent.js";
 import { PlanEditor } from "./PlanEditor.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
+import { selectedWorkflowTab } from "./WorkflowTabs.js";
 import { AgentPromptButton } from "../../components/AgentPromptButton.js";
 
 export function WorkflowPlan({
@@ -41,8 +44,10 @@ export function WorkflowPlan({
 }) {
   const { t, format } = useI18n();
   const inbox = useInbox();
+  const { connected, notice } = useLiveUpdates();
   const location = useLocation();
   const navigate = useNavigate();
+  const active = selectedWorkflowTab(location) === "plan";
   const section = useRef<HTMLElement>(null);
   const [view, setView] = useState<PlanView | null>(null);
   const [jobs, setJobs] = useState<PlanDraftingJob[]>([]);
@@ -76,6 +81,7 @@ export function WorkflowPlan({
     view?.confirmation?.invalidatedAt === null &&
     view.confirmation.boundHashes.plan === selected.hash;
   useEffect(() => {
+    if (!active) return;
     const controller = new AbortController();
     void Promise.all([
       questionnaireRequest<PlanView>(
@@ -112,12 +118,24 @@ export function WorkflowPlan({
     );
     return () => controller.abort();
   }, [
+    active,
     basePath,
     path,
     detail.version.revision,
     detail.capabilities.editPlan,
     refresh,
   ]);
+  useEffect(() => {
+    if (active && notice.versionIds.includes(detail.version.id))
+      setRefresh((value) => value + 1);
+  }, [active, detail.version.id, notice]);
+  useEffect(() => {
+    if (!active || connected) return;
+    const timer = window.setInterval(() => {
+      if (!document.hidden) setRefresh((value) => value + 1);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [active, connected]);
   useEffect(() => {
     if (location.hash === "#plan" && view)
       section.current?.scrollIntoView({ block: "start" });
@@ -249,15 +267,13 @@ export function WorkflowPlan({
               </Button>
             </>
           )}
-          <Button
+          <ReloadRecordsButton
             disabled={busy}
             onClick={() => {
               setFailure(null);
               setRefresh((r) => r + 1);
             }}
-          >
-            {t("workflow.reload")}
-          </Button>
+          />
         </Space>
       }
     >
@@ -377,6 +393,12 @@ export function WorkflowPlan({
                         </>
                       )}
                     </Space>
+                    {job.status === "claimed" &&
+                      (job.review?.result ?? job.result) && (
+                        <p className="muted" role="status">
+                          {t("plan.draftSaved")}
+                        </p>
+                      )}
                   </li>
                 ))}
               </ul>

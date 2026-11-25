@@ -29,6 +29,7 @@ import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { StageReviewGuidance } from "../components/StageReviewGuidance.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
+import { ReloadRecordsButton } from "../components/ReloadRecordsButton.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { useDemoMode } from "../app/DemoContext.js";
 import { workflowVersionLabel } from "../util/workflowVersion.js";
@@ -189,9 +190,9 @@ export function EvaluationsPage() {
         title={t("page.evaluations.title")}
         description={t("evaluation.description")}
         actions={
-          <Button onClick={() => setRefresh((value) => value + 1)}>
-            {t("workflow.reload")}
-          </Button>
+          <ReloadRecordsButton
+            onClick={() => setRefresh((value) => value + 1)}
+          />
         }
       />
       <section

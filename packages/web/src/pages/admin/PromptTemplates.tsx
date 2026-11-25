@@ -17,6 +17,7 @@ import {
 } from "@realityjunky/badger/prompts";
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import { readBasePath } from "../../app/paths.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
 export function PromptTemplates() {
@@ -83,15 +84,13 @@ export function PromptTemplates() {
   return (
     <section aria-label={t("prompts.title")}>
       <p>{t("prompts.description")}</p>
-      <Button
+      <ReloadRecordsButton
         disabled={busy}
         onClick={() => {
           setFailure(null);
           setReload((value) => value + 1);
         }}
-      >
-        {t("workflow.reload")}
-      </Button>
+      />
       {failure && <Alert type="error" title={failure} />}
       {saved && <Alert type="success" title={t("prompts.saved")} />}
       <Collapse

@@ -36,6 +36,7 @@ import {
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { StageReviewGuidance } from "../components/StageReviewGuidance.js";
+import { ReloadRecordsButton } from "../components/ReloadRecordsButton.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import { workflowVersionLabel } from "../util/workflowVersion.js";
@@ -522,14 +523,12 @@ export function QuestionnairePage() {
         <span className="muted" role="status">
           {t(connected ? "questionnaire.live" : "questionnaire.polling")}
         </span>
-        <Button
+        <ReloadRecordsButton
           onClick={() => {
             void reload();
             void reloadDossier();
           }}
-        >
-          {t("workflow.reload")}
-        </Button>
+        />
         {view?.capabilities.raiseConcern && (
           <Button
             onClick={() => {
@@ -585,9 +584,7 @@ export function QuestionnairePage() {
                   showIcon
                   title={dossierFailure}
                   action={
-                    <Button onClick={() => void reloadDossier()}>
-                      {t("workflow.reload")}
-                    </Button>
+                    <ReloadRecordsButton onClick={() => void reloadDossier()} />
                   }
                 />
               )}

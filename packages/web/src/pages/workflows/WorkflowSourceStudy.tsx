@@ -23,6 +23,7 @@ import type {
   WorkflowVersionDetail,
 } from "../../api/workflows.js";
 import { workingDossierPath } from "../../api/working-dossier.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { StudyRecordDialog } from "./StudyRecordDialog.js";
 import {
@@ -406,11 +407,7 @@ export function WorkflowSourceStudy({
           type="error"
           showIcon
           title={dossierFailure}
-          action={
-            <Button onClick={() => void reload()}>
-              {t("workflow.reload")}
-            </Button>
-          }
+          action={<ReloadRecordsButton onClick={() => void reload()} />}
         />
       )}
       {legacy ? (

@@ -20,6 +20,7 @@ import {
 import { loadWorkflows, type WorkflowCatalog } from "../api/workflows.js";
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
+import { ReloadRecordsButton } from "../components/ReloadRecordsButton.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { RunGatePanel } from "./RunGatePanel.js";
 import { StatusPill } from "../components/StatusPill.js";
@@ -120,9 +121,9 @@ export function RunsPage() {
                 {t("run.back")}
               </Link>
             )}
-            <Button onClick={() => setRefresh((v) => v + 1)}>
-              {t("workflow.reload")}
-            </Button>
+            <ReloadRecordsButton
+              onClick={() => setRefresh((value) => value + 1)}
+            />
           </Space>
         }
       />

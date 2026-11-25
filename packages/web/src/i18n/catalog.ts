@@ -221,7 +221,7 @@ const en = {
   "plan.description":
     "Draft from the approved dossier, review the kernel's findings, and save an immutable plan for the Workflow owner's approval.",
   "plan.needDossier": "Approve the current dossier before planning.",
-  "plan.empty": "No plan has been saved yet.",
+  "plan.empty": "No plan version has been saved yet.",
   "plan.edit": "Edit plan",
   "plan.editorHelp":
     "Complete the FactoryPlan's implementation choices. Keep the approved frame, Node identities, Semantic dossier, and pinned sources unchanged. Validation updates as you edit.",
@@ -249,6 +249,8 @@ const en = {
   "plan.requestHelp":
     "Queue a drafting job for your Agent using the approved dossier, skeleton, and pinned Skill versions. Its result stays a suggestion until you accept it.",
   "plan.draft": "Plan draft",
+  "plan.draftSaved":
+    "Draft saved. Ask the Agent to finish the drafting session to make it available for review.",
   "plan.suggestions": "Plan drafting jobs and suggestions",
   "plan.reviewSuggestion": "Review plan suggestion",
   "plan.accept": "Accept as a plan version",
@@ -1898,7 +1900,7 @@ const zh: Record<MessageId, string> = {
   "plan.description":
     "从已批准的语义档案起草计划，查看内核校验结果，并保存不可变的计划版本供工作流所有者批准。",
   "plan.needDossier": "请先批准当前语义档案，再开始计划。",
-  "plan.empty": "尚未保存计划。",
+  "plan.empty": "尚未保存计划版本。",
   "plan.edit": "编辑计划",
   "plan.editorHelp":
     "补全 FactoryPlan 的实现选择。保留已批准的工作流框架、节点标识、语义档案及固定来源。校验结果随编辑实时更新。",
@@ -1925,6 +1927,7 @@ const zh: Record<MessageId, string> = {
   "plan.requestHelp":
     "基于已批准的语义档案、计划骨架及固定的 Skill 版本创建 Agent 起草任务。您接受后，建议才会成为计划版本。",
   "plan.draft": "计划草稿",
+  "plan.draftSaved": "草稿已保存。请让 Agent 结束起草会话，以便审核。",
   "plan.suggestions": "计划起草任务与建议",
   "plan.reviewSuggestion": "审阅计划建议",
   "plan.accept": "接受为计划版本",

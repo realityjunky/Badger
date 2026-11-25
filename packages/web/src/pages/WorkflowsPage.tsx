@@ -26,6 +26,7 @@ import {
 import { readBasePath } from "../app/paths.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { StageTrack } from "../components/StageTrack.js";
+import { ReloadRecordsButton } from "../components/ReloadRecordsButton.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { WorkflowDialog } from "./workflows/WorkflowDialog.js";
 import { WorkflowVersionDialog } from "./workflows/WorkflowVersionDialog.js";
@@ -264,7 +265,7 @@ export function WorkflowsPage() {
           type="error"
           showIcon
           message={t("workflow.loadFailed")}
-          action={<Button onClick={reload}>{t("workflow.reload")}</Button>}
+          action={<ReloadRecordsButton onClick={reload} />}
         />
       )}
       {catalog && (

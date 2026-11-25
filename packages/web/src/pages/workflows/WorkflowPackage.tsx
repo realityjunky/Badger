@@ -8,6 +8,7 @@ import type {
   GatePreview,
   WorkflowVersionDetail,
 } from "../../api/workflows.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
 
@@ -151,15 +152,13 @@ export function WorkflowPackage({
               {t(saved ? "package.regenerate" : "package.generate")}
             </Button>
           )}
-          <Button
+          <ReloadRecordsButton
             disabled={busy}
             onClick={() => {
               setFailure(null);
               setRefresh((r) => r + 1);
             }}
-          >
-            {t("workflow.reload")}
-          </Button>
+          />
         </Space>
       }
     >

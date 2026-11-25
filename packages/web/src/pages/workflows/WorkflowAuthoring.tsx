@@ -7,6 +7,7 @@ import type {
 } from "@realityjunky/badger";
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import { AgentPromptButton } from "../../components/AgentPromptButton.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
 type LaneJob = {
@@ -172,9 +173,7 @@ export function WorkflowAuthoring({
               {t("authoring.assemble")}
             </Button>
           )}
-          <Button disabled={busy} onClick={refresh}>
-            {t("workflow.reload")}
-          </Button>
+          <ReloadRecordsButton disabled={busy} onClick={refresh} />
         </Space>
       </div>
       <p className="muted">{t("authoring.help")}</p>

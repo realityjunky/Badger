@@ -12,6 +12,7 @@ import type {
   GatePreview,
   WorkflowVersionDetail,
 } from "../../api/workflows.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { useInbox } from "../../inbox/InboxContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
@@ -214,11 +215,7 @@ export function WorkflowDossier({
           type="error"
           showIcon
           title={dossierFailure}
-          action={
-            <Button onClick={() => void reload()}>
-              {t("workflow.reload")}
-            </Button>
-          }
+          action={<ReloadRecordsButton onClick={() => void reload()} />}
         />
       )}
       {failure && (
@@ -236,16 +233,14 @@ export function WorkflowDossier({
             )
           }
           action={
-            <Button
+            <ReloadRecordsButton
               onClick={() => {
                 setFailure(null);
                 setFindings([]);
                 void reload();
                 setRefresh((r) => r + 1);
               }}
-            >
-              {t("workflow.reload")}
-            </Button>
+            />
           }
         />
       )}

@@ -26,6 +26,7 @@ import {
 import { NumberedTabs } from "../../components/NumberedTabs.js";
 import { SourceEvidenceDisclosure } from "../../components/SourceEvidenceDisclosure.js";
 import { UncertaintyTabLabel } from "../../components/UncertaintyTabLabel.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
 interface DraftEdits {
@@ -242,7 +243,7 @@ export function ScriptEffectsPanel({
                   : "effects.noDeclaration",
             )}
           </Tag>
-          <Button
+          <ReloadRecordsButton
             disabled={busy}
             onClick={() =>
               void perform(async () => {
@@ -251,9 +252,7 @@ export function ScriptEffectsPanel({
                 setSavedRevision(undefined);
               })
             }
-          >
-            {t("workflow.reload")}
-          </Button>
+          />
         </Space>
       </div>
       <p className="muted">{t("effects.help")}</p>

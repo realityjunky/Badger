@@ -311,18 +311,33 @@ for (const theme of ["light", "dark"] as const) {
       }>(`${root}/drafting-jobs/${job.id}/claim`, { revision: job.revision });
       const plan = claimed.contextBundle.planning.skeleton;
       plan.workflow.customNodes[0]!.implementation.skill = skillName;
-      await agentCall(`${root}/drafting-jobs/${job.id}/submit`, {
+      const saved = await agentCall<{
+        job: { revision: number; status: string };
+      }>(`${root}/drafting-jobs/${job.id}/submit`, {
         leaseId: claimed.job.lease.id,
         contextHash: claimed.job.contextHash,
         result: { plan },
+        keepClaim: true,
       });
+      expect(saved.job.status).toBe("claimed");
       expect((await call<PlanView>("GET", `${root}/plan`)).versions).toEqual(
         [],
       );
-      await author.reload();
-      await planning
-        .getByRole("button", { name: "Review plan suggestion", exact: true })
-        .click();
+      await expect(
+        planning.getByText("Draft saved.", { exact: false }),
+      ).toBeVisible({ timeout: 10_000 });
+      const suggestion = planning.getByRole("button", {
+        name: "Review plan suggestion",
+        exact: true,
+      });
+      await expect(suggestion).toHaveCount(0);
+      await agentCall(`${root}/drafting-jobs/${job.id}/finish`, {
+        leaseId: claimed.job.lease.id,
+        contextHash: claimed.job.contextHash,
+        revision: saved.job.revision,
+      });
+      await expect(suggestion).toBeVisible({ timeout: 10_000 });
+      await suggestion.click();
       const editor = author.getByRole("dialog");
       const json = editor.getByLabel("FactoryPlan (JSON)", { exact: true });
       await json.fill(

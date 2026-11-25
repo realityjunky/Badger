@@ -4,7 +4,6 @@ import {
   FilterOutlined,
   InfoCircleOutlined,
   PlusOutlined,
-  ReloadOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
@@ -35,6 +34,7 @@ import type {
   AnyDraftingJob,
   DraftingKind,
 } from "../../api/drafting-jobs.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { normalizeBasePath } from "../../app/paths.js";
 import { StatusPill, type PillTone } from "../../components/StatusPill.js";
@@ -369,14 +369,7 @@ export function DraftingJobs({
               {t("drafting.request")}
             </Button>
           )}
-          <Button
-            type="text"
-            icon={<ReloadOutlined aria-hidden="true" />}
-            disabled={busy}
-            onClick={() => void refresh()}
-          >
-            {t("workflow.reload")}
-          </Button>
+          <ReloadRecordsButton disabled={busy} onClick={() => void refresh()} />
           <Dropdown
             trigger={["click"]}
             menu={{

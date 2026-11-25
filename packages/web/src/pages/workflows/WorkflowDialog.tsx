@@ -1,4 +1,4 @@
-import { Alert, Button, Descriptions, Form, Input, Modal, Select } from "antd";
+import { Alert, Descriptions, Form, Input, Modal, Select } from "antd";
 import { useState, type ReactNode } from "react";
 import type { Group } from "../../api/organization.js";
 import type {
@@ -6,6 +6,7 @@ import type {
   WorkflowFrame,
   WriteResult,
 } from "../../api/workflows.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
 export type WriteFailure = Exclude<WriteResult<unknown>, { kind: "ok" }>;
@@ -39,7 +40,7 @@ export function WorkflowNotice({
           )}
         </>
       }
-      action={<Button onClick={onReload}>{t("workflow.reload")}</Button>}
+      action={<ReloadRecordsButton onClick={onReload} />}
     />
   );
 }

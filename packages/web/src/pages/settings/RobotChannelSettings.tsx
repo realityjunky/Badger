@@ -14,6 +14,7 @@ import {
   isWeComUserId,
   type RobotChannel,
 } from "../../api/notifications.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
 interface RobotValues {
@@ -115,14 +116,12 @@ export function RobotChannelSettings({
         />
       )}
       {!loaded ? (
-        <Button
+        <ReloadRecordsButton
           onClick={() => {
             setNotice(null);
             setRefresh((value) => value + 1);
           }}
-        >
-          {t("workflow.reload")}
-        </Button>
+        />
       ) : (
         <Form
           form={form}

@@ -7,6 +7,7 @@ import {
   type NotificationPreferences,
 } from "../../api/notifications.js";
 import { readBasePath } from "../../app/paths.js";
+import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
 export function NotificationSettings({
@@ -63,14 +64,12 @@ export function NotificationSettings({
           message={t(`notifications.${notice}`)}
           action={
             notice === "saved" ? undefined : (
-              <Button
+              <ReloadRecordsButton
                 onClick={() => {
                   setNotice(null);
                   setRefresh((value) => value + 1);
                 }}
-              >
-                {t("workflow.reload")}
-              </Button>
+              />
             )
           }
         />

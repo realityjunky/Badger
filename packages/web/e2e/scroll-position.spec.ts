@@ -343,6 +343,10 @@ test("reloading notification preferences after an edit conflict keeps the form i
     exact: true,
   });
   await expect(reload).toBeVisible();
+  await expect(reload).toHaveText("");
+  await expect(reload.locator(".anticon-reload")).toBeVisible();
+  await reload.focus();
+  await expect(page.getByRole("tooltip")).toHaveText("Reload records");
   await userid.scrollIntoViewIfNeeded();
   const before = await page.evaluate(() => window.scrollY);
   expect(before).toBeGreaterThan(0);
