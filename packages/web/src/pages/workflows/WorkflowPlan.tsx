@@ -1,4 +1,15 @@
-import { Alert, Button, Input, Modal, Select, Space, Spin, Tag } from "antd";
+import { InfoCircleOutlined } from "@ant-design/icons";
+import {
+  Alert,
+  Button,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Spin,
+  Tag,
+  Tooltip,
+} from "antd";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { FactoryPlan, PlanView } from "../../api/plans.js";
@@ -38,7 +49,6 @@ export function WorkflowPlan({
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
-  const [requesting, setRequesting] = useState(false);
   const [editing, setEditing] = useState<{
     plan: FactoryPlan;
     job?: PlanDraftingJob;
@@ -130,6 +140,13 @@ export function WorkflowPlan({
       setBusy(false);
     }
   }
+  async function requestDraft() {
+    await questionnaireRequest(basePath, `${path}/drafting-jobs`, "POST", {
+      kind: "draft-plan",
+      confirmed: true,
+    });
+    await changed();
+  }
   async function previewApproval() {
     if (!selected) return;
     const { preview } = await questionnaireRequest<{ preview: GatePreview }>(
@@ -200,9 +217,23 @@ export function WorkflowPlan({
         <Space wrap>
           {view?.skeleton && detail.capabilities.editPlan && (
             <>
-              <Button disabled={busy} onClick={() => setRequesting(true)}>
-                {t("plan.request")}
-              </Button>
+              <Space size={4} align="start">
+                <Button loading={busy} onClick={() => void run(requestDraft)}>
+                  {t("plan.request")}
+                </Button>
+                <Tooltip
+                  title={t("plan.requestHelp")}
+                  trigger={["hover", "focus"]}
+                  placement="topRight"
+                >
+                  <Button
+                    type="text"
+                    size="small"
+                    aria-label={t("drafting.about")}
+                    icon={<InfoCircleOutlined aria-hidden="true" />}
+                  />
+                </Tooltip>
+              </Space>
               <Button
                 type="primary"
                 disabled={busy}
@@ -368,31 +399,6 @@ export function WorkflowPlan({
           )}
         </>
       )}
-      <Modal
-        open={requesting}
-        title={t("plan.request")}
-        okText={t("plan.request")}
-        cancelText={t("common.cancel")}
-        confirmLoading={busy}
-        onCancel={() => {
-          if (!busy) setRequesting(false);
-        }}
-        onOk={() =>
-          void run(async () => {
-            await questionnaireRequest(
-              basePath,
-              `${path}/drafting-jobs`,
-              "POST",
-              { kind: "draft-plan", confirmed: true },
-            );
-            setRequesting(false);
-            await changed();
-          })
-        }
-      >
-        <p>{t("plan.requestHelp")}</p>
-        {failure && <Alert type="error" title={failure} />}
-      </Modal>
       <Modal
         open={approval !== null}
         width={900}

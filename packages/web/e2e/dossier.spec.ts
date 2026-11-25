@@ -266,17 +266,27 @@ for (const theme of ["light", "dark"] as const) {
       );
       const planning = author.getByTestId("workflow-plan");
       await planning
+        .getByRole("button", { name: "About drafting jobs and suggestions" })
+        .hover();
+      await expect(author.getByRole("tooltip")).toHaveText(
+        "Queue a drafting job for your Agent using the approved dossier, skeleton, and pinned Skill versions. Its result stays a suggestion until you accept it.",
+      );
+      await planning
         .getByRole("button", { name: "Request plan draft", exact: true })
         .click();
-      await author
-        .getByRole("dialog")
-        .getByRole("button", { name: "Request plan draft", exact: true })
-        .click();
-      await expect(author.getByRole("dialog")).toBeHidden();
+      await expect(
+        planning.getByRole("heading", {
+          name: "Plan drafting jobs and suggestions",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(author.getByRole("dialog")).toHaveCount(0);
       const { jobs } = await call<{
         jobs: { id: string; revision: number; kind: string }[];
       }>("GET", `${root}/drafting-jobs`);
-      const job = jobs.find((job) => job.kind === "draft-plan")!;
+      const drafts = jobs.filter((job) => job.kind === "draft-plan");
+      expect(drafts).toHaveLength(1);
+      const job = drafts[0]!;
       const { secret } = await call<{ secret: string }>("POST", "/me/tokens", {
         name: "Planning Agent",
         scopes: ["engineer"],
