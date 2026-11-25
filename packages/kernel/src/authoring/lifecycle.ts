@@ -82,6 +82,7 @@ import type {
 import type { GeneratedPackage } from "../factory/generate.js";
 
 export const AUTHORING_GENERATOR_CONTRACT_VERSION = 2 as const;
+export const AUTHORING_INPUT_LIMIT_BYTES = 16 * 1024 * 1024;
 const MAX_SUMMARY_BYTES = 8 * 1024;
 const MAX_ARTIFACT_BYTES = 64 * 1024;
 const MAX_RECORD_BYTES = 256 * 1024;
@@ -2097,7 +2098,7 @@ export async function readAuthoringPlan(
   }
   const file = sessionPlanPath(state);
   const stats = await fs.lstat(file);
-  if (!stats.isFile() || stats.size > MAX_RECORD_BYTES)
+  if (!stats.isFile() || stats.size > AUTHORING_INPUT_LIMIT_BYTES)
     throw new Error("Authoring plan is not a bounded regular file");
   const value = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
   const findings = validateAuthoringPlan(value);

@@ -11,6 +11,7 @@ import {
   readState,
 } from "../src/factory/state.js";
 import {
+  AUTHORING_INPUT_LIMIT_BYTES,
   AuthoringRevisionConflictError,
   assemblePackage as assemblePackageImplementation,
   authoringReadiness,
@@ -405,9 +406,53 @@ describe("resumable authoring session", () => {
     ).rejects.toThrow(/stale/);
   });
 
+  it("dispatches a generated package with a large semantic dossier", async () => {
+    const factoryPlan = await readPlan(planPath);
+    const candidates = await findSkills({
+      projectRoot: project,
+      sources: factoryPlan.skillSources,
+    });
+    const { dossier } = questionnaireFixture();
+    dossier.workflow.goal = factoryPlan.goal;
+    dossier.sources[0] = {
+      ...dossier.sources[0],
+      location: factoryPlan.skillSources[0].location,
+      contentHash: candidates[0].sources[0].hash,
+    };
+    const fact = dossier.sourceDerivedFacts[0];
+    dossier.sourceDerivedFacts = Array.from({ length: 1_200 }, (_, index) => ({
+      ...fact,
+      id: `report-requirement-${index}`,
+      statement: `Report requirement ${index}. ${"Keep the reviewed evidence with the report. ".repeat(20)}`,
+    }));
+    factoryPlan.semanticDossier = dossier;
+    await fs.writeFile(planPath, JSON.stringify(factoryPlan));
+
+    const { state } = await createSession();
+    expect((await fs.stat(state.authoring!.planPath)).size).toBeGreaterThan(
+      256 * 1024,
+    );
+    const handoff = await buildAuthoringHandoff({
+      state,
+      lane: "script",
+      outputPath: path.join(root, "script.json"),
+    });
+    const proposal = await fs.readFile(handoff.confirmedProposal.path);
+    expect(proposal.length).toBeGreaterThan(1024 * 1024);
+    expect(proposal.length).toBeLessThanOrEqual(
+      handoff.confirmedProposal.limitBytes,
+    );
+    expect(createHash("sha256").update(proposal).digest("hex")).toBe(
+      handoff.confirmedProposal.hash,
+    );
+    expect(handoff.outputLimitBytes).toBe(256 * 1024);
+  });
+
   it("rejects oversized confirmed proposals before creating handoff files", async () => {
     const { state } = await createSession();
-    state.confirmedProposal!.warnings = ["Detailed evidence ".repeat(20000)];
+    state.confirmedProposal!.warnings = [
+      "x".repeat(AUTHORING_INPUT_LIMIT_BYTES),
+    ];
     const outputRoot = path.join(root, "oversized");
     await expect(
       buildAuthoringHandoff({

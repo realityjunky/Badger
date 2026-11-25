@@ -5,6 +5,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { readPromptTemplate } from "./prompt-templates.js";
 import {
+  AUTHORING_INPUT_LIMIT_BYTES,
   authoringReadiness,
   authoringSessionGateway,
   buildAuthoringHandoff,
@@ -222,14 +223,13 @@ async function boundedBundle(
   let total = 0;
   for (const file of handoff.inputPaths) {
     const stat = await fs.lstat(file);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024)
-      throw new RequestError(
-        413,
-        "Authoring input must be a regular file within 1 MiB",
-      );
+    if (!stat.isFile())
+      throw new RequestError(413, "Authoring input must be a regular file");
+    if (stat.size > AUTHORING_INPUT_LIMIT_BYTES - total)
+      throw new RequestError(413, "The bounded authoring inputs exceed 16 MiB");
     const bytes = await fs.readFile(file);
     total += bytes.length;
-    if (total > 16 * 1024 * 1024)
+    if (total > AUTHORING_INPUT_LIMIT_BYTES)
       throw new RequestError(413, "The bounded authoring inputs exceed 16 MiB");
     let text = bytes.toString("utf8");
     if (

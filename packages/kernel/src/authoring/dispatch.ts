@@ -9,6 +9,7 @@ import { atomicWriteContainedText } from "../engine/contained-atomic-write.js";
 import { deriveAuthoringPlan } from "./plan.js";
 import { readState } from "../factory/state.js";
 import {
+  AUTHORING_INPUT_LIMIT_BYTES,
   authoringPlanPath,
   authoringSessionPath,
   authoringSessionGateway,
@@ -525,7 +526,7 @@ export async function buildAuthoringHandoff(
       "Confirmed proposal is missing or stale for authoring handoff",
     );
   const proposalContent = JSON.stringify(stableValue(proposal), null, 2) + "\n";
-  if (Buffer.byteLength(proposalContent, "utf8") > AUTHORING_OUTPUT_LIMIT_BYTES)
+  if (Buffer.byteLength(proposalContent, "utf8") > AUTHORING_INPUT_LIMIT_BYTES)
     throw new Error("Confirmed proposal exceeds the authoring input limit");
   const proposalHash = sha256(proposalContent);
   const proposalPath = path.join(
@@ -535,7 +536,7 @@ export async function buildAuthoringHandoff(
   const confirmedProposal = {
     path: proposalPath,
     hash: proposalHash,
-    limitBytes: AUTHORING_OUTPUT_LIMIT_BYTES,
+    limitBytes: AUTHORING_INPUT_LIMIT_BYTES,
   };
   await assertHandoffPath(commonPath);
   await assertHandoffPath(proposalPath);
@@ -609,7 +610,7 @@ export async function buildAuthoringHandoff(
       null,
       2,
     ) + "\n";
-  if (Buffer.byteLength(commonContent, "utf8") > AUTHORING_OUTPUT_LIMIT_BYTES)
+  if (Buffer.byteLength(commonContent, "utf8") > AUTHORING_INPUT_LIMIT_BYTES)
     throw new Error("Authoring common input exceeds its limit");
   await atomicWriteContainedText(proposalPath, proposalContent, {
     containedRoot: path.parse(proposalPath).root,
